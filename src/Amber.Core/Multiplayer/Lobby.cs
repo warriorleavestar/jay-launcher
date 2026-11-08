@@ -151,14 +151,20 @@ public sealed class HostLobby : IAsyncDisposable
     }
 }
 
+/// <summary>连不上任何中继节点（也没在局域网里找到房主）：根本没进大厅，跟邀请码本身无关。</summary>
+public sealed class LobbyUnreachableException(string message) : TimeoutException(message);
+
 /// <summary>加入方：进大厅、等看到房主、敲门，拿到结果后马上离开大厅。</summary>
 public static class LobbyJoin
 {
     /// <summary>进大厅后最多等这么久看到房主。</summary>
     public static readonly TimeSpan FindHostTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>这么久还一个对端（中继节点或房主）都没看到，就算连不上中继，不再等满。</summary>
+    public static readonly TimeSpan FindRelayTimeout = TimeSpan.FromSeconds(25);
 
+    /// <param name="relayFound">连上了中继节点（大厅里看到了除自己以外的对端），在找房主。</param>
     public static async Task<KnockOutcome> KnockAsync(EasyTierInstaller installer, string workDir, IReadOnlyList<string> peers, JayInvite invite,
-        X25519KeyPair me, string name, string version, Action<string>? log, Action? hostFound, CancellationToken ct)
+        X25519KeyPair me, string name, string version, Action<string>? log, Action? hostFound, CancellationToken ct, Action? relayFound = null)
     {
         var localPort = EasyTierArgs.FreeTcpPort();
         var options = new LobbyOptions(LobbyKeys.LobbyName(invite.LobbyKey), LobbyKeys.LobbySecret(invite.LobbyKey), false, peers, EasyTierArgs.FreeTcpPort(), localPort);
@@ -167,18 +173,11 @@ public static class LobbyJoin
         string[] lobbySecrets = [options.Secret, options.Name];
         if (log is not null) lobby.Output += line => log(NetDiagnostics.Redact(line, lobbySecrets, includePublicIps: true));
         // 先等大厅里看到房主再敲：没连上时本机转发端口会接了又断，白白算作一次失败。
-        using (var find = CancellationTokenSource.CreateLinkedTokenSource(ct))
-        {
-            find.CancelAfter(FindHostTimeout);
-            while (true)
-            {
-                if (lobby.HasExited) throw new IOException(L.F("core.mp.lobby.exited", NetDiagnostics.Redact(lobby.RecentOutput.LastOrDefault() ?? "", lobbySecrets, includePublicIps: true)));
-                var peersNow = await lobby.PeersAsync(find.Token);
-                if (peersNow.Any(p => p.Ip == LobbyArgs.HostIp && p.Cost != "Local")) break;
-                try { await Task.Delay(1000, find.Token); }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException(L.T("core.mp.lobby.nohost")); }
-            }
-        }
+        // 同时直接测一下节点能不能连上（TCP 类）：EasyTier 的对端列表里看不到中继时，用它兜底判断是不是网络问题。
+        var probes = peers.Select(p => RelayNodes.ProbeAsync(p, ct)).ToList();
+        bool NodeReachable() => probes.Any(t => t.IsCompletedSuccessfully && t.Result.Ms is not null);
+        await WaitForHostAsync(lobby.PeersAsync, () => lobby.HasExited ? NetDiagnostics.Redact(lobby.RecentOutput.LastOrDefault() ?? "", lobbySecrets, includePublicIps: true) : null,
+            peers, relayFound, FindRelayTimeout, FindHostTimeout, ct, nodeReachable: NodeReachable);
         hostFound?.Invoke();
         // EasyTier 刚看到对方时转发偶尔还没就绪：连接被立刻断开（握手还没开始）就再试几次。
         for (var attempt = 0; ; attempt++)
@@ -194,6 +193,47 @@ public static class LobbyJoin
                 log?.Invoke(L.F("core.mp.knock.failed", e.Message));
                 await Task.Delay(2000, ct);
             }
+            catch (EndOfStreamException) when (!ct.IsCancellationRequested)
+            {
+                // 连到了房主，房主却在握手前就断开：房主不认这张邀请（已经用完、过期或被撤销）。
+                return new KnockOutcome(null, "invalid", []);
+            }
         }
     }
+
+    /// <summary>
+    /// 等大厅里出现房主。分清两种失败：一直没看到任何对端、节点也测不通（连不上中继节点），和连上了中继却没有房主（邀请用完/过期，或房主已关房间）。
+    /// </summary>
+    /// <param name="nodeReachable">直接测节点是否连得上（EasyTier 的对端列表里不一定列出中继节点）。</param>
+    /// <param name="exited">大厅进程已经退出时返回它最后一行输出，还在跑返回 null。</param>
+    internal static async Task WaitForHostAsync(Func<CancellationToken, Task<List<PeerInfo>>> peersNow, Func<string?> exited, IReadOnlyList<string> nodes,
+        Action? relayFound, TimeSpan relayTimeout, TimeSpan hostTimeout, CancellationToken ct, TimeSpan? poll = null, Func<bool>? nodeReachable = null)
+    {
+        using var find = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        find.CancelAfter(hostTimeout);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var sawRemote = false;
+        while (true)
+        {
+            if (exited() is { } last) throw new IOException(L.F("core.mp.lobby.exited", last));
+            List<PeerInfo> list;
+            try { list = await peersNow(find.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw Timeout(sawRemote, nodes); }
+            if (list.Any(p => p.Ip == LobbyArgs.HostIp && p.Cost != "Local")) return;
+            if (!sawRemote && (list.Any(p => p.Cost != "Local") || nodeReachable?.Invoke() == true))
+            {
+                sawRemote = true;
+                relayFound?.Invoke();
+            }
+            // 没设节点时（局域网、直连桥）没有“中继”可等，等满找房主的时间。
+            if (!sawRemote && nodes.Count > 0 && watch.Elapsed >= relayTimeout) throw Timeout(false, nodes);
+            try { await Task.Delay(poll ?? TimeSpan.FromSeconds(1), find.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw Timeout(sawRemote, nodes); }
+        }
+    }
+
+    private static TimeoutException Timeout(bool sawRemote, IReadOnlyList<string> nodes) =>
+        sawRemote ? new TimeoutException(L.T("core.mp.lobby.nohost"))
+        : nodes.Count == 0 ? new LobbyUnreachableException(L.T("core.mp.lobby.nonodes"))
+        : new LobbyUnreachableException(L.F("core.mp.lobby.norelay", string.Join(", ", nodes.Take(3))));
 }

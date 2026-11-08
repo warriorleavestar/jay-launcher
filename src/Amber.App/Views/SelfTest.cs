@@ -1132,7 +1132,14 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("踢人：房主的成员列表里有两个人", await WaitAsync(() => host.Members.Count == 2, 10), string.Join(" | ", host.Members.Select(m => m.Label)));
 
         var target = host.Members.First(m => m.Fingerprint == kicked.Identity.Fingerprint);
-        await host.KickMemberCommand.ExecuteAsync(target);
+        // 踢出按钮先弹确认：点“取消”什么都不变。
+        string? askedTitle = null;
+        host.Confirm = (title, _, _) => { askedTitle = title; return Task.FromResult(false); };
+        await host.AskKickMemberCommand.ExecuteAsync(target);
+        Check("踢人：先弹确认框，取消后人还在", askedTitle?.Contains(target.Name) == true && host.Members.Any(m => m.Fingerprint == kicked.Identity.Fingerprint) && host.RoomEpoch == 1,
+            askedTitle ?? "");
+        host.Confirm = (_, _, _) => Task.FromResult(true);
+        await host.AskKickMemberCommand.ExecuteAsync(target);
         Check("踢人：进了禁入名单、成员列表里没了", host.BannedPeople.Count == 1 && host.Members.All(m => m.Fingerprint != kicked.Identity.Fingerprint),
             string.Join(" | ", host.BannedPeople.Select(b => b.Label)));
         Check("踢人：房主换到新网络（版本 2）", host.RoomEpoch == 2, host.Status);
@@ -1162,6 +1169,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("踢人：留下的人收到房主的新消息", await WaitAsync(() => stays.ChatLines.Any(l => l.Text == "被踢的人看不到"), 15));
         await Task.Delay(1000);
         Check("踢人：被踢的人收不到之后的消息", kicked.ChatLines.All(l => l.Text != "被踢的人看不到"));
+
+        // 被踢的人拿新邀请再敲门：明确告诉他“已被房主移出”，不是一串异常。
+        var again = await CreateInviteAsync(host, uses: 1, auto: true);
+        kicked.JoinCode = again;
+        await kicked.JoinCommand.ExecuteAsync(null);
+        Check("踢人：被踢的人再敲门看到“你已被房主移出”", await WaitAsync(() => !kicked.IsKnocking && kicked.Status.Contains("已被房主移出"), 90) && !kicked.IsJoined,
+            kicked.Status);
 
         host.UnbanCommand.Execute(host.BannedPeople[0]);
         Check("踢人：解除禁止", host.BannedPeople.Count == 0);

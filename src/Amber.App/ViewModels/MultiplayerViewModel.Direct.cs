@@ -330,7 +330,7 @@ public sealed partial class MultiplayerViewModel
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             IsKnocking = true;
-            SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+            SetStatus(StatusMessage.Info(peers.Count > 0 ? "multiplayer.invite.connecting_relay" : "multiplayer.invite.entering_lobby"));
         });
         try
         {
@@ -338,17 +338,13 @@ public sealed partial class MultiplayerViewModel
             var name = ChatName;
             var outcome = await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(AppSettings.DataDir, "easytier", "lobby-join"), peers, invite,
                 me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
-                () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"))), ct));
+                () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"))), ct,
+                () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby")))));
             return await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (outcome.Credentials is not { } credentials)
                 {
-                    SetStatus(StatusMessage.Warning(outcome.Reason switch
-                    {
-                        "expired" => "multiplayer.invite.reason.expired",
-                        "full" => "multiplayer.invite.reason.full",
-                        _ => "multiplayer.invite.reason.denied",
-                    }));
+                    SetStatus(StatusMessage.Warning(KnockReasonKey(outcome.Reason)));
                     return null;
                 }
                 if (credentials.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)

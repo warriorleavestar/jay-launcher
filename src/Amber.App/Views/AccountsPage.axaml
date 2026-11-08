@@ -75,7 +75,7 @@
                              FontSize="12" TextWrapping="Wrap" />
                 </StackPanel>
                 <WrapPanel Classes="account-actions" ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
-                  <Button Content="{l:T common.use}" Command="{Binding $parent[ListBox].((vm:AccountsViewModel)DataContext).UseCommand}" CommandParameter="{Binding}" />
+                  <Button Content="{l:T common.use}" IsVisible="{Binding !IsCurrent}" Command="{Binding $parent[ListBox].((vm:AccountsViewModel)DataContext).UseCommand}" CommandParameter="{Binding}" />
                   <c:ConfirmButton Content="{l:T common.remove}" ConfirmText="{l:T common.confirm_remove}" ObjectName="{Binding Name}" Command="{Binding $parent[ListBox].((vm:AccountsViewModel)DataContext).RemoveCommand}" CommandParameter="{Binding}" />
                 </WrapPanel>
               </Grid>

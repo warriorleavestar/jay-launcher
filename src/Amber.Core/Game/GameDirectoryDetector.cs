@@ -52,16 +52,46 @@ public static class GameDirectoryDetector
         return [.. found.OrderByDescending(f => f.Dir.InstanceCount).ThenBy(f => f.Order).Take(limit).Select(f => f.Dir)];
     }
 
-    /// <summary>目录里装好的实例数（有版本 JSON 的版本文件夹）；不是游戏目录或读不了时是 0。</summary>
+    /// <summary>
+    /// 目录里装好的实例数（有版本 JSON 的版本文件夹）；不是游戏目录或读不了时是 0。
+    /// 只是被加载器继承的原版（装 Fabric 26.3 时一起装的 26.3）不单算：玩家眼里那是一个游戏。
+    /// </summary>
     public static int CountInstances(string root)
     {
         try
         {
-            return Directory.Exists(Path.Combine(root, "versions")) ? new GameDirectory(root).ListInstalled().Count() : 0;
+            if (!Directory.Exists(Path.Combine(root, "versions"))) return 0;
+            var directory = new GameDirectory(root);
+            var installed = directory.ListInstalled().ToList();
+            var parents = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var id in installed)
+            {
+                if (InheritsFrom(directory, id) is { } parent && parent != id) parents.Add(parent);
+            }
+            return installed.Count(id => !parents.Contains(id));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             return 0;
+        }
+    }
+
+    /// <summary>版本 JSON 里的 inheritsFrom；读不了或没有时是 null（照常算一个实例）。</summary>
+    private static string? InheritsFrom(GameDirectory directory, string id)
+    {
+        try
+        {
+            using var stream = File.OpenRead(directory.VersionJsonPath(id));
+            if (stream.Length > 4 * 1024 * 1024) return null;
+            using var doc = System.Text.Json.JsonDocument.Parse(stream);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("inheritsFrom", out var value)
+                && value.ValueKind == System.Text.Json.JsonValueKind.String
+                ? value.GetString() : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException)
+        {
+            return null;
         }
     }
 

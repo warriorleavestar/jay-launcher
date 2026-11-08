@@ -10,27 +10,32 @@ public sealed partial class MultiplayerViewModel
 {
     private void InitGuide()
     {
-        Nodes.CollectionChanged += (_, _) =>
-        {
-            OnPropertyChanged(nameof(HasNodes));
-            OnPropertyChanged(nameof(NodesStatusText));
-            OnPropertyChanged(nameof(NodesHeaderText));
-        };
+        Nodes.CollectionChanged += (_, _) => NotifyNodesChanged();
     }
 
-    public bool HasNodes => Nodes.Count > 0;
+    private void NotifyNodesChanged()
+    {
+        OnPropertyChanged(nameof(HasNodes));
+        OnPropertyChanged(nameof(NodesStatusText));
+        OnPropertyChanged(nameof(NodesHeaderText));
+    }
+
+    /// <summary>实际会用的节点数（自己的 + 开着时的内置节点）。</summary>
+    private int EffectiveNodeCount => RelayNodes.Effective(Nodes.Select(n => n.Url), UseBuiltInNodes).Count;
+
+    public bool HasNodes => EffectiveNodeCount > 0;
 
     /// <summary>联机节点折叠区是否展开：载入时没有节点就展开，之后由用户决定。</summary>
     [ObservableProperty] public partial bool NodesExpanded { get; set; }
 
     /// <summary>引导卡里的节点状态：房间码方式需要节点，直连不需要。</summary>
     public string NodesStatusText => HasNodes
-        ? L.F("multiplayer.guide.nodes_ready", Nodes.Count)
+        ? L.F("multiplayer.guide.nodes_ready", EffectiveNodeCount)
         : L.T("multiplayer.guide.nodes_missing");
 
     /// <summary>联机节点折叠区的标题，收起时也能看到有几个节点。</summary>
     public string NodesHeaderText => HasNodes
-        ? L.F("multiplayer.nodes.header_count", Nodes.Count)
+        ? L.F("multiplayer.nodes.header_count", EffectiveNodeCount)
         : L.T("multiplayer.nodes.header_empty");
 
     /// <summary>开房间用的游戏端口：手动填的优先，其次是选中的游戏。和创建房间时的取法一致。</summary>
