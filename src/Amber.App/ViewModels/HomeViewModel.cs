@@ -97,6 +97,14 @@ public sealed partial class HomeViewModel : PageViewModel
     /// 烘焙后的启动很可能是被烘焙弄崩的：用了烘焙、不是玩家结束的、非 0 退出，而且没看到进入主界面的标志
     /// （只靠兜底时间“猜”进入的也算没进）。烘焙出错时已经按普通方式启动，这里管的是烘焙成功但游戏崩溃。
     /// </summary>
+    /// <summary>不是玩家结束的、退出码 0，却还没进主界面（或只是按时间猜的“进了”）：游戏多半根本没打开窗口。</summary>
+    internal static bool ExitedBeforeGame(bool stoppedByUser, int exitCode, bool inGame, bool inGameGuessed) =>
+        !stoppedByUser && exitCode == 0 && (!inGame || inGameGuessed);
+
+    /// <summary>崩溃分析里有“确定”的原因（比如显卡不支持 OpenGL）；只有“可能”的猜测不算。</summary>
+    internal static bool HasClearCause(CrashAnalysis analysis) =>
+        analysis.Findings.Count > 0 && analysis.Findings[0].Severity == CrashSeverity.Likely;
+
     internal static bool LikelyBakeCrash(bool baked, bool stoppedByUser, int exitCode, bool inGame, bool inGameGuessed) =>
         baked && !stoppedByUser && exitCode != 0 && (!inGame || inGameGuessed);
 
@@ -288,6 +296,8 @@ public sealed partial class HomeViewModel : PageViewModel
         foreach (var v in _service.InstalledVersions()) Versions.Add(v);
         SelectedVersion = _service.CurrentOr(Versions, Versions.FirstOrDefault());
         if (Versions.Count == 0) SetIdleStatus("home.status.no_versions");
+        // 新手卡或下载页刚装好第一个实例：“还没有安装实例”不能一直挂到重开启动器。
+        else if (StatusInfo?.Key == "home.status.no_versions") SetStatus(null);
         UpdateRunState();
     }
 
@@ -438,6 +448,9 @@ public sealed partial class HomeViewModel : PageViewModel
         var ctx = request.ExpectedContext ?? _service.Context;
         var workDir = _service.WorkDirFor(ctx, id);
         var run = new GameRun(id) { WorkDir = workDir };
+        // 每局一份日志：多开时第二局不会清掉第一局的，也不会混在一起。
+        // 从准备阶段就开始记：补文件、Java、登录这些步骤出错时，日志页也看得到原因。
+        run.Log = _log.BeginRun(id, DateTimeOffset.Now);
         _runs.Add(run);
         Crash = null;
         Progress = 0;
@@ -489,8 +502,6 @@ public sealed partial class HomeViewModel : PageViewModel
             await using var relay = relayClient;
             var memory = options.MaxMemoryMb;
 
-            // 每局一份日志：多开时第二局不会清掉第一局的，也不会混在一起。
-            run.Log = _log.BeginRun(id, DateTimeOffset.Now);
             if (_service.Settings.ExperimentalBake && !request.SkipBake)
             {
                 SetStatus(StatusMessage.Info("home.status.baking"));
@@ -551,21 +562,36 @@ public sealed partial class HomeViewModel : PageViewModel
             await game.WaitForExitAsync();
 
             var code = game.ExitCode;
+            // 退出码 0 但没进主界面：比如没有 OpenGL 时游戏弹个框就“正常”退出了，也要看一眼日志。
+            CrashInput? input = null;
+            CrashAnalysis? analysis = null;
+            if (!run.StoppedByUser && (code != 0 || ExitedBeforeGame(run.StoppedByUser, code, run.InGame, run.InGameGuessed)))
+            {
+                lock (parser) input = CrashInputFor(run, SafePid(game));
+                var pending = input;
+                analysis = await Task.Run(pending.Analyze);
+            }
+
             if (run.StoppedByUser)
             {
                 SetStatus(StatusMessage.Info("home.status.stopped"));
             }
-            else if (code == 0)
+            else if (input is null || analysis is null)
             {
                 SetStatus(StatusMessage.Info("home.status.exited"));
+            }
+            else if (code == 0 && !HasClearCause(analysis))
+            {
+                // 日志里没有明确原因：不弹崩溃卡，只说清楚游戏没进主界面就退了。
+                SetStatus(StatusMessage.Warning("home.status.exited_early"));
+                _log.AddRaw(run.Log, "[Jay] " + L.T("home.status.exited_early"));
             }
             else
             {
                 crashed = true;
-                SetStatus(StatusMessage.Error("home.status.crashed", code));
-                CrashInput input;
-                lock (parser) input = CrashInputFor(run, SafePid(game));
-                var analysis = await Task.Run(() => input.Analyze());
+                SetStatus(code == 0
+                    ? StatusMessage.Error("home.status.exited_early_cause", analysis.Findings[0].Title)
+                    : StatusMessage.Error("home.status.crashed", code));
                 RememberCrash(run, input, analysis);
                 if (LikelyBakeCrash(run.Baked, run.StoppedByUser, code, run.InGame, run.InGameGuessed))
                 {
@@ -585,10 +611,11 @@ public sealed partial class HomeViewModel : PageViewModel
             if (!string.IsNullOrWhiteSpace(settings.PostExitCommand))
                 await RunUserCommandAsync(settings.PostExitCommand, id, workDir, run.Log, CancellationToken.None);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
+        // 其他的取消异常不是玩家点的：多半是连接超时（HttpClient 的 ConnectTimeout 也抛 TaskCanceledException），按失败显示原因。
         catch (Exception e)
         {
             SetStatus(StatusMessage.Failure("home.status.launch_failed", e, ErrorText.Of(e)));
