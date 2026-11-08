@@ -35,6 +35,11 @@ internal sealed partial class SelfTest
         var expanders = page.GetVisualDescendants().OfType<Expander>().ToArray();
         var nodes = expanders.Single(e => (e.Header as TextBlock)?.Text == vm.NodesHeaderText);
         var advanced = expanders.Single(e => (e.Header as TextBlock)?.Text == vm.AdvancedHeaderText);
+        Check("联机引导：默认开着内置节点，开箱就有节点", vm.UseBuiltInNodes && vm.HasNodes && HasText("multiplayer.nodes.builtin_toggle")
+            && vm.NodesHeaderText == L.F("multiplayer.nodes.header_count", Amber.Core.Multiplayer.RelayNodes.BuiltIn.Count));
+        // 下面检查“没有节点”的引导：先关掉内置节点（最后恢复）。
+        vm.UseBuiltInNodes = false;
+        await Task.Delay(200);
         Check("联机引导：无节点时显示缺少条件并展开节点配置", !vm.HasNodes && nodes.IsExpanded
             && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == vm.NodesStatusText));
         Check("联机引导：高级选项默认收起", !advanced.IsExpanded);
@@ -63,8 +68,9 @@ internal sealed partial class SelfTest
         var importedNode = vm.Nodes.Single();
         Check("联机引导：节点数量和状态行同步更新", (nodes.Header as TextBlock)?.Text == L.F("multiplayer.nodes.header_count", 1)
             && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == L.F("multiplayer.guide.nodes_ready", 1)));
-        // 撤掉测试节点，后续再次运行仍从空节点状态开始。
+        // 撤掉测试节点、恢复内置节点，后续再次运行仍从默认状态开始。
         vm.RemoveNodeCommand.Execute(importedNode);
+        vm.UseBuiltInNodes = true;
 
         var directCode = await FindAsync<TextBox>(t => t.PlaceholderText == L.T("multiplayer.direct.invite_placeholder"));
         const string directInvite = "JAY2D-eyJ2IjoxfQ";

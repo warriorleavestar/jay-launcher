@@ -130,6 +130,21 @@
                          Text="{l:T multiplayer.nodes.hint}" />
               <Button Grid.Column="1" Content="{l:T multiplayer.nodes.test_latency}" Command="{Binding TestNodesCommand}" Margin="12,0,0,0" VerticalAlignment="Top" />
             </Grid>
+            <!-- 内置节点：默认开，和自己的节点一起用（双方都开着就能在同一个节点上碰面）。 -->
+            <StackPanel Spacing="2" IsVisible="{Binding HasBuiltInNodes}">
+              <CheckBox Content="{l:T multiplayer.nodes.builtin_toggle}" IsChecked="{Binding UseBuiltInNodes}" />
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.nodes.builtin_hint}" />
+              <ItemsControl ItemsSource="{Binding BuiltInNodes}" IsVisible="{Binding UseBuiltInNodes}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:NodeItem">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                      <TextBlock Text="{Binding Url}" FontFamily="Consolas,monospace" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Url}" />
+                      <TextBlock Grid.Column="1" Text="{Binding LatencyText}" Classes="hint" VerticalAlignment="Center" Margin="10,0" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
             <TextBlock Classes="hint" Text="{l:T multiplayer.nodes.empty}" IsVisible="{Binding !Nodes.Count}" />
             <ItemsControl ItemsSource="{Binding Nodes}">
               <ItemsControl.ItemTemplate>
@@ -376,7 +391,7 @@
                       <!-- 远程控制：请求看/控这个成员的屏幕（他那边每次都要点同意） -->
                       <Button Grid.Column="2" Content="{l:T multiplayer.remote.button}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RequestRemoteCommand}" CommandParameter="{Binding}"
                               IsEnabled="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).CanRemoteControl}" Margin="6,0,0,0" />
-                      <Button Grid.Column="3" Content="{l:T multiplayer.kick.button}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).KickMemberCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
+                      <Button Grid.Column="3" Content="{l:T multiplayer.kick.button}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).AskKickMemberCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
                     </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -552,7 +567,7 @@
           <StackPanel Spacing="6">
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Classes="h2" Text="{l:T multiplayer.peers.title}" Margin="0" VerticalAlignment="Center" />
-              <Button Grid.Column="1" Content="{l:T multiplayer.room.stop}" Command="{Binding StopCommand}" />
+              <Button Grid.Column="1" Content="{l:T multiplayer.room.stop}" Command="{Binding AskStopCommand}" />
             </Grid>
             <TextBlock Classes="hint" Text="{l:T multiplayer.peers.empty}" IsVisible="{Binding !Peers.Count}" />
             <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding TransportText}" />

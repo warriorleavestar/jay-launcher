@@ -396,11 +396,32 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial string NewNodeUrl { get; set; } = "";
     [ObservableProperty] public partial string ShareCodeText { get; set; } = "";
 
+    /// <summary>内置节点（只读显示，可以测延迟）。</summary>
+    public ObservableCollection<NodeItem> BuiltInNodes { get; } = [.. RelayNodes.BuiltIn.Select(u => new NodeItem(u))];
+
+    /// <summary>同时使用内置节点。</summary>
+    public bool UseBuiltInNodes
+    {
+        get => _service.Settings.UseBuiltInNodes;
+        set
+        {
+            if (_service.Settings.UseBuiltInNodes == value) return;
+            _service.Settings.UseBuiltInNodes = value;
+            _service.Settings.Save();
+            OnPropertyChanged();
+            NotifyNodesChanged();
+            // 关掉后一个节点都没有了：展开节点区，让人看到要加节点。
+            if (_service.MultiplayerPeers.Count == 0) NodesExpanded = true;
+        }
+    }
+
+    public bool HasBuiltInNodes => BuiltInNodes.Count > 0;
+
     private void LoadNodes()
     {
         Nodes.Clear();
-        foreach (var url in _service.MultiplayerPeers) Nodes.Add(new NodeItem(url));
-        NodesExpanded = Nodes.Count == 0;
+        foreach (var url in _service.Settings.MultiplayerPeers ?? []) if (RelayNodes.IsValid(url)) Nodes.Add(new NodeItem(url));
+        NodesExpanded = _service.MultiplayerPeers.Count == 0;
     }
 
     private void SaveNodes()
@@ -445,8 +466,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task TestNodesAsync()
     {
-        foreach (var node in Nodes) node.LatencyText = L.T("multiplayer.nodes.testing");
-        await Task.WhenAll(Nodes.ToList().Select(async node =>
+        var all = Nodes.Concat(UseBuiltInNodes ? BuiltInNodes : []).ToList();
+        foreach (var node in all) node.LatencyText = L.T("multiplayer.nodes.testing");
+        await Task.WhenAll(all.Select(async node =>
         {
             var (ms, error) = await RelayNodes.ProbeAsync(node.Url);
             node.LatencyText = ms is { } v ? $"{v:F0} ms" : error ?? L.T("common.failed");
@@ -1001,7 +1023,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
     }
 
-    /// <summary>复制房间码、邀请码、直连码用的剪贴板：60 秒后自动清掉（自检里换成短一点的）。</summary>
+    /// <summary>复制房间码、邀请码、直连码用的剪贴板：5 分钟后自动清掉（换台电脑粘贴也来得及）（自检里换成短一点的）。</summary>
     internal Amber.App.Services.SensitiveClipboard SecretClipboard { get; set; } = Amber.App.Services.SensitiveClipboard.Shared;
 
     [RelayCommand]
@@ -1031,6 +1053,37 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (TargetInstance is not { } id || JoinAddress.Length == 0) return;
         _service.RequestLaunch(new LaunchRequest(id, JoinServer: JoinAddress));
         NavigateHome?.Invoke();
+    }
+
+    /// <summary>踢人、结束联机前的确认框（标题、正文、确认按钮文字）。自检和测试里换掉。</summary>
+    internal Func<string, string, string, Task<bool>> Confirm { get; set; } = DefaultConfirmAsync;
+
+    private static Task<bool> DefaultConfirmAsync(string title, string body, string confirm) =>
+        Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner }
+            ? Views.ConfirmDialog.AskAsync(owner, title, body, confirm)
+            : Task.FromResult(true);
+
+    /// <summary>界面上的“踢出”按钮：先确认（踢了会马上断开、换钥匙）。</summary>
+    [RelayCommand]
+    private async Task AskKickMemberAsync(MemberItem? item)
+    {
+        if (item is null || IsRekeying || !IsHosting) return;
+        if (!await Confirm(L.F("multiplayer.kick.confirm_title", item.Name), L.F("multiplayer.kick.confirm_body", item.Name), L.T("multiplayer.kick.button"))) return;
+        await KickMemberAsync(item);
+    }
+
+    /// <summary>界面上的“结束联机”按钮：在房间里时先确认（房主结束会让所有人断开）。</summary>
+    [RelayCommand]
+    private async Task AskStopAsync()
+    {
+        if (IsHosting || _room is not null)
+        {
+            var body = IsHosting
+                ? Members.Count > 0 ? L.F("multiplayer.room.stop_confirm_host", Members.Count) : L.T("multiplayer.room.stop_confirm_host_empty")
+                : L.T("multiplayer.room.stop_confirm_guest");
+            if (!await Confirm(L.T("multiplayer.room.stop_confirm_title"), body, L.T("multiplayer.room.stop"))) return;
+        }
+        Stop();
     }
 
     [RelayCommand]

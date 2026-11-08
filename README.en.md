@@ -44,6 +44,22 @@ The packages include .NET. Jay selects a suitable local Java for each game versi
 
 The Apple silicon build was fully tested on a real Mac (install, launch, play). The Intel Mac and Linux builds pass the automated builds and tests but have not been tried on real hardware, so they are marked experimental. The macOS and Linux builds are currently unsigned. If Gatekeeper blocks the first macOS launch, approve it under System Settings → Privacy & Security. Full-LAN and exit-node modes remain Windows-only; ordinary rooms, direct connections, chat and game-only forwarding work across platforms.
 
+### Linux system requirements
+
+Jay's window needs a desktop session (X11, or Wayland with XWayland) and the libraries below. Desktop distributions normally ship them already; on minimal systems, containers or WSL, Jay lists what is missing and which package to install when it starts.
+
+| Purpose | Ubuntu/Debian | Fedora | Arch |
+|---|---|---|---|
+| Window (required) | `libx11-6 libice6 libsm6` | `libX11 libICE libSM` | `libx11 libice libsm` |
+| Input, cursors, multiple screens (recommended) | `libxi6 libxcursor1 libxrandr2` | `libXi libXcursor libXrandr` | `libxi libxcursor libxrandr` |
+| Fonts (required) | `libfontconfig1` | `fontconfig` | `fontconfig` |
+| Locale data (recommended) | `libicu78` (match your release, e.g. `libicu74`) | `libicu` | `icu` |
+| CJK fonts (recommended) | `fonts-noto-cjk` | `google-noto-sans-cjk-fonts` | `noto-fonts-cjk` |
+
+- Without ICU, Jay restarts itself in compatibility mode. The UI language still follows `LANG`; dates and numbers use a neutral format.
+- The Linux build bundles Noto Sans SC, so Chinese and Japanese text inside the window renders even without system CJK fonts. The title bar is drawn by the system, so Jay shows the title as "Jay" in that case; install `fonts-noto-cjk` to get the localized title.
+- WSL: WSLg on Windows 11 shows Jay's window directly. On Ubuntu, install everything at once with `sudo apt install libx11-6 libice6 libsm6 libxi6 libxcursor1 libxrandr2 libfontconfig1 fonts-noto-cjk`.
+
 ## Features
 
 ### Versions and loaders
@@ -187,6 +203,8 @@ Run Forge mods on Fabric / Quilt: there is no reliable compatibility layer, and 
 [MIT](LICENSE)
 
 The multiplayer feature uses EasyTier, a separate open-source project (LGPL-3.0). Jay does not bundle it; it is downloaded separately the first time you use multiplayer.
+
+The Linux build bundles the Noto Sans SC font under the SIL Open Font License 1.1; see [src/Amber.App/Assets/Fonts/OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt).
 
 ---
 

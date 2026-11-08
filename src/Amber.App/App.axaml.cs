@@ -31,6 +31,8 @@ public sealed class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         DevCrashGuard.HookDispatcher();
+        // Linux 系统没有中文字体时，系统画的标题栏会把中文显示成方框，标题改用「Jay」。
+        LinuxFonts.GuardWindowTitles();
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var settings = AppSettings.Load();

@@ -44,7 +44,7 @@ internal sealed partial class SelfTest
         Check("码：离开联机页后重新打码", !host.InviteShown && !host.JoinCodeShown && host.PendingInvites.All(i => !i.Shown)
             && host.InviteDisplay != invite, host.InviteDisplay);
 
-        // 剪贴板：真的 Avalonia 剪贴板，把 60 秒缩短成 2 秒。
+        // 剪贴板：真的 Avalonia 剪贴板，把 5 分钟缩短成 2 秒。
         var original = AvaloniaClipboard.FromMainWindow() is { } board ? await board.GetTextAsync() : null;
         var saved = host.SecretClipboard;
         try
@@ -52,11 +52,11 @@ internal sealed partial class SelfTest
             host.SecretClipboard = new SensitiveClipboard(AvaloniaClipboard.FromMainWindow, (_, ct) => Task.Delay(TimeSpan.FromSeconds(2), ct));
             await host.CopyInviteCommand.ExecuteAsync(null);
             var copied = await ClipboardTextAsync();
-            Check("码：复制邀请码，状态栏提示会自动清除", copied == invite && host.Status.Contains("60 秒"), host.Status);
+            Check("码：复制邀请码，状态栏提示会自动清除", copied == invite && host.Status.Contains("5 分钟"), host.Status);
             // 提示写在邀请对话框里（邀请码和复制按钮下面）：打开对话框看。
             host.OpenInviteDialogCommand.Execute(null);
-            Check("码：邀请码旁边写着“60 秒后自动从剪贴板清除”",
-                await FindAsync<TextBlock>(t => t.Text == "60 秒后自动从剪贴板清除", 5) is not null);
+            Check("码：邀请码旁边写着“5 分钟后自动从剪贴板清除”",
+                await FindAsync<TextBlock>(t => t.Text == "5 分钟后自动从剪贴板清除", 5) is not null);
             host.CloseInviteDialogCommand.Execute(null);
             await host.SecretClipboard.PendingClears;
             var after = await ClipboardTextAsync();

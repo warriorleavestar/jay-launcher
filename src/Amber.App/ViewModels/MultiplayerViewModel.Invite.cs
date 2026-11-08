@@ -554,27 +554,25 @@ public sealed partial class MultiplayerViewModel
         IsKnocking = true;
         var cts = new CancellationTokenSource();
         _knockCts = cts;
-        SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+        var peers = LobbyPeers(host: false);
+        SetStatus(StatusMessage.Info(peers.Count > 0 ? "multiplayer.invite.connecting_relay" : "multiplayer.invite.entering_lobby"));
         try
         {
             var me = Identity.KeyPair;
-            var peers = LobbyPeers(host: false);
             var name = ChatName;
             var outcome = await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(AppSettings.DataDir, "easytier", "lobby-join"), peers, invite,
                 me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
                 () => Dispatcher.UIThread.Post(() =>
                 {
                     if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
-                }), cts.Token));
+                }), cts.Token, () => Dispatcher.UIThread.Post(() =>
+                {
+                    if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+                })));
             if (_knockCts != cts) return;
             if (outcome.Credentials is not { } credentials)
             {
-                SetStatus(StatusMessage.Warning(outcome.Reason switch
-                {
-                    "expired" => "multiplayer.invite.reason.expired",
-                    "full" => "multiplayer.invite.reason.full",
-                    _ => "multiplayer.invite.reason.denied",
-                }));
+                SetStatus(StatusMessage.Warning(KnockReasonKey(outcome.Reason)));
                 return;
             }
             if (credentials.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)
@@ -611,4 +609,15 @@ public sealed partial class MultiplayerViewModel
 
     [RelayCommand]
     private void CancelKnock() => _knockCts?.Cancel();
+
+    /// <summary>敲门没成功的原因 → 界面文字。</summary>
+    internal static string KnockReasonKey(string? reason) => reason switch
+    {
+        "expired" => "multiplayer.invite.reason.expired",
+        "invalid" => "multiplayer.invite.reason.expired",
+        "full" => "multiplayer.invite.reason.full",
+        "removed" => "multiplayer.invite.reason.removed",
+        "closed" => "multiplayer.invite.reason.closed",
+        _ => "multiplayer.invite.reason.denied",
+    };
 }
