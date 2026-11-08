@@ -259,7 +259,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitDirect();
         InitGuide();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
+        HostServer = new HostServerViewModel(service);
     }
+
+    /// <summary>开服：在这台电脑上跑 Jay 服务器版。</summary>
+    public HostServerViewModel HostServer { get; }
 
     /// <summary>Jay 服务器（经网关进的专用服务器）。</summary>
     public JayServersViewModel JayServers { get; }
@@ -273,6 +277,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         RefreshInstances();
         RefreshTrusted();
         JayServers.Load();
+        HostServer.Load();
         // 不自动听局域网广播：绑定端口可能让 Windows 弹防火墙询问。用 Amber 启动的游戏从日志就能认出端口。
     }
 

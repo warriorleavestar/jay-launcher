@@ -134,37 +134,8 @@ public static class Program
 
     private static async Task<int> RunAsync(string root, Options options)
     {
-        var store = Gate(root);
-        var config = store.LoadConfig();
-        var host = new McServerHost(root);
-        var withMc = !options.Has("no-mc");
-        if (withMc)
-        {
-            if (!host.IsSetUp) throw new InvalidOperationException("MC 服务端还没准备好，先运行 jay-server setup");
-            if (!host.EulaAccepted) throw new InvalidOperationException("还没同意 Minecraft EULA，先运行 jay-server setup");
-            config.BackendHost = "127.0.0.1";
-            config.BackendPort = host.LoadSettings().Port;
-        }
-        using var key = store.LoadServerKey();
         var log = (string line) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [Jay] {line}");
-        await using var gate = new GateServer(store, config, key, log);
-        gate.Start();
-        var state = store.Read();
-        log(state.Privacy.IsSplit()
-            ? $"网关在端口 {gate.Port} 上等待玩家（{(state.Privacy == PrivacyLevel.PlusPlus ? "隐私++" : "隐私+")}：只收 {state.Relays.Count} 个节点转来的拆分连接）；服务器身份 {MemberIdentity.FingerprintOf(key.PublicKey)}"
-            : $"网关在端口 {gate.Port} 上等待玩家（玩家连 {config.PublicHost}:{config.PublicPort}）；服务器身份 {MemberIdentity.FingerprintOf(key.PublicKey)}");
-
-        McServerHost.RunningServer? mc = null;
-        if (withMc)
-        {
-            mc = host.Start(Console.WriteLine);
-            log($"MC 服务端已启动（进程 {mc.Process.Id}）");
-        }
-        gate.BreakerChanged += (open, _) =>
-        {
-            // 熔断时先存盘（不停服），万一之后有人去停服务端也不会坏档。
-            if (open) mc?.Command("save-all");
-        };
+        await using var runner = JayServerRunner.Start(root, !options.Has("no-mc"), log, Console.WriteLine);
 
         // 不 Dispose：退出时 ProcessExit 还可能来取消它。
         var stop = new CancellationTokenSource();
@@ -173,6 +144,8 @@ public static class Program
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Stop();
         using var sigterm = OperatingSystem.IsWindows() ? null
             : System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; Stop(); });
+        // MC 服务端自己退出了：网关一起停。
+        _ = runner.Exited.ContinueWith(_ => Stop(), TaskScheduler.Default);
 
         // 控制台：普通输入交给 MC；jay 开头的是管理命令。没有可交互的控制台（作为服务运行）时只等结束信号。
         var input = Task.Run(async () =>
@@ -184,36 +157,21 @@ public static class Program
                 if (line is null) return;
                 line = line.Trim();
                 if (line.Length == 0) continue;
-                if (line == "stop" || line == "jay stop") { stop.Cancel(); return; }
+                if (line == "stop" || line == "jay stop") { Stop(); return; }
                 if (line.StartsWith("jay ", StringComparison.Ordinal))
                 {
                     try { Admin(root, Options.Parse(Split(line[4..])), Console.Out); }
                     catch (Exception e) when (e is ArgumentException or InvalidOperationException or IOException or FormatException) { Console.WriteLine("出错：" + e.Message); }
                 }
-                else mc?.Command(line.TrimStart('/'));
+                else runner.Command(line);
             }
         });
 
-        try
-        {
-            while (!stop.IsCancellationRequested)
-            {
-                await Task.Delay(1000, stop.Token);
-                if (mc is { HasExited: true })
-                {
-                    log($"MC 服务端退出了（退出码 {mc.Process.ExitCode}），网关一起停止");
-                    stop.Cancel();
-                }
-            }
-        }
+        try { await Task.Delay(Timeout.Infinite, stop.Token); }
         catch (OperationCanceledException) { }
 
         log("正在关闭……");
-        if (mc is not null)
-        {
-            await mc.StopAsync(TimeSpan.FromSeconds(60));
-            mc.Dispose();
-        }
+        await runner.StopAsync(TimeSpan.FromSeconds(60));
         return 0;
     }
 

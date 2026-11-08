@@ -132,5 +132,24 @@ internal sealed partial class SelfTest
         await ShotAsync("联机引导最小窗口房间入口");
         ScrollToHeading("multiplayer.direct.heading");
         await ShotAsync("联机引导最小窗口直连入口");
+
+        // 开服：没初始化时只显示第一步；地址填错时点“下一步”给出提示，不建任何文件。
+        var host = vm.HostServer;
+        if (!host.IsInitialized)
+        {
+            ScrollToHeading("multiplayer.hostserver.title");
+            await Task.Delay(200);
+            Check("开服：未初始化时显示填地址这一步", HasText("multiplayer.hostserver.step_address") && !HasText("multiplayer.hostserver.step_setup"));
+            Dispatcher.UIThread.Invoke(() => host.PublicHost = "http://bad host");
+            Check("开服：地址填错时提示", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, host.InitCommand)))
+                && host.Status == L.T("multiplayer.hostserver.bad_host") && !host.IsInitialized);
+            await ShotAsync("开服最小窗口");
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                host.PublicHost = "";
+                host.Status = "";
+            });
+        }
+        else Check("开服：测试配置里已经初始化过，跳过第一步检查", true);
     }
 }
