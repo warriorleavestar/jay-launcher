@@ -853,7 +853,7 @@
   "multiplayer.component.exited": "連線元件意外結束：{0}",
   "multiplayer.component.license": "連線功能由開放原始碼專案 EasyTier 實作（{0}，{1}）。不經過 Jay 的伺服器；無法直接連線時，資料會透過你新增的連線節點轉送（以房間金鑰加密）。預設模式不需要系統管理員權限，也不會安裝驅動程式。",
   "multiplayer.component.ready": "EasyTier {0} 已就緒",
-  "multiplayer.component.required": "連線前需先下載 EasyTier {0}（約 {1} MB，來自 GitHub 官方發布頁，下載後會驗證 SHA-256）",
+  "multiplayer.component.required": "連線需要 EasyTier {0}（約 {1} MB）。會依序嘗試 GitHub 官方發布頁和幾個下載鏡像，下載後驗證 SHA-256",
   "multiplayer.diagnostics.debug_mode": "偵錯模式",
   "multiplayer.diagnostics.debug_tooltip": "顯示詳細日誌（含 EasyTier 本身的日誌），並可匯出診斷報告",
   "multiplayer.diagnostics.export": "匯出診斷報告…",
@@ -1599,5 +1599,18 @@
   "accounts.ms_fail.other_account": "換個帳號",
   "accounts.ms_fail.set_name": "去官網設定玩家名稱",
   "core.auth.microsoft.noownership": "這個帳號沒有 Minecraft Java 版的購買紀錄",
-  "core.auth.microsoft.noprofilename": "尚未設定 Minecraft 玩家名稱"
+  "core.auth.microsoft.noprofilename": "尚未設定 Minecraft 玩家名稱",
+  "core.mp.component.source.bundled": "發布套件內附",
+  "core.mp.component.sourcefailed": "· {0}：{1}",
+  "core.mp.component.allfailed": "所有來源都無法安裝 EasyTier。可以換個網路再試，或用瀏覽器下載 {1} 後按「從檔案匯入」。各來源的原因：\n{0}",
+  "core.mp.component.wrongpackage": "不是需要的安裝套件：應為 {0}（{1} 位元組），此檔案為 {2} 位元組",
+  "core.mp.component.httpstatus": "伺服器回傳 HTTP {0}",
+  "core.net.download.timeout": "下載逾時，伺服器長時間沒有回應：{0}",
+  "multiplayer.component.import": "從檔案匯入",
+  "multiplayer.component.import_picker": "選擇 EasyTier 安裝套件 {0}",
+  "multiplayer.component.import_filetype": "EasyTier 安裝套件",
+  "multiplayer.component.imported": "已匯入 EasyTier 並驗證通過",
+  "multiplayer.component.import_failed": "匯入失敗：{0}",
+  "multiplayer.component.downloading_from": "正在從 {0} 下載 EasyTier……",
+  "multiplayer.component.manual_hint": "無法下載時：用瀏覽器下載 {0}（官方網址 {1}），再按「從檔案匯入」。匯入的檔案同樣須通過 SHA-256 驗證。"
 }
