@@ -396,11 +396,32 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial string NewNodeUrl { get; set; } = "";
     [ObservableProperty] public partial string ShareCodeText { get; set; } = "";
 
+    /// <summary>内置节点（只读显示，可以测延迟）。</summary>
+    public ObservableCollection<NodeItem> BuiltInNodes { get; } = [.. RelayNodes.BuiltIn.Select(u => new NodeItem(u))];
+
+    /// <summary>同时使用内置节点。</summary>
+    public bool UseBuiltInNodes
+    {
+        get => _service.Settings.UseBuiltInNodes;
+        set
+        {
+            if (_service.Settings.UseBuiltInNodes == value) return;
+            _service.Settings.UseBuiltInNodes = value;
+            _service.Settings.Save();
+            OnPropertyChanged();
+            NotifyNodesChanged();
+            // 关掉后一个节点都没有了：展开节点区，让人看到要加节点。
+            if (_service.MultiplayerPeers.Count == 0) NodesExpanded = true;
+        }
+    }
+
+    public bool HasBuiltInNodes => BuiltInNodes.Count > 0;
+
     private void LoadNodes()
     {
         Nodes.Clear();
-        foreach (var url in _service.MultiplayerPeers) Nodes.Add(new NodeItem(url));
-        NodesExpanded = Nodes.Count == 0;
+        foreach (var url in _service.Settings.MultiplayerPeers ?? []) if (RelayNodes.IsValid(url)) Nodes.Add(new NodeItem(url));
+        NodesExpanded = _service.MultiplayerPeers.Count == 0;
     }
 
     private void SaveNodes()
@@ -445,8 +466,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task TestNodesAsync()
     {
-        foreach (var node in Nodes) node.LatencyText = L.T("multiplayer.nodes.testing");
-        await Task.WhenAll(Nodes.ToList().Select(async node =>
+        var all = Nodes.Concat(UseBuiltInNodes ? BuiltInNodes : []).ToList();
+        foreach (var node in all) node.LatencyText = L.T("multiplayer.nodes.testing");
+        await Task.WhenAll(all.Select(async node =>
         {
             var (ms, error) = await RelayNodes.ProbeAsync(node.Url);
             node.LatencyText = ms is { } v ? $"{v:F0} ms" : error ?? L.T("common.failed");

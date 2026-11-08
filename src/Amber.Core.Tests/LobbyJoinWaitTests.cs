@@ -82,3 +82,32 @@ public sealed class LobbyJoinWaitTests
             TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5), CancellationToken.None));
     }
 }
+
+/// <summary>内置节点：自己的节点在前，内置的总是加在后面（双方才能在同一个节点上碰面），可以关掉。</summary>
+public sealed class BuiltInNodeTests
+{
+    [Fact]
+    public void BuiltInNodesAreValidAndOfficialComesFirst()
+    {
+        Assert.NotEmpty(RelayNodes.BuiltIn);
+        Assert.All(RelayNodes.BuiltIn, u => Assert.True(RelayNodes.IsValid(u), u));
+        Assert.Equal([.. RelayNodes.Official, .. RelayNodes.Community], RelayNodes.BuiltIn);
+        Assert.Equal(RelayNodes.BuiltIn, EasyTierRelease.DefaultPeers);
+    }
+
+    [Fact]
+    public void UserNodesComeFirstAndBuiltInIsAppended()
+    {
+        var mine = "tcp://my.node:11010";
+        var list = RelayNodes.Effective([mine, " " + mine, "not a url", RelayNodes.BuiltIn[0]], true);
+        Assert.Equal([mine, .. RelayNodes.BuiltIn], list);
+    }
+
+    [Fact]
+    public void BuiltInCanBeTurnedOff()
+    {
+        Assert.Empty(RelayNodes.Effective(null, false));
+        Assert.Equal(["tcp://my.node:11010"], RelayNodes.Effective(["tcp://my.node:11010"], false));
+        Assert.Equal(RelayNodes.BuiltIn, RelayNodes.Effective(null, true));
+    }
+}

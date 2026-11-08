@@ -41,7 +41,16 @@ public sealed class MultiplayerGuideTests
     {
         var (service, vm, changed) = Create();
         using var _ = service;
+        // 默认开着内置节点：开箱就有节点。
+        Assert.True(vm.UseBuiltInNodes);
+        Assert.True(vm.HasNodes);
+        Assert.Equal(L.F("multiplayer.nodes.header_count", Amber.Core.Multiplayer.RelayNodes.BuiltIn.Count), vm.NodesHeaderText);
+        Assert.Equal(Amber.Core.Multiplayer.RelayNodes.BuiltIn, service.MultiplayerPeers);
+
+        vm.UseBuiltInNodes = false;
         Assert.False(vm.HasNodes);
+        Assert.True(vm.NodesExpanded);
+        Assert.Empty(service.MultiplayerPeers);
         Assert.Equal(L.T("multiplayer.nodes.header_empty"), vm.NodesHeaderText);
 
         vm.Nodes.Add(new NodeItem("tcp://example.com:11010"));

@@ -130,6 +130,21 @@
                          Text="{l:T multiplayer.nodes.hint}" />
               <Button Grid.Column="1" Content="{l:T multiplayer.nodes.test_latency}" Command="{Binding TestNodesCommand}" Margin="12,0,0,0" VerticalAlignment="Top" />
             </Grid>
+            <!-- 内置节点：默认开，和自己的节点一起用（双方都开着就能在同一个节点上碰面）。 -->
+            <StackPanel Spacing="2" IsVisible="{Binding HasBuiltInNodes}">
+              <CheckBox Content="{l:T multiplayer.nodes.builtin_toggle}" IsChecked="{Binding UseBuiltInNodes}" />
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.nodes.builtin_hint}" />
+              <ItemsControl ItemsSource="{Binding BuiltInNodes}" IsVisible="{Binding UseBuiltInNodes}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:NodeItem">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                      <TextBlock Text="{Binding Url}" FontFamily="Consolas,monospace" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Url}" />
+                      <TextBlock Grid.Column="1" Text="{Binding LatencyText}" Classes="hint" VerticalAlignment="Center" Margin="10,0" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
             <TextBlock Classes="hint" Text="{l:T multiplayer.nodes.empty}" IsVisible="{Binding !Nodes.Count}" />
             <ItemsControl ItemsSource="{Binding Nodes}">
               <ItemsControl.ItemTemplate>

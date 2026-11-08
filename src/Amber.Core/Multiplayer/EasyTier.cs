@@ -74,10 +74,10 @@ public static class EasyTierRelease
     }
 
     /// <summary>
-    /// 默认没有节点：EasyTier 官方文档没有给出固定的公共节点地址（安装脚本里写的 public.easytier.top 已经解析不到），
-    /// Amber 也不提供自己的服务器。节点由用户添加：自己用仓库 node 文件夹的脚本搭，或者导入朋友的节点分享码。
+    /// 默认节点：EasyTier 官方的公共节点已经失效（public.easytier.top 解析不到），改用 Jay 内置的节点列表（见 <see cref="RelayNodes.BuiltIn"/>）。
+    /// 用户也可以自己搭（仓库 node 文件夹的脚本）或导入朋友的节点分享码。
     /// </summary>
-    public static readonly string[] DefaultPeers = [];
+    public static IReadOnlyList<string> DefaultPeers => RelayNodes.BuiltIn;
 }
 
 /// <summary>一个安装来源失败的原因，用来在界面上逐个说明。</summary>

@@ -59,8 +59,8 @@ public sealed class LauncherService : IDisposable
     /// <summary>联机组件放在数据目录下，和游戏目录无关。</summary>
     public EasyTierInstaller EasyTier => new(Downloader, AppSettings.DataDir);
 
-    public IReadOnlyList<string> MultiplayerPeers =>
-        Settings.MultiplayerPeers is { Count: > 0 } peers ? peers : EasyTierRelease.DefaultPeers;
+    /// <summary>联机实际用的节点：自己的在前，内置的在后（开着时）。</summary>
+    public IReadOnlyList<string> MultiplayerPeers => RelayNodes.Effective(Settings.MultiplayerPeers, Settings.UseBuiltInNodes);
 
     public LauncherService(AppSettings settings)
     {
