@@ -4,24 +4,32 @@ namespace Amber.Core.Multiplayer;
 
 /// <summary>
 /// macOS/Linux 上的 easytier-core 残留进程记录。只在 PID、启动时间和可执行路径都对得上时结束，避免 PID 复用后伤及别的程序。
+/// 记录里还写了启动它的 Jay 进程（PID + 启动时间）：那个 Jay 仍在运行时不算残留，不结束，
+/// 这样同时开两个 Jay 时不会互相停掉对方的联机。
 /// </summary>
 internal static class EasyTierProcessTracker
 {
     private const string Prefix = ".jay-easytier-";
 
-    public static void Cleanup(string workDir, string corePath)
+    /// <param name="executables">认得的程序：easytier-core 本身，以及套了看门脚本时的 sh。</param>
+    public static void Cleanup(string workDir, params string[] executables)
     {
         if (OperatingSystem.IsWindows() || !Directory.Exists(workDir)) return;
-        var expected = Path.GetFullPath(corePath);
+        var expected = executables.Select(Path.GetFullPath).ToHashSet(StringComparer.Ordinal);
         foreach (var record in Directory.EnumerateFiles(workDir, Prefix + "*.pid"))
         {
             try
             {
                 var lines = File.ReadAllLines(record);
-                if (lines.Length != 3 || !int.TryParse(lines[0], out var pid) || !long.TryParse(lines[1], out var ticks))
+                if ((lines.Length != 3 && lines.Length != 5) || !int.TryParse(lines[0], out var pid) || !long.TryParse(lines[1], out var ticks))
                 {
                     File.Delete(record);
                     continue;
+                }
+                if (lines.Length == 5 && int.TryParse(lines[3], out var ownerPid) && long.TryParse(lines[4], out var ownerTicks)
+                    && ownerPid != Environment.ProcessId && IsAlive(ownerPid, ownerTicks))
+                {
+                    continue; // 另一个仍在运行的 Jay 的联机，不是残留。
                 }
                 var recordedPath = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(lines[2]));
                 using var process = Process.GetProcessById(pid);
@@ -35,7 +43,7 @@ internal static class EasyTierProcessTracker
                     continue;
                 }
                 if (runningPath is null) continue;
-                if (Path.GetFullPath(runningPath).Equals(expected, StringComparison.Ordinal))
+                if (expected.Contains(Path.GetFullPath(runningPath)))
                 {
                     process.Kill(entireProcessTree: true);
                     process.WaitForExit(5000);
@@ -53,7 +61,10 @@ internal static class EasyTierProcessTracker
         }
     }
 
-    public static string? Track(Process process, string workDir, string corePath)
+    public static string? Track(Process process, string workDir, string corePath) =>
+        Track(process, workDir, corePath, Environment.ProcessId, OwnStartTicks());
+
+    internal static string? Track(Process process, string workDir, string corePath, int ownerPid, long ownerStartTicks)
     {
         if (OperatingSystem.IsWindows()) return null;
         try
@@ -61,7 +72,8 @@ internal static class EasyTierProcessTracker
             Directory.CreateDirectory(workDir);
             var record = Path.Combine(workDir, $"{Prefix}{process.Id}-{Guid.NewGuid():N}.pid");
             var text = string.Join('\n', process.Id.ToString(), process.StartTime.ToUniversalTime().Ticks.ToString(),
-                Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(corePath)))) + "\n";
+                Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(corePath))),
+                ownerPid.ToString(), ownerStartTicks.ToString()) + "\n";
             var options = new FileStreamOptions
             {
                 Mode = FileMode.CreateNew,
@@ -84,6 +96,25 @@ internal static class EasyTierProcessTracker
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return null;
+        }
+    }
+
+    private static long OwnStartTicks()
+    {
+        using var self = Process.GetCurrentProcess();
+        return self.StartTime.ToUniversalTime().Ticks;
+    }
+
+    private static bool IsAlive(int pid, long startTicks)
+    {
+        try
+        {
+            using var owner = Process.GetProcessById(pid);
+            return !owner.HasExited && owner.StartTime.ToUniversalTime().Ticks == startTicks;
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return false;
         }
     }
 
