@@ -20,6 +20,15 @@ public partial class MultiplayerPage : UserControl
             {
                 vm.ChatLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("ChatScroll")?.ScrollToEnd(), DispatcherPriority.Background);
                 vm.DebugLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("DebugScroll")?.ScrollToEnd(), DispatcherPriority.Background);
+                // 开服控制台：新日志来了把光标放到最后，文本框就滚到最新一行。
+                vm.HostServer.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName != nameof(HostServerViewModel.LogText)) return;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (this.FindControl<TextBox>("HostServerLog") is { Text: { } text } box) box.CaretIndex = text.Length;
+                    }, DispatcherPriority.Background);
+                };
             }
         };
     }

@@ -31,6 +31,10 @@ public sealed partial class HostServerViewModel : ObservableObject
 
     private readonly LauncherService _service;
     private readonly List<string> _log = [];
+    /// <summary>卡片上显示的邀请码是给谁的：这个人的邀请用掉（或过期、作废）后就把码从卡片上清掉。</summary>
+    private string? _shownInviteFor;
+    /// <summary>是用户（或关 Jay）要停的：MC 随之退出不算“意外退出”。</summary>
+    private bool _stopRequested;
     private DispatcherTimer? _timer;
 
     public HostServerViewModel(LauncherService service, string? root = null)
@@ -179,12 +183,16 @@ public sealed partial class HostServerViewModel : ObservableObject
         {
             var runner = JayServerRunner.Start(DataDirectory, true, line => Log("[Jay] " + line), Log);
             s_running = runner;
+            _stopRequested = false;
             IsRunning = true;
             Status = L.T("multiplayer.hostserver.started");
             _ = runner.Exited.ContinueWith(_ => Dispatcher.UIThread.Post(async () =>
             {
-                if (!ReferenceEquals(s_running, runner)) return;
+                if (!ReferenceEquals(s_running, runner) || _stopRequested) return;
+                // MC 自己退出了（崩溃、端口被占、Java 不对……）：状态里写明，最后几行日志在控制台里。
+                var last = _log.LastOrDefault(l => !l.StartsWith("[Jay]", StringComparison.Ordinal)) ?? "";
                 await StopAsync();
+                Status = L.F("multiplayer.hostserver.mc_exited", last);
             }), TaskScheduler.Default);
             StartTimer();
             Refresh();
@@ -200,6 +208,7 @@ public sealed partial class HostServerViewModel : ObservableObject
     private async Task StopAsync()
     {
         if (s_running is not { } runner) return;
+        _stopRequested = true;
         IsBusy = true;
         Status = L.T("multiplayer.hostserver.stopping");
         try
@@ -258,6 +267,7 @@ public sealed partial class HostServerViewModel : ObservableObject
             var store = Store();
             using var key = store.LoadServerKey();
             InviteCode = store.CreateInvite(name, TimeSpan.FromHours(24), 1, key.PublicKey).Encode();
+            _shownInviteFor = name;
             Status = L.F("multiplayer.hostserver.invite_created", name);
             InviteName = "";
             Refresh();
@@ -309,6 +319,11 @@ public sealed partial class HostServerViewModel : ObservableObject
         GateState state;
         try { state = Store().Read(); }
         catch (Exception e) when (e is IOException or System.Text.Json.JsonException) { return; }
+        if (_shownInviteFor is { } invitee && !state.Invites.Any(i => string.Equals(i.Name, invitee, StringComparison.OrdinalIgnoreCase) && i.UsesLeft > 0 && i.Expires > DateTimeOffset.UtcNow))
+        {
+            InviteCode = "";
+            _shownInviteFor = null;
+        }
         var names = state.Members.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).Select(m => new HostMemberItem(m)).ToList();
         if (!names.Select(n => n.Detail + n.Name).SequenceEqual(Members.Select(n => n.Detail + n.Name)))
         {

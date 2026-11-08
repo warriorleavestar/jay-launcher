@@ -1,4 +1,7 @@
+using System.Net;
+using System.Net.Sockets;
 using Amber.Core.Multiplayer.Gate;
+using Amber.Core.Multiplayer.Transport;
 
 namespace Amber.Core.Tests;
 
@@ -40,5 +43,27 @@ public sealed class JayServerRunnerTests : IDisposable
         await runner.StopAsync();
         await runner.Exited.WaitAsync(TimeSpan.FromSeconds(5));
         await runner.StopAsync(); // 停两次没事。
+    }
+
+    [Fact]
+    public async Task TunnelReportsGateRejectionInsteadOfDroppingIt()
+    {
+        var lines = new List<string>();
+        await using var tunnel = new TunnelClient(0, _ => throw new GateRejectedException(GateStatus.NotMember), l => { lock (lines) lines.Add(l); });
+        using (var game = new TcpClient())
+        {
+            // 隧道会立刻重置这条连接：连接本身也可能报错，不影响要看的东西。
+            try { await game.ConnectAsync(IPAddress.Loopback, tunnel.Port); }
+            catch (SocketException) { }
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline)
+            {
+                lock (lines) if (lines.Count > 0) break;
+                await Task.Delay(20);
+            }
+        }
+        // 不比对文字：别的测试可能同时切换界面语言。
+        lock (lines) Assert.Single(lines);
+        Assert.Equal(1, tunnel.Failures);
     }
 }

@@ -1550,6 +1550,7 @@
   "multiplayer.hostserver.start_failed": "Couldn't start: {0}",
   "multiplayer.hostserver.stopping": "Saving and stopping…",
   "multiplayer.hostserver.stopped": "The server has stopped.",
+  "multiplayer.hostserver.mc_exited": "The Minecraft server exited on its own, so the server has stopped. Last output: {0} (full log in the console below)",
   "multiplayer.hostserver.invite_placeholder": "Friend's in-game name",
   "multiplayer.hostserver.invite": "Create invite",
   "multiplayer.hostserver.invite_created": "Invite code for {0} (valid for 24 hours, one use). Send it only to them, never somewhere public.",

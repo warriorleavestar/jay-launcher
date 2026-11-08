@@ -302,9 +302,10 @@ public sealed class TunnelClient : IAsyncDisposable
                 Interlocked.Add(ref BytesUp, down);
                 Interlocked.Add(ref BytesDown, up);
             }
-            catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or InvalidDataException or PlatformNotSupportedException or ArgumentException)
+            catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or InvalidDataException or PlatformNotSupportedException or ArgumentException
+                                           or Gate.GateRejectedException)
             {
-                // 出错断开：封装通道不发“正常结束”，本机的游戏连接也直接重置。
+                // 出错断开（包括 Jay 服务器拒绝：设备被撤销、不在名单、熔断中），把原因报给界面：封装通道不发“正常结束”，本机的游戏连接也直接重置。
                 (remote as IAuthenticatedStream)?.Abort();
                 Pump.Abort(game);
                 Interlocked.Increment(ref Failures);

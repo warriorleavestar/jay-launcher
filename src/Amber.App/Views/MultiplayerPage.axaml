@@ -187,9 +187,9 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <Expander HorizontalAlignment="Stretch" Header="{l:T multiplayer.hostserver.console}" IsVisible="{Binding IsRunning}">
+              <Expander HorizontalAlignment="Stretch" Header="{l:T multiplayer.hostserver.console}" IsVisible="{Binding LogText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                 <StackPanel Spacing="6">
-                  <TextBox IsReadOnly="True" FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" MaxHeight="220" Text="{Binding LogText}" />
+                  <TextBox x:Name="HostServerLog" IsReadOnly="True" FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" MaxHeight="220" Text="{Binding LogText}" />
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBox Text="{Binding McCommand}" PlaceholderText="{l:T multiplayer.hostserver.command_placeholder}" />
                     <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.send}" Command="{Binding SendCommandCommand}" />

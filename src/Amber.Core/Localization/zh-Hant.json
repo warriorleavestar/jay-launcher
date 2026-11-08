@@ -1519,6 +1519,7 @@
   "multiplayer.hostserver.start_failed": "啟動失敗：{0}",
   "multiplayer.hostserver.stopping": "正在存檔並停止……",
   "multiplayer.hostserver.stopped": "伺服器已停止。",
+  "multiplayer.hostserver.mc_exited": "MC 伺服器端自己結束了，伺服器已停止。最後一行輸出：{0}（完整日誌在下面的主控台裡）",
   "multiplayer.hostserver.invite_placeholder": "朋友的遊戲使用者名稱",
   "multiplayer.hostserver.invite": "產生邀請碼",
   "multiplayer.hostserver.invite_created": "給 {0} 的邀請碼（24 小時內有效，用一次）。只發給本人，別發到公開的地方。",

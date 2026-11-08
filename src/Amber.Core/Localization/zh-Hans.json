@@ -1519,6 +1519,7 @@
   "multiplayer.hostserver.start_failed": "启动失败：{0}",
   "multiplayer.hostserver.stopping": "正在存盘并停止……",
   "multiplayer.hostserver.stopped": "服务器已停止。",
+  "multiplayer.hostserver.mc_exited": "MC 服务端自己退出了，服务器已停止。最后一行输出：{0}（完整日志在下面的控制台里）",
   "multiplayer.hostserver.invite_placeholder": "朋友的游戏用户名",
   "multiplayer.hostserver.invite": "生成邀请码",
   "multiplayer.hostserver.invite_created": "给 {0} 的邀请码（24 小时内有效，用一次）。只发给本人，别发到公开的地方。",

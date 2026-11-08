@@ -1519,6 +1519,7 @@
   "multiplayer.hostserver.start_failed": "起動に失敗しました：{0}",
   "multiplayer.hostserver.stopping": "保存して停止しています…",
   "multiplayer.hostserver.stopped": "サーバーを停止しました。",
+  "multiplayer.hostserver.mc_exited": "MC サーバーが自ら終了したため、サーバーを停止しました。最後の出力：{0}（全ログは下のコンソールにあります）",
   "multiplayer.hostserver.invite_placeholder": "友だちのゲーム内ユーザー名",
   "multiplayer.hostserver.invite": "招待コードを作成",
   "multiplayer.hostserver.invite_created": "{0} への招待コード（24 時間有効、1 回のみ）。本人だけに送り、公開の場所には貼らないでください。",
