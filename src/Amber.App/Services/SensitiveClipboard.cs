@@ -11,13 +11,13 @@ public interface IClipboardText
 }
 
 /// <summary>
-/// 复制邀请码、直连码这类敏感文字：放进剪贴板，60 秒后如果剪贴板里还是这段文字就清掉；
+/// 复制邀请码、直连码这类敏感文字：放进剪贴板，5 分钟后如果剪贴板里还是这段文字就清掉；
 /// 那时已经换成别的内容（用户自己又复制了别的）就不动。
 /// 只用 Avalonia 的剪贴板接口，Windows、macOS、Linux 一样。
 /// </summary>
 public sealed class SensitiveClipboard
 {
-    public static readonly TimeSpan Lifetime = TimeSpan.FromSeconds(60);
+    public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(5);
 
     private readonly Func<IClipboardText?> _clipboard;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -42,7 +42,7 @@ public sealed class SensitiveClipboard
         get { lock (_gate) return Task.WhenAll([.. _pending]); }
     }
 
-    /// <summary>复制并安排 60 秒后清除。没有剪贴板时返回 false。</summary>
+    /// <summary>复制并安排 5 分钟后清除。没有剪贴板时返回 false。</summary>
     public async Task<bool> CopyAsync(string text)
     {
         if (string.IsNullOrEmpty(text) || _clipboard() is not { } clipboard) return false;

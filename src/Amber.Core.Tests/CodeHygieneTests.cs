@@ -51,14 +51,14 @@ public sealed class CodeHygieneTests
     }
 
     [Fact]
-    public async Task CopiedCodeIsClearedAfterSixtySeconds()
+    public async Task CopiedCodeIsClearedAfterFiveMinutes()
     {
         var board = new FakeClipboard();
         var delay = new ManualDelay();
         var clipboard = new SensitiveClipboard(() => board, delay.Delay);
         Assert.True(await clipboard.CopyAsync("JAY2D-secret"));
         Assert.Equal("JAY2D-secret", board.Text);
-        Assert.Equal([TimeSpan.FromSeconds(60)], delay.Requested);
+        Assert.Equal([TimeSpan.FromMinutes(5)], delay.Requested);
         delay.ReleaseAll();
         await clipboard.PendingClears;
         Assert.Null(board.Text);

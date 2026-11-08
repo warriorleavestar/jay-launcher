@@ -184,7 +184,7 @@ public static partial class KnockProtocol
     internal static partial Regex MemberIdPattern();
 }
 
-/// <summary>敲门的结果：批准时带凭据；拒绝时带原因（denied / expired / full）。</summary>
+/// <summary>敲门的结果：批准时带凭据；拒绝时带原因（denied / expired / full / removed 已被踢出 / closed 房主没回就断开 / invalid 房主不认这张邀请）。</summary>
 public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, byte[] HostPublicKey)
 {
     public bool Approved => Credentials is not null;
@@ -223,11 +223,20 @@ public static class KnockClient
         {
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
             wait.CancelAfter(decisionTimeout ?? DecisionTimeout);
-            var sealedReply = await KnockProtocol.ReadFrameAsync(stream, wait.Token);
+            byte[] sealedReply;
+            try
+            {
+                sealedReply = await KnockProtocol.ReadFrameAsync(stream, wait.Token);
+            }
+            catch (EndOfStreamException)
+            {
+                // 握手做完了、房主却没回结果就断开：旧版房主对被踢出的人就是这样（新版会回 removed），也可能是房主关了房间。
+                return new KnockOutcome(null, "closed", hostPub);
+            }
             var reply = KnockProtocol.ParseJson(receive.DecryptWithAd([], sealedReply));
             if (reply["ok"]?.GetValue<bool>() != true)
             {
-                var reason = reply["reason"]?.GetValue<string>() is var r && r is "denied" or "expired" or "full" ? r : "denied";
+                var reason = reply["reason"]?.GetValue<string>() is var r && r is "denied" or "expired" or "full" or "removed" ? r : "denied";
                 return new KnockOutcome(null, reason, hostPub);
             }
             var credentials = RoomCredentials.FromJson(reply);
@@ -588,10 +597,13 @@ public sealed class KnockServer : IAsyncDisposable
                     version = KnockProtocol.SanitizeName(about["ver"]?.GetValue<string>());
                 }
                 catch (Exception e) when (e is InvalidOperationException or FormatException) { }
-                // 这个房间里被踢出的人：不回任何东西直接断开，也不用掉邀请、不算失败次数。
+                // 这个房间里被踢出的人：明确告诉他“你已被移出”（回复走握手后的加密通道，只有他能看到），不用掉邀请、不算失败次数。
                 if (_members.IsBanned(guestPub))
                 {
                     _log?.Invoke(L.F("core.mp.knock.failed", L.T("core.mp.knock.banned")));
+                    using var removed = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    removed.CancelAfter(_limits.HandshakeTimeout);
+                    await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(Reject("removed"))), removed.Token);
                     return;
                 }
                 var request = new KnockRequest(name ?? "", (byte[])guestPub.Clone(), version ?? "", _isTrusted(guestPub), invite);
