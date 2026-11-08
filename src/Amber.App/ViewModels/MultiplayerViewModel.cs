@@ -992,6 +992,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             var host = Peers.FirstOrDefault(p => p.Peer.Ip == EasyTierArgs.HostIp && p.Peer.Cost != "Local");
             TickChat(host is not null);
             if (host is not null) _hostSeen = true;
+            // 刚显示过远程控制的提示（或正在等对方同意）时先不刷新，免得一两秒就被盖掉。
+            if (!RoomStatusMayOverwrite) return;
             if (IsJoined && host is null && !_hostSeen && DateTime.UtcNow - _joinedAt > TimeSpan.FromSeconds(20))
                 SetStatus(StatusMessage.Info("multiplayer.room.not_connected_hint"));
             else if (IsJoined)
