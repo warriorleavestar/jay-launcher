@@ -76,7 +76,7 @@ public static partial class CrashAnalyzer
         R(@"Checksum|Hash mismatch|SHA-?1 mismatch", "core.crash.files.checksum", CrashSeverity.Possible),
 
         // 显卡与驱动
-        R(@"Pixel format not accelerated|WGL_ARB_create_context|No OpenGL context|GLFW error 65542|Could not create context|WGL: The driver does not appear to support OpenGL", "core.crash.graphics.opengl"),
+        R(@"Pixel format not accelerated|WGL_ARB_create_context|No OpenGL context|GLFW error 65542|GLFW error (during init: )?\[0x10006\]|Could not create context|WGL: The driver does not appear to support OpenGL", "core.crash.graphics.opengl"),
         R(@"Couldn't set pixel format|Display.create|Failed to create window|GLFW error 6500\d", "core.crash.graphics.window", CrashSeverity.Possible),
         R(@"EXCEPTION_ACCESS_VIOLATION[\s\S]{0,4000}(atio6axx|atioglxx|nvoglv|ig\d{1,2}icd|amdvlk|vulkan)", "core.crash.graphics.drivercrash"),
         R(@"Problematic frame:\s*#\s*C\s+\[(atio6axx|atioglxx|nvoglv\w*|ig\d{1,2}icd\w*)", "core.crash.graphics.driverframe"),

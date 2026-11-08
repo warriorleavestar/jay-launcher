@@ -77,14 +77,14 @@ public partial class MainWindow : Window
                     $"chrome_logical={frame?.Width - ClientSize.Width:F1}x{frame?.Height - ClientSize.Height:F1}") + Environment.NewLine);
                 Close();
             }, DispatcherPriority.Background);
-        // 开发用：记录启动各阶段耗时，窗口打开后退出。
+        // 开发用：记录启动各阶段耗时，窗口打开后退出（和自检、截图等一起用时不退出）。
         if (StartupTrace.Enabled)
         {
             Opened += (_, _) => Dispatcher.UIThread.Post(() =>
             {
                 StartupTrace.Mark("opened");
                 StartupTrace.Flush();
-                Close();
+                if (StartupTrace.CloseWhenOpened) Close();
             }, DispatcherPriority.Background);
         }
     }
