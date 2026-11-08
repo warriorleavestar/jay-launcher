@@ -89,6 +89,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "accounts")
+            {
+                await MicrosoftLoginAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "game")
             {
                 await GameLifecycleAsync();
@@ -113,6 +120,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 return;
             }
             await LogPageAsync();
+            await MicrosoftLoginAsync();
             // 换语言前后各个下拉框的选中项和设置文件都不能变。
             string Selections() => Dispatcher.UIThread.Invoke(() =>
             {

@@ -6,7 +6,39 @@ using System.Text.Json.Nodes;
 
 namespace Amber.Core.Auth;
 
-public sealed record DeviceCodeInfo(string UserCode, string VerificationUri, string DeviceCode, int IntervalSeconds, int ExpiresInSeconds, string Message);
+public sealed record DeviceCodeInfo(string UserCode, string VerificationUri, string DeviceCode, int IntervalSeconds, int ExpiresInSeconds, string Message)
+{
+    /// <summary>带好代码的网址（消费者设备码流程通常不给，给了才用）。</summary>
+    public string? VerificationUriComplete { get; init; }
+}
+
+/// <summary>微软登录失败的种类，界面按它给出能点的下一步（改版规格 3.5 的失败状态表）。</summary>
+public enum MicrosoftLoginFailure
+{
+    Other,
+    /// <summary>XErr 2148916233：还没有 Xbox 档案。</summary>
+    NoXboxProfile,
+    /// <summary>XErr 2148916238：未成年账号，需要家长加入家庭组。</summary>
+    ChildAccount,
+    /// <summary>XErr 2148916235/6/7：地区限制或需要成年验证。</summary>
+    RegionOrAge,
+    /// <summary>XErr 2148916227：账号被封禁。</summary>
+    Banned,
+    /// <summary>授权列表为空：没买 Java 版。</summary>
+    NoOwnership,
+    /// <summary>有授权但读档案 404：还没设玩家名。</summary>
+    NoProfileName,
+    /// <summary>设备码过期。</summary>
+    CodeExpired,
+    /// <summary>用户在网页上拒绝了授权。</summary>
+    Denied,
+}
+
+/// <summary>带种类的微软登录失败。</summary>
+public sealed class MicrosoftLoginException(MicrosoftLoginFailure failure, string message) : InvalidOperationException(message)
+{
+    public MicrosoftLoginFailure Failure { get; } = failure;
+}
 
 /// <summary>
 /// 微软账号登录（设备码流程）：微软令牌 → Xbox Live → XSTS → Minecraft 令牌 → 档案。
@@ -37,7 +69,10 @@ public sealed class MicrosoftAuth(HttpClient http, string clientId)
             json["device_code"]!.GetValue<string>(),
             json["interval"]?.GetValue<int>() ?? 5,
             json["expires_in"]?.GetValue<int>() ?? 900,
-            json["message"]?.GetValue<string>() ?? "");
+            json["message"]?.GetValue<string>() ?? "")
+        {
+            VerificationUriComplete = json["verification_uri_complete"]?.GetValue<string>(),
+        };
     }
 
     /// <summary>轮询直到用户在浏览器里完成授权，然后走完整条换票流程。</summary>
@@ -66,14 +101,14 @@ public sealed class MicrosoftAuth(HttpClient http, string clientId)
                     interval += TimeSpan.FromSeconds(5);
                     continue;
                 case "authorization_declined":
-                    throw new LoginRequiredException(L.T("core.auth.microsoft.denied"));
+                    throw new MicrosoftLoginException(MicrosoftLoginFailure.Denied, L.T("core.auth.microsoft.denied"));
                 case "expired_token":
-                    throw new LoginRequiredException(L.T("core.auth.microsoft.devicecodeexpired"));
+                    throw new MicrosoftLoginException(MicrosoftLoginFailure.CodeExpired, L.T("core.auth.microsoft.devicecodeexpired"));
                 default:
                     throw new InvalidOperationException(L.F("core.auth.microsoft.loginfailed", Describe(json)));
             }
         }
-        throw new LoginRequiredException(L.T("core.auth.microsoft.devicecodeexpired"));
+        throw new MicrosoftLoginException(MicrosoftLoginFailure.CodeExpired, L.T("core.auth.microsoft.devicecodeexpired"));
     }
 
     /// <summary>令牌快过期时用刷新令牌续期。刷新令牌失效时抛 <see cref="LoginRequiredException"/>。</summary>
@@ -142,7 +177,7 @@ public sealed class MicrosoftAuth(HttpClient http, string clientId)
         request.Headers.Authorization = new("Bearer", account.AccessToken);
         using var profileResponse = await http.SendAsync(request, ct);
         if (profileResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
-            throw new InvalidOperationException(L.T("core.auth.microsoft.missingownership"));
+            throw await MissingProfileAsync(account.AccessToken, ct);
         var profile = await ReadJsonAsync(profileResponse, ct);
         if (!profileResponse.IsSuccessStatusCode) throw new InvalidOperationException(L.F("core.auth.microsoft.profilefailed", Describe(profile)));
 
@@ -156,6 +191,29 @@ public sealed class MicrosoftAuth(HttpClient http, string clientId)
         return account;
     }
 
+    /// <summary>读档案 404：看授权列表分清“没买 Java 版”和“买了但没设玩家名”；授权列表读不到时给合在一起的说法。</summary>
+    private async Task<MicrosoftLoginException> MissingProfileAsync(string accessToken, CancellationToken ct)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.minecraftservices.com/entitlements/mcstore");
+            request.Headers.Authorization = new("Bearer", accessToken);
+            using var response = await http.SendAsync(request, ct);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await ReadJsonAsync(response, ct);
+                return json["items"] is JsonArray { Count: > 0 }
+                    ? new MicrosoftLoginException(MicrosoftLoginFailure.NoProfileName, L.T("core.auth.microsoft.noprofilename"))
+                    : new MicrosoftLoginException(MicrosoftLoginFailure.NoOwnership, L.T("core.auth.microsoft.noownership"));
+            }
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            // 授权列表读不到：退回合在一起的说法。
+        }
+        return new MicrosoftLoginException(MicrosoftLoginFailure.NoOwnership, L.T("core.auth.microsoft.missingownership"));
+    }
+
     private async Task<JsonObject> PostJsonAsync(string url, JsonObject body, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = AmberJson.Body(body) };
@@ -163,18 +221,18 @@ public sealed class MicrosoftAuth(HttpClient http, string clientId)
         using var response = await http.SendAsync(request, ct);
         var json = await ReadJsonAsync(response, ct);
         if (response.IsSuccessStatusCode) return json;
-        if (json["XErr"] is { } code) throw new InvalidOperationException(XboxError(code.ToString()));
+        if (json["XErr"] is { } code) throw XboxError(code.ToString());
         throw new InvalidOperationException(L.F("core.auth.microsoft.requestfailed", url, (int)response.StatusCode, Describe(json)));
     }
 
-    private static string XboxError(string code) => code switch
+    internal static MicrosoftLoginException XboxError(string code) => code switch
     {
-        "2148916227" => L.T("core.auth.xbox.banned"),
-        "2148916233" => L.T("core.auth.xbox.missingprofile"),
-        "2148916235" => L.T("core.auth.xbox.regionunavailable"),
-        "2148916236" or "2148916237" => L.T("core.auth.xbox.adultverification"),
-        "2148916238" => L.T("core.auth.xbox.familyrequired"),
-        _ => L.F("core.auth.xbox.loginfailed", code),
+        "2148916227" => new(MicrosoftLoginFailure.Banned, L.T("core.auth.xbox.banned")),
+        "2148916233" => new(MicrosoftLoginFailure.NoXboxProfile, L.T("core.auth.xbox.missingprofile")),
+        "2148916235" => new(MicrosoftLoginFailure.RegionOrAge, L.T("core.auth.xbox.regionunavailable")),
+        "2148916236" or "2148916237" => new(MicrosoftLoginFailure.RegionOrAge, L.T("core.auth.xbox.adultverification")),
+        "2148916238" => new(MicrosoftLoginFailure.ChildAccount, L.T("core.auth.xbox.familyrequired")),
+        _ => new(MicrosoftLoginFailure.Other, L.F("core.auth.xbox.loginfailed", code)),
     };
 
     private static async Task<JsonObject> ReadJsonAsync(HttpResponseMessage response, CancellationToken ct)
