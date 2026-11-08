@@ -107,6 +107,8 @@ jobs:
           mkdir -p ../packages
           find ../out/${{ matrix.rid }} -name '*.pdb' -delete
           chmod +x ../out/${{ matrix.rid }}/Jay
+          # Linux 版内置了思源黑体，按 OFL 附上许可证。
+          if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}/NotoSansSC-OFL.txt; fi
           tar -C ../out/${{ matrix.rid }} -czf ../packages/Jay-${{ matrix.rid }}.tar.gz .
           chmod +x ../out/server-${{ matrix.rid }}/jay-server
           cp ../server/README.md ../server/jay-server.service ../out/server-${{ matrix.rid }}/

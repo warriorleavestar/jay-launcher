@@ -1607,5 +1607,6 @@
   "multiplayer.component.imported": "已匯入 EasyTier 並驗證通過",
   "multiplayer.component.import_failed": "匯入失敗：{0}",
   "multiplayer.component.downloading_from": "正在從 {0} 下載 EasyTier……",
-  "multiplayer.component.manual_hint": "無法下載時：用瀏覽器下載 {0}（官方網址 {1}），再按「從檔案匯入」。匯入的檔案同樣須通過 SHA-256 驗證。"
+  "multiplayer.component.manual_hint": "無法下載時：用瀏覽器下載 {0}（官方網址 {1}），再按「從檔案匯入」。匯入的檔案同樣須通過 SHA-256 驗證。",
+  "linux.missing_libraries": "Jay 無法啟動：系統缺少圖形介面需要的程式庫 {0}。\n\n請先安裝後再開啟 Jay：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\n如果是在沒有桌面的伺服器上，請改用 Jay Server。"
 }
