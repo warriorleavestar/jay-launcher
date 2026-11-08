@@ -271,7 +271,10 @@ public sealed class KnockTests : IAsyncDisposable
         server.Withdrawn += (_, _) => Interlocked.Increment(ref withdrawn);
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, server.Port);
-        await Assert.ThrowsAnyAsync<Exception>(() => KnockClient.KnockAsync(client.GetStream(), invite.Invite, _guest, "Gone", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5)));
+        // 加入方握手做完了却没收到结果：报“房主没回复就断开了”，不是一串异常。
+        var outcome = await KnockClient.KnockAsync(client.GetStream(), invite.Invite, _guest, "Gone", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5));
+        Assert.False(outcome.Approved);
+        Assert.Equal("closed", outcome.Reason);
         Assert.True(await WaitAsync(() => server.Active == 0));
         Assert.Equal(1, issued);
         Assert.Equal(1, withdrawn);
@@ -299,7 +302,7 @@ public sealed class KnockTests : IAsyncDisposable
         public override void SetLength(long value) => throw new NotSupportedException();
     }
 
-    /// <summary>本房间踢出的人拿着有效的新邀请再来敲门：不问房主、不回任何东西直接断开，也不用掉邀请。</summary>
+    /// <summary>本房间踢出的人拿着有效的新邀请再来敲门：不问房主、明确回“你已被移出”，也不用掉邀请。</summary>
     [Fact]
     public async Task BannedKeyCannotKnockAgain()
     {
@@ -309,7 +312,9 @@ public sealed class KnockTests : IAsyncDisposable
         server.Members.Ban(_guest.PublicKey, "Steve");
         server.Members.Remove(member);
         var fresh = Invite(auto: true);
-        await Assert.ThrowsAnyAsync<IOException>(() => KnockAsync(fresh.Invite));
+        var outcome = await KnockAsync(fresh.Invite);
+        Assert.False(outcome.Approved);
+        Assert.Equal("removed", outcome.Reason);
         Assert.Equal(1, fresh.UsesLeft);
         Assert.Single(_asked);
         Assert.Null(server.Members.FindGuest(_guest.PublicKey));

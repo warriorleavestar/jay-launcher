@@ -56,8 +56,11 @@ public sealed class AppSettings
     /// <summary>启动器窗口上次的位置和大小（逻辑像素，按当时那块屏幕记）。</summary>
     public WindowPlacement? LauncherWindow { get; set; }
 
-    /// <summary>联机用的 EasyTier 中继节点，空表示用 EasyTier 社区的公共节点。</summary>
+    /// <summary>用户自己添加的 EasyTier 中继节点。</summary>
     public List<string>? MultiplayerPeers { get; set; }
+
+    /// <summary>除了自己的节点，也连 Jay 内置的节点（默认开）。</summary>
+    public bool UseBuiltInNodes { get; set; } = true;
 
     /// <summary>最近玩过的实例 id，最近的在前（启动页的“最近游玩”）。</summary>
     public List<string>? RecentInstances { get; set; }

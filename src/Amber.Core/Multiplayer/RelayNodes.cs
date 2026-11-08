@@ -8,12 +8,36 @@ using System.Text.Json.Nodes;
 namespace Amber.Core.Multiplayer;
 
 /// <summary>
-/// 联机节点：EasyTier 节点地址（tcp://主机:端口 等）。全部由用户自己添加，Amber 不从网上拉节点列表。
+/// 联机节点：EasyTier 节点地址（tcp://主机:端口 等）。用户自己添加的节点在前，后面跟着编进程序里的内置节点（可以关掉）；
+/// 不从网上拉节点列表。
 /// 节点分享码把一个或几个地址打包成一串文字，方便搭节点的人发给朋友：AMBNODE-（base64url 编码的 JSON）。
 /// </summary>
 public static class RelayNodes
 {
     private const string Prefix = "AMBNODE-";
+
+    /// <summary>Jay 自己的节点（作者部署的服务器），排在最前面。还没部署时为空。</summary>
+    public static readonly string[] Official = [];
+
+    /// <summary>
+    /// 社区公开的 EasyTier 节点，实测能用才放进来（2026-11-08 两机联机测试用的香港节点）。随时可能失效，所以内置几个、全都连上：
+    /// EasyTier 同时连列表里的每个节点，哪个通走哪个，一个挂了不影响。
+    /// </summary>
+    public static readonly string[] Community = ["tcp://et-hk.clickor.click:11010"];
+
+    /// <summary>内置节点：自己的在前，社区的在后。</summary>
+    public static IReadOnlyList<string> BuiltIn { get; } = [.. Official, .. Community];
+
+    /// <summary>
+    /// 实际用的节点：用户自己的在前，再加上内置节点（开着时，去掉重复）。
+    /// 内置节点总是加上而不是被用户节点替换：双方要连到同一个节点才能找到对方，只用自己节点的人和只用内置节点的人会碰不上。
+    /// </summary>
+    public static List<string> Effective(IEnumerable<string>? user, bool useBuiltIn)
+    {
+        var list = (user ?? []).Select(u => u.Trim()).Where(IsValid).Distinct().ToList();
+        if (useBuiltIn) list.AddRange(BuiltIn.Where(b => !list.Contains(b)));
+        return list;
+    }
     private static readonly string[] Schemes = ["tcp", "udp", "ws", "wss", "quic", "wg"];
 
     /// <summary>检查节点地址：协议是 EasyTier 支持的，带主机和端口。</summary>
