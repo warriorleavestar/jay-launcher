@@ -44,6 +44,22 @@
 
 macOS Apple 芯片版已由合作者在真机上完整测过安装、启动和游玩；Intel Mac 和 Linux 版通过了自动构建和测试，但还没有真机验证，所以标为实验。macOS/Linux 版本目前没有代码签名。macOS 第一次运行若被 Gatekeeper 拦截，可在“系统设置 → 隐私与安全性”中确认打开。完整局域网和出口节点模式仍只支持 Windows；普通房间、直连、聊天和仅游戏转发可跨平台使用。
 
+### Linux 需要的系统组件
+
+Jay 的界面需要桌面环境（X11，或带 XWayland 的 Wayland）和下面这些库。装了桌面的发行版一般都已经有；精简系统、容器或 WSL 里缺的话，Jay 启动时会列出缺哪些、该装哪个包。
+
+| 用途 | Ubuntu/Debian | Fedora | Arch |
+|---|---|---|---|
+| 窗口（必需） | `libx11-6 libice6 libsm6` | `libX11 libICE libSM` | `libx11 libice libsm` |
+| 输入、光标、多屏（建议） | `libxi6 libxcursor1 libxrandr2` | `libXi libXcursor libXrandr` | `libxi libxcursor libxrandr` |
+| 字体（必需） | `libfontconfig1` | `fontconfig` | `fontconfig` |
+| 区域格式（建议） | `libicu78`（按发行版版本号，如 `libicu74`） | `libicu` | `icu` |
+| 中文字体（建议） | `fonts-noto-cjk` | `google-noto-sans-cjk-fonts` | `noto-fonts-cjk` |
+
+- 没装 ICU 时 Jay 会自动换成兼容模式启动，界面语言照样按系统语言（`LANG`）选，只是日期、数字按通用格式显示。
+- Linux 版自带一份思源黑体（Noto Sans SC），系统没有中文字体时界面里的中文也能正常显示。但窗口标题栏是系统画的，这时 Jay 会把标题显示成「Jay」；装上 `fonts-noto-cjk` 后标题也会显示中文。
+- WSL：Windows 11 自带的 WSLg 可以直接显示 Jay 的窗口；Ubuntu 上可以一次装齐：`sudo apt install libx11-6 libice6 libsm6 libxi6 libxcursor1 libxrandr2 libfontconfig1 fonts-noto-cjk`。
+
 ## 功能
 
 ### 版本与加载器
@@ -187,6 +203,8 @@ CurseForge 的接口需要 API Key，见上面的[配置](#配置)。Modrinth �
 [MIT](LICENSE)
 
 联机功能使用的 EasyTier 是独立的开源项目（LGPL-3.0），Jay 不内置它，在你第一次使用联机时单独下载。
+
+Linux 版内置的思源黑体（Noto Sans SC）使用 SIL Open Font License 1.1，许可证全文见 [src/Amber.App/Assets/Fonts/OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)。
 
 ---
 

@@ -29,6 +29,14 @@
     <AvaloniaResource Include="Assets\jay.png" />
   </ItemGroup>
 
+  <!-- Linux 发行版不一定有中文字体：只给 Linux 版打包思源黑体（Noto Sans SC，SIL OFL 1.1，见 Assets/Fonts/OFL.txt）做回退。 -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('linux')) Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Linux')))">
+    <AvaloniaResource Include="Assets\Fonts\NotoSansSC-Regular.otf" />
+  </ItemGroup>
+  <PropertyGroup Condition="$(RuntimeIdentifier.StartsWith('linux')) Or ('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Linux')))">
+    <DefineConstants>$(DefineConstants);JAY_BUNDLED_CJK_FONT</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Amber.Core.Tests" />
   </ItemGroup>

@@ -1588,5 +1588,6 @@
   "multiplayer.component.imported": "EasyTier を読み込み、検証しました",
   "multiplayer.component.import_failed": "読み込みに失敗しました：{0}",
   "multiplayer.component.downloading_from": "{0} から EasyTier をダウンロードしています…",
-  "multiplayer.component.manual_hint": "ダウンロードできない場合：ブラウザーで {0} を取得し（公式 URL {1}）、「ファイルから読み込む」を選んでください。読み込んだファイルも SHA-256 で検証します。"
+  "multiplayer.component.manual_hint": "ダウンロードできない場合：ブラウザーで {0} を取得し（公式 URL {1}）、「ファイルから読み込む」を選んでください。読み込んだファイルも SHA-256 で検証します。",
+  "linux.missing_libraries": "Jay を起動できません：画面表示に必要なライブラリ {0} がシステムにありません。\n\nインストールしてから Jay を開き直してください：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\nデスクトップのないサーバーでは Jay Server を使ってください。"
 }

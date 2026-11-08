@@ -1619,5 +1619,6 @@
   "multiplayer.component.imported": "EasyTier imported and verified",
   "multiplayer.component.import_failed": "Import failed: {0}",
   "multiplayer.component.downloading_from": "Downloading EasyTier from {0}…",
-  "multiplayer.component.manual_hint": "If the download fails: get {0} in a browser (official link {1}), then choose \"Import from file\". Imported files are SHA-256 verified too."
+  "multiplayer.component.manual_hint": "If the download fails: get {0} in a browser (official link {1}), then choose \"Import from file\". Imported files are SHA-256 verified too.",
+  "linux.missing_libraries": "Jay can't start: the system is missing libraries needed for the window: {0}.\n\nInstall them and open Jay again:\n  Ubuntu/Debian: sudo apt install {1}\n  Fedora: sudo dnf install {2}\n  Arch: sudo pacman -S {3}\n\nOn a server without a desktop, use Jay Server instead."
 }
