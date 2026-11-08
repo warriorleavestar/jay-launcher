@@ -12,7 +12,7 @@ No telemetry, no remote switches. Download, unzip, run.
 [![License](https://img.shields.io/github/license/warriorleavestar/jay-launcher)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 
-[简体中文](README.md) | English
+[简体中文](README.md) | English | [Code signing policy](docs/code-signing-policy.md)
 
 ![Jay home page](docs/images/jay-home.png)
 
@@ -39,6 +39,8 @@ Get the package for your computer from [Releases](https://github.com/warriorleav
 
 The recommended zip is compiled ahead of time to native code (Native AOT): the window opens in about 0.3 seconds and it uses less memory. It unzips to 4 files that must stay in the same folder.
 Each release also has `Jay-win-x64.zip`, which holds a single `Jay.exe` that runs straight after unzipping if you prefer one file; it starts a little slower. Both builds have the same features and share the same data, so you can switch at any time.
+
+Free code signing for the Windows builds from SignPath Foundation is being set up; see the [code signing policy](docs/code-signing-policy.md).
 
 The packages include .NET. Jay selects a suitable local Java for each game version and downloads one when Mojang publishes a runtime for that platform. Linux ARM64 needs a compatible 64-bit Java installed through the system.
 
@@ -119,7 +121,7 @@ The Apple silicon build was fully tested on a real Mac (install, launch, play). 
 - **Network access only for what you're doing:** signing in, fetching version lists, downloading and searching. The services involved are Microsoft and Xbox sign-in, any skin site you add, Mojang's game file servers, your chosen download source, loader download sites (OptiFine via BMCLAPI, authlib-injector via its official site or BMCLAPI), Modrinth and CurseForge.
 - **Multiplayer only connects to nodes you added:** only while you host or join a room on the Multiplayer page, Jay connects to the relay nodes you added there and to the other players in the room; joining a Jay server connects only to the server named in its invite. Jay ships no nodes and fetches no node list; room codes are generated randomly on your computer and never pass through an Jay server (Jay has none). The EasyTier component is downloaded from the releases page of `github.com/EasyTier/EasyTier`. Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address; they only answer that and carry no game data. They may also ask your router for a temporary port mapping, removed when the session ends.
 
-The code is open source, so you can check all of this yourself.
+The code is open source, so you can check all of this yourself. The full privacy policy and the changes Jay makes to your system are in the [code signing policy](docs/code-signing-policy.md#隐私政策--privacy-policy).
 
 ## Configuration
 
@@ -159,7 +161,7 @@ The experimental Android and iOS projects currently provide Jay Server enrollmen
 ## FAQ
 
 **Windows says it protected my PC. What should I do?**
-Jay isn't code-signed, so SmartScreen may block it. Make sure you downloaded it from this project's Releases, then choose "More info" → "Run anyway".
+Current Windows releases aren't code-signed yet, so SmartScreen may block them. Make sure you downloaded the file from this project's Releases, then choose "More info" → "Run anyway". Free signing from SignPath Foundation is being set up; see the [code signing policy](docs/code-signing-policy.md). Release notes will say when it takes effect.
 
 **Why is the exe so large?**
 It includes the .NET runtime and UI libraries, so you don't have to install anything else.

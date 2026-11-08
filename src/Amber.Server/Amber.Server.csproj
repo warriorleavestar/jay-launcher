@@ -15,7 +15,8 @@
     <Nullable>enable</Nullable>
     <!-- Jay 服务器版：VPS 和局域网电脑通用的命令行程序 -->
     <AssemblyName>jay-server</AssemblyName>
-    <Product>Jay Server</Product>
+    <AssemblyTitle>Jay Server</AssemblyTitle>
+    <Product>Jay</Product>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 
