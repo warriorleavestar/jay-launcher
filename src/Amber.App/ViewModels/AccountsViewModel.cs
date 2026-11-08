@@ -325,7 +325,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Success("accounts.status.logged_in", account.Name));
             Changed();
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_loginCts?.IsCancellationRequested == true)
         {
             DeviceCode = null;
             SetStatus(StatusMessage.Warning("accounts.status.login_cancelled"));
@@ -471,7 +471,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             }
             FinishExternal(result.Account);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_loginCts?.IsCancellationRequested == true)
         {
             SetStatus(StatusMessage.Warning("accounts.status.login_cancelled"));
         }
