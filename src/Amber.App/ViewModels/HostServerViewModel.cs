@@ -222,8 +222,15 @@ public sealed partial class HostServerViewModel : ObservableObject
     {
         var runner = Interlocked.Exchange(ref s_running, null);
         if (runner is null) return;
-        try { runner.StopAsync(TimeSpan.FromSeconds(30)).Wait(TimeSpan.FromSeconds(40)); }
-        catch (AggregateException) { }
+        // 这里在界面线程上同步等。StopAsync 里的 await 会想回到界面线程继续，界面线程又在等它，
+        // 结果卡满 40 秒、"stop" 根本没发出去，Jay 退出后 MC 还在跑（不存盘、占着存档锁）。所以放到线程池上跑。
+        var stopping = Task.Run(() => runner.StopAsync(TimeSpan.FromSeconds(30)));
+        try
+        {
+            if (!stopping.Wait(TimeSpan.FromSeconds(40)) && runner.Mc is { HasExited: false } mc)
+                mc.Process.Kill(entireProcessTree: true);
+        }
+        catch (Exception e) when (e is AggregateException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
     }
 
     [RelayCommand]
