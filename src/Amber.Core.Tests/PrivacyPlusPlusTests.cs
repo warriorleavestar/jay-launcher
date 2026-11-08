@@ -187,6 +187,8 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         back.Start();
         _relays[1] = (back, lost.Key, lost.Code, lost.Address);
         await Until(() => !_server.BreakerOpen, "breaker closed");
+        // 状态先变、写完 health.json 才发事件，等事件到齐再比。
+        await Until(() => { lock (changes) return changes.Count >= 2; }, "breaker events");
         lock (changes) Assert.Equal([true, false], changes);
         var (again, server2) = await Play(membership, identity);
         await again.DisposeAsync();
