@@ -1575,5 +1575,19 @@
   "mobile.servers.title": "已保存的服务器",
   "mobile.servers.empty": "还没有服务器。先在上面粘贴一个邀请码。",
   "mobile.server.connect": "开启本机网关",
-  "mobile.server.connected": "已连接"
+  "mobile.server.connected": "已连接",
+  "settings.reset": "恢复默认",
+  "settings.saved_tick": "已保存 ✓",
+  "settings.saved_next_launch": "已保存 ✓，正在运行的游戏下次启动生效",
+  "settings.saved_with_errors": "有填错的项没有保存，见字段下方的提示",
+  "settings.error.concurrency": "填 1 到 128 之间的整数",
+  "settings.error.window": "宽和高填正整数，或者留空",
+  "settings.error.quotes": "引号没有配对，补全后才会保存",
+  "settings.error.save_failed": "保存设置失败：{0}",
+  "settings.directory.confirm_title": "切换游戏目录",
+  "settings.directory.confirm_body": "切换到 {0} 后会重新扫描实例。",
+  "settings.directory.confirm": "切换",
+  "instance.settings.error.memory": "认不出内存大小，可以写 4G、4096 或 4096M",
+  "instance.settings.saved_next_launch": "{0} 的设置已保存 ✓，下次启动生效",
+  "instance.settings.autosave_hint": "改了就自动保存，输入框在离开时保存。"
 }

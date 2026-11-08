@@ -54,7 +54,7 @@
           <ComboBox ItemsSource="{Binding LoginKinds}" SelectedIndex="{Binding LoginTab}" HorizontalAlignment="Stretch" />
 
           <StackPanel Spacing="10" IsVisible="{Binding IsOfflineTab}">
-            <TextBox Text="{Binding OfflineName}" PlaceholderText="{l:T accounts.offline.name_placeholder}" MaxLength="16" />
+            <TextBox x:Name="OfflineNameBox" Text="{Binding OfflineName}" PlaceholderText="{l:T accounts.offline.name_placeholder}" MaxLength="16" c:EnterSubmit.Command="{Binding AddOfflineCommand}" />
             <Button Classes="primary" Content="{l:T accounts.offline.add}" Command="{Binding AddOfflineCommand}" />
             <TextBlock Classes="hint" Text="{l:T accounts.offline.hint}" TextWrapping="Wrap" />
           </StackPanel>
@@ -81,7 +81,7 @@
           <StackPanel Spacing="10" IsVisible="{Binding IsExternalTab}">
             <TextBox Text="{Binding ServerUrl}" PlaceholderText="{l:T accounts.external.server_placeholder}" />
             <TextBox Text="{Binding ExternalUser}" PlaceholderText="{l:T accounts.external.user_placeholder}" />
-            <TextBox Text="{Binding ExternalPassword}" PasswordChar="●" PlaceholderText="{l:T accounts.external.password_placeholder}" />
+            <TextBox Text="{Binding ExternalPassword}" PasswordChar="●" PlaceholderText="{l:T accounts.external.password_placeholder}" c:EnterSubmit.Command="{Binding LoginExternalCommand}" />
             <Button Classes="primary" Content="{l:T accounts.external.login}" Command="{Binding LoginExternalCommand}" />
             <StackPanel Spacing="8" IsVisible="{Binding NeedsProfileChoice}">
               <TextBlock Text="{l:T accounts.external.choose_profile}" />

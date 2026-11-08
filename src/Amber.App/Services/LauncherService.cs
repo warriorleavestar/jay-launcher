@@ -262,6 +262,9 @@ public sealed class LauncherService : IDisposable
         return new RunningMark(() => _runningDirs.AddOrUpdate(key, 0, (_, n) => n - 1));
     }
 
+    /// <summary>有游戏正在运行（设置页据此提示“下次启动生效”）。</summary>
+    public bool AnyRunning => _runningDirs.Values.Any(n => n > 0);
+
     public bool IsRunningIn(string workDir) => _runningDirs.TryGetValue(Path.GetFullPath(workDir), out var n) && n > 0;
 
     private sealed class RunningMark(Action release) : IDisposable

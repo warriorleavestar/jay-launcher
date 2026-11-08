@@ -89,6 +89,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "settings")
+            {
+                await SettingsAndKeyboardAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "game")
             {
                 await GameLifecycleAsync();
@@ -113,6 +120,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 return;
             }
             await LogPageAsync();
+            await SettingsAndKeyboardAsync();
             // 换语言前后各个下拉框的选中项和设置文件都不能变。
             string Selections() => Dispatcher.UIThread.Invoke(() =>
             {
@@ -704,7 +712,6 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         main.CurrentPage = settings;
         var noTraceBox = await FindAsync<CheckBox>(c => c.Name == "NoTraceBox");
         Dispatcher.UIThread.Invoke(() => { if (noTraceBox is not null) noTraceBox.IsChecked = true; });
-        Dispatcher.UIThread.Invoke(() => settings.SaveCommand.Execute(null));
         Check("无痕模式：勾选后存进设置", noTraceBox is not null && settings.NoTrace && File.ReadAllText(Amber.App.Services.AppSettings.FilePath).Contains("\"NoTrace\": true"));
         var instance = Page<InstanceViewModel>();
         instance.SelectedId = FabricName;
@@ -766,7 +773,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var cleaned = await WaitAsync(() => filtered.All(f => !File.Exists(f)), 15);
         Check("无痕模式：游戏退出后删掉生成的日志配置", filtered.Count > 0 && cleaned, string.Join(", ", filtered.Where(File.Exists).Select(Path.GetFileName)));
         // 后面的崩溃分析要看完整日志，把无痕模式关回去。
-        Dispatcher.UIThread.Invoke(() => { settings.NoTrace = false; settings.SaveCommand.Execute(null); });
+        Dispatcher.UIThread.Invoke(() => settings.NoTrace = false);
     }
 
     private async Task CrashAsync()

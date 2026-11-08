@@ -391,6 +391,16 @@ public sealed partial class HomeViewModel : PageViewModel
         await RunAsync(new LaunchRequest(id));
     }
 
+    /// <summary>
+    /// Ctrl+Enter（改版规格 7.1）：没在启动、没在运行时等于点主按钮；正在准备或运行时什么也不做（快捷键不拿来取消或退出游戏）。
+    /// </summary>
+    public bool LaunchShortcut()
+    {
+        if (Latest is not null || !PrimaryCommand.CanExecute(null)) return false;
+        PrimaryCommand.Execute(null);
+        return true;
+    }
+
     [RelayCommand]
     private Task LaunchAsync() => SelectedVersion is { } id ? RunAsync(new LaunchRequest(id)) : Task.CompletedTask;
 

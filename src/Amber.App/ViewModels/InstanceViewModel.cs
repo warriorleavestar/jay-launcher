@@ -592,8 +592,51 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [ObservableProperty] public partial string PostExit { get; set; } = "";
     [ObservableProperty] public partial string JoinServer { get; set; } = "";
 
+    /// <summary>正在把实例设置填进界面：这期间的改动不保存。</summary>
+    private bool _loadingSettings;
+
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasMemoryError))] public partial string? MemoryError { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasSizeError))] public partial string? SizeError { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasArgsError))] public partial string? ArgsError { get; set; }
+    public bool HasMemoryError => MemoryError is not null;
+    public bool HasSizeError => SizeError is not null;
+    public bool HasArgsError => ArgsError is not null;
+
+    // 即改即存（改版规格 3.10）：下拉框改了就存，文本框失焦才写回，校验通过才存。
+    partial void OnIsolateIndexChanged(int value) => AutoSave();
+    partial void OnMemoryModeIndexChanged(int value) => AutoSave();
+    partial void OnMemoryTextChanged(string value) => AutoSave();
+    partial void OnSelectedJavaChanged(JavaChoice? value) => AutoSave();
+    partial void OnJvmArgsChanged(string value) => AutoSave();
+    partial void OnGameArgsChanged(string value) => AutoSave();
+    partial void OnWidthTextChanged(string value) => AutoSave();
+    partial void OnHeightTextChanged(string value) => AutoSave();
+    partial void OnFullscreenIndexChanged(int value) => AutoSave();
+    partial void OnPreLaunchChanged(string value) => AutoSave();
+    partial void OnPostExitChanged(string value) => AutoSave();
+    partial void OnJoinServerChanged(string value) => AutoSave();
+
+    private void AutoSave()
+    {
+        if (!_loadingSettings && Current is not null) SaveSettings();
+    }
+
     private void LoadSettings()
     {
+        _loadingSettings = true;
+        try
+        {
+            LoadSettingsCore();
+        }
+        finally
+        {
+            _loadingSettings = false;
+        }
+    }
+
+    private void LoadSettingsCore()
+    {
+        MemoryError = SizeError = ArgsError = null;
         var s = InstanceSettings.Load(_service.Directory, Current!.Id);
         IsolateIndex = s.Isolate switch { true => 1, false => 2, _ => 0 };
         MemoryModeIndex = s.AutoMemory switch { true => 1, false => 2, _ => 0 };
@@ -618,27 +661,42 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             SelectedJava = JavaChoices[0];
         }
         var found = await _service.Java.ScanAsync();
+        var wasLoading = _loadingSettings;
+        _loadingSettings = true;
         JavaChoices.Clear();
         JavaChoices.Add(new JavaChoice("", null));
         foreach (var j in found) JavaChoices.Add(new JavaChoice(j.ToString(), j.JavaPath));
         if (current is not null && !found.Any(j => j.JavaPath == current)) JavaChoices.Add(new JavaChoice(current, current));
         SelectedJava = JavaChoices.FirstOrDefault(c => c.Path == current) ?? JavaChoices[0];
+        _loadingSettings = wasLoading;
     }
 
+    /// <summary>
+    /// 把实例设置写回文件。认不出来的字段（内存、窗口大小、引号没配对的参数）保留文件里的旧值，提示写在字段下面。
+    /// 只有版本隔离变了才重新读实例（工作目录、各个 Tab 跟着变）。
+    /// </summary>
     [RelayCommand]
     private void SaveSettings()
     {
         if (Current is not { } c) return;
+        var old = InstanceSettings.Load(_service.Directory, c.Id);
+        int? mb = old.MaxMemoryMb, w = old.WindowWidth, h = old.WindowHeight;
+        if (SettingInput.TryParseMemoryMb(MemoryText, out var parsedMb)) { mb = parsedMb; MemoryError = null; }
+        else MemoryError = L.T("instance.settings.error.memory");
+        if (SettingInput.TryParsePositiveInt(WidthText, out var pw, 16384) && SettingInput.TryParsePositiveInt(HeightText, out var ph, 16384)) { w = pw; h = ph; SizeError = null; }
+        else SizeError = L.T("settings.error.window");
+        var argsOk = SettingInput.QuotesBalanced(JvmArgs) && SettingInput.QuotesBalanced(GameArgs);
+        ArgsError = argsOk ? null : L.T("settings.error.quotes");
         var s = new InstanceSettings
         {
             Isolate = IsolateIndex switch { 1 => true, 2 => false, _ => null },
             AutoMemory = MemoryModeIndex switch { 1 => true, 2 => false, _ => null },
-            MaxMemoryMb = int.TryParse(MemoryText, out var mb) && mb > 0 ? mb : null,
+            MaxMemoryMb = mb,
             JavaPath = SelectedJava?.Path,
-            JvmArgs = NullIfBlank(JvmArgs),
-            GameArgs = NullIfBlank(GameArgs),
-            WindowWidth = int.TryParse(WidthText, out var w) && w > 0 ? w : null,
-            WindowHeight = int.TryParse(HeightText, out var h) && h > 0 ? h : null,
+            JvmArgs = SettingInput.QuotesBalanced(JvmArgs) ? NullIfBlank(JvmArgs) : old.JvmArgs,
+            GameArgs = SettingInput.QuotesBalanced(GameArgs) ? NullIfBlank(GameArgs) : old.GameArgs,
+            WindowWidth = w,
+            WindowHeight = h,
             Fullscreen = FullscreenIndex switch { 1 => true, 2 => false, _ => null },
             PreLaunchCommand = NullIfBlank(PreLaunch),
             PostExitCommand = NullIfBlank(PostExit),
@@ -646,10 +704,17 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         };
         s.Save(_service.Directory, c.Id);
         var id = c.Id;
-        // 隔离设置可能变了：按新的设置重新读实例（工作目录、各个 Tab）。
-        // 只实现了两个参数的 OnSelectedIdChanged，单参数的分部方法没有实现，调用它什么也不做。
-        OnSelectedIdChanged(id, id);
-        SetStatus(StatusMessage.Success("instance.settings.saved", id));
+        if (s.Isolate != old.Isolate)
+        {
+            // 只实现了两个参数的 OnSelectedIdChanged，单参数的分部方法没有实现，调用它什么也不做。
+            OnSelectedIdChanged(id, id);
+        }
+        if (HasMemoryError || HasSizeError || HasArgsError)
+            SetStatus(StatusMessage.Warning("settings.saved_with_errors"));
+        else if (_service.IsRunningIn(_service.WorkDirFor(id)))
+            SetStatus(StatusMessage.Success("instance.settings.saved_next_launch", id));
+        else
+            SetStatus(StatusMessage.Success("instance.settings.saved", id));
     }
 
     private static string? NullIfBlank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();

@@ -38,6 +38,19 @@
       <Setter Property="Background" Value="{DynamicResource WarningTint}" />
       <Setter Property="BorderBrush" Value="{DynamicResource Warning}" />
     </Style>
+    <!-- 字段下方的校验提示（改版规格 3.10：不通过时红字提示，保留输入） -->
+    <Style Selector="TextBlock.field-error">
+      <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
+      <Setter Property="FontSize" Value="{StaticResource FontCaption}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <!-- ↺ 恢复默认：图标按钮，至少 32×32 -->
+    <Style Selector="Button.reset">
+      <Setter Property="MinWidth" Value="32" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Padding" Value="6,2" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
     <Style Selector="Border.card">
       <Setter Property="Background" Value="{DynamicResource Surface}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
