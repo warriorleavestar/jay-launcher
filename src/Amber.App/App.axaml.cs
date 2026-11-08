@@ -40,6 +40,8 @@ public sealed class App : Application
             var viewModel = new MainViewModel(service);
             StartupTrace.Mark("viewmodels");
             desktop.MainWindow = new MainWindow(settings) { DataContext = viewModel };
+            // 关主窗口就退出：远程控制的小条、查看窗口这些不能让进程留在后台（被控时关 Jay 以为断了，其实还在被控制）。
+            desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnMainWindowClose;
             StartupTrace.Mark("window");
             desktop.Exit += (_, _) => service.Dispose();
             // 开发截图和自检不清理游戏回收目录或真实用户的无痕配置。

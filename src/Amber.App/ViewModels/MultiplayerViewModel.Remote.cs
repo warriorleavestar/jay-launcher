@@ -112,12 +112,12 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         RemoteWaiting = true;
-        SetStatus(StatusMessage.Info("multiplayer.remote.waiting", item.Name));
+        SetRemoteStatus(StatusMessage.Info("multiplayer.remote.waiting", item.Name));
         try
         {
             var result = await remote.RequestAsync(entry, sid => chat.SendRemoteRequest(entry, sid));
             if (result.Viewer is { } viewer) OpenViewer(viewer);
-            else SetStatus(FailureStatus(result.Failure, item.Name));
+            else SetRemoteStatus(FailureStatus(result.Failure, item.Name));
         }
         finally
         {
@@ -139,7 +139,7 @@ public sealed partial class MultiplayerViewModel
         }
         var name = HostDisplayName;
         RemoteWaiting = true;
-        SetStatus(StatusMessage.Info("multiplayer.remote.waiting", name));
+        SetRemoteStatus(StatusMessage.Info("multiplayer.remote.waiting", name));
         try
         {
             var (host, port) = RemoteEndpointToHost();
@@ -155,7 +155,7 @@ public sealed partial class MultiplayerViewModel
             }
             if (accept is null)
             {
-                SetStatus(FailureStatus(viewer.DenyReason switch
+                SetRemoteStatus(FailureStatus(viewer.DenyReason switch
                 {
                     RemoteDenyReason.Busy => RemoteRequestFailure.Busy,
                     RemoteDenyReason.Unsupported => RemoteRequestFailure.Unsupported,
@@ -169,7 +169,7 @@ public sealed partial class MultiplayerViewModel
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or OperationCanceledException
             or System.Security.Cryptography.CryptographicException or InvalidOperationException)
         {
-            SetStatus(StatusMessage.Failure("multiplayer.remote.connect_failed", e, ErrorText.Of(e)));
+            SetRemoteStatus(StatusMessage.Failure("multiplayer.remote.connect_failed", e, ErrorText.Of(e)));
         }
         finally
         {
@@ -181,9 +181,12 @@ public sealed partial class MultiplayerViewModel
     private (string Host, int Port) RemoteEndpointToHost() =>
         _localRemotePort is { } port ? ("127.0.0.1", port) : (EasyTierArgs.HostIp, RemoteHub.Port);
 
-    /// <summary>房主的名字：聊天里带房主指纹的那条消息上的名字；没有时写“房主”。</summary>
+    /// <summary>
+    /// 房主的名字：房主经聊天通道报的（加入后马上发、远程控制请求里也带）；旧版房主不报时用聊天里带房主指纹的那条消息上的名字；都没有时写“房主”。
+    /// </summary>
     private string HostDisplayName =>
-        ChatLines.LastOrDefault(l => HostFingerprint.Length > 0 && l.Message.Fingerprint == HostFingerprint)?.Message.Name is { Length: > 0 } name
+        _chat?.HostName is { Length: > 0 } reported ? reported
+        : ChatLines.LastOrDefault(l => HostFingerprint.Length > 0 && l.Message.Fingerprint == HostFingerprint)?.Message.Name is { Length: > 0 } name
             ? name : L.T("multiplayer.remote.host_fallback");
 
     /// <summary>成员：房主请求看/控自己。弹同意窗；同意就连回房主并共享屏幕，不同意就经聊天通道回“拒绝”。</summary>
@@ -234,7 +237,7 @@ public sealed partial class MultiplayerViewModel
         {
             screen?.Dispose();
             input?.Dispose();
-            SetStatus(StatusMessage.Failure("multiplayer.remote.connect_failed", e, ErrorText.Of(e)));
+            SetRemoteStatus(StatusMessage.Failure("multiplayer.remote.connect_failed", e, ErrorText.Of(e)));
         }
     }
 
@@ -251,14 +254,14 @@ public sealed partial class MultiplayerViewModel
     {
         Track(viewer);
         RemoteUi.ShowViewer(viewer);
-        SetStatus(StatusMessage.Success(viewer.ControlGranted ? "multiplayer.remote.controlling" : "multiplayer.remote.viewing", viewer.PeerName));
+        SetRemoteStatus(StatusMessage.Success(viewer.ControlGranted ? "multiplayer.remote.controlling" : "multiplayer.remote.viewing", viewer.PeerName));
     }
 
     private void TrackSharing(RemoteSharer sharer)
     {
         Track(sharer);
         RemoteUi.ShowSharing(sharer);
-        SetStatus(StatusMessage.Warning("multiplayer.remote.being_controlled", sharer.PeerName));
+        SetRemoteStatus(StatusMessage.Warning("multiplayer.remote.being_controlled", sharer.PeerName));
     }
 
     private void Track(RemoteEndpoint session)
@@ -267,7 +270,7 @@ public sealed partial class MultiplayerViewModel
         session.Ended += end => Dispatcher.UIThread.Post(() =>
         {
             if (!_remoteSessions.Remove(session)) return;
-            SetStatus(StatusMessage.Info(end switch
+            SetRemoteStatus(StatusMessage.Info(end switch
             {
                 RemoteEnd.Peer => "multiplayer.remote.ended_peer",
                 RemoteEnd.Local => "multiplayer.remote.ended_local",
@@ -275,6 +278,34 @@ public sealed partial class MultiplayerViewModel
             }, session.PeerName));
         });
         if (session.HasEnded) _remoteSessions.Remove(session);
+    }
+
+    private DateTime _remoteStatusUntil;
+
+    /// <summary>远程控制的提示（拒绝、等待、结束……）在状态栏上至少留这么久，不被每两秒一次的“已连上房主，延迟…”“房间里有 N 人”盖掉。</summary>
+    internal static TimeSpan RemoteStatusHold { get; set; } = TimeSpan.FromSeconds(8);
+
+    private void SetRemoteStatus(StatusMessage message)
+    {
+        _remoteStatusUntil = DateTime.UtcNow + RemoteStatusHold;
+        SetStatus(message);
+    }
+
+    /// <summary>定时刷新的房间状态现在能不能写状态栏（正在等对方同意、或者刚显示过远程控制提示时不写）。</summary>
+    private bool RoomStatusMayOverwrite => !RemoteWaiting && DateTime.UtcNow >= _remoteStatusUntil;
+
+    /// <summary>
+    /// 关 Jay 之前：先把每个远程控制会话正常结束（发“结束”给对方，收起红框、关查看窗口），最多等一小会儿。
+    /// 不这样做的话，被控时关掉主窗口，红框和小条还开着，进程不退出，对方还能接着控制。
+    /// </summary>
+    internal void StopRemoteForExit(TimeSpan wait)
+    {
+        var sessions = _remoteSessions.ToList();
+        if (sessions.Count == 0 && _remoteHub is null) return;
+        var stopping = Task.Run(() => Task.WhenAll(sessions.Select(s => s.StopAsync(RemoteStopReason.StoppedByUser))));
+        try { stopping.Wait(wait); }
+        catch (AggregateException) { }
+        StopRemote();
     }
 
     private static StatusMessage FailureStatus(RemoteRequestFailure failure, string name) => failure switch

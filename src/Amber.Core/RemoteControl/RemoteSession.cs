@@ -24,15 +24,31 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly CancellationTokenSource _cts = new();
     private int _ended;
+    private int _closed;
+    private long _lastReceived = Stopwatch.GetTimestamp();
+    private Task? _readLoop;
 
     protected RemoteEndpoint(Stream stream, string peerName, string peerFingerprint)
     {
-        Stream = stream;
+        Stream = new ProgressStream(stream, this);
+        _raw = stream;
         PeerName = peerName;
         PeerFingerprint = peerFingerprint;
     }
 
+    private readonly Stream _raw;
+
+    /// <summary>读写都走这里：每读到数据就记一下时间（看门狗用）。</summary>
     protected Stream Stream { get; }
+
+    /// <summary>
+    /// 这么久一点数据都没收到就当对方已经没了（进程被结束、断网）。对方每秒发一次心跳，
+    /// 所以正常时不会超过；中继上 TCP 的断开不一定传得过来，靠它在几秒内发现，而不是等系统超时（30–60 秒）。
+    /// </summary>
+    internal TimeSpan PeerSilenceTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>发了“结束”之后最多等这么久让对方先关连接（马上关的话，收件箱里还有没读的数据会变成重置，“结束”可能被中间的转发丢掉）。</summary>
+    internal static TimeSpan StopLinger { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>对方的名字和身份指纹（握手认出来的，不是对方自己报的）。</summary>
     public string PeerName { get; }
@@ -80,24 +96,122 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     /// <summary>测试用：绕过检查直接发一帧（验证对方会丢弃不该收的输入）。</summary>
     internal Task<bool> SendRawForTest(byte[] frame) => SendAsync(frame);
 
-    /// <summary>发“结束”再关。</summary>
+    /// <summary>
+    /// 发“结束”再关。本地马上算结束（不再注入输入、不再发画面、界面收起），连接再留一小会儿：
+    /// 等对方读到“结束”先关（或者最多 StopLinger），这样“结束”一定送得到。
+    /// </summary>
     public async Task StopAsync(RemoteStopReason reason = RemoteStopReason.Normal)
     {
         if (HasEnded) return;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-        await SendAsync(RemoteWire.Stop(reason), timeout.Token);
-        Abort(RemoteEnd.Local);
+        var sent = await SendAsync(RemoteWire.Stop(reason), timeout.Token);
+        if (Interlocked.Exchange(ref _ended, 1) != 0) return;
+        OnEnding();
+        Ended?.Invoke(RemoteEnd.Local);
+        if (sent && _readLoop is { IsCompleted: false } reader) _ = LingerThenCloseAsync(reader);
+        else Close();
+    }
+
+    private async Task LingerThenCloseAsync(Task reader)
+    {
+        try { await reader.WaitAsync(StopLinger); }
+        catch (TimeoutException) { }
+        Close();
     }
 
     /// <summary>立即断开（不通知对方）。</summary>
     public void Abort(RemoteEnd end)
     {
-        if (Interlocked.Exchange(ref _ended, 1) != 0) return;
-        try { _cts.Cancel(); } catch (ObjectDisposedException) { }
+        if (Interlocked.Exchange(ref _ended, 1) != 0)
+        {
+            // 已经结束、还在等对方关：连接出错或对方关了就直接关。
+            if (end != RemoteEnd.Local) Close();
+            return;
+        }
+        Close();
         OnEnding();
-        if (Stream is SecureStream secure) secure.Abort();
-        else Stream.Dispose();
         Ended?.Invoke(end);
+    }
+
+    private void Close()
+    {
+        if (Interlocked.Exchange(ref _closed, 1) != 0) return;
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { }
+        if (_raw is SecureStream secure) secure.Abort();
+        else _raw.Dispose();
+    }
+
+    /// <summary>开始读循环和看门狗（同意之后调用）。</summary>
+    protected Task StartReading()
+    {
+        var reader = ReadLoopAsync();
+        _readLoop = reader;
+        _ = WatchdogAsync();
+        return reader;
+    }
+
+    private async Task WatchdogAsync()
+    {
+        var step = PeerSilenceTimeout / 4;
+        try
+        {
+            while (!HasEnded)
+            {
+                await Task.Delay(step, Lifetime);
+                if (Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastReceived)) > PeerSilenceTimeout)
+                {
+                    Abort(RemoteEnd.Disconnected);
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    /// <summary>每秒发一次心跳：对方的看门狗靠它知道这边还活着（被控方还用回来的 Pong 量往返时间）。</summary>
+    protected async Task PingLoopAsync()
+    {
+        try
+        {
+            while (!HasEnded)
+            {
+                await SendAsync(RemoteWire.Ping(Stopwatch.GetTimestamp()));
+                await Task.Delay(TimeSpan.FromSeconds(1), Lifetime);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void Touch() => Interlocked.Exchange(ref _lastReceived, Stopwatch.GetTimestamp());
+
+    /// <summary>只多做一件事：读到数据时记时间。关闭由 RemoteEndpoint 对底下的流做。</summary>
+    private sealed class ProgressStream(Stream inner, RemoteEndpoint owner) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var n = inner.Read(buffer, offset, count);
+            if (n > 0) owner.Touch();
+            return n;
+        }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            var n = await inner.ReadAsync(buffer, ct);
+            if (n > 0) owner.Touch();
+            return n;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) => inner.WriteAsync(buffer, ct);
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct) => inner.WriteAsync(buffer, offset, count, ct);
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 
     /// <summary>结束前的收尾（被控方松开按住的键）。</summary>
@@ -108,7 +222,7 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     {
         try
         {
-            while (!HasEnded)
+            while (Volatile.Read(ref _closed) == 0)
             {
                 var frame = await RemoteWire.ReadAsync(Stream, Lifetime);
                 if (frame is not { } f)
@@ -116,6 +230,8 @@ public abstract class RemoteEndpoint : IAsyncDisposable
                     Abort(RemoteEnd.Disconnected);
                     return;
                 }
+                // 自己已经结束、在等对方关：后面来的都丢掉。
+                if (HasEnded) continue;
                 if (f.Type == RemoteFrameType.Stop)
                 {
                     Abort(RemoteEnd.Peer);
@@ -241,7 +357,7 @@ public sealed class RemoteSharer : RemoteEndpoint
             if (scale != 1) RemoteGeometry.Downscale(raw, frame, scale);
             _geometry = (_screen.Bounds, frame.Width, frame.Height);
             if (!await SendAsync(RemoteWire.Accept(new RemoteAccept(_controlAllowed, frame.Width, frame.Height, _codec.Id)))) return;
-            var reader = ReadLoopAsync();
+            var reader = StartReading();
             var pinger = PingLoopAsync();
             await CaptureLoopAsync(raw, frame);
             await reader;
@@ -376,19 +492,6 @@ public sealed class RemoteSharer : RemoteEndpoint
         return await SendAsync(RemoteWire.Tiles(new RemoteTileBatch(seq, frame.Width, frame.Height, tiles)));
     }
 
-    private async Task PingLoopAsync()
-    {
-        try
-        {
-            while (!HasEnded)
-            {
-                await SendAsync(RemoteWire.Ping(Stopwatch.GetTimestamp()));
-                await Task.Delay(TimeSpan.FromSeconds(1), Lifetime);
-            }
-        }
-        catch (OperationCanceledException) { }
-    }
-
     protected override Task<bool> HandleAsync(RemoteFrame frame)
     {
         switch (frame.Type)
@@ -398,7 +501,9 @@ public sealed class RemoteSharer : RemoteEndpoint
                 if (elapsed >= TimeSpan.Zero && elapsed < TimeSpan.FromMinutes(1)) Interlocked.Exchange(ref _rttTicks, elapsed.Ticks);
                 return Task.FromResult(true);
             case RemoteFrameType.Ping:
-                return SendAsync(RemoteWire.Pong(frame.Payload));
+                // 不在读循环里等：写锁可能被一大批画面占着，读循环卡住就收不到对方的心跳了。
+                _ = SendAsync(RemoteWire.Pong(frame.Payload));
+                return Task.FromResult(true);
             case RemoteFrameType.FrameAck:
                 var seq = RemoteWire.ParseFrameAck(frame.Payload);
                 if (seq > Interlocked.Read(ref _sent)) return Task.FromResult(false);
@@ -505,7 +610,8 @@ public sealed class RemoteViewer : RemoteEndpoint
                     }
                     lock (FrameLock) Frame.Resize(accept.Width, accept.Height);
                     _control = accept.Control;
-                    _ = ReadLoopAsync();
+                    _ = StartReading();
+                    _ = PingLoopAsync();
                     return accept;
                 case { Type: RemoteFrameType.Deny } d:
                     DenyReason = RemoteWire.ParseDeny(d.Payload);
