@@ -179,14 +179,19 @@ public sealed class RemoteViewerWindow : Window
         Content = dock;
         UpdateState();
         viewer.ControlChanged += _ => Dispatcher.UIThread.Post(UpdateState);
+        // 结束了（哪一边停的都算）：标题写“已结束”，停一下让人看到，然后自己关掉，不留在最后一帧上。
         viewer.Ended += _ => Dispatcher.UIThread.Post(() =>
         {
             UpdateState();
             _surface.ReleaseAll();
+            DispatcherTimer.RunOnce(Close, EndedCloseDelay);
         });
         Closed += (_, _) => _ = viewer.StopAsync();
         Opened += (_, _) => _surface.Focus();
     }
+
+    /// <summary>会话结束后查看窗口再停留多久。</summary>
+    internal static TimeSpan EndedCloseDelay { get; set; } = TimeSpan.FromSeconds(1.5);
 
     private void UpdateState()
     {
@@ -425,6 +430,19 @@ public static class RemoteSharingOverlay
     /// <summary>自检用：现在屏幕上有几条红框边。</summary>
     internal static int FrameCount { get; private set; }
 
+    /// <summary>每块屏幕四条边（桌面像素坐标），粗细按这块屏幕的缩放。</summary>
+    internal static List<(int X, int Y, int Width, int Height)> FrameRects(IEnumerable<Avalonia.Platform.Screen> screens)
+    {
+        var rects = new List<(int X, int Y, int Width, int Height)>();
+        foreach (var screen in screens)
+        {
+            var b = screen.Bounds;
+            var t = (int)Math.Ceiling(FrameThickness * screen.Scaling);
+            rects.AddRange([(b.X, b.Y, b.Width, t), (b.X, b.Bottom - t, b.Width, t), (b.X, b.Y, t, b.Height), (b.Right - t, b.Y, t, b.Height)]);
+        }
+        return rects;
+    }
+
     public static void Show(RemoteSharer sharer)
     {
         var windows = new List<Window>();
@@ -433,10 +451,12 @@ public static class RemoteSharingOverlay
         var bar = new RemoteSharingBar(sharer);
         windows.Add(bar);
         var closed = false;
+        DispatcherTimer? watch = null;
         void CloseAll()
         {
             if (closed) return;
             closed = true;
+            watch?.Stop();
             hotkey?.Dispose();
             frame?.Dispose();
             FrameCount = 0;
@@ -447,18 +467,26 @@ public static class RemoteSharingOverlay
             hotkey = new GlobalHotkey(() => _ = sharer.StopAsync(RemoteStopReason.StoppedByUser));
         bar.HotkeyAvailable = hotkey?.Registered == true;
         // 红框（Windows 用系统原生窗口；其他系统以后补）。小条放在红框里面、不重叠。
+        // 被控期间改分辨率、插拔显示器、缩放变了：每秒对一次屏幕布局，变了就按新的重画红框、小条放回主屏顶部。
         if (OperatingSystem.IsWindows())
         {
-            var rects = new List<(int, int, int, int)>();
-            foreach (var screen in bar.Screens.All)
-            {
-                var b = screen.Bounds;
-                var t = (int)Math.Ceiling(FrameThickness * screen.Scaling);
-                rects.AddRange([(b.X, b.Y, b.Width, t), (b.X, b.Bottom - t, b.Width, t), (b.X, b.Y, t, b.Height), (b.Right - t, b.Y, t, b.Height)]);
-            }
-            var red = new RedFrameWindows(rects);
+            var current = FrameRects(bar.Screens.All);
+            var red = new RedFrameWindows(current);
             frame = red;
             FrameCount = red.Count;
+            watch = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
+            {
+                if (closed || !OperatingSystem.IsWindows()) return;
+                var next = FrameRects(bar.Screens.All);
+                if (next.SequenceEqual(current)) return;
+                current = next;
+                frame?.Dispose();
+                var redrawn = new RedFrameWindows(next);
+                frame = redrawn;
+                FrameCount = redrawn.Count;
+                bar.PlaceAtTop();
+            });
+            watch.Start();
         }
         bar.Show();
         if (sharer.HasEnded) CloseAll();
@@ -520,7 +548,7 @@ public sealed class RemoteSharingBar : Window
     }
 
     /// <summary>放在主屏顶部正中（红框里面）。</summary>
-    private void PlaceAtTop()
+    internal void PlaceAtTop()
     {
         if (Screens.Primary is not { } primary) return;
         var size = PixelSize.FromSize(Bounds.Size, primary.Scaling);
