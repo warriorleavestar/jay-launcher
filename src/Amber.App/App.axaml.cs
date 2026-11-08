@@ -41,7 +41,12 @@ public sealed class App : Application
             StartupTrace.Mark("viewmodels");
             desktop.MainWindow = new MainWindow(settings) { DataContext = viewModel };
             StartupTrace.Mark("window");
-            desktop.Exit += (_, _) => service.Dispose();
+            desktop.Exit += (_, _) =>
+            {
+                // 开着的服务器先存盘停下，再清理别的。
+                ViewModels.HostServerViewModel.StopRunningServer();
+                service.Dispose();
+            };
             // 开发截图和自检不清理游戏回收目录或真实用户的无痕配置。
             if (Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR") is not { Length: > 0 }
                 && Environment.GetEnvironmentVariable("AMBER_SELFTEST") is not { Length: > 0 })
