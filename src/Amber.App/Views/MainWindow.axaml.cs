@@ -23,7 +23,13 @@ public partial class MainWindow : Window
         FitToScreen(settings?.LauncherWindow);
         // 窗口打开后才知道标题栏有多高：Width/Height 是客户区，加上标题栏可能比屏幕的可用区域还高（底下被任务栏挡住）。
         Opened += (_, _) => FitFrameToScreen();
-        Closing += (_, _) => RememberPlacement();
+        Closing += (_, _) =>
+        {
+            RememberPlacement();
+            // 关主窗口就是退出 Jay：先结束远程控制（通知对方、收起红框），不能让被控状态在后台继续。
+            if (DataContext is MainViewModel main)
+                foreach (var mp in main.Pages.OfType<MultiplayerViewModel>()) mp.StopRemoteForExit(TimeSpan.FromSeconds(1.5));
+        };
         Toasts.Attach(this, new Controls.BakeNoticeState());
         DataContextChanged += (_, _) => AttachGameWindowBehaviour();
         // Esc 取消所有“再点一次确认”的按钮；Ctrl+Z 撤销最近一次删除（焦点在输入框里时留给输入框自己的撤销）。

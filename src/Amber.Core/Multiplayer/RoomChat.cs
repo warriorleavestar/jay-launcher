@@ -219,7 +219,20 @@ internal static class ChatWire
     public static byte[] KickedAck() => KnockProtocol.Json(new JsonObject { ["ctl"] = "kicked-ack" });
 
     /// <summary>远程控制：房主 → 成员“我想看/控你的屏幕”（带随机会话号）；成员 → 房主“不同意”。</summary>
-    public static byte[] RemoteRequest(string sessionId) => KnockProtocol.Json(new JsonObject { ["ctl"] = "remote-request", ["sid"] = sessionId });
+    /// <summary>name 是房主自己的名字（成员表里房主那一项），让成员的同意窗写对方是谁而不是“房主”。</summary>
+    public static byte[] RemoteRequest(string sessionId, string? hostName = null)
+    {
+        var json = new JsonObject { ["ctl"] = "remote-request", ["sid"] = sessionId };
+        if (hostName is { Length: > 0 }) json["name"] = hostName;
+        return KnockProtocol.Json(json);
+    }
+
+    /// <summary>房主 → 成员：房主的名字（成员加入聊天后发一次）。旧版成员不认识这个控制帧，直接忽略。</summary>
+    public static byte[] HostInfo(string hostName) => KnockProtocol.Json(new JsonObject { ["ctl"] = "host-info", ["name"] = hostName });
+
+    /// <summary>控制帧里的名字（清理过；没有或为空返回 null）。</summary>
+    internal static string? NameField(JsonObject json) =>
+        json["name"] is JsonValue v && v.TryGetValue<string>(out var name) && RoomChat.Clean(name, RoomChat.MaxNameLength) is { Length: > 0 } clean ? clean : null;
 
     public static byte[] RemoteDeny(string sessionId) => KnockProtocol.Json(new JsonObject { ["ctl"] = "remote-deny", ["sid"] = sessionId });
 
@@ -645,7 +658,7 @@ public sealed class ChatHub : IAsyncDisposable
     public bool SendRemoteRequest(MemberEntry entry, string sessionId)
     {
         if (_table is null || entry.IsHost || entry.Revoked) return false;
-        var frame = ChatWire.RemoteRequest(sessionId);
+        var frame = ChatWire.RemoteRequest(sessionId, _table.Host is { } host ? ChatWire.NameOf(host) : null);
         var sent = false;
         foreach (var member in _members.Values)
             if (member.Authenticated && !member.IsHost && ReferenceEquals(member.Entry, entry)) sent |= member.Outbox.Writer.TryWrite(frame);
@@ -744,6 +757,8 @@ public sealed class ChatHub : IAsyncDisposable
                         Broadcast(_cipher is not null ? frame : Seal(message));
                     }
                     StartSweep();
+                    // 邀请房间：告诉成员房主叫什么（远程控制的同意窗、提示里用）。
+                    if (_table?.Host is { } hostEntry && !member.IsHost) member.Outbox.Writer.TryWrite(ChatWire.HostInfo(ChatWire.NameOf(hostEntry)));
                     // 告诉这个客户端：这个转发支持心跳（旧客户端解不开，直接忽略）。
                     member.Outbox.Writer.TryWrite(Seal(new ChatMessage(ChatKind.Ping, HubSender, "", "", Clock())));
                     continue;
@@ -877,6 +892,9 @@ public sealed class ChatClient : IAsyncDisposable
     /// <summary>邀请房间：房主请求看/控自己的屏幕（会话号）。只认房主这条腿上来的。</summary>
     public event Action<string>? RemoteRequested;
 
+    /// <summary>邀请房间：房主自己报的名字（经房主这条腿的控制帧）；还没收到时 null。</summary>
+    public string? HostName { get; private set; }
+
     /// <summary>远程控制：告诉房主“不同意”。</summary>
     public async Task DeclineRemoteAsync(string sessionId, CancellationToken ct = default)
     {
@@ -1000,7 +1018,12 @@ public sealed class ChatClient : IAsyncDisposable
                         }
                         Kicked?.Invoke();
                     }
-                    else if (ctl == "remote-request" && ChatWire.SessionOf(control!) is { } sid) RemoteRequested?.Invoke(sid);
+                    else if (ctl == "host-info" && ChatWire.NameField(control!) is { } hostName) HostName = hostName;
+                    else if (ctl == "remote-request" && ChatWire.SessionOf(control!) is { } sid)
+                    {
+                        if (ChatWire.NameField(control!) is { } requester) HostName = requester;
+                        RemoteRequested?.Invoke(sid);
+                    }
                     continue;
                 }
                 if ((_cipher is not null ? _cipher.Open(frame) : ChatWire.ParseRelay(frame)) is not { } message) continue;

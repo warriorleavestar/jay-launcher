@@ -119,6 +119,90 @@
           </StackPanel>
         </Border>
 
+        <!-- 开服：在这台电脑上跑 Jay 服务器版（网关 + 原版 MC 服务端），朋友用邀请码经“Jay 服务器”进来 -->
+        <Border Classes="card" Margin="0" DataContext="{Binding HostServer}" x:DataType="vm:HostServerViewModel">
+          <StackPanel Spacing="8">
+            <TextBlock Classes="h2" Text="{l:T multiplayer.hostserver.title}" Margin="0" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.hint}" />
+
+            <!-- 第一步：玩家连的地址 -->
+            <StackPanel Spacing="6" IsVisible="{Binding NeedsInit}">
+              <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.step_address}" />
+              <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBox Text="{Binding PublicHost}" PlaceholderText="{l:T multiplayer.hostserver.host_placeholder}" />
+                <TextBox Grid.Column="1" Width="90" Margin="6,0,0,0" Text="{Binding PublicPort}" PlaceholderText="47670" />
+                <Button Grid.Column="2" Classes="primary" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.init}" Command="{Binding InitCommand}" />
+              </Grid>
+            </StackPanel>
+
+            <!-- 第二步：准备 MC 服务端 -->
+            <StackPanel Spacing="6" IsVisible="{Binding NeedsSetup}">
+              <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.step_setup}" />
+              <WrapPanel Orientation="Horizontal">
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                  <TextBlock VerticalAlignment="Center" Text="{l:T multiplayer.hostserver.version}" />
+                  <TextBox Width="110" Text="{Binding McVersion}" PlaceholderText="latest" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                  <TextBlock VerticalAlignment="Center" Text="{l:T multiplayer.hostserver.memory}" />
+                  <TextBox Width="80" Text="{Binding MemoryMb}" />
+                </StackPanel>
+              </WrapPanel>
+              <CheckBox IsChecked="{Binding AcceptEula}">
+                <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.eula}" />
+              </CheckBox>
+              <Button Classes="primary" Content="{l:T multiplayer.hostserver.setup}" Command="{Binding SetupCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Left" />
+            </StackPanel>
+
+            <!-- 运行和管理 -->
+            <StackPanel Spacing="8" IsVisible="{Binding IsSetUp}">
+              <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding Summary}" />
+              <WrapPanel Orientation="Horizontal">
+                <Button Classes="primary" Margin="0,0,6,6" Content="{l:T multiplayer.hostserver.start}" Command="{Binding StartCommand}" IsVisible="{Binding CanStart}" />
+                <Button Margin="0,0,6,6" Content="{l:T multiplayer.hostserver.stop}" Command="{Binding StopCommand}" IsVisible="{Binding IsRunning}" IsEnabled="{Binding !IsBusy}" />
+              </WrapPanel>
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox Text="{Binding InviteName}" PlaceholderText="{l:T multiplayer.hostserver.invite_placeholder}" />
+                <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.invite}" Command="{Binding CreateInviteCommand}" />
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding InviteCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <TextBox IsReadOnly="True" FontSize="12" TextWrapping="Wrap" Text="{Binding InviteCode}" />
+                <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.copy}" Command="{Binding CopyInviteCommand}" />
+              </Grid>
+              <ItemsControl ItemsSource="{Binding Members}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:HostMemberItem">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                      <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Classes="hint" FontSize="12" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0">
+                        <Button Content="{l:T multiplayer.hostserver.revoke}" IsVisible="{Binding HasDevices}"
+                                Command="{Binding $parent[ItemsControl].((vm:HostServerViewModel)DataContext).RevokeCommand}" CommandParameter="{Binding}" />
+                        <Button Content="{l:T common.delete}"
+                                Command="{Binding $parent[ItemsControl].((vm:HostServerViewModel)DataContext).RemoveMemberCommand}" CommandParameter="{Binding}" />
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Expander HorizontalAlignment="Stretch" Header="{l:T multiplayer.hostserver.console}" IsVisible="{Binding LogText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                <StackPanel Spacing="6">
+                  <TextBox x:Name="HostServerLog" IsReadOnly="True" FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" MaxHeight="220" Text="{Binding LogText}" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Text="{Binding McCommand}" PlaceholderText="{l:T multiplayer.hostserver.command_placeholder}" />
+                    <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.send}" Command="{Binding SendCommandCommand}" />
+                  </Grid>
+                </StackPanel>
+              </Expander>
+            </StackPanel>
+
+            <SelectableTextBlock Classes="hint" FontSize="11" TextWrapping="Wrap" Text="{Binding DataDirectoryText}" IsVisible="{Binding IsInitialized}" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+
         <!-- 联机节点：收起时标题里显示有几个；没有节点时默认展开。房间里也要能导出分享码给朋友，所以一直显示。 -->
         <Expander HorizontalAlignment="Stretch" IsExpanded="{Binding NodesExpanded}">
           <Expander.Header>

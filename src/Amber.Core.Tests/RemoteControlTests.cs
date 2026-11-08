@@ -393,6 +393,64 @@ public sealed class RemoteControlTests
         Assert.Equal((150, 90), (viewer.Frame.Width, viewer.Frame.Height));
         Assert.True(await viewer.SendMouseAsync(new RemoteMouse(RemoteMouseAction.Move, RemoteMouseButton.None, 0, 0, 0)));
         await WaitUntil(() => !memberInput.Calls.IsEmpty);
+
+        // 成员按停止（热键）：房主的查看窗口马上知道是对方结束的，成员这边马上不再注入。
+        var ended = new TaskCompletionSource<RemoteEnd>(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewer.Ended += e => ended.TrySetResult(e);
+        await memberSharer!.StopAsync(RemoteStopReason.StoppedByUser);
+        Assert.True(memberSharer.HasEnded);
+        Assert.False(memberSharer.ControlAllowed);
+        Assert.Equal(RemoteEnd.Peer, await ended.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    /// <summary>流：先给出 prefix，之后一直不来数据也不断开（模拟对方进程没了、中继没把断开传过来）。</summary>
+    private sealed class SilentAfterStream(byte[] prefix) : Stream
+    {
+        private readonly MemoryStream _prefix = new(prefix);
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            var n = _prefix.Read(buffer.Span);
+            if (n > 0) return n;
+            await Task.Delay(Timeout.Infinite, ct);
+            return 0;
+        }
+        public override void Write(byte[] buffer, int offset, int count) { }
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task SilentPeer_EndsWithinWatchdogTimeout()
+    {
+        var accept = RemoteWire.Accept(new RemoteAccept(true, 64, 64, new RawTileCodec().Id));
+        var viewer = new RemoteViewer(new SilentAfterStream(accept), new RawTileCodec(), "Host", "") { PeerSilenceTimeout = TimeSpan.FromMilliseconds(600) };
+        var ended = new TaskCompletionSource<RemoteEnd>(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewer.Ended += e => ended.TrySetResult(e);
+        Assert.NotNull(await viewer.StartAsync());
+        Assert.False(viewer.HasEnded);
+        Assert.Equal(RemoteEnd.Disconnected, await ended.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(viewer.ControlGranted && !viewer.HasEnded);
+    }
+
+    [Fact]
+    public async Task ActivePeer_IsNotCutByWatchdog()
+    {
+        var (hostRoom, _, guest, _) = Rooms();
+        await using var hub = new RemoteHub(hostRoom, HostOptions(new FixedPolicy(new RemoteConsent(true, true)), new FakeScreen(), new FakeInput()), 0);
+        var stream = await RemoteConnector.OpenAsync("127.0.0.1", hub.ListenPort, guest, RemoteRole.Controller, null);
+        await using var viewer = new RemoteViewer(stream, new RawTileCodec(), "Host", "") { PeerSilenceTimeout = TimeSpan.FromMilliseconds(2500) };
+        Assert.NotNull(await viewer.StartAsync());
+        // 画面不变时只有每秒的心跳，也不能被当成没了。
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        Assert.False(viewer.HasEnded);
     }
 
     [Fact]
@@ -439,6 +497,8 @@ public sealed class RemoteControlTests
         chatHub.RemoteDeclined += (who, sid) => declined.TrySetResult((who, sid));
         await client.ConnectAsync("127.0.0.1", chatHub.Port);
         await WaitUntil(() => chatHub.MemberCount == 1);
+        // 房主加入后报自己的名字（同意窗写“Host 想要……”，不是“房主”）。
+        await WaitUntil(() => client.HostName == "Host", 5);
 
         var sid = Convert.ToHexStringLower(RemoteWire.NewSessionId());
         Assert.True(chatHub.SendRemoteRequest(entry, sid));

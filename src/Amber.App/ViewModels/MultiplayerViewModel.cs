@@ -259,7 +259,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitDirect();
         InitGuide();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
+        HostServer = new HostServerViewModel(service);
     }
+
+    /// <summary>开服：在这台电脑上跑 Jay 服务器版。</summary>
+    public HostServerViewModel HostServer { get; }
 
     /// <summary>Jay 服务器（经网关进的专用服务器）。</summary>
     public JayServersViewModel JayServers { get; }
@@ -273,6 +277,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         RefreshInstances();
         RefreshTrusted();
         JayServers.Load();
+        HostServer.Load();
         // 不自动听局域网广播：绑定端口可能让 Windows 弹防火墙询问。用 Amber 启动的游戏从日志就能认出端口。
     }
 
@@ -992,6 +997,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             var host = Peers.FirstOrDefault(p => p.Peer.Ip == EasyTierArgs.HostIp && p.Peer.Cost != "Local");
             TickChat(host is not null);
             if (host is not null) _hostSeen = true;
+            // 刚显示过远程控制的提示（或正在等对方同意）时先不刷新，免得一两秒就被盖掉。
+            if (!RoomStatusMayOverwrite) return;
             if (IsJoined && host is null && !_hostSeen && DateTime.UtcNow - _joinedAt > TimeSpan.FromSeconds(20))
                 SetStatus(StatusMessage.Info("multiplayer.room.not_connected_hint"));
             else if (IsJoined)

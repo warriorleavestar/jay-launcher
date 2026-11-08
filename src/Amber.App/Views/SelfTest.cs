@@ -111,6 +111,16 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") is "host-server" or "host-exit" or "jay-client")
+            {
+                var scope = Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE");
+                if (scope == "host-server") await HostServerAsync();
+                else if (scope == "host-exit") await HostExitAsync();
+                else await JayClientAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "game")
             {
                 await GameLifecycleAsync();
