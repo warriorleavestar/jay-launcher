@@ -46,8 +46,13 @@ internal sealed partial class SelfTest
         main.CurrentPage = host;
         await Task.Delay(500);
         var page = await FindAsync<MultiplayerPage>(_ => true);
+        // Since the four-tab lobby (official §6.14) the public network lives under Public rooms.
+        Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
+        await Task.Delay(400);
         bool HasText(string key) => page!.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == L.T(key));
-        Check("公共网络：联机页有公共网络卡片和说明", page is not null && HasText("multiplayer.public.title") && HasText("multiplayer.public.hint"));
+        // No public network added yet: the setup card explains where public rooms come from; with one: the card and its hint.
+        Check("公共网络：联机页有公共网络卡片和说明", page is not null && host.IsPublicTab && HasText("multiplayer.public.title")
+            && (host.ShowPublicSetup ? HasText("multiplayer.public.setup_body") : HasText("multiplayer.public.hint")));
         if (!host.IsComponentReady)
         {
             Log("SKIP 公共网络：联机组件没有下载");
@@ -68,6 +73,8 @@ internal sealed partial class SelfTest
         host.SavePublicNodesCommand.Execute(null);
         Check("公共网络：保存种子节点", host.HasPublicNodes, host.Status);
         service.Settings.PublicNetworkNoticeAccepted = false;
+        Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
+        await Task.Delay(300);
         Check("公共网络：第一次连接先显示隐私说明", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, host.ConnectPublicCommand))) && host.PublicNoticeOpen && !host.IsPublicConnecting);
         await ShotAsync("公共网络隐私说明");
         await host.AcceptPublicNoticeCommand.ExecuteAsync(null);
@@ -275,6 +282,8 @@ internal sealed partial class SelfTest
     /// <summary>网络账号：登录框按网络配置显示，密码错、缺两步验证码、码对了登录成功，房主要求登录。</summary>
     private async Task NetworkLoginAsync(MultiplayerViewModel host, byte[] totp)
     {
+        Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
+        await Task.Delay(300);
         Check("网络账号：网络要求登录时显示登录框和验证码框", host.HasNetworkLogin && host.IsNetworkLoginRequired && host.ShowAccountLogin
             && host.AccountFactors.SingleOrDefault()?.Name == "totp"
             && (await FindAsync<MultiplayerPage>(_ => true))!.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == L.T("multiplayer.account.title")));
