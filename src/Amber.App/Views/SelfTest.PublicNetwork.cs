@@ -143,7 +143,82 @@ internal sealed partial class SelfTest
         guest.DisconnectPublicCommand.Execute(null);
         server.Stop();
         Check("公共网络：断开后状态复原", !host.IsPublicConnected && !guest.IsPublicConnected && host.PublicRooms.Count == 0);
-    
+
+        seed.Dispose();
+        await NetworkSwitchAsync(host);
+    }
+
+    /// <summary>
+    /// 换公共网络：注册表签的连接串直接加、自动选上，再连进这个网络（本机另开一个这个网络的种子节点）；
+    /// 别人签的先提醒、确认后才加；同编号换钥匙的拒绝；删掉后回到 Jay 公共网络。
+    /// </summary>
+    private async Task NetworkSwitchAsync(MultiplayerViewModel host)
+    {
+        var service = host.TestService;
+        var registry = NetworkSigner.Generate(out _);
+        var someone = NetworkSigner.Generate(out _);
+        service.TrustedNetworkKeys = [registry.PublicKey];
+        service.ReloadNetworks();
+        Dispatcher.UIThread.Invoke(host.LoadNetworks);
+        Check("换公共网络：默认是 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && host.NetworkChoices.Count == 1,
+            string.Join(" | ", host.NetworkChoices.Select(c => c.Label)));
+
+        var node = $"tcp://127.0.0.1:{EasyTierArgs.FreeTcpPort()}";
+        var info = new NetworkInfo("selftest-net", "自检公共网络", "jay-selftest-" + Guid.NewGuid().ToString("N")[..8], "selftest-secret", [node]);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = NetworkString.Create(info, registry);
+            host.AddNetworkCommand.Execute(null);
+        });
+        Check("换公共网络：审核过的连接串直接加上并选中", host.SelectedNetworkChoice is { Id: "selftest-net", Reviewed: true }
+            && service.Settings.PublicNetworkId == "selftest-net" && host.PublicStateText.Contains("自检公共网络"), host.Status + " / " + host.PublicStateText);
+
+        // 这个网络的种子节点（和 jay-server directory --network 一样；目录服务沿用前面开的那个）。
+        using (var seed = PublicNetworkSession.Start(service.EasyTier, new PublicNetworkOptions(service.Networks.Find("selftest-net")!.ToProfile() with { Nodes = [] },
+            EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true, Listeners: [node]), Path.Combine(reportDir, "public-seed-2")))
+        {
+            await host.ConnectPublicCommand.ExecuteAsync(null);
+            Check("换公共网络：连进新网络（找得到它的目录）", await WaitAsync(() => host.IsPublicConnected, 60) && host.PublicStateText.Contains("自检公共网络"), host.Status);
+            host.DisconnectPublicCommand.Execute(null);
+        }
+
+        // 别人签的：先提醒（显示签名钥匙），确认后才加。
+        var other = new NetworkInfo("selftest-other", "没审核的网络", "jay-selftest-other", "other-secret", ["tcp://203.0.113.5:11010"]);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = NetworkString.Create(other, someone);
+            host.AddNetworkCommand.Execute(null);
+        });
+        Check("换公共网络：没审核的先提醒、还没加", host.NetworkConfirmOpen && host.NetworkConfirmText.Contains("没审核的网络") && service.Networks.Find("selftest-other") is null, host.Status);
+        var page = await FindAsync<MultiplayerPage>(_ => true);
+        if (page?.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => Equals(e.Header, L.T("multiplayer.network.title"))) is { } expander)
+        {
+            Dispatcher.UIThread.Invoke(() => expander.IsExpanded = true);
+            await Task.Delay(300);
+            Dispatcher.UIThread.Invoke(() => expander.BringIntoView());
+        }
+        await ShotAsync("换公共网络提醒");
+        Dispatcher.UIThread.Invoke(() => host.ConfirmAddNetworkCommand.Execute(null));
+        Check("换公共网络：确认后加上（标着未审核）", host.SelectedNetworkChoice is { Id: "selftest-other", Reviewed: false } && host.SelectedNetworkChoice.Label.Contains('⚠'), host.Status);
+
+        // 别的钥匙冒用同一个编号：拒绝。
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.NetworkInput = NetworkString.Create(info with { Seq = 5 }, someone);
+            host.AddNetworkCommand.Execute(null);
+        });
+        Check("换公共网络：同编号换了钥匙的拒绝", service.Networks.Find("selftest-net")!.SignerKey.AsSpan().SequenceEqual(registry.PublicKey)
+            && host.Status == L.F("multiplayer.network.conflict", "selftest-net"), host.Status);
+
+        // 删掉：回到 Jay 公共网络。
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.RemoveNetworkCommand.Execute(null);
+            host.SelectedNetworkChoice = host.NetworkChoices.First(c => c.Id == "selftest-net");
+            host.RemoveNetworkCommand.Execute(null);
+        });
+        Check("换公共网络：删掉后回到 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && service.Settings.PublicNetworkId is null
+            && (service.Settings.PublicNetworks ?? []).Count == 0, host.Status);
     }
 
     /// <summary>设备指纹：默认关着；打开后生成的码每次不同；房主隐藏房间 + 指纹查找 + 要求设备指纹；加入方按码找到房间，没开指纹进不去，开了、在名单里、房主批准后能进；换新后旧码找不到。</summary>

@@ -36,7 +36,7 @@ public sealed partial class MultiplayerViewModel
     [ObservableProperty] public partial string NetworkConfirmText { get; set; } = "";
     public bool CanRemoveNetwork => SelectedNetworkChoice is { IsBuiltIn: false };
 
-    private void LoadNetworks()
+    internal void LoadNetworks()
     {
         _loadingNetworks = true;
         try
