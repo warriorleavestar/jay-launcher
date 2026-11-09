@@ -62,7 +62,9 @@ public static class Program
               --blocked-words <文件>          屏蔽词，一行一个：公开房间的名字、房主名里有就不收
               --rate-limit 3,6,600            每人同时几个房间、每人每分钟新发布几次、整个目录每分钟几个新房间（默认 3,6,600；--no-rate-limit 关掉）
               --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
-              --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录。一个网络只能有一台跑目录
+              --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
+              --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
+                                              备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
           jay-server node status|rooms|bans   看运行中节点的计数、公开房间、封禁名单
           jay-server node ban host|room <房主指纹|房间编号> [--reason 原因] / node unban host|room <...>
               封禁房主（换房间也进不了列表）或房间，马上把他已经在目录里的房间拿掉
@@ -378,7 +380,7 @@ public static class Program
         var listen = options.GetInt("listen", 11010);
         log(server.SeedOnly
             ? $"公共网络 {server.Profile.NetworkName} 的种子节点（不跑目录）在端口 {listen}（TCP/UDP）上运行"
-            : $"公共网络 {server.Profile.NetworkName} 的节点在端口 {listen}（TCP/UDP）上运行，房间目录在 {PublicNetworkProfile.DirectoryIp}:{PublicNetworkProfile.DirectoryPort}");
+            : $"公共网络 {server.Profile.NetworkName} 的节点在端口 {listen}（TCP/UDP）上运行，房间目录在 {server.DirectoryIp}:{PublicNetworkProfile.DirectoryPort}");
         if (server.AdminPort is { } admin) log($"管理接口在 127.0.0.1:{admin}（健康检查 /health；jay-server node status 看状态）");
         log($"在 Jay 的联机设置里把公共节点填成 tcp://<这台机器的公网地址>:{listen}");
 
@@ -424,6 +426,11 @@ public static class Program
             if (options.Has("accounts") || options.Get("config") is not null || options.Get("blocked-words") is not null)
                 throw new ArgumentException("--seed-only 的节点不跑目录，不能同时用 --accounts、--config、--blocked-words");
             builder.SeedOnly();
+        }
+        if (options.Get("directory-index") is not null)
+        {
+            if (options.Has("seed-only")) throw new ArgumentException("--seed-only 的节点不跑目录，不能用 --directory-index");
+            builder.UseDirectoryIndex(options.GetInt("directory-index", 1));
         }
         if (options.Get("config") is { } configPath)
         {

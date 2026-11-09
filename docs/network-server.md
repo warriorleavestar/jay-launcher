@@ -1,6 +1,6 @@
 # Jay 网络服务端（官方版）
 
-> **实验功能**：已通过单元测试和本机真 EasyTier 的端到端测试（目录节点 + 地区种子节点），还没在两台不同网络的电脑上实测。
+> **实验功能**：已通过单元测试和本机真 EasyTier 的端到端测试（目录节点 + 地区种子节点）；备用目录只有单元测试；还没在两台不同网络的电脑上实测。
 
 Jay 的公共网络（看房间列表、敲门、账号登录）要有人跑**网络节点**。网络服务端就是 `jay-server directory`：
 
@@ -82,18 +82,29 @@ jay-server node remove <房间编号>       # 只删这一次，房主续期时�
 
 房主被拒时，Jay 里会显示节点给的原因（比如“房间名或房主名里有这个网络不允许的词”）。
 
-## 五、分地区多开节点
+## 五、多开节点：备用目录和地区种子
 
-一个网络只能有**一台**跑目录（它占着 10.235.0.1）。别的地区的机器只当种子节点，帮忙转发、离玩家近一点：
+**备用目录**：最多 4 台跑目录，一台挂了房间列表、查找、发布照常。
 
 ```bash
-# 主节点（比如在香港）
-jay-server directory --network nz-friends.jaynet --listen 11010
-# 地区节点（比如在新西兰），连到主节点
+# 主目录（编号 1，10.235.0.1）
+jay-server directory --network nz-friends.jaynet --config nz-friends/config.json
+# 备用目录（编号 2–4，10.235.255.254 / .253 / .252），连到主节点
+jay-server directory --network nz-friends.jaynet --config nz-friends/config.json --directory-index 2 --seeds tcp://主节点:11010
+```
+
+- Jay 把房间发给**每个**在线的目录，看列表时合并所有目录的结果，查找按编号顺序问。备用目录之间不用同步、不用互相信任：房间信息是房主签过名的。
+- 备用目录要和主目录用同样的 `--config`、`--blocked-words`。封禁要在每台上各执行一次 `node ban`。
+- 开账号登录时，把主目录数据目录里的 `login.key` 和 `accounts.json` 复制过去（登录凭证的签名钥匙要一样）。
+- 旧版 Jay（这个版本之前）只认主目录。
+
+**地区种子**：别的地区的机器只帮忙转发、离玩家近一点，不跑目录：
+
+```bash
 jay-server directory --network nz-friends.jaynet --listen 11010 --seed-only --seeds tcp://主节点:11010
 ```
 
-把所有节点都写进网络信息的 `nodes`，Jay 会都连上。目录在多个节点之间同步（志愿节点）还没做，见“以后”。
+把所有节点都写进网络信息的 `nodes`，Jay 会都连上。
 
 ## 六、长期运行
 
@@ -105,6 +116,8 @@ sudo bash install-network-node.sh
 sudo NETWORK=nz-friends.jaynet CONFIG=nz-friends/config.json ACCOUNTS=1 bash install-network-node.sh
 # 地区节点：
 sudo NETWORK=nz-friends.jaynet SEED_ONLY=1 SEEDS=tcp://主节点:11010 bash install-network-node.sh
+# 备用目录：
+sudo NETWORK=nz-friends.jaynet CONFIG=nz-friends/config.json SEEDS=tcp://主节点:11010 EXTRA="--directory-index 2" bash install-network-node.sh
 ```
 
 脚本建 `jay` 用户、数据放 `/var/lib/jay-network`、注册 `jay-network` 服务、在 ufw / firewalld 上放行端口。之后：
@@ -138,5 +151,4 @@ docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-ser
 
 ## 以后
 
-- 目录在多个节点之间同步（房间信息本来就是签过名的，可以直接转发，协议不用改）。
 - 志愿节点（玩家自愿把自己的电脑当种子节点）。

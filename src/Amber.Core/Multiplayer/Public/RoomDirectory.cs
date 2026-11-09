@@ -455,17 +455,88 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 /// <summary>查到的房主（拿着邀请码的人在目录里找到的）。</summary>
 public sealed record DirectoryHit(string Id, string Ip, byte[] HostKey);
 
-/// <summary>目录服务的客户端：经公共网络连 10.235.0.1:47668。</summary>
-public sealed class RoomDirectoryClient(IPublicNetwork network, string ip = PublicNetworkProfile.DirectoryIp, int port = PublicNetworkProfile.DirectoryPort)
+/// <summary>
+/// 目录服务的客户端：经公共网络连目录节点（10.235.0.1，网络有备用目录节点时还有 .2 .3 .4，见 <see cref="PublicNetworkProfile.DirectoryIps"/>）。
+/// 写（发布、续期、撤下）发给每个在线的目录节点，所以每个目录都有完整的房间表，一台挂了别的照常；
+/// 读（列表）合并所有在线目录的结果，查找按顺序问到有结果为止；捎话、登录交给第一个肯收的。
+/// 备用目录节点之间不用互相信任或同步：房间信息本来就是房主签过名的。
+/// </summary>
+public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<string>? ips = null, int port = PublicNetworkProfile.DirectoryPort)
 {
-    private async Task<JsonObject> CallAsync(JsonObject request, CancellationToken ct)
+    private async Task<IReadOnlyList<string>> TargetsAsync(CancellationToken ct)
+    {
+        if (ips is { Count: > 0 }) return ips;
+        try
+        {
+            var online = await network.DirectoriesAsync(ct);
+            return online.Count > 0 ? online : [PublicNetworkProfile.DirectoryIp];
+        }
+        catch (Exception e) when (e is IOException or InvalidOperationException or System.ComponentModel.Win32Exception) { return [PublicNetworkProfile.DirectoryIp]; }
+    }
+
+    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
-        await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
-        await RoomDirectoryProtocol.WriteLineAsync(stream, request, deadline.Token);
-        return await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token);
+        try
+        {
+            await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
+            await RoomDirectoryProtocol.WriteLineAsync(stream, request, deadline.Token);
+            return await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new IOException(L.T("core.mp.public.no_directory"));
+        }
+        catch (SocketException e)
+        {
+            throw new IOException(e.Message, e);
+        }
     }
+
+    /// <summary>发给每个目录，返回每个的回复（连不上的是异常）。</summary>
+    private async Task<List<(JsonObject? Reply, Exception? Error)>> FanOutAsync(JsonObject request, CancellationToken ct)
+    {
+        var targets = await TargetsAsync(ct);
+        var tasks = targets.Select(async ip =>
+        {
+            try { return ((JsonObject?)await CallAsync(ip, (JsonObject)request.DeepClone(), ct), (Exception?)null); }
+            catch (Exception e) when (e is IOException or InvalidDataException or EndOfStreamException) { return (null, e); }
+        }).ToList();
+        var results = (await Task.WhenAll(tasks)).ToList();
+        ct.ThrowIfCancellationRequested();
+        return results;
+    }
+
+    /// <summary>至少一个目录收下就算成功；都不收时，有明确拒绝就报拒绝，否则报连不上。</summary>
+    private static List<JsonObject> NeedOne(List<(JsonObject? Reply, Exception? Error)> results)
+    {
+        var ok = results.Where(r => r.Reply?["ok"]?.GetValue<bool>() == true).Select(r => r.Reply!).ToList();
+        if (ok.Count > 0) return ok;
+        if (results.FirstOrDefault(r => r.Reply is not null).Reply is { } rejected) Check(rejected);
+        throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
+    }
+
+    /// <summary>按顺序问，第一个成功的回复（<paramref name="accept"/> 决定算不算数，不算就问下一个）。</summary>
+    private async Task<JsonObject> FirstAsync(JsonObject request, Func<JsonObject, bool> accept, CancellationToken ct)
+    {
+        JsonObject? last = null;
+        Exception? error = null;
+        foreach (var ip in await TargetsAsync(ct))
+        {
+            try
+            {
+                var reply = await CallAsync(ip, (JsonObject)request.DeepClone(), ct);
+                if (accept(reply)) return reply;
+                // 都没有结果时，回一个“成功但没找到”比回别的目录的错误更准。
+                if (last is null || (!IsOk(last) && IsOk(reply))) last = reply;
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException or EndOfStreamException) { error ??= e; }
+        }
+        return last ?? throw error ?? new IOException(L.T("core.mp.public.no_directory"));
+    }
+
+    private static bool IsOk(JsonObject reply) => reply["ok"]?.GetValue<bool>() == true;
 
     private static void Check(JsonObject reply)
     {
@@ -484,14 +555,18 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, string ip = Publ
         });
     }
 
+    /// <summary>公开列表：合并所有在线目录的结果，同一个房间取序号最大的版本。</summary>
     public async Task<IReadOnlyList<RoomListing>> ListAsync(CancellationToken ct)
     {
-        var reply = await CallAsync(new JsonObject { ["op"] = "list" }, ct);
-        Check(reply);
-        return [.. (reply["rooms"] as JsonArray ?? []).Select(RoomListing.FromJson).OfType<RoomListing>()];
+        var replies = NeedOne(await FanOutAsync(new JsonObject { ["op"] = "list" }, ct));
+        var rooms = new Dictionary<string, RoomListing>(StringComparer.Ordinal);
+        foreach (var reply in replies)
+            foreach (var room in (reply["rooms"] as JsonArray ?? []).Select(RoomListing.FromJson).OfType<RoomListing>())
+                if (!rooms.TryGetValue(room.Id, out var have) || room.Seq > have.Seq) rooms[room.Id] = room;
+        return [.. rooms.Values.OrderByDescending(r => r.Players).ThenByDescending(r => r.Updated).Take(RoomDirectoryServer.MaxListed)];
     }
 
-    /// <summary>发布或续期。返回目录里给房主捎的话（直连回复码）。</summary>
+    /// <summary>发布或续期（发给每个在线的目录）。返回目录里给房主捎的话（直连回复码）。</summary>
     /// <param name="listing">已经用 <see cref="RoomSigner.Sign"/> 签好的房间信息。</param>
     /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
     public async Task<IReadOnlyList<string>> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<string> lookupKeys, CancellationToken ct,
@@ -505,21 +580,21 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, string ip = Publ
             ["lookup"] = new JsonArray(lookupKeys.Select(k => (JsonNode?)k).ToArray()),
         };
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
-        var reply = await CallAsync(request, ct);
-        Check(reply);
-        return [.. (reply["mail"] as JsonArray ?? []).Select(m => m?.GetValue<string>()).OfType<string>()];
+        var replies = NeedOne(await FanOutAsync(request, ct));
+        return [.. replies.SelectMany(r => (r["mail"] as JsonArray ?? []).Select(m => m?.GetValue<string>()).OfType<string>()).Distinct()];
     }
 
     public async Task WithdrawAsync(RoomSigner signer, CancellationToken ct)
     {
         var (seq, sig) = signer.SignWithdraw(DateTimeOffset.UtcNow);
-        Check(await CallAsync(new JsonObject { ["op"] = "withdraw", ["id"] = signer.RoomId, ["seq"] = seq, ["sig"] = Convert.ToHexStringLower(sig) }, ct));
+        NeedOne(await FanOutAsync(new JsonObject { ["op"] = "withdraw", ["id"] = signer.RoomId, ["seq"] = seq, ["sig"] = Convert.ToHexStringLower(sig) }, ct));
     }
 
     /// <summary>按邀请码里的大厅密钥找房主；目录里没有时返回 null。</summary>
     public async Task<DirectoryHit?> LookupAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct)
     {
-        var reply = await CallAsync(new JsonObject { ["op"] = "lookup", ["key"] = RoomDirectoryProtocol.LookupKey(lobbyKey.Span) }, ct);
+        var reply = await FirstAsync(new JsonObject { ["op"] = "lookup", ["key"] = RoomDirectoryProtocol.LookupKey(lobbyKey.Span) },
+            r => IsOk(r) && r["ip"] is not null, ct);
         Check(reply);
         var ip = reply["ip"]?.GetValue<string>();
         var key = reply["key"]?.GetValue<string>();
@@ -532,21 +607,24 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, string ip = Publ
     /// <summary>按设备指纹码找房间；没找到返回 null。</summary>
     public async Task<RoomListing?> FindAsync(string code, CancellationToken ct)
     {
-        var reply = await CallAsync(new JsonObject { ["op"] = "find", ["code"] = code }, ct);
+        var reply = await FirstAsync(new JsonObject { ["op"] = "find", ["code"] = code }, r => IsOk(r) && r["room"] is not null, ct);
         Check(reply);
         return RoomListing.FromJson(reply["room"]);
     }
 
-    /// <summary>登录公共网络的账号：账号密码封给节点的登录公钥，回来的凭证绑定自己的联机身份。</summary>
+    /// <summary>登录公共网络的账号：账号密码封给节点的登录公钥，回来的凭证绑定自己的联机身份。交给第一个开了登录的目录节点。</summary>
     public async Task<(string Token, AccountToken Parsed)> LoginAsync(X25519KeyPair me, NetworkLogin login, string network, string user, string password,
         CancellationToken ct, IReadOnlyDictionary<string, string>? factors = null)
     {
-        var reply = await CallAsync(NetworkLoginClient.Request(me, login, user, password, DateTimeOffset.UtcNow, factors), ct);
+        // 每个目录节点各算一次（请求里有时间戳，换个节点重发也一样）；没开登录的节点回 op，问下一个。
+        var request = NetworkLoginClient.Request(me, login, user, password, DateTimeOffset.UtcNow, factors);
+        var reply = await FirstAsync(request, r => r["error"]?.GetValue<string>() != "op", ct);
         return NetworkLoginClient.Read(reply, me, login, network, DateTimeOffset.UtcNow);
     }
 
+    /// <summary>给直连房间的房主捎话：交给第一个肯收的目录（房主续期时会从每个目录取一遍）。</summary>
     public async Task MailAsync(string id, string text, CancellationToken ct) =>
-        Check(await CallAsync(new JsonObject { ["op"] = "mail", ["id"] = id, ["text"] = text }, ct));
+        Check(await FirstAsync(new JsonObject { ["op"] = "mail", ["id"] = id, ["text"] = text }, IsOk, ct));
 }
 
 /// <summary>目录服务拒绝了请求（口令不对、满了、房间不在了）。</summary>

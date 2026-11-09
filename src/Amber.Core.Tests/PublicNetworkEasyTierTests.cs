@@ -97,6 +97,7 @@ public sealed class PublicNetworkEasyTierTests
         // 地址是 EasyTier 自动分配的，刚连上时可能还没分到。
         string? myIp = null;
         for (var i = 0; i < 60 && (myIp = await host.MyIpAsync(default)) is null; i++) await Task.Delay(500);
+        Assert.StartsWith(PublicNetworkProfile.Subnet, myIp);
         Assert.NotNull(myIp);
         RoomListing Room(string name) => new()
         {

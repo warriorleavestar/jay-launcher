@@ -46,7 +46,8 @@ await server.RunAsync(CancellationToken.None);
 
 其他常用的：
 
-- `UseSeeds([...])`、`SeedOnly()`：多个地区节点，只有一台跑目录。
+- `UseSeeds([...])`、`SeedOnly()`：多个地区节点（只转发，不跑目录）。
+- `UseDirectoryIndex(2..4)`：备用目录节点（见 [network-server.md](network-server.md#五多开节点备用目录和地区种子)）。
 - `UseEasyTier(core, cli)`：用已有的 EasyTier；不调就第一次运行时下载固定版本。
 - `WithoutEasyTier(endpoint)`：不启动 EasyTier，目录直接监听这个地址（测试，或者你自己管 EasyTier）。
 - `UseAdmin(port)` / `WithoutAdmin()`：本机管理接口（见下）。`AdminClient` 是它的客户端，可以拿来做你自己的面板。
@@ -75,6 +76,7 @@ await server.RunAsync(CancellationToken.None);
 
 - 节点跑一个 EasyTier（2.6.x），网络名和密钥用连接串里的 `network` / `secret`，对公网监听 `tcp://0.0.0.0:11010` 和 `udp://0.0.0.0:11010`。
 - 跑目录的那台：`--ipv4 10.235.0.1/16 --no-tun --tcp-whitelist 47668`，目录服务监听本机 `127.0.0.1:47668`，EasyTier 把公共网络里到 10.235.0.1:47668 的连接交过来。参数全貌见 `PublicNetworkArgs.Build`。
+- 备用目录用 10.235.255.254、.253、.252（`PublicNetworkProfile.DirectoryIpOf`）。Jay 的写请求（announce、withdraw）发给每个在线的目录，`list` 合并结果（同一个房间取 `seq` 最大的），`lookup` / `find` / `login` / `mail` 按编号顺序问，回 `op` 或连不上就问下一个。
 - Jay 连进来时用 `--dhcp --no-tun --disable-p2p --tcp-whitelist 47660`：成员之间只开敲门端口，不打洞，不暴露公网地址。
 
 ### 目录请求

@@ -417,4 +417,113 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Equal(1, await Program.NodeCommand(_dir, Options.Parse(["node", "unban", "room", "nope", "--admin-port", port]), nodeOut, http));
         await Assert.ThrowsAsync<ArgumentException>(() => Program.NodeCommand(_dir, Options.Parse(["node", "explode", "--admin-port", port]), nodeOut, http));
     }
+
+    /// <summary>公共网络里的几个目录节点，各映射到本机一个端口；连不上的地址直接报错（像真的掉线）。</summary>
+    private sealed class ReplicaNetwork : IPublicNetwork
+    {
+        public readonly Dictionary<string, int> Map = [];
+        public readonly HashSet<string> Down = [];
+
+        public async Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct)
+        {
+            if (Down.Contains(ip) || !Map.TryGetValue(ip, out var local)) throw new IOException("unreachable");
+            var c = new TcpClient();
+            await c.ConnectAsync(IPAddress.Loopback, local, ct);
+            return c.GetStream();
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.7");
+
+        public Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<string>>([.. PublicNetworkProfile.DirectoryIps.Where(ip => Map.ContainsKey(ip) && !Down.Contains(ip))]);
+    }
+
+    private async Task<RoomDirectoryServer> ReplicaAsync(string name, Action<JayNetworkServerBuilder>? configure = null)
+    {
+        var builder = new JayNetworkServerBuilder().UseDataDir(Path.Combine(_dir, name)).UseClock(() => _now)
+            .WithoutEasyTier(new IPEndPoint(IPAddress.Loopback, 0)).WithoutAdmin();
+        configure?.Invoke(builder);
+        var server = builder.Build();
+        _cleanup.Add(server);
+        await server.StartAsync();
+        return server.Directory!;
+    }
+
+    [Fact]
+    public async Task BackupDirectoriesKeepTheListWorkingWhenOneGoesDown()
+    {
+        var main = await ReplicaAsync("main");
+        var backup = await ReplicaAsync("backup", b => b.UseDirectoryIndex(2));
+        var net = new ReplicaNetwork { Map = { ["10.235.0.1"] = main.Port, ["10.235.255.254"] = backup.Port } };
+        var client = new RoomDirectoryClient(net);
+        var host = X25519KeyPair.Generate();
+        var signer = new RoomSigner();
+        var lobby = new byte[32];
+        Random.Shared.NextBytes(lobby);
+        await client.AnnounceAsync(signer.Sign(Listing(host), _now), true, [RoomDirectoryProtocol.LookupKey(lobby)], default);
+
+        // 两个目录都有，列表合并后不重复。
+        Assert.Equal(1, main.Count);
+        Assert.Equal(1, backup.Count);
+        Assert.Single(await client.ListAsync(default));
+
+        // 主目录掉线：列表、查找、续期照常。
+        net.Down.Add("10.235.0.1");
+        Assert.Single(await client.ListAsync(default));
+        Assert.Equal(signer.RoomId, (await client.LookupAsync(lobby, default))!.Id);
+        _now += TimeSpan.FromSeconds(30);
+        await client.AnnounceAsync(signer.Sign(Listing(host), _now), true, [], default);
+
+        // 主目录回来：续期把房间补回去。
+        net.Down.Clear();
+        _now += TimeSpan.FromMinutes(3);
+        Assert.Empty(await client.ListAsync(default));
+        await client.AnnounceAsync(signer.Sign(Listing(host), _now), true, [], default);
+        Assert.Equal(1, main.Count);
+
+        // 全都掉线：报连不上。
+        net.Down.UnionWith(["10.235.0.1", "10.235.255.254"]);
+        await Assert.ThrowsAnyAsync<IOException>(() => client.ListAsync(default));
+    }
+
+    [Fact]
+    public async Task ReplicaClientMergesRejectionsMailAndLogin()
+    {
+        var main = await ReplicaAsync("main", b => b.UseBlockedWords(["广告"]));
+        // 登录请求带的是真实时间，这个节点也用真实时钟。
+        var backup = await ReplicaAsync("backup", b => b.UseDirectoryIndex(2).UseBlockedWords(["广告"]).UseAccounts(new ForumAccounts()).UseClock(() => DateTimeOffset.UtcNow));
+        var net = new ReplicaNetwork { Map = { ["10.235.0.1"] = main.Port, ["10.235.255.254"] = backup.Port } };
+        var client = new RoomDirectoryClient(net);
+        var host = X25519KeyPair.Generate();
+
+        // 两个目录都拒绝：报拒绝和原因，不是“连不上”。
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(host, name: "广告"), _now), true, [], default));
+        Assert.Equal("name", e.Code);
+
+        // 直连房间的回复码：只捎给一个目录，房主续期时只收到一份。
+        var signer = new RoomSigner();
+        await client.AnnounceAsync(signer.Sign(Listing(host, RoomVisibility.Direct), _now), true, [], default);
+        await client.MailAsync(signer.RoomId, "JAY2R-REPLY", default);
+        _now += TimeSpan.FromSeconds(30);
+        Assert.Equal(["JAY2R-REPLY"], await client.AnnounceAsync(signer.Sign(Listing(host, RoomVisibility.Direct), _now), true, [], default));
+
+        // 只有备用目录开了登录：主目录回 op，客户端接着问备用的。
+        var authority = new JayNetworkServerBuilder().UseDataDir(Path.Combine(_dir, "backup")).UseAccounts(new ForumAccounts()).WithoutAdmin()
+            .WithoutEasyTier(new IPEndPoint(IPAddress.Loopback, 0)).Build();
+        _cleanup.Add(authority);
+        var login = NetworkLogin.Parse(authority.LoginSection)!;
+        var (_, token) = await client.LoginAsync(X25519KeyPair.Generate(), login, "jay", "bob", "forum-password", default);
+        Assert.Equal("bob", token.User);
+    }
+
+    [Fact]
+    public void DirectoryIndexPicksTheBackupAddress()
+    {
+        var args = PublicNetworkArgs.Build(new PublicNetworkOptions(PublicNetworkProfile.Jay(), 1, 2, Directory: true, DirectoryIndex: 3));
+        Assert.Equal("10.235.255.253/16", args[args.IndexOf("--ipv4") + 1]);
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().UseDirectoryIndex(5));
+        var output = new StringWriter();
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--seed-only", "--directory-index", "2"]), output, _ => { }));
+        Assert.Equal("10.235.255.254", Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--directory-index", "2", "--no-admin"]), output, _ => { }).Build().DirectoryIp);
+    }
 }

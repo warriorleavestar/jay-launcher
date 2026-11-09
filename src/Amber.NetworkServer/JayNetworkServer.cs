@@ -28,6 +28,7 @@ public sealed class JayNetworkServerBuilder
     internal bool DownloadEasyTier = true;
     internal IPEndPoint? DirectOnly;
     internal bool SeedOnlyMode;
+    internal int DirectoryIndex = 1;
     internal NetworkConfig? Config;
     internal LoginAuthority? Login;
     internal (IAccountStore? Store, bool RequireSecondFactor)? Accounts;
@@ -74,6 +75,17 @@ public sealed class JayNetworkServerBuilder
 
     /// <summary>只当种子节点（帮忙转发、分担地区流量），不跑房间目录。一个网络里只能有一个目录节点（它占着 10.235.0.1）。</summary>
     public JayNetworkServerBuilder SeedOnly() { SeedOnlyMode = true; return this; }
+
+    /// <summary>
+    /// 第几个目录节点：1 是主目录（10.235.0.1），2–4 是备用（10.235.0.2–4）。Jay 把房间发给每个在线的目录、合并列表，
+    /// 所以一台挂了别的照常。备用节点要和主节点用同样的网络配置、屏蔽词，开账号登录时用同一份 login.key 和账号表（或同一个 IAccountStore）。
+    /// </summary>
+    public JayNetworkServerBuilder UseDirectoryIndex(int index)
+    {
+        if (index is < 1 or > PublicNetworkProfile.MaxDirectories) throw new ArgumentException($"目录节点编号要是 1–{PublicNetworkProfile.MaxDirectories}");
+        DirectoryIndex = index;
+        return this;
+    }
 
     /// <summary>网络配置文件：节点按里面的 policy.modes 再挡一道（防改过的客户端）。</summary>
     public JayNetworkServerBuilder UseConfig(NetworkConfig config) { Config = config; return this; }
@@ -175,6 +187,8 @@ public sealed class JayNetworkServer : IAsyncDisposable
     public AccountStore? Builtin { get; }
     public string DataDir => _b.DataDir;
     public bool SeedOnly => _b.SeedOnlyMode;
+    /// <summary>这个节点的目录地址（只当种子时是 null）。</summary>
+    public string? DirectoryIp => SeedOnly ? null : PublicNetworkProfile.DirectoryIpOf(_b.DirectoryIndex);
     public int? AdminPort => _admin?.Port;
     /// <summary>管理接口的口令文件（数据目录里的 admin.token，只有本机这个用户能读）。</summary>
     public string AdminTokenPath => Path.Combine(_b.DataDir, "admin.token");
@@ -226,7 +240,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             (core, cli) = (installer.CorePath, installer.CliPath);
         }
         var options = new PublicNetworkOptions(Profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: !_b.SeedOnlyMode,
-            Listeners: [$"tcp://0.0.0.0:{_b.ListenPort}", $"udp://0.0.0.0:{_b.ListenPort}"]);
+            Listeners: [$"tcp://0.0.0.0:{_b.ListenPort}", $"udp://0.0.0.0:{_b.ListenPort}"], DirectoryIndex: _b.DirectoryIndex);
         _network = PublicNetworkSession.Start(core, cli, options, Path.Combine(_b.DataDir, "public-node"));
     }
 
@@ -272,6 +286,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             ["ok"] = healthy,
             ["network"] = Profile.Id,
             ["role"] = SeedOnly ? "seed" : "directory",
+            ["directory"] = SeedOnly ? null : PublicNetworkProfile.DirectoryIpOf(_b.DirectoryIndex),
             ["easytier"] = _b.DirectOnly is not null ? "external" : EasyTierRunning ? "running" : "stopped",
             ["rooms"] = view?.Rooms ?? 0,
             ["listed"] = view?.Listed ?? 0,
