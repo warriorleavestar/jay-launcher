@@ -141,6 +141,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
     {
         var info = new FileInfo(path);
         if (!info.Exists) throw new FileNotFoundException(path);
+        if (!AllowsFile(info.Length)) throw new InvalidDataException(L.T("core.mp.private.not_allowed"));
         byte[] hash;
         await using (var read = File.OpenRead(path)) hash = await SHA256.HashDataAsync(read, ct);
         var job = new Outgoing
@@ -316,6 +317,11 @@ public sealed class PrivateMessenger : IAsyncDisposable
                     var sha = body["sha"]?.GetValue<string>();
                     var name = SafeName(body["name"]?.GetValue<string>() ?? "");
                     if (size < 0 || sha is not { Length: 64 } || _incoming.Count >= 8) return;
+                    if (!AllowsFile(size))
+                    {
+                        await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
+                        return;
+                    }
                     var offer = new FileOffer(id, frame.FromFingerprint, frame.FromName, name, size);
                     _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey };
                     FileOffered?.Invoke(offer);
@@ -431,6 +437,9 @@ public sealed class PrivateMessenger : IAsyncDisposable
         job.Hasher?.Dispose();
         Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Finished = true, Error = error });
     }
+
+    /// <summary>公共网络的策略：这个大小的文件能不能传（网络配置里可以关掉传文件或限大小）。收发两头都查。</summary>
+    public Func<long, bool> AllowsFile { get; set; } = _ => true;
 
     /// <summary>查剩余空间的方法（测试里换掉）。</summary>
     internal Func<string, long?> FreeSpaceOf { get; set; } = FreeSpace;

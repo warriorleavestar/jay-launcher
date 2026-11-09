@@ -1851,5 +1851,13 @@
   "multiplayer.network.removed": "已刪除公共網路「{0}」",
   "multiplayer.network.switched": "已換到「{0}」",
   "multiplayer.network.copied": "連線字串已複製，傳給朋友就能進同一個公共網路",
-  "multiplayer.network.nodes.one": "{0} 個節點"
+  "multiplayer.network.nodes.one": "{0} 個節點",
+  "core.mp.netconfig.bad": "網路的設定檔格式不對",
+  "core.mp.netconfig.new_version": "網路的設定檔是新版格式（版本 {0}），請先更新 Jay",
+  "core.mp.netconfig.hash": "下載的網路設定檔和連線字串裡的雜湊對不上，可能被改過",
+  "core.mp.private.not_allowed": "這個公共網路不允許傳這麼大的檔案（或者不允許傳檔案）",
+  "multiplayer.netconfig.failed": "取不到「{0}」的網路設定：{1}",
+  "multiplayer.netconfig.too_old": "「{0}」要求 Jay {1} 或更新的版本，請先更新",
+  "multiplayer.netconfig.mode_not_allowed": "這個公共網路不允許「{0}」這種房間",
+  "multiplayer.netconfig.notice_title": "網路公告"
 }

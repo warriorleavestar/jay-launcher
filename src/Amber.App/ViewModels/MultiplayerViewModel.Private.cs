@@ -87,6 +87,8 @@ public sealed partial class MultiplayerViewModel
         StopPrivate();
         if (_room is not { FromInvite: true }) return;
         var messenger = new PrivateMessenger(chat, Identity.KeyPair, fp => chat.Roster.FirstOrDefault(r => r.Fingerprint == fp)?.PublicKey, DownloadsDir);
+        // 公共网络的配置可以关掉传文件或限大小（按现在连着的网络算）。
+        messenger.AllowsFile = size => NetworkPolicy.AllowsFile(size);
         _messenger = messenger;
         _messengerChat = chat;
         chat.RosterChanged += roster => Dispatcher.UIThread.Post(() => OnRoster(chat, roster));

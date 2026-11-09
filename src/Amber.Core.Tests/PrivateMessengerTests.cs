@@ -153,6 +153,27 @@ public sealed class PrivateMessengerTests : IDisposable
     }
 
     [Fact]
+    public async Task NetworkPolicyCanLimitFiles()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "big.bin");
+        await File.WriteAllBytesAsync(source, new byte[5000]);
+        // 发方的网络不让传：直接报错，不发 offer。
+        alice.AllowsFile = size => size <= 1000;
+        await Assert.ThrowsAsync<InvalidDataException>(() => alice.SendFileAsync(Fp(_bob), source));
+        // 发方不管，收方的网络不让收：自动拒绝，不弹给用户。
+        alice.AllowsFile = _ => true;
+        bob.AllowsFile = size => size <= 1000;
+        var offered = false;
+        bob.FileOffered += _ => offered = true;
+        Assert.False(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.False(offered);
+    }
+
+    [Fact]
     public async Task FileIsDeclinedWhenTheDiskIsTooFull()
     {
         var (alice, bob) = Pair();
