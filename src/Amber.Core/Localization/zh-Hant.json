@@ -2712,5 +2712,13 @@
   "multiplayer.hostserver.wizard.start": "啟動",
   "multiplayer.hostserver.wizard.invite": "邀請",
   "multiplayer.hostserver.running": "● 執行中",
-  "multiplayer.jayserver.empty": "還沒有加入過 Jay 伺服器。朋友給你伺服器邀請碼後貼在上面。"
+  "multiplayer.jayserver.empty": "還沒有加入過 Jay 伺服器。朋友給你伺服器邀請碼後貼在上面。",
+  "multiplayer.lobby.game.mods": "{0} 個模組",
+  "multiplayer.lobby.game.vanilla": "原版",
+  "multiplayer.lobby.game.use": "用這個遊戲進入：",
+  "multiplayer.lobby.game.pick_exact": "Jay 挑了這個：版本一樣，模組看起來也一樣。房主同意後還會再對一下模組。",
+  "multiplayer.lobby.game.pick_close": "Jay 挑了版本和模組最接近的這個。房主同意後會對一下模組，不一樣可以一鍵同步。",
+  "multiplayer.lobby.game.picking": "正在找合適的遊戲……",
+  "multiplayer.lobby.game.none": "你還沒有房主這個版本和載入器的遊戲。",
+  "multiplayer.lobby.game.install": "裝一個 {0} {1} 再加入"
 }

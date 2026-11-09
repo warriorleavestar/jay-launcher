@@ -2634,5 +2634,13 @@
   "multiplayer.hostserver.wizard.start": "啟",
   "multiplayer.hostserver.wizard.invite": "請",
   "multiplayer.hostserver.running": "● 運行",
-  "multiplayer.jayserver.empty": "未嘗赴 Jay 服器。友予汝服器之帖，則貼於上。"
+  "multiplayer.jayserver.empty": "未嘗赴 Jay 服器。友予汝服器之帖，則貼於上。",
+  "multiplayer.lobby.game.mods": "模組 {0}",
+  "multiplayer.lobby.game.vanilla": "本色",
+  "multiplayer.lobby.game.use": "以此戲入：",
+  "multiplayer.lobby.game.pick_exact": "Jay 擇此：版同，模組似亦同。主允之後，復核模組。",
+  "multiplayer.lobby.game.pick_close": "Jay 擇其版與模組最近者。主允之後核模組，異則一按而同之。",
+  "multiplayer.lobby.game.picking": "方覓合宜之戲……",
+  "multiplayer.lobby.game.none": "汝尚無與主同版同載器之戲。",
+  "multiplayer.lobby.game.install": "先裝 {0} {1}，而後赴之"
 }

@@ -348,6 +348,9 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         lock (_gate) return (byte[])(_lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength)).Clone();
     }
 
+    /// <summary>The host's game, written into new invites (invite v3) so the joiner can pick a matching instance.</summary>
+    public InviteGame? Game { get; set; }
+
     public PendingInvite Create(int uses, TimeSpan? lifetime, bool autoApprove, TunnelSettings tunnel)
     {
         if (uses is < 1 or > 20) throw new ArgumentOutOfRangeException(nameof(uses));
@@ -356,7 +359,7 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         {
             PruneLocked();
             _lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength);
-            invite = new PendingInvite(JayInvite.Create(_lobbyKey, tunnel), uses, lifetime is { } l ? _now() + l : null, autoApprove);
+            invite = new PendingInvite(JayInvite.Create(_lobbyKey, tunnel, Game), uses, lifetime is { } l ? _now() + l : null, autoApprove);
             _invites.Add(invite);
         }
         Changed?.Invoke();

@@ -292,6 +292,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         Instances.Clear();
         foreach (var v in _service.InstalledVersions()) Instances.Add(v);
         TargetInstance = _service.CurrentOr(Instances, Instances.FirstOrDefault());
+        RepickJoinInstance();
     }
 
     private void OnGameOutput(string versionId, string line)

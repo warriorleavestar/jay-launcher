@@ -2712,5 +2712,13 @@
   "multiplayer.hostserver.wizard.start": "起動",
   "multiplayer.hostserver.wizard.invite": "招待",
   "multiplayer.hostserver.running": "● 実行中",
-  "multiplayer.jayserver.empty": "まだ Jay サーバーに参加していません。フレンドからサーバー招待コードをもらったら上に貼ってください。"
+  "multiplayer.jayserver.empty": "まだ Jay サーバーに参加していません。フレンドからサーバー招待コードをもらったら上に貼ってください。",
+  "multiplayer.lobby.game.mods": "MOD {0} 個",
+  "multiplayer.lobby.game.vanilla": "バニラ",
+  "multiplayer.lobby.game.use": "使うゲーム：",
+  "multiplayer.lobby.game.pick_exact": "Jay がこれを選びました：バージョンが同じで、MOD も同じに見えます。ホストが許可したあと、MOD をもう一度確かめます。",
+  "multiplayer.lobby.game.pick_close": "Jay がバージョンと MOD が一番近いものを選びました。ホストが許可したあと MOD を確かめ、違えばワンクリックでそろえられます。",
+  "multiplayer.lobby.game.picking": "合うゲームを探しています…",
+  "multiplayer.lobby.game.none": "ホストと同じバージョンとローダーのゲームがまだありません。",
+  "multiplayer.lobby.game.install": "{0} {1} を入れてから参加"
 }

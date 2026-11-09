@@ -227,6 +227,21 @@
                 </Grid>
                 <TextBlock x:Name="JoinCodeRecognitionText" FontSize="12" TextWrapping="Wrap" Text="{Binding JoinCodeRecognition}" IsVisible="{Binding HasJoinCodeText}"
                            Classes.warn="{Binding JoinCodeRecognitionWarns}" />
+                <!-- Invite v3: the host's game, the instance Jay picked, or "install one and join". -->
+                <StackPanel x:Name="JoinGamePanel" Spacing="4" IsVisible="{Binding HasJoinGame}">
+                  <TextBlock x:Name="JoinGameText" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding JoinGameText}" />
+                  <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding ShowJoinInstancePicker}">
+                    <TextBlock FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0" Text="{l:T multiplayer.lobby.game.use}" />
+                    <ComboBox x:Name="JoinInstanceBox" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" />
+                  </Grid>
+                  <TextBlock x:Name="JoinMatchText" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding JoinMatchText}"
+                             IsVisible="{Binding JoinMatchText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <TextBlock x:Name="JoinNoInstanceText" Classes="warn" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.lobby.game.none}" IsVisible="{Binding JoinNeedsInstall}" />
+                  <Button x:Name="InstallForInviteButton" Command="{Binding InstallForInviteGameCommand}" IsVisible="{Binding JoinNeedsInstall}"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                    <TextBlock Text="{Binding InstallForInviteText}" TextWrapping="Wrap" TextAlignment="Center" />
+                  </Button>
+                </StackPanel>
                 <Button x:Name="LobbyJoinButton" Classes.primary="{Binding !JoinCodeRecognized}" Classes.play="{Binding JoinCodeRecognized}" Content="{l:T multiplayer.lobby.join_button}" Command="{Binding JoinCommand}"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                 <Button Content="{l:T multiplayer.invite.cancel}" Command="{Binding CancelKnockCommand}" IsVisible="{Binding IsKnocking}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />

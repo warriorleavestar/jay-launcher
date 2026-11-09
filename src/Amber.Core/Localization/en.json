@@ -2776,5 +2776,14 @@
   "multiplayer.hostserver.wizard.start": "Start",
   "multiplayer.hostserver.wizard.invite": "Invite",
   "multiplayer.hostserver.running": "● Running",
-  "multiplayer.jayserver.empty": "You haven't joined a Jay server yet. When a friend gives you a server invite, paste it above."
+  "multiplayer.jayserver.empty": "You haven't joined a Jay server yet. When a friend gives you a server invite, paste it above.",
+  "multiplayer.lobby.game.mods": "{0} mods",
+  "multiplayer.lobby.game.mods.one": "1 mod",
+  "multiplayer.lobby.game.vanilla": "Vanilla",
+  "multiplayer.lobby.game.use": "Join with:",
+  "multiplayer.lobby.game.pick_exact": "Jay picked this one: same version, and the mods look the same. Jay checks the mods again once the host lets you in.",
+  "multiplayer.lobby.game.pick_close": "Jay picked the closest one by version and mods. Once the host lets you in, Jay checks the mods and can sync them in one click.",
+  "multiplayer.lobby.game.picking": "Finding a matching game…",
+  "multiplayer.lobby.game.none": "You don't have a game with the host's version and loader yet.",
+  "multiplayer.lobby.game.install": "Install {0} {1}, then join"
 }
