@@ -25,8 +25,12 @@ public static partial class NetworkString
     public const string Current = "JAYNET1-";
     public const int MaxLength = 8192;
     public const int MaxNodes = 16;
-    /// <summary>At most this many directory keys (one per directory node: the main one and three backups).</summary>
-    public const int MaxDirectoryKeys = PublicNetworkProfile.MaxDirectories;
+    /// <summary>
+    /// At most this many directory keys: one per directory node (up to four) plus room for a new key per node while
+    /// rotating. Deliberately larger than <see cref="PublicNetworkProfile.MaxDirectories"/>: every shipped Jay refuses a
+    /// string with more keys than this, so it can't grow later without breaking older versions.
+    /// </summary>
+    public const int MaxDirectoryKeys = 8;
 
     /// <summary>
     /// Jay 注册表的签名公钥（base64）。可以有多把（换钥匙时新旧并存一段时间）。

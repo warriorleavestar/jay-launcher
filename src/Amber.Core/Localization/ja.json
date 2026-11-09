@@ -1885,7 +1885,7 @@
   "core.mp.network.bad_nodes": "ネットワークには有効なサーバー（tcp:// か udp://）が 1~16 個必要です",
   "core.mp.network.bad_link": "ネットワークのホームページは https アドレスにしてください",
   "core.mp.network.bad_config": "ネットワーク設定ファイルには https アドレスと SHA-256 が必要です",
-  "core.mp.network.bad_dir_keys": "ネットワークのディレクトリ鍵は 32 バイトの鍵を 1〜4 個にしてください",
+  "core.mp.network.bad_dir_keys": "ネットワークのディレクトリ鍵は 32 バイトの鍵を 1〜8 個にしてください",
   "core.mp.network.bad_key": "署名鍵が正しくありません（32 バイトの base64 が必要です）",
   "multiplayer.network.title": "公共ネットワーク",
   "multiplayer.network.hint": "既定では Jay 公共ネットワークを使います。ほかの人が運営する公共ネットワークは JAYNET1- で始まる接続文字列をくれるので、下に貼り付ければ切り替えられます。公共ネットワークはルーム一覧とノックにしか使わず、ルームの中身はエンドツーエンドで暗号化されたままです。",

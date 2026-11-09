@@ -33,6 +33,8 @@ public static class DirectoryChannel
 {
     private static readonly byte[] Prologue = "jay-directory-v1"u8.ToArray();
     private const int MaxMessage = RoomDirectoryProtocol.MaxLine + 256;
+    /// <summary>The first handshake message with an empty payload: ephemeral key (32) + tag (16).</summary>
+    private const int FirstMessageLength = 48;
 
     /// <summary>Directory keys are X25519 public keys, 32 bytes.</summary>
     public const int KeyLength = X25519KeyPair.Length;
@@ -98,7 +100,10 @@ public static class DirectoryChannel
         var hs = new NoiseHandshake(NoisePattern.XXpsk0, initiator: false, Prologue, psk, identity);
         try
         {
-            hs.ReadMessage(await ReadFrameAsync(stream, ct, firstByte));
+            var first = await ReadFrameAsync(stream, ct, firstByte);
+            // Anything else isn't a Jay client; skip the DH work.
+            if (first.Length != FirstMessageLength) return null;
+            hs.ReadMessage(first);
             await WriteFrameAsync(stream, hs.WriteMessage([]), ct);
             var payload = hs.ReadMessage(await ReadFrameAsync(stream, ct));
             JsonObject request;

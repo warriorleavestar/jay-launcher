@@ -1885,7 +1885,7 @@
   "core.mp.network.bad_nodes": "网络要有 1~16 个有效网络服务器（tcp:// 或 udp:// 地址）",
   "core.mp.network.bad_link": "网络主页要是 https 地址",
   "core.mp.network.bad_config": "网络配置文件要有 https 地址和 SHA-256",
-  "core.mp.network.bad_dir_keys": "网络的目录钥匙要有 1 到 4 把，每把 32 字节",
+  "core.mp.network.bad_dir_keys": "网络的目录钥匙要有 1 到 8 把，每把 32 字节",
   "core.mp.network.bad_key": "签名钥匙不对（要是 32 字节的 base64）",
   "multiplayer.network.title": "公共网络",
   "multiplayer.network.hint": "默认用 Jay 公共网络。别人搭的公共网络会给你一串 JAYNET1- 开头的连接串，粘贴到下面就能换过去。公共网络只用来看房间和敲门，进房间后的内容照样端到端加密。",

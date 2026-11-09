@@ -1885,7 +1885,7 @@
   "core.mp.network.bad_nodes": "網路要有 1~16 個有效網路伺服器（tcp:// 或 udp:// 位址）",
   "core.mp.network.bad_link": "網路首頁要是 https 位址",
   "core.mp.network.bad_config": "網路設定檔要有 https 位址和 SHA-256",
-  "core.mp.network.bad_dir_keys": "網路的目錄鑰匙要有 1 到 4 把，每把 32 位元組",
+  "core.mp.network.bad_dir_keys": "網路的目錄鑰匙要有 1 到 8 把，每把 32 位元組",
   "core.mp.network.bad_key": "簽章金鑰不對（要是 32 位元組的 base64）",
   "multiplayer.network.title": "公共網路",
   "multiplayer.network.hint": "預設用 Jay 公共網路。別人架的公共網路會給你一串 JAYNET1- 開頭的連線字串，貼到下面就能換過去。公共網路只用來看房間和敲門，進房間後的內容照樣端對端加密。",

@@ -28,7 +28,7 @@ A network can pin its directory nodes' keys in its signed connection string. Whe
 
 - Each directory node has an X25519 key pair in `directory.key` in its data dir. The node makes it on first start, and the file is created mode 0600 on Unix. `jay-server directory` prints the public key at startup, and `/health` reports it as `directoryKey`.
 - `jay-server network dir-key <network.json> --dir <node data dir>` adds the node's public key to the network JSON's `"dirKeys"` array and bumps `seq`. The operator then re-signs the network (`jay-server network sign`).
-- `NetworkInfo.DirectoryKeys` is base64 in JSON. You can pin 1 to 4 keys, one per directory node, and each must be 32 bytes. `NetworkString.Validate` enforces both limits. The connection string's Ed25519 signature covers the raw JSON bytes, so the keys are as trustworthy as the string: the registry's signature for reviewed networks, or the user's own confirmation for unreviewed ones.
+- `NetworkInfo.DirectoryKeys` is base64 in JSON. You can pin 1 to 8 keys (four directory nodes, each with a spare slot for rotation), and each must be 32 bytes. `NetworkString.Validate` enforces both limits. The connection string's Ed25519 signature covers the raw JSON bytes, so the keys are as trustworthy as the string: the registry's signature for reviewed networks, or the user's own confirmation for unreviewed ones.
 - Older Jay versions ignore unknown fields, so adding `dirKeys` doesn't break them. They keep using the unauthenticated protocol (see Downgrade below).
 - `PublicNetworkProfile.DirectoryKeys` carries the keys to `RoomDirectoryClient`, through `IPublicNetwork.Profile`.
 
@@ -49,7 +49,7 @@ Details:
 - **Psk.** `HKDF-SHA256(ikm = network EasyTier secret, salt = prologue, info = "jay-directory-psk-v1")`. The secret is public for public networks, so the psk only keeps handshakes of different networks apart. It is not an authentication factor; the pinned static key is.
 - **Framing.** Every message is a 2-byte big-endian length followed by the bytes. The maximum is `RoomDirectoryProtocol.MaxLine + 256`, and the request and reply JSON are each capped at `MaxLine`.
 - **Telling the protocols apart.** A legacy request is a JSON line that starts with `{` (0x7B). A Noise frame starts with the high byte of its length, which is 0x00 for every allowed size. The server reads one byte and dispatches on it (`RoomDirectoryServer.HandleAsync`).
-- **Server failures.** Any handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to both protocols.
+- **Server failures.** A first frame that isn't exactly 48 bytes is dropped before any DH work. Any other handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to both protocols.
 
 ### Downgrade
 
@@ -59,7 +59,7 @@ Details:
 
 ### Rotation and loss
 
-- **Rotating a key.** Add the new key to `dirKeys` while the old one is still listed, re-sign with a higher `seq`, wait until players have the new string, then remove the old key. With four slots there is room for one spare per node.
+- **Rotating a key.** Add the new key to `dirKeys` while the old one is still listed, re-sign with a higher `seq`, wait until players have the new string, then remove the old key. With eight slots there is room for one spare per node even with all four directory nodes.
 - **Losing `directory.key`.** Every Jay that pinned the old key will treat the replacement node as an impostor. That is intended. Operators must back the file up, and `dir-key` prints a reminder. Recovery is a re-signed string.
 
 ## What this does not cover

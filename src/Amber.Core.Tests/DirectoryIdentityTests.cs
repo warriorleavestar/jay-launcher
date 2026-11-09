@@ -161,6 +161,19 @@ public class DirectoryIdentityTests
     }
 
     [Fact]
+    public async Task ClientsFirstMessageHasTheExpectedLength()
+    {
+        // The directory drops any first frame that isn't 48 bytes before doing DH; make sure a real client's is.
+        using var identity = X25519KeyPair.Generate();
+        var stream = new MemoryStream();
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            DirectoryChannel.CallAsync(stream, [identity.PublicKey], Secret, new JsonObject { ["op"] = "list" }, default));
+        var written = stream.ToArray();
+        Assert.Equal(2 + 48, written.Length);
+        Assert.Equal(48, (written[0] << 8) | written[1]);
+    }
+
+    [Fact]
     public void FirstNoiseFrameNeverLooksLikeLegacyJson()
     {
         // The directory tells the two apart by the first byte: '{' for JSON, a length's high byte for Noise (messages are well under 0x7B00 bytes).
@@ -191,8 +204,9 @@ public class DirectoryIdentityTests
         var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://203.0.113.5:11010"]);
         Assert.NotNull(NetworkString.Validate(info with { DirectoryKeys = [new byte[31]] }));
         Assert.NotNull(NetworkString.Validate(info with { DirectoryKeys = [] }));
-        Assert.NotNull(NetworkString.Validate(info with { DirectoryKeys = [.. Enumerable.Range(0, 5).Select(_ => new byte[32])] }));
-        Assert.Null(NetworkString.Validate(info with { DirectoryKeys = [.. Enumerable.Range(0, 4).Select(_ => new byte[32])] }));
+        // Eight: four nodes, each with a spare slot for rotation.
+        Assert.NotNull(NetworkString.Validate(info with { DirectoryKeys = [.. Enumerable.Range(0, 9).Select(_ => new byte[32])] }));
+        Assert.Null(NetworkString.Validate(info with { DirectoryKeys = [.. Enumerable.Range(0, 8).Select(_ => new byte[32])] }));
     }
 
     [Fact]
