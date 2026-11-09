@@ -35,7 +35,8 @@ public sealed partial class InstanceViewModel
     [ObservableProperty] public partial bool HasRecentWorlds { get; set; }
     [ObservableProperty] public partial bool HasRecentShots { get; set; }
     [ObservableProperty] public partial bool HasSavedServers { get; set; }
-    [ObservableProperty] public partial bool IsVanilla { get; set; }
+    /// <summary>Vanilla instances cannot have mods: the mods tab and overview offer a loader instead.</summary>
+    public bool IsVanilla => Current is { Loader: null };
 
     private int _overviewGeneration;
 
@@ -43,7 +44,6 @@ public sealed partial class InstanceViewModel
     {
         if (Current is not { } c) return;
         var generation = ++_overviewGeneration;
-        IsVanilla = c.Loader is null;
 
         RecentWorlds.Clear();
         foreach (var w in WorldManager.List(c.SavesDir).OrderByDescending(w => w.LastPlayed ?? DateTimeOffset.MinValue).Take(OverviewRows))

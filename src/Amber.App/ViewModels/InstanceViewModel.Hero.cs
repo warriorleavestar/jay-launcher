@@ -149,6 +149,7 @@ public sealed partial class InstanceViewModel
         HeroNote = plan.NoteKey is { } note ? L.T(note) : "";
         HasHeroNote = HeroNote.Length > 0;
         AccountText = _home?.SelectedAccount is { } account ? L.F("instance.hero.as_account", account.Name) : "";
+        UpdateGameRunning();
         if (session?.IsActive == true) _heroClock.Start();
         else _heroClock.Stop();
     }

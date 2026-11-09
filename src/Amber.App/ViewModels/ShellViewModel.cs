@@ -162,10 +162,19 @@ public sealed partial class ShellViewModel : ObservableObject
             try
             {
                 // library/{实例}：把它设成焦点实例，实例页显示它。
+                string? instanceId = null;
                 if (route.Section == Section.Library && route[1] is { } id && id is not ("new" or "logs" or "current")
                     && _service.InstalledVersions().Contains(id))
+                {
                     _service.SetCurrentInstance(id);
+                    instanceId = id;
+                }
                 _main.CurrentPage = PageFor(route);
+                // The instance page was already showing another instance: it does not follow the focus change by itself
+                // (so work in progress is not moved to another instance), but an explicit library/{id} switches it.
+                if (instanceId is not null && _main.CurrentPage is InstanceViewModel page && !page.IsBusy
+                    && page.SelectedId != instanceId && page.Instances.Contains(instanceId))
+                    page.SelectedId = instanceId;
             }
             finally { _syncing = false; }
         }

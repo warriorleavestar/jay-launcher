@@ -303,32 +303,64 @@
             </Grid>
           </ScrollViewer>
         </TabItem>
-        <TabItem Header="{l:T instance.mods.title}" FontSize="14">
-          <Grid RowDefinitions="Auto,Auto,*">
-            <!-- 汇总一行、按钮一行（按钮放不下时换行），英文、日文的长按钮不会把汇总挤没。 -->
-            <StackPanel Spacing="6" Margin="0,0,0,6">
+        <TabItem x:Name="ModsTab" Header="{l:T instance.mods.title}" FontSize="14">
+          <Grid x:Name="ModsLayout" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,*,Auto,Auto">
+            <!-- 工具栏：添加 ▾、检查更新、搜索、筛选、⋯（官方设计 §6.5） -->
+            <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6" Margin="0,0,0,6" IsVisible="{Binding !IsVanilla}">
+              <Button x:Name="AddModButton" Classes="primary">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Path Classes="icon" Data="{StaticResource Icon.Plus}" Width="14" Height="14" Stroke="{Binding $parent[Button].Foreground}" />
+                  <TextBlock x:Name="AddModText" Text="{l:T instance.mods.add}" />
+                  <Path Classes="icon" Data="{StaticResource Icon.ChevronDown}" Width="12" Height="12" Stroke="{Binding $parent[Button].Foreground}" />
+                </StackPanel>
+                <Button.Flyout>
+                  <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                    <MenuItem Header="{l:T instance.mods.add_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Mod}" />
+                    <MenuItem Header="{l:T instance.mods.add_file}" Click="AddMods_Click" />
+                  </MenuFlyout>
+                </Button.Flyout>
+              </Button>
+              <Button x:Name="CheckUpdatesButton" Grid.Column="1" Classes="secondary" Content="{l:T common.check_updates}" Command="{Binding CheckModUpdatesCommand}" />
+              <TextBox x:Name="ModSearchBox" Grid.Column="2" Text="{Binding ModSearch}" PlaceholderText="{l:T instance.mods.search}" MinWidth="120"
+                       AutomationProperties.Name="{l:T instance.mods.search}" />
+              <Button Grid.Column="3" Classes="ghost icon-only" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
+                <Path Classes="icon" Data="{StaticResource Icon.More}" Width="16" Height="16" />
+                <Button.Flyout>
+                  <MenuFlyout Placement="BottomEdgeAlignedRight">
+                    <MenuItem Header="{l:T common.open_folder}" Command="{Binding OpenModsFolderCommand}" />
+                    <MenuItem Header="{l:T instance.mods.recheck}" Command="{Binding RecheckCompatNowCommand}" />
+                    <MenuItem Header="{l:T instance.connector.install}" Command="{Binding InstallConnectorCommand}" />
+                    <MenuItem Header="{l:T instance.bake.now}" Command="{Binding BakeNowCommand}" IsVisible="{Binding BakeEnabled}" />
+                  </MenuFlyout>
+                </Button.Flyout>
+              </Button>
+              <ListBox x:Name="ModFilterChips" Grid.Row="1" Grid.ColumnSpan="4" Classes="subtabs" ItemsSource="{Binding ModFilterOptions}" SelectedIndex="{Binding ModFilterIndex}"
+                       Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="{l:T instance.mods.filter.label}">
+                <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
+                  <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
+
+            <!-- 横幅：游戏在跑、共用文件夹、兼容和 Connector（同时最多两条重要的） -->
+            <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="6" Margin="0,0,0,6">
+              <Border Classes="banner warning" IsVisible="{Binding GameRunningHere}">
+                <TextBlock Text="{l:T instance.mods.running}" TextWrapping="Wrap" />
+              </Border>
               <Border Classes="callout info" IsVisible="{Binding IsSharedDir}">
                 <DockPanel>
                   <Button DockPanel.Dock="Right" Classes="ghost" Content="{l:T instance.shared.enable}" Command="{Binding GoToIsolationSettingCommand}" VerticalAlignment="Center" Margin="8,0,0,0" />
                   <TextBlock Text="{l:T instance.shared.notice}" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </DockPanel>
               </Border>
-              <TextBlock Classes="hint" Text="{Binding ModSummary}" TextWrapping="Wrap" />
-              <WrapPanel ItemSpacing="6" LineSpacing="6">
-                <Button Classes="primary" Content="{l:T instance.browse_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Mod}" />
-                <Button Content="{l:T common.add_files}" Click="AddMods_Click" />
-                <Button Content="{l:T common.open_folder}" Command="{Binding OpenModsFolderCommand}" />
-                <Button Content="{l:T common.check_updates}" Command="{Binding CheckModUpdatesCommand}" />
-                <Button Content="{l:T common.update_all}" Command="{Binding UpdateAllModsCommand}" />
-                <Button Content="{l:T instance.bake.now}" Command="{Binding BakeNowCommand}" IsVisible="{Binding BakeEnabled}" ToolTip.Tip="{l:T instance.bake.now_hint}" />
-              </WrapPanel>
-            </StackPanel>
-            <StackPanel Grid.Row="1" Spacing="4" Margin="0,0,0,6" IsVisible="{Binding CompatSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-              <TextBlock Text="{Binding CompatSummary}" FontSize="12" TextWrapping="Wrap" />
-              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding NeedsConnector}">
-                <TextBlock Classes="hint" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"
-                           Text="{l:T instance.connector.hint}" />
-                <Button Content="{l:T instance.connector.install}" Command="{Binding InstallConnectorCommand}" />
+              <StackPanel Spacing="4" IsVisible="{Binding NeedsConnector}">
+                <Border Classes="banner warning">
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="secondary" Content="{l:T instance.connector.install}" Command="{Binding InstallConnectorCommand}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                    <TextBlock Text="{l:T instance.connector.hint}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                  </DockPanel>
+                </Border>
               </StackPanel>
               <Border Classes="callout info" IsVisible="{Binding HasConnectorPending}">
                 <DockPanel>
@@ -338,43 +370,110 @@
                 </DockPanel>
               </Border>
             </StackPanel>
-            <StackPanel Grid.Row="2" Spacing="8" IsVisible="{Binding !Mods.Count}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
-              <TextBlock Classes="hint" Text="{l:T instance.mods.empty}" TextWrapping="Wrap" TextAlignment="Center" />
-              <Button Classes="primary" HorizontalAlignment="Center" Content="{l:T instance.browse_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Mod}" />
+
+            <!-- 空状态：原版、没有模组、筛选没结果 -->
+            <StackPanel Grid.Row="2" Spacing="8" IsVisible="{Binding !HasMods}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
+              <TextBlock x:Name="ModsEmptyText" Classes="hint" Text="{l:T instance.mods.empty}" TextWrapping="Wrap" TextAlignment="Center" IsVisible="{Binding !IsVanilla}" />
+              <TextBlock Classes="hint" Text="{l:T instance.mods.vanilla}" TextWrapping="Wrap" TextAlignment="Center" IsVisible="{Binding IsVanilla}" />
+              <WrapPanel HorizontalAlignment="Center" ItemSpacing="8" LineSpacing="6">
+                <Button Classes="primary" Content="{l:T instance.browse_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Mod}" IsVisible="{Binding !IsVanilla}" />
+                <Button Classes="secondary" Content="{l:T common.add_files}" Click="AddMods_Click" IsVisible="{Binding !IsVanilla}" />
+                <Button Classes="primary" Content="{l:T overview.install_loader}" Command="{Binding NewInstanceCommand}" IsVisible="{Binding IsVanilla}" />
+              </WrapPanel>
             </StackPanel>
-            <ListBox Grid.Row="2" ItemsSource="{Binding Mods}" Background="Transparent" IsVisible="{Binding !!Mods.Count}">
+            <StackPanel Grid.Row="2" Spacing="8" IsVisible="{Binding ModsNoMatches}" HorizontalAlignment="Center" VerticalAlignment="Center">
+              <TextBlock Classes="hint" Text="{l:T instance.mods.no_matches}" TextAlignment="Center" />
+              <Button HorizontalAlignment="Center" Classes="secondary" Content="{l:T library.clear_filters}" Command="{Binding ClearModFiltersCommand}" />
+            </StackPanel>
+
+            <ListBox x:Name="ModsList" Grid.Row="2" ItemsSource="{Binding ModsView}" SelectedItem="{Binding InspectedMod}" Background="Transparent" IsVisible="{Binding HasMods}"
+                     AutomationProperties.Name="{l:T instance.mods.title}">
               <ListBox.ItemTemplate>
                 <DataTemplate DataType="vm:ModItem">
-                  <Grid ColumnDefinitions="Auto,40,*,Auto" Margin="2">
-                    <CheckBox IsChecked="{Binding Enabled}" MinWidth="0" Margin="0,0,6,0" ToolTip.Tip="{l:T common.toggle_enabled}" />
-                    <Border Grid.Column="1" Width="40" Height="40" CornerRadius="5" Background="{DynamicResource PageBg}" ClipToBounds="True">
+                  <Grid ColumnDefinitions="Auto,Auto,32,*,Auto,Auto" ColumnSpacing="8" Margin="2">
+                    <CheckBox IsChecked="{Binding Selected}" MinWidth="0" ToolTip.Tip="{l:T instance.mods.select}" AutomationProperties.Name="{l:T instance.mods.select}" />
+                    <ToggleSwitch Grid.Column="1" Classes="compact" IsChecked="{Binding Enabled}" OnContent="" OffContent="" MinWidth="0"
+                                  ToolTip.Tip="{l:T common.toggle_enabled}" AutomationProperties.Name="{l:T common.toggle_enabled}" />
+                    <Border Grid.Column="2" Width="32" Height="32" CornerRadius="5" Background="{DynamicResource PageBg}" ClipToBounds="True">
                       <Image Source="{Binding Icon}" />
                     </Border>
-                    <StackPanel Grid.Column="2" Margin="10,0">
+                    <StackPanel Grid.Column="3" VerticalAlignment="Center">
                       <TextBlock Text="{Binding Name}" FontWeight="SemiBold" ToolTip.Tip="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                      <TextBlock Text="{Binding Meta}" Classes="caption" ToolTip.Tip="{Binding Meta}" TextTrimming="CharacterEllipsis" />
-                      <TextBlock Text="{Binding UpdateText}" IsVisible="{Binding HasUpdate}" FontSize="{DynamicResource FontCaption}" Foreground="{DynamicResource AccentText}" ToolTip.Tip="{Binding UpdateText}" TextTrimming="CharacterEllipsis" />
-                      <TextBlock Text="{Binding CompatText}" IsVisible="{Binding CompatText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap"
+                      <TextBlock Text="{Binding Version}" Classes="caption" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding CompatText}" IsVisible="{Binding HasCompatProblem}" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap"
                                  Classes="compat" Classes.problem="{Binding HasCompatProblem}" />
                     </StackPanel>
-                    <!-- 按钮最多占这么宽，多了就换行（窄窗口下名字那一列还有地方）。 -->
-                    <!-- 行内只固定一个主操作（有更新时“更新”），其余放进 ⋯ 菜单（改版规格 4.3）。 -->
-                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                      <Button Content="{l:T common.update}" IsVisible="{Binding HasUpdate}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).UpdateModCommand}" CommandParameter="{Binding}" />
-                      <Button Classes="ghost" Content="⋯" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
-                        <Button.Flyout>
-                          <MenuFlyout>
-                            <MenuItem Header="{l:T instance.mods.find_matching}" IsVisible="{Binding CanFindMatching}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).FindMatchingCommand}" CommandParameter="{Binding}"
-                                      ToolTip.Tip="{l:T instance.mods.find_matching_hint}" />
-                            <MenuItem Classes="danger" Header="{l:T common.delete}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).DeleteModCommand}" CommandParameter="{Binding}" />
-                          </MenuFlyout>
-                        </Button.Flyout>
-                      </Button>
-                    </StackPanel>
+                    <TextBlock Grid.Column="4" Text="{Binding CompatShort}" VerticalAlignment="Center" Classes.error="{Binding HasCompatProblem}" ToolTip.Tip="{Binding CompatText}" />
+                    <Button Grid.Column="5" Classes="secondary small" Content="{l:T common.update}" IsVisible="{Binding HasUpdate}" VerticalAlignment="Center"
+                            ToolTip.Tip="{Binding UpdateText}"
+                            Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).UpdateModCommand}" CommandParameter="{Binding}" />
                   </Grid>
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
+
+            <!-- 检查器：宽档固定在右边；中档、紧凑档点了行才盖在右边（代码里切换） -->
+            <Border x:Name="ModInspector" Grid.Row="2" Grid.Column="1" Width="320" Margin="10,0,0,0" Classes="card" Padding="12" IsVisible="{Binding HasInspected}"
+                    svc:ThemeRegion.Name="mods.inspector">
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="8" DataContext="{Binding InspectedMod}" x:DataType="vm:ModItem">
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <Border Width="40" Height="40" CornerRadius="6" Background="{DynamicResource PageBg}" ClipToBounds="True">
+                      <Image Source="{Binding Icon}" />
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <TextBlock Classes="caption" TextWrapping="Wrap">
+                        <Run Text="{Binding Version}" />
+                        <Run Text="{Binding AuthorsText}" />
+                      </TextBlock>
+                    </StackPanel>
+                    <Button Grid.Column="2" Classes="ghost icon-only" VerticalAlignment="Top" ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}"
+                            Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).CloseInspectorCommand}">
+                      <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="14" Height="14" />
+                    </Button>
+                  </Grid>
+                  <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Classes="hint" IsVisible="{Binding Description, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <TextBlock Classes="caption" TextWrapping="Wrap">
+                    <Run Text="{l:T instance.mods.file}" />
+                    <Run Text="{Binding FileName}" />
+                  </TextBlock>
+                  <TextBlock Text="{Binding CompatText}" TextWrapping="Wrap" Classes="compat" Classes.problem="{Binding HasCompatProblem}"
+                             IsVisible="{Binding CompatText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <TextBlock Text="{Binding UpdateText}" TextWrapping="Wrap" Foreground="{DynamicResource AccentText}" IsVisible="{Binding HasUpdate}" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Classes="secondary" Content="{Binding ToggleLabel}"
+                            Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).ToggleModCommand}" CommandParameter="{Binding}" />
+                    <Button Classes="secondary" Content="{l:T common.update}" IsVisible="{Binding HasUpdate}"
+                            Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).UpdateModCommand}" CommandParameter="{Binding}" />
+                    <Button Classes="secondary" Content="{l:T instance.mods.find_matching}" IsVisible="{Binding CanFindMatching}" ToolTip.Tip="{l:T instance.mods.find_matching_hint}"
+                            Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).FindMatchingCommand}" CommandParameter="{Binding}" />
+                    <Button Classes="danger" Content="{l:T common.delete}"
+                            Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).DeleteModCommand}" CommandParameter="{Binding}" />
+                  </WrapPanel>
+                </StackPanel>
+              </ScrollViewer>
+            </Border>
+
+            <!-- 多选时浮起的批量栏 -->
+            <Border x:Name="ModBulkBar" Grid.Row="3" Grid.ColumnSpan="2" Classes="card" Padding="10,6" Margin="0,6,0,0" IsVisible="{Binding HasModSelection}">
+              <WrapPanel ItemSpacing="8" LineSpacing="6">
+                <TextBlock Text="{Binding ModSelectionText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <Button Classes="secondary" Content="{l:T instance.mods.enable}" Command="{Binding EnableSelectedModsCommand}" />
+                <Button Classes="secondary" Content="{l:T instance.mods.disable}" Command="{Binding DisableSelectedModsCommand}" />
+                <Button Classes="secondary" Content="{l:T common.update}" Command="{Binding UpdateSelectedModsCommand}" IsVisible="{Binding HasModUpdates}" />
+                <Button Classes="danger" Content="{l:T common.delete}" Command="{Binding DeleteSelectedModsCommand}" />
+                <Button Classes="ghost icon-only" Command="{Binding ClearModSelectionCommand}" ToolTip.Tip="{l:T instance.mods.clear_selection}" AutomationProperties.Name="{l:T instance.mods.clear_selection}">
+                  <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="14" Height="14" />
+                </Button>
+              </WrapPanel>
+            </Border>
+
+            <!-- 底部：数量、可更新、【全部更新】只在检查出有更新时出现 -->
+            <Grid Grid.Row="4" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto" Margin="0,6,0,0" IsVisible="{Binding HasMods}">
+              <TextBlock x:Name="ModFooterText" Classes="hint" Text="{Binding ModFooter}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              <Button x:Name="UpdateAllButton" Grid.Column="1" Classes="secondary" Content="{l:T common.update_all}" Command="{Binding UpdateAllModsCommand}" IsVisible="{Binding HasModUpdates}" />
+            </Grid>
           </Grid>
         </TabItem>
 

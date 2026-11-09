@@ -88,7 +88,7 @@ internal sealed partial class SelfTest
             {
                 window.Width = width;
                 await Task.Delay(450);
-                Check($"英雄区 {width}：{tier} 档，至少高 {height}，开始按钮整个在英雄区里", page?.Tier == tier && page.Hero.MinHeight == height
+                Check($"英雄区 {width}：{tier} 档，至少高 {height}，开始按钮整个在英雄区里", page?.Tier == tier && (page.Hero.MinHeight == height || page.Short)
                     && page.StartButton.TranslatePoint(new Avalonia.Point(0, page.StartButton.Bounds.Height), page.Hero) is { } bottom && bottom.Y <= page.Hero.Bounds.Height,
                     $"{page?.Tier} {page?.Hero.Bounds.Height}");
                 await ShotAsync($"instance-ready-{width}");

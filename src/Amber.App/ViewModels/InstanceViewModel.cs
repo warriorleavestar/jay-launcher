@@ -56,6 +56,8 @@ public sealed partial class ModItem(LocalMod mod) : LocalizedObservable
             var path = ModManager.SetEnabled(Mod, value);
             Mod = Mod with { Path = path, FileName = Path.GetFileName(path), Enabled = value };
             OnPropertyChanged(nameof(Meta));
+            OnPropertyChanged(nameof(FileName));
+            OnPropertyChanged(nameof(ToggleLabel));
             EnabledChanged?.Invoke();
         }
         catch (IOException)
@@ -65,7 +67,27 @@ public sealed partial class ModItem(LocalMod mod) : LocalizedObservable
         }
     }
 
-    partial void OnUpdateChanged(ModUpdate? value) => OnPropertyChanged(nameof(UpdateText));
+    partial void OnUpdateChanged(ModUpdate? value)
+    {
+        OnPropertyChanged(nameof(UpdateText));
+        OnPropertyChanged(nameof(UpdateShort));
+    }
+
+    /// <summary>Ticked for bulk actions (official design §6.5). Not the same as enabled.</summary>
+    [ObservableProperty]
+    public partial bool Selected { get; set; }
+
+    public string Version => Mod.Version ?? "";
+    public string ToggleLabel => L.T(Enabled ? "instance.mods.disable" : "instance.mods.enable");
+    public string FileName => Mod.FileName;
+    public string? Authors => Mod.Authors;
+    public string AuthorsText => string.IsNullOrWhiteSpace(Mod.Authors) ? "" : L.F("instance.mods.by", Mod.Authors);
+    /// <summary>Short compatibility mark for the table: ✓, or ⚠ with the problem.</summary>
+    public string CompatShort => Compat is null ? "" : Compat.IsProblem ? "⚠" : "✓";
+    public string UpdateShort => Update is null ? "" : "↑";
+    public ModFacts Facts => new(Name, Mod.FileName, Mod.ModId, Mod.Authors, Enabled, HasUpdate, HasCompatProblem);
+
+    partial void OnCompatChanged(CompatResult? value) => OnPropertyChanged(nameof(CompatShort));
 }
 
 public sealed record WorldItem(WorldInfo World) : LocalizedRecord
@@ -169,7 +191,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public partial string? SelectedId { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasInstance), nameof(SupportsQuickPlay), nameof(IsSharedDir))]
+    [NotifyPropertyChangedFor(nameof(HasInstance), nameof(SupportsQuickPlay), nameof(IsSharedDir), nameof(IsVanilla))]
     public partial GameInstance? Current { get; set; }
 
     /// <summary>版本隔离关闭：模组、资源包、光影都在 .minecraft 下，所有实例共用（改版规格 2.3）。</summary>
@@ -202,6 +224,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public InstanceViewModel(LauncherService service)
     {
         _service = service;
+        HookMods();
         // PageViewModel 只有进入回调；离开时通过已有属性通知撤销服务器查询。
         PropertyChanged += (_, e) =>
         {

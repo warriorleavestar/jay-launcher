@@ -18,7 +18,12 @@ public partial class InstancePage : UserControl
     {
         InitializeComponent();
         ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "instances");
-        SizeChanged += (_, e) => ApplyWidth(e.NewSize.Width);
+        SizeChanged += (_, e) =>
+        {
+            ApplyWidth(e.NewSize.Width);
+            ApplyHeight(e.NewSize.Height);
+        };
+        ModsList.AddHandler(KeyDownEvent, OnModsKeyDown, RoutingStrategies.Tunnel);
     }
 
     /// <summary>Current layout tier (self-check).</summary>
@@ -35,16 +40,25 @@ public partial class InstancePage : UserControl
         var compact = Tier == WidthTier.Compact;
         var wide = Tier == WidthTier.Wide;
         // A minimum, not a fixed height: long translations and the compact layout grow the hero instead of cutting the button off.
-        Hero.MinHeight = wide ? 200 : compact ? 112 : 168;
+        Hero.MinHeight = Short ? 0 : wide ? 200 : compact ? 112 : 168;
         HeroThumb.Width = HeroThumb.Height = compact ? 88 : 64;
         HeroThumb.VerticalAlignment = compact ? Avalonia.Layout.VerticalAlignment.Center : Avalonia.Layout.VerticalAlignment.Bottom;
-        HeroWatermark.IsVisible = !compact;
+        HeroWatermark.IsVisible = !compact && !Short;
         HeroPin.IsVisible = HeroFolder.IsVisible = !compact;
         HeroAccount.IsVisible = !compact;
         HeroFacts.IsVisible = true;
         HeroContent.Margin = compact ? new Thickness(12, 10) : new Thickness(20, 14);
         HeroName.FontSize = compact ? 18 : wide ? 26 : 22;
         StartButton.MinWidth = compact ? 0 : 168;
+        // Mods (§6.5): the inspector is a fixed column when wide and covers the right of the table otherwise; compact keeps only ＋ and ⋯.
+        Grid.SetColumn(ModInspector, wide ? 1 : 0);
+        Grid.SetColumnSpan(ModInspector, wide ? 1 : 2);
+        ModInspector.HorizontalAlignment = wide ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Right;
+        ModInspector.Width = compact ? double.NaN : 320;
+        ModInspector.Margin = wide ? new Thickness(10, 0, 0, 0) : new Thickness(0);
+        ModInspector.BoxShadow = wide ? default : Avalonia.Media.BoxShadows.Parse("0 6 24 0 #40000000");
+        CheckUpdatesButton.IsVisible = !compact;
+        AddModText.IsVisible = !compact;
         // Overview: two columns only when wide; otherwise "this instance" goes on top.
         if (wide)
         {
@@ -61,6 +75,22 @@ public partial class InstancePage : UserControl
             Grid.SetRow(OverviewMain, 1);
         }
     }
+
+    /// <summary>§3.3 short windows: the hero drops its minimum height and watermark so the tabs keep room for their lists.</summary>
+    private void ApplyHeight(double height)
+    {
+        if (height <= 0) return;
+        Short = height < 520;
+        if (Short)
+        {
+            Hero.MinHeight = 0;
+            HeroWatermark.IsVisible = false;
+        }
+        else ApplyWidth(Bounds.Width);
+    }
+
+    /// <summary>The page is short enough that the hero is trimmed (self-check).</summary>
+    internal bool Short { get; private set; }
 
     private TopLevel? _top;
 
@@ -83,6 +113,12 @@ public partial class InstancePage : UserControl
     {
         if (!IsEffectivelyVisible || Vm is not { HasInstance: true } vm) return;
         var count = Enum.GetValues<InstanceTab>().Length;
+        if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control && vm.TabIndex == (int)InstanceTab.Mods)
+        {
+            ModSearchBox.Focus(NavigationMethod.Tab);
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.Tab && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var step = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1;
@@ -99,6 +135,59 @@ public partial class InstancePage : UserControl
             vm.SideActionCommand.Execute(null);
             e.Handled = true;
         }
+    }
+
+    private int _modAnchor = -1;
+
+    /// <summary>
+    /// §6.5 table keys (only while the table has focus, so typing in the search box or an input method never triggers them):
+    /// Space tick, Shift+↑↓ tick a range, Ctrl+A tick all, E on / off, U update, Delete delete (undo), Enter inspector,
+    /// Esc closes the inspector, then clears ticks, then clears filters.
+    /// </summary>
+    private void OnModsKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+        var rows = vm.ModsView.ToList();
+        var current = ModsList.SelectedItem as ModItem;
+        var index = current is null ? -1 : rows.IndexOf(current);
+        switch (e.Key)
+        {
+            case Key.Space when current is not null && e.KeyModifiers == KeyModifiers.None:
+                current.Selected = !current.Selected;
+                _modAnchor = index;
+                break;
+            case Key.Up or Key.Down when e.KeyModifiers == KeyModifiers.Shift && rows.Count > 0:
+                var target = Math.Clamp(index + (e.Key == Key.Down ? 1 : -1), 0, rows.Count - 1);
+                if (_modAnchor < 0) _modAnchor = Math.Max(index, 0);
+                foreach (var i in Amber.Core.Content.ModQuery.Range(_modAnchor, target, rows.Count)) rows[i].Selected = true;
+                ModsList.SelectedIndex = target;
+                ModsList.ContainerFromIndex(target)?.Focus();
+                break;
+            case Key.A when e.KeyModifiers == KeyModifiers.Control:
+                vm.SelectAllModsCommand.Execute(null);
+                break;
+            case Key.E when current is not null && e.KeyModifiers == KeyModifiers.None:
+                vm.ToggleModCommand.Execute(current);
+                break;
+            case Key.U when current is { HasUpdate: true } && e.KeyModifiers == KeyModifiers.None:
+                vm.UpdateModCommand.Execute(current);
+                break;
+            case Key.Delete when e.KeyModifiers == KeyModifiers.None:
+                var targets = vm.Mods.Where(m => m.Selected).ToList();
+                if (targets.Count == 0 && current is not null) targets.Add(current);
+                if (targets.Count == 0) return;
+                vm.DeleteModsWithUndo(targets);
+                break;
+            case Key.Escape:
+                if (vm.HasInspected) vm.CloseInspectorCommand.Execute(null);
+                else if (vm.HasModSelection) vm.ClearModSelectionCommand.Execute(null);
+                else if (vm.IsModFiltered) vm.ClearModFiltersCommand.Execute(null);
+                else return;
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
     }
 
     private void CloseHeroForceKill(object? sender, RoutedEventArgs e) => HeroForceKill.Flyout?.Hide();
