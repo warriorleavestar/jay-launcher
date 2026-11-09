@@ -84,7 +84,7 @@ public sealed class AskEveryTimePolicy(Func<RemoteConsentRequest, CancellationTo
 }
 
 /// <summary>
-/// 按当前系统选截屏和注入的实现：Windows 用 GDI + SendInput，Linux 用 X11（XGetImage + XTest），macOS 用 CoreGraphics + CGEvent。
+/// 按当前系统选截屏和注入的实现：Windows 用 GDI + SendInput，Linux 的 X11 会话用 XGetImage + XTest、Wayland 会话用系统门户（ScreenCast/RemoteDesktop + PipeWire），macOS 用 CoreGraphics + CGEvent。
 /// 这里只管“这台电脑能不能被别人看 / 控制”；看别人、控制别人在哪个系统上都行（只要解码和显示）。
 /// </summary>
 public static class RemotePlatform
@@ -95,7 +95,7 @@ public static class RemotePlatform
     /// <summary>不能被看 / 控制的原因（已翻译）；能时 null。Linux 上每次查一下（显示环境可能变），Windows 和 macOS 总是能。</summary>
     public static string? UnavailableReason =>
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? null
-        : OperatingSystem.IsLinux() ? Unix.X11.UnavailableReason()
+        : OperatingSystem.IsLinux() ? (Unix.X11.IsWayland() ? Unix.WaylandSession.UnavailableReason() : Unix.X11.UnavailableReason())
         : L.T("multiplayer.remote.unsupported_os");
 
     /// <summary>能用但还要用户在系统里授权（macOS 的屏幕录制 / 辅助功能）时的提示（已翻译）；不需要时 null。</summary>
@@ -121,6 +121,7 @@ public static class RemotePlatform
         {
             if (OperatingSystem.IsWindows()) return new Windows.GdiScreenSource();
             if (OperatingSystem.IsMacOS()) return Unix.MacCg.EnsureScreenAccess() ? new Unix.MacScreenSource() : null;
+            if (OperatingSystem.IsLinux() && Unix.X11.IsWayland()) return Unix.WaylandSession.UnavailableReason() is null ? new Unix.WaylandScreenSource() : null;
             if (OperatingSystem.IsLinux()) return Unix.X11.UnavailableReason() is null ? new Unix.X11ScreenSource() : null;
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException) { }
@@ -134,6 +135,8 @@ public static class RemotePlatform
         {
             if (OperatingSystem.IsWindows()) return new Windows.SendInputSink();
             if (OperatingSystem.IsMacOS()) return Unix.MacCg.EnsureAccessibility() ? new Unix.MacInputSink() : null;
+            // Wayland：和刚建的截屏共用一个门户会话；门户不给控制（比如 sway 只有 ScreenCast）时注入什么都不做。
+            if (OperatingSystem.IsLinux() && Unix.X11.IsWayland()) return Unix.WaylandSession.Latest is null ? null : new Unix.WaylandInputSink();
             if (OperatingSystem.IsLinux()) return Unix.X11.UnavailableReason() is null ? new Unix.X11InputSink() : null;
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException) { }
