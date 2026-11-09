@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         _settings = settings;
         InitializeComponent();
         Amber.App.Services.ThemeService.AttachMainWindow(this);
+        Amber.App.Services.DensityService.Attach(this);
         AttachShell();
         AttachDrop();
         FitToScreen(settings?.LauncherWindow);

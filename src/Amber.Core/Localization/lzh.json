@@ -2489,5 +2489,16 @@
   "help.category.storage": "设置与存储",
   "help.category.privacy": "私与安",
   "help.category.parents": "予亲长",
-  "help.category.reference": "参考"
+  "help.category.reference": "参考",
+  "log.dock.title": "游戏之志",
+  "log.dock.window_title": "Jay · 游戏之志",
+  "log.dock.dock_back": "泊于下",
+  "log.dock.pop_out": "出为独窗",
+  "log.dock.close": "收（Ctrl+`）",
+  "log.dock.resize": "调游戏之志之高",
+  "palette.action.dock_log": "泊游戏之志",
+  "settings.density.label": "疏密",
+  "settings.density.hint": "密：一屏容更多行（模组之列、日志）。安全之示不变其大小。",
+  "settings.density.standard": "常",
+  "settings.density.compact": "密"
 }

@@ -50,6 +50,7 @@ public static class SettingsCatalog
         new("AllowNetworkThemes", Appearance, "settings.themepack.allow_network"),
         new("Motion", Appearance, "settings.motion.label", "settings.motion.hint"),
         new("Sidebar", Appearance, "settings.sidebar.label"),
+        new("Density", Appearance, "settings.density.label", "settings.density.hint"),
 
         new("Java", Game, "settings.java.label"),
         new("AutoJava", Game, "settings.java.auto_download"),

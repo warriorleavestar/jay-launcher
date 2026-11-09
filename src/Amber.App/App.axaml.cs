@@ -41,6 +41,7 @@ public sealed class App : Application
             ThemeService.ApplyAtStartup(settings, desktop.Args ?? []);
             settings.ReduceMotionMode = Amber.Core.Layout.MotionPreference.Migrate(settings.ReduceMotionMode, settings.ReduceMotion);
             SystemMotion.Start(settings.ReduceMotionMode);
+            DensityService.Apply(settings.Density);
             Amber.Core.Localization.L.Changed += ThemeService.OnLanguageChanged;
             var service = new LauncherService(settings);
             var viewModel = new MainViewModel(service);

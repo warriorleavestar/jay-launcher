@@ -47,6 +47,9 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
     public Action<string>? StartInstance { get; set; }
     public Action<string>? AddModsTo { get; set; }
     public Action? OpenActivity { get; set; }
+
+    /// <summary>Docks the game log at the bottom (Ctrl+`).</summary>
+    public Action? DockLog { get; set; }
     public Action<string>? JoinInvite { get; set; }
     public Action<string>? JoinJayServer { get; set; }
 
@@ -243,6 +246,7 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
         list.Add(Act("new-instance", "palette.action.new_instance", () => Navigate?.Invoke(LegacyRoutes.NewInstance), null,
             [.. NamesOf("download.title"), "downloads", "install"]));
         list.Add(Act("activity", "palette.action.activity", () => OpenActivity?.Invoke(), null, [.. NamesOf("activity.title"), "Ctrl+J"]));
+        list.Add(Act("dock-log", "palette.action.dock_log", () => DockLog?.Invoke(), null, [.. NamesOf("log.dock.title"), "log", "Ctrl+`"]));
 
         // Every setting in the catalog: "settings#Field" opens its group, scrolls to the control and flashes it.
         foreach (var field in SettingsCatalog.Fields)

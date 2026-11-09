@@ -71,7 +71,7 @@
           <!-- Appearance -->
           <StackPanel x:Name="Group_appearance" Classes="group">
             <Border Classes="card">
-              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
                 <TextBlock Text="{l:T settings.theme.label}" VerticalAlignment="Center" />
                 <ComboBox x:Name="ThemeBox" Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedIndex="{Binding SelectedThemeIndex}" MinWidth="160"
                           AutomationProperties.Name="{l:T settings.theme.label}" />
@@ -91,6 +91,15 @@
                 <ComboBox x:Name="SidebarBox" Grid.Row="2" Grid.Column="1" ItemsSource="{Binding SidebarOptions}" SelectedIndex="{Binding SelectedSidebarIndex}" MinWidth="160" Margin="0,12,0,0"
                           AutomationProperties.Name="{l:T settings.sidebar.label}" />
                 <Button Grid.Row="2" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="sidebar"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="3" Text="{l:T settings.density.label}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <ComboBox x:Name="DensityBox" ItemsSource="{Binding DensityOptions}" SelectedIndex="{Binding SelectedDensityIndex}" MinWidth="160"
+                            AutomationProperties.Name="{l:T settings.density.label}" />
+                  <TextBlock Classes="hint" Text="{l:T settings.density.hint}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Row="3" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="density"
                         ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
               </Grid>
             </Border>

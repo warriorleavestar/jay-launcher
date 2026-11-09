@@ -177,7 +177,7 @@
     </Border>
 
     <!-- 内容列：顶栏、子页页签、“东西搬到哪了”、页面 -->
-    <Grid x:Name="ContentColumn" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto,*">
+    <Grid x:Name="ContentColumn" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
       <!-- 顶栏（§3.1）：← 返回 + 标题或面包屑；带上下文跳过来时有【完成，返回】 -->
       <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" Margin="8,0,16,0">
         <Button x:Name="BackButton" Classes="ghost icon-only" Command="{Binding Shell.BackCommand}" IsEnabled="{Binding Shell.CanGoBack}"
@@ -263,8 +263,19 @@
       </Border>
       <ContentControl x:Name="PageHost" Grid.Row="4" Content="{Binding CurrentPage}" Margin="24,4,24,20" />
 
+      <!-- Docked game log (§6.9): Ctrl+` docks the running game's log at the bottom, 240 high and draggable; in a short
+           window it becomes a drawer over the page. It can pop out into its own window. -->
+      <Thumb x:Name="LogDockSplitter" Grid.Row="5" Height="6" Background="Transparent" Cursor="SizeNorthSouth" IsVisible="False"
+             AutomationProperties.Name="{l:T log.dock.resize}">
+        <Thumb.Template><ControlTemplate><Border Background="{TemplateBinding Background}" /></ControlTemplate></Thumb.Template>
+      </Thumb>
+      <Border x:Name="LogDock" Grid.Row="6" Height="240" IsVisible="False" Background="{DynamicResource Surface}"
+              BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,1,0,0" Padding="16,8,16,8">
+        <views:LogDockView x:Name="LogDockContent" DataContext="{Binding Log}" />
+      </Border>
+
       <!-- Help drawer (§6.24): 400 on the right, full width when compact. Esc or a click outside closes it -->
-      <Panel x:Name="HelpLayer" Grid.RowSpan="5" IsVisible="{Binding Help.IsOpen}">
+      <Panel x:Name="HelpLayer" Grid.RowSpan="7" IsVisible="{Binding Help.IsOpen}">
         <Border x:Name="HelpScrim" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="HelpScrim_Pressed" />
         <Border x:Name="HelpDrawer" Width="400" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
                 BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}">
@@ -307,7 +318,7 @@
       </Panel>
 
       <!-- 活动中心（§6.22）：盖在内容区右侧的抽屉 400，紧凑档全宽。Esc 或点外面关 -->
-      <Panel x:Name="ActivityLayer" Grid.RowSpan="5" IsVisible="{Binding Activity.IsOpen}">
+      <Panel x:Name="ActivityLayer" Grid.RowSpan="7" IsVisible="{Binding Activity.IsOpen}">
         <Border x:Name="ActivityScrim" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="ActivityScrim_Pressed" />
         <Border x:Name="ActivityDrawer" Width="400" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
                 BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}">

@@ -1,0 +1,56 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:vm="using:Amber.App.ViewModels"
+             x:Class="Amber.App.Views.LogDockView"
+             x:DataType="vm:LogViewModel">
+  <!-- The running game's log, docked at the bottom of the content area or in its own window (official design §6.9):
+       follows the newest line, can show only problems, F8 jumps to the next error. -->
+  <UserControl.Styles>
+    <Style Selector="ListBoxItem">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="2,0" />
+      <Setter Property="MinHeight" Value="0" />
+    </Style>
+    <Style Selector="TextBlock.error">
+      <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
+    </Style>
+    <Style Selector="TextBlock.warning">
+      <Setter Property="Foreground" Value="{DynamicResource WarningText}" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource TextTertiary}" />
+    </Style>
+  </UserControl.Styles>
+  <DockPanel>
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,4">
+      <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+        <TextBlock x:Name="DockTitle" Text="{l:T log.dock.title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding RunSummary}" Classes="hint" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="320" />
+        <Button x:Name="DockErrors" Classes="ghost small" Command="{Binding NextErrorCommand}" IsEnabled="{Binding HasErrors}" ToolTip.Tip="{l:T log.next_error}">
+          <TextBlock Text="{Binding ErrorSummary}" Foreground="{DynamicResource DangerText}" />
+        </Button>
+        <CheckBox x:Name="DockProblems" IsChecked="{Binding OnlyProblems}" Content="{l:T log.filter.problems}" />
+        <CheckBox x:Name="DockFollow" IsChecked="{Binding FollowLatest}" Content="{l:T log.follow_latest}" />
+      </StackPanel>
+      <StackPanel x:Name="DockButtons" Grid.Column="1" Orientation="Horizontal" Spacing="4" />
+    </Grid>
+    <Panel>
+      <TextBlock Classes="hint" Text="{Binding EmptyMessage}" IsVisible="{Binding !Lines.Count}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+      <ListBox x:Name="DockList" ItemsSource="{Binding Lines}" Background="Transparent" FontFamily="{DynamicResource MonoFont}" FontSize="{DynamicResource FontCaption}"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+        <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate></ListBox.ItemsPanel>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:LogEntry">
+            <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+              <TextBlock Text="{Binding Time}" Foreground="{DynamicResource TextTertiary}" />
+              <TextBlock Grid.Column="1" Text="{Binding Level}" Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.muted="{Binding IsMuted}" />
+              <TextBlock Grid.Column="2" Text="{Binding Message}" TextWrapping="Wrap"
+                         Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.muted="{Binding IsMuted}" />
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Panel>
+  </DockPanel>
+</UserControl>
