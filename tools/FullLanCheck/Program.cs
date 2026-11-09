@@ -20,6 +20,54 @@ static class FullLanCheck
     private const int HostRpc = 15888, GuestRpc = 15889, ChildRpc = 15890, GamePort = 25565, BroadcastPort = 4445;
     private const string Listener = "tcp://127.0.0.1:11010";
     private static int _failures;
+    private static readonly Stopwatch Clock = Stopwatch.StartNew();
+    private static string _phase = "启动";
+    private static TimeSpan _phaseStarted;
+    private static TimeSpan _phaseLimit = TimeSpan.FromMinutes(3);
+    private static EasyTierElevatedSession? _watchedGuest;
+
+    /// <summary>进入下一步：打印带时间的进度；看门狗发现某一步超时就打印现场后直接退出（CI 卡住时能看出停在哪）。</summary>
+    private static void Phase(string name, int limitSeconds = 180)
+    {
+        lock (Clock)
+        {
+            _phase = name;
+            _phaseStarted = Clock.Elapsed;
+            _phaseLimit = TimeSpan.FromSeconds(limitSeconds);
+        }
+        Console.WriteLine($"==> [{Clock.Elapsed.TotalSeconds,6:0.0}s] {name}");
+    }
+
+    private static void StartWatchdog()
+    {
+        var thread = new Thread(() =>
+        {
+            while (true)
+            {
+                Thread.Sleep(2000);
+                string phase; TimeSpan over;
+                lock (Clock) { phase = _phase; over = Clock.Elapsed - _phaseStarted - _phaseLimit; }
+                if (over <= TimeSpan.Zero && Clock.Elapsed < TimeSpan.FromMinutes(15)) continue;
+                Console.WriteLine($"TIMEOUT  卡在：{phase}（总共 {Clock.Elapsed.TotalSeconds:0}s）");
+                try
+                {
+                    Console.WriteLine("---- 加入方 easytier / 守护输出 ----");
+                    foreach (var l in _watchedGuest?.RecentOutput.TakeLast(40) ?? []) Console.WriteLine("  " + l);
+                    Console.WriteLine("---- 进程 ----");
+                    Console.WriteLine(Run("ps", "axo", "pid,ppid,stat,etime,command").Output);
+                    Console.WriteLine("---- 网卡 ----");
+                    Console.WriteLine(Run("ifconfig", "-a").Output);
+                    Console.WriteLine("---- 托管线程栈 ----");
+                    Console.WriteLine(Run("dotnet-stack", "report", "-p", Environment.ProcessId.ToString()).Output);
+                }
+                catch (Exception e) { Console.WriteLine(e); }
+                Console.Out.Flush();
+                foreach (var pid in CorePids().Concat(GuardPids())) Run("kill", "-9", pid.ToString());
+                Environment.Exit(3);
+            }
+        }) { IsBackground = true, Name = "watchdog" };
+        thread.Start();
+    }
 
     public static async Task<int> MainAsync(string[] args)
     {
@@ -27,6 +75,8 @@ static class FullLanCheck
         if (args.Length >= 1 && args[0] == "--child") return await ChildAsync(args);
         if (args.Length != 1) { Console.WriteLine("用法：sudo dotnet FullLanCheck.dll <测试数据目录>"); return 2; }
         if (Environment.UserName != "root") { Console.WriteLine("要用 root 运行（sudo）"); return 2; }
+        StartWatchdog();
+        Phase("安装 easytier");
 
         var dataDir = Path.GetFullPath(args[0]);
         Directory.CreateDirectory(dataDir);
@@ -42,15 +92,19 @@ static class FullLanCheck
         var guestOptions = new EasyTierOptions(room, IsHost: false, Peers: [Listener], RpcPort: GuestRpc, MachineId: Guid.NewGuid().ToString(), Tun: true);
         var guestIp = IPAddress.Parse(EasyTierArgs.VirtualIp(guestOptions));
 
+        Phase("启动房主（不建网卡）", 60);
         using var game = new TcpListener(IPAddress.Loopback, GamePort);
         game.Start();
         var host = EasyTierSession.Start(installer, hostOptions, Path.Combine(dataDir, "host"));
         EasyTierElevatedSession? guest = null;
         try
         {
+            Phase("启动加入方守护并等就绪", 150);
             guest = EasyTierElevatedSession.Start(installer, guestOptions, Path.Combine(dataDir, "guest"));
             await guest.WaitForReadyAsync(new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token);
+            _watchedGuest = guest;
             Log("加入方守护已就绪");
+            Phase("等虚拟网卡", 60);
 
             // 1. 虚拟网卡带上本机虚拟 IP。
             var tun = await WaitAsync(() => FindInterface(guestIp), TimeSpan.FromSeconds(30));
@@ -59,13 +113,16 @@ static class FullLanCheck
             if (OperatingSystem.IsLinux()) Check("Linux 网卡名是 amberlan", tun == "amberlan", tun);
             else Check("macOS 用 utun", tun.StartsWith("utun", StringComparison.Ordinal), tun);
 
+            Phase("经虚拟网卡连房主", 120);
             // 2. 经虚拟网卡连房主的游戏端口（房主那边 EasyTier 交给本机 25565）。
             Check("经虚拟网卡连上房主游戏端口", await ConnectThroughTunAsync(game), string.Join('\n', guest.RecentOutput.TakeLast(15)));
 
+            Phase("广播转发", 60);
             // 3. 广播转发：本机从物理网卡发 255.255.255.255，守护应该从虚拟网卡用虚拟 IP 再发一份。
             var (seen, capture) = await BroadcastAsync(tun, guestIp);
             Check("广播从虚拟网卡转发出去（来源是虚拟 IP）", seen, capture);
 
+            Phase("换参数重启", 180);
             // 4. 换参数重启（不应再提权，守护还是同一个）。
             var guards = GuardPids();
             await guest.RestartAsync(guestOptions with { ExtraArgs = ["--default-protocol", "tcp"] }, new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token);
@@ -74,6 +131,7 @@ static class FullLanCheck
             Check("重启后网卡回来", tun is not null, "");
             Check("重启后还能连房主", await ConnectThroughTunAsync(game), "");
 
+            Phase("切到经房主上网", 180);
             // 5. 经房主上网：防漏规则、DNS 都要装上。
             var exitOptions = guestOptions with { ExitNode = EasyTierArgs.HostIp };
             await guest.RestartAsync(exitOptions, new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token);
@@ -85,6 +143,7 @@ static class FullLanCheck
             // 同一台机器上房主自己的出站也被本机的出口路由和防漏规则管着，这里不判断能不能上网，只记下来；真正经出口上网在两台机器上测。
             Log($"（仅记录）开出口后访问外网：{(await InternetAsync() ? "通" : "不通")}");
 
+            Phase("房主掉线", 90);
             // 6. 房主掉线：不能退回直接上网。
             host.Dispose();
             await Task.Delay(3000);
@@ -100,6 +159,7 @@ static class FullLanCheck
             host.Dispose();
         }
 
+        Phase("结束加入方并检查恢复", 120);
         // 7. 结束：网卡、规则、DNS、进程全部恢复。
         guest?.Dispose();
         await WaitAsync(() => FindInterface(guestIp) is null && CorePids().Count == 0 && GuardPids().Count == 0 ? "" : null, TimeSpan.FromSeconds(20));
@@ -110,6 +170,7 @@ static class FullLanCheck
         Check("结束后 DNS 恢复", dnsAfter == dnsBefore, $"之前：\n{dnsBefore}\n之后：\n{dnsAfter}");
         Check("结束后能上网", await InternetAsync(), "");
 
+        Phase("kill -9 测试", 240);
         // 8. 加入方进程被 kill -9：守护和 easytier-core 几秒内自己退出，网卡消失。
         await KillCheckAsync(dataDir);
         return Finish(null);
@@ -119,6 +180,9 @@ static class FullLanCheck
     {
         guest?.Dispose();
         Console.WriteLine(_failures == 0 ? "ALL PASS" : $"FAILED: {_failures}");
+        Console.Out.Flush();
+        // 有后台线程没收干净时也不要挂着不退。
+        Environment.Exit(_failures == 0 ? 0 : 1);
         return _failures == 0 ? 0 : 1;
     }
 
@@ -263,9 +327,11 @@ static class FullLanCheck
             using var p = Process.Start(info)!;
             var stdout = p.StandardOutput.ReadToEndAsync();
             var stderr = p.StandardError.ReadToEndAsync();
-            if (!p.WaitForExit(30000)) p.Kill(true);
-            p.WaitForExit();
-            return (p.ExitCode, stdout.Result + stderr.Result);
+            if (!p.WaitForExit(30000)) { Console.WriteLine($"      （命令超时，已结束：{file} {string.Join(' ', arguments)}）"); p.Kill(true); }
+            p.WaitForExit(5000);
+            // 子进程留下的后台进程可能还占着输出管道，读不完也不等。
+            var output = (stdout.Wait(5000) ? stdout.Result : "") + (stderr.Wait(1000) ? stderr.Result : "");
+            return (p.HasExited ? p.ExitCode : -1, output);
         }
         catch (System.ComponentModel.Win32Exception e) { return (-1, e.Message); }
     }

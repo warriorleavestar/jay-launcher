@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   e2e:
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +39,9 @@ jobs:
       - name: Build
         run: dotnet build tools/FullLanCheck -c Release
 
+      # 检查工具自己有看门狗（每一步限时、总共 15 分钟），卡住时打印停在哪一步和现场；这里再兜一层步骤超时，后面的现场步骤还能跑。
       - name: Run (root)
+        timeout-minutes: 18
         run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan"
 
       - name: Leftovers on failure
