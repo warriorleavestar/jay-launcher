@@ -46,7 +46,8 @@ public sealed record ApprovalCard(KnockRequest Request, string? Warning) : Local
 {
     internal TaskCompletionSource<bool> Decision { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public string Title => L.F("multiplayer.invite.knocking", Request.Name.Length > 0 ? Request.Name : L.T("multiplayer.peers.player"));
-    public string Detail => L.F("multiplayer.invite.fingerprint", Request.Fingerprint) + (Request.Version.Length > 0 ? " · " + Request.Version : "");
+    public string Detail => L.F("multiplayer.invite.fingerprint", Request.Fingerprint) + (Request.Version.Length > 0 ? " · " + Request.Version : "")
+        + (Request.DeviceId is { } device ? " · " + L.F("multiplayer.device.id", device) : "");
     public bool HasWarning => Warning is not null;
 }
 
@@ -188,7 +189,7 @@ public sealed partial class MultiplayerViewModel
         _members = members;
         var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => Trusted.IsTrusted(pub), AskApprovalAsync, members,
-            line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort);
+            line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy);
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.StateChanged += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.Paused += () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Warning("multiplayer.invite.paused")));
@@ -365,6 +366,7 @@ public sealed partial class MultiplayerViewModel
         {
             var chat = _chat;
             _chat = null;
+            StopPrivate();
             ChatReady = false;
             ChatStatus = L.T("multiplayer.chat.reconnecting");
             if (chat is not null) _ = chat.DisposeAsync().AsTask();
@@ -562,6 +564,7 @@ public sealed partial class MultiplayerViewModel
         {
             var me = Identity.KeyPair;
             var name = ChatName;
+            var device = Device;
             KnockOutcome? viaPublic = null;
             if (knock is not null || _public is not null)
             {
@@ -577,7 +580,7 @@ public sealed partial class MultiplayerViewModel
                 }), cts.Token, () => Dispatcher.UIThread.Post(() =>
                 {
                     if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
-                })));
+                }), device));
             if (_knockCts != cts) return;
             if (outcome.Credentials is not { } credentials)
             {
@@ -629,6 +632,7 @@ public sealed partial class MultiplayerViewModel
         "closed" => "multiplayer.invite.reason.closed",
         "mismatch" => "multiplayer.public.reason.mismatch",
         "password" => "multiplayer.public.reason.password",
+        "device" => "multiplayer.device.reason",
         _ => "multiplayer.invite.reason.denied",
     };
 }
