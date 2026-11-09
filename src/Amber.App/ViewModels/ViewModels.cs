@@ -189,6 +189,7 @@ public sealed partial class MainViewModel : ObservableObject
         var log = new LogViewModel();
         var home = new HomeViewModel(service, log);
         var instance = new InstanceViewModel(service) { NavigateHome = null };
+        instance.AttachHome(home);
         var content = new ContentViewModel(service);
         var multiplayer = new MultiplayerViewModel(service);
         Multiplayer = multiplayer;

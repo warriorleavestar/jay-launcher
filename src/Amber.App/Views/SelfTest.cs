@@ -82,6 +82,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "instance")
+            {
+                await InstanceDetailAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "library")
             {
                 await LibraryAsync();

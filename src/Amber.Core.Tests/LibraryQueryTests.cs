@@ -92,6 +92,20 @@ public class LibraryQueryTests
 public class AgoFormatTests
 {
     [Fact]
+    public void PlayTimeIsMinutesThenHours()
+    {
+        var before = Amber.Core.Localization.L.Language;
+        Amber.Core.Localization.L.SetLanguage("en");
+        try
+        {
+            Assert.Equal("45 minutes", Amber.Core.Localization.Fmt.PlayTime(TimeSpan.FromMinutes(45)));
+            Assert.Equal("1 hour", Amber.Core.Localization.Fmt.PlayTime(TimeSpan.FromMinutes(70)));
+            Assert.Equal("36 hours", Amber.Core.Localization.Fmt.PlayTime(TimeSpan.FromMinutes(2160)));
+        }
+        finally { Amber.Core.Localization.L.SetLanguage(before); }
+    }
+
+    [Fact]
     public void AgoBuckets()
     {
         var before = Amber.Core.Localization.L.Language;

@@ -192,7 +192,7 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 | 页面文件 | 区块 |
 |---|---|
 | `accounts.json` | `accounts.title` `accounts.list` `accounts.add` `accounts.status` |
-| `instances.json` | `instances.header` `instances.picker` `instances.details` `instances.status` |
+| `instances.json` | `instances.header` (the hero) `instances.lastrun` `instances.details` `instances.status` |
 | `downloads.json` | `downloads.title` `downloads.search` `downloads.filters` `downloads.body` `downloads.status` |
 | `content.json` | `content.header` `content.filters` `content.body` `content.status` |
 | `multiplayer.json` | `multiplayer.title` `multiplayer.body` `multiplayer.status` |

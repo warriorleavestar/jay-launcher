@@ -35,6 +35,14 @@ public static class Fmt
         return L.F("format.duration.hours_minutes", minutes / 60, minutes % 60);
     }
 
+    /// <summary>Total play time: minutes under an hour, whole hours after that ("36 hours").</summary>
+    public static string PlayTime(TimeSpan time)
+    {
+        if (time.TotalMinutes < 60) return Minutes(time);
+        var hours = (long)Math.Round(time.TotalHours);
+        return L.P("format.duration.hours", hours, hours);
+    }
+
     /// <summary>“X 分钟”，不到 1 分钟按 1 分钟算。</summary>
     public static string Minutes(TimeSpan time)
     {

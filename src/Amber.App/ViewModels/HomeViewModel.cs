@@ -351,6 +351,32 @@ public sealed partial class HomeViewModel : PageViewModel
     }
 
     /// <summary>按最近一次启动的阶段和当前选择，重算主按钮文字和进度条。</summary>
+    /// <summary>The latest session of each instance in this run of Jay (instance page start button).</summary>
+    private readonly Dictionary<string, LaunchSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
+
+    public LaunchSession? SessionOf(string id) => _sessions.GetValueOrDefault(id);
+
+    /// <summary>Force quit is being offered for this instance's session.</summary>
+    public bool ForceKillOfferedFor(string id) => _forceKillRun is { } r && string.Equals(r.Id, id, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Any run started, changed phase or ended. On the UI thread.</summary>
+    public event Action? RunStateChanged;
+
+    /// <summary>The instance page's side button: cancel while preparing, otherwise ask the game to save and quit.</summary>
+    public void StopRun(string id)
+    {
+        if (_runs.LastOrDefault(r => string.Equals(r.Id, id, StringComparison.OrdinalIgnoreCase)) is not { } run) return;
+        if (run.Game is null) CancelRun(run);
+        else if (!run.Exiting) ExitGame(run);
+    }
+
+    /// <summary>The instance whose session the crash panel is about.</summary>
+    [ObservableProperty]
+    public partial string? CrashInstance { get; set; }
+
+    /// <summary>When that session ended.</summary>
+    public DateTimeOffset? CrashTime { get; private set; }
+
     private void UpdateRunState()
     {
         var run = Latest;
@@ -368,6 +394,7 @@ public sealed partial class HomeViewModel : PageViewModel
         Onboarding.Update(Accounts.Count == 0, Versions.Count == 0, SelectedAccount?.Name);
         if (IsRunning) _clock.Start();
         else _clock.Stop();
+        RunStateChanged?.Invoke();
     }
 
     private string PrimaryKey(GameRun? run)
@@ -484,6 +511,7 @@ public sealed partial class HomeViewModel : PageViewModel
         // 从准备阶段就开始记：补文件、Java、登录这些步骤出错时，日志页也看得到原因。
         run.Log = _log.BeginRun(id, DateTimeOffset.Now);
         _runs.Add(run);
+        _sessions[id] = run.Session;
         _lastRequest = request;
         SessionStarted?.Invoke(run.Session);
         Crash = null;
@@ -829,8 +857,29 @@ public sealed partial class HomeViewModel : PageViewModel
     {
         var run = new GameRun(id) { Game = game, WorkDir = workDir, Started = DateTime.UtcNow };
         _runs.Add(run);
+        _sessions[id] = run.Session;
+        SessionStarted?.Invoke(run.Session);
         UpdateRunState();
         return run;
+    }
+
+    internal static LaunchSession SessionForTest(object run) => ((GameRun)run).Session;
+
+    /// <summary>Self-check: put a session for an instance into a given state without a game process.</summary>
+    internal LaunchSession SetSessionForTest(string id, LaunchSession session)
+    {
+        _sessions[id] = session;
+        SessionStarted?.Invoke(session);
+        RunStateChanged?.Invoke();
+        return session;
+    }
+
+    /// <summary>Self-check: show the crash panel for an instance with a ready-made analysis.</summary>
+    internal void ShowCrashForTest(string id, CrashAnalysis analysis)
+    {
+        CrashInstance = id;
+        CrashTime = DateTimeOffset.Now;
+        Crash = analysis;
     }
 
     internal void RemoveRunForTest(object run)
@@ -939,6 +988,8 @@ public sealed partial class HomeViewModel : PageViewModel
         _lastRunOutput = input.ExportOutput;
         _lastRunAttachments = input.Attachments;
         _log.AddRaw(run.Log, L.F("home.log.crash_analysis", analysis.Summary));
+        CrashInstance = run.Id;
+        CrashTime = run.Session.Ended ?? DateTimeOffset.Now;
         Crash = analysis;
     }
 

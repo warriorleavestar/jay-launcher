@@ -27,7 +27,7 @@ public sealed partial class LibraryCard(LibraryEntry entry, int modCount, double
         ? Entry.McVersion
         : ModCount > 0 ? L.F("library.facts.mods", Entry.McVersion, LoaderName, L.P("library.mods", ModCount, ModCount)) : L.F("library.facts", Entry.McVersion, LoaderName);
     public string LastPlayedText => Entry.LastPlayed is { } t ? L.F("library.last_played", Fmt.Ago(t, DateTimeOffset.Now)) : L.T("library.never_played");
-    public string PlayTimeText => playMinutes >= 1 ? L.F("library.play_time", Fmt.Minutes(TimeSpan.FromMinutes(playMinutes))) : "";
+    public string PlayTimeText => playMinutes >= 1 ? L.F("library.play_time", Fmt.PlayTime(TimeSpan.FromMinutes(playMinutes))) : "";
     public bool HasPlayTime => playMinutes >= 1;
     public bool IsPinned => Entry.Pinned;
     public bool IsRunning => Entry.IsRunning;

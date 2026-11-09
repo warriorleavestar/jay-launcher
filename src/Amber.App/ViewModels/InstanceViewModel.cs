@@ -257,8 +257,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     /// <summary>每个实例上次打开的 Tab（只在这次运行里记着）。</summary>
     private readonly Dictionary<string, int> _lastTab = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>没打开过的实例默认看哪个 Tab：有加载器看模组，原版看世界（改版规格 4.3）。</summary>
-    internal static InstanceTab DefaultTab(GameInstance instance) => instance.Loader is null ? InstanceTab.Worlds : InstanceTab.Mods;
+    /// <summary>An instance not opened before in this run starts on the overview (official design §6.4).</summary>
+    internal static InstanceTab DefaultTab(GameInstance instance) => InstanceTab.Overview;
 
     partial void OnSelectedIdChanged(string? oldValue, string? newValue)
     {
@@ -298,6 +298,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         if (Current is null || !_loadedTabs.Add(tab)) return;
         switch ((InstanceTab)tab)
         {
+            case InstanceTab.Overview: LoadOverview(); break;
             case InstanceTab.Settings: LoadSettings(); break;
             case InstanceTab.Mods: LoadMods(); break;
             case InstanceTab.Worlds: LoadWorlds(); break;
@@ -1346,9 +1347,10 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     }
 }
 
-/// <summary>实例页的 Tab，顺序就是界面上的顺序（改版规格 4.3）。“导出整合包”移进了【⋯ 更多】菜单。</summary>
+/// <summary>实例页的 Tab，顺序就是界面上的顺序（官方设计 §6.3）。“导出整合包”移进了【⋯ 更多】菜单。</summary>
 public enum InstanceTab
 {
+    Overview,
     Mods,
     Worlds,
     ResourcePacks,

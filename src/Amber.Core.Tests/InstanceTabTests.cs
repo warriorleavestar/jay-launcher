@@ -16,16 +16,16 @@ public sealed class InstanceTabTests : IDisposable
     public void TabOrderPutsModsFirstAndSettingsLast()
     {
         Assert.Equal(
-            [InstanceTab.Mods, InstanceTab.Worlds, InstanceTab.ResourcePacks, InstanceTab.ShaderPacks, InstanceTab.Servers, InstanceTab.Screenshots, InstanceTab.Settings],
+            [InstanceTab.Overview, InstanceTab.Mods, InstanceTab.Worlds, InstanceTab.ResourcePacks, InstanceTab.ShaderPacks, InstanceTab.Servers, InstanceTab.Screenshots, InstanceTab.Settings],
             Enum.GetValues<InstanceTab>());
-        Assert.Equal(0, (int)InstanceTab.Mods);
+        Assert.Equal(0, (int)InstanceTab.Overview);
     }
 
     [Fact]
-    public void DefaultTabIsModsWithLoaderAndWorldsForVanilla()
+    public void DefaultTabIsOverview()
     {
-        Assert.Equal(InstanceTab.Mods, InstanceViewModel.DefaultTab(new GameInstance("f", "1.21.1", "fabric", "0.16", _root)));
-        Assert.Equal(InstanceTab.Worlds, InstanceViewModel.DefaultTab(new GameInstance("v", "1.21.1", null, null, _root)));
+        Assert.Equal(InstanceTab.Overview, InstanceViewModel.DefaultTab(new GameInstance("f", "1.21.1", "fabric", "0.16", _root)));
+        Assert.Equal(InstanceTab.Overview, InstanceViewModel.DefaultTab(new GameInstance("v", "1.21.1", null, null, _root)));
     }
 
     /// <summary>保存实例设置后按新设置重新读实例：改了隔离，工作目录跟着变（不用重新选一次实例）。</summary>
@@ -73,11 +73,11 @@ public sealed class InstanceTabTests : IDisposable
         var vm = new InstanceViewModel(service);
 
         vm.SelectedId = "a";
-        Assert.Equal((int)InstanceTab.Worlds, vm.TabIndex); // 原版默认看世界
+        Assert.Equal((int)InstanceTab.Overview, vm.TabIndex);
         vm.TabIndex = (int)InstanceTab.ShaderPacks;
 
         vm.SelectedId = "b";
-        Assert.Equal((int)InstanceTab.Worlds, vm.TabIndex);
+        Assert.Equal((int)InstanceTab.Overview, vm.TabIndex);
         vm.TabIndex = (int)InstanceTab.Settings;
 
         vm.SelectedId = "a";

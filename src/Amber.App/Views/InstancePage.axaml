@@ -5,39 +5,304 @@
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:c="using:Amber.App.Views.Controls"
              xmlns:core="using:Amber.Core.Content"
+             xmlns:game="using:Amber.Core.Game"
+             xmlns:v="using:Amber.App.Views"
              x:Class="Amber.App.Views.InstancePage"
              x:DataType="vm:InstanceViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.hero">
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusLg}" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+    <Style Selector="Border.hero TextBlock.on-cover"><Setter Property="Foreground" Value="#F5F2EA" /></Style>
+    <Style Selector="Border.hero TextBlock.on-cover-dim"><Setter Property="Foreground" Value="#D9D3C7" /></Style>
+    <Style Selector="Border.hero Button.on-cover">
+      <Setter Property="Foreground" Value="#F5F2EA" />
+      <Setter Property="Background" Value="#33000000" />
+    </Style>
+    <Style Selector="Border.hero Button.on-cover Path.icon"><Setter Property="Stroke" Value="#F5F2EA" /></Style>
+    <Style Selector="Border.cover">
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="Border.cover TextBlock.initial">
+      <Setter Property="Foreground" Value="#F5F2EA" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.fact-tag">
+      <Setter Property="Background" Value="#40000000" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="8,2" />
+    </Style>
+    <!-- 正在玩：PlayTint 底 PlayText 字，不是实心琥珀 -->
+    <Style Selector="Button.start.playing">
+      <Setter Property="Background" Value="{DynamicResource PlayTint}" />
+      <Setter Property="Foreground" Value="{DynamicResource PlayText}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Play}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.lastrun">
+      <Setter Property="Background" Value="{DynamicResource Surface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Danger}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusLg}" />
+      <Setter Property="Padding" Value="16,12" />
+      <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+    <Style Selector="Border.overview-block">
+      <Setter Property="Background" Value="{DynamicResource Surface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="Padding" Value="12,10" />
+    </Style>
+  </UserControl.Styles>
   <Grid RowDefinitions="Auto,Auto,*,Auto">
-    <Grid svc:ThemeRegion.Name="instances.header" ColumnDefinitions="*,Auto">
-      <TextBlock Classes="h1" Text="{l:T instance.title}" />
-      <Button Grid.Column="1" Classes="ghost" Content="{l:T instance.new}" Command="{Binding NewInstanceCommand}" VerticalAlignment="Top" />
-    </Grid>
+    <!-- 英雄区：封面、名字、事实行、开始按钮（状态机）、旁边单独的取消 / 退出按钮（官方设计 §6.3） -->
+    <Border x:Name="Hero" Classes="hero" svc:ThemeRegion.Name="instances.header" IsVisible="{Binding HasInstance}" MinHeight="200"
+            Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
+      <Panel>
+        <Border IsHitTestVisible="False">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+              <GradientStop Color="#10000000" Offset="0" />
+              <GradientStop Color="#10000000" Offset="0.4" />
+              <GradientStop Color="#B0000000" Offset="1" />
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+        <TextBlock x:Name="HeroWatermark" Classes="on-cover" Text="{Binding CoverInitial}" FontSize="140" FontWeight="Bold" Opacity="0.12"
+                   HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,40,0" IsHitTestVisible="False" />
+        <Grid x:Name="HeroContent" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14" Margin="20,14">
+          <Border x:Name="HeroThumb" Classes="cover" Width="64" Height="64" VerticalAlignment="Bottom" BorderBrush="#66FFFFFF" BorderThickness="1"
+                  Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
+            <TextBlock Classes="initial" Text="{Binding CoverInitial}" FontSize="30" />
+          </Border>
+          <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Bottom">
+            <TextBlock x:Name="HeroName" Classes="on-cover headline" Text="{Binding HeroName}" TextTrimming="CharacterEllipsis" MaxLines="1" ToolTip.Tip="{Binding HeroName}" />
+            <WrapPanel x:Name="HeroFacts" ItemSpacing="6" LineSpacing="4">
+              <Border Classes="fact-tag"><TextBlock Classes="on-cover" Text="{Binding HeroVersion}" FontSize="12" /></Border>
+              <Border Classes="fact-tag" IsVisible="{Binding !!HeroLoader.Length}"><TextBlock Classes="on-cover" Text="{Binding HeroLoader}" FontSize="12" /></Border>
+              <TextBlock Classes="on-cover-dim" Text="{Binding HeroFacts}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </WrapPanel>
+            <WrapPanel ItemSpacing="10" LineSpacing="8" Margin="0,4,0,0">
+              <Button x:Name="StartButton" Classes="start" Classes.play="{Binding StartAmber}" Classes.primary="{Binding StartPrimary}"
+                      Classes.playing="{Binding StartPlaying}" Command="{Binding StartGameCommand}" ToolTip.Tip="Ctrl+Enter"
+                      AutomationProperties.Name="{Binding StartLabel}"
+                      MinHeight="44" MinWidth="168" Padding="22,8" FontSize="16" FontWeight="SemiBold" HorizontalContentAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Path Data="{StaticResource Icon.Play}" Width="14" Height="14" Stretch="Uniform" Fill="{Binding $parent[Button].Foreground}"
+                        IsVisible="{Binding ShowPlayIcon}" />
+                  <Ellipse Width="8" Height="8" Fill="{DynamicResource Play}" VerticalAlignment="Center" IsVisible="{Binding StartPlaying}" />
+                  <ProgressBar IsIndeterminate="True" Width="22" MinWidth="22" Height="4" VerticalAlignment="Center" IsVisible="{Binding StartBusy}" />
+                  <TextBlock Text="{Binding StartLabel}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button x:Name="SideButton" Classes="secondary" Content="{Binding SideLabel}" Command="{Binding SideActionCommand}" MinHeight="44"
+                      IsVisible="{Binding ShowSideButton}" />
+              <Button x:Name="HeroForceKill" Classes="danger" Content="{Binding SideLabel}" MinHeight="44" IsVisible="{Binding SideIsForceKill}">
+                <Button.Flyout>
+                  <Flyout Placement="TopEdgeAlignedLeft">
+                    <StackPanel Spacing="10" MaxWidth="280">
+                      <TextBlock Text="{l:T home.force_kill.confirm}" TextWrapping="Wrap" />
+                      <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Classes="danger" Content="{l:T home.button.force_kill}" Command="{Binding SideActionCommand}" Click="CloseHeroForceKill" />
+                        <Button Content="{l:T common.cancel}" Click="CloseHeroForceKill" />
+                      </StackPanel>
+                    </StackPanel>
+                  </Flyout>
+                </Button.Flyout>
+              </Button>
+              <TextBlock x:Name="HeroAccount" Classes="on-cover-dim" Text="{Binding AccountText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="240" />
+            </WrapPanel>
+            <TextBlock x:Name="HeroNote" Classes="on-cover-dim" Text="{Binding HeroNote}" IsVisible="{Binding HasHeroNote}" FontSize="12" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+            <Button x:Name="HeroPin" Classes="ghost icon-only on-cover" Command="{Binding TogglePinCommand}" ToolTip.Tip="{Binding PinTip}" AutomationProperties.Name="{Binding PinTip}">
+              <Path Classes="icon" Data="{StaticResource Icon.Pin}" Width="16" Height="16" />
+            </Button>
+            <Button x:Name="HeroFolder" Classes="ghost icon-only on-cover" Command="{Binding OpenFolderCommand}" ToolTip.Tip="{l:T common.open_folder}" AutomationProperties.Name="{l:T common.open_folder}">
+              <Path Classes="icon" Data="{StaticResource Icon.Folder}" Width="16" Height="16" />
+            </Button>
+            <Button x:Name="HeroMore" Classes="ghost icon-only on-cover" ToolTip.Tip="{l:T instance.more}" AutomationProperties.Name="{l:T instance.more}" HotKey="Ctrl+OemPeriod">
+              <Path Classes="icon" Data="{StaticResource Icon.More}" Width="16" Height="16" />
+              <Button.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                  <MenuItem Header="{l:T instance.files.repair}" Command="{Binding CompleteFilesCommand}" />
+                  <MenuItem Header="{l:T instance.export.pack_menu}" Click="ExportPackDialog_Click" />
+                  <MenuItem Header="{l:T instance.export.script_menu}" Click="ExportScript_Click" />
+                  <Separator />
+                  <MenuItem Classes="danger" Header="{l:T instance.version.delete}" Command="{Binding DeleteVersionCommand}" />
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Panel>
+    </Border>
+    <TextBlock Classes="hint" Text="{Binding InfoText}" IsVisible="{Binding !HasInstance}" TextWrapping="Wrap" />
 
-    <StackPanel svc:ThemeRegion.Name="instances.picker" Grid.Row="1" Spacing="6" Margin="0,0,0,8">
-      <!-- 选择器占满一行；启动、打开文件夹、更多放下一行，放不下自动折行（853 宽、长译文时不挤压选择器）。 -->
-      <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding SelectedId}" HorizontalAlignment="Stretch" PlaceholderText="{l:T instance.version.empty}" />
-      <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding HasInstance}">
-        <Button Classes="play" Content="{l:T instance.launch}" Command="{Binding LaunchCommand}" />
-        <Button Content="{l:T common.open_folder}" Command="{Binding OpenFolderCommand}" />
-        <Button Content="{l:T instance.more}">
-          <Button.Flyout>
-            <MenuFlyout Placement="BottomEdgeAlignedLeft">
-              <MenuItem Header="{l:T instance.files.repair}" Command="{Binding CompleteFilesCommand}" />
-              <MenuItem Header="{l:T instance.export.script_menu}" Click="ExportScript_Click" />
-              <MenuItem Header="{l:T instance.export.pack_menu}" Click="ExportPackDialog_Click" />
-              <Separator />
-              <MenuItem Classes="danger" Header="{l:T instance.version.delete}" Command="{Binding DeleteVersionCommand}" />
-            </MenuFlyout>
-          </Button.Flyout>
-        </Button>
-      </WrapPanel>
-      <TextBlock Classes="hint" FontSize="12" Text="{Binding InfoText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding InfoText}" />
-    </StackPanel>
+    <!-- 上一局：英雄区下面、页签上面；修复按钮挨着原因，就地做（官方设计 §6.3） -->
+    <Border x:Name="LastRunPanel" Grid.Row="1" Classes="lastrun" svc:ThemeRegion.Name="instances.lastrun" IsVisible="{Binding ShowLastRun}">
+      <StackPanel Spacing="8">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+          <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="18" Height="18" Stroke="{DynamicResource DangerText}" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1" Text="{Binding LastRunTitle}" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap" />
+          <Button Grid.Column="2" Classes="ghost icon-only" Command="{Binding DismissLastRunCommand}" ToolTip.Tip="{l:T home.failure.dismiss}" AutomationProperties.Name="{l:T home.failure.dismiss}">
+            <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="14" Height="14" />
+          </Button>
+        </Grid>
+        <ItemsControl x:Name="LastRunCauses" ItemsSource="{Binding LastRunCauses}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:LastRunCause">
+              <StackPanel Spacing="4" Margin="0,0,0,10">
+                <TextBlock Classes="caption" Text="{Binding SeverityText}" />
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Advice}" Classes="hint" TextWrapping="Wrap" />
+                <ItemsControl ItemsSource="{Binding Fixes}">
+                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="6" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:LastRunFixButton">
+                      <Button Classes="secondary" Command="{Binding $parent[UserControl].((vm:InstanceViewModel)DataContext).ApplyFixCommand}" CommandParameter="{Binding}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Path Classes="icon" Data="{StaticResource Icon.Check}" Width="14" Height="14" IsVisible="{Binding Done}" Stroke="{DynamicResource SuccessText}" />
+                          <TextBlock Text="{Binding Label}" />
+                        </StackPanel>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <ToggleButton x:Name="EvidenceToggle" Classes="ghost small" Background="Transparent" IsVisible="{Binding HasEvidence}" HorizontalAlignment="Left" Padding="4,2">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="{l:T instance.lastrun.evidence}" FontSize="12" />
+                    <Path Classes="icon" Data="{StaticResource Icon.ChevronDown}" Width="12" Height="12" />
+                  </StackPanel>
+                </ToggleButton>
+                <Border IsVisible="{Binding #EvidenceToggle.IsChecked}" Background="{DynamicResource PageBg}" CornerRadius="6" Padding="8,6">
+                  <SelectableTextBlock Text="{Binding Evidence}" FontFamily="{DynamicResource MonoFont}" FontSize="12" TextWrapping="Wrap" />
+                </Border>
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Classes="hint" Text="{l:T instance.lastrun.unknown}" IsVisible="{Binding LastRunUnknown}" TextWrapping="Wrap" />
+        <WrapPanel ItemSpacing="8" LineSpacing="6">
+          <TextBlock Text="{l:T instance.lastrun.still_broken}" VerticalAlignment="Center" Classes="hint" />
+          <Button Classes="secondary" Content="{l:T home.crash.view_log}" Command="{Binding ViewLastRunLogCommand}" />
+          <Button Classes="secondary" Content="{l:T home.crash.export}" Click="ExportLastRun_Click" />
+          <Button Classes="ghost" Content="{l:T home.crash.open_report}" Command="{Binding OpenLastRunReportCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
 
     <Border svc:ThemeRegion.Name="instances.details" Grid.Row="2" Classes="card" Padding="10" IsVisible="{Binding HasInstance}">
       <!-- 小窗口有状态提示时，页签和工具栏一起滚动；页签内容仍有有限高度，列表继续虚拟滚动。 -->
       <ScrollViewer x:Name="InstanceTabsScroll" HorizontalScrollBarVisibility="Disabled">
       <TabControl SelectedIndex="{Binding TabIndex}" Padding="0,8,0,0" Height="{Binding #InstanceTabsScroll.Viewport.Height}" MinHeight="320">
+        <TabItem x:Name="OverviewTab" Header="{l:T overview.title}" FontSize="14">
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid x:Name="OverviewGrid" ColumnDefinitions="2*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12" Margin="0,0,4,8">
+              <StackPanel x:Name="OverviewMain" Spacing="12">
+                <Border Classes="overview-block">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{l:T overview.worlds}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Classes="ghost small" Content="{l:T overview.all}" Command="{Binding GoToTabCommand}" CommandParameter="Worlds" />
+                    </Grid>
+                    <ItemsControl x:Name="OverviewWorlds" ItemsSource="{Binding RecentWorlds}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:WorldItem">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,2">
+                            <StackPanel>
+                              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Text="{Binding Meta}" Classes="caption" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="secondary" Content="{l:T overview.enter}" VerticalAlignment="Center"
+                                    Command="{Binding $parent[ItemsControl].((vm:InstanceViewModel)DataContext).EnterWorldCommand}" CommandParameter="{Binding}" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="hint" Text="{l:T overview.worlds.empty}" IsVisible="{Binding !HasRecentWorlds}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+                <Border Classes="overview-block">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{l:T overview.screenshots}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Classes="ghost small" Content="{l:T overview.all}" Command="{Binding GoToTabCommand}" CommandParameter="Screenshots" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding RecentShots}">
+                      <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:ScreenshotItem">
+                          <Button Padding="0" Background="Transparent" ToolTip.Tip="{Binding Name}" AutomationProperties.Name="{Binding Name}"
+                                  Command="{Binding $parent[ItemsControl].((vm:InstanceViewModel)DataContext).OpenScreenshotCommand}" CommandParameter="{Binding}">
+                            <Image Source="{Binding Thumbnail}" Width="120" Height="68" Stretch="UniformToFill" />
+                          </Button>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="hint" Text="{l:T overview.screenshots.empty}" IsVisible="{Binding !HasRecentShots}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+                <Border Classes="overview-block">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{l:T overview.servers}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Classes="ghost small" Content="{l:T overview.all}" Command="{Binding GoToTabCommand}" CommandParameter="Servers" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding SavedServers}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="game:ServerEntry">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,2">
+                            <StackPanel>
+                              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Text="{Binding Address}" Classes="caption" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="secondary" Content="{l:T overview.connect}" VerticalAlignment="Center"
+                                    Command="{Binding $parent[ItemsControl].((vm:InstanceViewModel)DataContext).ConnectServerCommand}" CommandParameter="{Binding}" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="hint" Text="{l:T overview.servers.empty}" IsVisible="{Binding !HasSavedServers}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+              <StackPanel x:Name="OverviewSide" Grid.Column="1" Spacing="12">
+                <Border Classes="overview-block">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{l:T overview.this_instance}" FontWeight="SemiBold" />
+                    <ItemsControl x:Name="OverviewFactList" ItemsSource="{Binding OverviewFacts}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:OverviewFact">
+                          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="0,2">
+                            <TextBlock Classes="hint" Text="{Binding Label}" MinWidth="56" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Text="{Binding Value}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Value}" VerticalAlignment="Center" />
+                            <Button Grid.Column="2" Classes="ghost small" Content="{Binding ActionLabel}" Command="{Binding Action}" IsVisible="{Binding HasAction}" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+                <Border Classes="overview-block">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{l:T overview.mod_updates}" FontWeight="SemiBold" IsVisible="{Binding !IsVanilla}" />
+                    <TextBlock Classes="hint" Text="{l:T overview.mod_updates.hint}" IsVisible="{Binding !IsVanilla}" TextWrapping="Wrap" />
+                    <Button Classes="secondary" Content="{l:T overview.mod_updates.check}" Command="{Binding CheckModUpdatesFromOverviewCommand}" IsVisible="{Binding !IsVanilla}" />
+                    <TextBlock Text="{l:T overview.want_mods}" FontWeight="SemiBold" IsVisible="{Binding IsVanilla}" TextWrapping="Wrap" />
+                    <Button Classes="secondary" Content="{l:T overview.install_loader}" Command="{Binding NewInstanceCommand}" IsVisible="{Binding IsVanilla}" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Grid>
+          </ScrollViewer>
+        </TabItem>
         <TabItem Header="{l:T instance.mods.title}" FontSize="14">
           <Grid RowDefinitions="Auto,Auto,*">
             <!-- 汇总一行、按钮一行（按钮放不下时换行），英文、日文的长按钮不会把汇总挤没。 -->
