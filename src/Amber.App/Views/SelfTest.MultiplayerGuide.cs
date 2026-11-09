@@ -1,3 +1,4 @@
+using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
@@ -69,9 +70,15 @@ internal sealed partial class SelfTest
         Check("联机设置：分组都在", HasText("multiplayer.settings.identity") && HasText("multiplayer.settings.invites") && HasText("multiplayer.settings.component")
             && HasText("multiplayer.settings.diagnostics"));
         var relayHeader = page.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "RelayHeader");
-        Check("联机设置：默认开着内置中转服务器，开箱就有", vm.UseBuiltInNodes && vm.HasNodes && HasText("multiplayer.nodes.builtin_toggle")
+        // "On by default" is about a fresh install, not about this test profile: a reused profile may have it switched off
+        // (earlier runs, or a tester who turned it off). Check the default itself, then show the switch on for the UI checks
+        // and put the profile's own choice back at the end.
+        var profileUsesBuiltIn = vm.UseBuiltInNodes;
+        vm.UseBuiltInNodes = true;
+        await Task.Delay(100);
+        Check("联机设置：默认开着内置中转服务器，开箱就有", new AppSettings().UseBuiltInNodes && vm.HasNodes && HasText("multiplayer.nodes.builtin_toggle")
             && relayHeader?.Text == vm.NodesHeaderText,
-            $"builtin={vm.UseBuiltInNodes} has={vm.HasNodes} header={vm.NodesHeaderText} count={RelayNodes.BuiltIn.Count}");
+            $"default={new AppSettings().UseBuiltInNodes} profile={profileUsesBuiltIn} has={vm.HasNodes} header={vm.NodesHeaderText} count={RelayNodes.BuiltIn.Count}");
         var advanced = page.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => e.Name == "AdvancedExpander");
         Check("联机设置：高级选项默认收起", advanced is { IsExpanded: false });
         vm.UseBuiltInNodes = false;
@@ -191,5 +198,6 @@ internal sealed partial class SelfTest
         else Check("开服：测试配置里已经初始化过，跳过第一步检查", true);
         vm.ShowMyServer = false;
         vm.ShowTabCommand.Execute("play");
+        vm.UseBuiltInNodes = profileUsesBuiltIn;
     }
 }

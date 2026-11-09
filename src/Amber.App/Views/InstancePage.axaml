@@ -82,6 +82,9 @@
       <Setter Property="Opacity" Value="0.5" />
     </Style>
   </UserControl.Styles>
+  <!-- Short windows: the whole page scrolls and the tabs card gets a fixed height (code-behind), so the tabs and the
+       status card below them stay reachable. Otherwise vertical scrolling is off and the tabs card fills the rest. -->
+  <ScrollViewer x:Name="PageScroll" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled">
   <Grid RowDefinitions="Auto,Auto,*,Auto">
     <!-- 英雄区：封面、名字、事实行、开始按钮（状态机）、旁边单独的取消 / 退出按钮（官方设计 §6.3） -->
     <Border x:Name="Hero" Classes="hero" svc:ThemeRegion.Name="instances.header" IsVisible="{Binding HasInstance}" MinHeight="200"
@@ -237,7 +240,7 @@
     </Border>
     </StackPanel>
 
-    <Border svc:ThemeRegion.Name="instances.details" Grid.Row="2" Classes="card" Padding="10" IsVisible="{Binding HasInstance}">
+    <Border x:Name="DetailsCard" svc:ThemeRegion.Name="instances.details" Grid.Row="2" Classes="card" Padding="10" IsVisible="{Binding HasInstance}">
       <!-- 小窗口有状态提示时，页签和工具栏一起滚动；页签内容仍有有限高度，列表继续虚拟滚动。 -->
       <ScrollViewer x:Name="InstanceTabsScroll" HorizontalScrollBarVisibility="Disabled">
       <TabControl SelectedIndex="{Binding TabIndex}" Padding="0,8,0,0" Height="{Binding #InstanceTabsScroll.Viewport.Height}" MinHeight="320">
@@ -988,6 +991,8 @@
         <MultiBinding Converter="{x:Static BoolConverters.Or}">
           <Binding Path="IsShowing" ElementName="PageStatus" />
           <Binding Path="IsBusy" />
+          <!-- The warning text fades after a few seconds; the CurseForge page button must stay until the file is handled. -->
+          <Binding Path="HasManualDownload" />
         </MultiBinding>
       </Border.IsVisible>
       <Grid ColumnDefinitions="*,Auto">
@@ -1000,4 +1005,5 @@
       </Grid>
     </Border>
   </Grid>
+  </ScrollViewer>
 </UserControl>

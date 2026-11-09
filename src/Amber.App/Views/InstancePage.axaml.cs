@@ -3,6 +3,7 @@ using Amber.Core.Localization;
 using Amber.App.ViewModels;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
@@ -140,6 +141,11 @@ public partial class InstancePage : UserControl
     {
         if (height <= 0) return;
         Short = height < 520;
+        // Very short (the minimum window with a notice above): even a trimmed hero leaves the tabs card only a sliver,
+        // so the page scrolls as a whole and the card keeps a usable fixed height.
+        var scrolls = height < ScrollBelow;
+        PageScroll.VerticalScrollBarVisibility = scrolls ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+        DetailsCard.Height = scrolls ? DetailsHeightWhenScrolling : double.NaN;
         if (Short)
         {
             Hero.MinHeight = 0;
@@ -147,6 +153,12 @@ public partial class InstancePage : UserControl
         }
         else ApplyWidth(Bounds.Width);
     }
+
+    /// <summary>Below this page height the page scrolls as a whole (see <see cref="ApplyHeight"/>).</summary>
+    internal const double ScrollBelow = 640;
+
+    /// <summary>The tabs card's height while the page scrolls: room for the toolbar and a few list rows.</summary>
+    internal const double DetailsHeightWhenScrolling = 380;
 
     /// <summary>The page is short enough that the hero is trimmed (self-check).</summary>
     internal bool Short { get; private set; }

@@ -5,6 +5,7 @@ using Amber.App.Views.Controls;
 using Amber.Core.Diagnostics;
 using Amber.Core.Localization;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Automation.Peers;
 using Avalonia.Automation.Provider;
 using Avalonia.Controls;
@@ -23,10 +24,12 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
     private BakeNoticeState State => Toasts.BakeNotices!;
     private HomeViewModel Home => main.Pages.OfType<HomeViewModel>().Single();
     private HomePage HomeView => window.GetVisualDescendants().OfType<HomePage>().Single();
+    // The home page has more than one StatusBar (the onboarding card has its own); pick the launch status by name.
+    private StatusBar LaunchStatus => HomeView.FindControl<StatusBar>("LaunchStatus")!;
 
-    private void Check(string name, bool ok)
+    private void Check(string name, bool ok, string detail = "")
     {
-        _report.Add($"{(ok ? "PASS" : "FAIL")} {name}");
+        _report.Add($"{(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " — " + detail : "")}");
         File.WriteAllLines(Path.Combine(reportDir, "report.txt"), _report);
         if (!ok) throw new InvalidOperationException(name);
     }
@@ -78,11 +81,19 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         Check(name + "：长说明最多两行且完整内容保留在提示框", description.Bounds.Height <= 36 && ToolTip.GetTip(description)?.ToString() == State.Current!.Text);
         var homeScroller = homePage.GetVisualDescendants().OfType<ScrollViewer>().First();
         Check(name + "：崩溃详情保留可滚动区域", homeScroller.Bounds.Height >= 60);
-        homeScroller.Offset = new Vector(0, homeScroller.Extent.Height);
-        await Task.Delay(100);
+        // Scroll to the end until it sticks: the crash card can still grow (text wrapping) after the first scroll,
+        // which left the log button a few pixels below the viewport.
+        for (var i = 0; i < 5; i++)
+        {
+            homeScroller.ScrollToEnd();
+            window.UpdateLayout();
+            await Task.Delay(100);
+            if (homeScroller.Offset.Y >= homeScroller.Extent.Height - homeScroller.Viewport.Height - 1) break;
+        }
         var log = homePage.GetVisualDescendants().OfType<Button>().Single(b => b.Content?.ToString() == L.T("home.crash.view_log"));
         var logBounds = BoundsIn(log, homeScroller);
-        Check(name + "：滚动后崩溃操作可达", logBounds.Top >= 0 && logBounds.Bottom <= homeScroller.Bounds.Height);
+        Check(name + "：滚动后崩溃操作可达", logBounds.Top >= 0 && logBounds.Bottom <= homeScroller.Bounds.Height,
+            $"log {logBounds}, viewport {homeScroller.Bounds.Height:F0}, offset {homeScroller.Offset.Y:F0}/{homeScroller.Extent.Height:F0}");
         if (multiple) Check(name + "：三条通知只呈现最新一条", State.Notices.Count == 3 && retry.Command == State.Current!.RetryCommand
             && Host.GetVisualDescendants().OfType<Button>().Count() == 1);
         await ShotAsync(name);
@@ -156,7 +167,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             Check("按钮只回调一次且保留实例/加入目标/SkipBake", calls.Count == 1 && calls[0] == request && request.VersionId == original.VersionId);
             Check("按钮移除通知，烘焙设置未改变", State.Notices.Count == 0 && File.ReadAllText(AppSettings.FilePath) == settingsBefore);
             window.UpdateLayout();
-            Check("通知结束后原状态文字恢复", !Host.IsVisible && HomeView.GetVisualDescendants().OfType<StatusBar>().Single().IsVisible);
+            Check("通知结束后原状态文字恢复", !Host.IsVisible && LaunchStatus.IsVisible);
             using (var simulatedGame = Process.GetCurrentProcess())
             {
                 var run = Home.AddRunForTest(instance, simulatedGame);
@@ -167,7 +178,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                     await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                     window.UpdateLayout();
                     Check("活动局的状态及进度优先显示，不被旧通知遮住", State.Notices.Count == 2 && !Host.IsEffectivelyVisible
-                        && HomeView.GetVisualDescendants().OfType<StatusBar>().Single().IsEffectivelyVisible && Home.ShowProgress);
+                        && LaunchStatus.IsEffectivelyVisible && Home.ShowProgress);
                     var stale = State.Notices.ToArray();
                     // 已有模拟运行局：真实启动请求进入多开确认后返回，不进入下载或启动流程。
                     Home.Service.RequestLaunch(original);
@@ -219,7 +230,10 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         }
     }
 
-    /// <summary>合并后的实例页仍使用现有模组工具栏；只检查入口，不触发补文件或烘焙进程。</summary>
+    /// <summary>
+    /// The bake entry on the instance page: since the mods-tab redesign it is "Bake now" in the toolbar's ⋯ menu. Checks
+    /// that the ⋯ button is reachable at small and medium sizes and that its menu offers the localized entry. Doesn't bake.
+    /// </summary>
     private async Task CheckInstanceBakeEntryAsync(string instance)
     {
         var page = main.Pages.OfType<InstanceViewModel>().Single();
@@ -227,7 +241,15 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         await Task.Delay(200);
         page.SelectedId = instance;
         page.TabIndex = (int)InstanceTab.Mods;
-        Check("实例页保留模组页签及实验烘焙入口", page.Current?.Id == instance && page.BakeEnabled);
+        await Task.Delay(200);
+        if (page.Current?.Id != instance)
+        {
+            // The test profile has no such instance (it is prepared by hand on the test machines).
+            _report.Add($"SKIP 实例页烘焙入口：测试目录里没有实例 {instance}");
+            File.WriteAllLines(Path.Combine(reportDir, "report.txt"), _report);
+            return;
+        }
+        Check("实例页保留模组页签及实验烘焙入口", page.BakeEnabled);
         foreach (var language in new[] { "zh-Hans", "zh-Hant", "en", "ja" })
         {
             L.SetLanguage(language);
@@ -237,19 +259,30 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                 window.Height = height;
                 await Task.Delay(200);
                 window.UpdateLayout();
-                var button = window.GetVisualDescendants().OfType<Button>()
-                    .Single(b => ReferenceEquals(b.Command, page.BakeNowCommand));
-                button.BringIntoView();
+                // The ⋯ button sits next to the mod search box. Menu item bindings only resolve once the menu has opened,
+                // so find the button by place and look for the bake item after opening it.
+                var search = window.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(t => t.Name == "ModSearchBox" && t.IsEffectivelyVisible);
+                var more = (search?.Parent as Panel)?.Children.OfType<Button>()
+                    .FirstOrDefault(b => b.IsEffectivelyVisible && b.Flyout is MenuFlyout && AutomationProperties.GetName(b) == L.T("common.more_actions"));
+                Check($"实例烘焙 {language}-{width}：模组工具栏有 ⋯ 按钮", more is not null);
+                more!.BringIntoView();
                 await Task.Delay(100);
-                var bounds = BoundsIn(button, window);
+                window.UpdateLayout();
+                var bounds = BoundsIn(more, window);
                 var hit = window.InputHitTest(bounds.Center) as Visual;
-                Check($"实例烘焙 {language}-{width}：入口完整可见且中心命中", button.IsEffectivelyVisible
-                    && button.IsEffectivelyEnabled && new Rect(window.ClientSize).Contains(bounds)
-                    && hit is not null && (ReferenceEquals(hit, button) || hit.GetVisualAncestors().Contains(button)));
-                Check($"实例烘焙 {language}-{width}：按钮文案及提示随语言切换", button.Content?.ToString() == L.T("instance.bake.now")
-                    && ToolTip.GetTip(button)?.ToString() == L.T("instance.bake.now_hint"));
+                Check($"实例烘焙 {language}-{width}：⋯ 按钮完整可见且中心命中", more.IsEffectivelyEnabled && new Rect(window.ClientSize).Contains(bounds)
+                    && hit is not null && (ReferenceEquals(hit, more) || hit.GetVisualAncestors().Contains(more)));
+                var flyout = (MenuFlyout)more.Flyout!;
+                flyout.ShowAt(more);
+                await Task.Delay(200);
+                var item = flyout.Items.OfType<MenuItem>().FirstOrDefault(m => m.Command == page.BakeNowCommand);
+                Check($"实例烘焙 {language}-{width}：⋯ 菜单里有烘焙，文案随语言切换且可用", item is not null && item.IsVisible && item.Header?.ToString() == L.T("instance.bake.now")
+                    && page.BakeNowCommand.CanExecute(item.CommandParameter));
                 await ShotAsync($"instance-bake-{language}-{width}x{height}");
+                flyout.Hide();
+                await Task.Delay(100);
             }
         }
+        L.SetLanguage("zh-Hans");
     }
 }

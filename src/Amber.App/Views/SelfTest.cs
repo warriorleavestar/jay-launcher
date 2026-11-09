@@ -410,6 +410,22 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             .Any(t => t.IsEffectivelyVisible && t.Text == L.T("content.curseforge.manual_hint")), content.ManualDownloadHint);
         var instance = Page<InstanceViewModel>();
         main.CurrentPage = instance;
+        // Run on its own (scope "curseforge") the test profile has no instance yet, and the instance checks below need one
+        // with an empty mods folder. Use a hand-written Fabric version in the report folder, like the shader scope does.
+        var service = Page<HomeViewModel>().Service;
+        var originalGameDir = service.Settings.GameDirectory;
+        var fixtureGame = instance.Current is null ? Path.Combine(reportDir, "game") : null;
+        if (fixtureGame is not null)
+        {
+            WriteVersion(fixtureGame, "cf-fabric", """[{"name":"net.fabricmc:fabric-loader:0.16.0"}]""");
+            service.Settings.GameDirectory = fixtureGame;
+            service.SaveAndReload();
+            await WaitAsync(() => service.InstalledVersions().Contains("cf-fabric"), 10);
+            instance.SelectedId = "cf-fabric";
+            await WaitAsync(() => instance.Current?.Id == "cf-fabric", 10);
+        }
+        instance.TabIndex = (int)InstanceTab.Mods;
+        await Ui.FlushAsync();
         var oldPath = Path.Combine(reportDir, "manual-update-old.jar");
         await File.WriteAllTextAsync(oldPath, "old");
         var mod = new ModItem(new LocalMod(oldPath, "manual-update-old.jar", true, "example", "示例模组", "0.9", null, null, null))
@@ -423,6 +439,11 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await ShotAsync("CurseForge更新手动下载");
         await LayoutHereAsync("CurseForge更新手动下载");
         await CheckInstanceScrollReachabilityAsync(instance, oldPath);
+        if (fixtureGame is not null)
+        {
+            service.Settings.GameDirectory = originalGameDir;
+            service.SaveAndReload();
+        }
         main.CurrentPage = previous;
         main.Pages[pageIndex] = originalContent;
     }
@@ -448,13 +469,19 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             window.Height = 440;
             await Ui.FlushAsync();
             var buttons = window.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible).ToList();
-            var manual = buttons.Single(b => b.Command == instance.OpenManualDownloadCommand);
-            Check($"实例窄窗 {language}：CurseForge 官网入口完整可见且中心命中", await ReachAsync(manual));
+            // A missing button is a failed check with the visible buttons listed, not an exception that ends the run.
+            var seen = string.Join(", ", buttons.Select(b => b.Content?.ToString() ?? b.Name ?? "?"));
+            var manual = buttons.FirstOrDefault(b => b.Command == instance.OpenManualDownloadCommand);
+            Check($"实例窄窗 {language}：CurseForge 官网入口完整可见且中心命中", manual is not null && await ReachAsync(manual), seen);
+            // Since the mods-tab redesign "Browse online" in the toolbar is an item of the [Add ▾] menu; the empty state
+            // keeps its own button.
             var browse = buttons.Where(b => b.Command == instance.BrowseOnlineCommand).ToList();
-            Check($"实例窄窗 {language}：模组工具栏可滚动到达且中心命中", await ReachAsync(browse.First()));
+            var add = buttons.FirstOrDefault(b => b.Name == "AddModButton");
+            Check($"实例窄窗 {language}：模组工具栏可滚动到达且中心命中", add is not null && await ReachAsync(add), seen);
             if (instance.BakeEnabled)
-                Check($"实例窄窗 {language}：烘焙入口可滚动到达且中心命中", await ReachAsync(buttons.Single(b => b.Command == instance.BakeNowCommand)));
-            Check($"实例窄窗 {language}：空态在线浏览可滚动到达且中心命中", browse.Count == 2 && await ReachAsync(browse.Last()));
+                Check($"实例窄窗 {language}：烘焙入口可滚动到达且中心命中",
+                    buttons.FirstOrDefault(b => b.Command == instance.BakeNowCommand) is { } bake && await ReachAsync(bake), seen);
+            Check($"实例窄窗 {language}：空态在线浏览可滚动到达且中心命中", browse.Count > 0 && await ReachAsync(browse[^1]), seen);
             await ShotAsync($"实例窄窗滚动命中-{language}");
         }
 
@@ -966,7 +993,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("进入游戏后显示运行时长，主按钮变成“退出游戏”", home.Status.Contains("运行中 ·") && home.PrimaryLabel == "退出游戏" && !home.ShowProgress,
             $"{home.Status} / {home.PrimaryLabel}");
         // 过滤后的配置放在 Amber 自己的数据目录里，游戏目录里一个都不能有；游戏退出后删掉。
-        var noTraceRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Amber", "notrace");
+        var noTraceRoot = Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber", "notrace");
         var filtered = Directory.Exists(noTraceRoot)
             ? Directory.EnumerateFiles(noTraceRoot, "*.amber-notrace.xml", SearchOption.AllDirectories).Where(f => File.GetLastWriteTime(f) >= launchStart).ToList()
             : [];
@@ -1172,7 +1199,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             if (installed) break;
         }
         var dir = DatapackManager.DirectoryOf(world);
-        Check("下载数据包进世界", installed && Directory.EnumerateFiles(dir, "*.zip").Count() >= 2, content.Status);
+        // The folder only exists once a pack was added; if an earlier step failed, report that instead of throwing.
+        Check("下载数据包进世界", installed && Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.zip").Count() >= 2, content.Status);
         await ShotAsync("资源页数据包");
         content.TypeIndex = 0;
         main.CurrentPage = instance;

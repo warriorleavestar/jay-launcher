@@ -22,6 +22,9 @@ public partial class ContentPage : UserControl
     {
         InitializeComponent();
         ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "content");
+        // Language changes resize the chips without resizing the page.
+        HeaderGrid.SizeChanged += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(LayoutHeader);
+        SourceChips.SizeChanged += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(LayoutHeader);
         SizeChanged += (_, e) =>
         {
             var width = e.NewSize.Width;
@@ -56,15 +59,7 @@ public partial class ContentPage : UserControl
         Classes.Set("compact", tier == "compact");
         TypeChips.IsVisible = tier != "compact";
         TypeCombo.IsVisible = tier == "compact";
-        // Compact: the source segment and the import button move to a second header row so the type drop-down fits.
-        var stacked = tier == "compact";
-        Grid.SetRow(SourceChips, stacked ? 1 : 0);
-        Grid.SetColumn(SourceChips, stacked ? 0 : 2);
-        Grid.SetColumnSpan(SourceChips, stacked ? 2 : 1);
-        SourceChips.HorizontalAlignment = stacked ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
-        SourceChips.Margin = stacked ? new Thickness(0, 6, 8, 0) : new Thickness(8, 0);
-        Grid.SetRow(ImportPackButton, stacked ? 1 : 0);
-        ImportPackButton.Margin = stacked ? new Thickness(0, 6, 0, 0) : new Thickness(0);
+        LayoutHeader();
         var overlay = tier != "wide";
         Grid.SetColumn(DetailPane, overlay ? 0 : 1);
         Grid.SetColumnSpan(DetailPane, overlay ? 2 : 1);
@@ -73,6 +68,30 @@ public partial class ContentPage : UserControl
         DetailPane.Width = tier switch { "wide" => 400, "medium" => Math.Min(380, width - 40), _ => double.NaN };
         DetailPane.Margin = overlay ? new Thickness(0) : new Thickness(14, 0, 0, 0);
         if (tier == "compact") DetailPane.HorizontalAlignment = HorizontalAlignment.Stretch;
+    }
+
+    private bool? _headerStacked;
+
+    /// <summary>
+    /// The source segment and the import button move to a second header row on compact widths (so the type drop-down
+    /// fits) and on medium widths when they would take more than half the header (long languages: the type chips were
+    /// squeezed to one clipped column).
+    /// </summary>
+    private void LayoutHeader()
+    {
+        var header = HeaderGrid.Bounds.Width;
+        // In either position the segment gets its natural width (an Auto column, or a row spanning the star column).
+        var rowWidth = SourceChips.DesiredSize.Width + SourceChips.Margin.Left + SourceChips.Margin.Right + ImportPackButton.DesiredSize.Width;
+        var stacked = _tier == "compact" || (header > 0 && rowWidth > header / 2);
+        if (_headerStacked == stacked) return;
+        _headerStacked = stacked;
+        Grid.SetRow(SourceChips, stacked ? 1 : 0);
+        Grid.SetColumn(SourceChips, stacked ? 0 : 2);
+        Grid.SetColumnSpan(SourceChips, stacked ? 2 : 1);
+        SourceChips.HorizontalAlignment = stacked ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
+        SourceChips.Margin = stacked ? new Thickness(0, 6, 8, 0) : new Thickness(8, 0);
+        Grid.SetRow(ImportPackButton, stacked ? 1 : 0);
+        ImportPackButton.Margin = stacked ? new Thickness(0, 6, 0, 0) : new Thickness(0);
     }
 
     /// <summary>Below this page height the whole page scrolls and the result list keeps a fixed height.</summary>

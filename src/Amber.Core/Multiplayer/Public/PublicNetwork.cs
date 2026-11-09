@@ -211,7 +211,7 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
                 var peers = await PeersAsync(cts.Token);
                 if (peers.Any(p => PublicNetworkProfile.DirectoryIps.Contains(StripMask(p.Ip)) && p.Cost != "Local")
                     // 自动分配的地址要已经在公共网络的网段里：刚连上、还没看到别人的路由时 EasyTier 会先给一个 10.126.126.x，过几秒才改过来。
-                    && peers.FirstOrDefault(p => p.Cost == "Local") is { Ip.Length: > 0 } me && StripMask(me.Ip).StartsWith(PublicNetworkProfile.Subnet, StringComparison.Ordinal)) return;
+                    && peers.FirstOrDefault(p => p.Cost == "Local") is { Ip.Length: > 0 } me && IsMemberAddress(StripMask(me.Ip))) return;
                 await Task.Delay(500, cts.Token);
             }
         }
@@ -224,6 +224,15 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
     public Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct) => Socks5Client.ConnectAsync(IPAddress.Loopback, Options.SocksPort, ip, port, ct);
 
     internal static string StripMask(string ip) => ip.Split('/')[0];
+
+    /// <summary>
+    /// An address a member may use: inside the public subnet and not one of the directory addresses. EasyTier's DHCP hands
+    /// out the lowest free address, so while the main directory is offline a member can be given 10.235.0.1. Such a member
+    /// isn't treated as connected; EasyTier moves it once the directory is back and claims its fixed address.
+    /// Even while it holds the address it can't receive directory traffic: members only let the knock port in.
+    /// </summary>
+    internal static bool IsMemberAddress(string ip) =>
+        ip.StartsWith(PublicNetworkProfile.Subnet, StringComparison.Ordinal) && !PublicNetworkProfile.DirectoryIps.Contains(ip);
 
     public void Dispose()
     {
