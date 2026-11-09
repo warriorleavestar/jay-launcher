@@ -1009,10 +1009,14 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         main.CurrentPage = log;
         await ShotAsync("日志页");
 
-        // 游戏在运行时从别的页面再请求启动：启动页给出多开警告，【仍然启动】能同时开第二个客户端。
+        // 游戏在运行时从别的页面再请求启动：多开警告进请求条（不换页，§2.5 第 5 条），启动页的卡片也在；【仍然启动】能同时开第二个客户端。
+        var pageBefore = main.CurrentPage;
         home.Service.RequestLaunch(new Amber.App.Services.LaunchRequest(FabricName));
-        await WaitAsync(() => home.HasPendingLaunch && main.CurrentPage == home, 5);
-        Check("多开：游戏运行中再启动出现警告并回到启动页", home.HasPendingLaunch && main.CurrentPage == home && home.PendingLaunchText.Contains(FabricName), home.PendingLaunchText);
+        bool MultiAsked() => home.Service.Requests.Pending.Any(r => r.Spec.Kind == "multi");
+        await WaitAsync(() => home.HasPendingLaunch && MultiAsked(), 5);
+        Check("多开：游戏运行中再启动出现警告（请求条 + 启动页卡片，不换页）",
+            home.HasPendingLaunch && MultiAsked() && main.CurrentPage == pageBefore && home.PendingLaunchText.Contains(FabricName),
+            $"{home.PendingLaunchText} / 请求条 {MultiAsked()} / 页面 {main.CurrentPage?.GetType().Name}");
         await ShotAsync("多开警告");
         home.LaunchAnywayCommand.Execute(null);
         // 第二个客户端自己的输出里出现进入主界面的标志，状态才会变成“运行中 ·”。
