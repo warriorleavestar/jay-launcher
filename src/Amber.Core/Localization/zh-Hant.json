@@ -351,6 +351,9 @@
   "core.install.vanilla.invalidassetindex": "資源索引解析失敗：{0}",
   "core.install.vanilla.invalidmanifest": "版本清單解析失敗",
   "core.install.vanilla.missingversion": "版本清單中沒有 {0}",
+  "core.java.install.needrosetta": "這台 Apple 晶片的 Mac 要用 x64 版 Java {0}（Mojang 不提供 Apple 晶片版），需要先裝 Rosetta 2：在「終端機」裡執行 softwareupdate --install-rosetta",
+  "core.java.install.checksum": "下載的 Java 校驗不通過，已刪除，請重試",
+  "core.java.install.badarchive": "下載的 Java 壓縮檔內容異常，已拒絕解壓",
   "core.java.install.missingexecutable": "執行階段已下載完成，但找不到 java",
   "core.java.install.unavailableversion": "Mojang 未提供 Java {0}",
   "core.java.install.unsupportedplatform": "Mojang 未提供適用於 {0} 的 Java",
@@ -1945,5 +1948,6 @@
   "settings.motion.system": "跟隨系統",
   "settings.motion.on": "開",
   "settings.motion.off": "關",
-  "settings.motion.hint": "開啟後頁面切換、抽屜和選單不再滑動，只保留很短的淡入淡出。跟隨系統時讀取系統的「動畫效果 / 減少動態效果」設定。"
+  "settings.motion.hint": "開啟後頁面切換、抽屜和選單不再滑動，只保留很短的淡入淡出。跟隨系統時讀取系統的「動畫效果 / 減少動態效果」設定。",
+  "multiplayer.network.test_reviewed": "用測試註冊表鑰匙簽的（只用於測試，不是 Jay 審核過的）"
 }

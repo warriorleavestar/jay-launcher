@@ -351,6 +351,9 @@
   "core.install.vanilla.invalidassetindex": "アセットインデックスの解析に失敗しました：{0}",
   "core.install.vanilla.invalidmanifest": "バージョンマニフェストの解析に失敗しました",
   "core.install.vanilla.missingversion": "バージョンマニフェストに {0} がありません",
+  "core.java.install.needrosetta": "この Apple シリコン Mac では x64 版 Java {0} が必要です（Mojang は Apple シリコン版を提供していません）。先に Rosetta 2 を入れてください：ターミナルで softwareupdate --install-rosetta を実行",
+  "core.java.install.checksum": "ダウンロードした Java のチェックサムが一致しないため削除しました。もう一度お試しください",
+  "core.java.install.badarchive": "ダウンロードした Java のアーカイブ内容が不正なため展開しませんでした",
   "core.java.install.missingexecutable": "ランタイムのダウンロードは完了しましたが、java が見つかりません",
   "core.java.install.unavailableversion": "Mojang は Java {0} を提供していません",
   "core.java.install.unsupportedplatform": "Mojang は {0} 用の Java を提供していません",
@@ -1945,5 +1948,6 @@
   "settings.motion.system": "システムに合わせる",
   "settings.motion.on": "オン",
   "settings.motion.off": "オフ",
-  "settings.motion.hint": "オンにすると、ページ切り替えや引き出し、メニューが動かず、短いフェードだけになります。「システムに合わせる」ではシステムの「アニメーション効果 / 視差効果を減らす」設定を読み取ります。"
+  "settings.motion.hint": "オンにすると、ページ切り替えや引き出し、メニューが動かず、短いフェードだけになります。「システムに合わせる」ではシステムの「アニメーション効果 / 視差効果を減らす」設定を読み取ります。",
+  "multiplayer.network.test_reviewed": "テスト用レジストリ鍵で署名（テスト専用、Jay の審査済みではありません）"
 }

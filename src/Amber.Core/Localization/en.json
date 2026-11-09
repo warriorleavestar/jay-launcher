@@ -359,6 +359,9 @@
   "core.install.vanilla.invalidassetindex": "Failed to parse the asset index: {0}",
   "core.install.vanilla.invalidmanifest": "Failed to parse the version manifest",
   "core.install.vanilla.missingversion": "{0} is missing from the version manifest",
+  "core.java.install.needrosetta": "This Apple silicon Mac needs the x64 build of Java {0} (Mojang doesn't provide an Apple silicon build). Install Rosetta 2 first: run softwareupdate --install-rosetta in Terminal",
+  "core.java.install.checksum": "The downloaded Java failed its checksum and was deleted. Please try again",
+  "core.java.install.badarchive": "The downloaded Java archive has unexpected contents and was not extracted",
   "core.java.install.missingexecutable": "The runtime download finished, but java was not found",
   "core.java.install.unavailableversion": "Mojang does not provide Java {0}",
   "core.java.install.unsupportedplatform": "Mojang does not provide Java for {0}",
@@ -1977,5 +1980,6 @@
   "settings.motion.system": "System",
   "settings.motion.on": "On",
   "settings.motion.off": "Off",
-  "settings.motion.hint": "When on, page changes, drawers and menus no longer slide; only short fades remain. \"System\" follows your system's animation / reduce motion setting."
+  "settings.motion.hint": "When on, page changes, drawers and menus no longer slide; only short fades remain. \"System\" follows your system's animation / reduce motion setting.",
+  "multiplayer.network.test_reviewed": "Signed with a test registry key (testing only, not reviewed by Jay)"
 }
