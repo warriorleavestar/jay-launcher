@@ -281,6 +281,64 @@ internal sealed partial class SelfTest
         window.Width = 1440;
         window.Height = 900;
         vm.ShowTabCommand.Execute("play");
+        await DrillAsync(vm);
+    }
+
+    /// <summary>Drill mode (official §9.5): lobby link, four steps with "No" focused, verdict + lesson, score, restart, Esc, no network.</summary>
+    private async Task DrillAsync(MultiplayerViewModel vm)
+    {
+        await Task.Delay(300);
+        var page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
+        Button? Named(string name) => page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == name && b.IsEffectivelyVisible);
+        var requests = 0;
+        void Count(Amber.Core.Net.NetworkCategory? c, Uri? u) => Interlocked.Increment(ref requests);
+        Amber.Core.Net.NetworkPolicy.Requested += Count;
+        try
+        {
+            Check("演练：大厅底部有【演练一遍】", Press(Named("LobbyDrillButton")) && vm.DrillOpen && vm.DrillAsking);
+            await Task.Delay(300);
+            Check("演练：第一步写两个码、焦点在【不让进】", Named("DrillNoButton")?.IsFocused == true
+                && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "DrillShownCodeText" && t.IsEffectivelyVisible && t.Text == "7Q4M-2KXP")
+                && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "DrillSaidCodeText" && t.IsEffectivelyVisible && t.Text == "7Q4M-2KXB"));
+            await ShotAsync("演练-1440");
+            Check("演练：码对不上还让进，写“不对”和这一课", Press(Named("DrillYesButton")) && vm.DrillExplaining && !vm.DrillRight
+                && vm.DrillLesson == L.T("drill.lesson.code_mismatch") && Named("DrillYesButton") is null);
+            await Task.Delay(200);
+            Check("演练：讲解时焦点在【下一步】", Named("DrillNextButton")?.IsFocused == true);
+            await ShotAsync("演练-讲解-1440");
+            Press(Named("DrillNextButton"));
+            await Task.Delay(200);
+            Check("演练：码一样时让进是对的", vm.DrillProgress == L.F("drill.step", 2, 4) && Press(Named("DrillYesButton")) && vm.DrillRight);
+            Press(Named("DrillNextButton"));
+            await Task.Delay(200);
+            Check("演练：程序文件写文件名，不收是对的", vm.DrillPrompt.Contains("free-skins.exe") && !vm.DrillShowsCodes && Press(Named("DrillNoButton")) && vm.DrillRight);
+            Press(Named("DrillNextButton"));
+            await Task.Delay(200);
+            Check("演练：远程控制，拒绝是对的", vm.DrillYesText == L.T("drill.yes.remote") && Press(Named("DrillNoButton")) && vm.DrillRight);
+            Press(Named("DrillNextButton"));
+            await Task.Delay(300);
+            Check("演练：结束写成绩（3 / 4）", vm.DrillDone && vm.DrillScore == L.F("drill.done", 3, 4)
+                && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "DrillScoreText" && t.IsEffectivelyVisible));
+            await ShotAsync("演练-成绩-1440");
+            Check("演练：【再来一次】回到第一步", Press(Named("DrillRestartButton")) && vm.DrillAsking && vm.DrillProgress == L.F("drill.step", 1, 4));
+            window.Width = 600;
+            window.Height = 420;
+            await Task.Delay(500);
+            var drawer = page.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Name == "DrillDrawer");
+            Check("演练：紧凑窗口铺满", drawer is not null && drawer.Bounds.Width >= page.Bounds.Width - 1, $"{drawer?.Bounds.Width}/{page.Bounds.Width}");
+            await ShotAsync("演练-600");
+            Dispatcher.UIThread.Invoke(() => PressKey(page, Avalonia.Input.Key.Escape));
+            Check("演练：Esc 关掉", !vm.DrillOpen);
+            Check("演练：全程没有网络请求", requests == 0, requests.ToString());
+        }
+        finally
+        {
+            Amber.Core.Net.NetworkPolicy.Requested -= Count;
+            window.Width = 1440;
+            window.Height = 900;
+            vm.DrillOpen = false;
+            vm.ShowTabCommand.Execute("play");
+        }
     }
 
     /// <summary>The public room list with stand-in rooms (no network): search, version, walk-right-in, sort, empty states, keys.</summary>

@@ -311,6 +311,7 @@
               <WrapPanel ItemSpacing="12" LineSpacing="4" VerticalAlignment="Center">
                 <Button Classes="ghost small" Command="{Binding OpenHelpCommand}" CommandParameter="multiplayer"><TextBlock Text="{l:T multiplayer.lobby.first_time}" TextWrapping="Wrap" /></Button>
                 <Button Classes="ghost small" Command="{Binding OpenHelpCommand}" CommandParameter="child-mode"><TextBlock Text="{l:T multiplayer.lobby.safety}" TextWrapping="Wrap" /></Button>
+                <Button x:Name="LobbyDrillButton" Classes="ghost small" Command="{Binding OpenDrillCommand}"><TextBlock Text="{l:T multiplayer.lobby.drill}" TextWrapping="Wrap" /></Button>
                 <Button x:Name="LobbyProblemsButton" Classes="ghost small" Command="{Binding OpenDiagnosticsCommand}"><TextBlock Text="{l:T multiplayer.room.problems}" TextWrapping="Wrap" /></Button>
               </WrapPanel>
               <Button Grid.Column="1" Classes="ghost small" HorizontalAlignment="Right" Command="{Binding ShowTabCommand}" CommandParameter="settings">
@@ -1354,6 +1355,53 @@
                 </ItemsControl>
               </StackPanel>
             </Expander>
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- Drill mode (official §9.5): a pretend friend plays the risky moments; each answer is explained on the spot.
+         Same drawer shape as the diagnostics one. Nothing in it connects anywhere. -->
+    <Border x:Name="DrillDrawer" Grid.Row="0" Grid.RowSpan="5" Width="560" HorizontalAlignment="Right" ZIndex="11"
+            Classes="card" Margin="0" Padding="16" BoxShadow="0 4 24 0 #40000000" IsVisible="{Binding DrillOpen}">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+          <TextBlock Classes="h2" Text="{l:T drill.title}" Margin="0" VerticalAlignment="Center" TextWrapping="Wrap" />
+          <Button x:Name="CloseDrillButton" Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding CloseDrillCommand}" ToolTip.Tip="{l:T common.close}" />
+        </Grid>
+        <ScrollViewer>
+          <StackPanel Spacing="12">
+            <TextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T drill.intro}" />
+            <StackPanel Spacing="12" IsVisible="{Binding !DrillDone}">
+              <TextBlock x:Name="DrillProgressText" Classes="hint" Text="{Binding DrillProgress}" />
+              <Border Classes="card" Padding="14" Margin="0">
+                <StackPanel Spacing="10">
+                  <TextBlock x:Name="DrillPromptText" Text="{Binding DrillPrompt}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                  <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="6" IsVisible="{Binding DrillShowsCodes}">
+                    <TextBlock Classes="hint" Text="{l:T drill.code_shown}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="DrillShownCodeText" Grid.Column="1" Text="{Binding DrillShownCode}" FontFamily="Consolas,Menlo,monospace" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="1" Classes="hint" Text="{l:T drill.code_said}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="DrillSaidCodeText" Grid.Row="1" Grid.Column="1" Text="{Binding DrillSaidCode}" FontFamily="Consolas,Menlo,monospace" FontSize="18" FontWeight="SemiBold" />
+                  </Grid>
+                  <WrapPanel ItemSpacing="8" LineSpacing="6" IsVisible="{Binding DrillAsking}">
+                    <Button x:Name="DrillNoButton" Content="{Binding DrillNoText}" Command="{Binding DrillAnswerNoCommand}" />
+                    <Button x:Name="DrillYesButton" Content="{Binding DrillYesText}" Command="{Binding DrillAnswerYesCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+              <StackPanel x:Name="DrillFeedback" Spacing="6" IsVisible="{Binding DrillExplaining}">
+                <TextBlock x:Name="DrillVerdictText" Text="{Binding DrillVerdict}" FontWeight="SemiBold" Classes.ok="{Binding DrillRight}" Classes.warn="{Binding !DrillRight}" />
+                <TextBlock x:Name="DrillLessonText" Text="{Binding DrillLesson}" TextWrapping="Wrap" />
+                <Button x:Name="DrillNextButton" Classes="primary" Content="{l:T drill.next}" Command="{Binding DrillNextCommand}" HorizontalAlignment="Left" />
+              </StackPanel>
+            </StackPanel>
+            <StackPanel x:Name="DrillDonePanel" Spacing="10" IsVisible="{Binding DrillDone}">
+              <TextBlock x:Name="DrillScoreText" Text="{Binding DrillScore}" TextWrapping="Wrap" FontWeight="SemiBold" />
+              <WrapPanel ItemSpacing="8" LineSpacing="6">
+                <Button x:Name="DrillRestartButton" Content="{l:T drill.again}" Command="{Binding DrillRestartCommand}" />
+                <Button x:Name="DrillFinishButton" Content="{l:T common.close}" Command="{Binding CloseDrillCommand}" />
+              </WrapPanel>
+            </StackPanel>
           </StackPanel>
         </ScrollViewer>
       </DockPanel>

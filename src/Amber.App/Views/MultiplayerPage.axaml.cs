@@ -28,6 +28,8 @@ public partial class MultiplayerPage : UserControl
             // The diagnostics drawer covers the page in compact windows.
             DiagnosticsDrawer.Width = e.NewSize.Width < 640 ? double.NaN : 560;
             DiagnosticsDrawer.HorizontalAlignment = e.NewSize.Width < 640 ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Right;
+            DrillDrawer.Width = DiagnosticsDrawer.Width;
+            DrillDrawer.HorizontalAlignment = DiagnosticsDrawer.HorizontalAlignment;
         };
         AddHandler(KeyDownEvent, OnRoomKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         DataContextChanged += (_, _) =>
@@ -53,6 +55,14 @@ public partial class MultiplayerPage : UserControl
                     // The next knock in line gets the same treatment once the first is answered.
                     if (vm.HasKnocks) Dispatcher.UIThread.Post(FocusKnockDeny, DispatcherPriority.Background);
                 };
+                // Drill: each new question starts on "No" (the safe default, like a real knock); the lesson starts on Next.
+                vm.DrillFocusRequested = () => Dispatcher.UIThread.Post(() =>
+                {
+                    if (!vm.DrillOpen) return;
+                    if (vm.DrillAsking) DrillNoButton.Focus();
+                    else if (vm.DrillExplaining) DrillNextButton.Focus();
+                    else DrillRestartButton.Focus();
+                }, DispatcherPriority.Background);
                 vm.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MultiplayerViewModel.DiagnosticsOpen) && vm.DiagnosticsOpen)
@@ -179,6 +189,12 @@ public partial class MultiplayerPage : UserControl
                 e.Handled = true;
                 return;
             }
+        }
+        if (vm.DrillOpen && e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
+        {
+            vm.DrillOpen = false;
+            e.Handled = true;
+            return;
         }
         if (vm.DiagnosticsOpen && e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
         {
