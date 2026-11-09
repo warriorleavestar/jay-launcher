@@ -1797,7 +1797,7 @@
   "multiplayer.device.allowed_placeholder": "只让这些电脑进：贴上对方的指纹码，一行一个（空着就不限）",
   "multiplayer.device.enable_first": "先在“设备指纹”里打开设备指纹",
   "multiplayer.device.reason": "房主要求设备指纹：先打开设备指纹；房主只让名单里的电脑进时，要把你的指纹码发给房主",
-  "core.mp.private.too_big": "文件太大（最多 {0} MB）",
+  "core.mp.private.no_space": "磁盘空间不够，收不下“{0}”",
   "core.mp.private.offline": "对方不在线",
   "core.mp.private.no_answer": "对方没有回应",
   "core.mp.private.declined": "对方拒绝了",

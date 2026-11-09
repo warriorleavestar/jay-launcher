@@ -38,7 +38,8 @@ public sealed class PrivateMessenger : IAsyncDisposable
 {
     public const int ChunkSize = 3 * 1024;
     public const int Window = 16;
-    public const long MaxFileSize = 200L * 1024 * 1024;
+    /// <summary>收文件前要求磁盘多留的空间（不限文件大小，只看收方磁盘够不够）。</summary>
+    public const long DiskReserve = 64L * 1024 * 1024;
     public const int MaxTextLength = 2000;
     private static readonly TimeSpan AckTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan OfferTimeout = TimeSpan.FromMinutes(5);
@@ -138,7 +139,6 @@ public sealed class PrivateMessenger : IAsyncDisposable
     {
         var info = new FileInfo(path);
         if (!info.Exists) throw new FileNotFoundException(path);
-        if (info.Length > MaxFileSize) throw new InvalidDataException(L.F("core.mp.private.too_big", MaxFileSize / 1024 / 1024));
         byte[] hash;
         await using (var read = File.OpenRead(path)) hash = await SHA256.HashDataAsync(read, ct);
         var job = new Outgoing
@@ -216,6 +216,12 @@ public sealed class PrivateMessenger : IAsyncDisposable
     {
         if (!_incoming.TryGetValue(id, out var job) || job.Stream is not null) return;
         Directory.CreateDirectory(_downloads);
+        if (FreeSpaceOf(_downloads) is { } free && free < job.Offer.Size + DiskReserve)
+        {
+            _incoming.TryRemove(id, out _);
+            await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
+            throw new IOException(L.F("core.mp.private.no_space", job.Offer.Name));
+        }
         job.TargetPath = UniquePath(_downloads, job.Offer.Name);
         job.TempPath = job.TargetPath + ".jaypart";
         job.Stream = new FileStream(job.TempPath, FileMode.Create, FileAccess.Write, FileShare.None, ChunkSize, useAsync: true);
@@ -275,7 +281,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
                     var size = body["size"]?.GetValue<long>() ?? -1;
                     var sha = body["sha"]?.GetValue<string>();
                     var name = SafeName(body["name"]?.GetValue<string>() ?? "");
-                    if (size is < 0 or > MaxFileSize || sha is not { Length: 64 } || _incoming.Count >= 8) return;
+                    if (size < 0 || sha is not { Length: 64 } || _incoming.Count >= 8) return;
                     var offer = new FileOffer(id, frame.FromFingerprint, frame.FromName, name, size);
                     _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey };
                     FileOffered?.Invoke(offer);
@@ -327,7 +333,17 @@ public sealed class PrivateMessenger : IAsyncDisposable
                 await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "cancel", ["id"] = job.Offer.Id }, _cts.Token);
                 return;
             }
-            await job.Stream.WriteAsync(data, _cts.Token);
+            try
+            {
+                await job.Stream.WriteAsync(data, _cts.Token);
+            }
+            catch (IOException)
+            {
+                // 传到一半磁盘满了（或者盘被拔了）：放弃这次接收，删掉临时文件。
+                if (_incoming.TryRemove(job.Offer.Id, out _)) Abort(job, L.F("core.mp.private.no_space", job.Offer.Name));
+                await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "cancel", ["id"] = job.Offer.Id }, _cts.Token);
+                return;
+            }
             job.Hasher.AppendData(data);
             job.Next++;
             job.Received += data.Length;
@@ -378,6 +394,16 @@ public sealed class PrivateMessenger : IAsyncDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         job.Hasher?.Dispose();
         Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Finished = true, Error = error });
+    }
+
+    /// <summary>查剩余空间的方法（测试里换掉）。</summary>
+    internal Func<string, long?> FreeSpaceOf { get; set; } = FreeSpace;
+
+    /// <summary>下载文件夹所在磁盘的剩余空间；查不到就返回 null（不拦）。</summary>
+    internal static long? FreeSpace(string dir)
+    {
+        try { return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace; }
+        catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>对方给的文件名只留最后一段、去掉不能用的字符；空的叫 file。</summary>

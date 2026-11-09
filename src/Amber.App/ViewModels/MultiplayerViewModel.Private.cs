@@ -30,7 +30,8 @@ public sealed record FileOfferItem(FileOffer Offer) : LocalizedRecord
     {
         < 1024 => $"{bytes} B",
         < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        _ => $"{bytes / 1024.0 / 1024.0:0.#} MB",
+        < 1024L * 1024 * 1024 => $"{bytes / 1024.0 / 1024.0:0.#} MB",
+        _ => $"{bytes / 1024.0 / 1024.0 / 1024.0:0.##} GB",
     };
 }
 

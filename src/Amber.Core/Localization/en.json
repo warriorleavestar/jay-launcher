@@ -1829,7 +1829,7 @@
   "multiplayer.device.allowed_placeholder": "Only let these computers in: paste their fingerprint codes, one per line (empty means anyone)",
   "multiplayer.device.enable_first": "Turn on the device fingerprint first",
   "multiplayer.device.reason": "The host requires a device fingerprint. Turn yours on; if the host only lets listed computers in, send them your fingerprint code",
-  "core.mp.private.too_big": "The file is too big (up to {0} MB)",
+  "core.mp.private.no_space": "Not enough disk space to receive \"{0}\"",
   "core.mp.private.offline": "They're not online",
   "core.mp.private.no_answer": "No answer",
   "core.mp.private.declined": "They declined",

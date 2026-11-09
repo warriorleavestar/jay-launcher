@@ -1797,7 +1797,7 @@
   "multiplayer.device.allowed_placeholder": "これらのPCだけ参加可：相手の指紋コードを1行に1つ（空なら制限なし）",
   "multiplayer.device.enable_first": "先にデバイス指紋をオンにしてください",
   "multiplayer.device.reason": "ホストはデバイス指紋を求めています。オンにしてください。リスト制の場合は指紋コードをホストに送ってください",
-  "core.mp.private.too_big": "ファイルが大きすぎます（最大 {0} MB）",
+  "core.mp.private.no_space": "ディスクの空き容量が足りず「{0}」を受け取れません",
   "core.mp.private.offline": "相手はオフラインです",
   "core.mp.private.no_answer": "応答がありません",
   "core.mp.private.declined": "拒否されました",

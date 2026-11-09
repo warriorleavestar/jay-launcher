@@ -118,6 +118,28 @@ public sealed class PrivateMessengerTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_dir, "bob")) && Directory.EnumerateFiles(Path.Combine(_dir, "bob")).Any());
     }
 
+    [Fact]
+    public async Task FileIsDeclinedWhenTheDiskIsTooFull()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "big.bin");
+        await File.WriteAllBytesAsync(source, new byte[10_000]);
+        // 不限文件大小，只看收方磁盘够不够：这里假装只剩 1 MB（不到预留空间）。
+        bob.FreeSpaceOf = _ => 1024 * 1024;
+        var refused = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.FileOffered += offer => _ = Task.Run(async () =>
+        {
+            try { await bob.AcceptAsync(offer.Id); refused.TrySetResult(null); }
+            catch (IOException e) { refused.TrySetResult(e); }
+        });
+        Assert.False(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<IOException>(await refused.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(Directory.Exists(Path.Combine(_dir, "bob")) && Directory.EnumerateFiles(Path.Combine(_dir, "bob")).Any());
+    }
+
     // ---- 经真的聊天转发（邀请房间） ----
 
     private sealed record Room(RoomCredentials Credentials, MemberTable Table, RoomCode Host);
