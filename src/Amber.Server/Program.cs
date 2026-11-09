@@ -206,7 +206,9 @@ public static class Program
                 if (line.StartsWith("jay ", StringComparison.Ordinal))
                 {
                     try { Admin(root, Options.Parse(Split(line[4..])), Console.Out); }
-                    catch (Exception e) when (e is ArgumentException or InvalidOperationException or IOException or FormatException) { Console.WriteLine("出错：" + e.Message); }
+                    // Any failure here (a corrupt store, a bad key file, ...) must not end this loop: it is also what forwards
+                    // console input to the Minecraft server.
+                    catch (Exception e) when (e is not OperationCanceledException) { Console.WriteLine("出错：" + e.Message); }
                 }
                 else runner.Command(line);
             }
