@@ -77,6 +77,7 @@ public partial class LocalizationTests
         "(\"zh-Hans\", \"简体中文\")",
         "(\"zh-Hant\", \"繁體中文\")",
         "(\"ja\", \"日本語\")",
+        "(\"lzh\", \"文言\")",
     ];
 
     [Fact]
@@ -115,12 +116,14 @@ public partial class LocalizationTests
     [InlineData("zh-Hans")]
     [InlineData("zh-Hant")]
     [InlineData("ja")]
+    [InlineData("lzh")]
     public void TranslationsAreCompleteAndKeepPlaceholders(string code)
     {
         var source = L.Load(L.Source);
         var table = L.Load(code);
         // 英文原文里的单复数变体（key.one / key.other）在没有单复数的语言里只要有 key 就行。
-        var missing = source.Keys.Where(k => !table.ContainsKey(k) && !(PluralBase(k) is { } pb && table.ContainsKey(pb))).ToList();
+        // Playful languages may lag behind: a missing key falls back to their parent (文言 → 繁體中文) and then English.
+        var missing = L.Playful.Contains(code) ? [] : source.Keys.Where(k => !table.ContainsKey(k) && !(PluralBase(k) is { } pb && table.ContainsKey(pb))).ToList();
         var extra = table.Keys.Where(k => !source.ContainsKey(k) && !(PluralBase(k) is { } b && source.ContainsKey(b))).ToList();
         var placeholderMismatch = source.Keys.Where(table.ContainsKey)
             .Where(k => !Placeholders(source[k]).SetEquals(Placeholders(table[k])))
@@ -333,4 +336,39 @@ public partial class LocalizationTests
         // 不存在的键原样返回，漏翻的地方一眼能看出来。
         Assert.Equal("no.such.key", L.T("no.such.key"));
     }
+
+    [Fact]
+    public void UpsideDownEnglishIsGeneratedAndKeepsPlaceholders()
+    {
+        Assert.Equal("ʇunoɔɔɐ pp∀", L.FlipUpsideDown("Add account"));
+        Assert.Equal("{1:F1} ɟo {0}", L.FlipUpsideDown("{0} of {1:F1}"));
+        Assert.Equal("ǝuo\noʍʇ", L.FlipUpsideDown("one\ntwo"));
+        var source = L.Load(L.Source);
+        var table = L.TableFor("en-x-ud");
+        Assert.Equal(source.Count, table.Count);
+        foreach (var (key, text) in source)
+            Assert.True(Placeholders(text).SetEquals(Placeholders(table[key])), key);
+    }
+
+    [Fact]
+    public void PlayfulLanguagesAreChosenOnlyInSettings()
+    {
+        Assert.Equal("lzh", L.Resolve("lzh"));
+        Assert.Equal("en-x-ud", L.Resolve("EN-X-UD"));
+        foreach (var name in new[] { "lzh", "en", "zh-TW", "zh-HK" })
+            Assert.False(L.Playful.Contains(L.FromCulture(new System.Globalization.CultureInfo(name))), name);
+        var before = L.Language;
+        try
+        {
+            L.SetLanguage("lzh");
+            Assert.Equal("增籍", L.T("accounts.add.title"));
+            L.SetLanguage("en-x-ud");
+            Assert.Equal("ʇunoɔɔɐ pp∀", L.T("accounts.add.title"));
+        }
+        finally
+        {
+            L.SetLanguage(before);
+        }
+    }
 }
+

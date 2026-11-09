@@ -57,6 +57,8 @@ AMBER_LAYOUTCHECK=<dir> src/Amber.App/bin/Release/net10.0/Jay.exe
 | `zh-Hans.json` | 简体中文 |
 | `zh-Hant.json` | 繁体中文（台湾用词） |
 | `ja.json` | 日文 |
+| `lzh.json` | 文言（趣味语言） |
+| *（自动生成）* `en-x-ud` | 上下颠倒的英文（趣味语言），运行时由 `en.json` 生成 |
 
 每个文件是一个平铺的 JSON 对象 `"键": "文字"`，键按字母排序。
 
@@ -67,6 +69,13 @@ AMBER_LAYOUTCHECK=<dir> src/Amber.App/bin/Release/net10.0/Jay.exe
 - 用各语言的 Minecraft 官方译名（World / ワールド / 世界、资源包、数据包、光影包、Mod / MOD / 模組、Server / サーバー / 伺服器、Open to LAN / LANに公開 / 在區域網路上開放）。
 - 键名说明文字出现的位置（`页面.区域.用途`）。两处英文相同、但在其他语言里要用不同说法时，分成两个键。
 - 改完文字跑一次上面的布局检查：长译文要换行或省略，不能被切掉。`--pseudo-loc`（或 `AMBER_PSEUDO_LOC=1`）会把每段文字加长 40%，方便找出空间不够的地方。
+
+### 趣味语言
+
+和 Minecraft 一样，Jay 也有几种好玩的语言：文言（`lzh`）和上下颠倒的英文（`en-x-ud`）。它们列在 `L.Playful` 里，跟随系统时不会被选中，只能在设置里手动选。Minecraft 也有同一种语言时（`L.MinecraftCodes`），新实例第一次启动的游戏语言也会跟着用它。
+
+- `lzh.json` 可以落后：缺的键先显示繁体中文，再显示英文。欢迎把新键翻成文言，但不是必须的。
+- 上下颠倒的英文没有文件，由 `en.json` 自动生成，新键会自动出现。
 
 ### 新增一种语言
 
