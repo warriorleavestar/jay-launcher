@@ -183,6 +183,7 @@ public sealed class UpdateChecker(HttpClient http)
     public async Task<UpdateInfo?> CheckAsync(string? feedUrl, string currentVersion, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(feedUrl)) return null;
+        using var scope = Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.UpdateCheck);
         using var doc = JsonDocument.Parse(await http.GetStringAsync(feedUrl, ct));
         var root = doc.RootElement;
         var tag = (root.TryGetProperty("tag_name", out var t) ? t.GetString() : root.TryGetProperty("version", out var v) ? v.GetString() : null)

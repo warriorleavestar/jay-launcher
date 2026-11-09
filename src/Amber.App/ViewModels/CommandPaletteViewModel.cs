@@ -47,10 +47,16 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
     public Action<string>? StartInstance { get; set; }
     public Action<string>? AddModsTo { get; set; }
     public Action? OpenActivity { get; set; }
+
+    /// <summary>Docks the game log at the bottom (Ctrl+`).</summary>
+    public Action? DockLog { get; set; }
     public Action<string>? JoinInvite { get; set; }
     public Action<string>? JoinJayServer { get; set; }
 
     public CommandPaletteViewModel(Func<IEnumerable<(string Id, string Name, string Facts)>> instances) => _instances = instances;
+
+    /// <summary>The help articles in the current language (listed under "?").</summary>
+    public Func<IEnumerable<Amber.Core.Help.HelpArticle>>? HelpArticles { get; set; }
 
     public ObservableCollection<PaletteEntry> Results { get; } = [];
 
@@ -240,6 +246,7 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
         list.Add(Act("new-instance", "palette.action.new_instance", () => Navigate?.Invoke(LegacyRoutes.NewInstance), null,
             [.. NamesOf("download.title"), "downloads", "install"]));
         list.Add(Act("activity", "palette.action.activity", () => OpenActivity?.Invoke(), null, [.. NamesOf("activity.title"), "Ctrl+J"]));
+        list.Add(Act("dock-log", "palette.action.dock_log", () => DockLog?.Invoke(), null, [.. NamesOf("log.dock.title"), "log", "Ctrl+`"]));
 
         // Every setting in the catalog: "settings#Field" opens its group, scrolls to the control and flashes it.
         foreach (var field in SettingsCatalog.Fields)
@@ -254,11 +261,24 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
         list.Add(Page("library", "shell.nav.library", [.. NamesOf("home.title", "instance.title"), "home"]));
         list.Add(Page("discover", "shell.nav.discover", [.. NamesOf("content.title"), "content"]));
         list.Add(Page("play", "shell.nav.multiplayer", [.. NamesOf("multiplayer.title"), "multiplayer"]));
+        list.Add(Page("play/public", "multiplayer.tab.public", "public rooms"));
+        list.Add(Page("play/servers", "multiplayer.tab.servers", "jay server"));
+        list.Add(Page("play/settings", "multiplayer.tab.settings", "relay", "nodes"));
         list.Add(Page("settings", "shell.settings"));
         list.Add(Page(LegacyRoutes.Tools, "tools.title", "tools", "toolbox"));
         list.Add(Page(LegacyRoutes.Logs, "log.title", "log"));
         list.Add(Page("accounts", "accounts.title"));
         list.Add(Page("settings#RecycleKeep", "recycle.title", "trash", "recycle"));
+        list.Add(Page("about", "about.title", "privacy", "about"));
+        list.Add(Page("help", "help.center.title", "help", "F1"));
+
+        // Help articles ("?" lists only these): open in the help center.
+        if (HelpArticles?.Invoke() is { } articles)
+            foreach (var a in articles)
+            {
+                var id = a.Id;
+                list.Add(new PaletteEntry(new CommandItem("help:" + id, CommandKind.Help, a.Title, a.Summary, [id]), () => Navigate?.Invoke("help/" + id)));
+            }
         return list;
     }
 }

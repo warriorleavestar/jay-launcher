@@ -17,6 +17,10 @@ public class SafetySurface : Border
     {
         Resources.MergedDictionaries.Add(DefaultTokens());
         Resources.MergedDictionaries.Add(new ResourceInclude(new Uri("avares://Jay/")) { Source = new Uri("avares://Jay/Themes/Safety.axaml") });
+        // Compact density sets sizes on the window; a safety surface keeps the standard ones (from the application).
+        if (Application.Current is { } app)
+            foreach (var key in Amber.App.Services.DensityService.Keys)
+                if (app.TryGetResource(key, null, out var standard)) Resources[key] = standard;
         ClipToBounds = true;
     }
 

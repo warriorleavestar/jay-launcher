@@ -1,6 +1,7 @@
 using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Layout;
+using Amber.Core.Localization;
 using Amber.Core.Navigation;
 using Amber.Core.Themes;
 using Avalonia;
@@ -44,12 +45,15 @@ public partial class MainWindow
                         ThemeService.SetNetworkPageActive(main.CurrentPage is MultiplayerViewModel);
                 };
                 main.Shell.FieldRequested += field => Dispatcher.UIThread.Post(() => RevealField(field), DispatcherPriority.Loaded);
+                main.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.LogDocked)) ApplyLogDock(); };
+                main.LogPopOutRequested += PopOutLog;
                 MovedNotice.IsVisible = _settings is { ShellMovedNoticeSeen: false };
             }
             ApplyShell();
         };
         SizeChanged += (_, _) => ApplyShell();
-        ContentColumn.SizeChanged += (_, e) => ApplyContentTier(e.NewSize.Width);
+        ContentColumn.SizeChanged += (_, e) => { ApplyContentTier(e.NewSize.Width); ApplyLogDock(); };
+        AttachLogDock();
         AddHandler(KeyDownEvent, OnShellKeyDown, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, OnShellPointerPressed, RoutingStrategies.Tunnel);
         ApplyShell();
@@ -174,6 +178,8 @@ public partial class MainWindow
         // 活动抽屉：紧凑档铺满内容区，其余 400 宽从右边滑出（§5.3）。
         ActivityDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
         ActivityDrawer.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
+        HelpDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
+        HelpDrawer.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
         PalettePanel.Width = ContentTier == WidthTier.Compact ? double.NaN : 640;
         PalettePanel.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
         ContentColumn.Classes.Set("compact", ContentTier == WidthTier.Compact);
@@ -195,7 +201,29 @@ public partial class MainWindow
             return;
         }
         if (e.Key == Key.Escape && main.Activity.IsOpen) { main.Activity.Close(); e.Handled = true; return; }
+        // Help (§6.24): F1 this page's article, Shift+F1 the help center; in the drawer Ctrl+F searches and Esc closes.
+        if (e.Key == Key.F1 && !main.FirstRun.IsOpen)
+        {
+            if (e.KeyModifiers == KeyModifiers.Shift) { main.Help.Close(); shell.Navigate("help"); }
+            else if (e.KeyModifiers == KeyModifiers.None) main.OpenHelp();
+            e.Handled = true;
+            return;
+        }
+        if (main.Help.IsOpen)
+        {
+            if (e.Key == Key.Escape) { main.Help.Close(); HelpButton.Focus(); e.Handled = true; return; }
+            if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control) { HelpDrawerSearch.Focus(); HelpDrawerSearch.SelectAll(); e.Handled = true; return; }
+        }
         if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.J) { main.Activity.Toggle(); e.Handled = true; return; }
+        // Ctrl+` docks / undocks the game log (§6.9).
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.OemTilde) { main.ToggleLogDock(); e.Handled = true; return; }
+        if (e.Key == Key.Escape && main.LogDocked && LogDockIsDrawer) { main.LogDocked = false; e.Handled = true; return; }
+        // Ctrl+V outside a text box: a pasted invite (or any other Jay code) opens multiplayer with it filled in.
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.V && FocusManager?.GetFocusedElement() is not TextBox)
+        {
+            _ = PasteCodeAsync(main);
+            return;
+        }
         if (e.KeyModifiers == KeyModifiers.Control)
         {
             string? id = e.Key switch { Key.D1 or Key.NumPad1 => "library", Key.D2 or Key.NumPad2 => "discover", Key.D3 or Key.NumPad3 => "multiplayer", _ => null };
@@ -208,6 +236,15 @@ public partial class MainWindow
         }
         else if (e.Key == Key.BrowserBack) e.Handled = shell.Router.Back();
         else if (e.Key == Key.BrowserForward) e.Handled = shell.Router.Forward();
+    }
+
+    private static async Task PasteCodeAsync(MainViewModel main)
+    {
+        if (Amber.App.Services.AvaloniaClipboard.FromMainWindow() is not { } board) return;
+        string? text;
+        try { text = await board.GetTextAsync(); }
+        catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException) { return; }
+        main.PasteCode(text);
     }
 
     /// <summary>鼠标侧键：返回、前进。</summary>
@@ -305,6 +342,12 @@ public partial class MainWindow
         else PaletteBox.Focus();
     }
 
+    private void HelpScrim_Pressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel main) main.Help.Close();
+        e.Handled = true;
+    }
+
     private void ActivityScrim_Pressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is MainViewModel main) main.Activity.Close();
@@ -324,4 +367,69 @@ public partial class MainWindow
         Grid.SetRow(c, row);
         Grid.SetColumn(c, column);
     }
+
+    // ---- Docked game log (§6.9) ----
+
+    /// <summary>Below this content height the docked log becomes a drawer over the page instead of taking rows.</summary>
+    internal const double LogDrawerBelow = 560;
+
+    /// <summary>The docked log is shown as a drawer (short window).</summary>
+    internal bool LogDockIsDrawer { get; private set; }
+
+    private LogWindow? _logWindow;
+
+    private void AttachLogDock()
+    {
+        var popOut = new Button { Content = L.T("log.dock.pop_out"), Classes = { "ghost", "small" } };
+        popOut.Click += (_, _) => (DataContext as MainViewModel)?.PopOutLog();
+        var close = new Button { Content = L.T("log.dock.close"), Classes = { "ghost", "small" } };
+        close.Click += (_, _) => { if (DataContext is MainViewModel m) m.LogDocked = false; };
+        L.Changed += () => Dispatcher.UIThread.Post(() =>
+        {
+            popOut.Content = L.T("log.dock.pop_out");
+            close.Content = L.T("log.dock.close");
+        });
+        LogDockContent.Buttons.Add(popOut);
+        LogDockContent.Buttons.Add(close);
+        LogDockSplitter.DragDelta += (_, e) =>
+        {
+            if (LogDockIsDrawer) return;
+            LogDock.Height = Math.Clamp(LogDock.Height - e.Vector.Y, 120, Math.Max(160, ContentColumn.Bounds.Height - 200));
+        };
+    }
+
+    private void ApplyLogDock()
+    {
+        var docked = DataContext is MainViewModel { LogDocked: true };
+        LogDockIsDrawer = ContentColumn.Bounds.Height > 0 && ContentColumn.Bounds.Height < LogDrawerBelow;
+        LogDock.IsVisible = docked;
+        LogDockSplitter.IsVisible = docked && !LogDockIsDrawer;
+        if (LogDockIsDrawer)
+        {
+            // Short window: a drawer from the bottom over the page (60% of the content height).
+            Grid.SetRow(LogDock, 4);
+            LogDock.VerticalAlignment = VerticalAlignment.Bottom;
+            LogDock.Height = Math.Max(160, ContentColumn.Bounds.Height * 0.6);
+            LogDock.BoxShadow = Avalonia.Media.BoxShadows.Parse("0 -4 16 0 #40000000");
+        }
+        else
+        {
+            Grid.SetRow(LogDock, 6);
+            LogDock.VerticalAlignment = VerticalAlignment.Stretch;
+            if (LogDock.Height is < 120 or double.NaN) LogDock.Height = 240;
+            LogDock.BoxShadow = default;
+        }
+    }
+
+    private void PopOutLog()
+    {
+        if (DataContext is not MainViewModel main) return;
+        if (_logWindow is { } open) { open.Activate(); return; }
+        _logWindow = new LogWindow(main.Log, () => main.LogDocked = true);
+        _logWindow.Closed += (_, _) => _logWindow = null;
+        _logWindow.Show(this);
+    }
+
+    /// <summary>The popped-out log window, if open (self-check).</summary>
+    internal LogWindow? PoppedOutLog => _logWindow;
 }

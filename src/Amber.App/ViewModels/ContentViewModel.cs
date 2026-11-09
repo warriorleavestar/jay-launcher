@@ -543,7 +543,9 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         await _iconGate.WaitAsync();
         try
         {
-            var bytes = await _service.Http.GetByteArrayAsync(url);
+            byte[] bytes;
+            using (Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.ContentApi))
+                bytes = await _service.Http.GetByteArrayAsync(url);
             item.Icon = await Task.Run(() =>
             {
                 using var memory = new MemoryStream(bytes);

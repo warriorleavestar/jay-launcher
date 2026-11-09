@@ -102,6 +102,13 @@ public sealed partial class MultiplayerViewModel
         messenger.FileOffered += offer => Dispatcher.UIThread.Post(() =>
         {
             if (_messenger != messenger) return;
+            // Child mode: files only from people on the trusted list; the rest are declined at once.
+            if (!Child.AcceptsFileFrom(Trusted.All.Any(m => m.Fingerprint == offer.FromFingerprint)))
+            {
+                _ = messenger.DeclineAsync(offer.Id);
+                SetStatus(StatusMessage.Info("settings.child.file_declined", offer.FromName));
+                return;
+            }
             FileOffers.Add(new FileOfferItem(offer));
             if (!IsCurrent) Badge++;
         });

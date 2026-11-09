@@ -11,7 +11,7 @@ public partial class LocalizationTests
     private static readonly string Src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
     /// <summary>开发用的自检文件不翻译。</summary>
-    private static readonly string[] Excluded = ["SelfTest.cs", "SelfTest.Hotspot.cs", "SelfTest.Shader.cs", "SelfTest.MultiplayerGuide.cs", "ContentPageSelfTest.cs", "SelfTest.BakeNotice.cs", "SelfTest.CodeHygiene.cs", "SelfTest.Remote.cs", "SelfTest.Settings.cs", "SelfTest.HostServer.cs", "SelfTest.MicrosoftLogin.cs", "SelfTest.PublicNetwork.cs", "SelfTest.Theme.cs", "SelfTest.Security.cs", "SelfTest.Gallery.cs", "SelfTest.SafetyLock.cs", "SelfTest.Shell.cs", "SelfTest.Activity.cs", "SelfTest.Library.cs", "SelfTest.Instance.cs", "SelfTest.Mods.cs", "SelfTest.NewInstance.cs", "SelfTest.Discover.cs", "SelfTest.FirstRun.cs", "SelfTest.Drop.cs", "SelfTest.Recycle.cs", "SelfTest.Packs.cs", "SelfTest.Backups.cs", "SelfTest.Logs.cs", "SelfTest.Fix.cs", "SelfTest.Palette.cs", "SelfTest.SettingsLayout.cs", "Gallery.axaml", "Gallery.axaml.cs", "LayoutCheck.cs", "Spike.cs"];
+    private static readonly string[] Excluded = ["SelfTest.cs", "SelfTest.Hotspot.cs", "SelfTest.Shader.cs", "SelfTest.MultiplayerGuide.cs", "ContentPageSelfTest.cs", "SelfTest.BakeNotice.cs", "SelfTest.CodeHygiene.cs", "SelfTest.Remote.cs", "SelfTest.Settings.cs", "SelfTest.HostServer.cs", "SelfTest.MicrosoftLogin.cs", "SelfTest.PublicNetwork.cs", "SelfTest.Theme.cs", "SelfTest.Security.cs", "SelfTest.Gallery.cs", "SelfTest.SafetyLock.cs", "SelfTest.Shell.cs", "SelfTest.Activity.cs", "SelfTest.Library.cs", "SelfTest.Instance.cs", "SelfTest.Mods.cs", "SelfTest.NewInstance.cs", "SelfTest.Discover.cs", "SelfTest.FirstRun.cs", "SelfTest.Drop.cs", "SelfTest.Recycle.cs", "SelfTest.Packs.cs", "SelfTest.Backups.cs", "SelfTest.Logs.cs", "SelfTest.Fix.cs", "SelfTest.Palette.cs", "SelfTest.SettingsLayout.cs", "SelfTest.Privacy.cs", "SelfTest.Help.cs", "SelfTest.DockDensity.cs", "Gallery.axaml", "Gallery.axaml.cs", "LayoutCheck.cs", "Spike.cs"];
 
     // 汉字（含扩展 A）、假名、中日文标点和全角符号，以及中文里常用的 …“”—：写死在代码里的标点换语言后也会留在文字中间。
     [GeneratedRegex(@"[㐀-䶿一-鿿぀-ヿ　-〿＀-￯…“”—]")]
@@ -137,6 +137,26 @@ public partial class LocalizationTests
             .ToList();
         Assert.True(missing.Count == 0 && extra.Count == 0 && placeholderMismatch.Count == 0,
             $"{code}：缺 {missing.Count} 个（{string.Join(", ", missing.Take(10))}），多 {extra.Count} 个（{string.Join(", ", extra.Take(10))}），占位符不一致：\n{string.Join("\n", placeholderMismatch.Take(10))}");
+    }
+
+    /// <summary>
+    /// Multiplayer glossary (official §6.14): the UI says relay server, safety code, friend code and "connected directly",
+    /// never the internal words. Internal names may appear only in the component's licence line.
+    /// </summary>
+    [Theory]
+    [InlineData("zh-Hans", new[] { "节点", "打洞", "指纹", "退出码" })]
+    [InlineData("zh-Hant", new[] { "節點", "打洞", "指紋", "NAT 穿透" })]
+    [InlineData("en", new[] { " node", "Node ", "fingerprint", "hole punch" })]
+    [InlineData("ja", new[] { "ノード", "指紋", "ホールパンチ", "フィンガープリント" })]
+    public void GlossaryKeepsInternalWordsOutOfUi(string code, string[] banned)
+    {
+        var table = L.Load(code);
+        var bad = table.Where(p => (p.Key.StartsWith("multiplayer.", StringComparison.Ordinal) || p.Key.StartsWith("core.mp.", StringComparison.Ordinal)
+                || p.Key.StartsWith("remote.", StringComparison.Ordinal))
+                && p.Key != "multiplayer.component.license" && p.Key != "multiplayer.nodes.hint"
+                && banned.Any(b => p.Value.Contains(b, StringComparison.Ordinal)))
+            .Select(p => $"{p.Key}: {p.Value}").ToList();
+        Assert.True(bad.Count == 0, string.Join("\n", bad.Take(10)));
     }
 
     /// <summary>占位符的完整写法（包括 :F1 这类格式），译文要和原文一模一样。</summary>

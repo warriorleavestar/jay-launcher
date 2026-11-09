@@ -89,6 +89,27 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "dock-density")
+            {
+                await DockDensityAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "help")
+            {
+                await HelpAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "privacy")
+            {
+                await PrivacyAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "settings-layout")
             {
                 await SettingsLayoutAsync();

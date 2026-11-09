@@ -189,7 +189,7 @@ public sealed partial class MultiplayerViewModel
         _members = members;
         ConfigureSecurity(members);
         var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
-            Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => Trusted.IsTrusted(pub), AskApprovalAsync, members,
+            Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => !Child.AlwaysAskKnock && Trusted.IsTrusted(pub), AskApprovalAsync, members,
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy);
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.StateChanged += () => Dispatcher.UIThread.Post(RefreshInvites);
@@ -439,7 +439,7 @@ public sealed partial class MultiplayerViewModel
     private async Task<PendingInvite?> IssueInviteAsync(int uses, TimeSpan? lifetime, bool autoApprove)
     {
         if (_lobby is not { } lobby || _credentials is not { } credentials) return null;
-        var invite = lobby.Book.Create(uses, lifetime, autoApprove, credentials.Tunnel);
+        var invite = lobby.Book.Create(uses, lifetime, Child.MayAutoAdmit(autoApprove), credentials.Tunnel);
         _lastInvite = invite.Invite;
         if (_direct is { IsHost: true } direct) MyDirectCode = direct.InviteCode(invite.Invite).Encode();
         InviteShown = false;

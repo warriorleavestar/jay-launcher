@@ -75,7 +75,8 @@ public sealed class Downloader
     public static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(100);
 
     /// <param name="timeout">Overall limit per request. Null (the default) means none: use that for file downloads, which watch for stalls themselves.</param>
-    public static HttpClient CreateHttpClient(TimeSpan? timeout = null)
+    /// <param name="category">The network-list category of every request through this client (null: by host or scope).</param>
+    public static HttpClient CreateHttpClient(TimeSpan? timeout = null, NetworkCategory? category = null)
     {
         var handler = new SocketsHttpHandler
         {
@@ -85,7 +86,7 @@ public sealed class Downloader
             ConnectTimeout = TimeSpan.FromSeconds(10),
         };
         // 超时由调用方按请求控制，大文件不能有总时长限制。
-        var http = new HttpClient(handler) { Timeout = timeout ?? Timeout.InfiniteTimeSpan };
+        var http = new HttpClient(new NetworkPolicyHandler(handler, category)) { Timeout = timeout ?? Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"Jay/{typeof(Downloader).Assembly.GetName().Version?.ToString(3) ?? "0.1"}");
         return http;
     }

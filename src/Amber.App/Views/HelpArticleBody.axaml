@@ -1,0 +1,49 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:help="using:Amber.Core.Help"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:views="using:Amber.App.Views"
+             x:Class="Amber.App.Views.HelpArticleBody"
+             x:DataType="vm:HelpArticleView">
+  <!-- One help article: headings, paragraphs and bullets; links become buttons under their block (jay: opens a place in
+       Jay, help: another article). Shared by the help drawer and the help center. -->
+  <StackPanel Spacing="8">
+    <TextBlock x:Name="ArticleTitle" Text="{Binding Title}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold" TextWrapping="Wrap" />
+    <ItemsControl x:Name="BlockList" ItemsSource="{Binding Blocks}">
+      <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate DataType="vm:HelpBlockItem">
+          <StackPanel Spacing="2">
+            <TextBlock Text="{Binding Text}" IsVisible="{Binding IsHeading}" FontWeight="SemiBold" Margin="0,8,0,0" TextWrapping="Wrap" />
+            <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding IsParagraph}" TextWrapping="Wrap" />
+            <Grid ColumnDefinitions="16,*" IsVisible="{Binding IsBullet}">
+              <TextBlock Text="•" />
+              <SelectableTextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+            </Grid>
+            <ItemsControl ItemsSource="{Binding Links}" IsVisible="{Binding HasLinks}" Margin="16,0,0,0">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="help:HelpLink">
+                  <Button Classes="ghost" Padding="0,2" Content="{Binding Text, StringFormat='{}{0} ›'}"
+                          Command="{Binding $parent[views:HelpArticleBody].LinkCommand}" CommandParameter="{Binding}" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <StackPanel Spacing="2" IsVisible="{Binding HasRelated}" Margin="0,8,0,0">
+      <TextBlock Text="{l:T help.related}" FontWeight="SemiBold" />
+      <ItemsControl x:Name="RelatedList" ItemsSource="{Binding Related}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate DataType="vm:HelpArticleItem">
+            <Button Classes="ghost" Padding="0,2" Content="{Binding Title, StringFormat='{}{0} ›'}" HorizontalAlignment="Left"
+                    Command="{Binding $parent[views:HelpArticleBody].ArticleCommand}" CommandParameter="{Binding}" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

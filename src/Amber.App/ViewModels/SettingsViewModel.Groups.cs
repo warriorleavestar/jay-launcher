@@ -144,6 +144,7 @@ public sealed partial class SettingsViewModel
 
     [RelayCommand] private void GoMultiplayerSettings() => Navigate?.Invoke("play");
     [RelayCommand] private void GoTools() => Navigate?.Invoke(LegacyRoutes.Tools);
+    [RelayCommand] private void GoAbout() => Navigate?.Invoke("about");
     [RelayCommand] private void GoGroup(string? id) { if (id is not null) SelectGroup(id); }
 
     // ---- General › after launching a game ----

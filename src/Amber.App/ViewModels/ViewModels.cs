@@ -153,6 +153,55 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Command palette, Ctrl+K (§6.23).</summary>
     public CommandPaletteViewModel Palette { get; }
 
+    /// <summary>The live game log (the docked panel and the pop-out window read it).</summary>
+    public LogViewModel Log => Pages.OfType<LogViewModel>().First();
+
+    /// <summary>
+    /// Ctrl+V outside a text box (§6.14): a code on the clipboard opens multiplayer with it filled in, nothing more.
+    /// Returns false when the text is not a code (the key press is then left alone).
+    /// </summary>
+    public bool PasteCode(string? text)
+    {
+        if (FirstRun.IsOpen || Pages.OfType<MultiplayerViewModel>().FirstOrDefault() is not { IsIdle: true } multiplayer) return false;
+        if (!multiplayer.PasteCode(text)) return false;
+        Shell.Navigate(multiplayer.Tab switch
+        {
+            MultiplayerTab.Public => "play/public",
+            MultiplayerTab.Servers => "play/servers",
+            MultiplayerTab.Settings => "play/settings",
+            _ => "play",
+        });
+        return true;
+    }
+
+    /// <summary>The log is docked at the bottom of the content area (Ctrl+`).</summary>
+    [ObservableProperty] public partial bool LogDocked { get; set; }
+
+    /// <summary>Asks the window to pop the log out into its own window.</summary>
+    public event Action? LogPopOutRequested;
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    public void ToggleLogDock() => LogDocked = !LogDocked;
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    public void PopOutLog()
+    {
+        LogDocked = false;
+        LogPopOutRequested?.Invoke();
+    }
+
+    /// <summary>Help drawer (F1) and the articles the help center reads (§6.24).</summary>
+    public HelpViewModel Help { get; } = new();
+
+    /// <summary>F1 or the help button: this page's article in the drawer.</summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    public void OpenHelp()
+    {
+        if (Help.IsOpen) { Help.Close(); return; }
+        Activity.Close();
+        Help.OpenFor(Shell.Router.Current, Shell.Title);
+    }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
         if (oldValue is not null) oldValue.IsCurrent = false;
@@ -214,6 +263,8 @@ public sealed partial class MainViewModel : ObservableObject
             new ToolsViewModel(service),
             new SettingsViewModel(service),
             log,
+            new AboutViewModel(service),
+            new HelpCenterViewModel(Help),
         ];
         var accounts = (AccountsViewModel)Pages[1];
         Shell = new ShellViewModel(this, service);
@@ -267,6 +318,14 @@ public sealed partial class MainViewModel : ObservableObject
         };
         var settingsPage = Pages.OfType<SettingsViewModel>().Single();
         settingsPage.Navigate = r => shell.Navigate(r);
+        Help.Navigate = r => shell.Navigate(r);
+        var about = Pages.OfType<AboutViewModel>().Single();
+        about.Navigate = r => shell.Navigate(r);
+        about.List.Navigate = r => shell.Navigate(r);
+        about.List.Multiplayer = multiplayer;
+        settingsPage.NetworkList.Navigate = r => shell.Navigate(r);
+        settingsPage.NetworkList.Multiplayer = multiplayer;
+        settingsPage.ChildModeChanged = () => { multiplayer.ApplyChildMode(); about.Refresh(); };
         Drop = new DropViewModel(service)
         {
             PreviewPack = async path =>
@@ -342,6 +401,7 @@ public sealed partial class MainViewModel : ObservableObject
         Palette = new CommandPaletteViewModel(() => library.AllCards.Select(c => (c.Id, c.Name, c.Facts)))
         {
             Navigate = r => shell.Navigate(r),
+            HelpArticles = () => Help.Library.Catalog,
             OpenInstance = library.OpenInstance,
             StartInstance = library.LaunchInstance,
             AddModsTo = id =>
@@ -350,6 +410,7 @@ public sealed partial class MainViewModel : ObservableObject
                 content.BrowseModsFor(id);
             },
             OpenActivity = () => { if (!Activity.IsOpen) Activity.Toggle(); },
+            DockLog = () => LogDocked = true,
             // A pasted invite fills the join box; joining (knocking) is still the player's click there.
             JoinInvite = code =>
             {
@@ -362,6 +423,7 @@ public sealed partial class MainViewModel : ObservableObject
                 multiplayer.JayServers.InviteText = code;
             },
         };
+        multiplayer.Navigate = r => shell.Navigate(r);
         foreach (var page in Pages) Shell.Watch(page);
         CurrentPage = library;
         CurrentPage.Activate();
@@ -506,7 +568,7 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
 
-    protected override void OnBecameCurrent() => Recycle.Refresh();
+    protected override void OnBecameCurrent() { Recycle.Refresh(); RefreshPrivacy(); }
 
     public Amber.App.Localization.OptionItem[] ThemeOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.theme.system", "settings.theme.light", "settings.theme.dark");
     private static readonly string[] ThemeKeys = ["system", "light", "dark"];
@@ -514,6 +576,23 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial int SelectedThemeIndex { get; set; }
 
     /// <summary>减少动画：跟随系统 / 开 / 关（顺序和 MotionPreference.Modes 一致）。</summary>
+    public Amber.App.Localization.OptionItem[] DensityOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.density.standard", "settings.density.compact");
+
+    /// <summary>Density: 0 standard, 1 compact. Applies at once to every Jay window.</summary>
+    public int SelectedDensityIndex
+    {
+        get => Amber.Core.Layout.Density.Normalize(_service.Settings.Density) == Amber.Core.Layout.Density.Compact ? 1 : 0;
+        set
+        {
+            var mode = Amber.Core.Layout.Density.Modes[Math.Clamp(value, 0, 1)];
+            if (mode == Amber.Core.Layout.Density.Normalize(_service.Settings.Density)) return;
+            _service.Settings.Density = mode;
+            _service.Settings.Save();
+            Amber.App.Services.DensityService.Apply(mode);
+            OnPropertyChanged();
+        }
+    }
+
     public Amber.App.Localization.OptionItem[] MotionOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.motion.system", "settings.motion.on", "settings.motion.off");
 
     [ObservableProperty] public partial int SelectedMotionIndex { get; set; }
@@ -846,6 +925,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
             case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
             case "motion": SelectedMotionIndex = 0; break;
+            case "density": SelectedDensityIndex = 0; break;
             case "sidebar": SelectedSidebarIndex = 0; break;
             case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); AllowNetworkThemes = true; break;
         }

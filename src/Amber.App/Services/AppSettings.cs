@@ -23,6 +23,9 @@ public sealed class AppSettings
     public int MaxMemoryMb { get; set; } = 4096;
     public bool IsolateVersions { get; set; } = true;
 
+    /// <summary>"For a child" (official design §9.6): main switch, six items and the time of the last change.</summary>
+    public Amber.Core.Safety.ChildModeSettings ChildMode { get; set; } = new();
+
     /// <summary>无痕模式：游戏日志（logs/latest.log）里不写聊天行。默认关。</summary>
     public bool NoTrace { get; set; }
     public string PlayerName { get; set; } = "Player";
@@ -129,6 +132,12 @@ public sealed class AppSettings
 
     /// <summary>启动游戏后启动器怎么办：minimize（最小化，默认）/ keep（保持）/ tray（隐藏到托盘）。</summary>
     public string AfterLaunch { get; set; } = "minimize";
+
+    /// <summary>standard / compact (official design §6.20 Appearance).</summary>
+    public string Density { get; set; } = Amber.Core.Layout.Density.Standard;
+
+    /// <summary>Multiplayer lobby: copy the first invite when a room is opened (cleared from the clipboard later).</summary>
+    public bool MultiplayerAutoCopyInvite { get; set; } = true;
 
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;

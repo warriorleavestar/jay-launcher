@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:l="using:Amber.App.Localization"
+             x:Class="Amber.App.Views.NetworkListView"
+             x:DataType="vm:NetworkListModel">
+  <!-- The network list (official design §8.8): the five kinds of network use and how each stands now. Wide and medium:
+       status in its own column; compact: under each item. "Change ›" is reachable with Tab. -->
+  <ItemsControl x:Name="RowList" ItemsSource="{Binding Rows}">
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate><StackPanel Spacing="14" /></ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate>
+      <DataTemplate DataType="vm:NetworkRow">
+        <Grid ColumnDefinitions="24,*,Auto" ColumnSpacing="8">
+          <TextBlock Text="{Binding Number}" FontWeight="Bold" />
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding When}" TextWrapping="Wrap" Opacity="0.8" FontSize="12" />
+            <StackPanel Spacing="2" Margin="0,2,0,0" IsVisible="{Binding $parent[ItemsControl].((vm:NetworkListModel)DataContext).IsCompact}">
+              <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding LastUsed}" IsVisible="{Binding HasLastUsed}" FontSize="12" Opacity="0.7" />
+              <Button Classes="ghost" Content="{l:T about.net.change}" Padding="0,2" HorizontalAlignment="Left" IsVisible="{Binding CanChange}"
+                      Command="{Binding $parent[ItemsControl].((vm:NetworkListModel)DataContext).ChangeCommand}" CommandParameter="{Binding}" />
+            </StackPanel>
+          </StackPanel>
+          <StackPanel x:Name="StatusCell" Grid.Column="2" Spacing="0" HorizontalAlignment="Right" MaxWidth="240"
+                      IsVisible="{Binding !$parent[ItemsControl].((vm:NetworkListModel)DataContext).IsCompact}">
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" TextAlignment="Right" />
+            <TextBlock Text="{Binding LastUsed}" IsVisible="{Binding HasLastUsed}" FontSize="12" Opacity="0.7" TextAlignment="Right" />
+            <Button Classes="ghost" Content="{l:T about.net.change}" Padding="0,2" HorizontalAlignment="Right" IsVisible="{Binding CanChange}"
+                    Command="{Binding $parent[ItemsControl].((vm:NetworkListModel)DataContext).ChangeCommand}" CommandParameter="{Binding}" />
+          </StackPanel>
+        </Grid>
+      </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>
