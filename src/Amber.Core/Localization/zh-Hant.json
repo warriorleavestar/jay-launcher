@@ -2770,5 +2770,7 @@
   "settings.themepack.fixed": "自動調了 {0} 處顏色，讓文字和按鈕看得清。",
   "settings.themepack.copy_report": "複製給作者看",
   "settings.themepack.report_copied": "已複製，發給主題作者就行",
-  "settings.themepack.needs_newer": "這個主題需要更新的 Jay（{0} 或更新），有些地方可能顯示得不對。"
+  "settings.themepack.needs_newer": "這個主題需要更新的 Jay（{0} 或更新），有些地方可能顯示得不對。",
+  "settings.themepack.builtin.jay-classic-amber": "Jay 經典琥珀（0.7 的樣子）",
+  "settings.themepack.builtin.jay-high-contrast": "高對比"
 }

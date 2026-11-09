@@ -2692,5 +2692,7 @@
   "settings.themepack.fixed": "自調色 {0} 處，使字與鈕可辨。",
   "settings.themepack.copy_report": "錄與作者觀之",
   "settings.themepack.report_copied": "已錄，寄與主題作者可也",
-  "settings.themepack.needs_newer": "此主題須新版 Jay（{0} 或更新），或有顯示不當處。"
+  "settings.themepack.needs_newer": "此主題須新版 Jay（{0} 或更新），或有顯示不當處。",
+  "settings.themepack.builtin.jay-classic-amber": "Jay 舊琥珀（〇・七之貌）",
+  "settings.themepack.builtin.jay-high-contrast": "高對比"
 }

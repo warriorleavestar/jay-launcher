@@ -645,7 +645,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// <summary>主题包的说明：作者、读取时发现的问题、安全模式提示。</summary>
     [ObservableProperty] public partial string ThemePackStatus { get; set; } = "";
 
-    public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false };
+    public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false } option && !Amber.Core.Themes.BuiltInThemes.IsBuiltIn(option.Id);
 
     /// <summary>What Jay changed in the current theme: the format upgrade and the automatic color fixes (official §10.4, §10.8).</summary>
     [ObservableProperty]
@@ -677,9 +677,15 @@ public sealed partial class SettingsViewModel : PageViewModel
         _themeLoading = true;
         ThemePacks.Clear();
         ThemePacks.Add(new ThemePackOption(ThemeService.DefaultId, L.T("settings.themepack.default"), true));
-        foreach (var pack in ThemeService.Store.List())
+        foreach (var pack in ThemeService.Store.ListAll())
         {
-            var label = pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name;
+            // Jay's own themes are named in the UI language; imported ones by their author.
+            var label = pack.Id switch
+            {
+                Amber.Core.Themes.BuiltInThemes.ClassicAmber => L.T("settings.themepack.builtin.jay-classic-amber"),
+                Amber.Core.Themes.BuiltInThemes.HighContrast => L.T("settings.themepack.builtin.jay-high-contrast"),
+                _ => pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name,
+            };
             // Format 1 packs are upgraded on read (official §10.8): the card says so.
             if (pack.Upgraded) label += " · " + L.T("settings.themepack.upgraded_tag");
             ThemePacks.Add(new ThemePackOption(pack.Id, label, false));
@@ -762,7 +768,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     [RelayCommand]
     private void RemoveThemePack()
     {
-        if (SelectedThemePack is not { IsDefault: false } option) return;
+        if (SelectedThemePack is not { IsDefault: false } option || Amber.Core.Themes.BuiltInThemes.IsBuiltIn(option.Id)) return;
         var wasCurrent = (_service.Settings.ThemePack ?? ThemeService.DefaultId) == option.Id;
         if (wasCurrent) ThemeService.Select(_service.Settings, ThemeService.DefaultId);
         try { ThemeService.Store.Remove(option.Id); }

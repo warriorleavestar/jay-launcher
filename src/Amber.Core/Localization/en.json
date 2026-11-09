@@ -2843,5 +2843,7 @@
   "settings.themepack.fixed": "Jay adjusted {0} colors so text and buttons stay readable.",
   "settings.themepack.copy_report": "Copy for the author",
   "settings.themepack.report_copied": "Copied. Send it to the theme's author.",
-  "settings.themepack.needs_newer": "This theme needs a newer Jay ({0} or later). Some parts may not look as intended."
+  "settings.themepack.needs_newer": "This theme needs a newer Jay ({0} or later). Some parts may not look as intended.",
+  "settings.themepack.builtin.jay-classic-amber": "Jay Classic Amber (the 0.7 look)",
+  "settings.themepack.builtin.jay-high-contrast": "High contrast"
 }

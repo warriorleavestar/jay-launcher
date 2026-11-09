@@ -25,6 +25,8 @@ public sealed class ThemeStore(string root)
             stream.Position = 0;
             pack = ThemePackReader.Read(stream);
         }
+        // Jay's own themes can't be replaced by an import that claims their id.
+        if (BuiltInThemes.IsBuiltIn(pack.Id)) throw new ThemePackException("builtin_id", pack.Id);
         Directory.CreateDirectory(Root);
         var target = Path.Combine(Root, pack.Id);
         var temp = Path.Combine(Root, $".{pack.Id}.{Guid.NewGuid():N}.tmp");
@@ -50,6 +52,9 @@ public sealed class ThemeStore(string root)
     }
 
     /// <summary>列出已安装的主题；读不了的跳过（不让一个坏主题拖垮设置页）。</summary>
+    /// <summary>Jay's built-in themes first, then the installed ones (the settings list).</summary>
+    public List<ThemePack> ListAll() => [.. BuiltInThemes.Ids.Select(BuiltInThemes.Load).OfType<ThemePack>(), .. List()];
+
     public List<ThemePack> List()
     {
         var result = new List<ThemePack>();
@@ -57,7 +62,7 @@ public sealed class ThemeStore(string root)
         foreach (var dir in Directory.EnumerateDirectories(Root))
         {
             var name = Path.GetFileName(dir);
-            if (name.StartsWith('.') || !ThemePackReader.IsValidId(name)) continue;
+            if (name.StartsWith('.') || !ThemePackReader.IsValidId(name) || BuiltInThemes.IsBuiltIn(name)) continue;
             if (TryLoad(name) is { } pack) result.Add(pack);
         }
         return result.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -65,6 +70,7 @@ public sealed class ThemeStore(string root)
 
     public ThemePack? TryLoad(string id)
     {
+        if (BuiltInThemes.Load(id) is { } builtIn) return builtIn;
         if (!ThemePackReader.IsValidId(id)) return null;
         var dir = Path.Combine(Root, id);
         if (!Directory.Exists(dir)) return null;
@@ -78,7 +84,7 @@ public sealed class ThemeStore(string root)
 
     public bool Remove(string id)
     {
-        if (!ThemePackReader.IsValidId(id)) return false;
+        if (!ThemePackReader.IsValidId(id) || BuiltInThemes.IsBuiltIn(id)) return false;
         var dir = Path.Combine(Root, id);
         if (!Directory.Exists(dir)) return false;
         Directory.Delete(dir, true);

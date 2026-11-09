@@ -63,7 +63,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Repo
 只验证发现页时设置 `AMBER_SELFTEST_SCOPE=discover`：在报告目录里建临时游戏目录和一个 Fabric 实例，检查类型芯片（窄窗变下拉）、来源分段、结果行【＋待装】和 Space、待装条【安装 N 个】一次装完（连前置）、详情三种宽度（右栏 / 抽屉 / 全区）、Esc、上下文模式【完成，返回】、整合包唯一的琥珀按钮，三种宽度两种语言截图；联网搜 Modrinth 并下载待装的模组。
 只验证活动中心时设置 `AMBER_SELFTEST_SCOPE=activity`：模拟任务、请求、一局游戏和启动失败，检查活动抽屉（Ctrl+J / Esc，三档宽度）、请求条（倒计时、去重、安全请求在最前、处理后同步收起）、出错通知不自动消失、正在玩胶囊、启动失败卡的修复按钮和关窗保护。不碰游戏目录、不联网。
 只验证安全外观锁定时设置 `AMBER_SELFTEST_SCOPE=safety-lock`：装上五个极端主题包，逐像素比对安全面板和隐私行在深浅两色下跟默认外观一致，并检查带保留词的主题包被拒、确认框默认焦点在“保留”。
-只验证界面主题包（导出、导入、立即生效、坏包被拒、恢复默认、删除、format 1 自动升级：主题卡标记、说明条和【复制给作者看】、侧栏色给顶栏、开始按钮跟强调色；format 2：minJay 提示、新颜色名、种子 play、动效时长）时设置 `AMBER_SELFTEST_SCOPE=theme`；主题包格式见 `docs/themes.md`。
+只验证界面主题包（导出、导入、立即生效、坏包被拒、恢复默认、删除、format 1 自动升级：主题卡标记、说明条和【复制给作者看】、侧栏色给顶栏、开始按钮跟强调色；format 2：minJay 提示、新颜色名、种子 play、动效时长；内置的经典琥珀和高对比：列表里有、套上生效、删不掉）时设置 `AMBER_SELFTEST_SCOPE=theme`；主题包格式见 `docs/themes.md`。
 只验证联机安全（设置页“联机安全”卡片、熔断倒计时盖住窗口、空格取消、到点重启、10 分钟内不再自动重启、跳过等待）时设置 `AMBER_SELFTEST_SCOPE=security`；重启这一步换成计数，不会真的重启。
 开服端到端要开两个 Jay：一个 `AMBER_SELFTEST_SCOPE=host-server`（按“开服”卡片的按钮走完 填地址 → 准备服务端 → 启动 → 邀请 → 等进服 → 撤销 → 停服 → 再开后关窗口），一个 `AMBER_SELFTEST_SCOPE=jay-client`（离线账号 Steve，用 `AMBER_SELFTEST_VERSION` 指定的实例进服）。两边各用自己的 `AMBER_DATA_DIR`，`AMBER_SELFTEST_INVITE` 指向同一个邀请码文件。`AMBER_SELFTEST_SCOPE=host-exit` 只测“服务器开着时关 Jay 会先存盘”。
 

@@ -2770,5 +2770,7 @@
   "settings.themepack.fixed": "文字やボタンが読みやすくなるよう、色を {0} か所自動で調整しました。",
   "settings.themepack.copy_report": "作者向けにコピー",
   "settings.themepack.report_copied": "コピーしました。テーマの作者に送ってください",
-  "settings.themepack.needs_newer": "このテーマには新しい Jay（{0} 以降）が必要です。一部が正しく表示されない場合があります。"
+  "settings.themepack.needs_newer": "このテーマには新しい Jay（{0} 以降）が必要です。一部が正しく表示されない場合があります。",
+  "settings.themepack.builtin.jay-classic-amber": "Jay クラシックアンバー（0.7 の見た目）",
+  "settings.themepack.builtin.jay-high-contrast": "ハイコントラスト"
 }
