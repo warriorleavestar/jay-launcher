@@ -163,6 +163,12 @@ internal sealed partial class SelfTest
         Check("换公共网络：默认是 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && host.NetworkChoices.Count == 1,
             string.Join(" | ", host.NetworkChoices.Select(c => c.Label)));
 
+        // Test registry key switch (AMBER_TEST_REGISTRY_KEY): only valid 32-byte keys count, and such networks are labelled as test-reviewed.
+        var testKey = Convert.ToBase64String(NetworkSigner.Generate(out _).PublicKey);
+        var parsedKeys = Amber.App.Services.LauncherService.ParseTestKeys($"{testKey}, not-base64, AAAA");
+        var testChoice = new NetworkChoice("t", "测试网络", true, 1, null, TestReviewed: true);
+        Check("测试注册表钥匙：只认合法公钥，网络标成测试审核", parsedKeys.Count == 1 && testChoice.Label.Contains("🧪")
+            && testChoice.Detail.Contains(L.T("multiplayer.network.test_reviewed")), testChoice.Detail);
         var node = $"tcp://127.0.0.1:{EasyTierArgs.FreeTcpPort()}";
         // 网络节点的账号登录（和 jay-server directory --accounts 一样）：一个开了两步验证的账号。
         var accounts = new AccountStore(Path.Combine(reportDir, "node-accounts.json"));
