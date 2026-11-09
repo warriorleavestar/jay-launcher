@@ -32,13 +32,12 @@ public class ThemeLayoutTests
             """));
         var shell = pack.Shell!;
         Assert.Equal("top", shell.Nav);
-        Assert.Equal("icons", shell.NavStyle);
-        Assert.Equal(360, shell.NavWidth); // 夹到范围里
+        Assert.Equal("rail", shell.NavStyle); // format 1 的 icons 升级成图标栏
+        Assert.Equal(320, shell.SidebarWidth); // 旧导航宽度夹到 200–320
         Assert.False(shell.ShowBrand);
         Assert.Equal(1200, shell.ContentMaxWidth);
-        Assert.Equal(["settings", "home"], shell.PageOrder.Take(2));
-        Assert.Equal(ThemeLayout.PageIds.Length, shell.PageOrder.Count); // 没写的页接在后面
-        Assert.Equal(["log"], shell.Hidden); // 设置页藏不掉
+        Assert.Equal(["library", "discover", "multiplayer"], shell.Sections); // 设置不再是导航项；没写的入口接在后面
+        Assert.Empty(shell.Hidden); // 日志归游戏库，游戏库藏不掉；设置页藏不掉
         Assert.Contains(pack.Problems, p => p.Code == "required_page");
     }
 
@@ -47,7 +46,7 @@ public class ThemeLayoutTests
     {
         var pack = Read(("layout/shell.json", """{ "nav": "diagonal", "navStyle": 3, "showBrand": "yes" }"""));
         Assert.Equal("left", pack.Shell!.Nav);
-        Assert.Equal("full", pack.Shell.NavStyle);
+        Assert.Equal("auto", pack.Shell.NavStyle);
         Assert.True(pack.Shell.ShowBrand);
         Assert.True(pack.Problems.Count(p => p.Code == "bad_value") >= 3);
     }

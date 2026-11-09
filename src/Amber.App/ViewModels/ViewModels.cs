@@ -1,3 +1,4 @@
+using Amber.Core.Navigation;
 using Amber.Core.Themes;
 using System.Collections.ObjectModel;
 using Amber.Core.Localization;
@@ -137,43 +138,15 @@ public sealed partial class MainViewModel : ObservableObject
 
     public string VersionText => L.F("main.version", UpdateChecker.CurrentVersion);
 
-    /// <summary>导航栏里显示的页面：主题包可以改顺序、藏掉不常用的页（启动页和设置页藏不掉）。页面本身还在，跳转照常。</summary>
-    public ObservableCollection<PageViewModel> NavPages { get; } = [];
-
-    /// <summary>
-    /// 导航栏的选中项。当前页不在导航栏里时是空；导航栏给空值（重排导航项时会发生）不改当前页。
-    /// </summary>
-    public PageViewModel? NavSelection
-    {
-        get => NavPages.Contains(CurrentPage) ? CurrentPage : null;
-        set { if (value is not null) CurrentPage = value; }
-    }
-
-    /// <summary>按主题包的 shell 布局排导航项；传空恢复 Jay 自带的顺序。</summary>
-    public void ApplyNavOrder(ShellLayout? shell)
-    {
-        var ids = ThemeLayout.PageIds;
-        var byId = new Dictionary<string, PageViewModel>();
-        for (var i = 0; i < Pages.Count && i < ids.Length; i++) byId[ids[i]] = Pages[i];
-        var order = new List<PageViewModel>();
-        foreach (var id in shell?.PageOrder ?? [])
-            if (byId.TryGetValue(id, out var page) && !order.Contains(page)) order.Add(page);
-        foreach (var page in Pages)
-            if (!order.Contains(page)) order.Add(page);
-        if (shell is not null)
-            order.RemoveAll(p => byId.FirstOrDefault(kv => kv.Value == p).Key is { } id && shell.Hidden.Contains(id) && !ThemeLayout.RequiredPages.Contains(id));
-        if (order.SequenceEqual(NavPages)) return;
-        NavPages.Clear();
-        foreach (var page in order) NavPages.Add(page);
-        OnPropertyChanged(nameof(NavSelection));
-    }
+    /// <summary>外壳：路由、历史栈、侧栏入口、子页（官方设计 §11.5）。</summary>
+    public ShellViewModel Shell { get; }
 
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
-        OnPropertyChanged(nameof(NavSelection));
         if (oldValue is not null) oldValue.IsCurrent = false;
         newValue.IsCurrent = true;
         newValue.Activate();
+        Shell?.OnPageChanged(newValue);
     }
 
     public MainViewModel(LauncherService service)
@@ -198,53 +171,57 @@ public sealed partial class MainViewModel : ObservableObject
             new SettingsViewModel(service),
             log,
         ];
-        var accounts = Pages[1];
-        home.NavigateToAccounts = () => CurrentPage = accounts;
-        home.NavigateToNewInstance = () => CurrentPage = download;
-        home.NavigateToLog = () => CurrentPage = log;
-        home.NavigateHere = () => CurrentPage = home;
+        var accounts = (AccountsViewModel)Pages[1];
+        Shell = new ShellViewModel(this, service);
+        var shell = Shell;
+        home.NavigateToAccounts = () => shell.Navigate("accounts");
+        home.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
+        home.NavigateToLog = () => shell.Navigate(LegacyRoutes.Logs);
+        home.NavigateHere = () => shell.Navigate("library");
         home.Onboarding.MicrosoftLogin = () =>
         {
-            if (accounts is AccountsViewModel a) a.LoginTab = AccountsViewModel.MicrosoftTab;
-            CurrentPage = accounts;
+            accounts.LoginTab = AccountsViewModel.MicrosoftTab;
+            shell.Navigate("accounts");
         };
-        home.Onboarding.ChooseVersion = () => CurrentPage = download;
+        home.Onboarding.ChooseVersion = () => shell.Navigate(LegacyRoutes.NewInstance);
         home.Onboarding.ImportPack = async path =>
         {
-            CurrentPage = content;
+            shell.Navigate("discover");
             await content.ImportLocalPackAsync(path);
         };
-        instance.NavigateHome = () => CurrentPage = home;
-        instance.NavigateToNewInstance = () => CurrentPage = download;
-        content.NavigateToSettings = () => CurrentPage = Pages.OfType<SettingsViewModel>().First();
+        instance.NavigateHome = () => shell.Navigate("library");
+        instance.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
+        content.NavigateToSettings = () => shell.Navigate("settings");
         instance.NavigateToContent = (id, type) =>
         {
-            CurrentPage = content;
-            content.BrowseFor(id, type, back: () => CurrentPage = instance);
+            var back = shell.Router.Current;
+            shell.Navigate("discover");
+            content.BrowseFor(id, type, back: () => shell.Router.Navigate(back));
         };
-        multiplayer.NavigateHome = () => CurrentPage = home;
+        multiplayer.NavigateHome = () => shell.Navigate("library");
         download.LaunchInstance = id =>
         {
             service.SetCurrentInstance(id);
-            CurrentPage = home;
+            shell.Navigate("library");
             service.RequestLaunch(new LaunchRequest(id));
         };
         download.OpenInstance = id =>
         {
             service.SetCurrentInstance(id);
-            CurrentPage = instance;
+            shell.Router.Navigate(Route.Of(Section.Library, id));
         };
         download.BrowseModsFor = id =>
         {
-            CurrentPage = content;
+            shell.Navigate("discover");
             content.BrowseModsFor(id);
         };
         instance.NavigateToDatapacks = (id, world) =>
         {
-            CurrentPage = content;
-            content.BrowseDatapacksFor(id, world, back: () => CurrentPage = instance);
+            var back = shell.Router.Current;
+            shell.Navigate("discover");
+            content.BrowseDatapacksFor(id, world, back: () => shell.Router.Navigate(back));
         };
-        ApplyNavOrder(null);
+        foreach (var page in Pages) Shell.Watch(page);
         CurrentPage = Pages[0];
         CurrentPage.Activate();
     }
@@ -348,6 +325,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         UpdateFeed = s.UpdateFeedUrl ?? "";
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
         SelectedMotionIndex = Math.Max(0, Array.IndexOf(Amber.Core.Layout.MotionPreference.Modes, Amber.Core.Layout.MotionPreference.Normalize(s.ReduceMotionMode)));
+        SelectedSidebarIndex = (int)Amber.Core.Layout.ShellRules.ParseMode(s.SidebarMode ?? (s.SidebarCollapsed ? "collapsed" : null));
         ReloadThemePacks();
         // 开发模式下主题文件改了会重新套用，提示跟着更新。
         ThemeService.Changed += UpdateThemePackStatus;
@@ -400,6 +378,23 @@ public sealed partial class SettingsViewModel : PageViewModel
         _service.Settings.ReduceMotion = _service.Settings.ReduceMotionMode == Amber.Core.Layout.MotionPreference.On;
         SystemMotion.Apply(_service.Settings.ReduceMotionMode);
         Persist();
+    }
+
+    /// <summary>侧栏：自动 / 总是展开 / 总是收起（顺序和 SidebarMode 一致）。</summary>
+    public Amber.App.Localization.OptionItem[] SidebarOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.sidebar.auto", "settings.sidebar.expanded", "settings.sidebar.collapsed");
+
+    [ObservableProperty] public partial int SelectedSidebarIndex { get; set; }
+
+    /// <summary>侧栏模式改了（窗口重新排外壳）。</summary>
+    public static event Action? SidebarModeChanged;
+
+    partial void OnSelectedSidebarIndexChanged(int value)
+    {
+        if (_loading || value < 0) return;
+        _service.Settings.SidebarMode = Amber.Core.Layout.ShellRules.ModeName((Amber.Core.Layout.SidebarMode)Math.Min(value, 2));
+        _service.Settings.SidebarCollapsed = false;
+        Persist();
+        SidebarModeChanged?.Invoke();
     }
 
     // ---- 界面主题包 ----
@@ -703,6 +698,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
             case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
             case "motion": SelectedMotionIndex = 0; break;
+            case "sidebar": SelectedSidebarIndex = 0; break;
             case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); AllowNetworkThemes = true; break;
         }
     }

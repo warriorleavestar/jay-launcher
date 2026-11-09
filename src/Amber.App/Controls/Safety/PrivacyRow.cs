@@ -17,6 +17,8 @@ public class PrivacyRow : SafetySurface
     protected override Type StyleKeyOverride => typeof(PrivacyRow);
 
     private readonly TextBlock _text = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+    private readonly StackPanel _panel;
+    private bool _compact;
 
     public PrivacyRow()
     {
@@ -25,27 +27,38 @@ public class PrivacyRow : SafetySurface
         shield.Bind(Path.DataProperty, this.GetResourceObservable("Icon.Shield"));
         _text.Bind(TextBlock.ForegroundProperty, this.GetResourceObservable("SidebarTextMuted"));
         _text.Bind(TextBlock.FontSizeProperty, this.GetResourceObservable("FontCaption"));
-        Child = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { shield, _text } };
+        _panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { shield, _text } };
+        Child = _panel;
         Update();
         L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(Update);
     }
 
+    private string FullText => $"{L.T("main.no_cloud_control")} · {L.T("main.no_telemetry")}";
+
     private void Update()
     {
-        _text.Text = $"{L.T("main.no_cloud_control")} · {L.T("main.no_telemetry")}";
-        Avalonia.Automation.AutomationProperties.SetName(this, _text.Text);
+        // 图标栏里：盾牌在上，下面一行小字“无遥测”；完整的话放进提示。读屏名字总是完整的。
+        _text.Text = _compact ? L.T("main.no_telemetry") : FullText;
+        Avalonia.Automation.AutomationProperties.SetName(this, FullText);
+        ToolTip.SetTip(this, _compact ? FullText : null);
     }
 
-    public string Text => _text.Text ?? "";
+    public string Text => FullText;
 
-    /// <summary>图标栏里只留盾牌，文字放进提示（读屏名字不变）。</summary>
+    /// <summary>图标栏：盾牌加一行短字“无遥测”，竖着排、居中（§3.1），完整的话在提示里。</summary>
     public bool Compact
     {
-        get => !_text.IsVisible;
+        get => _compact;
         set
         {
-            _text.IsVisible = !value;
-            ToolTip.SetTip(this, value ? _text.Text : null);
+            _compact = value;
+            _panel.Orientation = value ? Orientation.Vertical : Orientation.Horizontal;
+            _panel.Spacing = value ? 2 : 6;
+            _panel.HorizontalAlignment = value ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+            _text.TextAlignment = value ? TextAlignment.Center : TextAlignment.Left;
+            _text.MaxWidth = value ? 68 : double.PositiveInfinity;
+            foreach (var c in _panel.Children) c.HorizontalAlignment = value ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+            Update();
         }
     }
 }

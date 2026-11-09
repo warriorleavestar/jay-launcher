@@ -105,8 +105,14 @@ public sealed class AppSettings
     /// <summary>最近玩过的实例 id，最近的在前（启动页的“最近游玩”）。</summary>
     public List<string>? RecentInstances { get; set; }
 
-    /// <summary>侧边栏手动收成图标栏。</summary>
+    /// <summary>旧版：侧边栏手动收成图标栏。新版读 SidebarMode；这个勾过的升级成 collapsed。</summary>
     public bool SidebarCollapsed { get; set; }
+
+    /// <summary>侧栏：auto（按窗口宽度，默认）/ expanded / collapsed。</summary>
+    public string? SidebarMode { get; set; }
+
+    /// <summary>新版外壳的“东西搬到哪了”卡片已经关掉。</summary>
+    public bool ShellMovedNoticeSeen { get; set; }
 
     /// <summary>减少动画（页面切换、抽屉滑入这些都不做过渡）。</summary>
     public bool ReduceMotion { get; set; }
