@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
              xmlns:l="using:Amber.App.Localization"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:c="using:Amber.App.Views.Controls"
@@ -7,12 +8,12 @@
              x:Class="Amber.App.Views.InstancePage"
              x:DataType="vm:InstanceViewModel">
   <Grid RowDefinitions="Auto,Auto,*,Auto">
-    <Grid ColumnDefinitions="*,Auto">
+    <Grid svc:ThemeRegion.Name="instances.header" ColumnDefinitions="*,Auto">
       <TextBlock Classes="h1" Text="{l:T instance.title}" />
       <Button Grid.Column="1" Classes="ghost" Content="{l:T instance.new}" Command="{Binding NewInstanceCommand}" VerticalAlignment="Top" />
     </Grid>
 
-    <StackPanel Grid.Row="1" Spacing="6" Margin="0,0,0,8">
+    <StackPanel svc:ThemeRegion.Name="instances.picker" Grid.Row="1" Spacing="6" Margin="0,0,0,8">
       <!-- 选择器占满一行；启动、打开文件夹、更多放下一行，放不下自动折行（853 宽、长译文时不挤压选择器）。 -->
       <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding SelectedId}" HorizontalAlignment="Stretch" PlaceholderText="{l:T instance.version.empty}" />
       <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding HasInstance}">
@@ -33,7 +34,7 @@
       <TextBlock Classes="hint" FontSize="12" Text="{Binding InfoText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding InfoText}" />
     </StackPanel>
 
-    <Border Grid.Row="2" Classes="card" Padding="10" IsVisible="{Binding HasInstance}">
+    <Border svc:ThemeRegion.Name="instances.details" Grid.Row="2" Classes="card" Padding="10" IsVisible="{Binding HasInstance}">
       <!-- 小窗口有状态提示时，页签和工具栏一起滚动；页签内容仍有有限高度，列表继续虚拟滚动。 -->
       <ScrollViewer x:Name="InstanceTabsScroll" HorizontalScrollBarVisibility="Disabled">
       <TabControl SelectedIndex="{Binding TabIndex}" Padding="0,8,0,0" Height="{Binding #InstanceTabsScroll.Viewport.Height}" MinHeight="320">
@@ -390,7 +391,7 @@
       </ScrollViewer>
     </Border>
 
-    <Border Grid.Row="3" Classes="card" Margin="0">
+    <Border svc:ThemeRegion.Name="instances.status" Grid.Row="3" Classes="card" Margin="0">
       <Border.IsVisible>
         <MultiBinding Converter="{x:Static BoolConverters.Or}">
           <Binding Path="IsShowing" ElementName="PageStatus" />

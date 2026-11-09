@@ -9,7 +9,14 @@ namespace Amber.App.Views;
 
 public partial class ContentPage : UserControl
 {
-    public ContentPage() => InitializeComponent();
+    /// <summary>主题包可以重新排这一页的区块（docs/themes.md 的“页面布局”）。</summary>
+    internal Amber.App.Services.ThemeLayoutHost ThemeLayout { get; }
+
+    public ContentPage()
+    {
+        InitializeComponent();
+        ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "content");
+    }
 
     private void Query_KeyDown(object? sender, KeyEventArgs e)
     {
