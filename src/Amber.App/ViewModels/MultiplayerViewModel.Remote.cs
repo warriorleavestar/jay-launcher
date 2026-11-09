@@ -40,14 +40,17 @@ public sealed partial class MultiplayerViewModel
     /// <summary>远程控制的同意策略：每次都问（可以换，比如以后加“信任此人”）。</summary>
     internal IRemoteConsentPolicy RemoteConsentPolicy => new AskEveryTimePolicy((request, ct) => RemoteUi.AskConsentAsync(request, ct));
 
-    /// <summary>当前房间能用远程控制（邀请房间，并且这台电脑支持截屏和注入）。</summary>
-    public bool CanRemoteControl => _room is { FromInvite: true } && RemotePlatform.Supported;
+    /// <summary>当前房间能用远程控制（邀请房间）。看 / 控制别人在哪个系统上都行；这台电脑能不能被看由对方请求时再判断。</summary>
+    public bool CanRemoteControl => _room is { FromInvite: true };
 
-    /// <summary>不能用时的说明（AMB- 房间码的房间、不支持的系统）。</summary>
-    public string RemoteUnavailableText => !RemotePlatform.Supported ? L.T("multiplayer.remote.unsupported_os")
-        : _room is { FromInvite: false } ? L.T("multiplayer.remote.invite_only") : "";
+    /// <summary>
+    /// 说明：AMB- 房间码的房间不能用；这台电脑不能被看 / 控制时写原因（Linux 的 Wayland、缺组件），
+    /// macOS 还没授权屏幕录制 / 辅助功能时写去哪里开。
+    /// </summary>
+    public string RemoteUnavailableText => _room is { FromInvite: false } ? L.T("multiplayer.remote.invite_only")
+        : (RemotePlatform.UnavailableReason ?? RemotePlatform.SetupHint) is { } why ? L.F("multiplayer.remote.cannot_share", why) : "";
 
-    public bool HasRemoteUnavailableText => _room is not null && !CanRemoteControl;
+    public bool HasRemoteUnavailableText => _room is not null && RemoteUnavailableText.Length > 0;
 
     /// <summary>正在等对方同意（按钮先禁用）。</summary>
     [ObservableProperty] public partial bool RemoteWaiting { get; set; }
@@ -216,13 +219,21 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         var screen = RemotePlatform.CreateScreen();
+        if (screen is null)
+        {
+            // macOS 还没授权屏幕录制（系统这时已经弹了授权提示）之类：这次按拒绝回，界面上写原因。
+            await DeclineRemote(client, sessionId);
+            SetRemoteStatus(new StatusMessage("common.raw", [RemoteUnavailableText.Length > 0 ? RemoteUnavailableText : L.T("multiplayer.remote.unsupported_os")], StatusKind.Warning));
+            NotifyRemoteAvailability();
+            return;
+        }
         var input = consent.ViewOnly ? null : RemotePlatform.CreateInput();
         try
         {
             var (host, port) = RemoteEndpointToHost();
             using var connect = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var stream = await RemoteConnector.OpenAsync(host, port, room, RemoteRole.Controlled, sessionId, connect.Token);
-            var sharer = new RemoteSharer(stream, screen!, input, RemoteCodec, !consent.ViewOnly, HostDisplayName, HostFingerprint);
+            var sharer = new RemoteSharer(stream, screen, input, RemoteCodec, !consent.ViewOnly, HostDisplayName, HostFingerprint);
             if (_sessionCts is { } lifetime) sharer.EndWith(lifetime.Token);
             sharer.Ended += _ =>
             {

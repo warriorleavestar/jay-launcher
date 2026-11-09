@@ -86,7 +86,7 @@
 | 联机：“仅游戏”出口（SOCKS5） | ✅ | 🟡 路由拦截、SRV 已补，待真机验证 | 🟡 同左 | `Transport/ExitPolicy.cs`、`Transport/JoinTarget.cs` |
 | 联机身份（X25519 私钥）加密 | ✅ DPAPI | 🟡 AES-GCM + 本机密钥文件 | 🟡 同左 | `Multiplayer/MemberIdentity.cs` |
 | 敏感文字复制后 60 秒清剪贴板 | ✅ | ✅ | 🟡 Wayland 下要测 | `App/Services/SensitiveClipboard.cs` |
-| 远程控制【实验】【未发布】 | ✅ | 🪟 界面提示“只支持 Windows” | 🪟 同左 | `RemoteControl/Windows/WindowsRemote.cs` |
+| 远程控制【实验】【未发布】 | ✅ | ✅ CoreGraphics 截屏 + CGEvent 注入，要“屏幕录制”和“辅助功能”权限（待真机测） | ✅ X11 桌面（XGetImage + XTest）；Wayland 暂不支持，界面写原因 | `RemoteControl/Windows/WindowsRemote.cs`、`RemoteControl/Unix/` |
 | Jay 服务器（客户端加入）【实验】 | ✅ DPAPI 存访问密钥 | 🟡 访问密钥明文存（0600） | 🟡 同左 | `Multiplayer/Gate/JayServers.cs` |
 | `jay-server` 服务端【实验】 | ✅ | ✅ | ✅（systemd） | `src/Amber.Server` |
 | 模组烘焙【实验，默认关】 | ✅ | 🟡 | 🟡 | `Bake/BakeService.cs` |
@@ -280,8 +280,11 @@ Mac/Linux 上直接抛 `PlatformNotSupportedException`（“完整局域网模�
 | `RemoteControl/ScreenFrame.cs` | BGRA 帧、64×64 分块对比、缩放（最大 2560×1600）、坐标换算、无损编码 | 跨平台 |
 | `RemoteControl/RemoteHub.cs` | 房主侧服务，端口 47662，连接都由成员发起，经 `MemberChannel`（purpose `remote-v1`）认证 | 跨平台 |
 | `App/Services/SkiaTileCodec.cs` | JPEG 编码（用 Avalonia 自带的 Skia） | 跨平台 |
-| `App/Views/RemoteWindows.cs` | 同意弹窗、查看窗口、共享小条、键盘映射 | 跨平台，红框和热键只在 Windows 上挂 |
+| `App/Views/RemoteWindows.cs` | 同意弹窗、查看窗口、共享小条、键盘映射、红框（Mac/Linux 用四条窄的置顶窗口） | 跨平台；全局热键按系统挂（`Unix/UnixHotkeys.cs`） |
 | `RemoteControl/Windows/WindowsRemote.cs` | GDI BitBlt 截整个虚拟桌面、SendInput 注入、全局热键、红框原生窗口、窗口样式 | 🪟 |
+| `RemoteControl/Unix/X11Remote.cs` | XGetImage 截根窗口（所有显示器）、XTest 注入；Wayland 会话、没有 DISPLAY、缺 libXtst 时给出原因 | 🐧 X11 |
+| `RemoteControl/Unix/MacRemote.cs` | CGWindowListCreateImage 按“点”截所有显示器、CGEvent 注入（拖动、修饰键、滚轮）、屏幕录制 / 辅助功能权限检查和引导 | 🍎 |
+| `RemoteControl/Unix/RemoteKeyCodes.cs` | 扫描码换 X11 键码（evdev + 8）和 macOS 虚拟键码 | 🍎🐧 |
 
 #### 节奏
 
@@ -422,6 +425,10 @@ CI 的单元测试只在 `windows-latest` 上跑。有一些测试本身按 `Ope
 | 25 | 三平台互控矩阵 | Windows↔Mac、Windows↔Linux、Mac↔Linux，两个方向各测一次，邀请房间和直连房间都测 |
 
 做完后把 `RemotePlatform.Supported` 按平台放开，`SelfTest.Remote.cs` 在三个平台都跑一遍。
+
+**进度（2026-11-09）**：19、20、21 和 23 的截屏、注入、红框已经做了（macOS 先用 CoreGraphics 截屏，不是 ScreenCaptureKit；macOS 15 上如果截屏被系统挡掉再换）。
+Linux X11 在 Xvfb 上跑过 `AMBER_SELFTEST_SCOPE=remote`，14 项全过。看 / 控制别人在任何系统上都能用；这台电脑不能被控时（Wayland、macOS 没授权）联机页写原因。
+全局停止热键 Ctrl+Shift+F12 也做了：Linux X11 用 XGrabKey（Xvfb 上测过），macOS 用 Carbon 的 RegisterEventHotKey（不要额外权限，待真机测）。还没做：24 Wayland、25 跨平台互控真机矩阵。
 
 ### 第四批：完整局域网和全部流量出口（工作量最大）
 
