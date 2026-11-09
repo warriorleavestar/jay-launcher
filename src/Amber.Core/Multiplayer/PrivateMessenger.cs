@@ -121,7 +121,8 @@ public sealed class PrivateMessenger : IAsyncDisposable
     {
         if (_keyOf(to) is not { } key) return false;
         while (!_sendLimiter.TryAcquire()) await Task.Delay(10, ct);
-        var plain = JsonSerializer.SerializeToUtf8Bytes(body);
+        // 不走 JsonSerializer（Native AOT 下没有反射序列化）：JsonObject 自己写成 UTF-8。
+        var plain = System.Text.Encoding.UTF8.GetBytes(body.ToJsonString());
         return await _link.SendPrivateAsync(to, PrivateSeal.Seal(_me, key, plain), ct);
     }
 

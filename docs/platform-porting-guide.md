@@ -91,7 +91,7 @@
 | `jay-server` 服务端【实验】 | ✅ | ✅ | ✅（systemd） | `src/Amber.Server` |
 | 模组烘焙【实验，默认关】 | ✅ | 🟡 | 🟡 | `Bake/BakeService.cs` |
 | 发布包：单文件 + ReadyToRun | ✅ | ✅ | ✅ | `.github/workflows/build.yml` |
-| 发布包：Native AOT | ✅ | 🪟 CI 没出 | 🪟 CI 没出 | 同上 |
+| 发布包：Native AOT | ✅ | ✅ `Jay-osx-*-aot.tar.gz`（待真机测） | ✅ `Jay-linux-*-aot.tar.gz` | 同上 |
 | 代码签名 | 无 | 只有 ad-hoc（`scripts/publish-macos.sh`） | 无 | |
 
 ## 3. 功能和实现
