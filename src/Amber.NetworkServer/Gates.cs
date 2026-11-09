@@ -162,8 +162,14 @@ public sealed class BanList : IRoomGate
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
         var tmp = _path + ".tmp";
         File.WriteAllText(tmp, new JsonObject { ["v"] = 1, ["bans"] = array }.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        var previous = File.Exists(_path) ? File.GetLastWriteTimeUtc(_path) : DateTime.MinValue;
         File.Move(tmp, _path, overwrite: true);
-        _loadedStamp = File.GetLastWriteTimeUtc(_path);
+        // Two saves within the file system's clock tick can get the same write time, and then other nodes
+        // comparing stamps would miss the change. Keep the stamp strictly increasing.
+        var stamp = File.GetLastWriteTimeUtc(_path);
+        var floor = previous > _loadedStamp ? previous : _loadedStamp;
+        if (stamp <= floor) File.SetLastWriteTimeUtc(_path, stamp = floor.AddMilliseconds(1));
+        _loadedStamp = stamp;
     }
 
     /// <summary>The ban that applies to this host/room/account, if any.</summary>
