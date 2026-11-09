@@ -58,6 +58,14 @@ public static class Program
               在有公网 IP 的机器上运行，要放行 TCP 和 UDP 的 11010 端口。房间目录只在公共网络里可达（10.235.0.1:47668），不对公网开放。
               目录只存房主签过名的房间信息（名字、人数、敲门地址），不经手任何密钥；90 秒没续期的房间自动消失。
 
+        自己的公共网络（连接串 JAYNET1-...）：
+          jay-server network keygen --out <钥匙文件>          生成签名钥匙（私钥存在文件里，只自己留着），打印公钥
+          jay-server network sign <网络.json> [--key <钥匙文件>]  签名并打印连接串（也可以用环境变量 JAY_NETWORK_KEY 给钥匙）
+          jay-server network check <网络.json> ...             只检查格式（注册表的 PR 检查用）
+          jay-server network show <连接串或文件>              显示连接串里的内容和签名
+          jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
+          网络 JSON 的格式见 networks/README.md。提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
+
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
 
@@ -77,6 +85,7 @@ public static class Program
                 "run" => await RunAsync(root, options),
                 "relay" => await RelayAsync(options),
                 "directory" => await DirectoryAsync(root, options),
+                "network" => NetworkCommand(options, Console.Out),
                 null => Help(),
                 _ => Admin(root, options, Console.Out),
             };
@@ -214,6 +223,77 @@ public static class Program
         return 0;
     }
 
+    /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
+    internal static int NetworkCommand(Options options, TextWriter output)
+    {
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network keygen|sign|check|show");
+        var rest = options.Positional.Skip(1).ToList();
+        switch (sub)
+        {
+            case "keygen":
+            {
+                var path = options.Get("out") ?? throw new ArgumentException("要用 --out 指定钥匙文件");
+                if (File.Exists(path)) throw new IOException($"{path} 已经存在，不覆盖（换钥匙请换个文件名）");
+                var signer = NetworkSigner.Generate(out var seed);
+                File.WriteAllText(path, Convert.ToBase64String(seed) + "\n");
+                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                output.WriteLine($"私钥已存到 {path}（不要提交、不要发给别人）");
+                output.WriteLine($"公钥：{Convert.ToBase64String(signer.PublicKey)}");
+                return 0;
+            }
+            case "sign":
+            {
+                var file = rest.FirstOrDefault() ?? throw new ArgumentException("要给网络 JSON 文件");
+                var keyText = options.Get("key") is { } keyFile ? File.ReadAllText(keyFile)
+                    : Environment.GetEnvironmentVariable("JAY_NETWORK_KEY") ?? throw new ArgumentException("要用 --key 或环境变量 JAY_NETWORK_KEY 给签名钥匙");
+                var info = ReadNetwork(file);
+                output.WriteLine(NetworkString.Create(info, NetworkSigner.FromSeed(keyText)));
+                return 0;
+            }
+            case "check":
+            {
+                if (rest.Count == 0) throw new ArgumentException("要给网络 JSON 文件");
+                var bad = 0;
+                var ids = new HashSet<string>();
+                foreach (var file in rest)
+                {
+                    try
+                    {
+                        var info = ReadNetwork(file);
+                        if (Path.GetFileNameWithoutExtension(file) != info.Id) throw new InvalidDataException($"文件名要和编号一样（{info.Id}.json）");
+                        if (!ids.Add(info.Id)) throw new InvalidDataException($"编号 {info.Id} 重复");
+                        output.WriteLine($"{file}：没问题（{info.Name}，{info.Nodes.Count} 个节点）");
+                    }
+                    catch (Exception e) when (e is InvalidDataException or FormatException or System.Text.Json.JsonException or InvalidOperationException)
+                    {
+                        output.WriteLine($"{file}：{e.Message}");
+                        bad++;
+                    }
+                }
+                return bad == 0 ? 0 : 1;
+            }
+            case "show":
+            {
+                var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
+                var signed = NetworkString.Parse(File.Exists(text) ? File.ReadAllText(text) : text);
+                output.WriteLine(signed.Info.ToJson().ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                output.WriteLine($"签名钥匙：{Convert.ToBase64String(signed.SignerKey)}（{signed.SignerFingerprint}）{(signed.Reviewed ? "，Jay 审核过" : "，未经 Jay 审核")}");
+                return 0;
+            }
+            default:
+                throw new ArgumentException("用法：jay-server network keygen|sign|check|show");
+        }
+    }
+
+    private static NetworkInfo ReadNetwork(string file)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file)) as System.Text.Json.Nodes.JsonObject
+            ?? throw new InvalidDataException("要是一个 JSON 对象");
+        var info = NetworkInfo.FromJson(node);
+        if (NetworkString.Validate(info) is { } problem) throw new InvalidDataException(problem);
+        return info;
+    }
+
     /// <summary>公共网络的种子节点 + 房间目录：一个 EasyTier（固定地址 10.235.0.1，同时监听公网端口当节点）+ 本机 127.0.0.1:47668 的目录服务。</summary>
     private static async Task<int> DirectoryAsync(string root, Options options)
     {
@@ -242,6 +322,13 @@ public static class Program
 
         await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort, log);
         var profile = PublicNetworkProfile.Jay(seeds);
+        if (options.Get("network") is { } networkText)
+        {
+            // 自己的公共网络：用连接串里的网络名和密钥（节点就是这台机器，种子另外给）。
+            var signed = NetworkString.Parse(File.Exists(networkText) ? File.ReadAllText(networkText) : networkText);
+            profile = signed.ToProfile() with { Nodes = seeds };
+            log($"用公共网络“{signed.Info.Name}”（{signed.Info.Id}，{(signed.Reviewed ? "Jay 审核过" : "未经 Jay 审核")}）");
+        }
         var options2 = new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true,
             Listeners: [$"tcp://0.0.0.0:{listen}", $"udp://0.0.0.0:{listen}"]);
         using var network = PublicNetworkSession.Start(core, cli, options2, Path.Combine(root, "public-node"));

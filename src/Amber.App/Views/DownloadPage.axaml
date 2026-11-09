@@ -67,7 +67,7 @@
                         <TextBlock Text="{l:T download.installed.chip}" />
                       </Border>
                     </WrapPanel>
-                    <TextBlock Text="{Binding Date}" FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource TextTertiary}" />
+                    <TextBlock Text="{Binding Date}" FontSize="{DynamicResource FontCaption}" Foreground="{DynamicResource TextTertiary}" />
                   </StackPanel>
                   <Button Grid.Column="1" MinWidth="96" HorizontalContentAlignment="Center" VerticalAlignment="Center"
                           Content="{Binding InstallLabel}"

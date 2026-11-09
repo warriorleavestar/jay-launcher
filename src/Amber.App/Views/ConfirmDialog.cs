@@ -17,6 +17,8 @@ public sealed class ConfirmDialog : Window
 
     private ConfirmDialog(string title, string body, string confirm)
     {
+        // 确认框是安全界面：用 Jay 自带的配色和样式，主题包改不了“确认”和“取消”的样子。
+        Amber.App.Services.ThemeService.LockToDefault(this);
         Title = title;
         SizeToContent = SizeToContent.WidthAndHeight;
         CanResize = false;

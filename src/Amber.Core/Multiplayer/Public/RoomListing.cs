@@ -42,7 +42,7 @@ public sealed record RoomListing
     public int Players { get; init; }
     /// <summary>加入是否要房主点批准（公开、密码房间）。</summary>
     public bool Approval { get; init; } = true;
-    /// <summary>公开房间：长期邀请（JAY2-）。</summary>
+    /// <summary>公开房间：长期邀请（JAY2-）。隐藏房间开了指纹查找时也带一张（要房主批准），只有拿着指纹码的人能从目录里拿到。</summary>
     public string? Invite { get; init; }
     /// <summary>密码房间：房间的大厅密钥 L（十六进制）、盐和封装模式；令牌由密码派生。</summary>
     public string? Lobby { get; init; }
@@ -69,6 +69,7 @@ public sealed record RoomListing
         switch (Mode)
         {
             case RoomVisibility.Public:
+            case RoomVisibility.Hidden:
                 return JayInvite.TryParse(Invite, out var invite) ? invite : null;
             case RoomVisibility.Password:
                 if (password is null || Lobby is null || Salt is null) return null;

@@ -45,11 +45,11 @@
         <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" MinWidth="260" />
         <Border IsVisible="{Binding IsTemporaryTarget}" Background="{DynamicResource WarningTint}" CornerRadius="{DynamicResource RadiusPill}" Padding="8,2" VerticalAlignment="Center"
                 ToolTip.Tip="{l:T content.install.temporary_hint}">
-          <TextBlock Text="{l:T content.install.temporary}" Foreground="{DynamicResource WarningText}" FontSize="{StaticResource FontCaption}" />
+          <TextBlock Text="{l:T content.install.temporary}" Foreground="{DynamicResource WarningText}" FontSize="{DynamicResource FontCaption}" />
         </Border>
         <Border IsVisible="{Binding IsSharedTarget}" Background="{DynamicResource AccentTint}" CornerRadius="{DynamicResource RadiusPill}" Padding="8,2" VerticalAlignment="Center"
                 ToolTip.Tip="{l:T content.install.shared_hint}">
-          <TextBlock Text="{l:T content.install.shared}" Foreground="{DynamicResource AccentText}" FontSize="{StaticResource FontCaption}" />
+          <TextBlock Text="{l:T content.install.shared}" Foreground="{DynamicResource AccentText}" FontSize="{DynamicResource FontCaption}" />
         </Border>
         <CheckBox Content="{l:T content.search.filter_by_instance}" IsChecked="{Binding FilterByInstance}" />
       </WrapPanel>

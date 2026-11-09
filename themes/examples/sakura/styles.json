@@ -1,0 +1,13 @@
+{
+  // 樱：柔和阴影、渐变主按钮、圆润输入框
+  "button.primary": { "background": "linear(90, #E0538A, #F08AB0)", "foreground": "#FFFFFF", "radius": 999, "padding": [18, 6],
+                      "shadow": "0 4 12 0 #40E0538A",
+                      ":hover": { "background": "linear(90, #E86A9A, #F59CBD)", "foreground": "#FFFFFF" } },
+  "button.secondary": { "radius": 999, "border": "#F2C4D4" },
+  "card": { "borderWidth": 0, "radius": 18, "shadow": "0 6 20 0 #1FE0538A" },
+  "sidebar": { "background": "linear(180, #3A2430, #2A1A22)" },
+  "nav.item": { "radius": 12 },
+  "input": { "radius": 12, ":focus": { "border": "token:Accent" } },
+  "combobox": { "radius": 12 },
+  "heading": { "foreground": "#8A2E55" }
+}

@@ -51,6 +51,8 @@ public sealed class RemoteConsentDialog : Window
 
     public RemoteConsentDialog(RemoteConsentRequest request, TimeSpan timeout)
     {
+        // 同意框是安全界面：主题包改不了它的样子，“拒绝”永远长得像拒绝。
+        Amber.App.Services.ThemeService.LockToDefault(this);
         Title = L.T("remote.consent.window_title");
         SizeToContent = SizeToContent.Height;
         Width = 480;
@@ -502,6 +504,8 @@ public sealed class RemoteSharingBar : Window
 
     public RemoteSharingBar(RemoteSharer sharer)
     {
+        // “正在被远程控制”的提示条是安全界面，主题包改不了它。
+        Amber.App.Services.ThemeService.LockToDefault(this);
         _sharer = sharer;
         WindowDecorations = WindowDecorations.None;
         CanResize = false;

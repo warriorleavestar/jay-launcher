@@ -71,8 +71,18 @@ public sealed class LauncherService : IDisposable
         }
     }
 
-    /// <summary>Jay 公共网络（内置节点 + 设置里加的节点）。</summary>
-    public Amber.Core.Multiplayer.Public.PublicNetworkProfile PublicNetwork => Amber.Core.Multiplayer.Public.PublicNetworkProfile.Jay(Settings.PublicNetworkNodes);
+    private Amber.Core.Multiplayer.Public.PublicNetworkList? _networks;
+
+    /// <summary>认哪些注册表钥匙（自检里换成测试钥匙；null = 程序里内置的）。</summary>
+    internal IReadOnlyList<byte[]>? TrustedNetworkKeys { get; set; }
+
+    /// <summary>保存的公共网络（设置里的连接串验签后的结果，改了设置要 <see cref="ReloadNetworks"/>）。</summary>
+    public Amber.Core.Multiplayer.Public.PublicNetworkList Networks => _networks ??= new(Settings.PublicNetworks, TrustedNetworkKeys);
+
+    public void ReloadNetworks() => _networks = null;
+
+    /// <summary>现在用的公共网络：选中的连接串网络，或者内置的 Jay 公共网络（内置节点 + 设置里加的节点）。</summary>
+    public Amber.Core.Multiplayer.Public.PublicNetworkProfile PublicNetwork => Networks.Current(Settings.PublicNetworkId, Settings.PublicNetworkNodes);
 
     public LauncherService(AppSettings settings)
     {

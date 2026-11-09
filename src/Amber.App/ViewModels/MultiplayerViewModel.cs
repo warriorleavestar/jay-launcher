@@ -781,6 +781,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             if (_chat != client) return;
             _chat = null;
+            StopPrivate();
             ChatReady = false;
             ChatStatus = L.T("multiplayer.chat.reconnecting");
             _ = client.DisposeAsync();
@@ -797,6 +798,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             _chat = client;
             ChatReady = true;
             ChatStatus = L.T("multiplayer.chat.privacy");
+            StartPrivate(client);
         }
         catch (Exception e) when (e is System.Net.Sockets.SocketException or OperationCanceledException or IOException)
         {
@@ -1126,6 +1128,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var hub = _hub;
         _chat = null;
         _hub = null;
+        StopPrivate();
+        PrivateLines.Clear();
+        Transfers.Clear();
         ChatReady = false;
         ChatStatus = "";
         ChatLines.Clear();

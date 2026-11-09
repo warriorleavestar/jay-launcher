@@ -44,6 +44,7 @@ public sealed record PublicRoomItem(RoomListing Listing) : LocalizedRecord
         {
             RoomVisibility.Password => "multiplayer.public.visibility.password",
             RoomVisibility.Direct => "multiplayer.public.visibility.direct",
+            RoomVisibility.Hidden => "multiplayer.public.visibility.hidden",
             _ => "multiplayer.public.visibility.public",
         }),
         Listing.Approval && Listing.Mode != RoomVisibility.Direct ? L.T("multiplayer.public.needs_approval") : null,
@@ -106,6 +107,7 @@ public sealed partial class MultiplayerViewModel
     {
         SelectedVisibility = VisibilityChoices[0];
         PublicNodesText = string.Join("\n", _service.Settings.PublicNetworkNodes ?? []);
+        LoadNetworks();
     }
 
     [RelayCommand]
@@ -120,6 +122,7 @@ public sealed partial class MultiplayerViewModel
         }
         _service.Settings.PublicNetworkNodes = nodes.Distinct().ToList();
         _service.Settings.Save();
+        LoadNetworks();
         OnPropertyChanged(nameof(HasPublicNodes));
         OnPropertyChanged(nameof(PublicStateText));
         SetStatus(StatusMessage.Success("multiplayer.public.nodes_saved"));
@@ -152,6 +155,7 @@ public sealed partial class MultiplayerViewModel
         try
         {
             var profile = _service.PublicNetwork;
+            if (!await LoadNetworkConfigAsync(profile, cts.Token) || _publicCts != cts) return;
             session = PublicNetworkSession.Start(_service.EasyTier, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()),
                 Path.Combine(EasyTierWorkRoot, "public"));
             session.Output += line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line);
@@ -202,6 +206,7 @@ public sealed partial class MultiplayerViewModel
         _public = null;
         IsPublicConnected = false;
         PublicRooms.Clear();
+        ApplyNetworkConfig(null);
     }
 
     [RelayCommand]
@@ -255,9 +260,10 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Error("multiplayer.room.invalid_code"));
             return;
         }
+        var device = Device;
         await KnockAndJoinAsync(invite, async (me, name, ct) =>
         {
-            var outcome = await PublicJoin.KnockAsync(network, listing.Ip, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, listing.HostKey, ct);
+            var outcome = await PublicJoin.KnockAsync(network, listing.Ip, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, listing.HostKey, ct, device);
             // 密码房间握手失败多半是密码不对（长期邀请不会用完或过期）。
             return listing.Mode == RoomVisibility.Password && outcome.Reason == "invalid" ? outcome with { Reason = "password" } : outcome;
         });
@@ -269,7 +275,7 @@ public sealed partial class MultiplayerViewModel
         if (_public is not { } network) return null;
         try
         {
-            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct);
+            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, device: Device);
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException && !ct.IsCancellationRequested)
         {
@@ -290,7 +296,7 @@ public sealed partial class MultiplayerViewModel
     {
         if (_public is not { } network || _announcer is not null || !IsHosting || _lobby is null) return;
         var announcer = new RoomAnnouncer(network, BuildListing, LookupKeys, OnDirectoryMail,
-            line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line));
+            line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), searchKey: SearchKeyForAnnounce);
         announcer.StateChanged += () => Dispatcher.UIThread.Post(() =>
         {
             if (_announcer != announcer) return;
@@ -315,12 +321,13 @@ public sealed partial class MultiplayerViewModel
             Name = PublishRoomName.Trim().Length > 0 ? PublishRoomName.Trim() : L.F("multiplayer.public.default_name", ChatName),
             Host = ChatName,
             Mode = standing is null && mode != RoomVisibility.Hidden || mode == RoomVisibility.Direct && _standingDirect is null ? RoomVisibility.Hidden : mode,
+            // 隐藏房间开了指纹查找：带一张要房主批准的长期邀请，只有拿着指纹码的人能从目录里拿到。
             HostKey = Identity.PublicKey,
             Game = TargetInstance ?? "",
             Version = Amber.Core.Launch.UpdateChecker.CurrentVersion,
             Players = 1 + Members.Count,
             Approval = !(standing?.AutoApprove ?? false),
-            Invite = mode == RoomVisibility.Public ? standing?.Invite.ToString() : null,
+            Invite = mode == RoomVisibility.Public || mode == RoomVisibility.Hidden && _searchPublished ? standing?.Invite.ToString() : null,
             Lobby = mode == RoomVisibility.Password && standing is not null ? Convert.ToHexStringLower(standing.Invite.LobbyKey) : null,
             Salt = mode == RoomVisibility.Password && _standingSalt is { } salt ? Convert.ToHexStringLower(salt) : null,
             Tunnel = _credentials?.Tunnel ?? TunnelSettings.Default,
@@ -339,6 +346,11 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         var mode = SelectedVisibility?.Mode ?? RoomVisibility.Hidden;
+        if (!NetworkPolicy.Allows(mode))
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.netconfig.mode_not_allowed", SelectedVisibility?.Label ?? ""));
+            return;
+        }
         if (mode == RoomVisibility.Password && PublishPassword.Length < RoomPassword.MinLength)
         {
             SetStatus(StatusMessage.Warning("multiplayer.public.password_short", RoomPassword.MinLength));
@@ -349,6 +361,12 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.public.direct_needs_direct_room"));
             return;
         }
+        if (AllowFingerprintSearch && Device is null)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.device.enable_first"));
+            return;
+        }
+        _searchPublished = AllowFingerprintSearch;
         // 换方式时先收回旧的长期邀请。
         if (_standing is { } old) lobby.Book.Revoke(old);
         _standing = null;
@@ -356,6 +374,10 @@ public sealed partial class MultiplayerViewModel
         _standingDirect = null;
         switch (mode)
         {
+            case RoomVisibility.Hidden when _searchPublished:
+                // 只有拿着指纹码的人看得到这张邀请，一律要房主批准。
+                _standing = lobby.Book.CreateStanding(false, credentials.Tunnel);
+                break;
             case RoomVisibility.Public:
                 _standing = lobby.Book.CreateStanding(PublishAutoApprove, credentials.Tunnel);
                 break;
@@ -394,6 +416,7 @@ public sealed partial class MultiplayerViewModel
         _standing = null;
         _standingSalt = null;
         _standingDirect = null;
+        _searchPublished = false;
         CurrentVisibility = RoomVisibility.Hidden;
         _announcer?.Refresh();
         SetStatus(StatusMessage.Info("multiplayer.public.unpublished"));
@@ -429,6 +452,7 @@ public sealed partial class MultiplayerViewModel
         _standing = null;
         _standingSalt = null;
         _standingDirect = null;
+        _searchPublished = false;
         CurrentVisibility = RoomVisibility.Hidden;
         PublishStatus = "";
         if (announcer is not null) _ = announcer.DisposeAsync().AsTask();

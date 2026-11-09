@@ -165,7 +165,7 @@ public sealed class MemberIdentity : IDisposable
         }
     }
 
-    private static byte[] Protect(string directory, byte[] raw)
+    internal static byte[] Protect(string directory, byte[] raw)
     {
         if (OperatingSystem.IsWindows())
             return [.. MagicDpapi, .. ProtectedData.Protect(raw, Entropy, DataProtectionScope.CurrentUser)];
@@ -185,20 +185,23 @@ public sealed class MemberIdentity : IDisposable
         return [.. MagicAesGcm, .. nonce, .. tag, .. cipher];
     }
 
-    private static byte[] Unprotect(string directory, byte[] stored)
+    private static byte[] Unprotect(string directory, byte[] stored) => Unprotect(directory, stored, X25519KeyPair.Length);
+
+    /// <summary>解开 <see cref="Protect"/> 包起来的密钥；<paramref name="length"/> 是原文的长度。</summary>
+    internal static byte[] Unprotect(string directory, byte[] stored, int length)
     {
         if (stored.AsSpan().StartsWith(MagicDpapi))
         {
             if (!OperatingSystem.IsWindows()) throw new CryptographicException(L.T("core.mp.identity.otherplatform"));
             var raw = ProtectedData.Unprotect(stored[MagicDpapi.Length..], Entropy, DataProtectionScope.CurrentUser);
-            if (raw.Length != X25519KeyPair.Length) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
+            if (raw.Length != length) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
             return raw;
         }
         if (stored.AsSpan().StartsWith(MagicAesGcm))
         {
             var body = stored.AsSpan(MagicAesGcm.Length);
-            if (body.Length != 12 + 16 + X25519KeyPair.Length) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
-            var raw = new byte[X25519KeyPair.Length];
+            if (body.Length != 12 + 16 + length) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
+            var raw = new byte[length];
             var key = WrapKey(directory, create: false);
             try
             {
@@ -244,7 +247,7 @@ public sealed class MemberIdentity : IDisposable
     }
 
     /// <summary>写文件；非 Windows 上一创建就是 0600（不先以默认权限创建再改）。</summary>
-    private static void WritePrivate(string path, byte[] data, FileMode mode = FileMode.Create)
+    internal static void WritePrivate(string path, byte[] data, FileMode mode = FileMode.Create)
     {
         var options = new FileStreamOptions { Mode = mode, Access = FileAccess.Write, Share = FileShare.None };
         if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;

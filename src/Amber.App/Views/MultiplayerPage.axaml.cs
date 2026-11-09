@@ -18,6 +18,12 @@ public partial class MultiplayerPage : UserControl
             // 新消息来了滚到底。
             if (DataContext is MultiplayerViewModel vm)
             {
+                vm.PickFileToSend = async () =>
+                {
+                    if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
+                    var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = L.T("multiplayer.private.pick_title") });
+                    return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+                };
                 vm.ChatLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("ChatScroll")?.ScrollToEnd(), DispatcherPriority.Background);
                 vm.DebugLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("DebugScroll")?.ScrollToEnd(), DispatcherPriority.Background);
                 // 开服控制台：新日志来了把光标放到最后，文本框就滚到最新一行。

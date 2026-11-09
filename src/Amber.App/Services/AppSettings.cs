@@ -50,6 +50,9 @@ public sealed class AppSettings
     /// <summary>system / light / dark</summary>
     public string Theme { get; set; } = "system";
 
+    /// <summary>导入的界面主题包 id（{数据目录}/themes/{id}）；null 表示 Jay 默认主题。</summary>
+    public string? ThemePack { get; set; }
+
     /// <summary>界面语言：zh-Hans / zh-Hant / en / ja；null 表示跟随系统。</summary>
     public string? Language { get; set; }
 
@@ -64,6 +67,12 @@ public sealed class AppSettings
 
     /// <summary>Jay 公共网络的种子节点（程序里内置的之外，自己加的；比如朋友的 VPS 上跑的 jay-server directory）。</summary>
     public List<string>? PublicNetworkNodes { get; set; }
+
+    /// <summary>自己加的别的公共网络（连接串原文，每次读出来都重新验签）。</summary>
+    public List<string>? PublicNetworks { get; set; }
+
+    /// <summary>现在用哪个公共网络（编号）；空 = 内置的 Jay 公共网络。</summary>
+    public string? PublicNetworkId { get; set; }
 
     /// <summary>看过并同意了公共网络的隐私说明（第一次连公共网络时显示）。</summary>
     public bool PublicNetworkNoticeAccepted { get; set; }

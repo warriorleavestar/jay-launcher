@@ -36,12 +36,16 @@ public sealed class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var settings = AppSettings.Load();
-            ApplyTheme(settings.Theme);
             Amber.Core.Localization.L.SetLanguage(settings.Language);
+            // 主题包在主窗口创建前套上（启动保护：上次这个主题让 Jay 崩了，这次就用默认主题）。
+            ThemeService.ApplyAtStartup(settings, desktop.Args ?? []);
+            Amber.Core.Localization.L.Changed += ThemeService.OnLanguageChanged;
             var service = new LauncherService(settings);
             var viewModel = new MainViewModel(service);
             StartupTrace.Mark("viewmodels");
             desktop.MainWindow = new MainWindow(settings) { DataContext = viewModel };
+            // 窗口打开并画完几帧以后才算主题没问题。
+            desktop.MainWindow.Opened += (_, _) => Avalonia.Threading.DispatcherTimer.RunOnce(ThemeService.StartupSucceeded, TimeSpan.FromSeconds(3));
             // 关主窗口就退出：远程控制的小条、查看窗口这些不能让进程留在后台（被控时关 Jay 以为断了，其实还在被控制）。
             desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnMainWindowClose;
             StartupTrace.Mark("window");
