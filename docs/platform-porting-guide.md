@@ -280,7 +280,7 @@ Mac/Linux 上直接抛 `PlatformNotSupportedException`（“完整局域网模�
 | `RemoteControl/ScreenFrame.cs` | BGRA 帧、64×64 分块对比、缩放（最大 2560×1600）、坐标换算、无损编码 | 跨平台 |
 | `RemoteControl/RemoteHub.cs` | 房主侧服务，端口 47662，连接都由成员发起，经 `MemberChannel`（purpose `remote-v1`）认证 | 跨平台 |
 | `App/Services/SkiaTileCodec.cs` | JPEG 编码（用 Avalonia 自带的 Skia） | 跨平台 |
-| `App/Views/RemoteWindows.cs` | 同意弹窗、查看窗口、共享小条、键盘映射、红框（Mac/Linux 用四条窄的置顶窗口） | 跨平台，全局热键只在 Windows 上挂 |
+| `App/Views/RemoteWindows.cs` | 同意弹窗、查看窗口、共享小条、键盘映射、红框（Mac/Linux 用四条窄的置顶窗口） | 跨平台；全局热键按系统挂（`Unix/UnixHotkeys.cs`） |
 | `RemoteControl/Windows/WindowsRemote.cs` | GDI BitBlt 截整个虚拟桌面、SendInput 注入、全局热键、红框原生窗口、窗口样式 | 🪟 |
 | `RemoteControl/Unix/X11Remote.cs` | XGetImage 截根窗口（所有显示器）、XTest 注入；Wayland 会话、没有 DISPLAY、缺 libXtst 时给出原因 | 🐧 X11 |
 | `RemoteControl/Unix/MacRemote.cs` | CGWindowListCreateImage 按“点”截所有显示器、CGEvent 注入（拖动、修饰键、滚轮）、屏幕录制 / 辅助功能权限检查和引导 | 🍎 |
@@ -428,7 +428,7 @@ CI 的单元测试只在 `windows-latest` 上跑。有一些测试本身按 `Ope
 
 **进度（2026-11-09）**：19、20、21 和 23 的截屏、注入、红框已经做了（macOS 先用 CoreGraphics 截屏，不是 ScreenCaptureKit；macOS 15 上如果截屏被系统挡掉再换）。
 Linux X11 在 Xvfb 上跑过 `AMBER_SELFTEST_SCOPE=remote`，14 项全过。看 / 控制别人在任何系统上都能用；这台电脑不能被控时（Wayland、macOS 没授权）联机页写原因。
-还没做：Mac/Linux 的全局停止热键（被控时用小条上的“停止”）、24 Wayland、25 跨平台互控真机矩阵。
+全局停止热键 Ctrl+Shift+F12 也做了：Linux X11 用 XGrabKey（Xvfb 上测过），macOS 用 Carbon 的 RegisterEventHotKey（不要额外权限，待真机测）。还没做：24 Wayland、25 跨平台互控真机矩阵。
 
 ### 第四批：完整局域网和全部流量出口（工作量最大）
 

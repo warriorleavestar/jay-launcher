@@ -449,7 +449,7 @@ public static class RemoteSharingOverlay
     {
         var windows = new List<Window>();
         IDisposable? frame = null;
-        GlobalHotkey? hotkey = null;
+        IDisposable? hotkey = null;
         var bar = new RemoteSharingBar(sharer);
         windows.Add(bar);
         var closed = false;
@@ -465,9 +465,19 @@ public static class RemoteSharingOverlay
             foreach (var w in windows) w.Close();
         }
         sharer.Ended += _ => Dispatcher.UIThread.Post(CloseAll);
+        // 全局停止热键 Ctrl+Shift+F12：Windows 用 RegisterHotKey，Linux X11 用 XGrabKey，macOS 用 Carbon 热键（都不需要额外权限）。
+        void Stop() => _ = sharer.StopAsync(RemoteStopReason.StoppedByUser);
         if (OperatingSystem.IsWindows())
-            hotkey = new GlobalHotkey(() => _ = sharer.StopAsync(RemoteStopReason.StoppedByUser));
-        bar.HotkeyAvailable = hotkey?.Registered == true;
+        {
+            var windowsKey = new GlobalHotkey(Stop);
+            hotkey = windowsKey;
+            bar.HotkeyAvailable = windowsKey.Registered;
+        }
+        else if (Amber.Core.RemoteControl.Unix.StopHotkey.Create(Stop) is { } unixKey)
+        {
+            hotkey = unixKey;
+            bar.HotkeyAvailable = unixKey.Registered;
+        }
         // 红框：Windows 用系统原生窗口（点击穿透）；Mac/Linux 用四条很窄的置顶无边框窗口（只占屏幕边缘 4 像素，不需要穿透）。小条放在红框里面、不重叠。
         // 被控期间改分辨率、插拔显示器、缩放变了：每秒对一次屏幕布局，变了就按新的重画红框、小条放回主屏顶部。
         var current = FrameRects(bar.Screens.All);

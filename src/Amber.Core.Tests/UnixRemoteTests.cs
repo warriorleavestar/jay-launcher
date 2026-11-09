@@ -117,3 +117,51 @@ public class UnixRemoteTests
         }
     }
 }
+
+/// <summary>Linux X11 的全局停止热键：在 Xvfb 上用 XTest 按 Ctrl+Shift+F12（NumLock 开着也行），回调被调用；同一个组合键再抢一次会失败。</summary>
+public class X11HotkeyTests
+{
+    [Fact]
+    public void CtrlShiftF12_FiresAndSecondGrabFails()
+    {
+        if (!OperatingSystem.IsLinux() || !File.Exists("/usr/bin/Xvfb")) return;
+        const string display = ":95";
+        using var xvfb = Process.Start(new ProcessStartInfo("/usr/bin/Xvfb", [display, "-screen", "0", "320x240x24", "-nolisten", "tcp"])
+        { UseShellExecute = false, RedirectStandardError = true })!;
+        try
+        {
+            X11InputSink? input = null;
+            for (var i = 0; i < 50 && input is null; i++)
+            {
+                try { input = new X11InputSink(display); }
+                catch (InvalidOperationException) { Thread.Sleep(100); }
+            }
+            Assert.NotNull(input);
+            using (input)
+            {
+                var pressed = new ManualResetEventSlim();
+                using var hotkey = new X11Hotkey(pressed.Set, display);
+                Assert.True(hotkey.Registered);
+                using (var second = new X11Hotkey(() => { }, display)) Assert.False(second.Registered);
+
+                // 先按一下 F12 本身（不带修饰键）：不应触发。
+                input.Key(0x58, up: false, extended: false);
+                input.Key(0x58, up: true, extended: false);
+                Assert.False(pressed.Wait(300));
+
+                input.Key(0x1D, up: false, extended: false); // Ctrl
+                input.Key(0x2A, up: false, extended: false); // Shift
+                input.Key(0x58, up: false, extended: false); // F12
+                input.Key(0x58, up: true, extended: false);
+                input.Key(0x2A, up: true, extended: false);
+                input.Key(0x1D, up: true, extended: false);
+                Assert.True(pressed.Wait(3000));
+            }
+        }
+        finally
+        {
+            try { xvfb.Kill(); } catch (InvalidOperationException) { }
+            xvfb.WaitForExit(5000);
+        }
+    }
+}
