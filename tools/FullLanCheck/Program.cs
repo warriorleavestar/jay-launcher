@@ -27,6 +27,8 @@ static class FullLanCheck
     private static EasyTierElevatedSession? _watchedGuest;
     private static bool _noExit;
     private static bool _netWatch;
+    /// <summary>--part lan|stop|kill (macOS CI): run only part of the check so each workflow step keeps its own log when the runner goes silent.</summary>
+    private static string _part = "all";
 
     /// <summary>进入下一步：打印带时间的进度；看门狗发现某一步超时就打印现场后直接退出（CI 卡住时能看出停在哪）。</summary>
     private static void Phase(string name, int limitSeconds = 180)
@@ -100,6 +102,13 @@ static class FullLanCheck
         if (Environment.UserName != "root") { Console.WriteLine("要用 root 运行（sudo）"); return 2; }
         _netWatch = args.Contains("--net-watch");
         args = [.. args.Where(a => a != "--net-watch")];
+        var partAt = Array.IndexOf(args, "--part");
+        if (partAt >= 0 && partAt + 1 < args.Length)
+        {
+            _part = args[partAt + 1];
+            args = [.. args.Take(partAt), .. args.Skip(partAt + 2)];
+        }
+        if (_part is not ("all" or "lan" or "stop" or "kill")) { Console.WriteLine("--part: lan | stop | kill"); return 2; }
         if (args.Length != 1) { Console.WriteLine("用法：sudo dotnet FullLanCheck.dll <测试数据目录> [--no-exit] [--net-watch]"); return 2; }
         if (_netWatch && !Reachable()) { Log("--net-watch: no baseline network, watch disabled"); _netWatch = false; }
         StartWatchdog();
@@ -112,6 +121,12 @@ static class FullLanCheck
         Log($"easytier-core: {installer.CorePath}");
         Check("完整局域网可用", PlatformFeatures.FullLan, "");
         Check("经别人上网可用", PlatformFeatures.FullTrafficExit, "");
+        if (_part == "kill")
+        {
+            Phase("kill -9 测试", 240);
+            await KillCheckAsync(dataDir);
+            return Finish(null);
+        }
 
         var room = RoomCode.Create(GamePort);
         var dnsBefore = DnsSnapshot();
@@ -161,6 +176,14 @@ static class FullLanCheck
 
             // GitHub 的 macOS 机器上不能测经别人上网：pf 防漏规则一装，同一台机器上跑的 CI 代理也连不上 GitHub，
             // 整个任务失联直到超时（看门狗的输出也回不来）。Linux 上 nft 规则不影响已有连接，可以测。真 Mac 上照常测。
+            if (_part == "lan")
+            {
+                // Hard stop instead of the graceful teardown, which the "stop" part checks separately.
+                Phase("hard stop (--part lan)", 60);
+                foreach (var pid in CorePids().Concat(GuardPids())) Run("kill", "-9", pid.ToString());
+                host.Dispose();
+                return Finish(null);
+            }
             var skipExit = _noExit;
             if (skipExit) Log("跳过经房主上网和房主掉线两步（--no-exit）");
             if (!skipExit)
@@ -205,6 +228,7 @@ static class FullLanCheck
         Check("结束后 DNS 恢复", dnsAfter == dnsBefore, $"之前：\n{dnsBefore}\n之后：\n{dnsAfter}");
         Check("结束后能上网", await InternetAsync(), "");
 
+        if (_part == "stop") return Finish(null);
         Phase("kill -9 测试", 240);
         // 8. 加入方进程被 kill -9：守护和 easytier-core 几秒内自己退出，网卡消失。
         await KillCheckAsync(dataDir);
