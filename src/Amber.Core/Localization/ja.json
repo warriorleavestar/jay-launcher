@@ -2567,5 +2567,16 @@
   "help.category.storage": "設定とストレージ",
   "help.category.privacy": "プライバシーと安全",
   "help.category.parents": "保護者の方へ",
-  "help.category.reference": "リファレンス"
+  "help.category.reference": "リファレンス",
+  "log.dock.title": "ゲームログ",
+  "log.dock.window_title": "Jay · ゲームログ",
+  "log.dock.dock_back": "下にドッキング",
+  "log.dock.pop_out": "別ウィンドウで開く",
+  "log.dock.close": "隠す（Ctrl+`）",
+  "log.dock.resize": "ゲームログの高さを変える",
+  "palette.action.dock_log": "ゲームログをドッキング",
+  "settings.density.label": "表示密度",
+  "settings.density.hint": "コンパクト：1 画面により多くの行（MOD 一覧、ログ）。安全の表示は大きさが変わりません。",
+  "settings.density.standard": "標準",
+  "settings.density.compact": "コンパクト"
 }

@@ -133,6 +133,9 @@ public sealed class AppSettings
     /// <summary>启动游戏后启动器怎么办：minimize（最小化，默认）/ keep（保持）/ tray（隐藏到托盘）。</summary>
     public string AfterLaunch { get; set; } = "minimize";
 
+    /// <summary>standard / compact (official design §6.20 Appearance).</summary>
+    public string Density { get; set; } = Amber.Core.Layout.Density.Standard;
+
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 

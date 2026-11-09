@@ -2567,5 +2567,16 @@
   "help.category.storage": "設定和儲存",
   "help.category.privacy": "隱私與安全",
   "help.category.parents": "給家長",
-  "help.category.reference": "參考"
+  "help.category.reference": "參考",
+  "log.dock.title": "遊戲日誌",
+  "log.dock.window_title": "Jay · 遊戲日誌",
+  "log.dock.dock_back": "停靠到底部",
+  "log.dock.pop_out": "彈出視窗",
+  "log.dock.close": "收起（Ctrl+`）",
+  "log.dock.resize": "調整遊戲日誌高度",
+  "palette.action.dock_log": "停靠遊戲日誌",
+  "settings.density.label": "密度",
+  "settings.density.hint": "緊湊：一屏放下更多行（模組列表、日誌）。安全提示的大小不變。",
+  "settings.density.standard": "標準",
+  "settings.density.compact": "緊湊"
 }

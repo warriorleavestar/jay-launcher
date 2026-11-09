@@ -428,4 +428,12 @@
     <Setter Property="BorderThickness" Value="1,1,1,1" />
     <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
   </Style>
+
+  <!-- Compact density (§6.20): tighter list rows and card padding; heights come from the window's size tokens. -->
+  <Style Selector="Window.density-compact ListBoxItem">
+    <Setter Property="Padding" Value="8,3" />
+  </Style>
+  <Style Selector="Window.density-compact Border.card">
+    <Setter Property="Padding" Value="12" />
+  </Style>
 </Styles>

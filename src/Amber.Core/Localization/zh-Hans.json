@@ -2567,5 +2567,16 @@
   "help.category.storage": "设置和存储",
   "help.category.privacy": "隐私与安全",
   "help.category.parents": "给家长",
-  "help.category.reference": "参考"
+  "help.category.reference": "参考",
+  "log.dock.title": "游戏日志",
+  "log.dock.window_title": "Jay · 游戏日志",
+  "log.dock.dock_back": "停靠到底部",
+  "log.dock.pop_out": "弹出窗口",
+  "log.dock.close": "收起（Ctrl+`）",
+  "log.dock.resize": "调整游戏日志高度",
+  "palette.action.dock_log": "停靠游戏日志",
+  "settings.density.label": "密度",
+  "settings.density.hint": "紧凑：一屏放下更多行（模组列表、日志）。安全提示的大小不变。",
+  "settings.density.standard": "标准",
+  "settings.density.compact": "紧凑"
 }

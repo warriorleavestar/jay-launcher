@@ -2626,5 +2626,16 @@
   "help.category.storage": "Settings and storage",
   "help.category.privacy": "Privacy and safety",
   "help.category.parents": "For parents",
-  "help.category.reference": "Reference"
+  "help.category.reference": "Reference",
+  "log.dock.title": "Game log",
+  "log.dock.window_title": "Jay · Game log",
+  "log.dock.dock_back": "Dock at the bottom",
+  "log.dock.pop_out": "Pop out",
+  "log.dock.close": "Hide (Ctrl+`)",
+  "log.dock.resize": "Resize the game log",
+  "palette.action.dock_log": "Dock the game log",
+  "settings.density.label": "Density",
+  "settings.density.hint": "Compact fits more rows on a screen (mod lists, logs). Safety prompts never change size.",
+  "settings.density.standard": "Standard",
+  "settings.density.compact": "Compact"
 }
