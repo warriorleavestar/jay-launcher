@@ -114,7 +114,7 @@ internal sealed class X11Hotkey : IStopHotkey
 [SupportedOSPlatform("macos")]
 internal sealed class MacHotkey : IStopHotkey
 {
-    private const string Carbon = "/System/Library/Frameworks/Carbon.framework/Carbon";
+    private const string Carbon = Interop.MacFrameworks.Carbon;
     private const uint KeyboardClass = 0x6B657962; // 'keyb'
     private const uint HotKeyPressed = 5;          // kEventHotKeyPressed
     private const uint ControlKey = 0x1000, ShiftKey = 0x0200;

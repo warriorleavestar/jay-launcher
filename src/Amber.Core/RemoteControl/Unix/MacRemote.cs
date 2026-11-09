@@ -13,9 +13,9 @@ namespace Amber.Core.RemoteControl.Unix;
 [SupportedOSPlatform("macos")]
 internal static class MacCg
 {
-    private const string CoreGraphics = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
-    private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
-    private const string ApplicationServices = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
+    private const string CoreGraphics = Interop.MacFrameworks.CoreGraphics;
+    private const string CoreFoundation = Interop.MacFrameworks.CoreFoundation;
+    private const string ApplicationServices = Interop.MacFrameworks.ApplicationServices;
 
     [StructLayout(LayoutKind.Sequential)] public struct CGPoint { public double X, Y; }
     [StructLayout(LayoutKind.Sequential)] public struct CGRect { public double X, Y, Width, Height; }
