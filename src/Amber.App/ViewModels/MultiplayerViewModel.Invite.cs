@@ -189,7 +189,7 @@ public sealed partial class MultiplayerViewModel
         _members = members;
         var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => Trusted.IsTrusted(pub), AskApprovalAsync, members,
-            line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy);
+            line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy);
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.StateChanged += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.Paused += () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Warning("multiplayer.invite.paused")));
@@ -580,7 +580,7 @@ public sealed partial class MultiplayerViewModel
                 }), cts.Token, () => Dispatcher.UIThread.Post(() =>
                 {
                     if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
-                }), device));
+                }), device, AccountToken));
             if (_knockCts != cts) return;
             if (outcome.Credentials is not { } credentials)
             {
@@ -633,6 +633,7 @@ public sealed partial class MultiplayerViewModel
         "mismatch" => "multiplayer.public.reason.mismatch",
         "password" => "multiplayer.public.reason.password",
         "device" => "multiplayer.device.reason",
+        "account" => "multiplayer.account.reason",
         _ => "multiplayer.invite.reason.denied",
     };
 }

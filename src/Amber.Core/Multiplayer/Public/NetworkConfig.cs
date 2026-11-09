@@ -39,6 +39,9 @@ public sealed record NetworkPolicy(IReadOnlySet<RoomVisibility> AllowedModes, bo
 /// </summary>
 public sealed record NetworkConfig(string Network, string? Notice, IReadOnlyList<NetworkLink> Links, NetworkPolicy Policy, JsonObject? Ui)
 {
+    /// <summary>账号密码登录（网络节点管账号；没有就是不用登录）。</summary>
+    public NetworkLogin? Login { get; init; }
+
     public const int Version = 1;
     public const int MaxBytes = 256 * 1024;
     public const int MaxNotice = 2000;
@@ -64,7 +67,10 @@ public sealed record NetworkConfig(string Network, string? Notice, IReadOnlyList
                     if (item is not JsonObject l || l["url"]?.GetValue<string>() is not { } url || !IsHttps(url)) throw Bad();
                     links.Add(new NetworkLink(KnockProtocol.SanitizeName(l["name"]?.GetValue<string>() ?? url), url));
                 }
-            return new NetworkConfig(networkId, string.IsNullOrWhiteSpace(notice) ? null : notice, links, ParsePolicy(o["policy"] as JsonObject), o["ui"] as JsonObject);
+            return new NetworkConfig(networkId, string.IsNullOrWhiteSpace(notice) ? null : notice, links, ParsePolicy(o["policy"] as JsonObject), o["ui"] as JsonObject)
+            {
+                Login = NetworkLogin.Parse(o["login"] as JsonObject),
+            };
         }
         catch (Exception e) when (e is InvalidOperationException or FormatException or OverflowException) { throw Bad(); }
     }

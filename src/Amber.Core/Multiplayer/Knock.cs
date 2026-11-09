@@ -222,8 +222,10 @@ public static class KnockClient
     public static readonly TimeSpan DecisionTimeout = TimeSpan.FromSeconds(135);
 
     /// <param name="device">本机的设备指纹（打开了才有）。房主要求时才把设备证明发过去，房主不问就不发。</param>
+    /// <param name="account">公共网络的登录凭证（登录过才有）。房主要求时才发。</param>
     public static async Task<KnockOutcome> KnockAsync(Stream stream, JayInvite invite, X25519KeyPair me, string name, string version,
-        CancellationToken ct = default, TimeSpan? handshakeTimeout = null, TimeSpan? decisionTimeout = null, Public.DeviceFingerprint? device = null)
+        CancellationToken ct = default, TimeSpan? handshakeTimeout = null, TimeSpan? decisionTimeout = null, Public.DeviceFingerprint? device = null,
+        string? account = null)
     {
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
         var psk = LobbyKeys.KnockPsk(invite.Token);
@@ -240,6 +242,7 @@ public static class KnockClient
             var about = new JsonObject { ["v"] = 1, ["name"] = KnockProtocol.SanitizeName(name), ["ver"] = version };
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
                 about["device"] = device.Prove(host, me.PublicKey, KnockProtocol.ReadChallenges(ask)).ToJson();
+            if (account is not null && hello["account"]?.GetValue<bool>() == true) about["account"] = account;
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(about)), timeout.Token);
         }
         var hostPub = handshake.RemoteStaticPublicKey ?? throw new CryptographicException();
@@ -262,7 +265,7 @@ public static class KnockClient
             var reply = KnockProtocol.ParseJson(receive.DecryptWithAd([], sealedReply));
             if (reply["ok"]?.GetValue<bool>() != true)
             {
-                var reason = reply["reason"]?.GetValue<string>() is var r && r is "denied" or "expired" or "full" or "removed" or "device" ? r : "denied";
+                var reason = reply["reason"]?.GetValue<string>() is var r && r is "denied" or "expired" or "full" or "removed" or "device" or "account" ? r : "denied";
                 return new KnockOutcome(null, reason, hostPub);
             }
             var credentials = RoomCredentials.FromJson(reply);
@@ -466,6 +469,9 @@ public sealed record KnockRequest(string Name, byte[] PublicKey, string Version,
     /// <summary>对方证明过的设备编号（房主要求设备指纹、对方也打开了时才有）。</summary>
     public string? DeviceId { get; init; }
 
+    /// <summary>对方在公共网络上登录的账号（网络要求登录时才有，凭证验过）。</summary>
+    public string? Account { get; init; }
+
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
 }
 
@@ -546,6 +552,9 @@ public sealed class KnockServer : IAsyncDisposable
     /// <summary>房主对敲门的人的设备要求（每次敲门时取，房主在界面上改了马上生效）。</summary>
     public Func<Public.DevicePolicy>? DevicePolicy { get; init; }
 
+    /// <summary>房主对敲门的人的账号要求（公共网络要求登录时才有；每次敲门时取）。</summary>
+    public Func<Public.AccountPolicy?>? AccountPolicy { get; init; }
+
     /// <summary>测试用：包一层连接的流（模拟写失败）。</summary>
     internal Func<Stream, Stream>? StreamForTest { get; init; }
 
@@ -614,6 +623,7 @@ public sealed class KnockServer : IAsyncDisposable
         PendingInvite? invite;
         JsonNode about;
         var policy = DevicePolicy?.Invoke() ?? Public.DevicePolicy.None;
+        var accountPolicy = AccountPolicy?.Invoke();
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -634,6 +644,7 @@ public sealed class KnockServer : IAsyncDisposable
                 handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token));
                 var hello = new JsonObject { ["v"] = 1 };
                 if (policy.IsActive) hello["device"] = KnockProtocol.WriteChallenges(policy.Allowed);
+                if (accountPolicy is not null) hello["account"] = true;
                 await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(hello)), timeout.Token);
                 about = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token)));
                 if (about["v"]?.GetValue<int>() != 1) throw new InvalidDataException(L.T("core.mp.knock.badreply"));
@@ -677,9 +688,27 @@ public sealed class KnockServer : IAsyncDisposable
                     await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(Reject("device"))), refused.Token);
                     return;
                 }
+                Public.AccountToken? account = null;
+                if (accountPolicy is not null)
+                {
+                    string? token = null;
+                    try { token = about["account"]?.GetValue<string>(); }
+                    catch (Exception e) when (e is InvalidOperationException or FormatException) { }
+                    account = accountPolicy.Admit(token, guestPub, _book.Now);
+                    if (account is null)
+                    {
+                        // 公共网络要求登录，这个人没登录或凭证不对：不用掉邀请、不算失败次数。
+                        _log?.Invoke(L.F("core.mp.knock.failed", L.T("core.mp.knock.account")));
+                        using var refused = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        refused.CancelAfter(_limits.HandshakeTimeout);
+                        await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(Reject("account"))), refused.Token);
+                        return;
+                    }
+                }
                 var request = new KnockRequest(name ?? "", (byte[])guestPub.Clone(), version ?? "", _isTrusted(guestPub), invite)
                 {
                     DeviceId = deviceOk ? proof!.DeviceId : null,
+                    Account = account?.User,
                 };
                 JsonObject reply;
                 MemberEntry? member = null;
