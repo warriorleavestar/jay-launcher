@@ -152,6 +152,25 @@
                 </StackPanel>
               </Grid>
             </Border>
+            <!-- 联机安全：设备验证、熔断和重启前的倒计时 -->
+            <Border Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="h2" Text="{l:T settings.security.title}" Margin="0" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.security.hint}" TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="10">
+                  <TextBlock Text="{l:T settings.security.attest.label}" VerticalAlignment="Center" />
+                  <ComboBox x:Name="AttestationBox" Grid.Column="1" ItemsSource="{Binding AttestationOptions}" SelectedIndex="{Binding AttestationIndex}" HorizontalAlignment="Stretch" />
+                  <TextBlock Grid.Row="1" Text="{l:T settings.security.breaker.label}" VerticalAlignment="Center" />
+                  <CheckBox x:Name="BreakerBox" Grid.Row="1" Grid.Column="1" IsChecked="{Binding SecurityBreaker}" Content="{l:T settings.security.breaker.toggle}" />
+                  <TextBlock Grid.Row="2" Text="{l:T settings.security.delay.label}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                  <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+                    <TextBox x:Name="BreakerDelayBox" Text="{Binding BreakerRestartDelay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding !BreakerSkipDelay}" MaxWidth="120" HorizontalAlignment="Left" />
+                    <TextBlock Classes="field-error" Text="{Binding BreakerDelayError}" IsVisible="{Binding HasBreakerDelayError}" />
+                  </StackPanel>
+                  <CheckBox x:Name="BreakerSkipBox" Grid.Row="3" Grid.Column="1" IsChecked="{Binding BreakerSkipDelay}" Content="{l:T settings.security.skip.toggle}" />
+                </Grid>
+              </StackPanel>
+            </Border>
             <Border Classes="card">
               <StackPanel Spacing="6">
                 <TextBlock Classes="h2" Text="{l:T settings.bake.title}" Margin="0" />
@@ -270,5 +289,18 @@
 
     <!-- 内容区 -->
     <ContentControl x:Name="PageHost" Grid.Column="1" Content="{Binding CurrentPage}" Margin="24,20,24,20" />
+
+    <!-- 熔断倒计时：盖住整个窗口，按空格或点按钮取消重启 -->
+    <Border x:Name="BreakerOverlay" Grid.ColumnSpan="2" IsVisible="{Binding Multiplayer.IsBreakerCounting}" Background="#B0000000">
+      <Border Classes="card" MaxWidth="440" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="{l:T multiplayer.breaker.title}" Margin="0" />
+          <TextBlock Text="{Binding Multiplayer.BreakerReason}" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding Multiplayer.BreakerCountdownText}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" />
+          <TextBlock Classes="hint" FontSize="12" Text="{l:T multiplayer.breaker.hint}" TextWrapping="Wrap" />
+          <Button x:Name="BreakerCancel" Content="{l:T multiplayer.breaker.cancel}" Command="{Binding Multiplayer.CancelBreakerRestartCommand}" HorizontalAlignment="Right" />
+        </StackPanel>
+      </Border>
+    </Border>
   </Grid>
 </Window>

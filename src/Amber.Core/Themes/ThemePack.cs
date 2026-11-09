@@ -106,7 +106,7 @@ public static partial class ThemePackReader
         ["RadiusSm"] = (0, 32), ["RadiusMd"] = (0, 48), ["RadiusLg"] = (0, 64), ["RadiusPill"] = (0, 999),
     };
 
-    public static readonly string[] FontLanguages = ["default", "zh-Hans", "zh-Hant", "ja", "en"];
+    public static readonly string[] FontLanguages = ["default", "zh-Hans", "zh-Hant", "ja", "en", "lzh", "en-x-ud"];
 
     private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {

@@ -337,11 +337,11 @@ public sealed partial class MultiplayerViewModel
         {
             var me = Identity.KeyPair;
             var name = ChatName;
-            var device = await Dispatcher.UIThread.InvokeAsync(() => Device);
+            var (device, account) = await Dispatcher.UIThread.InvokeAsync(() => (Device, AccountToken));
             var outcome = await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
                 me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
                 () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"))), ct,
-                () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"))), device));
+                () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"))), device, account));
             return await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (outcome.Credentials is not { } credentials)

@@ -4,14 +4,14 @@ using Amber.Core.Localization;
 namespace Amber.Core.Tests;
 
 /// <summary>
-/// 多语言的检查：界面代码里没有写死的中文；用到的键都在简体中文表里；每种语言的键齐全、占位符一致。
+/// 多语言的检查：界面代码里没有写死的中文；用到的键都在英文原文表（en.json）里；每种语言的键齐全、占位符一致。
 /// </summary>
 public partial class LocalizationTests
 {
     private static readonly string Src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
     /// <summary>开发用的自检文件不翻译。</summary>
-    private static readonly string[] Excluded = ["SelfTest.cs", "SelfTest.Hotspot.cs", "SelfTest.MultiplayerGuide.cs", "ContentPageSelfTest.cs", "SelfTest.BakeNotice.cs", "SelfTest.CodeHygiene.cs", "SelfTest.Remote.cs", "SelfTest.Settings.cs", "SelfTest.HostServer.cs", "SelfTest.MicrosoftLogin.cs", "SelfTest.PublicNetwork.cs", "SelfTest.Theme.cs", "LayoutCheck.cs", "Spike.cs"];
+    private static readonly string[] Excluded = ["SelfTest.cs", "SelfTest.Hotspot.cs", "SelfTest.MultiplayerGuide.cs", "ContentPageSelfTest.cs", "SelfTest.BakeNotice.cs", "SelfTest.CodeHygiene.cs", "SelfTest.Remote.cs", "SelfTest.Settings.cs", "SelfTest.HostServer.cs", "SelfTest.MicrosoftLogin.cs", "SelfTest.PublicNetwork.cs", "SelfTest.Theme.cs", "SelfTest.Security.cs", "LayoutCheck.cs", "Spike.cs"];
 
     // 汉字（含扩展 A）、假名、中日文标点和全角符号，以及中文里常用的 …“”—：写死在代码里的标点换语言后也会留在文字中间。
     [GeneratedRegex(@"[㐀-䶿一-鿿぀-ヿ　-〿＀-￯…“”—]")]
@@ -77,6 +77,7 @@ public partial class LocalizationTests
         "(\"zh-Hans\", \"简体中文\")",
         "(\"zh-Hant\", \"繁體中文\")",
         "(\"ja\", \"日本語\")",
+        "(\"lzh\", \"文言\")",
     ];
 
     [Fact]
@@ -108,18 +109,21 @@ public partial class LocalizationTests
                 foreach (var suffix in new[] { ".title", ".advice" })
                     if (!source.ContainsKey(m.Groups[1].Value + suffix)) missing.Add($"{Path.GetFileName(file)}: {m.Groups[1].Value}{suffix}");
         }
-        Assert.True(missing.Count == 0, "简体中文表里没有这些键：\n" + string.Join("\n", missing.Distinct()));
+        Assert.True(missing.Count == 0, "英文原文表（en.json）里没有这些键：\n" + string.Join("\n", missing.Distinct()));
     }
 
     [Theory]
+    [InlineData("zh-Hans")]
     [InlineData("zh-Hant")]
-    [InlineData("en")]
     [InlineData("ja")]
+    [InlineData("lzh")]
     public void TranslationsAreCompleteAndKeepPlaceholders(string code)
     {
         var source = L.Load(L.Source);
         var table = L.Load(code);
-        var missing = source.Keys.Where(k => !table.ContainsKey(k)).ToList();
+        // 英文原文里的单复数变体（key.one / key.other）在没有单复数的语言里只要有 key 就行。
+        // Playful languages may lag behind: a missing key falls back to their parent (文言 → 繁體中文) and then English.
+        var missing = L.Playful.Contains(code) ? [] : source.Keys.Where(k => !table.ContainsKey(k) && !(PluralBase(k) is { } pb && table.ContainsKey(pb))).ToList();
         var extra = table.Keys.Where(k => !source.ContainsKey(k) && !(PluralBase(k) is { } b && source.ContainsKey(b))).ToList();
         var placeholderMismatch = source.Keys.Where(table.ContainsKey)
             .Where(k => !Placeholders(source[k]).SetEquals(Placeholders(table[k])))
@@ -332,4 +336,39 @@ public partial class LocalizationTests
         // 不存在的键原样返回，漏翻的地方一眼能看出来。
         Assert.Equal("no.such.key", L.T("no.such.key"));
     }
+
+    [Fact]
+    public void UpsideDownEnglishIsGeneratedAndKeepsPlaceholders()
+    {
+        Assert.Equal("ʇunoɔɔɐ pp∀", L.FlipUpsideDown("Add account"));
+        Assert.Equal("{1:F1} ɟo {0}", L.FlipUpsideDown("{0} of {1:F1}"));
+        Assert.Equal("ǝuo\noʍʇ", L.FlipUpsideDown("one\ntwo"));
+        var source = L.Load(L.Source);
+        var table = L.TableFor("en-x-ud");
+        Assert.Equal(source.Count, table.Count);
+        foreach (var (key, text) in source)
+            Assert.True(Placeholders(text).SetEquals(Placeholders(table[key])), key);
+    }
+
+    [Fact]
+    public void PlayfulLanguagesAreChosenOnlyInSettings()
+    {
+        Assert.Equal("lzh", L.Resolve("lzh"));
+        Assert.Equal("en-x-ud", L.Resolve("EN-X-UD"));
+        foreach (var name in new[] { "lzh", "en", "zh-TW", "zh-HK" })
+            Assert.False(L.Playful.Contains(L.FromCulture(new System.Globalization.CultureInfo(name))), name);
+        var before = L.Language;
+        try
+        {
+            L.SetLanguage("lzh");
+            Assert.Equal("增籍", L.T("accounts.add.title"));
+            L.SetLanguage("en-x-ud");
+            Assert.Equal("ʇunoɔɔɐ pp∀", L.T("accounts.add.title"));
+        }
+        finally
+        {
+            L.SetLanguage(before);
+        }
+    }
 }
+

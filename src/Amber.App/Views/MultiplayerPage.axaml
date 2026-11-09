@@ -73,6 +73,30 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <!-- 网络账号（网络配置里有 login 段才显示）：账号密码加密发给网络节点，可能还要两步验证 -->
+            <Border Classes="card" Margin="0" IsVisible="{Binding HasNetworkLogin}">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{l:T multiplayer.account.title}" FontWeight="SemiBold" />
+                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.account.hint}" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.account.required}" IsVisible="{Binding IsNetworkLoginRequired}" />
+                <StackPanel Spacing="6" IsVisible="{Binding ShowAccountLogin}">
+                  <TextBox Text="{Binding AccountUser}" PlaceholderText="{l:T multiplayer.account.user}" MaxLength="32" />
+                  <TextBox Text="{Binding AccountPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.account.password}" />
+                  <ItemsControl ItemsSource="{Binding AccountFactors}" IsVisible="{Binding HasAccountFactors}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:AccountFactorInput">
+                        <TextBox Text="{Binding Value}" PlaceholderText="{Binding Prompt}" MaxLength="256" Margin="0,0,0,6" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Button Classes="primary" Content="{l:T multiplayer.account.login}" Command="{Binding LoginAccountCommand}" />
+                </StackPanel>
+                <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding IsAccountLoggedIn}">
+                  <TextBlock VerticalAlignment="Center" Text="{Binding AccountLoggedInAs}" FontWeight="SemiBold" />
+                  <Button Content="{l:T multiplayer.account.logout}" Command="{Binding LogoutAccountCommand}" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
             <!-- 第一次连之前：别人能看到什么、看不到什么 -->
             <Border Classes="card" Margin="0" IsVisible="{Binding PublicNoticeOpen}">
               <StackPanel Spacing="8">
