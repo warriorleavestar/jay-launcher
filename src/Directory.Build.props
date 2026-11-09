@@ -6,6 +6,8 @@
   -->
   <PropertyGroup>
     <Version>0.7.0</Version>
+    <!-- Android versionCode / iOS CFBundleVersion 必须是递增整数；移动端工程都从这里读取。 -->
+    <MobileApplicationVersion>70</MobileApplicationVersion>
     <Product>Jay</Product>
     <Company>Jay</Company>
     <Authors>warriorleavestar</Authors>
