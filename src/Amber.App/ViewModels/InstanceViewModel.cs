@@ -303,7 +303,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             case InstanceTab.Worlds: LoadWorlds(); break;
             case InstanceTab.Screenshots: LoadScreenshots(); break;
             case InstanceTab.ResourcePacks: LoadPackFiles(ResourcePacks, Current.ResourcePacksDir); break;
-            case InstanceTab.ShaderPacks: LoadPackFiles(ShaderPacks, Current.ShaderPacksDir); break;
+            case InstanceTab.ShaderPacks: LoadPackFiles(ShaderPacks, Current.ShaderPacksDir); UpdateShaderState(); break;
             case InstanceTab.Servers: LoadServers(); break;
         }
     }
@@ -1128,6 +1128,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         if (Current is not { } c) return;
         LoadPackFiles(ResourcePacks, c.ResourcePacksDir);
         LoadPackFiles(ShaderPacks, c.ShaderPacksDir);
+        UpdateShaderState();
     }
 
     private static void LoadPackFiles(ObservableCollection<PackFileItem> target, string dir)

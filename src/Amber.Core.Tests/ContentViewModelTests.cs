@@ -405,6 +405,61 @@ public sealed class ContentViewModelTests
         Assert.Empty(vm.Results);
     });
 
+    [Fact]
+    public void ShaderTargetSaysWhenIrisIsMissing()
+    {
+        // 旧规格 N3：资源页选光影时检查“装到”的实例有没有 Iris / Oculus / OptiFine。
+        var root = Path.Combine(Path.GetTempPath(), "amber-content-shader-" + Guid.NewGuid().ToString("N"));
+        Version(root, "fab", """[{"name":"net.fabricmc:fabric-loader:0.16.0"}]""");
+        Version(root, "van", "[]");
+        try
+        {
+            UiTestThread.Run(() =>
+            {
+                using var service = new LauncherService(new AppSettings { GameDirectory = root, PlayerName = "" });
+                var provider = new FakeProvider(ContentSource.Modrinth);
+                var vm = new ContentViewModel(service, _ => provider, () => false);
+                vm.TargetInstance = "fab";
+                Assert.Null(vm.ShaderState);
+                vm.TypeIndex = (int)ContentType.Shader;
+                Assert.Equal(ShaderReadiness.NeedsIris, vm.ShaderState);
+                Assert.True(vm.HasShaderNote);
+                Assert.True(vm.CanInstallRenderer);
+                Assert.True(vm.AlsoInstallRenderer);
+                Assert.Contains("Iris", vm.AlsoInstallRendererLabel);
+
+                var mods = service.GetInstance("fab").ModsDir;
+                Directory.CreateDirectory(mods);
+                using (var zip = System.IO.Compression.ZipFile.Open(Path.Combine(mods, "iris.jar"), System.IO.Compression.ZipArchiveMode.Create))
+                using (var writer = new StreamWriter(zip.CreateEntry("fabric.mod.json").Open()))
+                    writer.Write("""{"schemaVersion":1,"id":"iris","version":"1.8.0","name":"Iris"}""");
+                vm.UpdateShaderState();
+                Assert.Equal(ShaderReadiness.Ready, vm.ShaderState);
+                Assert.False(vm.HasShaderNote);
+
+                vm.TargetInstance = "van";
+                Assert.Equal(ShaderReadiness.Vanilla, vm.ShaderState);
+                Assert.True(vm.HasShaderNote);
+                Assert.False(vm.CanInstallRenderer);
+
+                vm.TypeIndex = (int)ContentType.ResourcePack;
+                Assert.Null(vm.ShaderState);
+            });
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static void Version(string root, string id, string libraries)
+    {
+        var dir = Path.Combine(root, "versions", id);
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, id + ".json"),
+            $$"""{"id":"{{id}}","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":{{libraries}}}""");
+    }
+
     private static void Run(Action<ContentViewModel, FakeProvider, FakeProvider> test) => Run(test, hasCurseForge: true);
 
     private static void Run(Action<ContentViewModel, FakeProvider, FakeProvider> test, bool hasCurseForge)

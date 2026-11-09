@@ -39,6 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Repo
 
 只验证资源页首次加载和来源切换时，先设置 `AMBER_SELFTEST_SCOPE=content`；同样输出报告和截图，跳过游戏安装与启动。
 只验证联机（邀请、敲门、房间、直连）时设置 `AMBER_SELFTEST_SCOPE=multiplayer`。
+只验证光影检查时设置 `AMBER_SELFTEST_SCOPE=shader`：在报告目录里建一个临时游戏目录（Fabric 和原版两个手写版本），检查实例光影页和资源页在缺 Iris、已装 Iris、原版三种情况下的提示和【安装 Iris】，不联网。
 只看控件库和新配色时设置 `AMBER_SELFTEST_SCOPE=gallery`：控件库每一格和现有每一页在深浅两色下截图，检查琥珀按钮每屏最多一个、图标都解析得到；不碰游戏目录、不联网。
 只验证安全外观锁定时设置 `AMBER_SELFTEST_SCOPE=safety-lock`：装上五个极端主题包，逐像素比对安全面板和隐私行在深浅两色下跟默认外观一致，并检查带保留词的主题包被拒、确认框默认焦点在“保留”。
 只验证界面主题包（导出、导入、立即生效、坏包被拒、恢复默认、删除）时设置 `AMBER_SELFTEST_SCOPE=theme`；主题包格式见 `docs/themes.md`。
