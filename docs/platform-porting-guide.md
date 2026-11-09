@@ -63,12 +63,12 @@
 |---|---|---|---|---|
 | 版本、加载器安装 | ✅ | ✅ | ✅ | `Game/RuleEvaluator.cs`（os 名和架构） |
 | Java 扫描 | ✅ | ✅ | 🟡 | `Java/JavaFinder.cs` |
-| Java 自动下载（Mojang 运行时） | ✅ | ✅ | 🟡 x64 有；ARM64 Mojang 不提供 | `Java/JavaRuntimeInstaller.cs` |
+| Java 自动下载（Mojang 运行时） | ✅ ARM 上 Mojang 不提供的老 Java 退回 x64 版（系统仿真） | ✅ Apple 芯片上 Java 8/16 退回 x64 版（要 Rosetta 2，没装时提示命令） | ✅ x64 用 Mojang；ARM64 从 Adoptium 下 Temurin（校验 SHA-256，安全解压） | `Java/JavaRuntimeInstaller.cs`、`Java/TemurinInstaller.cs` |
 | 启动游戏 | ✅ | ✅ | 🟡 | `Launch/GameLauncher.cs` |
 | 非 ASCII 路径（中文路径）兜底 | ✅ 目录联接 | 不需要 | 不需要 | `Launch/AsciiPaths.cs`、`Launch/WindowsJunction.cs` |
 | 1.6 以前老版本的家目录重定向 | ✅ | 🪟 没做，会写进真实 `minecraft` 目录 | 🪟 同左 | `Launch/AsciiPaths.cs` `LegacyHome` |
 | 正常关闭游戏（让游戏存档） | ✅ `CloseMainWindow` | ✅ `NSRunningApplication.terminate` | 🟡 X11 发 `WM_DELETE_WINDOW`，Wayland 发 SIGTERM（待真机验证） | `Launch/GameLauncher.cs`、`Launch/MacGameProcess.cs`、`Launch/LinuxGameProcess.cs` |
-| 可用内存检测（自动内存） | ✅ `GlobalMemoryStatusEx` | 🟡 用 GC 信息估算 | 🟡 同左 | `Launch/InstanceSettings.cs` |
+| 可用内存检测（自动内存） | ✅ `GlobalMemoryStatusEx` | ✅ `sysctl hw.memsize` | ✅ `/proc/meminfo`（MemAvailable） | `Launch/InstanceSettings.cs` |
 | 启动前后命令、导出启动脚本 | ✅ cmd / .bat | ✅ /bin/sh / .sh | ✅ | `ViewModels/HomeViewModel.cs`、`Launch/Toolbox.cs` |
 | 账号令牌加密 | ✅ DPAPI | 🟡 本机密钥文件（0600） | 🟡 同左 | `Auth/Accounts.cs` |
 | 模组、整合包、资源 | ✅ | ✅ | ✅ | 大小写敏感比较 |
@@ -87,7 +87,7 @@
 | 联机身份（X25519 私钥）加密 | ✅ DPAPI | 🟡 AES-GCM + 本机密钥文件 | 🟡 同左 | `Multiplayer/MemberIdentity.cs` |
 | 敏感文字复制后 60 秒清剪贴板 | ✅ | ✅ | 🟡 Wayland 下要测 | `App/Services/SensitiveClipboard.cs` |
 | 远程控制【实验】【未发布】 | ✅ | ✅ CoreGraphics 截屏 + CGEvent 注入，要“屏幕录制”和“辅助功能”权限（待真机测） | ✅ X11 桌面（XGetImage + XTest）；🟡 Wayland 走系统门户（ScreenCast + PipeWire 截屏，GNOME/KDE 还能经 RemoteDesktop 控制，sway 之类只能看），每次弹系统授权框，要装 gstreamer1.0-pipewire（待真机测） | `RemoteControl/Windows/WindowsRemote.cs`、`RemoteControl/Unix/` |
-| Jay 服务器（客户端加入）【实验】 | ✅ DPAPI 存访问密钥 | 🟡 访问密钥明文存（0600） | 🟡 同左 | `Multiplayer/Gate/JayServers.cs` |
+| Jay 服务器（客户端加入）【实验】 | ✅ DPAPI 存访问密钥 | 🟡 AES-GCM + 本机密钥文件（0600），和账号令牌一样 | 🟡 同左 | `Multiplayer/Gate/JayServers.cs` |
 | `jay-server` 服务端【实验】 | ✅ | ✅ | ✅（systemd） | `src/Amber.Server` |
 | 模组烘焙【实验，默认关】 | ✅ | 🟡 | 🟡 | `Bake/BakeService.cs` |
 | 发布包：单文件 + ReadyToRun | ✅ | ✅ | ✅ | `.github/workflows/build.yml` |
@@ -141,7 +141,10 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
 - 令牌存储（`Auth/Accounts.cs`）：
   - Windows：DPAPI（当前用户范围）。
   - 其他平台：`accounts.json.key` 里放一把随机 32 字节密钥（创建时就是 0600，不留先建后改权限的窗口），令牌用 AES-256-GCM 加密，带 `v2:` 前缀。v0.5.x 在非 Windows 上只是 Base64，读到旧格式还能读，下次保存自动迁移。
-  - 这只防“别的系统用户读文件”，防不了同一用户下的程序。**建议适配**：macOS 用钥匙串（Security.framework 的 `SecItemAdd` / `SecItemCopyMatching`），Linux 用 Secret Service（libsecret，经 D-Bus），拿不到时退回现在的密钥文件。存进钥匙串的可以只是那把 32 字节密钥，不用改数据格式。
+  - 这只防“别的系统用户读文件”，防不了同一用户下的程序。
+  - **钥匙串 / Secret Service 暂不做（2026-11-09 评估）**：
+    - macOS：现在是临时签名，每次更新签名都变，钥匙串会在每次更新后弹框要密码，拒绝了就得重新登录；等正式签名（SignPath / Apple 开发者账号）后再做，存进钥匙串的只是那把 32 字节包裹密钥，数据格式不变。
+    - Linux：Secret Service 没有按程序隔离，同一用户的任何程序都能读已解锁的条目，安全上只比 0600 文件多了“不在数据目录里”；而迁移后钥匙环没解锁或没装（无界面登录、KDE 没开 KWallet）时会读不到身份和登录，代价大于收益。
 - CurseForge API Key 存在 `settings.json`（或 `AMBER_CF_KEY`），是明文；仓库里不放任何 Key。
 
 ### 3.5 模组、整合包、资源 ✅
@@ -345,7 +348,7 @@ public interface IInputSink : IDisposable
 一个只能用 Jay 进的 MC 服务器。三部分：
 
 - **服务端 `jay-server`**（`src/Amber.Server/Program.cs`）：`init`、`setup`（下载官方服务端 jar 并核对 SHA-1、准备 Java）、`run`、`invite`、`revoke`、节点管理等命令。MC 服务端固定只听 127.0.0.1（`Gate/McServerHost.cs`）。网关（`Gate/GateServer.cs`）在公网端口（默认 47670）上做 Noise 握手、核对设备名单和用户名（`Gate/McLogin.cs` 读 Handshake 和 Login Start），认不出的连接一个字节都不回。数据在 `Gate/GateStore.cs`，只存设备公钥和用户名，Unix 上文件权限 0600。Windows 上用 Ctrl+C，Unix 上另外处理 SIGTERM（systemd 停服务时正常关闭 MC）。三平台都能跑。
-- **客户端**（`Gate/JayServers.cs`，联机页的“Jay 服务器”卡片）：粘贴 `JAYS1-` 邀请码（`Gate/GateInvite.cs`）入服，拿到这台设备的访问密钥，之后一键进服。访问密钥在 Windows 上 DPAPI 加密（`dpapi:` 前缀），**在 Mac/Linux 上是明文 Base64（`plain:` 前缀），只靠文件权限 0600**。这是现在凭据存储里最弱的一处，建议和账号令牌一起改成钥匙串 / libsecret，至少先改成和 `Accounts.cs` 一样的 AES-GCM + 本机密钥。
+- **客户端**（`Gate/JayServers.cs`，联机页的“Jay 服务器”卡片）：粘贴 `JAYS1-` 邀请码（`Gate/GateInvite.cs`）入服，拿到这台设备的访问密钥，之后一键进服。访问密钥在 Windows 上 DPAPI 加密（`dpapi:` 前缀），在 Mac/Linux 上和 `Accounts.cs` 一样用 AES-GCM + 本机密钥（`jay-servers.json.key`，0600）；旧版的 `plain:` 明文读到后立即迁移。
 - **节点**（`Gate/GateRelay.cs`）：把 TCP 原样转给网关，不持有密钥。
 
 main 上 v0.7.0 之后新增【未发布】：
