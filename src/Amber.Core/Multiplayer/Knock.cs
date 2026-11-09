@@ -19,6 +19,9 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     /// <summary>这个成员的钥匙。房主手里的“房间级”凭据没有，批准某个人时才配上。</summary>
     public MemberKey? Member { get; init; }
 
+    /// <summary>这个成员要用的设备验证方案（房主开了验证、对方也支持时才有；只走加密的敲门回复）。</summary>
+    public AttestationScheme? Scheme { get; init; }
+
     public static RoomCredentials Create(byte[] hostPublicKey, int gamePort, TunnelSettings tunnel) =>
         new(NewNetwork(), NewSecret(), 1, (byte[])hostPublicKey.Clone(), gamePort, RoomChat.Port, tunnel);
 
@@ -56,6 +59,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         ["tunnel"] = new JsonObject { ["mode"] = (int)Tunnel.Mode, ["disguise"] = Tunnel.Disguise },
         ["memberId"] = Member?.IdHex ?? throw new InvalidOperationException("no member key"),
         ["memberPsk"] = Member.PskBase64,
+        ["attest"] = Scheme?.ToJson(),
     };
 
     internal static RoomCredentials FromJson(JsonNode json)
@@ -78,7 +82,11 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         var psk = Convert.FromBase64String(memberPsk);
         try
         {
-            return new RoomCredentials(net, secret, epoch, Convert.FromHexString(hostPub), game, chat, tunnel) { Member = new MemberKey(Convert.FromHexString(memberId), psk) };
+            return new RoomCredentials(net, secret, epoch, Convert.FromHexString(hostPub), game, chat, tunnel)
+            {
+                Member = new MemberKey(Convert.FromHexString(memberId), psk),
+                Scheme = json["attest"] is JsonObject attest ? AttestationScheme.FromJson(attest) : null,
+            };
         }
         finally
         {
@@ -239,7 +247,8 @@ public static class KnockClient
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), timeout.Token);
             var hello = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token)));
             if (hello["v"]?.GetValue<int>() != 1) throw new InvalidDataException(L.T("core.mp.knock.badreply"));
-            var about = new JsonObject { ["v"] = 1, ["name"] = KnockProtocol.SanitizeName(name), ["ver"] = version };
+            // attest = 1：这台电脑支持设备验证（旧版房主不认识这个字段，直接忽略）。
+            var about = new JsonObject { ["v"] = 1, ["name"] = KnockProtocol.SanitizeName(name), ["ver"] = version, ["attest"] = 1 };
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
                 about["device"] = device.Prove(host, me.PublicKey, KnockProtocol.ReadChallenges(ask)).ToJson();
             if (account is not null && hello["account"]?.GetValue<bool>() == true) about["account"] = account;
@@ -271,6 +280,8 @@ public static class KnockClient
             var credentials = RoomCredentials.FromJson(reply);
             // 只信握手里证明过的那把房主公钥：回复里写的必须就是它。
             if (!CryptographicOperations.FixedTimeEquals(credentials.HostPublicKey, hostPub)) throw new CryptographicException(L.T("core.mp.knock.hostmismatch"));
+            // 房主发了验证方案：之后每条成员通道都用本机设备密钥和这把（握手里证明过的）房主公钥互相证明。
+            if (credentials.Scheme is { } scheme) credentials.Member!.Attestor = new DeviceAttestor(me, hostPub, scheme);
             using var ack = CancellationTokenSource.CreateLinkedTokenSource(ct);
             ack.CancelAfter(handshakeTimeout ?? HandshakeTimeout);
             await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(new JsonObject { ["ack"] = true })), ack.Token);
@@ -662,10 +673,12 @@ public sealed class KnockServer : IAsyncDisposable
             using (receive)
             {
                 string? name = null, version = null;
+                var guestAttests = false;
                 try
                 {
                     name = KnockProtocol.SanitizeName(about["name"]?.GetValue<string>());
                     version = KnockProtocol.SanitizeName(about["ver"]?.GetValue<string>());
+                    guestAttests = about["attest"]?.GetValue<int>() == 1;
                 }
                 catch (Exception e) when (e is InvalidOperationException or FormatException) { }
                 // 这个房间里被踢出的人：明确告诉他“你已被移出”（回复走握手后的加密通道，只有他能看到），不用掉邀请、不算失败次数。
@@ -713,10 +726,14 @@ public sealed class KnockServer : IAsyncDisposable
                 JsonObject reply;
                 MemberEntry? member = null;
                 if (!_book.TryConsume(invite)) reply = Reject("expired");
+                // 安全策略要求设备验证、对方却不支持（旧版或改过的客户端）：不放进来。旧版客户端只认识 denied。
+                else if (_members.RequireAttestation && (!guestAttests || _members.Attestation is null)) reply = Reject("denied");
                 else if (request.Trusted || invite.AutoApprove || await AskAsync(request, ct))
                 {
                     member = _members.Issue(guestPub, request.Name, invite: invite);
-                    reply = (_credentials() with { Member = member.Key }).ToJson();
+                    var attestation = guestAttests ? _members.Attestation : null;
+                    member.Attests = attestation is not null;
+                    reply = (_credentials() with { Member = member.Key, Scheme = attestation?.Scheme }).ToJson();
                 }
                 else reply = Reject("denied");
                 _log?.Invoke(L.F(member is not null ? "core.mp.knock.approved" : "core.mp.knock.rejected", request.Name, request.Fingerprint));

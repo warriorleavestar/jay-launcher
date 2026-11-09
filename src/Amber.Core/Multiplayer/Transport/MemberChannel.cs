@@ -41,8 +41,11 @@ public static class MemberChannel
             await stream.WriteAsync(first, timeout.Token);
             await stream.FlushAsync(timeout.Token);
             hs.ReadMessage(await ReadFramedAsync(stream, timeout.Token));
+            var binding = hs.HandshakeHash;
             var (send, receive) = hs.Split();
-            return new SecureStream(stream, send, receive, profile);
+            var secure = new SecureStream(stream, send, receive, profile);
+            if (key.Attestor is { } attestor) await ProveAsInitiatorAsync(secure, attestor, binding, timeout.Token);
+            return secure;
         }
         finally
         {
@@ -78,12 +81,60 @@ public static class MemberChannel
             // 载荷先认过（比如服务号），不认识就在分出会话密钥之前失败。
             if (acceptPayload is not null && !acceptPayload(payload)) throw new CryptographicException(L.T("core.mp.transport.tunnel.unknownservice"));
             await WriteFramedAsync(stream, hs.WriteMessage([]), timeout.Token);
+            var binding = hs.HandshakeHash;
             var (send, receive) = hs.Split();
-            return (new SecureStream(stream, send, receive, profile), member, payload);
+            var secure = new SecureStream(stream, send, receive, profile);
+            await HostAttestAsync(secure, member, binding, timeout.Token);
+            return (secure, member, payload);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(psk);
+        }
+    }
+
+    /// <summary>
+    /// 成员这边的设备证明：发自己的，收房主的（两边同时发）。房主的证明不对说明对面不是那台房主电脑（有人拿着房间凭据冒充房主），
+    /// 抛 DeviceAttestationException，调用方断开。
+    /// </summary>
+    /// <summary>房主这边：这个成员要求设备证明时做一次（不要求时什么都不做）。伪装隧道也走这里。</summary>
+    internal static async Task HostAttestAsync(SecureStream secure, MemberEntry member, byte[] binding, CancellationToken ct)
+    {
+        if (!member.Attests || member.Owner?.Attestation is not { } attestation) return;
+        using var attestor = new DeviceAttestor(attestation.HostDevice, member.PublicKey, attestation.Scheme);
+        await ProveAsResponderAsync(secure, attestor, member, binding, ct);
+    }
+
+    internal static async Task ProveAsInitiatorAsync(SecureStream secure, DeviceAttestor attestor, byte[] binding, CancellationToken ct)
+    {
+        await secure.WriteAsync(attestor.Proof(binding, DeviceAttestor.Role.Initiator, 0), ct);
+        await secure.FlushAsync(ct);
+        var answer = new byte[attestor.ProofLength];
+        if (!await SecureStream.ReadExactAsync(secure, answer, ct)) throw new EndOfStreamException(L.T("core.mp.transport.tunnel.missinghandshake"));
+        if (!attestor.Verify(binding, DeviceAttestor.Role.Responder, 0, answer))
+        {
+            await secure.DisposeAsync();
+            throw new DeviceAttestationException(L.T("core.mp.attest.hostfailed"));
+        }
+    }
+
+    /// <summary>
+    /// 房主这边：两边同时发证明（房主不等成员的证明对了才发：这样冒充房主的人收不到真成员的证明时，
+    /// 真成员也能当场看出对面不是房主，而不是只看到一次断线）。证明绑定在这条连接的握手哈希上，换条连接就没用了。
+    /// 成员的 psk 对（握手过了）、证明却不对：这把钥匙落到了别人手里，
+    /// 报告冒充（成员表会踢人、按策略熔断），再抛 DeviceAttestationException。断线（读不到）不算冒充。
+    /// </summary>
+    private static async Task ProveAsResponderAsync(SecureStream secure, DeviceAttestor attestor, MemberEntry member, byte[] binding, CancellationToken ct)
+    {
+        await secure.WriteAsync(attestor.Proof(binding, DeviceAttestor.Role.Responder, 0), ct);
+        await secure.FlushAsync(ct);
+        var proof = new byte[attestor.ProofLength];
+        if (!await SecureStream.ReadExactAsync(secure, proof, ct)) throw new EndOfStreamException(L.T("core.mp.transport.tunnel.missinghandshake"));
+        if (!attestor.Verify(binding, DeviceAttestor.Role.Initiator, 0, proof))
+        {
+            await secure.DisposeAsync();
+            member.ReportImpersonation();
+            throw new DeviceAttestationException(L.T("core.mp.attest.memberfailed"));
         }
     }
 
