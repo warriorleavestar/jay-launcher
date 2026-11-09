@@ -23,6 +23,49 @@ public class HelpLibraryTests
     }
 
     [Fact]
+    public void ParsesScreenshotLines()
+    {
+        var a = HelpArticle.Parse("---\nid: x\ncategory: start\n---\n\n# T\n\nIntro.\n\n![The library](shot:library)\n\n## How\n- Step\n");
+        var shot = Assert.Single(a.Blocks, b => b.Kind == HelpBlockKind.Shot);
+        Assert.Equal("library", shot.Shot);
+        Assert.Equal("The library", shot.Text);
+        Assert.Equal("Intro.", a.Summary);
+    }
+
+    [Fact]
+    public void ShotNamesRejectPathTricks()
+    {
+        Assert.Null(HelpLibrary.OpenShot("en", "../en/library"));
+        Assert.Null(HelpLibrary.OpenShot("en", "nope"));
+        Assert.Null(HelpLibrary.OpenShot("../x", "library"));
+    }
+
+    [Theory]
+    [InlineData("zh-Hans")]
+    [InlineData("zh-Hant")]
+    [InlineData("en")]
+    [InlineData("ja")]
+    public void EveryScreenshotExistsAndIsUsed(string lang)
+    {
+        var library = HelpLibrary.Load(lang);
+        var used = library.All.SelectMany(a => a.Blocks).Where(b => b.Kind == HelpBlockKind.Shot).ToList();
+        foreach (var b in used)
+        {
+            Assert.Contains(b.Shot!, HelpLibrary.ShotNames);
+            Assert.False(string.IsNullOrWhiteSpace(b.Text), b.Shot);
+        }
+        foreach (var name in HelpLibrary.ShotNames)
+        {
+            Assert.Contains(used, b => b.Shot == name);
+            using var s = HelpLibrary.OpenShot(lang, name);
+            Assert.NotNull(s);
+            var head = new byte[8];
+            Assert.Equal(8, s!.Read(head, 0, 8));
+            Assert.Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }, head);
+        }
+    }
+
+    [Fact]
     public void FourLanguagesHaveTheSameArticles()
     {
         var ids = HelpLibrary.Languages.Select(l => HelpLibrary.LoadLanguage(l).Select(a => a.Id).Order().ToArray()).ToArray();

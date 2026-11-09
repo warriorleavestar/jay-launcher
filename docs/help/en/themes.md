@@ -9,6 +9,8 @@ related: settings
 
 Jay can follow your system, or always be light or dark. Theme packs change colours, fonts and corners.
 
+![Settings › Appearance](shot:appearance)
+
 ## How to
 - **Settings › Appearance › Theme**: System, Light or Dark.
 - Theme packs: import a .jaytheme file, or drag it onto the window. It applies at once.

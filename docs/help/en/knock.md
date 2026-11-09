@@ -9,6 +9,8 @@ related: multiplayer, child-mode, files-remote
 
 When someone joins your room with an invite, they knock first. You decide who comes in.
 
+![Drill mode: practise answering a knock](shot:drill)
+
 ## How to
 - A knock shows a locked card with the person's name and safety code. The focus starts on **Deny**, so Enter never lets anyone in by accident.
 - Ask your friend to read out the safety code on their screen. Let them in only if it is exactly the same.

@@ -310,6 +310,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "help-shots")
+            {
+                await HelpShotsAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             // Only the page × window size × language matrix (no install, no launch): AMBER_SELFTEST_SCOPE=layout.
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "layout")
             {

@@ -9,6 +9,8 @@ related: multiplayer, glossary
 
 连不上朋友时，检测一次就告诉你原因和该试什么。
 
+![“连接有问题？”抽屉](shot:connection)
+
 ## 怎么做
 - 点联机页底部的【连接有问题？】，或按 Ctrl+Shift+D。
 - 【检测我的网络】几秒钟，先用一句白话给结论，技术细节折叠起来。

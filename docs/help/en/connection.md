@@ -9,6 +9,8 @@ related: multiplayer, glossary
 
 If you can't connect to a friend, one check tells you why and what to try.
 
+![The Connection problems? drawer](shot:connection)
+
 ## How to
 - Choose **Connection problems?** at the bottom of Multiplayer, or press Ctrl+Shift+D.
 - **Check my network** takes a few seconds and gives one plain sentence first. The technical details are folded away.

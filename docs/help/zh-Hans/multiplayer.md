@@ -9,6 +9,8 @@ related: child-mode, network-list, knock, connection, public-rooms, glossary
 
 和朋友一起玩：开一个房间，把邀请码发给朋友；朋友贴上邀请码敲门，你同意后就能进来。
 
+![“一起玩”页签：开房间和加入朋友两张卡](shot:multiplayer-lobby)
+
 ## 怎么做
 - 开房间：在“联机”页点【开房间】，选要开的实例，然后点【邀请朋友】（Ctrl+Shift+I）。
 - 加入：把朋友给的邀请码贴进输入框，点【敲门】，等对方同意。
