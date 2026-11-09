@@ -167,6 +167,15 @@
             <Border Classes="callout warning" IsVisible="{Binding HasLoaderNote}">
               <TextBlock Text="{Binding LoaderNote}" TextWrapping="Wrap" />
             </Border>
+            <!-- 光影要 Iris / Oculus / OptiFine 才生效（旧规格 N3）：原版实例拦下；缺 Iris 时默认一并安装 -->
+            <Border x:Name="ShaderNoteBox" Classes="callout warning" IsVisible="{Binding HasShaderNote}">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{Binding ShaderNote}" TextWrapping="Wrap" />
+                <CheckBox x:Name="AlsoInstallRendererBox" IsChecked="{Binding AlsoInstallRenderer}" IsVisible="{Binding CanInstallRenderer}">
+                  <TextBlock Text="{Binding AlsoInstallRendererLabel}" TextWrapping="Wrap" />
+                </CheckBox>
+              </StackPanel>
+            </Border>
             <!-- Mods, packs, shaders, datapacks: [+ Queue] (blue) or [Install now]. -->
             <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding !IsModpack}">
               <Button x:Name="QueueSelectedButton" Classes="primary" Content="{l:T content.queue.add_selected}" Command="{Binding QueueSelectedCommand}" IsVisible="{Binding !SelectedRequiresManualDownload}" />

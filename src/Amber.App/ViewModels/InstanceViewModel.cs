@@ -318,7 +318,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             case InstanceTab.Worlds: LoadWorlds(); break;
             case InstanceTab.Screenshots: LoadScreenshots(); break;
             case InstanceTab.ResourcePacks: LoadResourcePacks(); break;
-            case InstanceTab.ShaderPacks: LoadShaderPacks(); break;
+            case InstanceTab.ShaderPacks: LoadShaderPacks(); UpdateShaderState(); break;
             case InstanceTab.Servers: LoadServers(); break;
             case InstanceTab.Logs: LoadLogs(); break;
         }

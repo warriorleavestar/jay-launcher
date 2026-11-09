@@ -690,13 +690,21 @@
         <TabItem Header="{l:T instance.shaderpacks.title}" FontSize="14">
           <Grid RowDefinitions="Auto,*">
             <StackPanel Spacing="6" Margin="0,0,0,6">
+              <!-- 光影要 Iris / Oculus / OptiFine 才生效（旧规格 N3） -->
+              <Border x:Name="ShaderNoteBox" Classes="callout warning" IsVisible="{Binding HasShaderNote}">
+                <DockPanel>
+                  <Button x:Name="InstallRendererButton" DockPanel.Dock="Right" Classes="primary" Content="{Binding InstallRendererLabel}" Command="{Binding InstallRendererCommand}"
+                          IsVisible="{Binding CanInstallRenderer}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                  <TextBlock Text="{Binding ShaderNote}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </DockPanel>
+              </Border>
               <Border Classes="callout info" IsVisible="{Binding IsSharedDir}">
                 <DockPanel>
                   <Button DockPanel.Dock="Right" Classes="ghost" Content="{l:T instance.shared.enable}" Command="{Binding GoToIsolationSettingCommand}" VerticalAlignment="Center" Margin="8,0,0,0" />
                   <TextBlock Text="{l:T instance.shared.notice}" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </DockPanel>
               </Border>
-              <Border x:Name="ShaderLoaderCard" Classes="callout warning" IsVisible="{Binding !HasShaderLoader}">
+              <Border x:Name="ShaderLoaderCard" Classes="callout warning" IsVisible="{Binding ShowShaderLoaderCard}">
                 <DockPanel>
                   <Button DockPanel.Dock="Right" Classes="primary" Content="{l:T instance.shaders.install_loader}" Command="{Binding InstallShaderLoaderCommand}"
                           IsVisible="{Binding !IsVanilla}" VerticalAlignment="Center" Margin="8,0,0,0" />
