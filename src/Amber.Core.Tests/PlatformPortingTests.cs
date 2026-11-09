@@ -86,14 +86,35 @@ public sealed class PlatformPortingTests : IDisposable
     public void StaleEasyTierProcessIsCleanedOnUnix()
     {
         if (OperatingSystem.IsWindows()) return;
+        // A leftover: the Jay that started it is gone (an earlier process that had this pid, so the start time differs).
         using var process = Process.Start(new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false })!;
         var executable = process.MainModule!.FileName!;
-        Assert.NotNull(EasyTierProcessTracker.Track(process, _root, executable));
+        Assert.NotNull(EasyTierProcessTracker.Track(process, _root, executable, Environment.ProcessId, ownerStartTicks: 1));
 
         EasyTierProcessTracker.Cleanup(_root, executable);
 
         Assert.True(process.WaitForExit(5000));
         Assert.Empty(Directory.EnumerateFiles(_root, ".jay-easytier-*.pid"));
+    }
+
+    [Fact]
+    public void ThisJaysOwnRunningEasyTierIsLeftAlone()
+    {
+        // Linux multiplayer self-check: the guest's EasyTier started in the same work dir used to kill the host's room.
+        if (OperatingSystem.IsWindows()) return;
+        using var process = Process.Start(new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false })!;
+        try
+        {
+            var executable = process.MainModule!.FileName!;
+            Assert.NotNull(EasyTierProcessTracker.Track(process, _root, executable));
+            EasyTierProcessTracker.Cleanup(_root, executable);
+            Assert.False(process.WaitForExit(500));
+            Assert.Single(Directory.EnumerateFiles(_root, ".jay-easytier-*.pid"));
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill();
+        }
     }
 
     [Fact]
