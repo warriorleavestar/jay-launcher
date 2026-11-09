@@ -102,4 +102,17 @@ public sealed class GameLanguageTests : IDisposable
         Assert.Contains("lang:zh_cn", File.ReadAllLines(Path.Combine(isolated, "options.txt")));
         Assert.False(File.Exists(Path.Combine(_root, "options.txt")));
     }
+
+    [Theory]
+    [InlineData("lzh", "lzh")]
+    [InlineData("en-x-ud", "en_ud")]
+    [InlineData("zh-Hant", null)]
+    [InlineData("en", null)]
+    public void PlayfulJayLanguageCarriesIntoTheGame(string jay, string? expected) =>
+        Assert.Equal(expected, GameLanguage.PlayfulMatch(jay, ["en_us", "zh_tw", "lzh", "en_ud"]));
+
+    [Fact]
+    public void PlayfulLanguageMissingFromOldGameFallsBack() =>
+        Assert.Null(GameLanguage.PlayfulMatch("lzh", ["en_us", "zh_tw"]));
 }
+

@@ -57,6 +57,8 @@ UI text lives in `src/Amber.Core/Localization/`. Use the terms in the [glossary]
 | `zh-Hans.json` | Simplified Chinese |
 | `zh-Hant.json` | Traditional Chinese (Taiwan wording) |
 | `ja.json` | Japanese |
+| `lzh.json` | 文言 (Literary Chinese), playful |
+| *(generated)* `en-x-ud` | English (upside down), playful; generated from `en.json` at run time |
 
 Each file is a flat JSON object `"key": "text"`, keys sorted alphabetically.
 
@@ -67,6 +69,13 @@ Each file is a flat JSON object `"key": "text"`, keys sorted alphabetically.
 - Use the official Minecraft terms for each language (World / ワールド / 世界, Resource Pack, Data Pack, Shader Pack, Mod / MOD / 模組, Server / サーバー / 伺服器, Open to LAN / LANに公開 / 在區域網路上開放).
 - The key name says where the text appears (`page.area.purpose`). If two places share the same English text but need different words in another language, give them separate keys.
 - After changing text, run the layout check above: longer translations must wrap or trim, not get cut off. `--pseudo-loc` (or `AMBER_PSEUDO_LOC=1`) makes every string 40% longer to find tight spots.
+
+### Playful languages
+
+Like Minecraft, Jay has a few just-for-fun languages: 文言 (`lzh`) and English upside down (`en-x-ud`). They are listed in `L.Playful`, are never picked by following the system language, and are only chosen in Settings. If Minecraft has the same language (`L.MinecraftCodes`), a new instance starts the game in it too.
+
+- `lzh.json` may lag behind: a missing key falls back to Traditional Chinese, then English. Translating new keys into 文言 is welcome but not required.
+- Upside-down English has no file. It is generated from `en.json`, so new keys appear automatically.
 
 ### Adding a language
 
