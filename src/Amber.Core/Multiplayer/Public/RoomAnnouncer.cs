@@ -141,15 +141,17 @@ public static class PublicJoin
     {
         for (var attempt = 0; ; attempt++)
         {
+            var connected = false;
             try
             {
                 await using var stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, ct);
+                connected = true;
                 var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct);
                 if (expectedHostKey is not null && !outcome.HostPublicKey.AsSpan().SequenceEqual(expectedHostKey))
                     return new KnockOutcome(null, "mismatch", outcome.HostPublicKey);
                 return outcome;
             }
-            catch (Exception e) when (e is EndOfStreamException or System.Security.Cryptography.CryptographicException && !ct.IsCancellationRequested)
+            catch (Exception e) when (connected && IsRejected(e) && !ct.IsCancellationRequested)
             {
                 // 握手前就被断开：房主不认这张邀请（密码不对、邀请已撤销），或者这个地址上已经不是这个房主。
                 return new KnockOutcome(null, "invalid", []);
@@ -160,6 +162,14 @@ public static class PublicJoin
             }
         }
     }
+
+    // 房主不认就直接断开：Linux/macOS 上读到的是 EOF，Windows 上常是连接被重置/中止。
+    private static bool IsRejected(Exception e) => e switch
+    {
+        EndOfStreamException or System.Security.Cryptography.CryptographicException => true,
+        IOException { InnerException: SocketException { SocketErrorCode: SocketError.ConnectionReset or SocketError.ConnectionAborted } } => true,
+        _ => false,
+    };
 
     /// <summary>拿着邀请码：先在目录里找房主；找到就经公共网络敲门，找不到返回 null（调用方改走邀请码自己的大厅）。</summary>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
