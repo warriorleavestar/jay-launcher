@@ -1,3 +1,4 @@
+using System.Net;
 // 这些测试只在 Mac/Linux 上真正执行（各自先判断系统），Windows 上直接返回。
 #pragma warning disable CA1416, xUnit1031
 
@@ -42,6 +43,16 @@ public sealed class UnixFullLanTests
         var udp = UnixBroadcastRelay.BuildUdp(src, dst, payload);
         Assert.Equal(packet.AsSpan(20).ToArray(), udp);
     }
+
+    [Theory]
+    [InlineData("10.233.144.37", "255.255.255.0", true, "10.233.144.255")]
+    [InlineData("10.233.144.37", null, true, "10.233.144.255")]
+    [InlineData("10.233.144.37", "255.255.0.0", true, "10.233.255.255")]
+    [InlineData("10.233.144.37", "0.0.0.0", true, "10.233.144.255")]
+    [InlineData("10.233.144.37", "255.255.255.0", false, "255.255.255.255")]
+    public void RelayTargetIsTheSubnetBroadcastOnMac(string ip, string? mask, bool mac, string expected) =>
+        Assert.Equal(IPAddress.Parse(expected),
+            UnixBroadcastRelay.RelayTarget(IPAddress.Parse(ip), mask is null ? null : IPAddress.Parse(mask), mac));
 
     [Fact]
     public void RelaySkipsFragmentsUnicastAndTheVirtualSubnet()

@@ -10,7 +10,7 @@ namespace Amber.Core.Multiplayer;
 /// <summary>
 /// Mac/Linux 完整局域网模式的 UDP 广播转发（Windows 上 EasyTier 自己用 --enable-udp-broadcast-relay 做）。
 /// 很多游戏往 255.255.255.255（或本机网段的广播地址）发包找局域网房间，这些包走的是物理网卡，到不了虚拟网卡。
-/// root 守护抓本机从物理网卡发出的 UDP 广播，原样（同样的源端口、目标端口和内容）从虚拟网卡再发一份到 255.255.255.255，
+/// root 守护抓本机从物理网卡发出的 UDP 广播，原样（同样的源端口、目标端口和内容）从虚拟网卡再发一份到 255.255.255.255（macOS 发到虚拟网段的广播地址，见 RelayTarget），
 /// EasyTier 会把它交给房间里所有人；对方回包是发给本机虚拟 IP 的单播，本来就通。
 /// Linux 用 AF_PACKET 抓包，macOS 用系统自带的 libpcap；发包用绑定到虚拟网卡的原始 UDP 套接字。
 /// 只转发本机发出的包（不转发从局域网收到的），从虚拟网卡发出的包不再抓，不会绕圈；每秒最多转发 200 个包。
@@ -54,7 +54,9 @@ internal sealed class UnixBroadcastRelay : IDisposable
             }
             if (tun is null || _stop.IsCancellationRequested) return;
             using var sender = OpenSender(tun);
-            _log($"broadcast relay: started on {tun.Name}");
+            var mask = tun.GetIPProperties().UnicastAddresses.FirstOrDefault(a => a.Address.Equals(_virtualIp))?.IPv4Mask;
+            var target = new IPEndPoint(RelayTarget(_virtualIp, mask, OperatingSystem.IsMacOS()), 0);
+            _log($"broadcast relay: started on {tun.Name} -> {target.Address}");
             var limiter = new RateLimiter(MaxPerSecond);
             // 第一次转发成功、第一次发送失败各记一行（排查用，不刷屏）。
             var loggedOk = false;
@@ -66,7 +68,7 @@ internal sealed class UnixBroadcastRelay : IDisposable
                 var datagram = BuildUdp(srcPort, dstPort, payload);
                 try
                 {
-                    sender.SendTo(datagram, new IPEndPoint(IPAddress.Broadcast, 0));
+                    sender.SendTo(datagram, target);
                     if (!loggedOk) { loggedOk = true; _log($"broadcast relay: forwarded first packet to port {dstPort}"); }
                 }
                 catch (SocketException e)
@@ -81,6 +83,23 @@ internal sealed class UnixBroadcastRelay : IDisposable
         {
             _log("broadcast relay stopped: " + e.Message);
         }
+    }
+
+    /// <summary>
+    /// Where the copy goes. Linux sends to 255.255.255.255 on the bound tun. macOS has no route for the limited broadcast on a
+    /// point-to-point utun (sendto fails with EHOSTUNREACH even with IP_BOUND_IF), so it uses the virtual subnet's broadcast
+    /// address, which EasyTier also delivers to every member. The mask falls back to /24, the size of Jay's virtual subnet.
+    /// </summary>
+    internal static IPAddress RelayTarget(IPAddress virtualIp, IPAddress? mask, bool mac)
+    {
+        if (!mac) return IPAddress.Broadcast;
+        var m = mask is { AddressFamily: AddressFamily.InterNetwork } && !mask.Equals(IPAddress.Any) && !mask.Equals(IPAddress.Broadcast)
+            ? BinaryPrimitives.ReadUInt32BigEndian(mask.GetAddressBytes())
+            : 0xFFFFFF00u;
+        var ip = BinaryPrimitives.ReadUInt32BigEndian(virtualIp.GetAddressBytes());
+        var bytes = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(bytes, ip | ~m);
+        return new IPAddress(bytes);
     }
 
     internal static NetworkInterface? FindByAddress(IPAddress address) =>
