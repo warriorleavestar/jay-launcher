@@ -131,24 +131,31 @@ static class FullLanCheck
             Check("重启后网卡回来", tun is not null, "");
             Check("重启后还能连房主", await ConnectThroughTunAsync(game), "");
 
-            Phase("切到经房主上网", 180);
-            // 5. 经房主上网：防漏规则、DNS 都要装上。
-            var exitOptions = guestOptions with { ExitNode = EasyTierArgs.HostIp };
-            await guest.RestartAsync(exitOptions, new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token);
-            Log("已切到经房主上网");
-            Check("防漏规则已装", FirewallPresent(), FirewallDump());
-            var dnsExit = DnsSnapshot();
-            Check("DNS 换成 1.1.1.1 / 8.8.8.8", dnsExit.Contains("1.1.1.1") && dnsExit.Contains("8.8.8.8"), dnsExit);
-            Check("经虚拟网卡还能连房主", await ConnectThroughTunAsync(game), "");
-            // 同一台机器上房主自己的出站也被本机的出口路由和防漏规则管着，这里不判断能不能上网，只记下来；真正经出口上网在两台机器上测。
-            Log($"（仅记录）开出口后访问外网：{(await InternetAsync() ? "通" : "不通")}");
+            // GitHub 的 macOS 机器上不能测经别人上网：pf 防漏规则一装，同一台机器上跑的 CI 代理也连不上 GitHub，
+            // 整个任务失联直到超时（看门狗的输出也回不来）。Linux 上 nft 规则不影响已有连接，可以测。真 Mac 上照常测。
+            var skipExit = Environment.GetEnvironmentVariable("JAY_FULLLAN_NO_EXIT") == "1";
+            if (skipExit) Log("跳过经房主上网和房主掉线两步（JAY_FULLLAN_NO_EXIT=1）");
+            if (!skipExit)
+            {
+                Phase("切到经房主上网", 180);
+                // 5. 经房主上网：防漏规则、DNS 都要装上。
+                var exitOptions = guestOptions with { ExitNode = EasyTierArgs.HostIp };
+                await guest.RestartAsync(exitOptions, new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token);
+                Log("已切到经房主上网");
+                Check("防漏规则已装", FirewallPresent(), FirewallDump());
+                var dnsExit = DnsSnapshot();
+                Check("DNS 换成 1.1.1.1 / 8.8.8.8", dnsExit.Contains("1.1.1.1") && dnsExit.Contains("8.8.8.8"), dnsExit);
+                Check("经虚拟网卡还能连房主", await ConnectThroughTunAsync(game), "");
+                // 同一台机器上房主自己的出站也被本机的出口路由和防漏规则管着，这里不判断能不能上网，只记下来；真正经出口上网在两台机器上测。
+                Log($"（仅记录）开出口后访问外网：{(await InternetAsync() ? "通" : "不通")}");
 
-            Phase("房主掉线", 90);
-            // 6. 房主掉线：不能退回直接上网。
-            host.Dispose();
-            await Task.Delay(3000);
-            Check("房主掉线后不漏到本机网络", !await InternetAsync(), "");
-            Check("房主掉线后防漏规则还在", FirewallPresent(), "");
+                Phase("房主掉线", 90);
+                // 6. 房主掉线：不能退回直接上网。
+                host.Dispose();
+                await Task.Delay(3000);
+                Check("房主掉线后不漏到本机网络", !await InternetAsync(), "");
+                Check("房主掉线后防漏规则还在", FirewallPresent(), "");
+            }
         }
         catch (Exception e)
         {
