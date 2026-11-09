@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Amber.Core.Multiplayer.Transport;
 
 namespace Amber.Core.Multiplayer;
 
@@ -33,6 +34,12 @@ public sealed class MemberKey
     }
 
     public byte[] Id { get; }
+
+    /// <summary>
+    /// 成员这边：用本机设备密钥和房主设备公钥算设备证明的对象（房主的敲门回复里带了验证方案时才有）。
+    /// 有它时，每条成员通道握手后都要互相证明一次“我还是那台设备”。钥匙清零时一起清零。
+    /// </summary>
+    internal DeviceAttestor? Attestor { get; set; }
 
     /// <summary>编号的十六进制（聊天里的发送者 id）。</summary>
     public string IdHex { get; }
@@ -74,6 +81,7 @@ public sealed class MemberKey
         {
             _zeroed = true;
             CryptographicOperations.ZeroMemory(_psk);
+            Attestor?.Dispose();
         }
     }
 
@@ -133,6 +141,14 @@ public sealed class MemberEntry
     public string Id => Key.IdHex;
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
 
+    /// <summary>敲门时对方说自己支持设备验证、房主也发了方案：之后他的每条通道都必须先证明设备。</summary>
+    public bool Attests { get; internal set; }
+
+    internal MemberTable? Owner { get; set; }
+
+    /// <summary>这个成员拿着对的 psk 却证明不了设备：钥匙多半泄露给了别人。交给成员表处理（踢出 + 通知房主）。</summary>
+    internal void ReportImpersonation() => Owner?.OnImpersonation(this);
+
     /// <summary>对方确认收到了凭据（敲门最后的 ack）。没确认的成员照样能用这把钥匙进来。</summary>
     public bool Confirmed { get; internal set; }
 
@@ -161,6 +177,20 @@ public sealed class MemberTable
     /// <summary>有成员被移出（踢出，或换网络时没收到新凭据）：游戏通道和聊天要马上断开他现有的连接。</summary>
     public event Action<MemberEntry>? Removed;
 
+    /// <summary>
+    /// 确认的冒充：有人拿着这个成员的 psk 连上了通道，却算不出设备证明。外人连握手都过不了，所以这个信号伪造不了。
+    /// 房主据此踢人、按安全策略熔断房间。
+    /// </summary>
+    public event Action<MemberEntry>? ImpersonationDetected;
+
+    /// <summary>房主的设备密钥和这个房间用的验证方案（房主开房时设置；没设置时不要求设备证明）。</summary>
+    public (X25519KeyPair HostDevice, AttestationScheme Scheme)? Attestation { get; set; }
+
+    /// <summary>安全策略是「必须验证」：不支持设备验证的人敲门一律拒绝。</summary>
+    public bool RequireAttestation { get; set; }
+
+    internal void OnImpersonation(MemberEntry entry) => ImpersonationDetected?.Invoke(entry);
+
     /// <summary>给一个被批准的人发钥匙（房主自己也有一把，用于本机的聊天客户端）。</summary>
     public MemberEntry Issue(ReadOnlySpan<byte> publicKey, string name, bool isHost = false, PendingInvite? invite = null)
     {
@@ -180,7 +210,7 @@ public sealed class MemberTable
             MemberKey key;
             do key = MemberKey.Create();
             while (_byId.ContainsKey(key.IdHex));
-            entry = new MemberEntry(key, pub, name, isHost, invite);
+            entry = new MemberEntry(key, pub, name, isHost, invite) { Owner = this };
             _byId[entry.Id] = entry;
         }
         foreach (var old in replaced)

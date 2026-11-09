@@ -215,6 +215,9 @@ internal static class ChatWire
 
     public static byte[] Kicked() => KnockProtocol.Json(new JsonObject { ["ctl"] = "kicked" });
 
+    /// <summary>房主 → 成员：房间发现冒充，熔断（所有人下线）。只认房主这条腿上来的；旧版成员不认识，房间关掉时照样断开。</summary>
+    public static byte[] Breaker() => KnockProtocol.Json(new JsonObject { ["ctl"] = "breaker" });
+
     /// <summary>成员收到“你已被移出房间”后回的确认。不带字段：只决定房主什么时候断开，安全上仍靠钥匙作废。</summary>
     public static byte[] KickedAck() => KnockProtocol.Json(new JsonObject { ["ctl"] = "kicked-ack" });
 
@@ -728,6 +731,28 @@ public sealed class ChatHub : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 熔断：经每个在线成员自己的通道发“房间熔断”，再稍等一下让帧写出去（不等确认：房主马上就要关房间，安全上靠关房间和钥匙作废）。
+    /// 返回发给了几个人。
+    /// </summary>
+    public async Task<int> BroadcastBreakerAsync(TimeSpan? flush = null, CancellationToken ct = default)
+    {
+        if (_table is null) return 0;
+        var frame = ChatWire.Breaker();
+        var sent = 0;
+        foreach (var member in _members.Values)
+        {
+            if (!member.Authenticated || member.IsHost || member.Entry is not { IsHost: false }) continue;
+            if (member.Outbox.Writer.TryWrite(frame)) sent++;
+        }
+        if (sent > 0)
+        {
+            try { await Task.Delay(flush ?? TimeSpan.FromMilliseconds(500), ct); }
+            catch (OperationCanceledException) { }
+        }
+        return sent;
+    }
+
     /// <summary>远程控制：成员回了“不同意”（会话号、成员都由 RemoteHub 再核对）。</summary>
     public event Action<MemberEntry, string>? RemoteDeclined;
 
@@ -969,6 +994,7 @@ public sealed class ChatClient : IAsyncDisposable, IPrivateLink
     private int _rekeyed;
     /// <summary>收到过踢人通知：之后连接断开不再报 Disconnected（被踢了不该显示“正在重连”）。</summary>
     private int _kicked;
+    private int _breaker;
     private Stream? _stream;
     private readonly TcpClient _client = new();
     private readonly CancellationTokenSource _cts = new();
@@ -996,6 +1022,9 @@ public sealed class ChatClient : IAsyncDisposable, IPrivateLink
 
     /// <summary>邀请房间：房主请求看/控自己的屏幕（会话号）。只认房主这条腿上来的。</summary>
     public event Action<string>? RemoteRequested;
+
+    /// <summary>邀请房间：房主发现冒充并熔断了房间（经房主这条腿上来的通知）。只报一次。</summary>
+    public event Action? Breaker;
 
     /// <summary>邀请房间：房主发来的在线名单（私聊、传文件按它找人）。</summary>
     public event Action<IReadOnlyList<RosterEntry>>? RosterChanged;
@@ -1139,6 +1168,7 @@ public sealed class ChatClient : IAsyncDisposable, IPrivateLink
                         }
                         Kicked?.Invoke();
                     }
+                    else if (ctl == "breaker" && Interlocked.Exchange(ref _breaker, 1) == 0) Breaker?.Invoke();
                     else if (ctl == "host-info" && ChatWire.NameField(control!) is { } hostName) HostName = hostName;
                     else if (ctl == "roster")
                     {
