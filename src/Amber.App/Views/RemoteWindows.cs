@@ -64,13 +64,14 @@ public sealed class RemoteConsentDialog : Window
         var name = request.Name.Length > 0 ? request.Name : L.T("multiplayer.peers.player");
         var viewOnly = new CheckBox { Content = L.T("remote.consent.view_only") };
         var countdown = new TextBlock { Classes = { "hint" }, FontSize = 12 };
-        var deny = new Button { Content = L.T("remote.consent.deny"), Classes = { "primary" }, IsDefault = true, IsCancel = true, MinWidth = 96 };
-        var allow = new Button { Content = L.T("remote.consent.allow"), Classes = { "secondary" }, MinWidth = 96 };
+        // 安全按钮：主题的 Button 样式匹配不到；“拒绝”是默认焦点的保留样式，“同意”是安全蓝。
+        var deny = new Amber.App.Controls.Safety.SafetyButton { Content = L.T("remote.consent.deny"), Kind = Amber.App.Controls.Safety.SafetyKind.Safe, IsDefault = true, IsCancel = true };
+        var allow = new Amber.App.Controls.Safety.SafetyButton { Content = L.T("remote.consent.allow"), Kind = Amber.App.Controls.Safety.SafetyKind.Confirm };
         deny.Click += (_, _) => Decide(RemoteConsent.Denied);
         allow.Click += (_, _) => Decide(new RemoteConsent(true, viewOnly.IsChecked == true));
         var warning = new Border
         {
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0xD9, 0x48, 0x2B)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xB3, 0x26, 0x1E)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(10),
@@ -134,6 +135,8 @@ public sealed class RemoteViewerWindow : Window
     public RemoteViewerWindow(RemoteViewer viewer)
     {
         _viewer = viewer;
+        // 查看窗也是安全界面：结束按钮和控制状态的样子主题改不了。
+        Amber.App.Services.ThemeService.LockToDefault(this);
         Title = L.F("remote.viewer.window_title", viewer.PeerName);
         Width = 1100;
         Height = 720;
@@ -142,7 +145,7 @@ public sealed class RemoteViewerWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         _surface = new RemoteSurface(viewer);
         _state = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeight.SemiBold };
-        var stop = new Button { Content = L.T("remote.viewer.stop"), Classes = { "danger" } };
+        var stop = new Amber.App.Controls.Safety.SafetyButton { Content = L.T("remote.viewer.stop"), Kind = Amber.App.Controls.Safety.SafetyKind.Danger };
         stop.Click += (_, _) => Close();
         var header = new Border
         {
@@ -449,7 +452,7 @@ public static class RemoteSharingOverlay
     {
         var windows = new List<Window>();
         IDisposable? frame = null;
-        GlobalHotkey? hotkey = null;
+        IDisposable? hotkey = null;
         var bar = new RemoteSharingBar(sharer);
         windows.Add(bar);
         var closed = false;
@@ -465,33 +468,85 @@ public static class RemoteSharingOverlay
             foreach (var w in windows) w.Close();
         }
         sharer.Ended += _ => Dispatcher.UIThread.Post(CloseAll);
-        if (OperatingSystem.IsWindows())
-            hotkey = new GlobalHotkey(() => _ = sharer.StopAsync(RemoteStopReason.StoppedByUser));
-        bar.HotkeyAvailable = hotkey?.Registered == true;
-        // 红框（Windows 用系统原生窗口；其他系统以后补）。小条放在红框里面、不重叠。
-        // 被控期间改分辨率、插拔显示器、缩放变了：每秒对一次屏幕布局，变了就按新的重画红框、小条放回主屏顶部。
+        // 全局停止热键 Ctrl+Shift+F12：Windows 用 RegisterHotKey，Linux X11 用 XGrabKey，macOS 用 Carbon 热键（都不需要额外权限）。
+        void Stop() => _ = sharer.StopAsync(RemoteStopReason.StoppedByUser);
         if (OperatingSystem.IsWindows())
         {
-            var current = FrameRects(bar.Screens.All);
-            var red = new RedFrameWindows(current);
-            frame = red;
-            FrameCount = red.Count;
-            watch = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
-            {
-                if (closed || !OperatingSystem.IsWindows()) return;
-                var next = FrameRects(bar.Screens.All);
-                if (next.SequenceEqual(current)) return;
-                current = next;
-                frame?.Dispose();
-                var redrawn = new RedFrameWindows(next);
-                frame = redrawn;
-                FrameCount = redrawn.Count;
-                bar.PlaceAtTop();
-            });
-            watch.Start();
+            var windowsKey = new GlobalHotkey(Stop);
+            hotkey = windowsKey;
+            bar.HotkeyAvailable = windowsKey.Registered;
         }
+        else if (Amber.Core.RemoteControl.Unix.StopHotkey.Create(Stop) is { } unixKey)
+        {
+            hotkey = unixKey;
+            bar.HotkeyAvailable = unixKey.Registered;
+        }
+        // 红框：Windows 用系统原生窗口（点击穿透）；Mac/Linux 用四条很窄的置顶无边框窗口（只占屏幕边缘 4 像素，不需要穿透）。小条放在红框里面、不重叠。
+        // 被控期间改分辨率、插拔显示器、缩放变了：每秒对一次屏幕布局，变了就按新的重画红框、小条放回主屏顶部。
+        var current = FrameRects(bar.Screens.All);
+        (IDisposable Frame, int Count) Draw(List<(int X, int Y, int Width, int Height)> rects)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var red = new RedFrameWindows(rects);
+                return (red, red.Count);
+            }
+            var edges = new RedFrameEdges(rects, bar.Screens);
+            return (edges, edges.Count);
+        }
+        (frame, FrameCount) = Draw(current);
+        watch = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
+        {
+            if (closed) return;
+            var next = FrameRects(bar.Screens.All);
+            if (next.SequenceEqual(current)) return;
+            current = next;
+            frame?.Dispose();
+            (frame, FrameCount) = Draw(next);
+            bar.PlaceAtTop();
+        });
+        watch.Start();
         bar.Show();
         if (sharer.HasEnded) CloseAll();
+    }
+}
+
+/// <summary>Mac/Linux 的红框：每条边一个置顶、不抢焦点、不进任务栏的无边框红色小窗口（位置和大小是桌面像素，按所在屏幕的缩放换成窗口尺寸）。</summary>
+internal sealed class RedFrameEdges : IDisposable
+{
+    private readonly List<Window> _windows = [];
+
+    public RedFrameEdges(IEnumerable<(int X, int Y, int Width, int Height)> rects, Avalonia.Controls.Screens screens)
+    {
+        foreach (var (x, y, w, h) in rects)
+        {
+            var scaling = screens.ScreenFromPoint(new PixelPoint(x + w / 2, y + h / 2))?.Scaling ?? 1;
+            var edge = new Window
+            {
+                WindowDecorations = WindowDecorations.None,
+                Topmost = true,
+                ShowActivated = false,
+                ShowInTaskbar = false,
+                CanResize = false,
+                Focusable = false,
+                Background = new SolidColorBrush(Color.FromRgb(0xFF, 0x3B, 0x30)),
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Position = new PixelPoint(x, y),
+                Width = w / scaling,
+                Height = h / scaling,
+                Title = "Jay",
+            };
+            edge.Show();
+            _windows.Add(edge);
+        }
+    }
+
+    public int Count => _windows.Count;
+
+    public void Dispose()
+    {
+        foreach (var w in _windows) w.Close();
+        _windows.Clear();
     }
 }
 
@@ -514,10 +569,10 @@ public sealed class RemoteSharingBar : Window
         Topmost = true;
         SizeToContent = SizeToContent.WidthAndHeight;
         WindowStartupLocation = WindowStartupLocation.Manual;
-        Background = new SolidColorBrush(Color.FromRgb(0xB3, 0x16, 0x16));
+        Background = new SolidColorBrush(Color.FromRgb(0xB3, 0x26, 0x1E));
         _toggle = new Button { Padding = new Thickness(10, 4), Background = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), Foreground = Brushes.White };
         _toggle.Click += async (_, _) => await _sharer.SetControlAsync(!_sharer.ControlAllowed);
-        var stop = new Button { Content = L.T("remote.sharing.stop"), Padding = new Thickness(14, 4), Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(0xB3, 0x16, 0x16)), FontWeight = FontWeight.SemiBold };
+        var stop = new Button { Content = L.T("remote.sharing.stop"), Padding = new Thickness(14, 4), Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(0xB3, 0x26, 0x1E)), FontWeight = FontWeight.SemiBold };
         stop.Click += async (_, _) => await _sharer.StopAsync(RemoteStopReason.StoppedByUser);
         _hotkeyHint = new TextBlock { Foreground = Brushes.White, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.85 };
         var who = new TextBlock

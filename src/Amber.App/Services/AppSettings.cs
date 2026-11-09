@@ -56,6 +56,13 @@ public sealed class AppSettings
     /// <summary>联机网络配置里带的主题：在联机页里使用（整个 Jay 要另外同意）。关掉就一律不用。</summary>
     public bool AllowNetworkThemes { get; set; } = true;
 
+    /// <summary>The first-run wizard (official design §6.1) was finished or skipped; it never opens again.</summary>
+    public bool FirstRunDone { get; set; }
+
+    /// <summary>No settings file existed: a brand-new Jay (not saved).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsFresh { get; private set; }
+
     /// <summary>界面语言：zh-Hans / zh-Hant / en / ja；null 表示跟随系统。</summary>
     public string? Language { get; set; }
 
@@ -105,11 +112,20 @@ public sealed class AppSettings
     /// <summary>最近玩过的实例 id，最近的在前（启动页的“最近游玩”）。</summary>
     public List<string>? RecentInstances { get; set; }
 
-    /// <summary>侧边栏手动收成图标栏。</summary>
+    /// <summary>旧版：侧边栏手动收成图标栏。新版读 SidebarMode；这个勾过的升级成 collapsed。</summary>
     public bool SidebarCollapsed { get; set; }
+
+    /// <summary>侧栏：auto（按窗口宽度，默认）/ expanded / collapsed。</summary>
+    public string? SidebarMode { get; set; }
+
+    /// <summary>新版外壳的“东西搬到哪了”卡片已经关掉。</summary>
+    public bool ShellMovedNoticeSeen { get; set; }
 
     /// <summary>减少动画（页面切换、抽屉滑入这些都不做过渡）。</summary>
     public bool ReduceMotion { get; set; }
+
+    /// <summary>减少动画：system（跟随系统，默认）/ on / off。旧的 ReduceMotion 勾过的升级成 on（见 MotionPreference.Migrate）。</summary>
+    public string? ReduceMotionMode { get; set; }
 
     /// <summary>启动游戏后启动器怎么办：minimize（最小化，默认）/ keep（保持）/ tray（隐藏到托盘）。</summary>
     public string AfterLaunch { get; set; } = "minimize";
@@ -169,7 +185,7 @@ public sealed class AppSettings
             // 设置文件损坏时回到默认值，原文件保留一份方便排查。
             File.Copy(FilePath, FilePath + ".broken", true);
         }
-        return new AppSettings();
+        return new AppSettings { IsFresh = !File.Exists(FilePath) };
     }
 
     /// <summary>测试用：这份设置存到别的文件（不序列化）。</summary>
@@ -193,6 +209,15 @@ public sealed class InstanceMeta
 
     /// <summary>null 表示正常；incomplete（安装未完成）/ broken（已损坏）。</summary>
     public string? State { get; set; }
+
+    /// <summary>Pinned to the top of the library.</summary>
+    public bool Pinned { get; set; }
+
+    /// <summary>When a game of this instance last started (local runs only).</summary>
+    public DateTimeOffset? LastPlayed { get; set; }
+
+    /// <summary>Total minutes played from this launcher.</summary>
+    public double PlayMinutes { get; set; }
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(AppSettings))]

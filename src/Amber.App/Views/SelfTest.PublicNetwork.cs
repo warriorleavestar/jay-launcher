@@ -163,6 +163,12 @@ internal sealed partial class SelfTest
         Check("换公共网络：默认是 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && host.NetworkChoices.Count == 1,
             string.Join(" | ", host.NetworkChoices.Select(c => c.Label)));
 
+        // Test registry key switch (AMBER_TEST_REGISTRY_KEY): only valid 32-byte keys count, and such networks are labelled as test-reviewed.
+        var testKey = Convert.ToBase64String(NetworkSigner.Generate(out _).PublicKey);
+        var parsedKeys = Amber.App.Services.LauncherService.ParseTestKeys($"{testKey}, not-base64, AAAA");
+        var testChoice = new NetworkChoice("t", "测试网络", true, 1, null, TestReviewed: true);
+        Check("测试注册表钥匙：只认合法公钥，网络标成测试审核", parsedKeys.Count == 1 && testChoice.Label.Contains("🧪")
+            && testChoice.Detail.Contains(L.T("multiplayer.network.test_reviewed")), testChoice.Detail);
         var node = $"tcp://127.0.0.1:{EasyTierArgs.FreeTcpPort()}";
         // 网络节点的账号登录（和 jay-server directory --accounts 一样）：一个开了两步验证的账号。
         var accounts = new AccountStore(Path.Combine(reportDir, "node-accounts.json"));
@@ -176,11 +182,14 @@ internal sealed partial class SelfTest
         var configJson = System.Text.Encoding.UTF8.GetBytes($$"""
             { "v": 1, "network": "selftest-net", "notice": "自检网络公告：只允许公开房间",
               "links": [{ "name": "网络规则", "url": "https://example.invalid/rules" }],
-              "policy": { "modes": ["public"], "requireDevice": true, "maxFileMB": 1 },
-              "login": {{loginJson}} }
+              "policy": { "modes": ["public"], "requireDevice": true, "maxFileMB": 1,
+                "security": { "attestation": "required", "breaker": "on", "restartDelayMin": 20 } },
+              "login": {{loginJson}},
+              "ui": { "scope": "global", "inline": { "seed": { "accent": "#22AA66" } } } }
             """);
         var configSha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(configJson));
         host.NetworkConfigDir = Path.Combine(reportDir, "network-configs");
+        host.NetworkThemeDir = Path.Combine(reportDir, "network-themes");
         Directory.CreateDirectory(host.NetworkConfigDir);
         await File.WriteAllBytesAsync(Path.Combine(host.NetworkConfigDir, configSha + ".json"), configJson);
         var info = new NetworkInfo("selftest-net", "自检公共网络", "jay-selftest-" + Guid.NewGuid().ToString("N")[..8], "selftest-secret", [node],
@@ -203,10 +212,18 @@ internal sealed partial class SelfTest
                 && host.NetworkLinks.SingleOrDefault()?.Name == "网络规则", host.NetworkNotice);
             Check("网络配置：策略生效（只允许公开房间、要求设备指纹、文件限 1 MB）", !host.NetworkPolicy.Allows(RoomVisibility.Password)
                 && host.HostDevicePolicy.Require && !host.NetworkPolicy.AllowsFile(2 * 1024 * 1024));
+            Check("网络主题：连上后换上网络的主题，global 先问用户", await WaitAsync(() => host.NetworkThemePack is not null && host.NetworkThemeAskGlobal, 10)
+                && ReferenceEquals(Amber.App.Services.ThemeService.NetworkPack, host.NetworkThemePack) && !Amber.App.Services.ThemeService.NetworkGlobalAccepted);
+            Check("网络配置：最低安全要求生效（设备验证必须、熔断开、倒计时至少 20 秒）",
+                host.Security is { Attestation: Amber.Core.Multiplayer.Transport.AttestationMode.Required, Breaker: true } && host.Security.EffectiveRestartDelay >= 20);
             await ShotAsync("网络配置公告");
+            host.AcceptNetworkThemeGlobalCommand.Execute(null);
+            Check("网络主题：用户同意后整个 Jay 都用", Amber.App.Services.ThemeService.NetworkGlobalAccepted && !host.NetworkThemeAskGlobal);
             await NetworkLoginAsync(host, totp);
             host.DisconnectPublicCommand.Execute(null);
             Check("网络配置：断开后公告和策略清掉", !host.HasNetworkNotice && !host.HostDevicePolicy.Require && host.NetworkPolicy.Allows(RoomVisibility.Password));
+            Check("网络配置：断开后安全要求回到本机设置", host.NetworkSecurityPolicy is null);
+            Check("网络主题：断开后换回自己的主题", Amber.App.Services.ThemeService.NetworkPack is null && host.NetworkThemePack is null && !host.NetworkThemeAskGlobal);
             Check("网络账号：断开后登录框和凭证清掉", !host.HasNetworkLogin && !host.IsAccountLoggedIn && host.AccountToken is null && host.HostAccountPolicy is null);
             directory.Login = null;
             // 缓存被改过、地址又连不上：不连。

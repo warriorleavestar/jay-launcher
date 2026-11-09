@@ -1,0 +1,149 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Amber.App.Views.Gallery">
+  <!-- 开发者页：每个基础控件的每个状态排一格（官方设计 §11.3）。AMBER_SELFTEST_SCOPE=gallery 在深浅两色下截图。文字是开发者看的，不进翻译。 -->
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource PagePadding}" Spacing="16" MaxWidth="1100">
+      <TextBlock Classes="display" Text="Jay 控件库" />
+      <TextBlock Classes="hint" Text="第 0 批：设计令牌和基础控件。琥珀只给开始游戏，松鸦蓝是普通主按钮。" />
+
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="h2" Text="按钮" />
+          <WrapPanel ItemSpacing="8" LineSpacing="8">
+            <Button x:Name="GalleryPlay" Classes="play">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Path Classes="icon" Data="{StaticResource Icon.Play}" />
+                <TextBlock Text="开始游戏" />
+              </StackPanel>
+            </Button>
+            <Button Classes="primary" Content="安装" />
+            <Button Classes="secondary" Content="导入" />
+            <Button Classes="ghost" Content="取消" />
+            <Button Classes="danger" Content="删除…" />
+            <Button Classes="danger solid" Content="删除这个实例" />
+            <Button Classes="primary" Content="不可用" IsEnabled="False" />
+          </WrapPanel>
+          <WrapPanel ItemSpacing="8" LineSpacing="8">
+            <Button Classes="primary small" Content="小按钮" />
+            <Button Classes="secondary small">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Path Classes="icon sm" Data="{StaticResource Icon.Refresh}" />
+                <TextBlock Text="刷新" />
+              </StackPanel>
+            </Button>
+            <Button Classes="secondary large" Content="大按钮" />
+            <Button Classes="ghost" ToolTip.Tip="更多" AutomationProperties.Name="更多">
+              <Path Classes="icon" Data="{StaticResource Icon.More}" />
+            </Button>
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="h2" Text="标签、角标、状态" />
+          <WrapPanel ItemSpacing="8" LineSpacing="8">
+            <Border Classes="chip"><TextBlock Text="全部" /></Border>
+            <Border Classes="chip selected"><TextBlock Text="已选中" /></Border>
+            <Border Classes="badge"><TextBlock Text="3" /></Border>
+            <Border Classes="badge muted"><TextBlock Text="12" /></Border>
+            <Border Classes="pill success"><TextBlock Text="正式版" /></Border>
+            <Border Classes="pill accent"><TextBlock Text="快照" /></Border>
+          </WrapPanel>
+          <WrapPanel ItemSpacing="8" LineSpacing="8">
+            <Border Classes="loader vanilla"><TextBlock Text="原版" /></Border>
+            <Border Classes="loader fabric"><TextBlock Text="Fabric" /></Border>
+            <Border Classes="loader forge"><TextBlock Text="Forge" /></Border>
+            <Border Classes="loader neoforge"><TextBlock Text="NeoForge" /></Border>
+            <Border Classes="loader quilt"><TextBlock Text="Quilt" /></Border>
+            <Border Classes="loader optifine"><TextBlock Text="OptiFine" /></Border>
+          </WrapPanel>
+          <WrapPanel ItemSpacing="16" LineSpacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot online" /><TextBlock Text="在线" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot busy" /><TextBlock Text="正在安装" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot playing" /><TextBlock Text="正在玩" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot warning" /><TextBlock Text="需要注意" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot error" /><TextBlock Text="出错" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot" /><TextBlock Text="离线" /></StackPanel>
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="横幅和错误条" />
+          <Border Classes="banner">
+            <StackPanel Orientation="Horizontal" Spacing="8"><Path Classes="icon sm" Data="{StaticResource Icon.Info}" /><TextBlock Text="提示：这台电脑还没装 Java 17，开始游戏时会自动下载。" /></StackPanel>
+          </Border>
+          <Border Classes="banner success">
+            <StackPanel Orientation="Horizontal" Spacing="8"><Path Classes="icon sm" Data="{StaticResource Icon.Success}" /><TextBlock Text="装好了：3 个模组。" /></StackPanel>
+          </Border>
+          <Border Classes="banner warning">
+            <StackPanel Orientation="Horizontal" Spacing="8"><Path Classes="icon sm" Data="{StaticResource Icon.Warning}" /><TextBlock Text="这个模组不支持 1.21.1，可能进不了游戏。" /></StackPanel>
+          </Border>
+          <Border Classes="error-bar">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+              <Path Classes="icon" Data="{StaticResource Icon.Error}" />
+              <StackPanel Grid.Column="1">
+                <TextBlock Classes="title" Text="游戏崩溃了" />
+                <TextBlock Classes="hint" Text="可能是 sodium 和 optifine 冲突。" />
+              </StackPanel>
+              <Button Grid.Column="2" Classes="secondary small" Content="帮我修…" />
+            </Grid>
+          </Border>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="输入、选择、进度" />
+          <TextBox PlaceholderText="搜索模组" MaxWidth="360" HorizontalAlignment="Left" />
+          <TextBox Classes="mono" Text="JAY2-7F3K-Q9MX-2WPD" MaxWidth="360" HorizontalAlignment="Left" />
+          <StackPanel Orientation="Horizontal" Spacing="16">
+            <CheckBox Content="已勾选" IsChecked="True" />
+            <CheckBox Content="没勾选" />
+            <ToggleSwitch IsChecked="True" OnContent="开" OffContent="关" />
+          </StackPanel>
+          <ProgressBar Value="62" MaxWidth="360" HorizontalAlignment="Left" />
+          <StackPanel Spacing="6">
+            <Border Classes="skeleton" Width="240" />
+            <Border Classes="skeleton" Width="180" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Classes="empty-state">
+          <Path Classes="icon" Data="{StaticResource Icon.Mods}" />
+          <TextBlock Classes="title" Text="这里还没有模组" />
+          <TextBlock Classes="hint" Text="从“发现”里找，或者把 .jar 文件拖进窗口。" />
+          <Button Classes="primary" HorizontalAlignment="Center" Content="去发现" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="字号阶梯" />
+          <TextBlock Classes="display" Text="Display 32 · 生存服 1.21" />
+          <TextBlock Classes="headline" Text="Headline 24 · 游戏库" />
+          <TextBlock FontSize="{DynamicResource FontTitle}" FontWeight="Bold" Text="Title 20 · 模组" />
+          <TextBlock FontSize="{DynamicResource FontSubtitle}" FontWeight="Bold" Text="Subtitle 16 · 卡片标题" />
+          <TextBlock Text="Body 14 · 正文：Jay 是一个原创的 Minecraft 启动器。" />
+          <TextBlock FontSize="{DynamicResource FontBodySmall}" Classes="hint" Text="BodySmall 13 · 说明文字" />
+          <TextBlock Classes="caption" Text="Caption 12 · 3 分钟前" />
+          <TextBlock Classes="mono" Text="Mono · [12:01:33] [Render thread/WARN]: 0O1lI" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="图标" />
+          <ItemsControl x:Name="IconGrid">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="12" LineSpacing="12" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

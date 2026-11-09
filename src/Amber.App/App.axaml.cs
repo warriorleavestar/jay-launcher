@@ -39,6 +39,8 @@ public sealed class App : Application
             Amber.Core.Localization.L.SetLanguage(settings.Language);
             // 主题包在主窗口创建前套上（启动保护：上次这个主题让 Jay 崩了，这次就用默认主题）。
             ThemeService.ApplyAtStartup(settings, desktop.Args ?? []);
+            settings.ReduceMotionMode = Amber.Core.Layout.MotionPreference.Migrate(settings.ReduceMotionMode, settings.ReduceMotion);
+            SystemMotion.Start(settings.ReduceMotionMode);
             Amber.Core.Localization.L.Changed += ThemeService.OnLanguageChanged;
             var service = new LauncherService(settings);
             var viewModel = new MainViewModel(service);

@@ -63,12 +63,12 @@
 |---|---|---|---|---|
 | 版本、加载器安装 | ✅ | ✅ | ✅ | `Game/RuleEvaluator.cs`（os 名和架构） |
 | Java 扫描 | ✅ | ✅ | 🟡 | `Java/JavaFinder.cs` |
-| Java 自动下载（Mojang 运行时） | ✅ | ✅ | 🟡 x64 有；ARM64 Mojang 不提供 | `Java/JavaRuntimeInstaller.cs` |
+| Java 自动下载（Mojang 运行时） | ✅ ARM 上 Mojang 不提供的老 Java 退回 x64 版（系统仿真） | ✅ Apple 芯片上 Java 8/16 退回 x64 版（要 Rosetta 2，没装时提示命令） | ✅ x64 用 Mojang；ARM64 从 Adoptium 下 Temurin（校验 SHA-256，安全解压） | `Java/JavaRuntimeInstaller.cs`、`Java/TemurinInstaller.cs` |
 | 启动游戏 | ✅ | ✅ | 🟡 | `Launch/GameLauncher.cs` |
 | 非 ASCII 路径（中文路径）兜底 | ✅ 目录联接 | 不需要 | 不需要 | `Launch/AsciiPaths.cs`、`Launch/WindowsJunction.cs` |
 | 1.6 以前老版本的家目录重定向 | ✅ | 🪟 没做，会写进真实 `minecraft` 目录 | 🪟 同左 | `Launch/AsciiPaths.cs` `LegacyHome` |
 | 正常关闭游戏（让游戏存档） | ✅ `CloseMainWindow` | ✅ `NSRunningApplication.terminate` | 🟡 X11 发 `WM_DELETE_WINDOW`，Wayland 发 SIGTERM（待真机验证） | `Launch/GameLauncher.cs`、`Launch/MacGameProcess.cs`、`Launch/LinuxGameProcess.cs` |
-| 可用内存检测（自动内存） | ✅ `GlobalMemoryStatusEx` | 🟡 用 GC 信息估算 | 🟡 同左 | `Launch/InstanceSettings.cs` |
+| 可用内存检测（自动内存） | ✅ `GlobalMemoryStatusEx` | ✅ `sysctl hw.memsize` | ✅ `/proc/meminfo`（MemAvailable） | `Launch/InstanceSettings.cs` |
 | 启动前后命令、导出启动脚本 | ✅ cmd / .bat | ✅ /bin/sh / .sh | ✅ | `ViewModels/HomeViewModel.cs`、`Launch/Toolbox.cs` |
 | 账号令牌加密 | ✅ DPAPI | 🟡 本机密钥文件（0600） | 🟡 同左 | `Auth/Accounts.cs` |
 | 模组、整合包、资源 | ✅ | ✅ | ✅ | 大小写敏感比较 |
@@ -86,8 +86,8 @@
 | 联机：“仅游戏”出口（SOCKS5） | ✅ | 🟡 路由拦截、SRV 已补，待真机验证 | 🟡 同左 | `Transport/ExitPolicy.cs`、`Transport/JoinTarget.cs` |
 | 联机身份（X25519 私钥）加密 | ✅ DPAPI | 🟡 AES-GCM + 本机密钥文件 | 🟡 同左 | `Multiplayer/MemberIdentity.cs` |
 | 敏感文字复制后 60 秒清剪贴板 | ✅ | ✅ | 🟡 Wayland 下要测 | `App/Services/SensitiveClipboard.cs` |
-| 远程控制【实验】【未发布】 | ✅ | 🪟 界面提示“只支持 Windows” | 🪟 同左 | `RemoteControl/Windows/WindowsRemote.cs` |
-| Jay 服务器（客户端加入）【实验】 | ✅ DPAPI 存访问密钥 | 🟡 访问密钥明文存（0600） | 🟡 同左 | `Multiplayer/Gate/JayServers.cs` |
+| 远程控制【实验】【未发布】 | ✅ | ✅ CoreGraphics 截屏 + CGEvent 注入，要“屏幕录制”和“辅助功能”权限（待真机测） | ✅ X11 桌面（XGetImage + XTest）；🟡 Wayland 走系统门户（ScreenCast + PipeWire 截屏，GNOME/KDE 还能经 RemoteDesktop 控制，sway 之类只能看），每次弹系统授权框，要装 gstreamer1.0-pipewire（待真机测） | `RemoteControl/Windows/WindowsRemote.cs`、`RemoteControl/Unix/` |
+| Jay 服务器（客户端加入）【实验】 | ✅ DPAPI 存访问密钥 | 🟡 AES-GCM + 本机密钥文件（0600），和账号令牌一样 | 🟡 同左 | `Multiplayer/Gate/JayServers.cs` |
 | `jay-server` 服务端【实验】 | ✅ | ✅ | ✅（systemd） | `src/Amber.Server` |
 | 模组烘焙【实验，默认关】 | ✅ | 🟡 | 🟡 | `Bake/BakeService.cs` |
 | 发布包：单文件 + ReadyToRun | ✅ | ✅ | ✅ | `.github/workflows/build.yml` |
@@ -141,7 +141,10 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
 - 令牌存储（`Auth/Accounts.cs`）：
   - Windows：DPAPI（当前用户范围）。
   - 其他平台：`accounts.json.key` 里放一把随机 32 字节密钥（创建时就是 0600，不留先建后改权限的窗口），令牌用 AES-256-GCM 加密，带 `v2:` 前缀。v0.5.x 在非 Windows 上只是 Base64，读到旧格式还能读，下次保存自动迁移。
-  - 这只防“别的系统用户读文件”，防不了同一用户下的程序。**建议适配**：macOS 用钥匙串（Security.framework 的 `SecItemAdd` / `SecItemCopyMatching`），Linux 用 Secret Service（libsecret，经 D-Bus），拿不到时退回现在的密钥文件。存进钥匙串的可以只是那把 32 字节密钥，不用改数据格式。
+  - 这只防“别的系统用户读文件”，防不了同一用户下的程序。
+  - **钥匙串 / Secret Service 暂不做（2026-11-09 评估）**：
+    - macOS：现在是临时签名，每次更新签名都变，钥匙串会在每次更新后弹框要密码，拒绝了就得重新登录；等正式签名（SignPath / Apple 开发者账号）后再做，存进钥匙串的只是那把 32 字节包裹密钥，数据格式不变。
+    - Linux：Secret Service 没有按程序隔离，同一用户的任何程序都能读已解锁的条目，安全上只比 0600 文件多了“不在数据目录里”；而迁移后钥匙环没解锁或没装（无界面登录、KDE 没开 KWallet）时会读不到身份和登录，代价大于收益。
 - CurseForge API Key 存在 `settings.json`（或 `AMBER_CF_KEY`），是明文；仓库里不放任何 Key。
 
 ### 3.5 模组、整合包、资源 ✅
@@ -280,8 +283,13 @@ Mac/Linux 上直接抛 `PlatformNotSupportedException`（“完整局域网模�
 | `RemoteControl/ScreenFrame.cs` | BGRA 帧、64×64 分块对比、缩放（最大 2560×1600）、坐标换算、无损编码 | 跨平台 |
 | `RemoteControl/RemoteHub.cs` | 房主侧服务，端口 47662，连接都由成员发起，经 `MemberChannel`（purpose `remote-v1`）认证 | 跨平台 |
 | `App/Services/SkiaTileCodec.cs` | JPEG 编码（用 Avalonia 自带的 Skia） | 跨平台 |
-| `App/Views/RemoteWindows.cs` | 同意弹窗、查看窗口、共享小条、键盘映射 | 跨平台，红框和热键只在 Windows 上挂 |
+| `App/Views/RemoteWindows.cs` | 同意弹窗、查看窗口、共享小条、键盘映射、红框（Mac/Linux 用四条窄的置顶窗口） | 跨平台；全局热键按系统挂（`Unix/UnixHotkeys.cs`） |
 | `RemoteControl/Windows/WindowsRemote.cs` | GDI BitBlt 截整个虚拟桌面、SendInput 注入、全局热键、红框原生窗口、窗口样式 | 🪟 |
+| `RemoteControl/Unix/X11Remote.cs` | XGetImage 截根窗口（所有显示器）、XTest 注入；没有 DISPLAY、缺 libXtst 时给出原因 | 🐧 X11 |
+| `RemoteControl/Unix/WaylandPortal.cs` | xdg-desktop-portal 会话（D-Bus，Tmds.DBus.Protocol）：CreateSession → SelectDevices → SelectSources → Start，拿 PipeWire 描述符；键鼠经 RemoteDesktop 的 Notify* | 🐧 Wayland |
+| `RemoteControl/Unix/WaylandRemote.cs` | 一个 gst-launch 子进程读 PipeWire 画面（多块屏幕用 compositor 拼起来）；截屏和注入共用一个门户会话 | 🐧 Wayland |
+| `RemoteControl/Unix/MacRemote.cs` | CGWindowListCreateImage 按“点”截所有显示器、CGEvent 注入（拖动、修饰键、滚轮）、屏幕录制 / 辅助功能权限检查和引导 | 🍎 |
+| `RemoteControl/Unix/RemoteKeyCodes.cs` | 扫描码换 X11 键码（evdev + 8）和 macOS 虚拟键码 | 🍎🐧 |
 
 #### 节奏
 
@@ -326,7 +334,7 @@ public interface IInputSink : IDisposable
 - 要区分 X11 和 Wayland（看 `XDG_SESSION_TYPE` / `WAYLAND_DISPLAY`）。
 - X11：截屏用 XShm（`XShmGetImage`）或 `XGetImage`；注入用 XTest（`XTestFakeMotionEvent`、`XTestFakeButtonEvent`、`XTestFakeKeyEvent`）。X11 的 keycode = evdev 码 + 8，而**evdev 码和第 1 套扫描码在非 extended 键上是一样的**（`KEY_ESC=1`、`KEY_1=2`、`KEY_Q=16`…），所以只有 extended 键要查表。
 - Wayland：截屏只能走 xdg-desktop-portal 的 ScreenCast + PipeWire，注入走 portal 的 RemoteDesktop（GNOME、KDE 支持）；每次会弹系统授权框，正好和“每次都要同意”一致。也可以用 `/dev/uinput` 注入，但要额外权限，不推荐。
-- 第一版可以只做 X11，Wayland 上 `Supported` 返回 false 并说明。
+- 已实现：Wayland 上第一次截屏时弹系统授权框（最多等 2 分钟，控制方的等待时间相应放到 150 秒）。门户描述符只能给一个 PipeWire 客户端用，所以所有屏幕在一个 gst-launch 里读。无界面的 sway 1.9 + xdg-desktop-portal-wlr 0.7 在 Start 时报 screencopy 格式错误，门户这一步要在真桌面（GNOME/KDE）上测。
 
 #### 要注意的
 
@@ -340,7 +348,7 @@ public interface IInputSink : IDisposable
 一个只能用 Jay 进的 MC 服务器。三部分：
 
 - **服务端 `jay-server`**（`src/Amber.Server/Program.cs`）：`init`、`setup`（下载官方服务端 jar 并核对 SHA-1、准备 Java）、`run`、`invite`、`revoke`、节点管理等命令。MC 服务端固定只听 127.0.0.1（`Gate/McServerHost.cs`）。网关（`Gate/GateServer.cs`）在公网端口（默认 47670）上做 Noise 握手、核对设备名单和用户名（`Gate/McLogin.cs` 读 Handshake 和 Login Start），认不出的连接一个字节都不回。数据在 `Gate/GateStore.cs`，只存设备公钥和用户名，Unix 上文件权限 0600。Windows 上用 Ctrl+C，Unix 上另外处理 SIGTERM（systemd 停服务时正常关闭 MC）。三平台都能跑。
-- **客户端**（`Gate/JayServers.cs`，联机页的“Jay 服务器”卡片）：粘贴 `JAYS1-` 邀请码（`Gate/GateInvite.cs`）入服，拿到这台设备的访问密钥，之后一键进服。访问密钥在 Windows 上 DPAPI 加密（`dpapi:` 前缀），**在 Mac/Linux 上是明文 Base64（`plain:` 前缀），只靠文件权限 0600**。这是现在凭据存储里最弱的一处，建议和账号令牌一起改成钥匙串 / libsecret，至少先改成和 `Accounts.cs` 一样的 AES-GCM + 本机密钥。
+- **客户端**（`Gate/JayServers.cs`，联机页的“Jay 服务器”卡片）：粘贴 `JAYS1-` 邀请码（`Gate/GateInvite.cs`）入服，拿到这台设备的访问密钥，之后一键进服。访问密钥在 Windows 上 DPAPI 加密（`dpapi:` 前缀），在 Mac/Linux 上和 `Accounts.cs` 一样用 AES-GCM + 本机密钥（`jay-servers.json.key`，0600）；旧版的 `plain:` 明文读到后立即迁移。
 - **节点**（`Gate/GateRelay.cs`）：把 TCP 原样转给网关，不持有密钥。
 
 main 上 v0.7.0 之后新增【未发布】：
@@ -422,6 +430,10 @@ CI 的单元测试只在 `windows-latest` 上跑。有一些测试本身按 `Ope
 | 25 | 三平台互控矩阵 | Windows↔Mac、Windows↔Linux、Mac↔Linux，两个方向各测一次，邀请房间和直连房间都测 |
 
 做完后把 `RemotePlatform.Supported` 按平台放开，`SelfTest.Remote.cs` 在三个平台都跑一遍。
+
+**进度（2026-11-09）**：19、20、21 和 23 的截屏、注入、红框已经做了（macOS 先用 CoreGraphics 截屏，不是 ScreenCaptureKit；macOS 15 上如果截屏被系统挡掉再换）。
+Linux X11 在 Xvfb 上跑过 `AMBER_SELFTEST_SCOPE=remote`，14 项全过。看 / 控制别人在任何系统上都能用；这台电脑不能被控时（Wayland、macOS 没授权）联机页写原因。
+全局停止热键 Ctrl+Shift+F12 也做了：Linux X11 用 XGrabKey（Xvfb 上测过），macOS 用 Carbon 的 RegisterEventHotKey（不要额外权限，待真机测）。还没做：24 Wayland、25 跨平台互控真机矩阵。
 
 ### 第四批：完整局域网和全部流量出口（工作量最大）
 

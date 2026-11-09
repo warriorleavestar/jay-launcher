@@ -69,26 +69,35 @@ public sealed partial class ToolsViewModel(LauncherService service) : PageViewMo
         JunkStatus = L.F("tools.junk.cleaned_skipped", freed / 1024.0 / 1024);
     }
 
-    private async Task RunAsync(Func<CancellationToken, Task> work)
+    /// <summary>活动中心里的当前任务（下载文件、下载 Java）：进度跟着报过去。</summary>
+    private Amber.Core.Activity.TaskHandle? _task;
+
+    private async Task RunAsync(Func<CancellationToken, Task> work, string? title = null)
     {
         if (IsBusy) return;
         IsBusy = true;
-        _cts = new CancellationTokenSource();
+        var cts = _cts = new CancellationTokenSource();
+        var task = _task = title is null ? null : service.Tasks.Track("tools", title, () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
         try
         {
-            await work(_cts.Token);
+            await work(cts.Token);
+            task?.Succeed(Status);
         }
         // 不是玩家点的取消（比如连接超时也抛 TaskCanceledException）按失败显示，不能说成“已取消”。
         catch (OperationCanceledException) when (_cts?.IsCancellationRequested == true)
         {
+            task?.Cancelled();
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
         catch (Exception e)
         {
+            task?.Fail(ErrorText.Describe(e));
             SetStatus(StatusMessage.Failure("instance.status.failed", e, ErrorText.Of(e)));
         }
         finally
         {
+            task?.Cancelled();
+            _task = null;
             IsBusy = false;
             Progress = 0;
         }
@@ -110,10 +119,11 @@ public sealed partial class ToolsViewModel(LauncherService service) : PageViewMo
         await service.Downloader.DownloadOneAsync(item, new Progress<long>(bytes =>
         {
             SetStatus(StatusMessage.Info("tools.download.progress", name, bytes / 1024.0 / 1024));
+            _task?.Report(null, Status);
         }), ct);
         await Ui.FlushAsync();
         SetStatus(StatusMessage.Success("tools.download.completed", target));
-    });
+    }, L.F("activity.kind.download", DownloadUrl.Trim()));
 
     [RelayCommand]
     private Task InstallJavaAsync() => RunAsync(async ct =>
@@ -124,11 +134,12 @@ public sealed partial class ToolsViewModel(LauncherService service) : PageViewMo
         {
             Progress = 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
             SetStatus(StatusMessage.Info("tools.java.progress", major, p.CompletedFiles, p.TotalFiles));
+            _task?.Report(Progress / 100, Status);
         }), ct);
         await service.Java.ScanAsync(true);
         await Ui.FlushAsync();
         SetStatus(StatusMessage.Success("tools.java.installed", path));
-    });
+    }, L.F("tools.java.downloading", SelectedJavaMajor));
 
     [RelayCommand]
     private async Task CheckUpdateAsync()

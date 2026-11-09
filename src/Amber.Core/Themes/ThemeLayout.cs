@@ -53,10 +53,24 @@ public static partial class ThemeLayout
     [GeneratedRegex(@"^(\d{1,4}(\.\d+)?|\d{0,3}\*|auto)$", RegexOptions.IgnoreCase)]
     private static partial Regex GridLengthPattern();
 
+    /// <summary>侧栏一级入口的 id（shell.json 的 pages / hidden 用）。</summary>
+    public static readonly string[] SectionIds = ["library", "discover", "multiplayer"];
+
+    /// <summary>主题能藏的入口：只有发现和联机。游戏库、设置、帮助、账号、隐私行永远在。</summary>
+    public static readonly string[] HideableSections = ["discover", "multiplayer"];
+
+    /// <summary>
+    /// layout/shell.json（官方设计 §10.5）。format 1 的字段自动升级（§10.8）：
+    /// navWidth 低于 120 变成图标栏，其余变成 sidebarWidth（200–320）；navStyle full → expanded、icons → rail；
+    /// pages / hidden 里的旧页面名换成入口名（home、instances、log → library，downloads、content → discover），账号、工具、设置不再是导航项，忽略。
+    /// </summary>
     public static void ReadShell(ThemePack pack, JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object) { pack.Problems.Add(new("bad_value", "layout/shell.json")); return; }
         var shell = new ShellLayout();
+        string? explicitStyle = null;
+        double? oldWidth = null;
+        var hiddenOld = new List<string>();
         foreach (var p in root.EnumerateObject())
         {
             var at = "shell." + p.Name;
@@ -67,15 +81,33 @@ public static partial class ThemeLayout
                     else pack.Problems.Add(new("bad_value", at));
                     break;
                 case "navWidth":
-                    if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out var w)) shell.NavWidth = Math.Clamp(w, 56, 360);
+                    if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out var w)) oldWidth = Math.Clamp(w, 56, 360);
+                    else pack.Problems.Add(new("bad_value", at));
+                    break;
+                case "sidebarWidth":
+                    if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out var sw)) shell.SidebarWidth = Math.Clamp(sw, 200, 320);
+                    else pack.Problems.Add(new("bad_value", at));
+                    break;
+                case "railWidth":
+                    if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetDouble(out var rw)) shell.RailWidth = Math.Clamp(rw, 64, 96);
                     else pack.Problems.Add(new("bad_value", at));
                     break;
                 case "navStyle":
-                    if (p.Value.ValueKind == JsonValueKind.String && p.Value.GetString() is "full" or "icons") shell.NavStyle = p.Value.GetString()!;
-                    else pack.Problems.Add(new("bad_value", at));
+                    explicitStyle = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() switch
+                    {
+                        "auto" => "auto",
+                        "expanded" or "full" => "expanded",
+                        "rail" or "icons" => "rail",
+                        _ => null,
+                    } : null;
+                    if (explicitStyle is null) pack.Problems.Add(new("bad_value", at));
                     break;
                 case "showBrand":
                     if (p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) shell.ShowBrand = p.Value.GetBoolean();
+                    else pack.Problems.Add(new("bad_value", at));
+                    break;
+                case "showShelf":
+                    if (p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) shell.ShowShelf = p.Value.GetBoolean();
                     else pack.Problems.Add(new("bad_value", at));
                     break;
                 case "contentMaxWidth":
@@ -84,30 +116,42 @@ public static partial class ThemeLayout
                     break;
                 case "pages":
                     if (p.Value.ValueKind != JsonValueKind.Array) { pack.Problems.Add(new("bad_value", at)); break; }
-                    var order = new List<string>();
                     foreach (var item in p.Value.EnumerateArray())
                     {
                         var id = item.ValueKind == JsonValueKind.String ? item.GetString()! : "";
-                        if (!PageIds.Contains(id)) { pack.Problems.Add(new("unknown_page", id)); continue; }
-                        if (!order.Contains(id)) order.Add(id);
+                        if (!PageIds.Contains(id) && !SectionIds.Contains(id)) { pack.Problems.Add(new("unknown_page", id)); continue; }
+                        if (Amber.Core.Navigation.LegacyRoutes.NavSectionFor(id) is { } section && !shell.Sections.Contains(section)) shell.Sections.Add(section);
                     }
-                    shell.PageOrder = order;
                     break;
                 case "hidden":
                     if (p.Value.ValueKind != JsonValueKind.Array) { pack.Problems.Add(new("bad_value", at)); break; }
                     foreach (var item in p.Value.EnumerateArray())
                     {
                         var id = item.ValueKind == JsonValueKind.String ? item.GetString()! : "";
-                        if (!PageIds.Contains(id)) pack.Problems.Add(new("unknown_page", id));
-                        else if (RequiredPages.Contains(id)) pack.Problems.Add(new("required_page", id));
-                        else shell.Hidden.Add(id);
+                        if (!PageIds.Contains(id) && !SectionIds.Contains(id)) pack.Problems.Add(new("unknown_page", id));
+                        else if (RequiredPages.Contains(id) || id == "library") pack.Problems.Add(new("required_page", id));
+                        else if (HideableSections.Contains(id)) { if (!shell.Hidden.Contains(id)) shell.Hidden.Add(id); }
+                        else hiddenOld.Add(id);
                     }
                     break;
                 default: pack.Problems.Add(new("unknown_key", at)); break;
             }
         }
-        // 没写进顺序的页面接在后面（新版本 Jay 加的页面也不会丢）。
-        shell.PageOrder = [.. shell.PageOrder, .. PageIds.Where(id => !shell.PageOrder.Contains(id))];
+        // format 1：旧导航宽度。窄于 120 的是图标栏，宽的夹到 200–320。
+        if (oldWidth is { } ow)
+        {
+            if (ow < 120) { shell.RailWidth ??= Math.Clamp(ow, 64, 96); explicitStyle ??= "rail"; }
+            else shell.SidebarWidth ??= Math.Clamp(ow, 200, 320);
+        }
+        shell.NavStyle = explicitStyle ?? "auto";
+        // format 1 的 hidden：一个入口下的旧页面全藏了，才藏这个入口（只藏资源页不会把整个发现藏掉）。
+        foreach (var section in HideableSections)
+        {
+            var olds = PageIds.Where(id => Amber.Core.Navigation.LegacyRoutes.NavSectionFor(id) == section).ToList();
+            if (olds.Count > 0 && olds.All(hiddenOld.Contains) && !shell.Hidden.Contains(section)) shell.Hidden.Add(section);
+        }
+        // 没写进顺序的入口接在后面（新版本 Jay 加的入口也不会丢）。
+        shell.Sections = [.. shell.Sections, .. SectionIds.Where(id => !shell.Sections.Contains(id))];
         pack.Shell = shell;
     }
 
@@ -224,6 +268,7 @@ public static partial class ThemeLayout
                 case "text":
                     if (type != "text" || v.ValueKind != JsonValueKind.String) { pack.Problems.Add(new("bad_value", at)); break; }
                     var text = new string(v.GetString()!.Where(ch => !char.IsControl(ch) || ch == '\n').ToArray());
+                    if (SafetyWords.Contains(text)) throw new ThemePackException("reserved_words", at);
                     node.Text = text.Length > MaxTextLength ? text[..MaxTextLength] : text;
                     break;
                 case "style":
@@ -322,12 +367,19 @@ public sealed class ShellLayout
 {
     /// <summary>left / right / top / bottom</summary>
     public string Nav { get; set; } = "left";
-    public double? NavWidth { get; set; }
-    /// <summary>full（图标加文字）/ icons（只有图标，文字放在提示里）</summary>
-    public string NavStyle { get; set; } = "full";
+    /// <summary>auto（按窗口宽度展开或收起）/ expanded / rail</summary>
+    public string NavStyle { get; set; } = "auto";
+    /// <summary>展开时侧栏宽度（200–320），空是默认 240。</summary>
+    public double? SidebarWidth { get; set; }
+    /// <summary>图标栏宽度（64–96），空是默认 76。</summary>
+    public double? RailWidth { get; set; }
     public bool ShowBrand { get; set; } = true;
+    /// <summary>侧栏的“常玩”。</summary>
+    public bool ShowShelf { get; set; } = true;
     public double? ContentMaxWidth { get; set; }
-    public List<string> PageOrder { get; set; } = [];
+    /// <summary>一级入口的顺序：library / discover / multiplayer，三个都在。</summary>
+    public List<string> Sections { get; set; } = [];
+    /// <summary>藏起来的入口（只会是 discover、multiplayer）。藏起来的入口还能从别处跳过去。</summary>
     public List<string> Hidden { get; } = [];
 }
 

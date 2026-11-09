@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 示例：用 Jay 网络服务端框架搭自己的公共网络节点。见 docs/network-server-framework.md。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 自己的仓库里：引用 Jay 仓库的 src/Amber.NetworkServer（git submodule），或者编译好的 Jay.NetworkServer.dll。 -->
+    <ProjectReference Include="..\..\src\Amber.NetworkServer\Amber.NetworkServer.csproj" />
+  </ItemGroup>
+
+</Project>

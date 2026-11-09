@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Amber.Core\Amber.Core.csproj" />
+    <ProjectReference Include="..\Amber.NetworkServer\Amber.NetworkServer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

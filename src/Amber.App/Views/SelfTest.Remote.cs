@@ -149,7 +149,7 @@ internal sealed class RemoteSelfTest(MainWindow window, MainViewModel main, stri
     {
         if (!RemotePlatform.Supported)
         {
-            Check("这台电脑不支持远程控制（不是 Windows），跳过端到端", true);
+            Check("这台电脑不能被远程控制，跳过端到端：" + RemotePlatform.UnavailableReason, true);
             return;
         }
         var (hostRoom, table, guestRoom, entry) = Rooms();
@@ -217,6 +217,8 @@ internal sealed class RemoteSelfTest(MainWindow window, MainViewModel main, stri
         // 远程移动鼠标：控制方发画面坐标，被控方注入后真的指针跟着动。移完放回原处。
         using var screen = RemotePlatform.CreateScreen()!;
         var original = screen.CursorPosition();
+        // 同一台电脑上自己控自己：本机指针被移进查看窗口时，查看窗口会把它当成控制方的鼠标再发回去。这一步先让查看窗口不收鼠标。
+        await Dispatcher.UIThread.InvokeAsync(() => viewerWindow!.IsEnabled = false);
         var (fw, fh) = (accept.Value.Width, accept.Value.Height);
         var target = (X: fw / 3, Y: fh / 3);
         await viewer.SendMouseAsync(new RemoteMouse(RemoteMouseAction.Move, RemoteMouseButton.None, target.X, target.Y, 0));
@@ -225,6 +227,7 @@ internal sealed class RemoteSelfTest(MainWindow window, MainViewModel main, stri
         Check("远程移动鼠标：本机指针到了对应位置", moved, $"期望 {expected}，实际 {screen.CursorPosition()}");
         Check("被控方注入计数", sharer!.InputsInjected >= 1, $"{sharer.InputsInjected}");
         if (original is { } o) RemotePlatform.CreateInput()?.Mouse(RemoteMouseAction.Move, RemoteMouseButton.None, o.X, o.Y, 0);
+        await Dispatcher.UIThread.InvokeAsync(() => viewerWindow!.IsEnabled = true);
 
         // 收回控制：控制方的状态跟着变，再发输入被丢弃。
         await sharer.SetControlAsync(false);

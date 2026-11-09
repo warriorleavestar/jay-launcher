@@ -22,11 +22,18 @@ public partial class MainWindow : Window
         InitializeComponent();
         Amber.App.Services.ThemeService.AttachMainWindow(this);
         AttachShell();
+        AttachDrop();
         FitToScreen(settings?.LauncherWindow);
         // 窗口打开后才知道标题栏有多高：Width/Height 是客户区，加上标题栏可能比屏幕的可用区域还高（底下被任务栏挡住）。
         Opened += (_, _) => FitFrameToScreen();
-        Closing += (_, _) =>
+        Opened += (_, _) =>
         {
+            if (DataContext is MainViewModel { FirstRun: var firstRun } && firstRun.ShouldOpen()) firstRun.Open();
+        };
+        Closing += (_, e) =>
+        {
+            // 关窗保护（§5.9）：还有远程控制、服务器、房间里的人、进行中的任务或准备中的游戏时先确认。
+            if (GuardClose(e)) return;
             RememberPlacement();
             // 关主窗口就是退出 Jay：先结束远程控制（通知对方、收起红框），不能让被控状态在后台继续。
             if (DataContext is MainViewModel main)
@@ -86,6 +93,8 @@ public partial class MainWindow : Window
                     await new RemoteSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "theme")
                     await new ThemeSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
+                else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "safety-lock")
+                    await new SafetyLockSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "bake-notice")
                     await new BakeNoticeSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else
@@ -293,37 +302,5 @@ public partial class MainWindow : Window
         using var bitmap = new RenderTargetBitmap(new PixelSize((int)Bounds.Width, (int)Bounds.Height));
         bitmap.Render(this);
         bitmap.Save(path);
-    }
-
-    private async void ImportTheme_Click(object? sender, RoutedEventArgs e)
-    {
-        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = L.T("settings.themepack.import"),
-            AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType(L.T("settings.themepack.filetype")) { Patterns = ["*.jaytheme", "*.zip"] }],
-        });
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) vm.ImportThemePack(path);
-    }
-
-    private async void ExportTheme_Click(object? sender, RoutedEventArgs e)
-    {
-        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = L.T("settings.themepack.export"),
-            SuggestedFileName = "my-theme.jaytheme",
-            DefaultExtension = "jaytheme",
-            FileTypeChoices = [new FilePickerFileType(L.T("settings.themepack.filetype")) { Patterns = ["*.jaytheme"] }],
-        });
-        if (file?.TryGetLocalPath() is { } path) vm.ExportThemePack(path);
-    }
-
-    private async void BrowseGameDir_Click(object? sender, RoutedEventArgs e)
-    {
-        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = L.T("settings.directory.picker") });
-        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path) vm.GameDirectory = path;
     }
 }

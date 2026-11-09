@@ -73,6 +73,17 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <!-- 网络主题想铺满整个 Jay：等用户点头 -->
+            <Border Classes="card" Margin="0" IsVisible="{Binding NetworkThemeAskGlobal}">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{l:T multiplayer.netconfig.theme_title}" FontWeight="SemiBold" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.netconfig.theme_global}" />
+                <WrapPanel ItemSpacing="6" LineSpacing="6">
+                  <Button Classes="primary" Content="{l:T multiplayer.netconfig.theme_accept}" Command="{Binding AcceptNetworkThemeGlobalCommand}" />
+                  <Button Content="{l:T multiplayer.netconfig.theme_decline}" Command="{Binding DeclineNetworkThemeGlobalCommand}" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
             <!-- 网络账号（网络配置里有 login 段才显示）：账号密码加密发给网络节点，可能还要两步验证 -->
             <Border Classes="card" Margin="0" IsVisible="{Binding HasNetworkLogin}">
               <StackPanel Spacing="6">
@@ -295,7 +306,7 @@
                       <TextBlock Classes="hint" FontSize="12" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0">
-                      <Button Classes="primary" Content="{l:T multiplayer.jayserver.play}" IsVisible="{Binding !IsConnected}"
+                      <Button Classes="play" Content="{l:T multiplayer.jayserver.play}" IsVisible="{Binding !IsConnected}"
                               Command="{Binding $parent[ItemsControl].((vm:JayServersViewModel)DataContext).PlayCommand}" CommandParameter="{Binding}" />
                       <Button Content="{l:T multiplayer.jayserver.disconnect}" IsVisible="{Binding IsConnected}"
                               Command="{Binding $parent[ItemsControl].((vm:JayServersViewModel)DataContext).DisconnectCommand}" />
@@ -559,7 +570,7 @@
         </Expander>
 
         <!-- 加入方：房主发起的测试正在进行 -->
-        <Border Classes="card" Margin="0" IsVisible="{Binding GuestTestRunning}" BorderBrush="#E0703A" BorderThickness="2">
+        <Border Classes="card" Margin="0" IsVisible="{Binding GuestTestRunning}" BorderBrush="{DynamicResource Warning}" BorderThickness="2">
           <Grid ColumnDefinitions="*,Auto">
             <TextBlock Text="{Binding GuestTestBanner}" TextWrapping="Wrap" VerticalAlignment="Center" FontWeight="SemiBold" />
             <Button Grid.Column="1" Classes="amber" Content="{l:T multiplayer.matrix.stop_test}" Command="{Binding StopGuestTestCommand}" Margin="12,0,0,0" />

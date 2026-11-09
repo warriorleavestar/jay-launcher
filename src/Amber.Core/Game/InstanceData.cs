@@ -99,7 +99,7 @@ public static class WorldManager
         return folder;
     }
 
-    private static string ImportPath(string name)
+    internal static string ImportPath(string name)
     {
         var normalized = name.Replace('\\', '/');
         if (normalized.Length == 0 || normalized.StartsWith('/') || normalized.Contains(':'))
@@ -108,7 +108,7 @@ public static class WorldManager
         return normalized;
     }
 
-    private static void CheckWorldComponent(string name)
+    internal static void CheckWorldComponent(string name)
     {
         GameDirectory.CheckId(name);
         // 世界可跨平台移动，不能让 Windows 把归档名解释成设备或改写为另一个路径。

@@ -37,5 +37,17 @@ public partial class HomePage : UserControl
         if (file?.TryGetLocalPath() is { } path) vm.ExportCrashBundle(path);
     }
 
+    private async void ExportFailure_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not HomeViewModel vm || TopLevel.GetTopLevel(this) is not { } top) return;
+        var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = L.T("home.crash.export_title"),
+            SuggestedFileName = $"jay-error-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
+            DefaultExtension = "zip",
+        });
+        if (file?.TryGetLocalPath() is { } path) vm.ExportFailureReport(path);
+    }
+
     private void CloseForceKillFlyout(object? sender, RoutedEventArgs e) => ForceKillButton.Flyout?.Hide();
 }
