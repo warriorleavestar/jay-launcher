@@ -161,20 +161,12 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "new-instance")
             {
+                await NewInstancePanelAsync();
                 var download = Page<DownloadViewModel>();
                 main.CurrentPage = download;
-                await WaitAsync(() => download.Items.Count > 0, 60);
-                Check("下载页加载版本列表", download.Items.Count > 0, $"{download.Items.Count} 个");
+                download.SourceIndex = 0;
                 Dispatcher.UIThread.Invoke(() => download.Search = "1.21.1");
-                var list = await FindAsync<ListBox>(l => ReferenceEquals(l.ItemsSource, download.Items));
-                Button? row = null;
-                await WaitAsync(() => Dispatcher.UIThread.Invoke(() =>
-                {
-                    if (download.Items.FirstOrDefault(i => i.Id == "1.21.1") is { } item) list?.ScrollIntoView(item);
-                    row = window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.IsEffectivelyVisible
-                        && b.DataContext is RemoteVersionItem { Id: "1.21.1" } && ReferenceEquals(b.Command, download.ConfigureCommand));
-                    return row is not null;
-                }), 20);
+                var row = await VersionRowAsync(download, "1.21.1");
                 await NewInstanceListAsync(download, row);
                 await ShotAsync("新建实例列表");
                 Log("DONE");
@@ -646,10 +638,24 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         }
     }
 
-    /// <summary>1b.5 新建实例列表：两行行布局和胶囊、已安装芯片、热门版本芯片、出错时的【重试】【切换下载源】、面板展开时各窗口大小不裁切。</summary>
-    private async Task NewInstanceListAsync(DownloadViewModel download, Button? row)
+    /// <summary>The ListBoxItem of a version row, scrolled into view (the list is virtualized).</summary>
+    private async Task<ListBoxItem?> VersionRowAsync(DownloadViewModel download, string id)
     {
-        // 1b.5：行改两行，带类型胶囊；已安装的版本显示“已安装”芯片、按钮写“再装一份…”。
+        var list = await FindAsync<ListBox>(l => ReferenceEquals(l.ItemsSource, download.Items));
+        ListBoxItem? row = null;
+        await WaitAsync(() => Dispatcher.UIThread.Invoke(() =>
+        {
+            if (download.Items.FirstOrDefault(i => i.Id == id) is { } item) list?.ScrollIntoView(item);
+            row = window.GetVisualDescendants().OfType<ListBoxItem>().FirstOrDefault(b => b.IsEffectivelyVisible && b.DataContext is RemoteVersionItem v && v.Id == id);
+            return row is not null;
+        }), 20);
+        return row;
+    }
+
+    /// <summary>1b.5 新建实例列表：行布局和胶囊、已安装芯片、热门版本芯片、出错时的【重试】【切换下载源】、选了版本后各窗口大小不裁切。</summary>
+    private async Task NewInstanceListAsync(DownloadViewModel download, ListBoxItem? row)
+    {
+        Check("新建实例：找到 1.21.1 这一行", row is not null);
         var pill = Dispatcher.UIThread.Invoke(() => window.GetVisualDescendants().OfType<Border>()
             .FirstOrDefault(b => b.Classes.Contains("pill") && b.DataContext is RemoteVersionItem { Id: "1.21.1" } && b.IsEffectivelyVisible));
         Check("新建实例：正式版行有 Success 色调的类型胶囊", pill is not null && Dispatcher.UIThread.Invoke(() => pill.Classes.Contains("success")));
@@ -657,12 +663,12 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var wasInstalled = demoItem.Installed;
         Dispatcher.UIThread.Invoke(() => demoItem.Installed = true);
         var chip = await FindAsync<TextBlock>(t => t.Text == "已安装" && t.DataContext is RemoteVersionItem { Id: "1.21.1" } && t.IsEffectivelyVisible);
-        Check("新建实例：已安装显示芯片，按钮改成“再装一份…”", chip is not null && Dispatcher.UIThread.Invoke(() => row?.Content as string) == "再装一份…");
+        Check("新建实例：已安装的版本显示“已安装”芯片", chip is not null);
         Dispatcher.UIThread.Invoke(() => demoItem.Installed = wasInstalled);
 
-        // 热门版本芯片：点“1.21.1 Fabric”直接打开 1.21.1 的面板并选好 Fabric。
+        // 热门版本芯片：点“1.21.1 Fabric”直接选好 1.21.1 和 Fabric。
         var hot = await FindAsync<Button>(b => b.Content as string == "1.21.1 Fabric" && b.IsEffectivelyVisible && ReferenceEquals(b.Command, download.ConfigureHotCommand));
-        Check("新建实例：热门版本芯片打开面板并选好加载器",
+        Check("新建实例：热门版本芯片选好版本和加载器",
             Press(hot) && await WaitAsync(() => download.Target?.Id == "1.21.1" && download.SelectedLoader.Kind == Amber.Core.Install.LoaderKind.Fabric, 5),
             $"{download.Target?.Id} {download.SelectedLoader.Label}");
         var latestChip = await FindAsync<Button>(b => ReferenceEquals(b.Command, download.ConfigureLatestCommand) && b.IsEffectivelyVisible);
@@ -676,9 +682,9 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("新建实例：取列表失败时显示【重试】和【切换下载源】", retry is not null && switchSource is not null);
         Dispatcher.UIThread.Invoke(() => download.ListError = null);
 
-        // 验收：最小窗口下面板展开时版本号完整可见（之前被挤成 0px）；窄到放不下时面板变成抽屉。
+        // 选了版本后（加载器、名字都展开）在小中大窗口、四种语言下不裁切。
         download.ConfigureCommand.Execute(demoItem);
-        await LayoutHereAsync("新建实例面板展开");
+        await LayoutHereAsync("新建实例已选版本");
         download.CloseConfigureCommand.Execute(null);
     }
 
@@ -692,35 +698,15 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
 
         var search = await FindAsync<TextBox>(t => t.PlaceholderText?.StartsWith("搜索版本号", StringComparison.Ordinal) == true);
         Dispatcher.UIThread.Invoke(() => search!.Text = "1.21.1");
-        // 按行的数据和命令找按钮（不靠按钮文字）；每次找之前把这一行滚进可见区，列表是虚拟化的，没滚到的行不会生成。
-        var list = await FindAsync<ListBox>(l => ReferenceEquals(l.ItemsSource, download.Items));
-        Button? row = null;
-        await WaitAsync(() => Dispatcher.UIThread.Invoke(() =>
-        {
-            if (download.Items.FirstOrDefault(i => i.Id == "1.21.1") is { } item) list?.ScrollIntoView(item);
-            row = window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.IsEffectivelyVisible
-                && b.DataContext is RemoteVersionItem { Id: "1.21.1" } && ReferenceEquals(b.Command, download.ConfigureCommand));
-            return row is not null;
-        }), 20);
-        var rowInfo = Dispatcher.UIThread.Invoke(() =>
-        {
-            var rows = window.GetVisualDescendants().OfType<Button>().Where(b => b.DataContext is RemoteVersionItem).ToList();
-            return $"{download.Items.Count} 个；窗口 {window.Bounds.Width:0}×{window.Bounds.Height:0}，已生成的行 {string.Join("/", rows.Select(b => ((RemoteVersionItem)b.DataContext!).Id))}，" +
-                   $"按钮文字「{row?.Content}」";
-        });
-        Check("搜索框过滤出 1.21.1 并显示安装按钮", row is not null && row.Content as string is "安装…" or "再装一份…" && download.Items.All(i => i.Id.Contains("1.21.1")), rowInfo);
+        var row = await VersionRowAsync(download, "1.21.1");
+        Check("搜索框过滤出 1.21.1 这一行", row is not null && download.Items.All(i => i.Id.Contains("1.21.1")), $"{download.Items.Count} 个");
         await NewInstanceListAsync(download, row);
-        // 上面换过语言和窗口大小，行可能重新生成过，重新找一次按钮。
-        await WaitAsync(() => Dispatcher.UIThread.Invoke(() =>
-        {
-            if (download.Items.FirstOrDefault(i => i.Id == "1.21.1") is { } item) list?.ScrollIntoView(item);
-            row = window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.IsEffectivelyVisible
-                && b.DataContext is RemoteVersionItem { Id: "1.21.1" } && ReferenceEquals(b.Command, download.ConfigureCommand));
-            return row is not null;
-        }), 20);
-        Check("点“安装…”打开安装面板", Press(row) && await WaitAsync(() => download.IsConfiguring && download.Target?.Id == "1.21.1", 5));
+        // 上面换过语言和窗口大小，行可能重新生成过，重新找一次。
+        row = await VersionRowAsync(download, "1.21.1");
+        Dispatcher.UIThread.Invoke(() => { if (row is not null) row.IsSelected = true; });
+        Check("在列表里选 1.21.1 就展开加载器和名字", await WaitAsync(() => download.IsConfiguring && download.Target?.Id == "1.21.1", 5));
 
-        var loaderBox = await FindAsync<ComboBox>(c => ReferenceEquals(c.ItemsSource, download.LoaderChoices));
+        var loaderBox = await FindAsync<ListBox>(c => ReferenceEquals(c.ItemsSource, download.LoaderChoices));
         Dispatcher.UIThread.Invoke(() => loaderBox!.SelectedItem = download.LoaderChoices.First(c => c.Label == "Fabric"));
         var versionBox = await FindAsync<ComboBox>(c => ReferenceEquals(c.ItemsSource, download.LoaderVersions));
         var gotVersion = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => versionBox?.SelectedItem is not null), 30);
@@ -732,11 +718,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("名字输入框写回", download.CustomName == FabricName, download.CustomName);
         await ShotAsync("安装面板");
 
-        var install = await FindAsync<Button>(b => b.Content as string == "开始安装");
-        Check("点“开始安装”", Press(install));
+        var install = await FindAsync<Button>(b => b.Name == "InstallButton" && b.IsEffectivelyVisible);
+        Check("点【安装】", Press(install));
         await WaitAsync(() => download.IsBusy, 5);
-        Check("安装中按钮变灰", !download.IsBusy || Dispatcher.UIThread.Invoke(() => !install!.IsEffectivelyEnabled));
+        Check("点了安装面板就关掉，回到游戏库，安装在活动中心继续", await WaitAsync(() => main.CurrentPage is LibraryViewModel, 5)
+            && main.Service.Tasks.Active.Any(t => t.Kind == "install"), main.CurrentPage.Title);
         await WaitAsync(() => !download.IsBusy, 600);
+        main.CurrentPage = download;
         Check("安装 Fabric（自定义名字）", download.Status.Contains("安装完成") && !download.IsConfiguring
                                          && File.Exists(Path.Combine(GameRoot(), "versions", FabricName, FabricName + ".json")), download.Status);
         var launchButton = await FindAsync<Button>(b => b.Content as string == "立即启动" && b.IsEffectivelyVisible);

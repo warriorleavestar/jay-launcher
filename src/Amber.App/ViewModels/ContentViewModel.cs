@@ -315,6 +315,15 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         SetReturn(instanceId, type, back);
     }
 
+    /// <summary>The new-instance panel's "online modpack" source: Discover on modpacks, from the popular list.</summary>
+    public void BrowseModpacks()
+    {
+        Query = "";
+        if (TypeIndex != (int)ContentType.Modpack) TypeIndex = (int)ContentType.Modpack;
+        else _ = SearchFromStart();
+        SetReturn("", ContentType.Modpack, null);
+    }
+
     /// <summary>从实例页的“下载数据包”跳过来：切到数据包，并选好版本和世界。</summary>
     public void BrowseDatapacksFor(string instanceId, string worldFolder, Action? back = null)
     {
@@ -836,9 +845,10 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         }
     }
 
-    /// <summary>导入本地整合包文件（由界面的文件选择器调用）。</summary>
-    public async Task ImportLocalPackAsync(string path)
+    /// <summary>导入本地整合包文件（由界面的文件选择器调用）。Returns the new instance's id, or null when it did not finish.</summary>
+    public async Task<string?> ImportLocalPackAsync(string path)
     {
+        string? imported = null;
         ManualDownloadUrl = null;
         // 快捷导入会先进入资源页，取消首次搜索，避免它迟到后覆盖导入状态。
         _searchCts?.Cancel();
@@ -851,7 +861,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         {
             var info = ModpackService.Inspect(path);
             task.Rename(L.F("activity.kind.import", SafeName(info.Name)));
-            await ImportCoreAsync(path, SafeName(info.Name), _workCts.Token);
+            imported = await ImportCoreAsync(path, SafeName(info.Name), _workCts.Token);
             task.Succeed(Status);
         }
         catch (ManualDownloadRequiredException e)
@@ -877,11 +887,12 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             IsBusy = false;
             Progress = 0;
         }
+        return imported;
     }
 
     private Amber.Core.Activity.TaskHandle? _importTask;
 
-    private async Task ImportCoreAsync(string path, string name, CancellationToken ct)
+    private async Task<string> ImportCoreAsync(string path, string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException(L.T("content.modpack.name_required"));
         var skipped = new List<string>();
@@ -901,6 +912,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         _service.NotifyInstalledChanged();
         // 新装的整合包直接成为当前实例（改版规格 2.3）。
         _service.SetCurrentInstance(id);
+        return id;
     }
 
     [RelayCommand]

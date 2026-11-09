@@ -7,18 +7,54 @@
              xmlns:install="using:Amber.Core.Install"
              x:Class="Amber.App.Views.DownloadPage"
              x:DataType="vm:DownloadViewModel">
-  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-    <TextBlock svc:ThemeRegion.Name="downloads.title" Classes="h1" Text="{l:T download.heading}" />
-    <Grid svc:ThemeRegion.Name="downloads.search" Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
-      <ComboBox ItemsSource="{Binding Filters}" SelectedItem="{Binding Filter}" MinWidth="110" />
-      <TextBox Grid.Column="1" Text="{Binding Search}" PlaceholderText="{l:T download.search.placeholder}" Margin="10,0" />
+  <UserControl.Styles>
+    <!-- The left source rail (wide) and the source segment (medium, compact): §6.11. -->
+    <Style Selector="ListBox.sources ListBoxItem">
+      <Setter Property="Padding" Value="10,7" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="Border.newinst-section">
+      <Setter Property="Padding" Value="14" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid x:Name="OuterGrid" RowDefinitions="*,Auto">
+  <!-- Short windows scroll the page (the version list gets a fixed height then); the button bar stays at the bottom. -->
+  <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled">
+  <Grid x:Name="RootGrid" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+    <!-- Header: title and ✕ (Esc does the same). -->
+    <Grid svc:ThemeRegion.Name="downloads.title" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto">
+      <TextBlock Classes="h1" Text="{l:T newinstance.title}" />
+      <Button x:Name="CloseButton" Grid.Column="1" Classes="ghost" Content="✕" VerticalAlignment="Top"
+              ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}" Click="Close_Click" />
+    </Grid>
+
+    <!-- Sources: a rail on the left when wide, a segment on top otherwise (code-behind moves it). -->
+    <ListBox x:Name="SourceList" Grid.Row="1" Grid.RowSpan="5" Classes="sources" Width="190" Margin="0,0,14,0"
+             ItemsSource="{Binding Sources}" SelectedIndex="{Binding SourceIndex}" Background="Transparent"
+             AutomationProperties.Name="{l:T newinstance.source.label}">
+      <ListBox.ItemTemplate>
+        <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" TextWrapping="Wrap" /></DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <!-- Version: type chips, search, refresh. -->
+    <Grid svc:ThemeRegion.Name="downloads.search" Grid.Row="2" Grid.Column="1" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,8" IsVisible="{Binding IsVersionSource}">
+      <ListBox x:Name="TypeChips" Classes="subtabs" ItemsSource="{Binding Filters}" SelectedItem="{Binding Filter}" Background="Transparent"
+               AutomationProperties.Name="{l:T newinstance.version.type}">
+        <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+      <TextBox x:Name="SearchBox" Grid.Column="1" Text="{Binding Search}" PlaceholderText="{l:T download.search.placeholder}" Margin="10,0" MinWidth="120" />
       <Button Grid.Column="2" Content="{l:T common.refresh}" Command="{Binding RefreshCommand}" />
     </Grid>
 
-    <!-- 热门版本芯片（改版规格 4.4）：最新正式版 + 和新手卡同一组热门版本，点了直接打开安装面板。 -->
-    <WrapPanel svc:ThemeRegion.Name="downloads.filters" Grid.Row="2" ItemSpacing="8" LineSpacing="8" Margin="0,0,0,10">
+    <!-- Hot versions (and the latest release): pick the version and its loader in one click. -->
+    <WrapPanel svc:ThemeRegion.Name="downloads.filters" Grid.Row="3" Grid.Column="1" ItemSpacing="8" LineSpacing="8" Margin="0,0,0,10" IsVisible="{Binding IsVersionSource}">
       <TextBlock Classes="hint" Text="{l:T onboarding.install.hot}" VerticalAlignment="Center" />
-      <Button x:Name="HotLatestButton" Classes="secondary" Content="{Binding LatestReleaseLabel}" Command="{Binding ConfigureLatestCommand}" IsVisible="{Binding HasLatestRelease}" />
+      <Button x:Name="HotLatestButton" Classes="secondary small" Content="{Binding LatestReleaseLabel}" Command="{Binding ConfigureLatestCommand}" IsVisible="{Binding HasLatestRelease}" />
       <ItemsControl x:Name="HotList" ItemsSource="{Binding HotVersions}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
@@ -27,124 +63,226 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate DataType="vm:HotVersion">
-            <Button Classes="secondary" Content="{Binding Label}"
+            <Button Classes="secondary small" Content="{Binding Label}"
                     Command="{Binding #HotList.((vm:DownloadViewModel)DataContext).ConfigureHotCommand}" CommandParameter="{Binding}" />
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
     </WrapPanel>
 
-    <Grid svc:ThemeRegion.Name="downloads.body" x:Name="BodyGrid" Grid.Row="3" ColumnDefinitions="*,Auto">
-      <Border Classes="card" Padding="6">
-        <Grid>
-          <!-- 加载和出错（改版规格 4.4 / 5.5）：加载只给 Spinner；出错写原因并给【重试】【切换下载源】。 -->
-          <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding IsLoadingList}">
-            <ProgressBar IsIndeterminate="True" Width="180" HorizontalAlignment="Center" />
-            <TextBlock Classes="hint" Text="{l:T download.status.fetching_versions}" TextAlignment="Center" TextWrapping="Wrap" />
-          </StackPanel>
-          <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Margin="12" IsVisible="{Binding HasListError}">
-            <TextBlock x:Name="ListErrorText" Text="{Binding ListError}" Foreground="{DynamicResource DangerText}" TextAlignment="Center" TextWrapping="Wrap" />
-            <TextBlock Classes="hint" Text="{Binding SourceText}" TextAlignment="Center" TextWrapping="Wrap" />
-            <WrapPanel HorizontalAlignment="Center" ItemSpacing="8" LineSpacing="8">
-              <Button x:Name="RetryListButton" Classes="primary" Content="{l:T common.retry}" Command="{Binding RefreshCommand}" />
-              <Button x:Name="SwitchSourceButton" Content="{l:T download.source.switch}" Command="{Binding SwitchDownloadSourceCommand}" />
-            </WrapPanel>
-          </StackPanel>
-          <ListBox x:Name="VersionList" ItemsSource="{Binding Items}" Background="Transparent" IsVisible="{Binding !!Items.Count}">
-            <ListBox.Styles>
-              <Style Selector="ListBoxItem"><Setter Property="Padding" Value="8,4" /></Style>
-            </ListBox.Styles>
-            <ListBox.ItemTemplate>
-              <!-- 两行：版本号 + 类型胶囊 + 已安装芯片；第二行日期。安装按钮固定显示，双击或回车也能打开安装面板。 -->
-              <DataTemplate DataType="vm:RemoteVersionItem">
-                <Grid ColumnDefinitions="*,Auto" Margin="6,0">
-                  <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,10,0">
-                    <WrapPanel ItemSpacing="6" LineSpacing="4">
-                      <TextBlock Text="{Binding Id}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Id}" />
+    <!-- Result of the last install or copy: start it, add mods, open it. -->
+    <Border x:Name="InstalledCard" Grid.Row="4" Grid.Column="1" Classes="banner success" Margin="0,0,0,10" IsVisible="{Binding HasInstalled}">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="4" VerticalAlignment="Center">
+          <TextBlock FontWeight="Bold" Text="{Binding InstalledTitle}" TextWrapping="Wrap" />
+          <TextBlock Classes="hint" Text="{l:T download.installed.hint}" TextWrapping="Wrap" />
+        </StackPanel>
+        <WrapPanel Grid.Column="1" ItemSpacing="8" LineSpacing="8" VerticalAlignment="Center" Margin="12,0,0,0">
+          <Button Classes="play" Content="{l:T download.installed.launch}" Command="{Binding LaunchInstalledCommand}" />
+          <Button Content="{l:T download.installed.add_mods}" Command="{Binding AddModsToInstalledCommand}" IsVisible="{Binding InstalledHasLoader}" />
+          <Button Content="{l:T download.installed.open}" Command="{Binding OpenInstalledCommand}" />
+          <Button Classes="ghost" Content="✕" Command="{Binding CloseInstalledCommand}" ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}" />
+        </WrapPanel>
+      </Grid>
+    </Border>
+
+    <Grid svc:ThemeRegion.Name="downloads.body" x:Name="BodyGrid" Grid.Row="5" Grid.Column="1">
+      <!-- ===== Version ===== -->
+      <Grid x:Name="VersionPane" RowDefinitions="*,Auto" IsVisible="{Binding IsVersionSource}">
+        <Border x:Name="VersionCard" Classes="card" Padding="6" MinHeight="120">
+          <Grid>
+            <!-- Loading and errors: a spinner while loading; the reason plus [Retry] [Switch download source] on failure. -->
+            <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding IsLoadingList}">
+              <ProgressBar IsIndeterminate="True" Width="180" HorizontalAlignment="Center" />
+              <TextBlock Classes="hint" Text="{l:T download.status.fetching_versions}" TextAlignment="Center" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Margin="12" IsVisible="{Binding HasListError}">
+              <TextBlock x:Name="ListErrorText" Text="{Binding ListError}" Foreground="{DynamicResource DangerText}" TextAlignment="Center" TextWrapping="Wrap" />
+              <TextBlock Classes="hint" Text="{Binding SourceText}" TextAlignment="Center" TextWrapping="Wrap" />
+              <WrapPanel HorizontalAlignment="Center" ItemSpacing="8" LineSpacing="8">
+                <Button x:Name="RetryListButton" Classes="primary" Content="{l:T common.retry}" Command="{Binding RefreshCommand}" />
+                <Button x:Name="SwitchSourceButton" Content="{l:T download.source.switch}" Command="{Binding SwitchDownloadSourceCommand}" />
+              </WrapPanel>
+            </StackPanel>
+            <!-- Picking a row chooses the version (↑↓ moves, Enter installs). -->
+            <ListBox x:Name="VersionList" ItemsSource="{Binding Items}" Background="Transparent" IsVisible="{Binding !!Items.Count}"
+                     AutomationProperties.Name="{l:T newinstance.version.label}">
+              <ListBox.Styles>
+                <Style Selector="ListBoxItem"><Setter Property="Padding" Value="8,5" /></Style>
+              </ListBox.Styles>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="vm:RemoteVersionItem">
+                  <Grid ColumnDefinitions="*,Auto" Margin="6,0">
+                    <WrapPanel ItemSpacing="8" LineSpacing="4" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Id}" FontWeight="Bold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Id}" MinWidth="72" />
                       <Border Classes="pill" Classes.success="{Binding IsRelease}" Classes.accent="{Binding IsSnapshot}">
                         <TextBlock Text="{Binding TypeText}" />
                       </Border>
-                      <Border Classes="pill success" IsVisible="{Binding Installed}">
-                        <TextBlock Text="{l:T download.installed.chip}" />
-                      </Border>
+                      <TextBlock Text="{Binding Date}" FontSize="{DynamicResource FontCaption}" Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center" />
                     </WrapPanel>
-                    <TextBlock Text="{Binding Date}" FontSize="{DynamicResource FontCaption}" Foreground="{DynamicResource TextTertiary}" />
-                  </StackPanel>
-                  <Button Grid.Column="1" MinWidth="96" HorizontalContentAlignment="Center" VerticalAlignment="Center"
-                          Content="{Binding InstallLabel}"
-                          Command="{Binding $parent[ListBox].((vm:DownloadViewModel)DataContext).ConfigureCommand}"
-                          CommandParameter="{Binding}" />
-                </Grid>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </Grid>
-      </Border>
-
-      <!-- 安装面板：选加载器和名字 -->
-      <!-- 宽屏在右侧占一列（260–340）；窄窗时由后台代码改成盖在列表上的抽屉，Esc 关闭。 -->
-      <Border x:Name="InstallPanel" Grid.Column="1" Classes="card" MinWidth="260" MaxWidth="340" Width="300" Margin="14,0,0,14" IsVisible="{Binding IsConfiguring}">
-        <ScrollViewer>
-          <StackPanel Spacing="10">
-            <TextBlock Classes="h2" Text="{Binding InstallTitle}" Margin="0" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding InstallTitle}" />
-            <TextBlock Text="{l:T download.loader.label}" />
-            <ComboBox ItemsSource="{Binding LoaderChoices}" SelectedItem="{Binding SelectedLoader}" HorizontalAlignment="Stretch">
-              <ComboBox.ItemTemplate>
-                <DataTemplate DataType="vm:LoaderChoice">
-                  <TextBlock Text="{Binding Label}" />
+                    <Border Grid.Column="1" Classes="pill success" IsVisible="{Binding Installed}" VerticalAlignment="Center">
+                      <TextBlock Text="{l:T download.installed.chip}" />
+                    </Border>
+                  </Grid>
                 </DataTemplate>
-              </ComboBox.ItemTemplate>
-            </ComboBox>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </Grid>
+        </Border>
 
-            <StackPanel Spacing="10" IsVisible="{Binding NeedsLoaderVersion}">
-              <TextBlock Text="{l:T download.loader.version}" />
-              <ComboBox ItemsSource="{Binding LoaderVersions}" SelectedItem="{Binding SelectedLoaderVersion}" HorizontalAlignment="Stretch">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate DataType="install:LoaderVersion">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                      <TextBlock Text="{Binding Version}" />
-                      <TextBlock Text="{Binding Note}" Classes="hint" />
-                    </StackPanel>
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-              <CheckBox Content="{l:T common.show_unstable}" IsChecked="{Binding ShowUnstableLoaders}" />
-              <TextBlock Classes="hint" Text="{Binding LoaderHint}" />
+        <!-- Loader, its version and the name: shown once a version is picked. -->
+        <Border x:Name="InstallPanel" Grid.Row="1" Classes="card newinst-section" Margin="0,10,0,0">
+          <Grid>
+            <TextBlock Classes="hint" Text="{l:T newinstance.version.pick}" IsVisible="{Binding !IsConfiguring}" TextWrapping="Wrap" />
+            <StackPanel Spacing="8" IsVisible="{Binding IsConfiguring}">
+              <TextBlock Classes="h2" Margin="0" Text="{Binding InstallTitle}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding InstallTitle}" />
+              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                <TextBlock Text="{l:T download.loader.label}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                <ListBox x:Name="LoaderSegment" Grid.Column="1" Classes="subtabs loaders" ItemsSource="{Binding LoaderChoices}" SelectedItem="{Binding SelectedLoader}"
+                         Background="Transparent" AutomationProperties.Name="{l:T download.loader.label}">
+                  <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:LoaderChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock Grid.Row="1" Grid.Column="1" Classes="hint" Text="{Binding LoaderDescription}" TextWrapping="Wrap" Margin="0,4,0,0" />
+
+                <TextBlock Grid.Row="2" Text="{l:T download.loader.version}" VerticalAlignment="Center" Margin="0,8,12,0" IsVisible="{Binding NeedsLoaderVersion}" />
+                <WrapPanel Grid.Row="2" Grid.Column="1" ItemSpacing="10" LineSpacing="6" Margin="0,8,0,0" IsVisible="{Binding NeedsLoaderVersion}">
+                  <ComboBox x:Name="LoaderVersionBox" ItemsSource="{Binding LoaderVersions}" SelectedItem="{Binding SelectedLoaderVersion}" MinWidth="200">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="install:LoaderVersion">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Text="{Binding Version}" />
+                          <TextBlock Text="{Binding Note}" Classes="hint" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <CheckBox Content="{l:T common.show_unstable}" IsChecked="{Binding ShowUnstableLoaders}" />
+                  <TextBlock Classes="hint" Text="{Binding LoaderHint}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </WrapPanel>
+
+                <TextBlock Grid.Row="3" Text="{l:T download.version.name}" VerticalAlignment="Top" Margin="0,14,12,0" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Spacing="4" Margin="0,8,0,0">
+                  <TextBox x:Name="NameBox" Text="{Binding CustomName}" IsReadOnly="{Binding !CanRename}" MaxWidth="420" HorizontalAlignment="Left" MinWidth="220" />
+                  <TextBlock x:Name="NameProblemText" Text="{Binding NameProblem}" Foreground="{DynamicResource DangerText}" IsVisible="{Binding HasNameProblem}" TextWrapping="Wrap" />
+                  <TextBlock Classes="hint" Text="{l:T download.version.name_hint}" TextWrapping="Wrap" IsVisible="{Binding !HasNameProblem}" />
+                </StackPanel>
+              </Grid>
             </StackPanel>
+          </Grid>
+        </Border>
+      </Grid>
 
-            <TextBlock Text="{l:T download.version.name}" />
-            <TextBox Text="{Binding CustomName}" />
-            <TextBlock Classes="hint" Text="{l:T download.version.name_hint}" />
-
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
-              <Button Classes="primary" Content="{l:T download.install.start}" Command="{Binding InstallCommand}" Padding="22,8" />
-              <Button Content="{l:T common.close}" Command="{Binding CloseConfigureCommand}" />
+      <!-- ===== Modpack file ===== -->
+      <ScrollViewer x:Name="PackPane" IsVisible="{Binding IsPackFileSource}">
+        <StackPanel Spacing="12" MaxWidth="680" HorizontalAlignment="Left">
+          <Border Classes="card newinst-section">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="h2" Margin="0" Text="{l:T newinstance.pack.heading}" />
+              <TextBlock Classes="hint" Text="{l:T newinstance.pack.hint}" TextWrapping="Wrap" />
+              <WrapPanel ItemSpacing="8" LineSpacing="8">
+                <Button x:Name="PickPackButton" Classes="secondary" Content="{l:T newinstance.pack.pick}" Click="PickPack_Click" />
+              </WrapPanel>
+              <TextBlock Text="{Binding PackError}" Foreground="{DynamicResource DangerText}" IsVisible="{Binding HasPackError}" TextWrapping="Wrap" />
             </StackPanel>
-          </StackPanel>
-        </ScrollViewer>
-      </Border>
+          </Border>
+          <Border x:Name="PackPreview" Classes="card newinst-section" IsVisible="{Binding HasPackPreview}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="h2" Margin="0" Text="{Binding PackTitle}" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding PackFacts}" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" />
+              <TextBlock Classes="hint" Text="{l:T newinstance.pack.isolated}" TextWrapping="Wrap" />
+              <WrapPanel ItemSpacing="8" LineSpacing="8" Margin="0,4,0,0">
+                <Button x:Name="ImportPackButton" Classes="primary" Content="{l:T newinstance.pack.import}" Command="{Binding ImportPackCommand}" />
+                <Button x:Name="ImportPackPlayButton" Classes="play" Content="{l:T newinstance.pack.import_play}" Command="{Binding ImportPackAndPlayCommand}" />
+                <Button Classes="ghost" Content="{l:T common.cancel}" Command="{Binding ClearPackCommand}" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
 
-      <!-- 成功卡：装好后给出下一步 -->
-      <Border x:Name="InstalledCard" Grid.Column="1" Classes="card" MinWidth="260" MaxWidth="340" Width="300" Margin="14,0,0,14" VerticalAlignment="Top" IsVisible="{Binding HasInstalled}">
+      <!-- ===== Online modpack: only an entry into Discover ===== -->
+      <Border x:Name="OnlinePackPane" Classes="card newinst-section" VerticalAlignment="Top" MaxWidth="680" HorizontalAlignment="Left" IsVisible="{Binding IsOnlinePackSource}">
         <StackPanel Spacing="10">
-          <TextBlock Classes="h2" Margin="0" Text="{Binding InstalledTitle}" TextWrapping="Wrap" />
-          <TextBlock Classes="hint" Text="{l:T download.installed.hint}" TextWrapping="Wrap" />
-          <Button Classes="play" Content="{l:T download.installed.launch}" Command="{Binding LaunchInstalledCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-          <Button Content="{l:T download.installed.add_mods}" Command="{Binding AddModsToInstalledCommand}" IsVisible="{Binding InstalledHasLoader}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-          <Button Content="{l:T download.installed.open}" Command="{Binding OpenInstalledCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-          <Button Classes="ghost" Content="{l:T common.close}" Command="{Binding CloseInstalledCommand}" HorizontalAlignment="Right" />
+          <TextBlock Classes="h2" Margin="0" Text="{l:T newinstance.online.heading}" />
+          <TextBlock Classes="hint" Text="{l:T newinstance.online.hint}" TextWrapping="Wrap" />
+          <Button x:Name="OpenDiscoverButton" Classes="primary" Content="{l:T newinstance.online.open}" Command="{Binding OpenDiscoverModpacksCommand}" HorizontalAlignment="Left" />
         </StackPanel>
       </Border>
+
+      <!-- ===== Copy an existing instance ===== -->
+      <ScrollViewer x:Name="CopyPane" IsVisible="{Binding IsCopySource}">
+        <Border Classes="card newinst-section" VerticalAlignment="Top" MaxWidth="680" HorizontalAlignment="Left">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Margin="0" Text="{l:T newinstance.copy.heading}" />
+            <TextBlock Classes="hint" Text="{l:T newinstance.copy.none}" TextWrapping="Wrap" IsVisible="{Binding !CopySources.Count}" />
+            <StackPanel Spacing="10" IsVisible="{Binding !!CopySources.Count}">
+              <TextBlock Text="{l:T newinstance.copy.from}" />
+              <ComboBox x:Name="CopySourceBox" ItemsSource="{Binding CopySources}" SelectedItem="{Binding CopySourceId}" MinWidth="240" />
+              <TextBlock Text="{l:T download.version.name}" />
+              <TextBox x:Name="CopyNameBox" Text="{Binding CopyName}" MaxWidth="420" HorizontalAlignment="Left" MinWidth="240" />
+              <TextBlock Text="{Binding CopyNameProblem}" Foreground="{DynamicResource DangerText}" IsVisible="{Binding HasCopyNameProblem}" TextWrapping="Wrap" />
+              <CheckBox x:Name="CopySavesBox" Content="{l:T newinstance.copy.saves}" IsChecked="{Binding CopySaves}" IsVisible="{Binding !CopySharesFolder}" />
+              <TextBlock Classes="hint" Text="{l:T newinstance.copy.shared}" TextWrapping="Wrap" IsVisible="{Binding CopySharesFolder}" />
+              <Button x:Name="CopyButton" Classes="primary" Content="{l:T newinstance.copy.start}" Command="{Binding CopyInstanceCommand}" HorizontalAlignment="Left" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </ScrollViewer>
+
+      <!-- ===== From another launcher ===== -->
+      <ScrollViewer x:Name="ImportPane" IsVisible="{Binding IsImportSource}">
+        <Border Classes="card newinst-section" VerticalAlignment="Top" MaxWidth="760" HorizontalAlignment="Left">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Margin="0" Text="{l:T newinstance.import.heading}" />
+            <TextBlock Classes="hint" Text="{l:T newinstance.import.hint}" TextWrapping="Wrap" />
+            <ProgressBar IsIndeterminate="True" Width="160" HorizontalAlignment="Left" IsVisible="{Binding IsScanning}" />
+            <TextBlock Classes="hint" Text="{l:T newinstance.import.none}" IsVisible="{Binding NoOtherDirectories}" TextWrapping="Wrap" />
+            <ItemsControl x:Name="OtherDirList" ItemsSource="{Binding OtherDirectories}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:OtherDirItem">
+                  <Border Classes="callout" Padding="10,8">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Path}" TextTrimming="PathSegmentEllipsis" ToolTip.Tip="{Binding Path}" />
+                        <TextBlock Classes="hint" Text="{Binding CountText}" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Classes="secondary" Content="{l:T newinstance.import.use}" Margin="10,0,0,0" VerticalAlignment="Center"
+                              Command="{Binding #OtherDirList.((vm:DownloadViewModel)DataContext).UseGameDirectoryCommand}" CommandParameter="{Binding Path}" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <WrapPanel ItemSpacing="8" LineSpacing="8">
+              <Button x:Name="PickFolderButton" Classes="secondary" Content="{l:T newinstance.import.pick}" Click="PickFolder_Click" />
+              <Button Classes="ghost" Content="{l:T newinstance.import.rescan}" Command="{Binding ScanOtherLaunchersCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+      </ScrollViewer>
     </Grid>
 
-    <Border svc:ThemeRegion.Name="downloads.status" Grid.Row="4" Classes="card" Margin="0">
+  </Grid>
+  </ScrollViewer>
+
+    <!-- Button bar: where it goes, progress, [Cancel] [Install]. It stays at the bottom on every width. -->
+    <Border svc:ThemeRegion.Name="downloads.status" Grid.Row="1" Classes="card" Margin="0,10,0,0" Padding="12,10">
       <Grid ColumnDefinitions="*,Auto">
         <StackPanel Spacing="6" VerticalAlignment="Center">
+          <TextBlock x:Name="InstallToText" Classes="hint" Text="{Binding InstallToText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding InstallToText}" />
           <c:StatusBar Message="{Binding StatusInfo}" />
           <ProgressBar Value="{Binding Progress}" Maximum="100" IsVisible="{Binding IsBusy}" />
           <TextBlock x:Name="WaitTextBlock" Classes="hint" Text="{Binding WaitText}" IsVisible="{Binding IsBusy}" TextTrimming="CharacterEllipsis" />
         </StackPanel>
-        <Button Grid.Column="1" Content="{l:T common.cancel}" Command="{Binding CancelInstallCommand}" IsVisible="{Binding IsBusy}" Margin="12,0,0,0" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="12,0,0,0">
+          <Button Content="{l:T common.cancel}" Command="{Binding CancelInstallCommand}" IsVisible="{Binding IsBusy}" />
+          <Button x:Name="InstallButton" Classes="primary" Content="{l:T newinstance.install}" Command="{Binding InstallCommand}" Padding="26,8"
+                  IsVisible="{Binding IsVersionSource}" HotKey="Ctrl+Enter" />
+        </StackPanel>
       </Grid>
     </Border>
   </Grid>

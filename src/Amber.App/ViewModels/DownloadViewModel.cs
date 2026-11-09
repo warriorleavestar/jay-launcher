@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Amber.App.Services;
 using Amber.Core.Game;
+using Amber.Core.GameLibrary;
 using Amber.Core.Install;
 using Amber.Core.Localization;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -37,9 +38,40 @@ public sealed partial class RemoteVersionItem(ManifestEntry entry, bool installe
     public string InstallLabel => L.T(Installed ? "download.install.again" : "common.install_more");
 }
 
-public sealed record LoaderChoice(string Name, LoaderKind? Kind) : LocalizedRecord
+/// <summary>
+/// One option of the loader segment (official design §6.11). Options the chosen game version can't have are greyed out
+/// with the reason, decided offline by <see cref="LoaderSupport"/>; the loader's own list still has the last word.
+/// </summary>
+public sealed partial class LoaderChoice(string name, LoaderKind? kind) : LocalizedObservable
 {
+    public string Name { get; } = name;
+    public LoaderKind? Kind { get; } = kind;
     public string Label => Kind is null ? L.T("home.version.vanilla") : Name;
+
+    /// <summary>One line on what the loader is good for, under the segment.</summary>
+    public string Description => L.T(Kind switch
+    {
+        LoaderKind.Fabric => "newinstance.loader.about.fabric",
+        LoaderKind.Quilt => "newinstance.loader.about.quilt",
+        LoaderKind.Forge => "newinstance.loader.about.forge",
+        LoaderKind.NeoForge => "newinstance.loader.about.neoforge",
+        LoaderKind.OptiFine => "newinstance.loader.about.optifine",
+        _ => "newinstance.loader.about.none",
+    });
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAvailable), nameof(BlockReason))]
+    public partial LoaderBlock Block { get; set; }
+
+    public bool IsAvailable => Block == LoaderBlock.None;
+
+    public string BlockReason => Block switch
+    {
+        LoaderBlock.AncientVersion => L.T("newinstance.loader.block.ancient"),
+        LoaderBlock.Snapshot => L.F("newinstance.loader.block.snapshot", Label),
+        LoaderBlock.TooOld => L.F("newinstance.loader.block.too_old", Label, Kind is { } k ? LoaderSupport.Minimum(k) : ""),
+        _ => "",
+    };
 }
 
 public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
@@ -49,7 +81,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     private CancellationTokenSource? _listCts;
     private CancellationTokenSource? _installCts;
 
-    public override string Title => L.T("download.title");
+    public override string Title => L.T("newinstance.title");
     public override string Icon => "M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.400-1.400 3.600 3.600zM5 18h14v2H5z";
 
     public OptionItem[] Filters { get; } = OptionItem.Keys("download.filter.release", "download.filter.snapshot", "download.filter.old", "common.all");
@@ -159,7 +191,14 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     /// <summary>正在配置安装的版本；非空时显示右侧的安装面板。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsConfiguring), nameof(InstallTitle))]
+    [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
     public partial RemoteVersionItem? Target { get; set; }
+
+    partial void OnTargetChanged(RemoteVersionItem? value)
+    {
+        foreach (var choice in LoaderChoices)
+            choice.Block = value is null || choice.Kind is not { } kind ? LoaderBlock.None : LoaderSupport.Check(value.Id, value.Entry.Type, kind);
+    }
 
     public bool IsConfiguring => Target is not null;
     public string InstallTitle => L.F("download.install.title", Target?.Id);
@@ -179,6 +218,9 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     public Action<string>? LaunchInstance { get; set; }
     public Action<string>? OpenInstance { get; set; }
     public Action<string>? BrowseModsFor { get; set; }
+
+    /// <summary>Leaves the panel once an install or copy has started (MainViewModel goes back to the library).</summary>
+    public Action? CloseAfterStart { get; set; }
 
     [RelayCommand]
     private void LaunchInstalled()
@@ -202,12 +244,17 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     private void CloseInstalled() => JustInstalled = null;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(NeedsLoaderVersion))]
+    [NotifyPropertyChangedFor(nameof(NeedsLoaderVersion), nameof(CanRename), nameof(LoaderDescription))]
+    [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
     public partial LoaderChoice SelectedLoader { get; set; }
+
+    public string LoaderDescription => SelectedLoader.Description;
 
     public bool NeedsLoaderVersion => SelectedLoader.Kind is not null;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NameProblem), nameof(HasNameProblem))]
+    [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
     public partial LoaderVersion? SelectedLoaderVersion { get; set; }
 
     [ObservableProperty]
@@ -258,7 +305,28 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NameProblem), nameof(HasNameProblem))]
+    [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
     public partial string CustomName { get; set; } = "";
+
+    /// <summary>Vanilla instances are named after their version: the name box is read-only then.</summary>
+    public bool CanRename => SelectedLoader.Kind is not null;
+
+    private InstanceNameProblem NameCheck =>
+        SelectedLoader.Kind is null || SelectedLoaderVersion is null ? InstanceNameProblem.None : NewInstanceNames.Check(CustomName, _service.InstalledVersions());
+
+    /// <summary>The inline line under the name box (official design §6.11 "名字非法").</summary>
+    public string NameProblem => NameCheck switch
+    {
+        InstanceNameProblem.Empty => L.T("newinstance.name.empty"),
+        InstanceNameProblem.InvalidCharacters => L.T("newinstance.name.invalid"),
+        InstanceNameProblem.TrailingDotOrSpace => L.T("newinstance.name.trailing"),
+        InstanceNameProblem.Reserved => L.T("newinstance.name.reserved"),
+        InstanceNameProblem.Taken => L.T("newinstance.name.taken"),
+        _ => "",
+    };
+
+    public bool HasNameProblem => NameProblem.Length > 0;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
@@ -276,7 +344,16 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     protected override void OnFirstActivated() => _ = RefreshAsync();
 
     partial void OnSearchChanged(string value) => ApplyFilter();
-    partial void OnSelectedLoaderChanged(LoaderChoice value) => _ = LoadLoaderVersionsAsync();
+    partial void OnSelectedLoaderChanged(LoaderChoice value)
+    {
+        // A greyed-out option can still arrive from code (a hot chip for a version that has no such loader): fall back to vanilla.
+        if (!value.IsAvailable)
+        {
+            SelectedLoader = LoaderChoices[0];
+            return;
+        }
+        _ = LoadLoaderVersionsAsync();
+    }
     partial void OnShowUnstableLoadersChanged(bool value) => _ = LoadLoaderVersionsAsync();
     partial void OnSelectedLoaderVersionChanged(LoaderVersion? value)
     {
@@ -326,6 +403,12 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     [RelayCommand]
     private void Configure(RemoteVersionItem? item)
     {
+        if (item is not null && Target is { } current && current.Id == item.Id)
+        {
+            // The list was rebuilt (search, filter): keep the loader and name the player already chose.
+            Target = item;
+            return;
+        }
         Target = item;
         if (item is not null) JustInstalled = null;
         SelectedLoader = LoaderChoices[0];
@@ -376,17 +459,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         // 原版的文件夹名就是版本号；加载器默认“1.21.1-Fabric”，重名加序号（改版规格 4.4）。
         CustomName = SelectedLoader.Kind is not { } kind ? Target.Id
             : SelectedLoaderVersion is null ? ""
-            : DefaultName(Target.Id, kind, _service.InstalledVersions());
-    }
-
-    /// <summary>加载器实例的默认名字：“{MC 版本}-{加载器}”，已有同名实例时加“-2”“-3”……</summary>
-    internal static string DefaultName(string mcVersion, LoaderKind kind, IEnumerable<string> installed)
-    {
-        var taken = installed.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var name = $"{mcVersion}-{kind}";
-        if (!taken.Contains(name)) return name;
-        for (var n = 2; ; n++)
-            if (!taken.Contains($"{name}-{n}")) return $"{name}-{n}";
+            : NewInstanceNames.Default(Target.Id, kind, _service.InstalledVersions());
     }
 
     private void StartWaitTimer()
@@ -407,7 +480,9 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         WaitText = "";
     }
 
-    private bool CanInstall() => !IsBusy;
+    /// <summary>A version is chosen, a loader (if any) has a version, and the name passes the check.</summary>
+    private bool CanInstall() => !IsBusy && Target is not null && SelectedLoader.IsAvailable
+                                 && (SelectedLoader.Kind is null || SelectedLoaderVersion is not null && NameCheck == InstanceNameProblem.None);
 
     [RelayCommand(CanExecute = nameof(CanInstall))]
     private async Task InstallAsync()
@@ -422,6 +497,8 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
 
         IsBusy = true;
         StartWaitTimer();
+        // §6.11: the panel closes and the install carries on as a task in the activity centre.
+        CloseAfterStart?.Invoke();
         var installCts = _installCts = new CancellationTokenSource();
         var watch = Stopwatch.StartNew();
         var ct = installCts.Token;
@@ -480,7 +557,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
             InstalledHasLoader = loader is not null;
             JustInstalled = id;
             // 装的时候切到别的页面了：用 Toast 告诉一声，带“打开实例”。
-            if (!IsCurrent && sameDirectory) Toasts.WithAction(L.F("download.installed.title", id), L.T("download.installed.open"), () => OpenInstance?.Invoke(id));
+            if (!IsCurrent && sameDirectory) Toasts.WithAction(L.F("download.installed.title", id), L.T("download.installed.launch"), () => LaunchInstance?.Invoke(id));
         }
         // 不是玩家点的取消（比如连接超时也抛 TaskCanceledException）按失败显示，不能说成“已取消”。
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

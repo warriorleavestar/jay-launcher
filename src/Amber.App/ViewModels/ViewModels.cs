@@ -240,6 +240,18 @@ public sealed partial class MainViewModel : ObservableObject
             service.SetCurrentInstance(id);
             service.RequestLaunch(new LaunchRequest(id));
         };
+        download.CloseAfterStart = () => shell.Navigate("library");
+        download.BrowseModpacks = () =>
+        {
+            shell.Navigate("discover");
+            content.BrowseModpacks();
+        };
+        // The import runs on the Discover page: it shows the files that need a manual download.
+        download.ImportPackFile = async (path, play) =>
+        {
+            shell.Navigate("discover");
+            if (await content.ImportLocalPackAsync(path) is { } id && play) download.LaunchInstance?.Invoke(id);
+        };
         Activity = new ActivityViewModel(service) { OpenRun = _ => shell.Navigate("library") };
         home.SessionStarted += Activity.Track;
         // 游戏库的“上次玩”和“共玩”：只记本机的运行记录。
