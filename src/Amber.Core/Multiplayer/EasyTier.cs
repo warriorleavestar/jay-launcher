@@ -343,10 +343,10 @@ public static class EasyTierArgs
         };
         // 默认不建虚拟网卡；完整局域网模式才建（要管理员权限和 wintun）。
         if (!o.Tun) args.Add("--no-tun");
-        // Only useful without a TUN device; with one the kernel's TCP stack is used anyway.
-        if (!o.Tun && o.QuicProxy) args.Add("--enable-quic-proxy");
         // 完整局域网模式下转发本机游戏发出的 UDP 广播，很多游戏靠广播找局域网房间（EasyTier 的这个功能只在 Windows 上、要管理员权限，正好这个模式已经有）。
         else args.AddRange(["--dev-name", DeviceName(o), "--enable-udp-broadcast-relay"]);
+        // Only useful without a TUN device; with one the kernel's TCP stack is used anyway.
+        if (!o.Tun && o.QuicProxy) args.Add("--enable-quic-proxy");
         // 出口节点：两边都要用户明确打开。允许别人经自己上网的一方加 --enable-exit-node；
         // 要经别人上网的一方把所有流量导进虚拟网卡，所以必须是完整局域网模式。
         if (o.AllowExit) args.Add("--enable-exit-node");

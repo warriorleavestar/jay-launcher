@@ -11,6 +11,9 @@ public class QuicProxyTrialTests
     {
         var args = EasyTierArgs.Build(new EasyTierOptions(Room, false, [], 16000, 40000) { QuicProxy = false });
         Assert.DoesNotContain("--enable-quic-proxy", args);
+        // Without TUN there is no adapter and no broadcast relay, with or without the trial.
+        Assert.DoesNotContain("--dev-name", args);
+        Assert.DoesNotContain("--enable-udp-broadcast-relay", args);
     }
 
     [Fact]
@@ -20,6 +23,8 @@ public class QuicProxyTrialTests
         Assert.Contains("--enable-quic-proxy", args);
         Assert.Contains("--no-tun", args);
         Assert.Contains("--tcp-whitelist", args);
+        Assert.DoesNotContain("--dev-name", args);
+        Assert.DoesNotContain("--enable-udp-broadcast-relay", args);
     }
 
     [Fact]
@@ -27,5 +32,6 @@ public class QuicProxyTrialTests
     {
         var args = EasyTierArgs.Build(new EasyTierOptions(Room, true, [], 16000, Tun: true) { QuicProxy = true });
         Assert.DoesNotContain("--enable-quic-proxy", args);
+        Assert.Contains("--enable-udp-broadcast-relay", args);
     }
 }
