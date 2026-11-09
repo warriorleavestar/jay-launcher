@@ -56,6 +56,13 @@ public sealed class AppSettings
     /// <summary>联机网络配置里带的主题：在联机页里使用（整个 Jay 要另外同意）。关掉就一律不用。</summary>
     public bool AllowNetworkThemes { get; set; } = true;
 
+    /// <summary>The first-run wizard (official design §6.1) was finished or skipped; it never opens again.</summary>
+    public bool FirstRunDone { get; set; }
+
+    /// <summary>No settings file existed: a brand-new Jay (not saved).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsFresh { get; private set; }
+
     /// <summary>界面语言：zh-Hans / zh-Hant / en / ja；null 表示跟随系统。</summary>
     public string? Language { get; set; }
 
@@ -178,7 +185,7 @@ public sealed class AppSettings
             // 设置文件损坏时回到默认值，原文件保留一份方便排查。
             File.Copy(FilePath, FilePath + ".broken", true);
         }
-        return new AppSettings();
+        return new AppSettings { IsFresh = !File.Exists(FilePath) };
     }
 
     /// <summary>测试用：这份设置存到别的文件（不序列化）。</summary>

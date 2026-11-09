@@ -144,6 +144,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>活动中心、请求条、正在玩胶囊（§6.22）。</summary>
     public ActivityViewModel Activity { get; }
 
+    /// <summary>The first-run wizard over the whole window (§6.1).</summary>
+    public FirstRunViewModel FirstRun { get; }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
         if (oldValue is not null) oldValue.IsCurrent = false;
@@ -252,6 +255,18 @@ public sealed partial class MainViewModel : ObservableObject
         {
             shell.Navigate("discover");
             if (await content.ImportLocalPackAsync(path) is { } id && play) download.LaunchInstance?.Invoke(id);
+        };
+        FirstRun = new FirstRunViewModel(service, home.Onboarding)
+        {
+            OpenLogin = tab =>
+            {
+                accounts.LoginTab = tab;
+                shell.Navigate("accounts");
+            },
+            OpenNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance),
+            ShowLibrary = () => shell.Navigate("library"),
+            Launch = id => download.LaunchInstance?.Invoke(id),
+            ImportPackAndPlay = path => download.ImportPackFile!(path, true),
         };
         Activity = new ActivityViewModel(service) { OpenRun = _ => shell.Navigate("library") };
         home.SessionStarted += Activity.Track;

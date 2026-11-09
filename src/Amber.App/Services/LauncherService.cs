@@ -90,11 +90,19 @@ public sealed class LauncherService : IDisposable
         var store = new AccountStore(Path.Combine(AppSettings.DataDir, "accounts.json"));
         store.Load();
         Accounts = new AccountService(_http, store, AppSettings.DataDir, () => Settings.MicrosoftClientId);
-        // 老版本只存了玩家名，第一次运行时转成离线账号。
-        if (store.Accounts.Count == 0 && !string.IsNullOrWhiteSpace(settings.PlayerName))
+        if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
+                Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
             Accounts.AddOffline(settings.PlayerName);
         Reload();
     }
+
+    /// <summary>
+    /// 老版本只存了玩家名，第一次运行时转成离线账号。A brand-new Jay (no settings file) has no old name: the first-run
+    /// wizard asks for one. Self-checks keep the default account so they can launch, except the first-run scope.
+    /// </summary>
+    internal static bool MigratesPlayerName(int accounts, string? playerName, bool freshSettings, string? selfTest, string? scope) =>
+        accounts == 0 && !string.IsNullOrWhiteSpace(playerName)
+        && (!freshSettings || (selfTest is { Length: > 0 } && scope != "firstrun"));
 
     /// <summary>所有长任务（活动中心“进行中”）。</summary>
     public Amber.Core.Activity.TaskCenter Tasks { get; } = new();
