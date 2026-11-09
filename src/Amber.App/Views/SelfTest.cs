@@ -191,6 +191,9 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 Amber.Core.Localization.L.SetLanguage(code);
                 await Task.Delay(300);
             }
+            // The checks below read Simplified Chinese text, whatever order the language list is in.
+            Amber.Core.Localization.L.SetLanguage("zh-Hans");
+            await Task.Delay(300);
             var selectionsAfter = Selections();
             var settingsAfter = File.Exists(Amber.App.Services.AppSettings.FilePath) ? File.ReadAllText(Amber.App.Services.AppSettings.FilePath) : "";
             Check("换语言：各下拉框的选中项不变，设置文件没被改写", selectionsBefore == selectionsAfter && settingsBefore == settingsAfter,
