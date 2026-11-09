@@ -258,6 +258,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         });
         InitDirect();
         InitGuide();
+        InitPublic();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
         HostServer = new HostServerViewModel(service);
     }
@@ -558,6 +559,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         RestoreChatHistory(room);
         StartHub(room);
         StartHostLobby(credentials, members);
+        StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T("multiplayer.room.created_full_lan")
             : L.T("multiplayer.room.created");
@@ -627,7 +629,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StopSession();
         try
         {
-            var workDir = Path.Combine(AppSettings.DataDir, "easytier", options.Tun ? "run-lan" : "run");
+            var workDir = Path.Combine(EasyTierWorkRoot, options.Tun ? "run-lan" : "run");
             _session = options.Tun
                 ? EasyTierElevatedSession.Start(_service.EasyTier, options, workDir)
                 : EasyTierSession.Start(_service.EasyTier, options, workDir);
@@ -727,7 +729,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             _session?.Dispose();
             try
             {
-                _session = EasyTierSession.Start(_service.EasyTier, options, Path.Combine(AppSettings.DataDir, "easytier", "run"));
+                _session = EasyTierSession.Start(_service.EasyTier, options, Path.Combine(EasyTierWorkRoot, "run"));
                 _service.ActiveMultiplayer = _session;
                 MarkJoinStarted(newRoom: false);
             }
@@ -901,7 +903,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 else
                 {
                     old.Dispose();
-                    var next = EasyTierElevatedSession.Start(_service.EasyTier, options, Path.Combine(AppSettings.DataDir, "easytier", "run-lan"));
+                    var next = EasyTierElevatedSession.Start(_service.EasyTier, options, Path.Combine(EasyTierWorkRoot, "run-lan"));
                     replacement = next;
                     await next.WaitForReadyAsync(lifetime.Token);
                     if (_sessionCts != lifetime || _direct != direct) return false;
@@ -1113,6 +1115,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         Peers.Clear();
         if (_room is { } leftRoom) SaveChatHistory(leftRoom);
         _room = null;
+        StopAnnouncer();
         StopHostLobby();
         HostFingerprint = "";
         _localChatPort = null;
