@@ -136,8 +136,15 @@ public static partial class JavaFinder
                 CreateNoWindow = true,
             });
             if (p is null) return (null, null);
-            var output = p.StandardError.ReadToEnd();
-            p.WaitForExit(5000);
+            // Read both pipes in the background and bound the wait: a broken or hung java.exe must not stall the Java scan forever.
+            var stderr = p.StandardError.ReadToEndAsync();
+            _ = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(10_000) || !stderr.Wait(2_000))
+            {
+                try { p.Kill(); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                return (null, null);
+            }
+            var output = stderr.Result;
             var version = VersionProperty().Match(output) is { Success: true } m ? m.Groups[1].Value.Trim() : null;
             var arch = ArchProperty().Match(output) is { Success: true } a ? a.Groups[1].Value.Trim() : "";
             return (version, arch.Contains("64"));

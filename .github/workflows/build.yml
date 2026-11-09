@@ -89,6 +89,7 @@ jobs:
           Get-ChildItem ../out/${{ matrix.rid }} -Recurse -Filter *.pdb | Remove-Item
           Compress-Archive -Path ../out/${{ matrix.rid }}/* -DestinationPath ../packages/Jay-${{ matrix.rid }}.zip
           Copy-Item ../server/README.md ../out/server-${{ matrix.rid }}/
+          Copy-Item ../docs/network-server.md ../out/server-${{ matrix.rid }}/
           Compress-Archive -Path ../out/server-${{ matrix.rid }}/* -DestinationPath ../packages/JayServer-${{ matrix.rid }}.zip
 
       - name: Package macOS/Linux
@@ -102,7 +103,8 @@ jobs:
           if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}/NotoSansSC-OFL.txt; fi
           tar -C ../out/${{ matrix.rid }} -czf ../packages/Jay-${{ matrix.rid }}.tar.gz .
           chmod +x ../out/server-${{ matrix.rid }}/jay-server
-          cp ../server/README.md ../server/jay-server.service ../out/server-${{ matrix.rid }}/
+          cp ../server/README.md ../server/jay-server.service ../server/jay-public-node.service ../server/install-network-node.sh ../docs/network-server.md ../out/server-${{ matrix.rid }}/
+          chmod +x ../out/server-${{ matrix.rid }}/install-network-node.sh
           tar -C ../out/server-${{ matrix.rid }} -czf ../packages/JayServer-${{ matrix.rid }}.tar.gz .
 
       - name: Publish Windows Native AOT

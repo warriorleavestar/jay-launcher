@@ -12,8 +12,13 @@ namespace Amber.App.Services;
 /// <summary>界面共用的核心对象。设置里的目录或下载源变了就调用 <see cref="Reload"/>。</summary>
 public sealed class LauncherService : IDisposable
 {
-    private readonly HttpClient _http = Downloader.CreateHttpClient();
+    // Downloads stream large files, so their client has no overall timeout (the downloader watches for stalls itself).
+    private readonly HttpClient _downloadHttp = Downloader.CreateHttpClient();
 
+    // API calls, sign-in, update checks and small fetches get a hard limit, so a stalled connection cannot hang them forever.
+    private readonly HttpClient _http = Downloader.CreateHttpClient(Downloader.ApiTimeout);
+
+    /// <summary>For small requests (APIs, icons, config files). Has an overall timeout; don't use it for big downloads.</summary>
     public HttpClient Http => _http;
     public AppSettings Settings { get; }
     public AccountService Accounts { get; }
@@ -74,7 +79,33 @@ public sealed class LauncherService : IDisposable
     private Amber.Core.Multiplayer.Public.PublicNetworkList? _networks;
 
     /// <summary>认哪些注册表钥匙（自检里换成测试钥匙；null = 程序里内置的）。</summary>
-    internal IReadOnlyList<byte[]>? TrustedNetworkKeys { get; set; }
+    internal IReadOnlyList<byte[]>? TrustedNetworkKeys { get; set; } = TestRegistryKeys.Count > 0
+        ? [.. Amber.Core.Multiplayer.Public.NetworkString.RegistryKeys.Select(Convert.FromBase64String), .. TestRegistryKeys]
+        : null;
+
+    /// <summary>
+    /// Developer switch for test machines: AMBER_TEST_REGISTRY_KEY holds one or more registry public keys
+    /// (base64, comma separated) that this Jay also trusts. Networks signed by them are shown as "test review",
+    /// never as properly reviewed.
+    /// </summary>
+    internal static readonly IReadOnlyList<byte[]> TestRegistryKeys = ParseTestKeys(Environment.GetEnvironmentVariable("AMBER_TEST_REGISTRY_KEY"));
+
+    internal static IReadOnlyList<byte[]> ParseTestKeys(string? text)
+    {
+        var keys = new List<byte[]>();
+        foreach (var part in (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            try
+            {
+                if (Convert.FromBase64String(part) is { Length: 32 } key) keys.Add(key);
+            }
+            catch (FormatException) { }
+        }
+        return keys;
+    }
+
+    /// <summary>Signed by a key that only AMBER_TEST_REGISTRY_KEY trusts.</summary>
+    internal static bool IsTestReviewed(byte[] signer) => TestRegistryKeys.Any(k => k.AsSpan().SequenceEqual(signer));
 
     /// <summary>保存的公共网络（设置里的连接串验签后的结果，改了设置要 <see cref="ReloadNetworks"/>）。</summary>
     public Amber.Core.Multiplayer.Public.PublicNetworkList Networks => _networks ??= new(Settings.PublicNetworks, TrustedNetworkKeys);
@@ -128,7 +159,7 @@ public sealed class LauncherService : IDisposable
             "mirror" => SourceChain.MirrorFirst,
             _ => SourceChain.Default(),
         };
-        var downloader = new Downloader(_http, sources)
+        var downloader = new Downloader(_downloadHttp, sources)
         {
             MaxConcurrency = Math.Clamp(Settings.DownloadConcurrency, 1, 128),
             Hashes = new HashCache(Path.Combine(Settings.GameDirectory, ".amber-hashes")),
@@ -419,6 +450,7 @@ public sealed class LauncherService : IDisposable
     {
         ActiveMultiplayer?.Dispose();
         _http.Dispose();
+        _downloadHttp.Dispose();
     }
 }
 
