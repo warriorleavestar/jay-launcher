@@ -2,7 +2,7 @@
 id: multiplayer
 category: multiplayer
 routes: play, play/*
-related: child-mode, network-list
+related: child-mode, network-list, knock, connection, public-rooms, glossary
 ---
 
 # 联机

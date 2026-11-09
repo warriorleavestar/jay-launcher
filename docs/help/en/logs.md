@@ -2,7 +2,7 @@
 id: logs
 category: trouble
 routes: library/logs
-related: instance
+related: instance, error-report, crash
 ---
 
 # Reading logs

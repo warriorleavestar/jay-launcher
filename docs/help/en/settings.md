@@ -2,7 +2,7 @@
 id: settings
 category: storage
 routes: settings, settings/*
-related: tools, network-list, child-mode
+related: tools, network-list, child-mode, recycle, themes
 ---
 
 # Settings

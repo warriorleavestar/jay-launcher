@@ -67,6 +67,9 @@ public class HelpLibraryTests
     [InlineData("accounts", "accounts")]
     [InlineData("about", "network-list")]
     [InlineData("help", "first-time")]
+    [InlineData("play/public", "public-rooms")]
+    [InlineData("play/servers", "servers")]
+    [InlineData("play/settings", "connection")]
     public void EveryRouteHasAnArticle(string route, string expected) =>
         Assert.Equal(expected, HelpLibrary.Load("zh-Hans").ForRoute(Route.Parse(route))?.Id);
 
@@ -89,4 +92,18 @@ public class HelpLibraryTests
     [InlineData("ja", "ja")]
     [InlineData("fr", "en")]
     public void HelpLanguageFallsBack(string ui, string expected) => Assert.Equal(expected, HelpLibrary.HelpLanguage(ui));
+
+    /// <summary>The catalog of official §9.7: every category has articles, in every language.</summary>
+    [Theory]
+    [InlineData("zh-Hans")]
+    [InlineData("zh-Hant")]
+    [InlineData("en")]
+    [InlineData("ja")]
+    public void EveryCategoryHasArticles(string lang)
+    {
+        var library = HelpLibrary.Load(lang);
+        foreach (var category in HelpLibrary.Categories)
+            Assert.Contains(library.All, a => a.Category == category);
+        Assert.True(library.All.Count >= 31, library.All.Count.ToString());
+    }
 }
