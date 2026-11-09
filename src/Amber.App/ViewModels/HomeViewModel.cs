@@ -445,14 +445,15 @@ public sealed partial class HomeViewModel : PageViewModel
 
     private async Task RunAsync(LaunchRequest request, bool allowSecond = false)
     {
-        // 手抖连点：600ms 内只算一次（多开确认后的“仍然开始”是另一次点击，不受影响）。
-        if (!allowSecond && !_gate.TryPass(DateTimeOffset.Now)) return;
         Toasts.DismissBakeFailures();
         if (!BakeRetryDirectoryMatches(_service, request))
         {
             Toasts.Show(L.T("home.bake.retry_directory_changed"));
             return;
         }
+        // 手抖连点：600ms 内只算一次（多开确认后的“仍然开始”是另一次点击，不受影响）。
+        // Checked after the directory check: a request refused for another reason must not swallow the next one.
+        if (!allowSecond && !_gate.TryPass(DateTimeOffset.Now)) return;
         if (_runs.Any(r => r.Game is null))
         {
             SetStatus(StatusMessage.Warning("home.status.preparing_other"));
