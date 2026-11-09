@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
              xmlns:l="using:Amber.App.Localization"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:c="using:Amber.App.Views.Controls"
@@ -7,11 +8,11 @@
              x:DataType="vm:ContentViewModel">
   <Grid RowDefinitions="Auto,Auto,*,Auto">
     <Grid ColumnDefinitions="*,Auto">
-      <TextBlock Classes="h1" Text="{l:T content.title}" />
+      <TextBlock svc:ThemeRegion.Name="content.header" Classes="h1" Text="{l:T content.title}" />
       <Button Grid.Column="1" Content="{l:T content.modpack.import}" Click="ImportPack_Click" VerticalAlignment="Top" />
     </Grid>
 
-    <StackPanel x:Name="ContentFilters" Grid.Row="1" Spacing="8" Margin="0,0,0,10">
+    <StackPanel svc:ThemeRegion.Name="content.filters" x:Name="ContentFilters" Grid.Row="1" Spacing="8" Margin="0,0,0,10">
       <!-- 从实例页【在线浏览…】跳来：写明在给哪个实例找什么，带【← 返回实例】（改版规格 4.5）。 -->
       <Border Classes="callout info" IsVisible="{Binding HasReturn}">
         <DockPanel>
@@ -63,7 +64,7 @@
       </StackPanel>
     </StackPanel>
 
-    <Grid Grid.Row="2" ColumnDefinitions="*,Auto">
+    <Grid svc:ThemeRegion.Name="content.body" Grid.Row="2" ColumnDefinitions="*,Auto">
       <Border Classes="card" Padding="6">
         <Grid RowDefinitions="*,Auto">
           <TextBlock Classes="hint" Text="{l:T content.search.empty_hint}" HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -164,7 +165,7 @@
       </Border>
     </Grid>
 
-    <Border Grid.Row="3" Classes="card" Margin="0">
+    <Border svc:ThemeRegion.Name="content.status" Grid.Row="3" Classes="card" Margin="0">
       <Grid ColumnDefinitions="*,Auto">
         <StackPanel Spacing="6" VerticalAlignment="Center">
           <c:StatusBar Message="{Binding StatusInfo}" />

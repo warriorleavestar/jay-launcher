@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Reflection;
 using System.Security.Cryptography;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
@@ -37,6 +38,8 @@ public sealed partial class MobileServerItem : ObservableObject
 
 public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDisposable
 {
+    private static readonly string AppVersion = typeof(MobileMainViewModel).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
     private readonly string _dataDirectory;
     private readonly JayServerList _serverList;
     private readonly MemberIdentity _identity;
@@ -66,7 +69,7 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
     private static string PlatformString(string key) =>
         L.T(OperatingSystem.IsIOS() ? key + ".ios" : OperatingSystem.IsAndroid() ? key + ".android" : key + ".mobile");
 
-    public string VersionText => L.F("mobile.version", PlatformName, "0.7.0");
+    public string VersionText => L.F("mobile.version", PlatformName, AppVersion);
     public string ExperimentalText => L.T("mobile.experimental");
     public string ScopeTitle => L.T("mobile.scope.title");
     public string ScopeDescription => PlatformString("mobile.scope.description");

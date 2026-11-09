@@ -64,7 +64,17 @@ public static class Program
           jay-server network check <网络.json> ...             只检查格式（注册表的 PR 检查用）
           jay-server network show <连接串或文件>              显示连接串里的内容和签名
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
-          网络 JSON 的格式见 networks/README.md。提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
+          网络 JSON 的格式见 networks/README.md。
+
+        公共网络账号（网络节点管账号，Jay 里登录；房主可以只让登录过的人进）：
+          jay-server directory --accounts [--require-2fa] [--factor <名字>:<提示>:<程序>] ...
+              开账号登录。第一次会生成登录钥匙（数据目录里的 login.key，不要外传），并打印要写进网络配置的 login 段。
+              --require-2fa：每个账号都必须开两步验证。
+              --factor：接自己的验证方式（邮件码、短信、会员系统……）：程序从标准输入读 {"user","response","network"}，退出码 0 = 通过。可以写多个，用逗号隔开。
+          jay-server account add|passwd <账号>      加账号 / 改密码（密码在终端输入；脚本里可以用环境变量 JAY_ACCOUNT_PASSWORD）
+          jay-server account remove|disable|enable <账号> / account list
+          jay-server account 2fa on <账号> [--issuer <网络名>]   开两步验证：打印密钥和 otpauth 地址，用验证器 App 添加
+          jay-server account 2fa off <账号>提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
 
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
@@ -86,6 +96,7 @@ public static class Program
                 "relay" => await RelayAsync(options),
                 "directory" => await DirectoryAsync(root, options),
                 "network" => NetworkCommand(options, Console.Out),
+                "account" => AccountCommand(root, options, Console.Out, ReadPassword),
                 null => Help(),
                 _ => Admin(root, options, Console.Out),
             };
@@ -320,7 +331,6 @@ public static class Program
             (core, cli) = (installer.CorePath, installer.CliPath);
         }
 
-        await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort, log);
         var profile = PublicNetworkProfile.Jay(seeds);
         if (options.Get("network") is { } networkText)
         {
@@ -329,6 +339,8 @@ public static class Program
             profile = signed.ToProfile() with { Nodes = seeds };
             log($"用公共网络“{signed.Info.Name}”（{signed.Info.Id}，{(signed.Reviewed ? "Jay 审核过" : "未经 Jay 审核")}）");
         }
+        var login = LoginFor(root, options, profile.Id, Console.Out);
+        await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort, log) { Login = login };
         var options2 = new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true,
             Listeners: [$"tcp://0.0.0.0:{listen}", $"udp://0.0.0.0:{listen}"]);
         using var network = PublicNetworkSession.Start(core, cli, options2, Path.Combine(root, "public-node"));
@@ -360,6 +372,109 @@ public static class Program
         }
         log("正在关闭……");
         return 0;
+    }
+
+    /// <summary>directory --accounts：账号表 + 登录钥匙 + 第二步验证。没开就是 null。</summary>
+    internal static LoginAuthority? LoginFor(string root, Options options, string network, TextWriter output)
+    {
+        if (!options.Has("accounts") && !options.Has("require-2fa") && options.Get("factor") is null) return null;
+        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(root, "login.key"));
+        var accounts = new AccountStore(Path.Combine(root, "accounts.json"));
+        var factors = new List<ILoginFactor> { new TotpFactor(accounts) };
+        foreach (var spec in (options.Get("factor") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = spec.Split(':', 3);
+            if (parts.Length != 3 || !LoginFactorPrompt.IsValidName(parts[0]) || parts[1].Length == 0 || parts[2].Length == 0)
+                throw new ArgumentException($"--factor 格式是 <名字>:<提示>:<程序>，名字只用小写字母、数字、横线：{spec}");
+            factors.Add(new CommandFactor(parts[0], parts[1], parts[2], [], network));
+        }
+        var require = options.Has("require-2fa");
+        var section = new System.Text.Json.Nodes.JsonObject
+        {
+            ["required"] = true,
+            ["key"] = Convert.ToBase64String(key.PublicKey),
+            ["signKey"] = Convert.ToBase64String(signer.PublicKey),
+            ["factors"] = new System.Text.Json.Nodes.JsonArray([.. factors.Select(f => (System.Text.Json.Nodes.JsonNode)f.Name)]),
+            ["requireFactor"] = require,
+        };
+        output.WriteLine($"账号登录已开启（{accounts.List().Count} 个账号）。把这段写进网络配置文件的 \"login\"（required 改成 false 就是登录可选）：");
+        output.WriteLine(section.ToJsonString());
+        return new LoginAuthority(accounts, key, signer, network) { Factors = factors, RequireSecondFactor = require };
+    }
+
+    /// <summary>公共网络账号：加、改密码、删、停用、两步验证。</summary>
+    internal static int AccountCommand(string root, Options options, TextWriter output, Func<string, string> readPassword)
+    {
+        var accounts = new AccountStore(Path.Combine(root, "accounts.json"));
+        string Name(int i) => options.Positional.ElementAtOrDefault(i) ?? throw new ArgumentException("要给账号名");
+        string Existing(int i) => accounts.List().Any(a => a.Name == Name(i)) ? Name(i) : throw new ArgumentException($"没有账号 {Name(i)}");
+        switch (options.Positional.FirstOrDefault())
+        {
+            case "add" or "passwd":
+            {
+                var name = AccountStore.CleanName(Name(1)) ?? throw new ArgumentException("账号名要 1–32 个字");
+                var exists = accounts.List().Any(a => a.Name == name);
+                if (options.Positional[0] == "add" && exists) throw new ArgumentException($"账号 {name} 已经有了（改密码用 account passwd）");
+                if (options.Positional[0] == "passwd" && !exists) throw new ArgumentException($"没有账号 {name}");
+                var password = Environment.GetEnvironmentVariable("JAY_ACCOUNT_PASSWORD") is { Length: > 0 } env ? env : readPassword($"{name} 的密码（至少 {AccountStore.MinPassword} 位）：");
+                if (Environment.GetEnvironmentVariable("JAY_ACCOUNT_PASSWORD") is not { Length: > 0 } && readPassword("再输一次：") != password)
+                    throw new ArgumentException("两次密码不一样");
+                accounts.Set(name, password);
+                output.WriteLine(exists ? $"已改 {name} 的密码" : $"已加账号 {name}");
+                return 0;
+            }
+            case "remove":
+                output.WriteLine(accounts.Remove(Existing(1)) ? $"已删除 {Name(1)}" : "没有这个账号");
+                return 0;
+            case "disable" or "enable":
+                accounts.SetDisabled(Existing(1), options.Positional[0] == "disable");
+                output.WriteLine(options.Positional[0] == "disable" ? $"已停用 {Name(1)}（已发的凭证最多 7 天后失效）" : $"已启用 {Name(1)}");
+                return 0;
+            case "list":
+                foreach (var (name, disabled) in accounts.List())
+                    output.WriteLine($"{name}{(disabled ? "（停用）" : "")}{(accounts.TotpSecret(name) is not null ? "（两步验证）" : "")}");
+                return 0;
+            case "2fa":
+            {
+                var on = options.Positional.ElementAtOrDefault(1) switch
+                {
+                    "on" => true,
+                    "off" => false,
+                    _ => throw new ArgumentException("用法：jay-server account 2fa on|off <账号>"),
+                };
+                var name = Existing(2);
+                if (!on)
+                {
+                    accounts.SetTotp(name, null);
+                    output.WriteLine($"已关掉 {name} 的两步验证");
+                    return 0;
+                }
+                var secret = TotpFactor.NewSecret();
+                accounts.SetTotp(name, secret);
+                output.WriteLine($"已给 {name} 开两步验证。在验证器 App 里扫码或手动输入（只显示这一次，只发给账号本人）：");
+                output.WriteLine($"密钥：{TotpFactor.Base32(secret)}");
+                output.WriteLine(TotpFactor.Uri(options.Get("issuer") ?? "Jay", name, secret));
+                return 0;
+            }
+            default:
+                throw new ArgumentException("用法：jay-server account add|passwd|remove|disable|enable|list|2fa");
+        }
+    }
+
+    private static string ReadPassword(string prompt)
+    {
+        Console.Write(prompt);
+        if (Console.IsInputRedirected) return Console.ReadLine() ?? "";
+        var sb = new StringBuilder();
+        while (true)
+        {
+            var k = Console.ReadKey(true);
+            if (k.Key == ConsoleKey.Enter) break;
+            if (k.Key == ConsoleKey.Backspace) { if (sb.Length > 0) sb.Length--; }
+            else if (!char.IsControl(k.KeyChar)) sb.Append(k.KeyChar);
+        }
+        Console.WriteLine();
+        return sb.ToString();
     }
 
     internal static int Admin(string root, Options options, TextWriter output)
@@ -593,7 +708,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];

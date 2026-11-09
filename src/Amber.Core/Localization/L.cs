@@ -5,24 +5,43 @@ using System.Text.Json;
 namespace Amber.Core.Localization;
 
 /// <summary>
-/// 界面文字的翻译。每种语言一个 JSON 文件（键 → 文字），作为嵌入资源编进程序集：
-///   Localization/zh-Hans.json（原文，所有键都在这里）、zh-Hant.json、en.json、ja.json。
-/// 找不到的键先退回简体中文，再退回键本身（这样漏翻的地方一眼能看出来）。
+/// UI text translations. One JSON file per language (key → text), embedded in the assembly:
+///   Localization/en.json (the source; every key is defined here), zh-Hans.json, zh-Hant.json, ja.json.
+/// A key missing from the current language falls back to English, then to the key itself (so gaps are easy to spot).
+/// The UI language follows the system language; when the system language has no translation, English is used.
 /// 用法：C# 里 L.T("home.launch")、L.F("home.running", id, memory)（{0}{1} 占位）、L.P("…", n, …)（区分单复数）；
 /// XAML 里 {l:T home.launch}。换语言时触发 Changed，界面上用 {l:T} 绑定的文字立刻跟着换。
 /// </summary>
 public static class L
 {
-    public const string Source = "zh-Hans";
+    /// <summary>Source and fallback language: new keys are written in en.json first.</summary>
+    public const string Source = "en";
 
     /// <summary>支持的语言（代码, 用这种语言写的名字）。</summary>
     public static readonly IReadOnlyList<(string Code, string Name)> Languages =
     [
+        ("en", "English"),
         ("zh-Hans", "简体中文"),
         ("zh-Hant", "繁體中文"),
-        ("en", "English"),
         ("ja", "日本語"),
+        ("lzh", "文言"),
+        ("en-x-ud", "ɥsᴉꞁᵷuƎ uʍop ǝpᴉsd∩"),
     ];
+
+    /// <summary>
+    /// Playful languages, the same idea as Minecraft's own 文言 and "English (Upside Down)". No operating system uses them,
+    /// so they are never picked by following the system language; players choose them in Settings.
+    /// </summary>
+    public static readonly IReadOnlySet<string> Playful = new HashSet<string>(StringComparer.Ordinal) { "lzh", "en-x-ud" };
+
+    /// <summary>A language whose missing keys come from another translation before English (文言 falls back to Traditional Chinese).</summary>
+    private static readonly Dictionary<string, string> Parents = new() { ["lzh"] = "zh-Hant" };
+
+    /// <summary>Minecraft's language code for each Jay language, so the game can match the launcher.</summary>
+    public static readonly IReadOnlyDictionary<string, string> MinecraftCodes = new Dictionary<string, string>
+    {
+        ["en"] = "en_us", ["zh-Hans"] = "zh_cn", ["zh-Hant"] = "zh_tw", ["ja"] = "ja_jp", ["lzh"] = "lzh", ["en-x-ud"] = "en_ud",
+    };
 
     /// <summary>每种语言格式化数字、日期用的区域（不跟 Windows 的区域设置走，界面是哪种语言就按哪种写）。</summary>
     private static readonly Dictionary<string, CultureInfo> Cultures = new()
@@ -31,6 +50,8 @@ public static class L
         ["zh-Hant"] = CultureInfo.GetCultureInfo("zh-TW"),
         ["en"] = CultureInfo.GetCultureInfo("en-US"),
         ["ja"] = CultureInfo.GetCultureInfo("ja-JP"),
+        ["lzh"] = CultureInfo.GetCultureInfo("zh-TW"),
+        ["en-x-ud"] = CultureInfo.GetCultureInfo("en-US"),
     };
 
     /// <summary>当前语言的全部状态放在一个不可变对象里，换语言时整体替换，别的线程读到的总是一致的一份。</summary>
@@ -57,7 +78,7 @@ public static class L
         for (var c = culture; !string.IsNullOrEmpty(c.Name); c = c.Parent)
         {
             foreach (var (code, _) in Languages)
-                if (string.Equals(c.Name, code, StringComparison.OrdinalIgnoreCase)) return code;
+                if (!Playful.Contains(code) && string.Equals(c.Name, code, StringComparison.OrdinalIgnoreCase)) return code;
             // 旧写法：zh-CHT / zh-CHS。
             if (string.Equals(c.Name, "zh-CHT", StringComparison.OrdinalIgnoreCase)) return "zh-Hant";
             if (string.Equals(c.Name, "zh-CHS", StringComparison.OrdinalIgnoreCase) || string.Equals(c.Name, "zh", StringComparison.OrdinalIgnoreCase)) return "zh-Hans";
@@ -72,6 +93,9 @@ public static class L
     public static string? Resolve(string? code)
     {
         if (string.IsNullOrWhiteSpace(code) || code.Equals("system", StringComparison.OrdinalIgnoreCase)) return null;
+        // Codes Jay knows exactly, including the playful ones that aren't real cultures (en-x-ud).
+        foreach (var (known, _) in Languages)
+            if (string.Equals(code.Trim(), known, StringComparison.OrdinalIgnoreCase)) return known;
         try
         {
             return Match(CultureInfo.GetCultureInfo(code.Trim()));
@@ -86,9 +110,66 @@ public static class L
     public static void SetLanguage(string? code)
     {
         var resolved = Resolve(code) ?? FromCulture(CultureInfo.CurrentUICulture);
-        _state = new State(resolved, Load(resolved), Cultures[resolved]);
+        _state = new State(resolved, TableFor(resolved), Cultures[resolved]);
         Changed?.Invoke();
     }
+
+    /// <summary>The language's own table, with its parent's text under it for keys it doesn't have yet.</summary>
+    internal static IReadOnlyDictionary<string, string> TableFor(string code)
+    {
+        var own = Load(code);
+        if (!Parents.TryGetValue(code, out var parent)) return own;
+        var merged = new Dictionary<string, string>(TableFor(parent), StringComparer.Ordinal);
+        foreach (var (k, v) in own) merged[k] = v;
+        return merged;
+    }
+
+    /// <summary>"English (upside down)" isn't a file: it is generated from en.json, so it never falls behind.</summary>
+    private const string UpsideDown = "en-x-ud";
+
+    private const string FlipFrom = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,'\"!?()[]{}<>_&;";
+    private const string FlipTo = "ɐqɔpǝɟᵷɥᴉɾʞꞁɯuodbɹsʇnʌʍxʎz∀ᗺƆᗡƎℲ⅁HIſʞ˥WNOԀΌᴚS⊥∩ΛMX⅄Z0ƖᄅƐㄣϛ9ㄥ86˙',„¡¿)(][}{><‾⅋؛";
+
+    /// <summary>
+    /// Turns each line upside down: characters are mirrored and the order is reversed, like Minecraft's "English (Upside Down)".
+    /// Placeholders such as {0} or {1:F1} are kept as they are, only moved, so formatting still works.
+    /// </summary>
+    internal static string FlipUpsideDown(string text) => string.Join('\n', text.Split('\n').Select(FlipLine));
+
+    private static string FlipLine(string line)
+    {
+        var parts = new List<string>();
+        var start = 0;
+        foreach (System.Text.RegularExpressions.Match m in PlaceholderPattern.Matches(line))
+        {
+            parts.Add(FlipPlain(line[start..m.Index]));
+            parts.Add(m.Value);
+            start = m.Index + m.Length;
+        }
+        parts.Add(FlipPlain(line[start..]));
+        parts.Reverse();
+        return string.Concat(parts);
+    }
+
+    private static string FlipPlain(string text)
+    {
+        var chars = new System.Text.StringBuilder(text.Length);
+        for (var i = text.Length - 1; i >= 0; i--)
+        {
+            var c = text[i];
+            if (char.IsLowSurrogate(c) && i > 0 && char.IsHighSurrogate(text[i - 1]))
+            {
+                chars.Append(text[i - 1]).Append(c);
+                i--;
+                continue;
+            }
+            var at = FlipFrom.IndexOf(c);
+            chars.Append(at < 0 ? c : FlipTo[at]);
+        }
+        return chars.ToString();
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex PlaceholderPattern = new(@"\{\d+(?::[^}]*)?\}", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     public static string T(string key) => Lookup(_state.Table, key);
 
@@ -111,7 +192,7 @@ public static class L
         return "⟦" + text + new string('·', padding) + "⟧";
     }
 
-    /// <summary>简体原文；单复数变体（key.one / key.other）在原文表里只有 key。</summary>
+    /// <summary>English source text; also covers plural variants (key.one / key.other) via the base key.</summary>
     private static string? FallbackText(string key) =>
         Fallback.TryGetValue(key, out var source) ? source
         : PluralBaseKey(key) is { } b && Fallback.TryGetValue(b, out var baseText) ? baseText
@@ -120,7 +201,7 @@ public static class L
     private static string? PluralBaseKey(string key) =>
         key.EndsWith(".one", StringComparison.Ordinal) ? key[..^4] : key.EndsWith(".other", StringComparison.Ordinal) ? key[..^6] : null;
 
-    /// <summary>按当前语言的区域格式化。译文的占位符写错了（格式异常）时先用简体原文，再不行就直接显示文字，不让界面崩掉。</summary>
+    /// <summary>按当前语言的区域格式化。译文的占位符写错了（格式异常）时先用英文原文，再不行就直接显示文字，不让界面崩掉。</summary>
     public static string F(string key, params object?[] args) => Format(_state, key, args);
 
     private static string Format(State state, string key, object?[] args)
@@ -159,9 +240,10 @@ public static class L
         : table.ContainsKey(key + ".other") ? key + ".other"
         : key;
 
-    /// <summary>某种语言的全部文字（检查漏翻用）。文件坏了（JSON 格式不对）时返回空表，界面退回简体原文，不会打不开。</summary>
+    /// <summary>某种语言的全部文字（检查漏翻用）。文件坏了（JSON 格式不对）时返回空表，界面退回英文原文，不会打不开。</summary>
     public static IReadOnlyDictionary<string, string> Load(string code) => Tables.GetOrAdd(code, static c =>
     {
+        if (c == UpsideDown) return Load(Source).ToDictionary(p => p.Key, p => FlipUpsideDown(p.Value), StringComparer.Ordinal);
         try
         {
             using var stream = typeof(L).Assembly.GetManifestResourceStream($"Amber.Core.Localization.{c}.json");

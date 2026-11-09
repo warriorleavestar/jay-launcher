@@ -12,7 +12,14 @@ public partial class LogPage : UserControl
     private LogViewModel? _vm;
     private bool _scrollQueued;
 
-    public LogPage() => InitializeComponent();
+    /// <summary>主题包可以重新排这一页的区块（docs/themes.md 的“页面布局”）。</summary>
+    internal Amber.App.Services.ThemeLayoutHost ThemeLayout { get; }
+
+    public LogPage()
+    {
+        InitializeComponent();
+        ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "log");
+    }
 
     protected override void OnDataContextChanged(EventArgs e)
     {

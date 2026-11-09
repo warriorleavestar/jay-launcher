@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:c="using:Amber.App.Views.Controls"
              xmlns:l="using:Amber.App.Localization"
@@ -41,9 +42,9 @@
   </UserControl.Styles>
 
   <Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="*,Auto" Container.Name="AccountsPageRoot" Container.Sizing="Width">
-    <TextBlock Classes="h1" Text="{l:T accounts.title}" Grid.ColumnSpan="2" />
+    <TextBlock svc:ThemeRegion.Name="accounts.title" Classes="h1" Text="{l:T accounts.title}" Grid.ColumnSpan="2" />
 
-    <Border Grid.Row="1" Classes="card" Padding="8">
+    <Border svc:ThemeRegion.Name="accounts.list" Grid.Row="1" Classes="card" Padding="8">
       <!-- 皮肤预览放在列表左边一块固定大小的区域里，不再挤在下面留一大块空白；页面窄时收起，给列表让位置 -->
       <Grid ColumnDefinitions="Auto,*">
         <Panel x:Name="SkinPreviewHost">
@@ -85,7 +86,7 @@
       </Grid>
     </Border>
 
-    <Border x:Name="AddCard" Grid.Row="1" Grid.Column="1" Classes="card" Margin="14,0,0,14">
+    <Border svc:ThemeRegion.Name="accounts.add" x:Name="AddCard" Grid.Row="1" Grid.Column="1" Classes="card" Margin="14,0,0,14">
       <ScrollViewer>
         <StackPanel Spacing="10">
           <TextBlock Classes="h2" Text="{l:T accounts.add.title}" Margin="0" />
@@ -185,7 +186,7 @@
       </ScrollViewer>
     </Border>
 
-    <Border Grid.Row="2" Grid.ColumnSpan="2" Classes="card" Margin="0">
+    <Border svc:ThemeRegion.Name="accounts.status" Grid.Row="2" Grid.ColumnSpan="2" Classes="card" Margin="0">
       <Border.IsVisible>
         <MultiBinding Converter="{x:Static BoolConverters.Or}">
           <Binding Path="IsShowing" ElementName="PageStatus" />

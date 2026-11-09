@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
              xmlns:l="using:Amber.App.Localization"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:c="using:Amber.App.Views.Controls"
@@ -7,15 +8,15 @@
              x:Class="Amber.App.Views.DownloadPage"
              x:DataType="vm:DownloadViewModel">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-    <TextBlock Classes="h1" Text="{l:T download.heading}" />
-    <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+    <TextBlock svc:ThemeRegion.Name="downloads.title" Classes="h1" Text="{l:T download.heading}" />
+    <Grid svc:ThemeRegion.Name="downloads.search" Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
       <ComboBox ItemsSource="{Binding Filters}" SelectedItem="{Binding Filter}" MinWidth="110" />
       <TextBox Grid.Column="1" Text="{Binding Search}" PlaceholderText="{l:T download.search.placeholder}" Margin="10,0" />
       <Button Grid.Column="2" Content="{l:T common.refresh}" Command="{Binding RefreshCommand}" />
     </Grid>
 
     <!-- 热门版本芯片（改版规格 4.4）：最新正式版 + 和新手卡同一组热门版本，点了直接打开安装面板。 -->
-    <WrapPanel Grid.Row="2" ItemSpacing="8" LineSpacing="8" Margin="0,0,0,10">
+    <WrapPanel svc:ThemeRegion.Name="downloads.filters" Grid.Row="2" ItemSpacing="8" LineSpacing="8" Margin="0,0,0,10">
       <TextBlock Classes="hint" Text="{l:T onboarding.install.hot}" VerticalAlignment="Center" />
       <Button x:Name="HotLatestButton" Classes="secondary" Content="{Binding LatestReleaseLabel}" Command="{Binding ConfigureLatestCommand}" IsVisible="{Binding HasLatestRelease}" />
       <ItemsControl x:Name="HotList" ItemsSource="{Binding HotVersions}">
@@ -33,7 +34,7 @@
       </ItemsControl>
     </WrapPanel>
 
-    <Grid x:Name="BodyGrid" Grid.Row="3" ColumnDefinitions="*,Auto">
+    <Grid svc:ThemeRegion.Name="downloads.body" x:Name="BodyGrid" Grid.Row="3" ColumnDefinitions="*,Auto">
       <Border Classes="card" Padding="6">
         <Grid>
           <!-- 加载和出错（改版规格 4.4 / 5.5）：加载只给 Spinner；出错写原因并给【重试】【切换下载源】。 -->
@@ -136,7 +137,7 @@
       </Border>
     </Grid>
 
-    <Border Grid.Row="4" Classes="card" Margin="0">
+    <Border svc:ThemeRegion.Name="downloads.status" Grid.Row="4" Classes="card" Margin="0">
       <Grid ColumnDefinitions="*,Auto">
         <StackPanel Spacing="6" VerticalAlignment="Center">
           <c:StatusBar Message="{Binding StatusInfo}" />

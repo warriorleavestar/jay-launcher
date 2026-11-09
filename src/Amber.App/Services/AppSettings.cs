@@ -53,6 +53,9 @@ public sealed class AppSettings
     /// <summary>导入的界面主题包 id（{数据目录}/themes/{id}）；null 表示 Jay 默认主题。</summary>
     public string? ThemePack { get; set; }
 
+    /// <summary>联机网络配置里带的主题：在联机页里使用（整个 Jay 要另外同意）。关掉就一律不用。</summary>
+    public bool AllowNetworkThemes { get; set; } = true;
+
     /// <summary>界面语言：zh-Hans / zh-Hant / en / ja；null 表示跟随系统。</summary>
     public string? Language { get; set; }
 
@@ -76,6 +79,28 @@ public sealed class AppSettings
 
     /// <summary>看过并同意了公共网络的隐私说明（第一次连公共网络时显示）。</summary>
     public bool PublicNetworkNoticeAccepted { get; set; }
+
+    /// <summary>联机设备验证：off / on / required（必须：不支持验证的人不让进我开的房间）。</summary>
+    public string SecurityAttestation { get; set; } = "on";
+
+    /// <summary>熔断：房间里确认有人冒充时，所有人下线，倒计时后重启 Jay。</summary>
+    public bool SecurityBreaker { get; set; } = true;
+
+    /// <summary>熔断后重启前的倒计时（秒），倒计时里按空格可以取消。</summary>
+    public int BreakerRestartDelay { get; set; } = Amber.Core.Multiplayer.Transport.SecurityPolicy.DefaultRestartDelay;
+
+    /// <summary>熔断后不等倒计时直接重启。</summary>
+    public bool BreakerSkipDelay { get; set; }
+
+    /// <summary>上次因为熔断自动重启的时间：10 分钟内不再自动重启，免得反复熔断变成反复重启。</summary>
+    public DateTimeOffset? LastBreakerRestart { get; set; }
+
+    /// <summary>本机设置给出的安全策略（公开网络的最低要求再用 Tighten 合进来）。</summary>
+    public Amber.Core.Multiplayer.Transport.SecurityPolicy LocalSecurityPolicy() => new(
+        SecurityAttestation switch { "off" => Amber.Core.Multiplayer.Transport.AttestationMode.Off, "required" => Amber.Core.Multiplayer.Transport.AttestationMode.Required, _ => Amber.Core.Multiplayer.Transport.AttestationMode.On },
+        SecurityBreaker,
+        Math.Clamp(BreakerRestartDelay, 0, Amber.Core.Multiplayer.Transport.SecurityPolicy.MaxRestartDelay),
+        BreakerSkipDelay);
 
     /// <summary>最近玩过的实例 id，最近的在前（启动页的“最近游玩”）。</summary>
     public List<string>? RecentInstances { get; set; }

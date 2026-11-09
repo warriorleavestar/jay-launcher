@@ -78,7 +78,7 @@
 | 联机：EasyTier 进程随 Jay 退出 | ✅ 作业对象 | ✅ 看门脚本 + 开始联机前按记录清理 | ✅ 同左 | `Multiplayer/ProcessJob.cs`、`Multiplayer/EasyTierProcessGuard.cs`、`Multiplayer/EasyTierProcessTracker.cs` |
 | 联机：邀请、敲门、成员钥匙、踢人【实验】 | ✅ | 🟡 | 🟡 | 纯托管代码 |
 | 联机：封装模式（MC 专用、高加密） | ✅ | 🟡 | 🟡 | `Multiplayer/Transport/` |
-| 联机：极端加密（ML-KEM 混合） | ✅ Win11 新版 | 🪟 .NET 在 macOS 上没有 ML-KEM | 🟡 需要 OpenSSL 3.5+ | `Multiplayer/Transport/Noise.cs` `HybridSupported` |
+| 联机：极端加密（ML-KEM 混合） | ✅ 系统有 ML-KEM 时用系统的，没有时用 BouncyCastle | ✅ BouncyCastle | ✅ OpenSSL 3.5+ 用系统的，否则 BouncyCastle | `Multiplayer/Transport/MlKem768.cs`、`Noise.cs` |
 | 联机：直连房间（IPv6、UPnP/NAT-PMP、打洞） | ✅ | 🟡 | 🟡 | `Multiplayer/DirectLink.cs`、`PortMapping.cs` |
 | 联机：房间聊天 | ✅ | 🟡 | 🟡 | `Multiplayer/RoomChat.cs` |
 | 联机：完整局域网模式（虚拟网卡） | ✅ 要管理员 | 🟡 管理员密码框 + utun，待真机验证 | 🟡 pkexec + tun，云端已测 | `Multiplayer/EasyTierElevated.cs`、`UnixElevated*.cs`、`UnixBroadcastRelay.cs` |
@@ -91,7 +91,7 @@
 | `jay-server` 服务端【实验】 | ✅ | ✅ | ✅（systemd） | `src/Amber.Server` |
 | 模组烘焙【实验，默认关】 | ✅ | 🟡 | 🟡 | `Bake/BakeService.cs` |
 | 发布包：单文件 + ReadyToRun | ✅ | ✅ | ✅ | `.github/workflows/build.yml` |
-| 发布包：Native AOT | ✅ | 🪟 CI 没出 | 🪟 CI 没出 | 同上 |
+| 发布包：Native AOT | ✅ | ✅ `Jay-osx-*-aot.tar.gz`（待真机测） | ✅ `Jay-linux-*-aot.tar.gz` | 同上 |
 | 代码签名 | 无 | 只有 ad-hoc（`scripts/publish-macos.sh`） | 无 | |
 
 ## 3. 功能和实现

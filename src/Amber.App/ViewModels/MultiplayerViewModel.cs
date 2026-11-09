@@ -776,6 +776,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         client.Received += m => Dispatcher.UIThread.Post(() => OnChatMessage(client, m));
         client.Rekeyed += next => Dispatcher.UIThread.Post(() => OnRekey(client, next));
         client.Kicked += () => Dispatcher.UIThread.Post(() => OnKicked(client));
+        client.Breaker += () => Dispatcher.UIThread.Post(() => OnBreakerFromHost(client));
         client.RemoteRequested += sid => Dispatcher.UIThread.Post(() => _ = OnRemoteRequestedAsync(client, sid));
         client.Disconnected += () => Dispatcher.UIThread.Post(() =>
         {
@@ -799,6 +800,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             ChatReady = true;
             ChatStatus = L.T("multiplayer.chat.privacy");
             StartPrivate(client);
+        }
+        catch (DeviceAttestationException)
+        {
+            // 对面拿着房间凭据，却证明不了自己是房主那台电脑：不是网络问题，不重连，按熔断处理。
+            await client.DisposeAsync();
+            if (_room == room) OnFakeHost();
         }
         catch (Exception e) when (e is System.Net.Sockets.SocketException or OperationCanceledException or IOException)
         {

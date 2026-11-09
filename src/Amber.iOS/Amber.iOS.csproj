@@ -9,8 +9,8 @@
     <AssemblyName>Jay</AssemblyName>
     <ApplicationId>nz.work.minecraft.jay</ApplicationId>
     <ApplicationTitle>Jay</ApplicationTitle>
-    <ApplicationDisplayVersion>0.7.0</ApplicationDisplayVersion>
-    <ApplicationVersion>70</ApplicationVersion>
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+    <ApplicationVersion>$(MobileApplicationVersion)</ApplicationVersion>
   </PropertyGroup>
 
   <ItemGroup>

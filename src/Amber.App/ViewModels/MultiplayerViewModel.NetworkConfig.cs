@@ -57,6 +57,7 @@ public sealed partial class MultiplayerViewModel
         NetworkLinks.Clear();
         foreach (var link in config?.Links ?? []) NetworkLinks.Add(link);
         OnPropertyChanged(nameof(HasNetworkLinks));
+        ResetAccount();
         UpdateHostPolicy();
     }
 

@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
              xmlns:l="using:Amber.App.Localization"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:pub="using:Amber.Core.Multiplayer.Public"
@@ -7,9 +8,9 @@
              x:Class="Amber.App.Views.MultiplayerPage"
              x:DataType="vm:MultiplayerViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
-    <TextBlock Classes="h1" Text="{l:T multiplayer.title}" />
+    <TextBlock svc:ThemeRegion.Name="multiplayer.title" Classes="h1" Text="{l:T multiplayer.title}" />
 
-    <ScrollViewer Grid.Row="1">
+    <ScrollViewer svc:ThemeRegion.Name="multiplayer.body" Grid.Row="1">
       <StackPanel Spacing="14" Margin="0,0,14,14">
 
         <!-- 组件 -->
@@ -72,6 +73,30 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <!-- 网络账号（网络配置里有 login 段才显示）：账号密码加密发给网络节点，可能还要两步验证 -->
+            <Border Classes="card" Margin="0" IsVisible="{Binding HasNetworkLogin}">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{l:T multiplayer.account.title}" FontWeight="SemiBold" />
+                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.account.hint}" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.account.required}" IsVisible="{Binding IsNetworkLoginRequired}" />
+                <StackPanel Spacing="6" IsVisible="{Binding ShowAccountLogin}">
+                  <TextBox Text="{Binding AccountUser}" PlaceholderText="{l:T multiplayer.account.user}" MaxLength="32" />
+                  <TextBox Text="{Binding AccountPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.account.password}" />
+                  <ItemsControl ItemsSource="{Binding AccountFactors}" IsVisible="{Binding HasAccountFactors}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:AccountFactorInput">
+                        <TextBox Text="{Binding Value}" PlaceholderText="{Binding Prompt}" MaxLength="256" Margin="0,0,0,6" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Button Classes="primary" Content="{l:T multiplayer.account.login}" Command="{Binding LoginAccountCommand}" />
+                </StackPanel>
+                <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding IsAccountLoggedIn}">
+                  <TextBlock VerticalAlignment="Center" Text="{Binding AccountLoggedInAs}" FontWeight="SemiBold" />
+                  <Button Content="{l:T multiplayer.account.logout}" Command="{Binding LogoutAccountCommand}" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
             <!-- 第一次连之前：别人能看到什么、看不到什么 -->
             <Border Classes="card" Margin="0" IsVisible="{Binding PublicNoticeOpen}">
               <StackPanel Spacing="8">
@@ -925,7 +950,7 @@
     </ScrollViewer>
 
     <!-- 消息被 ✕ 关掉后整张卡片一起收起，不留空卡片 -->
-    <Border Grid.Row="2" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
+    <Border svc:ThemeRegion.Name="multiplayer.status" Grid.Row="2" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
       <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
     </Border>
   </Grid>

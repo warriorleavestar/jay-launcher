@@ -306,7 +306,7 @@ public sealed class NoiseHandshake : IDisposable
     private X25519KeyPair? _e;
     private byte[]? _re;
 #pragma warning disable SYSLIB5006 // ML-KEM 在 .NET 10 里还标着实验性，但用的是系统（Windows CNG）的实现
-    private MLKem? _e1;
+    private MlKem768.IDecapsulationKey? _e1;
 #pragma warning restore SYSLIB5006
     private byte[]? _re1;
     private int _step;
@@ -346,15 +346,8 @@ public sealed class NoiseHandshake : IDisposable
     public byte[] HandshakeHash => _ss.HandshakeHash;
     public bool IsComplete => _step == MessageCount;
 
-    public static bool HybridSupported
-    {
-        get
-        {
-#pragma warning disable SYSLIB5006
-            return MLKem.IsSupported;
-#pragma warning restore SYSLIB5006
-        }
-    }
+    /// <summary>极端加密（ML-KEM 混合）：系统没有 ML-KEM 时用 BouncyCastle 的实现，所以每个系统都支持（见 <see cref="MlKem768"/>）。</summary>
+    public static bool HybridSupported => true;
 
     private void WriteE(List<byte> message)
     {
@@ -487,10 +480,8 @@ public sealed class NoiseHandshake : IDisposable
             WriteE(message);
             if (_pattern == NoisePattern.NNhfspsk0)
             {
-#pragma warning disable SYSLIB5006
-                _e1 = MLKem.GenerateKey(MLKemAlgorithm.MLKem768);
+                _e1 = MlKem768.Generate();
                 message.AddRange(_ss.EncryptAndHash(_e1.ExportEncapsulationKey()));
-#pragma warning restore SYSLIB5006
             }
         }
         else if (!_initiator && _step == 1)
@@ -499,10 +490,7 @@ public sealed class NoiseHandshake : IDisposable
             _ss.MixKey(_e!.Dh(_re!));
             if (_pattern == NoisePattern.NNhfspsk0)
             {
-#pragma warning disable SYSLIB5006
-                using var remote = MLKem.ImportEncapsulationKey(MLKemAlgorithm.MLKem768, _re1!);
-                remote.Encapsulate(out var ciphertext, out var shared);
-#pragma warning restore SYSLIB5006
+                var (ciphertext, shared) = MlKem768.Encapsulate(_re1!);
                 message.AddRange(_ss.EncryptAndHash(ciphertext));
                 _ss.MixKey(shared);
                 CryptographicOperations.ZeroMemory(shared);
@@ -523,9 +511,7 @@ public sealed class NoiseHandshake : IDisposable
             message = ReadE(message);
             if (_pattern == NoisePattern.NNhfspsk0)
             {
-#pragma warning disable SYSLIB5006
-                var length = MLKemAlgorithm.MLKem768.EncapsulationKeySizeInBytes + CipherState.TagLength;
-#pragma warning restore SYSLIB5006
+                var length = MlKem768.EncapsulationKeySize + CipherState.TagLength;
                 if (message.Length < length) throw new CryptographicException(L.T("core.mp.noise.handshakeshort"));
                 _re1 = _ss.DecryptAndHash(message[..length]);
                 message = message[length..];
@@ -537,12 +523,10 @@ public sealed class NoiseHandshake : IDisposable
             _ss.MixKey(_e!.Dh(_re!));
             if (_pattern == NoisePattern.NNhfspsk0)
             {
-#pragma warning disable SYSLIB5006
-                var length = MLKemAlgorithm.MLKem768.CiphertextSizeInBytes + CipherState.TagLength;
+                var length = MlKem768.CiphertextSize + CipherState.TagLength;
                 if (message.Length < length) throw new CryptographicException(L.T("core.mp.noise.handshakeshort"));
                 var ciphertext = _ss.DecryptAndHash(message[..length]);
                 var shared = _e1!.Decapsulate(ciphertext);
-#pragma warning restore SYSLIB5006
                 _ss.MixKey(shared);
                 CryptographicOperations.ZeroMemory(shared);
                 message = message[length..];

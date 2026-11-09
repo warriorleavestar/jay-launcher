@@ -1,6 +1,8 @@
-# 界面用词表
+# 界面用词表 / UI glossary
 
-写新文案、改翻译时按这张表用词。翻译表在 `src/Amber.Core/Localization/`，简体中文是原文。
+Use these terms when writing or translating UI text. The tables live in `src/Amber.Core/Localization/`; `en.json` is the source. See [CONTRIBUTING.md](../CONTRIBUTING.md#ui-translations).
+
+写新文案、改翻译时按这张表用词。翻译表在 `src/Amber.Core/Localization/`，英文 `en.json` 是原文。
 
 ## 核心概念
 

@@ -87,13 +87,31 @@
 { "v": 1, "network": "nz-friends", "notice": "欢迎……",
   "links": [{ "name": "规则", "url": "https://example.org/rules" }],
   "policy": { "modes": ["public", "password"], "requireDevice": true, "files": true, "maxFileMB": 2048, "minVersion": "0.8.0" },
+  "login": { "required": true, "key": "<登录公钥>", "signKey": "<发凭证的公钥>", "factors": ["totp"], "requireFactor": false },
   "ui": { "...": "界面主题，见 docs/themes.md" } }
 ```
 
 - `notice` 和 `links` 显示在公共网络卡片上，链接只认 https，用系统浏览器打开。
 - `policy` 只能比默认更严：`modes` 是这个网络上允许公开的房间方式（隐藏房间总是可以），`requireDevice` 让这个网络上开的房间都要求设备指纹，`files` / `maxFileMB` 关掉或限制成员之间传文件（收发两头都查），`minVersion` 是最低 Jay 版本。
 - `ui` 先原样保存，等界面主题功能合并后接上。
-- 账号密码登录还没做（要服务端配合，单独一期）。
+- `login` 见下一节。
+
+## 网络账号（账号密码 + 两步验证）
+
+账号由网络维护者在自己的节点上管，Jay 不经手、不保存账号库。
+
+1. 节点上开登录：`jay-server directory --accounts ...`。第一次会在数据目录生成 `login.key`（不要外传），并打印要写进网络配置的 `login` 段。
+2. 加账号：`jay-server account add <账号>`（密码在终端输入，至少 8 位；脚本里可以用环境变量 `JAY_ACCOUNT_PASSWORD`）。还有 `passwd`、`remove`、`disable`、`enable`、`list`。
+3. 两步验证：`jay-server account 2fa on <账号> [--issuer <网络名>]` 打印密钥和 `otpauth://` 地址，用任何验证器 App（Google / Microsoft Authenticator 等）添加；`2fa off` 关掉。`directory --require-2fa` 让没开两步验证的账号登录不了。
+4. 第三方验证方式：`directory --factor <名字>:<提示>:<程序>`（可以多个，用逗号隔开）。登录时 Jay 显示“提示”让用户填，节点把 `{"user","response","network"}` 写进程序的标准输入，退出码 0 = 通过，10 秒没结束算不通过。邮件码、短信、会员系统、人工审核都可以这样接。写 C# 的也可以直接实现 `ILoginFactor` 接口挂到 `LoginAuthority.Factors`。
+
+怎么保护的：
+
+- Jay 用自己的联机身份把账号密码（和验证码）加密给节点的登录公钥（X25519 + AES-GCM，和私聊同一套），公共网络上别人看不到；带时间戳，5 分钟外的旧请求不认。
+- 节点只存 PBKDF2-SHA256（60 万次）的盐和哈希。连续错 5 次（密码或验证码都算）锁 5 分钟；账号不存在和密码错的回答一样。密码对了要不要两步验证、验证码对不对，也加密发回，旁人看不出密码对没对。
+- 登录成功后节点发一张凭证：账号名 + 登录人的联机指纹 + 网络编号 + 7 天有效期，节点用 `signKey` 签名。凭证绑定指纹，被别人看到也没法用。
+- `required: true` 时，这个网络上开的房间敲门时都查凭证（房主用 `signKey` 自己验，不用联系节点），没登录的被拒，提示“这个网络要求登录账号”。房主的敲门卡片上能看到账号名。
+- 凭证只放在 Jay 的内存里，关掉 Jay 或换网络就要重新登录。停用账号后已发的凭证最多 7 天后失效。
 
 ## 部署种子节点
 
@@ -117,7 +135,7 @@ Linux 上长期运行可以用 `server/jay-public-node.service`（systemd）。
 AMBER_SELFTEST=<报告目录> AMBER_SELFTEST_SCOPE=public-network AMBER_DATA_DIR=<测试数据目录> Jay
 ```
 
-在本机开一个种子节点，走完：连接（第一次显示隐私说明）→ 开房间 → 公开发布 → 另一个成员在列表里看到并加入 → 改成密码房间（密码错进不去、对了能进）→ 设备指纹（默认关着、码每次不同、隐藏房间按码找到、要求设备指纹、名单 + 批准后进入、换新后旧码失效）→ 撤下 → 断开 → 换公共网络（审核过的直接加并连进去、没审核的先提醒、同编号换钥匙拒绝、删掉回到 Jay 网络、网络配置的公告 / 链接 / 策略、取不到配置就不连）。需要先下载好联机组件。
+在本机开一个种子节点，走完：连接（第一次显示隐私说明）→ 开房间 → 公开发布 → 另一个成员在列表里看到并加入 → 改成密码房间（密码错进不去、对了能进）→ 设备指纹（默认关着、码每次不同、隐藏房间按码找到、要求设备指纹、名单 + 批准后进入、换新后旧码失效）→ 撤下 → 断开 → 换公共网络（审核过的直接加并连进去、没审核的先提醒、同编号换钥匙拒绝、删掉回到 Jay 网络、网络配置的公告 / 链接 / 策略、网络账号登录（密码错、要两步验证码、码对了登录、退出和断开后凭证作废）、取不到配置就不连）。需要先下载好联机组件。
 
 用真 EasyTier 跑核心流程的单元测试：设置 `JAY_ET_DIR=<放 easytier-core 和 easytier-cli 的文件夹>` 后运行 `PublicNetworkEasyTierTests`。
 

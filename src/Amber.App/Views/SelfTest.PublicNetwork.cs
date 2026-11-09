@@ -145,14 +145,14 @@ internal sealed partial class SelfTest
         Check("公共网络：断开后状态复原", !host.IsPublicConnected && !guest.IsPublicConnected && host.PublicRooms.Count == 0);
 
         seed.Dispose();
-        await NetworkSwitchAsync(host);
+        await NetworkSwitchAsync(host, directory);
     }
 
     /// <summary>
     /// 换公共网络：注册表签的连接串直接加、自动选上，再连进这个网络（本机另开一个这个网络的种子节点）；
     /// 别人签的先提醒、确认后才加；同编号换钥匙的拒绝；删掉后回到 Jay 公共网络。
     /// </summary>
-    private async Task NetworkSwitchAsync(MultiplayerViewModel host)
+    private async Task NetworkSwitchAsync(MultiplayerViewModel host, RoomDirectoryServer directory)
     {
         var service = host.TestService;
         var registry = NetworkSigner.Generate(out _);
@@ -164,11 +164,20 @@ internal sealed partial class SelfTest
             string.Join(" | ", host.NetworkChoices.Select(c => c.Label)));
 
         var node = $"tcp://127.0.0.1:{EasyTierArgs.FreeTcpPort()}";
+        // 网络节点的账号登录（和 jay-server directory --accounts 一样）：一个开了两步验证的账号。
+        var accounts = new AccountStore(Path.Combine(reportDir, "node-accounts.json"));
+        accounts.Set("steve", "selftest-pass");
+        var totp = TotpFactor.NewSecret();
+        accounts.SetTotp("steve", totp);
+        var (loginKey, loginSigner) = LoginAuthority.LoadOrCreateKeys(Path.Combine(reportDir, "node-login.key"));
+        directory.Login = new LoginAuthority(accounts, loginKey, loginSigner, "selftest-net") { Factors = [new TotpFactor(accounts)] };
+        var loginJson = $$"""{ "required": true, "key": "{{Convert.ToBase64String(loginKey.PublicKey)}}", "signKey": "{{Convert.ToBase64String(loginSigner.PublicKey)}}", "factors": ["totp"] }""";
         // 网络配置文件：先放进缓存（按哈希命名），地址故意用连不上的，证明是按哈希从缓存里拿的。
-        var configJson = System.Text.Encoding.UTF8.GetBytes("""
+        var configJson = System.Text.Encoding.UTF8.GetBytes($$"""
             { "v": 1, "network": "selftest-net", "notice": "自检网络公告：只允许公开房间",
               "links": [{ "name": "网络规则", "url": "https://example.invalid/rules" }],
-              "policy": { "modes": ["public"], "requireDevice": true, "maxFileMB": 1 } }
+              "policy": { "modes": ["public"], "requireDevice": true, "maxFileMB": 1 },
+              "login": {{loginJson}} }
             """);
         var configSha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(configJson));
         host.NetworkConfigDir = Path.Combine(reportDir, "network-configs");
@@ -195,8 +204,11 @@ internal sealed partial class SelfTest
             Check("网络配置：策略生效（只允许公开房间、要求设备指纹、文件限 1 MB）", !host.NetworkPolicy.Allows(RoomVisibility.Password)
                 && host.HostDevicePolicy.Require && !host.NetworkPolicy.AllowsFile(2 * 1024 * 1024));
             await ShotAsync("网络配置公告");
+            await NetworkLoginAsync(host, totp);
             host.DisconnectPublicCommand.Execute(null);
             Check("网络配置：断开后公告和策略清掉", !host.HasNetworkNotice && !host.HostDevicePolicy.Require && host.NetworkPolicy.Allows(RoomVisibility.Password));
+            Check("网络账号：断开后登录框和凭证清掉", !host.HasNetworkLogin && !host.IsAccountLoggedIn && host.AccountToken is null && host.HostAccountPolicy is null);
+            directory.Login = null;
             // 缓存被改过、地址又连不上：不连。
             await File.WriteAllTextAsync(Path.Combine(host.NetworkConfigDir, configSha + ".json"), "{}");
             await host.ConnectPublicCommand.ExecuteAsync(null);
@@ -243,6 +255,33 @@ internal sealed partial class SelfTest
     }
 
     /// <summary>设备指纹：默认关着；打开后生成的码每次不同；房主隐藏房间 + 指纹查找 + 要求设备指纹；加入方按码找到房间，没开指纹进不去，开了、在名单里、房主批准后能进；换新后旧码找不到。</summary>
+    /// <summary>网络账号：登录框按网络配置显示，密码错、缺两步验证码、码对了登录成功，房主要求登录。</summary>
+    private async Task NetworkLoginAsync(MultiplayerViewModel host, byte[] totp)
+    {
+        Check("网络账号：网络要求登录时显示登录框和验证码框", host.HasNetworkLogin && host.IsNetworkLoginRequired && host.ShowAccountLogin
+            && host.AccountFactors.SingleOrDefault()?.Name == "totp"
+            && (await FindAsync<MultiplayerPage>(_ => true))!.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == L.T("multiplayer.account.title")));
+        Check("网络账号：要求登录时房主只让登录过的人进", host.HostAccountPolicy is { Network: "selftest-net" });
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.AccountUser = "steve";
+            host.AccountPassword = "wrong-password";
+        });
+        Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, host.LoginAccountCommand)));
+        Check("网络账号：密码错登录不了", await WaitAsync(() => !host.IsAccountLoggingIn && host.Status.Contains(L.T("core.mp.account.wrong")), 20) && !host.IsAccountLoggedIn, host.Status);
+        Dispatcher.UIThread.Invoke(() => host.AccountPassword = "selftest-pass");
+        await host.LoginAccountCommand.ExecuteAsync(null);
+        Check("网络账号：密码对了还要两步验证码", !host.IsAccountLoggedIn && host.Status == L.T("core.mp.factor.needed") && host.HasAccountFactors, host.Status);
+        await ShotAsync("网络账号两步验证");
+        Dispatcher.UIThread.Invoke(() => host.AccountFactors[0].Value = TotpFactor.Code(totp, DateTimeOffset.UtcNow));
+        await host.LoginAccountCommand.ExecuteAsync(null);
+        Check("网络账号：验证码对了登录成功，拿到凭证", host.IsAccountLoggedIn && host.AccountLoggedInAs == "steve" && host.AccountToken is not null
+            && host.AccountPassword.Length == 0, host.Status);
+        await ShotAsync("网络账号已登录");
+        host.LogoutAccountCommand.Execute(null);
+        Check("网络账号：退出登录后凭证作废", !host.IsAccountLoggedIn && host.AccountToken is null && host.ShowAccountLogin);
+    }
+
     private async Task DeviceFingerprintAsync(MultiplayerViewModel host, MultiplayerViewModel guest)
     {
         host.UseTestDevice(Path.Combine(reportDir, "device-host"));

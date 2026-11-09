@@ -8,7 +8,14 @@ namespace Amber.App.Views;
 
 public partial class InstancePage : UserControl
 {
-    public InstancePage() => InitializeComponent();
+    /// <summary>主题包可以重新排这一页的区块（docs/themes.md 的“页面布局”）。</summary>
+    internal Amber.App.Services.ThemeLayoutHost ThemeLayout { get; }
+
+    public InstancePage()
+    {
+        InitializeComponent();
+        ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "instances");
+    }
 
     private InstanceViewModel? Vm => DataContext as InstanceViewModel;
     private IStorageProvider? Storage => TopLevel.GetTopLevel(this)?.StorageProvider;
