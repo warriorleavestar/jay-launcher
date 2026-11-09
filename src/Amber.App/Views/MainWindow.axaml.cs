@@ -303,36 +303,4 @@ public partial class MainWindow : Window
         bitmap.Render(this);
         bitmap.Save(path);
     }
-
-    private async void ImportTheme_Click(object? sender, RoutedEventArgs e)
-    {
-        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = L.T("settings.themepack.import"),
-            AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType(L.T("settings.themepack.filetype")) { Patterns = ["*.jaytheme", "*.zip"] }],
-        });
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) vm.ImportThemePack(path);
-    }
-
-    private async void ExportTheme_Click(object? sender, RoutedEventArgs e)
-    {
-        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = L.T("settings.themepack.export"),
-            SuggestedFileName = "my-theme.jaytheme",
-            DefaultExtension = "jaytheme",
-            FileTypeChoices = [new FilePickerFileType(L.T("settings.themepack.filetype")) { Patterns = ["*.jaytheme"] }],
-        });
-        if (file?.TryGetLocalPath() is { } path) vm.ExportThemePack(path);
-    }
-
-    private async void BrowseGameDir_Click(object? sender, RoutedEventArgs e)
-    {
-        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = L.T("settings.directory.picker") });
-        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path) vm.GameDirectory = path;
-    }
 }

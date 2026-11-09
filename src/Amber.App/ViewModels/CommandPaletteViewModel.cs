@@ -241,25 +241,12 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
             [.. NamesOf("download.title"), "downloads", "install"]));
         list.Add(Act("activity", "palette.action.activity", () => OpenActivity?.Invoke(), null, [.. NamesOf("activity.title"), "Ctrl+J"]));
 
-        // Settings fields: "settings#Field" scrolls to the control and flashes it.
-        (string Field, string Key)[] settings =
-        [
-            ("GameDirectory", "settings.directory.label"),
-            ("Concurrency", "settings.download.concurrency"),
-            ("Motion", "settings.motion.label"),
-            ("Sidebar", "settings.sidebar.label"),
-            ("ThemePack", "settings.themepack.label"),
-            ("WindowWidth", "instance.settings.window_size"),
-            ("JvmArgs", "instance.settings.jvm_args"),
-            ("NoTrace", "settings.notrace.label"),
-            ("Attestation", "settings.security.attest.label"),
-            ("Breaker", "settings.security.breaker.label"),
-            ("RecycleKeep", "recycle.keep.label"),
-        ];
-        var settingsName = L.T("shell.settings");
-        foreach (var (field, key) in settings)
-            list.Add(new PaletteEntry(new CommandItem("setting:" + field, CommandKind.Setting, L.T(key), settingsName, NamesOf(key)),
-                () => Navigate?.Invoke("settings#" + field)));
+        // Every setting in the catalog: "settings#Field" opens its group, scrolls to the control and flashes it.
+        foreach (var field in SettingsCatalog.Fields)
+        {
+            var name = field.Field;
+            list.Add(new PaletteEntry(SettingsViewModel.ItemFor(field), () => Navigate?.Invoke("settings#" + name)));
+        }
 
         // Pages, with the old page names ("Downloads", "Toolbox"…) as other names.
         PaletteEntry Page(string route, string key, params string[] extra) =>

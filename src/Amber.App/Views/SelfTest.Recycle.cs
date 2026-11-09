@@ -41,7 +41,7 @@ internal sealed partial class SelfTest
 
             window.Width = 1440;
             window.Height = 900;
-            main.Shell.Navigate("settings");
+            main.Shell.Navigate("settings#RecycleKeep");
             await WaitAsync(() => main.CurrentPage is SettingsViewModel, 5);
             var card = await FindAsync<Border>(b => b.Name == "RecycleCard");
             Dispatcher.UIThread.Invoke(() => card?.BringIntoView());

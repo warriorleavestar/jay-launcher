@@ -226,9 +226,15 @@ public partial class MainWindow
     /// 路由带 #字段（§2.5 第 6 条）：在当前页里找 x:Name 是这个字段（或字段名 + Box）的控件，
     /// 滚到视口中间、给焦点、描边闪 2 秒。
     /// </summary>
-    private void RevealField(string? field)
+    internal void RevealField(string? field)
     {
         if (string.IsNullOrEmpty(field)) return;
+        // Settings show one group at a time: open the field's group first and lay it out.
+        if (DataContext is MainViewModel { CurrentPage: SettingsViewModel settings })
+        {
+            settings.ShowField(field);
+            PageHost.UpdateLayout();
+        }
         var target = PageHost.GetVisualDescendants().OfType<Control>().FirstOrDefault(c =>
             c.Name is { } n && (n.Equals(field, StringComparison.OrdinalIgnoreCase) || n.Equals(field + "Box", StringComparison.OrdinalIgnoreCase)));
         if (target is null) return;

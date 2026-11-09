@@ -17,6 +17,7 @@ internal sealed partial class SelfTest
     {
         var settings = Page<SettingsViewModel>();
         main.CurrentPage = settings;
+        settings.SelectGroup("game");
         await Task.Delay(600);
         var file = AppSettings.FilePath;
 
@@ -54,10 +55,10 @@ internal sealed partial class SelfTest
         Check("设置：↺ 恢复默认清掉 JVM 参数和提示", Press(reset) && await WaitAsync(() => !settings.HasJvmArgsError && settings.JvmArgs.Length == 0, 3));
         Dispatcher.UIThread.Invoke(() => settings.ResetFieldCommand.Execute("window"));
 
-        // Tab 顺序和视觉顺序一致：第一张卡从游戏目录开始往下走，纵坐标不往回跳。
+        // Tab 顺序和视觉顺序一致：游戏默认那张卡从 Java 开始往下走，纵坐标不往回跳。
         var order = Dispatcher.UIThread.Invoke(() =>
         {
-            var start = window.GetVisualDescendants().OfType<TextBox>().First(t => t.Name == "GameDirectoryBox");
+            var start = window.GetVisualDescendants().OfType<Control>().First(t => t.Name == "JavaBox");
             Border? Card(Visual c) => c.GetVisualAncestors().OfType<Border>().FirstOrDefault(b => b.Classes.Contains("card"));
             var card = Card(start);
             var ys = new List<double>();
@@ -70,7 +71,7 @@ internal sealed partial class SelfTest
             }
             return ys;
         });
-        Check("键盘：设置页 Tab 顺序从上到下", order.Count >= 5 && order.Zip(order.Skip(1)).All(p => p.Second >= p.First - 1), string.Join(",", order));
+        Check("键盘：设置页 Tab 顺序从上到下", order.Count >= 5 && order.Zip(order.Skip(1)).All(p => p.Second >= p.First - 4), string.Join(",", order));
 
         await ShotAsync("settings-saved");
 

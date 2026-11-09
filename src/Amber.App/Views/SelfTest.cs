@@ -82,6 +82,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "settings-layout")
+            {
+                await SettingsLayoutAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "palette")
             {
                 await PaletteAsync();
@@ -905,6 +912,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         // 无痕模式：在设置页勾上，这次启动的游戏日志不记聊天（生成过滤后的日志配置，游戏照常写 latest.log）。
         var settings = Page<SettingsViewModel>();
         main.CurrentPage = settings;
+        settings.SelectGroup("privacy");
         var noTraceBox = await FindAsync<CheckBox>(c => c.Name == "NoTraceBox");
         Dispatcher.UIThread.Invoke(() => { if (noTraceBox is not null) noTraceBox.IsChecked = true; });
         Check("无痕模式：勾选后存进设置", noTraceBox is not null && settings.NoTrace && File.ReadAllText(Amber.App.Services.AppSettings.FilePath).Contains("\"NoTrace\": true"));

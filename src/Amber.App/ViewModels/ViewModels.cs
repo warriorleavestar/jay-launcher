@@ -266,6 +266,7 @@ public sealed partial class MainViewModel : ObservableObject
             if (await content.ImportLocalPackAsync(path) is { } id && play) download.LaunchInstance?.Invoke(id);
         };
         var settingsPage = Pages.OfType<SettingsViewModel>().Single();
+        settingsPage.Navigate = r => shell.Navigate(r);
         Drop = new DropViewModel(service)
         {
             PreviewPack = async path =>
@@ -477,6 +478,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         _initializing = true;
         SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(s.Language) ?? "system"));
         _initializing = false;
+        InitGroups();
         _loading = false;
     }
 
