@@ -29,15 +29,27 @@ README.txt / *.md 可选：说明
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "id": "pixel-night",
   "name": "像素夜 Pixel Night",
   "author": "你的名字",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "minJay": "0.8.0"
 }
 ```
 
 `id` 只能用小写字母、数字、`.`、`_`、`-`，2 到 64 个字符。导入同 id 的主题会替换旧版本。
+
+### 格式版本（format）
+
+- 新主题写 `"format": 2`。没写 `format` 的包按 format 1 读。
+- `minJay`（可选）：主题需要的最低 Jay 版本。比当前 Jay 新时照常读，设置页提示“这个主题需要更新的 Jay”。
+- 比 Jay 认识的更新的 format：能认出的部分照常用，并提示（不拒绝）。
+- **format 1 自动升级**：读的时候在内存里换成 format 2，原文件不改。主题卡上写“已自动升级”，设置页的说明条写升级了什么、自动调了几处颜色，【复制给作者看】把完整说明复制成一段文字。具体对应：
+  - 只设计了一个强调色的 format 1 主题，开始按钮也用这个强调色（`Play*` = `Accent*`）；
+  - `FontDisplay`（format 1 是 26 号的大标题）→ `FontHeadline`，`FontDisplay` 按比例放大；`RadiusSm` 同时给 `RadiusXs`；`RadiusXl` = `RadiusLg` + 4（方角主题保持方角）；
+  - 组件 `callout` → `banner`，`pill` → `chip`、`badge`、`tag`，`nav.item` 也套到图标栏的 `rail.item`，`sidebar` 的背景同时给 `topbar`；
+  - shell.json 的旧字段见下面“窗口外壳”一节。
 
 ## tokens.json
 
@@ -49,18 +61,25 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
   "variants": "dark",
 
   // 种子色：给一两个颜色，Jay 推出整套配色。background 只用在明暗一致的那一套。
-  "seed": { "accent": "#5BD75B", "background": "#0E1224" },
+  // play 是开始按钮的颜色；只写 accent 的单色主题，开始按钮也用 accent（仍然更大、带光晕）。
+  "seed": { "accent": "#5BD75B", "play": "#F6A93B", "background": "#0E1224" },
 
   // 逐个指定颜色，盖住种子色推出来的值。dark / light / both（两套都用）。
   // 颜色写 #RRGGBB 或 #AARRGGBB（透明度在前）。
   "colors": {
-    "dark":  { "Accent": "#5BD75B", "SidebarBg": "#080A16" },
+    "dark":  { "Accent": "#5BD75B", "Frame": "#080A16" },
     "light": { "Accent": "#2E9E2E" },
     "both":  { "Danger": "#E5484D" }
   },
 
-  "sizes":  { "FontBody": 15, "FontTitle": 22, "Space4": 16 },
+  "sizes":  { "FontBody": 15, "FontTitle": 22, "Space4": 16, "ControlHeight": 40, "PlayHeight": 52 },
   "radius": { "RadiusSm": 0, "RadiusMd": 0, "RadiusLg": 0, "RadiusPill": 0 },
+  // 动效时长（毫秒），最多默认的 2 倍；用户打开“减少动画”时一律不用主题的值。
+  "motion": { "DurationBase": 200 },
+  // 线描插画的两种颜色（两套都用）。
+  "illustration": { "IlloLine": "#93B4FF", "IlloFill": "#202A3A" },
+  // 实例页英雄区：cover / blur / flat；遮罩最低 0.85。
+  "hero": { "mode": "cover", "scrim": 0.88 },
 
   // 字体：包里的文件（fonts/…）或系统字体名。可以按语言指定：default / zh-Hans / zh-Hant / ja / en。
   "fonts": {
@@ -74,17 +93,19 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 
 ### 颜色名
 
+format 2 的名字和 format 1 的名字都认（左边是 format 2 写法，括号里是 format 1 的旧名字，同一个颜色）：
+
 | 名字 | 用在哪 |
 |---|---|
-| PageBg / Surface / SurfaceRaised | 页面底色 / 卡片 / 卡片上的浮起层 |
-| BorderSubtle | 边框、分隔线 |
-| SidebarBg, SidebarText, SidebarTextMuted, NavSelected, NavHover | 侧边栏 |
-| TextPrimary / TextSecondary / TextTertiary | 正文 / 说明 / 次要说明 |
+| Base（PageBg） / Surface / Raised（SurfaceRaised） | 页面底色 / 卡片 / 卡片上的浮起层 |
+| Divider（BorderSubtle） | 边框、分隔线 |
+| Frame（SidebarBg；NavBg、TopBarBg 也写到这里）, NavText（SidebarText）, NavTextMuted（SidebarTextMuted）, NavItemSelected（NavSelected）, NavItemHover（NavHover） | 侧边栏和顶栏 |
+| Text（TextPrimary） / TextSecondary / TextTertiary | 正文 / 说明 / 次要说明 |
 | Accent, AccentHover, AccentPressed, OnAccent, AccentText, AccentTint | 强调色、按下悬停、强调色上的文字、强调色文字、强调色浅底 |
 | Success, SuccessText, SuccessTint | 成功 |
 | Warning, WarningText, WarningTint | 警告 |
 | Danger, DangerText, DangerTint, OnDanger | 危险操作 |
-| DisabledFill, DisabledText | 禁用状态 |
+| DisabledFill, TextDisabled（DisabledText） | 禁用状态 |
 | Overlay / Sunken / InputBg / Scrim | 菜单和对话框 / 日志和代码的凹陷底 / 输入框底 / 对话框后的遮罩。没写时 Overlay 跟着 Surface，Sunken 和 InputBg 跟着 PageBg |
 | ControlBorder, ControlHover, ControlPressed, ControlSelected, Focus | 输入框和次按钮的边、悬停、按下、选中底、焦点环 |
 | Play, PlayHover, PlayPressed, OnPlay, PlayBorder, PlayText, PlayGlow, PlayTint | “开始游戏”这一类琥珀按钮（Accent 管普通主按钮） |
@@ -103,6 +124,9 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 | FontSubtitle / FontTitle / FontHeadline / FontDisplay | 16 / 20 / 24 / 32 | |
 | Space0 … Space8 | 2 4 8 12 16 24 32 48 64 | |
 | RadiusXs / RadiusSm / RadiusMd / RadiusLg / RadiusXl / RadiusPill | 4 / 6 / 8 / 12 / 16 / 999 | ≥ 0 |
+| ControlHeightSm / ControlHeight / ControlHeightLg | 28 / 36 / 44 | 只能调高 |
+| PlayHeight（开始按钮高度） | 48 | ≥ 40 |
+| motion：DurationFast / DurationBase / DurationSlow / DurationSlower | 100 / 160 / 240 / 320 毫秒 | 0 到默认的 2 倍 |
 
 超出范围的值会被拉回范围内并提示。
 
@@ -124,18 +148,26 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 }
 ```
 
-| 组件 | 状态 | 能设的属性 |
+所有组件都能写 `background foreground border borderWidth radius padding fontWeight shadow`；少数组件另有属性。中日文界面里 fontWeight 只分 normal / bold（medium 当 normal，semibold 当 bold）。
+
+| 组件 | 状态 | 另外能设的 |
 |---|---|---|
-| button、button.primary / secondary / ghost / danger | :hover :pressed（button 还有 :disabled） | background foreground border borderWidth radius padding fontWeight shadow |
-| card | | background border borderWidth radius padding shadow |
-| pill（类型/状态小标签） | | background foreground border borderWidth radius padding |
-| callout（提示条） | | background border borderWidth radius padding |
-| sidebar（侧边栏） | | background border borderWidth shadow |
-| nav.item（侧边栏导航项） | :hover :selected | background foreground radius padding fontWeight |
-| input（输入框） | :hover :focus | background foreground border borderWidth radius padding |
-| combobox（下拉框） | :hover | background foreground border borderWidth radius padding |
-| heading（页面标题） | | foreground fontWeight |
-| window（窗口底色） | | background |
+| button、button.primary / secondary / tonal / ghost / danger / icon | :hover :pressed :disabled | |
+| button.play（开始按钮） | :hover :pressed | `glow`：光晕，写一个颜色或一条阴影 |
+| card、card.cover（游戏库封面卡） | card.cover 有 :hover | |
+| hero（实例页英雄区） | | `scrim`（≥ 0.85） |
+| chip、badge、tag（筛选芯片 / 角标 / 加载器等标签） | chip 有 :hover :selected | |
+| tab（页签） | :hover :selected | `indicator`、`indicatorHeight`（2–4） |
+| sidebar、rail.item、nav.item、topbar | 导航项有 :hover :selected | `indicator`（导航项左边的指示条） |
+| input、combobox、segmented、switch、checkbox | :hover :focus / :checked | |
+| list.row、table.header | :hover :selected | |
+| banner（提示条，= format 1 的 callout） | | |
+| toast、menu、tooltip、drawer、dialog、coachmark | | dialog 只管普通对话框，管不到安全确认 |
+| progress（进度条） | | `track`（轨道）、`fill`（进度） |
+| capsule（正在玩胶囊）、requestbar（只管非安全条目） | | |
+| heading（页面标题）、window（窗口底色，可用图片） | | |
+
+这一版 Jay 已经画出来的组件：button 全部、card、card.cover、hero、chip、badge、tag、tab、sidebar、rail.item、nav.item（含 indicator）、topbar（背景）、input、combobox、switch（开的颜色）、checkbox、banner、menu、tooltip、progress、heading、window。其余组件（segmented、list.row、table.header、toast、drawer、dialog、coachmark、capsule、requestbar）现在会被读取和检查，后续版本接上，写了不会报错。
 
 值的写法：
 
@@ -258,7 +290,12 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 
 ## 自动修正
 
-- **对比度**：正文、说明、按钮文字、侧边栏文字和背景的对比度低于 4.5:1（禁用文字 3:1）时，Jay 自动把文字颜色往黑或白推到看得清，并在设置页提示。组件样式里同时写了文字色和背景色（包括渐变的每个颜色、深浅两套 token）也一样检查。
+- **对比度**：正文、说明、按钮文字、侧边栏文字和背景的对比度低于 4.5:1（禁用文字 3:1）时，Jay 自动把文字颜色往黑或白推到看得清，并在设置页写“自动调了 N 处颜色”（【复制给作者看】列出每一处）。组件样式里同时写了文字色和背景色（包括渐变的每个颜色、深浅两套 token）也一样检查。
+- **先合成再算**：半透明的浅底（AccentTint 这类）先叠到卡片色上，再算上面文字的对比度。文字还要在浮起层、选中底和四种提示条浅底上看得清；`OnAccent`、`OnPlay` 在悬停和按下的底色上也要 ≥ 4.5:1。
+- **看得见的线**：输入框边框（ControlBorder）和焦点环（Focus）对卡片和页面底色 ≥ 3:1。
+- **深色卡片分得开**：卡片和页面几乎一样深、分隔线又太淡时，把分隔线调亮到 1.6:1。
+- **开始按钮的轮廓**：开始按钮和页面底色分不开（< 3:1）、主题又没画轮廓时，自动加一圈 `PlayBorder`。
+- **改了卡片色**：没写浮起层和四种浅底时，它们跟着卡片色走（不再配上 Jay 默认的颜色）。
 - **坏掉的部分**：颜色写错、文件缺失、字体文件不是字体、图片太大，这些只丢掉那一项，用默认值代替，主题的其余部分照常用。设置页会列出问题。
 
 ## 主题让 Jay 打不开怎么办

@@ -2836,5 +2836,12 @@
   "multiplayer.longinvite.revoke": "Revoke",
   "multiplayer.longinvite.created": "Long-lived invite made and copied (it is cleared from the clipboard in a while).",
   "multiplayer.longinvite.revoked": "Revoked {0}'s long-lived invite. The code stops working now.",
-  "multiplayer.longinvite.too_many": "You can have at most {0} long-lived invites. Revoke some first."
+  "multiplayer.longinvite.too_many": "You can have at most {0} long-lived invites. Revoke some first.",
+  "settings.themepack.upgraded_tag": "upgraded automatically",
+  "settings.themepack.upgraded": "Upgraded automatically: this theme uses the older format {0}, so Jay converted it while reading. The theme file itself is unchanged.",
+  "settings.themepack.fixed.one": "Jay adjusted {0} color so text and buttons stay readable.",
+  "settings.themepack.fixed": "Jay adjusted {0} colors so text and buttons stay readable.",
+  "settings.themepack.copy_report": "Copy for the author",
+  "settings.themepack.report_copied": "Copied. Send it to the theme's author.",
+  "settings.themepack.needs_newer": "This theme needs a newer Jay ({0} or later). Some parts may not look as intended."
 }

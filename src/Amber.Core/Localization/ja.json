@@ -2764,5 +2764,11 @@
   "multiplayer.longinvite.revoke": "無効にする",
   "multiplayer.longinvite.created": "長期招待を作ってコピーしました（しばらくするとクリップボードから消えます）。",
   "multiplayer.longinvite.revoked": "{0} の長期招待を無効にしました。このコードはすぐに使えなくなります。",
-  "multiplayer.longinvite.too_many": "長期招待は最大 {0} 枚です。先にいくつか無効にしてください。"
+  "multiplayer.longinvite.too_many": "長期招待は最大 {0} 枚です。先にいくつか無効にしてください。",
+  "settings.themepack.upgraded_tag": "自動で更新済み",
+  "settings.themepack.upgraded": "自動で更新しました：このテーマは旧形式（format {0}）のため、読み込み時に新形式へ変換しました。テーマのファイル自体は変更していません。",
+  "settings.themepack.fixed": "文字やボタンが読みやすくなるよう、色を {0} か所自動で調整しました。",
+  "settings.themepack.copy_report": "作者向けにコピー",
+  "settings.themepack.report_copied": "コピーしました。テーマの作者に送ってください",
+  "settings.themepack.needs_newer": "このテーマには新しい Jay（{0} 以降）が必要です。一部が正しく表示されない場合があります。"
 }

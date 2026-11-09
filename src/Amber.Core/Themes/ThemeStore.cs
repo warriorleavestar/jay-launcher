@@ -193,12 +193,12 @@ public static class ThemePackWriter
             {
                 w.WriteStartObject(key);
                 foreach (var k in ThemePackReader.ColorKeys)
-                    if (set.TryGetValue(k, out var c)) w.WriteString(k, ThemePackReader.FormatColor(c));
+                    if (set.TryGetValue(k, out var c)) w.WriteString(ThemeFormat.PublicColorName(k), ThemePackReader.FormatColor(c));
                 w.WriteEndObject();
             }
             w.WriteEndObject();
             w.WriteStartObject("sizes");
-            foreach (var (k, v) in numbers) w.WriteNumber(k, v);
+            foreach (var (k, v) in numbers) w.WriteNumber(ThemeFormat.PublicNumberName(k), v);
             w.WriteEndObject();
             w.WriteStartObject("radius");
             foreach (var (k, v) in radii) w.WriteNumber(k, v);

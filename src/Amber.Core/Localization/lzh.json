@@ -2686,5 +2686,11 @@
   "multiplayer.longinvite.revoke": "廢之",
   "multiplayer.longinvite.created": "長期請帖既成，已錄（少頃自剪貼簿除之）。",
   "multiplayer.longinvite.revoked": "已廢 {0} 之長期請帖，此碼即失其效。",
-  "multiplayer.longinvite.too_many": "長期請帖至多 {0} 張，先廢其數。"
+  "multiplayer.longinvite.too_many": "長期請帖至多 {0} 張，先廢其數。",
+  "settings.themepack.upgraded_tag": "已自更",
+  "settings.themepack.upgraded": "已自更：此主題乃舊式（format {0}），Jay 讀時易以新式，原檔未動。",
+  "settings.themepack.fixed": "自調色 {0} 處，使字與鈕可辨。",
+  "settings.themepack.copy_report": "錄與作者觀之",
+  "settings.themepack.report_copied": "已錄，寄與主題作者可也",
+  "settings.themepack.needs_newer": "此主題須新版 Jay（{0} 或更新），或有顯示不當處。"
 }

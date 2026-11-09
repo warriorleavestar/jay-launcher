@@ -2764,5 +2764,11 @@
   "multiplayer.longinvite.revoke": "作废",
   "multiplayer.longinvite.created": "长期邀请做好了，已复制（过一会儿会从剪贴板清掉）。",
   "multiplayer.longinvite.revoked": "已作废 {0} 的长期邀请，这张码马上失效。",
-  "multiplayer.longinvite.too_many": "长期邀请最多 {0} 张，先作废一些。"
+  "multiplayer.longinvite.too_many": "长期邀请最多 {0} 张，先作废一些。",
+  "settings.themepack.upgraded_tag": "已自动升级",
+  "settings.themepack.upgraded": "已自动升级：这个主题是旧格式（format {0}），Jay 读的时候换成了新格式，主题文件本身没动。",
+  "settings.themepack.fixed": "自动调了 {0} 处颜色，让文字和按钮看得清。",
+  "settings.themepack.copy_report": "复制给作者看",
+  "settings.themepack.report_copied": "已复制，发给主题作者就行",
+  "settings.themepack.needs_newer": "这个主题需要更新的 Jay（{0} 或更新），有些地方可能显示得不对。"
 }

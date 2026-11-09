@@ -128,6 +128,13 @@
                 </CheckBox>
               </Grid>
             </Border>
+            <Border x:Name="ThemeReportBanner" Classes="banner" Margin="0,0,0,12" IsVisible="{Binding HasThemeReport}">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBlock x:Name="ThemeReportText" Text="{Binding ThemeReportText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button x:Name="CopyThemeReportButton" Grid.Column="1" Classes="ghost" Content="{l:T settings.themepack.copy_report}"
+                        Command="{Binding CopyThemeReportCommand}" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
             <Border Classes="callout warning" Margin="0,0,0,12" IsVisible="{Binding ThemePackStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
               <TextBlock Classes="hint" Text="{Binding ThemePackStatus}" TextWrapping="Wrap" />
             </Border>

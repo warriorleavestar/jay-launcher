@@ -647,6 +647,29 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false };
 
+    /// <summary>What Jay changed in the current theme: the format upgrade and the automatic color fixes (official §10.4, §10.8).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasThemeReport))]
+    public partial string ThemeReportText { get; set; } = "";
+
+    public bool HasThemeReport => ThemeReportText.Length > 0;
+
+    /// <summary>Copy text to the clipboard (tests swap this so the real clipboard is never touched).</summary>
+    internal Func<string, Task<bool>> CopyText { get; set; } = async text =>
+    {
+        if (Amber.App.Services.AvaloniaClipboard.FromMainWindow() is not { } clipboard) return false;
+        await clipboard.SetTextAsync(text);
+        return true;
+    };
+
+    /// <summary>【复制给作者看】: the upgrade notes and fixes as plain text, for the theme's author.</summary>
+    [RelayCommand]
+    private async Task CopyThemeReportAsync()
+    {
+        if (ThemeService.Current is not { } pack) return;
+        if (await CopyText(Amber.Core.Themes.ThemeFormat.Report(pack))) Toasts.Show(L.T("settings.themepack.report_copied"));
+    }
+
     private bool _themeLoading;
 
     internal void ReloadThemePacks(string? select = null)
@@ -655,7 +678,12 @@ public sealed partial class SettingsViewModel : PageViewModel
         ThemePacks.Clear();
         ThemePacks.Add(new ThemePackOption(ThemeService.DefaultId, L.T("settings.themepack.default"), true));
         foreach (var pack in ThemeService.Store.List())
-            ThemePacks.Add(new ThemePackOption(pack.Id, pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name, false));
+        {
+            var label = pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name;
+            // Format 1 packs are upgraded on read (official §10.8): the card says so.
+            if (pack.Upgraded) label += " · " + L.T("settings.themepack.upgraded_tag");
+            ThemePacks.Add(new ThemePackOption(pack.Id, label, false));
+        }
         var id = select ?? _service.Settings.ThemePack ?? ThemeService.DefaultId;
         SelectedThemePack = ThemePacks.FirstOrDefault(o => o.Id == id) ?? ThemePacks[0];
         _themeLoading = false;
@@ -682,9 +710,18 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
         if (ThemeService.DevDirectory is { } devDir) lines.Add(L.F("settings.themepack.dev", devDir));
         if (ThemeService.DevError is { } devError) lines.Add(L.F("settings.themepack.dev_error", devError));
-        if (ThemeService.Current is { } pack && pack.Problems.Count > 0)
-            lines.Add(L.F("settings.themepack.problems", pack.Problems.Count, string.Join("; ", pack.Problems.Take(4))));
+        var report = new List<string>();
+        if (ThemeService.Current is { } pack)
+        {
+            if (pack.Problems.FirstOrDefault(p => p.Code == "needs_newer_jay") is { } newer) lines.Add(L.F("settings.themepack.needs_newer", newer.Detail));
+            var others = pack.Problems.Where(p => p.Code is not ("contrast_fixed" or "needs_newer_jay")).ToList();
+            if (others.Count > 0) lines.Add(L.F("settings.themepack.problems", others.Count, string.Join("; ", others.Take(4))));
+            if (pack.Upgraded) report.Add(L.F("settings.themepack.upgraded", pack.Format));
+            var fixes = pack.Problems.Count(p => p.Code == "contrast_fixed");
+            if (fixes > 0) report.Add(L.P("settings.themepack.fixed", fixes, fixes));
+        }
         ThemePackStatus = string.Join("\n", lines);
+        ThemeReportText = string.Join("\n", report);
     }
 
     /// <summary>导入 .jaytheme：读取、校验、安装，然后直接切换过去。</summary>
