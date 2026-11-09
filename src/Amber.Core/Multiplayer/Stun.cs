@@ -155,7 +155,9 @@ public static class Stun
     internal static IPEndPoint MapTo(Socket socket, IPEndPoint target) =>
         socket.AddressFamily == AddressFamily.InterNetworkV6 && target.AddressFamily == AddressFamily.InterNetwork
             ? new IPEndPoint(target.Address.MapToIPv6(), target.Port)
-            : target;
+            : socket.AddressFamily == AddressFamily.InterNetwork && target.Address.IsIPv4MappedToIPv6
+                ? new IPEndPoint(target.Address.MapToIPv4(), target.Port)
+                : target;
 
     internal static IPEndPoint Normalize(IPEndPoint endPoint) =>
         endPoint.Address.IsIPv4MappedToIPv6 ? new IPEndPoint(endPoint.Address.MapToIPv4(), endPoint.Port) : endPoint;

@@ -108,7 +108,15 @@ internal sealed class X11Hotkey : IStopHotkey
         }
     }
 
-    public void Dispose() => _disposed = true;
+    /// <summary>
+    /// Stops the loop and waits for it to close its X connection. Returning early would leave the thread polling a display
+    /// the caller may tear down next (session end, X server restart); Xlib's default I/O error handler then exits the whole process.
+    /// </summary>
+    public void Dispose()
+    {
+        _disposed = true;
+        if (Thread.CurrentThread != _thread) _thread.Join(TimeSpan.FromSeconds(2));
+    }
 }
 
 [SupportedOSPlatform("macos")]

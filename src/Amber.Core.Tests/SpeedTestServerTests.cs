@@ -149,6 +149,8 @@ public sealed class SpeedTestServerTests
     public async Task BothListenersShareOneAtomicQuota()
     {
         await using var server = new SpeedTestServer(0);
+        // The second listener is on IPv6 loopback; systems with IPv6 turned off can't run this.
+        if (!System.Net.Sockets.Socket.OSSupportsIPv6) return;
         var second = IPAddress.IPv6Loopback;
         Assert.True(server.TryAddListener(second));
         Assert.False(server.TryAddListener(second));
@@ -188,6 +190,8 @@ public sealed class SpeedTestServerTests
     [Fact]
     public async Task AddingListenerCannotRacePastDisposal()
     {
+        // Connecting to IPv6 loopback below needs IPv6; systems with it turned off can't run this.
+        if (!System.Net.Sockets.Socket.OSSupportsIPv6) return;
         await using var server = new SpeedTestServer(0);
         var second = IPAddress.IPv6Loopback;
         await Task.WhenAll(Task.Run(() => server.TryAddListener(second)), Task.Run(async () => await server.DisposeAsync()));

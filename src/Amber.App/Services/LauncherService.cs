@@ -12,8 +12,13 @@ namespace Amber.App.Services;
 /// <summary>界面共用的核心对象。设置里的目录或下载源变了就调用 <see cref="Reload"/>。</summary>
 public sealed class LauncherService : IDisposable
 {
-    private readonly HttpClient _http = Downloader.CreateHttpClient();
+    // Downloads stream large files, so their client has no overall timeout (the downloader watches for stalls itself).
+    private readonly HttpClient _downloadHttp = Downloader.CreateHttpClient();
 
+    // API calls, sign-in, update checks and small fetches get a hard limit, so a stalled connection cannot hang them forever.
+    private readonly HttpClient _http = Downloader.CreateHttpClient(Downloader.ApiTimeout);
+
+    /// <summary>For small requests (APIs, icons, config files). Has an overall timeout; don't use it for big downloads.</summary>
     public HttpClient Http => _http;
     public AppSettings Settings { get; }
     public AccountService Accounts { get; }
@@ -131,7 +136,7 @@ public sealed class LauncherService : IDisposable
             "mirror" => SourceChain.MirrorFirst,
             _ => SourceChain.Default(),
         };
-        var downloader = new Downloader(_http, sources)
+        var downloader = new Downloader(_downloadHttp, sources)
         {
             MaxConcurrency = Math.Clamp(Settings.DownloadConcurrency, 1, 128),
             Hashes = new HashCache(Path.Combine(Settings.GameDirectory, ".amber-hashes")),
@@ -379,6 +384,7 @@ public sealed class LauncherService : IDisposable
     {
         ActiveMultiplayer?.Dispose();
         _http.Dispose();
+        _downloadHttp.Dispose();
     }
 }
 
