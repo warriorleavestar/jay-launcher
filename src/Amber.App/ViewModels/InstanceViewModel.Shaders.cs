@@ -17,6 +17,11 @@ public sealed partial class InstanceViewModel
     public bool CanInstallRenderer => ShaderState is { } s && ShaderSupport.ProjectFor(s) is not null;
     public string InstallRendererLabel => L.F("content.shader.install", ShaderRenderer.NameFor(ShaderState ?? ShaderReadiness.NeedsIris));
 
+    /// <summary>The generic "needs a shader loader" card, hidden while the more specific Iris / vanilla note above shows.</summary>
+    public bool ShowShaderLoaderCard => !HasShaderLoader && !HasShaderNote;
+    partial void OnShaderStateChanged(ShaderReadiness? value) => OnPropertyChanged(nameof(ShowShaderLoaderCard));
+    partial void OnHasShaderLoaderChanged(bool value) => OnPropertyChanged(nameof(ShowShaderLoaderCard));
+
     internal void UpdateShaderState() => ShaderState = Current is { } c ? ShaderRenderer.ReadinessOf(c) : null;
 
     [RelayCommand]

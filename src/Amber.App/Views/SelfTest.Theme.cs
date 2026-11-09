@@ -109,8 +109,8 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             main.CurrentPage = main.Pages[0];
             await Task.Delay(500);
             var home = window.GetVisualDescendants().OfType<HomePage>().First();
-            Check("恢复默认后导航回到左边、九个页面都在、启动页用回自带布局",
-                window.ShellNav == "left" && main.NavPages.Count == main.Pages.Count && !home.ThemeLayout.UsingThemeLayout
+            Check("恢复默认后导航回到左边、三个入口都在、启动页用回自带布局",
+                window.ShellNav == "left" && main.Shell.Sections.Count == 3 && !home.ThemeLayout.UsingThemeLayout
                 && home.ThemeLayout.Regions["home.title"].Parent is not null);
             main.CurrentPage = settings;
             await Task.Delay(300);
@@ -139,7 +139,7 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
     {
         var path = Path.Combine(reportDir, "topbar.jaytheme");
         WritePack(path, """{ "id": "selftest-topbar", "name": "自检顶栏" }""", """{ "seed": { "accent": "#0F9D8A" } }""",
-            ("layout/shell.json", """{ "nav": "top", "navStyle": "icons", "pages": ["home", "multiplayer", "settings"], "hidden": ["tools", "log"] }"""),
+            ("layout/shell.json", """{ "nav": "top", "navStyle": "icons", "pages": ["home", "multiplayer", "settings"], "hidden": ["tools", "log", "downloads", "content"] }"""),
             ("layout/pages/home.json", """
             {
               "wide": { "type": "grid", "columns": ["*", "360"], "rows": ["auto", "*"], "spacing": 16, "children": [
@@ -156,13 +156,14 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         await Task.Delay(500);
         Check("导入带排版的主题包：导航挪到顶上", window.ShellNav == "top" && window.SidebarHost.Bounds.Width > window.Bounds.Width - 4
             && window.SidebarHost.Bounds.Height < 120, $"导航 {window.ShellNav} {window.SidebarHost.Bounds}");
-        Check("导航按主题排序、藏掉工具和日志，启动页和设置页还在",
-            main.NavPages.Take(3).SequenceEqual([main.Pages[0], main.Pages.OfType<MultiplayerViewModel>().Single(), settings])
-            && !main.NavPages.OfType<ToolsViewModel>().Any() && !main.NavPages.OfType<LogViewModel>().Any() && main.Pages.Count == 9);
-        // 当前页（设置）不在导航里也不会被清空；藏起来的页还能跳过去。
-        main.CurrentPage = main.Pages.OfType<LogViewModel>().Single();
+        // format 1 的页面名升级成入口：home → 游戏库、multiplayer → 联机；下载和资源都藏了 → 藏掉发现。
+        Check("旧版 shell.json 升级：入口按主题排序、藏掉发现，游戏库和联机还在",
+            main.Shell.Sections.Select(s => s.Id).SequenceEqual(["library", "multiplayer"]) && main.Pages.Count == 10,
+            string.Join(",", main.Shell.Sections.Select(s => s.Id)));
+        // 藏起来的入口还能跳过去，侧栏上没有选中项。
+        main.Shell.Navigate("discover");
         await Task.Delay(300);
-        Check("藏起来的页面还能跳过去", window.GetVisualDescendants().OfType<LogPage>().Any() && main.NavSelection is null);
+        Check("藏起来的入口还能跳过去", main.CurrentPage is ContentViewModel && main.Shell.SelectedSection is null);
 
         main.CurrentPage = main.Pages[0];
         window.Width = 1600;

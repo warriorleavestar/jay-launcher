@@ -337,4 +337,95 @@
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
+  <!-- ===== 外壳（官方设计 §3.1、§5.8）===== -->
+  <!-- 只放图标的按钮（返回、前进）：32×32 起，可点区域不小于 MinHitSize -->
+  <Style Selector="Button.icon-only">
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="MinWidth" Value="{DynamicResource MinHitSize}" />
+    <Setter Property="MinHeight" Value="{DynamicResource MinHitSize}" />
+  </Style>
+  <Style Selector="Button.icon-only Path.icon">
+    <Setter Property="Stroke" Value="{DynamicResource TextPrimary}" />
+  </Style>
+  <Style Selector="Button.icon-only:disabled Path.icon">
+    <Setter Property="Stroke" Value="{DynamicResource DisabledText}" />
+  </Style>
+  <!-- 侧栏品牌行：点它回游戏库 -->
+  <Style Selector="Button.shell-brand">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Margin" Value="8,10,8,6" />
+    <Setter Property="Padding" Value="12,8" />
+  </Style>
+  <!-- 侧栏底部的设置、账号 -->
+  <Style Selector="Button.shell-foot">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Padding" Value="12,0" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+    <Setter Property="FontWeight" Value="Normal" />
+  </Style>
+  <Style Selector="Button.shell-foot.active /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource NavSelected}" />
+  </Style>
+  <Style Selector="Button.shell-foot Path.icon">
+    <Setter Property="Stroke" Value="{DynamicResource SidebarText}" />
+  </Style>
+  <!-- 图标栏：底部按钮只留图标，居中 -->
+  <Style Selector="Border.sidebar.rail Button.shell-foot">
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="Border.sidebar.rail TextBlock.foot-title">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border.sidebar.rail Button.shell-brand">
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Padding" Value="0,8" />
+  </Style>
+  <!-- 入口里的子页页签：选中项下面一条强调色 -->
+  <Style Selector="ListBox.subtabs ListBoxItem">
+    <Setter Property="Padding" Value="12,6" />
+    <Setter Property="MinHeight" Value="{DynamicResource MinHitSize}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+    <Setter Property="BorderThickness" Value="0,0,0,2" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.subtabs ListBoxItem:selected">
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
+  <Style Selector="ListBox.subtabs ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ControlSelected}" />
+  </Style>
+  <!-- 路由定位到字段时闪一下描边（减少动画时也一样，是静态描边） -->
+  <Style Selector=":is(TemplatedControl).field-flash">
+    <Setter Property="BorderBrush" Value="{DynamicResource Focus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <!-- 正在玩胶囊（顶栏）：绿点 + 实例名；崩溃时红 -->
+  <Style Selector="Button.pill-play">
+    <Setter Property="Background" Value="{DynamicResource PlayTint}" />
+    <Setter Property="Foreground" Value="{DynamicResource PlayText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Play}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="10,3" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="Button.pill-play Ellipse.pill-dot"><Setter Property="Fill" Value="{DynamicResource Play}" /></Style>
+  <Style Selector="Button.pill-play.crash">
+    <Setter Property="Background" Value="{DynamicResource DangerTint}" />
+    <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Danger}" />
+  </Style>
+  <Style Selector="Button.pill-play.crash Ellipse.pill-dot"><Setter Property="Fill" Value="{DynamicResource Danger}" /></Style>
+  <Style Selector="TextBlock.error"><Setter Property="Foreground" Value="{DynamicResource DangerText}" /></Style>
+  <!-- 请求条：普通请求（非安全）。和横幅一样，但更醒目一点 -->
+  <Style Selector="Border.banner.request">
+    <Setter Property="BorderThickness" Value="1,1,1,1" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
 </Styles>

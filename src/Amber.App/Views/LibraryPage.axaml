@@ -1,0 +1,260 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:v="using:Amber.App.Views"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:svc="using:Amber.App.Services"
+             x:Class="Amber.App.Views.LibraryPage"
+             x:DataType="vm:LibraryViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.cover">
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+    <Style Selector="Border.cover TextBlock.initial">
+      <Setter Property="Foreground" Value="#F5F2EA" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Opacity" Value="0.92" />
+    </Style>
+    <Style Selector="Border.instance-card">
+      <Setter Property="Background" Value="{DynamicResource Surface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusLg}" />
+      <Setter Property="Width" Value="184" />
+    </Style>
+    <Style Selector="Border.instance-card:pointerover">
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+    </Style>
+    <Style Selector="Border.instance-card Button.card-play">
+      <Setter Property="Opacity" Value="0.85" />
+    </Style>
+    <!-- 图钉：固定了一直显示，没固定的只在悬停或聚焦时出现 -->
+    <Style Selector="Border.instance-card Button.card-pin">
+      <Setter Property="Opacity" Value="0" />
+    </Style>
+    <Style Selector="Border.instance-card:pointerover Button.card-pin, Border.instance-card Button.card-pin:focus-within, Border.instance-card Button.card-pin.pinned">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="Border.instance-card:pointerover Button.card-play">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="Border.continue">
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusLg}" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="MinHeight" Value="168" />
+    </Style>
+    <Style Selector="Border.continue TextBlock.on-cover">
+      <Setter Property="Foreground" Value="#F5F2EA" />
+    </Style>
+    <Style Selector="Border.continue TextBlock.on-cover-dim">
+      <Setter Property="Foreground" Value="#D9D3C7" />
+    </Style>
+  </UserControl.Styles>
+
+  <ScrollViewer x:Name="LibraryScroll" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="16" Margin="0,0,0,16">
+      <Grid ColumnDefinitions="*,Auto" svc:ThemeRegion.Name="library.title">
+        <TextBlock Classes="h1" Text="{Binding Title}" Margin="0" VerticalAlignment="Center" />
+        <Button x:Name="NewInstanceButton" Grid.Column="1" Classes="secondary" Command="{Binding NewInstanceCommand}"
+                ToolTip.Tip="Ctrl+N" AutomationProperties.Name="{l:T library.new}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Path Classes="icon" Data="{StaticResource Icon.Plus}" Width="16" Height="16" />
+            <TextBlock x:Name="NewInstanceText" Text="{l:T library.new}" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+      </Grid>
+
+      <!-- 继续玩 + 需要你处理：宽档并排，其余上下 -->
+      <Grid x:Name="TopRow" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" svc:ThemeRegion.Name="library.continue">
+        <Border x:Name="ContinueCard" Classes="continue" IsVisible="{Binding HasContinue}"
+                Background="{Binding Continue.CoverSlot, Converter={x:Static v:CoverBrush.Instance}, FallbackValue={x:Null}}">
+          <Panel>
+            <Border>
+              <Border.Background>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                  <GradientStop Color="#00000000" Offset="0" />
+                  <GradientStop Color="#99000000" Offset="1" />
+                </LinearGradientBrush>
+              </Border.Background>
+            </Border>
+            <TextBlock Classes="initial" Text="{Binding Continue.Initial}" FontSize="120" Opacity="0.14" Foreground="#FFFFFF"
+                       HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,24,0" IsHitTestVisible="False" />
+            <Grid x:Name="ContinueContent" ColumnDefinitions="Auto,*" Margin="20,16" ColumnSpacing="16">
+              <Border x:Name="ContinueThumb" Classes="cover" Width="88" Height="88" IsVisible="False" VerticalAlignment="Top"
+                      Background="{Binding Continue.CoverSlot, Converter={x:Static v:CoverBrush.Instance}, FallbackValue={x:Null}}">
+                <TextBlock Classes="initial" Text="{Binding Continue.Initial}" FontSize="40" />
+              </Border>
+              <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Bottom">
+                <TextBlock Classes="on-cover-dim" Text="{l:T library.continue}" FontSize="{DynamicResource FontBodySmall}" FontWeight="SemiBold" />
+                <TextBlock x:Name="ContinueName" Classes="on-cover headline" Text="{Binding Continue.Name}" TextTrimming="CharacterEllipsis" MaxLines="2" />
+                <TextBlock Classes="on-cover-dim" TextWrapping="Wrap">
+                  <Run Text="{Binding Continue.Facts}" />
+                  <Run Text=" · " />
+                  <Run Text="{Binding Continue.LastPlayedText}" />
+                </TextBlock>
+                <WrapPanel ItemSpacing="12" LineSpacing="8" Margin="0,8,0,0">
+                  <Button x:Name="ContinuePlay" Classes="play" Command="{Binding PlayContinueCommand}" ToolTip.Tip="Ctrl+Enter"
+                          MinHeight="44" MinWidth="168" Padding="24,8" FontSize="16" FontWeight="SemiBold" HorizontalContentAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Path Data="{StaticResource Icon.Play}" Width="16" Height="16" Stretch="Uniform" Fill="{Binding $parent[Button].Foreground}" />
+                      <TextBlock Text="{Binding Home.PrimaryLabel}" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Button>
+                  <TextBlock Classes="on-cover-dim" Text="{Binding Home.AccountHint}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="260" />
+                </WrapPanel>
+              </StackPanel>
+            </Grid>
+          </Panel>
+        </Border>
+
+        <Border x:Name="NeedsCard" Classes="card" Grid.Row="1" Margin="0,12,0,0" IsVisible="{Binding HasNeeds}" svc:ThemeRegion.Name="library.needs">
+          <StackPanel Spacing="8">
+            <TextBlock Text="{l:T library.needs}" FontWeight="SemiBold" />
+            <ItemsControl x:Name="NeedsList" ItemsSource="{Binding Needs}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:NeedItem">
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="0,2">
+                    <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="16" Height="16" VerticalAlignment="Center"
+                          Stroke="{DynamicResource WarningText}" />
+                    <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center" Classes.error="{Binding IsError}" />
+                    <Button Grid.Column="2" Classes="ghost small" Content="{Binding Action}" Command="{Binding RunCommand}" VerticalAlignment="Center" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <!-- 全部实例 -->
+      <StackPanel Spacing="10" IsVisible="{Binding HasInstances}" svc:ThemeRegion.Name="library.all">
+        <Grid x:Name="QueryBar" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8">
+          <TextBlock Text="{Binding CountText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBox x:Name="SearchBox" Grid.Column="1" Text="{Binding Search}" Watermark="{l:T library.search}" MaxWidth="360" HorizontalAlignment="Left"
+                   AutomationProperties.Name="{l:T library.search}">
+            <TextBox.InnerLeftContent>
+              <Path Classes="icon" Data="{StaticResource Icon.Search}" Width="16" Height="16" Margin="8,0,0,0" />
+            </TextBox.InnerLeftContent>
+          </TextBox>
+          <StackPanel x:Name="ViewToggles" Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            <ComboBox x:Name="SortBox" ItemsSource="{Binding SortOptions}" SelectedIndex="{Binding SortIndex}" MinWidth="120"
+                      AutomationProperties.Name="{l:T library.sort.label}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button x:Name="GridViewButton" Classes="ghost icon-only" Command="{Binding UseGridCommand}" IsVisible="{Binding !IsCompact}"
+                    ToolTip.Tip="{l:T library.view.grid}" AutomationProperties.Name="{l:T library.view.grid}" Classes.active="{Binding IsGridView}">
+              <Path Classes="icon" Data="{StaticResource Icon.Grid}" Width="18" Height="18" />
+            </Button>
+            <Button x:Name="ListViewButton" Classes="ghost icon-only" Command="{Binding UseListCommand}" IsVisible="{Binding !IsCompact}"
+                    ToolTip.Tip="{l:T library.view.list}" AutomationProperties.Name="{l:T library.view.list}" Classes.active="{Binding IsListView}">
+              <Path Classes="icon" Data="{StaticResource Icon.List}" Width="18" Height="18" />
+            </Button>
+          </StackPanel>
+          <ListBox x:Name="FilterChips" Grid.Row="1" Grid.ColumnSpan="3" Classes="subtabs" ItemsSource="{Binding FilterOptions}" SelectedIndex="{Binding FilterIndex}"
+                   Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="{l:T library.filter.label}">
+            <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+
+        <!-- 封面视图 -->
+        <ItemsControl x:Name="CardGrid" ItemsSource="{Binding Cards}" IsVisible="{Binding ShowGrid}">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="12" LineSpacing="12" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:LibraryCard">
+              <Border Classes="instance-card">
+                <Panel>
+                  <Button Classes="ghost" Padding="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding OpenCommand}"
+                          ToolTip.Tip="{Binding OpenTip}" AutomationProperties.Name="{Binding OpenTip}">
+                    <StackPanel>
+                      <Border Classes="cover" Height="104" CornerRadius="10,10,0,0" Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
+                        <TextBlock Classes="initial" Text="{Binding Initial}" FontSize="44" />
+                      </Border>
+                      <StackPanel Margin="12,8,12,12" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Ellipse Classes="status-dot playing" IsVisible="{Binding IsRunning}" />
+                          <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="14" Height="14" Stroke="{DynamicResource WarningText}" IsVisible="{Binding HasProblem}" />
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="150" ToolTip.Tip="{Binding Name}" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding Facts}" Classes="hint" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Facts}" />
+                        <TextBlock Text="{Binding LastPlayedText}" Classes="hint" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                    </StackPanel>
+                  </Button>
+                  <Button Classes="ghost icon-only card-pin" Classes.pinned="{Binding IsPinned}" Command="{Binding TogglePinCommand}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6"
+                          ToolTip.Tip="{Binding PinTip}" AutomationProperties.Name="{Binding PinTip}">
+                    <Path Data="{StaticResource Icon.Pin}" Width="16" Height="16" Stretch="Uniform" Stroke="#F5F2EA" StrokeThickness="1.75" />
+                  </Button>
+                  <Button Classes="card-play icon-only" Command="{Binding LaunchCommand}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,64,8,0"
+                          Background="#CC000000" CornerRadius="16" Width="32" Height="32"
+                          ToolTip.Tip="{Binding LaunchTip}" AutomationProperties.Name="{Binding LaunchTip}">
+                    <Path Data="{StaticResource Icon.Play}" Width="14" Height="14" Stretch="Uniform" Fill="#F5F2EA" />
+                  </Button>
+                </Panel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- 列表视图（紧凑档总是列表） -->
+        <ItemsControl x:Name="CardRows" ItemsSource="{Binding Cards}" IsVisible="{Binding ShowRows}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:LibraryCard">
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4" Margin="0,0,0,4">
+                <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="6" Command="{Binding OpenCommand}"
+                        ToolTip.Tip="{Binding OpenTip}" AutomationProperties.Name="{Binding OpenTip}">
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                    <Border Classes="cover" Width="40" Height="40" Background="{Binding CoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
+                      <TextBlock Classes="initial" Text="{Binding Initial}" FontSize="18" />
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse Classes="status-dot playing" IsVisible="{Binding IsRunning}" />
+                        <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="14" Height="14" Stroke="{DynamicResource WarningText}" IsVisible="{Binding HasProblem}" />
+                        <Path Classes="icon" Data="{StaticResource Icon.Pin}" Width="14" Height="14" IsVisible="{Binding IsPinned}" />
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                      <TextBlock Text="{Binding Facts}" Classes="hint" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{Binding LastPlayedText}" Classes="hint" FontSize="12" TextWrapping="NoWrap" VerticalAlignment="Center" />
+                  </Grid>
+                </Button>
+                <Button Grid.Column="1" Classes="ghost icon-only" Command="{Binding TogglePinCommand}" VerticalAlignment="Center"
+                        ToolTip.Tip="{Binding PinTip}" AutomationProperties.Name="{Binding PinTip}">
+                  <Path Classes="icon" Data="{StaticResource Icon.Pin}" Width="16" Height="16" />
+                </Button>
+                <Button Grid.Column="2" Classes="ghost icon-only" Command="{Binding LaunchCommand}" VerticalAlignment="Center"
+                        ToolTip.Tip="{Binding LaunchTip}" AutomationProperties.Name="{Binding LaunchTip}">
+                  <Path Classes="icon" Data="{StaticResource Icon.Play}" Width="16" Height="16" />
+                </Button>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <StackPanel x:Name="NoMatches" Orientation="Horizontal" Spacing="8" IsVisible="{Binding NoMatches}">
+          <TextBlock Classes="hint" Text="{l:T library.no_matches}" VerticalAlignment="Center" />
+          <Button Classes="secondary small" Content="{l:T library.clear_filters}" Command="{Binding ClearFiltersCommand}" />
+        </StackPanel>
+      </StackPanel>
+
+      <!-- 没有实例 -->
+      <StackPanel x:Name="EmptyLibrary" Classes="empty-state" IsVisible="{Binding IsEmpty}">
+        <Path Classes="icon" Data="{StaticResource Icon.Library}" />
+        <TextBlock Classes="title" Text="{l:T library.empty.title}" />
+        <TextBlock Classes="hint" Text="{l:T library.empty.body}" />
+        <WrapPanel HorizontalAlignment="Center" ItemSpacing="8" LineSpacing="8" Margin="0,8,0,0">
+          <Button Content="{l:T library.new}" Command="{Binding NewInstanceCommand}" />
+          <Button Classes="secondary" Content="{l:T library.empty.import}" Command="{Binding ImportPackCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

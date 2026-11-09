@@ -226,6 +226,9 @@ public sealed partial class HostServerViewModel : ObservableObject
         }
     }
 
+    /// <summary>Whether a server started from Jay is still running (used by the close guard).</summary>
+    public static bool ServerRunning => Volatile.Read(ref s_running) is not null;
+
     /// <summary>关掉 Jay 时调用：服务器存盘退出（最多等 30 秒）。</summary>
     public static void StopRunningServer()
     {

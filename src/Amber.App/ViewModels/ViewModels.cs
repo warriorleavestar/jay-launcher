@@ -1,3 +1,4 @@
+using Amber.Core.Navigation;
 using Amber.Core.Themes;
 using System.Collections.ObjectModel;
 using Amber.Core.Localization;
@@ -137,51 +138,64 @@ public sealed partial class MainViewModel : ObservableObject
 
     public string VersionText => L.F("main.version", UpdateChecker.CurrentVersion);
 
-    /// <summary>导航栏里显示的页面：主题包可以改顺序、藏掉不常用的页（启动页和设置页藏不掉）。页面本身还在，跳转照常。</summary>
-    public ObservableCollection<PageViewModel> NavPages { get; } = [];
+    /// <summary>外壳：路由、历史栈、侧栏入口、子页（官方设计 §11.5）。</summary>
+    public ShellViewModel Shell { get; }
 
-    /// <summary>
-    /// 导航栏的选中项。当前页不在导航栏里时是空；导航栏给空值（重排导航项时会发生）不改当前页。
-    /// </summary>
-    public PageViewModel? NavSelection
-    {
-        get => NavPages.Contains(CurrentPage) ? CurrentPage : null;
-        set { if (value is not null) CurrentPage = value; }
-    }
+    /// <summary>活动中心、请求条、正在玩胶囊（§6.22）。</summary>
+    public ActivityViewModel Activity { get; }
 
-    /// <summary>按主题包的 shell 布局排导航项；传空恢复 Jay 自带的顺序。</summary>
-    public void ApplyNavOrder(ShellLayout? shell)
-    {
-        var ids = ThemeLayout.PageIds;
-        var byId = new Dictionary<string, PageViewModel>();
-        for (var i = 0; i < Pages.Count && i < ids.Length; i++) byId[ids[i]] = Pages[i];
-        var order = new List<PageViewModel>();
-        foreach (var id in shell?.PageOrder ?? [])
-            if (byId.TryGetValue(id, out var page) && !order.Contains(page)) order.Add(page);
-        foreach (var page in Pages)
-            if (!order.Contains(page)) order.Add(page);
-        if (shell is not null)
-            order.RemoveAll(p => byId.FirstOrDefault(kv => kv.Value == p).Key is { } id && shell.Hidden.Contains(id) && !ThemeLayout.RequiredPages.Contains(id));
-        if (order.SequenceEqual(NavPages)) return;
-        NavPages.Clear();
-        foreach (var page in order) NavPages.Add(page);
-        OnPropertyChanged(nameof(NavSelection));
-    }
+    /// <summary>The first-run wizard over the whole window (§6.1).</summary>
+    public FirstRunViewModel FirstRun { get; }
+
+    /// <summary>Drag-and-drop import over the whole window (§6.25).</summary>
+    public DropViewModel Drop { get; }
 
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
-        OnPropertyChanged(nameof(NavSelection));
         if (oldValue is not null) oldValue.IsCurrent = false;
         newValue.IsCurrent = true;
         newValue.Activate();
+        Shell?.OnPageChanged(newValue);
+    }
+
+    private readonly LauncherService _main;
+
+    /// <summary>The Core services behind this window (self-check).</summary>
+    internal LauncherService Service => _main;
+
+    /// <summary>
+    /// Things that would be cut off if Jay closed now (§5.9 close guard): remote control, a running server,
+    /// a room with players, running tasks, a game still preparing. Empty means close right away.
+    /// </summary>
+    public IReadOnlyList<string> CloseBlockers()
+    {
+        var items = new List<string>();
+        if (Multiplayer.RemoteSessionCount > 0) items.Add(L.F("close.item.remote", Multiplayer.RemoteSessionCount));
+        if (HostServerViewModel.ServerRunning) items.Add(L.T("close.item.server"));
+        var others = Multiplayer.Peers.Count(p => p.Peer.Ip != Amber.Core.Multiplayer.EasyTierArgs.HostIp);
+        if (Multiplayer.IsHosting && others > 0) items.Add(L.F("close.item.room_host", others));
+        else if (Multiplayer.IsJoined) items.Add(L.T("close.item.room_join"));
+        var tasks = _main.Tasks.Active.Count;
+        if (tasks > 0) items.Add(L.F("close.item.tasks", tasks));
+        if (Pages.OfType<HomeViewModel>().FirstOrDefault() is { IsPreparing: true }) items.Add(L.T("close.item.preparing"));
+        return items;
+    }
+
+    /// <summary>Cancels running tasks before a confirmed close (servers and remote control are stopped by the exit path).</summary>
+    public void EndAllForExit()
+    {
+        _main.Tasks.CancelAll();
+        Pages.OfType<HomeViewModel>().FirstOrDefault()?.CancelPreparingForExit();
     }
 
     public MainViewModel(LauncherService service)
     {
+        _main = service;
         L.Changed += () => Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(VersionText)));
         var log = new LogViewModel();
         var home = new HomeViewModel(service, log);
         var instance = new InstanceViewModel(service) { NavigateHome = null };
+        instance.AttachHome(home);
         var content = new ContentViewModel(service);
         var multiplayer = new MultiplayerViewModel(service);
         Multiplayer = multiplayer;
@@ -198,54 +212,131 @@ public sealed partial class MainViewModel : ObservableObject
             new SettingsViewModel(service),
             log,
         ];
-        var accounts = Pages[1];
-        home.NavigateToAccounts = () => CurrentPage = accounts;
-        home.NavigateToNewInstance = () => CurrentPage = download;
-        home.NavigateToLog = () => CurrentPage = log;
-        home.NavigateHere = () => CurrentPage = home;
+        var accounts = (AccountsViewModel)Pages[1];
+        Shell = new ShellViewModel(this, service);
+        var shell = Shell;
+        home.NavigateToAccounts = () => shell.Navigate("accounts");
+        home.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
+        home.NavigateToLog = () => shell.Navigate(LegacyRoutes.Logs);
+        home.NavigateHere = () => shell.Navigate("library");
         home.Onboarding.MicrosoftLogin = () =>
         {
-            if (accounts is AccountsViewModel a) a.LoginTab = AccountsViewModel.MicrosoftTab;
-            CurrentPage = accounts;
+            accounts.LoginTab = AccountsViewModel.MicrosoftTab;
+            shell.Navigate("accounts");
         };
-        home.Onboarding.ChooseVersion = () => CurrentPage = download;
+        home.Onboarding.ChooseVersion = () => shell.Navigate(LegacyRoutes.NewInstance);
         home.Onboarding.ImportPack = async path =>
         {
-            CurrentPage = content;
+            shell.Navigate("discover");
             await content.ImportLocalPackAsync(path);
         };
-        instance.NavigateHome = () => CurrentPage = home;
-        instance.NavigateToNewInstance = () => CurrentPage = download;
-        content.NavigateToSettings = () => CurrentPage = Pages.OfType<SettingsViewModel>().First();
-        instance.NavigateToContent = (id, type) =>
+        instance.NavigateHome = () => shell.Navigate("library");
+        instance.LiveLogFor = id => log.Runs.LastOrDefault(r => r.Instance == id && r.Store?.Record.Outcome == RunOutcome.Running);
+        home.RunStarted += id => Avalonia.Threading.Dispatcher.UIThread.Post(() => instance.OnRunsChanged(id));
+        home.RunFinished += id => Avalonia.Threading.Dispatcher.UIThread.Post(() => instance.OnRunsChanged(id));
+        instance.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
+        content.NavigateToSettings = () => shell.Navigate("settings");
+        instance.NavigateToContent = (id, type, query) =>
         {
-            CurrentPage = content;
-            content.BrowseFor(id, type, back: () => CurrentPage = instance);
+            var back = shell.Router.Current;
+            shell.Navigate("discover");
+            content.BrowseFor(id, type, back: () => shell.Router.Navigate(back), query: query ?? "");
         };
-        multiplayer.NavigateHome = () => CurrentPage = home;
+        multiplayer.NavigateHome = () => shell.Navigate("library");
+        // 开始游戏不换页（§2.5 第 5 条）：进度在顶栏胶囊和启动页。
         download.LaunchInstance = id =>
         {
             service.SetCurrentInstance(id);
-            CurrentPage = home;
             service.RequestLaunch(new LaunchRequest(id));
+        };
+        download.CloseAfterStart = () => shell.Navigate("library");
+        content.LaunchInstance = id => download.LaunchInstance?.Invoke(id);
+        download.BrowseModpacks = () =>
+        {
+            shell.Navigate("discover");
+            content.BrowseModpacks();
+        };
+        // The import runs on the Discover page: it shows the files that need a manual download.
+        download.ImportPackFile = async (path, play) =>
+        {
+            shell.Navigate("discover");
+            if (await content.ImportLocalPackAsync(path) is { } id && play) download.LaunchInstance?.Invoke(id);
+        };
+        var settingsPage = Pages.OfType<SettingsViewModel>().Single();
+        Drop = new DropViewModel(service)
+        {
+            PreviewPack = async path =>
+            {
+                shell.Navigate(LegacyRoutes.NewInstance);
+                download.SourceIndex = (int)NewInstanceSource.PackFile;
+                await download.PreviewPackAsync(path);
+            },
+            ImportTheme = settingsPage.ImportThemePack,
+        };
+        FirstRun = new FirstRunViewModel(service, home.Onboarding)
+        {
+            OpenLogin = tab =>
+            {
+                accounts.LoginTab = tab;
+                shell.Navigate("accounts");
+            },
+            OpenNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance),
+            ShowLibrary = () => shell.Navigate("library"),
+            Launch = id => download.LaunchInstance?.Invoke(id),
+            ImportPackAndPlay = path => download.ImportPackFile!(path, true),
+        };
+        Activity = new ActivityViewModel(service) { OpenRun = _ => shell.Navigate("library") };
+        home.SessionStarted += Activity.Track;
+        // 游戏库的“上次玩”和“共玩”：只记本机的运行记录。
+        home.SessionStarted += session =>
+        {
+            service.RecordPlayed(session.InstanceId, session.Started);
+            var counted = false;
+            session.Changed += s =>
+            {
+                if (counted || s.IsActive || s.Ended is not { } ended || s.ProcessStarted is null) return;
+                counted = true;
+                service.AddPlayTime(s.InstanceId, s.PlayTime(ended));
+            };
+        };
+        var library = new LibraryViewModel(service, home, Activity) { Navigate = r => shell.Navigate(r) };
+        Pages.Add(library);
+        // 多开确认走请求条；启动页的卡片也还在，哪边处理都会让另一边一起消失。
+        const string MultiKey = "multi-launch";
+        home.MultiLaunchRequested += running => service.Requests.Post(new Amber.Core.Activity.RequestSpec("multi",
+            L.F("home.multi.warning", running), null,
+            [new("start", L.T("home.multi.launch_anyway")), new("cancel", L.T("common.cancel"), IsDefault: true)], DedupeKey: MultiKey));
+        service.Requests.Resolved += r =>
+        {
+            if (r.Spec.Kind != "multi" || r.ResolvedBy == Amber.Core.Activity.RequestSource.Program) return;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (r.Choice == "start") home.LaunchAnywayCommand.Execute(null);
+                else home.DismissPendingLaunchCommand.Execute(null);
+            });
+        };
+        home.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(HomeViewModel.PendingLaunch) && home.PendingLaunch is null) service.Requests.Withdraw(MultiKey);
         };
         download.OpenInstance = id =>
         {
             service.SetCurrentInstance(id);
-            CurrentPage = instance;
+            shell.Router.Navigate(Route.Of(Section.Library, id));
         };
         download.BrowseModsFor = id =>
         {
-            CurrentPage = content;
+            shell.Navigate("discover");
             content.BrowseModsFor(id);
         };
         instance.NavigateToDatapacks = (id, world) =>
         {
-            CurrentPage = content;
-            content.BrowseDatapacksFor(id, world, back: () => CurrentPage = instance);
+            var back = shell.Router.Current;
+            shell.Navigate("discover");
+            content.BrowseDatapacksFor(id, world, back: () => shell.Router.Navigate(back));
         };
-        ApplyNavOrder(null);
-        CurrentPage = Pages[0];
+        foreach (var page in Pages) Shell.Watch(page);
+        CurrentPage = library;
         CurrentPage.Activate();
     }
 }
@@ -302,9 +393,13 @@ public sealed partial class SettingsViewModel : PageViewModel
     public string SettingsPath => AppSettings.FilePath;
     public string SettingsPathLabel => L.F("settings.file_path", SettingsPath);
 
+    /// <summary>Storage › Recently deleted (§6.20).</summary>
+    public RecycleViewModel Recycle { get; }
+
     public SettingsViewModel(LauncherService service)
     {
         _service = service;
+        Recycle = new RecycleViewModel(service);
         _loading = true;
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
@@ -348,6 +443,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         UpdateFeed = s.UpdateFeedUrl ?? "";
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
         SelectedMotionIndex = Math.Max(0, Array.IndexOf(Amber.Core.Layout.MotionPreference.Modes, Amber.Core.Layout.MotionPreference.Normalize(s.ReduceMotionMode)));
+        SelectedSidebarIndex = (int)Amber.Core.Layout.ShellRules.ParseMode(s.SidebarMode ?? (s.SidebarCollapsed ? "collapsed" : null));
         ReloadThemePacks();
         // 开发模式下主题文件改了会重新套用，提示跟着更新。
         ThemeService.Changed += UpdateThemePackStatus;
@@ -382,6 +478,8 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
 
+    protected override void OnBecameCurrent() => Recycle.Refresh();
+
     public Amber.App.Localization.OptionItem[] ThemeOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.theme.system", "settings.theme.light", "settings.theme.dark");
     private static readonly string[] ThemeKeys = ["system", "light", "dark"];
 
@@ -400,6 +498,23 @@ public sealed partial class SettingsViewModel : PageViewModel
         _service.Settings.ReduceMotion = _service.Settings.ReduceMotionMode == Amber.Core.Layout.MotionPreference.On;
         SystemMotion.Apply(_service.Settings.ReduceMotionMode);
         Persist();
+    }
+
+    /// <summary>侧栏：自动 / 总是展开 / 总是收起（顺序和 SidebarMode 一致）。</summary>
+    public Amber.App.Localization.OptionItem[] SidebarOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.sidebar.auto", "settings.sidebar.expanded", "settings.sidebar.collapsed");
+
+    [ObservableProperty] public partial int SelectedSidebarIndex { get; set; }
+
+    /// <summary>侧栏模式改了（窗口重新排外壳）。</summary>
+    public static event Action? SidebarModeChanged;
+
+    partial void OnSelectedSidebarIndexChanged(int value)
+    {
+        if (_loading || value < 0) return;
+        _service.Settings.SidebarMode = Amber.Core.Layout.ShellRules.ModeName((Amber.Core.Layout.SidebarMode)Math.Min(value, 2));
+        _service.Settings.SidebarCollapsed = false;
+        Persist();
+        SidebarModeChanged?.Invoke();
     }
 
     // ---- 界面主题包 ----
@@ -703,6 +818,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
             case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
             case "motion": SelectedMotionIndex = 0; break;
+            case "sidebar": SelectedSidebarIndex = 0; break;
             case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); AllowNetworkThemes = true; break;
         }
     }
@@ -729,6 +845,9 @@ public sealed class RunLog : ObservableObject
     public string? Instance { get; }
     public DateTimeOffset StartedAt { get; }
     internal List<LogEntry> All { get; } = [];
+
+    /// <summary>The saved copy of this run's log (instance logs/jay), so earlier runs survive a restart.</summary>
+    internal RunLogStore? Store { get; set; }
 
     /// <summary>“实例 · 开始时间”，日志页页头和选择框里显示。</summary>
     public string Label => Instance is null ? "" : L.F("log.run_summary", Instance, Fmt.Time(StartedAt));
@@ -810,6 +929,7 @@ public sealed partial class LogViewModel : PageViewModel
     public void Add(RunLog? run, GameLogLine line)
     {
         var level = LogLevelParser.Parse(line.Message, line.Level);
+        run?.Store?.Add(line.Time, level, line.Message);
         Post(run, new LogEntry(line.Time, level.ToString().ToUpperInvariant(), line.Message, level));
     }
 
@@ -818,7 +938,9 @@ public sealed partial class LogViewModel : PageViewModel
     public void AddRaw(RunLog? run, string message)
     {
         var level = LogLevelParser.Parse(message);
-        Post(run, new LogEntry(DateTimeOffset.Now, level == GameLogLevel.Info ? "JAY" : level.ToString().ToUpperInvariant(), message, level));
+        var now = DateTimeOffset.Now;
+        run?.Store?.Add(now, level, message, fromJay: level == GameLogLevel.Info);
+        Post(run, new LogEntry(now, level == GameLogLevel.Info ? "JAY" : level.ToString().ToUpperInvariant(), message, level));
     }
 
     /// <summary>清空正在看的那次启动的日志（别的启动的不动）。</summary>

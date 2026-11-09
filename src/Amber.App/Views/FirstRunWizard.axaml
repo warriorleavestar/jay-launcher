@@ -1,0 +1,175 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:c="using:Amber.App.Views.Controls"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:svc="using:Amber.App.Services"
+             xmlns:safety="using:Amber.App.Controls.Safety"
+             x:Class="Amber.App.Views.FirstRunWizard"
+             x:DataType="vm:FirstRunViewModel"
+             IsVisible="{Binding IsOpen}">
+  <!-- First-run wizard (official design §6.1): covers the shell so there is one way forward, two steps, install in place. -->
+  <Border Background="{DynamicResource PageBg}">
+    <Grid x:Name="WizardRoot" RowDefinitions="Auto,Auto,*,Auto">
+      <!-- Brand, language (each written in itself) and [Skip, look around first]. -->
+      <Grid ColumnDefinitions="*,Auto,Auto" Margin="20,14,20,6">
+        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Image Source="/Assets/jay.ico" Width="22" Height="22" />
+          <TextBlock Text="Jay" FontWeight="Bold" FontSize="{DynamicResource FontSubtitle}" VerticalAlignment="Center" />
+        </StackPanel>
+        <ComboBox x:Name="LanguageBox" Grid.Column="1" ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding LanguageIndex}" MinWidth="120"
+                  AutomationProperties.Name="{l:T settings.language.label}" VerticalAlignment="Center" />
+        <Button x:Name="SkipButton" Grid.Column="2" Classes="ghost" Content="{l:T firstrun.skip}" Command="{Binding SkipCommand}" Margin="8,0,0,0" VerticalAlignment="Center" />
+      </Grid>
+
+      <!-- Step dots (wide / medium) or "Step 1 of 2 · Account" (compact). -->
+      <StackPanel x:Name="StepDots" Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10" Margin="0,4,0,8">
+        <TextBlock Text="{Binding AccountDot}" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" />
+        <TextBlock Text="{l:T firstrun.step.account}" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" />
+        <Border Width="80" Height="1" Background="{DynamicResource Divider}" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding StartDot}" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" />
+        <TextBlock Text="{l:T firstrun.step.start}" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" />
+      </StackPanel>
+      <TextBlock x:Name="StepLine" Grid.Row="1" Text="{Binding StepText}" Classes="hint" Margin="20,0,20,6" IsVisible="False" />
+
+      <ScrollViewer x:Name="WizardScroll" Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
+        <Border x:Name="WizardCard" Classes="card" MaxWidth="640" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="24,0,24,16">
+          <StackPanel Spacing="14">
+            <!-- Step 1: account. -->
+            <StackPanel x:Name="AccountStep" Spacing="12" IsVisible="{Binding IsAccountStep}">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="h2" Text="{l:T firstrun.welcome}" Margin="0" />
+                <TextBlock Classes="hint" Text="{l:T firstrun.account.intro}" TextWrapping="Wrap" />
+              </StackPanel>
+              <TextBlock Text="{Binding AccountText}" IsVisible="{Binding HasAccount}" Foreground="{DynamicResource SuccessText}" TextWrapping="Wrap" />
+              <Button x:Name="MicrosoftOption" Classes="secondary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding MicrosoftCommand}" Padding="14,10">
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{l:T firstrun.account.microsoft}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Classes="hint" Text="{l:T firstrun.account.microsoft.hint}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Border Grid.Column="1" Classes="pill" VerticalAlignment="Top" Margin="8,0,0,0">
+                    <TextBlock Text="{l:T firstrun.account.recommended}" />
+                  </Border>
+                </Grid>
+              </Button>
+              <Border Classes="card" Padding="14,10">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{l:T firstrun.account.offline}" FontWeight="SemiBold" />
+                  <TextBox x:Name="NameBox" Text="{Binding Onboarding.PlayerName}" Watermark="Steve" MaxLength="32"
+                           AutomationProperties.Name="{l:T firstrun.account.offline}" />
+                  <TextBlock Classes="hint" Text="{l:T firstrun.account.offline.rule}" TextWrapping="Wrap" />
+                  <TextBlock x:Name="NameProblemText" Text="{Binding Onboarding.NameProblem}" IsVisible="{Binding !!Onboarding.NameProblem.Length}"
+                             Foreground="{DynamicResource DangerText}" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Onboarding.NameWarning}" IsVisible="{Binding !!Onboarding.NameWarning.Length}"
+                             Foreground="{DynamicResource WarningText}" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" />
+                  <TextBlock x:Name="ContinueHintText" Text="{Binding ContinueHint}" IsVisible="{Binding HasContinueHint}"
+                             Foreground="{DynamicResource DangerText}" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+              <Button x:Name="SkinSiteButton" Classes="ghost" Content="{l:T firstrun.account.more}" Command="{Binding SkinSiteCommand}" HorizontalAlignment="Left" />
+              <safety:SafetyPanel x:Name="PrivacyPanel">
+                <safety:SafetyPanel.Body>
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{l:T firstrun.privacy.body}" TextWrapping="Wrap" />
+                    <Button x:Name="NetworkListButton" Classes="ghost" Content="{l:T firstrun.privacy.list}" Command="{Binding ToggleNetworkListCommand}" HorizontalAlignment="Left" Padding="0,2" />
+                    <TextBlock x:Name="NetworkList" Text="{l:T firstrun.privacy.items}" TextWrapping="Wrap" IsVisible="{Binding ShowNetworkList}" />
+                  </StackPanel>
+                </safety:SafetyPanel.Body>
+              </safety:SafetyPanel>
+            </StackPanel>
+
+            <!-- Step 2: where to start, then the install in place. -->
+            <StackPanel x:Name="StartStep" Spacing="12" IsVisible="{Binding IsStartStep}">
+              <TextBlock Classes="h2" Text="{l:T firstrun.start.title}" Margin="0" />
+              <Border x:Name="DetectedCard" Classes="callout info" IsVisible="{Binding ShowDetected}">
+                <DockPanel>
+                  <Button x:Name="AddDetectedButton" DockPanel.Dock="Right" Classes="secondary" Content="{l:T firstrun.detect.add}" Command="{Binding AddDetectedCommand}"
+                          Margin="12,0,0,0" VerticalAlignment="Center" />
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{l:T firstrun.detect.title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Onboarding.DetectedText}" TextWrapping="Wrap" />
+                    <TextBlock Classes="hint" Text="{l:T firstrun.detect.hint}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+              <StackPanel Spacing="10" IsVisible="{Binding ShowChoices}">
+                <ListBox x:Name="ChoiceList" ItemsSource="{Binding Options}" SelectedIndex="{Binding ChoiceIndex}" Background="Transparent"
+                         AutomationProperties.Name="{l:T firstrun.start.title}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:FirstRunOption">
+                      <StackPanel Spacing="1" Margin="2,4">
+                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Classes="hint" Text="{Binding Description}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <Border x:Name="LatestFailedCard" Classes="callout warning" IsVisible="{Binding ShowLatestFailed}">
+                  <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Center">
+                      <Button Content="{l:T common.retry}" Command="{Binding Onboarding.RetryLatestCommand}" />
+                      <Button Classes="ghost" Content="{l:T onboarding.source.switch}" Command="{Binding Onboarding.SwitchSourceCommand}" />
+                    </StackPanel>
+                    <TextBlock Text="{l:T firstrun.start.offline}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                  </DockPanel>
+                </Border>
+              </StackPanel>
+
+              <StackPanel x:Name="ProgressPanel" Spacing="8" IsVisible="{Binding Onboarding.IsInstalling}">
+                <TextBlock Text="{Binding Onboarding.StageText}" FontWeight="SemiBold" />
+                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="4">
+                  <TextBlock Text="{Binding GameStage}" />
+                  <TextBlock Grid.Column="1" Text="{l:T firstrun.stage.files}" />
+                  <TextBlock Grid.Row="1" Text="{Binding JavaStage}" />
+                  <TextBlock Grid.Row="1" Grid.Column="1" Text="{l:T firstrun.stage.java}" />
+                  <TextBlock Grid.Row="2" Text="{Binding StartStage}" />
+                  <TextBlock Grid.Row="2" Grid.Column="1" Text="{l:T firstrun.stage.start}" />
+                </Grid>
+                <ProgressBar Value="{Binding Onboarding.Progress}" Maximum="100" IsIndeterminate="{Binding Onboarding.ProgressIndeterminate}" />
+                <TextBlock Classes="hint" Text="{Binding Onboarding.DetailText}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Onboarding.DetailText}" />
+                <Border Classes="callout warning" IsVisible="{Binding Onboarding.ShowSlowHint}">
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="{l:T onboarding.source.switch}" Command="{Binding Onboarding.SwitchSourceCommand}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                    <TextBlock Text="{l:T onboarding.slow}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                  </DockPanel>
+                </Border>
+                <WrapPanel ItemSpacing="12" LineSpacing="6">
+                  <TextBlock Classes="hint" Text="{Binding Onboarding.WaitedText}" VerticalAlignment="Center" />
+                  <Button x:Name="CancelInstallButton" Classes="ghost" Content="{l:T common.cancel}" Command="{Binding Onboarding.CancelInstallCommand}" />
+                </WrapPanel>
+                <!-- Learn while you wait: paged by hand, never on a timer. Hidden on short windows. -->
+                <Border x:Name="TipCard" Classes="card" Padding="12,10">
+                  <StackPanel Spacing="4">
+                    <DockPanel>
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="2">
+                        <Button Classes="ghost" Content="‹" Command="{Binding PreviousTipCommand}" AutomationProperties.Name="{l:T firstrun.tip.previous}" />
+                        <Button x:Name="NextTipButton" Classes="ghost" Content="›" Command="{Binding NextTipCommand}" AutomationProperties.Name="{l:T firstrun.tip.next}" />
+                      </StackPanel>
+                      <TextBlock Text="{Binding TipCounter}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock x:Name="TipTextBlock" Text="{Binding TipText}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+              <c:StatusBar Message="{Binding Onboarding.Message}" />
+            </StackPanel>
+            <!-- Wide and tall: the buttons sit at the bottom of the card; otherwise they move to the sticky bar. -->
+            <Border x:Name="CardButtonHost" />
+          </StackPanel>
+        </Border>
+      </ScrollViewer>
+
+      <!-- The button bar sticks to the bottom (compact and short windows keep it in reach). -->
+      <Border x:Name="ButtonBar" Grid.Row="3" Padding="24,10" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource Divider}">
+        <Grid x:Name="ButtonGrid" ColumnDefinitions="Auto,*,Auto">
+          <Button x:Name="BackButton" Classes="ghost" Content="{l:T firstrun.back}" Command="{Binding BackCommand}" IsVisible="{Binding IsStartStep}" />
+          <Button x:Name="ContinueButton" Grid.Column="2" Classes="primary" Content="{l:T firstrun.continue}" Command="{Binding ContinueCommand}" HorizontalContentAlignment="Center"
+                  IsVisible="{Binding IsAccountStep}" />
+          <Button x:Name="InstallPlayButton" Grid.Column="2" Classes="play" Content="{Binding InstallLabel}" Command="{Binding InstallAndPlayCommand}" HorizontalContentAlignment="Center"
+                  IsVisible="{Binding IsStartStep}" />
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
+</UserControl>

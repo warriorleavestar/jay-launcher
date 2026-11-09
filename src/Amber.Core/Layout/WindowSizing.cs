@@ -7,8 +7,8 @@ namespace Amber.Core.Layout;
 public static class WindowSizing
 {
     /// <summary>最小窗口：放得下收起的侧栏和一列内容。屏幕比这还小时就用整个可用区域。</summary>
-    public const double MinWidth = 760;
-    public const double MinHeight = 440;
+    public const double MinWidth = 600;
+    public const double MinHeight = 420;
 
     /// <summary>默认占可用区域的比例：留出桌面，又不至于在小屏幕上太挤。</summary>
     public const double WidthFraction = 0.75;

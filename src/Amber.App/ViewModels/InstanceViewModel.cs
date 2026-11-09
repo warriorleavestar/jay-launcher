@@ -56,6 +56,8 @@ public sealed partial class ModItem(LocalMod mod) : LocalizedObservable
             var path = ModManager.SetEnabled(Mod, value);
             Mod = Mod with { Path = path, FileName = Path.GetFileName(path), Enabled = value };
             OnPropertyChanged(nameof(Meta));
+            OnPropertyChanged(nameof(FileName));
+            OnPropertyChanged(nameof(ToggleLabel));
             EnabledChanged?.Invoke();
         }
         catch (IOException)
@@ -65,7 +67,27 @@ public sealed partial class ModItem(LocalMod mod) : LocalizedObservable
         }
     }
 
-    partial void OnUpdateChanged(ModUpdate? value) => OnPropertyChanged(nameof(UpdateText));
+    partial void OnUpdateChanged(ModUpdate? value)
+    {
+        OnPropertyChanged(nameof(UpdateText));
+        OnPropertyChanged(nameof(UpdateShort));
+    }
+
+    /// <summary>Ticked for bulk actions (official design §6.5). Not the same as enabled.</summary>
+    [ObservableProperty]
+    public partial bool Selected { get; set; }
+
+    public string Version => Mod.Version ?? "";
+    public string ToggleLabel => L.T(Enabled ? "instance.mods.disable" : "instance.mods.enable");
+    public string FileName => Mod.FileName;
+    public string? Authors => Mod.Authors;
+    public string AuthorsText => string.IsNullOrWhiteSpace(Mod.Authors) ? "" : L.F("instance.mods.by", Mod.Authors);
+    /// <summary>Short compatibility mark for the table: ✓, or ⚠ with the problem.</summary>
+    public string CompatShort => Compat is null ? "" : Compat.IsProblem ? "⚠" : "✓";
+    public string UpdateShort => Update is null ? "" : "↑";
+    public ModFacts Facts => new(Name, Mod.FileName, Mod.ModId, Mod.Authors, Enabled, HasUpdate, HasCompatProblem);
+
+    partial void OnCompatChanged(CompatResult? value) => OnPropertyChanged(nameof(CompatShort));
 }
 
 public sealed record WorldItem(WorldInfo World) : LocalizedRecord
@@ -112,19 +134,6 @@ public sealed partial class ScreenshotItem(string path) : ObservableObject
     public partial Bitmap? Thumbnail { get; set; }
 }
 
-public sealed record PackFileItem(string Path)
-{
-    public string Name => System.IO.Path.GetFileName(Path);
-    public string Size
-    {
-        get
-        {
-            var bytes = File.Exists(Path) ? new FileInfo(Path).Length : Toolbox.SizeOf([Path]);
-            return bytes >= 1024 * 1024 ? $"{bytes / 1024.0 / 1024:F1} MB" : $"{bytes / 1024.0:F0} KB";
-        }
-    }
-}
-
 public sealed partial class ServerItem(ServerEntry entry) : LocalizedObservable
 {
     public ServerEntry Entry { get; } = entry;
@@ -169,7 +178,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public partial string? SelectedId { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasInstance), nameof(SupportsQuickPlay), nameof(IsSharedDir))]
+    [NotifyPropertyChangedFor(nameof(HasInstance), nameof(SupportsQuickPlay), nameof(IsSharedDir), nameof(IsVanilla))]
     public partial GameInstance? Current { get; set; }
 
     /// <summary>版本隔离关闭：模组、资源包、光影都在 .minecraft 下，所有实例共用（改版规格 2.3）。</summary>
@@ -202,6 +211,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public InstanceViewModel(LauncherService service)
     {
         _service = service;
+        HookMods();
         // PageViewModel 只有进入回调；离开时通过已有属性通知撤销服务器查询。
         PropertyChanged += (_, e) =>
         {
@@ -250,6 +260,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
 
     partial void OnCurrentChanged(GameInstance? value)
     {
+        LoadBisect();
         CancelServerQueries();
         _loadedTabs.Remove((int)InstanceTab.Servers);
     }
@@ -257,8 +268,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     /// <summary>每个实例上次打开的 Tab（只在这次运行里记着）。</summary>
     private readonly Dictionary<string, int> _lastTab = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>没打开过的实例默认看哪个 Tab：有加载器看模组，原版看世界（改版规格 4.3）。</summary>
-    internal static InstanceTab DefaultTab(GameInstance instance) => instance.Loader is null ? InstanceTab.Worlds : InstanceTab.Mods;
+    /// <summary>An instance not opened before in this run starts on the overview (official design §6.4).</summary>
+    internal static InstanceTab DefaultTab(GameInstance instance) => InstanceTab.Overview;
 
     partial void OnSelectedIdChanged(string? oldValue, string? newValue)
     {
@@ -290,7 +301,10 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             CancelServerQueries();
             _loadedTabs.Remove((int)InstanceTab.Servers);
         }
+        // Logs: read the run list again each time (a run may have started or ended meanwhile).
+        if (value == (int)InstanceTab.Logs) _loadedTabs.Remove(value);
         LoadTab(value);
+        UpdateLiveTimer();
     }
 
     private void LoadTab(int tab)
@@ -298,13 +312,15 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         if (Current is null || !_loadedTabs.Add(tab)) return;
         switch ((InstanceTab)tab)
         {
+            case InstanceTab.Overview: LoadOverview(); break;
             case InstanceTab.Settings: LoadSettings(); break;
             case InstanceTab.Mods: LoadMods(); break;
             case InstanceTab.Worlds: LoadWorlds(); break;
             case InstanceTab.Screenshots: LoadScreenshots(); break;
-            case InstanceTab.ResourcePacks: LoadPackFiles(ResourcePacks, Current.ResourcePacksDir); break;
-            case InstanceTab.ShaderPacks: LoadPackFiles(ShaderPacks, Current.ShaderPacksDir); UpdateShaderState(); break;
+            case InstanceTab.ResourcePacks: LoadResourcePacks(); break;
+            case InstanceTab.ShaderPacks: LoadShaderPacks(); UpdateShaderState(); break;
             case InstanceTab.Servers: LoadServers(); break;
+            case InstanceTab.Logs: LoadLogs(); break;
         }
     }
 
@@ -956,18 +972,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     }
 
     [RelayCommand]
-    private async Task BackupWorldAsync(WorldItem? item)
-    {
-        if (Current is not { } c || item is null) return;
-        await RunWorkAsync(async _ =>
-        {
-            SetStatus(StatusMessage.Info("instance.worlds.backing_up", item.Name));
-            var target = await Task.Run(() => WorldManager.Backup(item.World, Path.Combine(c.WorkDir, "backups")));
-            SetStatus(StatusMessage.Success("instance.worlds.backed_up", target));
-        });
-    }
-
-    [RelayCommand]
     private void OpenWorld(WorldItem? item)
     {
         if (item is not null) OpenPath(item.World.Path);
@@ -1007,7 +1011,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public partial WorldItem? DatapackWorld { get; set; }
 
     public bool HasDatapackWorld => DatapackWorld is not null;
-    public string DatapackTitle => DatapackWorld is { } w ? L.F("instance.datapacks.world_title", w.Name) : "";
+    public string DatapackTitle => DatapackWorld?.Name ?? "";
     public string? DatapacksDir => DatapackWorld is { } w ? DatapackManager.DirectoryOf(w.World.Path) : null;
 
     /// <summary>主窗口设置：去资源页搜索数据包（版本 id，世界文件夹名）。</summary>
@@ -1018,6 +1022,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     {
         DatapackWorld = item;
         LoadDatapacks();
+        LoadBackups();
     }
 
     [RelayCommand]
@@ -1116,46 +1121,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     {
         if (item is null || !Trash(item.Path, LoadScreenshots)) return;
         Screenshots.Remove(item);
-    }
-
-    // ---- 资源包、光影 ----
-
-    public ObservableCollection<PackFileItem> ResourcePacks { get; } = [];
-    public ObservableCollection<PackFileItem> ShaderPacks { get; } = [];
-
-    private void ReloadPackFiles()
-    {
-        if (Current is not { } c) return;
-        LoadPackFiles(ResourcePacks, c.ResourcePacksDir);
-        LoadPackFiles(ShaderPacks, c.ShaderPacksDir);
-        UpdateShaderState();
-    }
-
-    private static void LoadPackFiles(ObservableCollection<PackFileItem> target, string dir)
-    {
-        target.Clear();
-        if (!System.IO.Directory.Exists(dir)) return;
-        foreach (var path in System.IO.Directory.EnumerateFileSystemEntries(dir).Order()) target.Add(new PackFileItem(path));
-    }
-
-    [RelayCommand]
-    private void OpenResourcePacksFolder()
-    {
-        if (Current is { } c) OpenPath(c.ResourcePacksDir);
-    }
-
-    [RelayCommand]
-    private void OpenShaderPacksFolder()
-    {
-        if (Current is { } c) OpenPath(c.ShaderPacksDir);
-    }
-
-    [RelayCommand]
-    private void DeletePack(PackFileItem? item)
-    {
-        if (item is null || !Trash(item.Path, ReloadPackFiles)) return;
-        ResourcePacks.Remove(item);
-        ShaderPacks.Remove(item);
     }
 
     // ---- 服务器 ----
@@ -1279,7 +1244,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public Action? NavigateToNewInstance { get; set; }
 
     /// <summary>主窗口设置：【在线浏览…】跳到资源页，参数是实例和内容类型。</summary>
-    public Action<string, ContentType>? NavigateToContent { get; set; }
+    public Action<string, ContentType, string?>? NavigateToContent { get; set; }
 
     /// <summary>顶部【▶ 启动】：启动当前实例，切回启动页看进度。</summary>
     [RelayCommand]
@@ -1297,7 +1262,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [RelayCommand]
     private void BrowseOnline(ContentType type)
     {
-        if (Current is { } c) NavigateToContent?.Invoke(c.Id, type);
+        if (Current is { } c) NavigateToContent?.Invoke(c.Id, type, null);
     }
 
     // ---- 导出 ----
@@ -1347,14 +1312,16 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     }
 }
 
-/// <summary>实例页的 Tab，顺序就是界面上的顺序（改版规格 4.3）。“导出整合包”移进了【⋯ 更多】菜单。</summary>
+/// <summary>实例页的 Tab，顺序就是界面上的顺序（官方设计 §6.3）。“导出整合包”移进了【⋯ 更多】菜单。</summary>
 public enum InstanceTab
 {
+    Overview,
     Mods,
     Worlds,
     ResourcePacks,
     ShaderPacks,
     Servers,
     Screenshots,
+    Logs,
     Settings,
 }

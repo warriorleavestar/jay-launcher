@@ -6,48 +6,49 @@
              xmlns:c="using:Amber.App.Views.Controls"
              x:Class="Amber.App.Views.ContentPage"
              x:DataType="vm:ContentViewModel">
-  <Grid RowDefinitions="Auto,Auto,*,Auto">
-    <Grid ColumnDefinitions="*,Auto">
-      <TextBlock svc:ThemeRegion.Name="content.header" Classes="h1" Text="{l:T content.title}" />
-      <Button Grid.Column="1" Content="{l:T content.modpack.import}" Click="ImportPack_Click" VerticalAlignment="Top" />
+  <!-- Short windows scroll the whole page with a fixed-height result list (the bars stay reachable); otherwise the
+       list takes the room that is left. -->
+  <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled">
+  <Grid x:Name="RootGrid" RowDefinitions="Auto,Auto,*,Auto,Auto">
+    <!-- Title, type chips (a drop-down when compact), source segment: official design §6.12. -->
+    <Grid x:Name="HeaderGrid" svc:ThemeRegion.Name="content.header" ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,6">
+      <TextBlock Classes="h1" Text="{l:T content.title}" Margin="0,0,16,0" VerticalAlignment="Center" />
+      <ListBox x:Name="TypeChips" Grid.Column="1" Classes="subtabs" ItemsSource="{Binding TypeNames}" SelectedIndex="{Binding TypeIndex}" Background="Transparent"
+               VerticalAlignment="Center" AutomationProperties.Name="{l:T content.type.label}">
+        <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+      <ComboBox x:Name="TypeCombo" Grid.Column="1" ItemsSource="{Binding TypeNames}" SelectedIndex="{Binding TypeIndex}" MinWidth="110" IsVisible="False"
+                VerticalAlignment="Center" AutomationProperties.Name="{l:T content.type.label}" />
+      <!-- CurseForge stays selectable without a key: the list area then explains how to get one. -->
+      <ListBox x:Name="SourceChips" Grid.Column="2" Classes="subtabs" ItemsSource="{Binding SourceOptions}" SelectedIndex="{Binding SourceIndex}" Background="Transparent"
+               VerticalAlignment="Center" Margin="8,0" AutomationProperties.Name="{l:T content.source.label}">
+        <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="2" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:SourceOption"><TextBlock Text="{Binding Label}" /></DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+      <Button x:Name="ImportPackButton" Grid.Column="3" Classes="ghost" Content="{l:T content.modpack.import}" Click="ImportPack_Click" VerticalAlignment="Center" />
     </Grid>
 
     <StackPanel svc:ThemeRegion.Name="content.filters" x:Name="ContentFilters" Grid.Row="1" Spacing="8" Margin="0,0,0,10">
-      <!-- 从实例页【在线浏览…】跳来：写明在给哪个实例找什么，带【← 返回实例】（改版规格 4.5）。 -->
-      <Border Classes="callout info" IsVisible="{Binding HasReturn}">
+      <!-- Context mode (from an instance's "add mods"): where you came from and [Done, go back]. -->
+      <Border x:Name="Breadcrumb" Classes="callout info" IsVisible="{Binding HasReturn}">
         <DockPanel>
-          <Button DockPanel.Dock="Right" Classes="ghost" Content="{l:T content.context.back}" Command="{Binding ReturnCommand}" VerticalAlignment="Center" Margin="8,0,0,0" />
+          <Button x:Name="DoneReturnButton" DockPanel.Dock="Right" Classes="secondary" Content="{l:T content.context.done}" Command="{Binding ReturnCommand}" VerticalAlignment="Center" Margin="8,0,0,0" />
           <TextBlock Text="{Binding ReturnContext}" TextWrapping="Wrap" VerticalAlignment="Center" />
         </DockPanel>
       </Border>
       <!-- 先占用可用宽度再限宽，避免左对齐时搜索框缩到占位文字大小。 -->
-      <Grid x:Name="SearchToolbar" ColumnDefinitions="Auto,Auto,*,Auto" Width="{Binding #ContentFilters.Bounds.Width}" MaxWidth="1000" HorizontalAlignment="Left">
-        <ComboBox ItemsSource="{Binding TypeNames}" SelectedIndex="{Binding TypeIndex}" MinWidth="96" />
-        <ComboBox Grid.Column="1" ItemsSource="{Binding SourceOptions}" SelectedIndex="{Binding SourceIndex}" MinWidth="120" Margin="8,0,0,0">
-          <!-- 没配 CurseForge 密钥时 CurseForge 置灰（改版规格 4.5），说明和【去填写】在下面一行。 -->
-          <ComboBox.Styles>
-            <Style Selector="ComboBoxItem" x:DataType="vm:SourceOption">
-              <Setter Property="IsEnabled" Value="{Binding Enabled}" />
-            </Style>
-          </ComboBox.Styles>
-          <ComboBox.ItemTemplate>
-            <DataTemplate DataType="vm:SourceOption"><TextBlock Text="{Binding Label}" /></DataTemplate>
-          </ComboBox.ItemTemplate>
-        </ComboBox>
-        <TextBox x:Name="SearchInput" Grid.Column="2" Text="{Binding Query}" PlaceholderText="{l:T common.search_placeholder}" Margin="8,0" KeyDown="Query_KeyDown" />
-        <Button Grid.Column="3" Classes="primary" Content="{l:T common.search}" Command="{Binding SearchCommand}" Padding="20,6" />
+      <Grid x:Name="SearchToolbar" ColumnDefinitions="*,Auto" Width="{Binding #ContentFilters.Bounds.Width}" MaxWidth="1000" HorizontalAlignment="Left">
+        <TextBox x:Name="SearchInput" Text="{Binding Query}" PlaceholderText="{l:T common.search_placeholder}" Margin="0,0,8,0" KeyDown="Query_KeyDown" />
+        <Button Grid.Column="1" Classes="secondary" Content="{l:T common.search}" Command="{Binding SearchCommand}" Padding="20,6" />
       </Grid>
-      <WrapPanel ItemSpacing="8" LineSpacing="4" IsVisible="{Binding !HasCurseForge}">
-        <TextBlock Classes="hint" Text="{l:T content.source.needs_key}" VerticalAlignment="Center" TextWrapping="Wrap" />
-        <Button Classes="ghost" Content="{l:T content.source.go_fill}" Command="{Binding GoToCurseForgeKeyCommand}" />
-      </WrapPanel>
       <WrapPanel ItemSpacing="10" LineSpacing="4" IsVisible="{Binding !IsModpack}">
         <TextBlock Text="{l:T content.install.target}" VerticalAlignment="Center" />
         <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" MinWidth="260" />
-        <Border IsVisible="{Binding IsTemporaryTarget}" Background="{DynamicResource WarningTint}" CornerRadius="{DynamicResource RadiusPill}" Padding="8,2" VerticalAlignment="Center"
-                ToolTip.Tip="{l:T content.install.temporary_hint}">
-          <TextBlock Text="{l:T content.install.temporary}" Foreground="{DynamicResource WarningText}" FontSize="{DynamicResource FontCaption}" />
-        </Border>
         <Border IsVisible="{Binding IsSharedTarget}" Background="{DynamicResource AccentTint}" CornerRadius="{DynamicResource RadiusPill}" Padding="8,2" VerticalAlignment="Center"
                 ToolTip.Tip="{l:T content.install.shared_hint}">
           <TextBlock Text="{l:T content.install.shared}" Foreground="{DynamicResource AccentText}" FontSize="{DynamicResource FontCaption}" />
@@ -64,7 +65,7 @@
       </StackPanel>
     </StackPanel>
 
-    <Grid svc:ThemeRegion.Name="content.body" Grid.Row="2" ColumnDefinitions="*,Auto">
+    <Grid svc:ThemeRegion.Name="content.body" x:Name="BodyGrid" Grid.Row="2" ColumnDefinitions="*,Auto">
       <Border Classes="card" Padding="6">
         <Grid RowDefinitions="*,Auto">
           <TextBlock Classes="hint" Text="{l:T content.search.empty_hint}" HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -100,7 +101,7 @@
           <ListBox x:Name="ResultsList" IsVisible="{Binding !!Results.Count}" ItemsSource="{Binding Results}" SelectedItem="{Binding Selected}" Background="Transparent">
             <ListBox.ItemTemplate>
               <DataTemplate DataType="vm:ProjectItem">
-                <Grid ColumnDefinitions="48,*" Margin="2">
+                <Grid ColumnDefinitions="48,*,Auto" Margin="2">
                   <Border Width="48" Height="48" CornerRadius="6" Background="{DynamicResource PageBg}" ClipToBounds="True" VerticalAlignment="Top">
                     <Image Source="{Binding Icon}" />
                   </Border>
@@ -109,6 +110,9 @@
                     <TextBlock x:Name="ProjectSummary" Text="{Binding Summary}" Classes="hint" MaxWidth="640" HorizontalAlignment="Left" MaxLines="2" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Summary}" />
                     <TextBlock Text="{Binding Meta}" Classes="caption" />
                   </StackPanel>
+                  <Button Grid.Column="2" Classes="secondary small" Content="{Binding QueueLabel}" Classes.queued="{Binding Queued}" VerticalAlignment="Center" Margin="10,0,0,0"
+                          Command="{Binding $parent[ListBox].((vm:ContentViewModel)DataContext).ToggleQueueCommand}" CommandParameter="{Binding}"
+                          IsVisible="{Binding !$parent[ListBox].((vm:ContentViewModel)DataContext).IsModpack}" />
                 </Grid>
               </DataTemplate>
             </ListBox.ItemTemplate>
@@ -120,12 +124,17 @@
         </Grid>
       </Border>
 
-      <Border Grid.Column="1" Classes="card" Width="320" Margin="14,0,0,14" IsVisible="{Binding HasSelection}">
+      <!-- Detail: a 400 column when wide, a drawer over the list on medium, the whole area when compact (code-behind). -->
+      <Border x:Name="DetailPane" Grid.Column="1" Classes="card" Width="400" Margin="14,0,0,0" IsVisible="{Binding HasSelection}">
         <Grid RowDefinitions="Auto,Auto,*,Auto">
-          <StackPanel Spacing="4">
-            <TextBlock Classes="h2" Text="{Binding Detail.Title}" Margin="0" TextWrapping="Wrap" />
-            <Button Content="{l:T content.project.open_page}" Command="{Binding OpenPageCommand}" Padding="8,3" FontSize="12" />
-          </StackPanel>
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="h2" Text="{Binding Detail.Title}" Margin="0" TextWrapping="Wrap" />
+              <Button Classes="ghost" Content="{l:T content.project.open_page}" Command="{Binding OpenPageCommand}" Padding="8,3" FontSize="12" />
+            </StackPanel>
+            <Button x:Name="CloseDetailButton" Grid.Column="1" Classes="ghost" Content="✕" VerticalAlignment="Top" Command="{Binding CloseDetailCommand}"
+                    ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}" />
+          </Grid>
           <CheckBox Grid.Row="1" Content="{l:T common.show_unstable}" IsChecked="{Binding ShowUnstable}" Margin="0,6" />
           <ListBox Grid.Row="2" ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile}" Background="Transparent">
             <ListBox.ItemTemplate>
@@ -167,14 +176,34 @@
                 </CheckBox>
               </StackPanel>
             </Border>
-            <Button Classes="primary" Content="{l:T content.install.selected}" Command="{Binding InstallCommand}" IsVisible="{Binding !SelectedRequiresManualDownload}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                    ToolTip.Tip="{Binding InstallHint}" ToolTip.ShowOnDisabled="True" />
+            <!-- Mods, packs, shaders, datapacks: [+ Queue] (blue) or [Install now]. -->
+            <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding !IsModpack}">
+              <Button x:Name="QueueSelectedButton" Classes="primary" Content="{l:T content.queue.add_selected}" Command="{Binding QueueSelectedCommand}" IsVisible="{Binding !SelectedRequiresManualDownload}" />
+              <Button x:Name="InstallNowButton" Content="{l:T content.install.now}" Command="{Binding InstallCommand}" IsVisible="{Binding !SelectedRequiresManualDownload}"
+                      ToolTip.Tip="{Binding InstallHint}" ToolTip.ShowOnDisabled="True" />
+            </WrapPanel>
+            <!-- Modpacks: [Install and play] is the one amber button on this screen. -->
+            <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding IsModpack}">
+              <Button x:Name="InstallPlayButton" Classes="play" Content="{l:T content.modpack.install_play}" Command="{Binding InstallModpackAndPlayCommand}" IsVisible="{Binding !SelectedRequiresManualDownload}" />
+              <Button x:Name="InstallOnlyButton" Content="{l:T content.modpack.install_only}" Command="{Binding InstallCommand}" IsVisible="{Binding !SelectedRequiresManualDownload}" />
+            </WrapPanel>
           </StackPanel>
         </Grid>
       </Border>
     </Grid>
 
-    <Border svc:ThemeRegion.Name="content.status" Grid.Row="3" Classes="card" Margin="0">
+    <!-- "To install" bar: everything queued goes in as one task (Ctrl+Enter). -->
+    <Border x:Name="QueueBar" Grid.Row="3" Classes="card" Margin="0,10,0,0" Padding="12,8" IsVisible="{Binding HasQueue}">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Text="{Binding QueueText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding QueueText}" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0">
+          <Button Classes="ghost" Content="{l:T content.queue.clear}" Command="{Binding ClearQueueCommand}" />
+          <Button x:Name="InstallQueueButton" Classes="primary" Content="{Binding InstallQueueLabel}" Command="{Binding InstallQueueCommand}" HotKey="Ctrl+Enter" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Border svc:ThemeRegion.Name="content.status" Grid.Row="4" Classes="card" Margin="0,10,0,0">
       <Grid ColumnDefinitions="*,Auto">
         <StackPanel Spacing="6" VerticalAlignment="Center">
           <c:StatusBar Message="{Binding StatusInfo}" />
@@ -188,4 +217,5 @@
       </Grid>
     </Border>
   </Grid>
+  </ScrollViewer>
 </UserControl>

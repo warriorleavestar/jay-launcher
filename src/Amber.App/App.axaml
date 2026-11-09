@@ -120,6 +120,20 @@
       <Setter Property="Padding" Value="{DynamicResource CardPadding}" />
       <Setter Property="Margin" Value="0,0,0,12" />
     </Style>
+    <!-- Drag-and-drop zones (§6.25): a dashed accent frame, filled when the files are over it. -->
+    <Style Selector="Border.drop-target">
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Width" Value="240" />
+    </Style>
+    <Style Selector="Border.compact Border.drop-target">
+      <Setter Property="Width" Value="320" />
+    </Style>
+    <Style Selector="Border.drop-target.hovered">
+      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
+    </Style>
+
     <Style Selector="TextBlock.h1">
       <Setter Property="TextWrapping" Value="Wrap" />
       <Setter Property="FontSize" Value="{DynamicResource FontTitle}" />

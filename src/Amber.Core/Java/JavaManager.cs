@@ -52,11 +52,17 @@ public sealed class JavaManager(Downloader downloader, GameDirectory dir)
                 }
             }
             return JavaFinder.Pick(installs, major)?.JavaPath
-                   ?? throw new InvalidOperationException(L.F("core.java.manager.notfound", major, major));
+                   ?? throw new JavaNotFoundException(major, L.F("core.java.manager.notfound", major, major));
         }
         finally
         {
             _lock.Release();
         }
     }
+}
+
+/// <summary>找不到（也没能下载）需要的 Java。启动失败卡按它给出【下载 Java N】。</summary>
+public sealed class JavaNotFoundException(int major, string message) : InvalidOperationException(message)
+{
+    public int Major { get; } = major;
 }

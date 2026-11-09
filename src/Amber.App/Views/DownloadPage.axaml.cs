@@ -1,19 +1,24 @@
 using Amber.App.ViewModels;
+using Amber.Core.Localization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 
 namespace Amber.App.Views;
 
+/// <summary>
+/// The new-instance panel (official design §6.11). Wide: the sources are a rail on the left. Medium and compact: they
+/// become a segment above the content, and the button bar stays at the bottom.
+/// </summary>
 public partial class DownloadPage : UserControl
 {
-    /// <summary>列表一行（版本号、胶囊、日期加安装按钮）至少要 320，加面板最少 260 和间距放不下时，安装面板改成盖在列表上的抽屉（改版规格 4.4 compact）。</summary>
-    internal const double ListMinWidth = 320;
-    internal const double CompactWidth = ListMinWidth + 260 + 14;
-
-    /// <summary>打开安装面板的那个控件；面板关掉后焦点回到它。</summary>
-    private IInputElement? _opener;
+    /// <summary>Below this page width the source rail turns into a segment on top.</summary>
+    internal const double RailFrom = 820;
 
     /// <summary>主题包可以重新排这一页的区块（docs/themes.md 的“页面布局”）。</summary>
     internal Amber.App.Services.ThemeLayoutHost ThemeLayout { get; }
@@ -22,56 +27,124 @@ public partial class DownloadPage : UserControl
     {
         InitializeComponent();
         ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "downloads");
-        VersionList.DoubleTapped += (_, e) => { if (ConfigureSelected()) e.Handled = true; };
-        VersionList.KeyDown += (_, e) => { if (e.Key == Key.Enter && ConfigureSelected()) e.Handled = true; };
-        InstallPanel.KeyDown += (_, e) =>
+        // A click or arrow key on a row picks that version; a rebuilt list (search, filter) keeps the pick.
+        VersionList.SelectionChanged += (_, e) =>
         {
-            if (e.Key != Key.Escape || DataContext is not DownloadViewModel vm || vm.IsBusy) return;
-            vm.CloseConfigureCommand.Execute(null);
+            if (DataContext is DownloadViewModel vm && e.AddedItems is [RemoteVersionItem item, ..]) vm.ConfigureCommand.Execute(item);
+        };
+        // After a search or filter rebuilt the rows, highlight the chosen version again if it is still listed.
+        // Subscribed only while the page is shown: the view model outlives the page.
+        AttachedToVisualTree += (_, _) => { if (DataContext is DownloadViewModel vm) (_items = vm.Items).CollectionChanged += OnItemsChanged; };
+        DetachedFromVisualTree += (_, _) => { if (_items is not null) _items.CollectionChanged -= OnItemsChanged; _items = null; };
+        VersionList.DoubleTapped += (_, e) =>
+        {
+            if (DataContext is DownloadViewModel vm && vm.InstallCommand.CanExecute(null)) vm.InstallCommand.Execute(null);
             e.Handled = true;
         };
-        // 点按钮打开面板前记下焦点所在（按钮本身），面板关掉时还回去。
-        AddHandler(Button.ClickEvent, (_, _) => _opener = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement(), RoutingStrategies.Tunnel);
-        InstallPanel.PropertyChanged += (_, e) =>
+        SizeChanged += (_, e) =>
         {
-            if (e.Property != IsVisibleProperty) return;
-            if (InstallPanel.IsVisible) return;
-            if (_opener is Visual { IsEffectivelyVisible: true } && _opener.Focusable) _opener.Focus();
-            _opener = null;
+            var size = e.NewSize;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                ApplyWidth(size.Width);
+                ApplyHeight(size.Height);
+            });
         };
-        // 不在布局过程中改列：放到下一轮再按新宽度排。
-        BodyGrid.SizeChanged += (_, e) =>
+        // Loaders the chosen version can't have are greyed out, with the reason as a tooltip (§6.11).
+        LoaderSegment.ContainerPrepared += (_, e) =>
         {
-            var compact = e.NewSize.Width < CompactWidth;
-            var width = e.NewSize.Width;
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyCompact(compact, width));
+            if (e.Container is not ListBoxItem item) return;
+            item.Bind(IsEnabledProperty, new Avalonia.Data.Binding(nameof(LoaderChoice.IsAvailable)));
+            item.Bind(ToolTip.TipProperty, new Avalonia.Data.Binding(nameof(LoaderChoice.BlockReason)));
+            ToolTip.SetShowOnDisabled(item, true);
         };
     }
 
-    /// <summary>窄窗时面板盖在列表上（靠右的抽屉），宽屏时回到右侧一列。</summary>
-    private void ApplyCompact(bool compact, double width)
-    {
-        foreach (var panel in new Control[] { InstallPanel, InstalledCard })
+    private System.Collections.ObjectModel.ObservableCollection<RemoteVersionItem>? _items;
+
+    private void OnItemsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            Grid.SetColumn(panel, compact ? 0 : 1);
-            Grid.SetColumnSpan(panel, compact ? 2 : 1);
-            panel.HorizontalAlignment = compact ? Avalonia.Layout.HorizontalAlignment.Right : Avalonia.Layout.HorizontalAlignment.Stretch;
-            panel.Margin = compact ? new Thickness(0, 0, 0, 14) : new Thickness(14, 0, 0, 14);
-            panel.ZIndex = compact ? 1 : 0;
+            if (DataContext is DownloadViewModel { Target: { } target } vm && VersionList.SelectedItem is null
+                && vm.Items.FirstOrDefault(i => i.Id == target.Id) is { } row) VersionList.SelectedItem = row;
+        });
+
+    private bool? _rail;
+
+    private void ApplyWidth(double width)
+    {
+        Classes.Set("compact", width < Amber.App.Services.ThemeLayoutHost.CompactBelow);
+        var rail = width >= RailFrom;
+        if (_rail == rail) return;
+        _rail = rail;
+        Grid.SetColumn(SourceList, rail ? 0 : 1);
+        Grid.SetRowSpan(SourceList, rail ? 5 : 1);
+        SourceList.Width = rail ? 190 : double.NaN;
+        SourceList.Margin = rail ? new Thickness(0, 0, 14, 0) : new Thickness(0, 0, 0, 10);
+        SourceList.ItemsPanel = rail
+            ? new FuncTemplate<Panel?>(() => new StackPanel { Spacing = 2 })
+            : new FuncTemplate<Panel?>(() => new WrapPanel { ItemSpacing = 4, LineSpacing = 4 });
+        SourceList.Classes.Set("subtabs", !rail);
+    }
+
+    /// <summary>Below this page height the page scrolls and the version list gets a fixed height, so nothing is cut off.</summary>
+    internal const double ScrollBelow = 620;
+
+    private bool? _short;
+
+    private void ApplyHeight(double height)
+    {
+        var isShort = height < ScrollBelow;
+        if (_short == isShort) return;
+        _short = isShort;
+        PageScroll.VerticalScrollBarVisibility = isShort ? Avalonia.Controls.Primitives.ScrollBarVisibility.Auto : Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
+        VersionCard.Height = isShort ? 220 : double.NaN;
+        Classes.Set("short", isShort);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Handled || DataContext is not DownloadViewModel vm) return;
+        if (e.Key == Key.Escape && !vm.IsBusy)
+        {
+            Close();
+            e.Handled = true;
         }
-        InstallPanel.MinWidth = compact ? 0 : 260;
-        // 宽屏：260–340，并给列表留够 ListMinWidth；窄窗：抽屉最多 320。
-        InstallPanel.Width = compact ? Math.Min(320, Math.Max(200, width - 24)) : Math.Clamp(Math.Min(width * 0.4, width - ListMinWidth - 14), 260, 340);
-        InstalledCard.MinWidth = InstallPanel.MinWidth;
-        InstalledCard.Width = InstallPanel.Width;
-        Classes.Set("compact", compact);
+        // Enter installs from the list or the name box (§6.11 keyboard); other controls keep their own Enter.
+        else if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None && vm.IsVersionSource
+                 && (e.Source is Control c && (c == NameBox || c.FindAncestorOfType<ListBox>() == VersionList || c == VersionList))
+                 && vm.InstallCommand.CanExecute(null))
+        {
+            vm.InstallCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
-    private bool ConfigureSelected()
+    private void Close_Click(object? sender, RoutedEventArgs e) => Close();
+
+    /// <summary>✕ and Esc: back to where the panel was opened from (the library when it was opened directly).</summary>
+    private void Close()
     {
-        if (DataContext is not DownloadViewModel vm || VersionList.SelectedItem is not RemoteVersionItem item) return false;
-        _opener = VersionList;
-        vm.ConfigureCommand.Execute(item);
-        return true;
+        if (DataContext is DownloadViewModel vm) vm.CloseAfterStart?.Invoke();
+    }
+
+    private async void PickPack_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not DownloadViewModel vm || TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return;
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = L.T("newinstance.pack.pick"),
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType(L.T("newinstance.pack.type")) { Patterns = ["*.mrpack", "*.zip"] }],
+        });
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await vm.PreviewPackAsync(path);
+    }
+
+    private async void PickFolder_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not DownloadViewModel vm || TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return;
+        var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = L.T("newinstance.import.pick"), AllowMultiple = false });
+        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path) vm.UseGameDirectory(path);
     }
 }

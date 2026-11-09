@@ -16,7 +16,7 @@ public class SafetyPanel : SafetySurface
 {
     protected override Type StyleKeyOverride => typeof(SafetyPanel);
 
-    private readonly TextBlock _title = new() { TextWrapping = TextWrapping.Wrap, FontWeight = FontWeight.Bold };
+    private readonly TextBlock _title = new() { TextWrapping = TextWrapping.Wrap, FontWeight = FontWeight.Bold, IsVisible = false };
     private readonly ContentControl _body = new();
     private readonly TextBlock _badge = new() { VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeight.Bold };
 

@@ -22,11 +22,18 @@ public partial class MainWindow : Window
         InitializeComponent();
         Amber.App.Services.ThemeService.AttachMainWindow(this);
         AttachShell();
+        AttachDrop();
         FitToScreen(settings?.LauncherWindow);
         // 窗口打开后才知道标题栏有多高：Width/Height 是客户区，加上标题栏可能比屏幕的可用区域还高（底下被任务栏挡住）。
         Opened += (_, _) => FitFrameToScreen();
-        Closing += (_, _) =>
+        Opened += (_, _) =>
         {
+            if (DataContext is MainViewModel { FirstRun: var firstRun } && firstRun.ShouldOpen()) firstRun.Open();
+        };
+        Closing += (_, e) =>
+        {
+            // 关窗保护（§5.9）：还有远程控制、服务器、房间里的人、进行中的任务或准备中的游戏时先确认。
+            if (GuardClose(e)) return;
             RememberPlacement();
             // 关主窗口就是退出 Jay：先结束远程控制（通知对方、收起红框），不能让被控状态在后台继续。
             if (DataContext is MainViewModel main)
