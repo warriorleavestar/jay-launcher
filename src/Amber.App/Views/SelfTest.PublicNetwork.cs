@@ -16,7 +16,8 @@ internal sealed partial class SelfTest
     /// 要先下载好联机组件；所有连接都在本机回环上。
     /// </summary>
     /// <summary>加入方的页面不在主窗口里：单独开一个窗口显示它的联机页再截图。</summary>
-    private async Task ShotPageAsync(MultiplayerViewModel vm, string name)
+    /// <param name="scrollToText">截图前把显示这段文字的控件滚到可见处。</param>
+    private async Task ShotPageAsync(MultiplayerViewModel vm, string name, string? scrollToText = null)
     {
         var shot = Dispatcher.UIThread.Invoke(() =>
         {
@@ -25,6 +26,11 @@ internal sealed partial class SelfTest
             return w;
         });
         await Task.Delay(800);
+        if (scrollToText is not null)
+        {
+            Dispatcher.UIThread.Invoke(() => shot.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Text == scrollToText)?.BringIntoView());
+            await Task.Delay(400);
+        }
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             using var bitmap = new Avalonia.Media.Imaging.RenderTargetBitmap(new Avalonia.PixelSize((int)shot.Bounds.Width, (int)shot.Bounds.Height));
@@ -48,6 +54,8 @@ internal sealed partial class SelfTest
             return;
         }
         var service = host.TestService;
+        // 收到的文件放进报告目录（私聊在进房间时就建好了，要在开房间之前设）。
+        host.DownloadsDir = Path.Combine(reportDir, "downloads-host");
 
         // 本机的种子节点 + 目录（和 jay-server directory 一样）。
         var nodePort = EasyTierArgs.FreeTcpPort();
@@ -85,6 +93,10 @@ internal sealed partial class SelfTest
         guest.Activate();
         guest.TestPeers = [$"tcp://127.0.0.1:{relayPort}"];
         guest.EasyTierWorkRoot = Path.Combine(reportDir, "easytier-guest");
+        // 加入方要有自己的联机身份（同一个进程里默认和房主共用一个）。
+        guest.UseTestIdentity(Path.Combine(reportDir, "identity-guest"));
+        // 收到的文件放进报告目录（私聊在进房间时就建好了，要在那之前设）。
+        guest.DownloadsDir = Path.Combine(reportDir, "downloads-guest");
         await guest.ConnectPublicCommand.ExecuteAsync(null);
         Check("公共网络：加入方连上（隐私说明只显示一次）", guest.IsPublicConnected && !guest.PublicNoticeOpen, guest.Status);
         await guest.RefreshRoomsCommand.ExecuteAsync(null);
@@ -96,6 +108,7 @@ internal sealed partial class SelfTest
             await guest.JoinPublicRoomCommand.ExecuteAsync(listed);
             Check("公共网络：从列表申请加入后进了房间", guest.IsJoined && guest.HostFingerprint == host.Identity.Fingerprint, guest.Status);
             Check("公共网络：房主成员列表里有他", await WaitAsync(() => host.Members.Count == 1, 15));
+            await PrivateChatAsync(host, guest);
             guest.StopCommand.Execute(null);
         }
 
@@ -188,5 +201,35 @@ internal sealed partial class SelfTest
         host.RequireDevice = false;
         host.AllowedDevicesText = "";
         host.AllowFingerprintSearch = false;
+    }
+
+    /// <summary>私聊和传文件：双方在线名单里看到对方；私聊只到对方；发文件对方接收后完整收到。</summary>
+    private async Task PrivateChatAsync(MultiplayerViewModel host, MultiplayerViewModel guest)
+    {
+        var seen = await WaitAsync(() => guest.OnlinePeers.Any(p => p.Entry.Fingerprint == host.Identity.Fingerprint)
+            && host.OnlinePeers.Any(p => p.Entry.Fingerprint == guest.Identity.Fingerprint), 20);
+        Check("私聊：双方在线名单里看到对方", seen, string.Join(" | ", guest.OnlinePeers.Select(p => p.Label)) + " / " + string.Join(" | ", host.OnlinePeers.Select(p => p.Label))
+            + $" / chat {guest.ChatReady}:{host.ChatReady} invite {guest.IsInviteRoom}:{host.IsInviteRoom} {guest.PrivateDebug} {host.PrivateDebug} / {guest.ChatStatus} / {host.ChatStatus}");
+        if (!seen) return;
+        guest.ChoosePeerCommand.Execute(guest.OnlinePeers.First(p => p.Entry.Fingerprint == host.Identity.Fingerprint));
+        guest.PrivateInput = "只给房主看的悄悄话";
+        await guest.SendPrivateCommand.ExecuteAsync(null);
+        Check("私聊：对方收到私聊", await WaitAsync(() => host.PrivateLines.Any(l => l.Text == "只给房主看的悄悄话" && !l.Mine), 10)
+            && guest.PrivateLines.Any(l => l.Mine), string.Join(" | ", host.PrivateLines.Select(l => l.Display)));
+        Check("私聊：没进公共聊天", host.ChatLines.All(l => l.Message.Text != "只给房主看的悄悄话"));
+
+        var source = Path.Combine(reportDir, "send-test.bin");
+        var data = System.Security.Cryptography.RandomNumberGenerator.GetBytes(200_000);
+        await File.WriteAllBytesAsync(source, data);
+        var sending = guest.SendFileToAsync(guest.SelectedPeer!, source);
+        var offered = await WaitAsync(() => host.FileOffers.Count == 1, 15);
+        Check("传文件：对方看到“想发给你”", offered && host.FileOffers[0].Label.Contains("send-test.bin"), offered ? host.FileOffers[0].Label : "");
+        if (offered) await host.AcceptFileCommand.ExecuteAsync(host.FileOffers[0]);
+        var sent = await sending.WaitAsync(TimeSpan.FromSeconds(60));
+        var saved = Path.Combine(host.DownloadsDir, "send-test.bin");
+        var received = await WaitAsync(() => File.Exists(saved), 10);
+        Check("传文件：接收后完整收到（校验一致）", sent && received && File.ReadAllBytes(saved).AsSpan().SequenceEqual(data),
+            string.Join(" | ", host.Transfers.Select(t => t.Text)));
+        await ShotPageAsync(guest, "私聊和传文件", L.T("multiplayer.private.title"));
     }
 }

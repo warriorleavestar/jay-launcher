@@ -366,6 +366,7 @@ public sealed partial class MultiplayerViewModel
         {
             var chat = _chat;
             _chat = null;
+            StopPrivate();
             ChatReady = false;
             ChatStatus = L.T("multiplayer.chat.reconnecting");
             if (chat is not null) _ = chat.DisposeAsync().AsTask();

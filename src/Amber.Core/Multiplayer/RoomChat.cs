@@ -240,6 +240,84 @@ internal static class ChatWire
     internal static string? SessionOf(JsonObject json) =>
         json["sid"] is JsonValue v && v.TryGetValue<string>(out var sid) && RemoteControl.RemoteConnector.IsSessionId(sid) ? sid : null;
 
+    /// <summary>端到端消息里密文（Base64）最长多少字符：整帧仍在 8 KiB 以内。</summary>
+    public const int MaxPrivateText = 7000;
+
+    /// <summary>成员 → 房主：请转交给指纹是 <paramref name="to"/> 的人（密文房主解不开）。</summary>
+    public static byte[] PrivateTo(string to, byte[] sealedData) =>
+        KnockProtocol.Json(new JsonObject { ["ctl"] = "e2e", ["to"] = to, ["b"] = Convert.ToBase64String(sealedData) });
+
+    /// <summary>房主 → 收方：转交，按成员表盖上发方的指纹、公钥和名字。</summary>
+    public static byte[] PrivateFrom(MemberEntry from, string blob) => KnockProtocol.Json(new JsonObject
+    {
+        ["ctl"] = "e2e",
+        ["from"] = from.Fingerprint,
+        ["pk"] = Convert.ToHexStringLower(from.PublicKey),
+        ["name"] = NameOf(from),
+        ["b"] = blob,
+    });
+
+    /// <summary>房主 → 大家：现在在线的人（指纹、公钥、名字），私聊和传文件按它找人。</summary>
+    public static byte[] Roster(IEnumerable<MemberEntry> online) => KnockProtocol.Json(new JsonObject
+    {
+        ["ctl"] = "roster",
+        ["m"] = new JsonArray(online.Select(e => (JsonNode?)new JsonObject
+        {
+            ["fp"] = e.Fingerprint,
+            ["pk"] = Convert.ToHexStringLower(e.PublicKey),
+            ["name"] = NameOf(e),
+        }).ToArray()),
+    });
+
+    /// <summary>成员发来的转交请求：收方指纹和密文（原样的 Base64）。格式不对返回 null。</summary>
+    internal static (string To, string Blob)? ParsePrivateTo(JsonObject json)
+    {
+        try
+        {
+            var to = json["to"]?.GetValue<string>();
+            var blob = json["b"]?.GetValue<string>();
+            if (to is not { Length: > 0 and <= 32 } || blob is not { Length: > 0 and <= MaxPrivateText }) return null;
+            return (to, blob);
+        }
+        catch (Exception e) when (e is InvalidOperationException or FormatException) { return null; }
+    }
+
+    internal static PrivateFrame? ParsePrivateFrom(JsonObject json)
+    {
+        try
+        {
+            var from = json["from"]?.GetValue<string>();
+            var pk = json["pk"]?.GetValue<string>();
+            var blob = json["b"]?.GetValue<string>();
+            if (from is not { Length: > 0 and <= 32 } || pk is not { Length: 64 } || blob is not { Length: > 0 and <= MaxPrivateText }) return null;
+            var key = Convert.FromHexString(pk);
+            // 指纹必须就是这把公钥的指纹。
+            if (MemberIdentity.FingerprintOf(key) != from) return null;
+            return new PrivateFrame(from, key, NameField(json) ?? "", Convert.FromBase64String(blob));
+        }
+        catch (Exception e) when (e is InvalidOperationException or FormatException) { return null; }
+    }
+
+    internal static List<RosterEntry> ParseRoster(JsonObject json)
+    {
+        var list = new List<RosterEntry>();
+        foreach (var node in (json["m"] as JsonArray ?? []).Take(ChatHub.MaxConnections + 1))
+        {
+            try
+            {
+                var fp = node?["fp"]?.GetValue<string>();
+                var pk = node?["pk"]?.GetValue<string>();
+                if (fp is null || pk is not { Length: 64 }) continue;
+                var key = Convert.FromHexString(pk);
+                if (MemberIdentity.FingerprintOf(key) != fp) continue;
+                var name = node?["name"]?.GetValue<string>();
+                list.Add(new RosterEntry(fp, key, RoomChat.Clean(name, RoomChat.MaxNameLength)));
+            }
+            catch (Exception e) when (e is InvalidOperationException or FormatException) { }
+        }
+        return list;
+    }
+
     internal static int? EpochOf(JsonObject json) => json["epoch"] is JsonValue v && v.TryGetValue<int>(out var epoch) ? epoch : null;
 
     public static byte[] FromMember(ChatMessage message, out string nonce)
@@ -439,6 +517,8 @@ public sealed class ChatHub : IAsyncDisposable
         public Channel<byte[]> Outbox { get; } = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(outboxFrames) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
         public CancellationTokenSource Cts { get; } = CancellationTokenSource.CreateLinkedTokenSource(hub);
         public RateLimiter Limiter { get; } = new(5, TimeSpan.FromSeconds(5));
+        /// <summary>端到端转交（私聊、传文件分块）单独限速：5 秒 600 帧，约 350 KB/s。</summary>
+        public RateLimiter PrivateLimiter { get; } = new(600, TimeSpan.FromSeconds(5));
         public string? SenderId { get; set; }
         public string? Name { get; set; }
         public volatile bool Authenticated;
@@ -724,6 +804,9 @@ public sealed class ChatHub : IAsyncDisposable
                         RemoteDeclined?.Invoke(decliner, sid);
                     // 只完成这条连接自己的等待：没收到过踢人通知的连接 KickAck 是 null，回了也没用。
                     else if (ctl == "kicked-ack" && member.Authenticated && member.Entry is not null) member.KickAck?.TrySetResult(true);
+                    else if (ctl == "e2e" && member.Authenticated && member.Entry is { Revoked: false } from && ChatWire.ParsePrivateTo(control!) is { } request
+                             && member.PrivateLimiter.TryAcquire())
+                        Forward(from, request.To, request.Blob);
                     continue;
                 }
                 var message = Open(frame, member, out var contentTooLong);
@@ -757,6 +840,7 @@ public sealed class ChatHub : IAsyncDisposable
                         Broadcast(_cipher is not null ? frame : Seal(message));
                     }
                     StartSweep();
+                    if (_table is not null) BroadcastRoster();
                     // 邀请房间：告诉成员房主叫什么（远程控制的同意窗、提示里用）。
                     if (_table?.Host is { } hostEntry && !member.IsHost) member.Outbox.Writer.TryWrite(ChatWire.HostInfo(ChatWire.NameOf(hostEntry)));
                     // 告诉这个客户端：这个转发支持心跳（旧客户端解不开，直接忽略）。
@@ -798,7 +882,28 @@ public sealed class ChatHub : IAsyncDisposable
                 var leave = Seal(new ChatMessage(ChatKind.Leave, sender, member.Name ?? "", "", DateTimeOffset.UtcNow) { Fingerprint = member.Entry?.Fingerprint ?? "" });
                 Broadcast(leave);
             }
+            if (member.Authenticated && _table is not null && !_cts.IsCancellationRequested) BroadcastRoster();
         }
+    }
+
+    /// <summary>端到端转交：只发给指纹是 to 的在线成员（可能有好几条连接），发方由成员表盖。收方队列满了就丢（传文件那边有确认和重发）。</summary>
+    private void Forward(MemberEntry from, string to, string blob)
+    {
+        byte[]? frame = null;
+        foreach (var target in _members.Values)
+        {
+            if (!target.Authenticated || target.Entry is not { Revoked: false } entry || entry.Fingerprint != to || ReferenceEquals(entry, from)) continue;
+            frame ??= ChatWire.PrivateFrom(from, blob);
+            target.Outbox.Writer.TryWrite(frame);
+        }
+    }
+
+    /// <summary>在线名单变了（有人加入、离开）：发给每个人。同一个人有多条连接时只列一次。</summary>
+    private void BroadcastRoster()
+    {
+        var online = _members.Values.Where(m => m.Authenticated && m.Entry is { Revoked: false }).Select(m => m.Entry!)
+            .DistinctBy(e => e.Fingerprint).ToList();
+        Broadcast(ChatWire.Roster(online));
     }
 
     /// <summary>放进每个已加入成员的发送队列。队列满了先丢这一帧；一直满着超过 BacklogKickAfter 才断开他。</summary>
@@ -854,7 +959,7 @@ public sealed class ChatHub : IAsyncDisposable
 }
 
 /// <summary>房间成员一侧：连上房主的聊天转发，发消息、收消息。</summary>
-public sealed class ChatClient : IAsyncDisposable
+public sealed class ChatClient : IAsyncDisposable, IPrivateLink
 {
     /// <summary>AMB- 房间的共享密钥加密；邀请房间是 null（改用自己的成员钥匙开 Noise 通道）。</summary>
     private readonly ChatCipher? _cipher;
@@ -891,6 +996,22 @@ public sealed class ChatClient : IAsyncDisposable
 
     /// <summary>邀请房间：房主请求看/控自己的屏幕（会话号）。只认房主这条腿上来的。</summary>
     public event Action<string>? RemoteRequested;
+
+    /// <summary>邀请房间：房主发来的在线名单（私聊、传文件按它找人）。</summary>
+    public event Action<IReadOnlyList<RosterEntry>>? RosterChanged;
+
+    /// <summary>邀请房间：别人经房主转交来的端到端消息（还没解密）。</summary>
+    public event Action<PrivateFrame>? PrivateReceived;
+
+    public IReadOnlyList<RosterEntry> Roster { get; private set; } = [];
+
+    /// <summary>经房主转交一条端到端消息给指纹是 <paramref name="to"/> 的人。不是邀请房间时返回 false。</summary>
+    public async Task<bool> SendPrivateAsync(string to, byte[] sealedData, CancellationToken ct)
+    {
+        if (_key is null) return false;
+        await SendControlAsync(ChatWire.PrivateTo(to, sealedData), ct);
+        return true;
+    }
 
     /// <summary>邀请房间：房主自己报的名字（经房主这条腿的控制帧）；还没收到时 null。</summary>
     public string? HostName { get; private set; }
@@ -1019,6 +1140,12 @@ public sealed class ChatClient : IAsyncDisposable
                         Kicked?.Invoke();
                     }
                     else if (ctl == "host-info" && ChatWire.NameField(control!) is { } hostName) HostName = hostName;
+                    else if (ctl == "roster")
+                    {
+                        Roster = ChatWire.ParseRoster(control!);
+                        RosterChanged?.Invoke(Roster);
+                    }
+                    else if (ctl == "e2e" && ChatWire.ParsePrivateFrom(control!) is { } incoming) PrivateReceived?.Invoke(incoming);
                     else if (ctl == "remote-request" && ChatWire.SessionOf(control!) is { } sid)
                     {
                         if (ChatWire.NameField(control!) is { } requester) HostName = requester;
