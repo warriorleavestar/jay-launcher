@@ -61,6 +61,8 @@ public sealed class PrivateMessenger : IAsyncDisposable
         public readonly TaskCompletionSource<bool> Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public readonly SemaphoreSlim Credits = new(Window, int.MaxValue);
         public long Acked;
+        /// <summary>对方已经有的块数（断点续传：上次没收完的部分），接收时对方告诉我们。</summary>
+        public long From;
         public volatile bool Cancelled;
     }
 
@@ -164,7 +166,11 @@ public sealed class PrivateMessenger : IAsyncDisposable
 
             await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, ChunkSize, useAsync: true);
             var buffer = new byte[ChunkSize];
-            long index = 0;
+            // 断点续传：对方上次收到哪一块，就从下一块接着发。
+            long index = Math.Clamp(Interlocked.Read(ref job.From), 0, (job.Size + ChunkSize - 1) / ChunkSize);
+            file.Seek(index * ChunkSize, SeekOrigin.Begin);
+            Interlocked.Exchange(ref job.Acked, index);
+            Report(job, index * ChunkSize);
             while (true)
             {
                 if (job.Cancelled) return Fail(job, L.T("core.mp.private.cancelled"));
@@ -211,22 +217,47 @@ public sealed class PrivateMessenger : IAsyncDisposable
 
     private void Report(Outgoing job, long done) => Progress?.Invoke(new FileProgress(job.Id, job.To, job.Name, job.Size, Math.Min(done, job.Size), true));
 
-    /// <summary>收方点了接收：开始收，存到下载文件夹。</summary>
+    /// <summary>
+    /// 收方点了接收：开始收，存到下载文件夹。
+    /// 没收完的部分留在 “文件名.哈希前12位.jaypart” 里（失败、取消、断开都不删）：同一个文件再发过来时接着收，不用从头传。
+    /// </summary>
     public async Task AcceptAsync(string id)
     {
         if (!_incoming.TryGetValue(id, out var job) || job.Stream is not null) return;
         Directory.CreateDirectory(_downloads);
-        if (FreeSpaceOf(_downloads) is { } free && free < job.Offer.Size + DiskReserve)
+        var temp = PartPath(_downloads, job.Offer.Name, job.Hash);
+        var have = File.Exists(temp) ? new FileInfo(temp).Length : 0;
+        if (have > job.Offer.Size) have = 0;
+        var from = have / ChunkSize;
+        if (FreeSpaceOf(_downloads) is { } free && free < job.Offer.Size - from * ChunkSize + DiskReserve)
         {
             _incoming.TryRemove(id, out _);
             await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
             throw new IOException(L.F("core.mp.private.no_space", job.Offer.Name));
         }
         job.TargetPath = UniquePath(_downloads, job.Offer.Name);
-        job.TempPath = job.TargetPath + ".jaypart";
-        job.Stream = new FileStream(job.TempPath, FileMode.Create, FileAccess.Write, FileShare.None, ChunkSize, useAsync: true);
-        job.Hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "accept", ["id"] = id }, _cts.Token);
+        job.TempPath = temp;
+        var stream = new FileStream(temp, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, ChunkSize, useAsync: true);
+        var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        try
+        {
+            // 只留整块，已有的部分先算进哈希，最后整个文件对一遍 SHA-256。
+            stream.SetLength(from * ChunkSize);
+            var buffer = new byte[64 * 1024];
+            int read;
+            while ((read = await stream.ReadAsync(buffer, _cts.Token)) > 0) hasher.AppendData(buffer, 0, read);
+        }
+        catch
+        {
+            await stream.DisposeAsync();
+            hasher.Dispose();
+            throw;
+        }
+        job.Stream = stream;
+        job.Hasher = hasher;
+        job.Next = from;
+        job.Received = from * ChunkSize;
+        await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "accept", ["id"] = id, ["from"] = from }, _cts.Token);
         ReportIn(job);
     }
 
@@ -287,6 +318,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
                     FileOffered?.Invoke(offer);
                     break;
                 case "accept" or "decline" when id is not null && _outgoing.TryGetValue(id, out var job) && job.To == frame.FromFingerprint:
+                    if (type == "accept") Interlocked.Exchange(ref job.From, Math.Max(0, body["from"]?.GetValue<long>() ?? 0));
                     job.Answer.TrySetResult(type == "accept");
                     break;
                 case "ack" when id is not null && _outgoing.TryGetValue(id, out var acked) && acked.To == frame.FromFingerprint:
@@ -339,7 +371,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
             }
             catch (IOException)
             {
-                // 传到一半磁盘满了（或者盘被拔了）：放弃这次接收，删掉临时文件。
+                // 传到一半磁盘满了（或者盘被拔了）：放弃这次接收，已收的部分留着，腾出空间后再发一次就接着收。
                 if (_incoming.TryRemove(job.Offer.Id, out _)) Abort(job, L.F("core.mp.private.no_space", job.Offer.Name));
                 await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "cancel", ["id"] = job.Offer.Id }, _cts.Token);
                 return;
@@ -367,7 +399,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
             var hash = job.Hasher.GetHashAndReset();
             if (job.Received != job.Offer.Size || !CryptographicOperations.FixedTimeEquals(hash, job.Hash))
             {
-                Abort(job, L.T("core.mp.private.corrupt"));
+                Abort(job, L.T("core.mp.private.corrupt"), discard: true);
                 return;
             }
             var target = File.Exists(job.TargetPath!) ? UniquePath(_downloads, job.Offer.Name) : job.TargetPath!;
@@ -383,13 +415,14 @@ public sealed class PrivateMessenger : IAsyncDisposable
     private void ReportIn(Incoming job) =>
         Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false));
 
-    private void Abort(Incoming job, string error)
+    /// <summary>放弃这次接收。没收完的部分默认留着（下次接着收）；只有整个文件对不上哈希时才删（<paramref name="discard"/>）。</summary>
+    private void Abort(Incoming job, string error, bool discard = false)
     {
         try
         {
             job.Stream?.Dispose();
             job.Stream = null;
-            if (job.TempPath is { } temp && File.Exists(temp)) File.Delete(temp);
+            if (discard && job.TempPath is { } temp && File.Exists(temp)) File.Delete(temp);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         job.Hasher?.Dispose();
@@ -420,12 +453,16 @@ public sealed class PrivateMessenger : IAsyncDisposable
         return clean;
     }
 
+    /// <summary>没收完的文件放这里：同名同内容（哈希一样）的文件再发来时找得到，接着收。</summary>
+    internal static string PartPath(string dir, string name, byte[] hash) =>
+        Path.Combine(dir, $"{name}.{Convert.ToHexStringLower(hash)[..12]}.jaypart");
+
     private static string UniquePath(string dir, string name)
     {
         var path = Path.Combine(dir, name);
         var stem = Path.GetFileNameWithoutExtension(name);
         var ext = Path.GetExtension(name);
-        for (var i = 1; File.Exists(path) || File.Exists(path + ".jaypart"); i++) path = Path.Combine(dir, $"{stem} ({i}){ext}");
+        for (var i = 1; File.Exists(path); i++) path = Path.Combine(dir, $"{stem} ({i}){ext}");
         return path;
     }
 

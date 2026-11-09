@@ -119,6 +119,40 @@ public sealed class PrivateMessengerTests : IDisposable
     }
 
     [Fact]
+    public async Task InterruptedFileResumesWhereItStopped()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "存档.zip");
+        var data = RandomNumberGenerator.GetBytes(PrivateMessenger.ChunkSize * 60 + 77);
+        await File.WriteAllBytesAsync(source, data);
+        bob.FileOffered += offer => _ = bob.AcceptAsync(offer.Id);
+        // 第一次：收到 20 块以后收方取消。没收完的部分留着。
+        var round = 1;
+        long resumedFrom = -1;
+        var saved = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.Progress += p =>
+        {
+            if (round == 1 && !p.Finished && p.Done >= PrivateMessenger.ChunkSize * 20) _ = bob.CancelAsync(p.Id);
+            if (round == 2 && resumedFrom < 0) resumedFrom = p.Done;
+            if (round == 2 && p.Finished) saved.TrySetResult(p.SavedPath ?? p.Error ?? "");
+        };
+        Assert.False(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(30)));
+        var part = Assert.Single(Directory.GetFiles(Path.Combine(_dir, "bob"), "*.jaypart"));
+        Assert.True(new FileInfo(part).Length >= PrivateMessenger.ChunkSize * 20);
+        // 第二次发同一个文件：从断开的地方接着收，结果和原文件一样。
+        round = 2;
+        Assert.True(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(30)));
+        var path = await saved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(resumedFrom >= PrivateMessenger.ChunkSize * 20, $"resumed from {resumedFrom}");
+        Assert.Equal(Path.Combine(_dir, "bob", "存档.zip"), path);
+        Assert.Equal(data, await File.ReadAllBytesAsync(path));
+        Assert.Empty(Directory.GetFiles(Path.Combine(_dir, "bob"), "*.jaypart"));
+    }
+
+    [Fact]
     public async Task FileIsDeclinedWhenTheDiskIsTooFull()
     {
         var (alice, bob) = Pair();
