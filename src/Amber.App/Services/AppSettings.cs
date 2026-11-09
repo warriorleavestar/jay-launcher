@@ -62,6 +62,12 @@ public sealed class AppSettings
     /// <summary>除了自己的节点，也连 Jay 内置的节点（默认开）。</summary>
     public bool UseBuiltInNodes { get; set; } = true;
 
+    /// <summary>Jay 公共网络的种子节点（程序里内置的之外，自己加的；比如朋友的 VPS 上跑的 jay-server directory）。</summary>
+    public List<string>? PublicNetworkNodes { get; set; }
+
+    /// <summary>看过并同意了公共网络的隐私说明（第一次连公共网络时显示）。</summary>
+    public bool PublicNetworkNoticeAccepted { get; set; }
+
     /// <summary>最近玩过的实例 id，最近的在前（启动页的“最近游玩”）。</summary>
     public List<string>? RecentInstances { get; set; }
 

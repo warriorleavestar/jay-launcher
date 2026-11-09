@@ -169,7 +169,7 @@ public sealed partial class MultiplayerViewModel
         var bridgeKey = DirectKeys.Bridge(lobbyKey);
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(lobbyKey);
         SetStatus(StatusMessage.Info("multiplayer.direct.gathering_host"));
-        var direct = new DirectSession(_service.EasyTier, Path.Combine(AppSettings.DataDir, "easytier"), room, true, MakeDirectOptions(), _diag)
+        var direct = new DirectSession(_service.EasyTier, EasyTierWorkRoot, room, true, MakeDirectOptions(), _diag)
         {
             BridgeKey = bridgeKey,
             // 桥钥匙整个房间都不换：没有待用邀请时不接新的直连加入方。
@@ -186,6 +186,7 @@ public sealed partial class MultiplayerViewModel
             StartHub(room);
             var fallback = direct.Options.FallbackNodes;
             StartHostLobby(credentials, members, book, direct.LobbyUdpPort, () => fallback);
+            StartAnnouncerIfHosting();
             DirectHint = code.DirectlyReachable
                 ? L.T("multiplayer.direct.host_reachable")
                 : L.F("multiplayer.direct.host_reply_hint", DirectText.Nat(code.Nat));
@@ -248,7 +249,7 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         var bridgeKey = DirectKeys.Bridge(jay.LobbyKey);
-        var direct = new DirectSession(_service.EasyTier, Path.Combine(AppSettings.DataDir, "easytier"), null, false, MakeDirectOptions(), _diag) { BridgeKey = bridgeKey };
+        var direct = new DirectSession(_service.EasyTier, EasyTierWorkRoot, null, false, MakeDirectOptions(), _diag) { BridgeKey = bridgeKey };
         System.Security.Cryptography.CryptographicOperations.ZeroMemory(bridgeKey);
         // 先订阅再加入：打通后房主可能马上发来测试请求。只认当前这个会话的事件（结束或换了会话就不管）。
         direct.TestRequested += request => Dispatcher.UIThread.Post(() =>
@@ -336,7 +337,7 @@ public sealed partial class MultiplayerViewModel
         {
             var me = Identity.KeyPair;
             var name = ChatName;
-            var outcome = await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(AppSettings.DataDir, "easytier", "lobby-join"), peers, invite,
+            var outcome = await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
                 me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
                 () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"))), ct,
                 () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby")))));

@@ -229,7 +229,7 @@ public sealed class MemberTable
     {
         Ban(entry.PublicKey, entry.Name);
         Remove(entry);
-        if (entry.Invite is not { } invite || book is null) return false;
+        if (entry.Invite is not { } invite || book is null || invite.Standing) return false;
         var hadUses = invite.IsUsable(book.Now);
         book.Revoke(invite);
         return hadUses;

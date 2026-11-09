@@ -60,7 +60,19 @@ public sealed class LauncherService : IDisposable
     public EasyTierInstaller EasyTier => new(Downloader, AppSettings.DataDir);
 
     /// <summary>联机实际用的节点：自己的在前，内置的在后（开着时）。</summary>
-    public IReadOnlyList<string> MultiplayerPeers => RelayNodes.Effective(Settings.MultiplayerPeers, Settings.UseBuiltInNodes);
+    /// <summary>房间用的节点：自己的、内置的，再加上公共网络的种子节点（经公共网络找到的房主和加入方一定都连着它们，能在上面碰面）。</summary>
+    public IReadOnlyList<string> MultiplayerPeers
+    {
+        get
+        {
+            var list = RelayNodes.Effective(Settings.MultiplayerPeers, Settings.UseBuiltInNodes);
+            foreach (var n in PublicNetwork.Nodes) if (!list.Contains(n)) list.Add(n);
+            return list;
+        }
+    }
+
+    /// <summary>Jay 公共网络（内置节点 + 设置里加的节点）。</summary>
+    public Amber.Core.Multiplayer.Public.PublicNetworkProfile PublicNetwork => Amber.Core.Multiplayer.Public.PublicNetworkProfile.Jay(Settings.PublicNetworkNodes);
 
     public LauncherService(AppSettings settings)
     {
