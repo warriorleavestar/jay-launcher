@@ -9,12 +9,13 @@ using System.Collections.ObjectModel;
 namespace Amber.App.ViewModels;
 
 /// <summary>公共网络下拉框的一项：内置的 Jay 公共网络，或者自己加的连接串网络。</summary>
-public sealed record NetworkChoice(string Id, string Name, bool Reviewed, int NodeCount, string? Signer) : LocalizedRecord
+public sealed record NetworkChoice(string Id, string Name, bool Reviewed, int NodeCount, string? Signer, bool TestReviewed = false) : LocalizedRecord
 {
     public bool IsBuiltIn => Id == "jay";
-    public string Label => Reviewed ? Name : Name + " ⚠";
+    public string Label => TestReviewed ? Name + " 🧪" : Reviewed ? Name : Name + " ⚠";
     public string Detail => IsBuiltIn ? L.T("multiplayer.network.builtin")
-        : (Reviewed ? L.T("multiplayer.network.reviewed") : L.F("multiplayer.network.unreviewed", Signer ?? ""))
+        : (TestReviewed ? L.T("multiplayer.network.test_reviewed")
+            : Reviewed ? L.T("multiplayer.network.reviewed") : L.F("multiplayer.network.unreviewed", Signer ?? ""))
           + " · " + L.P("multiplayer.network.nodes", NodeCount, NodeCount);
     public override string ToString() => Label;
 }
@@ -45,7 +46,8 @@ public sealed partial class MultiplayerViewModel
             var jay = PublicNetworkProfile.Jay(_service.Settings.PublicNetworkNodes);
             NetworkChoices.Add(new NetworkChoice("jay", jay.Name, true, _service.PublicNetwork.IsBuiltIn ? _service.PublicNetwork.Nodes.Count : jay.Nodes.Count, null));
             foreach (var n in _service.Networks.Networks.Where(n => n.Info.Id != "jay"))
-                NetworkChoices.Add(new NetworkChoice(n.Info.Id, n.Info.Name, n.Reviewed, n.Info.Nodes.Count, n.SignerFingerprint));
+                NetworkChoices.Add(new NetworkChoice(n.Info.Id, n.Info.Name, n.Reviewed, n.Info.Nodes.Count, n.SignerFingerprint,
+                    n.Reviewed && LauncherService.IsTestReviewed(n.SignerKey)));
             var current = _service.PublicNetwork.Id;
             SelectedNetworkChoice = NetworkChoices.FirstOrDefault(c => c.Id == current) ?? NetworkChoices[0];
         }

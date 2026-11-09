@@ -1972,5 +1972,6 @@
   "multiplayer.netconfig.theme_title": "Network theme",
   "multiplayer.netconfig.theme_global": "This network has its own theme, used only on the multiplayer page for now. Apply it to all of Jay? Your own theme comes back when you disconnect.",
   "multiplayer.netconfig.theme_accept": "Use everywhere",
-  "multiplayer.netconfig.theme_decline": "Multiplayer page only"
+  "multiplayer.netconfig.theme_decline": "Multiplayer page only",
+  "multiplayer.network.test_reviewed": "Signed with a test registry key (testing only, not reviewed by Jay)"
 }
