@@ -49,6 +49,13 @@ public class MultiplayerTests
     [InlineData("[CHAT] 本地游戏已在端口 61000 上开启", 61000)]
     [InlineData("[Render thread/INFO]: Sound engine started", null)]
     [InlineData("Started serving on 99999", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [System] [CHAT] Local game hosted on port 25566", 25566)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] <Steve> Started serving on 22", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] <Steve> Local game hosted on port 3389", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] [Server] Started serving on 8080", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] Steve: 在端口 445", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] Steve:在端口 445", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] <史蒂夫> 本地游戏已在端口 445 上开启", null)]
     public void PortFromLog(string line, int? port) => Assert.Equal(port, LanGames.PortFromLog(line));
 
     [Fact]

@@ -43,6 +43,14 @@ public sealed class PrivateMessenger : IAsyncDisposable
     public const int MaxTextLength = 2000;
     private static readonly TimeSpan AckTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan OfferTimeout = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// A receive that has had no chunk for this long is given up (the sender gives up after <see cref="AckTimeout"/>).
+    /// Together with offers expiring after <see cref="OfferTimeout"/>, this keeps one member from holding all
+    /// <see cref="MaxIncoming"/> receive slots forever.
+    /// </summary>
+    internal static readonly TimeSpan ReceiveIdleTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>At most this many incoming offers and receives at once; further offers are ignored.</summary>
+    public const int MaxIncoming = 8;
 
     private readonly IPrivateLink _link;
     private readonly X25519KeyPair _me;
@@ -77,6 +85,8 @@ public sealed class PrivateMessenger : IAsyncDisposable
         public IncrementalHash? Hasher;
         public long Next;
         public long Received;
+        /// <summary>When the offer or the last chunk arrived (UTC), for <see cref="SweepIdle"/>.</summary>
+        public DateTime LastActivity;
     }
 
     private readonly ConcurrentDictionary<string, Outgoing> _outgoing = new();
@@ -86,10 +96,16 @@ public sealed class PrivateMessenger : IAsyncDisposable
     private readonly System.Threading.Channels.Channel<(PrivateFrame Frame, JsonObject Body)> _inbox =
         System.Threading.Channels.Channel.CreateUnbounded<(PrivateFrame, JsonObject)>(new() { SingleReader = true });
     private readonly Task _pump;
+    private readonly Task _sweeper;
 
     public event Action<PrivateMessage>? MessageReceived;
     public event Action<FileOffer>? FileOffered;
     public event Action<FileProgress>? Progress;
+    /// <summary>An offer that was never answered expired (after <see cref="OfferTimeout"/>); its card can go.</summary>
+    public event Action<string>? FileOfferExpired;
+
+    /// <summary>The clock for idle timeouts (tests replace it).</summary>
+    internal Func<DateTime> Clock { get; set; } = () => DateTime.UtcNow;
 
     /// <param name="keyOf">按指纹查这个人现在的公钥（房主发来的在线名单）；不在线返回 null。</param>
     /// <param name="downloads">收到的文件放在这里。</param>
@@ -101,6 +117,48 @@ public sealed class PrivateMessenger : IAsyncDisposable
         _downloads = downloads;
         _link.PrivateReceived += OnFrame;
         _pump = PumpAsync();
+        _sweeper = SweepLoopAsync();
+    }
+
+    private async Task SweepLoopAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(15), _cts.Token);
+                await SweepIdle();
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    /// <summary>
+    /// Drops offers nobody answered within <see cref="OfferTimeout"/> and receives that got no chunk within
+    /// <see cref="ReceiveIdleTimeout"/>, and tells the sender. A stalled receive keeps its .jaypart, so sending again resumes.
+    /// </summary>
+    internal async Task SweepIdle()
+    {
+        var now = Clock();
+        foreach (var (id, job) in _incoming.ToArray())
+        {
+            var accepted = job.Stream is not null;
+            if (now - job.LastActivity < (accepted ? ReceiveIdleTimeout : OfferTimeout)) continue;
+            await _incomingGate.WaitAsync();
+            try
+            {
+                // Re-check under the gate: a chunk may have arrived meanwhile.
+                if (now - job.LastActivity < (accepted ? ReceiveIdleTimeout : OfferTimeout) || !_incoming.TryRemove(new(id, job))) continue;
+                if (accepted) Abort(job, L.T("core.mp.private.stalled"));
+            }
+            finally
+            {
+                _incomingGate.Release();
+            }
+            if (!accepted) FileOfferExpired?.Invoke(id);
+            try { await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "cancel", ["id"] = id }, _cts.Token); }
+            catch (Exception e) when (e is IOException or ObjectDisposedException or OperationCanceledException or System.Net.Sockets.SocketException) { }
+        }
     }
 
     private async Task PumpAsync()
@@ -255,10 +313,18 @@ public sealed class PrivateMessenger : IAsyncDisposable
             hasher.Dispose();
             throw;
         }
+        if (!_incoming.ContainsKey(id))
+        {
+            // The offer expired while the partial file was being hashed.
+            await stream.DisposeAsync();
+            hasher.Dispose();
+            return;
+        }
         job.Stream = stream;
         job.Hasher = hasher;
         job.Next = from;
         job.Received = from * ChunkSize;
+        job.LastActivity = Clock();
         await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "accept", ["id"] = id, ["from"] = from }, _cts.Token);
         ReportIn(job);
     }
@@ -317,14 +383,14 @@ public sealed class PrivateMessenger : IAsyncDisposable
                     var size = body["size"]?.GetValue<long>() ?? -1;
                     var sha = body["sha"]?.GetValue<string>();
                     var name = SafeName(body["name"]?.GetValue<string>() ?? "");
-                    if (size < 0 || sha is not { Length: 64 } || _incoming.Count >= 8) return;
+                    if (size < 0 || sha is not { Length: 64 } || _incoming.Count >= MaxIncoming) return;
                     if (!AllowsFile(size))
                     {
                         await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
                         return;
                     }
                     var offer = new FileOffer(id, frame.FromFingerprint, frame.FromName, name, size);
-                    _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey };
+                    _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey, LastActivity = Clock() };
                     FileOffered?.Invoke(offer);
                     break;
                 case "accept" or "decline" when id is not null && _outgoing.TryGetValue(id, out var job) && job.To == frame.FromFingerprint:
@@ -389,6 +455,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
             job.Hasher.AppendData(data);
             job.Next++;
             job.Received += data.Length;
+            job.LastActivity = Clock();
         }
         finally
         {
@@ -457,7 +524,10 @@ public sealed class PrivateMessenger : IAsyncDisposable
     {
         var last = name.Replace('\\', '/').Split('/').LastOrDefault() ?? "";
         var invalid = Path.GetInvalidFileNameChars().Concat(['<', '>', ':', '"', '|', '?', '*']).ToHashSet();
-        var clean = new string(last.Where(c => !invalid.Contains(c) && !char.IsControl(c)).ToArray()).Trim().TrimEnd('.');
+        // Format characters (U+202E RIGHT-TO-LEFT OVERRIDE and friends, zero-width joiners) go too: "photo\u202Egnp.exe"
+        // would otherwise show as "photoexe.png".
+        var clean = new string(last.Where(c => !invalid.Contains(c) && !char.IsControl(c)
+            && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).ToArray()).Trim().TrimEnd('.');
         if (clean.Length > 120) clean = clean[..120];
         if (clean.Length == 0 || clean is "." or "..") clean = "file";
         // Windows 的保留名（CON、NUL……）前面加个下划线。
@@ -485,6 +555,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
         _inbox.Writer.TryComplete();
         _cts.Cancel();
         try { await _pump; } catch (OperationCanceledException) { }
+        try { await _sweeper; } catch (OperationCanceledException) { }
         foreach (var job in _outgoing.Values)
         {
             job.Cancelled = true;

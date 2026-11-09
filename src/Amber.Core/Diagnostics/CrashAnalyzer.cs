@@ -1,3 +1,4 @@
+using System.Text;
 using Amber.Core.Localization;
 using System.IO.Compression;
 using System.Text.RegularExpressions;
@@ -27,12 +28,18 @@ public static partial class CrashAnalyzer
 {
     private sealed record Rule(Regex Pattern, Func<Match, CrashFinding> Build);
 
+    /// <summary>
+    /// Logs contain text other players wrote (chat), so every pattern has a time limit: a line built to make a rule
+    /// backtrack can't freeze crash analysis. A rule that times out just doesn't match.
+    /// </summary>
+    private static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(1);
+
     /// <param name="key">翻译键的前缀：标题是 key.title，建议是 key.advice。匹配到时才取文字，换语言后马上生效。</param>
     private static Rule R(string pattern, string key, CrashSeverity severity = CrashSeverity.Likely) =>
-        new(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase), m => new CrashFinding(L.T(key + ".title"), L.T(key + ".advice"), severity, m.Value) { Key = key });
+        new(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase, MatchTimeout), m => new CrashFinding(L.T(key + ".title"), L.T(key + ".advice"), severity, m.Value) { Key = key });
 
     private static Rule R(string pattern, Func<Match, CrashFinding> build) =>
-        new(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase), build);
+        new(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase, MatchTimeout), build);
 
     private static readonly Rule[] Rules =
     [
@@ -95,16 +102,16 @@ public static partial class CrashAnalyzer
         R(@"java\.net\.BindException|Address already in use", "core.crash.network.port", CrashSeverity.Possible),
     ];
 
-    [GeneratedRegex(@"Suspected Mods?:\s*(.+)")]
+    [GeneratedRegex(@"Suspected Mods?:\s*(.+)", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex SuspectedLine();
 
-    [GeneratedRegex(@"^\s*Mod File:\s*(.+)$", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^\s*Mod File:\s*(.+)$", RegexOptions.Multiline, matchTimeoutMilliseconds: 1000)]
     private static partial Regex ModFileLine();
 
-    [GeneratedRegex(@"Suspected Mods?:\s*\n((?:[ \t]+.+\n)+)")]
+    [GeneratedRegex(@"Suspected Mods?:\s*\n((?:[ \t]+.+\n)+)", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex SuspectedBlock();
 
-    [GeneratedRegex(@"[\s(]([A-Za-z][\w .-]{1,60}) \(([\w-]+)\)")]
+    [GeneratedRegex(@"[\s(]([A-Za-z][\w .-]{1,60}) \(([\w-]+)\)", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex ModNameAndId();
 
     /// <summary>分析一段文本（崩溃报告、日志拼起来都行）。</summary>
@@ -113,12 +120,17 @@ public static partial class CrashAnalyzer
         var findings = new List<CrashFinding>();
         foreach (var rule in Rules)
         {
-            var match = rule.Pattern.Match(text);
+            Match match;
+            try { match = rule.Pattern.Match(text); }
+            catch (RegexMatchTimeoutException) { continue; }
             if (match.Success) findings.Add(rule.Build(match) with { Evidence = Clip(match.Value) });
         }
         // 同样的标题只留一条，确定的排前面。
         var unique = findings.GroupBy(f => f.Title).Select(g => g.First()).OrderBy(f => f.Severity).ToList();
-        return new CrashAnalysis(unique, FindSuspects(text), sourceFiles ?? []);
+        List<string> suspects;
+        try { suspects = FindSuspects(text); }
+        catch (RegexMatchTimeoutException) { suspects = []; }
+        return new CrashAnalysis(unique, suspects, sourceFiles ?? []);
     }
 
     private static List<string> FindSuspects(string text)
@@ -203,22 +215,42 @@ public static partial class CrashAnalyzer
         return result;
     }
 
-    /// <summary>把这次运行的日志打包，方便发给别人求助。账号令牌不会写进这些文件。</summary>
-    public static void ExportBundle(string outputZip, IEnumerable<string> files, IEnumerable<string> launcherLog)
+    /// <summary>
+    /// Packs this run's logs so the player can send them to someone for help. Everything goes through
+    /// <see cref="RedactForExport"/>: a JVM crash file (hs_err_pid*.log) repeats the whole command line, access token
+    /// included, and the zip usually ends up in a chat group or forum.
+    /// </summary>
+    public static void ExportBundle(string outputZip, IEnumerable<string> files, IEnumerable<string> launcherLog,
+        IEnumerable<(string Name, string Text)>? attachments = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputZip))!);
         // 保存对话框里确认过覆盖，旧文件直接替换。
         using var stream = new FileStream(outputZip, FileMode.Create, FileAccess.ReadWrite);
         using var zip = new ZipArchive(stream, ZipArchiveMode.Create);
+        var utf8 = new UTF8Encoding(false);
         foreach (var file in files.Distinct())
         {
             if (!File.Exists(file)) continue;
-            var entry = zip.CreateEntry(Path.GetFileName(file));
-            using var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var output = entry.Open();
-            input.CopyTo(output);
+            string text;
+            using (var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = new StreamReader(input, detectEncodingFromByteOrderMarks: true))
+                text = reader.ReadToEnd();
+            using var writer = new StreamWriter(zip.CreateEntry(Path.GetFileName(file)).Open(), utf8);
+            writer.Write(RedactForExport(text));
         }
-        using var writer = new StreamWriter(zip.CreateEntry("launcher-output.txt").Open());
-        foreach (var line in launcherLog) writer.WriteLine(line);
+        foreach (var (name, text) in attachments ?? [])
+        {
+            using var writer = new StreamWriter(zip.CreateEntry(Path.GetFileName(name)).Open(), utf8);
+            writer.Write(RedactForExport(text));
+        }
+        using (var writer = new StreamWriter(zip.CreateEntry("launcher-output.txt").Open(), utf8))
+            foreach (var line in launcherLog) writer.WriteLine(RedactForExport(line));
     }
+
+    /// <summary>
+    /// What goes into anything the player exports: launch secrets (--accessToken and friends, session tokens, JWTs,
+    /// bearer tokens), e-mail addresses and the computer user name are removed. Same rules as the error report.
+    /// </summary>
+    public static string RedactForExport(string text) =>
+        Launch.ErrorReport.Redact(text, Environment.UserName, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 }
