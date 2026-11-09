@@ -194,6 +194,8 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             while (State.Notices.Count > 0 && clock.Elapsed < TimeSpan.FromSeconds(11)) await Task.Delay(100);
             Check("回到启动页不重置八秒期限且不调用重试", State.Notices.Count == 0 && clock.Elapsed >= TimeSpan.FromSeconds(7.8) && calls.Count == 1);
             await CheckInstanceBakeEntryAsync(instance);
+            await CheckProblemNoticeAsync();
+            await CheckSettingsCleanupAsync();
         }
         catch (Exception ex)
         {
@@ -237,19 +239,88 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                 window.Height = height;
                 await Task.Delay(200);
                 window.UpdateLayout();
-                var button = window.GetVisualDescendants().OfType<Button>()
-                    .Single(b => ReferenceEquals(b.Command, page.BakeNowCommand));
-                button.BringIntoView();
-                await Task.Delay(100);
-                var bounds = BoundsIn(button, window);
-                var hit = window.InputHitTest(bounds.Center) as Visual;
-                Check($"实例烘焙 {language}-{width}：入口完整可见且中心命中", button.IsEffectivelyVisible
-                    && button.IsEffectivelyEnabled && new Rect(window.ClientSize).Contains(bounds)
-                    && hit is not null && (ReferenceEquals(hit, button) || hit.GetVisualAncestors().Contains(button)));
-                Check($"实例烘焙 {language}-{width}：按钮文案及提示随语言切换", button.Content?.ToString() == L.T("instance.bake.now")
-                    && ToolTip.GetTip(button)?.ToString() == L.T("instance.bake.now_hint"));
+                // "Bake now" lives in the mods toolbar's "More actions" menu: find that button, open it, check the item.
+                Button? more = null;
+                MenuItem? item = null;
+                var seen = new List<string>();
+                foreach (var candidate in window.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible && b.Flyout is MenuFlyout).ToList())
+                {
+                    candidate.BringIntoView();
+                    await Task.Delay(100);
+                    candidate.Flyout!.ShowAt(candidate);
+                    await Task.Delay(150);
+                    var items = ((MenuFlyout)candidate.Flyout).Items.OfType<MenuItem>().ToList();
+                    seen.Add(string.Join("|", items.Select(m => m.Header?.ToString())));
+                    item = items.FirstOrDefault(m => ReferenceEquals(m.Command, page.BakeNowCommand) || m.Header?.ToString() == L.T("instance.bake.now"));
+                    if (item is not null) { more = candidate; break; }
+                    candidate.Flyout.Hide();
+                }
+                if (item is null) _report.Add("INFO menus: " + string.Join(" ; ", seen));
+                Check($"实例烘焙 {language}-{width}：“更多操作”菜单里有立即烘焙", more is not null && item is not null && ReferenceEquals(item.Command, page.BakeNowCommand));
+                var bounds = BoundsIn(more!, window);
+                Check($"实例烘焙 {language}-{width}：菜单按钮完整可见", more!.IsEffectivelyEnabled && new Rect(window.ClientSize).Contains(bounds));
+                Check($"实例烘焙 {language}-{width}：菜单项可用且文案随语言切换", item!.IsEffectivelyVisible && item.IsEffectivelyEnabled
+                    && item.Header?.ToString() == L.T("instance.bake.now"));
+                more.Flyout!.Hide();
                 await ShotAsync($"instance-bake-{language}-{width}x{height}");
             }
         }
+    }
+
+    /// <summary>A bake problem with nothing to retry (dependency problem, loader too old): text only, no retry button.</summary>
+    private async Task CheckProblemNoticeAsync()
+    {
+        main.CurrentPage = Home;
+        foreach (var language in new[] { "zh-Hans", "en" })
+        {
+            L.SetLanguage(language);
+            window.Width = 1280;
+            window.Height = 700;
+            State.Clear();
+            Home.Crash = null;
+            Toasts.BakeProblem(L.F("home.bake.fallback", L.F("core.bake.dependency_failed", "modmenu: " + L.T("core.bake.problem.missing_dep"))));
+            for (var i = 0; i < 40 && !(State.HasNotice && Host.IsEffectivelyVisible); i++) { await Task.Delay(50); window.UpdateLayout(); }
+            Check($"烘焙问题提示 {language}：显示在状态框", State.HasNotice && Host.IsEffectivelyVisible && State.Current!.Text.Contains("modmenu"));
+            var retry = Host.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content?.ToString() == L.T("home.bake.retry_without"));
+            Check($"烘焙问题提示 {language}：没有重试按钮", retry is null || !retry.IsEffectivelyVisible);
+            await ShotAsync($"bake-problem-{language}");
+            State.Current!.RetryCommand.Execute(null);
+            Check($"烘焙问题提示 {language}：点不到的重试不会出错并收起", !State.HasNotice);
+        }
+        Toasts.BakeFailed(L.F("home.bake.mixin_disabled", 2, "sodium" + L.T("core.mp.format.listseparator") + "lithium"), () => { });
+        for (var i = 0; i < 40 && !Host.IsEffectivelyVisible; i++) { await Task.Delay(50); window.UpdateLayout(); }
+        Check("Mixin 被关提示：带“不烘焙再启动”", Host.GetVisualDescendants().OfType<Button>().Any(b => b.IsEffectivelyVisible && b.Content?.ToString() == L.T("home.bake.retry_without")));
+        await ShotAsync("bake-mixin-disabled-en");
+        State.Clear();
+    }
+
+    /// <summary>Settings › Experimental: the cleanup button is there, reachable by settings#BakeCleanup, and reports without a loader.</summary>
+    private async Task CheckSettingsCleanupAsync()
+    {
+        var settings = main.Pages.OfType<SettingsViewModel>().Single();
+        foreach (var language in new[] { "zh-Hans", "en", "ja" })
+        {
+            L.SetLanguage(language);
+            foreach (var (width, height) in new[] { (760, 440), (1280, 700) })
+            {
+                window.Width = width;
+                window.Height = height;
+                main.Shell.Navigate("settings#BakeCleanup");
+                for (var i = 0; i < 60 && window.RevealedField?.Name != "BakeCleanup"; i++) await Task.Delay(50);
+                Check($"清理烘焙缓存 {language}-{width}：settings#BakeCleanup 定位到按钮", window.RevealedField?.Name == "BakeCleanup");
+                var button = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => ReferenceEquals(b.Command, settings.CleanBakeCacheCommand));
+                button.BringIntoView();
+                await Task.Delay(150);
+                window.UpdateLayout();
+                Check($"清理烘焙缓存 {language}-{width}：按钮完整可见、文案随语言", button.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(button, window))
+                    && button.Content?.ToString() == L.T("settings.bake.gc"));
+                await ShotAsync($"settings-bake-cleanup-{language}-{width}x{height}");
+            }
+        }
+        // No loader build in this test data folder: the button says so and never deletes anything.
+        L.SetLanguage("en");
+        await settings.CleanBakeCacheCommand.ExecuteAsync(null);
+        Check("没有加载器时清理只给出原因", settings.BakeCleanupStatus == L.T("core.bake.loader_missing_short") || settings.BakeCleanupStatus == L.T("core.bake.gc_empty"));
+        await ShotAsync("settings-bake-cleanup-status-en");
     }
 }

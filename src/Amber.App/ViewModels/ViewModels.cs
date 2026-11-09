@@ -467,6 +467,44 @@ public sealed partial class SettingsViewModel : PageViewModel
     public bool HasBreakerDelayError => BreakerDelayError is not null;
     [ObservableProperty] public partial bool ExperimentalBake { get; set; }
     [ObservableProperty] public partial string BakeLoaderPath { get; set; }
+    /// <summary>Result of the last bake cache cleanup (or why it did not run); empty before the first one.</summary>
+    [ObservableProperty] public partial string BakeCleanupStatus { get; set; } = "";
+    [ObservableProperty] public partial bool IsCleaningBake { get; set; }
+
+    /// <summary>
+    /// Bake cache cleanup: a dry run first, then the totals in a confirmation, then the real gc. Only the loader's
+    /// cache and mapping cache are touched; everything removed is rebuilt on the next bake.
+    /// </summary>
+    [RelayCommand]
+    private async Task CleanBakeCacheAsync()
+    {
+        if (IsCleaningBake) return;
+        IsCleaningBake = true;
+        try
+        {
+            BakeCleanupStatus = L.T("settings.bake.gc_checking");
+            var (dry, reason) = await _service.CleanBakeCacheAsync(apply: false, CancellationToken.None);
+            if (dry is null) { BakeCleanupStatus = reason; return; }
+            if (dry.Removable == 0) { BakeCleanupStatus = L.T("settings.bake.gc_nothing"); return; }
+            if (Avalonia.Application.Current?.ApplicationLifetime is not Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner })
+                return;
+            var ok = await Views.ConfirmDialog.AskAsync(owner, L.T("settings.bake.gc"),
+                L.F("settings.bake.gc_body", dry.Removable, Fmt.Size(dry.RemovableBytes), dry.LiveStates), L.T("settings.bake.gc_confirm"));
+            if (!ok) { BakeCleanupStatus = ""; return; }
+            var (done, why) = await _service.CleanBakeCacheAsync(apply: true, CancellationToken.None);
+            BakeCleanupStatus = done is null ? why
+                : done.Failed > 0 ? L.F("settings.bake.gc_partial", done.Removed, done.Failed)
+                : L.F("settings.bake.gc_done", done.Removed, Fmt.Size(done.RemovableBytes));
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException)
+        {
+            BakeCleanupStatus = e.Message;
+        }
+        finally
+        {
+            IsCleaningBake = false;
+        }
+    }
     [ObservableProperty] public partial bool IsolateVersions { get; set; }
     [ObservableProperty] public partial string WindowWidth { get; set; }
     [ObservableProperty] public partial string WindowHeight { get; set; }

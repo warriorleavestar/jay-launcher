@@ -597,20 +597,16 @@ try
             if (bakeLoader is not null)
             {
                 var toolkit = Amber.Core.Bake.BakeToolkit.Find(bakeLoader) ?? throw new DirectoryNotFoundException(bakeLoader);
-                var bake = new Amber.Core.Bake.BakeService(toolkit, Path.Combine(dir.Root, ".amber-bake-cache"));
+                var bakeData = Environment.GetEnvironmentVariable("AMBER_BAKE_DATA") is { Length: > 0 } bd ? bd : Path.Combine(dir.Root, ".amber-bake-data");
+                var bake = new Amber.Core.Bake.BakeService(toolkit, Path.Combine(bakeData, "cache"), bakeData,
+                    (items, ct) => downloader.DownloadAllAsync(items, null, ct));
                 var instance = Instance(id, isolate);
-                var (_, _, supported) = await bake.VersionAsync(javaPath, cts.Token);
-                if (!Amber.Core.Bake.BakeService.Supports(instance, supported, out var reason)) throw new InvalidOperationException(reason);
                 var major = version.JavaVersion?.MajorVersion ?? 21;
                 var bakeWatch = System.Diagnostics.Stopwatch.StartNew();
-                var events = new SyncProgress<Amber.Core.Bake.BakeEvent>(e => Console.WriteLine("BAKE " + e.Message));
-                var baked = bake.Current(dir, instance, major);
-                if (baked is null)
-                {
-                    await bake.BakeModsAsync(javaPath, dir, instance, events, cts.Token);
-                    baked = await bake.BakeInstanceAsync(javaPath, major, dir, instance, events, cts.Token);
-                }
-                Console.WriteLine($"BAKE READY {bakeWatch.Elapsed.TotalSeconds:F1}s {baked.StateFile}");
+                var events = new SyncProgress<Amber.Core.Bake.BakeEvent>(e => Console.WriteLine((e.IsProblem ? "BAKE PROBLEM " : "BAKE ") + e.Message));
+                var prepared = await bake.PrepareAsync(javaPath, major, dir, instance, argList.Remove("--bake-warm"), events, cts.Token);
+                var baked = prepared.Launch ?? throw new InvalidOperationException(prepared.Reason);
+                Console.WriteLine($"BAKE READY {bakeWatch.Elapsed.TotalSeconds:F1}s reused={prepared.Reused} {prepared.Reason} {baked.StateFile}");
                 options = options with { Baked = baked };
             }
             var launcher = new GameLauncher(dir);

@@ -91,6 +91,8 @@ public sealed partial class HomeViewModel : PageViewModel
         public bool SharedWorkDir { get; set; }
         /// <summary>这一局用的是烘焙后的 classpath。</summary>
         public bool Baked { get; set; }
+        /// <summary>Problems the universal loader reported while this baked run was going (for example Mixins it switched off).</summary>
+        public List<Amber.Core.Bake.BakeRuntimeProblem> BakeProblems { get; } = [];
         /// <summary>这一局的状态机（正在玩胶囊、活动中心“运行记录”看它）。</summary>
         public LaunchSession Session { get; } = new(id, DateTimeOffset.Now);
     }
@@ -106,6 +108,14 @@ public sealed partial class HomeViewModel : PageViewModel
     /// <summary>崩溃分析里有“确定”的原因（比如显卡不支持 OpenGL）；只有“可能”的猜测不算。</summary>
     internal static bool HasClearCause(CrashAnalysis analysis) =>
         analysis.Findings.Count > 0 && analysis.Findings[0].Severity == CrashSeverity.Likely;
+
+    /// <summary>The mods the loader had to switch Mixins off for in this run, as one list ("" when none).</summary>
+    private static string BakeProblemMods(GameRun run)
+    {
+        lock (run.BakeProblems)
+            return string.Join(L.T("core.mp.format.listseparator"), run.BakeProblems.Select(p => p.Mod).Distinct(StringComparer.Ordinal).Take(3))
+                   + (run.BakeProblems.Select(p => p.Mod).Distinct(StringComparer.Ordinal).Count() > 3 ? "…" : "");
+    }
 
     internal static bool LikelyBakeCrash(bool baked, bool stoppedByUser, int exitCode, bool inGame, bool inGameGuessed) =>
         baked && !stoppedByUser && exitCode != 0 && (!inGame || inGameGuessed);
@@ -591,6 +601,8 @@ public sealed partial class HomeViewModel : PageViewModel
                     // 实验功能失败时不挡住游戏：记下原因，按普通方式启动。
                     _log.AddRaw(run.Log, "[Bake] " + L.F("home.bake.fallback", e.Message));
                     Toasts.Show(L.T("home.bake.fallback_toast"));
+                    // The reason (a missing dependency, an unsupported platform, a loader that is too old) in the launch status box too.
+                    Toasts.BakeProblem(L.F("home.bake.fallback", e.Message));
                 }
             }
             if (!string.IsNullOrWhiteSpace(settings.PreLaunchCommand))
@@ -612,6 +624,11 @@ public sealed partial class HomeViewModel : PageViewModel
                 {
                     run.Output.Add(line);
                     if (parser.Feed(line) is { } entry) _log.Add(run.Log, entry);
+                    if (run.Baked && Amber.Core.Bake.BakeRuntimeProblem.Parse(line) is { } bakeProblem)
+                    {
+                        lock (run.BakeProblems) run.BakeProblems.Add(bakeProblem);
+                        _log.AddRaw(run.Log, "[Bake] " + bakeProblem.Describe());
+                    }
                 }
                 if (!run.InGame && IsEnterGameLine(line)) Dispatcher.UIThread.Post(() => EnterGame(run, guessed: false));
                 _service.NotifyGameOutput(id, line);
@@ -666,7 +683,7 @@ public sealed partial class HomeViewModel : PageViewModel
                 {
                     // 烘焙成功了但游戏没进主界面就退出：多半是加载器原型不兼容某个模组（比如 Sodium 的 Mixin），给一个不烘焙再启动的入口。
                     _log.AddRaw(run.Log, "[Bake] " + L.T("home.bake.crashed"));
-                    Toasts.BakeFailed(L.F("home.bake.crashed_toast", id), () =>
+                    Toasts.BakeFailed(BakeProblemMods(run) is { Length: > 0 } suspects ? L.F("home.bake.crashed_mixin_toast", id, suspects) : L.F("home.bake.crashed_toast", id), () =>
                     {
                         if (!TryRequestBakeRetry(_service, ctx, request))
                             Toasts.Show(L.T("home.bake.retry_directory_changed"));
@@ -677,6 +694,15 @@ public sealed partial class HomeViewModel : PageViewModel
                 GameCrashed?.Invoke(id);
             }
 
+            // A baked run that did not crash but had Mixins switched off: say which mods may be missing features, with a way back.
+            if (!crashed && BakeProblemMods(run) is { Length: > 0 } partial)
+            {
+                Toasts.BakeFailed(L.F("home.bake.mixin_disabled", run.BakeProblems.Count, partial), () =>
+                {
+                    if (!TryRequestBakeRetry(_service, ctx, request))
+                        Toasts.Show(L.T("home.bake.retry_directory_changed"));
+                });
+            }
             if (!string.IsNullOrWhiteSpace(settings.PostExitCommand))
                 await RunUserCommandAsync(settings.PostExitCommand, id, workDir, run.Log, CancellationToken.None);
         }

@@ -407,30 +407,78 @@ public sealed class LauncherService : IDisposable
 
     public GameInstance GetInstance(GameContext ctx, string id) => GameInstance.Detect(ctx.Directory, id, WorkDirFor(ctx, id));
 
-    /// <summary>实验功能“烘焙”：开了并且找到了加载器原型时返回服务，否则 null。缓存放在数据目录，所有实例共用。</summary>
-    public Amber.Core.Bake.BakeService? Bake =>
+    /// <summary>Experimental baking: the service when it is on and a loader build was found, else null. Caches live in the data directory and are shared by every instance.</summary>
+    public Amber.Core.Bake.BakeService? Bake => BakeFor(Context);
+
+    public Amber.Core.Bake.BakeService? BakeFor(GameContext ctx) =>
         Settings.ExperimentalBake && Amber.Core.Bake.BakeToolkit.Find(Settings.BakeLoaderPath) is { } toolkit
-            ? new Amber.Core.Bake.BakeService(toolkit, Path.Combine(AppSettings.DataDir, "bake-cache"))
+            ? new Amber.Core.Bake.BakeService(toolkit, Path.Combine(AppSettings.DataDir, "bake-cache"), Path.Combine(AppSettings.DataDir, "bake-data"),
+                (items, ct) => ctx.Downloader.DownloadAllAsync(items, null, ct))
             : null;
 
+    /// <summary>One bake, warm or cleanup at a time: gc must never run while an instance using the cache is baking.</summary>
+    private readonly SemaphoreSlim _bakeLock = new(1, 1);
+
     /// <summary>
-    /// 启动前的烘焙：实例支持时，输入没变就直接用上次的结果，变了就先烘焙模组和实例。
-    /// 返回 null 表示这次按普通方式启动（没开、不支持）；reason 是给日志看的原因。
+    /// Bake before a launch: when the instance is supported, reuse the previous bake if nothing changed, otherwise
+    /// download what the loader asks for, prepare the NeoForge/Forge platform and run bake-instance. warm (interface
+    /// 1.2) runs only when asked, for "Bake now"; a launch fills in anything missing itself.
+    /// A null launch means "launch normally" (off, not supported); reason is for the log and status line.
     /// </summary>
     public Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason)> PrepareBakeAsync(string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct)
         => PrepareBakeAsync(Context, id, javaPath, progress, ct);
 
-    /// <summary>烘焙与本次启动共用固定的游戏目录；中途切换目录不会混用另一个同名实例。</summary>
-    public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct)
+    /// <summary>The bake uses the launch's own game directory; switching directories meanwhile never mixes up two instances of the same name.</summary>
+    public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false)
     {
-        if (Bake is not { } bake) return (null, Settings.ExperimentalBake ? Amber.Core.Localization.L.T("core.bake.loader_missing") : "");
-        var instance = GetInstance(ctx, id);
-        var (_, _, supported) = await bake.VersionAsync(javaPath, ct);
-        if (!Amber.Core.Bake.BakeService.Supports(instance, supported, out var reason)) return (null, reason);
-        var major = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? 21;
-        if (bake.Current(ctx.Directory, instance, major) is { } current) return (current, Amber.Core.Localization.L.T("core.bake.reused"));
-        await bake.BakeModsAsync(javaPath, ctx.Directory, instance, progress, ct);
-        return (await bake.BakeInstanceAsync(javaPath, major, ctx.Directory, instance, progress, ct), Amber.Core.Localization.L.T("core.bake.done"));
+        if (BakeFor(ctx) is not { } bake) return (null, Settings.ExperimentalBake ? Amber.Core.Localization.L.T("core.bake.loader_missing") : "");
+        await _bakeLock.WaitAsync(ct);
+        try
+        {
+            var major = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? 21;
+            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, GetInstance(ctx, id), warm, progress, ct);
+            return (done.Launch, done.Reason);
+        }
+        finally
+        {
+            _bakeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Bake cache cleanup (gc, interface 1.2): a dry run unless apply. Refused while a game is running or another bake
+    /// is in progress (returns null with a reason). Only the loader's cache and mapping cache are touched.
+    /// </summary>
+    public async Task<(Amber.Core.Bake.BakeGcResult? Result, string Reason)> CleanBakeCacheAsync(bool apply, CancellationToken ct)
+    {
+        var ctx = Context;
+        if (BakeFor(ctx) is not { } bake) return (null, Amber.Core.Localization.L.T("core.bake.loader_missing_short"));
+        if (AnyRunning) return (null, Amber.Core.Localization.L.T("core.bake.gc_busy"));
+        if (!await _bakeLock.WaitAsync(0, ct)) return (null, Amber.Core.Localization.L.T("core.bake.gc_busy"));
+        try
+        {
+            var java = await ctx.Java.ForMajorAsync(21, ct);
+            var loader = await bake.VersionAsync(java, ct);
+            loader.EnsureCompatible();
+            if (!loader.CanWarm) return (null, Amber.Core.Localization.L.F("core.bake.interface_old", loader.Interface.ToString(2), Amber.Core.Bake.BakeLoaderInfo.WarmInterface.ToString(2), loader.LoaderVersion));
+            var result = await bake.CollectGarbageAsync(java, apply, null, ct);
+            return (result, result is null ? Amber.Core.Localization.L.T("core.bake.gc_empty") : "");
+        }
+        finally
+        {
+            _bakeLock.Release();
+        }
+    }
+
+    /// <summary>After an instance is deleted or the recycle bin is emptied: drop bake cache files nothing uses any more.</summary>
+    public void CleanBakeCacheInBackground()
+    {
+        if (!Settings.ExperimentalBake) return;
+        _ = Task.Run(async () =>
+        {
+            try { await CleanBakeCacheAsync(apply: true, CancellationToken.None); }
+            catch (Exception e) when (e is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine("bake gc: " + e.Message); }
+        });
     }
 
     /// <summary>整合包的文件都在版本目录里，这个版本必须固定开启隔离。</summary>

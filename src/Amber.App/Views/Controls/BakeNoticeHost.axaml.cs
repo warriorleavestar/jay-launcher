@@ -29,7 +29,7 @@ public sealed class BakeNoticeState : ObservableObject
         OnPropertyChanged(nameof(HasNotice));
     };
 
-    internal BakeNotice Show(string text, Action retry)
+    internal BakeNotice Show(string text, Action? retry)
     {
         if (Notices.Count == 3) Notices[^1].DismissCommand.Execute(null);
         var notice = new BakeNotice(text, retry, item => Notices.Remove(item));
@@ -46,15 +46,17 @@ public sealed class BakeNoticeState : ObservableObject
 /// <summary>每条通知独立结束；按钮重复触发、过期或被挤出后都不会再次启动。</summary>
 public sealed class BakeNotice
 {
-    private readonly Action _retry;
+    private readonly Action? _retry;
     private readonly Action<BakeNotice> _remove;
     private readonly IDisposable _expiry;
     private bool _active = true;
     public string Text { get; }
+    /// <summary>False for problems that have nothing to retry (the button is hidden).</summary>
+    public bool CanRetry => _retry is not null;
     public IRelayCommand RetryCommand { get; }
     public IRelayCommand DismissCommand { get; }
 
-    internal BakeNotice(string text, Action retry, Action<BakeNotice> remove)
+    internal BakeNotice(string text, Action? retry, Action<BakeNotice> remove)
     {
         Text = text;
         _retry = retry;
@@ -70,6 +72,6 @@ public sealed class BakeNotice
         _active = false;
         _expiry.Dispose();
         _remove(this);
-        if (retry) _retry();
+        if (retry) _retry?.Invoke();
     }
 }
