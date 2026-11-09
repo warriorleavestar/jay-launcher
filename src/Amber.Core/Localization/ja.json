@@ -2739,5 +2739,17 @@
   "multiplayer.room.mod_sync": "MOD の同期",
   "multiplayer.room.mod_sync_allow": "参加した人が自分から MOD を同期できるようにする（相手には MOD リストが見えます。公開サイトにない MOD ファイルはルーム内で暗号化して送ります）",
   "instance.lastrun.mods_differ": "前回 {0} と遊んだとき、MOD が違っていました",
-  "instance.lastrun.mods_differ_advice": "参加時に「気にせず入る」を選びました。次は参加時に MOD をそろえるか、ホストに Modpack をもらってください。"
+  "instance.lastrun.mods_differ_advice": "参加時に「気にせず入る」を選びました。次は参加時に MOD をそろえるか、ホストに Modpack をもらってください。",
+  "multiplayer.modcheck.sync_to": "そろえる先：",
+  "multiplayer.modcheck.into_new": "新しいインスタンス（元のものはそのまま）",
+  "multiplayer.modcheck.into_mine": "{0} を直接変える（外したファイルは「最近削除した項目」へ）",
+  "multiplayer.modcheck.sync": "MOD をそろえる",
+  "multiplayer.modcheck.sync_summary": "{0} 個を入れます：Modrinth にあるものはそこから、残りはホストからルーム内で暗号化して受け取ります。どのファイルもホストのリストのハッシュと照合します。",
+  "multiplayer.modcheck.new_instance": "{0} のルーム",
+  "multiplayer.modcheck.task": "MOD をそろえています：{0}",
+  "multiplayer.modcheck.copying": "{0} を {1} にコピーしています…",
+  "multiplayer.modcheck.syncing": "{0}/{1}：{2}",
+  "multiplayer.modcheck.synced": "MOD をそろえました。{0} で参加します。",
+  "multiplayer.modcheck.sync_failed": "{0} 個は取得できませんでした：{1}。もう一度そろえるか、ホストに送ってもらってください。",
+  "multiplayer.modcheck.sync_error": "同期が終わりませんでした：{0}"
 }

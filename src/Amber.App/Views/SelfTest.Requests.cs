@@ -173,6 +173,9 @@ internal sealed partial class SelfTest
         Check("对一下模组：【看看差在哪】列出每一项", vm.ModDetailsOpen && vm.ModDiffLines.Count == 6
             && page.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "ModDiffList" && i.IsEffectivelyVisible));
         await ShotAsync("对一下模组-1440");
+        await ModSyncAsync(vm, page);
+        await Dispatcher.UIThread.InvokeAsync(() => vm.ShowModCheckAsync(new ModListReply(ModListAnswer.Sent, host), mine));
+        Dispatcher.UIThread.Invoke(() => vm.ModCheckInstance = "selftest-modcheck");
         Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "SkipModCheckButton" && b.IsEffectivelyVisible));
         await Task.Delay(200);
         Check("对一下模组：【不管了，直接进】收起卡片并记下（崩了时第一条建议）", !vm.ShowModCheck && main.Service.MetaOf("selftest-modcheck")?.ModsDifferFromHost == "Alex");
@@ -191,6 +194,60 @@ internal sealed partial class SelfTest
             vm.Mode = "host";
         });
         await Task.Delay(200);
+    }
+
+    /// <summary>One-click sync into a new instance with stand-in folders and a runner without network.</summary>
+    private async Task ModSyncAsync(MultiplayerViewModel vm, MultiplayerPage page)
+    {
+        var root = Path.Combine(reportDir, "modsync");
+        string DirOf(string id) => Path.Combine(root, id);
+        var mineDir = DirOf("selftest-mine");
+        Directory.CreateDirectory(mineDir);
+        byte[] Bytes(string text) => System.Text.Encoding.UTF8.GetBytes(text);
+        static string Sha(byte[] b) => Convert.ToHexStringLower(System.Security.Cryptography.SHA1.HashData(b));
+        var oldJar = Bytes("old version");
+        var shared = Bytes("same file");
+        var newJar = Bytes("new version");
+        var extra = Bytes("only mine");
+        File.WriteAllBytes(Path.Combine(mineDir, "thing-1.0.jar"), oldJar);
+        File.WriteAllBytes(Path.Combine(mineDir, "shared.jar"), shared);
+        File.WriteAllBytes(Path.Combine(mineDir, "my-extra.jar"), extra);
+        var host = new ModManifest([new ModManifestEntry("thing-2.0.jar", Sha(newJar), newJar.Length), new ModManifestEntry("shared.jar", Sha(shared), shared.Length)]);
+        var asked = new List<string>();
+        vm.TestModsDirOf = DirOf;
+        vm.TestRunner = _ => new ModSyncRunner
+        {
+            FindPublic = (_, _) => Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>()),
+            Download = (_, _, _) => throw new InvalidOperationException(),
+            FromHost = async (sha1, _) =>
+            {
+                asked.Add(sha1);
+                await Task.Delay(300);
+                var received = Path.Combine(root, "received.tmp");
+                File.WriteAllBytes(received, newJar);
+                return received;
+            },
+            Recycle = File.Delete,
+        };
+        Dispatcher.UIThread.Invoke(() => vm.ModCheckInstance = "selftest-mine");
+        await Dispatcher.UIThread.InvokeAsync(() => vm.ShowModCheckAsync(new ModListReply(ModListAnswer.Sent, host), ModManifest.Read(mineDir)));
+        Dispatcher.UIThread.Invoke(() => vm.ModCheckInstance = "selftest-mine");
+        await Task.Delay(200);
+        Check("一键同步：默认同步到新实例，写明原实例不动", vm.SyncIntoNewInstance && page.GetVisualDescendants().OfType<RadioButton>().Any(r => r.Name == "SyncIntoNewRadio" && r.IsChecked == true && r.IsEffectivelyVisible)
+            && page.GetVisualDescendants().OfType<Button>().Any(b => b.Name == "SyncModsButton" && b.IsEffectivelyVisible));
+        Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "SyncModsButton" && b.IsEffectivelyVisible));
+        await WaitAsync(() => vm.ModSyncing, 3);
+        await Task.Delay(100);
+        Check("一键同步：同步时显示进度、按钮收起", vm.ModSyncing && page.GetVisualDescendants().OfType<StackPanel>().Any(p => p.Name == "ModSyncProgress" && p.IsEffectivelyVisible));
+        await WaitAsync(() => !vm.ModSyncing, 10);
+        var copy = DirOf(L.F("multiplayer.modcheck.new_instance", "Alex"));
+        Check("一键同步：新实例里换上房主的版本、去掉可能挡路的模组，原实例不动", File.Exists(Path.Combine(copy, "thing-2.0.jar")) && !File.Exists(Path.Combine(copy, "thing-1.0.jar"))
+            && !File.Exists(Path.Combine(copy, "my-extra.jar")) && File.Exists(Path.Combine(mineDir, "thing-1.0.jar")) && File.Exists(Path.Combine(mineDir, "my-extra.jar")),
+            string.Join(",", Directory.Exists(copy) ? Directory.GetFiles(copy).Select(Path.GetFileName) : []));
+        Check("一键同步：不在公开网站上的文件向房主要，同步后重新对过且一样", asked.SequenceEqual([Sha(newJar)]) && vm.ModCheck is ModCheckState.Same or ModCheckState.Dismissed
+            && vm.ModCheckInstance == L.F("multiplayer.modcheck.new_instance", "Alex"), vm.ModCheck.ToString());
+        vm.TestModsDirOf = null;
+        vm.TestRunner = null;
     }
 
     /// <summary>Screenshot of another window (the popup).</summary>

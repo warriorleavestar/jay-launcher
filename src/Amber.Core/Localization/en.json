@@ -2808,5 +2808,19 @@
   "multiplayer.room.mod_sync": "Mod sync",
   "multiplayer.room.mod_sync_allow": "Let people who join sync mods from me (they see my mod list; mod files that aren't on public sites are sent to them encrypted through the room)",
   "instance.lastrun.mods_differ": "Your mods differed from {0}'s when you last played together",
-  "instance.lastrun.mods_differ_advice": "You chose “Never mind, just join”. Next time, sync the mods when you join, or ask the host for the modpack."
+  "instance.lastrun.mods_differ_advice": "You chose “Never mind, just join”. Next time, sync the mods when you join, or ask the host for the modpack.",
+  "multiplayer.modcheck.sync_to": "Sync into:",
+  "multiplayer.modcheck.into_new": "A new instance (yours stays as it is)",
+  "multiplayer.modcheck.into_mine": "Change {0} directly (replaced files go to Recently deleted)",
+  "multiplayer.modcheck.sync": "Sync the mods",
+  "multiplayer.modcheck.sync_summary": "{0} to install: files on Modrinth are downloaded from there, the rest are sent by the host, encrypted through the room. Every file is checked against the hash in the host's list.",
+  "multiplayer.modcheck.sync_summary.one": "1 to install: if it is on Modrinth it is downloaded from there, otherwise the host sends it, encrypted through the room. It is checked against the hash in the host's list.",
+  "multiplayer.modcheck.new_instance": "{0}'s room",
+  "multiplayer.modcheck.task": "Syncing mods: {0}",
+  "multiplayer.modcheck.copying": "Copying {0} to {1}…",
+  "multiplayer.modcheck.syncing": "{0} of {1}: {2}",
+  "multiplayer.modcheck.synced": "Mods synced. Join with {0}.",
+  "multiplayer.modcheck.sync_failed": "{0} could not be fetched: {1}. Try syncing again, or ask the host to send them.",
+  "multiplayer.modcheck.sync_failed.one": "1 could not be fetched: {1}. Try syncing again, or ask the host to send it.",
+  "multiplayer.modcheck.sync_error": "The sync didn't finish: {0}"
 }

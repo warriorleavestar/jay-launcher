@@ -2661,5 +2661,17 @@
   "multiplayer.room.mod_sync": "模組同步",
   "multiplayer.room.mod_sync_allow": "許赴者自我同步模組（彼見吾模組之錄；不在公站之模組，經室加密寄之）",
   "instance.lastrun.mods_differ": "前與 {0} 同戲，模組有異",
-  "instance.lastrun.mods_differ_advice": "入室時擇「不顧，徑入」。再赴時請一按同步，或請主寄整合包。"
+  "instance.lastrun.mods_differ_advice": "入室時擇「不顧，徑入」。再赴時請一按同步，或請主寄整合包。",
+  "multiplayer.modcheck.sync_to": "同步於：",
+  "multiplayer.modcheck.into_new": "新例（原例不動）",
+  "multiplayer.modcheck.into_mine": "徑改 {0}（所易者入近刪）",
+  "multiplayer.modcheck.sync": "一按同步",
+  "multiplayer.modcheck.sync_summary": "須裝 {0}：Modrinth 有者自彼下之，餘請主經室加密寄之。每檔皆以主錄之雜湊核之。",
+  "multiplayer.modcheck.new_instance": "{0} 之室",
+  "multiplayer.modcheck.task": "同步模組：{0}",
+  "multiplayer.modcheck.copying": "方錄 {0} 為 {1}……",
+  "multiplayer.modcheck.syncing": "第 {0}/{1}：{2}",
+  "multiplayer.modcheck.synced": "模組既同，以 {0} 入。",
+  "multiplayer.modcheck.sync_failed": "有 {0} 未得：{1}。可再同步，或請主寄之。",
+  "multiplayer.modcheck.sync_error": "同步未竟：{0}"
 }
