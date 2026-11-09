@@ -166,7 +166,8 @@ public sealed partial class MultiplayerViewModel
     {
         PendingInvites.Clear();
         if (_lobby is null) return;
-        foreach (var invite in _lobby.Book.Pending) PendingInvites.Add(new PendingInviteItem(invite));
+        // 公共网络的长期邀请由“公共网络”那一栏管，不列在这里。
+        foreach (var invite in _lobby.Book.Pending.Where(i => !i.Standing)) PendingInvites.Add(new PendingInviteItem(invite));
     }
 
     // ---- 房主 ----
@@ -185,7 +186,7 @@ public sealed partial class MultiplayerViewModel
     {
         _credentials = credentials;
         _members = members;
-        var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(AppSettings.DataDir, "easytier", "lobby"), peers ?? (() => LobbyPeers(host: true)),
+        var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => Trusted.IsTrusted(pub), AskApprovalAsync, members,
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort);
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
@@ -322,7 +323,7 @@ public sealed partial class MultiplayerViewModel
         _service.ActiveMultiplayer = null;
         try
         {
-            var workDir = Path.Combine(AppSettings.DataDir, "easytier", options.Tun ? "run-lan" : "run");
+            var workDir = Path.Combine(EasyTierWorkRoot, options.Tun ? "run-lan" : "run");
             _session = options.Tun
                 ? EasyTierElevatedSession.Start(_service.EasyTier, options, workDir)
                 : EasyTierSession.Start(_service.EasyTier, options, workDir);
@@ -549,7 +550,8 @@ public sealed partial class MultiplayerViewModel
     // ---- 加入方 ----
 
     /// <summary>贴了邀请码：进大厅、敲门、等批准；批准后离开大厅，用拿到的凭据加入房间。</summary>
-    private async Task KnockAndJoinAsync(JayInvite invite)
+    /// <param name="knock">从公共网络的房间列表加入时：经公共网络敲门。不给时先在公共网络的目录里找（连着时），找不到再进邀请码的大厅。</param>
+    private async Task KnockAndJoinAsync(JayInvite invite, Func<X25519KeyPair, string, CancellationToken, Task<KnockOutcome>>? knock = null)
     {
         IsKnocking = true;
         var cts = new CancellationTokenSource();
@@ -560,7 +562,14 @@ public sealed partial class MultiplayerViewModel
         {
             var me = Identity.KeyPair;
             var name = ChatName;
-            var outcome = await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(AppSettings.DataDir, "easytier", "lobby-join"), peers, invite,
+            KnockOutcome? viaPublic = null;
+            if (knock is not null || _public is not null)
+            {
+                SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
+                viaPublic = knock is not null ? await knock(me, name, cts.Token) : await TryPublicKnockAsync(invite, me, name, cts.Token);
+                if (viaPublic is null && _knockCts == cts) SetStatus(StatusMessage.Info(peers.Count > 0 ? "multiplayer.invite.connecting_relay" : "multiplayer.invite.entering_lobby"));
+            }
+            var outcome = viaPublic ?? await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
                 me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
                 () => Dispatcher.UIThread.Post(() =>
                 {
@@ -618,6 +627,8 @@ public sealed partial class MultiplayerViewModel
         "full" => "multiplayer.invite.reason.full",
         "removed" => "multiplayer.invite.reason.removed",
         "closed" => "multiplayer.invite.reason.closed",
+        "mismatch" => "multiplayer.public.reason.mismatch",
+        "password" => "multiplayer.public.reason.password",
         _ => "multiplayer.invite.reason.denied",
     };
 }

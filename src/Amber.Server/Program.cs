@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Gate;
+using Amber.Core.Multiplayer.Public;
 using Amber.Core.Multiplayer.Transport;
 using Amber.Core.Net;
 
@@ -52,6 +53,11 @@ public static class Program
               grace 期间固定端口照开，老玩家进一次服就会拿到轮换信息；之后固定端口关闭
           jay-server rotate off / rotate status
 
+        公共网络节点（Jay 公共网络 / 自己的公共网络的种子节点 + 房间目录）：
+          jay-server directory [--listen 11010] [--seeds tcp://别的种子:11010,...] [--easytier <放 easytier-core 的文件夹>]
+              在有公网 IP 的机器上运行，要放行 TCP 和 UDP 的 11010 端口。房间目录只在公共网络里可达（10.235.0.1:47668），不对公网开放。
+              目录只存房主签过名的房间信息（名字、人数、敲门地址），不经手任何密钥；90 秒没续期的房间自动消失。
+
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
 
@@ -70,6 +76,7 @@ public static class Program
                 "setup" => await SetupAsync(root, options),
                 "run" => await RunAsync(root, options),
                 "relay" => await RelayAsync(options),
+                "directory" => await DirectoryAsync(root, options),
                 null => Help(),
                 _ => Admin(root, options, Console.Out),
             };
@@ -203,6 +210,67 @@ public static class Program
             : System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; Stop(); });
         try { await Task.Delay(Timeout.Infinite, stop.Token); }
         catch (OperationCanceledException) { }
+        log("正在关闭……");
+        return 0;
+    }
+
+    /// <summary>公共网络的种子节点 + 房间目录：一个 EasyTier（固定地址 10.235.0.1，同时监听公网端口当节点）+ 本机 127.0.0.1:47668 的目录服务。</summary>
+    private static async Task<int> DirectoryAsync(string root, Options options)
+    {
+        var log = (string line) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [Jay 公共节点] {line}");
+        var listen = options.GetInt("listen", 11010);
+        if (listen is < 1 or > 65535) throw new ArgumentException("--listen 要是 1–65535 的端口");
+        var seeds = (options.Get("seeds") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        foreach (var s in seeds) if (!RelayNodes.IsValid(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://1.2.3.4:11010）");
+
+        string core, cli;
+        if (options.Get("easytier") is { } dir)
+        {
+            var exe = OperatingSystem.IsWindows() ? ".exe" : "";
+            core = Path.Combine(Path.GetFullPath(dir), "easytier-core" + exe);
+            cli = Path.Combine(Path.GetFullPath(dir), "easytier-cli" + exe);
+            if (!File.Exists(core) || !File.Exists(cli)) throw new IOException($"{dir} 里没有 easytier-core 和 easytier-cli");
+        }
+        else
+        {
+            using var http = Downloader.CreateHttpClient();
+            var installer = new EasyTierInstaller(new Downloader(http, SourceChain.Default()), root);
+            if (!installer.IsInstalled) log("下载 EasyTier……");
+            await installer.EnsureAsync();
+            (core, cli) = (installer.CorePath, installer.CliPath);
+        }
+
+        await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort, log);
+        var profile = PublicNetworkProfile.Jay(seeds);
+        var options2 = new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true,
+            Listeners: [$"tcp://0.0.0.0:{listen}", $"udp://0.0.0.0:{listen}"]);
+        using var network = PublicNetworkSession.Start(core, cli, options2, Path.Combine(root, "public-node"));
+        network.Output += line => { if (options.Has("verbose")) log(line); };
+        log($"公共网络 {profile.NetworkName} 的节点在端口 {listen}（TCP/UDP）上运行，房间目录在 {PublicNetworkProfile.DirectoryIp}:{PublicNetworkProfile.DirectoryPort}");
+        log($"在 Jay 的联机设置里把公共节点填成 tcp://<这台机器的公网地址>:{listen}");
+
+        var stop = new CancellationTokenSource();
+        void Stop() { try { stop.Cancel(); } catch (ObjectDisposedException) { } }
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; Stop(); };
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Stop();
+        using var sigterm = OperatingSystem.IsWindows() ? null
+            : System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; Stop(); });
+        var last = -1;
+        while (!stop.IsCancellationRequested)
+        {
+            if (network.HasExited)
+            {
+                log("EasyTier 意外退出：" + string.Join(" / ", network.RecentOutput.TakeLast(3)));
+                return 1;
+            }
+            if (directory.Count != last)
+            {
+                last = directory.Count;
+                log($"目录里现在有 {last} 个房间");
+            }
+            try { await Task.Delay(TimeSpan.FromSeconds(10), stop.Token); }
+            catch (OperationCanceledException) { }
+        }
         log("正在关闭……");
         return 0;
     }
@@ -438,7 +506,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];
