@@ -9,6 +9,9 @@ using Amber.Core.Java;
 using Amber.Core.Launch;
 using Amber.Core.Net;
 
+// Mac/Linux 完整局域网模式的 root 守护（开发时 dotnet run 的 Jay 也能用这个 CLI 测）。
+if (!OperatingSystem.IsWindows() && UnixElevatedGuardHost.IsGuardInvocation(args)) Environment.Exit(UnixElevatedGuardHost.Run(args));
+
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
 // 用法：

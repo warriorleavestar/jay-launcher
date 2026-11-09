@@ -81,8 +81,8 @@
 | 联机：极端加密（ML-KEM 混合） | ✅ Win11 新版 | 🪟 .NET 在 macOS 上没有 ML-KEM | 🟡 需要 OpenSSL 3.5+ | `Multiplayer/Transport/Noise.cs` `HybridSupported` |
 | 联机：直连房间（IPv6、UPnP/NAT-PMP、打洞） | ✅ | 🟡 | 🟡 | `Multiplayer/DirectLink.cs`、`PortMapping.cs` |
 | 联机：房间聊天 | ✅ | 🟡 | 🟡 | `Multiplayer/RoomChat.cs` |
-| 联机：完整局域网模式（虚拟网卡） | ✅ 要管理员 | 🪟 | 🪟 | `Multiplayer/EasyTierElevated.cs` |
-| 联机：出口节点（全部流量经房主） | ✅ 要管理员 | 🪟 | 🪟 | `Exit*Script.cs`（PowerShell + WFP） |
+| 联机：完整局域网模式（虚拟网卡） | ✅ 要管理员 | 🟡 管理员密码框 + utun，待真机验证 | 🟡 pkexec + tun，云端已测 | `Multiplayer/EasyTierElevated.cs`、`UnixElevated*.cs`、`UnixBroadcastRelay.cs` |
+| 联机：出口节点（全部流量经房主） | ✅ 要管理员 | 🪟 提供出口可以，经别人上网还没做 | 🪟 同左 | `Exit*Script.cs`（PowerShell + WFP） |
 | 联机：“仅游戏”出口（SOCKS5） | ✅ | 🟡 路由拦截、SRV 已补，待真机验证 | 🟡 同左 | `Transport/ExitPolicy.cs`、`Transport/JoinTarget.cs` |
 | 联机身份（X25519 私钥）加密 | ✅ DPAPI | 🟡 AES-GCM + 本机密钥文件 | 🟡 同左 | `Multiplayer/MemberIdentity.cs` |
 | 敏感文字复制后 60 秒清剪贴板 | ✅ | ✅ | 🟡 Wayland 下要测 | `App/Services/SensitiveClipboard.cs` |
@@ -229,17 +229,17 @@ EasyTier（组网，P2P 或经节点中继）
 - `RoomChat.cs`：点对点，不经服务器，AES-GCM，发送者由房主核对。
 - `LanGames.cs`：房主侧监听本机的局域网广播（224.0.2.60:4445）找到开放的游戏；加入方在本机回环上广播，让游戏的“多人游戏”列表出现这个房间。组播收发在 macOS 上的回环行为和 Windows 不完全一样，需要实测。
 
-#### 完整局域网模式 🪟
+#### 完整局域网模式
 
-`EasyTierElevated.cs`：EasyTier 建虚拟网卡（Windows 用 wintun），每人一个虚拟 IP，局域网广播也转发（`--enable-udp-broadcast-relay`，EasyTier 这个功能本身只支持 Windows）。建网卡要管理员，所以经 UAC（`powershell.exe` + `Verb = "runas"`）启动一个守护脚本，参数和密钥经命名管道传，不落盘；Jay 退出时管道断开，守护脚本结束 easytier-core 后退出。
+`EasyTierElevated.cs`：EasyTier 建虚拟网卡，每人一个虚拟 IP，局域网广播也转发。建网卡要管理员 / root，所以只在用户打开这个模式时请求一次权限，由一个守护进程运行 easytier-core；参数和密钥都不落盘；Jay 退出或崩溃时守护结束 easytier-core 后退出。
 
-Mac/Linux 上直接抛 `PlatformNotSupportedException`（“完整局域网模式目前只支持 Windows”）。**注意界面上这个勾选框在 Mac/Linux 上也会显示**（`MultiplayerPage.axaml` 里没按平台隐藏），勾了以后创建房间才报错，建议先在界面上禁用并说明。
+- Windows：wintun。经 UAC（`powershell.exe` + `Verb = "runas"`）启动守护脚本，参数经命名管道传。广播由 EasyTier 的 `--enable-udp-broadcast-relay` 转发（这个功能 EasyTier 只在 Windows 上有）。
+- Linux：tun，网卡名 `amberlan`（Linux 网卡名不能有空格）。经 `pkexec` 以 root 运行 **Jay 自己的守护模式**（`Jay --amber-et-guard …`，入口在 `Program.Main` 最前面，不开窗口），实现在 `UnixElevated.cs`（Jay 这边）和 `UnixElevatedHost.cs`（root 这边）。已经是 root 时不弹密码框。没有 pkexec 时勾选框禁用并说明原因。
+- macOS：utun（系统编号，不传 `--dev-name`）。经 `osascript … with administrator privileges` 弹系统管理员密码框，守护放后台运行。
+- Mac/Linux 的通信：Jay 在 `mkdtemp` 建的 0700 临时目录里开一个 Unix 域套接字，守护连上来。Jay 只接受 root（`SO_PEERCRED` / `LOCAL_PEERCRED` 核对 uid），守护核对对端就是命令行里那个 Jay 的进程号和用户（`SO_PEERCRED` / `LOCAL_PEERPID`）。连上后套接字文件马上删掉。命令是一行一个 JSON（参数按数组传，不经过 shell），easytier-core 只拿到固定 PATH 和房间密钥两个环境变量。easytier-core 必须是普通文件（不是符号链接）、组和其他人不可写，否则拒绝运行。
+- Mac/Linux 的广播转发（`UnixBroadcastRelay.cs`）：root 守护抓本机从物理网卡发出、发往 255.255.255.255 或本机网段广播地址的 UDP（Linux 用 `AF_PACKET` + 内核 BPF 过滤，macOS 用系统自带的 `/usr/lib/libpcap.dylib`），保持源端口、目标端口和内容，从绑定到虚拟网卡的原始 UDP 套接字发往 255.255.255.255；EasyTier 会交给房间里所有人。只转发本机发出的包，虚拟网卡上的包不再抓，不会绕圈；每秒最多 200 个。和 Windows 一样只转发广播，不转发组播（MC 的 224.0.2.60 局域网世界由 `LanGames.cs` 另外处理）。
+- Mac/Linux 上“经别人上网”（使用出口）还没做：守护收到带出口计划的命令直接拒绝，界面不显示这个按钮，全条件测试不排出口步骤。提供出口（`--enable-exit-node`）不需要改系统路由，三个系统都能勾。
 
-适配思路：
-- macOS：EasyTier 在 macOS 上用 utun，要 root。可以用 `osascript -e 'do shell script … with administrator privileges'` 拉起一个守护进程，或者做一个 `SMAppService` 特权助手（要签名）。
-- Linux：用 `pkexec` 拉起守护进程，或者给 easytier-core 设 `cap_net_admin`（`setcap`，要 root 一次）。
-- 守护进程和 Jay 之间沿用 Windows 的思路：用 Unix 域套接字（权限 0600）代替命名管道，连上后核对对方 PID，密钥只经套接字传，Jay 断开时守护进程收尾退出。
-- 广播转发在 Mac/Linux 上 EasyTier 不支持，需要的话要自己在虚拟网卡上转。
 
 #### 出口节点
 

@@ -404,7 +404,7 @@
   "core.mp.guard.sendfailed": "EasyTier 監視プロセスへコマンドを送信できませんでした。",
   "core.mp.guard.unavailable": "EasyTier の監視プロセスを利用できません。",
   "core.mp.component.tunrequired": "フルLANモードには Tun オプションが必要です",
-  "core.mp.component.windowsonly": "フルLANモードは現在 Windows のみに対応しています",
+  "core.mp.component.windowsonly": "このシステムではフルLANモードを使えません（Windows・macOS・Linux に対応）",
   "core.mp.diagnostics.log": "== 詳細ログ ==",
   "core.mp.diagnostics.maskedips": "後半をマスク済み",
   "core.mp.diagnostics.os32": "32 ビット",
@@ -1709,5 +1709,11 @@
   "multiplayer.component.import_failed": "読み込みに失敗しました：{0}",
   "multiplayer.component.downloading_from": "{0} から EasyTier をダウンロードしています…",
   "multiplayer.component.manual_hint": "ダウンロードできない場合：ブラウザーで {0} を取得し（公式 URL {1}）、「ファイルから読み込む」を選んでください。読み込んだファイルも SHA-256 で検証します。",
-  "linux.missing_libraries": "Jay を起動できません：画面表示に必要なライブラリ {0} がシステムにありません。\n\nインストールしてから Jay を開き直してください：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\nデスクトップのないサーバーでは Jay Server を使ってください。"
+  "linux.missing_libraries": "Jay を起動できません：画面表示に必要なライブラリ {0} がシステムにありません。\n\nインストールしてから Jay を開き直してください：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\nデスクトップのないサーバーでは Jay Server を使ってください。",
+  "core.mp.component.unixprompt": "フルLANモード用の仮想ネットワークアダプターを作成するため、管理者パスワードが必要です。",
+  "core.mp.component.nopkexec": "フルLANモードは pkexec で管理者権限を求めますが、このコンピューターにはインストールされていません（通常は polkit に含まれます）",
+  "core.mp.component.elevationdeclined.linux": "管理者パスワードの確認をキャンセルしたため、フルLANモードは有効になりませんでした",
+  "core.mp.component.elevationdeclined.mac": "macOS の管理者パスワードの確認をキャンセルしたため、フルLANモードは有効になりませんでした",
+  "core.mp.guard.exitcode": "EasyTier の監視プロセスが接続前に終了しました（終了コード {0}）。",
+  "core.mp.exit.windowsonly": "他のメンバー経由でのインターネット接続は現在 Windows のみ対応です。フルLANモード自体は使えます。"
 }

@@ -404,7 +404,7 @@
   "core.mp.guard.sendfailed": "EasyTier 守護命令傳送失敗。",
   "core.mp.guard.unavailable": "EasyTier 守護程序無法使用。",
   "core.mp.component.tunrequired": "完整區域網路模式需要使用 Tun 選項",
-  "core.mp.component.windowsonly": "完整區域網路模式目前僅支援 Windows",
+  "core.mp.component.windowsonly": "這個系統不支援完整區域網路模式（支援 Windows、macOS 和 Linux）",
   "core.mp.diagnostics.log": "== 詳細日誌 ==",
   "core.mp.diagnostics.maskedips": "已遮蔽後半段",
   "core.mp.diagnostics.os32": "32 位元",
@@ -1709,5 +1709,11 @@
   "multiplayer.component.import_failed": "匯入失敗：{0}",
   "multiplayer.component.downloading_from": "正在從 {0} 下載 EasyTier……",
   "multiplayer.component.manual_hint": "無法下載時：用瀏覽器下載 {0}（官方網址 {1}），再按「從檔案匯入」。匯入的檔案同樣須通過 SHA-256 驗證。",
-  "linux.missing_libraries": "Jay 無法啟動：系統缺少圖形介面需要的程式庫 {0}。\n\n請先安裝後再開啟 Jay：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\n如果是在沒有桌面的伺服器上，請改用 Jay Server。"
+  "linux.missing_libraries": "Jay 無法啟動：系統缺少圖形介面需要的程式庫 {0}。\n\n請先安裝後再開啟 Jay：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\n如果是在沒有桌面的伺服器上，請改用 Jay Server。",
+  "core.mp.component.unixprompt": "Jay 要建立一張虛擬網卡來開啟完整區域網路模式，需要管理員密碼。",
+  "core.mp.component.nopkexec": "完整區域網路模式要用 pkexec 請求管理員權限，這台電腦沒有安裝（通常在 polkit 套件裡）",
+  "core.mp.component.elevationdeclined.linux": "你取消了管理員密碼確認，未啟用完整區域網路模式",
+  "core.mp.component.elevationdeclined.mac": "你取消了 macOS 的管理員密碼確認，未啟用完整區域網路模式",
+  "core.mp.guard.exitcode": "EasyTier 守護程序尚未連線就結束了（結束代碼 {0}）。",
+  "core.mp.exit.windowsonly": "經由他人上網目前僅支援 Windows；完整區域網路模式本身可以使用。"
 }

@@ -412,7 +412,7 @@
   "core.mp.guard.sendfailed": "Could not send a command to the EasyTier guard.",
   "core.mp.guard.unavailable": "The EasyTier guard process is unavailable.",
   "core.mp.component.tunrequired": "Full LAN mode requires the Tun option",
-  "core.mp.component.windowsonly": "Full LAN mode currently supports Windows only",
+  "core.mp.component.windowsonly": "Full LAN mode isn't supported on this system (it supports Windows, macOS and Linux)",
   "core.mp.diagnostics.log": "== Detailed log ==",
   "core.mp.diagnostics.maskedips": "Last part masked",
   "core.mp.diagnostics.os32": "32-bit",
@@ -1740,5 +1740,11 @@
   "multiplayer.component.import_failed": "Import failed: {0}",
   "multiplayer.component.downloading_from": "Downloading EasyTier from {0}…",
   "multiplayer.component.manual_hint": "If the download fails: get {0} in a browser (official link {1}), then choose \"Import from file\". Imported files are SHA-256 verified too.",
-  "linux.missing_libraries": "Jay can't start: the system is missing libraries needed for the window: {0}.\n\nInstall them and open Jay again:\n  Ubuntu/Debian: sudo apt install {1}\n  Fedora: sudo dnf install {2}\n  Arch: sudo pacman -S {3}\n\nOn a server without a desktop, use Jay Server instead."
+  "linux.missing_libraries": "Jay can't start: the system is missing libraries needed for the window: {0}.\n\nInstall them and open Jay again:\n  Ubuntu/Debian: sudo apt install {1}\n  Fedora: sudo dnf install {2}\n  Arch: sudo pacman -S {3}\n\nOn a server without a desktop, use Jay Server instead.",
+  "core.mp.component.unixprompt": "Jay needs your administrator password to create a virtual network adapter for Full LAN mode.",
+  "core.mp.component.nopkexec": "Full LAN mode uses pkexec to ask for administrator rights, and it isn't installed on this computer (it usually comes with polkit)",
+  "core.mp.component.elevationdeclined.linux": "You cancelled the administrator password prompt. Full LAN mode was not enabled",
+  "core.mp.component.elevationdeclined.mac": "You cancelled the macOS administrator password prompt. Full LAN mode was not enabled",
+  "core.mp.guard.exitcode": "The EasyTier guard process exited before connecting (exit code {0}).",
+  "core.mp.exit.windowsonly": "Using another member as your internet exit currently supports Windows only. Full LAN mode itself works."
 }

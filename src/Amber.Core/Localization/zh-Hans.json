@@ -404,7 +404,7 @@
   "core.mp.guard.sendfailed": "EasyTier 守护命令发送失败。",
   "core.mp.guard.unavailable": "EasyTier 守护进程不可用。",
   "core.mp.component.tunrequired": "完整局域网模式要用 Tun 选项",
-  "core.mp.component.windowsonly": "完整局域网模式目前只支持 Windows",
+  "core.mp.component.windowsonly": "这个系统不支持完整局域网模式（支持 Windows、macOS 和 Linux）",
   "core.mp.diagnostics.log": "== 详细日志 ==",
   "core.mp.diagnostics.maskedips": "已遮挡后半段",
   "core.mp.diagnostics.os32": "32 位",
@@ -1709,5 +1709,11 @@
   "multiplayer.component.import_failed": "导入失败：{0}",
   "multiplayer.component.downloading_from": "正在从 {0} 下载 EasyTier……",
   "multiplayer.component.manual_hint": "下载不了时：用浏览器下载 {0}（官方地址 {1}），再点“从文件导入”。导入的文件同样要通过 SHA-256 校验。",
-  "linux.missing_libraries": "Jay 无法启动：系统缺少图形界面需要的库 {0}。\n\n请先安装后再打开 Jay：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\n如果是在没有桌面的服务器上，请改用 Jay Server。"
+  "linux.missing_libraries": "Jay 无法启动：系统缺少图形界面需要的库 {0}。\n\n请先安装后再打开 Jay：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\n如果是在没有桌面的服务器上，请改用 Jay Server。",
+  "core.mp.component.unixprompt": "Jay 要建一块虚拟网卡来开启完整局域网模式，需要管理员密码。",
+  "core.mp.component.nopkexec": "完整局域网模式要用 pkexec 请求管理员权限，这台电脑没装（一般在 polkit 软件包里）",
+  "core.mp.component.elevationdeclined.linux": "你取消了管理员密码确认，没有开启完整局域网模式",
+  "core.mp.component.elevationdeclined.mac": "你取消了 macOS 的管理员密码确认，没有开启完整局域网模式",
+  "core.mp.guard.exitcode": "EasyTier 守护进程没连上就退出了（退出码 {0}）。",
+  "core.mp.exit.windowsonly": "经别人上网目前只支持 Windows；完整局域网模式本身可以用。"
 }

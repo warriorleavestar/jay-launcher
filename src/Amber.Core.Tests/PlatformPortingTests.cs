@@ -78,7 +78,11 @@ public sealed class PlatformPortingTests : IDisposable
     [Fact]
     public void FullLanCapabilityMatchesTheImplementedPlatform()
     {
-        Assert.Equal(OperatingSystem.IsWindows(), PlatformFeatures.FullLan);
+        // Windows 和 macOS 一定能用；Linux 要有 pkexec（或者本来就是 root）。
+        var expected = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            || OperatingSystem.IsLinux() && (UnixElevation.FindPkexec() is not null || Environment.UserName == "root");
+        Assert.Equal(expected, PlatformFeatures.FullLan);
+        Assert.Equal(expected, PlatformFeatures.FullLanUnavailableReason is null);
         Assert.Equal(OperatingSystem.IsWindows(), PlatformFeatures.FullTrafficExit);
     }
 

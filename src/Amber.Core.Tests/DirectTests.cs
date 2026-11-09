@@ -147,8 +147,10 @@ public class TestMatrixTests
         Assert.All(steps, s => Assert.False(s.FullLan));
 
         var full = TestMatrix.Plan(new MatrixInputs(host, [.. guest, C(PathKind.IPv6, "[2409::2]:1")], 3, true, true));
-        Assert.Equal(3 * 5, full.Count);   // IPv6、打洞、喷洒、中转、节点，各 3 步
-        Assert.Contains(full, s => s.Route == RouteKind.Relay && s.FullLan && s.Exit);
+        // IPv6、打洞、喷洒、中转、节点，各 3 步（经别人上网只有 Windows 能用，其他系统各 2 步）
+        Assert.Equal((PlatformFeatures.FullTrafficExit ? 3 : 2) * 5, full.Count);
+        if (PlatformFeatures.FullTrafficExit) Assert.Contains(full, s => s.Route == RouteKind.Relay && s.FullLan && s.Exit);
+        else Assert.DoesNotContain(full, s => s.Exit);
         Assert.Equal(Enumerable.Range(1, full.Count), full.Select(s => s.Index));
     }
 
