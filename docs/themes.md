@@ -85,15 +85,24 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 | Warning, WarningText, WarningTint | 警告 |
 | Danger, DangerText, DangerTint, OnDanger | 危险操作 |
 | DisabledFill, DisabledText | 禁用状态 |
+| Overlay / Sunken / InputBg / Scrim | 菜单和对话框 / 日志和代码的凹陷底 / 输入框底 / 对话框后的遮罩。没写时 Overlay 跟着 Surface，Sunken 和 InputBg 跟着 PageBg |
+| ControlBorder, ControlHover, ControlPressed, ControlSelected, Focus | 输入框和次按钮的边、悬停、按下、选中底、焦点环 |
+| Play, PlayHover, PlayPressed, OnPlay, PlayBorder, PlayText, PlayGlow, PlayTint | “开始游戏”这一类琥珀按钮（Accent 管普通主按钮） |
+| Badge, OnBadge, BadgeMuted, OnBadgeMuted | 角标 |
+| IlloLine, IlloFill | 线描插画 |
+| LoaderVanilla, LoaderFabric, LoaderForge, LoaderNeoForge, LoaderQuilt, LoaderOptiFine | 加载器标签的文字色 |
+| LogDebug, LogInfo, LogWarn, LogError, LogFatal, LogJay | 日志各级别的文字色 |
+
+Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥珀只给开始游戏），完整色表和对比度见官方设计 §4.2。
 
 ### 数字
 
 | 名字 | 默认 | 允许范围 |
 |---|---|---|
 | FontCaption / FontBodySmall / FontBody | 12 / 13 / 14 | 最小 11 |
-| FontSubtitle / FontTitle / FontDisplay | 16 / 20 / 26 | |
-| Space1 … Space6 | 4 8 12 16 24 32 | |
-| RadiusSm / RadiusMd / RadiusLg / RadiusPill | 4 / 6 / 10 / 999 | ≥ 0 |
+| FontSubtitle / FontTitle / FontHeadline / FontDisplay | 16 / 20 / 24 / 32 | |
+| Space0 … Space8 | 2 4 8 12 16 24 32 48 64 | |
+| RadiusXs / RadiusSm / RadiusMd / RadiusLg / RadiusXl / RadiusPill | 4 / 6 / 8 / 12 / 16 / 999 | ≥ 0 |
 
 超出范围的值会被拉回范围内并提示。
 

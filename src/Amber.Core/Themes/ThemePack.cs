@@ -84,26 +84,30 @@ public static partial class ThemePackReader
     /// <summary>颜色 token：和 Themes/Tokens.axaml 的名字一一对应。</summary>
     public static readonly string[] ColorKeys =
     [
-        "PageBg", "Surface", "SurfaceRaised", "BorderSubtle", "SidebarBg",
-        "TextPrimary", "TextSecondary", "TextTertiary",
-        "Accent", "AccentHover", "AccentPressed", "OnAccent", "AccentText",
-        "Success", "SuccessText", "Warning", "WarningText", "Danger", "DangerText", "OnDanger",
-        "DisabledFill", "DisabledText", "SidebarText", "SidebarTextMuted", "NavSelected", "NavHover",
-        "AccentTint", "SuccessTint", "WarningTint", "DangerTint",
+        "PageBg", "Surface", "SurfaceRaised", "BorderSubtle", "SidebarBg", "TextPrimary", "TextSecondary", "TextTertiary",
+        "Accent", "AccentHover", "AccentPressed", "OnAccent", "AccentText", "Success", "SuccessText", "Warning",
+        "WarningText", "Danger", "DangerText", "OnDanger", "DisabledFill", "DisabledText", "SidebarText", "SidebarTextMuted",
+        "NavSelected", "NavHover", "AccentTint", "SuccessTint", "WarningTint", "DangerTint", "Overlay", "Sunken",
+        "InputBg", "Scrim", "ControlBorder", "ControlHover", "ControlPressed", "ControlSelected", "Focus", "Play",
+        "PlayHover", "PlayPressed", "OnPlay", "PlayBorder", "PlayText", "PlayGlow", "PlayTint", "Badge",
+        "OnBadge", "BadgeMuted", "OnBadgeMuted", "IlloLine", "IlloFill", "LoaderVanilla", "LoaderFabric", "LoaderForge",
+        "LoaderNeoForge", "LoaderQuilt", "LoaderOptiFine", "LogDebug", "LogInfo", "LogWarn", "LogError", "LogFatal",
+        "LogJay",
     ];
 
     /// <summary>数字 token 和允许的范围（字号最小 11，太小的看不清）。</summary>
     public static readonly Dictionary<string, (double Min, double Max)> NumberKeys = new()
     {
         ["FontCaption"] = (11, 24), ["FontBodySmall"] = (11, 28), ["FontBody"] = (12, 32),
-        ["FontSubtitle"] = (12, 40), ["FontTitle"] = (14, 56), ["FontDisplay"] = (16, 72),
+        ["FontSubtitle"] = (12, 40), ["FontTitle"] = (14, 56), ["FontHeadline"] = (14, 64), ["FontDisplay"] = (16, 72),
+        ["Space0"] = (0, 16), ["Space7"] = (0, 160), ["Space8"] = (0, 192),
         ["Space1"] = (0, 32), ["Space2"] = (0, 48), ["Space3"] = (0, 64),
         ["Space4"] = (0, 80), ["Space5"] = (0, 96), ["Space6"] = (0, 128),
     };
 
     public static readonly Dictionary<string, (double Min, double Max)> RadiusKeys = new()
     {
-        ["RadiusSm"] = (0, 32), ["RadiusMd"] = (0, 48), ["RadiusLg"] = (0, 64), ["RadiusPill"] = (0, 999),
+        ["RadiusXs"] = (0, 24), ["RadiusSm"] = (0, 32), ["RadiusMd"] = (0, 48), ["RadiusLg"] = (0, 64), ["RadiusXl"] = (0, 80), ["RadiusPill"] = (0, 999),
     };
 
     public static readonly string[] FontLanguages = ["default", "zh-Hans", "zh-Hant", "ja", "en", "lzh", "en-x-ud"];

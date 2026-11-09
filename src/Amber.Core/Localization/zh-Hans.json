@@ -1940,5 +1940,10 @@
   "multiplayer.netconfig.theme_title": "网络主题",
   "multiplayer.netconfig.theme_global": "这个网络带了自己的界面主题，现在只在联机页用。要整个 Jay 都换成它吗？断开网络后会换回你自己的主题。",
   "multiplayer.netconfig.theme_accept": "整个 Jay 都用",
-  "multiplayer.netconfig.theme_decline": "只在联机页用"
+  "multiplayer.netconfig.theme_decline": "只在联机页用",
+  "settings.motion.label": "减少动画",
+  "settings.motion.system": "跟随系统",
+  "settings.motion.on": "开",
+  "settings.motion.off": "关",
+  "settings.motion.hint": "打开后页面切换、抽屉和菜单不再滑动，只保留很短的淡入淡出。跟随系统时读取系统的“动画效果 / 减少动态效果”设置。"
 }

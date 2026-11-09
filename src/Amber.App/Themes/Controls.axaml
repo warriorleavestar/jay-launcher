@@ -1,0 +1,340 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    基础控件（官方设计 §5，第 0 批）：能用样式类解决的不新建控件类型。
+    在 Views/Gallery 里每个都有一格，AMBER_SELFTEST_SCOPE=gallery 会在深浅两色下截图。
+
+    按钮：play（琥珀，只给“开始游戏”这一类，每个视口最多 1 个）· primary（松鸦蓝，每块区域最多 1 个）
+          · secondary · ghost · danger（描边红字）· danger.solid（实心红，只在锁定确认里）；尺寸 small / large
+    标签：Border.chip · Border.badge（.muted）· Border.loader（.vanilla/.fabric/.forge/.neoforge/.quilt/.optifine）
+    状态：Ellipse.status-dot（.online/.busy/.error/.offline/.playing）
+    提示：Border.banner（.info/.success/.warning/.danger）· Border.error-bar · Border.skeleton · StackPanel.empty-state
+    图标：Path.icon（.sm / .lg）
+  -->
+
+  <!-- 图标：Lucide 是 24×24 的描边路径，按尺寸缩放，描边 1.75 -->
+  <Style Selector="Path.icon">
+    <Setter Property="Width" Value="{DynamicResource IconSize}" />
+    <Setter Property="Height" Value="{DynamicResource IconSize}" />
+    <Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="Stroke" Value="{DynamicResource TextSecondary}" />
+    <Setter Property="StrokeThickness" Value="1.75" />
+    <Setter Property="StrokeLineCap" Value="Round" />
+    <Setter Property="StrokeJoin" Value="Round" />
+    <Setter Property="Fill" Value="Transparent" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- 按钮里的图标跟按钮文字同色（悬停、按下、禁用都跟着变） -->
+  <Style Selector="Button Path.icon">
+    <Setter Property="Stroke" Value="{Binding $parent[Button].Foreground}" />
+  </Style>
+  <Style Selector="Path.icon.sm">
+    <Setter Property="Width" Value="{DynamicResource IconSizeSm}" />
+    <Setter Property="Height" Value="{DynamicResource IconSizeSm}" />
+    <Setter Property="StrokeThickness" Value="1.5" />
+  </Style>
+  <Style Selector="Path.icon.lg">
+    <Setter Property="Width" Value="{DynamicResource IconSizeLg}" />
+    <Setter Property="Height" Value="{DynamicResource IconSizeLg}" />
+  </Style>
+
+  <!-- 所有按钮：标准高 36、可点区域至少 32、焦点环用 Focus -->
+  <Style Selector="Button">
+    <Setter Property="MinHeight" Value="{DynamicResource MinHitSize}" />
+  </Style>
+  <Style Selector="Button:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource Focus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="Button.small">
+    <Setter Property="MinHeight" Value="{DynamicResource ControlHeightSm}" />
+    <Setter Property="Padding" Value="10,3" />
+    <Setter Property="FontSize" Value="{DynamicResource FontBodySmall}" />
+  </Style>
+  <Style Selector="Button.large">
+    <Setter Property="MinHeight" Value="{DynamicResource ControlHeightLg}" />
+    <Setter Property="Padding" Value="20,8" />
+  </Style>
+
+  <!-- 琥珀“开始游戏”：唯一发光的按钮；浅色下描 1px PlayBorder（琥珀和浅底对比只有 1.81） -->
+  <Style Selector="Button.play">
+    <Setter Property="Background" Value="{DynamicResource Play}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnPlay}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource PlayBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSubtitle}" />
+    <Setter Property="MinHeight" Value="{DynamicResource PlayButtonHeight}" />
+    <Setter Property="Padding" Value="24,8" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.play /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BoxShadow" Value="{DynamicResource PlayGlowShadow}" />
+  </Style>
+  <Style Selector="Button.play:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource PlayHover}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnPlay}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource PlayBorder}" />
+  </Style>
+  <Style Selector="Button.play:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource PlayPressed}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnPlay}" />
+  </Style>
+  <Style Selector="Button.play:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource Focus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="Button.play:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BoxShadow" Value="none" />
+  </Style>
+
+  <!-- 实心红：只在锁定确认（删除、结束、撤销授权）里 -->
+  <Style Selector="Button.danger.solid">
+    <Setter Property="Background" Value="{DynamicResource Danger}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnDanger}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.danger.solid:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Danger}" />
+    <Setter Property="Foreground" Value="{DynamicResource OnDanger}" />
+  </Style>
+
+  <!-- 次按钮的边改用 ControlBorder（对 Surface ≥ 3:1） -->
+  <Style Selector="Button.secondary">
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}" />
+  </Style>
+  <Style Selector="Button.secondary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ControlHover}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}" />
+  </Style>
+  <Style Selector="Button.secondary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ControlPressed}" />
+  </Style>
+  <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ControlHover}" />
+  </Style>
+  <Style Selector="Button.ghost:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ControlPressed}" />
+  </Style>
+
+  <!-- 输入框：InputBg 底、ControlBorder 边、焦点用 Focus -->
+  <Style Selector="TextBox">
+    <Setter Property="MinHeight" Value="{DynamicResource ControlHeight}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+  </Style>
+  <Style Selector="TextBox /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource InputBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}" />
+  </Style>
+  <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource InputBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Focus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="TextBox.mono">
+    <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+  </Style>
+  <Style Selector="TextBlock.mono">
+    <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+  </Style>
+  <Style Selector="SelectableTextBlock.mono">
+    <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+  </Style>
+
+  <!-- 芯片：可点的筛选、标签 -->
+  <Style Selector="Border.chip">
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+    <Setter Property="Padding" Value="8,2" />
+    <Setter Property="MinHeight" Value="24" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.chip > TextBlock">
+    <Setter Property="FontSize" Value="{DynamicResource FontBodySmall}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.chip.selected">
+    <Setter Property="Background" Value="{DynamicResource ControlSelected}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
+  <Style Selector="Border.chip.selected > TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
+  </Style>
+
+  <!-- 角标：红点数字（要你处理），灰数字（新消息） -->
+  <Style Selector="Border.badge">
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusPill}" />
+    <Setter Property="MinWidth" Value="18" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Padding" Value="5,0" />
+    <Setter Property="Background" Value="{DynamicResource Badge}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.badge > TextBlock">
+    <Setter Property="FontSize" Value="{DynamicResource FontCaption}" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Foreground" Value="{DynamicResource OnBadge}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.badge.muted">
+    <Setter Property="Background" Value="{DynamicResource BadgeMuted}" />
+  </Style>
+  <Style Selector="Border.badge.muted > TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource OnBadgeMuted}" />
+  </Style>
+
+  <!-- 加载器标签：文字 + 颜色，不用任何商标图形 -->
+  <Style Selector="Border.loader">
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusPill}" />
+    <Setter Property="Padding" Value="8,1" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+  </Style>
+  <Style Selector="Border.loader > TextBlock">
+    <Setter Property="FontSize" Value="{DynamicResource FontCaption}" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+  </Style>
+  <Style Selector="Border.loader.vanilla > TextBlock"><Setter Property="Foreground" Value="{DynamicResource LoaderVanilla}" /></Style>
+  <Style Selector="Border.loader.fabric > TextBlock"><Setter Property="Foreground" Value="{DynamicResource LoaderFabric}" /></Style>
+  <Style Selector="Border.loader.forge > TextBlock"><Setter Property="Foreground" Value="{DynamicResource LoaderForge}" /></Style>
+  <Style Selector="Border.loader.neoforge > TextBlock"><Setter Property="Foreground" Value="{DynamicResource LoaderNeoForge}" /></Style>
+  <Style Selector="Border.loader.quilt > TextBlock"><Setter Property="Foreground" Value="{DynamicResource LoaderQuilt}" /></Style>
+  <Style Selector="Border.loader.optifine > TextBlock"><Setter Property="Foreground" Value="{DynamicResource LoaderOptiFine}" /></Style>
+
+  <!-- 状态点：颜色从不单独表达信息，旁边一定有文字 -->
+  <Style Selector="Ellipse.status-dot">
+    <Setter Property="Width" Value="8" />
+    <Setter Property="Height" Value="8" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource TextTertiary}" />
+  </Style>
+  <Style Selector="Ellipse.status-dot.online"><Setter Property="Fill" Value="{DynamicResource Success}" /></Style>
+  <Style Selector="Ellipse.status-dot.busy"><Setter Property="Fill" Value="{DynamicResource Accent}" /></Style>
+  <Style Selector="Ellipse.status-dot.warning"><Setter Property="Fill" Value="{DynamicResource Warning}" /></Style>
+  <Style Selector="Ellipse.status-dot.error"><Setter Property="Fill" Value="{DynamicResource Danger}" /></Style>
+  <Style Selector="Ellipse.status-dot.playing"><Setter Property="Fill" Value="{DynamicResource Play}" /></Style>
+
+  <!-- 横幅：页面或卡片顶上的一条说明，左边一道状态色 + 图标 + 文字 -->
+  <Style Selector="Border.banner">
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+    <Setter Property="BorderThickness" Value="3,0,0,0" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="Background" Value="{DynamicResource AccentTint}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
+  <Style Selector="Border.banner TextBlock">
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.banner Path.icon"><Setter Property="Stroke" Value="{DynamicResource AccentText}" /></Style>
+  <Style Selector="Border.banner.success">
+    <Setter Property="Background" Value="{DynamicResource SuccessTint}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Success}" />
+  </Style>
+  <Style Selector="Border.banner.success Path.icon"><Setter Property="Stroke" Value="{DynamicResource SuccessText}" /></Style>
+  <Style Selector="Border.banner.warning">
+    <Setter Property="Background" Value="{DynamicResource WarningTint}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Warning}" />
+  </Style>
+  <Style Selector="Border.banner.warning Path.icon"><Setter Property="Stroke" Value="{DynamicResource WarningText}" /></Style>
+  <Style Selector="Border.banner.danger">
+    <Setter Property="Background" Value="{DynamicResource DangerTint}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Danger}" />
+  </Style>
+  <Style Selector="Border.banner.danger Path.icon"><Setter Property="Stroke" Value="{DynamicResource DangerText}" /></Style>
+
+  <!-- 错误条：出了什么事 + 怎么办（按钮）；出错级别不自动消失 -->
+  <Style Selector="Border.error-bar">
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="Background" Value="{DynamicResource DangerTint}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Danger}" />
+  </Style>
+  <Style Selector="Border.error-bar TextBlock.title">
+    <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style Selector="Border.error-bar Path.icon"><Setter Property="Stroke" Value="{DynamicResource DangerText}" /></Style>
+
+  <!-- 骨架屏：加载时占位；减少动画时也不闪 -->
+  <Style Selector="Border.skeleton">
+    <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+    <Setter Property="MinHeight" Value="12" />
+  </Style>
+
+  <!-- 空状态：一句话说清这里放什么 + 一个能做的事 -->
+  <Style Selector="StackPanel.empty-state">
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="MaxWidth" Value="420" />
+    <Setter Property="Spacing" Value="8" />
+    <Setter Property="Margin" Value="16,32" />
+  </Style>
+  <Style Selector="StackPanel.empty-state > Path.icon">
+    <Setter Property="Width" Value="48" />
+    <Setter Property="Height" Value="48" />
+    <Setter Property="StrokeThickness" Value="1.25" />
+    <Setter Property="Stroke" Value="{DynamicResource IlloLine}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="StackPanel.empty-state > TextBlock">
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style Selector="StackPanel.empty-state > TextBlock.title">
+    <Setter Property="FontSize" Value="{DynamicResource FontSubtitle}" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="StackPanel.empty-state > TextBlock.hint">
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+  </Style>
+
+  <!-- 菜单、下拉、提示：Overlay 底 -->
+  <Style Selector="ContextMenu">
+    <Setter Property="Background" Value="{DynamicResource Overlay}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+  </Style>
+  <Style Selector="MenuFlyoutPresenter">
+    <Setter Property="Background" Value="{DynamicResource Overlay}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+  </Style>
+  <Style Selector="FlyoutPresenter">
+    <Setter Property="Background" Value="{DynamicResource Overlay}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+  </Style>
+  <Style Selector="ToolTip">
+    <Setter Property="Background" Value="{DynamicResource Overlay}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+  </Style>
+
+  <!-- 开关：开 = Accent -->
+  <Style Selector="ToggleSwitch:checked /template/ Border#SwitchKnobBounds">
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
+  </Style>
+
+  <!-- 标题层级：Headline、Display -->
+  <Style Selector="TextBlock.headline">
+    <Setter Property="FontSize" Value="{DynamicResource FontHeadline}" />
+    <Setter Property="LineHeight" Value="{DynamicResource LineHeadline}" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style Selector="TextBlock.display">
+    <Setter Property="FontSize" Value="{DynamicResource FontDisplay}" />
+    <Setter Property="LineHeight" Value="{DynamicResource LineDisplay}" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+</Styles>

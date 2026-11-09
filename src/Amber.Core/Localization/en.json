@@ -1972,5 +1972,10 @@
   "multiplayer.netconfig.theme_title": "Network theme",
   "multiplayer.netconfig.theme_global": "This network has its own theme, used only on the multiplayer page for now. Apply it to all of Jay? Your own theme comes back when you disconnect.",
   "multiplayer.netconfig.theme_accept": "Use everywhere",
-  "multiplayer.netconfig.theme_decline": "Multiplayer page only"
+  "multiplayer.netconfig.theme_decline": "Multiplayer page only",
+  "settings.motion.label": "Reduce motion",
+  "settings.motion.system": "System",
+  "settings.motion.on": "On",
+  "settings.motion.off": "Off",
+  "settings.motion.hint": "When on, page changes, drawers and menus no longer slide; only short fades remain. \"System\" follows your system's animation / reduce motion setting."
 }

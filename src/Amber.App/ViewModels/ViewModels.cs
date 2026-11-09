@@ -347,6 +347,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         CurseForgeRoot = s.CurseForgeApiRoot ?? "";
         UpdateFeed = s.UpdateFeedUrl ?? "";
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
+        SelectedMotionIndex = Math.Max(0, Array.IndexOf(Amber.Core.Layout.MotionPreference.Modes, Amber.Core.Layout.MotionPreference.Normalize(s.ReduceMotionMode)));
         ReloadThemePacks();
         // 开发模式下主题文件改了会重新套用，提示跟着更新。
         ThemeService.Changed += UpdateThemePackStatus;
@@ -385,6 +386,21 @@ public sealed partial class SettingsViewModel : PageViewModel
     private static readonly string[] ThemeKeys = ["system", "light", "dark"];
 
     [ObservableProperty] public partial int SelectedThemeIndex { get; set; }
+
+    /// <summary>减少动画：跟随系统 / 开 / 关（顺序和 MotionPreference.Modes 一致）。</summary>
+    public Amber.App.Localization.OptionItem[] MotionOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.motion.system", "settings.motion.on", "settings.motion.off");
+
+    [ObservableProperty] public partial int SelectedMotionIndex { get; set; }
+
+    partial void OnSelectedMotionIndexChanged(int value)
+    {
+        if (_loading || value < 0) return;
+        var modes = Amber.Core.Layout.MotionPreference.Modes;
+        _service.Settings.ReduceMotionMode = modes[Math.Min(value, modes.Length - 1)];
+        _service.Settings.ReduceMotion = _service.Settings.ReduceMotionMode == Amber.Core.Layout.MotionPreference.On;
+        SystemMotion.Apply(_service.Settings.ReduceMotionMode);
+        Persist();
+    }
 
     // ---- 界面主题包 ----
 
@@ -686,6 +702,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "post": PostExit = d.PostExitCommand ?? ""; break;
             case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
             case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
+            case "motion": SelectedMotionIndex = 0; break;
             case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); AllowNetworkThemes = true; break;
         }
     }
