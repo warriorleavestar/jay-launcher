@@ -358,7 +358,8 @@ public sealed class RemoteControlTests
         await WaitUntil(() => sharer is not null);
         table.Kick(entry, null);
         await WaitUntil(() => sharer!.HasEnded && viewer.HasEnded, 5);
-        Assert.Null(hub.Sharing);
+        // 会话标记结束后，房主服务在 RunAsync 的 finally 里才清掉 Sharing：等它清掉，不能马上断言。
+        await WaitUntil(() => hub.Sharing is null, 5);
         // 被踢之后连都连不上。
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
