@@ -216,6 +216,9 @@ public static partial class ThemePackReader
         var id = Str(m, "id") ?? throw new ThemePackException("bad_manifest", "id");
         if (!IsValidId(id)) throw new ThemePackException("bad_id", id);
         var name = Str(m, "name") is { Length: > 0 } n ? Clip(n, 64) : id;
+        // 主题不能冒充安全提示：名字、作者里有保留词就整包拒绝（布局里的文字在 ThemeLayout 里查）。
+        if (SafetyWords.Contains(name)) throw new ThemePackException("reserved_words", "name");
+        if (SafetyWords.Contains(Str(m, "author"))) throw new ThemePackException("reserved_words", "author");
         var problems = new List<ThemeProblem>();
         if (m.TryGetProperty("format", out var fmt) && fmt.TryGetInt32(out var format) && format > FormatVersion)
             problems.Add(new("newer_format", $"{format}"));

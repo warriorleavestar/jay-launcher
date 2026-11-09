@@ -1992,5 +1992,9 @@
   "settings.motion.on": "On",
   "settings.motion.off": "Off",
   "settings.motion.hint": "When on, page changes, drawers and menus no longer slide; only short fades remain. \"System\" follows your system's animation / reduce motion setting.",
+  "safety.title": "Jay safety notice",
+  "safety.cannot_undo": "This can't be undone.",
+  "safety.keep": "Keep",
+  "safety.action_object": "{0}: {1}",
   "multiplayer.network.test_reviewed": "Signed with a test registry key (testing only, not reviewed by Jay)"
 }

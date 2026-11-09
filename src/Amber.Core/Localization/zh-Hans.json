@@ -1960,5 +1960,9 @@
   "settings.motion.on": "开",
   "settings.motion.off": "关",
   "settings.motion.hint": "打开后页面切换、抽屉和菜单不再滑动，只保留很短的淡入淡出。跟随系统时读取系统的“动画效果 / 减少动态效果”设置。",
+  "safety.title": "Jay 安全提示",
+  "safety.cannot_undo": "这一步做完就找不回来了。",
+  "safety.keep": "保留",
+  "safety.action_object": "{0}：{1}",
   "multiplayer.network.test_reviewed": "用测试注册表钥匙签的（只用于测试，不是 Jay 审核过的）"
 }

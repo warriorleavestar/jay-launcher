@@ -9,7 +9,8 @@
         Title="{l:T main.title}"
         Icon="/Assets/jay.ico"
         MinWidth="760" MinHeight="440"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        xmlns:safety="using:Amber.App.Controls.Safety">
 
   <Window.DataTemplates>
     <DataTemplate DataType="vm:HomeViewModel"><views:HomePage /></DataTemplate>
@@ -237,7 +238,7 @@
         <StackPanel x:Name="SidebarHeader" Spacing="2">
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Image Source="/Assets/jay.png" Width="36" Height="36" Stretch="Uniform" />
-            <TextBlock x:Name="BrandName" Text="Jay" FontSize="26" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource Accent}" />
+            <TextBlock x:Name="BrandName" Text="Jay" FontSize="26" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource SidebarText}" />
           </StackPanel>
           <TextBlock x:Name="BrandSubtitle" Text="{l:T main.subtitle}" FontSize="12" Foreground="{DynamicResource SidebarTextMuted}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{l:T main.subtitle}" />
         </StackPanel>
@@ -250,9 +251,9 @@
               <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             </Style>
           </WrapPanel.Styles>
-          <TextBlock Text="{Binding VersionText}" />
-          <TextBlock Text="{l:T main.no_cloud_control}" />
-          <TextBlock Text="{l:T main.no_telemetry}" />
+          <TextBlock x:Name="VersionLabel" Text="{Binding VersionText}" />
+          <!-- 隐私行是锁定的安全组件：主题改不了、任何尺寸都看得见 -->
+          <safety:PrivacyRow x:Name="PrivacyRow" />
         </WrapPanel>
         <ListBox x:Name="NavList" Grid.Row="1" Classes="nav" ItemsSource="{Binding NavPages}" SelectedItem="{Binding NavSelection}" Background="Transparent" Margin="8,0"
                  ClipToBounds="True">

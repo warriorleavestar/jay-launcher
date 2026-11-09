@@ -1,18 +1,15 @@
+using Amber.App.Controls.Safety;
 using Amber.Core.Localization;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Interactivity;
-using Avalonia.Media;
-using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 
 namespace Amber.App.Views.Controls;
 
 /// <summary>
-/// 两步确认的删除按钮（改版规格 3.9）：第一次点变成实心红底的“确认删除”，4 秒内再点一次才执行 Command；
-/// 待确认状态在指针移开后一直保持，按 Esc 或超时取消。两种文字的宽度取大的那个，切换时按钮不变宽变窄。
+/// 删除按钮（删世界、移除账号）。新界面第 1 批起不再是“点两下”：点一下弹出锁定的安全确认框（官方设计 §8.2），
+/// 写明删的是什么，默认焦点在“保留”，确认后才执行 Command。按钮本身还是普通的描边红字按钮。
 /// 对象名放在 ToolTip 和读屏名字里，按钮上只写动作。
 /// </summary>
 public class ConfirmButton : Button
@@ -25,62 +22,41 @@ public class ConfirmButton : Button
     public static readonly StyledProperty<string?> ObjectNameProperty =
         AvaloniaProperty.Register<ConfirmButton, string?>(nameof(ObjectName));
 
-    public static readonly TimeSpan ArmDuration = TimeSpan.FromSeconds(4);
+    /// <summary>以前两步确认用的全局取消；现在确认框自己处理 Esc，留着给旧调用方。</summary>
+    public static void CancelAll() { }
 
-    /// <summary>全局取消（窗口里按 Esc 时调用）：所有待确认的按钮都退回去。</summary>
-    public static event Action? CancelAllRequested;
-
-    public static void CancelAll() => CancelAllRequested?.Invoke();
-
-    private readonly DispatcherTimer _timer = new() { Interval = ArmDuration };
-    private object? _normalContent;
-
-    /// <summary>待确认时显示的文字，默认“确认删除”。</summary>
+    /// <summary>确认框里确认按钮的文字，默认“确认删除”。</summary>
     public string? ConfirmText
     {
         get => GetValue(ConfirmTextProperty);
         set => SetValue(ConfirmTextProperty, value);
     }
 
-    /// <summary>要删的东西叫什么（ToolTip、读屏用）。</summary>
+    /// <summary>要删的东西叫什么（确认框标题、ToolTip、读屏用）。</summary>
     public string? ObjectName
     {
         get => GetValue(ObjectNameProperty);
         set => SetValue(ObjectNameProperty, value);
     }
 
-    public bool IsArmed { get; private set; }
+    private bool _asking;
 
-    public ConfirmButton()
-    {
-        Classes.Add("danger");
-        _timer.Tick += (_, _) => Disarm();
-    }
-
-    private string Confirm => ConfirmText ?? L.T("common.confirm_delete");
+    public ConfirmButton() => Classes.Add("danger");
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        CancelAllRequested += Disarm;
         L.Changed += OnLanguageChanged;
         UpdateNames();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        CancelAllRequested -= Disarm;
         L.Changed -= OnLanguageChanged;
-        Disarm();
         base.OnDetachedFromVisualTree(e);
     }
 
-    private void OnLanguageChanged() => Dispatcher.UIThread.Post(() =>
-    {
-        if (IsArmed) Content = Confirm;
-        InvalidateMeasure();
-        UpdateNames();
-    });
+    private void OnLanguageChanged() => Dispatcher.UIThread.Post(UpdateNames);
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
@@ -88,69 +64,27 @@ public class ConfirmButton : Button
         if (change.Property == ObjectNameProperty || change.Property == ContentProperty) UpdateNames();
     }
 
-    protected override void OnClick()
+    protected override async void OnClick()
     {
-        if (!IsArmed)
+        if (_asking || TopLevel.GetTopLevel(this) is not Window owner) return;
+        _asking = true;
+        try
         {
-            Arm();
-            return;
+            var action = Content as string ?? L.T("common.delete");
+            var title = string.IsNullOrEmpty(ObjectName) ? action : L.F("safety.action_object", action, ObjectName);
+            if (await SafetyDialog.AskAsync(owner, title, L.T("safety.cannot_undo"), ConfirmText ?? L.T("common.confirm_delete"),
+                    SafetyKind.Danger, keep: L.T("safety.keep")))
+                base.OnClick();
         }
-        Disarm();
-        base.OnClick();
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape && IsArmed)
+        finally
         {
-            Disarm();
-            e.Handled = true;
-            return;
+            _asking = false;
         }
-        base.OnKeyDown(e);
-    }
-
-    /// <summary>宽度按两种文字里宽的那个算，避免切换时布局跳动。</summary>
-    protected override Size MeasureOverride(Size availableSize)
-    {
-        var size = base.MeasureOverride(availableSize);
-        var normal = (IsArmed ? _normalContent : Content) as string;
-        var widest = Math.Max(TextWidth(normal), TextWidth(Confirm));
-        var chrome = Padding.Left + Padding.Right + BorderThickness.Left + BorderThickness.Right;
-        return new Size(Math.Max(size.Width, Math.Min(availableSize.Width, widest + chrome)), size.Height);
-    }
-
-    private double TextWidth(string? text)
-    {
-        if (string.IsNullOrEmpty(text)) return 0;
-        using var layout = new TextLayout(text, new Typeface(FontFamily, FontStyle, FontWeight), FontSize, Foreground);
-        return Math.Ceiling(layout.WidthIncludingTrailingWhitespace);
-    }
-
-    private void Arm()
-    {
-        IsArmed = true;
-        _normalContent = Content;
-        Content = Confirm;
-        Classes.Set("armed", true);
-        _timer.Stop();
-        _timer.Start();
-        UpdateNames();
-    }
-
-    private void Disarm()
-    {
-        _timer.Stop();
-        if (!IsArmed) return;
-        IsArmed = false;
-        Content = _normalContent;
-        Classes.Set("armed", false);
-        UpdateNames();
     }
 
     private void UpdateNames()
     {
-        var action = IsArmed ? Confirm : Content as string ?? "";
+        var action = Content as string ?? "";
         var name = string.IsNullOrEmpty(ObjectName) ? action : action + " " + ObjectName;
         AutomationProperties.SetName(this, name);
         ToolTip.SetTip(this, string.IsNullOrEmpty(ObjectName) ? null : name);
