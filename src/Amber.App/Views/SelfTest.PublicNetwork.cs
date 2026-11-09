@@ -176,7 +176,8 @@ internal sealed partial class SelfTest
         var configJson = System.Text.Encoding.UTF8.GetBytes($$"""
             { "v": 1, "network": "selftest-net", "notice": "自检网络公告：只允许公开房间",
               "links": [{ "name": "网络规则", "url": "https://example.invalid/rules" }],
-              "policy": { "modes": ["public"], "requireDevice": true, "maxFileMB": 1 },
+              "policy": { "modes": ["public"], "requireDevice": true, "maxFileMB": 1,
+                "security": { "attestation": "required", "breaker": "on", "restartDelayMin": 20 } },
               "login": {{loginJson}},
               "ui": { "scope": "global", "inline": { "seed": { "accent": "#22AA66" } } } }
             """);
@@ -207,12 +208,15 @@ internal sealed partial class SelfTest
                 && host.HostDevicePolicy.Require && !host.NetworkPolicy.AllowsFile(2 * 1024 * 1024));
             Check("网络主题：连上后换上网络的主题，global 先问用户", await WaitAsync(() => host.NetworkThemePack is not null && host.NetworkThemeAskGlobal, 10)
                 && ReferenceEquals(Amber.App.Services.ThemeService.NetworkPack, host.NetworkThemePack) && !Amber.App.Services.ThemeService.NetworkGlobalAccepted);
+            Check("网络配置：最低安全要求生效（设备验证必须、熔断开、倒计时至少 20 秒）",
+                host.Security is { Attestation: Amber.Core.Multiplayer.Transport.AttestationMode.Required, Breaker: true } && host.Security.EffectiveRestartDelay >= 20);
             await ShotAsync("网络配置公告");
             host.AcceptNetworkThemeGlobalCommand.Execute(null);
             Check("网络主题：用户同意后整个 Jay 都用", Amber.App.Services.ThemeService.NetworkGlobalAccepted && !host.NetworkThemeAskGlobal);
             await NetworkLoginAsync(host, totp);
             host.DisconnectPublicCommand.Execute(null);
             Check("网络配置：断开后公告和策略清掉", !host.HasNetworkNotice && !host.HostDevicePolicy.Require && host.NetworkPolicy.Allows(RoomVisibility.Password));
+            Check("网络配置：断开后安全要求回到本机设置", host.NetworkSecurityPolicy is null);
             Check("网络主题：断开后换回自己的主题", Amber.App.Services.ThemeService.NetworkPack is null && host.NetworkThemePack is null && !host.NetworkThemeAskGlobal);
             Check("网络账号：断开后登录框和凭证清掉", !host.HasNetworkLogin && !host.IsAccountLoggedIn && host.AccountToken is null && host.HostAccountPolicy is null);
             directory.Login = null;
