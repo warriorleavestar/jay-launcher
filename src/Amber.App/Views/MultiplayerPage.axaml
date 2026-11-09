@@ -802,6 +802,7 @@
                   <TextBox Text="{Binding InviteText}" PlaceholderText="{l:T multiplayer.jayserver.invite_placeholder}" />
                   <Button Grid.Column="1" Classes="primary" Margin="6,0,0,0" Content="{l:T multiplayer.jayserver.join}" Command="{Binding JoinCommand}" IsEnabled="{Binding !IsBusy}" />
                 </Grid>
+                <TextBlock x:Name="NoJayServersText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.jayserver.empty}" IsVisible="{Binding !Servers.Count}" />
                 <ItemsControl ItemsSource="{Binding Servers}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:JayServerItem">
@@ -832,6 +833,18 @@
               <StackPanel Spacing="8">
                 <TextBlock Classes="h2" Text="{l:T multiplayer.hostserver.title}" Margin="0" />
                 <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.hint}" />
+                <!-- Step bar: ① address ── ② prepare ── ③ start ── ④ invite (done ✓, current ●) -->
+                <ItemsControl x:Name="ServerWizardSteps" ItemsSource="{Binding WizardSteps}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel ItemSpacing="14" LineSpacing="4" /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:WizardStepItem">
+                      <TextBlock Text="{Binding Label}" Classes.hint="{Binding !IsCurrent}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock x:Name="ServerRunningText" Text="{l:T multiplayer.hostserver.running}" Foreground="{DynamicResource SuccessText}" FontWeight="SemiBold" IsVisible="{Binding IsRunning}" />
 
                 <!-- 第一步：玩家连的地址 -->
                 <StackPanel Spacing="6" IsVisible="{Binding NeedsInit}">
@@ -899,7 +912,7 @@
                     <StackPanel Spacing="6">
                       <TextBox x:Name="HostServerLog" IsReadOnly="True" FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" MaxHeight="220" Text="{Binding LogText}" />
                       <Grid ColumnDefinitions="*,Auto">
-                        <TextBox Text="{Binding McCommand}" PlaceholderText="{l:T multiplayer.hostserver.command_placeholder}" />
+                        <TextBox x:Name="ServerCommandBox" Text="{Binding McCommand}" PlaceholderText="{l:T multiplayer.hostserver.command_placeholder}" KeyDown="ServerCommand_KeyDown" />
                         <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.send}" Command="{Binding SendCommandCommand}" />
                       </Grid>
                     </StackPanel>

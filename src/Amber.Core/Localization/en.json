@@ -2770,5 +2770,11 @@
   "multiplayer.public.sort.name": "By name",
   "multiplayer.public.sort.newest": "Recently updated",
   "multiplayer.public.empty": "No public rooms right now.",
-  "multiplayer.public.no_match": "No rooms match. Try other words or fewer filters."
+  "multiplayer.public.no_match": "No rooms match. Try other words or fewer filters.",
+  "multiplayer.hostserver.wizard.address": "Address",
+  "multiplayer.hostserver.wizard.prepare": "Prepare the server",
+  "multiplayer.hostserver.wizard.start": "Start",
+  "multiplayer.hostserver.wizard.invite": "Invite",
+  "multiplayer.hostserver.running": "● Running",
+  "multiplayer.jayserver.empty": "You haven't joined a Jay server yet. When a friend gives you a server invite, paste it above."
 }

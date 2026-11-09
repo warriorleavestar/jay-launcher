@@ -65,6 +65,31 @@ public sealed partial class HostServerViewModel : ObservableObject
     [ObservableProperty] public partial string LogText { get; set; } = "";
     [ObservableProperty] public partial string McCommand { get; set; } = "";
 
+    /// <summary>The wizard's step bar (official §6.17): 1 address, 2 prepare the server, 3 start, 4 invite.</summary>
+    public int WizardStep => !IsInitialized ? 1 : !IsSetUp ? 2 : !IsRunning ? 3 : 4;
+
+    public IReadOnlyList<WizardStepItem> WizardSteps =>
+    [
+        new(1, "multiplayer.hostserver.wizard.address", WizardStep),
+        new(2, "multiplayer.hostserver.wizard.prepare", WizardStep),
+        new(3, "multiplayer.hostserver.wizard.start", WizardStep),
+        new(4, "multiplayer.hostserver.wizard.invite", WizardStep),
+    ];
+
+    private readonly Amber.Core.Multiplayer.ConsoleHistory _history = new();
+
+    /// <summary>↑ in the console: the previous command.</summary>
+    public void HistoryUp()
+    {
+        if (_history.Previous() is { } line) McCommand = line;
+    }
+
+    /// <summary>↓ in the console: the next command (empty after the newest).</summary>
+    public void HistoryDown()
+    {
+        if (_history.Next() is { } line) McCommand = line;
+    }
+
     public bool NeedsInit => !IsInitialized;
     public bool NeedsSetup => IsInitialized && !IsSetUp;
     public bool CanStart => IsInitialized && IsSetUp && !IsRunning;
@@ -76,6 +101,8 @@ public sealed partial class HostServerViewModel : ObservableObject
     private void NotifyStates()
     {
         OnPropertyChanged(nameof(NeedsInit));
+        OnPropertyChanged(nameof(WizardStep));
+        OnPropertyChanged(nameof(WizardSteps));
         OnPropertyChanged(nameof(NeedsSetup));
         OnPropertyChanged(nameof(CanStart));
     }
@@ -251,6 +278,7 @@ public sealed partial class HostServerViewModel : ObservableObject
         var line = McCommand.Trim();
         if (line.Length == 0 || s_running is not { } runner) return;
         runner.Command(line);
+        _history.Add(line);
         Log("> " + line);
         McCommand = "";
     }
@@ -361,4 +389,12 @@ public sealed partial class HostServerViewModel : ObservableObject
             LogText = string.Join(Environment.NewLine, _log.TakeLast(40));
         });
     }
+}
+
+/// <summary>One step on the server wizard's bar: done (✓), current (●) or still to come.</summary>
+public sealed record WizardStepItem(int Number, string Key, int Current) : Amber.App.Localization.LocalizedRecord
+{
+    public bool IsDone => Number < Current;
+    public bool IsCurrent => Number == Current;
+    public string Label => $"{"①②③④"[Number - 1]} {L.T(Key)}{(IsDone ? " ✓" : IsCurrent ? " ●" : "")}";
 }

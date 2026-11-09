@@ -211,6 +211,28 @@ public partial class MultiplayerPage : UserControl
         Grid.SetColumnSpan(c, span);
     }
 
+    /// <summary>Server console: Enter sends, ↑↓ walk through earlier commands.</summary>
+    private void ServerCommand_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MultiplayerViewModel { HostServer: { } server } || e.KeyModifiers != KeyModifiers.None) return;
+        switch (e.Key)
+        {
+            case Key.Enter:
+                server.SendCommandCommand.Execute(null);
+                break;
+            case Key.Up:
+                server.HistoryUp();
+                break;
+            case Key.Down:
+                server.HistoryDown();
+                break;
+            default:
+                return;
+        }
+        if (sender is TextBox box) box.CaretIndex = box.Text?.Length ?? 0;
+        e.Handled = true;
+    }
+
     private void ChatInput_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && DataContext is MultiplayerViewModel vm)

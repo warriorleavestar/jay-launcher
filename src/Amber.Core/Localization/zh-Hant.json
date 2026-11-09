@@ -2706,5 +2706,11 @@
   "multiplayer.public.sort.name": "按名字",
   "multiplayer.public.sort.newest": "最近更新",
   "multiplayer.public.empty": "現在沒有公開的房間。",
-  "multiplayer.public.no_match": "沒有符合條件的房間。換個關鍵字或去掉篩選試試。"
+  "multiplayer.public.no_match": "沒有符合條件的房間。換個關鍵字或去掉篩選試試。",
+  "multiplayer.hostserver.wizard.address": "位址",
+  "multiplayer.hostserver.wizard.prepare": "準備伺服器端",
+  "multiplayer.hostserver.wizard.start": "啟動",
+  "multiplayer.hostserver.wizard.invite": "邀請",
+  "multiplayer.hostserver.running": "● 執行中",
+  "multiplayer.jayserver.empty": "還沒有加入過 Jay 伺服器。朋友給你伺服器邀請碼後貼在上面。"
 }
