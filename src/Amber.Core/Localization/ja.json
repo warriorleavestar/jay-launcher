@@ -1932,5 +1932,6 @@
   "multiplayer.netconfig.theme_title": "ネットワークのテーマ",
   "multiplayer.netconfig.theme_global": "このネットワークには独自のテーマがあり、今はマルチプレイページだけで使われています。Jay 全体に適用しますか？切断すると自分のテーマに戻ります。",
   "multiplayer.netconfig.theme_accept": "全体で使う",
-  "multiplayer.netconfig.theme_decline": "マルチプレイページだけ"
+  "multiplayer.netconfig.theme_decline": "マルチプレイページだけ",
+  "multiplayer.network.test_reviewed": "テスト用レジストリ鍵で署名（テスト専用、Jay の審査済みではありません）"
 }

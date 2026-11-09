@@ -1932,5 +1932,6 @@
   "multiplayer.netconfig.theme_title": "網路主題",
   "multiplayer.netconfig.theme_global": "這個網路帶了自己的介面主題，現在只在聯機頁用。要整個 Jay 都換成它嗎？斷開網路後會換回你自己的主題。",
   "multiplayer.netconfig.theme_accept": "整個 Jay 都用",
-  "multiplayer.netconfig.theme_decline": "只在聯機頁用"
+  "multiplayer.netconfig.theme_decline": "只在聯機頁用",
+  "multiplayer.network.test_reviewed": "用測試註冊表鑰匙簽的（只用於測試，不是 Jay 審核過的）"
 }
