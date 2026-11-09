@@ -262,6 +262,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitRequests();
         InitPublic();
         InitPublicList();
+        RefreshLongInvites();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
         HostServer = new HostServerViewModel(service);
     }
@@ -563,6 +564,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         RestoreChatHistory(room);
         StartHub(room);
         StartHostLobby(credentials, members);
+        if (_lobby is { } lobby) SeedLongInvites(lobby, credentials.Tunnel);
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T("multiplayer.room.created_full_lan")

@@ -2751,5 +2751,18 @@
   "multiplayer.modcheck.syncing": "{0}/{1}：{2}",
   "multiplayer.modcheck.synced": "MOD をそろえました。{0} で参加します。",
   "multiplayer.modcheck.sync_failed": "{0} 個は取得できませんでした：{1}。もう一度そろえるか、ホストに送ってもらってください。",
-  "multiplayer.modcheck.sync_error": "同期が終わりませんでした：{0}"
+  "multiplayer.modcheck.sync_error": "同期が終わりませんでした：{0}",
+  "multiplayer.lobby.last_room": "前回：{0}",
+  "multiplayer.lobby.repeat_room": "前回と同じで開く",
+  "multiplayer.lobby.last_room_password": "前回はパスワード付きルームでした。Jay はパスワードを保存しないので、ルーム設定でもう一度入力して公開してください。",
+  "multiplayer.longinvite.title": "いつもの友達向けの長期招待",
+  "multiplayer.longinvite.hint": "30 日間、あなたが開くどのルームにもこのコードで入れます。毎回新しいコードを送る必要はありません。ノックには毎回あなたの許可と安全コードの確認が必要で、いつでも無効にできます。信頼できる人にだけ渡してください。",
+  "multiplayer.longinvite.label_placeholder": "誰に渡すか（例：Bob）",
+  "multiplayer.longinvite.create": "作ってコピー（30 日）",
+  "multiplayer.longinvite.unnamed": "名前なし",
+  "multiplayer.longinvite.days_left": "残り {0} 日",
+  "multiplayer.longinvite.revoke": "無効にする",
+  "multiplayer.longinvite.created": "長期招待を作ってコピーしました（しばらくするとクリップボードから消えます）。",
+  "multiplayer.longinvite.revoked": "{0} の長期招待を無効にしました。このコードはすぐに使えなくなります。",
+  "multiplayer.longinvite.too_many": "長期招待は最大 {0} 枚です。先にいくつか無効にしてください。"
 }

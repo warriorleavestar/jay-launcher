@@ -386,6 +386,28 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         return invite;
     }
 
+    /// <summary>
+    /// A long-lived invite for a trusted friend (<see cref="LongLivedInvites"/>): it brings its own lobby key, which must be
+    /// added before any other invite of the room so they all share it. Unlimited uses until it expires or is revoked; the
+    /// host still approves every knock (and checks the safety code) unless the person is a trusted friend.
+    /// Returns null when this room already uses another lobby key.
+    /// </summary>
+    public PendingInvite? AddLongLived(byte[] lobbyKey, byte[] token, DateTimeOffset expiresAt, TunnelSettings tunnel)
+    {
+        if (lobbyKey.Length != JayInvite.KeyLength || token.Length != JayInvite.KeyLength) throw new ArgumentException(null, nameof(token));
+        PendingInvite invite;
+        lock (_gate)
+        {
+            PruneLocked();
+            if (_lobbyKey is { } current && !CryptographicOperations.FixedTimeEquals(current, lobbyKey)) return null;
+            _lobbyKey ??= (byte[])lobbyKey.Clone();
+            invite = new PendingInvite(new JayInvite((byte[])lobbyKey.Clone(), (byte[])token.Clone(), tunnel, Game), int.MaxValue, expiresAt, false, standing: true);
+            _invites.Add(invite);
+        }
+        Changed?.Invoke();
+        return invite;
+    }
+
     public void Revoke(PendingInvite invite)
     {
         lock (_gate)

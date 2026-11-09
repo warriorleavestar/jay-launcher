@@ -403,6 +403,7 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         CurrentVisibility = mode;
+        RememberLastVisibility(mode);
         StartAnnouncerIfHosting();
         _announcer?.Refresh();
         SetStatus(StatusMessage.Success(mode == RoomVisibility.Hidden ? "multiplayer.public.registered_hidden" : "multiplayer.public.published"));
