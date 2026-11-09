@@ -43,9 +43,7 @@ jobs:
       # macOS 上跳过“经别人上网”两步：pf 防漏规则会把同一台机器上的 CI 代理也断网，任务失联到超时（2026-11-09 两次都这样）。
       - name: Run (root)
         timeout-minutes: 18
-        env:
-          JAY_FULLLAN_NO_EXIT: ${{ runner.os == 'macOS' && '1' || '' }}
-        run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan"
+        run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan" ${{ runner.os == 'macOS' && '--no-exit' || '' }}
 
       - name: Leftovers on failure
         if: failure()

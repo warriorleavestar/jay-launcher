@@ -25,6 +25,7 @@ static class FullLanCheck
     private static TimeSpan _phaseStarted;
     private static TimeSpan _phaseLimit = TimeSpan.FromMinutes(3);
     private static EasyTierElevatedSession? _watchedGuest;
+    private static bool _noExit;
 
     /// <summary>进入下一步：打印带时间的进度；看门狗发现某一步超时就打印现场后直接退出（CI 卡住时能看出停在哪）。</summary>
     private static void Phase(string name, int limitSeconds = 180)
@@ -73,7 +74,10 @@ static class FullLanCheck
     {
         if (OperatingSystem.IsWindows()) { Console.WriteLine("只用于 Mac/Linux"); return 2; }
         if (args.Length >= 1 && args[0] == "--child") return await ChildAsync(args);
-        if (args.Length != 1) { Console.WriteLine("用法：sudo dotnet FullLanCheck.dll <测试数据目录>"); return 2; }
+        // --no-exit：跳过经房主上网两步（GitHub 的 macOS 机器上用；环境变量经 sudo 不一定传得过去，所以用参数）。
+        _noExit = args.Contains("--no-exit") || Environment.GetEnvironmentVariable("JAY_FULLLAN_NO_EXIT") == "1";
+        args = [.. args.Where(a => a != "--no-exit")];
+        if (args.Length != 1) { Console.WriteLine("用法：sudo dotnet FullLanCheck.dll <测试数据目录> [--no-exit]"); return 2; }
         if (Environment.UserName != "root") { Console.WriteLine("要用 root 运行（sudo）"); return 2; }
         StartWatchdog();
         Phase("安装 easytier");
@@ -134,8 +138,8 @@ static class FullLanCheck
 
             // GitHub 的 macOS 机器上不能测经别人上网：pf 防漏规则一装，同一台机器上跑的 CI 代理也连不上 GitHub，
             // 整个任务失联直到超时（看门狗的输出也回不来）。Linux 上 nft 规则不影响已有连接，可以测。真 Mac 上照常测。
-            var skipExit = Environment.GetEnvironmentVariable("JAY_FULLLAN_NO_EXIT") == "1";
-            if (skipExit) Log("跳过经房主上网和房主掉线两步（JAY_FULLLAN_NO_EXIT=1）");
+            var skipExit = _noExit;
+            if (skipExit) Log("跳过经房主上网和房主掉线两步（--no-exit）");
             if (!skipExit)
             {
                 Phase("切到经房主上网", 180);
