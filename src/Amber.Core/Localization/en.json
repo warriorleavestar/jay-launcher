@@ -359,6 +359,9 @@
   "core.install.vanilla.invalidassetindex": "Failed to parse the asset index: {0}",
   "core.install.vanilla.invalidmanifest": "Failed to parse the version manifest",
   "core.install.vanilla.missingversion": "{0} is missing from the version manifest",
+  "core.java.install.needrosetta": "This Apple silicon Mac needs the x64 build of Java {0} (Mojang doesn't provide an Apple silicon build). Install Rosetta 2 first: run softwareupdate --install-rosetta in Terminal",
+  "core.java.install.checksum": "The downloaded Java failed its checksum and was deleted. Please try again",
+  "core.java.install.badarchive": "The downloaded Java archive has unexpected contents and was not extracted",
   "core.java.install.missingexecutable": "The runtime download finished, but java was not found",
   "core.java.install.unavailableversion": "Mojang does not provide Java {0}",
   "core.java.install.unsupportedplatform": "Mojang does not provide Java for {0}",
@@ -1983,5 +1986,6 @@
   "content.shader.installed_without": "Installed {0} into {1}. It won't show up until {2} is installed too.",
   "content.shader.installed_unsupported": "Installed {0} into {1}. It needs OptiFine to work there.",
   "content.shader.renderer_installed": "Installed {0} into {1}. Shader packs will work now.",
-  "content.shader.renderer_unavailable": "No {0} build fits Minecraft {1} with {2} yet."
+  "content.shader.renderer_unavailable": "No {0} build fits Minecraft {1} with {2} yet.",
+  "multiplayer.network.test_reviewed": "Signed with a test registry key (testing only, not reviewed by Jay)"
 }
