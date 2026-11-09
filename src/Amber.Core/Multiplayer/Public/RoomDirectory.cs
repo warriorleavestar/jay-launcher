@@ -77,6 +77,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         public byte[]? Search;
         public DateTimeOffset Expires;
         public readonly List<string> Mail = [];
+        /// <summary>The host's verified network account (null when the host did not log in).</summary>
+        public string? Account;
     }
 
     private readonly TcpListener _listener;
@@ -97,6 +99,15 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>账号密码登录（jay-server directory --accounts 时才有）。</summary>
     public LoginAuthority? Login { get; set; }
+
+    /// <summary>
+    /// Oldest Jay allowed to use this directory (from the network config's policy.minVersion). Every request carries the
+    /// client's version in "jay"; older or unversioned clients get error "version" plus "min", and Jay tells the user to update.
+    /// </summary>
+    public Version? MinClientVersion { get; set; }
+
+    /// <summary>Only hosts logged in to this network's accounts may publish rooms (set when the network config requires login).</summary>
+    public bool RequireAccountToPublish { get; set; }
 
     /// <summary>房间审核规则（按顺序，任何一条拒绝就不收）。见 <see cref="IRoomGate"/>。</summary>
     public IReadOnlyList<IRoomGate> Gates { get; set; } = [];
@@ -173,6 +184,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         try
         {
             var op = request["op"]?.GetValue<string>();
+            if (MinClientVersion is { } min && !ClientVersion.Meets(request["jay"]?.GetValue<string>(), min))
+                return new JsonObject { ["ok"] = false, ["error"] = "version", ["min"] = min.ToString() };
             return op switch
             {
                 "announce" => Announce(request),
@@ -253,7 +266,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 Prune();
                 return [.. _rooms.Values.Where(e => e.Listed && e.Listing.Mode != RoomVisibility.Hidden).OrderByDescending(e => e.Listing.Updated)
                     .Select(e => new DirectoryRoomInfo(e.Listing.Id, e.Listing.Name, e.Listing.Host, e.Listing.HostFingerprint, e.Listing.Mode,
-                        e.Listing.Players, e.Listing.Game, e.Listing.Updated))];
+                        e.Listing.Players, e.Listing.Game, e.Listing.Updated, e.Account))];
             }
         }
         finally { Flush(); }
@@ -269,6 +282,27 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 if (!_rooms.TryGetValue(id, out var entry)) return false;
                 RemoveLocked(id, entry, RoomRemoval.Removed);
                 return true;
+            }
+        }
+        finally { Flush(); }
+    }
+
+    /// <summary>The verified account of a room's host, if any (for "ban this room's host").</summary>
+    public (string HostFingerprint, string? Account)? HostOf(string id)
+    {
+        lock (_gate) return _rooms.TryGetValue(id, out var e) ? (e.Listing.HostFingerprint, e.Account) : null;
+    }
+
+    /// <summary>Removes every room published under a network account. Returns how many.</summary>
+    public int RemoveAccount(string account)
+    {
+        try
+        {
+            lock (_gate)
+            {
+                var ids = _rooms.Where(p => p.Value.Account == account).Select(p => p.Key).ToList();
+                foreach (var id in ids) RemoveLocked(id, _rooms[id], RoomRemoval.Removed);
+                return ids.Count;
             }
         }
         finally { Flush(); }
@@ -309,6 +343,11 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         if (fp is not null && (fp.Length != 64 || !fp.All(char.IsAsciiHexDigit))) return Error("bad");
         fp = fp?.ToLowerInvariant();
         if (!listed && keys.Length == 0 && fp is null) return Error("empty");
+        // The host's account: a login token this node's login service signed for exactly this host identity.
+        string? account = null;
+        if (Login is { } login && request["account"]?.GetValue<string>() is { Length: > 0 and <= 2048 } token)
+            account = AccountToken.Verify(token, login.SignKey, login.Network, listing.HostKey, _now())?.User;
+        if (RequireAccountToPublish && account is null) return Error("login");
         lock (_gate)
         {
             Prune();
@@ -328,7 +367,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 if (_lookup.TryGetValue(key, out var holder) && holder != listing.Id) return Error("lookup");
             if (fp is not null && _search.TryGetValue(fp, out var owner) && owner != listing.Id) return Error("lookup");
             var isNew = !_rooms.ContainsKey(listing.Id);
-            var announcement = new RoomAnnouncement(listing, listed, isNew, fp is not null);
+            var announcement = new RoomAnnouncement(listing, listed, isNew, fp is not null, account);
             foreach (var gate in Gates)
             {
                 var verdict = gate.Check(announcement);
@@ -346,6 +385,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (fp is not null) _search[fp] = listing.Id;
             entry.Listing = listing with { Updated = _now() };
             entry.Listed = listed;
+            entry.Account = account;
             entry.Expires = _now() + RoomDirectoryProtocol.Ttl;
             _rooms[listing.Id] = entry;
             var published = entry.Listing;
@@ -463,6 +503,9 @@ public sealed record DirectoryHit(string Id, string Ip, byte[] HostKey);
 /// </summary>
 public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<string>? ips = null, int port = PublicNetworkProfile.DirectoryPort)
 {
+    /// <summary>This Jay's version, sent with every request so a network can turn away clients older than its policy.minVersion.</summary>
+    public string Version { get; init; } = Launch.UpdateChecker.CurrentVersion;
+
     private async Task<IReadOnlyList<string>> TargetsAsync(CancellationToken ct)
     {
         if (ips is { Count: > 0 }) return ips;
@@ -481,6 +524,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         try
         {
             await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
+            request["jay"] = Version;
             await RoomDirectoryProtocol.WriteLineAsync(stream, request, deadline.Token);
             return await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token);
         }
@@ -550,6 +594,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             "full" => L.T("core.mp.public.err_full"),
             "gone" => L.T("core.mp.public.err_gone"),
             "rate" => L.T("core.mp.public.err_rate"),
+            "version" => L.F("core.mp.public.err_version", reply["min"]?.GetValue<string>() is { Length: <= 32 } min ? min : "?"),
+            "login" => L.T("core.mp.public.err_login"),
             _ when !string.IsNullOrWhiteSpace(reason) => L.F("core.mp.public.err_policy", reason),
             _ => L.F("core.mp.public.err_other", code),
         });
@@ -569,8 +615,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>发布或续期（发给每个在线的目录）。返回目录里给房主捎的话（直连回复码）。</summary>
     /// <param name="listing">已经用 <see cref="RoomSigner.Sign"/> 签好的房间信息。</param>
     /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
+    /// <param name="account">This network's login token, if logged in: lets networks that require login accept the room and tie it to the account.</param>
     public async Task<IReadOnlyList<string>> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<string> lookupKeys, CancellationToken ct,
-        byte[]? searchKey = null)
+        byte[]? searchKey = null, string? account = null)
     {
         var request = new JsonObject
         {
@@ -580,6 +627,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             ["lookup"] = new JsonArray(lookupKeys.Select(k => (JsonNode?)k).ToArray()),
         };
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
+        if (account is not null) request["account"] = account;
         var replies = NeedOne(await FanOutAsync(request, ct));
         return [.. replies.SelectMany(r => (r["mail"] as JsonArray ?? []).Select(m => m?.GetValue<string>()).OfType<string>()).Distinct()];
     }

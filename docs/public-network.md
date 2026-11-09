@@ -92,7 +92,7 @@
 ```
 
 - `notice` 和 `links` 显示在公共网络卡片上，链接只认 https，用系统浏览器打开。
-- `policy` 只能比默认更严：`modes` 是这个网络上允许公开的房间方式（隐藏房间总是可以），`requireDevice` 让这个网络上开的房间都要求设备指纹，`files` / `maxFileMB` 关掉或限制成员之间传文件（收发两头都查），`minVersion` 是最低 Jay 版本。
+- `policy` 只能比默认更严：`modes` 是这个网络上允许公开的房间方式（隐藏房间总是可以），`requireDevice` 让这个网络上开的房间都要求设备指纹，`files` / `maxFileMB` 关掉或限制成员之间传文件（收发两头都查），`minVersion` 是最低 Jay 版本（节点用 `--config` 加载配置时也按它挡旧版 Jay，见 [network-server.md](network-server.md#要求的-jay-版本)）。
 - `ui` 先原样保存，等界面主题功能合并后接上。
 - `login` 见下一节。
 

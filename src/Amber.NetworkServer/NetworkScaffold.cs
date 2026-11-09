@@ -53,8 +53,14 @@ public static class NetworkScaffold
             ["modes"] = new JsonArray("public", "password", "hidden", "direct"),
             ["requireDevice"] = false,
             ["files"] = true,
+            // Oldest Jay allowed on this network; the node turns older clients away ("version"). Defaults to this build.
+            ["minVersion"] = DefaultMinVersion,
         },
     };
+
+    /// <summary>The template's policy.minVersion: the Jay version this server was built from (major.minor.patch).</summary>
+    public static string DefaultMinVersion =>
+        ClientVersion.Parse(Amber.Core.Launch.UpdateChecker.CurrentVersion) is { } v ? $"{v.Major}.{v.Minor}.{Math.Max(v.Build, 0)}" : "0.0.0";
 
     /// <summary>检查配置文件能不能被 Jay 读懂，返回它的 SHA-256（写进连接串的 config.sha256）。</summary>
     public static (NetworkConfig Config, string Sha256) Hash(string configPath, string networkId)

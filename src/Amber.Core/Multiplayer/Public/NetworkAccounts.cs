@@ -275,6 +275,9 @@ public sealed class LoginAuthority(IAccountStore accounts, X25519KeyPair key, Ne
     /// <summary>每个账号都必须至少有一种第二步验证；没设置的账号不让登录。</summary>
     public bool RequireSecondFactor { get; init; }
 
+    /// <summary>Accounts the operator banned: their logins are refused like a disabled account (set by the node's ban list).</summary>
+    public Func<string, bool>? Blocked { get; set; }
+
     /// <summary>处理一个 login 请求（目录服务调）。</summary>
     public JsonObject Handle(JsonObject request)
     {
@@ -289,6 +292,7 @@ public sealed class LoginAuthority(IAccountStore accounts, X25519KeyPair key, Ne
         var result = accounts.Check(user, body["pass"]?.GetValue<string>() ?? "", now);
         if (result != LoginResult.Ok) return Error(result switch { LoginResult.Locked => "locked", LoginResult.Disabled => "disabled", _ => "wrong" });
         if (AccountStore.CleanName(user) is not { } name) return Error("wrong");
+        if (Blocked?.Invoke(name) == true) return Error("disabled");
         var factors = Factors.Where(f => f.AppliesTo(name)).ToList();
         if (RequireSecondFactor && factors.Count == 0) return Error("factor_setup");
         if (factors.Count > 0)

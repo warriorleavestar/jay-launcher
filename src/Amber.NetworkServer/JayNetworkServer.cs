@@ -161,7 +161,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
         _b = b;
         _started = Now;
         Profile = b.Network is { } n ? n.ToProfile() with { Nodes = b.Seeds } : PublicNetworkProfile.Jay(b.Seeds);
-        Bans = b.BanListOn ? new BanList(Path.Combine(b.DataDir, "bans.json")) : null;
+        Bans = b.BanListOn ? new BanList(Path.Combine(b.DataDir, "bans.json"), b.Clock) : null;
         Stats = new DirectoryStats();
         if (b.Login is { } login) Login = login;
         else if (b.Accounts is { } accounts)
@@ -224,8 +224,11 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Gates = gates,
                 Observers = observers,
                 Extensions = [.. _b.Extensions],
+                MinClientVersion = _b.Config?.Policy.MinVersion,
+                RequireAccountToPublish = Login is not null && _b.Config?.Login?.Required == true,
             };
         }
+        if (Login is not null && Bans is { } banList) Login.Blocked = banList.IsAccountBanned;
         if (_b.AdminPort is { } port) _admin = AdminApi.Start(this, port, AdminToken.LoadOrCreate(AdminTokenPath), _b.Log);
         if (_b.DirectOnly is not null) return;
 
@@ -291,17 +294,39 @@ public sealed class JayNetworkServer : IAsyncDisposable
             ["rooms"] = view?.Rooms ?? 0,
             ["listed"] = view?.Listed ?? 0,
             ["login"] = Login is not null,
+            ["minVersion"] = _b.Config?.Policy.MinVersion?.ToString(),
             ["uptime"] = (long)(Now - _started).TotalSeconds,
         };
     }
 
-    /// <summary>封禁并马上把他已经在目录里的房间拿掉。</summary>
-    public int Ban(string kind, string value, string? reason)
+    /// <summary>
+    /// Bans a host fingerprint, a room id or a network account (optionally only for <paramref name="duration"/>) and
+    /// immediately drops the matching rooms from the directory. Returns how many rooms were removed.
+    /// </summary>
+    public int Ban(string kind, string value, string? reason, TimeSpan? duration = null)
     {
-        if (Bans is null) throw new InvalidOperationException("这个节点没开封禁名单");
-        Bans.Add(kind, value, reason, Now);
+        if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
+        var ban = Bans.Add(kind, value, reason, Now, duration);
         if (Directory is not { } d) return 0;
-        return kind == "host" ? d.RemoveHost(value.Trim()) : d.Remove(value.Trim()) ? 1 : 0;
+        return ban.Kind switch
+        {
+            "host" => d.RemoveHost(ban.Value),
+            "account" => d.RemoveAccount(ban.Value),
+            _ => d.Remove(ban.Value) ? 1 : 0,
+        };
+    }
+
+    /// <summary>
+    /// Bans whoever hosts room <paramref name="roomId"/>: their host fingerprint and, when they published while logged in,
+    /// their account. Returns null when the room is not in the directory.
+    /// </summary>
+    public (int Removed, string Host, string? Account)? BanRoomHost(string roomId, string? reason, TimeSpan? duration = null)
+    {
+        if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
+        if (Directory?.HostOf(roomId.Trim()) is not { } owner) return null;
+        var removed = Ban("host", owner.HostFingerprint, reason, duration);
+        if (owner.Account is { } account) removed += Ban("account", account, reason, duration);
+        return (removed, owner.HostFingerprint, owner.Account);
     }
 
     public async ValueTask DisposeAsync()

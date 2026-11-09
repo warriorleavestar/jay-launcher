@@ -8,7 +8,8 @@ namespace Amber.Core.Multiplayer.Public;
 /// <param name="Listed">房主想不想进公开列表。</param>
 /// <param name="IsNew">目录里原来没有这个房间（第一次发布，不是续期）。</param>
 /// <param name="HasFingerprintSearch">房主打开了“可以用指纹码找到这个房间”。</param>
-public sealed record RoomAnnouncement(RoomListing Listing, bool Listed, bool IsNew, bool HasFingerprintSearch);
+/// <param name="Account">The host's network account, when the announce carried a login token this node signed for the host's identity; otherwise null.</param>
+public sealed record RoomAnnouncement(RoomListing Listing, bool Listed, bool IsNew, bool HasFingerprintSearch, string? Account = null);
 
 /// <summary>审核规则的结论：放行，或者拒绝（带一个错误码和一句给房主看的话）。</summary>
 public readonly record struct RoomVerdict(string? Code, string? Reason)
@@ -69,7 +70,24 @@ public interface IDirectoryExtension
 public sealed record DirectoryView(int Rooms, int Listed, IReadOnlyList<RoomListing> ListedRooms);
 
 /// <summary>运营者看到的一个房间（管理接口用）。隐藏房间只计数，不给内容：它们不在公开列表里，运营者不需要知道。</summary>
-public sealed record DirectoryRoomInfo(string Id, string Name, string Host, string HostFingerprint, RoomVisibility Mode, int Players, string Game, DateTimeOffset Updated);
+public sealed record DirectoryRoomInfo(string Id, string Name, string Host, string HostFingerprint, RoomVisibility Mode, int Players, string Game, DateTimeOffset Updated,
+    string? Account = null);
+
+/// <summary>Jay versions as sent in directory requests ("0.8.0", "0.8.0-beta.1"): the numeric part only.</summary>
+public static class ClientVersion
+{
+    public static Version? Parse(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 32) return null;
+        var core = text.Trim().TrimStart('v', 'V').Split('-', '+')[0];
+        return Version.TryParse(core, out var v) ? v : null;
+    }
+
+    /// <summary>True when <paramref name="text"/> is at least <paramref name="min"/>. A missing or unreadable version counts as too old.</summary>
+    public static bool Meets(string? text, Version min) => Parse(text) is { } v && Normalize(v) >= Normalize(min);
+
+    private static Version Normalize(Version v) => new(v.Major, v.Minor, Math.Max(v.Build, 0), Math.Max(v.Revision, 0));
+}
 
 public static partial class DirectoryExtensions
 {

@@ -66,8 +66,9 @@ public static class Program
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
           jay-server node status|rooms|bans   看运行中节点的计数、公开房间、封禁名单
-          jay-server node ban host|room <房主指纹|房间编号> [--reason 原因] / node unban host|room <...>
-              封禁房主（换房间也进不了列表）或房间，马上把他已经在目录里的房间拿掉
+          jay-server node ban host|room|account|room-host <房主指纹|房间编号|账号|房间编号> [--for 7d] [--reason 原因]
+              封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
+              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
         自己的公共网络（连接串 JAYNET1-...）：
@@ -332,7 +333,8 @@ public static class Program
                     : throw new ArgumentException("要用 --network <网络.json> 或 --id <编号> 说明是哪个网络的配置"));
                 var (config, sha) = NetworkScaffold.Hash(file, networkId);
                 output.WriteLine($"配置文件没问题：允许的房间方式 {string.Join("、", config.Policy.AllowedModes.Order())}，" +
-                    $"{(config.Login is { } l ? l.Required ? "要求登录" : "可选登录" : "不用登录")}，{config.Links.Count} 个链接");
+                    $"{(config.Login is { } l ? l.Required ? "要求登录" : "可选登录" : "不用登录")}，{config.Links.Count} 个链接，" +
+                    $"{(config.Policy.MinVersion is { } min ? $"最低 Jay {min}（节点挡更旧的）" : "不限 Jay 版本")}");
                 output.WriteLine($"SHA-256：{sha}");
                 if (options.Get("url") is { } url)
                 {
@@ -477,8 +479,12 @@ public static class Program
                 "status" => await client.CallAsync("GET", "/stats"),
                 "rooms" => await client.CallAsync("GET", "/rooms"),
                 "bans" => await client.CallAsync("GET", "/bans"),
-                "ban" => await client.CallAsync("POST", "/ban", new() { ["kind"] = Need(0, "host 或 room"), ["value"] = Need(1, "房主指纹或房间编号"), ["reason"] = options.Get("reason") }),
-                "unban" => await client.CallAsync("POST", "/unban", new() { ["kind"] = Need(0, "host 或 room"), ["value"] = Need(1, "房主指纹或房间编号") }),
+                "ban" => await client.CallAsync("POST", "/ban", new()
+                {
+                    ["kind"] = Need(0, "host、room、account 或 room-host"), ["value"] = Need(1, "房主指纹、房间编号或账号"), ["reason"] = options.Get("reason"),
+                    ["for"] = options.Get("for") is { } span ? BanSeconds(span) : null,
+                }),
+                "unban" => await client.CallAsync("POST", "/unban", new() { ["kind"] = Need(0, "host、room 或 account"), ["value"] = Need(1, "房主指纹、房间编号或账号") }),
                 "remove" => await client.CallAsync("POST", "/remove", new() { ["id"] = Need(0, "房间编号") }),
                 _ => throw new ArgumentException("用法：jay-server node status|rooms|bans|ban|unban|remove"),
             };
@@ -807,6 +813,12 @@ public static class Program
         output.WriteLine(code.Encode());
         output.WriteLine();
         output.WriteLine($"在节点电脑上运行：jay-server relay --origin <网关地址>:<网关端口> --listen {GateEndpoint.TryParse(address)?.Port} --code <上面这段>");
+    }
+
+    private static long BanSeconds(string text)
+    {
+        var span = ParseDuration(text);
+        return span > TimeSpan.Zero ? (long)span.TotalSeconds : throw new ArgumentException("--for 要大于 0，比如 30m、24h、7d");
     }
 
     internal static TimeSpan ParseDuration(string text)

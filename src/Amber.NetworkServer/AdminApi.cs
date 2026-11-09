@@ -155,7 +155,7 @@ public sealed class AdminApi : IAsyncDisposable
                         {
                             ["id"] = r.Id, ["name"] = r.Name, ["host"] = r.Host, ["hostFingerprint"] = r.HostFingerprint,
                             ["mode"] = r.Mode.ToString().ToLowerInvariant(), ["players"] = r.Players, ["game"] = r.Game,
-                            ["updated"] = r.Updated.ToUnixTimeSeconds(),
+                            ["account"] = r.Account, ["updated"] = r.Updated.ToUnixTimeSeconds(),
                         })]),
                     });
                 }
@@ -166,13 +166,25 @@ public sealed class AdminApi : IAsyncDisposable
                         ["bans"] = new JsonArray([.. (_server.Bans?.List() ?? []).Select(b => (JsonNode)new JsonObject
                         {
                             ["kind"] = b.Kind, ["value"] = b.Value, ["reason"] = b.Reason, ["at"] = b.At.ToUnixTimeSeconds(),
+                            ["until"] = b.Until?.ToUnixTimeSeconds(),
                         })]),
                     });
                 case ("POST", "/ban"):
                 {
                     var o = Body();
-                    var removed = _server.Ban(o["kind"]?.GetValue<string>() ?? "", o["value"]?.GetValue<string>() ?? "", o["reason"]?.GetValue<string>());
-                    _log($"管理：封禁 {o["kind"]} {o["value"]}，拿掉了 {removed} 个房间");
+                    TimeSpan? duration = o["for"]?.GetValue<long>() is { } seconds ? TimeSpan.FromSeconds(seconds) : null;
+                    var kind = o["kind"]?.GetValue<string>() ?? "";
+                    var value = o["value"]?.GetValue<string>() ?? "";
+                    var reason = o["reason"]?.GetValue<string>();
+                    if (kind == "room-host")
+                    {
+                        // Ban whoever hosts this room: host fingerprint plus the account they published with.
+                        if (_server.BanRoomHost(value, reason, duration) is not { } hit) return (404, Fail("not_found"));
+                        _log($"admin: banned the host of room {value}, removed {hit.Removed} room(s)");
+                        return (200, new JsonObject { ["ok"] = true, ["removed"] = hit.Removed, ["host"] = hit.Host, ["account"] = hit.Account });
+                    }
+                    var removed = _server.Ban(kind, value, reason, duration);
+                    _log($"admin: banned {kind} {value}, removed {removed} room(s)");
                     return (200, new JsonObject { ["ok"] = true, ["removed"] = removed });
                 }
                 case ("POST", "/unban"):

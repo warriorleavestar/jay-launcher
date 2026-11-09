@@ -62,6 +62,8 @@ jay-server node status                 # 健康状态和计数（发布、续期
 jay-server node rooms                  # 公开房间（不公开的只显示数量，不显示内容）
 jay-server node ban host <房主指纹> --reason 刷广告   # 封房主：他换房间也进不了列表，已有的马上拿掉
 jay-server node ban room <房间编号>
+jay-server node ban account <账号> --for 7d            # 封网络账号：他的房间马上拿掉，也不能再登录
+jay-server node ban room-host <房间编号> --for 24h     # 封这个房间的房主：指纹 + 他发布时登录的账号
 jay-server node unban host <房主指纹>
 jay-server node bans
 jay-server node remove <房间编号>       # 只删这一次，房主续期时重新审核
@@ -69,7 +71,22 @@ jay-server node remove <房间编号>       # 只删这一次，房主续期时�
 
 - `node` 命令经本机管理接口操作运行中的节点，口令在数据目录的 `admin.token`（只有运行节点的用户能读）。要和 `directory` 用同一个 `--dir`（或 `JAY_SERVER_DIR`）。
 - 健康检查：`curl http://127.0.0.1:47669/health`，不用口令，给监控和 Docker 用。
-- 封禁名单存在数据目录的 `bans.json`。
+- 封禁名单存在数据目录的 `bans.json`。`--for 30m` / `24h` / `7d` 是临时封禁，到点自动解除；不加就是永久。房主被拒时能看到原因和解封时间。
+- 节点每 5 秒检查一次 `bans.json` 有没有被改过，改了就重新读。几台目录节点想共用一份封禁名单，可以用 rsync、共享盘之类把这个文件同步过去，不用在每台上各执行一次。
+- 封账号只在开了账号登录的节点上有用：Jay 发布房间时会带上登录凭证，节点核对过签名才记下账号。
+
+## 要求的 Jay 版本
+
+在网络配置文件的 `policy` 里写最低版本（`network init` 生成的模板默认就是 `jay-server` 自己的版本）：
+
+```json
+"policy": { "modes": ["public", "password", "hidden", "direct"], "minVersion": "0.8.0" }
+```
+
+- Jay 读到配置后，自己低于这个版本就不连这个网络，提示升级。
+- 节点用 `--config` 加载同一份配置时，也按它挡：每个目录请求都带着 Jay 的版本号，太旧（或者没带版本号的旧版 Jay）就回 `version`，Jay 显示“这个网络要求 Jay x.y.z 或更新的版本”。防的是改过的客户端或没更新配置的旧客户端。
+- 改了版本要求，和改别的配置一样，重新 `config-hash` 和 `sign`。
+- 配置里 `login.required` 为 `true` 时，节点也要求发布房间的人先登录（没登录回 `login`）。
 
 审核相关的选项：
 
@@ -94,7 +111,7 @@ jay-server directory --network nz-friends.jaynet --config nz-friends/config.json
 ```
 
 - Jay 把房间发给**每个**在线的目录，看列表时合并所有目录的结果，查找按编号顺序问。备用目录之间不用同步、不用互相信任：房间信息是房主签过名的。
-- 备用目录要和主目录用同样的 `--config`、`--blocked-words`。封禁要在每台上各执行一次 `node ban`。
+- 备用目录要和主目录用同样的 `--config`、`--blocked-words`。封禁要在每台上各执行一次 `node ban`，或者把 `bans.json` 同步过去（节点会自动重读）。
 - 开账号登录时，把主目录数据目录里的 `login.key` 和 `accounts.json` 复制过去（登录凭证的签名钥匙要一样）。
 - 旧版 Jay（这个版本之前）只认主目录。
 

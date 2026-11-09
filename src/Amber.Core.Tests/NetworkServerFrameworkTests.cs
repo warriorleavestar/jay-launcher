@@ -358,6 +358,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var (config, sha) = NetworkScaffold.Hash(r.ConfigPath, "nz-friends");
         Assert.Equal(64, sha.Length);
         Assert.True(config.Policy.Allows(RoomVisibility.Direct));
+        Assert.Equal(Version.Parse(NetworkScaffold.DefaultMinVersion), config.Policy.MinVersion);
         Assert.Throws<InvalidDataException>(() => NetworkScaffold.Hash(r.ConfigPath, "other"));
 
         var info = NetworkScaffold.AttachConfig(r.NetworkPath, "https://example.org/config.json", sha);
@@ -416,6 +417,169 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Contains("\"mode\": 1", nodeOut.ToString());
         Assert.Equal(1, await Program.NodeCommand(_dir, Options.Parse(["node", "unban", "room", "nope", "--admin-port", port]), nodeOut, http));
         await Assert.ThrowsAsync<ArgumentException>(() => Program.NodeCommand(_dir, Options.Parse(["node", "explode", "--admin-port", port]), nodeOut, http));
+    }
+
+    [Fact]
+    public async Task MinVersionFromTheNetworkConfigTurnsAwayOlderJay()
+    {
+        var config = NetworkConfig.Parse("""{"v":1,"network":"nz","policy":{"minVersion":"0.8.0"}}"""u8, "nz");
+        var server = await StartAsync(b => b.UseConfig(config));
+        JsonObject List(string? version)
+        {
+            var request = new JsonObject { ["op"] = "list" };
+            if (version is not null) request["jay"] = version;
+            return server.Directory!.Handle(request);
+        }
+        Assert.Equal("version", List(null)["error"]!.GetValue<string>());
+        var old = List("0.7.0");
+        Assert.Equal("version", old["error"]!.GetValue<string>());
+        Assert.Equal("0.8.0", old["min"]!.GetValue<string>());
+        Assert.Equal("version", List("garbage")["error"]!.GetValue<string>());
+        Assert.True(Ok(List("0.8.0")));
+        Assert.True(Ok(List("v0.9.1-beta.2")));
+        Assert.Equal("0.8.0", server.Health()["minVersion"]!.GetValue<string>());
+
+        // Through the real client: the host is told which version to update to.
+        var net = new LoopbackNetwork(server.Directory!.Port);
+        var host = X25519KeyPair.Generate();
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
+            new RoomDirectoryClient(net) { Version = "0.7.3" }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default));
+        Assert.Equal("version", e.Code);
+        Assert.Contains("0.8.0", e.Message);
+        await new RoomDirectoryClient(net) { Version = "0.8.0" }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default);
+        Assert.Equal(1, server.Directory.Count);
+
+        // No minVersion in the config: any client is fine.
+        Assert.Null(ClientVersion.Parse(null));
+        Assert.True(ClientVersion.Meets("1.0", new Version(0, 9, 9)));
+    }
+
+    private (string Token, X25519KeyPair Me) LogIn(JayNetworkServer server, string user = "bob", X25519KeyPair? me = null)
+    {
+        me ??= X25519KeyPair.Generate();
+        var login = NetworkLogin.Parse(server.LoginSection!)!;
+        var reply = server.Directory!.Handle(NetworkLoginClient.Request(me, login, user, "forum-password", _now));
+        return (NetworkLoginClient.Read(reply, me, login, server.Profile.Id, _now).Token, me);
+    }
+
+    private JsonObject AnnounceAs(RoomSigner signer, X25519KeyPair host, string? token)
+    {
+        var request = Announce(signer, Listing(host));
+        if (token is not null) request["account"] = token;
+        return request;
+    }
+
+    [Fact]
+    public async Task LoginRequiredNetworksOnlyListRoomsOfLoggedInHosts()
+    {
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts()));
+        server.Directory!.RequireAccountToPublish = true;
+        var (token, host) = LogIn(server);
+        Assert.Equal("login", server.Directory.Handle(AnnounceAs(new RoomSigner(), host, null))["error"]!.GetValue<string>());
+        Assert.Equal("login", server.Directory.Handle(AnnounceAs(new RoomSigner(), host, "not-a-token"))["error"]!.GetValue<string>());
+        // A token is bound to the identity it was issued for: someone else can't publish with it.
+        Assert.Equal("login", server.Directory.Handle(AnnounceAs(new RoomSigner(), X25519KeyPair.Generate(), token))["error"]!.GetValue<string>());
+        Assert.True(Ok(server.Directory.Handle(AnnounceAs(new RoomSigner(), host, token))));
+        Assert.Equal("bob", Assert.Single(server.Directory.ListedRooms()).Account);
+    }
+
+    [Fact]
+    public async Task AccountBanTakesRoomsDownAndBlocksLogin()
+    {
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts()));
+        var (token, host) = LogIn(server);
+        var signer = new RoomSigner();
+        Assert.True(Ok(server.Directory!.Handle(AnnounceAs(signer, host, token))));
+        Assert.True(Ok(server.Directory.Handle(AnnounceAs(new RoomSigner(), X25519KeyPair.Generate(), null))));
+
+        Assert.Equal(1, server.Ban("account", "bob", "cheating"));
+        Assert.Equal(1, server.Directory.Count);
+        _now += TimeSpan.FromSeconds(30);
+        Assert.Equal("banned", server.Directory.Handle(AnnounceAs(signer, host, token))["error"]!.GetValue<string>());
+        var login = NetworkLogin.Parse(server.LoginSection!)!;
+        var again = server.Directory.Handle(NetworkLoginClient.Request(X25519KeyPair.Generate(), login, "bob", "forum-password", _now));
+        Assert.Equal("disabled", again["error"]!.GetValue<string>());
+
+        Assert.True(server.Bans!.Remove("account", "bob"));
+        Assert.True(Ok(server.Directory.Handle(NetworkLoginClient.Request(X25519KeyPair.Generate(), login, "bob", "forum-password", _now))));
+    }
+
+    [Fact]
+    public async Task TemporaryBansExpireOnTheirOwn()
+    {
+        var server = await StartAsync();
+        var host = X25519KeyPair.Generate();
+        var fingerprint = MemberIdentity.FingerprintOf(host.PublicKey);
+        server.Ban("host", fingerprint, "spam", TimeSpan.FromHours(1));
+        var reply = server.Directory!.Handle(Announce(new RoomSigner(), Listing(host)));
+        Assert.Equal("banned", reply["error"]!.GetValue<string>());
+        Assert.Contains("2026-11-09 01:00 UTC", reply["reason"]!.GetValue<string>());
+        Assert.Equal(_now + TimeSpan.FromHours(1), Assert.Single(server.Bans!.List()).Until);
+
+        _now += TimeSpan.FromMinutes(61);
+        Assert.Empty(server.Bans.List());
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))));
+        Assert.Throws<ArgumentException>(() => server.Bans.Add("host", fingerprint, null, _now, TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task BanningARoomsHostCoversTheirFingerprintAndAccount()
+    {
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts()));
+        var (token, host) = LogIn(server);
+        var first = new RoomSigner();
+        var second = new RoomSigner();
+        Assert.True(Ok(server.Directory!.Handle(AnnounceAs(first, host, token))));
+        Assert.True(Ok(server.Directory.Handle(AnnounceAs(second, host, token))));
+
+        var hit = server.BanRoomHost(first.RoomId, "griefing")!.Value;
+        Assert.Equal(2, hit.Removed);
+        Assert.Equal(MemberIdentity.FingerprintOf(host.PublicKey), hit.Host);
+        Assert.Equal("bob", hit.Account);
+        Assert.Equal(["account", "host"], server.Bans!.List().Select(b => b.Kind).Order());
+        Assert.Null(server.BanRoomHost("0000", null));
+    }
+
+    [Fact]
+    public void BanListPicksUpChangesFromAnotherNode()
+    {
+        var path = Path.Combine(_dir, "shared-bans.json");
+        var a = new BanList(path, () => _now);
+        var b = new BanList(path, () => _now);
+        Assert.False(b.IsAccountBanned("mallory"));
+        a.Add("account", "mallory", null, _now);
+        _now += TimeSpan.FromSeconds(6);
+        Assert.True(b.IsAccountBanned("mallory"));
+        Assert.True(b.Remove("account", "mallory"));
+        _now += TimeSpan.FromSeconds(6);
+        Assert.False(a.IsAccountBanned("mallory"));
+        // A broken file keeps the last good list.
+        a.Add("account", "eve", null, _now);
+        File.WriteAllText(path, "{ not json");
+        _now += TimeSpan.FromSeconds(6);
+        Assert.True(a.IsAccountBanned("eve"));
+    }
+
+    [Fact]
+    public async Task NodeCommandBansAccountsTemporarilyAndRoomHosts()
+    {
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts()), admin: true);
+        var (token, host) = LogIn(server);
+        var signer = new RoomSigner();
+        Assert.True(Ok(server.Directory!.Handle(AnnounceAs(signer, host, token))));
+        using var http = new HttpClient();
+        var port = server.AdminPort!.Value.ToString();
+        var output = new StringWriter();
+
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "ban", "room-host", signer.RoomId, "--for", "7d", "--admin-port", port]), output, http));
+        Assert.Equal(0, server.Directory.Count);
+        Assert.All(server.Bans!.List(), b => Assert.Equal(_now + TimeSpan.FromDays(7), b.Until));
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "ban", "account", "carol", "--for", "30m", "--admin-port", port]), output, http));
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "bans", "--admin-port", port]), output, http));
+        Assert.Contains("\"until\"", output.ToString());
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "unban", "account", "carol", "--admin-port", port]), output, http));
+        Assert.Equal(1, await Program.NodeCommand(_dir, Options.Parse(["node", "ban", "room-host", "missing", "--admin-port", port]), output, http));
+        await Assert.ThrowsAsync<ArgumentException>(() => Program.NodeCommand(_dir, Options.Parse(["node", "ban", "account", "x", "--for", "0", "--admin-port", port]), output, http));
     }
 
     /// <summary>公共网络里的几个目录节点，各映射到本机一个端口；连不上的地址直接报错（像真的掉线）。</summary>

@@ -37,7 +37,7 @@ await server.RunAsync(CancellationToken.None);
 
 | 类 | 作用 |
 |---|---|
-| `BanList` | 按房主指纹或房间编号封禁，存在 `bans.json`。默认开着，`WithoutBanList()` 关掉 |
+| `BanList` | 按房主指纹、房间编号或网络账号封禁，可以设到期时间，存在 `bans.json`（文件被别人改了会自动重读）。封账号也挡登录。默认开着，`WithoutBanList()` 关掉 |
 | `RateLimitGate` | 每人同时几个房间、每人每分钟新发布几次、整个目录每分钟几个新房间。默认 3 / 6 / 600 |
 | `NameFilterGate` | 屏蔽词（`UseBlockedWords`） |
 | `PolicyGate` | 按网络配置的 `policy.modes` 挡（`UseConfig`） |
@@ -53,6 +53,9 @@ await server.RunAsync(CancellationToken.None);
 - `UseAdmin(port)` / `WithoutAdmin()`：本机管理接口（见下）。`AdminClient` 是它的客户端，可以拿来做你自己的面板。
 - `NetworkScaffold`：生成签名钥匙、网络信息、配置模板，算配置哈希（`jay-server network init` / `config-hash` 用的就是它）。
 - `server.LoginSection`：开了账号登录时，要写进网络配置 `login` 的那一段。
+- `server.Ban(kind, value, reason, duration)`、`server.BanRoomHost(roomId, ...)`：封禁并马上拿掉相关房间。
+- `UseConfig(config)` 时，`policy.minVersion` 会挡旧版 Jay，`login.required` 会要求发布房间的人先登录（`RoomDirectoryServer.MinClientVersion` / `RequireAccountToPublish`，也可以自己设）。
+- `RoomAnnouncement.Account`：房主登录过时是他的账号名（凭证核对过），审核规则可以按账号判断。
 
 ## 管理接口
 
@@ -62,9 +65,10 @@ await server.RunAsync(CancellationToken.None);
 |---|---|
 | `GET /health` | `{ok, network, role: directory\|seed, easytier: running\|stopped\|external, rooms, listed, login, uptime}` |
 | `GET /stats` | `{ok, health, stats: {published, renewed, withdrawn, expired, removed, rejected: {code: n}, loginOk, loginFail}}` |
-| `GET /rooms` | `{ok, total, hidden, rooms: [{id, name, host, hostFingerprint, mode, players, game, updated}]}`（只有公开房间） |
-| `GET /bans` | `{ok, bans: [{kind, value, reason, at}]}` |
-| `POST /ban` `{kind: host\|room, value, reason?}` | `{ok, removed}` |
+| `GET /rooms` | `{ok, total, hidden, rooms: [{id, name, host, hostFingerprint, mode, players, game, account, updated}]}`（只有公开房间） |
+| `GET /bans` | `{ok, bans: [{kind, value, reason, at, until}]}`（`until` 为 null 是永久） |
+| `POST /ban` `{kind: host\|room\|account, value, reason?, for?}` | `{ok, removed}`；`for` 是秒数 |
+| `POST /ban` `{kind: room-host, value: <房间编号>, reason?, for?}` | `{ok, removed, host, account}`：封这个房间房主的指纹和账号；房间不在回 404 |
 | `POST /unban` `{kind, value}` | `{ok}` 或 404 |
 | `POST /remove` `{id}` | `{ok}` 或 404 |
 
@@ -84,9 +88,11 @@ await server.RunAsync(CancellationToken.None);
 一条 TCP 连接一个请求：Jay 发一行 JSON（UTF-8，`\n` 结尾，最长 16 KB），你回一行 JSON，然后关连接。10 秒内要回。
 回复都有 `ok`。失败时 `{ok: false, error: "<code>", reason?: "<给房主看的话，最多 120 字>"}`。
 
+每个请求都带 `jay: "<Jay 的版本号>"`（比如 `"0.8.0"`）。网络配置有 `policy.minVersion` 时，版本更低或者没带这个字段就回 `{ok: false, error: "version", min: "<最低版本>"}`，不处理请求。
+
 | op | 请求 | 回复 |
 |---|---|---|
-| `announce` | `{room: <房间>, listed: bool, lookup: ["<64 位十六进制>", ...最多 4 个], fp?: "<64 位十六进制>"}` | `{ok, mail: ["..."]}`：直连房间收到的留言，交出去后清空 |
+| `announce` | `{room: <房间>, listed: bool, lookup: ["<64 位十六进制>", ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok, mail: ["..."]}`：直连房间收到的留言，交出去后清空 |
 | `withdraw` | `{id, seq, sig}`：`sig` 是房间签名钥匙对 `"jay-withdraw-v1\n<id>\n<seq>"` 的 Ed25519 签名（十六进制） | `{ok}` |
 | `list` | `{}` | `{ok, rooms: [<房间>, ...]}`：`listed` 为真且不是隐藏房间的，最多 300 个 |
 | `lookup` | `{key}`：邀请码大厅名的查找键 | `{ok, ip?, key?, id?}` |
@@ -95,7 +101,7 @@ await server.RunAsync(CancellationToken.None);
 | `login` | 见 `NetworkLoginClient.Request` / `LoginAuthority.Handle` | 加密的凭证或 `factor` 提示 |
 | `x-*` | 你自己的 | 你自己的 |
 
-Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别人占着、旧版本）、`full`（满了）、`gone`、`rate`（限流），其他码有 `reason` 就显示 `reason`。
+Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别人占着、旧版本）、`full`（满了）、`gone`、`rate`（限流）、`version`（Jay 太旧，带 `min`）、`login`（要先登录），其他码有 `reason` 就显示 `reason`。
 
 ### 房间（room）
 
