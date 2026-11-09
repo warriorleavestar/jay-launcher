@@ -205,6 +205,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             if (_service.CurrentInstance is { } id && Instances.Contains(id)) TargetInstance = id;
             OnPropertyChanged(nameof(IsTemporaryTarget));
         });
+        service.ContentChanged += () => Dispatcher.UIThread.Post(UpdateShaderState);
         RefreshInstances();
     }
 
@@ -236,6 +237,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     {
         if (value < 0) return;
         OnPropertyChanged(nameof(IsSharedTarget));
+        UpdateShaderState();
         if (IsDatapack) RefreshWorlds();
         _ = SearchFromStart();
     }
@@ -285,6 +287,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     partial void OnTargetInstanceChanged(string? value)
     {
         OnPropertyChanged(nameof(IsTemporaryTarget));
+        UpdateShaderState();
         OnPropertyChanged(nameof(IsSharedTarget));
         if (IsDatapack) RefreshWorlds();
         if (Detail is not null) _ = LoadFilesAsync();
@@ -705,6 +708,13 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Warning("content.install.vanilla_blocked", instance.Id));
             return;
         }
+        var shaderState = CurrentType == ContentType.Shader ? ShaderRenderer.ReadinessOf(instance) : (ShaderReadiness?)null;
+        if (shaderState == ShaderReadiness.Vanilla)
+        {
+            // 原版实例用不了光影：和原版装模组一样装前拦下（旧规格 N3）。
+            SetStatus(StatusMessage.Warning("content.shader.vanilla", instance.Id));
+            return;
+        }
         var world = TargetWorld;
         if (IsDatapack && world is null)
         {
@@ -749,6 +759,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             var kind = problems.Length > 0 || noLoader.Length > 0 ? StatusKind.Warning : StatusKind.Success;
             SetStatus(new StatusMessage("content.install.completed", [file.DisplayName, extra, where, problems, noLoader], kind));
             _service.NotifyContentChanged();
+            if (shaderState is { } state) await AfterShaderInstallAsync(instance, state, file.DisplayName, _workCts.Token);
         }
         catch (ManualDownloadRequiredException e)
         {
