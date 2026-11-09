@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 namespace Amber.Core.RemoteControl;
 
 /// <summary>被共享的那块屏幕在桌面坐标里的位置（多显示器时是整个虚拟桌面，左上角可能是负数）。</summary>
@@ -82,12 +83,60 @@ public sealed class AskEveryTimePolicy(Func<RemoteConsentRequest, CancellationTo
     }
 }
 
-/// <summary>按当前系统选截屏和注入的实现。Mac/Linux 还没有（返回 null，界面上提示不支持）。</summary>
+/// <summary>
+/// 按当前系统选截屏和注入的实现：Windows 用 GDI + SendInput，Linux 用 X11（XGetImage + XTest），macOS 用 CoreGraphics + CGEvent。
+/// 这里只管“这台电脑能不能被别人看 / 控制”；看别人、控制别人在哪个系统上都行（只要解码和显示）。
+/// </summary>
 public static class RemotePlatform
 {
-    public static bool Supported => OperatingSystem.IsWindows();
+    /// <summary>这台电脑能被看 / 控制。</summary>
+    public static bool Supported => UnavailableReason is null;
 
-    public static IScreenSource? CreateScreen() => OperatingSystem.IsWindows() ? new Windows.GdiScreenSource() : null;
+    /// <summary>不能被看 / 控制的原因（已翻译）；能时 null。Linux 上每次查一下（显示环境可能变），Windows 和 macOS 总是能。</summary>
+    public static string? UnavailableReason =>
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? null
+        : OperatingSystem.IsLinux() ? Unix.X11.UnavailableReason()
+        : L.T("multiplayer.remote.unsupported_os");
 
-    public static IInputSink? CreateInput() => OperatingSystem.IsWindows() ? new Windows.SendInputSink() : null;
+    /// <summary>能用但还要用户在系统里授权（macOS 的屏幕录制 / 辅助功能）时的提示（已翻译）；不需要时 null。</summary>
+    public static string? SetupHint
+    {
+        get
+        {
+            if (!OperatingSystem.IsMacOS()) return null;
+            try
+            {
+                var screen = Unix.MacCg.CGPreflightScreenCaptureAccess();
+                var input = Unix.MacCg.AXIsProcessTrusted();
+                return screen && input ? null : L.T(screen ? "core.remote.mac_accessibility" : "core.remote.mac_permissions");
+            }
+            catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { return null; }
+        }
+    }
+
+    /// <summary>截屏来源；不支持或者（macOS）还没授权时 null，调用方按“不支持”拒绝。</summary>
+    public static IScreenSource? CreateScreen()
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows()) return new Windows.GdiScreenSource();
+            if (OperatingSystem.IsMacOS()) return Unix.MacCg.EnsureScreenAccess() ? new Unix.MacScreenSource() : null;
+            if (OperatingSystem.IsLinux()) return Unix.X11.UnavailableReason() is null ? new Unix.X11ScreenSource() : null;
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException) { }
+        return null;
+    }
+
+    /// <summary>鼠标键盘注入；不支持或者（macOS）还没授权辅助功能时 null（这时只能看，不能控制）。</summary>
+    public static IInputSink? CreateInput()
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows()) return new Windows.SendInputSink();
+            if (OperatingSystem.IsMacOS()) return Unix.MacCg.EnsureAccessibility() ? new Unix.MacInputSink() : null;
+            if (OperatingSystem.IsLinux()) return Unix.X11.UnavailableReason() is null ? new Unix.X11InputSink() : null;
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException) { }
+        return null;
+    }
 }

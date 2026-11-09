@@ -468,30 +468,72 @@ public static class RemoteSharingOverlay
         if (OperatingSystem.IsWindows())
             hotkey = new GlobalHotkey(() => _ = sharer.StopAsync(RemoteStopReason.StoppedByUser));
         bar.HotkeyAvailable = hotkey?.Registered == true;
-        // 红框（Windows 用系统原生窗口；其他系统以后补）。小条放在红框里面、不重叠。
+        // 红框：Windows 用系统原生窗口（点击穿透）；Mac/Linux 用四条很窄的置顶无边框窗口（只占屏幕边缘 4 像素，不需要穿透）。小条放在红框里面、不重叠。
         // 被控期间改分辨率、插拔显示器、缩放变了：每秒对一次屏幕布局，变了就按新的重画红框、小条放回主屏顶部。
-        if (OperatingSystem.IsWindows())
+        var current = FrameRects(bar.Screens.All);
+        (IDisposable Frame, int Count) Draw(List<(int X, int Y, int Width, int Height)> rects)
         {
-            var current = FrameRects(bar.Screens.All);
-            var red = new RedFrameWindows(current);
-            frame = red;
-            FrameCount = red.Count;
-            watch = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
+            if (OperatingSystem.IsWindows())
             {
-                if (closed || !OperatingSystem.IsWindows()) return;
-                var next = FrameRects(bar.Screens.All);
-                if (next.SequenceEqual(current)) return;
-                current = next;
-                frame?.Dispose();
-                var redrawn = new RedFrameWindows(next);
-                frame = redrawn;
-                FrameCount = redrawn.Count;
-                bar.PlaceAtTop();
-            });
-            watch.Start();
+                var red = new RedFrameWindows(rects);
+                return (red, red.Count);
+            }
+            var edges = new RedFrameEdges(rects, bar.Screens);
+            return (edges, edges.Count);
         }
+        (frame, FrameCount) = Draw(current);
+        watch = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
+        {
+            if (closed) return;
+            var next = FrameRects(bar.Screens.All);
+            if (next.SequenceEqual(current)) return;
+            current = next;
+            frame?.Dispose();
+            (frame, FrameCount) = Draw(next);
+            bar.PlaceAtTop();
+        });
+        watch.Start();
         bar.Show();
         if (sharer.HasEnded) CloseAll();
+    }
+}
+
+/// <summary>Mac/Linux 的红框：每条边一个置顶、不抢焦点、不进任务栏的无边框红色小窗口（位置和大小是桌面像素，按所在屏幕的缩放换成窗口尺寸）。</summary>
+internal sealed class RedFrameEdges : IDisposable
+{
+    private readonly List<Window> _windows = [];
+
+    public RedFrameEdges(IEnumerable<(int X, int Y, int Width, int Height)> rects, Avalonia.Controls.Screens screens)
+    {
+        foreach (var (x, y, w, h) in rects)
+        {
+            var scaling = screens.ScreenFromPoint(new PixelPoint(x + w / 2, y + h / 2))?.Scaling ?? 1;
+            var edge = new Window
+            {
+                WindowDecorations = WindowDecorations.None,
+                Topmost = true,
+                ShowActivated = false,
+                ShowInTaskbar = false,
+                CanResize = false,
+                Focusable = false,
+                Background = new SolidColorBrush(Color.FromRgb(0xE5, 0x1C, 0x1C)),
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Position = new PixelPoint(x, y),
+                Width = w / scaling,
+                Height = h / scaling,
+                Title = "Jay",
+            };
+            edge.Show();
+            _windows.Add(edge);
+        }
+    }
+
+    public int Count => _windows.Count;
+
+    public void Dispose()
+    {
+        foreach (var w in _windows) w.Close();
+        _windows.Clear();
     }
 }
 

@@ -1453,7 +1453,7 @@
   "multiplayer.remote.button": "リモート操作",
   "multiplayer.remote.control_host": "ホストの PC をリモート操作",
   "multiplayer.remote.hint": "相手は毎回同意が必要です。操作されている側の画面の縁は赤く表示され、Ctrl+Shift+F12 でいつでも停止できます。",
-  "multiplayer.remote.unsupported_os": "リモート操作は現在 Windows のみ対応しています。",
+  "multiplayer.remote.unsupported_os": "このシステムはまだリモート操作を受けられません（対応：Windows、macOS、Linux の X11 デスクトップ）。",
   "multiplayer.remote.invite_only": "リモート操作には招待で作成したルームが必要です（旧 AMB- ルームコードは非対応）。",
   "multiplayer.remote.diagnostics_category": "リモート操作",
   "multiplayer.remote.port_occupied": "リモート操作のポート {0} が使用中です：{1}",
@@ -1874,5 +1874,11 @@
   "multiplayer.netconfig.failed": "「{0}」のネットワーク設定を取得できません：{1}",
   "multiplayer.netconfig.too_old": "「{0}」には Jay {1} 以降が必要です。先に更新してください",
   "multiplayer.netconfig.mode_not_allowed": "この公共ネットワークでは「{0}」のルームは使えません",
-  "multiplayer.netconfig.notice_title": "ネットワークのお知らせ"
+  "multiplayer.netconfig.notice_title": "ネットワークのお知らせ",
+  "multiplayer.remote.cannot_share": "今はこのコンピューターを他の人が見たり操作したりできません：{0} 他の人を見たり操作したりはできます。",
+  "core.remote.wayland": "Linux の Wayland デスクトップはまだリモート操作に対応していません（XWayland では他のウィンドウを取得できません）。ログイン時に「X11」または「Xorg」セッションを選ぶと使えます。",
+  "core.remote.nodisplay": "X11 デスクトップが見つかりません（DISPLAY が未設定か接続できません）。",
+  "core.remote.missinglib": "X11 コンポーネント {0} がありません。パッケージマネージャーでインストールして Jay を開き直してください。",
+  "core.remote.mac_permissions": "この Mac をリモート操作してもらう前に、「システム設定 → プライバシーとセキュリティ」で Jay に「画面収録」と「アクセシビリティ」を許可し、Jay を開き直してください。",
+  "core.remote.mac_accessibility": "マウスとキーボードを操作してもらうには「システム設定 → プライバシーとセキュリティ → アクセシビリティ」で Jay を許可してください。許可するまでは見るだけになります。"
 }

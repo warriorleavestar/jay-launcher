@@ -1453,7 +1453,7 @@
   "multiplayer.remote.button": "远程控制",
   "multiplayer.remote.control_host": "远程控制房主的电脑",
   "multiplayer.remote.hint": "对方每次都要点同意；被控的一方屏幕边缘会有红框，按 Ctrl+Shift+F12 随时停止。",
-  "multiplayer.remote.unsupported_os": "远程控制暂时只支持 Windows。",
+  "multiplayer.remote.unsupported_os": "这个系统还不支持被远程控制（支持 Windows、macOS 和 Linux 的 X11 桌面）。",
   "multiplayer.remote.invite_only": "远程控制需要用邀请创建的房间（旧的 AMB- 房间码不支持）。",
   "multiplayer.remote.diagnostics_category": "远程控制",
   "multiplayer.remote.port_occupied": "远程控制端口 {0} 被占用：{1}",
@@ -1874,5 +1874,11 @@
   "multiplayer.netconfig.failed": "取不到“{0}”的网络配置：{1}",
   "multiplayer.netconfig.too_old": "“{0}”要求 Jay {1} 或更新的版本，请先更新",
   "multiplayer.netconfig.mode_not_allowed": "这个公共网络不允许“{0}”这种房间",
-  "multiplayer.netconfig.notice_title": "网络公告"
+  "multiplayer.netconfig.notice_title": "网络公告",
+  "multiplayer.remote.cannot_share": "别人暂时不能看或控制这台电脑：{0} 你仍然可以看或控制别人。",
+  "core.remote.wayland": "Linux 的 Wayland 桌面还不支持被远程控制（XWayland 截不到其他窗口）。登录时选“X11”或“Xorg”会话就能用。",
+  "core.remote.nodisplay": "没有找到 X11 图形桌面（DISPLAY 没设置或连不上）。",
+  "core.remote.missinglib": "缺少 X11 组件 {0}，请用系统的包管理器安装后重新打开 Jay。",
+  "core.remote.mac_permissions": "在 macOS 上被远程控制前，要先到“系统设置 → 隐私与安全性”里给 Jay 打开“屏幕录制”和“辅助功能”权限，开完后重新打开 Jay。",
+  "core.remote.mac_accessibility": "要让对方控制鼠标键盘，还要到“系统设置 → 隐私与安全性 → 辅助功能”里允许 Jay；没开时对方只能看。"
 }
