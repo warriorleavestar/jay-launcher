@@ -51,6 +51,61 @@
       <Setter Property="Padding" Value="6,2" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
+    <!-- 三段式选择器：一排等宽的单选段，选中的用强调色底（改版规格 3.5） -->
+    <Style Selector="UniformGrid.segmented > RadioButton">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Name="SegmentBorder" Background="{DynamicResource PageBg}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"
+                  Padding="{TemplateBinding Padding}" CornerRadius="{StaticResource RadiusSm}">
+            <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="UniformGrid.segmented > RadioButton:checked /template/ Border#SegmentBorder">
+      <Setter Property="Background" Value="{DynamicResource Accent}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+    </Style>
+    <Style Selector="UniformGrid.segmented > RadioButton:checked TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="UniformGrid.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder">
+      <Setter Property="Background" Value="{DynamicResource NavHover}" />
+    </Style>
+    <Style Selector="UniformGrid.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentText}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <!-- 胶囊：类型和状态标签（改版规格 4.4：正式版 Success、快照 Accent、其余中性色） -->
+    <Style Selector="Border.pill">
+      <Setter Property="CornerRadius" Value="{StaticResource RadiusPill}" />
+      <Setter Property="Padding" Value="8,1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource PageBg}" />
+    </Style>
+    <Style Selector="Border.pill > TextBlock">
+      <Setter Property="FontSize" Value="{StaticResource FontCaption}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+    </Style>
+    <Style Selector="Border.pill.success">
+      <Setter Property="Background" Value="{DynamicResource SuccessTint}" />
+    </Style>
+    <Style Selector="Border.pill.success > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource SuccessText}" />
+    </Style>
+    <Style Selector="Border.pill.accent">
+      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
+    </Style>
+    <Style Selector="Border.pill.accent > TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
+    </Style>
     <Style Selector="Border.card">
       <Setter Property="Background" Value="{DynamicResource Surface}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />

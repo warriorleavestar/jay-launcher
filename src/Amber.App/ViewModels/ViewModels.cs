@@ -168,7 +168,7 @@ public sealed partial class MainViewModel : ObservableObject
         home.NavigateHere = () => CurrentPage = home;
         home.Onboarding.MicrosoftLogin = () =>
         {
-            if (accounts is AccountsViewModel a) a.LoginTab = 1;
+            if (accounts is AccountsViewModel a) a.LoginTab = AccountsViewModel.MicrosoftTab;
             CurrentPage = accounts;
         };
         home.Onboarding.ChooseVersion = () => CurrentPage = download;

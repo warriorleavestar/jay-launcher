@@ -89,7 +89,18 @@
       <ScrollViewer>
         <StackPanel Spacing="10">
           <TextBlock Classes="h2" Text="{l:T accounts.add.title}" Margin="0" />
-          <ComboBox ItemsSource="{Binding LoginKinds}" SelectedIndex="{Binding LoginTab}" HorizontalAlignment="Stretch" />
+          <!-- 三段式选择器（改版规格 3.5）：正版 | 离线 | 皮肤站，每段一样宽，放不下时省略并给 ToolTip。 -->
+          <UniformGrid x:Name="LoginKindSwitch" Columns="3" Classes="segmented">
+            <RadioButton GroupName="LoginKind" IsChecked="{Binding IsMicrosoftTab}" ToolTip.Tip="{l:T accounts.tab.microsoft}">
+              <TextBlock Text="{l:T accounts.tab.microsoft}" TextTrimming="CharacterEllipsis" />
+            </RadioButton>
+            <RadioButton GroupName="LoginKind" IsChecked="{Binding IsOfflineTab}" ToolTip.Tip="{l:T accounts.tab.offline}">
+              <TextBlock Text="{l:T accounts.tab.offline}" TextTrimming="CharacterEllipsis" />
+            </RadioButton>
+            <RadioButton GroupName="LoginKind" IsChecked="{Binding IsExternalTab}" ToolTip.Tip="{l:T accounts.tab.external}">
+              <TextBlock Text="{l:T accounts.tab.external}" TextTrimming="CharacterEllipsis" />
+            </RadioButton>
+          </UniformGrid>
 
           <StackPanel Spacing="10" IsVisible="{Binding IsOfflineTab}">
             <TextBox x:Name="OfflineNameBox" Text="{Binding OfflineName}" PlaceholderText="{l:T accounts.offline.name_placeholder}" MaxLength="16" c:EnterSubmit.Command="{Binding AddOfflineCommand}" />
@@ -98,22 +109,58 @@
           </StackPanel>
 
           <StackPanel Spacing="10" IsVisible="{Binding IsMicrosoftTab}">
-            <TextBlock Text="{l:T accounts.microsoft.client_id_label}" TextWrapping="Wrap" />
-            <TextBox Text="{Binding ClientIdInput}" PlaceholderText="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-            <TextBlock Classes="hint"
-                       Text="{l:T accounts.microsoft.client_id_hint}" />
-            <Button Classes="primary" Content="{l:T accounts.microsoft.login}" Command="{Binding LoginMicrosoftCommand}" />
+            <Button x:Name="MicrosoftLoginButton" Classes="primary" Content="{l:T accounts.microsoft.login}" Command="{Binding LoginMicrosoftCommand}"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="16,10" IsVisible="{Binding !HasDeviceCode}" />
+
+            <!-- 设备码：已自动复制并打开网页；旁边【复制代码】、倒计时；过期后留着给【重新获取代码】。 -->
             <Border IsVisible="{Binding HasDeviceCode}" Background="{DynamicResource PageBg}" CornerRadius="8" Padding="12">
               <StackPanel Spacing="8">
-                <TextBlock Text="{l:T accounts.microsoft.device_code_hint}" />
-                <SelectableTextBlock Text="{Binding DeviceCode}" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource AccentText}" />
+                <TextBlock Text="{Binding CodeCopiedText}" TextWrapping="Wrap" IsVisible="{Binding CodeActive}" />
+                <SelectableTextBlock x:Name="DeviceCodeText" Text="{Binding DeviceCode}" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource AccentText}"
+                                     AutomationProperties.Name="{l:T accounts.microsoft.code_name}" />
                 <SelectableTextBlock Text="{Binding DeviceUri}" Classes="hint" TextWrapping="Wrap" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Button Content="{l:T accounts.microsoft.open_browser}" Command="{Binding OpenDeviceUriCommand}" />
+                <TextBlock x:Name="CountdownText" Classes="hint" Text="{Binding CountdownText}" IsVisible="{Binding CodeActive}" />
+                <TextBlock Text="{l:T accounts.microsoft.expired}" Foreground="{DynamicResource WarningText}" TextWrapping="Wrap" IsVisible="{Binding CodeExpired}" />
+                <WrapPanel ItemSpacing="8" LineSpacing="8">
+                  <Button x:Name="CopyCodeButton" Content="{Binding CopyCodeLabel}" Command="{Binding CopyCodeCommand}" IsVisible="{Binding CodeActive}" />
+                  <Button Content="{l:T accounts.microsoft.open_browser}" Command="{Binding OpenDeviceUriCommand}" IsVisible="{Binding CodeActive}" />
+                  <Button x:Name="RenewCodeButton" Classes="primary" Content="{l:T accounts.microsoft.renew}" Command="{Binding LoginMicrosoftCommand}" IsVisible="{Binding CodeExpired}" />
                   <Button Content="{l:T common.cancel}" Command="{Binding CancelLoginCommand}" />
-                </StackPanel>
+                </WrapPanel>
               </StackPanel>
             </Border>
+
+            <!-- 失败：原因 + 按种类给的按钮（改版规格 3.5 失败状态表）。 -->
+            <Border x:Name="LoginFailureCard" Classes="callout warning" IsVisible="{Binding HasLoginFailure}">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{Binding LoginFailure}" TextWrapping="Wrap" />
+                <ItemsControl x:Name="LoginActionList" ItemsSource="{Binding LoginActions}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <WrapPanel ItemSpacing="8" LineSpacing="8" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:LoginAction">
+                      <Button Content="{Binding Label}" Command="{Binding #LoginActionList.((vm:AccountsViewModel)DataContext).RunLoginActionCommand}" CommandParameter="{Binding}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="callout info" IsVisible="{Binding HasLoginSuccess}">
+              <TextBlock x:Name="LoginSuccessText" Text="{Binding LoginSuccess}" TextWrapping="Wrap" />
+            </Border>
+
+            <!-- Client ID 一般不用填，收进默认折叠的“高级”。 -->
+            <Expander x:Name="MicrosoftAdvanced" Header="{l:T accounts.microsoft.advanced}" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{l:T accounts.microsoft.client_id_label}" TextWrapping="Wrap" />
+                <TextBox Text="{Binding ClientIdInput}" PlaceholderText="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                <TextBlock Classes="hint" Text="{l:T accounts.microsoft.client_id_hint}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Expander>
           </StackPanel>
 
           <StackPanel Spacing="10" IsVisible="{Binding IsExternalTab}">

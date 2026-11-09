@@ -97,7 +97,7 @@ internal sealed partial class SelfTest
         // 单字段 Enter 提交：离线名框里按 Enter 添加账号。
         var accounts = Page<AccountsViewModel>();
         main.CurrentPage = accounts;
-        accounts.LoginTab = 0;
+        accounts.LoginTab = AccountsViewModel.OfflineTab;
         var nameBox = await FindAsync<TextBox>(t => t.Name == "OfflineNameBox" && t.IsEffectivelyVisible);
         var count = service.Accounts.Store.Accounts.Count;
         Dispatcher.UIThread.Invoke(() =>
@@ -121,7 +121,7 @@ internal sealed partial class SelfTest
             if (added is not null) service.Accounts.Store.Remove(added);
             service.NotifyAccountsChanged();
         });
-        accounts.LoginTab = 1;
+        accounts.LoginTab = AccountsViewModel.MicrosoftTab;
     }
 
     /// <summary>直接读设置文件（不经界面）。</summary>
