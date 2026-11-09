@@ -24,6 +24,7 @@
     <ProjectReference Include="..\Amber.App\Amber.App.csproj" />
     <ProjectReference Include="..\Amber.Mobile\Amber.Mobile.csproj" />
     <ProjectReference Include="..\Amber.Server\Amber.Server.csproj" />
+    <ProjectReference Include="..\Amber.NetworkServer\Amber.NetworkServer.csproj" />
   </ItemGroup>
 
 </Project>

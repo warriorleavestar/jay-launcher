@@ -53,7 +53,7 @@ public sealed class SecondFactorRequiredException(IReadOnlyList<LoginFactorPromp
 /// TOTP（RFC 6238：HMAC-SHA1、30 秒、6 位），就是 Google Authenticator、Microsoft Authenticator 这类 App 里的码。
 /// 允许前后各差一个 30 秒；同一个码用过一次就不能再用。
 /// </summary>
-public sealed class TotpFactor(AccountStore accounts) : ILoginFactor
+public sealed class TotpFactor(IAccountStore accounts) : ILoginFactor
 {
     public const int Digits = 6;
     public static readonly TimeSpan Step = TimeSpan.FromSeconds(30);

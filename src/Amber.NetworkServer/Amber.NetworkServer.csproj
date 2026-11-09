@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Jay 网络服务端框架：公共网络节点（种子节点 + 房间目录 + 账号登录）做成一个库。
+    jay-server 的 directory 命令就是用它跑的；第三方网络也可以引用它，接自己的审核规则、账号库、验证方式和自定义请求。
+    协议和扩展点见 docs/network-server-framework.md。
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Jay.NetworkServer</AssemblyName>
+    <RootNamespace>Amber.NetworkServer</RootNamespace>
+    <Product>Jay</Product>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Amber.Core\Amber.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Amber.Core.Tests" />
+  </ItemGroup>
+
+</Project>
