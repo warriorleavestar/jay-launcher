@@ -11,7 +11,8 @@ namespace Amber.Core.Multiplayer.Public;
 /// <summary>
 /// 目录服务的协议：一条连接一个请求，各是一行 JSON（UTF-8，最长 16 KB）。
 /// announce 发布 / 续期房间（房主用房间的签名钥匙签过，房间编号由签名公钥派生，序号只能变大）；
-/// withdraw 撤下；list 看公开列表；lookup 按大厅名找房主（拿着邀请码的人用它找到隐藏房间）；mail 给房主捎一句话（直连房间的回复码）。
+/// withdraw 撤下；list 看公开列表；lookup 按大厅名找房主（拿着邀请码的人用它找到隐藏房间）；mail 给房主捎一句话（直连房间的回复码）；
+/// find 按设备指纹码找房间（房主打开了“可以用指纹码找到这个房间”时，发布时带上指纹密钥，目录拿它认码）。
 /// 目录服务只存这些，不经手任何钥匙；房主 90 秒没续期就从列表里消失。
 /// </summary>
 public static class RoomDirectoryProtocol
@@ -71,6 +72,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         public required RoomListing Listing;
         public bool Listed;
         public string[] Lookup = [];
+        /// <summary>房主的指纹密钥（没打开指纹查找时为 null）。</summary>
+        public byte[]? Search;
         public DateTimeOffset Expires;
         public readonly List<string> Mail = [];
     }
@@ -81,6 +84,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Entry> _rooms = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _lookup = new(StringComparer.Ordinal);
+    /// <summary>指纹密钥（十六进制）→ 房间编号，先到先得。</summary>
+    private readonly Dictionary<string, string> _search = new(StringComparer.Ordinal);
     /// <summary>撤下过的房间和撤下时的序号（之后拿旧签名重新发布的不认）。只留最近的一些。</summary>
     private readonly Dictionary<string, long> _withdrawn = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _slots = new(MaxConcurrent, MaxConcurrent);
@@ -154,6 +159,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "list" => List(),
                 "lookup" => Lookup(request),
                 "mail" => Mail(request),
+                "find" => Find(request),
                 _ => Error("op"),
             };
         }
@@ -172,7 +178,10 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         var listed = request["listed"]?.GetValue<bool>() ?? false;
         var keys = (request["lookup"] as JsonArray ?? []).Select(k => k?.GetValue<string>()).OfType<string>()
             .Where(k => k.Length == 64 && k.All(char.IsAsciiHexDigit)).Distinct().Take(RoomDirectoryProtocol.MaxLookupKeys).ToArray();
-        if (!listed && keys.Length == 0) return Error("empty");
+        var fp = request["fp"]?.GetValue<string>();
+        if (fp is not null && (fp.Length != 64 || !fp.All(char.IsAsciiHexDigit))) return Error("bad");
+        fp = fp?.ToLowerInvariant();
+        if (!listed && keys.Length == 0 && fp is null) return Error("empty");
         lock (_gate)
         {
             Prune();
@@ -190,9 +199,13 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             // 查找键先到先得：别人的房间已经占着的键不给（拿着同一张公开邀请的人不能把找房主的人引到自己那里）。
             foreach (var key in keys)
                 if (_lookup.TryGetValue(key, out var holder) && holder != listing.Id) return Error("lookup");
+            if (fp is not null && _search.TryGetValue(fp, out var owner) && owner != listing.Id) return Error("lookup");
             foreach (var old in entry.Lookup) _lookup.Remove(old);
             foreach (var key in keys) _lookup[key] = listing.Id;
             entry.Lookup = keys;
+            if (entry.Search is { } oldSearch) _search.Remove(Convert.ToHexStringLower(oldSearch));
+            entry.Search = fp is null ? null : Convert.FromHexString(fp);
+            if (fp is not null) _search[fp] = listing.Id;
             entry.Listing = listing with { Updated = _now() };
             entry.Listed = listed;
             entry.Expires = _now() + RoomDirectoryProtocol.Ttl;
@@ -245,6 +258,20 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
+    /// <summary>按指纹码找房间：拿每个登记了指纹密钥的房间算一遍标签（几千个 HMAC，很快）。找到了给整份签过名的房间信息。</summary>
+    private JsonObject Find(JsonObject request)
+    {
+        if (!FingerprintCode.TryParse(request["code"]?.GetValue<string>(), out var code)) return Error("bad");
+        lock (_gate)
+        {
+            Prune();
+            foreach (var entry in _rooms.Values)
+                if (entry.Search is { } key && FingerprintCode.Matches(key, code))
+                    return new JsonObject { ["ok"] = true, ["room"] = entry.Listing.ToJson() };
+            return new JsonObject { ["ok"] = true };
+        }
+    }
+
     private JsonObject Mail(JsonObject request)
     {
         var id = request["id"]?.GetValue<string>();
@@ -271,6 +298,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         _rooms.Remove(id);
         foreach (var key in entry.Lookup)
             if (_lookup.TryGetValue(key, out var holder) && holder == id) _lookup.Remove(key);
+        if (entry.Search is { } search && _search.TryGetValue(Convert.ToHexStringLower(search), out var finder) && finder == id)
+            _search.Remove(Convert.ToHexStringLower(search));
     }
 
     public async ValueTask DisposeAsync()
@@ -319,7 +348,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, string ip = Publ
 
     /// <summary>发布或续期。返回目录里给房主捎的话（直连回复码）。</summary>
     /// <param name="listing">已经用 <see cref="RoomSigner.Sign"/> 签好的房间信息。</param>
-    public async Task<IReadOnlyList<string>> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<string> lookupKeys, CancellationToken ct)
+    /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
+    public async Task<IReadOnlyList<string>> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<string> lookupKeys, CancellationToken ct,
+        byte[]? searchKey = null)
     {
         var request = new JsonObject
         {
@@ -328,6 +359,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, string ip = Publ
             ["listed"] = listed,
             ["lookup"] = new JsonArray(lookupKeys.Select(k => (JsonNode?)k).ToArray()),
         };
+        if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         var reply = await CallAsync(request, ct);
         Check(reply);
         return [.. (reply["mail"] as JsonArray ?? []).Select(m => m?.GetValue<string>()).OfType<string>()];
@@ -350,6 +382,14 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, string ip = Publ
         if (ip is null || key is not { Length: 64 } || id is null || !RoomListing.IsPublicNetworkIp(ip)) return null;
         try { return new DirectoryHit(id, ip, Convert.FromHexString(key)); }
         catch (FormatException) { return null; }
+    }
+
+    /// <summary>按设备指纹码找房间；没找到返回 null。</summary>
+    public async Task<RoomListing?> FindAsync(string code, CancellationToken ct)
+    {
+        var reply = await CallAsync(new JsonObject { ["op"] = "find", ["code"] = code }, ct);
+        Check(reply);
+        return RoomListing.FromJson(reply["room"]);
     }
 
     public async Task MailAsync(string id, string text, CancellationToken ct) =>

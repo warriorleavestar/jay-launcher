@@ -118,6 +118,8 @@ internal sealed partial class SelfTest
             guest.StopCommand.Execute(null);
         }
 
+        await DeviceFingerprintAsync(host, guest);
+
         // 撤下：列表里没了；关房间、断开后目录里也没了。
         host.UnpublishRoomCommand.Execute(null);
         await Task.Delay(1500);
@@ -128,5 +130,63 @@ internal sealed partial class SelfTest
         guest.DisconnectPublicCommand.Execute(null);
         server.Stop();
         Check("公共网络：断开后状态复原", !host.IsPublicConnected && !guest.IsPublicConnected && host.PublicRooms.Count == 0);
+    
+    }
+
+    /// <summary>设备指纹：默认关着；打开后生成的码每次不同；房主隐藏房间 + 指纹查找 + 要求设备指纹；加入方按码找到房间，没开指纹进不去，开了、在名单里、房主批准后能进；换新后旧码找不到。</summary>
+    private async Task DeviceFingerprintAsync(MultiplayerViewModel host, MultiplayerViewModel guest)
+    {
+        host.UseTestDevice(Path.Combine(reportDir, "device-host"));
+        guest.UseTestDevice(Path.Combine(reportDir, "device-guest"));
+        Check("设备指纹：默认关着", !host.DeviceEnabled && !guest.DeviceEnabled && host.MyFingerprintCode.Length == 0);
+        host.EnableDeviceCommand.Execute(null);
+        var first = host.MyFingerprintCode;
+        host.NewFingerprintCodeCommand.Execute(null);
+        var code = host.MyFingerprintCode;
+        Check("设备指纹：打开后生成指纹码，每次都不一样", host.DeviceEnabled && first.StartsWith("JAYF1-") && code.StartsWith("JAYF1-") && first != code, first + " / " + code);
+        var page = await FindAsync<MultiplayerPage>(_ => true);
+        if (page?.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => Equals(e.Header, L.T("multiplayer.device.title"))) is { } expander)
+        {
+            Dispatcher.UIThread.Invoke(() => expander.IsExpanded = true);
+            await Task.Delay(300);
+            Dispatcher.UIThread.Invoke(() => expander.BringIntoView());
+        }
+        await ShotAsync("设备指纹");
+
+        host.SelectedVisibility = host.VisibilityChoices.Single(c => c.Mode == RoomVisibility.Hidden);
+        host.AllowFingerprintSearch = true;
+        host.RequireDevice = true;
+        await host.PublishRoomCommand.ExecuteAsync(null);
+        await Task.Delay(1500);
+        await guest.RefreshRoomsCommand.ExecuteAsync(null);
+        Check("设备指纹：隐藏房间不在列表里", guest.PublicRooms.All(r => r.Listing.Name != "自检房间"));
+        guest.FindCodeInput = first;
+        await guest.FindByFingerprintCommand.ExecuteAsync(null);
+        Check("设备指纹：按指纹码找到房主的隐藏房间", guest.FoundRoom?.Listing.Name == "自检房间", guest.Status);
+        await guest.JoinFoundRoomCommand.ExecuteAsync(null);
+        Check("设备指纹：房主要求设备指纹，没打开进不去", guest.IsIdle && guest.Status == L.T("multiplayer.device.reason"), guest.Status);
+
+        guest.EnableDeviceCommand.Execute(null);
+        host.AllowedDevicesText = guest.MyFingerprintCode;
+        var joining = guest.JoinFoundRoomCommand.ExecuteAsync(null);
+        var asked = await WaitAsync(() => host.ApprovalCards.Count == 1, 30);
+        Check("设备指纹：房主的敲门卡片带设备编号", asked && host.ApprovalCards[0].Detail.Contains(guest.Device!.DeviceId), asked ? host.ApprovalCards[0].Detail : guest.Status);
+        if (asked) host.ApproveKnockCommand.Execute(host.ApprovalCards[0]);
+        await joining;
+        Check("设备指纹：在名单里、房主批准后进了房间", guest.IsJoined, guest.Status);
+        guest.StopCommand.Execute(null);
+
+        // 换新：以前的码全部作废。
+        host.RotateDeviceCommand.Execute(null);
+        await Task.Delay(1500);
+        guest.FindCodeInput = code;
+        await guest.FindByFingerprintCommand.ExecuteAsync(null);
+        Check("设备指纹：换新后旧码找不到", guest.FoundRoom is null && guest.Status == L.T("multiplayer.device.not_found"), guest.Status);
+        guest.FindCodeInput = host.MyFingerprintCode;
+        await guest.FindByFingerprintCommand.ExecuteAsync(null);
+        Check("设备指纹：新码找得到", guest.FoundRoom is not null, guest.Status);
+        host.RequireDevice = false;
+        host.AllowedDevicesText = "";
+        host.AllowFingerprintSearch = false;
     }
 }

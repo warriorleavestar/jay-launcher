@@ -79,6 +79,21 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
               <TextBox Text="{Binding PublicRoomPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.public.password_placeholder}" IsVisible="{Binding IsPublicConnected}" />
+              <!-- 用指纹码找房间 -->
+              <StackPanel Spacing="6" IsVisible="{Binding IsPublicConnected}">
+                <TextBlock Text="{l:T multiplayer.device.find_title}" FontWeight="SemiBold" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBox Text="{Binding FindCodeInput}" PlaceholderText="{l:T multiplayer.device.find_placeholder}" FontFamily="Consolas,monospace" />
+                  <Button Grid.Column="1" Content="{l:T multiplayer.device.find}" Command="{Binding FindByFingerprintCommand}" IsEnabled="{Binding !IsFindingRoom}" Margin="6,0,0,0" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasFoundRoom}">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding FoundRoom.Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="hint" FontSize="12" Text="{Binding FoundRoom.Meta}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Content="{l:T multiplayer.public.join}" Margin="8,0,0,0" VerticalAlignment="Center" Command="{Binding JoinFoundRoomCommand}" />
+                </Grid>
+              </StackPanel>
             </StackPanel>
             <!-- 房主：在公共网络上怎么出现 -->
             <StackPanel Spacing="6" IsVisible="{Binding IsHosting}">
@@ -96,12 +111,33 @@
               <TextBox Text="{Binding PublishRoomName}" PlaceholderText="{l:T multiplayer.public.name_placeholder}" />
               <TextBox Text="{Binding PublishPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.public.publish_password_placeholder}" IsVisible="{Binding NeedsPublishPassword}" />
               <CheckBox Content="{l:T multiplayer.public.auto_approve}" IsChecked="{Binding PublishAutoApprove}" />
+              <CheckBox Content="{l:T multiplayer.device.allow_search}" IsChecked="{Binding AllowFingerprintSearch}" />
+              <CheckBox Content="{l:T multiplayer.device.require}" IsChecked="{Binding RequireDevice}" />
+              <TextBox Text="{Binding AllowedDevicesText}" AcceptsReturn="True" MinHeight="40" FontFamily="Consolas,monospace" TextWrapping="Wrap"
+                       PlaceholderText="{l:T multiplayer.device.allowed_placeholder}" />
               <WrapPanel ItemSpacing="6" LineSpacing="6">
                 <Button Classes="primary" Content="{l:T multiplayer.public.publish}" Command="{Binding PublishRoomCommand}" />
                 <Button Content="{l:T multiplayer.public.unpublish}" Command="{Binding UnpublishRoomCommand}" />
               </WrapPanel>
               <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding PublishStatus}" IsVisible="{Binding PublishStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </StackPanel>
+            <!-- 设备指纹：默认关着 -->
+            <Expander Header="{l:T multiplayer.device.title}" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.device.hint}" />
+                <Button Classes="primary" Content="{l:T multiplayer.device.enable}" Command="{Binding EnableDeviceCommand}" IsVisible="{Binding !DeviceEnabled}" HorizontalAlignment="Left" />
+                <StackPanel Spacing="6" IsVisible="{Binding DeviceEnabled}">
+                  <TextBlock FontSize="12" Text="{Binding DeviceIdText}" />
+                  <SelectableTextBlock Text="{Binding MyFingerprintCode}" FontFamily="Consolas,monospace" FontWeight="SemiBold" TextWrapping="Wrap" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Classes="primary" Content="{l:T multiplayer.device.new_code}" Command="{Binding NewFingerprintCodeCommand}" />
+                    <Button Content="{l:T multiplayer.device.copy}" Command="{Binding CopyFingerprintCodeCommand}" />
+                    <Button Content="{l:T multiplayer.device.rotate}" Command="{Binding RotateDeviceCommand}" />
+                    <Button Content="{l:T multiplayer.device.disable}" Command="{Binding DisableDeviceCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </StackPanel>
+            </Expander>
             <!-- 公共节点（种子）：没有内置节点时要填 -->
             <Expander Header="{l:T multiplayer.public.nodes_title}" IsExpanded="{Binding !HasPublicNodes, Mode=OneTime}" HorizontalAlignment="Stretch">
               <StackPanel Spacing="6">
