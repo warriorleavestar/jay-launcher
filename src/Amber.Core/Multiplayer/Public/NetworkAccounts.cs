@@ -89,7 +89,22 @@ public sealed record AccountPolicy(string Network, byte[] SignKey)
 /// 节点上的账号表（jay-server 用）：账号名 → PBKDF2-SHA256 的盐和哈希。密码本身不存。
 /// 每个账号连续猜错 5 次锁 5 分钟，在线猜密码很慢。
 /// </summary>
-public sealed class AccountStore
+/// <summary>
+/// 账号库。内置的 <see cref="AccountStore"/> 存在节点的一个 JSON 文件里；第三方网络可以换成自己的（数据库、论坛账号、会员系统……）。
+/// 实现要自己防在线猜密码（比如连续错几次就锁一会儿），账号不存在和密码错要回答一样的 <see cref="LoginResult.Wrong"/>。
+/// </summary>
+public interface IAccountStore
+{
+    LoginResult Check(string name, string password, DateTimeOffset now);
+    /// <summary>第二步验证错了：算一次失败（和密码错一起计数）。</summary>
+    void RecordFailure(string name, DateTimeOffset now);
+    /// <summary>全部验证都过了：清掉失败计数。</summary>
+    void Succeeded(string name);
+    /// <summary>这个账号的 TOTP 密钥（没开两步验证是 null）。</summary>
+    byte[]? TotpSecret(string name);
+}
+
+public sealed class AccountStore : IAccountStore
 {
     public const int Iterations = 600_000;
     public const int MinPassword = 8;
@@ -245,7 +260,7 @@ public enum LoginResult { Ok, Wrong, Locked, Disabled }
 /// 节点的登录服务：收到加密的账号密码（用 <see cref="PrivateSeal"/> 封给节点的登录公钥，发方是登录人的 Jay 联机身份），
 /// 核对后发一张绑定这把身份的凭证，再封回去。公共网络上的其他人看不到账号密码，也拿不走能用的凭证。
 /// </summary>
-public sealed class LoginAuthority(AccountStore accounts, X25519KeyPair key, NetworkSigner signer, string network, Func<DateTimeOffset>? clock = null)
+public sealed class LoginAuthority(IAccountStore accounts, X25519KeyPair key, NetworkSigner signer, string network, Func<DateTimeOffset>? clock = null)
 {
     /// <summary>登录请求里的时间和节点时间差多少以内算有效（防重放）。</summary>
     public static readonly TimeSpan Skew = TimeSpan.FromMinutes(5);
@@ -273,7 +288,7 @@ public sealed class LoginAuthority(AccountStore accounts, X25519KeyPair key, Net
         var user = body["user"]?.GetValue<string>() ?? "";
         var result = accounts.Check(user, body["pass"]?.GetValue<string>() ?? "", now);
         if (result != LoginResult.Ok) return Error(result switch { LoginResult.Locked => "locked", LoginResult.Disabled => "disabled", _ => "wrong" });
-        var name = AccountStore.CleanName(user)!;
+        if (AccountStore.CleanName(user) is not { } name) return Error("wrong");
         var factors = Factors.Where(f => f.AppliesTo(name)).ToList();
         if (RequireSecondFactor && factors.Count == 0) return Error("factor_setup");
         if (factors.Count > 0)

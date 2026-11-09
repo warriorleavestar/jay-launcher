@@ -1,0 +1,420 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text.Json.Nodes;
+using Amber.Core.Multiplayer;
+using Amber.Core.Multiplayer.Public;
+using Amber.Core.Multiplayer.Transport;
+using Amber.NetworkServer;
+using Amber.Server;
+
+namespace Amber.Core.Tests;
+
+/// <summary>
+/// 网络服务端框架（Jay.NetworkServer）：审核规则（网络策略、屏蔽词、封禁、限流）、事件、自定义请求、
+/// 换账号库、本机管理接口、搭网络的脚手架，以及 jay-server 的 directory / node / network init 命令。全在本机回环上跑，不启动 EasyTier。
+/// </summary>
+public sealed class NetworkServerFrameworkTests : IAsyncDisposable
+{
+    private DateTimeOffset _now = new(2026, 11, 9, 0, 0, 0, TimeSpan.Zero);
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "jay-netserver-test-" + Guid.NewGuid().ToString("N"));
+    private readonly List<IAsyncDisposable> _cleanup = [];
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var c in _cleanup) await c.DisposeAsync();
+        try { if (Directory.Exists(_dir)) Directory.Delete(_dir, true); } catch (IOException) { }
+    }
+
+    private static RoomListing Listing(X25519KeyPair host, RoomVisibility mode = RoomVisibility.Public, string name = "生存服", string hostName = "Alex") => new()
+    {
+        Id = "",
+        Name = name,
+        Host = hostName,
+        Mode = mode,
+        HostKey = host.PublicKey,
+        Ip = "10.235.0.7",
+        Game = "1.21.1",
+        Players = 2,
+        Invite = mode is RoomVisibility.Public ? new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite.ToString() : null,
+        Direct = mode == RoomVisibility.Direct ? "JAY2D-TEST" : null,
+        Lobby = mode == RoomVisibility.Password ? new string('a', 32) : null,
+        Salt = mode == RoomVisibility.Password ? new string('b', 32) : null,
+    };
+
+    private JsonObject Announce(RoomSigner signer, RoomListing listing, bool listed = true) => new()
+    {
+        ["op"] = "announce",
+        ["room"] = signer.Sign(listing, _now).ToJson(),
+        ["listed"] = listed,
+        ["lookup"] = new JsonArray(listed ? [] : [(JsonNode)new string('c', 64)]),
+    };
+
+    private static bool Ok(JsonObject reply) => reply["ok"]?.GetValue<bool>() == true;
+
+    private async Task<JayNetworkServer> StartAsync(Action<JayNetworkServerBuilder>? configure = null, bool admin = false)
+    {
+        var builder = new JayNetworkServerBuilder().UseDataDir(_dir).UseClock(() => _now).WithoutEasyTier(new IPEndPoint(IPAddress.Loopback, 0));
+        if (admin) builder.UseAdmin(0); else builder.WithoutAdmin();
+        configure?.Invoke(builder);
+        var server = builder.Build();
+        _cleanup.Add(server);
+        await server.StartAsync();
+        return server;
+    }
+
+    private sealed class Recorder : IDirectoryObserver
+    {
+        public readonly List<string> Events = [];
+        public void OnAnnounced(RoomListing listing, bool listed, bool isNew) { lock (Events) Events.Add(isNew ? "new" : "renew"); }
+        public void OnRemoved(string roomId, RoomRemoval reason) { lock (Events) Events.Add("removed:" + reason); }
+        public void OnRejected(RoomListing listing, RoomVerdict verdict) { lock (Events) Events.Add("rejected:" + verdict.Code); }
+        public void OnLogin(bool ok, string? error) { lock (Events) Events.Add("login:" + (ok ? "ok" : error)); }
+    }
+
+    private sealed class Throwing : IDirectoryObserver
+    {
+        public void OnAnnounced(RoomListing listing, bool listed, bool isNew) => throw new InvalidOperationException("boom");
+    }
+
+    [Fact]
+    public async Task PolicyGateEnforcesNetworkModesButAlwaysAllowsHidden()
+    {
+        var config = NetworkConfig.Parse("""{"v":1,"network":"nz","policy":{"modes":["public"]}}"""u8, "nz");
+        var server = await StartAsync(b => b.UseConfig(config));
+        var host = X25519KeyPair.Generate();
+        Assert.True(Ok(server.Directory!.Handle(Announce(new RoomSigner(), Listing(host)))));
+        var reply = server.Directory.Handle(Announce(new RoomSigner(), Listing(host, RoomVisibility.Password)));
+        Assert.Equal("mode", reply["error"]!.GetValue<string>());
+        Assert.False(string.IsNullOrEmpty(reply["reason"]?.GetValue<string>()));
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host, RoomVisibility.Hidden), listed: false))));
+    }
+
+    [Fact]
+    public async Task RejectionReasonReachesTheHostThroughTheClient()
+    {
+        var server = await StartAsync(b => b.UseBlockedWords(["坏 词"]));
+        var net = new LoopbackNetwork(server.Directory!.Port);
+        var client = new RoomDirectoryClient(net);
+        var host = X25519KeyPair.Generate();
+        var signer = new RoomSigner();
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
+            client.AnnounceAsync(signer.Sign(Listing(host, name: "我的坏词房"), _now), true, [], default));
+        Assert.Equal("name", e.Code);
+        Assert.Contains("不允许的词", e.Message);
+        // 隐藏房间不进列表，屏蔽词不管。
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host, RoomVisibility.Hidden, name: "坏词"), listed: false))));
+    }
+
+    private sealed class LoopbackNetwork(int port) : IPublicNetwork
+    {
+        public async Task<Stream> ConnectAsync(string ip, int p, CancellationToken ct)
+        {
+            var c = new TcpClient();
+            await c.ConnectAsync(IPAddress.Loopback, port, ct);
+            return c.GetStream();
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.7");
+    }
+
+    [Fact]
+    public async Task BanByHostRemovesLiveRoomsBlocksRenewalAndPersists()
+    {
+        var server = await StartAsync();
+        var host = X25519KeyPair.Generate();
+        var signer = new RoomSigner();
+        Assert.True(Ok(server.Directory!.Handle(Announce(signer, Listing(host)))));
+        Assert.Single(server.Directory.ListedRooms());
+
+        var fingerprint = MemberIdentity.FingerprintOf(host.PublicKey);
+        Assert.Equal(1, server.Ban("host", fingerprint, "刷屏"));
+        Assert.Empty(server.Directory.ListedRooms());
+        _now += TimeSpan.FromSeconds(30);
+        Assert.Equal("banned", server.Directory.Handle(Announce(signer, Listing(host)))["error"]!.GetValue<string>());
+        Assert.Equal("banned", server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))["error"]!.GetValue<string>());
+        // 别人不受影响。
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(X25519KeyPair.Generate())))));
+
+        var reloaded = new BanList(Path.Combine(_dir, "bans.json"));
+        Assert.Contains(reloaded.List(), b => b.Kind == "host" && b.Value == fingerprint && b.Reason == "刷屏");
+        Assert.True(server.Bans!.Remove("host", fingerprint));
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))));
+        Assert.Throws<ArgumentException>(() => server.Bans.Add("ip", "1.2.3.4", null, _now));
+    }
+
+    [Fact]
+    public async Task RenewalThatAGateNowRejectsTakesTheRoomOut()
+    {
+        var blocked = false;
+        var server = await StartAsync(b => b.AddGate(new LambdaGate(_ => blocked ? RoomVerdict.Reject("closed", "维护中") : RoomVerdict.Allow)));
+        var host = X25519KeyPair.Generate();
+        var signer = new RoomSigner();
+        Assert.True(Ok(server.Directory!.Handle(Announce(signer, Listing(host)))));
+        blocked = true;
+        _now += TimeSpan.FromSeconds(30);
+        var reply = server.Directory.Handle(Announce(signer, Listing(host)));
+        Assert.Equal("closed", reply["error"]!.GetValue<string>());
+        Assert.Equal("维护中", reply["reason"]!.GetValue<string>());
+        Assert.Equal(0, server.Directory.Count);
+    }
+
+    private sealed class LambdaGate(Func<RoomAnnouncement, RoomVerdict> check) : IRoomGate
+    {
+        public RoomVerdict Check(RoomAnnouncement announcement) => check(announcement);
+    }
+
+    [Fact]
+    public async Task RateLimitCapsRoomsPerHostAndNewRoomsPerMinute()
+    {
+        var server = await StartAsync(b => b.UseRateLimit(maxRoomsPerHost: 2, newPerHostPerMinute: 3, newPerMinute: 100));
+        var host = X25519KeyPair.Generate();
+        var a = new RoomSigner();
+        var b = new RoomSigner();
+        Assert.True(Ok(server.Directory!.Handle(Announce(a, Listing(host)))));
+        Assert.True(Ok(server.Directory.Handle(Announce(b, Listing(host)))));
+        Assert.Equal("rate", server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))["error"]!.GetValue<string>());
+        // 续期不算新发布。
+        _now += TimeSpan.FromSeconds(1);
+        Assert.True(Ok(server.Directory.Handle(Announce(a, Listing(host)))));
+
+        // 撤下一个就能再开，但这一分钟里新发布的次数已经用完了。
+        var (seq, sig) = b.SignWithdraw(_now);
+        Assert.True(Ok(server.Directory.Handle(new JsonObject { ["op"] = "withdraw", ["id"] = b.RoomId, ["seq"] = seq, ["sig"] = Convert.ToHexStringLower(sig) })));
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))));
+        var (seq2, sig2) = a.SignWithdraw(_now + TimeSpan.FromMilliseconds(5));
+        Assert.True(Ok(server.Directory.Handle(new JsonObject { ["op"] = "withdraw", ["id"] = a.RoomId, ["seq"] = seq2, ["sig"] = Convert.ToHexStringLower(sig2) })));
+        Assert.Equal("rate", server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))["error"]!.GetValue<string>());
+        _now += TimeSpan.FromMinutes(2);
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host)))));
+    }
+
+    [Fact]
+    public async Task ObserversSeeEveryEventAndAFaultyOneDoesNotBreakTheDirectory()
+    {
+        var recorder = new Recorder();
+        var server = await StartAsync(b => b.AddObserver(new Throwing()).AddObserver(recorder).UseBlockedWords(["nope"]));
+        var host = X25519KeyPair.Generate();
+        var signer = new RoomSigner();
+        Assert.True(Ok(server.Directory!.Handle(Announce(signer, Listing(host)))));
+        _now += TimeSpan.FromSeconds(10);
+        Assert.True(Ok(server.Directory.Handle(Announce(signer, Listing(host)))));
+        server.Directory.Handle(Announce(new RoomSigner(), Listing(host, name: "nope")));
+        _now += TimeSpan.FromMinutes(5);
+        Assert.Equal(0, server.Directory.Count);
+        Assert.Equal(["new", "renew", "rejected:name", "removed:Expired"], recorder.Events);
+        var stats = server.Stats.ToJson();
+        Assert.Equal(1, stats["published"]!.GetValue<long>());
+        Assert.Equal(1, stats["renewed"]!.GetValue<long>());
+        Assert.Equal(1, stats["expired"]!.GetValue<long>());
+        Assert.Equal(1, stats["rejected"]!["name"]!.GetValue<long>());
+    }
+
+    private sealed class Motd : IDirectoryExtension
+    {
+        public string Op => "x-motd";
+        public JsonObject Handle(JsonObject request, DirectoryView directory) => new() { ["text"] = "你好", ["rooms"] = directory.Rooms };
+    }
+
+    private sealed class Broken : IDirectoryExtension
+    {
+        public string Op => "x-broken";
+        public JsonObject Handle(JsonObject request, DirectoryView directory) => throw new InvalidOperationException();
+    }
+
+    [Fact]
+    public async Task ExtensionsAnswerTheirOwnOpsOnly()
+    {
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().AddExtension(new LambdaExtension("motd")));
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().AddExtension(new Motd()).AddExtension(new Motd()));
+        var server = await StartAsync(b => b.AddExtension(new Motd()).AddExtension(new Broken()));
+        var reply = server.Directory!.Handle(new JsonObject { ["op"] = "x-motd" });
+        Assert.True(Ok(reply));
+        Assert.Equal("你好", reply["text"]!.GetValue<string>());
+        Assert.Equal("ext", server.Directory.Handle(new JsonObject { ["op"] = "x-broken" })["error"]!.GetValue<string>());
+        Assert.Equal("op", server.Directory.Handle(new JsonObject { ["op"] = "x-unknown" })["error"]!.GetValue<string>());
+    }
+
+    private sealed class LambdaExtension(string op) : IDirectoryExtension
+    {
+        public string Op => op;
+        public JsonObject Handle(JsonObject request, DirectoryView directory) => [];
+    }
+
+    /// <summary>第三方的账号库：比如接自己的论坛账号。</summary>
+    private sealed class ForumAccounts : IAccountStore
+    {
+        public int Failures;
+        public LoginResult Check(string name, string password, DateTimeOffset now) =>
+            name == "bob" && password == "forum-password" ? LoginResult.Ok : LoginResult.Wrong;
+        public void RecordFailure(string name, DateTimeOffset now) => Failures++;
+        public void Succeeded(string name) { }
+        public byte[]? TotpSecret(string name) => null;
+    }
+
+    private sealed class PinFactor : ILoginFactor
+    {
+        public string Name => "pin";
+        public string Prompt => "论坛私信里的 PIN";
+        public bool AppliesTo(string user) => true;
+        public bool Verify(string user, string response, DateTimeOffset now) => response == "4242";
+    }
+
+    [Fact]
+    public async Task CustomAccountStoreAndFactorLogIn()
+    {
+        var store = new ForumAccounts();
+        var recorder = new Recorder();
+        var server = await StartAsync(b => b.UseAccounts(store).AddLoginFactor(new PinFactor()).AddObserver(recorder));
+        var section = server.LoginSection!;
+        Assert.Equal(["totp", "pin"], (section["factors"] as JsonArray)!.Select(f => f!.GetValue<string>()));
+        var login = NetworkLogin.Parse(section)!;
+        var me = X25519KeyPair.Generate();
+
+        var wrong = server.Directory!.Handle(NetworkLoginClient.Request(me, login, "bob", "nope", _now));
+        Assert.Equal("wrong", wrong["error"]!.GetValue<string>());
+        var needPin = server.Directory.Handle(NetworkLoginClient.Request(me, login, "bob", "forum-password", _now));
+        Assert.Equal("factor", needPin["error"]!.GetValue<string>());
+        var reply = server.Directory.Handle(NetworkLoginClient.Request(me, login, "bob", "forum-password", _now, new Dictionary<string, string> { ["pin"] = "4242" }));
+        var (_, token) = NetworkLoginClient.Read(reply, me, login, server.Profile.Id, _now);
+        Assert.Equal("bob", token.User);
+        Assert.Contains("login:ok", recorder.Events);
+        Assert.Contains("login:wrong", recorder.Events);
+        Assert.True(File.Exists(Path.Combine(_dir, "login.key")));
+        Assert.Null(server.Builtin);
+    }
+
+    [Fact]
+    public async Task AdminApiNeedsTheTokenAndHidesHiddenRooms()
+    {
+        var server = await StartAsync(admin: true);
+        var host = X25519KeyPair.Generate();
+        Assert.True(Ok(server.Directory!.Handle(Announce(new RoomSigner(), Listing(host, name: "公开房")))));
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host, RoomVisibility.Hidden, name: "秘密房"), listed: false))));
+
+        using var http = new HttpClient();
+        var port = server.AdminPort!.Value;
+        var health = JsonNode.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/health"))!;
+        Assert.True(health["ok"]!.GetValue<bool>());
+        Assert.Equal(2, health["rooms"]!.GetValue<int>());
+        Assert.Equal("external", health["easytier"]!.GetValue<string>());
+
+        var anonymous = await http.GetAsync($"http://127.0.0.1:{port}/rooms");
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        var forged = new AdminClient(http, port, new string('0', 64));
+        Assert.Equal("token", (await forged.CallAsync("GET", "/stats"))["error"]!.GetValue<string>());
+
+        var admin = AdminClient.ForDataDir(http, _dir, port);
+        var rooms = await admin.CallAsync("GET", "/rooms");
+        Assert.Equal(1, rooms["hidden"]!.GetValue<int>());
+        var listed = Assert.Single((rooms["rooms"] as JsonArray)!);
+        Assert.Equal("公开房", listed!["name"]!.GetValue<string>());
+        Assert.DoesNotContain("秘密房", rooms.ToJsonString());
+
+        var ban = await admin.CallAsync("POST", "/ban", new JsonObject { ["kind"] = "host", ["value"] = MemberIdentity.FingerprintOf(host.PublicKey) });
+        Assert.Equal(2, ban["removed"]!.GetValue<int>());
+        Assert.Single((await admin.CallAsync("GET", "/bans"))["bans"] as JsonArray ?? []);
+        Assert.Equal("bad", (await admin.CallAsync("POST", "/ban", new JsonObject { ["kind"] = "nope", ["value"] = "x" }))["error"]!.GetValue<string>());
+        Assert.Equal("not_found", (await admin.CallAsync("POST", "/remove", new JsonObject { ["id"] = "nope" }))["error"]!.GetValue<string>());
+
+        // 口令文件只有本机这个用户能读。
+        if (!OperatingSystem.IsWindows())
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(server.AdminTokenPath));
+    }
+
+    [Fact]
+    public async Task AdminApiRejectsOversizedAndMalformedRequests()
+    {
+        var server = await StartAsync(admin: true);
+        async Task<string> Raw(string request)
+        {
+            using var c = new TcpClient();
+            await c.ConnectAsync(IPAddress.Loopback, server.AdminPort!.Value);
+            var s = c.GetStream();
+            await s.WriteAsync(System.Text.Encoding.ASCII.GetBytes(request));
+            using var reader = new StreamReader(s);
+            return await reader.ReadToEndAsync();
+        }
+        Assert.Equal("", await Raw("GARBAGE\r\n\r\n"));
+        Assert.Equal("", await Raw("POST /ban HTTP/1.1\r\nContent-Length: 999999\r\n\r\n"));
+        Assert.StartsWith("HTTP/1.1 404", await Raw("GET /nope HTTP/1.1\r\nAuthorization: Bearer " + File.ReadAllText(server.AdminTokenPath).Trim() + "\r\n\r\n"));
+    }
+
+    [Fact]
+    public async Task SeedOnlyNodeHasNoDirectory()
+    {
+        var server = await StartAsync(b => b.SeedOnly());
+        Assert.Null(server.Directory);
+        Assert.Equal("seed", server.Health()["role"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void ScaffoldCreatesASignableNetworkAndAttachesTheConfig()
+    {
+        var r = NetworkScaffold.Init(_dir, "nz-friends", "新西兰朋友服", ["tcp://203.0.113.5:11010"]);
+        Assert.Throws<IOException>(() => NetworkScaffold.Init(_dir, "nz-friends", "x", ["tcp://203.0.113.5:11010"]));
+        Assert.Throws<ArgumentException>(() => NetworkScaffold.Init(Path.Combine(_dir, "b"), "jay", "x", ["tcp://203.0.113.5:11010"]));
+        if (!OperatingSystem.IsWindows()) Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(r.KeyPath));
+
+        var (config, sha) = NetworkScaffold.Hash(r.ConfigPath, "nz-friends");
+        Assert.Equal(64, sha.Length);
+        Assert.True(config.Policy.Allows(RoomVisibility.Direct));
+        Assert.Throws<InvalidDataException>(() => NetworkScaffold.Hash(r.ConfigPath, "other"));
+
+        var info = NetworkScaffold.AttachConfig(r.NetworkPath, "https://example.org/config.json", sha);
+        Assert.Equal(2, info.Seq);
+        Assert.Throws<ArgumentException>(() => NetworkScaffold.AttachConfig(r.NetworkPath, "http://example.org/config.json", sha));
+
+        var signed = NetworkString.Parse(NetworkString.Create(info, NetworkSigner.FromSeed(File.ReadAllText(r.KeyPath))));
+        Assert.Equal(r.PublicKey, signed.SignerKey);
+        Assert.Equal(sha, signed.Info.Config!.Sha256);
+        Assert.StartsWith("jay-net-", signed.ToProfile().NetworkName);
+    }
+
+    [Fact]
+    public async Task CliInitConfigHashDirectoryAndNodeCommandsWorkTogether()
+    {
+        var output = new StringWriter();
+        var net = Path.Combine(_dir, "net");
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "init", "nz-friends", "--name", "朋友服", "--host", "203.0.113.5", "--out", net]), output));
+        Assert.Contains("签名公钥", output.ToString());
+        var config = Path.Combine(net, "config.json");
+        var network = Path.Combine(net, "nz-friends.json");
+        // 只允许公开房间。
+        File.WriteAllText(config, """{"v":1,"network":"nz-friends","policy":{"modes":["public"]}}""");
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "config-hash", config, "--network", network, "--url", "https://example.org/c.json"]), output));
+        Assert.Contains("版本号 2", output.ToString());
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "sign", network, "--key", Path.Combine(net, "network.key")]), output));
+        var jaynet = output.ToString().Split('\n').Single(l => l.StartsWith(NetworkString.Current, StringComparison.Ordinal)).Trim();
+
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--seed-only", "--accounts"]), output, _ => { }));
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--rate-limit", "3,x"]), output, _ => { }));
+
+        var words = Path.Combine(_dir, "words.txt");
+        File.WriteAllText(words, "# 屏蔽词\n广告\n");
+        var builder = Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--network", jaynet, "--config", config, "--blocked-words", words,
+            "--admin-port", "0", "--rate-limit", "5,10,100"]), output, _ => { });
+        builder.WithoutEasyTier(new IPEndPoint(IPAddress.Loopback, 0)).UseClock(() => _now);
+        var server = builder.Build();
+        _cleanup.Add(server);
+        await server.StartAsync();
+        Assert.Equal("nz-friends", server.Profile.Id);
+
+        var host = X25519KeyPair.Generate();
+        Assert.Equal("mode", server.Directory!.Handle(Announce(new RoomSigner(), Listing(host, RoomVisibility.Password)))["error"]!.GetValue<string>());
+        Assert.Equal("name", server.Directory.Handle(Announce(new RoomSigner(), Listing(host, name: "广告房")))["error"]!.GetValue<string>());
+        var signer = new RoomSigner();
+        Assert.True(Ok(server.Directory.Handle(Announce(signer, Listing(host, name: "好房间")))));
+
+        using var http = new HttpClient();
+        var port = server.AdminPort!.Value.ToString();
+        var nodeOut = new StringWriter();
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "rooms", "--admin-port", port]), nodeOut, http));
+        Assert.Contains("好房间", nodeOut.ToString());
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "ban", "room", signer.RoomId, "--reason", "测试", "--admin-port", port]), nodeOut, http));
+        Assert.Equal(0, server.Directory.Count);
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "status", "--admin-port", port]), nodeOut, http));
+        Assert.Contains("\"mode\": 1", nodeOut.ToString());
+        Assert.Equal(1, await Program.NodeCommand(_dir, Options.Parse(["node", "unban", "room", "nope", "--admin-port", port]), nodeOut, http));
+        await Assert.ThrowsAsync<ArgumentException>(() => Program.NodeCommand(_dir, Options.Parse(["node", "explode", "--admin-port", port]), nodeOut, http));
+    }
+}

@@ -77,7 +77,7 @@
 审核流程见 [networks/README.md](../networks/README.md)：在 `networks/` 提交 JSON → PR 检查格式 → 维护者审核合并 → CI 用注册表钥匙签名，发到 `networks` Release。
 注册表钥匙还没生成：生成后私钥放进 `network-registry` environment 的 secret `JAY_NETWORK_KEY`，公钥写进 `NetworkString.RegistryKeys`。
 
-自己搭网络：`jay-server network keygen` → `network sign` → `jay-server directory --network <连接串>`。
+自己搭网络：`jay-server network init` → `network config-hash` → `network sign` → `jay-server directory --network <连接串>`，完整步骤、管理和部署见 [network-server.md](network-server.md)。想接自己的账号库、审核规则、验证方式，用 [网络服务端框架](network-server-framework.md)。
 
 ## 网络配置文件
 
@@ -125,7 +125,7 @@ jay-server directory --listen 11010
 
 然后在每个人的 Jay 里：联机 → Jay 公共网络 → 公共节点，填 `tcp://<这台机器的公网地址>:11010`，保存。
 
-Linux 上长期运行可以用 `server/jay-public-node.service`（systemd）。
+Linux 上长期运行可以用 `server/install-network-node.sh`（一键装成 systemd 服务）或 `server/docker/`，见 [network-server.md](network-server.md#六长期运行)。
 
 这台节点同时也会被加进房间用的中继节点，所以经公共网络找到的房主和加入方在它上面一定碰得上面。
 
