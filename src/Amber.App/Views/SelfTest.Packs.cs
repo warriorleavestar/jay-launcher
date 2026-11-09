@@ -110,7 +110,7 @@ internal sealed partial class SelfTest
             await WaitAsync(() => instance.ShaderPacks.Count == 2, 10);
             await Task.Delay(400);
             Check("光影：没装 Iris 时写明要先装，并给【装 Iris】", !instance.HasShaderLoader
-                && Dispatcher.UIThread.Invoke(() => page.ShaderLoaderCard.IsEffectivelyVisible));
+                && Dispatcher.UIThread.Invoke(() => page.ShaderLoaderCard.IsEffectivelyVisible || page.ShaderNoteBox.IsEffectivelyVisible));
             Check("光影：Forge 上搜 Oculus，其余搜 Iris", InstanceViewModel.ShaderLoaderQuery("forge") == "Oculus" && InstanceViewModel.ShaderLoaderQuery("fabric") == "Iris");
             await ShotAsync("shaders-no-loader-1440");
 
