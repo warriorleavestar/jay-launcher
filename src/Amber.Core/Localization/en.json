@@ -1972,5 +1972,16 @@
   "multiplayer.netconfig.theme_title": "Network theme",
   "multiplayer.netconfig.theme_global": "This network has its own theme, used only on the multiplayer page for now. Apply it to all of Jay? Your own theme comes back when you disconnect.",
   "multiplayer.netconfig.theme_accept": "Use everywhere",
-  "multiplayer.netconfig.theme_decline": "Multiplayer page only"
+  "multiplayer.netconfig.theme_decline": "Multiplayer page only",
+  "content.shader.vanilla": "{0} is a vanilla instance, so shader packs won't work. Use an instance with Fabric (plus Iris) or OptiFine.",
+  "content.shader.needs_renderer": "{0} doesn't have {1} yet, so shader packs won't show up in game.",
+  "content.shader.unsupported": "Jay can't add a shader mod for {0}'s loader and game version. Shader packs need OptiFine there.",
+  "content.shader.also_install": "Also install {0}",
+  "content.shader.install": "Install {0}",
+  "content.shader.installing": "Installing {0}…",
+  "content.shader.installed_with": "Installed {0} and {1} into {2}.",
+  "content.shader.installed_without": "Installed {0} into {1}. It won't show up until {2} is installed too.",
+  "content.shader.installed_unsupported": "Installed {0} into {1}. It needs OptiFine to work there.",
+  "content.shader.renderer_installed": "Installed {0} into {1}. Shader packs will work now.",
+  "content.shader.renderer_unavailable": "No {0} build fits Minecraft {1} with {2} yet."
 }
