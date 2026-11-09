@@ -329,6 +329,8 @@ public sealed partial class SettingsViewModel : PageViewModel
         UpdateFeed = s.UpdateFeedUrl ?? "";
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
         ReloadThemePacks();
+        // 开发模式下主题文件改了会重新套用，提示跟着更新。
+        ThemeService.Changed += UpdateThemePackStatus;
         // 启动时只把选单对上已经生效的语言，不再重新应用、不写设置文件。
         _initializing = true;
         SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(s.Language) ?? "system"));
@@ -410,6 +412,8 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "requested": lines.Add(L.T("settings.themepack.safe.requested")); break;
             case "missing": lines.Add(L.T("settings.themepack.safe.missing")); break;
         }
+        if (ThemeService.DevDirectory is { } devDir) lines.Add(L.F("settings.themepack.dev", devDir));
+        if (ThemeService.DevError is { } devError) lines.Add(L.F("settings.themepack.dev_error", devError));
         if (ThemeService.Current is { } pack && pack.Problems.Count > 0)
             lines.Add(L.F("settings.themepack.problems", pack.Problems.Count, string.Join("; ", pack.Problems.Take(4))));
         ThemePackStatus = string.Join("\n", lines);

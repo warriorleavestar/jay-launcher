@@ -162,4 +162,30 @@ public class ThemeLayoutTests
         Assert.Equal(["tools.status", "tools.body"], regions); // 别的页的区块不能拿过来；body 自动补回
         Assert.Contains(pack.Problems, p => p.Code == "unknown_region");
     }
+
+    [Fact]
+    public void PackDirectorySkipsHiddenFilesAndRejectsBadPacks()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "jay-themedir-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, ".git"));
+            File.WriteAllText(Path.Combine(dir, "theme.json"), """{ "id": "packed", "name": "打包" }""");
+            File.WriteAllText(Path.Combine(dir, "tokens.json"), "{}");
+            File.WriteAllText(Path.Combine(dir, ".git", "config"), "x");
+            File.WriteAllText(Path.Combine(dir, ".DS_Store"), "x");
+            var output = Path.Combine(dir, "..", Path.GetFileName(dir) + ".jaytheme");
+            var pack = ThemePackWriter.PackDirectory(dir, output);
+            Assert.Equal("packed", pack.Id);
+            using (var zip = ZipFile.OpenRead(output))
+                Assert.Equal(["theme.json", "tokens.json"], zip.Entries.Select(e => e.FullName).Order());
+            File.Delete(output);
+
+            File.WriteAllText(Path.Combine(dir, "run.exe"), "MZ");
+            Assert.Throws<ThemePackException>(() => ThemePackWriter.PackDirectory(dir, output));
+            Assert.False(File.Exists(output));
+            Assert.False(File.Exists(output + ".tmp"));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
 }

@@ -64,6 +64,14 @@ public static class ThemeService
     public static void ApplyAtStartup(AppSettings settings, string[] args)
     {
         _variantSetting = settings.Theme;
+        // 做主题用：--theme-dev <目录>（或 AMBER_THEME_DEV=<目录>）直接用没打包的主题目录，文件一改就重新套用。不安装、不改设置。
+        var devIndex = Array.IndexOf(args, "--theme-dev");
+        var devDir = devIndex >= 0 && devIndex + 1 < args.Length ? args[devIndex + 1] : Environment.GetEnvironmentVariable("AMBER_THEME_DEV");
+        if (devDir is { Length: > 0 } && Directory.Exists(devDir))
+        {
+            StartDevMode(Path.GetFullPath(devDir));
+            return;
+        }
         var id = settings.ThemePack;
         if (string.IsNullOrEmpty(id) || id == DefaultId) { ApplyVariant(); return; }
         if (args.Contains("--default-theme") || Environment.GetEnvironmentVariable("AMBER_DEFAULT_THEME") == "1")
@@ -84,6 +92,50 @@ public static class ThemeService
             SafeModeReason = "missing";
             Guard.Succeeded();
             ApplyVariant();
+        }
+    }
+
+    /// <summary>主题开发模式正在看的目录；不是开发模式时为空。</summary>
+    public static string? DevDirectory { get; private set; }
+
+    /// <summary>开发模式下最近一次读主题失败的原因（读成功就清空）。</summary>
+    public static string? DevError { get; private set; }
+
+    private static FileSystemWatcher? _devWatcher;
+    private static Avalonia.Threading.DispatcherTimer? _devReload;
+
+    private static void StartDevMode(string dir)
+    {
+        DevDirectory = dir;
+        ReloadDev();
+        _devReload = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _devReload.Tick += (_, _) => { _devReload.Stop(); ReloadDev(); };
+        _devWatcher = new FileSystemWatcher(dir) { IncludeSubdirectories = true, EnableRaisingEvents = true };
+        // 编辑器保存时会连着触发好几次：停下来 0.4 秒再读。
+        void changed(object? _, FileSystemEventArgs __) => Avalonia.Threading.Dispatcher.UIThread.Post(() => { _devReload.Stop(); _devReload.Start(); });
+        _devWatcher.Changed += changed;
+        _devWatcher.Created += changed;
+        _devWatcher.Deleted += changed;
+        _devWatcher.Renamed += (o, e) => changed(o, e);
+    }
+
+    /// <summary>重新读开发目录并套用。读失败时保留上一次能用的样子，把原因写到标准错误和设置页。</summary>
+    public static void ReloadDev()
+    {
+        if (DevDirectory is null) return;
+        try
+        {
+            var pack = ThemePackReader.ReadDirectory(DevDirectory);
+            DevError = null;
+            Apply(pack);
+            foreach (var problem in pack.Problems) Console.Error.WriteLine($"[theme-dev] {problem}");
+            Console.Error.WriteLine($"[theme-dev] applied {pack.Id} ({pack.Problems.Count} problems)");
+        }
+        catch (Exception e) when (e is ThemePackException or IOException or UnauthorizedAccessException)
+        {
+            DevError = e is ThemePackException t ? $"{t.Code}: {t.Detail}" : e.Message;
+            Console.Error.WriteLine($"[theme-dev] read failed: {DevError}");
+            Changed?.Invoke();
         }
     }
 

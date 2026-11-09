@@ -1,3 +1,4 @@
+using Amber.Core.Themes;
 using Amber.Core;
 using Amber.Core.Multiplayer;
 using Amber.Core.Auth;
@@ -523,6 +524,24 @@ try
         case "junk":
         {
             foreach (var g in Toolbox.ScanJunk(dir)) Console.WriteLine($"{g.Name}: {g.Paths.Count} 项，{g.Bytes / 1024} KB");
+            break;
+        }
+        case "theme-check":
+        {
+            // 检查主题目录或 .jaytheme：按导入时的规则读一遍，列出各层和提示。有提示返回 2，读不了返回 1。
+            var path = argList[1];
+            var pack = Directory.Exists(path) ? ThemePackReader.ReadDirectory(path) : ThemePackReader.Read(path);
+            Console.WriteLine($"{pack.Id}  {pack.Name}  {pack.Version}  ({pack.Variants})");
+            Console.WriteLine($"颜色 深 {pack.DarkColors.Count} / 浅 {pack.LightColors.Count}，组件样式 {pack.Styles.Count}，外壳 {(pack.Shell is null ? "无" : pack.Shell.Nav)}，页面布局 {string.Join(",", pack.Pages.Keys)}");
+            foreach (var problem in pack.Problems) Console.WriteLine("提示：" + problem);
+            return pack.Problems.Count == 0 ? 0 : 2;
+        }
+        case "theme-pack":
+        {
+            // 把主题目录打成 .jaytheme（打完会按导入规则检查一遍）。
+            var pack = ThemePackWriter.PackDirectory(argList[1], argList[2]);
+            Console.WriteLine($"已打包 {pack.Id} → {argList[2]}（{new FileInfo(argList[2]).Length / 1024} KB，{pack.Problems.Count} 个提示）");
+            foreach (var problem in pack.Problems) Console.WriteLine("提示：" + problem);
             break;
         }
         case "analyze":

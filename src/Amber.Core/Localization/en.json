@@ -1755,5 +1755,7 @@
   "settings.themepack.problems": "This theme has {0} problem(s); defaults are used instead: {1}",
   "settings.themepack.safe.crashed": "Jay did not open properly with this theme last time, so the default theme is used for now. Select it again above to retry.",
   "settings.themepack.safe.requested": "Jay was started with --default-theme, so the theme pack is not applied.",
-  "settings.themepack.safe.missing": "The selected theme pack could not be found, so the default theme is used."
+  "settings.themepack.safe.missing": "The selected theme pack could not be found, so the default theme is used.",
+  "settings.themepack.dev": "Theme dev mode: using the folder {0}; changes are applied as soon as a file is saved.",
+  "settings.themepack.dev_error": "Could not read the theme, keeping the last working look: {0}"
 }

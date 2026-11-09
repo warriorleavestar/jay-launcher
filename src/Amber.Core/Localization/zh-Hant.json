@@ -1724,5 +1724,7 @@
   "settings.themepack.problems": "這個主題有 {0} 處問題，已用預設值代替：{1}",
   "settings.themepack.safe.crashed": "上次用這個主題時 Jay 沒能正常開啟，這次先用預設主題。重新在上面選一次就會再試。",
   "settings.themepack.safe.requested": "這次是用 --default-theme 啟動的，主題包沒有套用。",
-  "settings.themepack.safe.missing": "設定裡選的主題包找不到了，已用預設主題。"
+  "settings.themepack.safe.missing": "設定裡選的主題包找不到了，已用預設主題。",
+  "settings.themepack.dev": "主題開發模式：正在使用目錄 {0}，檔案一改就重新套用。",
+  "settings.themepack.dev_error": "主題讀取失敗，保留上一次的樣子：{0}"
 }
