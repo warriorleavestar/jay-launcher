@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
 
+# 同一个 PR 推了新提交时，取消旧提交还在排队或在跑的检查；main 和标签上的不取消
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -42,22 +47,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            rid: win-x64
-            archive: zip
-          - os: macos-15-intel
-            rid: osx-x64
-            archive: tar
-          - os: macos-15
-            rid: osx-arm64
-            archive: tar
-          - os: ubuntu-latest
-            rid: linux-x64
-            archive: tar
-          - os: ubuntu-24.04-arm
-            rid: linux-arm64
-            archive: tar
+        # PR 上不打 Intel Mac 包（GitHub 免费账号 Mac 机器很少，排队最久）；main 和发版标签照常打全部五个平台。
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15","rid":"osx-arm64","archive":"tar"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]' || '[{"os":"windows-latest","rid":"win-x64","archive":"zip"},{"os":"macos-15-intel","rid":"osx-x64","archive":"tar"},{"os":"macos-15","rid":"osx-arm64","archive":"tar"},{"os":"ubuntu-latest","rid":"linux-x64","archive":"tar"},{"os":"ubuntu-24.04-arm","rid":"linux-arm64","archive":"tar"}]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
