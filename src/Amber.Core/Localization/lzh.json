@@ -2545,6 +2545,7 @@
   "core.bake.platform.neoforge": "NeoForge",
   "core.bake.platform.forge": "Forge",
   "core.bake.protocol_mismatch": "此通用載入器（{2}）之快取協定為 {0}，此版 Jay 唯識協定 {1}。請更 Jay，或易以相合之載入器。",
+  "core.bake.java_too_old": "通用載入器須 Java {0} 或更新者。烘焙而啟，Jay 自用 Java {0}；若此實例用君自擇之 Java，請於其設定易以 Java {0} 或更新者。",
   "core.bake.interface_old": "此通用載入器（{2}）之介面為 {0}，Jay 須 {1} 或更新者。請更載入器。",
   "core.bake.platform_unknown_version": "不辨此實例所用 {0} 之版，重裝而後可烘",
   "core.bake.platform_installer": "方為通用載入器取 {0} {1} 之安裝器",

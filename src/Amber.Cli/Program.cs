@@ -601,7 +601,14 @@ try
                 var bake = new Amber.Core.Bake.BakeService(toolkit, Path.Combine(bakeData, "cache"), bakeData,
                     (items, ct) => downloader.DownloadAllAsync(items, null, ct));
                 var instance = Instance(id, isolate);
-                var major = version.JavaVersion?.MajorVersion ?? 21;
+                var versionMajor = version.JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.MinJavaMajor;
+                var major = Amber.Core.Bake.BakeService.JavaMajorFor(versionMajor);
+                if (major != versionMajor)
+                {
+                    javaPath = await javaManager.ForMajorAsync(major, cts.Token);
+                    Console.WriteLine($"BAKE Java {major}: {javaPath}");
+                    options = options with { JavaPath = javaPath };
+                }
                 var bakeWatch = System.Diagnostics.Stopwatch.StartNew();
                 var events = new SyncProgress<Amber.Core.Bake.BakeEvent>(e => Console.WriteLine((e.IsProblem ? "BAKE PROBLEM " : "BAKE ") + e.Message));
                 var prepared = await bake.PrepareAsync(javaPath, major, dir, instance, argList.Remove("--bake-warm"), events, cts.Token);

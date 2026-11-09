@@ -524,7 +524,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Info("home.status.baking"));
             try
             {
-                var (baked, reason) = await _service.PrepareBakeAsync(ctx, c.Id, java, new Progress<Amber.Core.Bake.BakeEvent>(e => Status = e.Message), ct, warm: true);
+                var (baked, reason, _) = await _service.PrepareBakeAsync(ctx, c.Id, java, new Progress<Amber.Core.Bake.BakeEvent>(e => Status = e.Message), ct, warm: true);
                 SetStatus(baked is null ? StatusMessage.Warning("instance.bake.skipped", reason) : StatusMessage.Success("instance.bake.done", reason));
             }
             catch (Amber.Core.Bake.BakeException e)

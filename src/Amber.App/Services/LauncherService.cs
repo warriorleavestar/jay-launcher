@@ -425,19 +425,25 @@ public sealed class LauncherService : IDisposable
     /// 1.2) runs only when asked, for "Bake now"; a launch fills in anything missing itself.
     /// A null launch means "launch normally" (off, not supported); reason is for the log and status line.
     /// </summary>
-    public Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason)> PrepareBakeAsync(string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct)
+    public Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct)
         => PrepareBakeAsync(Context, id, javaPath, progress, ct);
 
     /// <summary>The bake uses the launch's own game directory; switching directories meanwhile never mixes up two instances of the same name.</summary>
-    public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false)
+    /// <remarks>
+    /// The returned JavaPath is the Java to launch the baked game with: the loader needs Java 21, so for a version that
+    /// asks for less (Forge 1.20.1 asks for 17) the bake switches to Java 21 and the launch must use it too.
+    /// </remarks>
+    public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false)
     {
-        if (BakeFor(ctx) is not { } bake) return (null, Settings.ExperimentalBake ? Amber.Core.Localization.L.T("core.bake.loader_missing") : "");
+        if (BakeFor(ctx) is not { } bake) return (null, Settings.ExperimentalBake ? Amber.Core.Localization.L.T("core.bake.loader_missing") : "", javaPath);
         await _bakeLock.WaitAsync(ct);
         try
         {
-            var major = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? 21;
+            var versionMajor = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.MinJavaMajor;
+            var major = Amber.Core.Bake.BakeService.JavaMajorFor(versionMajor);
+            if (major != versionMajor) javaPath = await ctx.Java.ForMajorAsync(major, ct);
             var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, GetInstance(ctx, id), warm, progress, ct);
-            return (done.Launch, done.Reason);
+            return (done.Launch, done.Reason, javaPath);
         }
         finally
         {

@@ -2623,6 +2623,7 @@
   "core.bake.platform.neoforge": "NeoForge",
   "core.bake.platform.forge": "Forge",
   "core.bake.protocol_mismatch": "這個通用載入器（{2}）用的快取協定是 {0}，這個版本的 Jay 只認協定 {1}。請更新 Jay，或換一個相符的載入器建置。",
+  "core.bake.java_too_old": "通用載入器需要 Java {0} 或更新的版本。烘焙啟動時 Jay 會自動用 Java {0}；如果這個實例用的是你自己選的 Java，請在實例設定裡換成 Java {0} 或更新的版本。",
   "core.bake.interface_old": "這個通用載入器（{2}）的介面版本是 {0}，Jay 需要 {1} 或更新。請更新載入器建置。",
   "core.bake.platform_unknown_version": "看不出這個實例用的是哪個 {0} 版本，重新安裝後才能烘焙",
   "core.bake.platform_installer": "正在為通用載入器下載 {0} {1} 安裝程式",

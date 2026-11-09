@@ -87,6 +87,8 @@ public sealed class BakeTests : IDisposable
         };
         public List<(string Stage, JsonObject? Request)> Calls { get; } = [];
         public HashSet<string> Hang { get; } = [];
+        /// <summary>A stage that dies before printing anything, with these stderr lines (for example an old JVM).</summary>
+        public Dictionary<string, string[]> Crash { get; } = [];
         public List<string> RequestFiles { get; } = [];
 
         public async Task<int> RunAsync(string javaPath, IReadOnlyList<string> classpath, string stage, string? requestFile, Action<string> stdout, Action<string> stderr, CancellationToken ct)
@@ -98,6 +100,11 @@ public sealed class BakeTests : IDisposable
             {
                 stdout("""{"type":"progress","stage":"bake-instance","step":"resolve","done":0,"total":3,"message":"resolving"}""");
                 await Task.Delay(Timeout.Infinite, ct);
+            }
+            if (Crash.TryGetValue(stage, out var crash))
+            {
+                foreach (var line in crash) stderr(line);
+                return 1;
             }
             if (!Stages.TryGetValue(stage, out var answer))
             {
@@ -377,6 +384,26 @@ public sealed class BakeTests : IDisposable
         Assert.Null(skipped.Warm);
         Assert.Equal(0, older.Count("warm"));
     }
+
+    [Fact]
+    public async Task OldJavaGetsAClearMessage()
+    {
+        Version("1.21.1");
+        var loader = VanillaLoader();
+        loader.Crash["version"] = ["Error: LinkageError occurred while loading main class amber.ul.Bake",
+            "	java.lang.UnsupportedClassVersionError: amber/ul/Bake has been compiled by a more recent version of the Java Runtime (class file version 65.0)"];
+        var e = await Assert.ThrowsAsync<BakeException>(() => Service(loader).PrepareAsync("java", 17, new GameDirectory(Game), Instance(), false, null, CancellationToken.None));
+        Assert.Equal("java_too_old", e.Code);
+        Assert.Contains("21", e.Message);
+        Assert.Equal(0, loader.Count("bake-instance"));
+    }
+
+    [Theory]
+    [InlineData(8, 21)]
+    [InlineData(17, 21)]
+    [InlineData(21, 21)]
+    [InlineData(25, 25)]
+    public void BakeUsesAtLeastJava21(int versionMajor, int expected) => Assert.Equal(expected, BakeService.JavaMajorFor(versionMajor));
 
     [Fact]
     public async Task ProtocolMismatchStopsBeforeAnyBake()

@@ -155,6 +155,15 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     Func<IReadOnlyCollection<DownloadItem>, CancellationToken, Task>? download = null, IBakeProcess? process = null)
 {
     public const string StateFolder = ".amber-ul";
+
+    /// <summary>
+    /// The loader is built for Java 21, and a baked game runs on the loader's own launcher class, so both the bake
+    /// and the baked launch need at least this Java even when the version asks for less (Forge 1.20.1 asks for 17).
+    /// </summary>
+    public const int MinJavaMajor = 21;
+
+    /// <summary>The Java major version to bake and launch with for a version that asks for <paramref name="versionMajor"/>.</summary>
+    public static int JavaMajorFor(int versionMajor) => Math.Max(versionMajor, MinJavaMajor);
     public BakeToolkit Toolkit => toolkit;
     public string CacheRoot => cacheRoot;
     public string DataRoot => dataRoot;
@@ -575,6 +584,8 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         if (exit == 0 && result is not null) return result;
         string tail;
         lock (stderr) tail = string.Join(" / ", stderr);
+        if (error is null && tail.Contains("UnsupportedClassVersionError", StringComparison.Ordinal))
+            throw new BakeException(L.F("core.bake.java_too_old", MinJavaMajor), problems, "java_too_old");
         if (errorCode == "unknown_stage")
             throw new BakeException(L.F("core.bake.stage_unsupported", stage), problems, errorCode);
         if (errorCode == "stale_state")

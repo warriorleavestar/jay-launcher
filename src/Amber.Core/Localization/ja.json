@@ -2623,6 +2623,7 @@
   "core.bake.platform.neoforge": "NeoForge",
   "core.bake.platform.forge": "Forge",
   "core.bake.protocol_mismatch": "この汎用ローダー（{2}）のキャッシュプロトコルは {0} ですが、この Jay が扱えるのはプロトコル {1} です。Jay を更新するか、合うローダーのビルドを使ってください。",
+  "core.bake.java_too_old": "汎用ローダーには Java {0} 以降が必要です。ベイクして起動するとき Jay は Java {0} を使います。このインスタンスで自分で選んだ Java を使っている場合は、インスタンス設定で Java {0} 以降を選んでください。",
   "core.bake.interface_old": "この汎用ローダー（{2}）のインターフェースは {0} です。Jay には {1} 以降が必要です。ローダーのビルドを更新してください。",
   "core.bake.platform_unknown_version": "このインスタンスの {0} のバージョンがわかりません。ベイクするには再インストールしてください",
   "core.bake.platform_installer": "汎用ローダー用に {0} {1} のインストーラーをダウンロード中",

@@ -583,7 +583,7 @@ public sealed partial class HomeViewModel : PageViewModel
                 SetStatus(StatusMessage.Info("home.status.baking"));
                 try
                 {
-                    var (baked, reason) = await _service.PrepareBakeAsync(ctx, id, javaPath, new Progress<Amber.Core.Bake.BakeEvent>(e =>
+                    var (baked, reason, bakeJava) = await _service.PrepareBakeAsync(ctx, id, javaPath, new Progress<Amber.Core.Bake.BakeEvent>(e =>
                     {
                         Status = e.Message;
                         if (e.IsProblem) _log.AddRaw(run.Log, "[Bake] " + e.Message);
@@ -591,7 +591,9 @@ public sealed partial class HomeViewModel : PageViewModel
                     if (reason.Length > 0) _log.AddRaw(run.Log, "[Bake] " + reason);
                     if (baked is not null)
                     {
-                        options = options with { Baked = baked };
+                        // The loader's launcher needs Java 21 even where the version asks for less.
+                        options = options with { Baked = baked, JavaPath = bakeJava };
+                        javaPath = bakeJava;
                         run.Baked = true;
                     }
                 }

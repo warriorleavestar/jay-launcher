@@ -2682,6 +2682,7 @@
   "core.bake.platform.neoforge": "NeoForge",
   "core.bake.platform.forge": "Forge",
   "core.bake.protocol_mismatch": "This universal loader ({2}) uses cache protocol {0}, but this version of Jay understands protocol {1}. Update Jay or use a matching loader build.",
+  "core.bake.java_too_old": "The universal loader needs Java {0} or newer. Jay picks Java {0} for baked launches; if this instance uses a Java you chose yourself, choose Java {0} or newer in its settings.",
   "core.bake.interface_old": "This universal loader ({2}) has interface {0}; Jay needs {1} or newer. Update the loader build.",
   "core.bake.platform_unknown_version": "Cannot tell which {0} version this instance uses; reinstall it to bake it",
   "core.bake.platform_installer": "Downloading the {0} {1} installer for the universal loader",
