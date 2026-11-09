@@ -217,6 +217,10 @@ public sealed partial class MainViewModel : ObservableObject
 }
 
 public sealed record JavaOption(string Label, string? Path);
+public sealed record ThemePackOption(string Id, string Label, bool IsDefault)
+{
+    public override string ToString() => Label;
+}
 
 public sealed partial class SettingsViewModel : PageViewModel
 {
@@ -307,6 +311,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         CurseForgeRoot = s.CurseForgeApiRoot ?? "";
         UpdateFeed = s.UpdateFeedUrl ?? "";
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
+        ReloadThemePacks();
         // 启动时只把选单对上已经生效的语言，不再重新应用、不写设置文件。
         _initializing = true;
         SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(s.Language) ?? "system"));
@@ -342,6 +347,107 @@ public sealed partial class SettingsViewModel : PageViewModel
     private static readonly string[] ThemeKeys = ["system", "light", "dark"];
 
     [ObservableProperty] public partial int SelectedThemeIndex { get; set; }
+
+    // ---- 界面主题包 ----
+
+    /// <summary>第一项永远是 Jay 默认主题，后面是导入的主题包。</summary>
+    public ObservableCollection<ThemePackOption> ThemePacks { get; } = [];
+
+    [ObservableProperty] public partial ThemePackOption? SelectedThemePack { get; set; }
+
+    /// <summary>主题包的说明：作者、读取时发现的问题、安全模式提示。</summary>
+    [ObservableProperty] public partial string ThemePackStatus { get; set; } = "";
+
+    public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false };
+
+    private bool _themeLoading;
+
+    internal void ReloadThemePacks(string? select = null)
+    {
+        _themeLoading = true;
+        ThemePacks.Clear();
+        ThemePacks.Add(new ThemePackOption(ThemeService.DefaultId, L.T("settings.themepack.default"), true));
+        foreach (var pack in ThemeService.Store.List())
+            ThemePacks.Add(new ThemePackOption(pack.Id, pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name, false));
+        var id = select ?? _service.Settings.ThemePack ?? ThemeService.DefaultId;
+        SelectedThemePack = ThemePacks.FirstOrDefault(o => o.Id == id) ?? ThemePacks[0];
+        _themeLoading = false;
+        UpdateThemePackStatus();
+    }
+
+    partial void OnSelectedThemePackChanged(ThemePackOption? value)
+    {
+        OnPropertyChanged(nameof(CanRemoveThemePack));
+        if (_themeLoading || value is null) return;
+        ThemeService.Select(_service.Settings, value.Id);
+        Persist();
+        UpdateThemePackStatus();
+    }
+
+    private void UpdateThemePackStatus()
+    {
+        var lines = new List<string>();
+        switch (ThemeService.SafeModeReason)
+        {
+            case "crashed": lines.Add(L.T("settings.themepack.safe.crashed")); break;
+            case "requested": lines.Add(L.T("settings.themepack.safe.requested")); break;
+            case "missing": lines.Add(L.T("settings.themepack.safe.missing")); break;
+        }
+        if (ThemeService.Current is { } pack && pack.Problems.Count > 0)
+            lines.Add(L.F("settings.themepack.problems", pack.Problems.Count, string.Join("; ", pack.Problems.Take(4))));
+        ThemePackStatus = string.Join("\n", lines);
+    }
+
+    /// <summary>导入 .jaytheme：读取、校验、安装，然后直接切换过去。</summary>
+    public void ImportThemePack(string path)
+    {
+        try
+        {
+            var pack = ThemeService.Store.Install(path);
+            ReloadThemePacks(pack.Id);
+            ThemeService.Select(_service.Settings, pack.Id);
+            Persist();
+            UpdateThemePackStatus();
+            Toasts.Show(L.F("settings.themepack.imported", pack.Name));
+        }
+        catch (Amber.Core.Themes.ThemePackException e)
+        {
+            Toasts.Show(L.F("settings.themepack.import_failed", e.Code, e.Detail), Avalonia.Controls.Notifications.NotificationType.Error);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Toasts.Show(L.F("settings.themepack.import_failed", "io", e.Message), Avalonia.Controls.Notifications.NotificationType.Error);
+        }
+    }
+
+    public void ExportThemePack(string path)
+    {
+        try
+        {
+            ThemeService.ExportCurrent(path);
+            Toasts.Show(L.F("settings.themepack.exported", Path.GetFileName(path)));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or Amber.Core.Themes.ThemePackException)
+        {
+            Toasts.Show(e.Message, Avalonia.Controls.Notifications.NotificationType.Error);
+        }
+    }
+
+    [RelayCommand]
+    private void RemoveThemePack()
+    {
+        if (SelectedThemePack is not { IsDefault: false } option) return;
+        var wasCurrent = (_service.Settings.ThemePack ?? ThemeService.DefaultId) == option.Id;
+        if (wasCurrent) ThemeService.Select(_service.Settings, ThemeService.DefaultId);
+        try { ThemeService.Store.Remove(option.Id); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Toasts.Show(e.Message, Avalonia.Controls.Notifications.NotificationType.Error); }
+        Persist();
+        ReloadThemePacks();
+    }
+
+    /// <summary>恢复默认主题：设置页固定位置的按钮，主题改不了它。</summary>
+    [RelayCommand]
+    private void ResetThemePack() => SelectedThemePack = ThemePacks.FirstOrDefault();
 
     [RelayCommand]
     private Task RefreshJavaAsync() => LoadJavaAsync(true);
@@ -403,7 +509,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     {
         if (_loading || value < 0) return;
         _service.Settings.Theme = ThemeKeys[Math.Min(value, ThemeKeys.Length - 1)];
-        App.ApplyTheme(_service.Settings.Theme);
+        ThemeService.SetVariant(_service.Settings.Theme);
         Persist();
     }
 
@@ -533,6 +639,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "post": PostExit = d.PostExitCommand ?? ""; break;
             case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
             case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
+            case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); break;
         }
     }
 }

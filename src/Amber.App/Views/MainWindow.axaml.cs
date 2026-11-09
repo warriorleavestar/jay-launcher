@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     {
         _settings = settings;
         InitializeComponent();
+        Amber.App.Services.ThemeService.AttachMainWindow(this);
         FitToScreen(settings?.LauncherWindow);
         // 窗口打开后才知道标题栏有多高：Width/Height 是客户区，加上标题栏可能比屏幕的可用区域还高（底下被任务栏挡住）。
         Opened += (_, _) => FitFrameToScreen();
@@ -82,6 +83,8 @@ public partial class MainWindow : Window
                     await new ContentPageSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "remote")
                     await new RemoteSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
+                else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "theme")
+                    await new ThemeSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "bake-notice")
                     await new BakeNoticeSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else
@@ -289,6 +292,31 @@ public partial class MainWindow : Window
         using var bitmap = new RenderTargetBitmap(new PixelSize((int)Bounds.Width, (int)Bounds.Height));
         bitmap.Render(this);
         bitmap.Save(path);
+    }
+
+    private async void ImportTheme_Click(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = L.T("settings.themepack.import"),
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType(L.T("settings.themepack.filetype")) { Patterns = ["*.jaytheme", "*.zip"] }],
+        });
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) vm.ImportThemePack(path);
+    }
+
+    private async void ExportTheme_Click(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = L.T("settings.themepack.export"),
+            SuggestedFileName = "my-theme.jaytheme",
+            DefaultExtension = "jaytheme",
+            FileTypeChoices = [new FilePickerFileType(L.T("settings.themepack.filetype")) { Patterns = ["*.jaytheme"] }],
+        });
+        if (file?.TryGetLocalPath() is { } path) vm.ExportThemePack(path);
     }
 
     private async void BrowseGameDir_Click(object? sender, RoutedEventArgs e)

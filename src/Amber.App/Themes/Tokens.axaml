@@ -39,6 +39,8 @@
   <x:Double x:Key="FontDisplay">26</x:Double>
   <!-- 字体：中文优先，按语言替换的工作在 i18n 那边（繁体、日文） -->
   <FontFamily x:Key="UiFont">Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, Source Han Sans SC, Segoe UI</FontFamily>
+  <!-- 主题包的窗口背景图透明度（背景图本身只在主题包里有） -->
+  <x:Double x:Key="ThemeBackgroundOpacity">1</x:Double>
   <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, monospace</FontFamily>
 
   <ResourceDictionary.ThemeDictionaries>

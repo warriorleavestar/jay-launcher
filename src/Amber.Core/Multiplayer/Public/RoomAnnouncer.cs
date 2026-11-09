@@ -14,6 +14,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     private readonly RoomDirectoryClient _client;
     private readonly Func<RoomListing> _listing;
     private readonly Func<IReadOnlyList<string>> _lookupKeys;
+    private readonly Func<byte[]?>? _searchKey;
     private readonly Action<string>? _mail;
     private readonly Action<string>? _log;
     private readonly TimeSpan _every;
@@ -33,8 +34,9 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     /// <param name="lookupKeys">现在还能用的邀请码对应的查找键（<see cref="RoomDirectoryProtocol.LookupKey"/>）。</param>
     /// <param name="mail">目录捎来的话（直连房间的回复码）。</param>
     public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<string>> lookupKeys, Action<string>? mail = null,
-        Action<string>? log = null, TimeSpan? every = null, RoomDirectoryClient? client = null)
+        Action<string>? log = null, TimeSpan? every = null, RoomDirectoryClient? client = null, Func<byte[]?>? searchKey = null)
     {
+        _searchKey = searchKey;
         _network = network;
         _client = client ?? new RoomDirectoryClient(network);
         _listing = listing;
@@ -80,8 +82,9 @@ public sealed class RoomAnnouncer : IAsyncDisposable
             {
                 var listing = _signer.Sign(_listing() with { Ip = ip }, DateTimeOffset.UtcNow);
                 var keys = _lookupKeys();
-                // 隐藏房间又没有能用的邀请：目录里没什么可登记的（之前登记的 90 秒后自己过期）。
-                if (listing.Mode == RoomVisibility.Hidden && keys.Count == 0)
+                var search = _searchKey?.Invoke();
+                // 隐藏房间又没有能用的邀请、也没开指纹查找：目录里没什么可登记的（之前登记的 90 秒后自己过期）。
+                if (listing.Mode == RoomVisibility.Hidden && keys.Count == 0 && search is null)
                 {
                     // 之前在列表里（刚撤下）：马上从目录里撤掉，不等 90 秒过期。
                     if (Published) await _client.WithdrawAsync(_signer, ct);
@@ -93,7 +96,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                     }
                     return;
                 }
-                var mails = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct);
+                var mails = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search);
                 foreach (var m in mails) _mail?.Invoke(m);
             }
         }
@@ -137,7 +140,7 @@ public static class PublicJoin
     /// 对不上就当没成功，免得有人在目录里冒用别人的房间。
     /// </summary>
     public static async Task<KnockOutcome> KnockAsync(IPublicNetwork network, string hostIp, JayInvite invite, X25519KeyPair me, string name, string version,
-        byte[]? expectedHostKey, CancellationToken ct)
+        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -146,7 +149,7 @@ public static class PublicJoin
             {
                 await using var stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, ct);
                 connected = true;
-                var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct);
+                var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct, device: device);
                 if (expectedHostKey is not null && !outcome.HostPublicKey.AsSpan().SequenceEqual(expectedHostKey))
                     return new KnockOutcome(null, "mismatch", outcome.HostPublicKey);
                 return outcome;
@@ -173,10 +176,10 @@ public static class PublicJoin
 
     /// <summary>拿着邀请码：先在目录里找房主；找到就经公共网络敲门，找不到返回 null（调用方改走邀请码自己的大厅）。</summary>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
-        CancellationToken ct, RoomDirectoryClient? client = null)
+        CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null)
     {
         var hit = await (client ?? new RoomDirectoryClient(network)).LookupAsync(invite.LobbyKey, ct);
         if (hit is null) return null;
-        return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct);
+        return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device);
     }
 }

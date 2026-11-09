@@ -1,0 +1,257 @@
+using System.Security.Cryptography;
+using Amber.Core.Multiplayer;
+using Amber.Core.Multiplayer.Transport;
+
+namespace Amber.Core.Tests;
+
+/// <summary>成员之间的端到端私聊和传文件：加密格式、房主转交（名单、按指纹转、盖发方）、传文件的确认 / 拒绝 / 校验。</summary>
+public sealed class PrivateMessengerTests : IDisposable
+{
+    private readonly X25519KeyPair _host = X25519KeyPair.Generate();
+    private readonly X25519KeyPair _alice = X25519KeyPair.Generate();
+    private readonly X25519KeyPair _bob = X25519KeyPair.Generate();
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "jay-pm-" + Guid.NewGuid().ToString("N"));
+
+    private static string Fp(X25519KeyPair key) => MemberIdentity.FingerprintOf(key.PublicKey);
+
+    [Fact]
+    public void SealOpensOnlyForTheRecipientFromTheRealSender()
+    {
+        var plain = "只给 Bob 看"u8.ToArray();
+        var sealedData = PrivateSeal.Seal(_alice, _bob.PublicKey, plain);
+        Assert.Equal(plain, PrivateSeal.Open(_bob, _alice.PublicKey, sealedData));
+        // 第三个人（包括房主）解不开；说成别的发方也解不开。
+        Assert.Null(PrivateSeal.Open(_host, _alice.PublicKey, sealedData));
+        Assert.Null(PrivateSeal.Open(_bob, _host.PublicKey, sealedData));
+        // 改一个字节就不认。
+        sealedData[^1] ^= 1;
+        Assert.Null(PrivateSeal.Open(_bob, _alice.PublicKey, sealedData));
+        // 同样的内容每次加密都不一样。
+        Assert.NotEqual(PrivateSeal.Seal(_alice, _bob.PublicKey, plain), PrivateSeal.Seal(_alice, _bob.PublicKey, plain));
+    }
+
+    [Theory]
+    [InlineData("../../etc/passwd", "passwd")]
+    [InlineData("C:\\Windows\\evil.exe", "evil.exe")]
+    [InlineData("", "file")]
+    [InlineData("..", "file")]
+    [InlineData("CON.txt", "_CON.txt")]
+    [InlineData("a<b>c?.png", "abc.png")]
+    public void FileNamesFromOthersAreMadeSafe(string name, string expected) => Assert.Equal(expected, PrivateMessenger.SafeName(name));
+
+    // ---- 不经网络：两头直接连 ----
+
+    private sealed class Link(string me, byte[] myKey, string name) : IPrivateLink
+    {
+        public Link? Peer;
+        public bool Drop;
+        public event Action<PrivateFrame>? PrivateReceived;
+
+        public Task<bool> SendPrivateAsync(string to, byte[] sealedData, CancellationToken ct)
+        {
+            if (Peer is null || Drop) return Task.FromResult(false);
+            Peer.PrivateReceived?.Invoke(new PrivateFrame(me, myKey, name, sealedData));
+            return Task.FromResult(true);
+        }
+    }
+
+    private (PrivateMessenger Alice, PrivateMessenger Bob) Pair()
+    {
+        var a = new Link(Fp(_alice), _alice.PublicKey, "Alice");
+        var b = new Link(Fp(_bob), _bob.PublicKey, "Bob");
+        a.Peer = b;
+        b.Peer = a;
+        var keys = new Dictionary<string, byte[]> { [Fp(_alice)] = _alice.PublicKey, [Fp(_bob)] = _bob.PublicKey };
+        return (new PrivateMessenger(a, _alice, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "alice")),
+            new PrivateMessenger(b, _bob, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "bob")));
+    }
+
+    [Fact]
+    public async Task TextMessageArrives()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        var got = new TaskCompletionSource<PrivateMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.MessageReceived += m => got.TrySetResult(m);
+        Assert.True(await alice.SendTextAsync(Fp(_bob), "晚上一起挖矿？"));
+        var message = await got.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("晚上一起挖矿？", message.Text);
+        Assert.Equal(Fp(_alice), message.FromFingerprint);
+        Assert.False(await alice.SendTextAsync("NOT-ONLINE", "hi"));
+    }
+
+    [Fact]
+    public async Task FileArrivesIntactAfterAccepting()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "截图.png");
+        var data = RandomNumberGenerator.GetBytes(PrivateMessenger.ChunkSize * 40 + 123);
+        await File.WriteAllBytesAsync(source, data);
+        bob.FileOffered += offer => _ = bob.AcceptAsync(offer.Id);
+        var saved = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.Progress += p =>
+        {
+            if (p.Finished) saved.TrySetResult(p.SavedPath ?? p.Error ?? "");
+        };
+        Assert.True(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(30)));
+        var path = await saved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(Path.Combine(_dir, "bob", "截图.png"), path);
+        Assert.Equal(data, await File.ReadAllBytesAsync(path));
+        Assert.Empty(Directory.GetFiles(Path.Combine(_dir, "bob"), "*.jaypart"));
+    }
+
+    [Fact]
+    public async Task DeclinedFileIsNotSent()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "a.txt");
+        await File.WriteAllTextAsync(source, "hello");
+        bob.FileOffered += offer => _ = bob.DeclineAsync(offer.Id);
+        Assert.False(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.False(Directory.Exists(Path.Combine(_dir, "bob")) && Directory.EnumerateFiles(Path.Combine(_dir, "bob")).Any());
+    }
+
+    [Fact]
+    public async Task InterruptedFileResumesWhereItStopped()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "存档.zip");
+        var data = RandomNumberGenerator.GetBytes(PrivateMessenger.ChunkSize * 60 + 77);
+        await File.WriteAllBytesAsync(source, data);
+        bob.FileOffered += offer => _ = bob.AcceptAsync(offer.Id);
+        // 第一次：收到 20 块以后收方取消。没收完的部分留着。
+        var round = 1;
+        long resumedFrom = -1;
+        var saved = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.Progress += p =>
+        {
+            if (round == 1 && !p.Finished && p.Done >= PrivateMessenger.ChunkSize * 20) _ = bob.CancelAsync(p.Id);
+            if (round == 2 && resumedFrom < 0) resumedFrom = p.Done;
+            if (round == 2 && p.Finished) saved.TrySetResult(p.SavedPath ?? p.Error ?? "");
+        };
+        Assert.False(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(30)));
+        var part = Assert.Single(Directory.GetFiles(Path.Combine(_dir, "bob"), "*.jaypart"));
+        Assert.True(new FileInfo(part).Length >= PrivateMessenger.ChunkSize * 20);
+        // 第二次发同一个文件：从断开的地方接着收，结果和原文件一样。
+        round = 2;
+        Assert.True(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(30)));
+        var path = await saved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(resumedFrom >= PrivateMessenger.ChunkSize * 20, $"resumed from {resumedFrom}");
+        Assert.Equal(Path.Combine(_dir, "bob", "存档.zip"), path);
+        Assert.Equal(data, await File.ReadAllBytesAsync(path));
+        Assert.Empty(Directory.GetFiles(Path.Combine(_dir, "bob"), "*.jaypart"));
+    }
+
+    [Fact]
+    public async Task FileIsDeclinedWhenTheDiskIsTooFull()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "big.bin");
+        await File.WriteAllBytesAsync(source, new byte[10_000]);
+        // 不限文件大小，只看收方磁盘够不够：这里假装只剩 1 MB（不到预留空间）。
+        bob.FreeSpaceOf = _ => 1024 * 1024;
+        var refused = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.FileOffered += offer => _ = Task.Run(async () =>
+        {
+            try { await bob.AcceptAsync(offer.Id); refused.TrySetResult(null); }
+            catch (IOException e) { refused.TrySetResult(e); }
+        });
+        Assert.False(await alice.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<IOException>(await refused.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(Directory.Exists(Path.Combine(_dir, "bob")) && Directory.EnumerateFiles(Path.Combine(_dir, "bob")).Any());
+    }
+
+    // ---- 经真的聊天转发（邀请房间） ----
+
+    private sealed record Room(RoomCredentials Credentials, MemberTable Table, RoomCode Host);
+
+    private Room HostRoom()
+    {
+        var credentials = RoomCredentials.Create(_host.PublicKey.ToArray(), 25565, TunnelSettings.Default);
+        var table = new MemberTable();
+        return new Room(credentials, table, credentials.ToHostRoom(table, "Host"));
+    }
+
+    private static RoomCode GuestRoom(Room room, MemberEntry entry) =>
+        RoomCredentials.FromJson((room.Credentials with { Member = entry.Key }).ToJson()).ToRoom();
+
+    private static async Task<bool> WaitAsync(Func<bool> condition, int seconds = 5)
+    {
+        for (var i = 0; i < seconds * 20; i++)
+        {
+            if (condition()) return true;
+            await Task.Delay(50);
+        }
+        return condition();
+    }
+
+    [Fact]
+    public async Task HubForwardsOnlyToTheRecipientAndStampsTheSender()
+    {
+        var room = HostRoom();
+        var alice = room.Table.Issue(_alice.PublicKey, "Alice");
+        var bob = room.Table.Issue(_bob.PublicKey, "Bob");
+        var carol = room.Table.Issue(X25519KeyPair.Generate().PublicKey, "Carol");
+        await using var hub = new ChatHub(room.Host, 0);
+        await using var aliceChat = new ChatClient(GuestRoom(room, alice), "Alice");
+        await using var bobChat = new ChatClient(GuestRoom(room, bob), "Bob");
+        var carolChat = new ChatClient(GuestRoom(room, carol), "Carol");
+        var carolGot = 0;
+        carolChat.PrivateReceived += _ => Interlocked.Increment(ref carolGot);
+        await aliceChat.ConnectAsync("127.0.0.1", hub.Port);
+        await bobChat.ConnectAsync("127.0.0.1", hub.Port);
+        await carolChat.ConnectAsync("127.0.0.1", hub.Port);
+        // 名单：三个人都在，公钥和指纹对得上。
+        Assert.True(await WaitAsync(() => aliceChat.Roster.Count == 3));
+        Assert.Contains(aliceChat.Roster, r => r.Fingerprint == Fp(_bob) && r.PublicKey.SequenceEqual(_bob.PublicKey) && r.Name == "Bob");
+
+        byte[]? KeyOf(ChatClient chat, string fp) => chat.Roster.FirstOrDefault(r => r.Fingerprint == fp)?.PublicKey;
+        await using var aliceMessenger = new PrivateMessenger(aliceChat, _alice, fp => KeyOf(aliceChat, fp), Path.Combine(_dir, "alice"));
+        await using var bobMessenger = new PrivateMessenger(bobChat, _bob, fp => KeyOf(bobChat, fp), Path.Combine(_dir, "bob"));
+        var got = new TaskCompletionSource<PrivateMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bobMessenger.MessageReceived += m => got.TrySetResult(m);
+        Assert.True(await aliceMessenger.SendTextAsync(Fp(_bob), "悄悄话"));
+        var message = await got.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("悄悄话", message.Text);
+        Assert.Equal(Fp(_alice), message.FromFingerprint);
+        Assert.Equal("Alice", message.FromName);
+
+        // 经转发传一个小文件。
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "world.zip");
+        var data = RandomNumberGenerator.GetBytes(50_000);
+        await File.WriteAllBytesAsync(source, data);
+        bobMessenger.FileOffered += offer => _ = bobMessenger.AcceptAsync(offer.Id);
+        var saved = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bobMessenger.Progress += p =>
+        {
+            if (p.Finished) saved.TrySetResult(p.SavedPath);
+        };
+        Assert.True(await aliceMessenger.SendFileAsync(Fp(_bob), source).WaitAsync(TimeSpan.FromSeconds(30)));
+        var path = await saved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(data, await File.ReadAllBytesAsync(path!));
+        Assert.Equal(0, carolGot);
+
+        // Carol 离开后名单更新。
+        await carolChat.DisposeAsync();
+        Assert.True(await WaitAsync(() => aliceChat.Roster.Count == 2));
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+}
