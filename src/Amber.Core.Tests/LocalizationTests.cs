@@ -139,6 +139,26 @@ public partial class LocalizationTests
             $"{code}：缺 {missing.Count} 个（{string.Join(", ", missing.Take(10))}），多 {extra.Count} 个（{string.Join(", ", extra.Take(10))}），占位符不一致：\n{string.Join("\n", placeholderMismatch.Take(10))}");
     }
 
+    /// <summary>
+    /// Multiplayer glossary (official §6.14): the UI says relay server, safety code, friend code and "connected directly",
+    /// never the internal words. Internal names may appear only in the component's licence line.
+    /// </summary>
+    [Theory]
+    [InlineData("zh-Hans", new[] { "节点", "打洞", "指纹", "退出码" })]
+    [InlineData("zh-Hant", new[] { "節點", "打洞", "指紋", "NAT 穿透" })]
+    [InlineData("en", new[] { " node", "Node ", "fingerprint", "hole punch" })]
+    [InlineData("ja", new[] { "ノード", "指紋", "ホールパンチ", "フィンガープリント" })]
+    public void GlossaryKeepsInternalWordsOutOfUi(string code, string[] banned)
+    {
+        var table = L.Load(code);
+        var bad = table.Where(p => (p.Key.StartsWith("multiplayer.", StringComparison.Ordinal) || p.Key.StartsWith("core.mp.", StringComparison.Ordinal)
+                || p.Key.StartsWith("remote.", StringComparison.Ordinal))
+                && p.Key != "multiplayer.component.license" && p.Key != "multiplayer.nodes.hint"
+                && banned.Any(b => p.Value.Contains(b, StringComparison.Ordinal)))
+            .Select(p => $"{p.Key}: {p.Value}").ToList();
+        Assert.True(bad.Count == 0, string.Join("\n", bad.Take(10)));
+    }
+
     /// <summary>占位符的完整写法（包括 :F1 这类格式），译文要和原文一模一样。</summary>
     private static HashSet<string> Placeholders(string text) => Placeholder().Matches(text).Select(m => m.Value).ToHashSet();
 
