@@ -88,18 +88,29 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
                 }
             L.SetLanguage("zh-Hans");
 
+            // 2b. 排版和层级：导航挪到顶上、只显示图标、藏掉工具和日志；启动页按宽度重新排。
+            await LayoutAsync(settings);
+
             // 3. 坏包：带 .dll 的整个拒绝，不留文件，当前主题不变。
             var bad = Path.Combine(reportDir, "bad.jaytheme");
             WritePack(bad, """{ "id": "selftest-bad", "name": "坏" }""", "{}", ("payload.dll", "MZ"));
             settings.ImportThemePack(bad);
             await Task.Delay(300);
-            Check("带程序文件的主题包被拒绝，不安装", !Directory.Exists(Path.Combine(ThemeService.Store.Root, "selftest-bad")) && settings.SelectedThemePack?.Id == "selftest-blue");
+            Check("带程序文件的主题包被拒绝，不安装", !Directory.Exists(Path.Combine(ThemeService.Store.Root, "selftest-bad")) && settings.SelectedThemePack?.Id == "selftest-topbar");
 
             // 4. 恢复默认：颜色回到默认，设置文件清掉主题包。
             settings.ResetThemePackCommand.Execute(null);
             await Task.Delay(400);
             Check("恢复默认主题后强调色回到默认", Brush("Accent", ThemeVariant.Dark) == defaultAccent && ThemeService.Current is null);
-            Check("恢复默认后设置文件不再指定主题包", !File.ReadAllText(AppSettings.FilePath).Contains("selftest-blue", StringComparison.Ordinal));
+            Check("恢复默认后设置文件不再指定主题包", !File.ReadAllText(AppSettings.FilePath).Contains("selftest-", StringComparison.Ordinal));
+            main.CurrentPage = main.Pages[0];
+            await Task.Delay(500);
+            var home = window.GetVisualDescendants().OfType<HomePage>().First();
+            Check("恢复默认后导航回到左边、九个页面都在、启动页用回自带布局",
+                window.ShellNav == "left" && main.NavPages.Count == main.Pages.Count && !home.ThemeLayout.UsingThemeLayout
+                && home.ThemeLayout.Regions["home.title"].Parent is not null);
+            main.CurrentPage = settings;
+            await Task.Delay(300);
 
             // 5. 删除主题。
             settings.SelectedThemePack = settings.ThemePacks.First(o => o.Id == "selftest-blue");
@@ -119,6 +130,63 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             File.WriteAllLines(Path.Combine(reportDir, "report.txt"), _report);
             window.Close();
         }
+    }
+
+    private async Task LayoutAsync(SettingsViewModel settings)
+    {
+        var path = Path.Combine(reportDir, "topbar.jaytheme");
+        WritePack(path, """{ "id": "selftest-topbar", "name": "自检顶栏" }""", """{ "seed": { "accent": "#0F9D8A" } }""",
+            ("layout/shell.json", """{ "nav": "top", "navStyle": "icons", "pages": ["home", "multiplayer", "settings"], "hidden": ["tools", "log"] }"""),
+            ("layout/pages/home.json", """
+            {
+              "wide": { "type": "grid", "columns": ["*", "360"], "rows": ["auto", "*"], "spacing": 16, "children": [
+                  { "type": "region", "name": "home.title", "columnSpan": 2 },
+                  { "type": "scroll", "row": 1, "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] },
+                  { "type": "region", "name": "home.launch", "row": 1, "column": 1, "valign": "start" } ] },
+              "default": { "type": "dock", "children": [
+                  { "type": "region", "name": "home.launch", "dock": "top", "margin": [0, 0, 0, 12] },
+                  { "type": "scroll", "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] } ] }
+            }
+            """));
+        settings.ImportThemePack(path);
+        await Task.Delay(500);
+        Check("导入带排版的主题包：导航挪到顶上", window.ShellNav == "top" && window.SidebarHost.Bounds.Width > window.Bounds.Width - 4
+            && window.SidebarHost.Bounds.Height < 120, $"导航 {window.ShellNav} {window.SidebarHost.Bounds}");
+        Check("导航按主题排序、藏掉工具和日志，启动页和设置页还在",
+            main.NavPages.Take(3).SequenceEqual([main.Pages[0], main.Pages.OfType<MultiplayerViewModel>().Single(), settings])
+            && !main.NavPages.OfType<ToolsViewModel>().Any() && !main.NavPages.OfType<LogViewModel>().Any() && main.Pages.Count == 9);
+        // 当前页（设置）不在导航里也不会被清空；藏起来的页还能跳过去。
+        main.CurrentPage = main.Pages.OfType<LogViewModel>().Single();
+        await Task.Delay(300);
+        Check("藏起来的页面还能跳过去", window.GetVisualDescendants().OfType<LogPage>().Any() && main.NavSelection is null);
+
+        main.CurrentPage = main.Pages[0];
+        window.Width = 1600;
+        window.Height = 900;
+        await Task.Delay(600);
+        var home = window.GetVisualDescendants().OfType<HomePage>().First();
+        var launch = home.ThemeLayout.Regions["home.launch"];
+        Check("宽窗口：启动页用主题的布局，启动卡片在右边一栏",
+            home.ThemeLayout.UsingThemeLayout && launch.TranslatePoint(default, home) is { X: > 600 },
+            $"启动卡片位置 {launch.TranslatePoint(default, home)}");
+        await ShotAsync("layout-home-1600x900");
+
+        window.Width = 1024;
+        window.Height = 640;
+        await Task.Delay(600);
+        Check("中等窗口：换成另一棵树，启动卡片在最上面",
+            home.ThemeLayout.UsingThemeLayout && launch.TranslatePoint(default, home) is { Y: < 20 } && home.ThemeLayout.Regions["home.title"].Parent is null,
+            $"启动卡片位置 {launch.TranslatePoint(default, home)}");
+        await ShotAsync("layout-home-1024x640");
+        window.Width = 760;
+        window.Height = 440;
+        await ShotAsync("layout-home-760x440");
+        main.CurrentPage = main.Pages.OfType<MultiplayerViewModel>().Single();
+        window.Width = 1280;
+        window.Height = 800;
+        await ShotAsync("layout-multiplayer-1280x800");
+        main.CurrentPage = settings;
+        await Task.Delay(300);
     }
 
     private static void WritePack(string path, string manifest, string tokens, params (string Name, string Text)[] extra)

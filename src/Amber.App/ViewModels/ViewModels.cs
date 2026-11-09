@@ -1,3 +1,4 @@
+using Amber.Core.Themes;
 using System.Collections.ObjectModel;
 using Amber.Core.Localization;
 using Amber.App.Services;
@@ -133,8 +134,40 @@ public sealed partial class MainViewModel : ObservableObject
 
     public string VersionText => L.F("main.version", UpdateChecker.CurrentVersion);
 
+    /// <summary>导航栏里显示的页面：主题包可以改顺序、藏掉不常用的页（启动页和设置页藏不掉）。页面本身还在，跳转照常。</summary>
+    public ObservableCollection<PageViewModel> NavPages { get; } = [];
+
+    /// <summary>
+    /// 导航栏的选中项。当前页不在导航栏里时是空；导航栏给空值（重排导航项时会发生）不改当前页。
+    /// </summary>
+    public PageViewModel? NavSelection
+    {
+        get => NavPages.Contains(CurrentPage) ? CurrentPage : null;
+        set { if (value is not null) CurrentPage = value; }
+    }
+
+    /// <summary>按主题包的 shell 布局排导航项；传空恢复 Jay 自带的顺序。</summary>
+    public void ApplyNavOrder(ShellLayout? shell)
+    {
+        var ids = ThemeLayout.PageIds;
+        var byId = new Dictionary<string, PageViewModel>();
+        for (var i = 0; i < Pages.Count && i < ids.Length; i++) byId[ids[i]] = Pages[i];
+        var order = new List<PageViewModel>();
+        foreach (var id in shell?.PageOrder ?? [])
+            if (byId.TryGetValue(id, out var page) && !order.Contains(page)) order.Add(page);
+        foreach (var page in Pages)
+            if (!order.Contains(page)) order.Add(page);
+        if (shell is not null)
+            order.RemoveAll(p => byId.FirstOrDefault(kv => kv.Value == p).Key is { } id && shell.Hidden.Contains(id) && !ThemeLayout.RequiredPages.Contains(id));
+        if (order.SequenceEqual(NavPages)) return;
+        NavPages.Clear();
+        foreach (var page in order) NavPages.Add(page);
+        OnPropertyChanged(nameof(NavSelection));
+    }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
+        OnPropertyChanged(nameof(NavSelection));
         if (oldValue is not null) oldValue.IsCurrent = false;
         newValue.IsCurrent = true;
         newValue.Activate();
@@ -207,6 +240,7 @@ public sealed partial class MainViewModel : ObservableObject
             CurrentPage = content;
             content.BrowseDatapacksFor(id, world, back: () => CurrentPage = instance);
         };
+        ApplyNavOrder(null);
         CurrentPage = Pages[0];
         CurrentPage.Activate();
     }

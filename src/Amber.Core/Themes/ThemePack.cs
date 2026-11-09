@@ -7,7 +7,7 @@ namespace Amber.Core.Themes;
 
 /// <summary>
 /// 界面主题包（.jaytheme）：一个 zip，里面只有数据（JSON、字体、图片），没有任何代码。
-/// 读 theme.json、tokens.json（配色、字体、字号、间距、圆角、背景图）和 styles.json（组件样式）；layout/ 留给后面几期，现在读到了只提示“这个版本还不支持”。
+/// 读 theme.json、tokens.json（配色、字体、字号、间距、圆角、背景图）、styles.json（组件样式）和 layout/（外壳和页面的排版、层级）。
 /// 自己导入的主题和联机网络带来的主题都走这一个读取器，规则完全一样。
 /// </summary>
 public sealed class ThemePack
@@ -40,6 +40,15 @@ public sealed class ThemePack
 
     /// <summary>第 2 层组件样式：组件名 → 状态（"" 是普通状态）→ 属性。</summary>
     public Dictionary<string, Dictionary<string, StyleProps>> Styles { get; } = [];
+
+    /// <summary>第 3 层外壳布局（layout/shell.json）；null 表示用 Jay 自带的。</summary>
+    public ShellLayout? Shell { get; set; }
+
+    /// <summary>第 3 层页面布局（layout/pages/{页面}.json），键是页面 id。</summary>
+    public Dictionary<string, PageLayout> Pages { get; } = [];
+
+    /// <summary>读取时用来取包里文件的函数（布局里的图片要核对文件）。</summary>
+    internal Func<string, byte[]?>? Open { get; set; }
 
     /// <summary>解压后的目录（已安装的主题）；只在内存里读的为 null。</summary>
     public string? Directory { get; set; }
@@ -288,12 +297,18 @@ public static partial class ThemePackReader
         if (has("sizes", out var sizes)) ReadNumbers(sizes, NumberKeys, pack.Numbers, pack.Problems, "sizes");
         if (has("radius", out var radius)) ReadNumbers(radius, RadiusKeys, pack.Radii, pack.Problems, "radius");
 
-        if (open("layout/shell.json") is not null) pack.Problems.Add(new("layer_not_supported_yet", "layout/"));
 
         ThemeContrast.Enforce(pack);
         // 组件样式在配色修正之后读：组件里引用的 token 要按修正后的颜色算对比度。
         if (open("styles.json") is { } stylesBytes && ParseJsonOrProblem(stylesBytes, "styles.json", pack.Problems) is { } styles)
             using (styles) ThemeStyles.Read(pack, styles.RootElement, open);
+        pack.Open = open;
+        if (open("layout/shell.json") is { } shellBytes && ParseJsonOrProblem(shellBytes, "layout/shell.json", pack.Problems) is { } shell)
+            using (shell) ThemeLayout.ReadShell(pack, shell.RootElement);
+        foreach (var page in ThemeLayout.PageIds)
+            if (open($"layout/pages/{page}.json") is { } pageBytes && ParseJsonOrProblem(pageBytes, $"layout/pages/{page}.json", pack.Problems) is { } pageDoc)
+                using (pageDoc) ThemeLayout.ReadPage(pack, page, pageDoc.RootElement);
+        pack.Open = null;
         return pack;
     }
 

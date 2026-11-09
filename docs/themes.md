@@ -1,10 +1,10 @@
 # Jay 界面主题包（.jaytheme）
 
-主题包可以换掉 Jay 的配色、字体、字号、间距、圆角和窗口背景图。在 **设置 → 界面主题包 → 导入主题…** 里导入。
+主题包可以换掉 Jay 的配色、字体、字号、间距、圆角、窗口背景图、组件的美术风格，以及窗口和页面的排版、层级。在 **设置 → 界面主题包 → 导入主题…** 里导入。
 
 主题包里**只有数据**：JSON、字体、图片。不能带代码、脚本、XAML，也不能从网上加载任何东西。所以别人做的主题、联机网络配置文件带来的主题，都不能在你电脑上运行程序。Windows、macOS、Linux 上效果一样。
 
-> 现在支持配色和字体（tokens.json）、组件样式（styles.json）。页面布局（layout/）在后面加入；现在的 Jay 读到它会提示“这个版本还不支持”，其余部分照常生效。
+> 现在支持配色和字体（tokens.json）、组件样式（styles.json）、窗口外壳（layout/shell.json）和启动页的布局（layout/pages/home.json）。其他页面的布局会陆续加入；现在的 Jay 读到还不支持的页面会在设置页提示，其余部分照常生效。
 
 ## 文件结构
 
@@ -14,6 +14,8 @@
 theme.json        必需：清单
 tokens.json       可选：配色、字体、字号、间距、圆角、背景图
 styles.json       可选：组件样式（按钮、卡片、导航、输入框……的美术风格）
+layout/shell.json 可选：窗口外壳（导航放哪、多宽、只显示图标、页面顺序）
+layout/pages/     可选：各页面的布局，如 layout/pages/home.json
 fonts/            可选：.ttf / .otf
 assets/           可选：.png / .jpg（每边不超过 4096 像素）
 README.txt / *.md 可选：说明
@@ -21,7 +23,7 @@ README.txt / *.md 可选：说明
 
 其他类型的文件会让整个包被拒绝。限制：整个包不超过 20 MB、最多 256 个文件、单个文件不超过 16 MB、JSON 不超过 512 KB。
 
-最快的起点：在设置里点 **导出当前主题…**，解开导出的文件改 tokens.json，再打包。仓库里有两个示例：[`themes/examples/`](../themes/examples/)。
+最快的起点：在设置里点 **导出当前主题…**，解开导出的文件改 tokens.json，再打包。仓库里有三个示例：[`themes/examples/`](../themes/examples/)，其中 `topbar` 演示了排版。
 
 ## theme.json
 
@@ -136,6 +138,71 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 
 组件样式只作用在 Jay 主窗口里。确认框、远程控制同意框、“正在被远程控制”提示条这些安全窗口永远用 Jay 自带的配色和样式。
 
+## layout/shell.json：窗口外壳
+
+```jsonc
+{
+  "nav": "top",              // 导航放在 left（默认）/ right / top / bottom
+  "navWidth": 200,           // 左右导航的宽度，56–360
+  "navStyle": "icons",       // full（图标加文字，默认）/ icons（只有图标，悬停显示名字）
+  "showBrand": true,         // 显示 Jay 的标志
+  "contentMaxWidth": 1280,   // 页面内容最宽多少（大屏上居中），640–4000
+  "pages": ["home", "multiplayer", "settings"],  // 导航顺序；没写到的页面按原顺序接在后面
+  "hidden": ["tools", "log"] // 不在导航里显示（页面还在，从别的地方还能跳过去）
+}
+```
+
+页面名：`home` `accounts` `instances` `downloads` `content` `multiplayer` `tools` `settings` `log`。`home` 和 `settings` 不能隐藏（“恢复默认主题”在设置页里）。
+
+## layout/pages/*.json：页面布局
+
+页面被分成几个**区块**，每个区块是 Jay 自带的一整块功能（按钮、绑定、提示都在里面）。主题不能改区块里面，但可以决定区块放在哪、套什么容器、怎么分栏，还能加装饰性的文字和图片。
+
+启动页（`home.json`）的区块：
+
+| 区块 | 内容 | 必需 |
+|---|---|---|
+| `home.title` | 页面标题 | 否 |
+| `home.pending` | “游戏已在运行，还要再开一个吗”提示 | 是 |
+| `home.onboarding` | 新手卡（没有账号或实例时） | 是 |
+| `home.instance` | 版本、账号、内存 | 是 |
+| `home.crash` | 崩溃原因分析 | 是 |
+| `home.launch` | 启动按钮和状态 | 是 |
+
+必需的区块没写进去，Jay 会把它补在最外层容器的最后并在设置页提示，所以功能不会因为主题丢掉。每个区块只能出现一次。
+
+文件可以只写一棵树，也可以按页面宽度分档写：`compact`（窄于 640）、`medium`、`wide`（1100 起）、`default`。某一档没写时用相邻的档或 `default`。
+
+```jsonc
+{
+  "wide": {
+    "type": "grid", "columns": ["*", "360"], "rows": ["auto", "*"], "spacing": 16,
+    "children": [
+      { "type": "region", "name": "home.title", "columnSpan": 2 },
+      { "type": "scroll", "row": 1, "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] },
+      { "type": "region", "name": "home.launch", "row": 1, "column": 1, "valign": "start" }
+    ]
+  },
+  "default": {
+    "type": "dock",
+    "children": [
+      { "type": "region", "name": "home.launch", "dock": "top" },
+      { "type": "scroll", "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] }
+    ]
+  }
+}
+```
+
+节点类型：
+
+- 容器：`stack`（`"orientation": "horizontal"` 横排）、`grid`（`columns` / `rows`，如 `["auto", "*", "2*", "240"]`）、`dock`、`wrap`、`panel`（叠在一起）、`scroll`、`card`（套上卡片样式）。
+- 叶子：`region`（`"name"` 写区块名；直接写字符串 `"home.launch"` 是简写）、`spacer`、`text`（`"text"` 不超过 200 字，`"style"`：h1 / h2 / hint / caption / body）、`image`（`"source": "assets/xx.png"`）。
+- 通用属性：`width` `height` `minWidth` `maxWidth` `minHeight` `maxHeight` `margin` `padding`（一个数，或 `[左右, 上下]`，或 `[左, 上, 右, 下]`）、`align` / `valign`（start / center / end / stretch）、`spacing`。
+- 放在父容器里的位置：`row` `column` `rowSpan` `columnSpan`（grid）、`dock`（left / right / top / bottom）。
+- `hideBelow`：页面窄于这个宽度时不显示（只能用在装饰和容器上，区块不能这样藏起来）。
+
+限制：一棵树最多 2000 个节点、嵌套 12 层。
+
 ## 自动修正
 
 - **对比度**：正文、说明、按钮文字、侧边栏文字和背景的对比度低于 4.5:1（禁用文字 3:1）时，Jay 自动把文字颜色往黑或白推到看得清，并在设置页提示。组件样式里同时写了文字色和背景色（包括渐变的每个颜色、深浅两套 token）也一样检查。
@@ -155,4 +222,4 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 - 从网上加载图片或字体（会被用来追踪谁打开了 Jay）。
 - 把字号调到 11 以下，或把关键文字调到看不清。
 - 改确认框、远程控制同意框和共享提示条的样式（这些窗口锁定用 Jay 自带样式）。
-- （布局那一期）改隐私说明、微软登录这些安全区块的文字，或隐藏设置入口和“恢复默认主题”。
+- 改区块里面的文字和按钮，或把必需的区块藏起来；隐藏启动页、设置页和“恢复默认主题”。
