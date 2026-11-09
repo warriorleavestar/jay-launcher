@@ -2687,5 +2687,11 @@
   "multiplayer.file.accept": "接收…",
   "multiplayer.file.see_above": "有人想發檔案給你，在上面處理。",
   "multiplayer.settings.request_popup": "Jay 不在前面時，有人敲門或發檔案用置頂小窗提醒（不搶遊戲的鍵盤）",
-  "multiplayer.popup.window_title": "Jay 安全提示"
+  "multiplayer.popup.window_title": "Jay 安全提示",
+  "multiplayer.diag.intro": "檢測要幾秒鐘。檢測完會用一句話告訴你是什麼情況、可以怎麼辦。",
+  "multiplayer.diag.suggest": "可以試試",
+  "multiplayer.diag.switch_relay": "換中轉伺服器",
+  "multiplayer.diag.debug_on": "開啟除錯模式",
+  "multiplayer.diag.export_hint": "匯出的診斷去掉了房間密鑰和所有碼；公網 IP 預設遮住，勾上才包含。",
+  "multiplayer.diag.details": "技術細節"
 }

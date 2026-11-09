@@ -2687,5 +2687,11 @@
   "multiplayer.file.accept": "受け取る…",
   "multiplayer.file.see_above": "ファイルが届いています。上で対応してください。",
   "multiplayer.settings.request_popup": "Jay が裏にあるとき、ノックやファイルを最前面の小さなウィンドウで知らせる（ゲームのキーボード操作は奪いません）",
-  "multiplayer.popup.window_title": "Jay 安全のお知らせ"
+  "multiplayer.popup.window_title": "Jay 安全のお知らせ",
+  "multiplayer.diag.intro": "チェックは数秒で終わり、何が起きているか、どうすればよいかを一言で伝えます。",
+  "multiplayer.diag.suggest": "試せること",
+  "multiplayer.diag.switch_relay": "別の中継サーバーにする",
+  "multiplayer.diag.debug_on": "デバッグモードをオンにする",
+  "multiplayer.diag.export_hint": "書き出す診断にはルームの鍵とコードは含まれません。公開 IP はチェックしたときだけ含めます。",
+  "multiplayer.diag.details": "技術的な詳細"
 }

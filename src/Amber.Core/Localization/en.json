@@ -2751,5 +2751,11 @@
   "multiplayer.file.accept": "Accept…",
   "multiplayer.file.see_above": "Someone wants to send you a file: answer it above.",
   "multiplayer.settings.request_popup": "When Jay is in the background, show knocks and incoming files in a small window on top (it doesn't take the keyboard from your game)",
-  "multiplayer.popup.window_title": "Jay safety notice"
+  "multiplayer.popup.window_title": "Jay safety notice",
+  "multiplayer.diag.intro": "The check takes a few seconds, then tells you in one sentence what is going on and what you can do.",
+  "multiplayer.diag.suggest": "Things to try",
+  "multiplayer.diag.switch_relay": "Try another relay server",
+  "multiplayer.diag.debug_on": "Turn on debug mode",
+  "multiplayer.diag.export_hint": "Exported diagnostics leave out room keys and every code; public IPs are hidden unless you tick the box.",
+  "multiplayer.diag.details": "Technical details"
 }

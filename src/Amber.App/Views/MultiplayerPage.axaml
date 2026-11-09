@@ -234,10 +234,11 @@
             </Border>
 
             <!-- Footer: first time? · safety · component and relay servers -->
-            <Grid x:Name="LobbyFooter" Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="Auto,*" Margin="0,4,0,0">
+            <Grid x:Name="LobbyFooter" Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="*,*" Margin="0,4,0,0">
               <WrapPanel ItemSpacing="12" LineSpacing="4" VerticalAlignment="Center">
-                <Button Classes="ghost small" Content="{l:T multiplayer.lobby.first_time}" Command="{Binding OpenHelpCommand}" CommandParameter="multiplayer" />
-                <Button Classes="ghost small" Content="{l:T multiplayer.lobby.safety}" Command="{Binding OpenHelpCommand}" CommandParameter="child-mode" />
+                <Button Classes="ghost small" Command="{Binding OpenHelpCommand}" CommandParameter="multiplayer"><TextBlock Text="{l:T multiplayer.lobby.first_time}" TextWrapping="Wrap" /></Button>
+                <Button Classes="ghost small" Command="{Binding OpenHelpCommand}" CommandParameter="child-mode"><TextBlock Text="{l:T multiplayer.lobby.safety}" TextWrapping="Wrap" /></Button>
+                <Button x:Name="LobbyProblemsButton" Classes="ghost small" Command="{Binding OpenDiagnosticsCommand}"><TextBlock Text="{l:T multiplayer.room.problems}" TextWrapping="Wrap" /></Button>
               </WrapPanel>
               <Button Grid.Column="1" Classes="ghost small" HorizontalAlignment="Right" Command="{Binding ShowTabCommand}" CommandParameter="settings">
                 <TextBlock Text="{Binding LobbyStatusText}" TextWrapping="Wrap" TextAlignment="Right" Classes.warn="{Binding LobbyStatusWarns}" />
@@ -1159,6 +1160,52 @@
     <!-- 消息被 ✕ 关掉后整张卡片一起收起，不留空卡片 -->
     <Border svc:ThemeRegion.Name="multiplayer.status" Grid.Row="4" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
       <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
+    </Border>
+
+    <!-- "Connection problems?" (official §6.18): a 560 drawer over the page (full width in compact windows). One check, a plain
+         conclusion, suggestions, and the technical details folded away. Esc closes; Ctrl+Shift+D opens. -->
+    <Border x:Name="DiagnosticsDrawer" Grid.Row="0" Grid.RowSpan="5" Width="560" HorizontalAlignment="Right" ZIndex="10"
+            Classes="card" Margin="0" Padding="16" BoxShadow="0 4 24 0 #40000000" IsVisible="{Binding DiagnosticsOpen}">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+          <TextBlock Classes="h2" Text="{l:T multiplayer.room.problems}" Margin="0" VerticalAlignment="Center" />
+          <Button x:Name="CloseDiagnosticsButton" Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding CloseDiagnosticsCommand}" ToolTip.Tip="{l:T common.close}" />
+        </Grid>
+        <ScrollViewer>
+          <StackPanel Spacing="10">
+            <TextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.diag.intro}" />
+            <Button x:Name="DiagnosticsCheckButton" Classes="primary" Content="{l:T multiplayer.network.check}" Command="{Binding CheckNetworkCommand}" IsEnabled="{Binding !IsCheckingNetwork}" HorizontalAlignment="Left" />
+            <TextBlock x:Name="DiagnosticsVerdict" Text="{Binding NetworkVerdict}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding HasNetworkVerdict}" />
+            <TextBlock Text="{l:T multiplayer.diag.suggest}" FontWeight="SemiBold" />
+            <WrapPanel ItemSpacing="6" LineSpacing="6">
+              <Button x:Name="SwitchRelayButton" Content="{l:T multiplayer.diag.switch_relay}" Command="{Binding SwitchRelayCommand}" />
+              <Button x:Name="DebugOnButton" Content="{l:T multiplayer.diag.debug_on}" Command="{Binding TurnOnDebugModeCommand}" IsVisible="{Binding !DebugMode}" />
+              <Button x:Name="DrawerExportButton" Content="{l:T multiplayer.diagnostics.export}" Click="ExportDiagnostics_Click" />
+            </WrapPanel>
+            <CheckBox Content="{l:T multiplayer.diagnostics.include_ips}" IsChecked="{Binding IncludePublicIps}" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.diag.export_hint}" />
+            <Expander x:Name="DiagnosticsDetails" Header="{l:T multiplayer.diag.details}" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="8">
+                <SelectableTextBlock Text="{Binding NetworkDetails}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap"
+                                     IsVisible="{Binding NetworkDetails, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <SelectableTextBlock Text="{Binding TransportText}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding !IsIdle}" />
+                <ItemsControl ItemsSource="{Binding Peers}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:PeerItem">
+                      <SelectableTextBlock FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" Text="{Binding Meta}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <ItemsControl ItemsSource="{Binding DebugLines}" IsVisible="{Binding DebugMode}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" /></DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Expander>
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
     </Border>
   </Grid>
 </UserControl>

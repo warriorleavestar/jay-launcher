@@ -191,5 +191,30 @@ internal sealed partial class SelfTest
         else Check("开服：测试配置里已经初始化过，跳过第一步检查", true);
         vm.ShowMyServer = false;
         vm.ShowTabCommand.Execute("play");
+
+        // "Connection problems?" drawer (§6.18): from the lobby footer, Esc closes, Ctrl+Shift+D toggles, 560 wide (full width when compact).
+        await Task.Delay(300);
+        page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
+        Check("连接有问题？：大厅底部有入口", Press(Visible("LobbyProblemsButton") ?? page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "LobbyProblemsButton" && b.IsEffectivelyVisible)) && vm.DiagnosticsOpen);
+        await Task.Delay(300);
+        var drawer = page.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Name == "DiagnosticsDrawer");
+        Check("连接有问题？：抽屉宽 560，焦点在【检测我的网络】", drawer is { IsEffectivelyVisible: true } && Math.Abs(drawer.Bounds.Width - 560) < 1
+            && page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "DiagnosticsCheckButton")?.IsFocused == true, drawer?.Bounds.Width.ToString() ?? "none");
+        Check("连接有问题？：有建议按钮和折叠的技术细节", page.GetVisualDescendants().OfType<Button>().Any(b => b.Name == "SwitchRelayButton" && b.IsEffectivelyVisible)
+            && page.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => e.Name == "DiagnosticsDetails") is { IsExpanded: false });
+        await ShotAsync("连接有问题-1440");
+        Dispatcher.UIThread.Invoke(() => PressKey(page.GetVisualDescendants().OfType<Button>().First(b => b.Name == "DiagnosticsCheckButton"), Avalonia.Input.Key.Escape));
+        Check("连接有问题？：Esc 关掉", !vm.DiagnosticsOpen);
+        Dispatcher.UIThread.Invoke(() => PressKey(page, Avalonia.Input.Key.D, Avalonia.Input.KeyModifiers.Control | Avalonia.Input.KeyModifiers.Shift));
+        Check("连接有问题？：Ctrl+Shift+D 打开", vm.DiagnosticsOpen);
+        window.Width = 600;
+        window.Height = 420;
+        await Task.Delay(500);
+        Check("连接有问题？：紧凑窗口铺满", drawer is not null && drawer.Bounds.Width >= page.Bounds.Width - 1, $"{drawer?.Bounds.Width}/{page.Bounds.Width}");
+        await ShotAsync("连接有问题-600");
+        Check("连接有问题？：【换中转服务器】去联机设置", Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "SwitchRelayButton")) && !vm.DiagnosticsOpen && vm.IsSettingsTab);
+        window.Width = 1440;
+        window.Height = 900;
+        vm.ShowTabCommand.Execute("play");
     }
 }

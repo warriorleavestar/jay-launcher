@@ -2687,5 +2687,11 @@
   "multiplayer.file.accept": "接收…",
   "multiplayer.file.see_above": "有人想发文件给你，在上面处理。",
   "multiplayer.settings.request_popup": "Jay 不在前面时，有人敲门或发文件用置顶小窗提醒（不抢游戏的键盘）",
-  "multiplayer.popup.window_title": "Jay 安全提示"
+  "multiplayer.popup.window_title": "Jay 安全提示",
+  "multiplayer.diag.intro": "检测要几秒钟。检测完会用一句话告诉你是什么情况、可以怎么办。",
+  "multiplayer.diag.suggest": "可以试试",
+  "multiplayer.diag.switch_relay": "换中转服务器",
+  "multiplayer.diag.debug_on": "打开调试模式",
+  "multiplayer.diag.export_hint": "导出的诊断去掉了房间密钥和所有码；公网 IP 默认遮住，勾上才包含。",
+  "multiplayer.diag.details": "技术细节"
 }
