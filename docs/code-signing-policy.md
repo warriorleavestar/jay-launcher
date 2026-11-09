@@ -51,7 +51,7 @@ This program will not transfer any information to other networked systems unless
   - 远程协助：只有房主在对话框里同意后才会共享画面，可以随时停止 / Remote assistance: the screen is shared only after the host agrees in a dialog, and can be stopped at any time.
 - 上面这些第三方服务各有自己的隐私政策，Jay 只把完成操作所需的数据发给它们。/ Each third-party service above has its own privacy policy; Jay sends them only what the action needs.
 
-更详细的说明见 [README 的隐私部分](../README.md#隐私)。/ See also the [Privacy section of the README](../README.en.md#privacy).
+更详细的说明见 [README 的隐私部分](../README.zh-Hans.md#隐私)。/ See also the [Privacy section of the README](../README.md#privacy).
 
 ## 对系统的改动与卸载 / System changes and uninstalling
 
