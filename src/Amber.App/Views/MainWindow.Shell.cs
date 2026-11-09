@@ -90,7 +90,10 @@ public partial class MainWindow
             ScrollViewer.SetHorizontalScrollBarVisibility(NavList, ScrollBarVisibility.Disabled);
             ScrollViewer.SetVerticalScrollBarVisibility(NavList, ScrollBarVisibility.Auto);
             NavList.Margin = new Thickness(8, 0);
-            SidebarFooter.IsVisible = !icons;
+            // 隐私行任何尺寸都看得见：图标栏里只留盾牌（文字在提示里），版本号收起来。
+            SidebarFooter.IsVisible = true;
+            VersionLabel.IsVisible = !icons;
+            PrivacyRow.Compact = icons;
         }
         NavList.Classes.Set("icons", icons);
         SidebarHost.Classes.Set("horizontal", horizontal);

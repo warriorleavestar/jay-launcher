@@ -5,37 +5,55 @@ public static class ThemeDefaults
 {
     public static readonly IReadOnlyDictionary<string, uint> Dark = Parse(new()
     {
-        ["PageBg"] = "#1C1A18", ["Surface"] = "#2A2724", ["SurfaceRaised"] = "#322E2A", ["BorderSubtle"] = "#3D3731",
-        ["SidebarBg"] = "#141210", ["TextPrimary"] = "#EDE6DC", ["TextSecondary"] = "#B0A89E", ["TextTertiary"] = "#A39A8F",
-        ["Accent"] = "#E89B32", ["AccentHover"] = "#F0A93F", ["AccentPressed"] = "#C9801F", ["OnAccent"] = "#1C1408",
-        ["AccentText"] = "#F0A93F", ["Success"] = "#4CC38A", ["SuccessText"] = "#4CC38A", ["Warning"] = "#EC8956",
-        ["WarningText"] = "#EC8956", ["Danger"] = "#F07167", ["DangerText"] = "#F4877E", ["OnDanger"] = "#1C1408",
-        ["DisabledFill"] = "#3A342E", ["DisabledText"] = "#A89C8C", ["SidebarText"] = "#EDE6DC", ["SidebarTextMuted"] = "#B0A89E",
-        ["NavSelected"] = "#2E2924", ["NavHover"] = "#24201C",
-        ["AccentTint"] = "#26E89B32", ["SuccessTint"] = "#264CC38A", ["WarningTint"] = "#26EC8956", ["DangerTint"] = "#26F07167",
+        ["PageBg"] = "#0E1219", ["Surface"] = "#202A3A", ["SurfaceRaised"] = "#29344A", ["BorderSubtle"] = "#394660",
+        ["SidebarBg"] = "#080B10", ["TextPrimary"] = "#E8EDF5", ["TextSecondary"] = "#B3BDCD", ["TextTertiary"] = "#A0ABBE",
+        ["Accent"] = "#78A0FF", ["AccentHover"] = "#93B4FF", ["AccentPressed"] = "#6188EA", ["OnAccent"] = "#08132E",
+        ["AccentText"] = "#8FB1FF", ["Success"] = "#3DD68C", ["SuccessText"] = "#5BE0A0", ["Warning"] = "#E9C84A",
+        ["WarningText"] = "#F0D46A", ["Danger"] = "#FF6B6B", ["DangerText"] = "#FF8C87", ["OnDanger"] = "#1F0606",
+        ["DisabledFill"] = "#293342", ["DisabledText"] = "#808B9E", ["SidebarText"] = "#E8EDF5", ["SidebarTextMuted"] = "#A3AEC0",
+        ["NavSelected"] = "#1A2336", ["NavHover"] = "#17191E", ["AccentTint"] = "#2E3D5A", ["SuccessTint"] = "#244246",
+        ["WarningTint"] = "#3C403C", ["DangerTint"] = "#3F3341", ["Overlay"] = "#2D394E", ["Sunken"] = "#070A0E",
+        ["InputBg"] = "#0B0F16", ["Scrim"] = "#8C000000", ["ControlBorder"] = "#7783A0", ["ControlHover"] = "#2D3746",
+        ["ControlPressed"] = "#37404E", ["ControlSelected"] = "#2E3D5A", ["Focus"] = "#A9C4FF", ["Play"] = "#F6A93B",
+        ["PlayHover"] = "#FFB955", ["PlayPressed"] = "#E0952A", ["OnPlay"] = "#1E1404", ["PlayBorder"] = "#00000000",
+        ["PlayText"] = "#F8B85C", ["PlayGlow"] = "#40F6A93B", ["PlayTint"] = "#3E3C3A", ["Badge"] = "#FF6B6B",
+        ["OnBadge"] = "#1F0606", ["BadgeMuted"] = "#455068", ["OnBadgeMuted"] = "#E8EDF5", ["IlloLine"] = "#93B4FF",
+        ["IlloFill"] = "#202A3A", ["LoaderVanilla"] = "#7DD08A", ["LoaderFabric"] = "#E2C49A", ["LoaderForge"] = "#A9BCD6",
+        ["LoaderNeoForge"] = "#F5A66B", ["LoaderQuilt"] = "#C3A6FA", ["LoaderOptiFine"] = "#F08C8C", ["LogDebug"] = "#8D98AA",
+        ["LogInfo"] = "#E8EDF5", ["LogWarn"] = "#F0D46A", ["LogError"] = "#FF8C87", ["LogFatal"] = "#FF7AA8",
+        ["LogJay"] = "#F8B85C",
     });
 
     public static readonly IReadOnlyDictionary<string, uint> Light = Parse(new()
     {
-        ["PageBg"] = "#F4F1EC", ["Surface"] = "#FFFFFF", ["SurfaceRaised"] = "#FBF9F6", ["BorderSubtle"] = "#DDD5CA",
-        ["SidebarBg"] = "#2B2622", ["TextPrimary"] = "#1F1B17", ["TextSecondary"] = "#5C544B", ["TextTertiary"] = "#756C62",
-        ["Accent"] = "#D98A1E", ["AccentHover"] = "#E79A2E", ["AccentPressed"] = "#B97314", ["OnAccent"] = "#1C1408",
-        ["AccentText"] = "#9A5200", ["Success"] = "#1A7F37", ["SuccessText"] = "#166E30", ["Warning"] = "#B54708",
-        ["WarningText"] = "#9A3C06", ["Danger"] = "#B42318", ["DangerText"] = "#B42318", ["OnDanger"] = "#FFFFFF",
-        ["DisabledFill"] = "#E6E0D8", ["DisabledText"] = "#685F56", ["SidebarText"] = "#EDE6DC", ["SidebarTextMuted"] = "#B0A89E",
-        ["NavSelected"] = "#3A322B", ["NavHover"] = "#332D27",
-        ["AccentTint"] = "#26D98A1E", ["SuccessTint"] = "#261A7F37", ["WarningTint"] = "#26B54708", ["DangerTint"] = "#26B42318",
+        ["PageBg"] = "#F3F5F9", ["Surface"] = "#FFFFFF", ["SurfaceRaised"] = "#EEF1F6", ["BorderSubtle"] = "#D3D9E2",
+        ["SidebarBg"] = "#E4E9F0", ["TextPrimary"] = "#111722", ["TextSecondary"] = "#455164", ["TextTertiary"] = "#566275",
+        ["Accent"] = "#2C59CC", ["AccentHover"] = "#3A67DA", ["AccentPressed"] = "#2149B0", ["OnAccent"] = "#FFFFFF",
+        ["AccentText"] = "#2550BF", ["Success"] = "#16804F", ["SuccessText"] = "#11683F", ["Warning"] = "#9A7400",
+        ["WarningText"] = "#7A5C00", ["Danger"] = "#C93030", ["DangerText"] = "#B02828", ["OnDanger"] = "#FFFFFF",
+        ["DisabledFill"] = "#F3F4F5", ["DisabledText"] = "#7C8698", ["SidebarText"] = "#111722", ["SidebarTextMuted"] = "#455164",
+        ["NavSelected"] = "#CED7EC", ["NavHover"] = "#D9DEE6", ["AccentTint"] = "#E5EBF9", ["SuccessTint"] = "#E7F2ED",
+        ["WarningTint"] = "#F5F1E5", ["DangerTint"] = "#F9EAEA", ["Overlay"] = "#FFFFFF", ["Sunken"] = "#EBEEF3",
+        ["InputBg"] = "#FFFFFF", ["Scrim"] = "#590B1220", ["ControlBorder"] = "#6E7B8F", ["ControlHover"] = "#F3F3F5",
+        ["ControlPressed"] = "#E9EAED", ["ControlSelected"] = "#E5EBF9", ["Focus"] = "#2C59CC", ["Play"] = "#F6A93B",
+        ["PlayHover"] = "#FFB955", ["PlayPressed"] = "#E0952A", ["OnPlay"] = "#1E1404", ["PlayBorder"] = "#A3620C",
+        ["PlayText"] = "#8F520A", ["PlayGlow"] = "#4DF6A93B", ["PlayTint"] = "#FEF5E7", ["Badge"] = "#C9302C",
+        ["OnBadge"] = "#FFFFFF", ["BadgeMuted"] = "#5A6578", ["OnBadgeMuted"] = "#FFFFFF", ["IlloLine"] = "#3A67DA",
+        ["IlloFill"] = "#E5EBF9", ["LoaderVanilla"] = "#236B30", ["LoaderFabric"] = "#7D5E30", ["LoaderForge"] = "#3D5675",
+        ["LoaderNeoForge"] = "#9C4710", ["LoaderQuilt"] = "#6A3FC2", ["LoaderOptiFine"] = "#A3303A", ["LogDebug"] = "#566275",
+        ["LogInfo"] = "#111722", ["LogWarn"] = "#7A5C00", ["LogError"] = "#B02828", ["LogFatal"] = "#A3245A",
+        ["LogJay"] = "#8F520A",
     });
 
     public static readonly IReadOnlyDictionary<string, double> Numbers = new Dictionary<string, double>
     {
-        ["FontCaption"] = 12, ["FontBodySmall"] = 13, ["FontBody"] = 14, ["FontSubtitle"] = 16, ["FontTitle"] = 20, ["FontDisplay"] = 26,
-        ["Space1"] = 4, ["Space2"] = 8, ["Space3"] = 12, ["Space4"] = 16, ["Space5"] = 24, ["Space6"] = 32,
+        ["FontCaption"] = 12, ["FontBodySmall"] = 13, ["FontBody"] = 14, ["FontSubtitle"] = 16, ["FontTitle"] = 20, ["FontHeadline"] = 24, ["FontDisplay"] = 32,
+        ["Space0"] = 2, ["Space1"] = 4, ["Space2"] = 8, ["Space3"] = 12, ["Space4"] = 16, ["Space5"] = 24, ["Space6"] = 32, ["Space7"] = 48, ["Space8"] = 64,
     };
 
     public static readonly IReadOnlyDictionary<string, double> Radii = new Dictionary<string, double>
     {
-        ["RadiusSm"] = 4, ["RadiusMd"] = 6, ["RadiusLg"] = 10, ["RadiusPill"] = 999,
+        ["RadiusXs"] = 4, ["RadiusSm"] = 6, ["RadiusMd"] = 8, ["RadiusLg"] = 12, ["RadiusXl"] = 16, ["RadiusPill"] = 999,
     };
 
     private static Dictionary<string, uint> Parse(Dictionary<string, string> hex) =>
@@ -128,6 +146,15 @@ public static class ThemeColor
             result["SidebarTextMuted"] = Mix(White, sidebar, 0.32);
             result["NavSelected"] = Mix(sidebar, White, 0.10);
             result["NavHover"] = Mix(sidebar, White, 0.06);
+            // 第 0 批新加的表面：跟着背景走，不然深色背景的主题会配上 Jay 默认的墨蓝菜单
+            var surface = result["Surface"];
+            result["Overlay"] = dark ? Mix(bg, White, 0.14) : White;
+            result["Sunken"] = dark ? Mix(bg, Black, 0.45) : Mix(bg, Black, 0.04);
+            result["InputBg"] = dark ? Mix(bg, Black, 0.25) : White;
+            result["ControlBorder"] = EnsureContrast(Mix(ink, bg, 0.5), surface, 3.0);
+            result["ControlHover"] = Mix(surface, ink, dark ? 0.06 : 0.05);
+            result["ControlPressed"] = Mix(surface, ink, dark ? 0.10 : 0.09);
+            result["IlloFill"] = surface;
         }
         if (accent is { } a0)
         {
@@ -139,6 +166,9 @@ public static class ThemeColor
             result["OnAccent"] = Contrast(Black, a) >= Contrast(White, a) ? 0xFF1C1408 : White;
             result["AccentText"] = EnsureContrast(dark ? Mix(a, White, 0.12) : Mix(a, Black, 0.3), page, 4.5);
             result["AccentTint"] = (a & 0x00FFFFFF) | 0x26000000;
+            result["ControlSelected"] = result["AccentTint"];
+            result["Focus"] = dark ? Mix(a, White, 0.3) : a;
+            result["IlloLine"] = result["AccentHover"];
         }
         return result;
     }
@@ -161,6 +191,8 @@ public static class ThemeContrast
         ("SidebarText", "SidebarBg", 4.5), ("SidebarTextMuted", "SidebarBg", 4.5),
         ("SidebarText", "NavSelected", 4.5),
         ("DisabledText", "DisabledFill", 3.0),
+        ("TextPrimary", "Overlay", 4.5), ("TextSecondary", "Overlay", 4.5), ("TextTertiary", "Overlay", 4.5),
+        ("OnPlay", "Play", 4.5), ("PlayText", "Surface", 4.5), ("OnBadge", "Badge", 4.5), ("OnBadgeMuted", "BadgeMuted", 4.5),
     ];
 
     public static void Enforce(ThemePack pack)
@@ -178,6 +210,14 @@ public static class ThemeContrast
     private static void Enforce(Dictionary<string, uint> colors, IReadOnlyDictionary<string, uint> defaults, List<ThemeProblem> problems, string variant)
     {
         if (colors.Count == 0) return;
+        // format 1 的主题不知道新加的表面：改了卡片色、底色却没写菜单、日志、输入框的底时，让它们跟着走，
+        // 不然浅色主题会配上 Jay 默认的墨蓝菜单，文字两边都顾不上。
+        if (colors.TryGetValue("Surface", out var surface) && !colors.ContainsKey("Overlay")) colors["Overlay"] = surface;
+        if (colors.TryGetValue("PageBg", out var page))
+        {
+            if (!colors.ContainsKey("Sunken")) colors["Sunken"] = page;
+            if (!colors.ContainsKey("InputBg")) colors["InputBg"] = page;
+        }
         // 背景层次多的时候前景要同时满足几种背景：多跑两遍，后一对改过的颜色前一对还要再查。
         for (var pass = 0; pass < 3; pass++)
         {

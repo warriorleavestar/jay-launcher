@@ -1888,5 +1888,14 @@
   "content.shader.installed_without": "已以 {0} 入 {1}。須並裝 {2}，光影乃行。",
   "content.shader.installed_unsupported": "已以 {0} 入 {1}。此例須 OptiFine，光影乃行。",
   "content.shader.renderer_installed": "已以 {0} 入 {1}，光影今可用。",
-  "content.shader.renderer_unavailable": "{0} 尚無合 Minecraft {1}（{2}）之版。"
+  "content.shader.renderer_unavailable": "{0} 尚無合 Minecraft {1}（{2}）之版。",
+  "settings.motion.label": "減動",
+  "settings.motion.system": "從系統",
+  "settings.motion.on": "開",
+  "settings.motion.off": "閉",
+  "settings.motion.hint": "開則易頁、抽屜、選單皆不滑動，唯留須臾之淡入淡出。從系統則讀系統之動效之設。",
+  "safety.title": "Jay 安危之示",
+  "safety.cannot_undo": "此事既成，不可復得。",
+  "safety.keep": "留之",
+  "safety.action_object": "{0}：{1}"
 }

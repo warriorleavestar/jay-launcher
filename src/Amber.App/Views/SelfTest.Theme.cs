@@ -231,7 +231,7 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         Check("离开网络后换回自己的主题", Brush("Accent", ThemeVariant.Dark) == mine && settings.SelectedThemePack?.Id == "selftest-topbar");
     }
 
-    private static void WritePack(string path, string manifest, string tokens, params (string Name, string Text)[] extra)
+    internal static void WritePack(string path, string manifest, string tokens, params (string Name, string Text)[] extra)
     {
         if (File.Exists(path)) File.Delete(path);
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);

@@ -224,6 +224,7 @@ public static partial class ThemeLayout
                 case "text":
                     if (type != "text" || v.ValueKind != JsonValueKind.String) { pack.Problems.Add(new("bad_value", at)); break; }
                     var text = new string(v.GetString()!.Where(ch => !char.IsControl(ch) || ch == '\n').ToArray());
+                    if (SafetyWords.Contains(text)) throw new ThemePackException("reserved_words", at);
                     node.Text = text.Length > MaxTextLength ? text[..MaxTextLength] : text;
                     break;
                 case "style":

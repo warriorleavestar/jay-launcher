@@ -9,7 +9,8 @@
         Title="{l:T main.title}"
         Icon="/Assets/jay.ico"
         MinWidth="760" MinHeight="440"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        xmlns:safety="using:Amber.App.Controls.Safety">
 
   <Window.DataTemplates>
     <DataTemplate DataType="vm:HomeViewModel"><views:HomePage /></DataTemplate>
@@ -29,7 +30,7 @@
         <ScrollViewer Grid.Row="1">
           <StackPanel Margin="0,0,14,0">
             <Border Classes="card">
-              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Text="{l:T settings.directory.label}" VerticalAlignment="Center" />
                 <TextBox x:Name="GameDirectoryBox" Grid.Column="1" Text="{Binding GameDirectory, UpdateSourceTrigger=LostFocus}" />
                 <Button Grid.Column="2" Content="{l:T common.browse}" Margin="8,0,0,0" Click="BrowseGameDir_Click" />
@@ -59,6 +60,15 @@
 
                 <TextBlock Grid.Row="5" Text="{l:T settings.language.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
                 <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding SelectedLanguageIndex}" MinWidth="160" Margin="0,12,0,0" />
+
+                <TextBlock Grid.Row="6" Text="{l:T settings.motion.label}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <ComboBox x:Name="MotionBox" ItemsSource="{Binding MotionOptions}" SelectedIndex="{Binding SelectedMotionIndex}" MinWidth="160"
+                            AutomationProperties.Name="{l:T settings.motion.label}" />
+                  <TextBlock Classes="hint" Text="{l:T settings.motion.hint}" />
+                </StackPanel>
+                <Button Grid.Row="6" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="motion"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
               </Grid>
             </Border>
             <!-- 界面主题包（.jaytheme）：导入、切换、删除、导出。“恢复默认主题”固定在这里，主题包改不了它。 -->
@@ -228,7 +238,7 @@
         <StackPanel x:Name="SidebarHeader" Spacing="2">
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Image Source="/Assets/jay.png" Width="36" Height="36" Stretch="Uniform" />
-            <TextBlock x:Name="BrandName" Text="Jay" FontSize="26" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource Accent}" />
+            <TextBlock x:Name="BrandName" Text="Jay" FontSize="26" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource SidebarText}" />
           </StackPanel>
           <TextBlock x:Name="BrandSubtitle" Text="{l:T main.subtitle}" FontSize="12" Foreground="{DynamicResource SidebarTextMuted}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{l:T main.subtitle}" />
         </StackPanel>
@@ -241,9 +251,9 @@
               <Setter Property="TextTrimming" Value="CharacterEllipsis" />
             </Style>
           </WrapPanel.Styles>
-          <TextBlock Text="{Binding VersionText}" />
-          <TextBlock Text="{l:T main.no_cloud_control}" />
-          <TextBlock Text="{l:T main.no_telemetry}" />
+          <TextBlock x:Name="VersionLabel" Text="{Binding VersionText}" />
+          <!-- 隐私行是锁定的安全组件：主题改不了、任何尺寸都看得见 -->
+          <safety:PrivacyRow x:Name="PrivacyRow" />
         </WrapPanel>
         <ListBox x:Name="NavList" Grid.Row="1" Classes="nav" ItemsSource="{Binding NavPages}" SelectedItem="{Binding NavSelection}" Background="Transparent" Margin="8,0"
                  ClipToBounds="True">
@@ -291,7 +301,7 @@
     <ContentControl x:Name="PageHost" Grid.Column="1" Content="{Binding CurrentPage}" Margin="24,20,24,20" />
 
     <!-- 熔断倒计时：盖住整个窗口，按空格或点按钮取消重启 -->
-    <Border x:Name="BreakerOverlay" Grid.ColumnSpan="2" IsVisible="{Binding Multiplayer.IsBreakerCounting}" Background="#B0000000">
+    <Border x:Name="BreakerOverlay" Grid.ColumnSpan="2" IsVisible="{Binding Multiplayer.IsBreakerCounting}" Background="{DynamicResource Scrim}">
       <Border Classes="card" MaxWidth="440" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
         <StackPanel Spacing="10">
           <TextBlock Classes="h2" Text="{l:T multiplayer.breaker.title}" Margin="0" />

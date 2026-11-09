@@ -305,7 +305,7 @@ public class ThemePackTests : IDisposable
         var pack = Read(Text("theme.json", Manifest), Text("styles.json", """
             {
               "button.primary": { "background": "linear(90, #102030, #203040)", "foreground": "#FFFFFF", "radius": 0, "padding": [18, 6],
-                                  "shadow": "3 3 0 0 #000000", ":hover": { "background": "token:SidebarBg" } },
+                                  "shadow": "3 3 0 0 #000000", ":hover": { "background": "token:SidebarBg", "foreground": "token:SidebarText" } },
               "card": { "background": "image:assets/paper.png", "borderWidth": 2, "shadow": "0 4 12 0 #33000000, inset 0 1 0 0 #22FFFFFF" },
               "nav.item": { ":selected": { "background": "#334455", "foreground": "#FFFFFF" } }
             }
@@ -354,10 +354,11 @@ public class ThemePackTests : IDisposable
             """));
         var fg = pack.Styles["button.primary"][""].Foreground!;
         Assert.True(ThemeColor.Contrast(fg.Colors[0], 0xFFE0538A) >= 4.5 && ThemeColor.Contrast(fg.Colors[0], 0xFFF08AB0) >= 4.5);
+        // 松鸦蓝深浅两套一亮一暗，一种固定颜色满足不了：改用两套都看得清的文字 token（OnAccent）。
         var nav = pack.Styles["nav.item"][":selected"].Foreground!;
-        Assert.Equal(PaintKind.Color, nav.Kind);
-        Assert.True(ThemeColor.Contrast(nav.Colors[0], ThemeDefaults.Dark["Accent"]) >= 4.5);
-        Assert.True(ThemeColor.Contrast(nav.Colors[0], ThemeDefaults.Light["Accent"]) >= 4.5);
+        Assert.Equal(PaintKind.Token, nav.Kind);
+        Assert.True(ThemeColor.Contrast(ThemeDefaults.Dark[nav.Token!], ThemeDefaults.Dark["Accent"]) >= 4.5);
+        Assert.True(ThemeColor.Contrast(ThemeDefaults.Light[nav.Token!], ThemeDefaults.Light["Accent"]) >= 4.5);
     }
 
     [Theory]

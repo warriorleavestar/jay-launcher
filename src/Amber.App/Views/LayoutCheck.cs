@@ -268,7 +268,7 @@ internal sealed class LayoutCheck(MainWindow window, MainViewModel main, string 
             if (sv.Extent.Width > sv.Viewport.Width + 1)
                 result.Add($"出现横向滚动（内容宽 {sv.Extent.Width:F0}，可见 {sv.Viewport.Width:F0}）：{FirstText(sv)}");
 
-        foreach (var button in root.GetVisualDescendants().OfType<Button>().Where(b => b.Classes.Contains("primary") && b.IsEffectivelyVisible))
+        foreach (var button in root.GetVisualDescendants().OfType<Button>().Where(b => (b.Classes.Contains("primary") || b.Classes.Contains("play")) && b.IsEffectivelyVisible))
         {
             if (button.TranslatePoint(new Point(0, 0), root) is not { } p) continue;
             var visible = p.X >= -1 && p.Y >= -1 && p.X + button.Bounds.Width <= size.Width + 1 && p.Y + button.Bounds.Height <= size.Height + 1;

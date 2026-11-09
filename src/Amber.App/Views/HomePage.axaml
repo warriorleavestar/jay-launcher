@@ -110,7 +110,7 @@
           </Button.Flyout>
         </Button>
         <StackPanel Grid.Column="2" Margin="12,0,0,0" Spacing="4" VerticalAlignment="Center">
-          <Button x:Name="PrimaryButton" Classes="primary" Content="{Binding PrimaryLabel}" Command="{Binding PrimaryCommand}" ToolTip.Tip="Ctrl+Enter"
+          <Button x:Name="PrimaryButton" Classes="play" Content="{Binding PrimaryLabel}" Command="{Binding PrimaryCommand}" ToolTip.Tip="Ctrl+Enter"
                   MinHeight="48" MinWidth="160" Padding="28,10" FontSize="16" FontWeight="SemiBold"
                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
           <TextBlock Classes="hint" Text="{Binding AccountHint}" HorizontalAlignment="Center" MaxWidth="200"
