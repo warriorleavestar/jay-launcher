@@ -25,6 +25,7 @@
     <DataTemplate DataType="vm:LogViewModel"><views:LogPage /></DataTemplate>
 
     <DataTemplate DataType="vm:SettingsViewModel"><views:SettingsPage /></DataTemplate>
+    <DataTemplate DataType="vm:AboutViewModel"><views:AboutPage /></DataTemplate>
 
     <!-- 请求条上的一条请求（§6.22）：安全类用锁定的安全横幅和安全按钮，其余用普通横幅 -->
     <DataTemplate DataType="vm:RequestItem">

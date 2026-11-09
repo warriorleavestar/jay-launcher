@@ -87,7 +87,7 @@ public sealed partial class MultiplayerViewModel
 
     partial void OnAllowExitNodeChanged(bool value)
     {
-        if (value && (!CanUseFullLan || !FullLanMode))
+        if (value && (!CanUseFullLan || !FullLanMode || Child.HideNetworkExit))
         {
             AllowExitNode = false;
             return;

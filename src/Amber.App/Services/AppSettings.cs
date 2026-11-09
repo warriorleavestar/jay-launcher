@@ -23,6 +23,9 @@ public sealed class AppSettings
     public int MaxMemoryMb { get; set; } = 4096;
     public bool IsolateVersions { get; set; } = true;
 
+    /// <summary>"For a child" (official design §9.6): main switch, six items and the time of the last change.</summary>
+    public Amber.Core.Safety.ChildModeSettings ChildMode { get; set; } = new();
+
     /// <summary>无痕模式：游戏日志（logs/latest.log）里不写聊天行。默认关。</summary>
     public bool NoTrace { get; set; }
     public string PlayerName { get; set; } = "Player";

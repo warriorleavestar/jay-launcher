@@ -132,7 +132,7 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task ConnectPublicAsync()
     {
-        if (IsPublicConnected || IsPublicConnecting) return;
+        if (IsPublicConnected || IsPublicConnecting || Child.InviteOnly) return;
         if (!IsComponentReady)
         {
             SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));

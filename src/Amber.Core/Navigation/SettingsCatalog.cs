@@ -74,6 +74,8 @@ public static class SettingsCatalog
         new("Breaker", Privacy, "settings.security.breaker.label", "settings.security.breaker.toggle"),
         new("BreakerDelay", Privacy, "settings.security.delay.label"),
         new("BreakerSkip", Privacy, "settings.security.skip.toggle"),
+        new("NetworkList", Privacy, "settings.privacy.network_list", "about.net.heading"),
+        new("ChildMode", Privacy, "settings.child.title", "settings.child.hint"),
         new("DataFolder", Privacy, "settings.privacy.data_folder"),
 
         new("MultiplayerSettings", Multiplayer, "settings.multiplayer.card"),
@@ -86,6 +88,7 @@ public static class SettingsCatalog
 
         new("Version", About, "settings.about.version"),
         new("CheckUpdate", About, "settings.about.check_update"),
+        new("AboutPage", About, "about.title", "about.promise"),
     ];
 
     public static SettingsGroup? Group(string? id) =>
