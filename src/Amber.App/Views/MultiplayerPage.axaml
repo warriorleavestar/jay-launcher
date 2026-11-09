@@ -184,13 +184,13 @@
           <Panel IsVisible="{Binding !IsComponentReady}">
             <Border Classes="card" Margin="0">
               <StackPanel Spacing="8">
-                <Grid ColumnDefinitions="*,Auto">
+                <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                   <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" IsVisible="{Binding !IsComponentReady}">
+                  <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
                     <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
                     <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
                     <Button Content="{l:T common.cancel}" Command="{Binding CancelDownloadCommand}" IsVisible="{Binding IsDownloading}" />
-                  </StackPanel>
+                  </WrapPanel>
                 </Grid>
                 <ProgressBar Value="{Binding DownloadPercent}" Maximum="100" IsVisible="{Binding IsDownloading}" />
                 <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
@@ -1200,13 +1200,13 @@
             <TextBlock Classes="h2" Text="{l:T multiplayer.settings.component}" Margin="0" />
           <Border Classes="card" Margin="0">
             <StackPanel Spacing="8">
-              <Grid ColumnDefinitions="*,Auto">
+              <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                 <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" IsVisible="{Binding !IsComponentReady}">
+                <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
                   <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
                   <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
                   <Button Content="{l:T common.cancel}" Command="{Binding CancelDownloadCommand}" IsVisible="{Binding IsDownloading}" />
-                </StackPanel>
+                </WrapPanel>
               </Grid>
               <ProgressBar Value="{Binding DownloadPercent}" Maximum="100" IsVisible="{Binding IsDownloading}" />
               <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />

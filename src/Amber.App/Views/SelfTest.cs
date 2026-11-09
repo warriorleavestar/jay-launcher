@@ -310,6 +310,17 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            // Only the page × window size × language matrix (no install, no launch): AMBER_SELFTEST_SCOPE=layout.
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "layout")
+            {
+                var matrix = await new LayoutCheck(window, main, Path.Combine(reportDir, "layout")).RunAsync(Log);
+                var clipped = matrix.Where(p => p.Kind == LayoutCheck.Kind.Clipped).ToList();
+                Check($"界面尺寸：{main.Pages.Count} 个页面 × {LayoutCheck.Sizes.Length} 种窗口大小 × 5 种语言没有被切掉的内容", clipped.Count == 0,
+                    string.Join("；", clipped.Take(12).Select(p => $"{p.Page}@{p.Size} {p.What}")));
+                Log("DONE");
+                window.Close();
+                return;
+            }
             // 必须在布局检查遍历所有页面之前验证，免得漏掉首次进入资源页的空列表。
             await ContentAutoLoadAsync();
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "content")
@@ -1686,9 +1697,17 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var download = Page<DownloadViewModel>();
         main.CurrentPage = download;
         await WaitAsync(() => download.Items.Count > 0, 30);
+        // Earlier steps leave a search or a type chip behind: list releases again, or 1.5.2 isn't in the rows.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            download.Filter = download.Filters[0];
+            download.Search = "";
+        });
+        await WaitAsync(() => download.Items.Any(i => i.Id == "1.5.2"), 10);
         download.ConfigureCommand.Execute(download.Items.FirstOrDefault(i => i.Id == "1.5.2"));
+        Check("下载页：列表里找到 1.5.2", download.Target?.Id == "1.5.2", $"{download.Items.Count} 行，搜索“{download.Search}”");
         download.SelectedLoader = download.LoaderChoices.First(c => c.Label == "Forge");
-        await WaitAsync(() => download.LoaderVersions.Count > 0 || download.LoaderHint.Length > 0 && !download.LoaderHint.StartsWith("正在", StringComparison.Ordinal), 45);
+        await WaitAsync(() => download.LoaderVersions.Count > 0 || download.LoaderHint.Length > 0 && download.LoaderHint != L.T("download.status.fetching_versions"), 45);
         Check("下载页：1.5.2 能选 Forge 版本", download.LoaderVersions.Any(v => v.Version.StartsWith("1.5.2-", StringComparison.Ordinal)), $"{download.LoaderVersions.Count} 个 {download.LoaderHint}");
         // 换语言时 Forge 的“推荐 / 最新”备注跟着换，但不能把用户填的名字改回默认。
         Dispatcher.UIThread.Invoke(() => download.CustomName = "MyPack");

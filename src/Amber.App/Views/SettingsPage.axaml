@@ -33,7 +33,7 @@
       <ComboBox x:Name="GroupPicker" Grid.Column="2" ItemsSource="{Binding Groups}" SelectedIndex="{Binding SelectedGroupIndex}" MinWidth="160"
                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,0" IsVisible="False" AutomationProperties.Name="{l:T settings.groups.picker}">
         <ComboBox.ItemTemplate>
-          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" /></DataTemplate>
+          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" /></DataTemplate>
         </ComboBox.ItemTemplate>
       </ComboBox>
       <TextBox x:Name="SettingsSearchBox" Grid.Column="3" Width="260" Text="{Binding SettingsSearch}" PlaceholderText="{l:T settings.search.placeholder}"
@@ -44,7 +44,7 @@
       <ListBox x:Name="GroupList" ItemsSource="{Binding Groups}" SelectedIndex="{Binding SelectedGroupIndex}" Background="Transparent"
                AutomationProperties.Name="{l:T settings.groups.picker}">
         <ListBox.ItemTemplate>
-          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" /></DataTemplate>
+          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" TextWrapping="Wrap" /></DataTemplate>
         </ListBox.ItemTemplate>
       </ListBox>
 
@@ -432,7 +432,7 @@
           <DataTemplate DataType="vm:SettingsGroupItem">
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" MinHeight="40">
               <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
                 <TextBlock Classes="hint" FontSize="12" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
               </StackPanel>
               <TextBlock Grid.Column="1" Text="›" Classes="hint" FontSize="18" VerticalAlignment="Center" />
