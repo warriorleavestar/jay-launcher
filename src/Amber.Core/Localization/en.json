@@ -2744,5 +2744,12 @@
   "multiplayer.invite.minutes.one": "{0} minute",
   "multiplayer.room.section.details": "Details",
   "multiplayer.knock.more": "{0} more people are knocking; they come next.",
-  "multiplayer.knock.more.one": "1 more person is knocking; they come next."
+  "multiplayer.knock.more.one": "1 more person is knocking; they come next.",
+  "multiplayer.knock.request_body": "Safety code {0}. {1}",
+  "multiplayer.file.program_warning": "This is a program file. Only accept it from someone you trust. Jay never opens it by itself.",
+  "multiplayer.file.never_runs": "It is only saved to Downloads/Jay; Jay never opens it by itself.",
+  "multiplayer.file.accept": "Accept…",
+  "multiplayer.file.see_above": "Someone wants to send you a file: answer it above.",
+  "multiplayer.settings.request_popup": "When Jay is in the background, show knocks and incoming files in a small window on top (it doesn't take the keyboard from your game)",
+  "multiplayer.popup.window_title": "Jay safety notice"
 }

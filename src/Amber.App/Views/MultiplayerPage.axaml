@@ -82,6 +82,29 @@
       <TextBlock x:Name="MoreKnocksText" Text="{Binding MoreKnocksText}" IsVisible="{Binding HasMoreKnocks}" FontWeight="SemiBold" />
       </StackPanel>
       </ScrollViewer>
+
+      <!-- Someone wants to send me a file: locked card in the same safety layer; programs get an extra warning. Never opened by Jay. -->
+      <ItemsControl x:Name="FileOfferList" ItemsSource="{Binding FileOffers}" IsVisible="{Binding HasFileOffers}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate DataType="vm:FileOfferItem">
+            <safety:SafetyPanel Title="{Binding Headline}" Margin="0,0,0,6">
+              <safety:SafetyPanel.Body>
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{Binding Warning}" TextWrapping="Wrap" FontWeight="SemiBold" IsVisible="{Binding IsProgram}" />
+                  <TextBlock Text="{Binding Warning}" TextWrapping="Wrap" IsVisible="{Binding !IsProgram}" />
+                  <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding SafetyCode, StringFormat='▦ {0}'}" />
+                  <WrapPanel ItemSpacing="8" LineSpacing="6">
+                    <safety:SafetyButton Classes="file-decline" Kind="Safe" Content="{l:T multiplayer.private.decline}"
+                                         Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DeclineFileCommand}" CommandParameter="{Binding}" />
+                    <safety:SafetyButton Classes="file-accept" Kind="Confirm" Content="{l:T multiplayer.file.accept}"
+                                         Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).AcceptFileCommand}" CommandParameter="{Binding}" />
+                  </WrapPanel>
+                </StackPanel>
+              </safety:SafetyPanel.Body>
+            </safety:SafetyPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
     </StackPanel>
 
     <ScrollViewer x:Name="MpBody" svc:ThemeRegion.Name="multiplayer.body" Grid.Row="3">
@@ -330,19 +353,7 @@
                       <Button Grid.Column="2" Content="{l:T multiplayer.private.send_file}" Command="{Binding SendFileCommand}" Margin="6,0,0,0" />
                     </Grid>
                   </StackPanel>
-                  <ItemsControl ItemsSource="{Binding FileOffers}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate DataType="vm:FileOfferItem">
-                        <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2">
-                          <TextBlock Text="{Binding Label}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                          <Button Grid.Column="1" Classes="primary" Content="{l:T multiplayer.private.accept}" Margin="8,0,0,0"
-                                  Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).AcceptFileCommand}" CommandParameter="{Binding}" />
-                          <Button Grid.Column="2" Content="{l:T multiplayer.private.decline}" Margin="6,0,0,0"
-                                  Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DeclineFileCommand}" CommandParameter="{Binding}" />
-                        </Grid>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
+                  <TextBlock x:Name="FileOfferPointer" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.file.see_above}" IsVisible="{Binding HasFileOffers}" />
                   <ItemsControl ItemsSource="{Binding Transfers}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate DataType="vm:TransferItem">
@@ -907,6 +918,9 @@
                   <DataTemplate DataType="vm:KnockWaitChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
                 </ComboBox.ItemTemplate>
               </ComboBox>
+              <CheckBox x:Name="RequestPopupBox" IsChecked="{Binding RequestPopup}">
+                <TextBlock Text="{l:T multiplayer.settings.request_popup}" TextWrapping="Wrap" />
+              </CheckBox>
             </StackPanel>
           </Border>
 

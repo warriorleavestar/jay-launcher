@@ -47,6 +47,8 @@ public partial class MainWindow
                 main.Shell.FieldRequested += field => Dispatcher.UIThread.Post(() => RevealField(field), DispatcherPriority.Loaded);
                 main.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.LogDocked)) ApplyLogDock(); };
                 main.LogPopOutRequested += PopOutLog;
+                // Knocks and incoming files while Jay is in the background: a small topmost window (on by default).
+                Popups = new RequestPopups(this, main.Service.Requests, () => main.Service.Settings.MultiplayerRequestPopup);
                 MovedNotice.IsVisible = _settings is { ShellMovedNoticeSeen: false };
             }
             ApplyShell();
@@ -58,6 +60,9 @@ public partial class MainWindow
         AddHandler(PointerPressedEvent, OnShellPointerPressed, RoutingStrategies.Tunnel);
         ApplyShell();
     }
+
+    /// <summary>Topmost request popups (self-check uses it to open one directly).</summary>
+    internal RequestPopups? Popups { get; private set; }
 
     /// <summary>当前导航位置（自检用）。</summary>
     internal string ShellNav { get; private set; } = "left";

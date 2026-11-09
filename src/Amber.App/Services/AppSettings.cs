@@ -140,6 +140,8 @@ public sealed class AppSettings
     public bool MultiplayerAutoCopyInvite { get; set; } = true;
     /// <summary>How long a room waits for the host to answer a knock: "2m", "10m" or "forever".</summary>
     public string MultiplayerKnockWait { get; set; } = "10m";
+    /// <summary>Knocks and incoming files while Jay is in the background open a small topmost window.</summary>
+    public bool MultiplayerRequestPopup { get; set; } = true;
 
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
