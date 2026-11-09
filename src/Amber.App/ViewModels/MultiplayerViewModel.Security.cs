@@ -24,6 +24,9 @@ public sealed partial class MultiplayerViewModel
     /// <summary>当前生效的安全策略：本机设置，再按公开网络的最低要求收紧。</summary>
     internal SecurityPolicy Security => _service.Settings.LocalSecurityPolicy().Tighten(NetworkSecurityPolicy);
 
+    /// <summary>自检用：当前设置（倒计时、跳过等待、上次自动重启时间）。</summary>
+    internal AppSettings SecuritySettings => _service.Settings;
+
     /// <summary>测试用：重启这一步（默认真的重启 Jay）。</summary>
     internal Action RestartApp { get; set; } = AppRestart.Restart;
 
