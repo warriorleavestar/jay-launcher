@@ -233,11 +233,11 @@ public sealed partial class MainViewModel : ObservableObject
         instance.NavigateHome = () => shell.Navigate("library");
         instance.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
         content.NavigateToSettings = () => shell.Navigate("settings");
-        instance.NavigateToContent = (id, type) =>
+        instance.NavigateToContent = (id, type, query) =>
         {
             var back = shell.Router.Current;
             shell.Navigate("discover");
-            content.BrowseFor(id, type, back: () => shell.Router.Navigate(back));
+            content.BrowseFor(id, type, back: () => shell.Router.Navigate(back), query: query ?? "");
         };
         multiplayer.NavigateHome = () => shell.Navigate("library");
         // 开始游戏不换页（§2.5 第 5 条）：进度在顶栏胶囊和启动页。

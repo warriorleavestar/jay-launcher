@@ -2316,5 +2316,21 @@
   "recycle.deleted": "{0} を完全に削除しました",
   "recycle.emptied": "{0} 件を削除しました",
   "recycle.emptied_partly": "{0} 件を削除しました。{1} 件は使用中のため次回削除します。",
-  "recycle.failed": "できませんでした：{0}"
+  "recycle.failed": "できませんでした：{0}",
+  "instance.packs.older": "古いバージョン用",
+  "instance.packs.newer": "新しいバージョン用",
+  "instance.packs.age_tip": "たいてい使えますが、一部のテクスチャがおかしく見えることがあります。",
+  "instance.packs.enabled": "オン",
+  "instance.packs.disabled": "オフ",
+  "instance.packs.order_hint": "上にあるほど優先されます。ゲーム内の「リソースパック」画面と同じリストです。Space でオン／オフ、Alt+↑/↓ で並べ替え。",
+  "instance.packs.none_enabled": "オンのリソースパックはありません。下でチェックしてください。",
+  "instance.packs.up": "上へ（優先度を上げる）",
+  "instance.packs.down": "下へ",
+  "instance.packs.save_failed": "パックのリストを保存できませんでした：{0}",
+  "instance.shaders.need_loader": "シェーダーパックには先に Iris（Fabric）、Oculus（Forge）または OptiFine が必要です。",
+  "instance.shaders.install_loader": "Iris を入れる",
+  "instance.shaders.pick_hint": "使うシェーダーパックを選んでください。次にゲームを起動したときに反映されます。",
+  "instance.shaders.off": "シェーダーなし",
+  "instance.shaders.used": "次の起動から {0} を使います。",
+  "instance.shaders.off_done": "次の起動からシェーダーをオフにします。"
 }

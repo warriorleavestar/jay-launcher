@@ -313,11 +313,11 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     /// 从别的页面跳来给某个实例找某类内容（实例页的【在线浏览…】、安装成功卡）。
     /// back 不为 null 时页面顶部显示上下文条和【← 返回实例】（改版规格 4.5）。
     /// </summary>
-    public void BrowseFor(string instanceId, ContentType type, Action? back = null)
+    public void BrowseFor(string instanceId, ContentType type, Action? back = null, string query = "")
     {
         if (Instances.Contains(instanceId)) TargetInstance = instanceId;
-        // 之前搜别的内容留下的关键词对这次没意义，清掉后显示热门。
-        Query = "";
+        // 之前搜别的内容留下的关键词对这次没意义，清掉后显示热门（或者带上调用方给的关键词，比如光影页的“Iris”）。
+        Query = query;
         if (TypeIndex != (int)type) TypeIndex = (int)type;
         else _ = SearchFromStart();
         SetReturn(instanceId, type, back);

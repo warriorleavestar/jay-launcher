@@ -559,27 +559,72 @@
                 <Button Content="{l:T common.open_folder}" Command="{Binding OpenResourcePacksFolderCommand}" />
               </WrapPanel>
             </StackPanel>
-            <StackPanel Grid.Row="1" Spacing="8" IsVisible="{Binding !ResourcePacks.Count}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
+            <StackPanel Grid.Row="1" Spacing="8" IsVisible="{Binding !HasResourcePacks}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
               <TextBlock Classes="hint" Text="{l:T instance.resourcepacks.empty}" TextWrapping="Wrap" TextAlignment="Center" />
               <Button Classes="primary" HorizontalAlignment="Center" Content="{l:T instance.browse_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.ResourcePack}" />
             </StackPanel>
-            <ListBox Grid.Row="1" ItemsSource="{Binding ResourcePacks}" Background="Transparent" IsVisible="{Binding !!ResourcePacks.Count}">
-              <ListBox.ItemTemplate>
-                <DataTemplate DataType="vm:PackFileItem">
-                  <Grid ColumnDefinitions="*,80,Auto">
-                    <c:MiddleEllipsisTextBlock FullText="{Binding Name}" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding Size}" Classes="hint" VerticalAlignment="Center" />
-                    <Button Grid.Column="2" Classes="ghost" Content="⋯" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
+            <ScrollViewer x:Name="PacksScroll" Grid.Row="1" IsVisible="{Binding HasResourcePacks}">
+              <StackPanel Spacing="4">
+                <TextBlock Classes="h2" Margin="0" Text="{l:T instance.packs.enabled}" />
+                <TextBlock Classes="hint" Text="{l:T instance.packs.order_hint}" TextWrapping="Wrap" />
+                <TextBlock Classes="hint" Text="{l:T instance.packs.none_enabled}" IsVisible="{Binding !HasEnabledPacks}" Margin="0,4" />
+                <ListBox x:Name="EnabledPackList" ItemsSource="{Binding EnabledPacks}" Background="Transparent" IsVisible="{Binding HasEnabledPacks}"
+                         AutomationProperties.Name="{l:T instance.packs.enabled}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:PackFileItem">
+                      <Grid ColumnDefinitions="Auto,*,Auto,72,Auto,Auto,Auto">
+                        <CheckBox IsChecked="{Binding IsOn}" Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).TogglePackCommand}" CommandParameter="{Binding}"
+                                  AutomationProperties.Name="{Binding Name}" VerticalAlignment="Center" />
+                        <c:MiddleEllipsisTextBlock Grid.Column="1" FullText="{Binding Name}" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                      <Border Classes="pill" IsVisible="{Binding HasAge}" Margin="8,0,0,0" ToolTip.Tip="{l:T instance.packs.age_tip}">
+                        <TextBlock Text="{Binding AgeText}" />
+                      </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Column="3" Text="{Binding Size}" Classes="hint" VerticalAlignment="Center" TextAlignment="Right" Margin="0,0,6,0" />
+                        <Button Grid.Column="4" Classes="ghost" Content="↑" ToolTip.Tip="{l:T instance.packs.up}" AutomationProperties.Name="{l:T instance.packs.up}"
+                                Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).MovePackUpCommand}" CommandParameter="{Binding}" />
+                        <Button Grid.Column="5" Classes="ghost" Content="↓" ToolTip.Tip="{l:T instance.packs.down}" AutomationProperties.Name="{l:T instance.packs.down}"
+                                Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).MovePackDownCommand}" CommandParameter="{Binding}" />
+                        <Button Grid.Column="6" Classes="ghost" Content="⋯" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
                       <Button.Flyout>
                         <MenuFlyout>
-                          <MenuItem Classes="danger" Header="{l:T common.delete}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).DeletePackCommand}" CommandParameter="{Binding}" />
+                          <MenuItem Classes="danger" Header="{l:T common.delete}" Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).DeletePackCommand}" CommandParameter="{Binding}" />
                         </MenuFlyout>
                       </Button.Flyout>
                     </Button>
-                  </Grid>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock Classes="h2" Text="{l:T instance.packs.disabled}" IsVisible="{Binding HasDisabledPacks}" Margin="0,12,0,0" />
+                <ListBox x:Name="DisabledPackList" ItemsSource="{Binding DisabledPacks}" Background="Transparent" IsVisible="{Binding HasDisabledPacks}"
+                         AutomationProperties.Name="{l:T instance.packs.disabled}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:PackFileItem">
+                      <Grid ColumnDefinitions="Auto,*,Auto,72,Auto">
+                        <CheckBox IsChecked="{Binding IsOn}" Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).TogglePackCommand}" CommandParameter="{Binding}"
+                                  AutomationProperties.Name="{Binding Name}" VerticalAlignment="Center" />
+                        <c:MiddleEllipsisTextBlock Grid.Column="1" FullText="{Binding Name}" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                      <Border Classes="pill" IsVisible="{Binding HasAge}" Margin="8,0,0,0" ToolTip.Tip="{l:T instance.packs.age_tip}">
+                        <TextBlock Text="{Binding AgeText}" />
+                      </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Column="3" Text="{Binding Size}" Classes="hint" VerticalAlignment="Center" TextAlignment="Right" Margin="0,0,6,0" />
+                        <Button Grid.Column="4" Classes="ghost" Content="⋯" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
+                      <Button.Flyout>
+                        <MenuFlyout>
+                          <MenuItem Classes="danger" Header="{l:T common.delete}" Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).DeletePackCommand}" CommandParameter="{Binding}" />
+                        </MenuFlyout>
+                      </Button.Flyout>
+                    </Button>
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </ScrollViewer>
           </Grid>
         </TabItem>
 
@@ -592,33 +637,50 @@
                   <TextBlock Text="{l:T instance.shared.notice}" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </DockPanel>
               </Border>
+              <Border x:Name="ShaderLoaderCard" Classes="callout warning" IsVisible="{Binding !HasShaderLoader}">
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Classes="primary" Content="{l:T instance.shaders.install_loader}" Command="{Binding InstallShaderLoaderCommand}"
+                          IsVisible="{Binding !IsVanilla}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                  <TextBlock Text="{l:T instance.shaders.need_loader}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </DockPanel>
+              </Border>
               <WrapPanel ItemSpacing="6" LineSpacing="6">
-                <Button Classes="primary" Content="{l:T instance.browse_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Shader}" />
+                <Button Classes="primary" Content="{l:T instance.browse_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Shader}" IsVisible="{Binding HasShaderLoader}" />
+                <Button Content="{l:T instance.browse_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Shader}" IsVisible="{Binding !HasShaderLoader}" />
                 <Button Content="{l:T common.add_files}" Click="AddShaderPacks_Click" />
                 <Button Content="{l:T common.open_folder}" Command="{Binding OpenShaderPacksFolderCommand}" />
               </WrapPanel>
             </StackPanel>
-            <StackPanel Grid.Row="1" Spacing="8" IsVisible="{Binding !ShaderPacks.Count}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
+            <StackPanel Grid.Row="1" Spacing="8" IsVisible="{Binding !HasShaderPacks}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
               <TextBlock Classes="hint" Text="{l:T instance.shaderpacks.empty}" TextWrapping="Wrap" TextAlignment="Center" />
-              <Button Classes="primary" HorizontalAlignment="Center" Content="{l:T instance.browse_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Shader}" />
             </StackPanel>
-            <ListBox Grid.Row="1" ItemsSource="{Binding ShaderPacks}" Background="Transparent" IsVisible="{Binding !!ShaderPacks.Count}">
-              <ListBox.ItemTemplate>
-                <DataTemplate DataType="vm:PackFileItem">
-                  <Grid ColumnDefinitions="*,80,Auto">
-                    <c:MiddleEllipsisTextBlock FullText="{Binding Name}" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding Size}" Classes="hint" VerticalAlignment="Center" />
-                    <Button Grid.Column="2" Classes="ghost" Content="⋯" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
+            <ScrollViewer Grid.Row="1" IsVisible="{Binding HasShaderPacks}">
+              <StackPanel Spacing="4">
+                <TextBlock Classes="hint" Text="{l:T instance.shaders.pick_hint}" TextWrapping="Wrap" />
+                <RadioButton x:Name="ShadersOffButton" GroupName="shader" Content="{l:T instance.shaders.off}" IsChecked="{Binding ShadersOff, Mode=OneWay}"
+                             Command="{Binding UseShaderCommand}" CommandParameter="{x:Null}" Margin="12,2" MinHeight="36" />
+                <ItemsControl x:Name="ShaderList" ItemsSource="{Binding ShaderPacks}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:PackFileItem">
+                      <Grid ColumnDefinitions="*,72,Auto" Margin="12,2" MinHeight="36">
+                        <RadioButton GroupName="shader" IsChecked="{Binding IsOn, Mode=OneWay}" AutomationProperties.Name="{Binding Name}" HorizontalAlignment="Stretch"
+                                     Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).UseShaderCommand}" CommandParameter="{Binding}">
+                          <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        </RadioButton>
+                        <TextBlock Grid.Column="1" Text="{Binding Size}" Classes="hint" VerticalAlignment="Center" TextAlignment="Right" Margin="0,0,6,0" />
+                        <Button Grid.Column="2" Classes="ghost" Content="⋯" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
                       <Button.Flyout>
                         <MenuFlyout>
-                          <MenuItem Classes="danger" Header="{l:T common.delete}" Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).DeletePackCommand}" CommandParameter="{Binding}" />
+                          <MenuItem Classes="danger" Header="{l:T common.delete}" Command="{Binding $parent[TabItem].((vm:InstanceViewModel)DataContext).DeletePackCommand}" CommandParameter="{Binding}" />
                         </MenuFlyout>
                       </Button.Flyout>
                     </Button>
-                  </Grid>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
           </Grid>
         </TabItem>
 

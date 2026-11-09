@@ -2316,5 +2316,21 @@
   "recycle.deleted": "永久刪除了 {0}",
   "recycle.emptied": "清空了 {0} 項",
   "recycle.emptied_partly": "清空了 {0} 項；{1} 項正被佔用，下次再清。",
-  "recycle.failed": "沒做成：{0}"
+  "recycle.failed": "沒做成：{0}",
+  "instance.packs.older": "版本舊",
+  "instance.packs.newer": "版本新",
+  "instance.packs.age_tip": "多半還能用，個別材質可能顯示不對。",
+  "instance.packs.enabled": "已啟用",
+  "instance.packs.disabled": "未啟用",
+  "instance.packs.order_hint": "越靠上越優先，和遊戲裡「資源包」介面是同一份列表。空白鍵開關，Alt+↑/↓ 調順序。",
+  "instance.packs.none_enabled": "還沒有啟用資源包，在下面勾一個。",
+  "instance.packs.up": "上移（更優先）",
+  "instance.packs.down": "下移",
+  "instance.packs.save_failed": "資源包列表沒存上：{0}",
+  "instance.shaders.need_loader": "光影要先裝 Iris（Fabric）、Oculus（Forge）或 OptiFine。",
+  "instance.shaders.install_loader": "裝 Iris",
+  "instance.shaders.pick_hint": "選一個要用的光影，下次進遊戲生效。",
+  "instance.shaders.off": "不用光影",
+  "instance.shaders.used": "下次進遊戲用 {0}。",
+  "instance.shaders.off_done": "下次進遊戲關掉光影。"
 }

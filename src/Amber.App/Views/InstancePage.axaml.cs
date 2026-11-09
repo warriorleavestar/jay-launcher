@@ -24,6 +24,32 @@ public partial class InstancePage : UserControl
             ApplyHeight(e.NewSize.Height);
         };
         ModsList.AddHandler(KeyDownEvent, OnModsKeyDown, RoutingStrategies.Tunnel);
+        EnabledPackList.AddHandler(KeyDownEvent, OnPacksKeyDown, RoutingStrategies.Tunnel);
+        DisabledPackList.AddHandler(KeyDownEvent, OnPacksKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>§6.7 pack lists: Space on / off, Alt+↑↓ move (enabled list only), Delete moves the pack to Recently deleted.</summary>
+    private void OnPacksKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (Vm is not { } vm || sender is not ListBox list || list.SelectedItem is not ViewModels.PackFileItem item) return;
+        switch (e.Key)
+        {
+            case Key.Space when e.KeyModifiers == KeyModifiers.None:
+                vm.TogglePackCommand.Execute(item);
+                (item.IsOn ? EnabledPackList : DisabledPackList).SelectedItem = item;
+                break;
+            case Key.Up or Key.Down when e.KeyModifiers == KeyModifiers.Alt && list == EnabledPackList:
+                vm.MovePack(item, e.Key == Key.Up ? -1 : 1);
+                list.SelectedItem = item;
+                list.ContainerFromItem(item)?.Focus();
+                break;
+            case Key.Delete when e.KeyModifiers == KeyModifiers.None:
+                vm.DeletePackCommand.Execute(item);
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
     }
 
     /// <summary>Current layout tier (self-check).</summary>

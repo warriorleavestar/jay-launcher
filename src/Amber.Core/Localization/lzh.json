@@ -2253,5 +2253,21 @@
   "recycle.deleted": "已永除 {0}",
   "recycle.emptied": "已盡清 {0} 項",
   "recycle.emptied_partly": "已清 {0} 項；{1} 項方用，俟後再清。",
-  "recycle.failed": "未成：{0}"
+  "recycle.failed": "未成：{0}",
+  "instance.packs.older": "舊版之包",
+  "instance.packs.newer": "新版之包",
+  "instance.packs.age_tip": "多尚可用，或有材質失真。",
+  "instance.packs.enabled": "已啟",
+  "instance.packs.disabled": "未啟",
+  "instance.packs.order_hint": "居上者先。與戲中「資源包」之列同。空格以啟閉，Alt+↑/↓ 以易序。",
+  "instance.packs.none_enabled": "未啟資源包，可於下擇之。",
+  "instance.packs.up": "上移（愈先）",
+  "instance.packs.down": "下移",
+  "instance.packs.save_failed": "資源包之列未能存：{0}",
+  "instance.shaders.need_loader": "欲用光影，先置 Iris（Fabric）、Oculus（Forge）或 OptiFine。",
+  "instance.shaders.install_loader": "置 Iris",
+  "instance.shaders.pick_hint": "擇一光影，次入戲乃效。",
+  "instance.shaders.off": "不用光影",
+  "instance.shaders.used": "次入戲用 {0}。",
+  "instance.shaders.off_done": "次入戲閉光影。"
 }

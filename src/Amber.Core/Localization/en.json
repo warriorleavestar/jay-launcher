@@ -2371,5 +2371,21 @@
   "recycle.emptied": "Emptied {0} items",
   "recycle.emptied.one": "Emptied {0} item",
   "recycle.emptied_partly": "Emptied {0}; {1} are in use and stay until next time.",
-  "recycle.failed": "Couldn't do it: {0}"
+  "recycle.failed": "Couldn't do it: {0}",
+  "instance.packs.older": "Made for an older version",
+  "instance.packs.newer": "Made for a newer version",
+  "instance.packs.age_tip": "The pack may still work; some textures can look wrong.",
+  "instance.packs.enabled": "On",
+  "instance.packs.disabled": "Off",
+  "instance.packs.order_hint": "Packs higher in the list win. Same list as the in-game Resource Packs screen. Space turns on or off, Alt+↑/↓ moves.",
+  "instance.packs.none_enabled": "No resource packs are on. Tick one below.",
+  "instance.packs.up": "Move up (higher priority)",
+  "instance.packs.down": "Move down",
+  "instance.packs.save_failed": "Couldn't save the pack list: {0}",
+  "instance.shaders.need_loader": "Shader packs need Iris (Fabric), Oculus (Forge) or OptiFine first.",
+  "instance.shaders.install_loader": "Install Iris",
+  "instance.shaders.pick_hint": "Pick the shader pack to use. It takes effect the next time the game starts.",
+  "instance.shaders.off": "No shaders",
+  "instance.shaders.used": "Using {0} from the next start.",
+  "instance.shaders.off_done": "Shaders are off from the next start."
 }

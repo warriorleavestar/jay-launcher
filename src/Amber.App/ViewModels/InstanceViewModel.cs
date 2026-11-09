@@ -134,19 +134,6 @@ public sealed partial class ScreenshotItem(string path) : ObservableObject
     public partial Bitmap? Thumbnail { get; set; }
 }
 
-public sealed record PackFileItem(string Path)
-{
-    public string Name => System.IO.Path.GetFileName(Path);
-    public string Size
-    {
-        get
-        {
-            var bytes = File.Exists(Path) ? new FileInfo(Path).Length : Toolbox.SizeOf([Path]);
-            return bytes >= 1024 * 1024 ? $"{bytes / 1024.0 / 1024:F1} MB" : $"{bytes / 1024.0:F0} KB";
-        }
-    }
-}
-
 public sealed partial class ServerItem(ServerEntry entry) : LocalizedObservable
 {
     public ServerEntry Entry { get; } = entry;
@@ -326,8 +313,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             case InstanceTab.Mods: LoadMods(); break;
             case InstanceTab.Worlds: LoadWorlds(); break;
             case InstanceTab.Screenshots: LoadScreenshots(); break;
-            case InstanceTab.ResourcePacks: LoadPackFiles(ResourcePacks, Current.ResourcePacksDir); break;
-            case InstanceTab.ShaderPacks: LoadPackFiles(ShaderPacks, Current.ShaderPacksDir); break;
+            case InstanceTab.ResourcePacks: LoadResourcePacks(); break;
+            case InstanceTab.ShaderPacks: LoadShaderPacks(); break;
             case InstanceTab.Servers: LoadServers(); break;
         }
     }
@@ -1142,45 +1129,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         Screenshots.Remove(item);
     }
 
-    // ---- 资源包、光影 ----
-
-    public ObservableCollection<PackFileItem> ResourcePacks { get; } = [];
-    public ObservableCollection<PackFileItem> ShaderPacks { get; } = [];
-
-    private void ReloadPackFiles()
-    {
-        if (Current is not { } c) return;
-        LoadPackFiles(ResourcePacks, c.ResourcePacksDir);
-        LoadPackFiles(ShaderPacks, c.ShaderPacksDir);
-    }
-
-    private static void LoadPackFiles(ObservableCollection<PackFileItem> target, string dir)
-    {
-        target.Clear();
-        if (!System.IO.Directory.Exists(dir)) return;
-        foreach (var path in System.IO.Directory.EnumerateFileSystemEntries(dir).Order()) target.Add(new PackFileItem(path));
-    }
-
-    [RelayCommand]
-    private void OpenResourcePacksFolder()
-    {
-        if (Current is { } c) OpenPath(c.ResourcePacksDir);
-    }
-
-    [RelayCommand]
-    private void OpenShaderPacksFolder()
-    {
-        if (Current is { } c) OpenPath(c.ShaderPacksDir);
-    }
-
-    [RelayCommand]
-    private void DeletePack(PackFileItem? item)
-    {
-        if (item is null || !Trash(item.Path, ReloadPackFiles)) return;
-        ResourcePacks.Remove(item);
-        ShaderPacks.Remove(item);
-    }
-
     // ---- 服务器 ----
 
     public ObservableCollection<ServerItem> Servers { get; } = [];
@@ -1302,7 +1250,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public Action? NavigateToNewInstance { get; set; }
 
     /// <summary>主窗口设置：【在线浏览…】跳到资源页，参数是实例和内容类型。</summary>
-    public Action<string, ContentType>? NavigateToContent { get; set; }
+    public Action<string, ContentType, string?>? NavigateToContent { get; set; }
 
     /// <summary>顶部【▶ 启动】：启动当前实例，切回启动页看进度。</summary>
     [RelayCommand]
@@ -1320,7 +1268,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [RelayCommand]
     private void BrowseOnline(ContentType type)
     {
-        if (Current is { } c) NavigateToContent?.Invoke(c.Id, type);
+        if (Current is { } c) NavigateToContent?.Invoke(c.Id, type, null);
     }
 
     // ---- 导出 ----
