@@ -309,8 +309,8 @@
             <!-- Footer: first time? · safety · component and relay servers -->
             <Grid x:Name="LobbyFooter" Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="*,*" Margin="0,4,0,0">
               <WrapPanel ItemSpacing="12" LineSpacing="4" VerticalAlignment="Center">
-                <Button Classes="ghost small" Command="{Binding OpenHelpCommand}" CommandParameter="multiplayer"><TextBlock Text="{l:T multiplayer.lobby.first_time}" TextWrapping="Wrap" /></Button>
-                <Button Classes="ghost small" Command="{Binding OpenHelpCommand}" CommandParameter="child-mode"><TextBlock Text="{l:T multiplayer.lobby.safety}" TextWrapping="Wrap" /></Button>
+                <Button x:Name="LobbyLessonButton" Classes="ghost small" Command="{Binding OpenLessonCommand}" CommandParameter="multiplayer"><TextBlock Text="{l:T multiplayer.lobby.first_time}" TextWrapping="Wrap" /></Button>
+                <Button x:Name="LobbySafetyButton" Classes="ghost small" Command="{Binding OpenLessonCommand}" CommandParameter="safety"><TextBlock Text="{l:T multiplayer.lobby.safety}" TextWrapping="Wrap" /></Button>
                 <Button x:Name="LobbyDrillButton" Classes="ghost small" Command="{Binding OpenDrillCommand}"><TextBlock Text="{l:T multiplayer.lobby.drill}" TextWrapping="Wrap" /></Button>
                 <Button x:Name="LobbyProblemsButton" Classes="ghost small" Command="{Binding OpenDiagnosticsCommand}"><TextBlock Text="{l:T multiplayer.room.problems}" TextWrapping="Wrap" /></Button>
               </WrapPanel>
@@ -1402,6 +1402,37 @@
                 <Button x:Name="DrillFinishButton" Content="{l:T common.close}" Command="{Binding CloseDrillCommand}" />
               </WrapPanel>
             </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- The two short lessons (official §9.5): five illustrated cards each, ← → to page, Esc closes. -->
+    <Border x:Name="LessonDrawer" Grid.Row="0" Grid.RowSpan="5" Width="560" HorizontalAlignment="Right" ZIndex="11"
+            Classes="card" Margin="0" Padding="16" BoxShadow="0 4 24 0 #40000000" IsVisible="{Binding LessonOpen}">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+          <TextBlock x:Name="LessonHeadingText" Classes="h2" Text="{Binding LessonHeading}" Margin="0" VerticalAlignment="Center" TextWrapping="Wrap" />
+          <Button x:Name="CloseLessonButton" Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding CloseLessonCommand}" ToolTip.Tip="{l:T common.close}" />
+        </Grid>
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="0,12,0,0">
+          <Button x:Name="LessonPreviousButton" Content="{l:T lesson.previous}" Command="{Binding LessonPreviousCommand}" IsVisible="{Binding LessonHasPrevious}" />
+          <TextBlock x:Name="LessonStepText" Grid.Column="1" Classes="hint" Text="{Binding LessonStep}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <Panel Grid.Column="2">
+            <Button x:Name="LessonNextButton" Classes="primary" Content="{l:T lesson.next}" Command="{Binding LessonNextCommand}" IsVisible="{Binding LessonHasNext}" />
+            <Button x:Name="LessonDoneButton" Classes="primary" Content="{l:T lesson.done}" Command="{Binding LessonNextCommand}" IsVisible="{Binding LessonIsLast}" />
+          </Panel>
+        </Grid>
+        <ScrollViewer>
+          <StackPanel Spacing="12">
+            <c:LineArt x:Name="LessonArt" Picture="{Binding LessonPicture}" MaxHeight="160" HorizontalAlignment="Center" />
+            <TextBlock x:Name="LessonTitleText" Text="{Binding LessonTitle}" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="{DynamicResource FontSubtitle}" />
+            <TextBlock x:Name="LessonBodyText" Text="{Binding LessonBody}" TextWrapping="Wrap" />
+            <WrapPanel ItemSpacing="8" LineSpacing="6" IsVisible="{Binding LessonIsLast}">
+              <Button x:Name="LessonDiagnosticsButton" Content="{l:T multiplayer.room.problems}" Command="{Binding LessonDiagnosticsCommand}" IsVisible="{Binding LessonOffersDiagnostics}" />
+              <Button x:Name="LessonDrillButton" Content="{l:T multiplayer.lobby.drill}" Command="{Binding LessonDrillCommand}" IsVisible="{Binding LessonOffersDrill}" />
+              <Button x:Name="LessonArticleButton" Classes="ghost" Content="{l:T lesson.article}" Command="{Binding LessonArticleCommand}" />
+            </WrapPanel>
           </StackPanel>
         </ScrollViewer>
       </DockPanel>

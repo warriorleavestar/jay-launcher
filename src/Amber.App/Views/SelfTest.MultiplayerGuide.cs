@@ -282,6 +282,79 @@ internal sealed partial class SelfTest
         window.Height = 900;
         vm.ShowTabCommand.Execute("play");
         await DrillAsync(vm);
+        await LessonsAsync(vm);
+    }
+
+    /// <summary>The two lessons (official §9.5): five cards each with a picture, ← →, Esc, and each lesson's last step.</summary>
+    private async Task LessonsAsync(MultiplayerViewModel vm)
+    {
+        await Task.Delay(300);
+        var page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
+        Button? Named(string name) => page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == name && b.IsEffectivelyVisible);
+        Check("小课堂：大厅底部【第一次用？】打开第一张", Press(Named("LobbyLessonButton")) && vm.LessonOpen && vm.LessonKind == Amber.Core.Multiplayer.LessonKind.Multiplayer
+            && vm.LessonStep == L.F("lesson.step", 1, 5) && vm.LessonTitle == L.T("lesson.mp.room.title"));
+        await Task.Delay(300);
+        var art = page.GetVisualDescendants().OfType<Amber.App.Views.Controls.LineArt>().First(a => a.Name == "LessonArt");
+        Check("小课堂：有插画（≤160 高）、焦点在【下一张】", art.IsEffectivelyVisible && art.Picture == "room" && art.Bounds.Height is > 40 and <= 160
+            && Named("LessonNextButton")?.IsFocused == true && Named("LessonPreviousButton") is null, $"{art.Bounds.Width}x{art.Bounds.Height}");
+        await ShotAsync("小课堂-1-1440");
+        Dispatcher.UIThread.Invoke(() => PressKey(Named("LessonNextButton")!, Avalonia.Input.Key.Right));
+        Check("小课堂：→ 翻到第二张", vm.LessonIndex == 1 && vm.LessonHasPrevious);
+        Dispatcher.UIThread.Invoke(() => PressKey(page, Avalonia.Input.Key.Left));
+        Check("小课堂：← 翻回第一张", vm.LessonIndex == 0);
+        for (var i = 0; i < 4; i++)
+        {
+            Press(Named("LessonNextButton"));
+            await Task.Delay(150);
+            await ShotAsync($"小课堂-{i + 2}-1440");
+        }
+        Check("小课堂：最后一张给【连接有问题？】和【看完了】", vm.LessonIsLast && Named("LessonDiagnosticsButton") is not null && Named("LessonDoneButton") is not null
+            && Named("LessonNextButton") is null && Named("LessonDrillButton") is null && art.Picture == "trouble");
+        Check("小课堂：【连接有问题？】换成诊断抽屉", Press(Named("LessonDiagnosticsButton")) && !vm.LessonOpen && vm.DiagnosticsOpen);
+        vm.DiagnosticsOpen = false;
+        await Task.Delay(200);
+
+        Check("安全小课：大厅底部【安全小课】打开第一张", Press(Named("LobbySafetyButton")) && vm.LessonOpen && vm.LessonKind == Amber.Core.Multiplayer.LessonKind.Safety
+            && vm.LessonIndex == 0 && vm.LessonHeading == L.T("lesson.safety.heading"));
+        await Task.Delay(200);
+        await ShotAsync("安全小课-1-1440");
+        for (var i = 0; i < 4; i++)
+        {
+            Dispatcher.UIThread.Invoke(() => PressKey(page, Avalonia.Input.Key.Right));
+            await Task.Delay(150);
+            await ShotAsync($"安全小课-{i + 2}-1440");
+        }
+        Check("安全小课：最后一张给【演练一遍】", vm.LessonIsLast && Named("LessonDrillButton") is not null && Named("LessonDiagnosticsButton") is null && art.Picture == "public");
+        Dispatcher.UIThread.Invoke(() => PressKey(page, Avalonia.Input.Key.Right));
+        Check("安全小课：最后一张再 → 不越界、不关", vm.LessonIsLast && vm.LessonOpen);
+        Check("安全小课：【演练一遍】打开演练", Press(Named("LessonDrillButton")) && !vm.LessonOpen && vm.DrillOpen && vm.DrillAsking);
+        vm.DrillOpen = false;
+
+        window.Width = 600;
+        window.Height = 420;
+        await Task.Delay(500);
+        Dispatcher.UIThread.Invoke(() => vm.OpenLessonCommand.Execute("multiplayer"));
+        await Task.Delay(300);
+        var drawer = page.GetVisualDescendants().OfType<Border>().First(b => b.Name == "LessonDrawer");
+        Check("小课堂：矮窗口铺满、插画藏起来、文字还在", drawer.Bounds.Width >= page.Bounds.Width - 1 && !art.IsEffectivelyVisible
+            && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "LessonBodyText" && t.IsEffectivelyVisible), $"{drawer.Bounds.Width}/{page.Bounds.Width}");
+        await ShotAsync("小课堂-600");
+        Dispatcher.UIThread.Invoke(() => PressKey(page, Avalonia.Input.Key.Escape));
+        Check("小课堂：Esc 关掉", !vm.LessonOpen);
+        window.Width = 1440;
+        window.Height = 900;
+        await Task.Delay(300);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.OpenLessonCommand.Execute("safety");
+            while (vm.LessonHasNext) vm.LessonNextCommand.Execute(null);
+        });
+        await Task.Delay(200);
+        Check("安全小课：【看完整文章】去帮助", Press(Named("LessonArticleButton")) && !vm.LessonOpen);
+        await Task.Delay(500);
+        Check("安全小课：帮助打开“给孩子用”", main.Shell.Router.Current.ToString().StartsWith("help/child-mode", StringComparison.Ordinal), main.Shell.Router.Current.ToString());
+        main.Shell.Navigate("play");
+        await Task.Delay(300);
     }
 
     /// <summary>Drill mode (official §9.5): lobby link, four steps with "No" focused, verdict + lesson, score, restart, Esc, no network.</summary>
