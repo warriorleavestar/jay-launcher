@@ -226,8 +226,11 @@ public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, 
 public static class KnockClient
 {
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
-    /// <summary>等房主点批准：房主那边 120 秒没点算拒绝，这边多等一会儿。</summary>
-    public static readonly TimeSpan DecisionTimeout = TimeSpan.FromSeconds(135);
+    /// <summary>
+    /// How long a guest waits for the host's answer. The host chooses 2 minutes, 10 minutes or "keep waiting"
+    /// (<see cref="KnockWaits"/>); the guest cannot know which, so it waits up to an hour and can cancel at any time.
+    /// </summary>
+    public static readonly TimeSpan DecisionTimeout = TimeSpan.FromHours(1);
 
     /// <param name="device">本机的设备指纹（打开了才有）。房主要求时才把设备证明发过去，房主不问就不发。</param>
     /// <param name="account">公共网络的登录凭证（登录过才有）。房主要求时才发。</param>
@@ -774,21 +777,36 @@ public sealed class KnockServer : IAsyncDisposable
 
     private static JsonObject Reject(string reason) => new() { ["ok"] = false, ["reason"] = reason };
 
+    /// <summary>
+    /// How long the host has to answer, read at each knock (the room setting can change while the room is open).
+    /// <see cref="Timeout.InfiniteTimeSpan"/> keeps waiting. When not set, <see cref="KnockLimits.DecisionTimeout"/>.
+    /// </summary>
+    public Func<TimeSpan>? DecisionWait { get; set; }
+
+    /// <summary>A knock was not answered in time and counted as declined (the host's card says so).</summary>
+    public event Action<KnockRequest>? TimedOut;
+
     /// <summary>问房主；超时或者服务关了算拒绝。</summary>
     private async Task<bool> AskAsync(KnockRequest request, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(_limits.DecisionTimeout);
+        var wait = DecisionWait?.Invoke() ?? _limits.DecisionTimeout;
+        if (wait != Timeout.InfiniteTimeSpan) timeout.CancelAfter(wait);
         try
         {
             var decision = _approve(request, timeout.Token);
             var finished = await Task.WhenAny(decision, Task.Delay(Timeout.Infinite, timeout.Token));
             // 超时之后才给出的答案（包括被取消时回的 true）一律不算。
-            if (finished != decision || timeout.IsCancellationRequested) return false;
+            if (finished != decision || timeout.IsCancellationRequested)
+            {
+                if (!ct.IsCancellationRequested) TimedOut?.Invoke(request);
+                return false;
+            }
             return await decision;
         }
         catch (OperationCanceledException)
         {
+            if (!ct.IsCancellationRequested) TimedOut?.Invoke(request);
             return false;
         }
     }

@@ -258,6 +258,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         });
         InitDirect();
         InitGuide();
+        InitRoom();
         InitPublic();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
         HostServer = new HostServerViewModel(service);
@@ -748,7 +749,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         return true;
     }
 
-    private string ChatName => _service.Accounts.Store.Selected?.Name ?? _service.Settings.PlayerName;
+    internal string ChatName => _service.Accounts.Store.Selected?.Name ?? _service.Settings.PlayerName;
 
     private void StartHub(RoomCode room)
     {

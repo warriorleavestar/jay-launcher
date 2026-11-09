@@ -138,6 +138,8 @@ public sealed class AppSettings
 
     /// <summary>Multiplayer lobby: copy the first invite when a room is opened (cleared from the clipboard later).</summary>
     public bool MultiplayerAutoCopyInvite { get; set; } = true;
+    /// <summary>How long a room waits for the host to answer a knock: "2m", "10m" or "forever".</summary>
+    public string MultiplayerKnockWait { get; set; } = "10m";
 
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;

@@ -195,7 +195,7 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 | `instances.json` | `instances.header` (the hero) `instances.lastrun` `instances.details` `instances.status` |
 | `downloads.json` | `downloads.title` `downloads.search` `downloads.filters` `downloads.body` `downloads.status` |
 | `content.json` | `content.header` `content.filters` `content.body` `content.status` |
-| `multiplayer.json` | `multiplayer.title` `multiplayer.body` `multiplayer.status` |
+| `multiplayer.json` | `multiplayer.title` `multiplayer.tabs` `multiplayer.room` (the room header and knock panel) `multiplayer.body` `multiplayer.status` |
 | `tools.json` | `tools.title` `tools.body` `tools.status` |
 | `log.json` | `log.header` `log.jump` `log.filters` `log.list` |
 
