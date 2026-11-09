@@ -136,6 +136,9 @@ public sealed class AppSettings
     /// <summary>standard / compact (official design §6.20 Appearance).</summary>
     public string Density { get; set; } = Amber.Core.Layout.Density.Standard;
 
+    /// <summary>Multiplayer lobby: copy the first invite when a room is opened (cleared from the clipboard later).</summary>
+    public bool MultiplayerAutoCopyInvite { get; set; } = true;
+
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 

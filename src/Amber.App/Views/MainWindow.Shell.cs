@@ -218,6 +218,12 @@ public partial class MainWindow
         // Ctrl+` docks / undocks the game log (§6.9).
         if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.OemTilde) { main.ToggleLogDock(); e.Handled = true; return; }
         if (e.Key == Key.Escape && main.LogDocked && LogDockIsDrawer) { main.LogDocked = false; e.Handled = true; return; }
+        // Ctrl+V outside a text box: a pasted invite (or any other Jay code) opens multiplayer with it filled in.
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.V && FocusManager?.GetFocusedElement() is not TextBox)
+        {
+            _ = PasteCodeAsync(main);
+            return;
+        }
         if (e.KeyModifiers == KeyModifiers.Control)
         {
             string? id = e.Key switch { Key.D1 or Key.NumPad1 => "library", Key.D2 or Key.NumPad2 => "discover", Key.D3 or Key.NumPad3 => "multiplayer", _ => null };
@@ -230,6 +236,15 @@ public partial class MainWindow
         }
         else if (e.Key == Key.BrowserBack) e.Handled = shell.Router.Back();
         else if (e.Key == Key.BrowserForward) e.Handled = shell.Router.Forward();
+    }
+
+    private static async Task PasteCodeAsync(MainViewModel main)
+    {
+        if (Amber.App.Services.AvaloniaClipboard.FromMainWindow() is not { } board) return;
+        string? text;
+        try { text = await board.GetTextAsync(); }
+        catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException) { return; }
+        main.PasteCode(text);
     }
 
     /// <summary>鼠标侧键：返回、前进。</summary>

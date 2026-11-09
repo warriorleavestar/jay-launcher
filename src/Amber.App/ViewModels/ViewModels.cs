@@ -156,6 +156,24 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The live game log (the docked panel and the pop-out window read it).</summary>
     public LogViewModel Log => Pages.OfType<LogViewModel>().First();
 
+    /// <summary>
+    /// Ctrl+V outside a text box (§6.14): a code on the clipboard opens multiplayer with it filled in, nothing more.
+    /// Returns false when the text is not a code (the key press is then left alone).
+    /// </summary>
+    public bool PasteCode(string? text)
+    {
+        if (FirstRun.IsOpen || Pages.OfType<MultiplayerViewModel>().FirstOrDefault() is not { IsIdle: true } multiplayer) return false;
+        if (!multiplayer.PasteCode(text)) return false;
+        Shell.Navigate(multiplayer.Tab switch
+        {
+            MultiplayerTab.Public => "play/public",
+            MultiplayerTab.Servers => "play/servers",
+            MultiplayerTab.Settings => "play/settings",
+            _ => "play",
+        });
+        return true;
+    }
+
     /// <summary>The log is docked at the bottom of the content area (Ctrl+`).</summary>
     [ObservableProperty] public partial bool LogDocked { get; set; }
 
@@ -405,6 +423,7 @@ public sealed partial class MainViewModel : ObservableObject
                 multiplayer.JayServers.InviteText = code;
             },
         };
+        multiplayer.Navigate = r => shell.Navigate(r);
         foreach (var page in Pages) Shell.Watch(page);
         CurrentPage = library;
         CurrentPage.Activate();

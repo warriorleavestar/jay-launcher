@@ -18,6 +18,10 @@ public enum PastedCodeKind
     NodeShare,
     /// <summary>Jay 服务器邀请码 JAYS1-…：贴到“Jay 服务器”卡片。</summary>
     JayServer,
+    /// <summary>好友码 JAYF1-…（设备指纹码）：到“公开房间”里找朋友的隐藏房间。</summary>
+    FriendCode,
+    /// <summary>公共网络地址 JAYNET…：到联机设置里先看内容再确认添加。</summary>
+    PublicNetwork,
 }
 
 /// <summary>
@@ -55,5 +59,7 @@ public static class PastedCode
         ("AMBNODE-", PastedCodeKind.NodeShare),
         ("JAY2-", PastedCodeKind.Invite),
         ("JAYS1-", PastedCodeKind.JayServer),
+        ("JAYF1-", PastedCodeKind.FriendCode),
+        ("JAYNET", PastedCodeKind.PublicNetwork),
     ];
 }

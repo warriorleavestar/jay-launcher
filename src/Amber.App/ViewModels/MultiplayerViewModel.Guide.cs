@@ -18,6 +18,7 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(HasNodes));
         OnPropertyChanged(nameof(NodesStatusText));
         OnPropertyChanged(nameof(NodesHeaderText));
+        NotifyLobbyStatus();
     }
 
     /// <summary>实际会用的节点数（自己的 + 开着时的内置节点）。</summary>
@@ -109,6 +110,7 @@ public sealed partial class MultiplayerViewModel
         {
             case PastedCodeKind.Invite:
                 clearSource();
+                Tab = MultiplayerTab.Play;
                 JoinCode = text;
                 JoinCommand.Execute(null);
                 return true;
@@ -118,6 +120,7 @@ public sealed partial class MultiplayerViewModel
                 return true;
             case PastedCodeKind.DirectInvite:
                 clearSource();
+                MoreWaysOpen = true;
                 DirectInviteInput = text;
                 JoinDirectCommand.Execute(null);
                 return true;
@@ -126,6 +129,7 @@ public sealed partial class MultiplayerViewModel
                 clearSource();
                 ShareCodeText = text;
                 NodesExpanded = true;
+                Tab = MultiplayerTab.Settings;
                 SetStatus(StatusMessage.Warning("multiplayer.code.node_misplaced"));
                 return true;
             case PastedCodeKind.DirectReply:
@@ -139,6 +143,20 @@ public sealed partial class MultiplayerViewModel
                 clearSource();
                 JayServers.InviteText = text;
                 JayServers.JoinCommand.Execute(null);
+                return true;
+            case PastedCodeKind.FriendCode when ShowPublicNetworks:
+                // 好友码：到“公开房间”里找朋友的隐藏房间（要先连上公共网络）。
+                clearSource();
+                FindCodeInput = text.Trim();
+                Tab = MultiplayerTab.Public;
+                SetStatus(StatusMessage.Info("multiplayer.code.friend_misplaced"));
+                return true;
+            case PastedCodeKind.PublicNetwork:
+                // 公共网络地址：放进联机设置的输入框，用户看过内容再确认添加，不静默添加。
+                clearSource();
+                NetworkInput = text.Trim();
+                Tab = MultiplayerTab.Settings;
+                SetStatus(StatusMessage.Info("multiplayer.code.network_misplaced"));
                 return true;
             default:
                 return false;

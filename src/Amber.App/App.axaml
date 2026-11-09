@@ -54,7 +54,7 @@
       <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
     <!-- 三段式选择器：一排等宽的单选段，选中的用强调色底（改版规格 3.5） -->
-    <Style Selector="UniformGrid.segmented > RadioButton">
+    <Style Selector="UniformGrid.segmented > RadioButton, StackPanel.segmented > RadioButton">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
       <Setter Property="MinWidth" Value="0" />
@@ -70,18 +70,18 @@
         </ControlTemplate>
       </Setter>
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:checked /template/ Border#SegmentBorder">
+    <Style Selector="UniformGrid.segmented > RadioButton:checked /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:checked /template/ Border#SegmentBorder">
       <Setter Property="Background" Value="{DynamicResource Accent}" />
       <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:checked TextBlock">
+    <Style Selector="UniformGrid.segmented > RadioButton:checked TextBlock, StackPanel.segmented > RadioButton:checked TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder">
+    <Style Selector="UniformGrid.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder">
       <Setter Property="Background" Value="{DynamicResource NavHover}" />
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder">
+    <Style Selector="UniformGrid.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder">
       <Setter Property="BorderBrush" Value="{DynamicResource AccentText}" />
       <Setter Property="BorderThickness" Value="2" />
     </Style>

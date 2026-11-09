@@ -17,6 +17,7 @@ public partial class MultiplayerPage : UserControl
     {
         InitializeComponent();
         ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "multiplayer");
+        SizeChanged += (_, e) => ApplyLobbyLayout(e.NewSize.Width);
         DataContextChanged += (_, _) =>
         {
             // 新消息来了滚到底。
@@ -41,6 +42,46 @@ public partial class MultiplayerPage : UserControl
                 };
             }
         };
+    }
+
+    /// <summary>Lobby cards at the page's width: side by side when there is room, else stacked (compact: join first).</summary>
+    internal LobbyArrangement LobbyLayout { get; private set; } = LobbyArrangement.SideBySide;
+
+    internal enum LobbyArrangement { SideBySide, Stacked, JoinFirst }
+
+    private void ApplyLobbyLayout(double width)
+    {
+        var layout = width >= 820 ? LobbyArrangement.SideBySide : width >= 560 ? LobbyArrangement.Stacked : LobbyArrangement.JoinFirst;
+        LobbyLayout = layout;
+        var grid = LobbyGrid;
+        if (layout == LobbyArrangement.SideBySide)
+        {
+            grid.ColumnDefinitions = new ColumnDefinitions("*,14,*");
+            Place(HostCard, 0, 0, 1);
+            Place(JoinCard, 0, 2, 1);
+        }
+        else
+        {
+            grid.ColumnDefinitions = new ColumnDefinitions("*");
+            var hostFirst = layout == LobbyArrangement.Stacked;
+            Place(HostCard, hostFirst ? 0 : 1, 0, 1);
+            Place(JoinCard, hostFirst ? 1 : 0, 0, 1);
+            HostCard.Margin = JoinCard.Margin = new Avalonia.Thickness(0);
+            (hostFirst ? JoinCard : HostCard).Margin = new Avalonia.Thickness(0, 14, 0, 0);
+        }
+        if (layout == LobbyArrangement.SideBySide) HostCard.Margin = JoinCard.Margin = new Avalonia.Thickness(0);
+        Grid.SetColumnSpan(LobbyFooter, layout == LobbyArrangement.SideBySide ? 3 : 1);
+        HostCard.MaxWidth = JoinCard.MaxWidth = layout == LobbyArrangement.Stacked ? 720 : double.PositiveInfinity;
+        HostCard.HorizontalAlignment = JoinCard.HorizontalAlignment = layout == LobbyArrangement.Stacked ? Avalonia.Layout.HorizontalAlignment.Center : Avalonia.Layout.HorizontalAlignment.Stretch;
+        if (layout == LobbyArrangement.Stacked) HostCard.Width = JoinCard.Width = Math.Min(720, width - 14);
+        else HostCard.Width = JoinCard.Width = double.NaN;
+    }
+
+    private static void Place(Control c, int row, int column, int span)
+    {
+        Grid.SetRow(c, row);
+        Grid.SetColumn(c, column);
+        Grid.SetColumnSpan(c, span);
     }
 
     private void ChatInput_KeyDown(object? sender, KeyEventArgs e)
