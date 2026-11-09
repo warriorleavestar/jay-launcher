@@ -85,7 +85,7 @@ public sealed class TrustedMembers(string path)
     {
         _members = list;
         var array = new JsonArray();
-        foreach (var m in list) array.Add(new JsonObject { ["pub"] = Convert.ToHexStringLower(m.PublicKey), ["name"] = m.Name });
+        foreach (var m in list) array.Add((JsonNode)new JsonObject { ["pub"] = Convert.ToHexStringLower(m.PublicKey), ["name"] = m.Name });
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         var temp = path + ".tmp";
         File.WriteAllText(temp, array.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
