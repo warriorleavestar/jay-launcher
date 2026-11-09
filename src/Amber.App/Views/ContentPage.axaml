@@ -6,7 +6,10 @@
              xmlns:c="using:Amber.App.Views.Controls"
              x:Class="Amber.App.Views.ContentPage"
              x:DataType="vm:ContentViewModel">
-  <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
+  <!-- Short windows scroll the whole page with a fixed-height result list (the bars stay reachable); otherwise the
+       list takes the room that is left. -->
+  <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled">
+  <Grid x:Name="RootGrid" RowDefinitions="Auto,Auto,*,Auto,Auto">
     <!-- Title, type chips (a drop-down when compact), source segment: official design §6.12. -->
     <Grid x:Name="HeaderGrid" svc:ThemeRegion.Name="content.header" ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,6">
       <TextBlock Classes="h1" Text="{l:T content.title}" Margin="0,0,16,0" VerticalAlignment="Center" />
@@ -205,4 +208,5 @@
       </Grid>
     </Border>
   </Grid>
+  </ScrollViewer>
 </UserControl>

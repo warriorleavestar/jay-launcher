@@ -58,6 +58,14 @@ internal sealed partial class SelfTest
             Check("待装条出现，写数量和名字", bar is not null && content.QueueText.Contains(first.Title), content.QueueText);
             Check("详情跟着打开（宽窗是右边一栏）", content.HasSelection && Dispatcher.UIThread.Invoke(() => Grid.GetColumn(page.DetailPane) == 1));
             await ShotAsync("discover-1440");
+            // The drawer covers the list on purpose at medium widths: check the list itself.
+            var keepDetail = content.Detail;
+            content.Detail = null;
+            await LayoutHereAsync("发现页");
+            content.Detail = keepDetail;
+            window.Width = 1440;
+            window.Height = 900;
+            await Task.Delay(400);
 
             // Space on the selected row takes it out again, and back in.
             Dispatcher.UIThread.Invoke(() => { page.ResultsList.SelectedItem = first; PressKey(page.ResultsList, Key.Space); });

@@ -9,7 +9,7 @@
              x:DataType="vm:FirstRunViewModel"
              IsVisible="{Binding IsOpen}">
   <!-- First-run wizard (official design §6.1): covers the shell so there is one way forward, two steps, install in place. -->
-  <Border svc:ThemeRegion.Name="firstrun" Background="{DynamicResource PageBg}">
+  <Border Background="{DynamicResource PageBg}">
     <Grid x:Name="WizardRoot" RowDefinitions="Auto,Auto,*,Auto">
       <!-- Brand, language (each written in itself) and [Skip, look around first]. -->
       <Grid ColumnDefinitions="*,Auto,Auto" Margin="20,14,20,6">

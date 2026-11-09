@@ -390,9 +390,13 @@ public sealed partial class SettingsViewModel : PageViewModel
     public string SettingsPath => AppSettings.FilePath;
     public string SettingsPathLabel => L.F("settings.file_path", SettingsPath);
 
+    /// <summary>Storage › Recently deleted (§6.20).</summary>
+    public RecycleViewModel Recycle { get; }
+
     public SettingsViewModel(LauncherService service)
     {
         _service = service;
+        Recycle = new RecycleViewModel(service);
         _loading = true;
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
@@ -470,6 +474,8 @@ public sealed partial class SettingsViewModel : PageViewModel
     }
 
     protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
+
+    protected override void OnBecameCurrent() => Recycle.Refresh();
 
     public Amber.App.Localization.OptionItem[] ThemeOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.theme.system", "settings.theme.light", "settings.theme.dark");
     private static readonly string[] ThemeKeys = ["system", "light", "dark"];

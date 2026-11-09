@@ -25,7 +25,12 @@ public partial class ContentPage : UserControl
         SizeChanged += (_, e) =>
         {
             var width = e.NewSize.Width;
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyWidth(width));
+            var height = e.NewSize.Height;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                ApplyWidth(width);
+                ApplyHeight(height);
+            });
         };
         // Space on a result row: queue it or take it out (§6.12 keyboard).
         ResultsList.AddHandler(KeyDownEvent, (_, e) =>
@@ -68,6 +73,16 @@ public partial class ContentPage : UserControl
         DetailPane.Width = tier switch { "wide" => 400, "medium" => Math.Min(380, width - 40), _ => double.NaN };
         DetailPane.Margin = overlay ? new Thickness(0) : new Thickness(14, 0, 0, 0);
         if (tier == "compact") DetailPane.HorizontalAlignment = HorizontalAlignment.Stretch;
+    }
+
+    /// <summary>Below this page height the whole page scrolls and the result list keeps a fixed height.</summary>
+    internal const double ShortBelow = 520;
+
+    private void ApplyHeight(double height)
+    {
+        var tall = height >= ShortBelow;
+        PageScroll.VerticalScrollBarVisibility = tall ? Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled : Avalonia.Controls.Primitives.ScrollBarVisibility.Auto;
+        BodyGrid.Height = tall ? double.NaN : 320;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

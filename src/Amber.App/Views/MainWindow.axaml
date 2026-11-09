@@ -10,6 +10,7 @@
         Icon="/Assets/jay.ico"
         MinWidth="600" MinHeight="420"
         WindowStartupLocation="CenterScreen"
+        xmlns:svc="using:Amber.App.Services"
         xmlns:safety="using:Amber.App.Controls.Safety">
 
   <Window.DataTemplates>
@@ -206,6 +207,44 @@
                 <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding UpdateFeed, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" PlaceholderText="{l:T settings.update.feed_hint}" />
                 <TextBlock Grid.Row="3" Grid.Column="1" Classes="hint" FontSize="12" Margin="0,6,0,0" Text="{l:T settings.accounts.client_id_hint}" />
               </Grid>
+            </Border>
+            <!-- Storage › Recently deleted (§6.20): [Restore] on every row; [Delete forever] and [Empty] use the locked confirm. -->
+            <Border x:Name="RecycleCard" Classes="card">
+              <StackPanel Spacing="8">
+                <DockPanel>
+                  <c:ConfirmButton x:Name="EmptyRecycleButton" DockPanel.Dock="Right" Content="{l:T recycle.empty_all}" ConfirmText="{l:T recycle.empty_all.confirm}"
+                                   ObjectName="{l:T recycle.title}" Command="{Binding Recycle.EmptyAllCommand}" IsVisible="{Binding Recycle.HasRows}" VerticalAlignment="Center" />
+                  <StackPanel Spacing="2">
+                    <TextBlock Classes="h2" Text="{l:T recycle.title}" Margin="0" />
+                    <TextBlock Classes="hint" Text="{Binding Recycle.Summary}" IsVisible="{Binding Recycle.HasRows}" />
+                  </StackPanel>
+                </DockPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="{l:T recycle.keep.label}" VerticalAlignment="Center" />
+                  <ComboBox x:Name="RecycleKeepBox" ItemsSource="{Binding Recycle.KeepOptions}" SelectedIndex="{Binding Recycle.KeepIndex}" MinWidth="110"
+                            AutomationProperties.Name="{l:T recycle.keep.label}" />
+                </StackPanel>
+                <TextBlock x:Name="RecycleEmptyText" Classes="hint" Text="{Binding Recycle.EmptyText}" IsVisible="{Binding Recycle.IsEmpty}" TextWrapping="Wrap" />
+                <ItemsControl x:Name="RecycleList" ItemsSource="{Binding Recycle.Rows}" IsVisible="{Binding Recycle.HasRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:RecycledRow">
+                      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,4">
+                        <StackPanel Spacing="1" VerticalAlignment="Center">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Item.Entry.OriginalPath}" />
+                          <TextBlock Classes="hint" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Classes="hint" Text="{Binding When}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="secondary" Content="{l:T recycle.restore}" VerticalAlignment="Center"
+                                Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).Recycle.RestoreCommand}" CommandParameter="{Binding}" />
+                        <c:ConfirmButton Grid.Column="2" Content="{l:T recycle.delete_forever}" ConfirmText="{l:T recycle.delete_forever}" ObjectName="{Binding Name}"
+                                         VerticalAlignment="Center"
+                                         Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).Recycle.DeleteForeverCommand}" CommandParameter="{Binding}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <c:StatusBar Message="{Binding Recycle.Message}" />
+              </StackPanel>
             </Border>
             <Border Classes="card">
               <StackPanel Spacing="6">
