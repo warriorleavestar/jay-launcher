@@ -1,0 +1,79 @@
+name: networks
+
+# 公共网络注册表：networks/*.json 的 PR 只做格式检查（拿不到签名钥匙）；
+# 合并到 main 以后（= 审核通过）才用注册表钥匙签名，连接串发到 “networks” 这个 Release 里。
+on:
+  pull_request:
+    paths: ['networks/**']
+  push:
+    branches: [main]
+    paths: ['networks/**']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check network files
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(networks/*.json)
+          if [ ${#files[@]} -eq 0 ]; then echo "networks/ 里还没有网络"; exit 0; fi
+          dotnet run --project src/Amber.Server -c Release -- network check "${files[@]}"
+
+  sign:
+    if: github.event_name == 'push'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 签名钥匙放在这个 environment 的 secret 里（JAY_NETWORK_KEY），可以在仓库设置里要求人工批准才运行。
+    environment: network-registry
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Sign networks
+        shell: bash
+        env:
+          JAY_NETWORK_KEY: ${{ secrets.JAY_NETWORK_KEY }}
+        run: |
+          shopt -s nullglob
+          if [ -z "$JAY_NETWORK_KEY" ]; then echo "::notice::还没配置 JAY_NETWORK_KEY，跳过签名"; exit 0; fi
+          mkdir -p signed
+          dotnet build src/Amber.Server -c Release -o server
+          for f in networks/*.json; do
+            id=$(basename "$f" .json)
+            ./server/jay-server network sign "$f" > "signed/$id.jaynet"
+          done
+          ls signed
+
+      - name: Publish to the networks release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(signed/*.jaynet)
+          if [ ${#files[@]} -eq 0 ]; then exit 0; fi
+          gh release view networks -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create networks -R "$GITHUB_REPOSITORY" --title "公共网络注册表" --notes "审核通过的公共网络连接串（CI 自动签名）。" --prerelease
+          gh release upload networks "${files[@]}" -R "$GITHUB_REPOSITORY" --clobber

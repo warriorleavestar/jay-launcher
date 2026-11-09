@@ -107,6 +107,7 @@ public sealed partial class MultiplayerViewModel
     {
         SelectedVisibility = VisibilityChoices[0];
         PublicNodesText = string.Join("\n", _service.Settings.PublicNetworkNodes ?? []);
+        LoadNetworks();
     }
 
     [RelayCommand]
@@ -121,6 +122,7 @@ public sealed partial class MultiplayerViewModel
         }
         _service.Settings.PublicNetworkNodes = nodes.Distinct().ToList();
         _service.Settings.Save();
+        LoadNetworks();
         OnPropertyChanged(nameof(HasPublicNodes));
         OnPropertyChanged(nameof(PublicStateText));
         SetStatus(StatusMessage.Success("multiplayer.public.nodes_saved"));

@@ -138,6 +138,38 @@
                 </StackPanel>
               </StackPanel>
             </Expander>
+            <!-- 换公共网络：粘贴别人给的连接串 -->
+            <Expander Header="{l:T multiplayer.network.title}" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.network.hint}" />
+                <ComboBox ItemsSource="{Binding NetworkChoices}" SelectedItem="{Binding SelectedNetworkChoice}" HorizontalAlignment="Stretch">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate DataType="vm:NetworkChoice">
+                      <StackPanel Spacing="1">
+                        <TextBlock Text="{Binding Label}" />
+                        <TextBlock Classes="hint" FontSize="12" Text="{Binding Detail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding CanRemoveNetwork}">
+                  <Button Content="{l:T multiplayer.network.copy}" Command="{Binding CopyNetworkCommand}" />
+                  <Button Content="{l:T multiplayer.network.remove}" Command="{Binding RemoveNetworkCommand}" />
+                </WrapPanel>
+                <TextBox Text="{Binding NetworkInput}" FontFamily="Consolas,monospace" TextWrapping="Wrap" MaxLength="8192"
+                         PlaceholderText="{l:T multiplayer.network.input_placeholder}" />
+                <Button Content="{l:T multiplayer.network.add}" Command="{Binding AddNetworkCommand}" HorizontalAlignment="Left" />
+                <Border Classes="card" Margin="0" IsVisible="{Binding NetworkConfirmOpen}">
+                  <StackPanel Spacing="6">
+                    <TextBlock TextWrapping="Wrap" Text="{Binding NetworkConfirmText}" />
+                    <WrapPanel ItemSpacing="6" LineSpacing="6">
+                      <Button Classes="primary" Content="{l:T multiplayer.network.confirm_add}" Command="{Binding ConfirmAddNetworkCommand}" />
+                      <Button Content="{l:T common.cancel}" Command="{Binding CancelAddNetworkCommand}" />
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Expander>
             <!-- 公共节点（种子）：没有内置节点时要填 -->
             <Expander Header="{l:T multiplayer.public.nodes_title}" IsExpanded="{Binding !HasPublicNodes, Mode=OneTime}" HorizontalAlignment="Stretch">
               <StackPanel Spacing="6">
