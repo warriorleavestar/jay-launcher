@@ -9,6 +9,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
+using Avalonia.VisualTree;
 
 namespace Amber.App.Views;
 
@@ -59,12 +60,23 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             // 2. 改强调色、圆角、字号，导入后立即生效（不用重启）。
             var custom = Path.Combine(reportDir, "selftest.jaytheme");
             WritePack(custom, """{ "id": "selftest-blue", "name": "自检蓝" }""",
-                """{ "seed": { "accent": "#2F80ED" }, "radius": { "RadiusMd": 0 }, "sizes": { "FontBody": 16 } }""");
+                """{ "seed": { "accent": "#2F80ED" }, "radius": { "RadiusMd": 0 }, "sizes": { "FontBody": 16 } }""",
+                ("styles.json", """{ "card": { "radius": 0, "borderWidth": 3 }, "sidebar": { "background": "#123456" } }"""));
             settings.ImportThemePack(custom);
             await Task.Delay(400);
             Check("导入后设置里选中了新主题", settings.SelectedThemePack?.Id == "selftest-blue", settings.SelectedThemePack?.Id ?? "(空)");
             Check("导入后强调色立即换成主题的颜色", Brush("Accent", ThemeVariant.Dark) == 0xFF2F80ED && Brush("Accent", ThemeVariant.Light) == 0xFF2F80ED);
             Check("导入后圆角和字号生效", Resource("RadiusMd") is CornerRadius { TopLeft: 0 } && Resource("FontBody") is 16.0);
+            var card = window.GetVisualDescendants().OfType<Border>().First(b => b.Classes.Contains("card") && b.IsEffectivelyVisible);
+            var sidebar = window.GetVisualDescendants().OfType<Border>().First(b => b.Classes.Contains("sidebar"));
+            Check("组件样式生效：卡片方角粗边、侧栏换色", card.CornerRadius.TopLeft == 0 && card.BorderThickness.Left == 3
+                && sidebar.Background is ISolidColorBrush { Color: var sc } && sc.ToUInt32() == 0xFF123456,
+                $"卡片圆角 {card.CornerRadius.TopLeft} 边 {card.BorderThickness.Left}");
+            // 安全窗口锁定：同一时刻，锁定的窗口里查到的还是 Jay 默认的强调色。
+            var locked = new Window { Content = new Border { Classes = { "card" } } };
+            ThemeService.LockToDefault(locked);
+            Check("安全窗口不受主题影响（强调色仍是默认）",
+                locked.TryFindResource("Accent", ThemeVariant.Dark, out var lockedAccent) && lockedAccent is ISolidColorBrush lb && lb.Color.ToUInt32() == defaultAccent);
             Check("设置文件记下了主题包", File.ReadAllText(AppSettings.FilePath).Contains("\"ThemePack\": \"selftest-blue\"", StringComparison.Ordinal));
             foreach (var lang in new[] { "zh-Hans", "zh-Hant", "en", "ja" })
                 foreach (var (w, h) in new[] { (760, 440), (1024, 640), (1600, 900) })

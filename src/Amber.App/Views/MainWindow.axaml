@@ -9,8 +9,7 @@
         Title="{l:T main.title}"
         Icon="/Assets/jay.ico"
         MinWidth="760" MinHeight="440"
-        WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource PageBg}">
+        WindowStartupLocation="CenterScreen">
 
   <Window.DataTemplates>
     <DataTemplate DataType="vm:HomeViewModel"><views:HomePage /></DataTemplate>
@@ -191,7 +190,7 @@
            Stretch="UniformToFill" IsHitTestVisible="False" />
     <!-- 侧边栏 -->
     <!-- 窗口矮时导航项收紧，八项尽量不用滚动就放得下 -->
-    <Border Background="{DynamicResource SidebarBg}" Container.Name="Sidebar" Container.Sizing="Height">
+    <Border Classes="sidebar" Container.Name="Sidebar" Container.Sizing="Height">
       <Border.Styles>
         <Style Selector="StackPanel#SidebarHeader">
           <Setter Property="Margin" Value="20,18,20,12" />

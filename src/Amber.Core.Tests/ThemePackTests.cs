@@ -142,7 +142,7 @@ public class ThemePackTests : IDisposable
             }
             """),
             ("fonts/fake.ttf", Encoding.UTF8.GetBytes("MZ this is not a font")),
-            Text("styles.json", "{}"));
+            Text("layout/shell.json", "{}"));
         Assert.Equal(0xFF202020u, pack.DarkColors["Surface"]);
         Assert.False(pack.DarkColors.ContainsKey("Accent"));
         Assert.Empty(pack.UiFonts);
@@ -300,6 +300,76 @@ public class ThemePackTests : IDisposable
         Assert.Equal(14, pack.Numbers["FontBody"]);
         Assert.Empty(pack.Problems);
     }
+
+    [Fact]
+    public void ReadsComponentStyles()
+    {
+        var pack = Read(Text("theme.json", Manifest), Text("styles.json", """
+            {
+              "button.primary": { "background": "linear(90, #102030, #203040)", "foreground": "#FFFFFF", "radius": 0, "padding": [18, 6],
+                                  "shadow": "3 3 0 0 #000000", ":hover": { "background": "token:SidebarBg" } },
+              "card": { "background": "image:assets/paper.png", "borderWidth": 2, "shadow": "0 4 12 0 #33000000, inset 0 1 0 0 #22FFFFFF" },
+              "nav.item": { ":selected": { "background": "#334455", "foreground": "#FFFFFF" } }
+            }
+            """), ("assets/paper.png", Png(64, 64)));
+        var primary = pack.Styles["button.primary"];
+        Assert.Equal(PaintKind.Linear, primary[""].Background!.Kind);
+        Assert.Equal(90, primary[""].Background!.Angle);
+        Assert.Equal((18.0, 6.0), primary[""].Padding);
+        Assert.Equal("3 3 0 0 #000000", primary[""].Shadow);
+        Assert.Equal("SidebarBg", primary[":hover"].Background!.Token);
+        Assert.Equal("assets/paper.png", pack.Styles["card"][""].Background!.ImagePath);
+        Assert.Equal(PaintKind.Color, pack.Styles["nav.item"][":selected"].Background!.Kind);
+        Assert.True(pack.Problems.Count == 0, string.Join("; ", pack.Problems));
+    }
+
+    [Fact]
+    public void ComponentStyleRulesAreWhitelisted()
+    {
+        var pack = Read(Text("theme.json", Manifest), Text("styles.json", """
+            {
+              "remote.consent": { "background": "#00FF00" },
+              "confirm.dialog": { "background": "#00FF00" },
+              "card": { "foreground": "#FFFFFF", ":hover": { "background": "#000000" }, "background": "image:../../etc/x.png", "radius": 999 },
+              "button": { "background": "url(https://evil.example/x.png)", "shadow": "0 0 500 400 #FF000000", "fontWeight": "900" },
+              "heading": { "foreground": "token:NotAToken" },
+              "pill": { "background": "image:assets/x.png" }
+            }
+            """));
+        var codes = pack.Problems.Select(p => p.Code).ToList();
+        Assert.Equal(2, codes.Count(c => c == "unknown_component")); // 安全界面不是组件，改不了
+        Assert.Contains("unknown_key", codes);   // card 没有 foreground
+        Assert.Contains("unknown_state", codes); // card 没有 :hover
+        Assert.Contains("bad_shadow", codes);
+        Assert.Contains("value_clamped", codes);
+        Assert.Equal(4, codes.Count(c => c == "bad_paint")); // ../ 路径、网址、不存在的 token、只有背景能用图片但文件不在
+        Assert.False(pack.Styles.ContainsKey("button") && pack.Styles["button"][""].Background is not null);
+        Assert.Equal(64, pack.Styles["card"][""].Radius);
+    }
+
+    [Fact]
+    public void ComponentTextIsFixedToMeetContrast()
+    {
+        var pack = Read(Text("theme.json", Manifest), Text("styles.json", """
+            { "button.primary": { "background": "linear(0, #E0538A, #F08AB0)", "foreground": "#FFFFFF" },
+              "nav.item": { ":selected": { "background": "token:Accent", "foreground": "token:Accent" } } }
+            """));
+        var fg = pack.Styles["button.primary"][""].Foreground!;
+        Assert.True(ThemeColor.Contrast(fg.Colors[0], 0xFFE0538A) >= 4.5 && ThemeColor.Contrast(fg.Colors[0], 0xFFF08AB0) >= 4.5);
+        var nav = pack.Styles["nav.item"][":selected"].Foreground!;
+        Assert.Equal(PaintKind.Color, nav.Kind);
+        Assert.True(ThemeColor.Contrast(nav.Colors[0], ThemeDefaults.Dark["Accent"]) >= 4.5);
+        Assert.True(ThemeColor.Contrast(nav.Colors[0], ThemeDefaults.Light["Accent"]) >= 4.5);
+    }
+
+    [Theory]
+    [InlineData("none", "none")]
+    [InlineData("0 2 6 0 #66000000", "0 2 6 0 #66000000")]
+    [InlineData("inset 1 1 0 0 #FFFFFF", "inset 1 1 0 0 #FFFFFF")]
+    [InlineData("0 2 6 #66000000", null)]
+    [InlineData("0 2 -6 0 #000000", null)]
+    [InlineData("1 1 1 1 #000000, 2 2 2 2 #000000, 3 3 3 3 #000000", null)]
+    public void ParsesShadows(string text, string? expected) => Assert.Equal(expected, ThemeStyles.ParseShadow(text));
 
     [Fact]
     public void ReadsJpegSize()

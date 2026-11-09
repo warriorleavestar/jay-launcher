@@ -32,6 +32,33 @@ public static class ThemeService
     private static string _variantSetting = "system";
     private static Uri? _fontCollectionKey;
     private static Dictionary<string, string> _fontFamilies = [];
+    private static Window? _mainWindow;
+    private static Styles? _componentStyles;
+
+    /// <summary>组件样式（styles.json）只套在主窗口上。主窗口创建时登记一次。</summary>
+    public static void AttachMainWindow(Window window)
+    {
+        _mainWindow = window;
+        ApplyComponentStyles();
+    }
+
+    private static void ApplyComponentStyles()
+    {
+        if (_mainWindow is null) return;
+        if (_componentStyles is not null) _mainWindow.Styles.Remove(_componentStyles);
+        _componentStyles = Current is { Styles.Count: > 0 } pack ? ThemeStyleBuilder.Build(pack) : null;
+        if (_componentStyles is not null) _mainWindow.Styles.Add(_componentStyles);
+    }
+
+    /// <summary>
+    /// 安全窗口（确认框、远程控制同意框和共享提示条）用 Jay 自带的配色、字号和字体：
+    /// 窗口自己带一份默认 token，查资源时先找到它，主题包的值盖不到这里；组件样式本来就只加在主窗口上。
+    /// </summary>
+    public static void LockToDefault(Window window) =>
+        window.Resources.MergedDictionaries.Add(new Avalonia.Markup.Xaml.Styling.ResourceInclude(new Uri("avares://Jay/"))
+        {
+            Source = new Uri("avares://Jay/Themes/Tokens.axaml"),
+        });
 
     /// <summary>启动时调用（主窗口创建之前）。</summary>
     public static void ApplyAtStartup(AppSettings settings, string[] args)
@@ -105,6 +132,7 @@ public static class ThemeService
             }
         }
         else UnloadFonts();
+        ApplyComponentStyles();
         ApplyVariant();
         Changed?.Invoke();
     }

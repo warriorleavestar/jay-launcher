@@ -106,6 +106,10 @@
     <Style Selector="Border.pill.accent > TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
     </Style>
+    <!-- 侧边栏底色写成样式（不写在元素上），主题包的组件样式才盖得住。窗口底色同理，在上面的 :is(Window) 里。 -->
+    <Style Selector="Border.sidebar">
+      <Setter Property="Background" Value="{DynamicResource SidebarBg}" />
+    </Style>
     <Style Selector="Border.card">
       <Setter Property="Background" Value="{DynamicResource Surface}" />
       <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
