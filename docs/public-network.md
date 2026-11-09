@@ -77,7 +77,7 @@
 审核流程见 [networks/README.md](../networks/README.md)：在 `networks/` 提交 JSON → PR 检查格式 → 维护者审核合并 → CI 用注册表钥匙签名，发到 `networks` Release。
 注册表钥匙还没生成：生成后私钥放进 `network-registry` environment 的 secret `JAY_NETWORK_KEY`，公钥写进 `NetworkString.RegistryKeys`。
 
-自己搭网络：`jay-server network keygen` → `network sign` → `jay-server directory --network <连接串>`。
+自己搭网络：`jay-server network init` → `network config-hash` → `network sign` → `jay-server directory --network <连接串>`，完整步骤、管理和部署见 [network-server.md](network-server.md)。想接自己的账号库、审核规则、验证方式，用 [网络服务端框架](network-server-framework.md)。
 
 ## 网络配置文件
 
@@ -93,7 +93,7 @@
 ```
 
 - `notice` 和 `links` 显示在公共网络卡片上，链接只认 https，用系统浏览器打开。
-- `policy` 只能比默认更严：`modes` 是这个网络上允许公开的房间方式（隐藏房间总是可以），`requireDevice` 让这个网络上开的房间都要求设备指纹，`files` / `maxFileMB` 关掉或限制成员之间传文件（收发两头都查），`minVersion` 是最低 Jay 版本，`security` 是最低安全要求（设备验证 off/on/required、冒充熔断 off/on、熔断后重启前至少等几秒），和本机设置合并时只取更严的，写错整份配置都不用。
+- `policy` 只能比默认更严：`modes` 是这个网络上允许公开的房间方式（隐藏房间总是可以），`requireDevice` 让这个网络上开的房间都要求设备指纹，`files` / `maxFileMB` 关掉或限制成员之间传文件（收发两头都查），`minVersion` 是最低 Jay 版本（节点用 `--config` 加载配置时也按它挡旧版 Jay，见 [network-server.md](network-server.md#要求的-jay-版本)），`security` 是最低安全要求（设备验证 off/on/required、冒充熔断 off/on、熔断后重启前至少等几秒），和本机设置合并时只取更严的，写错整份配置都不用。
 - `ui` 是这个网络的界面主题，格式见 docs/themes.md（网址 + sha256 + 大小，或内联配色）。连上后只在联机页用；`scope: "global"` 时 Jay 先问用户要不要整个换掉。断开就换回自己的主题；取不到或格式不对不影响联机。设置里关掉“网络主题”就都不用。
 - `login` 见下一节。
 
@@ -126,7 +126,7 @@ jay-server directory --listen 11010
 
 然后在每个人的 Jay 里：联机 → Jay 公共网络 → 公共节点，填 `tcp://<这台机器的公网地址>:11010`，保存。
 
-Linux 上长期运行可以用 `server/jay-public-node.service`（systemd）。
+Linux 上长期运行可以用 `server/install-network-node.sh`（一键装成 systemd 服务）或 `server/docker/`，见 [network-server.md](network-server.md#六长期运行)。
 
 这台节点同时也会被加进房间用的中继节点，所以经公共网络找到的房主和加入方在它上面一定碰得上面。
 

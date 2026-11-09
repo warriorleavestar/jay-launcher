@@ -1,0 +1,20 @@
+# Jay 网络服务端（公共网络节点）。在仓库根目录：
+#   docker compose -f server/docker/docker-compose.yml up -d --build
+# 自己的公共网络：把连接串和配置文件放进 ./jay-network-data，改下面的 command。
+# 管理：docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-server/jay-server node status
+services:
+  jay-network:
+    build:
+      context: ../..
+      dockerfile: server/docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "11010:11010/tcp"
+      - "11010:11010/udp"
+    volumes:
+      - ./jay-network-data:/data
+    command: ["directory", "--listen", "11010"]
+    # 自己的网络 + 配置 + 账号登录：
+    # command: ["directory", "--listen", "11010", "--network", "/data/network.jaynet", "--config", "/data/config.json", "--accounts"]
+    # 只当地区种子节点（连到目录节点）：
+    # command: ["directory", "--listen", "11010", "--seed-only", "--seeds", "tcp://主节点:11010"]

@@ -237,10 +237,12 @@ public static class DirectGatherer
     public static async Task<Gathered> GatherAsync(Socket socket, IReadOnlyList<string> stunServers, bool tryPortMapping, Action<string> log, CancellationToken ct = default)
     {
         var port = ((IPEndPoint)socket.LocalEndPoint!).Port;
+        // An IPv4-only socket (no IPv6 on this OS) can't receive on IPv6 addresses, so don't hand them out.
+        var ipv6 = socket.AddressFamily == AddressFamily.InterNetworkV6;
         var list = new List<Candidate>();
         foreach (var address in Stun.LocalAddresses())
         {
-            if (address.AddressFamily == AddressFamily.InterNetworkV6 && PortMapping.IsPublic(address) && !address.IsIPv6Teredo && !address.IsIPv4MappedToIPv6)
+            if (ipv6 && address.AddressFamily == AddressFamily.InterNetworkV6 && PortMapping.IsPublic(address) && !address.IsIPv6Teredo && !address.IsIPv4MappedToIPv6)
                 list.Add(new Candidate(PathKind.IPv6, new IPEndPoint(address, port)));
             else if (address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address) && !address.ToString().StartsWith("169.254.", StringComparison.Ordinal))
                 list.Add(new Candidate(PathKind.Lan, new IPEndPoint(address, port)));
@@ -284,6 +286,8 @@ public sealed class DirectPeer
     internal readonly ConcurrentDictionary<uint, long> PendingPings = new();
     /// <summary>房主：这条桥的数据转发到本机哪个 EasyTier（批准前是大厅，批准后是房间）。</summary>
     internal int TargetPort;
+    /// <summary>Host: cached loopback endpoint for <see cref="TargetPort"/>, so forwarding doesn't allocate one per packet.</summary>
+    internal IPEndPoint? LocalTarget;
     /// <summary>房主：已经证明了自己是批准过的成员，数据转发到房间的 EasyTier。</summary>
     public bool Admitted { get; internal set; }
     /// <summary>房主：这条桥上是哪个成员（批准后才有）。踢出时断开这条桥。</summary>
@@ -329,6 +333,9 @@ public sealed class DirectBridge : IAsyncDisposable
     private readonly ConcurrentDictionary<IPEndPoint, MemberEntry> _admittedRemotes = new();
     private Socket? _guestLocal;
     private int _probeRound;
+    /// <summary>Placeholder remote endpoint for ReceiveFromAsync on the shared socket (matches its address family).</summary>
+    private readonly IPEndPoint _anyRemote;
+    private static readonly IPEndPoint AnyLoopbackRemote = new(IPAddress.Any, 0);
 
     /// <summary>房主：本机房间 EasyTier 的 UDP 监听端口；加入方：给本机 EasyTier 连的端口。</summary>
     public int LocalPort { get; private set; }
@@ -351,14 +358,42 @@ public sealed class DirectBridge : IAsyncDisposable
     public event Action<DirectPeer>? Connected;
     public event Action<DirectPeer, JsonObject>? ControlReceived;
 
-    public static Socket CreateSocket(int port = 0)
+    /// <summary>
+    /// One UDP socket for every path: dual-stack IPv6 when the OS has IPv6, otherwise plain IPv4
+    /// (some Linux systems boot with IPv6 disabled, where an IPv6 socket cannot even be created).
+    /// </summary>
+    public static Socket CreateSocket(int port = 0) => CreateSocket(port, preferIPv6: true);
+
+    /// <param name="preferIPv6">False forces the IPv4-only fallback (tests use it to cover systems without IPv6).</param>
+    internal static Socket CreateSocket(int port, bool preferIPv6)
     {
-        var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp) { DualMode = true };
-        // Windows 上对方端口不可达时 UDP 会报 10054，关掉这个行为，免得打洞时接收循环被打断。
-        if (OperatingSystem.IsWindows()) socket.IOControl(unchecked((int)0x9800000C), [0, 0, 0, 0], null);
-        socket.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
-        return socket;
+        Socket? socket = null;
+        if (preferIPv6)
+        {
+            try
+            {
+                socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp) { DualMode = true };
+            }
+            catch (SocketException e) when (e.SocketErrorCode is SocketError.AddressFamilyNotSupported or SocketError.ProtocolNotSupported)
+            {
+            }
+        }
+        socket ??= new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        try
+        {
+            // Windows 上对方端口不可达时 UDP 会报 10054，关掉这个行为，免得打洞时接收循环被打断。
+            if (OperatingSystem.IsWindows()) socket.IOControl(unchecked((int)0x9800000C), [0, 0, 0, 0], null);
+            socket.Bind(new IPEndPoint(AnyAddress(socket), port));
+            return socket;
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
+
+    private static IPAddress AnyAddress(Socket socket) => socket.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any;
 
     /// <param name="key">探测和控制包的 HMAC 钥匙（<see cref="DirectKeys.Bridge"/>）。</param>
     /// <param name="easyTierPort">房主：本机房间 EasyTier 监听的 UDP 端口。加入方传 null，桥会开一个本机端口给 EasyTier 连。</param>
@@ -367,6 +402,7 @@ public sealed class DirectBridge : IAsyncDisposable
     {
         if (key.Length != 32) throw new ArgumentException(null, nameof(key));
         _socket = socket;
+        _anyRemote = new IPEndPoint(AnyAddress(socket), 0);
         _isHost = isHost;
         _log = log;
         _key = (byte[])key.Clone();
@@ -414,12 +450,13 @@ public sealed class DirectBridge : IAsyncDisposable
         _log(spray is null ? startMessage : L.F("core.mp.punch.start_spray", startMessage,
             L.P("core.mp.punch.spray", SprayPorts, spray.Address, SprayPorts)));
         foreach (var t in targets) _log(L.T("core.mp.punch.try") + t);
-        var known = _peers.Count;
         var start = _clock.ElapsedMilliseconds;
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct, _cts.Token);
         limit.CancelAfter(timeout);
         var sent = 0;
         var random = new Random();
+        var targetAddresses = targets.Select(t => Stun.Normalize(t.EndPoint).Address)
+            .Concat(spray is null ? [] : [Stun.Normalize(spray).Address]).ToHashSet();
         _punches[round] = acknowledged;
         try
         {
@@ -445,8 +482,12 @@ public sealed class DirectBridge : IAsyncDisposable
                 var confirmed = acknowledged.Task.IsCompletedSuccessfully ? acknowledged.Task.Result : null;
                 if (confirmed is not null && (!_peers.TryGetValue(confirmed.Remote, out var active) || !ReferenceEquals(active, confirmed)))
                     confirmed = null;
-                var newest = confirmed ?? _peers.Values.Where(p => p.ConnectedMs >= start).OrderBy(p => p.ConnectedMs).FirstOrDefault();
-                if (newest is not null && (confirmed is not null || !_isHost || _peers.Count > known))
+                // A peer that (re)connected since this punch started counts. Comparing peer counts instead would miss a newcomer
+                // whenever a stale peer was evicted at the same time. When two guests punch at once, prefer the one whose address
+                // is among this punch's targets so each punch reports its own guest; a NAT may still rewrite the address, so any
+                // newcomer is the fallback.
+                var newest = confirmed ?? NewestSince(_peers.Values, start, targetAddresses);
+                if (newest is not null)
                 {
                     _log(L.P("core.mp.punch.success", sent, DirectText.Path(newest.Path), newest.Remote, _clock.ElapsedMilliseconds - start, sent));
                     return newest;
@@ -464,6 +505,20 @@ public sealed class DirectBridge : IAsyncDisposable
         }
         _log(L.P("core.mp.punch.timeout", (long)Math.Round(timeout.TotalSeconds), timeout.TotalSeconds, sent));
         return null;
+    }
+
+    /// <summary>The earliest peer connected at or after <paramref name="start"/>, preferring one whose address is a punch target.</summary>
+    internal static DirectPeer? NewestSince(IEnumerable<DirectPeer> peers, long start, IReadOnlySet<IPAddress> targetAddresses)
+    {
+        DirectPeer? any = null, targeted = null;
+        foreach (var p in peers)
+        {
+            if (p.ConnectedMs < start) continue;
+            if (any is null || p.ConnectedMs < any.ConnectedMs) any = p;
+            if (targetAddresses.Contains(Stun.Normalize(p.Remote).Address) && (targeted is null || p.ConnectedMs < targeted.ConnectedMs))
+                targeted = p;
+        }
+        return targeted ?? any;
     }
 
     /// <summary>NAT 保活的间隔。很多运营商（尤其是国内的 CGNAT）几十秒没有包就回收 UDP 映射。</summary>
@@ -530,8 +585,10 @@ public sealed class DirectBridge : IAsyncDisposable
         return payload;
     }
 
-    private async Task SendRawAsync(byte[] packet, IPEndPoint target, CancellationToken ct)
+    private async Task SendRawAsync(ReadOnlyMemory<byte> packet, IPEndPoint target, CancellationToken ct)
     {
+        // IPv4-only socket: an IPv6 candidate is unreachable from here (and SendTo would throw), skip it.
+        if (_socket.AddressFamily == AddressFamily.InterNetwork && target.AddressFamily == AddressFamily.InterNetworkV6 && !target.Address.IsIPv4MappedToIPv6) return;
         try
         {
             await _socket.SendToAsync(packet, SocketFlags.None, Stun.MapTo(_socket, target), ct);
@@ -562,7 +619,7 @@ public sealed class DirectBridge : IAsyncDisposable
             SocketReceiveFromResult r;
             try
             {
-                r = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.IPv6Any, 0), _cts.Token);
+                r = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, _anyRemote, _cts.Token);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
             {
@@ -584,7 +641,8 @@ public sealed class DirectBridge : IAsyncDisposable
             {
                 if (type == Data)
                 {
-                    if (_peers.TryGetValue(from, out var peer)) await ForwardToLocalAsync(peer, packet[1..].ToArray());
+                    // Forward straight from the receive buffer: it is only reused after this await completes.
+                    if (_peers.TryGetValue(from, out var peer)) await ForwardToLocalAsync(peer, buffer.AsMemory(1, r.ReceivedBytes - 1));
                     continue;
                 }
                 if (!Verify(packet)) continue;
@@ -754,39 +812,47 @@ public sealed class DirectBridge : IAsyncDisposable
         }
     }
 
-    private async Task ForwardToLocalAsync(DirectPeer peer, byte[] data)
+    private async Task ForwardToLocalAsync(DirectPeer peer, ReadOnlyMemory<byte> data)
     {
         peer.LastSeen = DateTime.UtcNow;
         Interlocked.Add(ref peer.BytesIn, data.Length);
         try
         {
-            if (_isHost) { if (peer.Local is { } local) await local.SendToAsync(data, SocketFlags.None, new IPEndPoint(IPAddress.Loopback, peer.TargetPort)); }
+            if (_isHost)
+            {
+                if (peer.Local is not { } local) return;
+                var target = peer.LocalTarget;
+                if (target is null || target.Port != peer.TargetPort) peer.LocalTarget = target = new IPEndPoint(IPAddress.Loopback, peer.TargetPort);
+                await local.SendToAsync(data, SocketFlags.None, target);
+            }
             else if (peer.LocalClient is { } client) await _guestLocal!.SendToAsync(data, SocketFlags.None, client);
         }
         catch (Exception e) when (e is SocketException or ObjectDisposedException) { }
     }
 
-    private async Task SendDataAsync(DirectPeer peer, ReadOnlyMemory<byte> data)
+    /// <summary>
+    /// Sends one data packet. <paramref name="buffer"/> holds the payload from index 1 on; index 0 is overwritten with the
+    /// packet type, so the local loops receive at offset 1 and send without copying.
+    /// </summary>
+    private async Task SendDataAsync(DirectPeer peer, byte[] buffer, int dataLength)
     {
-        var packet = new byte[data.Length + 1];
-        packet[0] = Data;
-        data.Span.CopyTo(packet.AsSpan(1));
-        Interlocked.Add(ref peer.BytesOut, data.Length);
-        await SendRawAsync(packet, peer.Remote, _cts.Token);
+        buffer[0] = Data;
+        Interlocked.Add(ref peer.BytesOut, dataLength);
+        await SendRawAsync(buffer.AsMemory(0, dataLength + 1), peer.Remote, _cts.Token);
     }
 
     private async Task HostLocalLoopAsync(DirectPeer peer, Socket local)
     {
-        var buffer = new byte[65536];
+        var buffer = new byte[65536 + 1];
         while (!_cts.IsCancellationRequested)
         {
             try
             {
-                var r = await local.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), _cts.Token);
+                var r = await local.ReceiveFromAsync(buffer.AsMemory(1), SocketFlags.None, AnyLoopbackRemote, _cts.Token);
                 // 批准后换了本机套接字：旧套接字（大厅那边）上收到的不再往外发。
                 if (!ReferenceEquals(peer.Local, local)) return;
                 if (!_peers.TryGetValue(peer.Remote, out var active) || !ReferenceEquals(active, peer)) continue;
-                await SendDataAsync(peer, buffer.AsMemory(0, r.ReceivedBytes));
+                await SendDataAsync(peer, buffer, r.ReceivedBytes);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
             {
@@ -798,16 +864,22 @@ public sealed class DirectBridge : IAsyncDisposable
 
     private async Task GuestLocalLoopAsync()
     {
-        var buffer = new byte[65536];
+        var buffer = new byte[65536 + 1];
         while (!_cts.IsCancellationRequested)
         {
             try
             {
-                var r = await _guestLocal!.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), _cts.Token);
-                var peer = _peers.Values.FirstOrDefault();
+                var r = await _guestLocal!.ReceiveFromAsync(buffer.AsMemory(1), SocketFlags.None, AnyLoopbackRemote, _cts.Token);
+                // The guest keeps at most one peer (the host). Enumerating doesn't snapshot the dictionary the way .Values does.
+                DirectPeer? peer = null;
+                foreach (var entry in _peers)
+                {
+                    peer = entry.Value;
+                    break;
+                }
                 if (peer is null) continue;
-                peer.LocalClient = (IPEndPoint)r.RemoteEndPoint;
-                await SendDataAsync(peer, buffer.AsMemory(0, r.ReceivedBytes));
+                if (!r.RemoteEndPoint.Equals(peer.LocalClient)) peer.LocalClient = (IPEndPoint)r.RemoteEndPoint;
+                await SendDataAsync(peer, buffer, r.ReceivedBytes);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
             {
