@@ -106,7 +106,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     public ObservableCollection<PeerItem> Peers { get; } = [];
     public ObservableCollection<string> Instances { get; } = [];
 
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ComponentText))] public partial bool IsComponentReady { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ComponentText), nameof(LobbyStatusText), nameof(LobbyStatusWarns))] public partial bool IsComponentReady { get; set; }
     [ObservableProperty] public partial bool IsDownloading { get; set; }
     [ObservableProperty] public partial double DownloadPercent { get; set; }
 
