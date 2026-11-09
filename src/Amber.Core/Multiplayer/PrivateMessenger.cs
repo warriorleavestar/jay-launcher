@@ -279,8 +279,11 @@ public sealed class PrivateMessenger : IAsyncDisposable
         }
         if (_incoming.TryRemove(id, out var receive))
         {
+            // 先关掉临时文件再告诉对方：对方马上重发时，这边要已经能接着收。
+            await _incomingGate.WaitAsync();
+            try { Abort(receive, L.T("core.mp.private.cancelled")); }
+            finally { _incomingGate.Release(); }
             await SendAsync(receive.Offer.FromFingerprint, new JsonObject { ["t"] = "cancel", ["id"] = id }, _cts.Token);
-            Abort(receive, L.T("core.mp.private.cancelled"));
         }
     }
 
