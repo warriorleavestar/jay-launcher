@@ -116,11 +116,11 @@ public class ThemeLayoutTests
     }
 
     [Fact]
-    public void PagesWithoutRegionsYetAreReportedNotApplied()
+    public void SettingsPageLayoutIsLocked()
     {
-        var pack = Read(("layout/pages/accounts.json", """{ "type": "stack", "children": [] }"""));
-        Assert.False(pack.Pages.ContainsKey("accounts"));
-        Assert.Contains(pack.Problems, p => p.Code == "page_not_supported_yet");
+        var pack = Read(("layout/pages/settings.json", """{ "type": "stack", "children": [] }"""));
+        Assert.False(pack.Pages.ContainsKey("settings"));
+        Assert.Contains(pack.Problems, p => p.Code == "page_locked");
     }
 
     [Fact]
@@ -152,5 +152,14 @@ public class ThemeLayoutTests
         Assert.Equal("top", topbar.Shell!.Nav);
         Assert.Equal("dock", ThemeLayout.TreeFor(topbar.Pages["home"], "compact")!.Type);
         Assert.Equal("grid", ThemeLayout.TreeFor(topbar.Pages["home"], "wide")!.Type);
+    }
+
+    [Fact]
+    public void OtherPagesGetTheirRequiredRegionsBack()
+    {
+        var pack = Read(("layout/pages/tools.json", """{ "type": "dock", "children": [ { "type": "region", "name": "tools.status", "dock": "top" }, "home.launch" ] }"""));
+        var regions = RegionsIn(ThemeLayout.TreeFor(pack.Pages["tools"], "wide")!).ToList();
+        Assert.Equal(["tools.status", "tools.body"], regions); // 别的页的区块不能拿过来；body 自动补回
+        Assert.Contains(pack.Problems, p => p.Code == "unknown_region");
     }
 }

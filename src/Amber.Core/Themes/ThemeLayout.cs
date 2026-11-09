@@ -29,7 +29,21 @@ public static partial class ThemeLayout
     {
         ["home"] = (["home.title", "home.pending", "home.onboarding", "home.instance", "home.crash", "home.launch"],
                     ["home.pending", "home.onboarding", "home.instance", "home.crash", "home.launch"]),
+        // 其余页面：标题可以不要，带按钮、输入的区块都必须在。设置页不开放（“恢复默认主题”在那里，排版固定）。
+        ["accounts"] = Page("accounts", ["list", "add", "status"], "title"),
+        ["instances"] = Page("instances", ["header", "picker", "details", "status"]),
+        ["downloads"] = Page("downloads", ["search", "filters", "body", "status"], "title"),
+        ["content"] = Page("content", ["header", "filters", "body", "status"]),
+        ["multiplayer"] = Page("multiplayer", ["body", "status"], "title"),
+        ["tools"] = Page("tools", ["body", "status"], "title"),
+        ["log"] = Page("log", ["header", "jump", "filters", "list"]),
     };
+
+    private static (string[] All, string[] Required) Page(string id, string[] required, params string[] optional)
+    {
+        var req = required.Select(r => $"{id}.{r}").ToArray();
+        return ([.. optional.Select(o => $"{id}.{o}"), .. req], req);
+    }
 
     public static readonly string[] Breakpoints = ["compact", "medium", "wide"];
 
@@ -99,7 +113,7 @@ public static partial class ThemeLayout
 
     public static void ReadPage(ThemePack pack, string page, JsonElement root)
     {
-        if (!Regions.TryGetValue(page, out var regions)) { pack.Problems.Add(new("page_not_supported_yet", page)); return; }
+        if (!Regions.TryGetValue(page, out var regions)) { pack.Problems.Add(new(page == "settings" ? "page_locked" : "page_not_supported_yet", page)); return; }
         if (root.ValueKind != JsonValueKind.Object) { pack.Problems.Add(new("bad_value", $"layout/pages/{page}.json")); return; }
         var layout = new PageLayout();
         // 整个文件就是一棵树（有 "type"），或者按宽度分：{ "wide": 树, "compact": 树, "default": 树 }。

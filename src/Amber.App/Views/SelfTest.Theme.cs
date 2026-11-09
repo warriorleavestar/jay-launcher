@@ -147,7 +147,8 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
                   { "type": "region", "name": "home.launch", "dock": "top", "margin": [0, 0, 0, 12] },
                   { "type": "scroll", "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] } ] }
             }
-            """));
+            """),
+            ("layout/pages/tools.json", """{ "type": "dock", "children": [ { "type": "region", "name": "tools.status", "dock": "top" }, "tools.body" ] }"""));
         settings.ImportThemePack(path);
         await Task.Delay(500);
         Check("导入带排版的主题包：导航挪到顶上", window.ShellNav == "top" && window.SidebarHost.Bounds.Width > window.Bounds.Width - 4
@@ -181,6 +182,12 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         window.Width = 760;
         window.Height = 440;
         await ShotAsync("layout-home-760x440");
+        main.CurrentPage = main.Pages.OfType<ToolsViewModel>().Single();
+        await Task.Delay(500);
+        var tools = window.GetVisualDescendants().OfType<ToolsPage>().First();
+        Check("工具页也能重排：状态卡片挪到最上面、标题去掉",
+            tools.ThemeLayout.UsingThemeLayout && tools.ThemeLayout.Regions["tools.status"].TranslatePoint(default, tools) is { Y: < 5 }
+            && tools.ThemeLayout.Regions["tools.title"].Parent is null);
         main.CurrentPage = main.Pages.OfType<MultiplayerViewModel>().Single();
         window.Width = 1280;
         window.Height = 800;

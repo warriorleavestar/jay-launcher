@@ -4,7 +4,7 @@
 
 主题包里**只有数据**：JSON、字体、图片。不能带代码、脚本、XAML，也不能从网上加载任何东西。所以别人做的主题、联机网络配置文件带来的主题，都不能在你电脑上运行程序。Windows、macOS、Linux 上效果一样。
 
-> 现在支持配色和字体（tokens.json）、组件样式（styles.json）、窗口外壳（layout/shell.json）和启动页的布局（layout/pages/home.json）。其他页面的布局会陆续加入；现在的 Jay 读到还不支持的页面会在设置页提示，其余部分照常生效。
+> 现在支持配色和字体（tokens.json）、组件样式（styles.json）、窗口外壳（layout/shell.json）和除设置页以外各页面的布局（layout/pages/*.json）。
 
 ## 文件结构
 
@@ -168,6 +168,20 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 | `home.instance` | 版本、账号、内存 | 是 |
 | `home.crash` | 崩溃原因分析 | 是 |
 | `home.launch` | 启动按钮和状态 | 是 |
+
+其他页面的区块（标题以外都必需）：
+
+| 页面文件 | 区块 |
+|---|---|
+| `accounts.json` | `accounts.title` `accounts.list` `accounts.add` `accounts.status` |
+| `instances.json` | `instances.header` `instances.picker` `instances.details` `instances.status` |
+| `downloads.json` | `downloads.title` `downloads.search` `downloads.filters` `downloads.body` `downloads.status` |
+| `content.json` | `content.header` `content.filters` `content.body` `content.status` |
+| `multiplayer.json` | `multiplayer.title` `multiplayer.body` `multiplayer.status` |
+| `tools.json` | `tools.title` `tools.body` `tools.status` |
+| `log.json` | `log.header` `log.jump` `log.filters` `log.list` |
+
+设置页的排版固定，不能改（“恢复默认主题”在那里）。
 
 必需的区块没写进去，Jay 会把它补在最外层容器的最后并在设置页提示，所以功能不会因为主题丢掉。每个区块只能出现一次。
 
