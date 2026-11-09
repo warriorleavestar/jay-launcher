@@ -26,6 +26,9 @@ public sealed record NetworkPolicy(IReadOnlySet<RoomVisibility> AllowedModes, bo
 
     /// <summary>这个大小的文件能不能传。</summary>
     public bool AllowsFile(long size) => AllowFiles && (MaxFileBytes is not { } max || size <= max);
+
+    /// <summary>最低安全要求（policy.security：设备验证、熔断、重启倒计时）；没写是 null。和本机设置合并时只会更严。</summary>
+    public Transport.SecurityPolicy? Security { get; init; }
 }
 
 /// <summary>
@@ -33,7 +36,8 @@ public sealed record NetworkPolicy(IReadOnlySet<RoomVisibility> AllowedModes, bo
 /// Jay 下载后先对哈希，对不上就不用（所以配置文件和连接串一样改不了）。只是声明式的数据，没有脚本。
 /// <code>
 /// { "v": 1, "network": "nz-friends", "notice": "欢迎……", "links": [{ "name": "规则", "url": "https://..." }],
-///   "policy": { "modes": ["public", "password"], "requireDevice": true, "files": true, "maxFileMB": 2048, "minVersion": "0.8.0" },
+///   "policy": { "modes": ["public", "password"], "requireDevice": true, "files": true, "maxFileMB": 2048, "minVersion": "0.8.0",
+///               "security": { "attestation": "required", "breaker": "on", "restartDelayMin": 30 } },
 ///   "ui": { ...界面主题，见 docs/themes.md... } }
 /// </code>
 /// </summary>
@@ -96,7 +100,16 @@ public sealed record NetworkConfig(string Network, string? Notice, IReadOnlyList
         }
         long? max = p["maxFileMB"]?.GetValue<long>() is { } mb ? mb is >= 0 and <= 1L << 30 ? mb * 1024 * 1024 : throw Bad() : null;
         Version? min = p["minVersion"]?.GetValue<string>() is { } text ? System.Version.TryParse(text, out var parsed) ? parsed : throw Bad() : null;
-        return new NetworkPolicy(modes, p["requireDevice"]?.GetValue<bool>() ?? false, p["files"]?.GetValue<bool>() ?? true, max, min);
+        return new NetworkPolicy(modes, p["requireDevice"]?.GetValue<bool>() ?? false, p["files"]?.GetValue<bool>() ?? true, max, min)
+        {
+            Security = ParseSecurity(p["security"]),
+        };
+    }
+
+    private static Transport.SecurityPolicy? ParseSecurity(JsonNode? node)
+    {
+        try { return Transport.SecurityPolicy.Parse(node); }
+        catch (InvalidDataException) { throw Bad(); }
     }
 
     private static bool IsHttps(string url) => Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps && url.Length <= 512;

@@ -1927,5 +1927,10 @@
   "multiplayer.account.logged_in": "已登录为 {0}",
   "multiplayer.account.failed": "登录失败：{0}",
   "multiplayer.account.connect_first": "先连上公共网络再登录。",
-  "multiplayer.account.fill": "请填账号和密码。"
+  "multiplayer.account.fill": "请填账号和密码。",
+  "multiplayer.netconfig.theme_failed": "这个网络的界面主题用不了：{0}",
+  "multiplayer.netconfig.theme_title": "网络主题",
+  "multiplayer.netconfig.theme_global": "这个网络带了自己的界面主题，现在只在联机页用。要整个 Jay 都换成它吗？断开网络后会换回你自己的主题。",
+  "multiplayer.netconfig.theme_accept": "整个 Jay 都用",
+  "multiplayer.netconfig.theme_decline": "只在联机页用"
 }

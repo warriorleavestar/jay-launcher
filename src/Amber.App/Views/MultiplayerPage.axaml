@@ -73,6 +73,17 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <!-- 网络主题想铺满整个 Jay：等用户点头 -->
+            <Border Classes="card" Margin="0" IsVisible="{Binding NetworkThemeAskGlobal}">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{l:T multiplayer.netconfig.theme_title}" FontWeight="SemiBold" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.netconfig.theme_global}" />
+                <WrapPanel ItemSpacing="6" LineSpacing="6">
+                  <Button Classes="primary" Content="{l:T multiplayer.netconfig.theme_accept}" Command="{Binding AcceptNetworkThemeGlobalCommand}" />
+                  <Button Content="{l:T multiplayer.netconfig.theme_decline}" Command="{Binding DeclineNetworkThemeGlobalCommand}" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
             <!-- 网络账号（网络配置里有 login 段才显示）：账号密码加密发给网络节点，可能还要两步验证 -->
             <Border Classes="card" Margin="0" IsVisible="{Binding HasNetworkLogin}">
               <StackPanel Spacing="6">
