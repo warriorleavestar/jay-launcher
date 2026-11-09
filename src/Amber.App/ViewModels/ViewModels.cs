@@ -128,6 +128,9 @@ public sealed partial class MainViewModel : ObservableObject
 {
     public ObservableCollection<PageViewModel> Pages { get; }
 
+    /// <summary>联机页（熔断倒计时盖在整个窗口上，窗口直接绑它）。</summary>
+    public MultiplayerViewModel Multiplayer { get; }
+
     [ObservableProperty]
     public partial PageViewModel CurrentPage { get; set; }
 
@@ -148,6 +151,7 @@ public sealed partial class MainViewModel : ObservableObject
         var instance = new InstanceViewModel(service) { NavigateHome = null };
         var content = new ContentViewModel(service);
         var multiplayer = new MultiplayerViewModel(service);
+        Multiplayer = multiplayer;
         var download = new DownloadViewModel(service);
         Pages =
         [
@@ -225,6 +229,9 @@ public sealed partial class SettingsViewModel : PageViewModel
     public Amber.App.Localization.OptionItem[] SourceOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.source.auto", "settings.source.official", "settings.source.mirror");
     internal static readonly string[] SourceKeys = ["auto", "official", "mirror"];
 
+    public Amber.App.Localization.OptionItem[] AttestationOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.security.attest.off", "settings.security.attest.on", "settings.security.attest.required");
+    internal static readonly string[] AttestationKeys = ["off", "on", "required"];
+
     public ObservableCollection<JavaOption> JavaOptions { get; } = [];
 
     [ObservableProperty] public partial string GameDirectory { get; set; }
@@ -233,6 +240,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial JavaOption? SelectedJava { get; set; }
     [ObservableProperty] public partial bool AutoJavaDownload { get; set; }
     [ObservableProperty] public partial bool NoTrace { get; set; }
+    [ObservableProperty] public partial int AttestationIndex { get; set; }
+    [ObservableProperty] public partial bool SecurityBreaker { get; set; }
+    [ObservableProperty] public partial string BreakerRestartDelay { get; set; } = "";
+    [ObservableProperty] public partial bool BreakerSkipDelay { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasBreakerDelayError))] public partial string? BreakerDelayError { get; set; }
+    public bool HasBreakerDelayError => BreakerDelayError is not null;
     [ObservableProperty] public partial bool ExperimentalBake { get; set; }
     [ObservableProperty] public partial string BakeLoaderPath { get; set; }
     [ObservableProperty] public partial bool IsolateVersions { get; set; }
@@ -276,6 +289,10 @@ public sealed partial class SettingsViewModel : PageViewModel
         Concurrency = s.DownloadConcurrency.ToString();
         AutoJavaDownload = s.AutoJavaDownload;
         NoTrace = s.NoTrace;
+        AttestationIndex = Math.Max(0, Array.IndexOf(AttestationKeys, s.SecurityAttestation));
+        SecurityBreaker = s.SecurityBreaker;
+        BreakerRestartDelay = s.BreakerRestartDelay.ToString();
+        BreakerSkipDelay = s.BreakerSkipDelay;
         ExperimentalBake = s.ExperimentalBake;
         BakeLoaderPath = s.BakeLoaderPath ?? "";
         IsolateVersions = s.IsolateVersions;
@@ -362,6 +379,10 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnSelectedJavaChanged(JavaOption? value) => Persist();
     partial void OnAutoJavaDownloadChanged(bool value) => Persist();
     partial void OnNoTraceChanged(bool value) => Persist();
+    partial void OnAttestationIndexChanged(int value) => Persist();
+    partial void OnSecurityBreakerChanged(bool value) => Persist();
+    partial void OnBreakerRestartDelayChanged(string value) => Persist();
+    partial void OnBreakerSkipDelayChanged(bool value) => Persist();
     partial void OnExperimentalBakeChanged(bool value) => Persist();
     partial void OnBakeLoaderPathChanged(string value) => Persist();
     partial void OnIsolateVersionsChanged(bool value) => Persist();
@@ -427,6 +448,15 @@ public sealed partial class SettingsViewModel : PageViewModel
         if (SelectedJava is not null) s.JavaPath = SelectedJava.Path;
         s.AutoJavaDownload = AutoJavaDownload;
         s.NoTrace = NoTrace;
+        s.SecurityAttestation = AttestationKeys[Math.Clamp(AttestationIndex, 0, AttestationKeys.Length - 1)];
+        s.SecurityBreaker = SecurityBreaker;
+        s.BreakerSkipDelay = BreakerSkipDelay;
+        if (int.TryParse(BreakerRestartDelay.Trim(), out var delay) && delay is >= 1 and <= Amber.Core.Multiplayer.Transport.SecurityPolicy.MaxRestartDelay)
+        {
+            s.BreakerRestartDelay = delay;
+            BreakerDelayError = null;
+        }
+        else BreakerDelayError = L.F("settings.security.delay_error", Amber.Core.Multiplayer.Transport.SecurityPolicy.MaxRestartDelay);
         s.ExperimentalBake = ExperimentalBake;
         s.BakeLoaderPath = Blank(BakeLoaderPath);
         s.IsolateVersions = IsolateVersions;

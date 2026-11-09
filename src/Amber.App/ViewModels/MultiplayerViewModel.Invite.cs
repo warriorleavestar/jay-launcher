@@ -186,6 +186,7 @@ public sealed partial class MultiplayerViewModel
     {
         _credentials = credentials;
         _members = members;
+        ConfigureSecurity(members);
         var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => Trusted.IsTrusted(pub), AskApprovalAsync, members,
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort);
