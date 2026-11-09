@@ -1469,7 +1469,7 @@
   "multiplayer.remote.ended_disconnected": "{0} とのリモート操作が切断されました",
   "multiplayer.remote.timed_out": "{0} から応答がありません（30 秒で自動的に拒否）",
   "multiplayer.remote.busy": "{0} は別のリモート操作中か、拒否したばかりです。しばらくしてから再試行してください",
-  "multiplayer.remote.peer_unsupported": "{0} の PC はリモート操作に対応していません（現在 Windows のみ）",
+  "multiplayer.remote.peer_unsupported": "{0} のコンピューターは今リモート操作を受けられません（Linux の Wayland デスクトップ、または Mac で画面収録が未許可）。相手のマルチプレイページの説明を確認してもらってください",
   "multiplayer.remote.declined": "{0} がリモート操作を拒否しました",
   "remote.consent.window_title": "リモート操作のリクエスト",
   "remote.consent.title": "{0} があなたの PC をリモート操作しようとしています",

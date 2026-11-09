@@ -1469,7 +1469,7 @@
   "multiplayer.remote.ended_disconnected": "和 {0} 的遠端控制已中斷",
   "multiplayer.remote.timed_out": "{0} 沒有回應（30 秒自動拒絕）",
   "multiplayer.remote.busy": "{0} 正在進行另一次遠端控制，或剛拒絕過，請稍後再試",
-  "multiplayer.remote.peer_unsupported": "{0} 的電腦不支援被遠端控制（目前只有 Windows）",
+  "multiplayer.remote.peer_unsupported": "{0} 的電腦現在不能被遠端控制（Linux 的 Wayland 桌面，或者 Mac 沒允許螢幕錄製）。請對方看一下他連線頁上的說明",
   "multiplayer.remote.declined": "{0} 拒絕了遠端控制",
   "remote.consent.window_title": "遠端控制請求",
   "remote.consent.title": "{0} 想要遠端控制你的電腦",
