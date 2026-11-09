@@ -164,7 +164,18 @@ internal sealed partial class SelfTest
             string.Join(" | ", host.NetworkChoices.Select(c => c.Label)));
 
         var node = $"tcp://127.0.0.1:{EasyTierArgs.FreeTcpPort()}";
-        var info = new NetworkInfo("selftest-net", "自检公共网络", "jay-selftest-" + Guid.NewGuid().ToString("N")[..8], "selftest-secret", [node]);
+        // 网络配置文件：先放进缓存（按哈希命名），地址故意用连不上的，证明是按哈希从缓存里拿的。
+        var configJson = System.Text.Encoding.UTF8.GetBytes("""
+            { "v": 1, "network": "selftest-net", "notice": "自检网络公告：只允许公开房间",
+              "links": [{ "name": "网络规则", "url": "https://example.invalid/rules" }],
+              "policy": { "modes": ["public"], "requireDevice": true, "maxFileMB": 1 } }
+            """);
+        var configSha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(configJson));
+        host.NetworkConfigDir = Path.Combine(reportDir, "network-configs");
+        Directory.CreateDirectory(host.NetworkConfigDir);
+        await File.WriteAllBytesAsync(Path.Combine(host.NetworkConfigDir, configSha + ".json"), configJson);
+        var info = new NetworkInfo("selftest-net", "自检公共网络", "jay-selftest-" + Guid.NewGuid().ToString("N")[..8], "selftest-secret", [node],
+            Config: new NetworkConfigRef("https://example.invalid/network.json", configSha));
         Dispatcher.UIThread.Invoke(() =>
         {
             host.NetworkInput = NetworkString.Create(info, registry);
@@ -179,7 +190,17 @@ internal sealed partial class SelfTest
         {
             await host.ConnectPublicCommand.ExecuteAsync(null);
             Check("换公共网络：连进新网络（找得到它的目录）", await WaitAsync(() => host.IsPublicConnected, 60) && host.PublicStateText.Contains("自检公共网络"), host.Status);
+            Check("网络配置：显示公告和链接", host.HasNetworkNotice && host.NetworkNotice.Contains("只允许公开房间")
+                && host.NetworkLinks.SingleOrDefault()?.Name == "网络规则", host.NetworkNotice);
+            Check("网络配置：策略生效（只允许公开房间、要求设备指纹、文件限 1 MB）", !host.NetworkPolicy.Allows(RoomVisibility.Password)
+                && host.HostDevicePolicy.Require && !host.NetworkPolicy.AllowsFile(2 * 1024 * 1024));
+            await ShotAsync("网络配置公告");
             host.DisconnectPublicCommand.Execute(null);
+            Check("网络配置：断开后公告和策略清掉", !host.HasNetworkNotice && !host.HostDevicePolicy.Require && host.NetworkPolicy.Allows(RoomVisibility.Password));
+            // 缓存被改过、地址又连不上：不连。
+            await File.WriteAllTextAsync(Path.Combine(host.NetworkConfigDir, configSha + ".json"), "{}");
+            await host.ConnectPublicCommand.ExecuteAsync(null);
+            Check("网络配置：取不到配置文件就不连", !host.IsPublicConnected && !host.IsPublicConnecting && host.Status.Contains("自检公共网络"), host.Status);
         }
 
         // 别人签的：先提醒（显示签名钥匙），确认后才加。

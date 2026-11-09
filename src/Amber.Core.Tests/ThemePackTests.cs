@@ -141,8 +141,7 @@ public class ThemePackTests : IDisposable
               "background": { "image": "../../secret.png" }
             }
             """),
-            ("fonts/fake.ttf", Encoding.UTF8.GetBytes("MZ this is not a font")),
-            Text("layout/shell.json", "{}"));
+            ("fonts/fake.ttf", Encoding.UTF8.GetBytes("MZ this is not a font")));
         Assert.Equal(0xFF202020u, pack.DarkColors["Surface"]);
         Assert.False(pack.DarkColors.ContainsKey("Accent"));
         Assert.Empty(pack.UiFonts);
@@ -154,7 +153,6 @@ public class ThemePackTests : IDisposable
         Assert.Contains("missing_file", codes);
         Assert.Contains("bad_font_file", codes);
         Assert.Contains("unsafe_path", codes);
-        Assert.Contains("layer_not_supported_yet", codes);
     }
 
     [Fact]

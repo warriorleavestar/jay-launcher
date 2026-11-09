@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         _settings = settings;
         InitializeComponent();
         Amber.App.Services.ThemeService.AttachMainWindow(this);
+        AttachShell();
         FitToScreen(settings?.LauncherWindow);
         // 窗口打开后才知道标题栏有多高：Width/Height 是客户区，加上标题栏可能比屏幕的可用区域还高（底下被任务栏挡住）。
         Opened += (_, _) => FitFrameToScreen();

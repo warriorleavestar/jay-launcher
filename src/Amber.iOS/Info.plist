@@ -6,10 +6,6 @@
   <string>Jay</string>
   <key>CFBundleIdentifier</key>
   <string>nz.work.minecraft.jay</string>
-  <key>CFBundleShortVersionString</key>
-  <string>0.7.0</string>
-  <key>CFBundleVersion</key>
-  <string>70</string>
   <key>LSRequiresIPhoneOS</key>
   <true/>
   <key>MinimumOSVersion</key>

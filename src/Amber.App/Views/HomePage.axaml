@@ -5,14 +5,15 @@
              xmlns:v="using:Amber.App.Views"
              xmlns:l="using:Amber.App.Localization"
              xmlns:diag="using:Amber.Core.Diagnostics"
+             xmlns:svc="using:Amber.App.Services"
              x:Class="Amber.App.Views.HomePage"
              x:DataType="vm:HomeViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
-    <TextBlock Classes="h1" Text="{l:T home.launch}" />
+    <TextBlock Classes="h1" Text="{l:T home.launch}" svc:ThemeRegion.Name="home.title" />
     <ScrollViewer Grid.Row="1">
       <StackPanel>
         <!-- 游戏在运行时又要启动：问一声，允许同时开两个客户端 -->
-        <Border Classes="callout warning" IsVisible="{Binding HasPendingLaunch}" Margin="0,0,0,12">
+        <Border Classes="callout warning" svc:ThemeRegion.Name="home.pending" IsVisible="{Binding HasPendingLaunch}" Margin="0,0,0,12">
           <DockPanel>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0" VerticalAlignment="Center">
               <Button Classes="primary" Content="{l:T home.multi.launch_anyway}" Command="{Binding LaunchAnywayCommand}" />
@@ -23,9 +24,9 @@
         </Border>
 
         <!-- 新手卡：没有账号或没有实例时替换实例卡（改版规格 3.1） -->
-        <v:OnboardingCard x:Name="OnboardingCard" DataContext="{Binding Onboarding}" />
+        <v:OnboardingCard x:Name="OnboardingCard" svc:ThemeRegion.Name="home.onboarding" DataContext="{Binding Onboarding}" />
 
-        <Border Classes="card" IsVisible="{Binding ShowInstanceCard}">
+        <Border Classes="card" svc:ThemeRegion.Name="home.instance" IsVisible="{Binding ShowInstanceCard}">
           <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
             <TextBlock Text="{l:T home.version.label}" VerticalAlignment="Center" />
             <ComboBox Grid.Column="1" ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}"
@@ -49,7 +50,7 @@
           </Grid>
         </Border>
 
-        <Border Classes="card" IsVisible="{Binding HasCrash}" BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+        <Border Classes="card" svc:ThemeRegion.Name="home.crash" IsVisible="{Binding HasCrash}" BorderBrush="{DynamicResource Accent}" BorderThickness="1">
           <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="{l:T home.crash.causes}" Margin="0" />
             <ItemsControl ItemsSource="{Binding Crash.Findings}">
@@ -77,7 +78,7 @@
       </StackPanel>
     </ScrollViewer>
 
-    <Border x:Name="LaunchStatusCard" Grid.Row="2" Classes="card" Margin="0">
+    <Border x:Name="LaunchStatusCard" svc:ThemeRegion.Name="home.launch" Grid.Row="2" Classes="card" Margin="0">
       <Grid ColumnDefinitions="*,Auto,Auto">
         <StackPanel VerticalAlignment="Center" Spacing="6">
           <c:StatusBar Message="{Binding StatusInfo}">

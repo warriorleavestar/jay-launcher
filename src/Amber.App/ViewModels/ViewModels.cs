@@ -1,3 +1,4 @@
+using Amber.Core.Themes;
 using System.Collections.ObjectModel;
 using Amber.Core.Localization;
 using Amber.App.Services;
@@ -136,8 +137,40 @@ public sealed partial class MainViewModel : ObservableObject
 
     public string VersionText => L.F("main.version", UpdateChecker.CurrentVersion);
 
+    /// <summary>导航栏里显示的页面：主题包可以改顺序、藏掉不常用的页（启动页和设置页藏不掉）。页面本身还在，跳转照常。</summary>
+    public ObservableCollection<PageViewModel> NavPages { get; } = [];
+
+    /// <summary>
+    /// 导航栏的选中项。当前页不在导航栏里时是空；导航栏给空值（重排导航项时会发生）不改当前页。
+    /// </summary>
+    public PageViewModel? NavSelection
+    {
+        get => NavPages.Contains(CurrentPage) ? CurrentPage : null;
+        set { if (value is not null) CurrentPage = value; }
+    }
+
+    /// <summary>按主题包的 shell 布局排导航项；传空恢复 Jay 自带的顺序。</summary>
+    public void ApplyNavOrder(ShellLayout? shell)
+    {
+        var ids = ThemeLayout.PageIds;
+        var byId = new Dictionary<string, PageViewModel>();
+        for (var i = 0; i < Pages.Count && i < ids.Length; i++) byId[ids[i]] = Pages[i];
+        var order = new List<PageViewModel>();
+        foreach (var id in shell?.PageOrder ?? [])
+            if (byId.TryGetValue(id, out var page) && !order.Contains(page)) order.Add(page);
+        foreach (var page in Pages)
+            if (!order.Contains(page)) order.Add(page);
+        if (shell is not null)
+            order.RemoveAll(p => byId.FirstOrDefault(kv => kv.Value == p).Key is { } id && shell.Hidden.Contains(id) && !ThemeLayout.RequiredPages.Contains(id));
+        if (order.SequenceEqual(NavPages)) return;
+        NavPages.Clear();
+        foreach (var page in order) NavPages.Add(page);
+        OnPropertyChanged(nameof(NavSelection));
+    }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
+        OnPropertyChanged(nameof(NavSelection));
         if (oldValue is not null) oldValue.IsCurrent = false;
         newValue.IsCurrent = true;
         newValue.Activate();
@@ -211,6 +244,7 @@ public sealed partial class MainViewModel : ObservableObject
             CurrentPage = content;
             content.BrowseDatapacksFor(id, world, back: () => CurrentPage = instance);
         };
+        ApplyNavOrder(null);
         CurrentPage = Pages[0];
         CurrentPage.Activate();
     }
@@ -243,6 +277,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial string Concurrency { get; set; }
     [ObservableProperty] public partial JavaOption? SelectedJava { get; set; }
     [ObservableProperty] public partial bool AutoJavaDownload { get; set; }
+    [ObservableProperty] public partial bool AllowNetworkThemes { get; set; }
     [ObservableProperty] public partial bool NoTrace { get; set; }
     [ObservableProperty] public partial int AttestationIndex { get; set; }
     [ObservableProperty] public partial bool SecurityBreaker { get; set; }
@@ -292,6 +327,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         });
         Concurrency = s.DownloadConcurrency.ToString();
         AutoJavaDownload = s.AutoJavaDownload;
+        AllowNetworkThemes = s.AllowNetworkThemes;
         NoTrace = s.NoTrace;
         AttestationIndex = Math.Max(0, Array.IndexOf(AttestationKeys, s.SecurityAttestation));
         SecurityBreaker = s.SecurityBreaker;
@@ -312,6 +348,8 @@ public sealed partial class SettingsViewModel : PageViewModel
         UpdateFeed = s.UpdateFeedUrl ?? "";
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
         ReloadThemePacks();
+        // 开发模式下主题文件改了会重新套用，提示跟着更新。
+        ThemeService.Changed += UpdateThemePackStatus;
         // 启动时只把选单对上已经生效的语言，不再重新应用、不写设置文件。
         _initializing = true;
         SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(s.Language) ?? "system"));
@@ -393,6 +431,8 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "requested": lines.Add(L.T("settings.themepack.safe.requested")); break;
             case "missing": lines.Add(L.T("settings.themepack.safe.missing")); break;
         }
+        if (ThemeService.DevDirectory is { } devDir) lines.Add(L.F("settings.themepack.dev", devDir));
+        if (ThemeService.DevError is { } devError) lines.Add(L.F("settings.themepack.dev_error", devError));
         if (ThemeService.Current is { } pack && pack.Problems.Count > 0)
             lines.Add(L.F("settings.themepack.problems", pack.Problems.Count, string.Join("; ", pack.Problems.Take(4))));
         ThemePackStatus = string.Join("\n", lines);
@@ -484,6 +524,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnSourceIndexChanged(int value) => Persist();
     partial void OnSelectedJavaChanged(JavaOption? value) => Persist();
     partial void OnAutoJavaDownloadChanged(bool value) => Persist();
+    partial void OnAllowNetworkThemesChanged(bool value)
+    {
+        ThemeService.AllowNetworkThemes = value;
+        ThemeService.Refresh();
+        Persist();
+    }
     partial void OnNoTraceChanged(bool value) => Persist();
     partial void OnAttestationIndexChanged(int value) => Persist();
     partial void OnSecurityBreakerChanged(bool value) => Persist();
@@ -553,6 +599,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         else ConcurrencyError = L.T("settings.error.concurrency");
         if (SelectedJava is not null) s.JavaPath = SelectedJava.Path;
         s.AutoJavaDownload = AutoJavaDownload;
+        s.AllowNetworkThemes = AllowNetworkThemes;
         s.NoTrace = NoTrace;
         s.SecurityAttestation = AttestationKeys[Math.Clamp(AttestationIndex, 0, AttestationKeys.Length - 1)];
         s.SecurityBreaker = SecurityBreaker;
@@ -639,7 +686,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "post": PostExit = d.PostExitCommand ?? ""; break;
             case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
             case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
-            case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); break;
+            case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); AllowNetworkThemes = true; break;
         }
     }
 }

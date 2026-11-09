@@ -155,6 +155,7 @@ public sealed partial class MultiplayerViewModel
         try
         {
             var profile = _service.PublicNetwork;
+            if (!await LoadNetworkConfigAsync(profile, cts.Token) || _publicCts != cts) return;
             session = PublicNetworkSession.Start(_service.EasyTier, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()),
                 Path.Combine(EasyTierWorkRoot, "public"));
             session.Output += line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line);
@@ -205,6 +206,7 @@ public sealed partial class MultiplayerViewModel
         _public = null;
         IsPublicConnected = false;
         PublicRooms.Clear();
+        ApplyNetworkConfig(null);
     }
 
     [RelayCommand]
@@ -344,6 +346,11 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         var mode = SelectedVisibility?.Mode ?? RoomVisibility.Hidden;
+        if (!NetworkPolicy.Allows(mode))
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.netconfig.mode_not_allowed", SelectedVisibility?.Label ?? ""));
+            return;
+        }
         if (mode == RoomVisibility.Password && PublishPassword.Length < RoomPassword.MinLength)
         {
             SetStatus(StatusMessage.Warning("multiplayer.public.password_short", RoomPassword.MinLength));
