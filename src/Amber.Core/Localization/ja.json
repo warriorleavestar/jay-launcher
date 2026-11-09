@@ -1725,6 +1725,7 @@
   "settings.themepack.safe.crashed": "前回このテーマで Jay が正常に開けなかったため、今回は標準テーマを使っています。上でもう一度選ぶと再試行します。",
   "settings.themepack.safe.requested": "--default-theme で起動したため、テーマパックは適用されていません。",
   "settings.themepack.safe.missing": "選択したテーマパックが見つからないため、標準テーマを使っています。",
+  "settings.themepack.allow_network": "マルチプレイのネットワークが配布するテーマを使う（マルチプレイページだけ。Jay 全体に使う前に確認します）",
   "settings.themepack.dev": "テーマ開発モード：フォルダー {0} を使用中。ファイルを保存するとすぐ反映されます。",
   "settings.themepack.dev_error": "テーマを読み込めなかったため、前回の見た目のままです：{0}"
 }

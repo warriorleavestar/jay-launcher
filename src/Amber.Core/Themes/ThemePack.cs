@@ -137,6 +137,8 @@ public static partial class ThemePackReader
         return Parse(name => files.TryGetValue(name, out var bytes) ? bytes : null);
     }
 
+    internal static ThemePack ParseFiles(Dictionary<string, byte[]> files) => Parse(name => files.TryGetValue(name, out var bytes) ? bytes : null);
+
     /// <summary>从已解压的目录读（已安装的主题、开发时直接用文件夹）。</summary>
     public static ThemePack ReadDirectory(string directory)
     {

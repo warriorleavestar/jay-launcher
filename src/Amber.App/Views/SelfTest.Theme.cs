@@ -98,6 +98,9 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             await Task.Delay(300);
             Check("带程序文件的主题包被拒绝，不安装", !Directory.Exists(Path.Combine(ThemeService.Store.Root, "selftest-bad")) && settings.SelectedThemePack?.Id == "selftest-topbar");
 
+            // 3b. 联机网络带来的主题：只在联机页用；关掉开关就不用；global 要同意后才铺满。
+            await NetworkThemeAsync(settings);
+
             // 4. 恢复默认：颜色回到默认，设置文件清掉主题包。
             settings.ResetThemePackCommand.Execute(null);
             await Task.Delay(400);
@@ -194,6 +197,38 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         await ShotAsync("layout-multiplayer-1280x800");
         main.CurrentPage = settings;
         await Task.Delay(300);
+    }
+
+    private async Task NetworkThemeAsync(SettingsViewModel settings)
+    {
+        var mine = Brush("Accent", ThemeVariant.Dark);
+        var multiplayer = main.Pages.OfType<MultiplayerViewModel>().Single();
+        var network = NetworkTheme.ReadInline("""{ "seed": { "accent": "#CC2233" } }""");
+        ThemeService.SetNetworkTheme(network, "network");
+        await Task.Delay(300);
+        Check("网络主题：不在联机页时不生效", Brush("Accent", ThemeVariant.Dark) == mine);
+        main.CurrentPage = multiplayer;
+        await Task.Delay(500);
+        Check("网络主题：进联机页换上网络的配色，导航不动", Brush("Accent", ThemeVariant.Dark) == 0xFFCC2233 && window.ShellNav == "top");
+        await ShotAsync("network-theme-multiplayer");
+        main.CurrentPage = settings;
+        await Task.Delay(400);
+        Check("网络主题：离开联机页换回自己的主题", Brush("Accent", ThemeVariant.Dark) == mine);
+        settings.AllowNetworkThemes = false;
+        main.CurrentPage = multiplayer;
+        await Task.Delay(400);
+        Check("网络主题：设置里关掉后联机页也不用", Brush("Accent", ThemeVariant.Dark) == mine);
+        settings.AllowNetworkThemes = true;
+        main.CurrentPage = settings;
+        ThemeService.SetNetworkTheme(network, "global");
+        await Task.Delay(300);
+        Check("网络主题 global：用户同意之前不铺满整个 Jay", Brush("Accent", ThemeVariant.Dark) == mine);
+        ThemeService.AcceptNetworkThemeGlobally();
+        await Task.Delay(300);
+        Check("网络主题 global：同意后设置页也换了", Brush("Accent", ThemeVariant.Dark) == 0xFFCC2233);
+        ThemeService.SetNetworkTheme(null);
+        await Task.Delay(300);
+        Check("离开网络后换回自己的主题", Brush("Accent", ThemeVariant.Dark) == mine && settings.SelectedThemePack?.Id == "selftest-topbar");
     }
 
     private static void WritePack(string path, string manifest, string tokens, params (string Name, string Text)[] extra)

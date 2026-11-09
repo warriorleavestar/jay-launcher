@@ -63,7 +63,7 @@
             </Border>
             <!-- 界面主题包（.jaytheme）：导入、切换、删除、导出。“恢复默认主题”固定在这里，主题包改不了它。 -->
             <Border Classes="card">
-              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
                 <TextBlock Text="{l:T settings.themepack.label}" VerticalAlignment="Center" />
                 <ComboBox x:Name="ThemePackBox" Grid.Column="1" ItemsSource="{Binding ThemePacks}" SelectedItem="{Binding SelectedThemePack}"
                           HorizontalAlignment="Stretch" AutomationProperties.Name="{l:T settings.themepack.label}">
@@ -81,6 +81,9 @@
                   <Button Classes="danger" Content="{l:T settings.themepack.remove}" Command="{Binding RemoveThemePackCommand}" IsEnabled="{Binding CanRemoveThemePack}" />
                 </WrapPanel>
                 <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Classes="hint" Margin="0,8,0,0" Text="{l:T settings.themepack.hint}" />
+                <CheckBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" IsChecked="{Binding AllowNetworkThemes}">
+                  <TextBlock Text="{l:T settings.themepack.allow_network}" TextWrapping="Wrap" />
+                </CheckBox>
               </Grid>
             </Border>
             <Border Classes="callout warning" Margin="0,0,0,12" IsVisible="{Binding ThemePackStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">

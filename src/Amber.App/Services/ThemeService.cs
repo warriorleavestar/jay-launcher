@@ -64,6 +64,7 @@ public static class ThemeService
     public static void ApplyAtStartup(AppSettings settings, string[] args)
     {
         _variantSetting = settings.Theme;
+        AllowNetworkThemes = settings.AllowNetworkThemes;
         // 做主题用：--theme-dev <目录>（或 AMBER_THEME_DEV=<目录>）直接用没打包的主题目录，文件一改就重新套用。不安装、不改设置。
         var devIndex = Array.IndexOf(args, "--theme-dev");
         var devDir = devIndex >= 0 && devIndex + 1 < args.Length ? args[devIndex + 1] : Environment.GetEnvironmentVariable("AMBER_THEME_DEV");
@@ -158,7 +159,73 @@ public static class ThemeService
         ApplyVariant();
     }
 
+    /// <summary>用户自己选的主题（设置里的、开发模式的）。联机网络的主题不改它，离开联机页就换回来。</summary>
+    private static ThemePack? _userPack;
+
+    /// <summary>当前联机网络配置带来的主题；不在网络里或网络没带主题时为空。</summary>
+    public static ThemePack? NetworkPack { get; private set; }
+
+    /// <summary>网络主题想要的范围：network（只在联机页）或 global（整个 Jay，要用户同意）。</summary>
+    public static string NetworkScope { get; private set; } = "network";
+
+    /// <summary>用户同意了这个网络的主题用在整个 Jay 上（只对当前这个网络主题有效）。</summary>
+    public static bool NetworkGlobalAccepted { get; private set; }
+
+    /// <summary>设置里“使用联机网络带来的主题”。关掉后网络主题一律不用。</summary>
+    public static bool AllowNetworkThemes { get; set; } = true;
+
+    private static bool _networkPageActive;
+
     public static void Apply(ThemePack? pack)
+    {
+        _userPack = pack;
+        Refresh(force: true);
+    }
+
+    /// <summary>
+    /// 联机那边拿到（或离开）一个带主题的网络时调用。网络主题从不写进设置、不进主题列表；
+    /// 用 --default-theme 启动时不用。global 要等用户点头（AcceptNetworkThemeGlobally）才铺满整个 Jay，在那之前和 network 一样。
+    /// </summary>
+    public static void SetNetworkTheme(ThemePack? pack, string scope = "network")
+    {
+        if (ReferenceEquals(pack, NetworkPack) && scope == NetworkScope) return;
+        NetworkPack = pack;
+        NetworkScope = scope;
+        NetworkGlobalAccepted = false;
+        Refresh();
+    }
+
+    public static void AcceptNetworkThemeGlobally()
+    {
+        if (NetworkPack is null || NetworkScope != "global") return;
+        NetworkGlobalAccepted = true;
+        Refresh();
+    }
+
+    /// <summary>主窗口切页时调用：进入联机页时换上网络主题，离开时换回用户自己的。</summary>
+    public static void SetNetworkPageActive(bool active)
+    {
+        if (_networkPageActive == active) return;
+        _networkPageActive = active;
+        Refresh();
+    }
+
+    /// <summary>窗口外壳（导航位置、顺序）用谁的：只在联机页生效的网络主题不动导航，免得一进联机页导航就跳。</summary>
+    public static ShellLayout? Shell => (ReferenceEquals(Current, NetworkPack) && !NetworkGlobalAccepted ? _userPack : Current)?.Shell;
+
+    /// <summary>现在该用哪个主题。</summary>
+    public static ThemePack? Effective =>
+        NetworkPack is not null && AllowNetworkThemes && SafeModeReason != "requested" && (_networkPageActive || NetworkGlobalAccepted)
+            ? NetworkPack : _userPack;
+
+    public static void Refresh(bool force = false)
+    {
+        var effective = Effective;
+        if (!force && ReferenceEquals(effective, Current)) return;
+        ApplyNow(effective);
+    }
+
+    private static void ApplyNow(ThemePack? pack)
     {
         if (Application.Current is not { } app) return;
         var resources = app.Resources;

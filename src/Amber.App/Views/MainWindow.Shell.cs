@@ -21,7 +21,17 @@ public partial class MainWindow
     {
         ThemeService.Changed += ApplyShell;
         Closed += (_, _) => ThemeService.Changed -= ApplyShell;
-        DataContextChanged += (_, _) => ApplyShell();
+        DataContextChanged += (_, _) =>
+        {
+            ApplyShell();
+            // 联机网络带来的主题只在联机页里用：切页时告诉主题服务。
+            if (DataContext is MainViewModel main)
+                main.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(MainViewModel.CurrentPage))
+                        ThemeService.SetNetworkPageActive(main.CurrentPage is MultiplayerViewModel);
+                };
+        };
         ApplyShell();
     }
 
@@ -30,7 +40,7 @@ public partial class MainWindow
 
     private void ApplyShell()
     {
-        var shell = ThemeService.Current?.Shell;
+        var shell = ThemeService.Shell;
         (DataContext as MainViewModel)?.ApplyNavOrder(shell);
         var nav = shell?.Nav ?? "left";
         var icons = shell?.NavStyle == "icons";

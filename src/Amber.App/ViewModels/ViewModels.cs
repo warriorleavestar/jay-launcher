@@ -270,6 +270,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial string Concurrency { get; set; }
     [ObservableProperty] public partial JavaOption? SelectedJava { get; set; }
     [ObservableProperty] public partial bool AutoJavaDownload { get; set; }
+    [ObservableProperty] public partial bool AllowNetworkThemes { get; set; }
     [ObservableProperty] public partial bool NoTrace { get; set; }
     [ObservableProperty] public partial bool ExperimentalBake { get; set; }
     [ObservableProperty] public partial string BakeLoaderPath { get; set; }
@@ -313,6 +314,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         });
         Concurrency = s.DownloadConcurrency.ToString();
         AutoJavaDownload = s.AutoJavaDownload;
+        AllowNetworkThemes = s.AllowNetworkThemes;
         NoTrace = s.NoTrace;
         ExperimentalBake = s.ExperimentalBake;
         BakeLoaderPath = s.BakeLoaderPath ?? "";
@@ -505,6 +507,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnSourceIndexChanged(int value) => Persist();
     partial void OnSelectedJavaChanged(JavaOption? value) => Persist();
     partial void OnAutoJavaDownloadChanged(bool value) => Persist();
+    partial void OnAllowNetworkThemesChanged(bool value)
+    {
+        ThemeService.AllowNetworkThemes = value;
+        ThemeService.Refresh();
+        Persist();
+    }
     partial void OnNoTraceChanged(bool value) => Persist();
     partial void OnExperimentalBakeChanged(bool value) => Persist();
     partial void OnBakeLoaderPathChanged(string value) => Persist();
@@ -570,6 +578,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         else ConcurrencyError = L.T("settings.error.concurrency");
         if (SelectedJava is not null) s.JavaPath = SelectedJava.Path;
         s.AutoJavaDownload = AutoJavaDownload;
+        s.AllowNetworkThemes = AllowNetworkThemes;
         s.NoTrace = NoTrace;
         s.ExperimentalBake = ExperimentalBake;
         s.BakeLoaderPath = Blank(BakeLoaderPath);
@@ -647,7 +656,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "post": PostExit = d.PostExitCommand ?? ""; break;
             case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
             case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
-            case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); break;
+            case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); AllowNetworkThemes = true; break;
         }
     }
 }
