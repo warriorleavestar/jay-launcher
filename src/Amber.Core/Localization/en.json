@@ -1740,5 +1740,20 @@
   "multiplayer.component.import_failed": "Import failed: {0}",
   "multiplayer.component.downloading_from": "Downloading EasyTier from {0}…",
   "multiplayer.component.manual_hint": "If the download fails: get {0} in a browser (official link {1}), then choose \"Import from file\". Imported files are SHA-256 verified too.",
-  "linux.missing_libraries": "Jay can't start: the system is missing libraries needed for the window: {0}.\n\nInstall them and open Jay again:\n  Ubuntu/Debian: sudo apt install {1}\n  Fedora: sudo dnf install {2}\n  Arch: sudo pacman -S {3}\n\nOn a server without a desktop, use Jay Server instead."
+  "linux.missing_libraries": "Jay can't start: the system is missing libraries needed for the window: {0}.\n\nInstall them and open Jay again:\n  Ubuntu/Debian: sudo apt install {1}\n  Fedora: sudo dnf install {2}\n  Arch: sudo pacman -S {3}\n\nOn a server without a desktop, use Jay Server instead.",
+  "settings.themepack.label": "Theme pack",
+  "settings.themepack.default": "Jay default",
+  "settings.themepack.import": "Import theme…",
+  "settings.themepack.export": "Export current theme…",
+  "settings.themepack.remove": "Remove this theme",
+  "settings.themepack.reset": "Restore default theme",
+  "settings.themepack.filetype": "Jay theme pack",
+  "settings.themepack.hint": "A theme pack (.jaytheme) can change colors, fonts, text sizes, corner radius and the window background. Theme packs contain only data and cannot run any program. If a theme stops Jay from opening, the next start falls back to the default theme; you can also start Jay with --default-theme.",
+  "settings.themepack.imported": "Imported and switched to theme \"{0}\"",
+  "settings.themepack.exported": "Exported {0}",
+  "settings.themepack.import_failed": "Could not import the theme pack ({0}): {1}",
+  "settings.themepack.problems": "This theme has {0} problem(s); defaults are used instead: {1}",
+  "settings.themepack.safe.crashed": "Jay did not open properly with this theme last time, so the default theme is used for now. Select it again above to retry.",
+  "settings.themepack.safe.requested": "Jay was started with --default-theme, so the theme pack is not applied.",
+  "settings.themepack.safe.missing": "The selected theme pack could not be found, so the default theme is used."
 }

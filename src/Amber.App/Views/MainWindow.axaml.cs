@@ -76,6 +76,8 @@ public partial class MainWindow : Window
                     await new ContentPageSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "remote")
                     await new RemoteSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
+                else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "theme")
+                    await new ThemeSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "bake-notice")
                     await new BakeNoticeSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else
@@ -283,6 +285,31 @@ public partial class MainWindow : Window
         using var bitmap = new RenderTargetBitmap(new PixelSize((int)Bounds.Width, (int)Bounds.Height));
         bitmap.Render(this);
         bitmap.Save(path);
+    }
+
+    private async void ImportTheme_Click(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = L.T("settings.themepack.import"),
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType(L.T("settings.themepack.filetype")) { Patterns = ["*.jaytheme", "*.zip"] }],
+        });
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) vm.ImportThemePack(path);
+    }
+
+    private async void ExportTheme_Click(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not SettingsViewModel vm) return;
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = L.T("settings.themepack.export"),
+            SuggestedFileName = "my-theme.jaytheme",
+            DefaultExtension = "jaytheme",
+            FileTypeChoices = [new FilePickerFileType(L.T("settings.themepack.filetype")) { Patterns = ["*.jaytheme"] }],
+        });
+        if (file?.TryGetLocalPath() is { } path) vm.ExportThemePack(path);
     }
 
     private async void BrowseGameDir_Click(object? sender, RoutedEventArgs e)

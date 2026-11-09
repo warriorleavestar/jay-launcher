@@ -1709,5 +1709,20 @@
   "multiplayer.component.import_failed": "导入失败：{0}",
   "multiplayer.component.downloading_from": "正在从 {0} 下载 EasyTier……",
   "multiplayer.component.manual_hint": "下载不了时：用浏览器下载 {0}（官方地址 {1}），再点“从文件导入”。导入的文件同样要通过 SHA-256 校验。",
-  "linux.missing_libraries": "Jay 无法启动：系统缺少图形界面需要的库 {0}。\n\n请先安装后再打开 Jay：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\n如果是在没有桌面的服务器上，请改用 Jay Server。"
+  "linux.missing_libraries": "Jay 无法启动：系统缺少图形界面需要的库 {0}。\n\n请先安装后再打开 Jay：\n  Ubuntu/Debian：sudo apt install {1}\n  Fedora：sudo dnf install {2}\n  Arch：sudo pacman -S {3}\n\n如果是在没有桌面的服务器上，请改用 Jay Server。",
+  "settings.themepack.label": "界面主题包",
+  "settings.themepack.default": "Jay 默认",
+  "settings.themepack.import": "导入主题…",
+  "settings.themepack.export": "导出当前主题…",
+  "settings.themepack.remove": "删除这个主题",
+  "settings.themepack.reset": "恢复默认主题",
+  "settings.themepack.filetype": "Jay 主题包",
+  "settings.themepack.hint": "主题包（.jaytheme）可以换配色、字体、字号、圆角和窗口背景图。主题包里只有数据，不能运行任何程序。主题让 Jay 打不开时，下次启动会自动换回默认主题；也可以用 --default-theme 参数启动。",
+  "settings.themepack.imported": "已导入并切换到主题「{0}」",
+  "settings.themepack.exported": "已导出 {0}",
+  "settings.themepack.import_failed": "主题包导入失败（{0}）：{1}",
+  "settings.themepack.problems": "这个主题有 {0} 处问题，已用默认值代替：{1}",
+  "settings.themepack.safe.crashed": "上次用这个主题时 Jay 没能正常打开，这次先用默认主题。重新在上面选一次就会再试。",
+  "settings.themepack.safe.requested": "这次是用 --default-theme 启动的，主题包没有套用。",
+  "settings.themepack.safe.missing": "设置里选的主题包找不到了，已用默认主题。"
 }

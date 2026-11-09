@@ -50,6 +50,9 @@ public sealed class AppSettings
     /// <summary>system / light / dark</summary>
     public string Theme { get; set; } = "system";
 
+    /// <summary>导入的界面主题包 id（{数据目录}/themes/{id}）；null 表示 Jay 默认主题。</summary>
+    public string? ThemePack { get; set; }
+
     /// <summary>界面语言：zh-Hans / zh-Hant / en / ja；null 表示跟随系统。</summary>
     public string? Language { get; set; }
 
