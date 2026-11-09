@@ -241,6 +241,7 @@ public sealed partial class MainViewModel : ObservableObject
             service.RequestLaunch(new LaunchRequest(id));
         };
         download.CloseAfterStart = () => shell.Navigate("library");
+        content.LaunchInstance = id => download.LaunchInstance?.Invoke(id);
         download.BrowseModpacks = () =>
         {
             shell.Navigate("discover");

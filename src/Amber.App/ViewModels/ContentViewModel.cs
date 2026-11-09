@@ -196,6 +196,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         _providerForSource = providerForSource;
         _hasCurseForge = hasCurseForge;
         SourceOptions[1].Enabled = HasCurseForge;
+        HookQueue();
         _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _slowTimer.Tick += (_, _) => UpdateSlow();
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshInstances);
@@ -262,9 +263,16 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         SetManualDownloadContext(value is not null && IsModpack ? ManualDownloadContext.ModpackArchive : ManualDownloadContext.Resource);
         LoadOptionalDependencies(value);
         InstallCommand.NotifyCanExecuteChanged();
+        QueueSelectedCommand.NotifyCanExecuteChanged();
+        InstallModpackAndPlayCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(InstallHint));
     }
-    partial void OnIsBusyChanged(bool value) => InstallCommand.NotifyCanExecuteChanged();
+    partial void OnIsBusyChanged(bool value)
+    {
+        InstallCommand.NotifyCanExecuteChanged();
+        InstallQueueCommand.NotifyCanExecuteChanged();
+        InstallModpackAndPlayCommand.NotifyCanExecuteChanged();
+    }
     /// <summary>“装到”临时换成了不是当前实例的那个（显示“仅本次”）。</summary>
     public bool IsTemporaryTarget => TargetInstance is { } t && _service.CurrentInstance is { } c && t != c && Instances.Contains(c);
 
@@ -499,6 +507,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             foreach (var p in result.Items)
             {
                 var item = new ProjectItem(p);
+                item.Queued = Queue.Contains(item.Project.Source, item.Project.Id);
                 Results.Add(item);
                 _ = LoadIconAsync(item);
             }
@@ -811,8 +820,9 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     /// <summary>往没有加载器的原版实例里装模组：装了也不会生效，安装前拦下。</summary>
     internal static bool BlocksVanillaModInstall(ContentType type, GameInstance instance) => type == ContentType.Mod && instance.Loader is null;
 
-    private async Task InstallModpackFromFileAsync(ContentFile file)
+    private async Task<string?> InstallModpackFromFileAsync(ContentFile file)
     {
+        string? id = null;
         IsBusy = true;
         _workCts = new CancellationTokenSource();
         var importStarted = false;
@@ -822,7 +832,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Info("content.modpack.downloading"));
             await _service.Downloader.DownloadOneAsync(ContentInstaller.ToItem(file, Path.GetDirectoryName(temp)!), _workCts.Token);
             importStarted = true;
-            await ImportCoreAsync(temp, NewInstanceName, _workCts.Token);
+            id = await ImportCoreAsync(temp, NewInstanceName, _workCts.Token);
         }
         catch (ManualDownloadRequiredException e)
         {
@@ -843,6 +853,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             Progress = 0;
             try { Directory.Delete(Path.GetDirectoryName(temp)!, true); } catch { /* 临时文件 */ }
         }
+        return id;
     }
 
     /// <summary>导入本地整合包文件（由界面的文件选择器调用）。Returns the new instance's id, or null when it did not finish.</summary>
