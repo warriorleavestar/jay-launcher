@@ -342,38 +342,47 @@
               </ComboBox>
 
               <TextBlock Grid.Row="2" Classes="label" Text="{l:T instance.settings.memory}" />
-              <WrapPanel Grid.Row="2" Grid.Column="1" ItemSpacing="8" LineSpacing="4" Margin="0,8,0,0">
+              <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" Spacing="4">
+              <WrapPanel ItemSpacing="8" LineSpacing="4">
                 <ComboBox ItemsSource="{Binding MemoryModes}" SelectedIndex="{Binding MemoryModeIndex}" MinWidth="160" />
-                <TextBox Text="{Binding MemoryText}" Width="100" PlaceholderText="MB" />
+                <TextBox x:Name="InstanceMemoryBox" Text="{Binding MemoryText, UpdateSourceTrigger=LostFocus}" Width="100" PlaceholderText="4G / 4096" />
                 <TextBlock Classes="hint" Text="{l:T instance.settings.manual_hint}" VerticalAlignment="Center" />
               </WrapPanel>
+                <TextBlock Classes="field-error" Text="{Binding MemoryError}" IsVisible="{Binding HasMemoryError}" />
+              </StackPanel>
 
               <TextBlock Grid.Row="3" Classes="label" Text="{l:T instance.settings.jvm_args}" />
-              <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding JvmArgs}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.jvm_hint}" />
+              <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,8,0,0" Spacing="4">
+                <TextBox x:Name="InstanceJvmArgsBox" Text="{Binding JvmArgs, UpdateSourceTrigger=LostFocus}" PlaceholderText="{l:T instance.settings.jvm_hint}" />
+                <TextBlock Classes="field-error" Text="{Binding ArgsError}" IsVisible="{Binding HasArgsError}" />
+              </StackPanel>
 
               <TextBlock Grid.Row="4" Classes="label" Text="{l:T instance.settings.game_args}" />
-              <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding GameArgs}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.inherit_hint}" />
+              <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding GameArgs, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.inherit_hint}" />
 
               <TextBlock Grid.Row="5" Classes="label" Text="{l:T instance.settings.window_size}" />
-              <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-                <TextBox Text="{Binding WidthText}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
+              <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,8,0,0" Spacing="4">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBox Text="{Binding WidthText, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
                 <TextBlock Text="×" VerticalAlignment="Center" />
-                <TextBox Text="{Binding HeightText}" Width="90" PlaceholderText="{l:T instance.settings.height}" />
+                <TextBox Text="{Binding HeightText, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.height}" />
+              </StackPanel>
+              <TextBlock Classes="field-error" Text="{Binding SizeError}" IsVisible="{Binding HasSizeError}" />
               </StackPanel>
 
               <TextBlock Grid.Row="6" Classes="label" Text="{l:T instance.settings.fullscreen}" />
               <ComboBox Grid.Row="6" Grid.Column="1" ItemsSource="{Binding FullscreenChoices}" SelectedIndex="{Binding FullscreenIndex}" MinWidth="200" Margin="0,8,0,0" />
 
               <TextBlock Grid.Row="7" Classes="label" Text="{l:T instance.settings.pre_launch}" />
-              <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding PreLaunch}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.pre_launch_hint}" />
+              <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding PreLaunch, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.pre_launch_hint}" />
 
               <TextBlock Grid.Row="8" Classes="label" Text="{l:T instance.settings.post_exit}" />
-              <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding PostExit}" Margin="0,8,0,0" />
+              <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" />
 
               <TextBlock Grid.Row="9" Classes="label" Text="{l:T instance.settings.join_server}" />
-              <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding JoinServer}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.join_server_hint}" />
+              <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding JoinServer, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.join_server_hint}" />
 
-              <Button Grid.Row="10" Grid.Column="1" Classes="primary" Command="{Binding SaveSettingsCommand}" Margin="0,12,0,4"><TextBlock Text="{l:T instance.settings.save}" TextWrapping="Wrap" /></Button>
+              <TextBlock Grid.Row="10" Grid.Column="1" Classes="hint" Margin="0,12,0,4" Text="{l:T instance.settings.autosave_hint}" TextWrapping="Wrap" />
             </Grid>
           </ScrollViewer>
         </TabItem>

@@ -8,7 +8,18 @@ namespace Amber.App.Views;
 
 public partial class HomePage : UserControl
 {
-    public HomePage() => InitializeComponent();
+    public HomePage()
+    {
+        InitializeComponent();
+        // 进入启动页时焦点放在启动按钮上，按 Enter 或空格就能启动（改版规格 7.2）；新手卡在的时候焦点交给卡。
+        AttachedToVisualTree += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(FocusPrimary, Avalonia.Threading.DispatcherPriority.Loaded);
+    }
+
+    internal void FocusPrimary()
+    {
+        if (DataContext is HomeViewModel { Onboarding.IsVisible: true }) return;
+        if (PrimaryButton.IsEffectivelyVisible && PrimaryButton.IsEffectivelyEnabled) PrimaryButton.Focus(Avalonia.Input.NavigationMethod.Tab);
+    }
 
     private async void ExportCrash_Click(object? sender, RoutedEventArgs e)
     {

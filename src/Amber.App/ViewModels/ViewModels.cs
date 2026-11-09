@@ -253,6 +253,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     public SettingsViewModel(LauncherService service)
     {
         _service = service;
+        _loading = true;
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
             var automatic = JavaOptions.FirstOrDefault(o => o.Path is null);
@@ -267,8 +268,10 @@ public sealed partial class SettingsViewModel : PageViewModel
         SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, s.DownloadSource));
         service.SettingsChangedElsewhere += () => Dispatcher.UIThread.Post(() =>
         {
+            _loading = true;
             GameDirectory = service.Settings.GameDirectory;
             SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, service.Settings.DownloadSource));
+            _loading = false;
         });
         Concurrency = s.DownloadConcurrency.ToString();
         AutoJavaDownload = s.AutoJavaDownload;
@@ -291,9 +294,13 @@ public sealed partial class SettingsViewModel : PageViewModel
         _initializing = true;
         SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(s.Language) ?? "system"));
         _initializing = false;
+        _loading = false;
     }
 
     private bool _initializing;
+
+    /// <summary>正在把设置文件里的值填进界面：这期间的改动不是用户改的，不保存。</summary>
+    private bool _loading;
 
     /// <summary>界面语言：第一项跟随系统，其余每种语言用自己的文字写名字（不管现在是什么语言都认得出来）。</summary>
     public Amber.App.Localization.OptionItem[] LanguageOptions { get; } =
@@ -326,45 +333,177 @@ public sealed partial class SettingsViewModel : PageViewModel
     {
         var current = _service.Settings.JavaPath;
         var found = await _service.Java.ScanAsync(refresh);
+        _loading = true;
         JavaOptions.Clear();
         JavaOptions.Add(new JavaOption(L.T("settings.java.automatic"), null));
         foreach (var j in found) JavaOptions.Add(new JavaOption(j.ToString(), j.JavaPath));
         SelectedJava = JavaOptions.FirstOrDefault(o => o.Path == current) ?? JavaOptions[0];
+        _loading = false;
     }
 
     private static string? Blank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
-    [RelayCommand]
-    private void Save()
+    // ---- 即改即存（改版规格 3.10）----
+    // 下拉框、复选框改了立即存；文本框绑定在失焦时才写回，写回时校验，通过才存，不通过就在字段下面提示、保留输入。
+
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasConcurrencyError))] public partial string? ConcurrencyError { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasWindowError))] public partial string? WindowError { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasJvmArgsError))] public partial string? JvmArgsError { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasGameArgsError))] public partial string? GameArgsError { get; set; }
+    public bool HasConcurrencyError => ConcurrencyError is not null;
+    public bool HasWindowError => WindowError is not null;
+    public bool HasJvmArgsError => JvmArgsError is not null;
+    public bool HasGameArgsError => GameArgsError is not null;
+
+    /// <summary>改游戏目录前确认（会重新扫描实例）；界面接上对话框，返回 false 就不换。</summary>
+    public Func<string, Task<bool>>? ConfirmDirectoryChange { get; set; }
+
+    partial void OnSourceIndexChanged(int value) => Persist();
+    partial void OnSelectedJavaChanged(JavaOption? value) => Persist();
+    partial void OnAutoJavaDownloadChanged(bool value) => Persist();
+    partial void OnNoTraceChanged(bool value) => Persist();
+    partial void OnExperimentalBakeChanged(bool value) => Persist();
+    partial void OnBakeLoaderPathChanged(string value) => Persist();
+    partial void OnIsolateVersionsChanged(bool value) => Persist();
+    partial void OnConcurrencyChanged(string value) => Persist();
+    partial void OnWindowWidthChanged(string value) => Persist();
+    partial void OnWindowHeightChanged(string value) => Persist();
+    partial void OnFullscreenChanged(bool value) => Persist();
+    partial void OnJvmArgsChanged(string value) => Persist();
+    partial void OnGameArgsChanged(string value) => Persist();
+    partial void OnPreLaunchChanged(string value) => Persist();
+    partial void OnPostExitChanged(string value) => Persist();
+    partial void OnCurseForgeKeyChanged(string value) => Persist();
+    partial void OnCurseForgeRootChanged(string value) => Persist();
+    partial void OnUpdateFeedChanged(string value) => Persist();
+
+    /// <summary>主题选了立即生效。</summary>
+    partial void OnSelectedThemeIndexChanged(int value)
     {
+        if (_loading || value < 0) return;
+        _service.Settings.Theme = ThemeKeys[Math.Min(value, ThemeKeys.Length - 1)];
+        App.ApplyTheme(_service.Settings.Theme);
+        Persist();
+    }
+
+    partial void OnGameDirectoryChanged(string value)
+    {
+        if (_loading) return;
+        _ = ChangeDirectoryAsync(value);
+    }
+
+    /// <summary>换游戏目录：先确认，取消就把输入框改回原来的目录。</summary>
+    private async Task ChangeDirectoryAsync(string value)
+    {
+        var target = value.Trim();
         var s = _service.Settings;
-        var dirChanged = !string.Equals(s.GameDirectory, GameDirectory.Trim(), StringComparison.OrdinalIgnoreCase);
-        s.GameDirectory = GameDirectory.Trim();
+        if (target.Length == 0 || string.Equals(s.GameDirectory, target, StringComparison.OrdinalIgnoreCase)) return;
+        if (ConfirmDirectoryChange is { } confirm && !await confirm(target))
+        {
+            _loading = true;
+            GameDirectory = s.GameDirectory;
+            _loading = false;
+            return;
+        }
+        s.GameDirectory = target;
+        Persist();
+        SetStatus(StatusMessage.Success("settings.saved_directory_changed"));
+        _ = LoadJavaAsync(true);
+    }
+
+    /// <summary>把通过校验的字段写进设置并保存；没通过的字段留在设置里的旧值，提示写在字段下面。</summary>
+    private void Persist()
+    {
+        if (_loading) return;
+        var s = _service.Settings;
         if (SourceIndex >= 0) s.DownloadSource = SourceKeys[Math.Min(SourceIndex, SourceKeys.Length - 1)];
-        s.DownloadConcurrency = int.TryParse(Concurrency, out var c) ? Math.Clamp(c, 1, 128) : 32;
-        Concurrency = s.DownloadConcurrency.ToString();
-        s.JavaPath = SelectedJava?.Path;
+        if (SettingInput.TryParsePositiveInt(Concurrency, out var c, 128) && c is not null)
+        {
+            s.DownloadConcurrency = c.Value;
+            ConcurrencyError = null;
+            Normalize(() => Concurrency = c.Value.ToString());
+        }
+        else ConcurrencyError = L.T("settings.error.concurrency");
+        if (SelectedJava is not null) s.JavaPath = SelectedJava.Path;
         s.AutoJavaDownload = AutoJavaDownload;
         s.NoTrace = NoTrace;
         s.ExperimentalBake = ExperimentalBake;
         s.BakeLoaderPath = Blank(BakeLoaderPath);
         s.IsolateVersions = IsolateVersions;
-        s.WindowWidth = int.TryParse(WindowWidth, out var w) && w > 0 ? w : null;
-        s.WindowHeight = int.TryParse(WindowHeight, out var h) && h > 0 ? h : null;
+        if (SettingInput.TryParsePositiveInt(WindowWidth, out var w, 16384) && SettingInput.TryParsePositiveInt(WindowHeight, out var h, 16384))
+        {
+            s.WindowWidth = w;
+            s.WindowHeight = h;
+            WindowError = null;
+            // 全角数字等认出来以后，输入框里也换成规范写法（不再触发保存）。
+            // 绑定正在把输入框的值写回来，这时改属性输入框不会刷新，所以排到下一轮再改。
+            Normalize(() => { WindowWidth = w?.ToString() ?? ""; WindowHeight = h?.ToString() ?? ""; });
+        }
+        else WindowError = L.T("settings.error.window");
         s.Fullscreen = Fullscreen;
-        s.JvmArgs = Blank(JvmArgs);
-        s.GameArgs = Blank(GameArgs);
+        if (SettingInput.QuotesBalanced(JvmArgs))
+        {
+            s.JvmArgs = Blank(JvmArgs);
+            JvmArgsError = null;
+        }
+        else JvmArgsError = L.T("settings.error.quotes");
+        if (SettingInput.QuotesBalanced(GameArgs))
+        {
+            s.GameArgs = Blank(GameArgs);
+            GameArgsError = null;
+        }
+        else GameArgsError = L.T("settings.error.quotes");
         s.PreLaunchCommand = Blank(PreLaunch);
         s.PostExitCommand = Blank(PostExit);
         s.CurseForgeApiKey = Blank(CurseForgeKey);
         s.CurseForgeApiRoot = Blank(CurseForgeRoot);
         s.UpdateFeedUrl = Blank(UpdateFeed);
-        if (SelectedThemeIndex >= 0) s.Theme = ThemeKeys[Math.Min(SelectedThemeIndex, ThemeKeys.Length - 1)];
-        App.ApplyTheme(s.Theme);
-        s.Save();
+        try
+        {
+            s.Save();
+        }
+        catch (IOException e)
+        {
+            SetStatus(StatusMessage.Failure("settings.error.save_failed", e, ErrorText.Of(e)));
+            return;
+        }
         _service.Reload();
-        SetStatus(StatusMessage.Success(dirChanged ? "settings.saved_directory_changed" : "common.saved"));
-        if (dirChanged) _ = LoadJavaAsync(true);
+        if (HasConcurrencyError || HasWindowError || HasJvmArgsError || HasGameArgsError)
+            SetStatus(StatusMessage.Warning("settings.saved_with_errors"));
+        else
+            SetStatus(StatusMessage.Success(_service.AnyRunning ? "settings.saved_next_launch" : "settings.saved_tick"));
+    }
+
+    private void Normalize(Action apply) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+    {
+        _loading = true;
+        try { apply(); }
+        finally { _loading = false; }
+    });
+
+    /// <summary>↺ 恢复默认：把这一项改回新装时的值（随即保存）。</summary>
+    [RelayCommand]
+    private void ResetField(string? field)
+    {
+        var d = new AppSettings();
+        switch (field)
+        {
+            case "source": SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, d.DownloadSource)); break;
+            case "concurrency": Concurrency = d.DownloadConcurrency.ToString(); break;
+            case "window":
+                _loading = true;
+                WindowWidth = d.WindowWidth?.ToString() ?? "";
+                _loading = false;
+                WindowHeight = d.WindowHeight?.ToString() ?? "";
+                Fullscreen = d.Fullscreen;
+                break;
+            case "jvm": JvmArgs = d.JvmArgs ?? ""; break;
+            case "game_args": GameArgs = d.GameArgs ?? ""; break;
+            case "pre": PreLaunch = d.PreLaunchCommand ?? ""; break;
+            case "post": PostExit = d.PostExitCommand ?? ""; break;
+            case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
+            case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
+        }
     }
 }
 

@@ -32,10 +32,24 @@ public partial class MainWindow : Window
         };
         Toasts.Attach(this, new Controls.BakeNoticeState());
         DataContextChanged += (_, _) => AttachGameWindowBehaviour();
+        // 设置页改游戏目录前确认（会重新扫描实例）。
+        DataContextChanged += (_, _) =>
+        {
+            if (DataContext is MainViewModel { Pages: var pages } && pages.OfType<SettingsViewModel>().FirstOrDefault() is { } settings)
+                settings.ConfirmDirectoryChange = path => ConfirmDialog.AskAsync(this, L.T("settings.directory.confirm_title"),
+                    L.F("settings.directory.confirm_body", path), L.T("settings.directory.confirm"));
+        };
         // Esc 取消所有“再点一次确认”的按钮；Ctrl+Z 撤销最近一次删除（焦点在输入框里时留给输入框自己的撤销）。
         AddHandler(KeyDownEvent, (_, e) =>
         {
             if (e.Key == Avalonia.Input.Key.Escape) Controls.ConfirmButton.CancelAll();
+            // Ctrl+Enter 启动当前实例；焦点在输入框里（JVM 参数这类）时不触发，免得边填参数边把游戏启动了。
+            else if (e.Key == Avalonia.Input.Key.Enter && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control)
+            {
+                if (FocusManager?.GetFocusedElement() is TextBox) return;
+                if (DataContext is MainViewModel { Pages: var pages } && pages.OfType<HomeViewModel>().FirstOrDefault() is { } home)
+                    e.Handled = home.LaunchShortcut();
+            }
             else if (e.Key == Avalonia.Input.Key.Z && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control
                      && FocusManager?.GetFocusedElement() is not TextBox)
                 e.Handled = Toasts.UndoLatest();

@@ -22,7 +22,8 @@
     <DataTemplate DataType="vm:ToolsViewModel"><views:ToolsPage /></DataTemplate>
     <DataTemplate DataType="vm:LogViewModel"><views:LogPage /></DataTemplate>
 
-    <!-- 设置页 -->
+    <!-- 设置页：即改即存（改版规格 3.10）。下拉框、复选框改了就存；文本框失焦时校验，通过才存，不通过在下面写原因并保留输入。
+         XAML 里的声明顺序和行顺序一致，Tab 键从上到下走。 -->
     <DataTemplate DataType="vm:SettingsViewModel">
       <Grid RowDefinitions="Auto,*,Auto">
         <TextBlock Classes="h1" Text="{l:T instance.settings.title}" />
@@ -31,35 +32,38 @@
             <Border Classes="card">
               <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Text="{l:T settings.directory.label}" VerticalAlignment="Center" />
-                <TextBox Grid.Column="1" Text="{Binding GameDirectory}" />
+                <TextBox x:Name="GameDirectoryBox" Grid.Column="1" Text="{Binding GameDirectory, UpdateSourceTrigger=LostFocus}" />
                 <Button Grid.Column="2" Content="{l:T common.browse}" Margin="8,0,0,0" Click="BrowseGameDir_Click" />
 
                 <TextBlock Grid.Row="1" Text="{l:T settings.source.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
                 <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding SourceOptions}" SelectedIndex="{Binding SourceIndex}"
                           HorizontalAlignment="Stretch" Margin="0,12,0,0" />
+                <Button Grid.Row="1" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="source"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
-                <TextBlock Grid.Row="2" Text="{l:T settings.download.concurrency}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Concurrency}" Width="90" HorizontalAlignment="Left" Margin="0,12,0,0" />
-
-                <TextBlock Grid.Row="5" Text="{l:T settings.language.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding SelectedLanguageIndex}" MinWidth="160" Margin="0,12,0,0" />
-
-                <TextBlock Grid.Row="4" Text="{l:T settings.theme.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedIndex="{Binding SelectedThemeIndex}" MinWidth="160" Margin="0,12,0,0" />
+                <TextBlock Grid.Row="2" Text="{l:T settings.download.concurrency}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox x:Name="ConcurrencyBox" Text="{Binding Concurrency, UpdateSourceTrigger=LostFocus}" Width="90" HorizontalAlignment="Left" />
+                  <TextBlock Classes="field-error" Text="{Binding ConcurrencyError}" IsVisible="{Binding HasConcurrencyError}" />
+                </StackPanel>
+                <Button Grid.Row="2" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="concurrency"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
                 <TextBlock Grid.Row="3" Text="{l:T instance.settings.isolation}" VerticalAlignment="Center" Margin="0,12,0,0" />
                 <CheckBox Grid.Row="3" Grid.Column="1" IsChecked="{Binding IsolateVersions}" Margin="0,12,0,0"
                           Content="{l:T settings.isolation.hint}" />
+
+                <TextBlock Grid.Row="4" Text="{l:T settings.theme.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedIndex="{Binding SelectedThemeIndex}" MinWidth="160" Margin="0,12,0,0" />
+                <Button Grid.Row="4" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="theme"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="5" Text="{l:T settings.language.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding SelectedLanguageIndex}" MinWidth="160" Margin="0,12,0,0" />
               </Grid>
             </Border>
             <Border Classes="card">
               <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
-                <!-- 无痕模式：游戏日志里不写聊天行 -->
-                <TextBlock Grid.Row="7" Text="{l:T settings.notrace.label}" VerticalAlignment="Top" Margin="0,12,0,0" />
-                <StackPanel Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,12,0,0" Spacing="4">
-                  <CheckBox x:Name="NoTraceBox" IsChecked="{Binding NoTrace}" Content="{l:T settings.notrace.toggle}" />
-                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.notrace.hint}" TextWrapping="Wrap" />
-                </StackPanel>
                 <TextBlock Text="Java" VerticalAlignment="Center" />
                 <ComboBox Grid.Column="1" ItemsSource="{Binding JavaOptions}" SelectedItem="{Binding SelectedJava}"
                           HorizontalAlignment="Stretch">
@@ -74,23 +78,51 @@
                 <CheckBox Grid.Row="1" Grid.Column="1" IsChecked="{Binding AutoJavaDownload}" Margin="0,8,0,0"
                           Content="{l:T settings.java.auto_download}" />
 
-                <TextBlock Grid.Row="2" Text="{l:T instance.settings.window_size}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <!-- 窄窗口下“全屏”换到下一行，不超出右边 -->
-                <WrapPanel Grid.Row="2" Grid.Column="1" ItemSpacing="8" LineSpacing="4" Margin="0,12,0,0">
-                  <TextBox Text="{Binding WindowWidth}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
-                  <TextBlock Text="×" VerticalAlignment="Center" />
-                  <TextBox Text="{Binding WindowHeight}" Width="90" PlaceholderText="{l:T instance.settings.height}" />
-                  <CheckBox IsChecked="{Binding Fullscreen}" Content="{l:T instance.settings.fullscreen}" />
-                </WrapPanel>
+                <TextBlock Grid.Row="2" Text="{l:T instance.settings.window_size}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <WrapPanel ItemSpacing="8" LineSpacing="8">
+                    <TextBox x:Name="WindowWidthBox" Text="{Binding WindowWidth, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
+                    <TextBlock Text="×" VerticalAlignment="Center" />
+                    <TextBox x:Name="WindowHeightBox" Text="{Binding WindowHeight, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.height}" />
+                    <CheckBox IsChecked="{Binding Fullscreen}" Content="{l:T instance.settings.fullscreen}" />
+                  </WrapPanel>
+                  <TextBlock Classes="field-error" Text="{Binding WindowError}" IsVisible="{Binding HasWindowError}" />
+                </StackPanel>
+                <Button Grid.Row="2" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="window"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
-                <TextBlock Grid.Row="3" Text="{l:T instance.settings.jvm_args}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding JvmArgs}" Margin="0,12,0,0" />
-                <TextBlock Grid.Row="4" Text="{l:T instance.settings.game_args}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding GameArgs}" Margin="0,12,0,0" />
+                <TextBlock Grid.Row="3" Text="{l:T instance.settings.jvm_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox x:Name="JvmArgsBox" Text="{Binding JvmArgs, UpdateSourceTrigger=LostFocus}" />
+                  <TextBlock Classes="field-error" Text="{Binding JvmArgsError}" IsVisible="{Binding HasJvmArgsError}" />
+                </StackPanel>
+                <Button Grid.Row="3" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="jvm"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="4" Text="{l:T instance.settings.game_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox Text="{Binding GameArgs, UpdateSourceTrigger=LostFocus}" />
+                  <TextBlock Classes="field-error" Text="{Binding GameArgsError}" IsVisible="{Binding HasGameArgsError}" />
+                </StackPanel>
+                <Button Grid.Row="4" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="game_args"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
                 <TextBlock Grid.Row="5" Text="{l:T instance.settings.pre_launch}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding PreLaunch}" Margin="0,12,0,0" />
+                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding PreLaunch, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
+                <Button Grid.Row="5" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="pre"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
                 <TextBlock Grid.Row="6" Text="{l:T instance.settings.post_exit}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding PostExit}" Margin="0,12,0,0" />
+                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
+                <Button Grid.Row="6" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="post"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <!-- 无痕模式：游戏日志里不写聊天行 -->
+                <TextBlock Grid.Row="7" Text="{l:T settings.notrace.label}" VerticalAlignment="Top" Margin="0,12,0,0" />
+                <StackPanel Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,12,0,0" Spacing="4">
+                  <CheckBox x:Name="NoTraceBox" IsChecked="{Binding NoTrace}" Content="{l:T settings.notrace.toggle}" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.notrace.hint}" TextWrapping="Wrap" />
+                </StackPanel>
               </Grid>
             </Border>
             <Border Classes="card">
@@ -98,17 +130,17 @@
                 <TextBlock Classes="h2" Text="{l:T settings.bake.title}" Margin="0" />
                 <CheckBox IsChecked="{Binding ExperimentalBake}" Content="{l:T settings.bake.toggle}" />
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.bake.hint}" TextWrapping="Wrap" />
-                <TextBox Text="{Binding BakeLoaderPath}" IsEnabled="{Binding ExperimentalBake}" PlaceholderText="{l:T settings.bake.loader_hint}" />
+                <TextBox Text="{Binding BakeLoaderPath, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding ExperimentalBake}" PlaceholderText="{l:T settings.bake.loader_hint}" />
               </StackPanel>
             </Border>
             <Border Classes="card">
               <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
                 <TextBlock Text="{l:T settings.curseforge.key}" VerticalAlignment="Center" />
-                <TextBox Grid.Column="1" Text="{Binding CurseForgeKey}" PasswordChar="●" PlaceholderText="{l:T settings.curseforge.key_hint}" />
+                <TextBox Grid.Column="1" Text="{Binding CurseForgeKey, UpdateSourceTrigger=LostFocus}" PasswordChar="●" PlaceholderText="{l:T settings.curseforge.key_hint}" />
                 <TextBlock Grid.Row="1" Text="{l:T settings.curseforge.endpoint}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding CurseForgeRoot}" Margin="0,12,0,0" PlaceholderText="{l:T settings.curseforge.endpoint_hint}" />
+                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding CurseForgeRoot, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" PlaceholderText="{l:T settings.curseforge.endpoint_hint}" />
                 <TextBlock Grid.Row="2" Text="{l:T settings.update.feed}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding UpdateFeed}" Margin="0,12,0,0" PlaceholderText="{l:T settings.update.feed_hint}" />
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding UpdateFeed, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" PlaceholderText="{l:T settings.update.feed_hint}" />
                 <TextBlock Grid.Row="3" Grid.Column="1" Classes="hint" FontSize="12" Margin="0,6,0,0" Text="{l:T settings.accounts.client_id_hint}" />
               </Grid>
             </Border>
@@ -122,10 +154,7 @@
             </Border>
           </StackPanel>
         </ScrollViewer>
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="12" Margin="0,4,0,0">
-          <Button Classes="primary" Content="{l:T settings.save}" Command="{Binding SaveCommand}" Padding="28,10" />
-          <c:StatusBar Message="{Binding StatusInfo}" VerticalAlignment="Center" />
-        </StackPanel>
+        <c:StatusBar Grid.Row="2" x:Name="SettingsStatus" Message="{Binding StatusInfo}" Margin="0,4,0,0" />
       </Grid>
     </DataTemplate>
 
