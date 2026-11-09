@@ -12,6 +12,15 @@ public class UnixRemoteTests
     private static readonly ushort[] Extended = [0x1C, 0x1D, 0x35, 0x37, 0x38, 0x47, 0x48, 0x49, 0x4B, 0x4D, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x5B, 0x5C, 0x5D];
 
     [Fact]
+    public void MacFrameworkNames_MapToSystemPaths()
+    {
+        Assert.Equal("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", Amber.Core.Interop.MacFrameworks.PathOf(Amber.Core.Interop.MacFrameworks.CoreGraphics));
+        Assert.Equal("/System/Library/Frameworks/Carbon.framework/Carbon", Amber.Core.Interop.MacFrameworks.PathOf(Amber.Core.Interop.MacFrameworks.Carbon));
+        Assert.Null(Amber.Core.Interop.MacFrameworks.PathOf("libX11.so.6"));
+        Assert.Null(Amber.Core.Interop.MacFrameworks.PathOf("JayMac."));
+    }
+
+    [Fact]
     public void X11_EveryKeyHasAKeycode()
     {
         foreach (var s in Basic.Where(s => s != 0x54 && s != 0x55)) Assert.Equal(s + 8u, RemoteKeyCodes.X11(s, false));
