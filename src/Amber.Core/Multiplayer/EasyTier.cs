@@ -308,7 +308,7 @@ public static class EasyTierArgs
     /// <summary>Developer switch for the QUIC proxy trial (real-device test of slow invite rooms).</summary>
     public const string QuicProxyVariable = "AMBER_ET_QUIC";
 
-    public static bool QuicProxyRequested => Environment.GetEnvironmentVariable(QuicProxyVariable) == "1";
+    public static bool QuicProxyRequested => System.Environment.GetEnvironmentVariable(QuicProxyVariable) == "1";
 
     /// <summary>房主固定用这个虚拟地址，加入方用同网段的随机地址。</summary>
     public const string HostIp = "10.233.144.1";
