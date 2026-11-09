@@ -31,9 +31,9 @@
           <Button Grid.Column="1" x:Name="AddOfflineButton" Classes="primary" Content="{l:T onboarding.name.add}" Command="{Binding AddOfflineCommand}" />
         </Grid>
         <TextBlock Text="{Binding NameProblem}" IsVisible="{Binding !!NameProblem.Length}" Foreground="{DynamicResource DangerText}"
-                   FontSize="{StaticResource FontCaption}" TextWrapping="Wrap" />
+                   FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" />
         <TextBlock Text="{Binding NameWarning}" IsVisible="{Binding !!NameWarning.Length}" Foreground="{DynamicResource WarningText}"
-                   FontSize="{StaticResource FontCaption}" TextWrapping="Wrap" />
+                   FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" />
         <Button Classes="secondary" Content="{l:T onboarding.name.microsoft}" Command="{Binding MicrosoftCommand}" />
       </StackPanel>
 

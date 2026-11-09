@@ -684,7 +684,7 @@
             </StackPanel>
             <!-- 直连码默认打码；两种码都带着本机的公网地址 -->
             <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-              <TextBox Text="{Binding MyDirectCodeDisplay}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="{StaticResource FontCaption}" TextWrapping="Wrap" MaxHeight="70" />
+              <TextBox Text="{Binding MyDirectCodeDisplay}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" MaxHeight="70" />
               <Button Grid.Column="1" Command="{Binding ToggleDirectCodeShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
                 <Panel>
                   <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !DirectCodeShown}" />
@@ -732,7 +732,7 @@
             </Border>
             <ItemsControl ItemsSource="{Binding MatrixLines}" IsVisible="{Binding !!MatrixLines.Count}">
               <ItemsControl.ItemTemplate>
-                <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,monospace" FontSize="{StaticResource FontCaption}" TextWrapping="Wrap" /></DataTemplate>
+                <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,monospace" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" /></DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </StackPanel>
@@ -751,7 +751,7 @@
               <ScrollViewer Name="DebugScroll">
                 <ItemsControl ItemsSource="{Binding DebugLines}">
                   <ItemsControl.ItemTemplate>
-                    <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,monospace" FontSize="{StaticResource FontCaption}" TextWrapping="Wrap" /></DataTemplate>
+                    <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,monospace" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" /></DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
               </ScrollViewer>
