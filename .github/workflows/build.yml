@@ -166,8 +166,16 @@ jobs:
       - name: Stage APK
         shell: bash
         run: |
+          APK_PATH="Amber.Android/bin/Release/net10.0-android/publish/nz.work.minecraft.jay-Signed.apk"
+          DISPLAY_VERSION="$(dotnet msbuild Amber.Android/Amber.Android.csproj -getProperty:ApplicationDisplayVersion)"
+          BUILD_VERSION="$(dotnet msbuild Amber.Android/Amber.Android.csproj -getProperty:ApplicationVersion)"
+          AAPT_PATH="$(find "${{ runner.temp }}/android-sdk/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
+          test -n "$AAPT_PATH"
+          BADGING="$("$AAPT_PATH" dump badging "$APK_PATH" | head -n 1)"
+          [[ "$BADGING" == *"versionName='$DISPLAY_VERSION'"* ]]
+          [[ "$BADGING" == *"versionCode='$BUILD_VERSION'"* ]]
           mkdir -p ../packages
-          cp Amber.Android/bin/Release/net10.0-android/publish/nz.work.minecraft.jay-Signed.apk ../packages/Jay-android-experimental.apk
+          cp "$APK_PATH" ../packages/Jay-android-experimental.apk
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -205,6 +213,10 @@ jobs:
         run: |
           APP_PATH="$(find Amber.iOS/bin/Release/net10.0-ios/iossimulator-arm64 -type d -name 'Jay.app' -print -quit)"
           test -n "$APP_PATH"
+          DISPLAY_VERSION="$(dotnet msbuild Amber.iOS/Amber.iOS.csproj -getProperty:ApplicationDisplayVersion)"
+          BUILD_VERSION="$(dotnet msbuild Amber.iOS/Amber.iOS.csproj -getProperty:ApplicationVersion)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")" = "$DISPLAY_VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")" = "$BUILD_VERSION"
           mkdir -p ../packages
           tar -C "$(dirname "$APP_PATH")" -czf ../packages/Jay-ios-simulator-arm64-experimental.tar.gz "$(basename "$APP_PATH")"
 
