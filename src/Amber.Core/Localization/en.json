@@ -2321,5 +2321,22 @@
   "firstrun.tip.previous": "Previous tip",
   "firstrun.tip.next": "Next tip",
   "firstrun.back": "Back",
-  "firstrun.continue": "Continue"
+  "firstrun.continue": "Continue",
+  "drop.failed": "Couldn't add the dropped files: {0}",
+  "drop.unknown": "Jay doesn't recognise what this is: {0}",
+  "drop.modpack": "Import as a new instance",
+  "drop.theme": "Import this theme",
+  "drop.no_instance": "Pick an instance in the library first, then drop mods, packs or worlds again.",
+  "drop.vanilla": "{0} has no mod loader, so mods can't go in. Add Fabric or another loader in its settings first.",
+  "drop.mod": "Install into {0}",
+  "drop.resourcepack": "Add to {0}'s resource packs",
+  "drop.shader": "Add to {0}'s shaders",
+  "drop.world": "Import as a world of {0}",
+  "drop.world.done": "Imported {0} worlds into {1}",
+  "drop.world.done.one": "Imported a world into {1}",
+  "drop.datapack": "A datapack goes into one world: open {0} › Worlds, pick the world, then add it there.",
+  "drop.files": "{0} files",
+  "drop.files.one": "{0} file",
+  "drop.copied": "Added {0} files to {1}",
+  "drop.copied.one": "Added a file to {1}"
 }

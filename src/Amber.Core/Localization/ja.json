@@ -2274,5 +2274,19 @@
   "firstrun.tip.previous": "前のヒント",
   "firstrun.tip.next": "次のヒント",
   "firstrun.back": "戻る",
-  "firstrun.continue": "続ける"
+  "firstrun.continue": "続ける",
+  "drop.failed": "ドロップしたファイルを追加できませんでした：{0}",
+  "drop.unknown": "何のファイルか分かりません：{0}",
+  "drop.modpack": "新しいインスタンスとして読み込む",
+  "drop.theme": "このテーマを読み込む",
+  "drop.no_instance": "まずライブラリでインスタンスを選んでから、MOD・パック・ワールドをドロップしてください。",
+  "drop.vanilla": "{0} には MOD ローダーがないため MOD を入れられません。先に設定で Fabric などを入れてください。",
+  "drop.mod": "{0} に入れる",
+  "drop.resourcepack": "{0} のリソースパックに追加",
+  "drop.shader": "{0} のシェーダーに追加",
+  "drop.world": "{0} のワールドとして読み込む",
+  "drop.world.done": "{1} に {0} 個のワールドを読み込みました",
+  "drop.datapack": "データパックはワールドに入れます：{0} › ワールド でワールドを選んでから追加してください。",
+  "drop.files": "{0} 個のファイル",
+  "drop.copied": "{1} に {0} 個のファイルを追加しました"
 }

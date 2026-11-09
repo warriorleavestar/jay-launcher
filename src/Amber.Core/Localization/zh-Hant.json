@@ -2274,5 +2274,19 @@
   "firstrun.tip.previous": "上一條",
   "firstrun.tip.next": "下一條",
   "firstrun.back": "上一步",
-  "firstrun.continue": "繼續"
+  "firstrun.continue": "繼續",
+  "drop.failed": "沒加上拖進來的檔案：{0}",
+  "drop.unknown": "認不出這是什麼檔案：{0}",
+  "drop.modpack": "匯入成新實例",
+  "drop.theme": "匯入這個主題",
+  "drop.no_instance": "先在遊戲庫裡選一個實例，再把模組、資源包或存檔拖進來。",
+  "drop.vanilla": "{0} 沒有裝載入器，放不了模組。先在它的設定裡裝上 Fabric 之類的載入器。",
+  "drop.mod": "裝到 {0}",
+  "drop.resourcepack": "加到 {0} 的資源包",
+  "drop.shader": "加到 {0} 的光影",
+  "drop.world": "匯入為 {0} 的世界",
+  "drop.world.done": "匯入了 {0} 個世界到 {1}",
+  "drop.datapack": "資料包要放進某個世界：打開 {0} › 世界，選好世界再新增。",
+  "drop.files": "{0} 個檔案",
+  "drop.copied": "加了 {0} 個檔案到 {1}"
 }

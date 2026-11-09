@@ -147,6 +147,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The first-run wizard over the whole window (§6.1).</summary>
     public FirstRunViewModel FirstRun { get; }
 
+    /// <summary>Drag-and-drop import over the whole window (§6.25).</summary>
+    public DropViewModel Drop { get; }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
         if (oldValue is not null) oldValue.IsCurrent = false;
@@ -255,6 +258,17 @@ public sealed partial class MainViewModel : ObservableObject
         {
             shell.Navigate("discover");
             if (await content.ImportLocalPackAsync(path) is { } id && play) download.LaunchInstance?.Invoke(id);
+        };
+        var settingsPage = Pages.OfType<SettingsViewModel>().Single();
+        Drop = new DropViewModel(service)
+        {
+            PreviewPack = async path =>
+            {
+                shell.Navigate(LegacyRoutes.NewInstance);
+                download.SourceIndex = (int)NewInstanceSource.PackFile;
+                await download.PreviewPackAsync(path);
+            },
+            ImportTheme = settingsPage.ImportThemePack,
         };
         FirstRun = new FirstRunViewModel(service, home.Onboarding)
         {

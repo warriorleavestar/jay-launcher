@@ -546,6 +546,31 @@
     <!-- First-run wizard (§6.1): covers the whole shell, under the breaker countdown. -->
     <views:FirstRunWizard x:Name="FirstRunLayer" Grid.ColumnSpan="2" DataContext="{Binding FirstRun}" />
 
+    <!-- Drag-and-drop import (§6.25): one to three big zones for what is being dragged. Zones sit in a row on wide
+         windows and stack when compact. Dropping outside a zone does nothing. -->
+    <Border x:Name="DropLayer" Grid.ColumnSpan="2" IsVisible="{Binding Drop.IsActive}" Background="{DynamicResource Scrim}">
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" Margin="16">
+        <ItemsControl x:Name="DropTargets" ItemsSource="{Binding Drop.Targets}" HorizontalAlignment="Center">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel x:Name="DropTargetsPanel" ItemSpacing="14" LineSpacing="14" HorizontalAlignment="Center" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:DropTarget">
+              <Border Classes="card drop-target" Classes.hovered="{Binding IsHovered}" MinHeight="130" Padding="18">
+                <StackPanel Spacing="6" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="{DynamicResource FontSubtitle}" TextWrapping="Wrap" TextAlignment="Center" />
+                  <TextBlock Classes="hint" Text="{Binding Hint}" TextWrapping="Wrap" TextAlignment="Center" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Border Classes="card" IsVisible="{Binding Drop.HasNote}" MaxWidth="520" HorizontalAlignment="Center">
+          <TextBlock x:Name="DropNote" Text="{Binding Drop.Note}" TextWrapping="Wrap" TextAlignment="Center" />
+        </Border>
+      </StackPanel>
+    </Border>
+
     <!-- 熔断倒计时：盖住整个窗口，按空格或点按钮取消重启 -->
     <Border x:Name="BreakerOverlay" Grid.ColumnSpan="2" IsVisible="{Binding Multiplayer.IsBreakerCounting}" Background="{DynamicResource Scrim}">
       <Border Classes="card" MaxWidth="440" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">

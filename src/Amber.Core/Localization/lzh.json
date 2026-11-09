@@ -2211,5 +2211,19 @@
   "firstrun.tip.previous": "前一則",
   "firstrun.tip.next": "後一則",
   "firstrun.back": "返",
-  "firstrun.continue": "續"
+  "firstrun.continue": "續",
+  "drop.failed": "所曳之檔未能添：{0}",
+  "drop.unknown": "不識此為何檔：{0}",
+  "drop.modpack": "導為新實例",
+  "drop.theme": "導此主題",
+  "drop.no_instance": "先於遊戲庫擇一實例，再曳模組、資源包或存檔入。",
+  "drop.vanilla": "{0} 無載入器，不能置模組。先於其設定裝 Fabric 之屬。",
+  "drop.mod": "裝於 {0}",
+  "drop.resourcepack": "添於 {0} 之資源包",
+  "drop.shader": "添於 {0} 之光影",
+  "drop.world": "導為 {0} 之世界",
+  "drop.world.done": "已導 {0} 世界於 {1}",
+  "drop.datapack": "數據包當入某一世界：開 {0} › 世界，擇定而後添。",
+  "drop.files": "{0} 檔",
+  "drop.copied": "已添 {0} 檔於 {1}"
 }
