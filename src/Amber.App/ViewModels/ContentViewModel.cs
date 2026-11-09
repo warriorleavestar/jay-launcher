@@ -25,7 +25,7 @@ public sealed partial class ProjectItem(ContentProject project) : LocalizedObser
     public partial Bitmap? Icon { get; set; }
 
     /// <summary>下载数：中文和日文按“万 / 亿”，英文按 K / M / B。按当前界面语言的区域写数字。</summary>
-    internal static string FormatCount(long n) => L.Language == "en"
+    internal static string FormatCount(long n) => L.Language.StartsWith("en", StringComparison.Ordinal)
         ? Compact(n, 1_000, [("K", 1_000), ("M", 1_000_000), ("B", 1_000_000_000)], (unit, v) => v.ToString("0.#", L.Culture) + unit)
         : Compact(n, 10_000, [("content.count.ten_thousand", 10_000), ("content.count.hundred_million", 100_000_000)], (key, v) => L.F(key, v));
 

@@ -44,7 +44,13 @@ public partial class MainWindow : Window
         // Esc 取消所有“再点一次确认”的按钮；Ctrl+Z 撤销最近一次删除（焦点在输入框里时留给输入框自己的撤销）。
         AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.Key == Avalonia.Input.Key.Escape) Controls.ConfirmButton.CancelAll();
+            // 熔断倒计时里按空格：取消重启（倒计时盖住了整个窗口，空格不会落到别的控件上）。
+            if (e.Key == Avalonia.Input.Key.Space && DataContext is MainViewModel { Multiplayer.IsBreakerCounting: true } breaker)
+            {
+                breaker.Multiplayer.CancelBreakerRestart();
+                e.Handled = true;
+            }
+            else if (e.Key == Avalonia.Input.Key.Escape) Controls.ConfirmButton.CancelAll();
             // Ctrl+Enter 启动当前实例；焦点在输入框里（JVM 参数这类）时不触发，免得边填参数边把游戏启动了。
             else if (e.Key == Avalonia.Input.Key.Enter && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control)
             {

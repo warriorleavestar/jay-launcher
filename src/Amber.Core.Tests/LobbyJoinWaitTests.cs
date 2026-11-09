@@ -31,12 +31,12 @@ public sealed class LobbyJoinWaitTests
     public async Task NoPeerAtAllMeansTheRelayIsUnreachable()
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        // 找房主给足 5 秒、找中继 200 毫秒：连不上中继时应在找中继的时间后就报错，不等满 5 秒。
-        // （原来两者只差 400 毫秒，CI 的 Windows 机器忙时会超出。）
-        var e = await Assert.ThrowsAsync<LobbyUnreachableException>(() => Wait(() => [Self], Nodes, hostTimeout: TimeSpan.FromSeconds(5)));
+        // 找房主的时间给足 10 秒，断言 5 秒内报错：慢的 CI 机器也能分清“提前报中继连不上”和“等满了才报”。
+        var e = await Assert.ThrowsAsync<LobbyUnreachableException>(() => Wait(() => [Self], Nodes, hostTimeout: TimeSpan.FromSeconds(10)));
         Assert.Contains("relay.example", e.Message);
         Assert.Equal(L.F("core.mp.lobby.norelay", Nodes[0]), e.Message);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), watch.Elapsed.ToString());
+        // 不等满找房主的时间。
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
     }
 
     [Fact]

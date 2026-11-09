@@ -263,7 +263,7 @@ public sealed partial class MultiplayerViewModel
         var device = Device;
         await KnockAndJoinAsync(invite, async (me, name, ct) =>
         {
-            var outcome = await PublicJoin.KnockAsync(network, listing.Ip, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, listing.HostKey, ct, device);
+            var outcome = await PublicJoin.KnockAsync(network, listing.Ip, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, listing.HostKey, ct, device, AccountToken);
             // 密码房间握手失败多半是密码不对（长期邀请不会用完或过期）。
             return listing.Mode == RoomVisibility.Password && outcome.Reason == "invalid" ? outcome with { Reason = "password" } : outcome;
         });
@@ -275,7 +275,7 @@ public sealed partial class MultiplayerViewModel
         if (_public is not { } network) return null;
         try
         {
-            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, device: Device);
+            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, device: Device, account: AccountToken);
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException && !ct.IsCancellationRequested)
         {

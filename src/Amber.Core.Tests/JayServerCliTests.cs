@@ -134,4 +134,38 @@ public sealed class JayServerCliTests
             try { Directory.Delete(root, true); } catch (IOException) { }
         }
     }
+    [Fact]
+    public void AccountCommandsAndLoginSection()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-cli-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var output = new StringWriter();
+            var answers = new Queue<string>(["password1", "password1", "password2", "different"]);
+            int Run(params string[] args) => Program.AccountCommand(root, Options.Parse(["account", .. args]), output, _ => answers.Dequeue());
+            Assert.Equal(0, Run("add", "alice"));
+            Assert.Throws<ArgumentException>(() => Run("add", "alice"));
+            Assert.Throws<ArgumentException>(() => Run("passwd", "alice"));
+            Assert.Equal(0, Run("2fa", "on", "alice", "--issuer", "nz-friends"));
+            Assert.Contains("otpauth://totp/nz-friends%3Aalice", output.ToString());
+            Run("disable", "alice");
+            Run("list");
+            Assert.Contains("alice（停用）（两步验证）", output.ToString());
+            Assert.Throws<ArgumentException>(() => Run("remove", "bob"));
+            var accounts = new Amber.Core.Multiplayer.Public.AccountStore(Path.Combine(root, "accounts.json"));
+            Assert.NotNull(accounts.TotpSecret("alice"));
+
+            var login = Program.LoginFor(root, Options.Parse(["directory", "--accounts", "--require-2fa", "--factor", "mail:邮件里的码:/bin/false"]), "nz-friends", output);
+            Assert.NotNull(login);
+            Assert.Equal(["totp", "mail"], login!.Factors.Select(f => f.Name));
+            Assert.True(login.RequireSecondFactor);
+            Assert.Contains("\"requireFactor\":true", output.ToString());
+            Assert.Null(Program.LoginFor(root, Options.Parse(["directory"]), "nz-friends", output));
+            Assert.Throws<ArgumentException>(() => Program.LoginFor(root, Options.Parse(["directory", "--factor", "Bad:x:y"]), "n", output));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
 }

@@ -38,7 +38,7 @@ internal static class GameLanguage
                 }
                 catch (InvalidDataException) { } // 不让语言预设改变已有的启动校验流程。
             }
-            var language = Match(CultureInfo.CurrentUICulture, available);
+            var language = PlayfulMatch(L.Language, available) ?? Match(CultureInfo.CurrentUICulture, available);
             if (language is not null) WriteDefault(workDir, language);
         }
         catch (IOException) { } // 语言预设失败时保留游戏自身的默认行为。
@@ -56,6 +56,12 @@ internal static class GameLanguage
         if (code.Length is > 0 and <= 32 && code.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
             available.Add(code);
     }
+
+    /// <summary>Someone who picked 文言 or upside-down English for Jay gets the same playful language in the game, when the game has it.</summary>
+    internal static string? PlayfulMatch(string jayLanguage, IEnumerable<string> available) =>
+        L.Playful.Contains(jayLanguage) && L.MinecraftCodes.TryGetValue(jayLanguage, out var code)
+            ? available.FirstOrDefault(a => string.Equals(a, code, StringComparison.OrdinalIgnoreCase))
+            : null;
 
     internal static string? Match(CultureInfo culture, IEnumerable<string> available)
     {

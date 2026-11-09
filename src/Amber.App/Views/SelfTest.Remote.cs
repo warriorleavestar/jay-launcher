@@ -99,7 +99,7 @@ internal sealed class RemoteSelfTest(MainWindow window, MainViewModel main, stri
     public async Task RunAsync()
     {
         Directory.CreateDirectory(reportDir);
-        L.SetLanguage(L.Source);
+        L.SetLanguage("zh-Hans");
         try
         {
             await PageButtonsAsync();

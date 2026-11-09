@@ -116,9 +116,12 @@ public static class TunnelHandshake
             await McDisguise.WriteLoginAsync(stream, ct, key.Id);
             hs.ReadMessage(await McDisguise.ReadEncryptionRequestAsync(stream, ct));
             await McDisguise.WriteEncryptionResponseAsync(stream, hs.WriteMessage([(byte)service]), ct);
+            var binding = hs.HandshakeHash;
             var (send, receive) = hs.Split();
-            var (i2r, r2i) = Masks(hs.HandshakeHash);
-            return new SecureStream(stream, send, receive, profile, sendMask: r2i, receiveMask: i2r);
+            var (i2r, r2i) = Masks(binding);
+            var secure = new SecureStream(stream, send, receive, profile, sendMask: r2i, receiveMask: i2r);
+            if (key.Attestor is { } attestor) await MemberChannel.ProveAsInitiatorAsync(secure, attestor, binding, ct);
+            return secure;
         }
         finally
         {
@@ -143,9 +146,12 @@ public static class TunnelHandshake
             using var hs = new NoiseHandshake(profile.Pattern, initiator: true, MemberChannel.Prologue("tunnel", profile.Mode, true, member.Key.Id), psk);
             await McDisguise.WriteEncryptionRequestAsync(stream, hs.WriteMessage([]), ct);
             var service = ParseService(hs.ReadMessage(await McDisguise.ReadEncryptionResponseAsync(stream, ct)));
+            var binding = hs.HandshakeHash;
             var (send, receive) = hs.Split();
-            var (i2r, r2i) = Masks(hs.HandshakeHash);
-            return (new SecureStream(stream, send, receive, profile, sendMask: i2r, receiveMask: r2i), service, member);
+            var (i2r, r2i) = Masks(binding);
+            var secure = new SecureStream(stream, send, receive, profile, sendMask: i2r, receiveMask: r2i);
+            await MemberChannel.HostAttestAsync(secure, member, binding, ct);
+            return (secure, service, member);
         }
         finally
         {
