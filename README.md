@@ -4,155 +4,155 @@
 
 # Jay
 
-**干净、轻快的 Minecraft Java 版启动器**
+**A clean, lightweight launcher for Minecraft: Java Edition**
 
-没有遥测，没有远程开关，下载解压就能用。
+No telemetry, no remote switches. Download, unzip, run.
 
-[![最新版本](https://img.shields.io/github/v/release/warriorleavestar/jay-launcher?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=d98a1f)](https://github.com/warriorleavestar/jay-launcher/releases/latest)
-[![许可证](https://img.shields.io/github/license/warriorleavestar/jay-launcher?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
-![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20macOS%20%7C%20Linux-blue)
+[![Latest release](https://img.shields.io/github/v/release/warriorleavestar/jay-launcher?color=d98a1f)](https://github.com/warriorleavestar/jay-launcher/releases/latest)
+[![License](https://img.shields.io/github/license/warriorleavestar/jay-launcher)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 
-简体中文 | [English](README.en.md) | [代码签名政策](docs/code-signing-policy.md)
+English | [简体中文](README.zh-Hans.md) | [Code signing policy](docs/code-signing-policy.md) | [Contributing](CONTRIBUTING.md)
 
-![Jay 启动页](docs/images/jay-home.png)
+![Jay home page](docs/images/jay-home.png)
 
 </div>
 
-本项目原名 Amber，从 v0.7.0 起改名 **Jay**，程序和图标都换成了 Jay。旧账号和设置可以直接沿用，详见[改名与兼容说明](docs/announcements/2026-11-06-jay-rename.md)。
+The project was called Amber; from v0.7.0 it is named **Jay**, with the Jay name and feather icon. Existing accounts and settings carry over. See the [rename and compatibility notice](docs/announcements/2026-11-06-jay-rename.md) (Chinese).
 
-> **v0.7.0 的联机不兼容旧版本**：联机加密和加入房间的方式重做了，房间要用新的 `JAY2-` 邀请码，直连用 `JAY2D-` / `JAY2R-` 码。旧的 `AMB-` 房间码和直连码不再接受，一起联机的人都要升级到 v0.7.0。
+> **v0.7.0 multiplayer does not work with older versions.** Multiplayer encryption and joining were rebuilt: rooms use new `JAY2-` invite codes and direct connections use `JAY2D-` / `JAY2R-` codes. Old `AMB-` room and direct codes are no longer accepted, so everyone playing together needs v0.7.0.
 >
-> 标了 **（实验）** 的功能已经做完并通过自动测试，但还没有在真实环境里完整验证过，遇到问题欢迎[反馈](https://github.com/warriorleavestar/jay-launcher/issues/new/choose)。
+> Features marked **(experimental)** are complete and pass the automated tests but have not been fully verified in real-world use yet. Please [report problems](https://github.com/warriorleavestar/jay-launcher/issues/new/choose).
 
-## 下载安装
+## Download
 
-到 [Releases](https://github.com/warriorleavestar/jay-launcher/releases/latest) 下载与你的电脑对应的包。v0.5.9 及更早的版本使用 `Amber-` 包名前缀和 `Amber.exe`。
+Get the package for your computer from [Releases](https://github.com/warriorleavestar/jay-launcher/releases/latest). v0.5.9 and earlier use the `Amber-` archive prefix and `Amber.exe`.
 
-| 系统 | 文件 | 运行方式 |
+| System | File | Run |
 |---|---|---|
-| Windows 10+ x64 | `Jay-win-x64-aot.zip`（推荐） | 解压后双击 `Jay.exe` |
-| macOS Apple 芯片 | `Jay-osx-arm64.tar.gz` | 解压后在终端运行 `./Jay` |
-| macOS Intel（实验） | `Jay-osx-x64.tar.gz` | 解压后在终端运行 `./Jay` |
-| Linux x64（实验） | `Jay-linux-x64.tar.gz` | 解压后运行 `./Jay` |
-| Linux ARM64（实验） | `Jay-linux-arm64.tar.gz` | 解压后运行 `./Jay`，并使用系统安装的 Java |
-| Jay 服务器版（实验） | `JayServer-<系统>.zip` / `.tar.gz` | 见 [server/README.md](server/README.md) |
+| Windows 10+ x64 | `Jay-win-x64-aot.zip` (recommended) | Unzip and run `Jay.exe` |
+| Apple silicon Mac | `Jay-osx-arm64.tar.gz` | Extract and run `./Jay` in Terminal |
+| Intel Mac (experimental) | `Jay-osx-x64.tar.gz` | Extract and run `./Jay` in Terminal |
+| Linux x64 (experimental) | `Jay-linux-x64.tar.gz` | Extract and run `./Jay` |
+| Linux ARM64 (experimental) | `Jay-linux-arm64.tar.gz` | Extract and run `./Jay`; install Java through your distribution |
+| Jay Server (experimental) | `JayServer-<platform>.zip` / `.tar.gz` | See [server/README.md](server/README.md) |
 
-推荐的 zip 是预先编译成本机代码的版本（Native AOT），启动更快（窗口约 0.3 秒打开）、占内存更少，解压后是 4 个文件，要放在同一个文件夹里。
-同一个发布里还有单个文件的 `Jay-win-x64.zip`（里面只有一个 `Jay.exe`），解压即可运行，适合只想要一个文件的情况，启动稍慢一些。两个版本功能和数据完全相同，可以随时换用。
+The recommended zip is compiled ahead of time to native code (Native AOT): the window opens in about 0.3 seconds and it uses less memory. It unzips to 4 files that must stay in the same folder.
+Each release also has `Jay-win-x64.zip`, which holds a single `Jay.exe` that runs straight after unzipping if you prefer one file; it starts a little slower. Both builds have the same features and share the same data, so you can switch at any time.
 
-Windows 版正在申请 SignPath Foundation 的免费代码签名，详见[代码签名政策](docs/code-signing-policy.md)。
+Free code signing for the Windows builds from SignPath Foundation is being set up; see the [code signing policy](docs/code-signing-policy.md).
 
-发布包自带 .NET，不用安装。Jay 会按游戏版本选择本机 Java，并在 Mojang 提供对应平台运行时时自动下载；Linux ARM64 需要先安装合适版本的 64 位 Java。
+The packages include .NET. Jay selects a suitable local Java for each game version and downloads one when Mojang publishes a runtime for that platform. Linux ARM64 needs a compatible 64-bit Java installed through the system.
 
-macOS Apple 芯片版已由合作者在真机上完整测过安装、启动和游玩；Intel Mac 和 Linux 版通过了自动构建和测试，但还没有真机验证，所以标为实验。macOS/Linux 版本目前没有代码签名。macOS 第一次运行若被 Gatekeeper 拦截，可在“系统设置 → 隐私与安全性”中确认打开。完整局域网和出口节点模式仍只支持 Windows；普通房间、直连、聊天和仅游戏转发可跨平台使用。
+The Apple silicon build was fully tested on a real Mac (install, launch, play). The Intel Mac and Linux builds pass the automated builds and tests but have not been tried on real hardware, so they are marked experimental. The macOS and Linux builds are currently unsigned. If Gatekeeper blocks the first macOS launch, approve it under System Settings → Privacy & Security. Full-LAN and exit-node modes remain Windows-only; ordinary rooms, direct connections, chat and game-only forwarding work across platforms.
 
-### Linux 需要的系统组件
+### Linux system requirements
 
-Jay 的界面需要桌面环境（X11，或带 XWayland 的 Wayland）和下面这些库。装了桌面的发行版一般都已经有；精简系统、容器或 WSL 里缺的话，Jay 启动时会列出缺哪些、该装哪个包。
+Jay's window needs a desktop session (X11, or Wayland with XWayland) and the libraries below. Desktop distributions normally ship them already; on minimal systems, containers or WSL, Jay lists what is missing and which package to install when it starts.
 
-| 用途 | Ubuntu/Debian | Fedora | Arch |
+| Purpose | Ubuntu/Debian | Fedora | Arch |
 |---|---|---|---|
-| 窗口（必需） | `libx11-6 libice6 libsm6` | `libX11 libICE libSM` | `libx11 libice libsm` |
-| 输入、光标、多屏（建议） | `libxi6 libxcursor1 libxrandr2` | `libXi libXcursor libXrandr` | `libxi libxcursor libxrandr` |
-| 字体（必需） | `libfontconfig1` | `fontconfig` | `fontconfig` |
-| 区域格式（建议） | `libicu78`（按发行版版本号，如 `libicu74`） | `libicu` | `icu` |
-| 中文字体（建议） | `fonts-noto-cjk` | `google-noto-sans-cjk-fonts` | `noto-fonts-cjk` |
+| Window (required) | `libx11-6 libice6 libsm6` | `libX11 libICE libSM` | `libx11 libice libsm` |
+| Input, cursors, multiple screens (recommended) | `libxi6 libxcursor1 libxrandr2` | `libXi libXcursor libXrandr` | `libxi libxcursor libxrandr` |
+| Fonts (required) | `libfontconfig1` | `fontconfig` | `fontconfig` |
+| Locale data (recommended) | `libicu78` (match your release, e.g. `libicu74`) | `libicu` | `icu` |
+| CJK fonts (recommended) | `fonts-noto-cjk` | `google-noto-sans-cjk-fonts` | `noto-fonts-cjk` |
 
-- 没装 ICU 时 Jay 会自动换成兼容模式启动，界面语言照样按系统语言（`LANG`）选，只是日期、数字按通用格式显示。
-- Linux 版自带一份思源黑体（Noto Sans SC），系统没有中文字体时界面里的中文也能正常显示。但窗口标题栏是系统画的，这时 Jay 会把标题显示成「Jay」；装上 `fonts-noto-cjk` 后标题也会显示中文。
-- WSL：Windows 11 自带的 WSLg 可以直接显示 Jay 的窗口；Ubuntu 上可以一次装齐：`sudo apt install libx11-6 libice6 libsm6 libxi6 libxcursor1 libxrandr2 libfontconfig1 fonts-noto-cjk`。
+- Without ICU, Jay restarts itself in compatibility mode. The UI language still follows `LANG`; dates and numbers use a neutral format.
+- The Linux build bundles Noto Sans SC, so Chinese and Japanese text inside the window renders even without system CJK fonts. The title bar is drawn by the system, so Jay shows the title as "Jay" in that case; install `fonts-noto-cjk` to get the localized title.
+- WSL: WSLg on Windows 11 shows Jay's window directly. On Ubuntu, install everything at once with `sudo apt install libx11-6 libice6 libsm6 libxi6 libxcursor1 libxrandr2 libfontconfig1 fonts-noto-cjk`.
 
-## 功能
+## Features
 
-### 版本与加载器
+### Versions and loaders
 
-- 安装正式版和快照版
-- 一键安装 Fabric、Quilt、Forge（包括 1.5.2 及更早的老版本）、NeoForge、OptiFine
-- 老 Forge 需要的 FML 库会提前校验好放进实例，旧版本的游戏不会写进你自己的 .minecraft
-- 每个版本可以有独立的存档、模组和配置文件夹
+- Install releases and snapshots
+- One-click Fabric, Quilt, Forge (including 1.5.2 and older), NeoForge and OptiFine
+- Old Forge gets its FML libraries pre-verified in the instance, and old versions never write into your own .minecraft
+- Optional separate saves, mods and config folders for each version
 
-### 账号
+### Accounts
 
-- 微软账号（设备码登录）、authlib-injector 外置登录、离线账号
-- 支持多账号切换和皮肤预览
-- 不保存密码；登录令牌在 Windows 上用 DPAPI 加密，在 macOS/Linux 上用仅当前系统用户可读的本机密钥加密
+- Microsoft (device code), authlib-injector and offline accounts
+- Multiple accounts and skin preview
+- Passwords are never stored. Login tokens use Windows DPAPI on Windows and a per-user local encryption key on macOS/Linux
 
-### 模组与整合包
+### Mods and modpacks
 
-- 在 Modrinth 和 CurseForge 上搜索、安装模组、资源包、光影、数据包和整合包，自动带上必需的依赖
-- 导入 mrpack、CurseForge、MultiMC / Prism Launcher 实例、HMCL 和 MCBBS 整合包，也认得 PCL 带启动器的包、压缩的 .minecraft 文件夹和多套一层文件夹的包；导出 mrpack 和 CurseForge 格式
-- 管理实例里的模组，以及每个世界的数据包（启用、禁用、删除）
-- 模组兼容检查：读每个模组声明的加载器、游戏版本和前置，标出装错的，一键找对应版本
-- Fabric 模组上 Forge / NeoForge：可以自动装开源的 Sinytra Connector 和 Forgified Fabric API（不是每个 Fabric 模组都能用）；Quilt 实例直接用 Fabric 模组
-- Connector 预先处理：提前把 Fabric 模组转换好，之后启动不用再等
-- 模组烘焙（实验，默认关闭）：启动前用本机的通用加载器预处理模组并缓存，目前只支持 1.21.1 的 Fabric、Quilt 和原版；失败时自动按普通方式启动
-- CurseForge 上作者关闭了第三方分发的文件不会被偷偷下载，而是给出官网的手动下载入口
-- 模组多也读得快：几百个模组的文件夹不到 1 秒，没变的再次打开只要几毫秒
+- Search and install mods, resource packs, shaders, data packs and modpacks from Modrinth and CurseForge, with required dependencies
+- Import mrpack, CurseForge, MultiMC / Prism Launcher instances, HMCL and MCBBS modpacks, as well as PCL packs bundled with a launcher, zipped .minecraft folders and packs wrapped in an extra folder; export mrpack and CurseForge
+- Manage the mods in each instance and the data packs in each world (enable, disable, delete)
+- Mod compatibility check: reads each mod's declared loader, game version and dependencies, flags mismatches and finds the matching version in one click
+- Fabric mods on Forge / NeoForge via the open-source Sinytra Connector and Forgified Fabric API, installed automatically (not every Fabric mod works); Quilt instances use Fabric mods directly
+- Connector pre-processing: convert Fabric mods ahead of time so later launches skip the wait
+- Mod baking (experimental, off by default): pre-process mods with a local universal loader before launch and cache the result; currently Minecraft 1.21.1 Fabric, Quilt and vanilla only, falling back to a normal launch on failure
+- CurseForge files whose authors disabled third-party distribution are never downloaded behind their back; Jay links to the official page for a manual download instead
+- Fast mod scanning: a folder of a few hundred mods reads in under a second, and unchanged folders reopen in milliseconds
 
-### 游戏管理与崩溃分析
+### Game management and crash analysis
 
-- 每个版本可以单独设置 Java、内存、JVM 参数、窗口大小，以及启动前后要运行的命令
-- 管理世界、截图、资源包、光影和服务器列表
-- 游戏崩溃时分析原因、列出疑似模组、导出错误报告
-- 工具箱：清理游戏垃圾、下载文件、提前下载 Java
+- Per-version Java, memory, JVM arguments, window size and pre-launch / post-exit commands
+- Manage worlds, screenshots, resource packs, shaders and server lists
+- Find the likely cause of a crash, list suspect mods and export an error report
+- Toolbox: clean up game junk, download files, install Java ahead of time
 
-### 联机
+### Multiplayer
 
-- 不在同一个局域网也能一起玩：房主把世界“对局域网开放”后创建房间，把邀请码发给朋友；朋友粘贴邀请码后“敲门”，房主在弹出的卡片上同意，朋友才进得来
-- 新的联机加密（实验）：邀请码默认 10 分钟内只能用一次，码里不含房间密钥；每个成员有自己的一把钥匙；房主可以踢人，被踢的人马上断开、进不了这个房间，房间随即换一把新钥匙。码在界面上默认打码，复制后 60 秒自动从剪贴板清除，日志和诊断报告里不出现密钥。同一网络内已实测，跨网络（两边不在同一个网络）还没实测
-- 基于开源组网工具 [EasyTier](https://github.com/EasyTier/EasyTier)，第一次使用时从它的 GitHub 发布页下载并校验；默认模式不需要管理员权限，也不安装驱动
-- 房间聊天：点对点，不经过任何服务器，每个成员用自己的钥匙加密，发送者由房主核对，成员无法冒充别人
-- 直连房间（不用联机节点）：双方互发一次邀请码 / 回复码（码里不含房间密钥），依次尝试 IPv6 直连、路由器端口映射（UPnP / NAT-PMP）、IPv4 打洞（含严格 NAT 的端口预测和喷洒）；多人时由能连上的成员中转；都不通且添加了节点时再用节点。“检测我的网络”能提前看出好不好连
-- 联机调试模式和诊断报告（自动去掉房间密钥、默认遮住公网 IP），以及一键“全条件测试”：双方同步把每种路径和模式都测一遍，记录连通、用时、延迟、吞吐和失败原因
-- 可选的完整局域网模式：每人一个虚拟 IP，游戏的局域网广播也会转发，其他支持局域网联机的游戏和程序也能互通（需要管理员权限）；还可以让房间成员经某个人的电脑上网（出口节点，双方都要手动开启，流量全部走隧道、防止泄漏到隧道外）
-- 无痕模式（默认关）：游戏日志不记录聊天内容；完整局域网模式也不再把密钥写到磁盘上
-- 联机页有“怎么联机”的引导，贴错码会自动认出来并提示
-- 联机节点由你自己添加：[node 文件夹](node/README.md)里有 Linux、Docker、Windows 的一键部署脚本，搭好后把节点分享码发给朋友
+- Play together without being on the same LAN: the host opens the world to LAN, creates a room and shares an invite code; a friend pastes it and "knocks", and gets in only after the host approves on a pop-up card
+- New multiplayer encryption (experimental): invite codes are single-use and expire after 10 minutes by default, and contain no room secret; every member has their own key; the host can kick, which disconnects that person at once, bans them from the room and switches the room to a new key. Codes are masked on screen, cleared from the clipboard 60 seconds after copying, and never appear in logs or diagnostic reports. Tested on one network; not yet tested between two different networks
+- Built on the open-source networking tool [EasyTier](https://github.com/EasyTier/EasyTier), downloaded from its GitHub releases and verified on first use; the default mode needs no admin rights and installs no driver
+- Room chat: peer-to-peer, no server in between; each member encrypts with their own key and the host fills in the sender, so members can't impersonate each other
+- Direct rooms (no relay node): swap one invite / reply code (no room secret inside), then Jay tries IPv6, router port mapping (UPnP / NAT-PMP) and IPv4 hole punching (with port prediction and spraying for strict NATs); with more players, a reachable member relays; a node is used only if all of that fails and you added one. "Check my network" tells you beforehand how easy you are to reach
+- Multiplayer debug mode with a diagnostic report (room secrets removed, public IPs masked by default), plus a one-click full test matrix that switches both sides through every path and mode and records connectivity, time, latency, throughput and failure reasons
+- Optional full-LAN mode: everyone gets a virtual IP and games' LAN broadcasts are forwarded, so other LAN games and apps work too (needs admin rights); members can also route their internet traffic through one member's PC (exit node, opt-in on both sides; all traffic stays inside the tunnel with leak protection)
+- Incognito mode (off by default): game logs don't record chat; full-LAN mode no longer writes secrets to disk
+- A "how to play together" guide on the Multiplayer page, which also recognises codes pasted into the wrong box
+- You add the relay nodes yourself: the [node folder](node/README.md) has one-step scripts for Linux, Docker and Windows, and a share code to send to friends
 
-### Jay 服务器版（实验）
+### Jay Server (experimental)
 
-- 只能用 Jay 进的 Minecraft 服务器，可以放在 VPS 上，也可以是局域网里的电脑。命令行程序 `jay-server` 会下载官方服务端（校验 SHA-1）和合适的 Java
-- 服务器管理员给每个人发一次性的 `JAYS1-` 邀请码，用户在联机页的“Jay 服务器”卡片里粘贴后就能一键进服；每台设备有自己的身份，用户名和设备绑定，访问密钥被拿到别的电脑上也用不了
-- 不认识的连接一个字节都不回，扫描器看不到这是 MC 服务器
-- 目前通过了自动测试，还没有连真实 MC 服务端做过完整测试。用法见 [server/README.md](server/README.md)
+- A Minecraft server only Jay can join, on a VPS or a computer on your LAN. The `jay-server` command-line tool downloads the official server (SHA-1 checked) and a suitable Java
+- The admin hands each player a single-use `JAYS1-` invite; the player pastes it into the "Jay servers" card on the Multiplayer page and joins in one click. Each device has its own identity bound to a username, so a stolen access key doesn't work on another computer
+- Unknown connections get not a single byte back, so scanners can't see a Minecraft server
+- Passes the automated tests but has not been tried end to end with a real Minecraft server yet. See [server/README.md](server/README.md)
 
-### 下载
+### Downloads
 
-- 分块并发、断点续传、SHA1 校验
-- 官方源和 BMCLAPI 镜像可以手动选择，也可以按时区自动选择，失败时自动换源
+- Parallel chunked downloads, resume and SHA1 verification
+- Choose the official source or the BMCLAPI mirror, or pick automatically by time zone, with automatic fallback on failure
 
-## 截图
+## Screenshots
 
-| 下载游戏 | 实例设置 |
+| Download | Instance settings |
 |---|---|
-| ![下载游戏](docs/images/download.png) | ![实例设置](docs/images/instance.png) |
+| ![Download page](docs/images/download.png) | ![Instance settings](docs/images/instance.png) |
 
-![启动器设置](docs/images/settings.png)
+![Launcher settings](docs/images/settings.png)
 
-## 隐私
+## Privacy
 
-- **没有遥测**：不收集使用数据，不生成设备识别码。
-- **没有远程控制**：功能不受任何远程开关或云端配置影响。时区只用来选默认下载源。
-- **更新由你决定**：默认不检查更新；在设置里填了更新地址才会检查，而且只提示，不会自动下载或替换。
-- **联网只为了完成你要做的事**：登录、获取版本列表、下载和搜索。会用到的服务有微软和 Xbox 登录、你添加的皮肤站、Mojang 游戏文件服务器、你选择的下载源、各加载器的下载地址（OptiFine 通过 BMCLAPI，authlib-injector 通过其官方地址或 BMCLAPI），以及 Modrinth 和 CurseForge。
-- **联机只连你看得到的节点**：只有在联机页创建或加入房间时才会连接，连的是你在“联机节点”里添加的节点、Jay 内置的几个公共节点（列在“联机节点”里，可以关掉）和房间里的其他玩家；加入 Jay 服务器时只连邀请码里写的那台服务器。内置节点编在程序里，Jay 不从网上拉节点列表，房间码在你的电脑上随机生成，不经过 Jay 的服务器（Jay 没有服务器）。联机组件 EasyTier 从 `github.com/EasyTier/EasyTier` 的发布页下载。直连房间会向你设置的 STUN 服务器（默认 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`，可改可清空）询问你的外部地址，它们只回答地址、不经过游戏数据；也会请你的路由器临时映射一个端口，结束联机时删掉。
+- **No telemetry:** Jay collects no usage data and creates no device ID.
+- **No remote control:** no remote switch or cloud config can change what Jay does. The time zone is only used to pick the default download source.
+- **Updates are up to you:** Jay doesn't check for updates unless you set an update URL, and even then it only tells you. It never downloads or replaces anything by itself.
+- **Network access only for what you're doing:** signing in, fetching version lists, downloading and searching. The services involved are Microsoft and Xbox sign-in, any skin site you add, Mojang's game file servers, your chosen download source, loader download sites (OptiFine via BMCLAPI, authlib-injector via its official site or BMCLAPI), Modrinth and CurseForge.
+- **Multiplayer only connects to nodes you added:** only while you host or join a room on the Multiplayer page, Jay connects to the relay nodes you added there and to the other players in the room; joining a Jay server connects only to the server named in its invite. Jay ships no nodes and fetches no node list; room codes are generated randomly on your computer and never pass through an Jay server (Jay has none). The EasyTier component is downloaded from the releases page of `github.com/EasyTier/EasyTier`. Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address; they only answer that and carry no game data. They may also ask your router for a temporary port mapping, removed when the session ends.
 
-代码完全开源，欢迎自行查看。完整的隐私说明和对系统的改动见[代码签名政策](docs/code-signing-policy.md#隐私政策--privacy-policy)。
+The code is open source, so you can check all of this yourself. The full privacy policy and the changes Jay makes to your system are in the [code signing policy](docs/code-signing-policy.md#隐私政策--privacy-policy).
 
-## 配置
+## Configuration
 
-大部分功能不用任何配置。下面两项是可选的：
+Most features need no setup. Both of these are optional:
 
-| 项目 | 在哪里设置 | 环境变量 | 说明 |
+| Item | Where | Environment variable | Notes |
 |---|---|---|---|
-| 微软 Client ID | 「账号」页 | `AMBER_MS_CLIENT_ID` | 留空使用内置的默认值。优先级：界面填写 > 环境变量 > 默认值 |
-| CurseForge API Key | 「设置」页 | `AMBER_CF_KEY` | 到 [console.curseforge.com](https://console.curseforge.com) 免费申请。没有 Key 时不能使用 CurseForge，其他功能不受影响 |
+| Microsoft Client ID | Accounts page | `AMBER_MS_CLIENT_ID` | A built-in default is used if empty. Order: UI, then environment variable, then default |
+| CurseForge API key | Settings page | `AMBER_CF_KEY` | Free from [console.curseforge.com](https://console.curseforge.com). CurseForge is unavailable without one; everything else still works |
 
-设置保存在系统应用数据目录的 `Amber/settings.json`（Windows 为 `%APPDATA%\Amber`，macOS 为 `~/Library/Application Support/Amber`，Linux 通常为 `~/.config/Amber`）。
+Settings are stored under the system application-data directory in `Amber/settings.json` (`%APPDATA%\Amber` on Windows, `~/Library/Application Support/Amber` on macOS, and usually `~/.config/Amber` on Linux).
 
-## 从源码构建
+## Build from source
 
-需要 [.NET 10 SDK](https://dotnet.microsoft.com/download)。
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```shell
 git clone https://github.com/warriorleavestar/jay-launcher.git
@@ -162,52 +162,52 @@ dotnet test
 dotnet run --project Amber.App
 ```
 
-打包当前平台的单文件版本（把 RID 换成 `win-x64`、`osx-arm64`、`osx-x64`、`linux-x64` 或 `linux-arm64`）：
+To publish a single-file build, replace the RID with `win-x64`, `osx-arm64`, `osx-x64`, `linux-x64` or `linux-arm64`:
 
 ```shell
 dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishReadyToRun=true -p:DebugType=none -o ../publish
 ```
 
-还有一个命令行版本，例如 `dotnet run --project Amber.Cli -- list-remote`。
+There is also a command-line version, for example `dotnet run --project Amber.Cli -- list-remote`.
 
-项目使用 C#、.NET 10 和 [Avalonia](https://avaloniaui.net/)。
+Jay is built with C#, .NET 10 and [Avalonia](https://avaloniaui.net/).
 
-Android 和 iOS 实验版使用独立的平台工程，目前只提供 Jay 服务器登记和本机网关，还不能直接启动 Minecraft。构建方法和能力边界见 [Android 实验版说明](docs/android.md)和 [iOS 实验版说明](docs/ios.md)。
+The experimental Android and iOS projects currently provide Jay Server enrollment and a localhost gateway; they cannot launch Minecraft themselves yet. See the [Android](docs/android.md) and [iOS](docs/ios.md) experiment notes for build steps and current limitations.
 
-## 常见问题
+## FAQ
 
-**Windows 提示“已保护你的电脑”怎么办？**
-目前发布的 Windows 版还没有代码签名，所以 SmartScreen 可能会拦截。确认文件是从本项目的 Releases 下载的，点“更多信息”→“仍要运行”即可。Windows 版签名正在申请中，见[代码签名政策](docs/code-signing-policy.md)；生效后版本说明里会写明。
+**Windows says it protected my PC. What should I do?**
+Current Windows releases aren't code-signed yet, so SmartScreen may block them. Make sure you downloaded the file from this project's Releases, then choose "More info" → "Run anyway". Free signing from SignPath Foundation is being set up; see the [code signing policy](docs/code-signing-policy.md). Release notes will say when it takes effect.
 
-**exe 为什么这么大？**
-.NET 运行时和界面库都打包在里面，所以不用另外安装任何东西。
+**Why is the exe so large?**
+It includes the .NET runtime and UI libraries, so you don't have to install anything else.
 
-**可以用我现有的 `.minecraft` 文件夹吗？**
-可以，在「设置」页把游戏目录指向它。
+**Can I use my existing `.minecraft` folder?**
+Yes. Point the game directory at it on the Settings page.
 
-**微软账号登录失败怎么办？**
-先看提示里的错误信息，并确认这个账号已经拥有 Minecraft。也可以换成你自己的 Azure 应用：注册一个允许个人账号、开启设备码流程、并且有 Minecraft API 访问权限的公共客户端应用，再把 Client ID 填到「账号」页。
+**Microsoft sign-in fails. What can I try?**
+Read the error message and make sure the account owns Minecraft. You can also use your own Azure app: register a public client that allows personal accounts, has device code flow enabled and has Minecraft API access, then enter its Client ID on the Accounts page.
 
-**为什么搜不到 CurseForge 的内容？**
-CurseForge 的接口需要 API Key，见上面的[配置](#配置)。Modrinth 不需要。
+**Why can't I find anything on CurseForge?**
+The CurseForge API needs a key; see [Configuration](#configuration). Modrinth doesn't.
 
-**下载很慢怎么办？**
-在「设置」页切换下载源，试试官方源或 BMCLAPI 镜像。
+**Downloads are slow. What can I do?**
+Switch the download source on the Settings page and try the official source or the BMCLAPI mirror.
 
-**支持 macOS 和 Linux 吗？**
-支持 macOS Intel/Apple 芯片和 Linux x64/ARM64。Apple 芯片版已真机验证，Intel Mac 和 Linux 版目前是实验。完整局域网、出口节点和极端加密仍受 Windows 系统能力限制；其他主要功能可跨平台使用。
+**Does it run on macOS or Linux?**
+Yes: Intel and Apple silicon Macs, plus Linux x64 and ARM64. The Apple silicon build is verified on real hardware; Intel Mac and Linux are experimental for now. Full-LAN, exit-node and Extreme encryption modes still depend on Windows system capabilities; the other main features are cross-platform.
 
-**有哪些做不到的？**
-在 Fabric / Quilt 上运行 Forge 模组：目前没有可靠的兼容层，Jay 会直接说明。
+**What can't it do?**
+Run Forge mods on Fabric / Quilt: there is no reliable compatibility layer, and Jay says so plainly.
 
-## 许可证
+## License
 
 [MIT](LICENSE)
 
-联机功能使用的 EasyTier 是独立的开源项目（LGPL-3.0），Jay 不内置它，在你第一次使用联机时单独下载。
+The multiplayer feature uses EasyTier, a separate open-source project (LGPL-3.0). Jay does not bundle it; it is downloaded separately the first time you use multiplayer.
 
-Linux 版内置的思源黑体（Noto Sans SC）使用 SIL Open Font License 1.1，许可证全文见 [src/Amber.App/Assets/Fonts/OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)。
+The Linux build bundles the Noto Sans SC font under the SIL Open Font License 1.1; see [src/Amber.App/Assets/Fonts/OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt).
 
 ---
 
-Jay 不是 Minecraft 官方产品，与 Mojang 和 Microsoft 没有关联。
+Jay is not an official Minecraft product and is not affiliated with Mojang or Microsoft.

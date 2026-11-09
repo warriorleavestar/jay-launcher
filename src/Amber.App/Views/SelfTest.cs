@@ -72,7 +72,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
     {
         Directory.CreateDirectory(reportDir);
         // 下面的检查按简体中文的文字判断，不管这台电脑是什么系统语言都先切到简体中文。
-        Amber.Core.Localization.L.SetLanguage(Amber.Core.Localization.L.Source);
+        Amber.Core.Localization.L.SetLanguage("zh-Hans");
         try
         {
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "curseforge")
@@ -191,6 +191,9 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 Amber.Core.Localization.L.SetLanguage(code);
                 await Task.Delay(300);
             }
+            // The checks below read Simplified Chinese text, whatever order the language list is in.
+            Amber.Core.Localization.L.SetLanguage("zh-Hans");
+            await Task.Delay(300);
             var selectionsAfter = Selections();
             var settingsAfter = File.Exists(Amber.App.Services.AppSettings.FilePath) ? File.ReadAllText(Amber.App.Services.AppSettings.FilePath) : "";
             Check("换语言：各下拉框的选中项不变，设置文件没被改写", selectionsBefore == selectionsAfter && settingsBefore == settingsAfter,
@@ -1541,7 +1544,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await Task.Delay(800);
         var englishNotes = download.LoaderVersions.Where(v => v.Note is not null).Select(v => v.Note).Distinct().ToList();
         var nameKept = download.CustomName == "MyPack";
-        Amber.Core.Localization.L.SetLanguage(Amber.Core.Localization.L.Source);
+        Amber.Core.Localization.L.SetLanguage("zh-Hans");
         await Task.Delay(500);
         Check("下载页：换语言后 Forge 备注换成英文，自己填的名字不变",
             nameKept && (noted == 0 || englishNotes.All(n => n is "Recommended" or "Latest")),

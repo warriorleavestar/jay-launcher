@@ -5,22 +5,24 @@ using System.Text.Json;
 namespace Amber.Core.Localization;
 
 /// <summary>
-/// 界面文字的翻译。每种语言一个 JSON 文件（键 → 文字），作为嵌入资源编进程序集：
-///   Localization/zh-Hans.json（原文，所有键都在这里）、zh-Hant.json、en.json、ja.json。
-/// 找不到的键先退回简体中文，再退回键本身（这样漏翻的地方一眼能看出来）。
+/// UI text translations. One JSON file per language (key → text), embedded in the assembly:
+///   Localization/en.json (the source; every key is defined here), zh-Hans.json, zh-Hant.json, ja.json.
+/// A key missing from the current language falls back to English, then to the key itself (so gaps are easy to spot).
+/// The UI language follows the system language; when the system language has no translation, English is used.
 /// 用法：C# 里 L.T("home.launch")、L.F("home.running", id, memory)（{0}{1} 占位）、L.P("…", n, …)（区分单复数）；
 /// XAML 里 {l:T home.launch}。换语言时触发 Changed，界面上用 {l:T} 绑定的文字立刻跟着换。
 /// </summary>
 public static class L
 {
-    public const string Source = "zh-Hans";
+    /// <summary>Source and fallback language: new keys are written in en.json first.</summary>
+    public const string Source = "en";
 
     /// <summary>支持的语言（代码, 用这种语言写的名字）。</summary>
     public static readonly IReadOnlyList<(string Code, string Name)> Languages =
     [
+        ("en", "English"),
         ("zh-Hans", "简体中文"),
         ("zh-Hant", "繁體中文"),
-        ("en", "English"),
         ("ja", "日本語"),
     ];
 
@@ -111,7 +113,7 @@ public static class L
         return "⟦" + text + new string('·', padding) + "⟧";
     }
 
-    /// <summary>简体原文；单复数变体（key.one / key.other）在原文表里只有 key。</summary>
+    /// <summary>English source text; also covers plural variants (key.one / key.other) via the base key.</summary>
     private static string? FallbackText(string key) =>
         Fallback.TryGetValue(key, out var source) ? source
         : PluralBaseKey(key) is { } b && Fallback.TryGetValue(b, out var baseText) ? baseText
@@ -120,7 +122,7 @@ public static class L
     private static string? PluralBaseKey(string key) =>
         key.EndsWith(".one", StringComparison.Ordinal) ? key[..^4] : key.EndsWith(".other", StringComparison.Ordinal) ? key[..^6] : null;
 
-    /// <summary>按当前语言的区域格式化。译文的占位符写错了（格式异常）时先用简体原文，再不行就直接显示文字，不让界面崩掉。</summary>
+    /// <summary>按当前语言的区域格式化。译文的占位符写错了（格式异常）时先用英文原文，再不行就直接显示文字，不让界面崩掉。</summary>
     public static string F(string key, params object?[] args) => Format(_state, key, args);
 
     private static string Format(State state, string key, object?[] args)
@@ -159,7 +161,7 @@ public static class L
         : table.ContainsKey(key + ".other") ? key + ".other"
         : key;
 
-    /// <summary>某种语言的全部文字（检查漏翻用）。文件坏了（JSON 格式不对）时返回空表，界面退回简体原文，不会打不开。</summary>
+    /// <summary>某种语言的全部文字（检查漏翻用）。文件坏了（JSON 格式不对）时返回空表，界面退回英文原文，不会打不开。</summary>
     public static IReadOnlyDictionary<string, string> Load(string code) => Tables.GetOrAdd(code, static c =>
     {
         try

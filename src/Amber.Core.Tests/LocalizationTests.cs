@@ -4,7 +4,7 @@ using Amber.Core.Localization;
 namespace Amber.Core.Tests;
 
 /// <summary>
-/// 多语言的检查：界面代码里没有写死的中文；用到的键都在简体中文表里；每种语言的键齐全、占位符一致。
+/// 多语言的检查：界面代码里没有写死的中文；用到的键都在英文原文表（en.json）里；每种语言的键齐全、占位符一致。
 /// </summary>
 public partial class LocalizationTests
 {
@@ -108,18 +108,19 @@ public partial class LocalizationTests
                 foreach (var suffix in new[] { ".title", ".advice" })
                     if (!source.ContainsKey(m.Groups[1].Value + suffix)) missing.Add($"{Path.GetFileName(file)}: {m.Groups[1].Value}{suffix}");
         }
-        Assert.True(missing.Count == 0, "简体中文表里没有这些键：\n" + string.Join("\n", missing.Distinct()));
+        Assert.True(missing.Count == 0, "英文原文表（en.json）里没有这些键：\n" + string.Join("\n", missing.Distinct()));
     }
 
     [Theory]
+    [InlineData("zh-Hans")]
     [InlineData("zh-Hant")]
-    [InlineData("en")]
     [InlineData("ja")]
     public void TranslationsAreCompleteAndKeepPlaceholders(string code)
     {
         var source = L.Load(L.Source);
         var table = L.Load(code);
-        var missing = source.Keys.Where(k => !table.ContainsKey(k)).ToList();
+        // 英文原文里的单复数变体（key.one / key.other）在没有单复数的语言里只要有 key 就行。
+        var missing = source.Keys.Where(k => !table.ContainsKey(k) && !(PluralBase(k) is { } pb && table.ContainsKey(pb))).ToList();
         var extra = table.Keys.Where(k => !source.ContainsKey(k) && !(PluralBase(k) is { } b && source.ContainsKey(b))).ToList();
         var placeholderMismatch = source.Keys.Where(table.ContainsKey)
             .Where(k => !Placeholders(source[k]).SetEquals(Placeholders(table[k])))

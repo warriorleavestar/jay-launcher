@@ -1,7 +1,7 @@
 # Amber launcher: notes for coding agents
 
 Amber is an original cross-platform Minecraft Java launcher for Windows, macOS and Linux, built with .NET 10 and Avalonia 12 (MVVM via CommunityToolkit.Mvvm).
-The UI text, comments and docs are written in Simplified Chinese. Keep new ones in the same language and tone.
+English comes first: write new code comments, docs, commit messages and PRs in English. UI text is localized; `src/Amber.Core/Localization/en.json` is the source and fallback, so add new strings there first and then to every other language file. Some existing comments and docs are in Simplified Chinese; leave them unless you are substantially changing that code. See CONTRIBUTING.md for the translation workflow.
 
 ## Layout
 
