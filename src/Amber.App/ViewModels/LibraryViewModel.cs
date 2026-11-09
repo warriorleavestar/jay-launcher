@@ -107,6 +107,9 @@ public sealed partial class LibraryViewModel : PageViewModel
 
     public bool HasContinue => Continue is not null;
     public bool HasNeeds => Needs.Count > 0;
+    /// <summary>Every instance in the library, unfiltered (command palette).</summary>
+    public IReadOnlyList<LibraryCard> AllCards => _all;
+
     public int TotalCount => _all.Count;
     public bool IsEmpty => IsLoaded && _all.Count == 0;
     public bool HasInstances => _all.Count > 0;

@@ -150,6 +150,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Drag-and-drop import over the whole window (§6.25).</summary>
     public DropViewModel Drop { get; }
 
+    /// <summary>Command palette, Ctrl+K (§6.23).</summary>
+    public CommandPaletteViewModel Palette { get; }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
         if (oldValue is not null) oldValue.IsCurrent = false;
@@ -263,6 +266,7 @@ public sealed partial class MainViewModel : ObservableObject
             if (await content.ImportLocalPackAsync(path) is { } id && play) download.LaunchInstance?.Invoke(id);
         };
         var settingsPage = Pages.OfType<SettingsViewModel>().Single();
+        settingsPage.Navigate = r => shell.Navigate(r);
         Drop = new DropViewModel(service)
         {
             PreviewPack = async path =>
@@ -334,6 +338,29 @@ public sealed partial class MainViewModel : ObservableObject
             var back = shell.Router.Current;
             shell.Navigate("discover");
             content.BrowseDatapacksFor(id, world, back: () => shell.Router.Navigate(back));
+        };
+        Palette = new CommandPaletteViewModel(() => library.AllCards.Select(c => (c.Id, c.Name, c.Facts)))
+        {
+            Navigate = r => shell.Navigate(r),
+            OpenInstance = library.OpenInstance,
+            StartInstance = library.LaunchInstance,
+            AddModsTo = id =>
+            {
+                shell.Navigate("discover");
+                content.BrowseModsFor(id);
+            },
+            OpenActivity = () => { if (!Activity.IsOpen) Activity.Toggle(); },
+            // A pasted invite fills the join box; joining (knocking) is still the player's click there.
+            JoinInvite = code =>
+            {
+                shell.Navigate("play");
+                multiplayer.JoinCode = code;
+            },
+            JoinJayServer = code =>
+            {
+                shell.Navigate("play");
+                multiplayer.JayServers.InviteText = code;
+            },
         };
         foreach (var page in Pages) Shell.Watch(page);
         CurrentPage = library;
@@ -451,6 +478,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         _initializing = true;
         SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(s.Language) ?? "system"));
         _initializing = false;
+        InitGroups();
         _loading = false;
     }
 
