@@ -123,6 +123,7 @@ public sealed partial class MultiplayerViewModel
             if (!IsCurrent) Badge++;
         });
         messenger.Progress += p => Dispatcher.UIThread.Post(() => OnTransfer(messenger, p));
+        if (IsHosting) ServeMods(messenger);
         OnRoster(chat, chat.Roster);
     }
 
@@ -133,6 +134,7 @@ public sealed partial class MultiplayerViewModel
         _messengerChat = null;
         OnlinePeers.Clear();
         FileOffers.Clear();
+        ResetModCheck();
         SelectedPeer = null;
         OnPropertyChanged(nameof(HasOnlinePeers));
         if (messenger is not null) _ = messenger.DisposeAsync().AsTask();
@@ -147,6 +149,7 @@ public sealed partial class MultiplayerViewModel
         foreach (var entry in roster.Where(r => r.Fingerprint != me)) OnlinePeers.Add(new OnlinePeerItem(entry));
         SelectedPeer = OnlinePeers.FirstOrDefault(p => p.Entry.Fingerprint == selected);
         OnPropertyChanged(nameof(HasOnlinePeers));
+        MaybeCheckMods();
     }
 
     private void OnTransfer(PrivateMessenger messenger, FileProgress p)

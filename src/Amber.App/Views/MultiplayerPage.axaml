@@ -105,6 +105,38 @@
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
+
+      <!-- Joiner: check the mods against the host's (official §6.14). Never says "same" before the lists were compared. -->
+      <Border x:Name="ModCheckCard" Classes="card" Margin="0,0,0,6" IsVisible="{Binding ShowModCheck}">
+        <StackPanel Spacing="6">
+          <TextBlock Classes="h2" Margin="0" Text="{l:T multiplayer.modcheck.heading}" />
+          <TextBlock x:Name="ModCheckingText" Text="{l:T multiplayer.modcheck.checking}" IsVisible="{Binding ModCheckChecking}" TextWrapping="Wrap" />
+          <TextBlock x:Name="ModCheckSameText" Text="{l:T multiplayer.modcheck.same}" IsVisible="{Binding ModCheckSame}" FontWeight="SemiBold" TextWrapping="Wrap" />
+          <TextBlock x:Name="ModCheckNoticeText" Text="{Binding ModCheckNotice}" IsVisible="{Binding HasModCheckNotice}" TextWrapping="Wrap" />
+          <StackPanel x:Name="ModDifferencePanel" Spacing="4" IsVisible="{Binding ModCheckDifferent}">
+            <TextBlock Text="{Binding ModCheckTitle}" TextWrapping="Wrap" />
+            <TextBlock x:Name="ModMissingText" Text="{Binding ModMissingText}" IsVisible="{Binding HasModMissing}" TextWrapping="Wrap" />
+            <TextBlock x:Name="ModDifferentText" Text="{Binding ModDifferentText}" IsVisible="{Binding HasModDifferent}" TextWrapping="Wrap" />
+            <TextBlock x:Name="ModExtraText" Classes="hint" Text="{Binding ModExtraText}" IsVisible="{Binding HasModExtra}" TextWrapping="Wrap" />
+            <WrapPanel x:Name="ModCheckButtons" ItemSpacing="8" LineSpacing="6" Margin="0,4,0,0">
+              <Button x:Name="ModDetailsButton" Content="{l:T multiplayer.modcheck.details}" Command="{Binding ToggleModDetailsCommand}" />
+              <Button x:Name="SkipModCheckButton" Classes="ghost" Content="{l:T multiplayer.modcheck.skip}" Command="{Binding SkipModCheckCommand}" />
+            </WrapPanel>
+            <ScrollViewer MaxHeight="240" IsVisible="{Binding ModDetailsOpen}">
+            <ItemsControl x:Name="ModDiffList" ItemsSource="{Binding ModDiffLines}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:ModDiffLine">
+                  <Grid ColumnDefinitions="24,*" Margin="0,1">
+                    <TextBlock Text="{Binding Mark}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            </ScrollViewer>
+          </StackPanel>
+        </StackPanel>
+      </Border>
     </StackPanel>
 
     <ScrollViewer x:Name="MpBody" svc:ThemeRegion.Name="multiplayer.body" Grid.Row="3">
@@ -407,6 +439,10 @@
                         <DataTemplate DataType="vm:KnockWaitChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
                       </ComboBox.ItemTemplate>
                     </ComboBox>
+                    <TextBlock Text="{l:T multiplayer.room.mod_sync}" FontWeight="SemiBold" />
+                    <CheckBox x:Name="AllowModSyncBox" IsChecked="{Binding AllowModSync}">
+                      <TextBlock Text="{l:T multiplayer.room.mod_sync_allow}" TextWrapping="Wrap" />
+                    </CheckBox>
                     <TextBlock Text="{l:T multiplayer.kick.banned_title}" FontWeight="SemiBold" />
                     <TextBlock Classes="hint" FontSize="12" Text="{l:T multiplayer.room.removed_none}" IsVisible="{Binding !BannedPeople.Count}" />
                     <ItemsControl x:Name="RemovedList" ItemsSource="{Binding BannedPeople}">
