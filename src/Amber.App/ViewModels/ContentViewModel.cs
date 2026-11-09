@@ -845,31 +845,41 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         // 被取消的搜索不会自己收起“正在搜索”：这里收起，不然转圈和慢速提示会一直留着。
         if (IsSearching) SetSearchState(false);
         IsBusy = true;
-        _workCts = new CancellationTokenSource();
+        var cts = _workCts = new CancellationTokenSource();
+        var task = _importTask = _service.Tasks.Track("import", L.F("activity.kind.import", Path.GetFileName(path)), () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
         try
         {
             var info = ModpackService.Inspect(path);
+            task.Rename(L.F("activity.kind.import", SafeName(info.Name)));
             await ImportCoreAsync(path, SafeName(info.Name), _workCts.Token);
+            task.Succeed(Status);
         }
         catch (ManualDownloadRequiredException e)
         {
             await Ui.FlushAsync();
+            task.Fail(L.T("activity.task.manual"));
             ShowManualDownload(e.File, ManualDownloadContext.ModpackImport);
         }
         catch (OperationCanceledException) when (_workCts?.IsCancellationRequested == true)
         {
+            task.Cancelled();
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
         catch (Exception e)
         {
+            task.Fail(ErrorText.Describe(e));
             SetStatus(StatusMessage.Failure("instance.worlds.import_failed", e, ErrorText.Of(e)));
         }
         finally
         {
+            task.Cancelled();
+            _importTask = null;
             IsBusy = false;
             Progress = 0;
         }
     }
+
+    private Amber.Core.Activity.TaskHandle? _importTask;
 
     private async Task ImportCoreAsync(string path, string name, CancellationToken ct)
     {
@@ -879,6 +889,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         {
             Status = p.Stage;
             if (p.Percent is { } percent) Progress = percent;
+            _importTask?.Report(p.Percent / 100.0, p.Stage);
         }), ct, onSkip: file => { lock (skipped) skipped.Add(file); });
         await Ui.FlushAsync();
         _service.ForceIsolated(id);

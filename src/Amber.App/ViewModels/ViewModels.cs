@@ -141,6 +141,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>外壳：路由、历史栈、侧栏入口、子页（官方设计 §11.5）。</summary>
     public ShellViewModel Shell { get; }
 
+    /// <summary>活动中心、请求条、正在玩胶囊（§6.22）。</summary>
+    public ActivityViewModel Activity { get; }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
         if (oldValue is not null) oldValue.IsCurrent = false;
@@ -149,8 +152,39 @@ public sealed partial class MainViewModel : ObservableObject
         Shell?.OnPageChanged(newValue);
     }
 
+    private readonly LauncherService _main;
+
+    /// <summary>The Core services behind this window (self-check).</summary>
+    internal LauncherService Service => _main;
+
+    /// <summary>
+    /// Things that would be cut off if Jay closed now (§5.9 close guard): remote control, a running server,
+    /// a room with players, running tasks, a game still preparing. Empty means close right away.
+    /// </summary>
+    public IReadOnlyList<string> CloseBlockers()
+    {
+        var items = new List<string>();
+        if (Multiplayer.RemoteSessionCount > 0) items.Add(L.F("close.item.remote", Multiplayer.RemoteSessionCount));
+        if (HostServerViewModel.ServerRunning) items.Add(L.T("close.item.server"));
+        var others = Multiplayer.Peers.Count(p => p.Peer.Ip != Amber.Core.Multiplayer.EasyTierArgs.HostIp);
+        if (Multiplayer.IsHosting && others > 0) items.Add(L.F("close.item.room_host", others));
+        else if (Multiplayer.IsJoined) items.Add(L.T("close.item.room_join"));
+        var tasks = _main.Tasks.Active.Count;
+        if (tasks > 0) items.Add(L.F("close.item.tasks", tasks));
+        if (Pages.OfType<HomeViewModel>().FirstOrDefault() is { IsPreparing: true }) items.Add(L.T("close.item.preparing"));
+        return items;
+    }
+
+    /// <summary>Cancels running tasks before a confirmed close (servers and remote control are stopped by the exit path).</summary>
+    public void EndAllForExit()
+    {
+        _main.Tasks.CancelAll();
+        Pages.OfType<HomeViewModel>().FirstOrDefault()?.CancelPreparingForExit();
+    }
+
     public MainViewModel(LauncherService service)
     {
+        _main = service;
         L.Changed += () => Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(VersionText)));
         var log = new LogViewModel();
         var home = new HomeViewModel(service, log);
@@ -199,11 +233,31 @@ public sealed partial class MainViewModel : ObservableObject
             content.BrowseFor(id, type, back: () => shell.Router.Navigate(back));
         };
         multiplayer.NavigateHome = () => shell.Navigate("library");
+        // 开始游戏不换页（§2.5 第 5 条）：进度在顶栏胶囊和启动页。
         download.LaunchInstance = id =>
         {
             service.SetCurrentInstance(id);
-            shell.Navigate("library");
             service.RequestLaunch(new LaunchRequest(id));
+        };
+        Activity = new ActivityViewModel(service) { OpenRun = _ => shell.Navigate("library") };
+        home.SessionStarted += Activity.Track;
+        // 多开确认走请求条；启动页的卡片也还在，哪边处理都会让另一边一起消失。
+        const string MultiKey = "multi-launch";
+        home.MultiLaunchRequested += running => service.Requests.Post(new Amber.Core.Activity.RequestSpec("multi",
+            L.F("home.multi.warning", running), null,
+            [new("start", L.T("home.multi.launch_anyway")), new("cancel", L.T("common.cancel"), IsDefault: true)], DedupeKey: MultiKey));
+        service.Requests.Resolved += r =>
+        {
+            if (r.Spec.Kind != "multi" || r.ResolvedBy == Amber.Core.Activity.RequestSource.Program) return;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (r.Choice == "start") home.LaunchAnywayCommand.Execute(null);
+                else home.DismissPendingLaunchCommand.Execute(null);
+            });
+        };
+        home.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(HomeViewModel.PendingLaunch) && home.PendingLaunch is null) service.Requests.Withdraw(MultiKey);
         };
         download.OpenInstance = id =>
         {

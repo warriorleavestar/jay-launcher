@@ -96,6 +96,21 @@ public sealed class LauncherService : IDisposable
         Reload();
     }
 
+    /// <summary>所有长任务（活动中心“进行中”）。</summary>
+    public Amber.Core.Activity.TaskCenter Tasks { get; } = new();
+
+    /// <summary>所有要你处理的请求（请求条、房间卡、小窗共用，一处处理处处撤掉）。</summary>
+    public Amber.Core.Activity.RequestCenter Requests { get; } = new();
+
+    /// <summary>换下载源（启动失败卡的“切换到镜像后重试”）：存进设置并按新源重建下载器。</summary>
+    public void SetDownloadSource(string source)
+    {
+        Settings.DownloadSource = source;
+        try { Settings.Save(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { SettingsSaveFailed?.Invoke(e); }
+        Reload();
+    }
+
     public void Reload()
     {
         var directory = new GameDirectory(Settings.GameDirectory);

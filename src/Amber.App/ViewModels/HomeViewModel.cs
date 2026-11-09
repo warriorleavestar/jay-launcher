@@ -91,6 +91,8 @@ public sealed partial class HomeViewModel : PageViewModel
         public bool SharedWorkDir { get; set; }
         /// <summary>这一局用的是烘焙后的 classpath。</summary>
         public bool Baked { get; set; }
+        /// <summary>这一局的状态机（正在玩胶囊、活动中心“运行记录”看它）。</summary>
+        public LaunchSession Session { get; } = new(id, DateTimeOffset.Now);
     }
 
     /// <summary>
@@ -210,6 +212,22 @@ public sealed partial class HomeViewModel : PageViewModel
     public Action? NavigateToNewInstance { get; set; }
     public Action? NavigateToLog { get; set; }
     public Action? NavigateHere { get; set; }
+
+    /// <summary>新的一局开始了（启动协调器记进运行记录、更新正在玩胶囊）。</summary>
+    public event Action<LaunchSession>? SessionStarted;
+
+    /// <summary>别的实例在跑时又要开：发到请求条问一声（参数：在跑的实例）。没人接时停在启动页的卡片上。</summary>
+    public event Action<string>? MultiLaunchRequested;
+
+    /// <summary>600ms 内连点开始只算一次。</summary>
+    private readonly LaunchGate _gate = new();
+
+    /// <summary>上一次启动失败：原因和修复按钮（重新登录、下载 Java、切镜像重试、重试、查看日志、导出错误报告）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFailure))]
+    public partial LaunchFailureCard? Failure { get; set; }
+
+    public bool HasFailure => Failure is not null;
 
     /// <summary>游戏进程起来了 / 退出了（参数：是不是崩溃）。窗口按“启动后启动器”的设置最小化、恢复。</summary>
     public event Action? GameStarted;
@@ -427,6 +445,8 @@ public sealed partial class HomeViewModel : PageViewModel
 
     private async Task RunAsync(LaunchRequest request, bool allowSecond = false)
     {
+        // 手抖连点：600ms 内只算一次（多开确认后的“仍然开始”是另一次点击，不受影响）。
+        if (!allowSecond && !_gate.TryPass(DateTimeOffset.Now)) return;
         Toasts.DismissBakeFailures();
         if (!BakeRetryDirectoryMatches(_service, request))
         {
@@ -442,7 +462,9 @@ public sealed partial class HomeViewModel : PageViewModel
         {
             _pendingRunningId = other.Id;
             PendingLaunch = request;
-            NavigateHere?.Invoke();
+            // 不换页（§2.5 第 5 条）：问题发到请求条，启动页的卡片也在，哪边点都行。
+            if (MultiLaunchRequested is { } ask) ask(other.Id);
+            else NavigateHere?.Invoke();
             return;
         }
         if (SelectedAccount is not { } account)
@@ -462,7 +484,10 @@ public sealed partial class HomeViewModel : PageViewModel
         // 从准备阶段就开始记：补文件、Java、登录这些步骤出错时，日志页也看得到原因。
         run.Log = _log.BeginRun(id, DateTimeOffset.Now);
         _runs.Add(run);
+        _lastRequest = request;
+        SessionStarted?.Invoke(run.Session);
         Crash = null;
+        Failure = null;
         Progress = 0;
         UpdateRunState();
         var ct = run.Cts.Token;
@@ -562,6 +587,7 @@ public sealed partial class HomeViewModel : PageViewModel
             });
             run.Started = DateTime.UtcNow;
             run.Game = game;
+            run.Session.ProcessUp(DateTimeOffset.Now);
             // 同一个游戏目录里同时开着两局：两局的崩溃报告、latest.log 分不清，崩溃分析只用各自的输出。
             foreach (var sibling in _runs.Where(r => r != run && r.Game is not null && string.Equals(r.WorkDir, workDir, StringComparison.OrdinalIgnoreCase)))
                 sibling.SharedWorkDir = run.SharedWorkDir = true;
@@ -582,6 +608,8 @@ public sealed partial class HomeViewModel : PageViewModel
                 analysis = await Task.Run(pending.Analyze);
             }
 
+            run.Session.ProcessEnded(DateTimeOffset.Now, code, crashed: !run.StoppedByUser && input is not null && analysis is not null
+                && !(code == 0 && !HasClearCause(analysis)), analysis?.Findings.FirstOrDefault()?.Title);
             if (run.StoppedByUser)
             {
                 SetStatus(StatusMessage.Info("home.status.stopped"));
@@ -613,8 +641,8 @@ public sealed partial class HomeViewModel : PageViewModel
                             Toasts.Show(L.T("home.bake.retry_directory_changed"));
                     });
                 }
-                // 玩家在别的页面：弹个 Toast，带“查看”。
-                if (!IsCurrent) Toasts.WithAction(L.F("home.crash.toast", id), L.T("home.crash.show"), () => NavigateHere?.Invoke());
+                // 玩家在别的页面：弹个出错级的 Toast（不自动消失），带“查看”。
+                if (!IsCurrent) Toasts.WithAction(L.F("home.crash.toast", id), L.T("home.crash.show"), () => NavigateHere?.Invoke(), Avalonia.Controls.Notifications.NotificationType.Error);
                 GameCrashed?.Invoke(id);
             }
 
@@ -623,13 +651,17 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            run.Session.Cancel(DateTimeOffset.Now);
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
         // 其他的取消异常不是玩家点的：多半是连接超时（HttpClient 的 ConnectTimeout 也抛 TaskCanceledException），按失败显示原因。
         catch (Exception e)
         {
+            run.Session.Fail(DateTimeOffset.Now, ErrorText.Describe(e));
             SetStatus(StatusMessage.Failure("home.status.launch_failed", e, ErrorText.Of(e)));
             _log.AddRaw(run.Log, "[Jay] " + e);
+            // 游戏没起来才给修复卡；进程起来以后的异常（比如退出后的命令出错）不算启动失败。
+            if (!gameStarted) ShowFailure(run, request, e);
         }
         finally
         {
@@ -679,6 +711,7 @@ public sealed partial class HomeViewModel : PageViewModel
     {
         if (run.InGame) return;
         run.InGame = true;
+        run.Session.EnteredGame(DateTimeOffset.Now);
         run.InGameGuessed = guessed;
         UpdateRunState();
         Tick();
@@ -712,6 +745,12 @@ public sealed partial class HomeViewModel : PageViewModel
             SetOwnedStatus(StatusMessage.Info("home.status.in_game", run.Id, (int)elapsed.TotalMinutes));
     }
 
+    /// <summary>Before a confirmed close: cancels launches still preparing. Games already running keep running.</summary>
+    public void CancelPreparingForExit()
+    {
+        foreach (var run in _runs.Where(r => r.Game is null).ToList()) CancelRun(run);
+    }
+
     private void CancelRun(GameRun run)
     {
         run.StoppedByUser = true;
@@ -725,6 +764,7 @@ public sealed partial class HomeViewModel : PageViewModel
         if (run.Game is not { } game) return;
         run.StoppedByUser = true;
         run.Exiting = true;
+        run.Session.ExitRequested(DateTimeOffset.Now);
         UpdateRunState();
         SetOwnedStatus(StatusMessage.Info("home.status.exiting", run.Id));
         ExitRequest request;
@@ -937,6 +977,76 @@ public sealed partial class HomeViewModel : PageViewModel
         }
     }
 
+    private LaunchRequest? _lastRequest;
+    private string[] _failureOutput = [];
+
+    private void ShowFailure(GameRun run, LaunchRequest request, Exception e)
+    {
+        var info = LaunchFailure.Classify(e, _service.Settings.DownloadSource);
+        _failureOutput = [.. run.Log?.All.Select(l => $"[{l.Timestamp:HH:mm:ss}] [{l.Level}] {l.Message}") ?? [], "", e.ToString()];
+        var log = run.Log;
+        Failure = new LaunchFailureCard(info, ErrorText.Describe(e), request, log);
+    }
+
+    /// <summary>Self-check only: shows the failure card for an exception without launching.</summary>
+    internal void ShowFailureForSelfTest(Exception e)
+    {
+        var info = LaunchFailure.Classify(e, _service.Settings.DownloadSource);
+        _failureOutput = ["self-check", e.ToString()];
+        Failure = new LaunchFailureCard(info, ErrorText.Describe(e), new LaunchRequest("self-check"), null);
+    }
+
+    /// <summary>启动失败卡上的修复按钮。</summary>
+    [RelayCommand]
+    private async Task FixAsync(LaunchFix fix)
+    {
+        if (Failure is not { } card) return;
+        switch (fix)
+        {
+            case LaunchFix.Relogin:
+                NavigateToAccounts?.Invoke();
+                break;
+            case LaunchFix.Retry:
+                Failure = null;
+                await RunAsync(card.Request, allowSecond: false);
+                break;
+            case LaunchFix.RetryWithMirror:
+                Failure = null;
+                _service.SetDownloadSource("mirror");
+                await RunAsync(card.Request with { ExpectedContext = null });
+                break;
+            case LaunchFix.DownloadJava when card.Info.JavaMajor is { } major:
+                Failure = null;
+                var task = _service.Tasks.Start("java", L.F("tools.java.downloading", major), async (ctx, ct) =>
+                {
+                    await new Amber.Core.Java.JavaRuntimeInstaller(_service.Downloader, _service.Directory.Root).InstallAsync(null, major,
+                        new Progress<Amber.Core.Net.DownloadProgress>(p => ctx.Report((double)p.CompletedFiles / Math.Max(1, p.TotalFiles),
+                            L.F("tools.java.progress", major, p.CompletedFiles, p.TotalFiles))), ct);
+                    await _service.Java.ScanAsync(true);
+                    return Amber.Core.Activity.TaskOutcome.Success();
+                }, $"java:{major}");
+                while (task.IsRunning) await Task.Delay(200);
+                if (task.State == Amber.Core.Activity.TaskState.Succeeded) await RunAsync(card.Request);
+                else SetStatus(StatusMessage.Error("home.status.launch_failed", task.Message ?? ""));
+                break;
+            case LaunchFix.ViewLog:
+                _log.Show(card.Log);
+                _log.OnlyProblems = true;
+                NavigateToLog?.Invoke();
+                break;
+        }
+    }
+
+    [RelayCommand]
+    private void DismissFailure() => Failure = null;
+
+    /// <summary>导出启动失败的错误报告（这一局的日志和异常）。</summary>
+    public void ExportFailureReport(string zipPath)
+    {
+        CrashAnalyzer.ExportBundle(zipPath, [], _failureOutput);
+        SetStatus(StatusMessage.Success("home.status.report_exported", zipPath));
+    }
+
     /// <summary>导出崩溃卡对应的那一局：无痕过滤已在保存快照时完成，多开和后续启动不会串日志。</summary>
     public void ExportCrashBundle(string zipPath)
     {
@@ -959,4 +1069,39 @@ public sealed partial class HomeViewModel : PageViewModel
         if (_lastRunFiles.FirstOrDefault() is { } file)
             Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
     }
+}
+
+/// <summary>启动失败卡：原因一句话和按顺序排好的修复按钮。</summary>
+public sealed class LaunchFailureCard(LaunchFailure info, string reason, LaunchRequest request, RunLog? log)
+{
+    public LaunchFailure Info { get; } = info;
+    public string Reason { get; } = reason;
+    public LaunchRequest Request { get; } = request;
+    public RunLog? Log { get; } = log;
+
+    public string Title => Info.Kind switch
+    {
+        LaunchFailureKind.Login => L.T("home.failure.login"),
+        LaunchFailureKind.Java => L.F("home.failure.java", Info.JavaMajor ?? 0),
+        LaunchFailureKind.Network => L.T("home.failure.network"),
+        _ => L.T("home.failure.other"),
+    };
+
+    /// <summary>卡上的按钮（导出错误报告要选保存位置，由页面处理，不在这里）。</summary>
+    public IReadOnlyList<LaunchFixButton> Buttons => Info.Fixes.Where(f => f != LaunchFix.ExportReport)
+        .Select((f, i) => new LaunchFixButton(f, i == 0)).ToList();
+
+    public bool CanExport => Info.Fixes.Contains(LaunchFix.ExportReport);
+}
+
+public sealed record LaunchFixButton(LaunchFix Fix, bool IsPrimary)
+{
+    public string Label => Fix switch
+    {
+        LaunchFix.Relogin => L.T("home.failure.fix.relogin"),
+        LaunchFix.DownloadJava => L.T("home.failure.fix.java"),
+        LaunchFix.RetryWithMirror => L.T("home.failure.fix.mirror"),
+        LaunchFix.Retry => L.T("home.failure.fix.retry"),
+        _ => L.T("home.failure.fix.log"),
+    };
 }

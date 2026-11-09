@@ -38,7 +38,8 @@ public static class Toasts
 
     public static void Attach(Window window, Views.Controls.BakeNoticeState? bakeHost = null)
     {
-        _manager = new WindowNotificationManager(window) { Position = NotificationPosition.BottomRight, MaxItems = 3 };
+        // Bottom right, above the launch bar, at most 3: top right would cover the request bar and the activity button.
+        _manager = new WindowNotificationManager(window) { Position = NotificationPosition.BottomRight, MaxItems = 3, Margin = new Avalonia.Thickness(0, 0, 0, 96) };
         _bakeHost?.Clear();
         _bakeHost = bakeHost;
         window.Closed += (_, _) =>
@@ -61,13 +62,24 @@ public static class Toasts
     /// <summary>开始处理新的启动请求后，旧失败提示不能遮住这次的状态或留下过时重试入口。</summary>
     internal static void DismissBakeFailures() => _bakeHost?.Clear();
 
-    public static void Show(string text, NotificationType type = NotificationType.Information) =>
-        Dispatcher.UIThread.Post(() => _manager?.Show(new TextBlock { Text = text, TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = 360 }, type, TimeSpan.FromSeconds(4)));
+    /// <summary>每条 Toast 显示时触发（活动中心“通知”里回看）。在界面线程上。</summary>
+    public static event Action<string, NotificationType>? Shown;
 
-    /// <summary>带一个按钮的 Toast（比如安装完成后的“打开实例”）。</summary>
-    public static void WithAction(string text, string actionLabel, Action action) =>
+    /// <summary>出错的 Toast 不自动消失（§6.22），其余 5 秒。</summary>
+    internal static TimeSpan DurationFor(NotificationType type, TimeSpan normal) => type == NotificationType.Error ? TimeSpan.Zero : normal;
+
+    public static void Show(string text, NotificationType type = NotificationType.Information) =>
         Dispatcher.UIThread.Post(() =>
         {
+            Shown?.Invoke(text, type);
+            _manager?.Show(new TextBlock { Text = text, TextWrapping = Avalonia.Media.TextWrapping.Wrap, MaxWidth = 360 }, type, DurationFor(type, TimeSpan.FromSeconds(5)));
+        });
+
+    /// <summary>带一个按钮的 Toast（比如安装完成后的“打开实例”）。出错级的不自动消失。</summary>
+    public static void WithAction(string text, string actionLabel, Action action, NotificationType type = NotificationType.Success) =>
+        Dispatcher.UIThread.Post(() =>
+        {
+            Shown?.Invoke(text, type);
             if (_manager is null) return;
             var button = new Button { Content = actionLabel, Classes = { "secondary" }, Margin = new Avalonia.Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             var content = new DockPanel
@@ -80,7 +92,7 @@ public static class Toasts
             };
             DockPanel.SetDock(button, Dock.Right);
             button.Click += (_, _) => action();
-            _manager.Show(content, NotificationType.Success, UndoDuration);
+            _manager.Show(content, type, DurationFor(type, UndoDuration));
         });
 
     /// <summary>
@@ -110,6 +122,7 @@ public static class Toasts
         lock (History) History.Add(item);
         Dispatcher.UIThread.Post(() =>
         {
+            Shown?.Invoke(L.F("trash.deleted", item.Name), NotificationType.Information);
             if (_manager is null) return;
             var undo = new Button { Content = L.T("common.undo"), Classes = { "secondary" }, Margin = new Avalonia.Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             var content = new DockPanel

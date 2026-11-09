@@ -403,4 +403,29 @@
     <Setter Property="BorderBrush" Value="{DynamicResource Focus}" />
     <Setter Property="BorderThickness" Value="2" />
   </Style>
+
+  <!-- 正在玩胶囊（顶栏）：绿点 + 实例名；崩溃时红 -->
+  <Style Selector="Button.pill-play">
+    <Setter Property="Background" Value="{DynamicResource PlayTint}" />
+    <Setter Property="Foreground" Value="{DynamicResource PlayText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Play}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="10,3" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="Button.pill-play Ellipse.pill-dot"><Setter Property="Fill" Value="{DynamicResource Play}" /></Style>
+  <Style Selector="Button.pill-play.crash">
+    <Setter Property="Background" Value="{DynamicResource DangerTint}" />
+    <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Danger}" />
+  </Style>
+  <Style Selector="Button.pill-play.crash Ellipse.pill-dot"><Setter Property="Fill" Value="{DynamicResource Danger}" /></Style>
+  <Style Selector="TextBlock.error"><Setter Property="Foreground" Value="{DynamicResource DangerText}" /></Style>
+  <!-- 请求条：普通请求（非安全）。和横幅一样，但更醒目一点 -->
+  <Style Selector="Border.banner.request">
+    <Setter Property="BorderThickness" Value="1,1,1,1" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
 </Styles>

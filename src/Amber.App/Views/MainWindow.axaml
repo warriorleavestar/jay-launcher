@@ -220,6 +220,46 @@
       </Grid>
     </DataTemplate>
 
+    <!-- 请求条上的一条请求（§6.22）：安全类用锁定的安全横幅和安全按钮，其余用普通横幅 -->
+    <DataTemplate DataType="vm:RequestItem">
+      <Panel>
+        <safety:SafetyBanner IsVisible="{Binding IsSafety}">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Body}" IsVisible="{Binding HasBody}" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding RemainingText}" IsVisible="{Binding HasRemaining}" FontSize="12" />
+            </StackPanel>
+            <ItemsControl Grid.Column="1" ItemsSource="{Binding Buttons}" VerticalAlignment="Center">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:RequestButton">
+                  <safety:SafetyButton Content="{Binding Label}" Command="{Binding ChooseCommand}" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Grid>
+        </safety:SafetyBanner>
+        <Border Classes="banner request" IsVisible="{Binding !IsSafety}">
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+            <Path Classes="icon" Data="{StaticResource Icon.Bell}" Width="20" Height="20" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Body}" IsVisible="{Binding HasBody}" Classes="hint" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding RemainingText}" IsVisible="{Binding HasRemaining}" Classes="hint" />
+            </StackPanel>
+            <ItemsControl Grid.Column="2" ItemsSource="{Binding Buttons}" VerticalAlignment="Center">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:RequestButton">
+                  <Button Classes="secondary small" Classes.primary="{Binding Choice.IsDefault}" Content="{Binding Label}" Command="{Binding ChooseCommand}" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Grid>
+        </Border>
+      </Panel>
+    </DataTemplate>
   </Window.DataTemplates>
 
   <Grid x:Name="ShellGrid" ColumnDefinitions="240,*">
@@ -329,9 +369,9 @@
     </Border>
 
     <!-- 内容列：顶栏、子页页签、“东西搬到哪了”、页面 -->
-    <Grid x:Name="ContentColumn" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,*">
+    <Grid x:Name="ContentColumn" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto,*">
       <!-- 顶栏（§3.1）：← 返回 + 标题或面包屑；带上下文跳过来时有【完成，返回】 -->
-      <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto" Margin="8,0,16,0">
+      <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" Margin="8,0,16,0">
         <Button x:Name="BackButton" Classes="ghost icon-only" Command="{Binding Shell.BackCommand}" IsEnabled="{Binding Shell.CanGoBack}"
                 ToolTip.Tip="{l:T shell.back_tip}" AutomationProperties.Name="{l:T shell.back}" VerticalAlignment="Center">
           <Path Classes="icon" Data="{StaticResource Icon.ChevronLeft}" Width="20" Height="20" />
@@ -347,9 +387,41 @@
         </StackPanel>
         <Button Grid.Column="3" Classes="secondary small" Content="{l:T shell.return_done}" Command="{Binding Shell.ReturnCommand}"
                 IsVisible="{Binding Shell.HasReturn}" VerticalAlignment="Center" />
+        <!-- 正在玩胶囊：有游戏准备中、运行中或刚崩溃时才出现；点它去游戏库 -->
+        <Button x:Name="PlayingPill" Grid.Column="4" Classes="pill-play" Classes.crash="{Binding Activity.PillIsCrash}" Command="{Binding Activity.OpenPillCommand}"
+                IsVisible="{Binding Activity.HasPill}" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip.Tip="{Binding Activity.PillText}"
+                AutomationProperties.Name="{Binding Activity.PillText}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Ellipse Classes="pill-dot" Width="8" Height="8" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding Activity.PillText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
+          </StackPanel>
+        </Button>
+        <!-- 活动：铃铛；有任务时外圈是总进度，有没看过的失败或请求时红点。Ctrl+J -->
+        <Button x:Name="ActivityButton" Grid.Column="5" Classes="ghost icon-only" Command="{Binding Activity.ToggleCommand}" Margin="4,0,0,0"
+                VerticalAlignment="Center" ToolTip.Tip="{Binding Activity.ActivityTip}" AutomationProperties.Name="{l:T activity.title}">
+          <Panel Width="28" Height="28">
+            <Arc Stroke="{DynamicResource Accent}" StrokeThickness="2" StartAngle="-90" SweepAngle="{Binding Activity.RingSweep}" Width="28" Height="28"
+                 IsVisible="{Binding Activity.HasRunningTasks}" />
+            <Path Classes="icon" Data="{StaticResource Icon.Bell}" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Ellipse Width="8" Height="8" Fill="{DynamicResource Danger}" HorizontalAlignment="Right" VerticalAlignment="Top" IsVisible="{Binding Activity.HasAttention}" />
+          </Panel>
+        </Button>
       </Grid>
+      <!-- 请求条（§6.22）：要你处理、有时限的事。多条时折叠成“N 件事等你处理 ▾” -->
+      <StackPanel x:Name="RequestBar" Grid.Row="1" Margin="16,0,16,8" Spacing="6" IsVisible="{Binding Activity.HasRequests}">
+        <ContentControl Content="{Binding Activity.FirstRequest}" />
+        <Button Classes="ghost small" Command="{Binding Activity.ToggleRequestsCommand}" IsVisible="{Binding Activity.HasMoreRequests}" HorizontalAlignment="Left">
+          <StackPanel Orientation="Horizontal" Spacing="4">
+            <TextBlock Text="{Binding Activity.MoreRequestsText}" />
+            <Path Classes="icon sm" Data="{StaticResource Icon.ChevronDown}" Width="14" Height="14" />
+          </StackPanel>
+        </Button>
+        <ItemsControl ItemsSource="{Binding Activity.Requests}" IsVisible="{Binding Activity.RequestsExpanded}">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        </ItemsControl>
+      </StackPanel>
       <!-- 入口里的子页：游戏库 = 游戏库 / 实例 / 新建实例 / 运行记录；设置 = 设置 / 工具 -->
-      <ListBox x:Name="SubPageTabs" Grid.Row="1" Classes="subtabs" ItemsSource="{Binding Shell.SubPages}" SelectedItem="{Binding Shell.SelectedSubPage}"
+      <ListBox x:Name="SubPageTabs" Grid.Row="2" Classes="subtabs" ItemsSource="{Binding Shell.SubPages}" SelectedItem="{Binding Shell.SelectedSubPage}"
                IsVisible="{Binding Shell.HasSubPages}" Background="Transparent" Margin="16,0,16,4"
                ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled"
                AutomationProperties.Name="{Binding Shell.Title}">
@@ -366,7 +438,7 @@
         </ListBox.ItemTemplate>
       </ListBox>
       <!-- 第一次打开新版：东西搬到哪了（可关闭） -->
-      <Border x:Name="MovedNotice" Grid.Row="2" Classes="banner" Margin="16,0,16,8" IsVisible="False">
+      <Border x:Name="MovedNotice" Grid.Row="3" Classes="banner" Margin="16,0,16,8" IsVisible="False">
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
           <Path Classes="icon" Data="{StaticResource Icon.Info}" Width="20" Height="20" VerticalAlignment="Top" />
           <StackPanel Grid.Column="1" Spacing="2">
@@ -376,7 +448,98 @@
           <Button x:Name="MovedNoticeClose" Grid.Column="2" Classes="ghost small" Content="{l:T shell.moved.ok}" VerticalAlignment="Top" Click="MovedNotice_Close" />
         </Grid>
       </Border>
-      <ContentControl x:Name="PageHost" Grid.Row="3" Content="{Binding CurrentPage}" Margin="24,4,24,20" />
+      <ContentControl x:Name="PageHost" Grid.Row="4" Content="{Binding CurrentPage}" Margin="24,4,24,20" />
+
+      <!-- 活动中心（§6.22）：盖在内容区右侧的抽屉 400，紧凑档全宽。Esc 或点外面关 -->
+      <Panel x:Name="ActivityLayer" Grid.RowSpan="5" IsVisible="{Binding Activity.IsOpen}">
+        <Border x:Name="ActivityScrim" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="ActivityScrim_Pressed" />
+        <Border x:Name="ActivityDrawer" Width="400" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
+                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}">
+          <DockPanel Margin="16,12,16,16">
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+              <TextBlock Text="{l:T activity.title}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold" VerticalAlignment="Center" />
+              <Button x:Name="ActivityClose" Grid.Column="1" Classes="ghost icon-only" Command="{Binding Activity.CloseCommand}"
+                      ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}">
+                <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
+              </Button>
+            </Grid>
+            <ListBox x:Name="ActivityTabs" DockPanel.Dock="Top" Classes="subtabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
+                     Background="Transparent" Margin="-4,0,0,8" ScrollViewer.HorizontalScrollBarVisibility="Auto">
+              <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+              <ListBox.ItemTemplate>
+                <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+              <Button Classes="secondary small" Content="{l:T activity.clear_finished}" Command="{Binding Activity.ClearFinishedCommand}"
+                      IsVisible="{Binding Activity.IsTasksTab}" IsEnabled="{Binding Activity.HasFinishedTasks}" />
+              <Button Classes="secondary small" Content="{l:T activity.clear_notices}" Command="{Binding Activity.ClearNoticesCommand}"
+                      IsVisible="{Binding Activity.IsNoticesTab}" IsEnabled="{Binding Activity.HasNotices}" />
+            </StackPanel>
+            <Panel>
+              <!-- 进行中 -->
+              <Panel IsVisible="{Binding Activity.IsTasksTab}">
+                <TextBlock Classes="hint" Text="{l:T activity.empty.tasks}" IsVisible="{Binding !Activity.HasTasks}" Margin="0,8" TextWrapping="Wrap" />
+                <ScrollViewer>
+                  <ItemsControl x:Name="ActivityTaskList" ItemsSource="{Binding Activity.Tasks}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:TaskItem">
+                        <Border Classes="card" Padding="12" Margin="0,0,0,8">
+                          <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
+                            <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Value="{Binding Percent}" Maximum="100" IsIndeterminate="{Binding Indeterminate}"
+                                         IsVisible="{Binding IsRunning}" Margin="0,6,0,0" />
+                            <TextBlock Grid.Row="2" Text="{Binding Detail}" Classes="hint" Classes.error="{Binding IsFailed}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <Button Grid.Column="1" Classes="ghost small" Content="{l:T common.cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding CanCancel}" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </Panel>
+              <!-- 通知 -->
+              <Panel IsVisible="{Binding Activity.IsNoticesTab}">
+                <TextBlock Classes="hint" Text="{l:T activity.empty.notices}" IsVisible="{Binding !Activity.HasNotices}" Margin="0,8" TextWrapping="Wrap" />
+                <ScrollViewer>
+                  <ItemsControl ItemsSource="{Binding Activity.Notices}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:NoticeItem">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="0,4">
+                          <TextBlock Text="{Binding TimeText}" Classes="hint" FontSize="12" VerticalAlignment="Top" />
+                          <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" Classes.error="{Binding IsError}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </Panel>
+              <!-- 运行记录 -->
+              <Panel IsVisible="{Binding Activity.IsRunsTab}">
+                <TextBlock Classes="hint" Text="{l:T activity.empty.runs}" IsVisible="{Binding !Activity.HasRuns}" Margin="0,8" TextWrapping="Wrap" />
+                <ScrollViewer>
+                  <ItemsControl ItemsSource="{Binding Activity.Runs}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:RunItem">
+                        <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,0,0,4"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Activity.OpenCommand}" CommandParameter="{Binding}">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <StackPanel>
+                              <TextBlock Text="{Binding Instance}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Text="{Binding StateText}" Classes="hint" Classes.error="{Binding IsCrash}" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="{Binding StartedText}" Classes="hint" FontSize="12" VerticalAlignment="Top" />
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </Panel>
+            </Panel>
+          </DockPanel>
+        </Border>
+      </Panel>
     </Grid>
 
     <!-- 熔断倒计时：盖住整个窗口，按空格或点按钮取消重启 -->

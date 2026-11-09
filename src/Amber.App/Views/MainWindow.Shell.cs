@@ -170,13 +170,19 @@ public partial class MainWindow
         TopBar.Margin = new Thickness(pad - 8, 0, pad, 0);
         SubPageTabs.Margin = new Thickness(pad - 4, 0, pad, 4);
         MovedNotice.Margin = new Thickness(pad, 0, pad, 8);
+        RequestBar.Margin = new Thickness(pad, 0, pad, 8);
+        // 活动抽屉：紧凑档铺满内容区，其余 400 宽从右边滑出（§5.3）。
+        ActivityDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
+        ActivityDrawer.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
         ContentColumn.Classes.Set("compact", ContentTier == WidthTier.Compact);
         ContentColumn.Classes.Set("wide", ContentTier == WidthTier.Wide);
     }
 
     private void OnShellKeyDown(object? sender, KeyEventArgs e)
     {
-        if (DataContext is not MainViewModel { Shell: var shell }) return;
+        if (DataContext is not MainViewModel { Shell: var shell } main) return;
+        if (e.Key == Key.Escape && main.Activity.IsOpen) { main.Activity.Close(); e.Handled = true; return; }
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.J) { main.Activity.Toggle(); e.Handled = true; return; }
         if (e.KeyModifiers == KeyModifiers.Control)
         {
             string? id = e.Key switch { Key.D1 or Key.NumPad1 => "library", Key.D2 or Key.NumPad2 => "discover", Key.D3 or Key.NumPad3 => "multiplayer", _ => null };
@@ -218,6 +224,12 @@ public partial class MainWindow
         target.Focus(NavigationMethod.Tab);
         target.Classes.Add("field-flash");
         DispatcherTimer.RunOnce(() => target.Classes.Remove("field-flash"), TimeSpan.FromSeconds(2));
+    }
+
+    private void ActivityScrim_Pressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel main) main.Activity.Close();
+        e.Handled = true;
     }
 
     private void MovedNotice_Close(object? sender, RoutedEventArgs e)

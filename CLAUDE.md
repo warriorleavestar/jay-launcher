@@ -39,6 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Repo
 只验证联机（邀请、敲门、房间、直连）时设置 `AMBER_SELFTEST_SCOPE=multiplayer`。
 只看控件库和新配色时设置 `AMBER_SELFTEST_SCOPE=gallery`：控件库每一格和现有每一页在深浅两色下截图，检查琥珀按钮每屏最多一个、图标都解析得到；不碰游戏目录、不联网。
 只验证新外壳时设置 `AMBER_SELFTEST_SCOPE=shell`：600×420 到 1440×900 四种窗口 × 四种语言截图，检查隐私行、三个入口、设置和账号都看得见，侧栏只在宽窗口展开；再走快捷键、返回前进、旧的九页都能走到、`settings#字段` 定位和带上下文返回。不碰游戏目录、不联网。
+只验证活动中心时设置 `AMBER_SELFTEST_SCOPE=activity`：模拟任务、请求、一局游戏和启动失败，检查活动抽屉（Ctrl+J / Esc，三档宽度）、请求条（倒计时、去重、安全请求在最前、处理后同步收起）、出错通知不自动消失、正在玩胶囊、启动失败卡的修复按钮和关窗保护。不碰游戏目录、不联网。
 只验证安全外观锁定时设置 `AMBER_SELFTEST_SCOPE=safety-lock`：装上五个极端主题包，逐像素比对安全面板和隐私行在深浅两色下跟默认外观一致，并检查带保留词的主题包被拒、确认框默认焦点在“保留”。
 只验证界面主题包（导出、导入、立即生效、坏包被拒、恢复默认、删除）时设置 `AMBER_SELFTEST_SCOPE=theme`；主题包格式见 `docs/themes.md`。
 只验证联机安全（设置页“联机安全”卡片、熔断倒计时盖住窗口、空格取消、到点重启、10 分钟内不再自动重启、跳过等待）时设置 `AMBER_SELFTEST_SCOPE=security`；重启这一步换成计数，不会真的重启。
