@@ -36,6 +36,83 @@
           </StackPanel>
         </Border>
 
+        <!-- 公共网络：大家先进的大厅层，看房间列表、申请加入；房主可以把房间公开 / 设密码 / 发直连码 -->
+        <Border Classes="card" Margin="0">
+          <StackPanel Spacing="8">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="h2" Text="{l:T multiplayer.public.title}" Margin="0" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding PublicStateText}" Classes.hint="{Binding !IsPublicConnected}" />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Top">
+                <Button Classes="primary" Content="{l:T multiplayer.public.connect}" Command="{Binding ConnectPublicCommand}" IsVisible="{Binding !IsPublicConnected}" IsEnabled="{Binding !IsPublicConnecting}" />
+                <Button Content="{l:T multiplayer.public.refresh}" Command="{Binding RefreshRoomsCommand}" IsVisible="{Binding IsPublicConnected}" IsEnabled="{Binding !IsRefreshingRooms}" />
+                <Button Content="{l:T multiplayer.public.disconnect}" Command="{Binding DisconnectPublicCommand}" IsVisible="{Binding IsPublicConnected}" />
+              </StackPanel>
+            </Grid>
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.hint}" />
+            <!-- 第一次连之前：别人能看到什么、看不到什么 -->
+            <Border Classes="card" Margin="0" IsVisible="{Binding PublicNoticeOpen}">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{l:T multiplayer.public.notice_title}" FontWeight="SemiBold" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.notice_body}" />
+                <WrapPanel ItemSpacing="6" LineSpacing="6">
+                  <Button Classes="primary" Content="{l:T multiplayer.public.notice_accept}" Command="{Binding AcceptPublicNoticeCommand}" />
+                  <Button Content="{l:T common.cancel}" Command="{Binding ClosePublicNoticeCommand}" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+            <!-- 房间列表（没在房间里时） -->
+            <StackPanel Spacing="6" IsVisible="{Binding IsIdle}">
+              <ItemsControl ItemsSource="{Binding PublicRooms}" IsVisible="{Binding IsPublicConnected}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:PublicRoomItem">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                      <StackPanel Spacing="1">
+                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Classes="hint" FontSize="12" Text="{Binding Meta}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Content="{l:T multiplayer.public.join}" Margin="8,0,0,0" VerticalAlignment="Center"
+                              Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).JoinPublicRoomCommand}" CommandParameter="{Binding}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBox Text="{Binding PublicRoomPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.public.password_placeholder}" IsVisible="{Binding IsPublicConnected}" />
+            </StackPanel>
+            <!-- 房主：在公共网络上怎么出现 -->
+            <StackPanel Spacing="6" IsVisible="{Binding IsHosting}">
+              <TextBlock Text="{l:T multiplayer.public.publish_title}" FontWeight="SemiBold" />
+              <ComboBox ItemsSource="{Binding VisibilityChoices}" SelectedItem="{Binding SelectedVisibility}" HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate DataType="vm:VisibilityChoice">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="{Binding Label}" />
+                      <TextBlock Classes="hint" FontSize="12" Text="{Binding Detail}" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBox Text="{Binding PublishRoomName}" PlaceholderText="{l:T multiplayer.public.name_placeholder}" />
+              <TextBox Text="{Binding PublishPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.public.publish_password_placeholder}" IsVisible="{Binding NeedsPublishPassword}" />
+              <CheckBox Content="{l:T multiplayer.public.auto_approve}" IsChecked="{Binding PublishAutoApprove}" />
+              <WrapPanel ItemSpacing="6" LineSpacing="6">
+                <Button Classes="primary" Content="{l:T multiplayer.public.publish}" Command="{Binding PublishRoomCommand}" />
+                <Button Content="{l:T multiplayer.public.unpublish}" Command="{Binding UnpublishRoomCommand}" />
+              </WrapPanel>
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding PublishStatus}" IsVisible="{Binding PublishStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+            <!-- 公共节点（种子）：没有内置节点时要填 -->
+            <Expander Header="{l:T multiplayer.public.nodes_title}" IsExpanded="{Binding !HasPublicNodes, Mode=OneTime}" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.nodes_hint}" />
+                <TextBox Text="{Binding PublicNodesText}" AcceptsReturn="True" MinHeight="56" FontFamily="Consolas,monospace" PlaceholderText="tcp://1.2.3.4:11010" />
+                <Button Content="{l:T multiplayer.public.save_nodes}" Command="{Binding SavePublicNodesCommand}" HorizontalAlignment="Left" />
+              </StackPanel>
+            </Expander>
+          </StackPanel>
+        </Border>
+
         <!-- 开房间用的游戏：房间码和直连共用 -->
         <Border Classes="card" Margin="0" IsVisible="{Binding IsIdle}">
           <StackPanel Spacing="8">

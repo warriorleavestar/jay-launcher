@@ -1,0 +1,25 @@
+# Jay 公共网络节点（种子节点 + 房间目录）的 systemd 服务。
+# 用法见 docs/public-network.md：把 jay-server 放到 /opt/jay-server/，数据放 /var/lib/jay-public-node/，用单独的 jay 用户运行。
+[Unit]
+Description=Jay public network node (seed + room directory)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jay
+Group=jay
+Environment=JAY_SERVER_DIR=/var/lib/jay-public-node
+ExecStart=/opt/jay-server/jay-server directory --listen 11010
+Restart=on-failure
+RestartSec=10
+
+# 加固：只能写自己的数据目录。
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/jay-public-node
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

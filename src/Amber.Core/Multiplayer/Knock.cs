@@ -253,8 +253,9 @@ public static class KnockClient
 /// <summary>房主这次发出去的一张邀请。</summary>
 public sealed class PendingInvite
 {
-    internal PendingInvite(JayInvite invite, int uses, DateTimeOffset? expiresAt, bool autoApprove)
+    internal PendingInvite(JayInvite invite, int uses, DateTimeOffset? expiresAt, bool autoApprove, bool standing = false)
     {
+        Standing = standing;
         Invite = invite;
         Id = LobbyKeys.InviteId(invite.Token);
         UsesLeft = uses;
@@ -270,6 +271,10 @@ public sealed class PendingInvite
     public DateTimeOffset? ExpiresAt { get; }
     public bool AutoApprove { get; }
     public bool Revoked { get; internal set; }
+    /// <summary>
+    /// 长期邀请：在公共网络上公开或设了密码的房间用它敲门，次数不限、房间关掉才失效。踢人时不作废它（被踢的人按公钥进了禁入名单）。
+    /// </summary>
+    public bool Standing { get; }
 
     public bool IsUsable(DateTimeOffset now) => !Revoked && UsesLeft > 0 && (ExpiresAt is not { } at || now < at);
 }
@@ -309,6 +314,26 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
             PruneLocked();
             _lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength);
             invite = new PendingInvite(JayInvite.Create(_lobbyKey, tunnel), uses, lifetime is { } l ? _now() + l : null, autoApprove);
+            _invites.Add(invite);
+        }
+        Changed?.Invoke();
+        return invite;
+    }
+
+    /// <summary>
+    /// 长期邀请（公共网络上的公开 / 密码房间）：和普通邀请共用大厅密钥，次数不限、不过期，直到撤销或房间关掉。
+    /// </summary>
+    /// <param name="token">密码房间：由密码派生的令牌（见 <see cref="Public.RoomPassword"/>）；不给时随机生成。</param>
+    public PendingInvite CreateStanding(bool autoApprove, TunnelSettings tunnel, byte[]? token = null)
+    {
+        if (token is { Length: not JayInvite.KeyLength }) throw new ArgumentException(null, nameof(token));
+        PendingInvite invite;
+        lock (_gate)
+        {
+            PruneLocked();
+            _lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength);
+            var jay = token is null ? JayInvite.Create(_lobbyKey, tunnel) : new JayInvite((byte[])_lobbyKey.Clone(), (byte[])token.Clone(), tunnel);
+            invite = new PendingInvite(jay, int.MaxValue, null, autoApprove, standing: true);
             _invites.Add(invite);
         }
         Changed?.Invoke();
