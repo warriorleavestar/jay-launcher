@@ -66,7 +66,8 @@ public static class Program
               --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
-          jay-server node status|rooms|bans|nodes  看运行中节点的计数、公开房间、封禁名单、志愿节点
+          jay-server node status|rooms|bans|nodes  看运行中节点的计数、公开房间、封禁名单、志愿中转
+          jay-server node panel               打印网页管理面板的链接（只能在本机打开；远程服务器用 ssh -L 转发端口）
           jay-server node ban host|room|account|room-host|node <房主指纹|房间编号|账号|房间编号|志愿节点地址> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
               马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
@@ -475,6 +476,16 @@ public static class Program
         var client = AdminClient.ForDataDir(http ?? owned!, root, options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
         var pretty = new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
         string Need(int i, string what) => rest.ElementAtOrDefault(i) ?? throw new ArgumentException("要给" + what);
+        if (sub == "panel")
+        {
+            // The web panel: the token rides in the URL fragment, which the browser keeps to itself.
+            var port = options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort);
+            var token = File.ReadAllText(Path.Combine(root, "admin.token")).Trim();
+            output.WriteLine("在这台机器的浏览器里打开（链接里带着管理口令，不要发给别人）：");
+            output.WriteLine(AdminPanel.Url(port, token));
+            output.WriteLine($"节点在远程服务器上时，先在自己电脑上运行 ssh -L {port}:127.0.0.1:{port} <用户>@<服务器>，再在自己电脑上打开上面的链接。");
+            return 0;
+        }
         System.Text.Json.Nodes.JsonObject reply;
         try
         {
@@ -491,7 +502,7 @@ public static class Program
                 }),
                 "unban" => await client.CallAsync("POST", "/unban", new() { ["kind"] = Need(0, "host、room 或 account"), ["value"] = Need(1, "房主指纹、房间编号或账号") }),
                 "remove" => await client.CallAsync("POST", "/remove", new() { ["id"] = Need(0, "房间编号") }),
-                _ => throw new ArgumentException("用法：jay-server node status|rooms|bans|nodes|ban|unban|remove"),
+                _ => throw new ArgumentException("用法：jay-server node status|rooms|bans|nodes|panel|ban|unban|remove"),
             };
         }
         catch (HttpRequestException e)

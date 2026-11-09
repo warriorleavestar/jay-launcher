@@ -62,6 +62,8 @@ await server.RunAsync(CancellationToken.None);
 
 只听 `127.0.0.1`（默认 47669），每个请求一次连接。除了 `/health` 都要 `Authorization: Bearer <数据目录里 admin.token 的内容>`。
 
+`GET /`、`/panel.js`、`/panel.css` 是网页管理面板（静态文件，不用口令，本身不含数据；`AdminPanel.Url(port, token)` 生成直接登录的链接）。所有请求的 Host 都必须是 127.0.0.1 / localhost / [::1]（任意端口），带 Origin 时也必须是本机，否则回 403。
+
 | 请求 | 回复 |
 |---|---|
 | `GET /health` | `{ok, network, role: directory\|seed, easytier: running\|stopped\|external, rooms, listed, login, uptime}` |
