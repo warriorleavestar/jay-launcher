@@ -65,7 +65,9 @@ public sealed partial class MultiplayerViewModel
     partial void OnRequireDeviceChanged(bool value) => UpdateHostPolicy();
     partial void OnAllowedDevicesTextChanged(string value) => UpdateHostPolicy();
 
-    private void UpdateHostPolicy() => _hostPolicy = new DevicePolicy(RequireDevice, DevicePolicy.ParseCodes(AllowedDevicesText));
+    /// <summary>房主的设备策略：自己勾的“要求设备指纹”，或者公共网络的配置要求（只会更严）。</summary>
+    private void UpdateHostPolicy() =>
+        _hostPolicy = new DevicePolicy(RequireDevice || NetworkPolicy.RequireDevice, DevicePolicy.ParseCodes(AllowedDevicesText));
 
     private void OnDeviceChanged()
     {

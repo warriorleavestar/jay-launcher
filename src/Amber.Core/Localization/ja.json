@@ -1866,5 +1866,13 @@
   "multiplayer.network.removed": "公共ネットワーク「{0}」を削除しました",
   "multiplayer.network.switched": "「{0}」に切り替えました",
   "multiplayer.network.copied": "接続文字列をコピーしました。友達に送れば同じ公共ネットワークに入れます",
-  "multiplayer.network.nodes.one": "ノード {0} 個"
+  "multiplayer.network.nodes.one": "ノード {0} 個",
+  "core.mp.netconfig.bad": "ネットワークの設定ファイルの形式が正しくありません",
+  "core.mp.netconfig.new_version": "ネットワークの設定ファイルは新しい形式（バージョン {0}）です。先に Jay を更新してください",
+  "core.mp.netconfig.hash": "ダウンロードしたネットワーク設定が接続文字列のハッシュと一致しません。改ざんされた可能性があります",
+  "core.mp.private.not_allowed": "この公共ネットワークではこのファイルを送れません（大きすぎるか、ファイル送信が無効です）",
+  "multiplayer.netconfig.failed": "「{0}」のネットワーク設定を取得できません：{1}",
+  "multiplayer.netconfig.too_old": "「{0}」には Jay {1} 以降が必要です。先に更新してください",
+  "multiplayer.netconfig.mode_not_allowed": "この公共ネットワークでは「{0}」のルームは使えません",
+  "multiplayer.netconfig.notice_title": "ネットワークのお知らせ"
 }

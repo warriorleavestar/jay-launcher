@@ -1898,5 +1898,13 @@
   "multiplayer.network.removed": "Removed the public network \"{0}\"",
   "multiplayer.network.switched": "Switched to \"{0}\"",
   "multiplayer.network.copied": "Network string copied. Send it to friends so they can join the same public network",
-  "multiplayer.network.nodes.one": "{0} node"
+  "multiplayer.network.nodes.one": "{0} node",
+  "core.mp.netconfig.bad": "The network's config file is invalid",
+  "core.mp.netconfig.new_version": "The network's config file uses a newer format (version {0}). Update Jay first",
+  "core.mp.netconfig.hash": "The downloaded network config does not match the hash in the network string. It may have been altered",
+  "core.mp.private.not_allowed": "This public network does not allow sending this file (too large, or file transfer is off)",
+  "multiplayer.netconfig.failed": "Could not load the config for \"{0}\": {1}",
+  "multiplayer.netconfig.too_old": "\"{0}\" requires Jay {1} or newer. Update Jay first",
+  "multiplayer.netconfig.mode_not_allowed": "This public network does not allow \"{0}\" rooms",
+  "multiplayer.netconfig.notice_title": "Network notice"
 }

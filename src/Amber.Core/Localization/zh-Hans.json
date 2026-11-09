@@ -1866,5 +1866,13 @@
   "multiplayer.network.removed": "已删除公共网络“{0}”",
   "multiplayer.network.switched": "已换到“{0}”",
   "multiplayer.network.copied": "连接串已复制，发给朋友就能进同一个公共网络",
-  "multiplayer.network.nodes.one": "{0} 个节点"
+  "multiplayer.network.nodes.one": "{0} 个节点",
+  "core.mp.netconfig.bad": "网络的配置文件格式不对",
+  "core.mp.netconfig.new_version": "网络的配置文件是新版格式（版本 {0}），请先更新 Jay",
+  "core.mp.netconfig.hash": "下载的网络配置文件和连接串里的哈希对不上，可能被改过",
+  "core.mp.private.not_allowed": "这个公共网络不允许传这么大的文件（或者不允许传文件）",
+  "multiplayer.netconfig.failed": "取不到“{0}”的网络配置：{1}",
+  "multiplayer.netconfig.too_old": "“{0}”要求 Jay {1} 或更新的版本，请先更新",
+  "multiplayer.netconfig.mode_not_allowed": "这个公共网络不允许“{0}”这种房间",
+  "multiplayer.netconfig.notice_title": "网络公告"
 }

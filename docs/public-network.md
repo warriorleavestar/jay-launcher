@@ -79,6 +79,22 @@
 
 自己搭网络：`jay-server network keygen` → `network sign` → `jay-server directory --network <连接串>`。
 
+## 网络配置文件
+
+连接串里可以带 `config: {url, sha256}`。连这个网络之前，Jay 先取配置文件：本机缓存（按哈希命名，在 `network-configs/`）对得上就直接用，否则从 https 地址下载（最多 256 KB），SHA-256 对不上就不连。所以配置文件和连接串一样改不了，改了要发新版本的连接串。
+
+```json
+{ "v": 1, "network": "nz-friends", "notice": "欢迎……",
+  "links": [{ "name": "规则", "url": "https://example.org/rules" }],
+  "policy": { "modes": ["public", "password"], "requireDevice": true, "files": true, "maxFileMB": 2048, "minVersion": "0.8.0" },
+  "ui": { "...": "界面主题，见 docs/themes.md" } }
+```
+
+- `notice` 和 `links` 显示在公共网络卡片上，链接只认 https，用系统浏览器打开。
+- `policy` 只能比默认更严：`modes` 是这个网络上允许公开的房间方式（隐藏房间总是可以），`requireDevice` 让这个网络上开的房间都要求设备指纹，`files` / `maxFileMB` 关掉或限制成员之间传文件（收发两头都查），`minVersion` 是最低 Jay 版本。
+- `ui` 先原样保存，等界面主题功能合并后接上。
+- 账号密码登录还没做（要服务端配合，单独一期）。
+
 ## 部署种子节点
 
 找一台有公网 IP 的机器（Linux / Windows / macOS 都行），放行 **TCP 和 UDP 的 11010** 端口：
@@ -101,10 +117,10 @@ Linux 上长期运行可以用 `server/jay-public-node.service`（systemd）。
 AMBER_SELFTEST=<报告目录> AMBER_SELFTEST_SCOPE=public-network AMBER_DATA_DIR=<测试数据目录> Jay
 ```
 
-在本机开一个种子节点，走完：连接（第一次显示隐私说明）→ 开房间 → 公开发布 → 另一个成员在列表里看到并加入 → 改成密码房间（密码错进不去、对了能进）→ 设备指纹（默认关着、码每次不同、隐藏房间按码找到、要求设备指纹、名单 + 批准后进入、换新后旧码失效）→ 撤下 → 断开 → 换公共网络（审核过的直接加并连进去、没审核的先提醒、同编号换钥匙拒绝、删掉回到 Jay 网络）。需要先下载好联机组件。
+在本机开一个种子节点，走完：连接（第一次显示隐私说明）→ 开房间 → 公开发布 → 另一个成员在列表里看到并加入 → 改成密码房间（密码错进不去、对了能进）→ 设备指纹（默认关着、码每次不同、隐藏房间按码找到、要求设备指纹、名单 + 批准后进入、换新后旧码失效）→ 撤下 → 断开 → 换公共网络（审核过的直接加并连进去、没审核的先提醒、同编号换钥匙拒绝、删掉回到 Jay 网络、网络配置的公告 / 链接 / 策略、取不到配置就不连）。需要先下载好联机组件。
 
 用真 EasyTier 跑核心流程的单元测试：设置 `JAY_ET_DIR=<放 easytier-core 和 easytier-cli 的文件夹>` 后运行 `PublicNetworkEasyTierTests`。
 
 ## 以后
 
-服务器下发配置（界面、账号密码登录、安全策略）、分地区节点和志愿节点，见设计方案。
+网络配置里的界面主题接上主题功能、账号密码登录、分地区节点和志愿节点，见设计方案。
