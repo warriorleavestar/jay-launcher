@@ -57,14 +57,15 @@ public sealed class HostLobby : IAsyncDisposable
     /// <summary>用真的 EasyTier 和 47660 端口的房主大厅。</summary>
     public static HostLobby Create(EasyTierInstaller installer, string workDir, Func<IReadOnlyList<string>> peers, X25519KeyPair identity,
         Func<RoomCredentials> credentials, Func<byte[], bool> isTrusted, Func<KnockRequest, CancellationToken, Task<bool>> approve, MemberTable members, Action<string>? log = null,
-        InviteBook? book = null, int? listenUdpPort = null, Func<Public.DevicePolicy>? devicePolicy = null)
+        InviteBook? book = null, int? listenUdpPort = null, Func<Public.DevicePolicy>? devicePolicy = null,
+        Func<Public.AccountPolicy?>? accountPolicy = null)
     {
         HostLobby? lobby = null;
         lobby = new HostLobby(
             options => EasyTierLobby.Start(installer, options, workDir),
             peers,
             // 不建网卡时 EasyTier 把发往房主大厅地址 10.234.0.1:47660 的连接交给本机 127.0.0.1:47660。
-            book => new KnockServer(book, identity, credentials, isTrusted, approve, IPAddress.Loopback, KnockProtocol.Port, log, members: members) { DevicePolicy = devicePolicy },
+            book => new KnockServer(book, identity, credentials, isTrusted, approve, IPAddress.Loopback, KnockProtocol.Port, log, members: members) { DevicePolicy = devicePolicy, AccountPolicy = accountPolicy },
             log, book) { ListenUdpPort = listenUdpPort };
         return lobby;
     }
@@ -165,7 +166,7 @@ public static class LobbyJoin
     /// <param name="relayFound">连上了中继节点（大厅里看到了除自己以外的对端），在找房主。</param>
     public static async Task<KnockOutcome> KnockAsync(EasyTierInstaller installer, string workDir, IReadOnlyList<string> peers, JayInvite invite,
         X25519KeyPair me, string name, string version, Action<string>? log, Action? hostFound, CancellationToken ct, Action? relayFound = null,
-        Public.DeviceFingerprint? device = null)
+        Public.DeviceFingerprint? device = null, string? account = null)
     {
         var localPort = EasyTierArgs.FreeTcpPort();
         var options = new LobbyOptions(LobbyKeys.LobbyName(invite.LobbyKey), LobbyKeys.LobbySecret(invite.LobbyKey), false, peers, EasyTierArgs.FreeTcpPort(), localPort);
@@ -187,7 +188,7 @@ public static class LobbyJoin
             try
             {
                 await client.ConnectAsync(IPAddress.Loopback, localPort, ct);
-                return await KnockClient.KnockAsync(client.GetStream(), invite, me, name, version, ct, device: device);
+                return await KnockClient.KnockAsync(client.GetStream(), invite, me, name, version, ct, device: device, account: account);
             }
             catch (Exception e) when (attempt < 2 && e is IOException or SocketException && !ct.IsCancellationRequested)
             {
