@@ -9,7 +9,7 @@ namespace Amber.App.ViewModels;
 
 /// <summary>
 /// 公共网络的服务器配置：连接串里写了配置文件地址和 SHA-256 的网络，连之前先下载、对哈希，再按里面的公告、链接和安全策略来。
-/// 策略只会更严：限制房间方式、要求设备指纹、关掉或限制传文件、要求最低 Jay 版本。界面主题（ui）留给主题功能接上。
+/// 策略只会更严：限制房间方式、要求设备指纹、关掉或限制传文件、要求最低 Jay 版本。界面主题（ui）见 MultiplayerViewModel.NetworkTheme.cs。
 /// </summary>
 public sealed partial class MultiplayerViewModel
 {
@@ -58,6 +58,7 @@ public sealed partial class MultiplayerViewModel
         foreach (var link in config?.Links ?? []) NetworkLinks.Add(link);
         OnPropertyChanged(nameof(HasNetworkLinks));
         ResetAccount();
+        ApplyNetworkTheme(config);
         UpdateHostPolicy();
     }
 

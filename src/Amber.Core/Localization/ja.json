@@ -1902,5 +1902,10 @@
   "multiplayer.account.logged_in": "{0} としてログイン中",
   "multiplayer.account.failed": "ログインに失敗しました：{0}",
   "multiplayer.account.connect_first": "ログインする前に公開ネットワークに接続してください。",
-  "multiplayer.account.fill": "アカウント名とパスワードを入力してください。"
+  "multiplayer.account.fill": "アカウント名とパスワードを入力してください。",
+  "multiplayer.netconfig.theme_failed": "このネットワークのテーマは使えません：{0}",
+  "multiplayer.netconfig.theme_title": "ネットワークのテーマ",
+  "multiplayer.netconfig.theme_global": "このネットワークには独自のテーマがあり、今はマルチプレイページだけで使われています。Jay 全体に適用しますか？切断すると自分のテーマに戻ります。",
+  "multiplayer.netconfig.theme_accept": "全体で使う",
+  "multiplayer.netconfig.theme_decline": "マルチプレイページだけ"
 }

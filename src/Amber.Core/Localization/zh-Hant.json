@@ -1902,5 +1902,10 @@
   "multiplayer.account.logged_in": "已登入為 {0}",
   "multiplayer.account.failed": "登入失敗：{0}",
   "multiplayer.account.connect_first": "先連上公共網路再登入。",
-  "multiplayer.account.fill": "請填帳號和密碼。"
+  "multiplayer.account.fill": "請填帳號和密碼。",
+  "multiplayer.netconfig.theme_failed": "這個網路的介面主題用不了：{0}",
+  "multiplayer.netconfig.theme_title": "網路主題",
+  "multiplayer.netconfig.theme_global": "這個網路帶了自己的介面主題，現在只在聯機頁用。要整個 Jay 都換成它嗎？斷開網路後會換回你自己的主題。",
+  "multiplayer.netconfig.theme_accept": "整個 Jay 都用",
+  "multiplayer.netconfig.theme_decline": "只在聯機頁用"
 }
