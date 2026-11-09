@@ -43,6 +43,7 @@ jay-server directory --network nz-friends.jaynet --config nz-friends/config.json
 
 - `network.key` 是签名私钥，只自己留着。丢了就只能换一把钥匙重新发连接串，玩家要先删掉旧的再加。
 - 改了配置文件就要重新 `config-hash` 和 `sign`，玩家粘贴新连接串后才生效。
+- Directory identity (recommended): before step 3, run `jay-server network dir-key nz-friends/nz-friends.json --dir <node data dir>` on each directory node. It adds the node's key to `"dirKeys"`, and Jay then refuses to talk to anyone else who takes the directory address. Back up `directory.key` in the data dir. Details: [security/directory-identity.md](security/directory-identity.md).
 - 想让 Jay 显示“已审核”：把 `nz-friends.json` 提交到仓库的 [networks/](../networks/README.md)。
 
 ## 三、开账号登录

@@ -63,6 +63,13 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
     /// <summary>网络主页（可选）。</summary>
     public string? Home { get; init; }
 
+    /// <summary>
+    /// The directory nodes' pinned X25519 public keys, from the signed connection string. Empty means the network doesn't
+    /// pin its directory (the built-in network until its nodes are deployed, and older strings): Jay then uses the legacy
+    /// unauthenticated protocol. Non-empty means Jay never sends a request to a directory that can't prove it holds one.
+    /// </summary>
+    public IReadOnlyList<byte[]> DirectoryKeys { get; init; } = [];
+
     public bool IsBuiltIn => Id == "jay";
 
     public override string ToString() => Name;
@@ -126,6 +133,8 @@ public interface IPublicNetwork
     Task<string?> MyIpAsync(CancellationToken ct);
     /// <summary>现在在线的目录节点地址（按编号排）。默认只有主目录。</summary>
     Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([PublicNetworkProfile.DirectoryIp]);
+    /// <summary>The network this is, for its pinned directory keys. Null: unknown, use the legacy directory protocol.</summary>
+    PublicNetworkProfile? Profile => null;
 }
 
 /// <summary>运行中的公共网络 EasyTier。Dispose 时结束进程。</summary>
@@ -137,6 +146,7 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
     private readonly Queue<string> _output = new();
 
     public PublicNetworkOptions Options { get; }
+    public PublicNetworkProfile Profile => Options.Profile;
     public bool HasExited => _process.HasExited;
     public event Action<string>? Output;
 

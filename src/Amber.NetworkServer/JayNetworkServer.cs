@@ -140,6 +140,14 @@ public sealed class JayNetworkServerBuilder
 
     public JayNetworkServerBuilder UseLog(Action<string> log) { Log = log; return this; }
 
+    internal bool SecureDirectoryOnly;
+
+    /// <summary>
+    /// Answer only authenticated directory requests (see <c>docs/security/directory-identity.md</c>). Jay versions that
+    /// don't know "dirKeys" can then no longer use this directory, so pair it with policy.minVersion.
+    /// </summary>
+    public JayNetworkServerBuilder RequireDirectoryChannel() { SecureDirectoryOnly = true; return this; }
+
     /// <summary>测试用：换时钟。</summary>
     public JayNetworkServerBuilder UseClock(Func<DateTimeOffset> clock) { Clock = clock; return this; }
 
@@ -194,6 +202,16 @@ public sealed class JayNetworkServer : IAsyncDisposable
     public string AdminTokenPath => Path.Combine(_b.DataDir, "admin.token");
     public bool EasyTierRunning => _network is { HasExited: false };
 
+    /// <summary>
+    /// This directory node's identity key file (directory.key in the data dir, made on first start, readable by this user only).
+    /// Its public key (<see cref="DirectoryKey"/>) goes into the network string's "dirKeys" so Jay can check it is talking
+    /// to the real directory. Back up this file: a node with a new key is an impostor to every Jay that pinned the old one.
+    /// </summary>
+    public string DirectoryKeyPath => Path.Combine(_b.DataDir, "directory.key");
+
+    /// <summary>The directory's public key (base64), once started. Null on a seed-only node.</summary>
+    public string? DirectoryKey => Directory?.Identity is { } id ? Convert.ToBase64String(id.PublicKey) : null;
+
     /// <summary>开了账号登录时，要写进网络配置文件 "login" 的那一段。</summary>
     public JsonObject? LoginSection => Login is not { } login ? null : new JsonObject
     {
@@ -226,7 +244,11 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Extensions = [.. _b.Extensions],
                 MinClientVersion = _b.Config?.Policy.MinVersion,
                 RequireAccountToPublish = Login is not null && _b.Config?.Login?.Required == true,
+                Identity = DirectoryChannel.LoadOrCreateIdentity(DirectoryKeyPath),
+                NetworkSecret = Profile.Secret,
+                AcceptLegacyClients = !_b.SecureDirectoryOnly,
             };
+            _b.Log("目录公钥 / directory key (dirKeys): " + DirectoryKey);
         }
         if (Login is not null && Bans is { } banList) Login.Blocked = banList.IsAccountBanned;
         if (_b.AdminPort is { } port) _admin = AdminApi.Start(this, port, AdminToken.LoadOrCreate(AdminTokenPath), _b.Log);
@@ -294,6 +316,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             ["rooms"] = view?.Rooms ?? 0,
             ["listed"] = view?.Listed ?? 0,
             ["login"] = Login is not null,
+            ["directoryKey"] = DirectoryKey,
             ["minVersion"] = _b.Config?.Policy.MinVersion?.ToString(),
             ["uptime"] = (long)(Now - _started).TotalSeconds,
         };
