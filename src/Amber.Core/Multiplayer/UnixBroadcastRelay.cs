@@ -54,14 +54,25 @@ internal sealed class UnixBroadcastRelay : IDisposable
             }
             if (tun is null || _stop.IsCancellationRequested) return;
             using var sender = OpenSender(tun);
+            _log($"broadcast relay: started on {tun.Name}");
             var limiter = new RateLimiter(MaxPerSecond);
+            // 第一次转发成功、第一次发送失败各记一行（排查用，不刷屏）。
+            var loggedOk = false;
+            var loggedError = false;
             void Forward(ReadOnlySpan<byte> ipPacket)
             {
                 if (!TryParse(ipPacket, out var srcPort, out var dstPort, out var payload)) return;
                 if (!limiter.Take()) return;
                 var datagram = BuildUdp(srcPort, dstPort, payload);
-                try { sender.SendTo(datagram, new IPEndPoint(IPAddress.Broadcast, 0)); }
-                catch (SocketException) { }
+                try
+                {
+                    sender.SendTo(datagram, new IPEndPoint(IPAddress.Broadcast, 0));
+                    if (!loggedOk) { loggedOk = true; _log($"broadcast relay: forwarded first packet to port {dstPort}"); }
+                }
+                catch (SocketException e)
+                {
+                    if (!loggedError) { loggedError = true; _log($"broadcast relay: send failed: {e.SocketErrorCode} {e.Message}"); }
+                }
             }
             if (OperatingSystem.IsLinux()) CaptureLinux(TunIndex(tun), Forward);
             else if (OperatingSystem.IsMacOS()) CaptureMac(tun.Name, Forward);
@@ -276,6 +287,7 @@ internal sealed class UnixBroadcastRelay : IDisposable
             }).Prepend("dst host 255.255.255.255"));
             var expression = $"ip and udp and ({sources}) and ({targets})";
             var name = n.Name;
+            _log($"broadcast relay: capturing on {name}");
             var thread = new Thread(() =>
             {
                 try { CaptureMacInterface(name, expression, packet => { lock (gate) forward(packet); }); }

@@ -120,7 +120,8 @@ static class FullLanCheck
             Phase("广播转发", 60);
             // 3. 广播转发：本机从物理网卡发 255.255.255.255，守护应该从虚拟网卡用虚拟 IP 再发一份。
             var (seen, capture) = await BroadcastAsync(tun, guestIp);
-            Check("广播从虚拟网卡转发出去（来源是虚拟 IP）", seen, capture);
+            Check("广播从虚拟网卡转发出去（来源是虚拟 IP）", seen,
+                capture + string.Join('\n', guest.RecentOutput.Where(l => l.Contains("broadcast relay", StringComparison.Ordinal))));
 
             Phase("换参数重启", 180);
             // 4. 换参数重启（不应再提权，守护还是同一个）。
@@ -240,16 +241,17 @@ static class FullLanCheck
             try
             {
                 using var client = new TcpClient();
-                var accept = game.AcceptTcpClientAsync();
                 await client.ConnectAsync(EasyTierArgs.HostIp, GamePort).WaitAsync(TimeSpan.FromSeconds(3));
-                using var server = await accept.WaitAsync(TimeSpan.FromSeconds(5));
+                // 连上以后再 Accept：先挂着的 Accept 在连接失败时不会取消，会把后面成功的连接抢走，之后每次都等不到。
+                using var acceptTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                using var server = await game.AcceptTcpClientAsync(acceptTimeout.Token);
                 var payload = Encoding.ASCII.GetBytes("jay-fulllan");
                 await client.GetStream().WriteAsync(payload);
                 var buffer = new byte[payload.Length];
                 await server.GetStream().ReadExactlyAsync(buffer).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
                 if (buffer.AsSpan().SequenceEqual(payload)) return true;
             }
-            catch (Exception e) when (e is SocketException or TimeoutException or IOException) { await Task.Delay(1000); }
+            catch (Exception e) when (e is SocketException or TimeoutException or IOException or OperationCanceledException) { await Task.Delay(1000); }
         }
         return false;
     }
