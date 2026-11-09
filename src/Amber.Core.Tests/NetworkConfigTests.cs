@@ -65,6 +65,20 @@ public sealed class NetworkConfigTests : IDisposable
     }
 
     [Fact]
+    public void SecurityPolicyCanOnlyTighten()
+    {
+        var config = NetworkConfig.Parse("""{ "v": 1, "network": "x1", "policy": { "security": { "attestation": "required", "breaker": "on", "restartDelayMin": 30 } } }"""u8, "x1");
+        var security = Assert.IsType<Amber.Core.Multiplayer.Transport.SecurityPolicy>(config.Policy.Security);
+        var local = new Amber.Core.Multiplayer.Transport.SecurityPolicy(Amber.Core.Multiplayer.Transport.AttestationMode.Off, false, 7, true);
+        var merged = local.Tighten(security);
+        Assert.Equal(Amber.Core.Multiplayer.Transport.AttestationMode.Required, merged.Attestation);
+        Assert.True(merged.Breaker);
+        Assert.Equal(30, merged.EffectiveRestartDelay);
+        Assert.Null(NetworkConfig.Parse("""{ "v": 1, "network": "x1", "policy": {} }"""u8, "x1").Policy.Security);
+        Assert.Throws<InvalidDataException>(() => NetworkConfig.Parse("""{ "v": 1, "network": "x1", "policy": { "security": { "attestation": "maybe" } } }"""u8, "x1"));
+    }
+
+    [Fact]
     public void FilesCanBeTurnedOff()
     {
         var config = NetworkConfig.Parse("""{ "v": 1, "network": "x1", "policy": { "files": false } }"""u8, "x1");

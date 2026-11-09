@@ -56,7 +56,17 @@ public sealed class NetworkAccountsTests : IAsyncDisposable
         Assert.Null(AccountToken.Verify(token, login.SignKey, "net1", X25519KeyPair.Generate().PublicKey, now));
         Assert.Null(AccountToken.Verify(token, login.SignKey, "net2", _guest.PublicKey, now));
         Assert.Null(AccountToken.Verify(token, login.SignKey, "net1", _guest.PublicKey, now + AccountToken.Lifetime + TimeSpan.FromMinutes(1)));
-        Assert.Null(AccountToken.Verify(token[..^2] + "AA", login.SignKey, "net1", _guest.PublicKey, now));
+        // 签名改一个字节就不认（改解码后的字节：直接改末尾字符可能只动了补位的位，等于没改）。
+        Assert.Null(AccountToken.Verify(Tamper(token), login.SignKey, "net1", _guest.PublicKey, now));
+    }
+
+    private static string Tamper(string token)
+    {
+        var parts = token.Split('.');
+        var b64 = parts[1].Replace('-', '+').Replace('_', '/');
+        var sig = Convert.FromBase64String(b64 + new string('=', (4 - b64.Length % 4) % 4));
+        sig[0] ^= 0x01;
+        return parts[0] + "." + Convert.ToBase64String(sig).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     [Fact]

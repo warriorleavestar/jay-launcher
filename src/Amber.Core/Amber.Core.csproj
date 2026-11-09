@@ -10,6 +10,8 @@
   <ItemGroup>
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
+    <!-- Linux Wayland 远程控制走 xdg-desktop-portal（D-Bus）；和 Avalonia 在 Linux 上用的是同一个库、同一个版本。 -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
   </ItemGroup>
 
   <ItemGroup>

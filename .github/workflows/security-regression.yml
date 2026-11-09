@@ -7,6 +7,11 @@ on:
     branches: [main]
     paths: ['src/**', '.github/workflows/security-regression.yml']
 
+# 同一个 PR 推了新提交时，取消旧提交还在排队或在跑的检查；main 和标签上的不取消
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
