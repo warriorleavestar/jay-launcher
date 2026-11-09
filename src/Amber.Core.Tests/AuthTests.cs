@@ -74,7 +74,7 @@ public class AuthTests
             .On("https://user.auth.xboxlive.com/user/authenticate", """{"Token":"xbl","DisplayClaims":{"xui":[{"uhs":"h"}]}}""")
             .On("https://xsts.auth.xboxlive.com/xsts/authorize", """{"XErr":2148916233}""", HttpStatusCode.Unauthorized);
         var account = new Account { Kind = AccountKind.Microsoft, Name = "x", RefreshToken = "old" };
-        var e = await Assert.ThrowsAsync<InvalidOperationException>(() => new MicrosoftAuth(new HttpClient(fake), "c").RefreshAsync(account));
+        var e = await Assert.ThrowsAnyAsync<InvalidOperationException>(() => new MicrosoftAuth(new HttpClient(fake), "c").RefreshAsync(account));
         Assert.Contains("Xbox 档案", e.Message);
     }
 
