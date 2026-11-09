@@ -1945,5 +1945,9 @@
   "settings.motion.system": "システムに合わせる",
   "settings.motion.on": "オン",
   "settings.motion.off": "オフ",
-  "settings.motion.hint": "オンにすると、ページ切り替えや引き出し、メニューが動かず、短いフェードだけになります。「システムに合わせる」ではシステムの「アニメーション効果 / 視差効果を減らす」設定を読み取ります。"
+  "settings.motion.hint": "オンにすると、ページ切り替えや引き出し、メニューが動かず、短いフェードだけになります。「システムに合わせる」ではシステムの「アニメーション効果 / 視差効果を減らす」設定を読み取ります。",
+  "safety.title": "Jay セキュリティ確認",
+  "safety.cannot_undo": "この操作は元に戻せません。",
+  "safety.keep": "残す",
+  "safety.action_object": "{0}：{1}"
 }

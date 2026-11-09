@@ -1977,5 +1977,9 @@
   "settings.motion.system": "System",
   "settings.motion.on": "On",
   "settings.motion.off": "Off",
-  "settings.motion.hint": "When on, page changes, drawers and menus no longer slide; only short fades remain. \"System\" follows your system's animation / reduce motion setting."
+  "settings.motion.hint": "When on, page changes, drawers and menus no longer slide; only short fades remain. \"System\" follows your system's animation / reduce motion setting.",
+  "safety.title": "Jay safety notice",
+  "safety.cannot_undo": "This can't be undone.",
+  "safety.keep": "Keep",
+  "safety.action_object": "{0}: {1}"
 }
