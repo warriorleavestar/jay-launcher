@@ -174,6 +174,8 @@ public partial class MainWindow
         // 活动抽屉：紧凑档铺满内容区，其余 400 宽从右边滑出（§5.3）。
         ActivityDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
         ActivityDrawer.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
+        PalettePanel.Width = ContentTier == WidthTier.Compact ? double.NaN : 640;
+        PalettePanel.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
         ContentColumn.Classes.Set("compact", ContentTier == WidthTier.Compact);
         ContentColumn.Classes.Set("wide", ContentTier == WidthTier.Wide);
     }
@@ -181,6 +183,17 @@ public partial class MainWindow
     private void OnShellKeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not MainViewModel { Shell: var shell } main) return;
+        if (main.Palette.IsOpen)
+        {
+            HandlePaletteKey(main.Palette, e);
+            return;
+        }
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.K && !main.FirstRun.IsOpen)
+        {
+            OpenPalette(main.Palette);
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.Escape && main.Activity.IsOpen) { main.Activity.Close(); e.Handled = true; return; }
         if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.J) { main.Activity.Toggle(); e.Handled = true; return; }
         if (e.KeyModifiers == KeyModifiers.Control)
@@ -224,6 +237,66 @@ public partial class MainWindow
         target.Focus(NavigationMethod.Tab);
         target.Classes.Add("field-flash");
         DispatcherTimer.RunOnce(() => target.Classes.Remove("field-flash"), TimeSpan.FromSeconds(2));
+    }
+
+    private IInputElement? _focusBeforePalette;
+
+    /// <summary>Ctrl+K: opens the palette with the cursor in its box; focus comes back where it was on close.</summary>
+    internal void OpenPalette(CommandPaletteViewModel palette)
+    {
+        _focusBeforePalette = FocusManager?.GetFocusedElement();
+        palette.Open();
+        Dispatcher.UIThread.Post(() => PaletteBox.Focus(), DispatcherPriority.Input);
+    }
+
+    private void ClosedPalette()
+    {
+        (_focusBeforePalette ?? this).Focus();
+        _focusBeforePalette = null;
+    }
+
+    /// <summary>While the palette is open: ↑↓ choose, Enter runs (Ctrl+Enter starts an instance), Tab fills, Esc goes back.</summary>
+    private void HandlePaletteKey(CommandPaletteViewModel palette, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Escape:
+                palette.Back();
+                break;
+            case Key.K when e.KeyModifiers == KeyModifiers.Control:
+                palette.Close();
+                break;
+            case Key.Up or Key.Down:
+                palette.Move(e.Key == Key.Down ? 1 : -1);
+                if (palette.SelectedIndex >= 0) PaletteList.ScrollIntoView(palette.SelectedIndex);
+                break;
+            case Key.Enter:
+                palette.Run(alt: e.KeyModifiers.HasFlag(KeyModifiers.Control));
+                break;
+            case Key.Tab:
+                palette.Fill();
+                PaletteBox.CaretIndex = PaletteBox.Text?.Length ?? 0;
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
+        if (!palette.IsOpen) ClosedPalette();
+    }
+
+    private void PaletteScrim_Pressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel main) main.Palette.Close();
+        ClosedPalette();
+        e.Handled = true;
+    }
+
+    private void PaletteList_Tapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is not MainViewModel main || (e.Source as Control)?.DataContext is not PaletteEntry entry) return;
+        main.Palette.Run(entry);
+        if (!main.Palette.IsOpen) ClosedPalette();
+        else PaletteBox.Focus();
     }
 
     private void ActivityScrim_Pressed(object? sender, PointerPressedEventArgs e)

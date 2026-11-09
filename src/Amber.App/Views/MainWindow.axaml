@@ -610,6 +610,46 @@
       </StackPanel>
     </Border>
 
+    <!-- Command palette (§6.23): Ctrl+K. 640 wide, top centre, at most 480 high; full width when compact. -->
+    <Panel x:Name="PaletteLayer" Grid.ColumnSpan="2" IsVisible="{Binding Palette.IsOpen}">
+      <Border x:Name="PaletteScrim" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="PaletteScrim_Pressed" />
+      <Border x:Name="PalettePanel" Width="640" MaxHeight="480" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="16,64,16,16"
+              Background="{DynamicResource Overlay}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="10"
+              BoxShadow="{DynamicResource Elevation3}" Padding="0,0,0,8">
+        <DockPanel>
+          <TextBox x:Name="PaletteBox" DockPanel.Dock="Top" Text="{Binding Palette.Query}" PlaceholderText="{Binding Palette.Placeholder}"
+                   Margin="12,12,12,6" FontSize="{DynamicResource FontSubtitle}" />
+          <TextBlock x:Name="PalettePicking" DockPanel.Dock="Top" Text="{Binding Palette.PickingText}" IsVisible="{Binding Palette.IsPicking}"
+                     Classes="hint" Margin="16,0,16,6" TextWrapping="Wrap" />
+          <TextBlock x:Name="PaletteRecent" DockPanel.Dock="Top" Text="{l:T palette.recent}" IsVisible="{Binding Palette.ShowsRecent}"
+                     Classes="hint" FontSize="12" Margin="16,0,16,4" />
+          <TextBlock x:Name="PaletteHint" DockPanel.Dock="Bottom" Text="{l:T palette.hint}" Classes="hint" FontSize="12" Margin="16,6,16,0" TextWrapping="Wrap" />
+          <TextBlock x:Name="PaletteEmpty" DockPanel.Dock="Top" Text="{l:T palette.empty}" IsVisible="{Binding Palette.IsEmpty}"
+                     Classes="hint" Margin="16,8" TextWrapping="Wrap" />
+          <ListBox x:Name="PaletteList" ItemsSource="{Binding Palette.Results}" SelectedIndex="{Binding Palette.SelectedIndex}"
+                   Background="Transparent" Margin="6,0" Focusable="False" Tapped="PaletteList_Tapped">
+            <ListBox.Styles>
+              <Style Selector="ListBoxItem">
+                <Setter Property="Padding" Value="10,4" />
+                <Setter Property="CornerRadius" Value="6" />
+              </Style>
+            </ListBox.Styles>
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:PaletteEntry">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" MinHeight="32">
+                  <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Subtitle}" IsVisible="{Binding HasSubtitle}" Classes="hint" FontSize="12" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding KindText}" Classes="hint" FontSize="12" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+    </Panel>
+
     <!-- 熔断倒计时：盖住整个窗口，按空格或点按钮取消重启 -->
     <Border x:Name="BreakerOverlay" Grid.ColumnSpan="2" IsVisible="{Binding Multiplayer.IsBreakerCounting}" Background="{DynamicResource Scrim}">
       <Border Classes="card" MaxWidth="440" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
