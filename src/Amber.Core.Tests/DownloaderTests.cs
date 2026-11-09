@@ -188,12 +188,12 @@ public class DownloaderTests : IDisposable
 
     private static string Sha1(byte[] data) => Convert.ToHexStringLower(SHA1.HashData(data));
 
-    private Downloader Make(SourceChain? chain = null, HashCache? cache = null) => new(_http, chain ?? new SourceChain([new OfficialSource()]))
+    private Downloader Make(SourceChain? chain = null, HashCache? cache = null, TimeSpan? stall = null) => new(_http, chain ?? new SourceChain([new OfficialSource()]))
     {
         RetriesPerSource = 2,
         ChunkThreshold = 1024 * 1024,
         MinChunkSize = 256 * 1024,
-        StallTimeout = TimeSpan.FromSeconds(2),
+        StallTimeout = stall ?? TimeSpan.FromSeconds(2),
         Hashes = cache,
     };
 
@@ -213,7 +213,11 @@ public class DownloaderTests : IDisposable
             var data = RandomBytes(1000 + i);
             items.Add(new(_server.Add($"s{i}", data), Local($"s{i}"), Sha1(data), data.Length));
         }
-        var downloader = Make(MirrorOf(_server, 3));
+        // 服务器按“收到请求到开始回数据之前”算并发。客户端只有在这段时间里放弃一个请求（卡住超时）再重试，
+        // 才会让服务器同时数到被放弃的那个和新的那个——繁忙机器上 30 ms 的延迟可能被拖过 2 秒的卡住超时，
+        // 这个测试就偶尔多数出一个。这里不测卡住超时：给一个远大于任何调度延迟的期限，客户端不会放弃请求，
+        // 服务器数到的就严格等于客户端占着的名额。
+        var downloader = Make(MirrorOf(_server, 3), stall: TimeSpan.FromMinutes(5));
 
         await downloader.DownloadAllAsync(items);
 
@@ -253,6 +257,24 @@ public class DownloaderTests : IDisposable
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"不该等限流结束，实际 {watch.Elapsed}");
         Assert.Equal(1, mirrorHits);
         Assert.Equal(data, await File.ReadAllBytesAsync(Local("a.bin")));
+    }
+
+    [Fact]
+    public async Task EverySourceFailing_ReportsEachSource_NotJustTheThrottledMirror()
+    {
+        // 官方源连不上（这里是 404），最后一个源（镜像）又限流：报错里两边的原因都要有。
+        using var mirror = new TestServer();
+        var data = RandomBytes(5000);
+        mirror.Add("a.bin", data);
+        mirror.FailNext = 1000;
+        mirror.RetryAfter = "0";
+        var chain = new SourceChain([new OfficialSource(), new PrefixMirrorSource("镜像", new Dictionary<string, string> { [_server.Root] = mirror.Root })]);
+
+        var e = await Assert.ThrowsAsync<IOException>(() => Make(chain).DownloadOneAsync(new(_server.Root + "a.bin", Local("a.bin"), Sha1(data), data.Length)));
+
+        Assert.Contains(new Uri(_server.Root).Authority, e.Message);
+        Assert.Contains(new Uri(mirror.Root).Authority, e.Message);
+        Assert.Contains("a.bin", e.Message);
     }
 
     [Fact]

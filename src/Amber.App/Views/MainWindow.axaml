@@ -9,8 +9,7 @@
         Title="{l:T main.title}"
         Icon="/Assets/jay.ico"
         MinWidth="760" MinHeight="440"
-        WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource PageBg}">
+        WindowStartupLocation="CenterScreen">
 
   <Window.DataTemplates>
     <DataTemplate DataType="vm:HomeViewModel"><views:HomePage /></DataTemplate>
@@ -22,7 +21,8 @@
     <DataTemplate DataType="vm:ToolsViewModel"><views:ToolsPage /></DataTemplate>
     <DataTemplate DataType="vm:LogViewModel"><views:LogPage /></DataTemplate>
 
-    <!-- 设置页 -->
+    <!-- 设置页：即改即存（改版规格 3.10）。下拉框、复选框改了就存；文本框失焦时校验，通过才存，不通过在下面写原因并保留输入。
+         XAML 里的声明顺序和行顺序一致，Tab 键从上到下走。 -->
     <DataTemplate DataType="vm:SettingsViewModel">
       <Grid RowDefinitions="Auto,*,Auto">
         <TextBlock Classes="h1" Text="{l:T instance.settings.title}" />
@@ -31,35 +31,66 @@
             <Border Classes="card">
               <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Text="{l:T settings.directory.label}" VerticalAlignment="Center" />
-                <TextBox Grid.Column="1" Text="{Binding GameDirectory}" />
+                <TextBox x:Name="GameDirectoryBox" Grid.Column="1" Text="{Binding GameDirectory, UpdateSourceTrigger=LostFocus}" />
                 <Button Grid.Column="2" Content="{l:T common.browse}" Margin="8,0,0,0" Click="BrowseGameDir_Click" />
 
                 <TextBlock Grid.Row="1" Text="{l:T settings.source.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
                 <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding SourceOptions}" SelectedIndex="{Binding SourceIndex}"
                           HorizontalAlignment="Stretch" Margin="0,12,0,0" />
+                <Button Grid.Row="1" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="source"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
-                <TextBlock Grid.Row="2" Text="{l:T settings.download.concurrency}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Concurrency}" Width="90" HorizontalAlignment="Left" Margin="0,12,0,0" />
-
-                <TextBlock Grid.Row="5" Text="{l:T settings.language.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding SelectedLanguageIndex}" MinWidth="160" Margin="0,12,0,0" />
-
-                <TextBlock Grid.Row="4" Text="{l:T settings.theme.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedIndex="{Binding SelectedThemeIndex}" MinWidth="160" Margin="0,12,0,0" />
+                <TextBlock Grid.Row="2" Text="{l:T settings.download.concurrency}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox x:Name="ConcurrencyBox" Text="{Binding Concurrency, UpdateSourceTrigger=LostFocus}" Width="90" HorizontalAlignment="Left" />
+                  <TextBlock Classes="field-error" Text="{Binding ConcurrencyError}" IsVisible="{Binding HasConcurrencyError}" />
+                </StackPanel>
+                <Button Grid.Row="2" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="concurrency"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
                 <TextBlock Grid.Row="3" Text="{l:T instance.settings.isolation}" VerticalAlignment="Center" Margin="0,12,0,0" />
                 <CheckBox Grid.Row="3" Grid.Column="1" IsChecked="{Binding IsolateVersions}" Margin="0,12,0,0"
                           Content="{l:T settings.isolation.hint}" />
+
+                <TextBlock Grid.Row="4" Text="{l:T settings.theme.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedIndex="{Binding SelectedThemeIndex}" MinWidth="160" Margin="0,12,0,0" />
+                <Button Grid.Row="4" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="theme"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="5" Text="{l:T settings.language.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding SelectedLanguageIndex}" MinWidth="160" Margin="0,12,0,0" />
               </Grid>
+            </Border>
+            <!-- 界面主题包（.jaytheme）：导入、切换、删除、导出。“恢复默认主题”固定在这里，主题包改不了它。 -->
+            <Border Classes="card">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                <TextBlock Text="{l:T settings.themepack.label}" VerticalAlignment="Center" />
+                <ComboBox x:Name="ThemePackBox" Grid.Column="1" ItemsSource="{Binding ThemePacks}" SelectedItem="{Binding SelectedThemePack}"
+                          HorizontalAlignment="Stretch" AutomationProperties.Name="{l:T settings.themepack.label}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate DataType="vm:ThemePackOption">
+                      <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,0,0,0" Command="{Binding ResetThemePackCommand}"
+                        ToolTip.Tip="{l:T settings.themepack.reset}" AutomationProperties.Name="{l:T settings.themepack.reset}" />
+                <WrapPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" ItemSpacing="8" LineSpacing="8">
+                  <Button Classes="secondary" Content="{l:T settings.themepack.import}" Click="ImportTheme_Click" />
+                  <Button Classes="secondary" Content="{l:T settings.themepack.export}" Click="ExportTheme_Click" />
+                  <Button Classes="danger" Content="{l:T settings.themepack.remove}" Command="{Binding RemoveThemePackCommand}" IsEnabled="{Binding CanRemoveThemePack}" />
+                </WrapPanel>
+                <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Classes="hint" Margin="0,8,0,0" Text="{l:T settings.themepack.hint}" />
+                <CheckBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" IsChecked="{Binding AllowNetworkThemes}">
+                  <TextBlock Text="{l:T settings.themepack.allow_network}" TextWrapping="Wrap" />
+                </CheckBox>
+              </Grid>
+            </Border>
+            <Border Classes="callout warning" Margin="0,0,0,12" IsVisible="{Binding ThemePackStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+              <TextBlock Classes="hint" Text="{Binding ThemePackStatus}" />
             </Border>
             <Border Classes="card">
               <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
-                <!-- 无痕模式：游戏日志里不写聊天行 -->
-                <TextBlock Grid.Row="7" Text="{l:T settings.notrace.label}" VerticalAlignment="Top" Margin="0,12,0,0" />
-                <StackPanel Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,12,0,0" Spacing="4">
-                  <CheckBox x:Name="NoTraceBox" IsChecked="{Binding NoTrace}" Content="{l:T settings.notrace.toggle}" />
-                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.notrace.hint}" TextWrapping="Wrap" />
-                </StackPanel>
                 <TextBlock Text="Java" VerticalAlignment="Center" />
                 <ComboBox Grid.Column="1" ItemsSource="{Binding JavaOptions}" SelectedItem="{Binding SelectedJava}"
                           HorizontalAlignment="Stretch">
@@ -74,32 +105,69 @@
                 <CheckBox Grid.Row="1" Grid.Column="1" IsChecked="{Binding AutoJavaDownload}" Margin="0,8,0,0"
                           Content="{l:T settings.java.auto_download}" />
 
-                <TextBlock Grid.Row="2" Text="{l:T instance.settings.window_size}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
-                  <TextBox Text="{Binding WindowWidth}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
-                  <TextBlock Text="×" VerticalAlignment="Center" />
-                  <TextBox Text="{Binding WindowHeight}" Width="90" PlaceholderText="{l:T instance.settings.height}" />
-                  <CheckBox IsChecked="{Binding Fullscreen}" Content="{l:T instance.settings.fullscreen}" />
+                <TextBlock Grid.Row="2" Text="{l:T instance.settings.window_size}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <WrapPanel ItemSpacing="8" LineSpacing="8">
+                    <TextBox x:Name="WindowWidthBox" Text="{Binding WindowWidth, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
+                    <TextBlock Text="×" VerticalAlignment="Center" />
+                    <TextBox x:Name="WindowHeightBox" Text="{Binding WindowHeight, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.height}" />
+                    <CheckBox IsChecked="{Binding Fullscreen}" Content="{l:T instance.settings.fullscreen}" />
+                  </WrapPanel>
+                  <TextBlock Classes="field-error" Text="{Binding WindowError}" IsVisible="{Binding HasWindowError}" />
                 </StackPanel>
+                <Button Grid.Row="2" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="window"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
-                <TextBlock Grid.Row="3" Text="{l:T instance.settings.jvm_args}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding JvmArgs}" Margin="0,12,0,0" />
-                <TextBlock Grid.Row="4" Text="{l:T instance.settings.game_args}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding GameArgs}" Margin="0,12,0,0" />
+                <TextBlock Grid.Row="3" Text="{l:T instance.settings.jvm_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox x:Name="JvmArgsBox" Text="{Binding JvmArgs, UpdateSourceTrigger=LostFocus}" />
+                  <TextBlock Classes="field-error" Text="{Binding JvmArgsError}" IsVisible="{Binding HasJvmArgsError}" />
+                </StackPanel>
+                <Button Grid.Row="3" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="jvm"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="4" Text="{l:T instance.settings.game_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox Text="{Binding GameArgs, UpdateSourceTrigger=LostFocus}" />
+                  <TextBlock Classes="field-error" Text="{Binding GameArgsError}" IsVisible="{Binding HasGameArgsError}" />
+                </StackPanel>
+                <Button Grid.Row="4" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="game_args"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
                 <TextBlock Grid.Row="5" Text="{l:T instance.settings.pre_launch}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding PreLaunch}" Margin="0,12,0,0" />
+                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding PreLaunch, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
+                <Button Grid.Row="5" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="pre"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
                 <TextBlock Grid.Row="6" Text="{l:T instance.settings.post_exit}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding PostExit}" Margin="0,12,0,0" />
+                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
+                <Button Grid.Row="6" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="post"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <!-- 无痕模式：游戏日志里不写聊天行 -->
+                <TextBlock Grid.Row="7" Text="{l:T settings.notrace.label}" VerticalAlignment="Top" Margin="0,12,0,0" />
+                <StackPanel Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,12,0,0" Spacing="4">
+                  <CheckBox x:Name="NoTraceBox" IsChecked="{Binding NoTrace}" Content="{l:T settings.notrace.toggle}" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.notrace.hint}" TextWrapping="Wrap" />
+                </StackPanel>
               </Grid>
+            </Border>
+            <Border Classes="card">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="h2" Text="{l:T settings.bake.title}" Margin="0" />
+                <CheckBox IsChecked="{Binding ExperimentalBake}" Content="{l:T settings.bake.toggle}" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.bake.hint}" TextWrapping="Wrap" />
+                <TextBox Text="{Binding BakeLoaderPath, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding ExperimentalBake}" PlaceholderText="{l:T settings.bake.loader_hint}" />
+              </StackPanel>
             </Border>
             <Border Classes="card">
               <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
                 <TextBlock Text="{l:T settings.curseforge.key}" VerticalAlignment="Center" />
-                <TextBox Grid.Column="1" Text="{Binding CurseForgeKey}" PasswordChar="●" PlaceholderText="{l:T settings.curseforge.key_hint}" />
+                <TextBox Grid.Column="1" Text="{Binding CurseForgeKey, UpdateSourceTrigger=LostFocus}" PasswordChar="●" PlaceholderText="{l:T settings.curseforge.key_hint}" />
                 <TextBlock Grid.Row="1" Text="{l:T settings.curseforge.endpoint}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding CurseForgeRoot}" Margin="0,12,0,0" PlaceholderText="{l:T settings.curseforge.endpoint_hint}" />
+                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding CurseForgeRoot, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" PlaceholderText="{l:T settings.curseforge.endpoint_hint}" />
                 <TextBlock Grid.Row="2" Text="{l:T settings.update.feed}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding UpdateFeed}" Margin="0,12,0,0" PlaceholderText="{l:T settings.update.feed_hint}" />
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding UpdateFeed, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" PlaceholderText="{l:T settings.update.feed_hint}" />
                 <TextBlock Grid.Row="3" Grid.Column="1" Classes="hint" FontSize="12" Margin="0,6,0,0" Text="{l:T settings.accounts.client_id_hint}" />
               </Grid>
             </Border>
@@ -113,36 +181,70 @@
             </Border>
           </StackPanel>
         </ScrollViewer>
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="12" Margin="0,4,0,0">
-          <Button Classes="primary" Content="{l:T settings.save}" Command="{Binding SaveCommand}" Padding="28,10" />
-          <c:StatusBar Message="{Binding StatusInfo}" VerticalAlignment="Center" />
-        </StackPanel>
+        <c:StatusBar Grid.Row="2" x:Name="SettingsStatus" Message="{Binding StatusInfo}" Margin="0,4,0,0" />
       </Grid>
     </DataTemplate>
 
   </Window.DataTemplates>
 
-  <Grid ColumnDefinitions="180,*">
+  <Grid x:Name="ShellGrid" ColumnDefinitions="180,*">
+    <!-- 主题包的窗口背景图（没有主题背景图时是空的）。放在最底层，不接收点击。 -->
+    <Image x:Name="ThemeBackground" Grid.ColumnSpan="2" Source="{DynamicResource ThemeBackgroundImage}" Opacity="{DynamicResource ThemeBackgroundOpacity}"
+           Stretch="UniformToFill" IsHitTestVisible="False" />
     <!-- 侧边栏 -->
-    <Border Background="{DynamicResource SidebarBg}">
+    <!-- 窗口矮时导航项收紧，八项尽量不用滚动就放得下 -->
+    <Border x:Name="SidebarHost" Classes="sidebar" Container.Name="Sidebar" Container.Sizing="Height">
+      <Border.Styles>
+        <Style Selector="StackPanel#SidebarHeader">
+          <Setter Property="Margin" Value="20,18,20,12" />
+        </Style>
+        <ContainerQuery Name="Sidebar" Query="max-height:520">
+          <Style Selector="StackPanel#SidebarHeader">
+            <Setter Property="Margin" Value="20,12,20,6" />
+          </Style>
+        </ContainerQuery>
+      </Border.Styles>
       <!-- 标题、导航、版本三行：导航放不下时自己滚动，版本那行永远在底部看得见 -->
-      <Grid RowDefinitions="Auto,*,Auto">
-        <StackPanel Margin="20,18,20,12" Spacing="2">
+      <Grid x:Name="SidebarGrid" RowDefinitions="Auto,*,Auto">
+        <StackPanel x:Name="SidebarHeader" Spacing="2">
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Image Source="/Assets/jay.png" Width="36" Height="36" Stretch="Uniform" />
-            <TextBlock Text="Jay" FontSize="26" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource Accent}" />
+            <TextBlock x:Name="BrandName" Text="Jay" FontSize="26" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource Accent}" />
           </StackPanel>
-          <TextBlock Text="{l:T main.subtitle}" FontSize="12" Foreground="{DynamicResource SidebarTextMuted}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{l:T main.subtitle}" />
+          <TextBlock x:Name="BrandSubtitle" Text="{l:T main.subtitle}" FontSize="12" Foreground="{DynamicResource SidebarTextMuted}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{l:T main.subtitle}" />
         </StackPanel>
-        <TextBlock Grid.Row="2" Text="{Binding VersionText}" FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SidebarTextMuted}" Margin="20,6,8,12"
-                   TextWrapping="Wrap" />
-        <ListBox Grid.Row="1" Classes="nav" ItemsSource="{Binding Pages}" SelectedItem="{Binding CurrentPage}" Background="Transparent" Margin="8,0"
+        <!-- 版本号和两条承诺分成三段，放不下时按段换行，不会从词中间断开 -->
+        <WrapPanel x:Name="SidebarFooter" Grid.Row="2" Margin="20,6,8,12" ItemSpacing="10" ToolTip.Tip="{Binding VersionText}">
+          <WrapPanel.Styles>
+            <Style Selector="TextBlock">
+              <Setter Property="FontSize" Value="{DynamicResource FontCaption}" />
+              <Setter Property="Foreground" Value="{DynamicResource SidebarTextMuted}" />
+              <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+          </WrapPanel.Styles>
+          <TextBlock Text="{Binding VersionText}" />
+          <TextBlock Text="{l:T main.no_cloud_control}" />
+          <TextBlock Text="{l:T main.no_telemetry}" />
+        </WrapPanel>
+        <ListBox x:Name="NavList" Grid.Row="1" Classes="nav" ItemsSource="{Binding NavPages}" SelectedItem="{Binding NavSelection}" Background="Transparent" Margin="8,0"
                  ClipToBounds="True">
           <ListBox.Styles>
             <Style Selector="ListBoxItem">
               <Setter Property="CornerRadius" Value="8" />
               <Setter Property="Margin" Value="0,1" />
               <Setter Property="Padding" Value="12,7" />
+            </Style>
+            <ContainerQuery Name="Sidebar" Query="max-height:520">
+              <Style Selector="ListBoxItem">
+                <Setter Property="Padding" Value="12,4" />
+              </Style>
+            </ContainerQuery>
+            <!-- 主题包把导航设成“只显示图标”：文字收起来，悬停时看提示 -->
+            <Style Selector="ListBox.icons TextBlock.nav-title">
+              <Setter Property="IsVisible" Value="False" />
+            </Style>
+            <Style Selector="ListBox.icons ListBoxItem" x:DataType="vm:PageViewModel">
+              <Setter Property="ToolTip.Tip" Value="{Binding Title}" />
             </Style>
           </ListBox.Styles>
           <ListBox.ItemTemplate>
@@ -154,9 +256,9 @@
                       IsVisible="{Binding $parent[ListBoxItem].IsSelected}" />
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <PathIcon Data="{Binding IconGeometry}" Width="16" Height="16" Foreground="{DynamicResource Accent}" />
-                <TextBlock Text="{Binding Title}" Foreground="{DynamicResource SidebarText}" FontSize="14" VerticalAlignment="Center" />
+                <TextBlock Classes="nav-title" Text="{Binding Title}" Foreground="{DynamicResource SidebarText}" FontSize="14" VerticalAlignment="Center" />
                 <Border IsVisible="{Binding HasBadge}" Background="{DynamicResource Accent}" CornerRadius="8" MinWidth="18" Height="18" Padding="5,0" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding Badge}" Foreground="{DynamicResource OnAccent}" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Badge}" Foreground="{DynamicResource OnAccent}" FontSize="{DynamicResource FontCaption}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
               </StackPanel>
               </Panel>
@@ -167,6 +269,6 @@
     </Border>
 
     <!-- 内容区 -->
-    <ContentControl Grid.Column="1" Content="{Binding CurrentPage}" Margin="24,20,24,20" />
+    <ContentControl x:Name="PageHost" Grid.Column="1" Content="{Binding CurrentPage}" Margin="24,20,24,20" />
   </Grid>
 </Window>

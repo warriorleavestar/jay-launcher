@@ -122,6 +122,24 @@ public sealed class RunLifecycleTests : IDisposable
         }
     }
 
+    [Fact]
+    public void LinuxWithoutX11WindowFallsBackToSigterm()
+    {
+        // 没有图形会话（CI）时找不到窗口，只能发 SIGTERM；有 X11 的情况用 Xvfb 手动验证过（见 PR 说明）。
+        if (!OperatingSystem.IsLinux() || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY"))) return;
+        using var process = Process.Start(new ProcessStartInfo("/bin/sleep") { ArgumentList = { "60" }, UseShellExecute = false })!;
+        try
+        {
+            Assert.Equal(ExitRequest.Signal, GameLauncher.RequestExitDetailed(process));
+            Assert.True(process.WaitForExit(5000));
+            Assert.Equal(ExitRequest.NotSent, GameLauncher.RequestExitDetailed(process));
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(true);
+        }
+    }
+
     // ---- 1：强制结束绑定到那一局 ----
 
     /// <summary>1：关不掉主窗口时“正在退出”撤回，强制结束只给这一局；又开了一局后收回，不会杀到新的那局。</summary>
@@ -326,7 +344,13 @@ public sealed class RunLifecycleTests : IDisposable
         var settingsPath = Path.Combine(_game, "locked", "settings.json");
         // 临时文件的位置被一个文件夹占着：写设置时抛 UnauthorizedAccessException。
         Directory.CreateDirectory(settingsPath + ".tmp");
-        var service = new LauncherService(new AppSettings { GameDirectory = _game, SavePathForTest = settingsPath });
+        // 此用例只验证实例设置保存，不应触发共享测试账号库的旧玩家名迁移。
+        var service = new LauncherService(new AppSettings
+        {
+            GameDirectory = _game,
+            SavePathForTest = settingsPath,
+            PlayerName = "",
+        });
         var failures = new List<Exception>();
         var changed = 0;
         service.SettingsSaveFailed += failures.Add;

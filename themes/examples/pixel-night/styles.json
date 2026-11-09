@@ -1,0 +1,13 @@
+{
+  // 像素风：方块、粗边、硬阴影（不模糊）
+  "button": { "borderWidth": 2, "border": "#000000", "radius": 0, "shadow": "3 3 0 0 #1F6B2A",
+              ":pressed": { "shadow": "none" } },
+  "button.primary": { "background": "token:Accent", "foreground": "#0B1A0B", "fontWeight": "bold",
+                      ":hover": { "background": "#7CF07C", "foreground": "#0B1A0B" } },
+  "card": { "borderWidth": 2, "border": "#2A3360", "background": "#E6141A33", "shadow": "6 6 0 0 #05060E" },
+  "pill": { "radius": 0, "borderWidth": 1, "border": "#2A3360" },
+  "nav.item": { "radius": 0, ":selected": { "background": "#2A3D2A" }, ":hover": { "background": "#1A2040" } },
+  "input": { "radius": 0, "borderWidth": 2, "border": "#2A3360", ":focus": { "border": "token:Accent" } },
+  "combobox": { "radius": 0, "borderWidth": 2, "border": "#2A3360" },
+  "heading": { "foreground": "token:Accent", "fontWeight": "bold" }
+}

@@ -18,6 +18,15 @@ public sealed record TunnelSettings(TransportMode Mode, bool Disguise)
     public const int PlainSocksPort = 47654;
 }
 
+/// <summary>端到端认证过的流（<see cref="SecureStream"/>、两路拆分的 SplitStream）：能区分“对面正常结束”和“被截断”，出错时能不发结束记录就断开。</summary>
+public interface IAuthenticatedStream
+{
+    /// <summary>收到了对面认证过的结束记录。</summary>
+    bool ClosedCleanly { get; }
+    /// <summary>出错时用：不发结束记录就关。</summary>
+    void Abort();
+}
+
 /// <summary>两个流互相转发，任何一边结束就都关掉。返回两个方向各转了多少字节。</summary>
 public static class Pump
 {
@@ -29,7 +38,7 @@ public static class Pump
         var up = CopyAsync(a, b, linked.Token);
         var down = CopyAsync(b, a, linked.Token);
         var first = await Task.WhenAny(up, down);
-        var secure = a as SecureStream ?? b as SecureStream;
+        var secure = a as IAuthenticatedStream ?? b as IAuthenticatedStream;
         // 任何一个方向出错结束（本机连接读写出错、封装通道被截断）：封装通道按出错处理，不发“正常结束”。
         // 只有从本机那头正常读到结尾时才算正常结束。
         if (first.Result.Error) secure?.Abort();
@@ -156,14 +165,23 @@ public sealed class TunnelServer : IAsyncDisposable
         {
             Pump.Tune(client);
             Stream stream = client.GetStream();
+            CancellationTokenRegistration revocation = default;
             try
             {
                 TunnelService service;
                 if (_settings.Wraps)
                 {
-                    var accepted = await TunnelHandshake.AcceptAsync(stream, _room, _settings.Mode, _settings.Disguise, ct);
+                    var accepted = await TunnelHandshake.AcceptWithMemberAsync(stream, _room, _settings.Mode, _settings.Disguise, ct);
                     if (accepted is null) return;
-                    (stream, service) = accepted.Value;
+                    (stream, service, var member) = accepted.Value;
+                    // 邀请房间：这个成员的钥匙一作废（踢出、重新批准换了钥匙、房间结束）就断开这条连接。
+                    // 握手完之前已经作废的，Register 会立刻调用。
+                    if (member is not null)
+                        revocation = member.Revocation.Register(() =>
+                        {
+                            try { client.Client.LingerState = new LingerOption(true, 0); } catch (Exception e) when (e is SocketException or ObjectDisposedException) { }
+                            client.Dispose();
+                        });
                 }
                 else service = TunnelService.Socks;
                 var handler = _route(service);
@@ -179,12 +197,13 @@ public sealed class TunnelServer : IAsyncDisposable
             catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or PlatformNotSupportedException or InvalidDataException or ArgumentException)
             {
                 // 出错断开：不给对面发“正常结束”。
-                (stream as SecureStream)?.Abort();
+                (stream as IAuthenticatedStream)?.Abort();
                 Interlocked.Increment(ref Rejected);
                 if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
             }
             finally
             {
+                await revocation.DisposeAsync();
                 await stream.DisposeAsync();
             }
         }
@@ -283,10 +302,11 @@ public sealed class TunnelClient : IAsyncDisposable
                 Interlocked.Add(ref BytesUp, down);
                 Interlocked.Add(ref BytesDown, up);
             }
-            catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or InvalidDataException or PlatformNotSupportedException or ArgumentException)
+            catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or InvalidDataException or PlatformNotSupportedException or ArgumentException
+                                           or Gate.GateRejectedException)
             {
-                // 出错断开：封装通道不发“正常结束”，本机的游戏连接也直接重置。
-                (remote as SecureStream)?.Abort();
+                // 出错断开（包括 Jay 服务器拒绝：设备被撤销、不在名单、熔断中），把原因报给界面：封装通道不发“正常结束”，本机的游戏连接也直接重置。
+                (remote as IAuthenticatedStream)?.Abort();
                 Pump.Abort(game);
                 Interlocked.Increment(ref Failures);
                 _log?.Invoke(L.T("core.mp.transport.endpoint_connect_failed") + e.Message);

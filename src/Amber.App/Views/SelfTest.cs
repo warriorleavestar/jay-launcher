@@ -8,6 +8,7 @@ using Avalonia;
 using Avalonia.Automation.Peers;
 using Avalonia.Automation.Provider;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -81,9 +82,84 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "curseforge")
+            {
+                await CurseForgeManualDownloadAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "public-network")
+            {
+                await PublicNetworkAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "multiplayer-guide")
+            {
+                await MultiplayerGuideAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "settings")
+            {
+                await SettingsAndKeyboardAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "accounts")
+            {
+                await MicrosoftLoginAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "new-instance")
+            {
+                var download = Page<DownloadViewModel>();
+                main.CurrentPage = download;
+                await WaitAsync(() => download.Items.Count > 0, 60);
+                Check("下载页加载版本列表", download.Items.Count > 0, $"{download.Items.Count} 个");
+                Dispatcher.UIThread.Invoke(() => download.Search = "1.21.1");
+                var list = await FindAsync<ListBox>(l => ReferenceEquals(l.ItemsSource, download.Items));
+                Button? row = null;
+                await WaitAsync(() => Dispatcher.UIThread.Invoke(() =>
+                {
+                    if (download.Items.FirstOrDefault(i => i.Id == "1.21.1") is { } item) list?.ScrollIntoView(item);
+                    row = window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.IsEffectivelyVisible
+                        && b.DataContext is RemoteVersionItem { Id: "1.21.1" } && ReferenceEquals(b.Command, download.ConfigureCommand));
+                    return row is not null;
+                }), 20);
+                await NewInstanceListAsync(download, row);
+                await ShotAsync("新建实例列表");
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") is "host-server" or "host-exit" or "jay-client")
+            {
+                var scope = Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE");
+                if (scope == "host-server") await HostServerAsync();
+                else if (scope == "host-exit") await HostExitAsync();
+                else await JayClientAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "game")
             {
                 await GameLifecycleAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "multiplayer")
+            {
+                await MultiplayerAsync();
+                await DirectRoomAsync();
                 Log("DONE");
                 window.Close();
                 return;
@@ -97,6 +173,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 return;
             }
             await LogPageAsync();
+            await MicrosoftLoginAsync();
+            await SettingsAndKeyboardAsync();
             // 换语言前后各个下拉框的选中项和设置文件都不能变。
             string Selections() => Dispatcher.UIThread.Invoke(() =>
             {
@@ -148,6 +226,148 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         window.Close();
     }
 
+    /// <summary>使用合成的受限项目验证网页下载入口；不访问 CurseForge，也不打开浏览器。</summary>
+    private async Task CurseForgeManualDownloadAsync()
+    {
+        var previous = main.CurrentPage;
+        var provider = new ManualDownloadProvider();
+        var content = new ContentViewModel(Page<HomeViewModel>().Service, _ => provider, () => true) { SourceIndex = 1 };
+        var originalContent = Page<ContentViewModel>();
+        var pageIndex = main.Pages.IndexOf(originalContent);
+        main.Pages[pageIndex] = content;
+        main.CurrentPage = content;
+        content.Selected = content.Results.FirstOrDefault();
+        await Ui.FlushAsync();
+        Check("CurseForge：受限文件显示手动下载入口", content.HasManualDownload && content.SelectedRequiresManualDownload, content.ManualDownloadUrl ?? "");
+        var button = await FindAsync<Button>(b => b.Command == content.OpenManualDownloadCommand && b.IsEffectivelyVisible);
+        Check("CurseForge：官网按钮可见且可用", button is { IsEnabled: true }, "");
+        Check("CurseForge：受限文件不显示应用内安装按钮", !window.GetVisualDescendants().OfType<Button>().Any(b => b.Command == content.InstallCommand && b.IsEffectivelyVisible), "");
+        await content.InstallCommand.ExecuteAsync(null);
+        Check("CurseForge：命令直接调用也只提示手动下载", !content.IsBusy && content.StatusInfo?.Key == "core.content.curseforge.manual_download", content.Status);
+        string? opened = null;
+        Check("CurseForge：网页入口使用文件页面", ContentViewModel.TryOpenProjectPage(content.ManualDownloadUrl, start => opened = start.FileName)
+            && opened == provider.File.ManualDownloadPage, opened ?? "");
+        window.Width = 1080;
+        window.Height = 700;
+        await ShotAsync("CurseForge手动下载");
+        await LayoutHereAsync("CurseForge手动下载");
+        content.Selected = null;
+        content.Detail = null;
+        content.ManualDownloadUrl = provider.File.ManualDownloadPage;
+        await content.SearchCommand.ExecuteAsync(null);
+        await Ui.FlushAsync();
+        Check("CurseForge：重新搜索清除导入遗留的官网入口", !content.HasManualDownload
+            && !window.GetVisualDescendants().OfType<Button>().Any(b => b.Command == content.OpenManualDownloadCommand && b.IsEffectivelyVisible), "");
+        content.TypeIndex = (int)ContentType.Modpack;
+        content.Selected = content.Results.FirstOrDefault();
+        await Ui.FlushAsync();
+        Check("CurseForge：整合包归档显示下载后导入的指引", window.GetVisualDescendants().OfType<TextBlock>()
+            .Any(t => t.IsEffectivelyVisible && t.Text == L.T("content.curseforge.manual_pack_archive_hint")), content.ManualDownloadHint);
+        L.SetLanguage("en");
+        await Ui.FlushAsync();
+        Check("CurseForge：手动下载指引随界面语言更新", window.GetVisualDescendants().OfType<TextBlock>()
+            .Any(t => t.IsEffectivelyVisible && t.Text == L.T("content.curseforge.manual_pack_archive_hint")), content.ManualDownloadHint);
+        L.SetLanguage("zh-Hans");
+        content.TypeIndex = (int)ContentType.Mod;
+        content.Selected = content.Results.FirstOrDefault();
+        await Ui.FlushAsync();
+        Check("CurseForge：切回模组恢复实例文件夹指引", window.GetVisualDescendants().OfType<TextBlock>()
+            .Any(t => t.IsEffectivelyVisible && t.Text == L.T("content.curseforge.manual_hint")), content.ManualDownloadHint);
+        var instance = Page<InstanceViewModel>();
+        main.CurrentPage = instance;
+        var oldPath = Path.Combine(reportDir, "manual-update-old.jar");
+        await File.WriteAllTextAsync(oldPath, "old");
+        var mod = new ModItem(new LocalMod(oldPath, "manual-update-old.jar", true, "example", "示例模组", "0.9", null, null, null))
+        {
+            Update = new ModUpdate(oldPath, provider.File),
+        };
+        await instance.UpdateModCommand.ExecuteAsync(mod);
+        var updateButton = await FindAsync<Button>(b => b.Command == instance.OpenManualDownloadCommand);
+        Check("CurseForge：实例更新保留原文件并显示官网按钮", instance.HasManualDownload && updateButton is { IsEnabled: true }
+            && await File.ReadAllTextAsync(oldPath) == "old", instance.Status);
+        await ShotAsync("CurseForge更新手动下载");
+        await LayoutHereAsync("CurseForge更新手动下载");
+        await CheckInstanceScrollReachabilityAsync(instance, oldPath);
+        main.CurrentPage = previous;
+        main.Pages[pageIndex] = originalContent;
+    }
+
+    /// <summary>长路径与手动下载提示同时存在时，验证真正能滚到并命中操作；不下载或启动游戏。</summary>
+    private async Task CheckInstanceScrollReachabilityAsync(InstanceViewModel instance, string fixturePath)
+    {
+        async Task<bool> ReachAsync(Control control)
+        {
+            control.BringIntoView();
+            await Ui.FlushAsync();
+            await Task.Delay(100);
+            var bounds = new Rect(control.TranslatePoint(default, window) ?? default, control.Bounds.Size);
+            var hit = window.InputHitTest(bounds.Center) as Visual;
+            return control.IsEffectivelyVisible && control.IsEffectivelyEnabled && new Rect(window.ClientSize).Contains(bounds)
+                && hit is not null && (ReferenceEquals(hit, control) || hit.GetVisualAncestors().Contains(control));
+        }
+
+        foreach (var language in new[] { "en", "ja" })
+        {
+            L.SetLanguage(language);
+            window.Width = 760;
+            window.Height = 440;
+            await Ui.FlushAsync();
+            var buttons = window.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible).ToList();
+            var manual = buttons.Single(b => b.Command == instance.OpenManualDownloadCommand);
+            Check($"实例窄窗 {language}：CurseForge 官网入口完整可见且中心命中", await ReachAsync(manual));
+            var browse = buttons.Where(b => b.Command == instance.BrowseOnlineCommand).ToList();
+            Check($"实例窄窗 {language}：模组工具栏可滚动到达且中心命中", await ReachAsync(browse.First()));
+            if (instance.BakeEnabled)
+                Check($"实例窄窗 {language}：烘焙入口可滚动到达且中心命中", await ReachAsync(buttons.Single(b => b.Command == instance.BakeNowCommand)));
+            Check($"实例窄窗 {language}：空态在线浏览可滚动到达且中心命中", browse.Count == 2 && await ReachAsync(browse.Last()));
+            await ShotAsync($"实例窄窗滚动命中-{language}");
+        }
+
+        var original = instance.Mods.ToArray();
+        try
+        {
+            L.SetLanguage("zh-Hans");
+            window.Width = 1280;
+            window.Height = 700;
+            instance.Mods.Clear();
+            for (var i = 0; i < 120; i++)
+                instance.Mods.Add(new ModItem(new LocalMod(fixturePath, $"scroll-{i}.jar", true, $"scroll-{i}", $"滚动测试 {i}", "1.0", null, null, null)));
+            await Ui.FlushAsync();
+            var list = window.GetVisualDescendants().OfType<ListBox>().Single(l => ReferenceEquals(l.ItemsSource, instance.Mods));
+            var realized = list.GetVisualDescendants().OfType<ListBoxItem>().Count();
+            Check("实例非空模组列表保持有限高度与虚拟化", list.Bounds.Height > 0 && list.Bounds.Height < window.ClientSize.Height
+                && realized > 0 && realized < instance.Mods.Count, $"120 项，仅实现 {realized} 行，列表高 {list.Bounds.Height:F0}");
+            list.ScrollIntoView(instance.Mods[^1]);
+            await Ui.FlushAsync();
+            Check("实例非空模组列表可滚到末项并实际命中", list.ContainerFromIndex(instance.Mods.Count - 1) is { } last && await ReachAsync(last));
+            list.ScrollIntoView(instance.Mods[0]);
+            await Ui.FlushAsync();
+            Check("实例非空模组列表可滚回首项并实际命中", list.ContainerFromIndex(0) is { } first && await ReachAsync(first));
+            await ShotAsync("实例模组列表有限视口");
+        }
+        finally
+        {
+            instance.Mods.Clear();
+            foreach (var item in original) instance.Mods.Add(item);
+        }
+    }
+
+    private sealed class ManualDownloadProvider : IContentProvider
+    {
+        public ContentSource Source => ContentSource.CurseForge;
+        public ContentFile File { get; } = new(ContentSource.CurseForge, "123", "456", "示例模组 1.0", "example.jar", "", null, 0,
+            ["1.21.1"], ["fabric"], "release", default, [])
+        {
+            ManualDownloadPage = "https://www.curseforge.com/projects/123",
+        };
+        public Task<SearchResult> SearchAsync(SearchQuery query, CancellationToken ct = default) =>
+            Task.FromResult(new SearchResult([new ContentProject(Source, "123", "示例模组", "用于自检：作者关闭第三方下载。", null, null, 0, "https://www.curseforge.com/projects/123")], 1));
+        public Task<IReadOnlyList<ContentFile>> GetFilesAsync(string projectId, string? gameVersion, string? loader, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ContentFile>>([File]);
+        public Task<ContentProject> GetProjectAsync(string projectId, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<ContentFile> GetFileAsync(string projectId, string fileId, CancellationToken ct = default) => Task.FromResult(File);
+    }
+
     private async Task ContentAutoLoadAsync()
     {
         var content = Page<ContentViewModel>();
@@ -169,6 +389,38 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         content.SourceIndex = 0;
         await WaitAsync(() => content.Results.Count > 0 || content.StatusInfo?.Kind == StatusKind.Error, 30);
         Check("切回 Modrinth 自动加载列表", content.Results.Count > 0, content.Status);
+
+        // 热门列表有多页：确认确实翻到了下一页，避免单个搜索结果让命令直接返回却算通过。
+        content.Selected = content.Results.FirstOrDefault();
+        await WaitAsync(() => content.SelectedFile is not null || content.StatusInfo?.Kind == StatusKind.Error, 30);
+        var detail = content.Detail;
+        var selectedFile = content.SelectedFile;
+        var firstPage = content.Results.FirstOrDefault();
+        var page = content.Page;
+        await content.NextPageCommand.ExecuteAsync(null);
+        Check("资源页下一页实际刷新列表（#22）", content.Page == page + 1 && content.Results.Count > 0
+            && firstPage?.Project.Id != content.Results.FirstOrDefault()?.Project.Id, content.Status);
+        Check("资源页翻页保留详情和文件选择（#22）", detail is not null && selectedFile is not null
+            && ReferenceEquals(content.Detail, detail) && ReferenceEquals(content.SelectedFile, selectedFile) && content.HasSelection);
+        await ShotAsync("资源页翻页保留详情");
+        await content.PreviousPageCommand.ExecuteAsync(null);
+        Check("资源页上一页保留详情（#22）", content.Page == page && ReferenceEquals(content.Detail, detail)
+            && firstPage?.Project.Id == content.Results.FirstOrDefault()?.Project.Id, content.Status);
+
+        content.Query = "Xaero's Minimap";
+        await content.SearchCommand.ExecuteAsync(null);
+        content.Selected = content.Results.FirstOrDefault(r => r.Title.Equals("Xaero's Minimap", StringComparison.OrdinalIgnoreCase));
+        await WaitAsync(() => content.SelectedFile is not null || content.StatusInfo?.Kind == StatusKind.Error, 30);
+        Check("Xaero 可选依赖显示且默认不勾（#22）", content.HasOptionalDependencies && content.OptionalDependencies.All(d => !d.Include), content.Status);
+        if (content.OptionalDependencies.FirstOrDefault() is { } optional)
+        {
+            var checkbox = await FindAsync<CheckBox>(b => ReferenceEquals(b.DataContext, optional));
+            checkbox?.SetCurrentValue(Avalonia.Controls.Primitives.ToggleButton.IsCheckedProperty, true);
+            Check("勾选可选依赖同步到安装选项（#22）", optional.Include);
+            await ShotAsync("资源页可选依赖");
+        }
+        content.Query = "";
+        await content.SearchCommand.ExecuteAsync(null);
         main.CurrentPage = previous;
     }
 
@@ -322,7 +574,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             var instance = Page<InstanceViewModel>();
             main.CurrentPage = instance;
             instance.SelectedId = id;
-            instance.TabIndex = 2;
+            instance.TabIndex = (int)InstanceTab.Worlds;
             if (!await WaitAsync(() => instance.Worlds.Count > 0, 20))
                 throw new InvalidOperationException("测试目录里没有已保存的世界");
             var world = instance.Worlds[0];
@@ -347,6 +599,42 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             File.WriteAllLines(Path.Combine(reportDir, "game-log.txt"), log.Lines.Select(l => l.Message));
             if (home.RunCount > 0) home.CancelCommand.Execute(null);
         }
+    }
+
+    /// <summary>1b.5 新建实例列表：两行行布局和胶囊、已安装芯片、热门版本芯片、出错时的【重试】【切换下载源】、面板展开时各窗口大小不裁切。</summary>
+    private async Task NewInstanceListAsync(DownloadViewModel download, Button? row)
+    {
+        // 1b.5：行改两行，带类型胶囊；已安装的版本显示“已安装”芯片、按钮写“再装一份…”。
+        var pill = Dispatcher.UIThread.Invoke(() => window.GetVisualDescendants().OfType<Border>()
+            .FirstOrDefault(b => b.Classes.Contains("pill") && b.DataContext is RemoteVersionItem { Id: "1.21.1" } && b.IsEffectivelyVisible));
+        Check("新建实例：正式版行有 Success 色调的类型胶囊", pill is not null && Dispatcher.UIThread.Invoke(() => pill.Classes.Contains("success")));
+        var demoItem = download.Items.First(i => i.Id == "1.21.1");
+        var wasInstalled = demoItem.Installed;
+        Dispatcher.UIThread.Invoke(() => demoItem.Installed = true);
+        var chip = await FindAsync<TextBlock>(t => t.Text == "已安装" && t.DataContext is RemoteVersionItem { Id: "1.21.1" } && t.IsEffectivelyVisible);
+        Check("新建实例：已安装显示芯片，按钮改成“再装一份…”", chip is not null && Dispatcher.UIThread.Invoke(() => row?.Content as string) == "再装一份…");
+        Dispatcher.UIThread.Invoke(() => demoItem.Installed = wasInstalled);
+
+        // 热门版本芯片：点“1.21.1 Fabric”直接打开 1.21.1 的面板并选好 Fabric。
+        var hot = await FindAsync<Button>(b => b.Content as string == "1.21.1 Fabric" && b.IsEffectivelyVisible && ReferenceEquals(b.Command, download.ConfigureHotCommand));
+        Check("新建实例：热门版本芯片打开面板并选好加载器",
+            Press(hot) && await WaitAsync(() => download.Target?.Id == "1.21.1" && download.SelectedLoader.Kind == Amber.Core.Install.LoaderKind.Fabric, 5),
+            $"{download.Target?.Id} {download.SelectedLoader.Label}");
+        var latestChip = await FindAsync<Button>(b => ReferenceEquals(b.Command, download.ConfigureLatestCommand) && b.IsEffectivelyVisible);
+        Check("新建实例：显示“最新正式版”芯片", latestChip is not null && download.HasLatestRelease, download.LatestReleaseLabel);
+        download.CloseConfigureCommand.Execute(null);
+
+        // 列表出错：显示原因、【重试】【切换下载源】。
+        Dispatcher.UIThread.Invoke(() => download.ListError = "自检：模拟取列表失败");
+        var retry = await FindAsync<Button>(b => ReferenceEquals(b.Command, download.RefreshCommand) && b.Name == "RetryListButton" && b.IsEffectivelyVisible);
+        var switchSource = await FindAsync<Button>(b => ReferenceEquals(b.Command, download.SwitchDownloadSourceCommand) && b.IsEffectivelyVisible);
+        Check("新建实例：取列表失败时显示【重试】和【切换下载源】", retry is not null && switchSource is not null);
+        Dispatcher.UIThread.Invoke(() => download.ListError = null);
+
+        // 验收：最小窗口下面板展开时版本号完整可见（之前被挤成 0px）；窄到放不下时面板变成抽屉。
+        download.ConfigureCommand.Execute(demoItem);
+        await LayoutHereAsync("新建实例面板展开");
+        download.CloseConfigureCommand.Execute(null);
     }
 
     /// <summary>下载页全程操作控件：搜索框输入、点“安装…”、在下拉框选 Fabric、改名字、点“开始安装”。</summary>
@@ -375,7 +663,16 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             return $"{download.Items.Count} 个；窗口 {window.Bounds.Width:0}×{window.Bounds.Height:0}，已生成的行 {string.Join("/", rows.Select(b => ((RemoteVersionItem)b.DataContext!).Id))}，" +
                    $"按钮文字「{row?.Content}」";
         });
-        Check("搜索框过滤出 1.21.1 并显示安装按钮", row is not null && row.Content as string == "安装…" && download.Items.All(i => i.Id.Contains("1.21.1")), rowInfo);
+        Check("搜索框过滤出 1.21.1 并显示安装按钮", row is not null && row.Content as string is "安装…" or "再装一份…" && download.Items.All(i => i.Id.Contains("1.21.1")), rowInfo);
+        await NewInstanceListAsync(download, row);
+        // 上面换过语言和窗口大小，行可能重新生成过，重新找一次按钮。
+        await WaitAsync(() => Dispatcher.UIThread.Invoke(() =>
+        {
+            if (download.Items.FirstOrDefault(i => i.Id == "1.21.1") is { } item) list?.ScrollIntoView(item);
+            row = window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.IsEffectivelyVisible
+                && b.DataContext is RemoteVersionItem { Id: "1.21.1" } && ReferenceEquals(b.Command, download.ConfigureCommand));
+            return row is not null;
+        }), 20);
         Check("点“安装…”打开安装面板", Press(row) && await WaitAsync(() => download.IsConfiguring && download.Target?.Id == "1.21.1", 5));
 
         var loaderBox = await FindAsync<ComboBox>(c => ReferenceEquals(c.ItemsSource, download.LoaderChoices));
@@ -384,8 +681,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var gotVersion = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => versionBox?.SelectedItem is not null), 30);
         Check("下拉框选 Fabric 后列出加载器版本", gotVersion && download.SelectedLoader.Label == "Fabric", download.SelectedLoaderVersion?.Version ?? download.LoaderHint);
 
-        var nameBox = await FindAsync<TextBox>(t => t.Text == download.CustomName && download.CustomName.StartsWith("fabric-loader-", StringComparison.Ordinal));
-        Check("默认名字按加载器版本生成", nameBox is not null, download.CustomName);
+        var nameBox = await FindAsync<TextBox>(t => t.Text == download.CustomName && download.CustomName.StartsWith("1.21.1-Fabric", StringComparison.Ordinal));
+        Check("默认名字是“1.21.1-Fabric”（重名加序号）", nameBox is not null, download.CustomName);
         Dispatcher.UIThread.Invoke(() => nameBox!.Text = FabricName);
         Check("名字输入框写回", download.CustomName == FabricName, download.CustomName);
         await ShotAsync("安装面板");
@@ -431,6 +728,34 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var instance = Path.Combine(GameRoot(), "versions", FabricName, "mods");
         Check("安装模组到实例", Directory.Exists(instance) && Directory.EnumerateFiles(instance, "sodium*").Any(), content.Status);
 
+        // 1b.4：往原版实例装模组，安装前拦下；没选文件时安装按钮禁用。
+        var vanillaId = Environment.GetEnvironmentVariable("AMBER_SELFTEST_VERSION") ?? "1.21.1";
+        if (content.Instances.Contains(vanillaId))
+        {
+            var keepTarget = content.TargetInstance;
+            content.TargetInstance = vanillaId;
+            await WaitAsync(() => content.SelectedFile is not null || content.Files.Count == 0, 20);
+            if (content.SelectedFile is not null)
+            {
+                var vanillaMods = Path.Combine(GameRoot(), "versions", vanillaId, "mods");
+                var before = Directory.Exists(vanillaMods) ? Directory.GetFiles(vanillaMods).Length : 0;
+                await content.InstallCommand.ExecuteAsync(null);
+                var after = Directory.Exists(vanillaMods) ? Directory.GetFiles(vanillaMods).Length : 0;
+                Check("原版实例装模组前拦下", content.StatusInfo?.Key == "content.install.vanilla_blocked" && after == before, content.Status);
+            }
+            content.TargetInstance = keepTarget;
+        }
+        var keepFile = content.SelectedFile;
+        content.SelectedFile = null;
+        Check("没选文件时安装按钮禁用", !content.InstallCommand.CanExecute(null));
+        content.SelectedFile = keepFile;
+
+        // #22：翻页时右侧详情不收起。
+        var detail = content.Detail;
+        await content.NextPageCommand.ExecuteAsync(null);
+        Check("翻页时详情面板不收起（#22）", detail is not null && ReferenceEquals(content.Detail, detail) && content.HasSelection, content.Status);
+        await content.PreviousPageCommand.ExecuteAsync(null);
+
         content.SourceIndex = 1;
         await WaitAsync(() => content.Status.Contains("失败") || content.Results.Count > 0, 20);
         Check("没配 Key 时 CurseForge 给出明确提示", content.Status.Contains("API 密钥") || content.Results.Count > 0, content.Status);
@@ -445,7 +770,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         main.CurrentPage = instance;
         await WaitAsync(() => instance.Instances.Contains(FabricName), 5);
         instance.SelectedId = FabricName;
-        instance.TabIndex = 1;
+        instance.TabIndex = (int)InstanceTab.Mods;
         await WaitAsync(() => instance.Mods.Count > 0, 10);
         var mod = instance.Mods.FirstOrDefault();
         Check("模组列表读到元数据", mod is { Name: "Sodium" }, mod?.Meta ?? "");
@@ -460,7 +785,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("检查模组更新", instance.Status.Contains("最新") || instance.Status.Contains("可更新"), instance.Status);
         await ShotAsync("模组页");
 
-        instance.TabIndex = 0;
+        instance.TabIndex = (int)InstanceTab.Settings;
         await Task.Delay(300);
         instance.MemoryModeIndex = 2;
         instance.MemoryText = "3072";
@@ -486,7 +811,6 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         main.CurrentPage = settings;
         var noTraceBox = await FindAsync<CheckBox>(c => c.Name == "NoTraceBox");
         Dispatcher.UIThread.Invoke(() => { if (noTraceBox is not null) noTraceBox.IsChecked = true; });
-        Dispatcher.UIThread.Invoke(() => settings.SaveCommand.Execute(null));
         Check("无痕模式：勾选后存进设置", noTraceBox is not null && settings.NoTrace && File.ReadAllText(Amber.App.Services.AppSettings.FilePath).Contains("\"NoTrace\": true"));
         var instance = Page<InstanceViewModel>();
         instance.SelectedId = FabricName;
@@ -548,14 +872,14 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var cleaned = await WaitAsync(() => filtered.All(f => !File.Exists(f)), 15);
         Check("无痕模式：游戏退出后删掉生成的日志配置", filtered.Count > 0 && cleaned, string.Join(", ", filtered.Where(File.Exists).Select(Path.GetFileName)));
         // 后面的崩溃分析要看完整日志，把无痕模式关回去。
-        Dispatcher.UIThread.Invoke(() => { settings.NoTrace = false; settings.SaveCommand.Execute(null); });
+        Dispatcher.UIThread.Invoke(() => settings.NoTrace = false);
     }
 
     private async Task CrashAsync()
     {
         var instance = Page<InstanceViewModel>();
         main.CurrentPage = instance;
-        instance.TabIndex = 0;
+        instance.TabIndex = (int)InstanceTab.Settings;
         await Task.Delay(300);
         instance.JvmArgs = "-XX:AmberBadOption=1";
         instance.SaveSettingsCommand.Execute(null);
@@ -594,7 +918,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
     {
         var instance = Page<InstanceViewModel>();
         instance.SelectedId = FabricName;
-        instance.TabIndex = 6;
+        instance.TabIndex = (int)InstanceTab.Servers;
         await Task.Delay(300);
         instance.NewServerName = "自检服务器";
         instance.NewServerAddress = "127.0.0.1:1";
@@ -614,7 +938,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         });
         instance.SelectedId = null;
         instance.SelectedId = FabricName;
-        instance.TabIndex = 2;
+        instance.TabIndex = (int)InstanceTab.Worlds;
         await WaitAsync(() => instance.Worlds.Count > 0, 5);
         Check("世界列表", instance.Worlds.Any(w => w.Name == "自检世界"));
         await instance.BackupWorldCommand.ExecuteAsync(instance.Worlds.First());
@@ -622,6 +946,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await ShotAsync("世界页");
         await LayoutHereAsync("世界页");
         await DatapacksAsync(instance, world);
+        await BrowseOnlineAndBackAsync(instance);
         instance.DeleteWorldCommand.Execute(instance.Worlds.First());
         var trashRoot = Path.Combine(GameRoot(), TrashService.TrashFolder);
         Check("删除世界进回收目录", !Directory.Exists(world) && TrashService.List(trashRoot).Any(e => Path.GetFullPath(e.OriginalPath) == Path.GetFullPath(world)), instance.Status);
@@ -632,20 +957,51 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         instance.DeleteWorldCommand.Execute(instance.Worlds.First(w => w.Name == "自检世界"));
         Check("再次删除世界", !Directory.Exists(world), instance.Status);
 
-        for (var tab = 3; tab <= 7; tab++)
+        foreach (var tab in new[] { InstanceTab.ResourcePacks, InstanceTab.ShaderPacks, InstanceTab.Servers, InstanceTab.Screenshots })
         {
-            instance.TabIndex = tab;
-            await ShotAsync($"实例标签{tab}");
+            instance.TabIndex = (int)tab;
+            await ShotAsync($"实例标签-{tab}");
         }
+    }
+
+    /// <summary>1b.3：光影 Tab 的【在线浏览…】跳到资源页（类型和实例选好、显示上下文条），【← 返回实例】回来时实例和 Tab 不变。</summary>
+    private async Task BrowseOnlineAndBackAsync(InstanceViewModel instance)
+    {
+        main.CurrentPage = instance;
+        instance.TabIndex = (int)InstanceTab.ShaderPacks;
+        var id = instance.SelectedId;
+        instance.BrowseOnlineCommand.Execute(Amber.Core.Content.ContentType.Shader);
+        var content = Page<ContentViewModel>();
+        Check("在线浏览光影跳到资源页", main.CurrentPage == content && content.TypeIndex == (int)Amber.Core.Content.ContentType.Shader
+                                    && content.TargetInstance == id && content.HasReturn, content.ReturnContext ?? "");
+        await ShotAsync("资源页-从实例跳来");
+        content.ReturnCommand.Execute(null);
+        Check("返回实例后实例和 Tab 不变", main.CurrentPage == instance && instance.SelectedId == id
+                                    && instance.TabIndex == (int)InstanceTab.ShaderPacks && !content.HasReturn);
+        content.TypeIndex = 0;
     }
 
     private async Task DatapacksAsync(InstanceViewModel instance, string world)
     {
         main.CurrentPage = instance;
-        instance.TabIndex = 2;
+        instance.TabIndex = (int)InstanceTab.Worlds;
         await WaitAsync(() => instance.Worlds.Count > 0, 5);
-        var button = await FindAsync<Button>(b => b.Content as string == "数据包" && b.DataContext is WorldItem w && w.World.Path == world);
-        Check("点世界的“数据包”", Press(button) && instance.HasDatapackWorld);
+        // “数据包”在世界行的 ⋯ 菜单里（改版规格 4.3）：找到这一行的 ⋯ 按钮，执行菜单项的命令。
+        var folder = Path.GetFileName(world);
+        var more = await FindAsync<Button>(b => b.Content as string == "⋯" && b.DataContext is WorldItem w && w.World.FolderName == folder);
+        // 像玩家一样打开菜单：菜单项的绑定在菜单打开后才生效，这也验证了 ⋯ 菜单里能找到页面的命令。
+        var flyout = more?.Flyout as MenuFlyout;
+        if (more is not null) Dispatcher.UIThread.Invoke(() => flyout?.ShowAt(more));
+        MenuItem? menuItem = null;
+        await WaitAsync(() => (menuItem = Dispatcher.UIThread.Invoke(() => flyout?.Items.OfType<MenuItem>().FirstOrDefault(m => ReferenceEquals(m.Command, instance.ShowDatapacksCommand)))) is not null, 5);
+        await ShotAsync("世界行更多菜单");
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            menuItem?.Command?.Execute(menuItem.CommandParameter);
+            flyout?.Hide();
+        });
+        Check("点世界 ⋯ 菜单里的“数据包”", menuItem is not null && instance.HasDatapackWorld,
+            $"⋯ 按钮{(more is null ? "没找到" : "找到")}，菜单项{(menuItem is null ? "没找到" : "找到")}；列表：{string.Join(", ", instance.Worlds.Select(w => w.World.Path))}");
 
         var zip = Path.Combine(reportDir, "selftest-datapack.zip");
         File.Delete(zip);
@@ -690,7 +1046,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         main.CurrentPage = instance;
         instance.SelectedId = null;
         instance.SelectedId = FabricName;
-        instance.TabIndex = 2;
+        instance.TabIndex = (int)InstanceTab.Worlds;
         await WaitAsync(() => instance.Worlds.Count > 0, 5);
     }
 
@@ -703,8 +1059,16 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var host = Page<MultiplayerViewModel>();
         main.CurrentPage = host;
         await Task.Delay(500);
-        host.JoinCode = "AMB-123";
-        Check("联机：房间码格式错误有提示", Press(await FindAsync<Button>(b => b.Content as string == "加入房间")) && host.Status.Contains("格式") || !host.IsComponentReady && host.Status.Contains("组件"), host.Status);
+        host.JoinCode = "JAY2-123";
+        await PasteBoxMaskedAsync(host);
+        Check("联机：邀请码格式错误有提示", Press(await FindAsync<Button>(b => b.Content as string == "加入房间")) && host.Status.Contains("格式") || !host.IsComponentReady && host.Status.Contains("组件"), host.Status);
+        if (host.IsComponentReady)
+        {
+            host.JoinCode = "AMB-K7Q2M9XD-4HZP8RW2N6TC-25565";
+            await host.JoinCommand.ExecuteAsync(null);
+            Check("联机：旧版本房间码提示对方更新", host.IsIdle && host.Status.Contains("旧版本"), host.Status);
+        }
+        Check("联机：显示自己的指纹", host.MyFingerprint.Contains('-') && host.MyFingerprint.Length > 16, host.MyFingerprint);
         await ShotAsync("联机页");
         if (!host.IsComponentReady)
         {
@@ -735,16 +1099,27 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         host.TestPeers = [];
         host.ManualPort = gamePort.ToString();
         await host.CreateRoomCommand.ExecuteAsync(null);
-        Check("联机：创建房间", host.IsHosting && host.RoomCodeText.StartsWith("AMB-", StringComparison.Ordinal), host.Status);
+        Check("联机：创建房间（没有可分享的房间码）", host.IsHosting && host.RoomCodeText.Length == 0, host.Status);
         await ShotAsync("联机房主");
         await LayoutHereAsync("联机房主");
 
         var guest = host.CreateTestPeer();
         guest.Activate();
         guest.TestPeers = [$"tcp://127.0.0.1:{relayPort}"];
-        guest.JoinCode = "朋友发来的：" + host.RoomCodeText;
-        guest.JoinCommand.Execute(null);
-        Check("联机：加入房间", guest.IsJoined && guest.JoinAddress.StartsWith("127.0.0.1:", StringComparison.Ordinal), guest.Status);
+        // 邀请两次：第一次要房主点批准，之后把对方加进信任列表，第二次重新加入时直接批准。
+        var invite = await CreateInviteAsync(host, uses: 2, auto: false);
+        await CodeHygieneAsync(host, invite);
+        guest.JoinCode = "朋友发来的：" + invite;
+        var joining = guest.JoinCommand.ExecuteAsync(null);
+        var asked = await WaitAsync(() => host.ApprovalCards.Count > 0, 90);
+        Check("联机：房主收到敲门卡片（带指纹）", asked && host.ApprovalCards[0].Detail.Contains(guest.Identity.Fingerprint), guest.Status);
+        await ShotAsync("联机敲门卡片");
+        if (asked) host.ApproveKnockCommand.Execute(host.ApprovalCards[0]);
+        await joining;
+        Check("联机：批准后加入房间", guest.IsJoined && guest.JoinAddress.StartsWith("127.0.0.1:", StringComparison.Ordinal), guest.Status);
+        Check("联机：加入方看到房主指纹", guest.HostFingerprint == host.Identity.Fingerprint, guest.HostFingerprint);
+        Check("联机：房主的成员列表带指纹", await WaitAsync(() => host.Members.Count == 1, 10) && host.Members[0].Fingerprint == guest.Identity.Fingerprint, string.Join(" | ", host.Members.Select(m => m.Label)));
+        Check("联机：成员确认收到凭据后标“已确认”", await WaitAsync(() => host.Members.Count == 1 && host.Members[0].Confirmed, 10), string.Join(" | ", host.Members.Select(m => m.Label)));
 
         var connected = await WaitAsync(() => guest.Peers.Any(p => p.Peer.Ip == Amber.Core.Multiplayer.EasyTierArgs.HostIp), 60);
         Check("联机：加入方看到房主", connected, guest.Status);
@@ -777,6 +1152,11 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await host.SendChatCommand.ExecuteAsync(null);
         var chatOk = await WaitAsync(() => host.ChatLines.Any(l => l.Text == "你好，房主" && !l.Mine) && guest.ChatLines.Any(l => l.Text == "欢迎" && !l.Mine), 15);
         Check("联机：聊天消息双向送达", chatOk, string.Join(" | ", host.ChatLines.Select(l => l.Name + ":" + l.Text)));
+        // 每个成员到房主是自己的 Noise 通道；房主按成员表给消息盖上发送者的指纹（成员自己写的发送者不算数）。
+        var stamped = host.ChatLines.FirstOrDefault(l => l.Text == "你好，房主" && !l.Mine);
+        Check("联机：房主给聊天消息盖上发送者指纹", stamped?.Message.Fingerprint == guest.Identity.Fingerprint, stamped?.Message.Fingerprint ?? "没有消息");
+        var welcome = guest.ChatLines.FirstOrDefault(l => l.Text == "欢迎" && !l.Mine);
+        Check("联机：加入方看到房主的指纹", welcome?.Message.Fingerprint == host.Identity.Fingerprint, welcome?.Message.Fingerprint ?? "没有消息");
         Check("联机：进入房间通知", host.ChatLines.Any(l => l.Message.Kind == Amber.Core.Multiplayer.ChatKind.Join && !l.Mine));
         main.CurrentPage = Page<HomeViewModel>();
         guest.ChatInput = "看得到未读吗";
@@ -790,18 +1170,25 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         main.CurrentPage = host;
         await ShotAsync("联机房主有玩家");
 
-        // 结束后用同一个房间码再加入：之前的聊天还在（只在内存里），后面有分隔行。
-        var code = host.RoomCodeText;
+        // 信任这个人，再用同一张邀请重新加入：直接批准；之前的聊天还在（只在内存里），后面有分隔行。
+        host.TrustMemberCommand.Execute(host.Members[0]);
+        Check("联机：信任列表记下了这个人", host.TrustedPeople.Any(p => p.Member.Fingerprint == guest.Identity.Fingerprint));
         guest.StopCommand.Execute(null);
         Check("联机：结束后聊天清空", guest.ChatLines.Count == 0);
-        guest.JoinCode = code;
-        guest.JoinCommand.Execute(null);
+        guest.JoinCode = invite;
+        await guest.JoinCommand.ExecuteAsync(null);
+        Check("联机：信任的人重新加入不用批准", guest.IsJoined && host.ApprovalCards.Count == 0, guest.Status);
+        Check("联机：一张邀请用完后不再列为待用", await WaitAsync(() => host.PendingInvites.Count == 0, 10), host.PendingInvites.Count.ToString());
         var restored = guest.ChatLines.Any(l => l.Text == "欢迎") && guest.ChatLines.Any(l => l.IsSeparator);
         Check("联机：重新加入同一房间看到之前的消息", restored, string.Join(" | ", guest.ChatLines.Select(l => l.Text)));
         Check("联机：重新加入后聊天重连", await WaitAsync(() => guest.ChatReady, 40), guest.ChatStatus);
+        var trusted = host.TrustedPeople.FirstOrDefault(p => p.Member.Fingerprint == guest.Identity.Fingerprint);
+        host.RemoveTrustedCommand.Execute(trusted);
+        Check("联机：从信任列表移除", await WaitAsync(() => host.TrustedPeople.All(p => p.Member.Fingerprint != guest.Identity.Fingerprint), 5));
         guest.StopCommand.Execute(null);
         host.StopCommand.Execute(null);
 
+        await KickAndRekeyAsync(host, guest, gamePort, relayPort);
         await TransportRoomAsync(host, guest, gamePort, relayPort);
 
         stopServer.Cancel();
@@ -811,6 +1198,88 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("联机：结束后 easytier-core 都关掉了", left == 0, $"剩 {left} 个");
         host.TestListeners = null;
         host.TestPeers = null;
+    }
+
+    /// <summary>
+    /// 踢人和换网络：两个人经邀请进来，房主踢掉其中一个。被踢的人马上断开、进了禁入名单；
+    /// 房间换了网络（版本加一），留下的人自动换过去、聊天重连还能说话；被踢的人还在旧版本、收不到消息。最后解除禁止。
+    /// </summary>
+    private async Task KickAndRekeyAsync(MultiplayerViewModel host, MultiplayerViewModel stays, int gamePort, int relayPort)
+    {
+        await Task.Delay(1500);
+        host.SelectedTransport = host.TransportChoices.First(c => c.Mode == Amber.Core.Multiplayer.Transport.TransportMode.General);
+        host.DisguiseAsMinecraft = false;
+        host.ManualPort = gamePort.ToString();
+        await host.CreateRoomCommand.ExecuteAsync(null);
+        Check("踢人：创建房间", host.IsHosting, host.Status);
+        // 第二个成员要用不同的联机身份（同一个进程里），放在测试数据目录里。
+        var kicked = host.CreateTestPeer();
+        kicked.Activate();
+        kicked.TestPeers = [$"tcp://127.0.0.1:{relayPort}"];
+        kicked.UseTestIdentity(Path.Combine(AppSettingsDataDir(), "selftest-identity-kicked"));
+        // 三次的邀请，两个人进来后还剩一次：踢人时这张一起作废。
+        var invite = await CreateInviteAsync(host, uses: 3, auto: true);
+        stays.JoinCode = invite;
+        await stays.JoinCommand.ExecuteAsync(null);
+        kicked.JoinCode = invite;
+        await kicked.JoinCommand.ExecuteAsync(null);
+        Check("踢人：两个人都进了房间", stays.IsJoined && kicked.IsJoined, stays.Status + " / " + kicked.Status);
+        Check("踢人：两个人的指纹不同", stays.Identity.Fingerprint != kicked.Identity.Fingerprint);
+        var bothChat = await WaitAsync(() => host.ChatReady && stays.ChatReady && kicked.ChatReady, 60);
+        Check("踢人：三个人都连上聊天", bothChat, $"{stays.ChatStatus} / {kicked.ChatStatus}");
+        Check("踢人：房主的成员列表里有两个人", await WaitAsync(() => host.Members.Count == 2, 10), string.Join(" | ", host.Members.Select(m => m.Label)));
+
+        var target = host.Members.First(m => m.Fingerprint == kicked.Identity.Fingerprint);
+        // 踢出按钮先弹确认：点“取消”什么都不变。
+        string? askedTitle = null;
+        host.Confirm = (title, _, _) => { askedTitle = title; return Task.FromResult(false); };
+        await host.AskKickMemberCommand.ExecuteAsync(target);
+        Check("踢人：先弹确认框，取消后人还在", askedTitle?.Contains(target.Name) == true && host.Members.Any(m => m.Fingerprint == kicked.Identity.Fingerprint) && host.RoomEpoch == 1,
+            askedTitle ?? "");
+        host.Confirm = (_, _, _) => Task.FromResult(true);
+        await host.AskKickMemberCommand.ExecuteAsync(target);
+        Check("踢人：进了禁入名单、成员列表里没了", host.BannedPeople.Count == 1 && host.Members.All(m => m.Fingerprint != kicked.Identity.Fingerprint),
+            string.Join(" | ", host.BannedPeople.Select(b => b.Label)));
+        Check("踢人：房主换到新网络（版本 2）", host.RoomEpoch == 2, host.Status);
+        Check("踢人：他进来用的那张邀请作废了，并提示房主重新发", host.PendingInvites.Count == 0 && host.Status.Contains("作废"), host.Status);
+        Check("踢人：被踢的人聊天马上断开", await WaitAsync(() => !kicked.ChatReady, 10), kicked.ChatStatus);
+        Check("踢人：被踢的人看到“你已被移出房间”并停止联机", await WaitAsync(() => !kicked.IsJoined && kicked.Status.Contains("移出房间"), 10), kicked.Status);
+        // 之后几秒内不能被“掉线重连”盖掉：不显示“正在连接房主”，聊天也不显示“正在重连”。
+        var kickedLater = new List<string>();
+        for (var i = 0; i < 30; i++)
+        {
+            kickedLater.Add(kicked.Status + " / " + kicked.ChatStatus);
+            await Task.Delay(100);
+        }
+        Check("踢人：被踢的人一直显示“已被移出房间”，没有变成掉线重连",
+            kickedLater.All(s => s.Contains("移出房间") && !s.Contains("正在连接房主") && !s.Contains("重连")) && !kicked.IsJoined,
+            string.Join(" | ", kickedLater.Distinct()));
+        Check("踢人：留下的人收到新网络并换过去", await WaitAsync(() => stays.RoomEpoch == 2, 15), stays.Status);
+        Check("踢人：被踢的人收不到新网络", kicked.RoomEpoch != 2, kicked.RoomEpoch.ToString());
+        await ShotAsync("联机踢人后");
+        Check("踢人：留下的人聊天重连", await WaitAsync(() => stays.ChatReady, 90), stays.ChatStatus);
+        stays.ChatInput = "换钥之后还在";
+        await stays.SendChatCommand.ExecuteAsync(null);
+        var after = await WaitAsync(() => host.ChatLines.Any(l => l.Text == "换钥之后还在" && !l.Mine && l.Message.Fingerprint == stays.Identity.Fingerprint), 20);
+        Check("踢人：换网络后留下的人还能聊天", after, string.Join(" | ", host.ChatLines.Select(l => l.Name + ":" + l.Text)));
+        host.ChatInput = "被踢的人看不到";
+        await host.SendChatCommand.ExecuteAsync(null);
+        Check("踢人：留下的人收到房主的新消息", await WaitAsync(() => stays.ChatLines.Any(l => l.Text == "被踢的人看不到"), 15));
+        await Task.Delay(1000);
+        Check("踢人：被踢的人收不到之后的消息", kicked.ChatLines.All(l => l.Text != "被踢的人看不到"));
+
+        // 被踢的人拿新邀请再敲门：明确告诉他“已被房主移出”，不是一串异常。
+        var again = await CreateInviteAsync(host, uses: 1, auto: true);
+        kicked.JoinCode = again;
+        await kicked.JoinCommand.ExecuteAsync(null);
+        Check("踢人：被踢的人再敲门看到“你已被房主移出”", await WaitAsync(() => !kicked.IsKnocking && kicked.Status.Contains("已被房主移出"), 90) && !kicked.IsJoined,
+            kicked.Status);
+
+        host.UnbanCommand.Execute(host.BannedPeople[0]);
+        Check("踢人：解除禁止", host.BannedPeople.Count == 0);
+        kicked.StopCommand.Execute(null);
+        stays.StopCommand.Execute(null);
+        host.StopCommand.Execute(null);
     }
 
     /// <summary>
@@ -825,10 +1294,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         host.AllowGameProxy = true;
         host.ManualPort = gamePort.ToString();
         await host.CreateRoomCommand.ExecuteAsync(null);
-        Check("封装：创建高加密 + 伪装的房间", host.IsHosting && host.RoomCodeText.StartsWith("AMB-T2D-", StringComparison.Ordinal) && host.TransportText.Contains("高加密"), host.TransportText + " / " + host.Status);
-        guest.JoinCode = host.RoomCodeText;
-        guest.JoinCommand.Execute(null);
-        Check("封装：加入方按房间码用同样的封装", guest.IsJoined && guest.TransportText.Contains("高加密") && guest.TransportText.Contains("伪装"), guest.TransportText);
+        Check("封装：创建高加密 + 伪装的房间", host.IsHosting && host.TransportText.Contains("高加密"), host.TransportText + " / " + host.Status);
+        // 这次勾“自动批准”：不出卡片直接进。
+        var invite = await CreateInviteAsync(host, uses: 1, auto: true);
+        Check("封装：邀请码带模式段", invite.StartsWith("JAY2-T2D-", StringComparison.Ordinal), invite[..9]);
+        guest.JoinCode = invite;
+        await guest.JoinCommand.ExecuteAsync(null);
+        Check("封装：自动批准，加入方按房主发来的设置用同样的封装", guest.IsJoined && host.ApprovalCards.Count == 0 && guest.TransportText.Contains("高加密") && guest.TransportText.Contains("伪装"), guest.TransportText + " / " + guest.Status);
         await WaitAsync(() => guest.Peers.Any(p => p.Peer.Ip == Amber.Core.Multiplayer.EasyTierArgs.HostIp), 60);
         string? reply = null;
         for (var attempt = 0; attempt < 15 && reply is null; attempt++)
@@ -853,6 +1325,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         guest.ChatInput = "封装后的聊天";
         await guest.SendChatCommand.ExecuteAsync(null);
         Check("封装：聊天经封装通道送达", chatUp && await WaitAsync(() => host.ChatLines.Any(l => l.Text == "封装后的聊天" && !l.Mine), 15), $"{host.ChatStatus} / {guest.ChatStatus}");
+        Check("封装：聊天发送者由房主按成员钥匙认出", host.ChatLines.FirstOrDefault(l => l.Text == "封装后的聊天" && !l.Mine)?.Message.Fingerprint == guest.Identity.Fingerprint);
 
         guest.SelectedExitPeer = guest.ExitCandidates.FirstOrDefault(p => p.Peer.Ip == Amber.Core.Multiplayer.EasyTierArgs.HostIp);
         await guest.UseGameProxyCommand.ExecuteAsync(null);
@@ -933,17 +1406,33 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         host.DebugMode = true;
         host.ManualPort = gamePort.ToString();
         await host.CreateDirectRoomCommand.ExecuteAsync(null);
-        Check("直连：创建房间并生成邀请码", host.IsDirect && host.MyDirectCode.StartsWith("AMBDIRECT1-", StringComparison.Ordinal), host.Status);
+        Check("直连：创建房间并生成直连邀请码（JAY2D-）", host.IsDirect && host.MyDirectCode.StartsWith("JAY2D-", StringComparison.Ordinal), host.Status);
+        Check("直连：邀请码默认打码", host.MyDirectCodeDisplay.Contains('•') && !host.MyDirectCodeDisplay.Contains(host.MyDirectCode[6..^4]), host.MyDirectCodeDisplay);
+        var hostSecrets = host.RoomSecretsForTest;
+        Check("直连：邀请码里没有房间的网络名和密钥", hostSecrets.Count > 0 && hostSecrets.All(s => !DecodedDirect(host.MyDirectCode).Contains(s, StringComparison.OrdinalIgnoreCase)));
         await ShotAsync("直连房主");
 
         var guest = host.CreateTestPeer();
         guest.Activate();
         guest.DirectSimulate = true;
         guest.DirectUseNodes = false;
-        guest.DirectInviteInput = host.MyDirectCode;
+        guest.DirectInviteInput = "AMBDIRECT1-eyJhIjoxfQ";
         await guest.JoinDirectCommand.ExecuteAsync(null);
-        Check("直连：加入并打洞", guest.IsDirect && guest.IsJoined, guest.Status);
-        Check("直连：加入方生成回复码", guest.MyDirectCode.StartsWith("AMBREPLY1-", StringComparison.Ordinal));
+        Check("直连：旧版直连码不认，提示更新", guest.IsIdle && guest.Status.Contains("旧版本"), guest.Status);
+        guest.DirectInviteInput = host.MyDirectCode;
+        var joining = guest.JoinDirectCommand.ExecuteAsync(null);
+        // 打通后先经直连桥进大厅敲门：房主批准前，这条桥只到大厅。
+        var knocked = await WaitAsync(() => host.ApprovalCards.Count == 1, 90);
+        Check("直连：经直连桥敲门，房主看到批准卡片", knocked, guest.Status);
+        Check("直连：批准前加入方还没进房间、直连桥只到大厅", guest.DirectForTest?.HasRoom == false
+            && host.DirectForTest?.Bridge?.Peers is { Count: 1 } before && !before.First().Admitted, guest.Status);
+        Check("直连：加入方生成回复码（JAY2R-，默认打码）", guest.MyDirectCode.StartsWith("JAY2R-", StringComparison.Ordinal) && guest.MyDirectCodeDisplay.Contains('•'));
+        if (knocked) host.ApproveKnockCommand.Execute(host.ApprovalCards[0]);
+        await joining;
+        Check("直连：批准后加入房间", guest.IsDirect && guest.IsJoined, guest.Status);
+        Check("直连：证明了成员身份，直连桥接到房间", host.DirectForTest?.Bridge?.Peers is { Count: 1 } after && after.First().Admitted);
+        Check("直连：邀请用完后不再接新的直连", host.DirectForTest?.Bridge?.AcceptingNewPeers?.Invoke() == false && host.PendingInvites.Count == 0, host.PendingInvites.Count.ToString());
+        Check("直连：房主的成员列表里有这个人", await WaitAsync(() => host.Members.Count == 1, 10), string.Join(" | ", host.Members.Select(m => m.Label)));
 
         string? reply = null;
         for (var attempt = 0; attempt < 20 && reply is null; attempt++)
@@ -985,8 +1474,15 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var report = Path.Combine(reportDir, "direct-report.txt");
         host.ExportDiagnostics(report);
         var text = File.ReadAllText(report);
-        var secret = host.RoomCodeText.Split('-')[2];
-        Check("直连：诊断报告去掉了房间密钥", File.Exists(report) && !text.Contains(secret) && text.Contains("全条件测试结果"), $"{text.Length} 字");
+        Check("直连：诊断报告去掉了房间密钥和直连码", File.Exists(report) && host.RoomSecretsForTest.All(s => !text.Contains(s, StringComparison.OrdinalIgnoreCase))
+            && !text.Contains(host.MyDirectCode[6..]) && !text.Contains(guest.MyDirectCode[6..]) && text.Contains("全条件测试结果"), $"{text.Length} 字");
+
+        // 踢出直连成员：他的直连桥马上断开，他那边看到“你已被移出房间”并停止联机。
+        var member = host.Members.First();
+        await host.KickMemberCommand.ExecuteAsync(member);
+        Check("直连：踢出后断开他的直连桥", await WaitAsync(() => host.DirectForTest?.Bridge?.Peers.Count == 0, 10), host.Status);
+        Check("直连：被踢的人看到“你已被移出房间”并停止联机", await WaitAsync(() => !guest.IsJoined && guest.Status.Contains("移出房间"), 15), guest.Status);
+        Check("直连：房主换了网络（版本 2）", host.RoomEpoch == 2, host.Status);
 
         guest.StopCommand.Execute(null);
         host.StopCommand.Execute(null);
@@ -1001,6 +1497,31 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
     }
 
     private static string AppSettingsDataDir() => Amber.App.Services.AppSettings.DataDir;
+
+    /// <summary>直连码的正文（base64url 解开后的 JSON）。</summary>
+    private static string DecodedDirect(string code)
+    {
+        var b64 = code[6..].Replace('-', '+').Replace('_', '/');
+        b64 += new string('=', (4 - b64.Length % 4) % 4);
+        return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(b64));
+    }
+
+    /// <summary>房主开“邀请朋友”对话框、生成一张邀请；界面上默认打码，返回完整的码。</summary>
+    private async Task<string> CreateInviteAsync(MultiplayerViewModel host, int uses, bool auto)
+    {
+        host.OpenInviteDialogCommand.Execute(null);
+        host.InviteUses = uses;
+        host.SelectedInviteExpiry = host.InviteExpiryChoices[0];
+        host.InviteAutoApprove = auto;
+        await host.CreateInviteCommand.ExecuteAsync(null);
+        var full = host.TestInviteText ?? "";
+        Check("邀请：生成邀请码，默认打码显示", host.HasInvite && full.StartsWith("JAY2-", StringComparison.Ordinal) && host.InviteDisplay != full && !host.InviteDisplay.Contains(full[^20..]), host.Status);
+        Check("邀请：待用邀请列表里有它", host.PendingInvites.Count > 0, host.PendingInvites.Count.ToString());
+        await ShotAsync(auto ? "邀请对话框（自动批准）" : "邀请对话框");
+        host.InviteAutoApprove = false;
+        host.CloseInviteDialogCommand.Execute(null);
+        return full;
+    }
 
     private static void FakeJar(string path, string entry, string text)
     {
@@ -1043,7 +1564,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             return;
         }
         instance.SelectedId = neo;
-        instance.TabIndex = 1;
+        instance.TabIndex = (int)InstanceTab.Mods;
         await WaitAsync(() => instance.Mods.Count > 0 && instance.Mods.All(m => m.Compat is not null || !m.Enabled), 15);
         var fabricMod = instance.Mods.FirstOrDefault(m => m.Mod.FileName.StartsWith("morechathistory", StringComparison.Ordinal));
         Check("模组兼容：Fabric 模组标为经 Connector 运行", fabricMod?.CompatText.Contains("Connector") == true, fabricMod?.CompatText ?? "没有这个模组");
@@ -1057,7 +1578,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         FakeJar(wrong, "META-INF/neoforge.mods.toml", "[[mods]]\nmodId=\"selftestold\"\n[[dependencies.selftestold]]\nmodId=\"minecraft\"\ntype=\"required\"\nversionRange=\"[1.20.4,1.20.5)\"\n");
         instance.SelectedId = null;
         instance.SelectedId = neo;
-        instance.TabIndex = 1;
+        instance.TabIndex = (int)InstanceTab.Mods;
         await WaitAsync(() => instance.Mods.Any(m => m.Mod.FileName == "amber-selftest-wrongversion.jar" && m.Compat is not null), 15);
         var flagged = instance.Mods.FirstOrDefault(m => m.Mod.FileName == "amber-selftest-wrongversion.jar");
         Check("模组兼容：游戏版本不对的模组被标出", flagged is { HasCompatProblem: true, CanFindMatching: true } && flagged.CompatText.Contains("1.20.4"), flagged?.CompatText ?? "");
@@ -1068,12 +1589,12 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await FindMatchingAsync(instance, neo);
 
         instance.SelectedId = FabricName;
-        instance.TabIndex = 1;
+        instance.TabIndex = (int)InstanceTab.Mods;
         var forgeOnFabric = Path.Combine(instance.ModsDir!, "amber-selftest-neoforge-only.jar");
         FakeJar(forgeOnFabric, "META-INF/neoforge.mods.toml", "[[mods]]\nmodId=\"selftestneo\"\n");
         instance.SelectedId = null;
         instance.SelectedId = FabricName;
-        instance.TabIndex = 1;
+        instance.TabIndex = (int)InstanceTab.Mods;
         await WaitAsync(() => instance.Mods.Any(m => m.Mod.FileName == "amber-selftest-neoforge-only.jar" && m.Compat is not null), 15);
         var neoOnFabric = instance.Mods.FirstOrDefault(m => m.Mod.FileName == "amber-selftest-neoforge-only.jar");
         Check("模组兼容：Fabric 上的 NeoForge 模组说明没有兼容层", neoOnFabric?.CompatText.Contains("没有可靠的办法") == true, neoOnFabric?.CompatText ?? "");
@@ -1098,7 +1619,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var before = Directory.GetFiles(instance.ModsDir!).ToHashSet();
         instance.SelectedId = null;
         instance.SelectedId = id;
-        instance.TabIndex = 1;
+        instance.TabIndex = (int)InstanceTab.Mods;
         await WaitAsync(() => instance.Mods.Any(m => m.Mod.FileName == old.FileName && m.Compat is not null), 15);
         var item = instance.Mods.FirstOrDefault(m => m.Mod.FileName == old.FileName);
         Check("找对应版本：真实的旧版本模组被标出", item is { CanFindMatching: true }, item?.CompatText ?? "没读到");
@@ -1137,7 +1658,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var instance = Page<InstanceViewModel>();
         main.CurrentPage = instance;
         instance.SelectedId = FabricName;
-        instance.TabIndex = 7;
+        instance.PrepareExport();
         await WaitAsync(() => instance.ExportOptions.Count > 0, 5);
         var pack = Path.Combine(reportDir, "e2e.mrpack");
         await instance.ExportPackAsync(pack);

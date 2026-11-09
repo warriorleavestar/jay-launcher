@@ -78,6 +78,18 @@ jobs:
           -p:PublishReadyToRun=true -p:DebugType=none
           -o ../out/${{ matrix.rid }}
 
+      - name: Publish Jay Server (single file)
+        run: >-
+          dotnet publish Amber.Server -c Release -r ${{ matrix.rid }} --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -o ../out/server-${{ matrix.rid }}
+
+      # 发布包自带 EasyTier 官方安装包（校验固定的 SHA-256），网络不好也能直接用联机。
+      - name: Bundle EasyTier
+        shell: bash
+        run: bash ../scripts/bundle-easytier.sh ${{ matrix.rid }} ../out/${{ matrix.rid }}/easytier
+
       - name: Package Windows
         if: matrix.archive == 'zip'
         shell: pwsh
@@ -85,6 +97,8 @@ jobs:
           New-Item -ItemType Directory -Force ../packages | Out-Null
           Get-ChildItem ../out/${{ matrix.rid }} -Recurse -Filter *.pdb | Remove-Item
           Compress-Archive -Path ../out/${{ matrix.rid }}/* -DestinationPath ../packages/Jay-${{ matrix.rid }}.zip
+          Copy-Item ../server/README.md ../out/server-${{ matrix.rid }}/
+          Compress-Archive -Path ../out/server-${{ matrix.rid }}/* -DestinationPath ../packages/JayServer-${{ matrix.rid }}.zip
 
       - name: Package macOS/Linux
         if: matrix.archive == 'tar'
@@ -93,7 +107,12 @@ jobs:
           mkdir -p ../packages
           find ../out/${{ matrix.rid }} -name '*.pdb' -delete
           chmod +x ../out/${{ matrix.rid }}/Jay
+          # Linux 版内置了思源黑体，按 OFL 附上许可证。
+          if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}/NotoSansSC-OFL.txt; fi
           tar -C ../out/${{ matrix.rid }} -czf ../packages/Jay-${{ matrix.rid }}.tar.gz .
+          chmod +x ../out/server-${{ matrix.rid }}/jay-server
+          cp ../server/README.md ../server/jay-server.service ../out/server-${{ matrix.rid }}/
+          tar -C ../out/server-${{ matrix.rid }} -czf ../packages/JayServer-${{ matrix.rid }}.tar.gz .
 
       - name: Publish Windows Native AOT
         if: matrix.rid == 'win-x64'
@@ -101,6 +120,7 @@ jobs:
         run: |
           dotnet publish Amber.App -c Release -r win-x64 -p:PublishAot=true -p:DebugType=none -o ../out/win-x64-aot
           Get-ChildItem ../out/win-x64-aot -Recurse -Filter *.pdb | Remove-Item
+          Copy-Item -Recurse ../out/win-x64/easytier ../out/win-x64-aot/easytier
           Compress-Archive -Path ../out/win-x64-aot/* -DestinationPath ../packages/Jay-win-x64-aot.zip
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -109,9 +129,155 @@ jobs:
           path: packages/*
           if-no-files-found: error
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Install Android SDK and JDK
+        run: >-
+          dotnet build Amber.Android/Amber.Android.csproj
+          -t:InstallAndroidDependencies -f net10.0-android
+          -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
+          -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:AcceptAndroidSdkLicenses=true
+
+      - name: Publish experimental APK
+        run: >-
+          dotnet publish Amber.Android/Amber.Android.csproj -c Release
+          -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
+          -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:AndroidPackageFormats=apk
+
+      - name: Stage APK
+        shell: bash
+        run: |
+          APK_PATH="Amber.Android/bin/Release/net10.0-android/publish/nz.work.minecraft.jay-Signed.apk"
+          DISPLAY_VERSION="$(dotnet msbuild Amber.Android/Amber.Android.csproj -getProperty:ApplicationDisplayVersion)"
+          BUILD_VERSION="$(dotnet msbuild Amber.Android/Amber.Android.csproj -getProperty:ApplicationVersion)"
+          AAPT_PATH="$(find "${{ runner.temp }}/android-sdk/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
+          test -n "$AAPT_PATH"
+          BADGING="$("$AAPT_PATH" dump badging "$APK_PATH" | head -n 1)"
+          [[ "$BADGING" == *"versionName='$DISPLAY_VERSION'"* ]]
+          [[ "$BADGING" == *"versionCode='$BUILD_VERSION'"* ]]
+          mkdir -p ../packages
+          cp "$APK_PATH" ../packages/Jay-android-experimental.apk
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jay-android
+          path: packages/Jay-android-experimental.apk
+          if-no-files-found: error
+
+  ios:
+    # Keep the platform compile independent so a desktop-only/flaky test cannot hide iOS compiler failures.
+    # .NET 10.0.403 installs the iOS 27.1 workload; this image has matching Xcode 27.1 as its default.
+    runs-on: xcode-27
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install iOS workload
+        run: dotnet workload install ios
+
+      - name: Build experimental iOS Simulator app
+        run: >-
+          dotnet build Amber.iOS/Amber.iOS.csproj -c Release
+          -r iossimulator-arm64 -p:CodesignKey=-
+
+      - name: Stage simulator app
+        shell: bash
+        run: |
+          APP_PATH="$(find Amber.iOS/bin/Release/net10.0-ios/iossimulator-arm64 -type d -name 'Jay.app' -print -quit)"
+          test -n "$APP_PATH"
+          DISPLAY_VERSION="$(dotnet msbuild Amber.iOS/Amber.iOS.csproj -getProperty:ApplicationDisplayVersion)"
+          BUILD_VERSION="$(dotnet msbuild Amber.iOS/Amber.iOS.csproj -getProperty:ApplicationVersion)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")" = "$DISPLAY_VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")" = "$BUILD_VERSION"
+          mkdir -p ../packages
+          tar -C "$(dirname "$APP_PATH")" -czf ../packages/Jay-ios-simulator-arm64-experimental.tar.gz "$(basename "$APP_PATH")"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jay-ios-simulator
+          path: packages/Jay-ios-simulator-arm64-experimental.tar.gz
+          if-no-files-found: error
+
+  # Windows 代码签名（SignPath Foundation）。只在发布标签上跑，并且要先在仓库设置里配好
+  # 变量 SIGNPATH_ORGANIZATION_ID 和密钥 SIGNPATH_API_TOKEN，没配时整个任务跳过，发布照旧（未签名）。
+  # 每次签名都要在 SignPath 网页上人工批准，所以等待时间放宽到 1 小时。
+  # 签名范围见 .signpath/artifact-configuration.xml，政策见 docs/code-signing-policy.md。
+  sign-windows:
+    if: startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != ''
     needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Find unsigned Windows artifact
+        id: unsigned
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+            --jq '.artifacts[] | select(.name == "jay-win-x64") | .id')"
+          test -n "$id"
+          echo "artifact-id=$id" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Submit signing request
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'jay-launcher' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+          parameters: |
+            version: ${{ toJSON(steps.unsigned.outputs.version) }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-jay-win-x64
+          path: signed/*
+          if-no-files-found: error
+
+  release:
+    # 签名任务跳过（没配置 SignPath）时照常发布；签名失败或被拒时不发布，避免把未签名的包当成正式版发出去。
+    if: >-
+      always() && startsWith(github.ref, 'refs/tags/v') &&
+      needs.publish.result == 'success' &&
+      (needs.sign-windows.result == 'success' || needs.sign-windows.result == 'skipped')
+    needs: [publish, sign-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -122,6 +288,20 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        if: needs.sign-windows.result == 'success'
+        with:
+          name: signed-jay-win-x64
+          path: signed-assets
+
+      - name: Use signed Windows packages
+        if: needs.sign-windows.result == 'success'
+        run: |
+          for f in Jay-win-x64.zip Jay-win-x64-aot.zip JayServer-win-x64.zip; do
+            test -f "signed-assets/$f"
+            cp -f "signed-assets/$f" "release-assets/$f"
+          done
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -129,5 +309,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" release-assets/* \
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
+            --notes "代码签名政策 / Code signing policy: https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/code-signing-policy.md" \
             --generate-notes \
             --title "Jay ${GITHUB_REF_NAME}"

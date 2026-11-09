@@ -1,0 +1,17 @@
+<Project>
+  <!--
+    所有程序集共用的版本和产品信息。Windows 版由 SignPath 代码签名时，签名服务会核对 exe 里的
+    产品名（Jay）和产品版本（与发布标签一致），所以版本号只在这里改一处。
+    不把提交哈希拼进 InformationalVersion，否则 exe 的“产品版本”会变成 0.7.0+abc123，和标签对不上。
+  -->
+  <PropertyGroup>
+    <Version>0.7.0</Version>
+    <!-- Android versionCode / iOS CFBundleVersion 必须是递增整数；移动端工程都从这里读取。 -->
+    <MobileApplicationVersion>70</MobileApplicationVersion>
+    <Product>Jay</Product>
+    <Company>Jay</Company>
+    <Authors>warriorleavestar</Authors>
+    <Copyright>Copyright (c) 2026 warriorleavestar</Copyright>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+</Project>

@@ -50,14 +50,35 @@ public sealed class AppSettings
     /// <summary>system / light / dark</summary>
     public string Theme { get; set; } = "system";
 
+    /// <summary>导入的界面主题包 id（{数据目录}/themes/{id}）；null 表示 Jay 默认主题。</summary>
+    public string? ThemePack { get; set; }
+
+    /// <summary>联机网络配置里带的主题：在联机页里使用（整个 Jay 要另外同意）。关掉就一律不用。</summary>
+    public bool AllowNetworkThemes { get; set; } = true;
+
     /// <summary>界面语言：zh-Hans / zh-Hant / en / ja；null 表示跟随系统。</summary>
     public string? Language { get; set; }
 
     /// <summary>启动器窗口上次的位置和大小（逻辑像素，按当时那块屏幕记）。</summary>
     public WindowPlacement? LauncherWindow { get; set; }
 
-    /// <summary>联机用的 EasyTier 中继节点，空表示用 EasyTier 社区的公共节点。</summary>
+    /// <summary>用户自己添加的 EasyTier 中继节点。</summary>
     public List<string>? MultiplayerPeers { get; set; }
+
+    /// <summary>除了自己的节点，也连 Jay 内置的节点（默认开）。</summary>
+    public bool UseBuiltInNodes { get; set; } = true;
+
+    /// <summary>Jay 公共网络的种子节点（程序里内置的之外，自己加的；比如朋友的 VPS 上跑的 jay-server directory）。</summary>
+    public List<string>? PublicNetworkNodes { get; set; }
+
+    /// <summary>自己加的别的公共网络（连接串原文，每次读出来都重新验签）。</summary>
+    public List<string>? PublicNetworks { get; set; }
+
+    /// <summary>现在用哪个公共网络（编号）；空 = 内置的 Jay 公共网络。</summary>
+    public string? PublicNetworkId { get; set; }
+
+    /// <summary>看过并同意了公共网络的隐私说明（第一次连公共网络时显示）。</summary>
+    public bool PublicNetworkNoticeAccepted { get; set; }
 
     /// <summary>最近玩过的实例 id，最近的在前（启动页的“最近游玩”）。</summary>
     public List<string>? RecentInstances { get; set; }
@@ -73,6 +94,12 @@ public sealed class AppSettings
 
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
+
+    /// <summary>实验功能“烘焙”：Fabric / Quilt 实例启动前先用通用加载器预先处理，启动时用处理结果。</summary>
+    public bool ExperimentalBake { get; set; }
+
+    /// <summary>通用加载器原型的目录（实验）；为空时看环境变量 AMBER_BAKE_LOADER。</summary>
+    public string? BakeLoaderPath { get; set; }
 
     /// <summary>删除的模组、存档等在回收目录里保留几天，过期自动清掉。</summary>
     public int TrashRetentionDays { get; set; } = 7;

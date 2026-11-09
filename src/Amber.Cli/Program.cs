@@ -1,3 +1,4 @@
+using Amber.Core.Themes;
 using Amber.Core;
 using Amber.Core.Multiplayer;
 using Amber.Core.Auth;
@@ -332,27 +333,55 @@ try
             var seconds = int.Parse(TakeOption(argList, "--seconds") ?? "0");
             var et = new EasyTierInstaller(downloader, AmberDataDir());
             if (!et.IsInstalled) throw new InvalidOperationException("先运行 lan-setup");
-            RoomCode room;
+            // 直连房间也是邀请房间：房主开大厅、发一张自动批准的邀请；加入方经直连桥敲门拿到房间凭据。
+            // 这里的联机身份每次新生成，不保存。
+            using var me = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
             DirectCode? invite = null;
-            if (isHost) room = RoomCode.Create(int.Parse(argList[1]));
-            else
-            {
-                if (!DirectCode.TryParse(argList[1], out invite, out var error)) throw new ArgumentException(error ?? "邀请码不对");
-                room = invite.Room;
-            }
-            var log = new DiagnosticLog();
-            log.Added += e => { if (debug || e.Category is not "EasyTier") Console.WriteLine("  log| " + NetDiagnostics.Redact(e.ToString(), [.. room.Secrets], true)); };
-            var options = new DirectOptions(stunList.Count > 0 ? stunList : Stun.DefaultServers, !sim, nodes, false, false, debug, sim);
-            await using var direct = new DirectSession(et, Path.Combine(AmberDataDir(), "easytier"), room, isHost, options, log);
-            var code = await direct.PrepareAsync(cts.Token);
+            RoomCode? room = null;
+            MemberTable? members = null;
+            RoomCredentials? credentials = null;
+            InviteBook? book = null;
+            byte[] bridgeKey;
             if (isHost)
             {
-                Console.WriteLine("INVITE " + code.Encode());
+                credentials = RoomCredentials.Create(me.PublicKey, int.Parse(argList[1]), Amber.Core.Multiplayer.Transport.TunnelSettings.Default);
+                members = new MemberTable();
+                room = credentials.ToHostRoom(members, "cli");
+                book = new InviteBook { KeepLobbyKey = true };
+                var lobbyKey = book.LobbyKeyCopy();
+                bridgeKey = DirectKeys.Bridge(lobbyKey);
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(lobbyKey);
             }
             else
             {
-                Console.WriteLine("REPLY " + code.Encode());
-                await direct.JoinAsync(invite!, cts.Token);
+                if (!DirectCode.TryParse(argList[1], out invite, out var error) || invite.Invite is null) throw new ArgumentException(error ?? "邀请码不对");
+                bridgeKey = DirectKeys.Bridge(invite.Invite.LobbyKey);
+            }
+            var log = new DiagnosticLog();
+            log.Added += e => { if (debug || e.Category is not "EasyTier") Console.WriteLine("  log| " + NetDiagnostics.Redact(e.ToString(), room is { } r ? [.. r.Secrets] : [], true)); };
+            var options = new DirectOptions(stunList.Count > 0 ? stunList : Stun.DefaultServers, !sim, nodes, false, false, debug, sim);
+            await using var direct = new DirectSession(et, Path.Combine(AmberDataDir(), "easytier"), room, isHost, options, log) { BridgeKey = bridgeKey, AcceptNewPeers = book is null ? null : () => book.HasPending };
+            var code = await direct.PrepareAsync(cts.Token);
+            await using var lobby = isHost
+                ? HostLobby.Create(et, Path.Combine(AmberDataDir(), "easytier", "lobby"), () => nodes, me, () => credentials!, _ => false, (_, _) => Task.FromResult(true),
+                    members!, l => Console.WriteLine("  lobby| " + l), book, direct.LobbyUdpPort)
+                : null;
+            if (lobby is not null)
+            {
+                var pending = lobby.Book.Create(1, TimeSpan.FromMinutes(30), true, credentials!.Tunnel);
+                await lobby.UpdateAsync();
+                Console.WriteLine("INVITE " + direct.InviteCode(pending.Invite).Encode());
+            }
+            else
+            {
+                Console.WriteLine("REPLY " + (code with { Session = invite!.Session }).Encode());
+                var joined = await direct.JoinAsync(invite, async (lobbyPeers, ct) =>
+                {
+                    var outcome = await LobbyJoin.KnockAsync(et, Path.Combine(AmberDataDir(), "easytier", "lobby-join"), lobbyPeers, invite.Invite!, me, "cli",
+                        UpdateChecker.CurrentVersion, l => Console.WriteLine("  lobby| " + l), null, ct);
+                    return outcome.Credentials?.ToRoom();
+                }, cts.Token);
+                if (!joined) throw new InvalidOperationException("房主没有批准");
                 Console.WriteLine($"LOCAL 127.0.0.1:{direct.LocalGamePort}");
             }
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
@@ -497,6 +526,24 @@ try
             foreach (var g in Toolbox.ScanJunk(dir)) Console.WriteLine($"{g.Name}: {g.Paths.Count} 项，{g.Bytes / 1024} KB");
             break;
         }
+        case "theme-check":
+        {
+            // 检查主题目录或 .jaytheme：按导入时的规则读一遍，列出各层和提示。有提示返回 2，读不了返回 1。
+            var path = argList[1];
+            var pack = Directory.Exists(path) ? ThemePackReader.ReadDirectory(path) : ThemePackReader.Read(path);
+            Console.WriteLine($"{pack.Id}  {pack.Name}  {pack.Version}  ({pack.Variants})");
+            Console.WriteLine($"颜色 深 {pack.DarkColors.Count} / 浅 {pack.LightColors.Count}，组件样式 {pack.Styles.Count}，外壳 {(pack.Shell is null ? "无" : pack.Shell.Nav)}，页面布局 {string.Join(",", pack.Pages.Keys)}");
+            foreach (var problem in pack.Problems) Console.WriteLine("提示：" + problem);
+            return pack.Problems.Count == 0 ? 0 : 2;
+        }
+        case "theme-pack":
+        {
+            // 把主题目录打成 .jaytheme（打完会按导入规则检查一遍）。
+            var pack = ThemePackWriter.PackDirectory(argList[1], argList[2]);
+            Console.WriteLine($"已打包 {pack.Id} → {argList[2]}（{new FileInfo(argList[2]).Length / 1024} KB，{pack.Problems.Count} 个提示）");
+            foreach (var problem in pack.Problems) Console.WriteLine("提示：" + problem);
+            break;
+        }
         case "analyze":
         {
             var analysis = CrashAnalyzer.Analyze(File.ReadAllText(argList[1]));
@@ -519,6 +566,8 @@ try
             var joinServer = TakeOption(argList, "--server");
             var joinWorld = TakeOption(argList, "--world");
             var extraJvm = TakeOption(argList, "--jvm");
+            // --bake <加载器目录>：实验功能，先用通用加载器烘焙模组和实例，再用烘焙结果启动。
+            var bakeLoader = TakeOption(argList, "--bake");
 
             await installer.CompleteAsync(id, null, cts.Token);
             var version = dir.ResolveVersion(id);
@@ -544,6 +593,25 @@ try
                 var jar = await new AuthlibInjector(http, Path.Combine(dir.Root, "authlib-injector")).EnsureJarAsync(cts.Token);
                 options = options with { ExtraJvmArgs = AuthlibInjector.JvmArgs(jar, api, await external.GetMetadataAsync(api, cts.Token)) };
                 Console.WriteLine($"authlib-injector：{jar} → {api}");
+            }
+            if (bakeLoader is not null)
+            {
+                var toolkit = Amber.Core.Bake.BakeToolkit.Find(bakeLoader) ?? throw new DirectoryNotFoundException(bakeLoader);
+                var bake = new Amber.Core.Bake.BakeService(toolkit, Path.Combine(dir.Root, ".amber-bake-cache"));
+                var instance = Instance(id, isolate);
+                var (_, _, supported) = await bake.VersionAsync(javaPath, cts.Token);
+                if (!Amber.Core.Bake.BakeService.Supports(instance, supported, out var reason)) throw new InvalidOperationException(reason);
+                var major = version.JavaVersion?.MajorVersion ?? 21;
+                var bakeWatch = System.Diagnostics.Stopwatch.StartNew();
+                var events = new SyncProgress<Amber.Core.Bake.BakeEvent>(e => Console.WriteLine("BAKE " + e.Message));
+                var baked = bake.Current(dir, instance, major);
+                if (baked is null)
+                {
+                    await bake.BakeModsAsync(javaPath, dir, instance, events, cts.Token);
+                    baked = await bake.BakeInstanceAsync(javaPath, major, dir, instance, events, cts.Token);
+                }
+                Console.WriteLine($"BAKE READY {bakeWatch.Elapsed.TotalSeconds:F1}s {baked.StateFile}");
+                options = options with { Baked = baked };
             }
             var launcher = new GameLauncher(dir);
             if (dryRun)

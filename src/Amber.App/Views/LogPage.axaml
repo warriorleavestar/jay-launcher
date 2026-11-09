@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
              xmlns:l="using:Amber.App.Localization"
              xmlns:vm="using:Amber.App.ViewModels"
              x:Class="Amber.App.Views.LogPage"
@@ -27,7 +28,7 @@
     </Style>
   </UserControl.Styles>
   <Grid RowDefinitions="Auto,Auto,Auto,*">
-    <StackPanel>
+    <StackPanel svc:ThemeRegion.Name="log.header">
       <TextBlock Classes="h1" Text="{l:T log.heading}" Margin="0,0,0,2" />
       <TextBlock Classes="caption" Text="{Binding RunSummary}" IsVisible="{Binding HasRun}" TextWrapping="Wrap" Margin="0,0,0,10" />
       <!-- 多开时选看哪一次启动的日志。 -->
@@ -41,7 +42,7 @@
       </ComboBox>
     </StackPanel>
     <!-- 计数芯片也是按钮：点一次跳到下一个错误 / 警告，到末尾回到第一个。 -->
-    <WrapPanel Grid.Row="1" Margin="0,0,0,4">
+    <WrapPanel svc:ThemeRegion.Name="log.jump" Grid.Row="1" Margin="0,0,0,4">
       <Button x:Name="ErrorChip" Classes="ghost chip" Background="{DynamicResource DangerTint}" Margin="0,0,8,8"
               Command="{Binding NextErrorCommand}" IsEnabled="{Binding HasErrors}"
               ToolTip.Tip="{l:T log.next_error}" AutomationProperties.HelpText="{l:T log.next_error}">
@@ -53,7 +54,7 @@
         <TextBlock x:Name="WarningSummary" Text="{Binding WarningSummary}" Foreground="{DynamicResource WarningText}" TextWrapping="Wrap" />
       </Button>
     </WrapPanel>
-    <WrapPanel Grid.Row="2" Margin="0,0,0,4">
+    <WrapPanel svc:ThemeRegion.Name="log.filters" Grid.Row="2" Margin="0,0,0,4">
       <CheckBox x:Name="ProblemsFilter" IsChecked="{Binding OnlyProblems}" Margin="0,0,12,8">
         <TextBlock Text="{l:T log.filter.problems}" TextWrapping="Wrap" />
       </CheckBox>
@@ -64,7 +65,7 @@
         <TextBlock Text="{Binding CopyLabel}" TextWrapping="Wrap" />
       </Button>
     </WrapPanel>
-    <Border Grid.Row="3" Classes="card" Padding="8" Margin="0">
+    <Border svc:ThemeRegion.Name="log.list" Grid.Row="3" Classes="card" Padding="8" Margin="0">
       <Panel>
         <TextBlock Classes="hint" Text="{Binding EmptyMessage}" IsVisible="{Binding !Lines.Count}"
                    Margin="12" TextAlignment="Center"

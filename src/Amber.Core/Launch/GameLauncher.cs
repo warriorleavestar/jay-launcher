@@ -33,6 +33,9 @@ public sealed record LaunchOptions
     /// <summary>无痕模式：logs/latest.log 里不写聊天行（见 ChatLogFilter）。</summary>
     public bool NoTrace { get; init; }
     public string LauncherName { get; init; } = "Jay";
+
+    /// <summary>实验功能“烘焙”的结果：设了就用通用加载器的主类和 classpath 启动，原版的其余参数不变。</summary>
+    public Amber.Core.Bake.BakedLaunch? Baked { get; init; }
     public string LauncherVersion { get; init; } = "0.1";
 }
 
@@ -40,10 +43,18 @@ public sealed record LaunchOptions
 public sealed class GameLauncher(GameDirectory dir)
 {
     /// <summary>请求游戏正常退出，让游戏自己保存世界。</summary>
-    public static bool RequestExit(Process game)
+    public static bool RequestExit(Process game) => RequestExitDetailed(game) != ExitRequest.NotSent;
+
+    /// <summary>
+    /// 请求游戏正常退出（像点窗口的关闭按钮）。Windows 关主窗口，macOS 发“退出”，
+    /// Linux 在 X11 下给游戏窗口发 WM_DELETE_WINDOW，找不到窗口（Wayland、还在加载）时发 SIGTERM（老版本可能来不及存档）。
+    /// </summary>
+    public static ExitRequest RequestExitDetailed(Process game)
     {
-        if (game.HasExited) return false;
-        return OperatingSystem.IsMacOS() ? MacGameProcess.RequestExit(game.Id) : game.CloseMainWindow();
+        if (game.HasExited) return ExitRequest.NotSent;
+        if (OperatingSystem.IsMacOS()) return MacGameProcess.RequestExit(game.Id) ? ExitRequest.WindowClose : ExitRequest.NotSent;
+        if (OperatingSystem.IsLinux()) return LinuxGameProcess.RequestExit(game.Id);
+        return game.CloseMainWindow() ? ExitRequest.WindowClose : ExitRequest.NotSent;
     }
 
     public GameDirectory GameDir => dir;
@@ -94,6 +105,7 @@ public sealed class GameLauncher(GameDirectory dir)
         var jarId = version.Jar ?? options.VersionId;
         var classpath = libraries.Where(l => l.OnClasspath).Select(l => l.LocalPath).ToList();
         classpath.Add(dir.VersionJarPath(jarId));
+        if (options.Baked is { } baked) classpath = baked.Classpath.Select(p => AsciiPaths.MapArgument(p, notice)).ToList();
 
         var assetsIndexName = version.AssetIndex?.Id ?? version.Assets ?? "legacy";
         var vars = new Dictionary<string, string>
@@ -189,9 +201,18 @@ public sealed class GameLauncher(GameDirectory dir)
             args.Add("-cp");
             args.Add(vars["classpath"]);
         }
+        if (options.Baked is { } bakedJvm) args.AddRange(bakedJvm.JvmArgs);
         args.AddRange(options.ExtraJvmArgs);
 
-        args.Add(version.MainClass ?? throw new InvalidDataException(L.F("core.launch.game.missingmainclass", options.VersionId)));
+        if (options.Baked is { } bakedMain)
+        {
+            args.Add(bakedMain.MainClass);
+            args.AddRange(bakedMain.GameArgsPrefix.Select(a => AsciiPaths.MapArgument(a, notice)));
+        }
+        else
+        {
+            args.Add(version.MainClass ?? throw new InvalidDataException(L.F("core.launch.game.missingmainclass", options.VersionId)));
+        }
 
         if (version.Arguments?.Game is { Count: > 0 } game)
             args.AddRange(Expand(game, rules).Select(a => Substitute(a, vars)));
@@ -284,9 +305,14 @@ public sealed class GameLauncher(GameDirectory dir)
             StandardErrorEncoding = onOutput is not null ? System.Text.Encoding.UTF8 : null,
             CreateNoWindow = true,
         };
+        // 1.6 以前的版本（和 Jay 装的老 Forge）会按系统家目录写文件，先准备指向本实例的隔离家目录。
+        var realWorkDir = RealRoot is { } real ? AsciiPaths.Remap(workDir, dir.Root, real) : workDir;
+        var legacyHome = IsPreLaunchwrapperHome(version) ? AsciiPaths.LegacyHome(realWorkDir, onOutput) : null;
         string? noTraceDir = null;
         try
         {
+            if (legacyHome is not null && !OperatingSystem.IsWindows())
+                psi.ArgumentList.Add("-Duser.home=" + legacyHome);
             foreach (var arg in BuildArguments(options, onOutput, out noTraceDir)) psi.ArgumentList.Add(arg);
         }
         catch
@@ -294,13 +320,13 @@ public sealed class GameLauncher(GameDirectory dir)
             DeleteNoTraceDir(noTraceDir);
             throw;
         }
-        // 1.6 以前的版本（和 Amber 装的老 Forge）把 %APPDATA%\.minecraft 当家目录，改成指向这个实例。
-        var realWorkDir = RealRoot is { } real ? AsciiPaths.Remap(workDir, dir.Root, real) : workDir;
-        if (IsPreLaunchwrapperHome(version) && AsciiPaths.LegacyHome(realWorkDir, onOutput) is { } home)
+        if (legacyHome is not null && OperatingSystem.IsWindows())
         {
-            psi.Environment["APPDATA"] = home;
-            onOutput?.Invoke(L.F("core.launch.game.legacyappdata", home));
+            psi.Environment["APPDATA"] = legacyHome;
+            onOutput?.Invoke(L.F("core.launch.game.legacyappdata", legacyHome));
         }
+        else if (legacyHome is not null)
+            onOutput?.Invoke(L.F("core.launch.game.legacyhome", legacyHome));
 
         Process process;
         try

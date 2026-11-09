@@ -10,16 +10,35 @@ namespace Amber.App.Views;
 
 public partial class MultiplayerPage : UserControl
 {
+    /// <summary>主题包可以重新排这一页的区块（docs/themes.md 的“页面布局”）。</summary>
+    internal Amber.App.Services.ThemeLayoutHost ThemeLayout { get; }
+
     public MultiplayerPage()
     {
         InitializeComponent();
+        ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "multiplayer");
         DataContextChanged += (_, _) =>
         {
             // 新消息来了滚到底。
             if (DataContext is MultiplayerViewModel vm)
             {
+                vm.PickFileToSend = async () =>
+                {
+                    if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
+                    var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = L.T("multiplayer.private.pick_title") });
+                    return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+                };
                 vm.ChatLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("ChatScroll")?.ScrollToEnd(), DispatcherPriority.Background);
                 vm.DebugLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("DebugScroll")?.ScrollToEnd(), DispatcherPriority.Background);
+                // 开服控制台：新日志来了把光标放到最后，文本框就滚到最新一行。
+                vm.HostServer.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName != nameof(HostServerViewModel.LogText)) return;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        if (this.FindControl<TextBox>("HostServerLog") is { Text: { } text } box) box.CaretIndex = text.Length;
+                    }, DispatcherPriority.Background);
+                };
             }
         };
     }
@@ -31,6 +50,17 @@ public partial class MultiplayerPage : UserControl
             vm.SendChatCommand.Execute(null);
             e.Handled = true;
         }
+    }
+
+    private async void ImportComponent_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MultiplayerViewModel vm || TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return;
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = L.F("multiplayer.component.import_picker", vm.ComponentFileName),
+            FileTypeFilter = [new FilePickerFileType(L.T("multiplayer.component.import_filetype")) { Patterns = ["*.zip"] }],
+        });
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await vm.ImportComponentAsync(path);
     }
 
     private async void ExportDiagnostics_Click(object? sender, RoutedEventArgs e)

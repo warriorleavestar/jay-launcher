@@ -1,3 +1,4 @@
+using Amber.Core.Themes;
 using System.Collections.ObjectModel;
 using Amber.Core.Localization;
 using Amber.App.Services;
@@ -56,16 +57,21 @@ public abstract class PageViewModel : ObservableObject
         get => _isCurrent;
         set
         {
-            if (SetProperty(ref _isCurrent, value) && value)
+            if (!SetProperty(ref _isCurrent, value)) return;
+            if (value)
             {
                 Badge = 0;
                 OnBecameCurrent();
             }
+            else OnLeftCurrent();
         }
     }
 
     /// <summary>切到这一页时调用（每次）。</summary>
     protected virtual void OnBecameCurrent() { }
+
+    /// <summary>从这一页切走时调用（每次）。</summary>
+    protected virtual void OnLeftCurrent() { }
 
     /// <summary>页面第一次显示时调用一次。启动时不联网、不扫描，都放在这里。</summary>
     public void Activate()
@@ -128,8 +134,40 @@ public sealed partial class MainViewModel : ObservableObject
 
     public string VersionText => L.F("main.version", UpdateChecker.CurrentVersion);
 
+    /// <summary>导航栏里显示的页面：主题包可以改顺序、藏掉不常用的页（启动页和设置页藏不掉）。页面本身还在，跳转照常。</summary>
+    public ObservableCollection<PageViewModel> NavPages { get; } = [];
+
+    /// <summary>
+    /// 导航栏的选中项。当前页不在导航栏里时是空；导航栏给空值（重排导航项时会发生）不改当前页。
+    /// </summary>
+    public PageViewModel? NavSelection
+    {
+        get => NavPages.Contains(CurrentPage) ? CurrentPage : null;
+        set { if (value is not null) CurrentPage = value; }
+    }
+
+    /// <summary>按主题包的 shell 布局排导航项；传空恢复 Jay 自带的顺序。</summary>
+    public void ApplyNavOrder(ShellLayout? shell)
+    {
+        var ids = ThemeLayout.PageIds;
+        var byId = new Dictionary<string, PageViewModel>();
+        for (var i = 0; i < Pages.Count && i < ids.Length; i++) byId[ids[i]] = Pages[i];
+        var order = new List<PageViewModel>();
+        foreach (var id in shell?.PageOrder ?? [])
+            if (byId.TryGetValue(id, out var page) && !order.Contains(page)) order.Add(page);
+        foreach (var page in Pages)
+            if (!order.Contains(page)) order.Add(page);
+        if (shell is not null)
+            order.RemoveAll(p => byId.FirstOrDefault(kv => kv.Value == p).Key is { } id && shell.Hidden.Contains(id) && !ThemeLayout.RequiredPages.Contains(id));
+        if (order.SequenceEqual(NavPages)) return;
+        NavPages.Clear();
+        foreach (var page in order) NavPages.Add(page);
+        OnPropertyChanged(nameof(NavSelection));
+    }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
+        OnPropertyChanged(nameof(NavSelection));
         if (oldValue is not null) oldValue.IsCurrent = false;
         newValue.IsCurrent = true;
         newValue.Activate();
@@ -163,7 +201,7 @@ public sealed partial class MainViewModel : ObservableObject
         home.NavigateHere = () => CurrentPage = home;
         home.Onboarding.MicrosoftLogin = () =>
         {
-            if (accounts is AccountsViewModel a) a.LoginTab = 1;
+            if (accounts is AccountsViewModel a) a.LoginTab = AccountsViewModel.MicrosoftTab;
             CurrentPage = accounts;
         };
         home.Onboarding.ChooseVersion = () => CurrentPage = download;
@@ -173,6 +211,13 @@ public sealed partial class MainViewModel : ObservableObject
             await content.ImportLocalPackAsync(path);
         };
         instance.NavigateHome = () => CurrentPage = home;
+        instance.NavigateToNewInstance = () => CurrentPage = download;
+        content.NavigateToSettings = () => CurrentPage = Pages.OfType<SettingsViewModel>().First();
+        instance.NavigateToContent = (id, type) =>
+        {
+            CurrentPage = content;
+            content.BrowseFor(id, type, back: () => CurrentPage = instance);
+        };
         multiplayer.NavigateHome = () => CurrentPage = home;
         download.LaunchInstance = id =>
         {
@@ -193,14 +238,19 @@ public sealed partial class MainViewModel : ObservableObject
         instance.NavigateToDatapacks = (id, world) =>
         {
             CurrentPage = content;
-            content.BrowseDatapacksFor(id, world);
+            content.BrowseDatapacksFor(id, world, back: () => CurrentPage = instance);
         };
+        ApplyNavOrder(null);
         CurrentPage = Pages[0];
         CurrentPage.Activate();
     }
 }
 
 public sealed record JavaOption(string Label, string? Path);
+public sealed record ThemePackOption(string Id, string Label, bool IsDefault)
+{
+    public override string ToString() => Label;
+}
 
 public sealed partial class SettingsViewModel : PageViewModel
 {
@@ -220,7 +270,10 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial string Concurrency { get; set; }
     [ObservableProperty] public partial JavaOption? SelectedJava { get; set; }
     [ObservableProperty] public partial bool AutoJavaDownload { get; set; }
+    [ObservableProperty] public partial bool AllowNetworkThemes { get; set; }
     [ObservableProperty] public partial bool NoTrace { get; set; }
+    [ObservableProperty] public partial bool ExperimentalBake { get; set; }
+    [ObservableProperty] public partial string BakeLoaderPath { get; set; }
     [ObservableProperty] public partial bool IsolateVersions { get; set; }
     [ObservableProperty] public partial string WindowWidth { get; set; }
     [ObservableProperty] public partial string WindowHeight { get; set; }
@@ -239,6 +292,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     public SettingsViewModel(LauncherService service)
     {
         _service = service;
+        _loading = true;
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
             var automatic = JavaOptions.FirstOrDefault(o => o.Path is null);
@@ -253,12 +307,17 @@ public sealed partial class SettingsViewModel : PageViewModel
         SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, s.DownloadSource));
         service.SettingsChangedElsewhere += () => Dispatcher.UIThread.Post(() =>
         {
+            _loading = true;
             GameDirectory = service.Settings.GameDirectory;
             SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, service.Settings.DownloadSource));
+            _loading = false;
         });
         Concurrency = s.DownloadConcurrency.ToString();
         AutoJavaDownload = s.AutoJavaDownload;
+        AllowNetworkThemes = s.AllowNetworkThemes;
         NoTrace = s.NoTrace;
+        ExperimentalBake = s.ExperimentalBake;
+        BakeLoaderPath = s.BakeLoaderPath ?? "";
         IsolateVersions = s.IsolateVersions;
         WindowWidth = s.WindowWidth?.ToString() ?? "";
         WindowHeight = s.WindowHeight?.ToString() ?? "";
@@ -271,13 +330,20 @@ public sealed partial class SettingsViewModel : PageViewModel
         CurseForgeRoot = s.CurseForgeApiRoot ?? "";
         UpdateFeed = s.UpdateFeedUrl ?? "";
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
+        ReloadThemePacks();
+        // 开发模式下主题文件改了会重新套用，提示跟着更新。
+        ThemeService.Changed += UpdateThemePackStatus;
         // 启动时只把选单对上已经生效的语言，不再重新应用、不写设置文件。
         _initializing = true;
         SelectedLanguageIndex = Math.Max(0, Array.IndexOf(LanguageKeys, Amber.Core.Localization.L.Resolve(s.Language) ?? "system"));
         _initializing = false;
+        _loading = false;
     }
 
     private bool _initializing;
+
+    /// <summary>正在把设置文件里的值填进界面：这期间的改动不是用户改的，不保存。</summary>
+    private bool _loading;
 
     /// <summary>界面语言：第一项跟随系统，其余每种语言用自己的文字写名字（不管现在是什么语言都认得出来）。</summary>
     public Amber.App.Localization.OptionItem[] LanguageOptions { get; } =
@@ -303,6 +369,109 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     [ObservableProperty] public partial int SelectedThemeIndex { get; set; }
 
+    // ---- 界面主题包 ----
+
+    /// <summary>第一项永远是 Jay 默认主题，后面是导入的主题包。</summary>
+    public ObservableCollection<ThemePackOption> ThemePacks { get; } = [];
+
+    [ObservableProperty] public partial ThemePackOption? SelectedThemePack { get; set; }
+
+    /// <summary>主题包的说明：作者、读取时发现的问题、安全模式提示。</summary>
+    [ObservableProperty] public partial string ThemePackStatus { get; set; } = "";
+
+    public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false };
+
+    private bool _themeLoading;
+
+    internal void ReloadThemePacks(string? select = null)
+    {
+        _themeLoading = true;
+        ThemePacks.Clear();
+        ThemePacks.Add(new ThemePackOption(ThemeService.DefaultId, L.T("settings.themepack.default"), true));
+        foreach (var pack in ThemeService.Store.List())
+            ThemePacks.Add(new ThemePackOption(pack.Id, pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name, false));
+        var id = select ?? _service.Settings.ThemePack ?? ThemeService.DefaultId;
+        SelectedThemePack = ThemePacks.FirstOrDefault(o => o.Id == id) ?? ThemePacks[0];
+        _themeLoading = false;
+        UpdateThemePackStatus();
+    }
+
+    partial void OnSelectedThemePackChanged(ThemePackOption? value)
+    {
+        OnPropertyChanged(nameof(CanRemoveThemePack));
+        if (_themeLoading || value is null) return;
+        ThemeService.Select(_service.Settings, value.Id);
+        Persist();
+        UpdateThemePackStatus();
+    }
+
+    private void UpdateThemePackStatus()
+    {
+        var lines = new List<string>();
+        switch (ThemeService.SafeModeReason)
+        {
+            case "crashed": lines.Add(L.T("settings.themepack.safe.crashed")); break;
+            case "requested": lines.Add(L.T("settings.themepack.safe.requested")); break;
+            case "missing": lines.Add(L.T("settings.themepack.safe.missing")); break;
+        }
+        if (ThemeService.DevDirectory is { } devDir) lines.Add(L.F("settings.themepack.dev", devDir));
+        if (ThemeService.DevError is { } devError) lines.Add(L.F("settings.themepack.dev_error", devError));
+        if (ThemeService.Current is { } pack && pack.Problems.Count > 0)
+            lines.Add(L.F("settings.themepack.problems", pack.Problems.Count, string.Join("; ", pack.Problems.Take(4))));
+        ThemePackStatus = string.Join("\n", lines);
+    }
+
+    /// <summary>导入 .jaytheme：读取、校验、安装，然后直接切换过去。</summary>
+    public void ImportThemePack(string path)
+    {
+        try
+        {
+            var pack = ThemeService.Store.Install(path);
+            ReloadThemePacks(pack.Id);
+            ThemeService.Select(_service.Settings, pack.Id);
+            Persist();
+            UpdateThemePackStatus();
+            Toasts.Show(L.F("settings.themepack.imported", pack.Name));
+        }
+        catch (Amber.Core.Themes.ThemePackException e)
+        {
+            Toasts.Show(L.F("settings.themepack.import_failed", e.Code, e.Detail), Avalonia.Controls.Notifications.NotificationType.Error);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Toasts.Show(L.F("settings.themepack.import_failed", "io", e.Message), Avalonia.Controls.Notifications.NotificationType.Error);
+        }
+    }
+
+    public void ExportThemePack(string path)
+    {
+        try
+        {
+            ThemeService.ExportCurrent(path);
+            Toasts.Show(L.F("settings.themepack.exported", Path.GetFileName(path)));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or Amber.Core.Themes.ThemePackException)
+        {
+            Toasts.Show(e.Message, Avalonia.Controls.Notifications.NotificationType.Error);
+        }
+    }
+
+    [RelayCommand]
+    private void RemoveThemePack()
+    {
+        if (SelectedThemePack is not { IsDefault: false } option) return;
+        var wasCurrent = (_service.Settings.ThemePack ?? ThemeService.DefaultId) == option.Id;
+        if (wasCurrent) ThemeService.Select(_service.Settings, ThemeService.DefaultId);
+        try { ThemeService.Store.Remove(option.Id); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Toasts.Show(e.Message, Avalonia.Controls.Notifications.NotificationType.Error); }
+        Persist();
+        ReloadThemePacks();
+    }
+
+    /// <summary>恢复默认主题：设置页固定位置的按钮，主题改不了它。</summary>
+    [RelayCommand]
+    private void ResetThemePack() => SelectedThemePack = ThemePacks.FirstOrDefault();
+
     [RelayCommand]
     private Task RefreshJavaAsync() => LoadJavaAsync(true);
 
@@ -310,43 +479,185 @@ public sealed partial class SettingsViewModel : PageViewModel
     {
         var current = _service.Settings.JavaPath;
         var found = await _service.Java.ScanAsync(refresh);
+        _loading = true;
         JavaOptions.Clear();
         JavaOptions.Add(new JavaOption(L.T("settings.java.automatic"), null));
         foreach (var j in found) JavaOptions.Add(new JavaOption(j.ToString(), j.JavaPath));
         SelectedJava = JavaOptions.FirstOrDefault(o => o.Path == current) ?? JavaOptions[0];
+        _loading = false;
     }
 
     private static string? Blank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
-    [RelayCommand]
-    private void Save()
+    // ---- 即改即存（改版规格 3.10）----
+    // 下拉框、复选框改了立即存；文本框绑定在失焦时才写回，写回时校验，通过才存，不通过就在字段下面提示、保留输入。
+
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasConcurrencyError))] public partial string? ConcurrencyError { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasWindowError))] public partial string? WindowError { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasJvmArgsError))] public partial string? JvmArgsError { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasGameArgsError))] public partial string? GameArgsError { get; set; }
+    public bool HasConcurrencyError => ConcurrencyError is not null;
+    public bool HasWindowError => WindowError is not null;
+    public bool HasJvmArgsError => JvmArgsError is not null;
+    public bool HasGameArgsError => GameArgsError is not null;
+
+    /// <summary>改游戏目录前确认（会重新扫描实例）；界面接上对话框，返回 false 就不换。</summary>
+    public Func<string, Task<bool>>? ConfirmDirectoryChange { get; set; }
+
+    partial void OnSourceIndexChanged(int value) => Persist();
+    partial void OnSelectedJavaChanged(JavaOption? value) => Persist();
+    partial void OnAutoJavaDownloadChanged(bool value) => Persist();
+    partial void OnAllowNetworkThemesChanged(bool value)
     {
+        ThemeService.AllowNetworkThemes = value;
+        ThemeService.Refresh();
+        Persist();
+    }
+    partial void OnNoTraceChanged(bool value) => Persist();
+    partial void OnExperimentalBakeChanged(bool value) => Persist();
+    partial void OnBakeLoaderPathChanged(string value) => Persist();
+    partial void OnIsolateVersionsChanged(bool value) => Persist();
+    partial void OnConcurrencyChanged(string value) => Persist();
+    partial void OnWindowWidthChanged(string value) => Persist();
+    partial void OnWindowHeightChanged(string value) => Persist();
+    partial void OnFullscreenChanged(bool value) => Persist();
+    partial void OnJvmArgsChanged(string value) => Persist();
+    partial void OnGameArgsChanged(string value) => Persist();
+    partial void OnPreLaunchChanged(string value) => Persist();
+    partial void OnPostExitChanged(string value) => Persist();
+    partial void OnCurseForgeKeyChanged(string value) => Persist();
+    partial void OnCurseForgeRootChanged(string value) => Persist();
+    partial void OnUpdateFeedChanged(string value) => Persist();
+
+    /// <summary>主题选了立即生效。</summary>
+    partial void OnSelectedThemeIndexChanged(int value)
+    {
+        if (_loading || value < 0) return;
+        _service.Settings.Theme = ThemeKeys[Math.Min(value, ThemeKeys.Length - 1)];
+        ThemeService.SetVariant(_service.Settings.Theme);
+        Persist();
+    }
+
+    partial void OnGameDirectoryChanged(string value)
+    {
+        if (_loading) return;
+        _ = ChangeDirectoryAsync(value);
+    }
+
+    /// <summary>换游戏目录：先确认，取消就把输入框改回原来的目录。</summary>
+    private async Task ChangeDirectoryAsync(string value)
+    {
+        var target = value.Trim();
         var s = _service.Settings;
-        var dirChanged = !string.Equals(s.GameDirectory, GameDirectory.Trim(), StringComparison.OrdinalIgnoreCase);
-        s.GameDirectory = GameDirectory.Trim();
+        if (target.Length == 0 || string.Equals(s.GameDirectory, target, StringComparison.OrdinalIgnoreCase)) return;
+        if (ConfirmDirectoryChange is { } confirm && !await confirm(target))
+        {
+            _loading = true;
+            GameDirectory = s.GameDirectory;
+            _loading = false;
+            return;
+        }
+        s.GameDirectory = target;
+        Persist();
+        SetStatus(StatusMessage.Success("settings.saved_directory_changed"));
+        _ = LoadJavaAsync(true);
+    }
+
+    /// <summary>把通过校验的字段写进设置并保存；没通过的字段留在设置里的旧值，提示写在字段下面。</summary>
+    private void Persist()
+    {
+        if (_loading) return;
+        var s = _service.Settings;
         if (SourceIndex >= 0) s.DownloadSource = SourceKeys[Math.Min(SourceIndex, SourceKeys.Length - 1)];
-        s.DownloadConcurrency = int.TryParse(Concurrency, out var c) ? Math.Clamp(c, 1, 128) : 32;
-        Concurrency = s.DownloadConcurrency.ToString();
-        s.JavaPath = SelectedJava?.Path;
+        if (SettingInput.TryParsePositiveInt(Concurrency, out var c, 128) && c is not null)
+        {
+            s.DownloadConcurrency = c.Value;
+            ConcurrencyError = null;
+            Normalize(() => Concurrency = c.Value.ToString());
+        }
+        else ConcurrencyError = L.T("settings.error.concurrency");
+        if (SelectedJava is not null) s.JavaPath = SelectedJava.Path;
         s.AutoJavaDownload = AutoJavaDownload;
+        s.AllowNetworkThemes = AllowNetworkThemes;
         s.NoTrace = NoTrace;
+        s.ExperimentalBake = ExperimentalBake;
+        s.BakeLoaderPath = Blank(BakeLoaderPath);
         s.IsolateVersions = IsolateVersions;
-        s.WindowWidth = int.TryParse(WindowWidth, out var w) && w > 0 ? w : null;
-        s.WindowHeight = int.TryParse(WindowHeight, out var h) && h > 0 ? h : null;
+        if (SettingInput.TryParsePositiveInt(WindowWidth, out var w, 16384) && SettingInput.TryParsePositiveInt(WindowHeight, out var h, 16384))
+        {
+            s.WindowWidth = w;
+            s.WindowHeight = h;
+            WindowError = null;
+            // 全角数字等认出来以后，输入框里也换成规范写法（不再触发保存）。
+            // 绑定正在把输入框的值写回来，这时改属性输入框不会刷新，所以排到下一轮再改。
+            Normalize(() => { WindowWidth = w?.ToString() ?? ""; WindowHeight = h?.ToString() ?? ""; });
+        }
+        else WindowError = L.T("settings.error.window");
         s.Fullscreen = Fullscreen;
-        s.JvmArgs = Blank(JvmArgs);
-        s.GameArgs = Blank(GameArgs);
+        if (SettingInput.QuotesBalanced(JvmArgs))
+        {
+            s.JvmArgs = Blank(JvmArgs);
+            JvmArgsError = null;
+        }
+        else JvmArgsError = L.T("settings.error.quotes");
+        if (SettingInput.QuotesBalanced(GameArgs))
+        {
+            s.GameArgs = Blank(GameArgs);
+            GameArgsError = null;
+        }
+        else GameArgsError = L.T("settings.error.quotes");
         s.PreLaunchCommand = Blank(PreLaunch);
         s.PostExitCommand = Blank(PostExit);
         s.CurseForgeApiKey = Blank(CurseForgeKey);
         s.CurseForgeApiRoot = Blank(CurseForgeRoot);
         s.UpdateFeedUrl = Blank(UpdateFeed);
-        if (SelectedThemeIndex >= 0) s.Theme = ThemeKeys[Math.Min(SelectedThemeIndex, ThemeKeys.Length - 1)];
-        App.ApplyTheme(s.Theme);
-        s.Save();
+        try
+        {
+            s.Save();
+        }
+        catch (IOException e)
+        {
+            SetStatus(StatusMessage.Failure("settings.error.save_failed", e, ErrorText.Of(e)));
+            return;
+        }
         _service.Reload();
-        SetStatus(StatusMessage.Success(dirChanged ? "settings.saved_directory_changed" : "common.saved"));
-        if (dirChanged) _ = LoadJavaAsync(true);
+        if (HasConcurrencyError || HasWindowError || HasJvmArgsError || HasGameArgsError)
+            SetStatus(StatusMessage.Warning("settings.saved_with_errors"));
+        else
+            SetStatus(StatusMessage.Success(_service.AnyRunning ? "settings.saved_next_launch" : "settings.saved_tick"));
+    }
+
+    private void Normalize(Action apply) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+    {
+        _loading = true;
+        try { apply(); }
+        finally { _loading = false; }
+    });
+
+    /// <summary>↺ 恢复默认：把这一项改回新装时的值（随即保存）。</summary>
+    [RelayCommand]
+    private void ResetField(string? field)
+    {
+        var d = new AppSettings();
+        switch (field)
+        {
+            case "source": SourceIndex = Math.Max(0, Array.IndexOf(SourceKeys, d.DownloadSource)); break;
+            case "concurrency": Concurrency = d.DownloadConcurrency.ToString(); break;
+            case "window":
+                _loading = true;
+                WindowWidth = d.WindowWidth?.ToString() ?? "";
+                _loading = false;
+                WindowHeight = d.WindowHeight?.ToString() ?? "";
+                Fullscreen = d.Fullscreen;
+                break;
+            case "jvm": JvmArgs = d.JvmArgs ?? ""; break;
+            case "game_args": GameArgs = d.GameArgs ?? ""; break;
+            case "pre": PreLaunch = d.PreLaunchCommand ?? ""; break;
+            case "post": PostExit = d.PostExitCommand ?? ""; break;
+            case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
+            case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
+            case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); AllowNetworkThemes = true; break;
+        }
     }
 }
 

@@ -12,7 +12,8 @@ namespace Amber.Core.Multiplayer;
 
 /// <summary>
 /// 联机用的 EasyTier（开源组网工具，LGPL-3.0，https://github.com/EasyTier/EasyTier）。
-/// Amber 不内置它：第一次用联机时从 GitHub 官方发布页下载固定版本，校验 SHA-256 后解压到数据目录。
+/// 发布包里自带固定版本的官方安装包；单独拿到主程序时，第一次用联机再从 GitHub 或下载镜像下载。
+/// 无论哪种来源，都校验固定的大小和 SHA-256 后才解压到数据目录。
 /// </summary>
 public static class EasyTierRelease
 {
@@ -41,6 +42,25 @@ public static class EasyTierRelease
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
+    /// <summary>
+    /// GitHub 下载加速镜像：把完整的 GitHub 地址接在前缀后面。它们都是第三方公益服务，只用来搬运文件，
+    /// 内容由固定的 SHA-256 把关，被改过的包装不上。
+    /// </summary>
+    public static readonly IReadOnlyList<(string Name, string Prefix)> Mirrors =
+    [
+        ("ghfast.top", "https://ghfast.top/"),
+        ("gh-proxy.com", "https://gh-proxy.com/"),
+        ("ghproxy.net", "https://ghproxy.net/"),
+    ];
+
+    /// <summary>下载来源（名称、地址），mirrorsFirst 为真时镜像排在官方前面。</summary>
+    public static IReadOnlyList<(string Name, string Url)> Sources(Asset asset, bool mirrorsFirst)
+    {
+        var official = ("GitHub", asset.Url);
+        var mirrors = Mirrors.Select(m => (m.Name, m.Prefix + asset.Url)).ToList();
+        return mirrorsFirst ? [.. mirrors, official] : [official, .. mirrors];
+    }
+
     private static Asset ForCurrentPlatform()
     {
         var os = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : OperatingSystem.IsLinux() ? "linux" : "unknown";
@@ -54,45 +74,156 @@ public static class EasyTierRelease
     }
 
     /// <summary>
-    /// 默认没有节点：EasyTier 官方文档没有给出固定的公共节点地址（安装脚本里写的 public.easytier.top 已经解析不到），
-    /// Amber 也不提供自己的服务器。节点由用户添加：自己用仓库 node 文件夹的脚本搭，或者导入朋友的节点分享码。
+    /// 默认节点：EasyTier 官方的公共节点已经失效（public.easytier.top 解析不到），改用 Jay 内置的节点列表（见 <see cref="RelayNodes.BuiltIn"/>）。
+    /// 用户也可以自己搭（仓库 node 文件夹的脚本）或导入朋友的节点分享码。
     /// </summary>
-    public static readonly string[] DefaultPeers = [];
+    public static IReadOnlyList<string> DefaultPeers => RelayNodes.BuiltIn;
 }
 
-public sealed class EasyTierInstaller(Downloader downloader, string dataDir)
+/// <summary>一个安装来源失败的原因，用来在界面上逐个说明。</summary>
+public sealed record EasyTierSourceFailure(string Source, string Reason);
+
+/// <summary>所有来源都没装上：消息里列出每个来源的失败原因，并提示可以手动导入安装包。</summary>
+public sealed class EasyTierInstallException(string message, IReadOnlyList<EasyTierSourceFailure> failures) : IOException(message)
 {
-    private EasyTierRelease.Asset Asset => EasyTierRelease.Current;
-    public string InstallDir => Path.Combine(dataDir, "easytier", EasyTierRelease.Version, Asset.Platform);
+    public IReadOnlyList<EasyTierSourceFailure> Failures { get; } = failures;
+}
+
+/// <summary>
+/// 安装顺序：发布包里自带的安装包 → 官方 GitHub 和几个 GitHub 下载加速镜像（时区为中国时镜像在前）。
+/// 不管文件从哪来，都要和固定的大小、SHA-256 完全一致才解压，镜像改不了内容。
+/// 下载中断的进度保留在数据目录里，换源或下次再点下载时接着下。
+/// </summary>
+public sealed class EasyTierInstaller
+{
+    private readonly Downloader _downloader;
+    private readonly string _dataDir;
+    private readonly string _bundledDir;
+    private readonly EasyTierRelease.Asset? _asset;
+    private readonly IReadOnlyList<(string Name, string Url)>? _sources;
+
+    public EasyTierInstaller(Downloader downloader, string dataDir) : this(downloader, dataDir, null, null, null) { }
+
+    /// <summary>测试用：指定自带安装包的目录、安装包和下载来源。</summary>
+    internal EasyTierInstaller(Downloader downloader, string dataDir, string? bundledDir, EasyTierRelease.Asset? asset, IReadOnlyList<(string Name, string Url)>? sources)
+    {
+        _downloader = downloader;
+        _dataDir = dataDir;
+        _bundledDir = bundledDir ?? DefaultBundledDir();
+        _asset = asset;
+        _sources = sources;
+    }
+
+    /// <summary>主程序旁边的 easytier 文件夹；macOS 的 .app 里放在 Contents/Resources/easytier。</summary>
+    private static string DefaultBundledDir()
+    {
+        var beside = Path.Combine(AppContext.BaseDirectory, "easytier");
+        if (OperatingSystem.IsMacOS())
+        {
+            var resources = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Resources", "easytier"));
+            if (Directory.Exists(resources)) return resources;
+        }
+        return beside;
+    }
+
+    private EasyTierRelease.Asset Asset => _asset ?? EasyTierRelease.Current;
+    public string InstallDir => Path.Combine(_dataDir, "easytier", EasyTierRelease.Version, Asset.Platform);
     public string CorePath => Path.Combine(InstallDir, Asset.CoreName);
     public string CliPath => Path.Combine(InstallDir, Asset.CliName);
+    /// <summary>发布包里随程序附带的安装包（和 Jay 主程序同目录下的 easytier 文件夹）。</summary>
+    public string BundledPath => Path.Combine(_bundledDir, Asset.Name);
+    /// <summary>手动导入时需要的文件名。</summary>
+    public string ExpectedFileName => Asset.Name;
     /// <summary>WinDivert64.sys 是完整局域网模式转发游戏局域网广播要用的驱动文件，缺了也重新解压。</summary>
     public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath) && (!OperatingSystem.IsWindows() || File.Exists(Path.Combine(InstallDir, "WinDivert64.sys")));
 
+    /// <summary>下载来源，按尝试顺序排列。</summary>
+    public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
+
+    /// <summary>progress 的 CurrentFile 是正在尝试的来源名。</summary>
     public async Task EnsureAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
         if (IsInstalled) return;
-        var work = Path.Combine(dataDir, "easytier", "download-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(work);
-        try
+        var failures = new List<EasyTierSourceFailure>();
+
+        if (File.Exists(BundledPath))
         {
-            var zip = Path.Combine(work, Asset.Name);
-            await downloader.DownloadAllAsync([new DownloadItem(Asset.Url, zip, null, Asset.Size)], progress, ct);
-            await using (var stream = File.OpenRead(zip))
+            progress?.Report(new DownloadProgress(0, 1, 0, L.T("core.mp.component.source.bundled")));
+            try
             {
-                var hash = Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, ct));
-                if (hash != Asset.Sha256)
-                    throw new InvalidDataException(L.F("core.mp.component.hashfailed", hash));
+                await InstallFromZipAsync(BundledPath, ct);
+                return;
             }
-            Extract(zip, InstallDir, Asset);
-            MakeExecutable(CorePath);
-            MakeExecutable(CliPath);
-            if (!IsInstalled) throw new InvalidDataException(L.T("core.mp.component.missingexecutable"));
+            catch (Exception e) when (!ct.IsCancellationRequested && e is IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                failures.Add(new(L.T("core.mp.component.source.bundled"), Describe(e)));
+            }
         }
-        finally
+
+        // 固定的下载位置：中断后 .part 留着，换源、重试或下次打开都能接着下。
+        var zip = Path.Combine(_dataDir, "easytier", "download", Asset.Name);
+        foreach (var (name, url) in Sources)
         {
-            try { Directory.Delete(work, true); } catch (IOException) { }
+            ct.ThrowIfCancellationRequested();
+            progress?.Report(new DownloadProgress(0, 1, 0, name));
+            try
+            {
+                await _downloader.DownloadOneAsync(new DownloadItem(url, zip, null, Asset.Size),
+                    new Progress<long>(b => progress?.Report(new DownloadProgress(0, 1, b, name))), ct);
+                await InstallFromZipAsync(zip, ct);
+                TryDelete(zip);
+                return;
+            }
+            catch (Exception e) when (!ct.IsCancellationRequested)
+            {
+                failures.Add(new(name, Describe(e)));
+                // 内容不对就整个丢掉，不能拿坏数据给下一个源续传。
+                if (e is InvalidDataException)
+                {
+                    TryDelete(zip);
+                    TryDelete(zip + ".part");
+                    TryDelete(zip + ".part.state");
+                }
+            }
         }
+
+        var lines = string.Join(Environment.NewLine, failures.Select(f => L.F("core.mp.component.sourcefailed", f.Source, f.Reason)));
+        throw new EasyTierInstallException(L.F("core.mp.component.allfailed", lines, Asset.Name), failures);
+    }
+
+    /// <summary>用户手动选的安装包：同样要求大小和 SHA-256 与固定值一致。</summary>
+    public Task ImportAsync(string zipPath, CancellationToken ct = default) => InstallFromZipAsync(zipPath, ct);
+
+    private async Task InstallFromZipAsync(string zip, CancellationToken ct)
+    {
+        var length = new FileInfo(zip).Length;
+        if (length != Asset.Size)
+            throw new InvalidDataException(L.F("core.mp.component.wrongpackage", Asset.Name, Asset.Size, length));
+        await using (var stream = File.OpenRead(zip))
+        {
+            var hash = Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, ct));
+            if (hash != Asset.Sha256)
+                throw new InvalidDataException(L.F("core.mp.component.hashfailed", hash));
+        }
+        Extract(zip, InstallDir, Asset);
+        MakeExecutable(CorePath);
+        MakeExecutable(CliPath);
+        if (!IsInstalled) throw new InvalidDataException(L.T("core.mp.component.missingexecutable"));
+    }
+
+    /// <summary>把异常说成人话：超时不要显示成“操作已取消”。</summary>
+    public static string Describe(Exception e) => e switch
+    {
+        OperationCanceledException or TimeoutException => L.T("common.request_timeout"),
+        HttpRequestException { StatusCode: { } status } => L.F("core.mp.component.httpstatus", (int)status),
+        HttpRequestException { InnerException: { } inner } => inner.Message,
+        IOException { InnerException: OperationCanceledException or TimeoutException } => L.T("common.request_timeout"),
+        _ => e.Message,
+    };
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     /// <summary>安装包里文件放在一层子文件夹下，拍平到安装目录。</summary>
@@ -146,6 +277,8 @@ public sealed record EasyTierOptions(
 {
     /// <summary>封装模式下加入方：本机这个端口经 EasyTier 转发到房主的封装端口（游戏和聊天都走它）。</summary>
     public int? LocalTunnelPort { get; init; }
+    /// <summary>邀请房间的加入方：远程控制连房主用的本机端口（不建网卡时经 EasyTier 或封装通道转到房主的 47662）。</summary>
+    public int? LocalRemotePort { get; init; }
     /// <summary>允许房间里的人经自己“仅游戏”转发（只开 SOCKS5，不用建网卡）。</summary>
     public bool AllowProxy { get; init; }
     /// <summary>“仅游戏”转发经过的成员（虚拟 IP）。</summary>
@@ -247,6 +380,8 @@ public static class EasyTierArgs
             args.AddRange(["--port-forward", $"tcp://127.0.0.1:{local}/{HostIp}:{o.Room.Port}"]);
             // 房间聊天：本机另一个端口转发到房主的聊天服务。
             if (o.LocalChatPort is { } chat) args.AddRange(["--port-forward", $"tcp://127.0.0.1:{chat}/{HostIp}:{RoomChat.Port}"]);
+            // 邀请房间的远程控制：本机另一个端口转发到房主的远程控制服务。
+            if (o.LocalRemotePort is { } remote && o.Room.FromInvite) args.AddRange(["--port-forward", $"tcp://127.0.0.1:{remote}/{HostIp}:{RemoteControl.RemoteHub.Port}"]);
         }
         if (!o.Tun && o.ProxyExit is { } proxyExit)
         {
@@ -276,6 +411,7 @@ public static class EasyTierArgs
             {
                 ports.Add(o.Room.Port);
                 ports.Add(RoomChat.Port);
+                if (o.Room.FromInvite) ports.Add(RemoteControl.RemoteHub.Port);
             }
             if (o.ServesSpeedTest) ports.Add(SpeedTestServer.Port);
         }
@@ -346,8 +482,21 @@ public sealed class EasyTierSession : IEasyTierSession
 
     public static EasyTierSession Start(EasyTierInstaller installer, EasyTierOptions options, string workDir)
     {
+        var (process, job) = Launch(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), workDir);
+        var session = new EasyTierSession(process, installer.CliPath, options, job);
+        process.OutputDataReceived += (_, e) => session.OnLine(e.Data);
+        process.ErrorDataReceived += (_, e) => session.OnLine(e.Data);
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        return session;
+    }
+
+    /// <summary>启动 easytier-core（密钥经环境变量传）；Windows 上放进作业对象。输出要调用方开始读。</summary>
+    internal static (Process Process, ProcessJob? Job) Launch(string corePath, IEnumerable<string> args, IReadOnlyDictionary<string, string> environment, string workDir)
+    {
         Directory.CreateDirectory(workDir);
-        var info = new ProcessStartInfo(installer.CorePath)
+        EasyTierProcessTracker.Cleanup(workDir, corePath, EasyTierProcessGuard.WatcherExecutable);
+        var info = new ProcessStartInfo(corePath)
         {
             WorkingDirectory = workDir,
             UseShellExecute = false,
@@ -355,9 +504,13 @@ public sealed class EasyTierSession : IEasyTierSession
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        foreach (var a in EasyTierArgs.Build(options)) info.ArgumentList.Add(a);
-        foreach (var (name, value) in EasyTierArgs.Environment(options)) info.Environment[name] = value;
+        foreach (var a in args) info.ArgumentList.Add(a);
+        foreach (var (name, value) in environment) info.Environment[name] = value;
+        // Mac/Linux：经看门脚本启动，Jay 崩溃或被 kill -9 后一两秒内 easytier-core 跟着结束（不用等下次开房间时清理）。
+        EasyTierProcessGuard.Wrap(info);
         var process = Process.Start(info) ?? throw new InvalidOperationException(L.T("core.mp.component.startfailed"));
+        // 记录的是实际启动的程序（套了看门脚本时是 sh），清理时按它核对，结束整棵进程树。
+        EasyTierProcessTracker.Track(process, workDir, EasyTierProcessGuard.TrackedExecutable(info));
         ProcessJob? job = null;
         if (OperatingSystem.IsWindows())
         {
@@ -372,12 +525,7 @@ public sealed class EasyTierSession : IEasyTierSession
                 job = null;
             }
         }
-        var session = new EasyTierSession(process, installer.CliPath, options, job);
-        process.OutputDataReceived += (_, e) => session.OnLine(e.Data);
-        process.ErrorDataReceived += (_, e) => session.OnLine(e.Data);
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        return session;
+        return (process, job);
     }
 
     private void OnLine(string? line)
@@ -455,6 +603,115 @@ public sealed class EasyTierSession : IEasyTierSession
             return null;
         }
     }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (!_process.HasExited) _process.Kill(true);
+            _process.WaitForExit(3000);
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        _process.Dispose();
+        _job?.Dispose();
+    }
+}
+
+/// <summary>大厅的参数：只为敲门存在的第二个 EasyTier 网络（名字和密钥从邀请码里的大厅密钥派生）。</summary>
+/// <param name="ListenUdpPort">房主：在本机回环的这个 UDP 端口上监听（直连桥把还没批准的加入方转发到这里）。不设时不监听。</param>
+public sealed record LobbyOptions(string Name, string Secret, bool IsHost, IReadOnlyList<string> Peers, int RpcPort, int? LocalKnockPort = null, int? ListenUdpPort = null)
+{
+    public override string ToString() => "LobbyOptions";
+}
+
+/// <summary>
+/// 大厅的 easytier-core 参数。和房间的实例完全分开：另一个网段（10.234.0.0/24，房主固定 .1）、另一个管理端口，不建网卡、不监听公网端口。
+/// 房主只放行敲门端口 47660（不建网卡时 EasyTier 把发往房主大厅地址的连接交给本机 127.0.0.1:47660）；加入方什么都不放行，只把本机一个端口转发到房主的敲门端口。
+/// </summary>
+public static class LobbyArgs
+{
+    public const string HostIp = "10.234.0.1";
+    public const string Subnet = "10.234.0.";
+
+    public static Dictionary<string, string> Environment(LobbyOptions o) => new() { [EasyTierArgs.SecretVariable] = o.Secret };
+
+    public static List<string> Build(LobbyOptions o)
+    {
+        var args = new List<string>
+        {
+            "--network-name", o.Name,
+            "--ipv4", o.IsHost ? HostIp : Subnet + RandomNumberGenerator.GetInt32(2, 255),
+            "--rpc-portal", $"127.0.0.1:{o.RpcPort}",
+            "--hostname", o.IsHost ? "jay-lobby-host" : "jay-lobby-guest",
+            "--instance-name", $"jay-lobby-{(o.IsHost ? "host" : "guest")}-{o.RpcPort}",
+            // 和房间的实例用不同的机器标识，免得在节点上互相顶掉。
+            "--machine-id", Guid.NewGuid().ToString(),
+            "--no-tun",
+            "--latency-first",
+        };
+        // 直连房间的房主：只在本机回环上监听，给直连桥用；其他情况不监听。
+        if (o.IsHost && o.ListenUdpPort is { } listen) args.AddRange(["--listeners", $"udp://127.0.0.1:{listen.ToString(System.Globalization.CultureInfo.InvariantCulture)}"]);
+        else args.Add("--no-listener");
+        foreach (var peer in o.Peers.Where(p => !string.IsNullOrWhiteSpace(p))) args.AddRange(["--peers", peer.Trim()]);
+        if ((o.IsHost && o.ListenUdpPort is not null) || o.Peers.Any(p => Uri.TryCreate(p.Trim(), UriKind.Absolute, out var u) && (u.IsLoopback || u.Host == "localhost")))
+            args.AddRange(["--bind-device", "false"]);
+        args.AddRange(["--tcp-whitelist", o.IsHost ? KnockProtocol.Port.ToString(System.Globalization.CultureInfo.InvariantCulture) : "1"]);
+        args.AddRange(["--udp-whitelist", "1"]);
+        args.AddRange(["--rpc-portal-whitelist", "127.0.0.1/32"]);
+        if (!o.IsHost)
+        {
+            var local = o.LocalKnockPort ?? throw new ArgumentException(L.T("core.mp.component.forwardrequired"));
+            args.AddRange(["--port-forward", $"tcp://127.0.0.1:{local}/{HostIp}:{KnockProtocol.Port}"]);
+        }
+        return args;
+    }
+}
+
+/// <summary>运行中的大厅 easytier-core。</summary>
+public sealed class EasyTierLobby : IDisposable
+{
+    private readonly Process _process;
+    private readonly IDisposable? _job;
+    private readonly string _cliPath;
+    private readonly Queue<string> _output = new();
+
+    public LobbyOptions Options { get; }
+    public bool HasExited => _process.HasExited;
+    public event Action<string>? Output;
+
+    private EasyTierLobby(Process process, ProcessJob? job, string cliPath, LobbyOptions options)
+    {
+        _process = process;
+        _job = job;
+        _cliPath = cliPath;
+        Options = options;
+    }
+
+    public IReadOnlyList<string> RecentOutput { get { lock (_output) return _output.ToList(); } }
+
+    public static EasyTierLobby Start(EasyTierInstaller installer, LobbyOptions options, string workDir)
+    {
+        var (process, job) = EasyTierSession.Launch(installer.CorePath, LobbyArgs.Build(options), LobbyArgs.Environment(options), workDir);
+        var lobby = new EasyTierLobby(process, job, installer.CliPath, options);
+        process.OutputDataReceived += (_, e) => lobby.OnLine(e.Data);
+        process.ErrorDataReceived += (_, e) => lobby.OnLine(e.Data);
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        return lobby;
+    }
+
+    private void OnLine(string? line)
+    {
+        if (line is null) return;
+        lock (_output)
+        {
+            _output.Enqueue(line);
+            if (_output.Count > 200) _output.Dequeue();
+        }
+        Output?.Invoke(line);
+    }
+
+    public Task<List<PeerInfo>> PeersAsync(CancellationToken ct = default) => EasyTierSession.QueryPeersAsync(_cliPath, Options.RpcPort, ct);
 
     public void Dispose()
     {

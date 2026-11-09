@@ -9,6 +9,8 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
+using Amber.Core.Multiplayer.Transport;
 using System.Threading.Channels;
 
 namespace Amber.Core.Multiplayer;
@@ -23,6 +25,9 @@ public enum ChatKind { Message, Join, Leave, Ping }
 public sealed record ChatMessage(ChatKind Kind, string SenderId, string Name, string Text, DateTimeOffset Time)
 {
     public string Nonce { get; init; } = "";
+
+    /// <summary>邀请房间里由房主按成员表盖上的发送者指纹（成员自己报的名字和 id 一律不用）。AMB- 房间是空的。</summary>
+    public string Fingerprint { get; init; } = "";
 }
 
 /// <summary>
@@ -40,6 +45,8 @@ public sealed class ChatCipher
 
     public ChatCipher(RoomCode room)
     {
+        // 邀请房间不用房间级的共享聊天密钥：每个成员到房主是一条自己的 Noise 通道（见 ChatWire）。
+        if (room.FromInvite) throw new InvalidOperationException("invite rooms use per-member chat channels");
         _key = HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(room.Secret), 32,
             Encoding.UTF8.GetBytes(room.NetworkName), Encoding.UTF8.GetBytes(Info));
     }
@@ -131,10 +138,11 @@ public static class RoomChat
     internal static async Task WriteFrameAsync(Stream stream, byte[] payload, CancellationToken ct)
     {
         if (payload.Length > MaxFrameBytes) throw new InvalidDataException(L.T("core.mp.chat.toolong"));
-        var header = new byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(header, payload.Length);
-        await stream.WriteAsync(header, ct);
-        await stream.WriteAsync(payload, ct);
+        // 长度和内容一次写出（经 Noise 通道时是一条记录，不是两条）。
+        var frame = new byte[4 + payload.Length];
+        BinaryPrimitives.WriteInt32BigEndian(frame, payload.Length);
+        payload.CopyTo(frame, 4);
+        await stream.WriteAsync(frame, ct);
         await stream.FlushAsync(ct);
     }
 
@@ -171,6 +179,227 @@ public static class RoomChat
             socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 6);
         }
         catch (Exception e) when (e is SocketException or PlatformNotSupportedException or ObjectDisposedException) { }
+    }
+}
+
+/// <summary>
+/// 邀请房间的聊天帧：每条腿（成员 ↔ 房主）都是成员自己的 Noise 通道，帧本身是明文 JSON。
+/// 成员发给房主的只有种类、正文、时间和一个随机 nonce（判断哪条是自己的），没有发送者字段；
+/// 房主转发时按成员表盖上编号、名字和指纹。成员写什么名字或 id 都没用，冒充不了别人。
+/// </summary>
+internal static class ChatWire
+{
+    private const int MaxNonce = 32;
+
+    /// <summary>
+    /// 控制帧（带 "ctl" 字段）：房主 → 成员的 "rekey"（换网络）和 "kicked"（你被踢了），
+    /// 成员 → 房主的 "rekey-ack" 和 "kicked-ack"（收到了踢人通知，可以断开了）。
+    /// 房主从不转发控制帧；成员发来的 "rekey" 一律不理。不是控制帧时返回 null。
+    /// </summary>
+    public static string? ControlOf(byte[] frame, out JsonObject? json)
+    {
+        json = null;
+        try
+        {
+            if (JsonNode.Parse(frame) is JsonObject o && o["ctl"] is JsonValue v && v.TryGetValue<string>(out var ctl))
+            {
+                json = o;
+                return ctl;
+            }
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException) { }
+        return null;
+    }
+
+    public static byte[] RekeyAck(int epoch) => KnockProtocol.Json(new JsonObject { ["ctl"] = "rekey-ack", ["epoch"] = epoch });
+
+    public static byte[] Kicked() => KnockProtocol.Json(new JsonObject { ["ctl"] = "kicked" });
+
+    /// <summary>成员收到“你已被移出房间”后回的确认。不带字段：只决定房主什么时候断开，安全上仍靠钥匙作废。</summary>
+    public static byte[] KickedAck() => KnockProtocol.Json(new JsonObject { ["ctl"] = "kicked-ack" });
+
+    /// <summary>远程控制：房主 → 成员“我想看/控你的屏幕”（带随机会话号）；成员 → 房主“不同意”。</summary>
+    /// <summary>name 是房主自己的名字（成员表里房主那一项），让成员的同意窗写对方是谁而不是“房主”。</summary>
+    public static byte[] RemoteRequest(string sessionId, string? hostName = null)
+    {
+        var json = new JsonObject { ["ctl"] = "remote-request", ["sid"] = sessionId };
+        if (hostName is { Length: > 0 }) json["name"] = hostName;
+        return KnockProtocol.Json(json);
+    }
+
+    /// <summary>房主 → 成员：房主的名字（成员加入聊天后发一次）。旧版成员不认识这个控制帧，直接忽略。</summary>
+    public static byte[] HostInfo(string hostName) => KnockProtocol.Json(new JsonObject { ["ctl"] = "host-info", ["name"] = hostName });
+
+    /// <summary>控制帧里的名字（清理过；没有或为空返回 null）。</summary>
+    internal static string? NameField(JsonObject json) =>
+        json["name"] is JsonValue v && v.TryGetValue<string>(out var name) && RoomChat.Clean(name, RoomChat.MaxNameLength) is { Length: > 0 } clean ? clean : null;
+
+    public static byte[] RemoteDeny(string sessionId) => KnockProtocol.Json(new JsonObject { ["ctl"] = "remote-deny", ["sid"] = sessionId });
+
+    /// <summary>控制帧里的会话号（格式不对返回 null）。</summary>
+    internal static string? SessionOf(JsonObject json) =>
+        json["sid"] is JsonValue v && v.TryGetValue<string>(out var sid) && RemoteControl.RemoteConnector.IsSessionId(sid) ? sid : null;
+
+    /// <summary>端到端消息里密文（Base64）最长多少字符：整帧仍在 8 KiB 以内。</summary>
+    public const int MaxPrivateText = 7000;
+
+    /// <summary>成员 → 房主：请转交给指纹是 <paramref name="to"/> 的人（密文房主解不开）。</summary>
+    public static byte[] PrivateTo(string to, byte[] sealedData) =>
+        KnockProtocol.Json(new JsonObject { ["ctl"] = "e2e", ["to"] = to, ["b"] = Convert.ToBase64String(sealedData) });
+
+    /// <summary>房主 → 收方：转交，按成员表盖上发方的指纹、公钥和名字。</summary>
+    public static byte[] PrivateFrom(MemberEntry from, string blob) => KnockProtocol.Json(new JsonObject
+    {
+        ["ctl"] = "e2e",
+        ["from"] = from.Fingerprint,
+        ["pk"] = Convert.ToHexStringLower(from.PublicKey),
+        ["name"] = NameOf(from),
+        ["b"] = blob,
+    });
+
+    /// <summary>房主 → 大家：现在在线的人（指纹、公钥、名字），私聊和传文件按它找人。</summary>
+    public static byte[] Roster(IEnumerable<MemberEntry> online) => KnockProtocol.Json(new JsonObject
+    {
+        ["ctl"] = "roster",
+        ["m"] = new JsonArray(online.Select(e => (JsonNode?)new JsonObject
+        {
+            ["fp"] = e.Fingerprint,
+            ["pk"] = Convert.ToHexStringLower(e.PublicKey),
+            ["name"] = NameOf(e),
+        }).ToArray()),
+    });
+
+    /// <summary>成员发来的转交请求：收方指纹和密文（原样的 Base64）。格式不对返回 null。</summary>
+    internal static (string To, string Blob)? ParsePrivateTo(JsonObject json)
+    {
+        try
+        {
+            var to = json["to"]?.GetValue<string>();
+            var blob = json["b"]?.GetValue<string>();
+            if (to is not { Length: > 0 and <= 32 } || blob is not { Length: > 0 and <= MaxPrivateText }) return null;
+            return (to, blob);
+        }
+        catch (Exception e) when (e is InvalidOperationException or FormatException) { return null; }
+    }
+
+    internal static PrivateFrame? ParsePrivateFrom(JsonObject json)
+    {
+        try
+        {
+            var from = json["from"]?.GetValue<string>();
+            var pk = json["pk"]?.GetValue<string>();
+            var blob = json["b"]?.GetValue<string>();
+            if (from is not { Length: > 0 and <= 32 } || pk is not { Length: 64 } || blob is not { Length: > 0 and <= MaxPrivateText }) return null;
+            var key = Convert.FromHexString(pk);
+            // 指纹必须就是这把公钥的指纹。
+            if (MemberIdentity.FingerprintOf(key) != from) return null;
+            return new PrivateFrame(from, key, NameField(json) ?? "", Convert.FromBase64String(blob));
+        }
+        catch (Exception e) when (e is InvalidOperationException or FormatException) { return null; }
+    }
+
+    internal static List<RosterEntry> ParseRoster(JsonObject json)
+    {
+        var list = new List<RosterEntry>();
+        foreach (var node in (json["m"] as JsonArray ?? []).Take(ChatHub.MaxConnections + 1))
+        {
+            try
+            {
+                var fp = node?["fp"]?.GetValue<string>();
+                var pk = node?["pk"]?.GetValue<string>();
+                if (fp is null || pk is not { Length: 64 }) continue;
+                var key = Convert.FromHexString(pk);
+                if (MemberIdentity.FingerprintOf(key) != fp) continue;
+                var name = node?["name"]?.GetValue<string>();
+                list.Add(new RosterEntry(fp, key, RoomChat.Clean(name, RoomChat.MaxNameLength)));
+            }
+            catch (Exception e) when (e is InvalidOperationException or FormatException) { }
+        }
+        return list;
+    }
+
+    internal static int? EpochOf(JsonObject json) => json["epoch"] is JsonValue v && v.TryGetValue<int>(out var epoch) ? epoch : null;
+
+    public static byte[] FromMember(ChatMessage message, out string nonce)
+    {
+        nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(12));
+        return KnockProtocol.Json(new JsonObject
+        {
+            ["k"] = (int)message.Kind,
+            ["text"] = message.Text,
+            ["ts"] = message.Time.ToUnixTimeMilliseconds(),
+            ["n"] = nonce,
+        });
+    }
+
+    /// <summary>房主收到成员的一帧：发送者只取自握手认出来的成员。格式不对返回 null。</summary>
+    public static ChatMessage? ParseFromMember(byte[] frame, MemberEntry sender, out bool contentTooLong)
+    {
+        contentTooLong = false;
+        if (frame.Length > RoomChat.MaxFrameBytes) return null;
+        try
+        {
+            if (JsonNode.Parse(frame) is not JsonObject json) return null;
+            var kind = (ChatKind)(json["k"]?.GetValue<int>() ?? -1);
+            if (!Enum.IsDefined(kind)) return null;
+            var text = json["text"]?.GetValue<string>() ?? "";
+            var nonce = json["n"]?.GetValue<string>() ?? "";
+            if (nonce.Length > MaxNonce) return null;
+            if (text.Length > RoomChat.MaxTextLength)
+            {
+                contentTooLong = true;
+                return null;
+            }
+            var time = DateTimeOffset.FromUnixTimeMilliseconds(json["ts"]?.GetValue<long>() ?? 0);
+            return new ChatMessage(kind, sender.Id, NameOf(sender), RoomChat.Clean(text, RoomChat.MaxTextLength), time)
+            {
+                Nonce = nonce,
+                Fingerprint = sender.Fingerprint,
+            };
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
+    internal static string NameOf(MemberEntry member) =>
+        RoomChat.Clean(member.Name, RoomChat.MaxNameLength) is { Length: > 0 } name ? name : L.T("core.mp.chat.player");
+
+    /// <summary>房主转发给成员的一帧（发送者是房主盖的）。</summary>
+    public static byte[] Relay(ChatMessage message) => KnockProtocol.Json(new JsonObject
+    {
+        ["k"] = (int)message.Kind,
+        ["s"] = message.SenderId,
+        ["name"] = message.Name,
+        ["fp"] = message.Fingerprint,
+        ["text"] = message.Text,
+        ["ts"] = message.Time.ToUnixTimeMilliseconds(),
+        ["n"] = message.Nonce,
+    });
+
+    /// <summary>成员收到房主转发的一帧。</summary>
+    public static ChatMessage? ParseRelay(byte[] frame)
+    {
+        if (frame.Length > RoomChat.MaxFrameBytes) return null;
+        try
+        {
+            if (JsonNode.Parse(frame) is not JsonObject json) return null;
+            var kind = (ChatKind)(json["k"]?.GetValue<int>() ?? -1);
+            var sender = json["s"]?.GetValue<string>() ?? "";
+            var nonce = json["n"]?.GetValue<string>() ?? "";
+            if (!Enum.IsDefined(kind) || sender.Length is 0 or > RoomChat.MaxSenderLength || nonce.Length > MaxNonce) return null;
+            return new ChatMessage(kind, sender, RoomChat.Clean(json["name"]?.GetValue<string>(), RoomChat.MaxNameLength),
+                RoomChat.Clean(json["text"]?.GetValue<string>(), RoomChat.MaxTextLength), DateTimeOffset.FromUnixTimeMilliseconds(json["ts"]?.GetValue<long>() ?? 0))
+            {
+                Nonce = nonce,
+                Fingerprint = RoomChat.Clean(json["fp"]?.GetValue<string>(), 64),
+            };
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or ArgumentOutOfRangeException)
+        {
+            return null;
+        }
     }
 }
 
@@ -254,7 +483,14 @@ public sealed class ChatHub : IAsyncDisposable
     /// <summary>测试用：在指定成员的写入前等待，稳定模拟发送阻塞，不依赖系统 TCP 缓冲区。</summary>
     internal Func<string?, CancellationToken, Task>? BeforeSendForTest { get; init; }
 
-    private readonly ChatCipher _cipher;
+    /// <summary>AMB- 房间：共享密钥加密每条消息。邀请房间是 null（改用 _table）。</summary>
+    private readonly ChatCipher? _cipher;
+    /// <summary>邀请房间：成员表。每条连接先按编号查到成员、用他的 psk 握手，消息的发送者由这里盖。</summary>
+    private readonly MemberTable? _table;
+    private readonly TransportProfile? _profile;
+    /// <summary>换网络：发给了谁、谁回了确认（按成员编号）。</summary>
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> _rekeyAcks = new();
+    private int _rekeyEpoch;
     private readonly List<TcpListener> _listeners = [];
     private readonly ConcurrentDictionary<Guid, Member> _members = new();
     private readonly object _identityGate = new();
@@ -269,12 +505,20 @@ public sealed class ChatHub : IAsyncDisposable
     private sealed class Member(TcpClient client, int outboxFrames, bool isHost, CancellationToken hub)
     {
         public TcpClient Client { get; } = client;
+        /// <summary>收发用的流：AMB- 房间是 TCP 本身，邀请房间是握手后的 Noise 通道。</summary>
+        public Stream Stream { get; set; } = client.GetStream();
+        /// <summary>邀请房间：握手认出来的成员。</summary>
+        public MemberEntry? Entry { get; set; }
+        /// <summary>挂在成员钥匙作废上的回调（断开这条连接）。</summary>
+        public CancellationTokenRegistration Revocation { get; set; }
         public bool IsHost { get; } = isHost;
         /// <summary>发送队列从什么时候开始一直是满的（UTC ticks，0 表示没满）。</summary>
         public long FullSince;
         public Channel<byte[]> Outbox { get; } = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(outboxFrames) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
         public CancellationTokenSource Cts { get; } = CancellationTokenSource.CreateLinkedTokenSource(hub);
         public RateLimiter Limiter { get; } = new(5, TimeSpan.FromSeconds(5));
+        /// <summary>端到端转交（私聊、传文件分块）单独限速：5 秒 600 帧，约 350 KB/s。</summary>
+        public RateLimiter PrivateLimiter { get; } = new(600, TimeSpan.FromSeconds(5));
         public string? SenderId { get; set; }
         public string? Name { get; set; }
         public volatile bool Authenticated;
@@ -284,6 +528,11 @@ public sealed class ChatHub : IAsyncDisposable
         public volatile bool PingCapable;
         /// <summary>加入被宣布过（离开时要宣布）。</summary>
         public bool JoinAnnounced;
+        /// <summary>
+        /// 给这条连接发了踢人通知后等它确认：收到 "kicked-ack" 完成为 true，连接先断了完成为 false。
+        /// 只属于这条连接，别的成员发 "kicked-ack" 碰不到它。
+        /// </summary>
+        public volatile TaskCompletionSource<bool>? KickAck;
 
         public void Kick()
         {
@@ -295,7 +544,12 @@ public sealed class ChatHub : IAsyncDisposable
     /// <summary>监听在本机回环（房主自己和普通模式下 EasyTier 转发进来的连接）；完整局域网模式再加上虚拟 IP。</summary>
     public ChatHub(RoomCode room, int port, IEnumerable<IPAddress>? extraAddresses = null)
     {
-        _cipher = new ChatCipher(room);
+        if (room.FromInvite)
+        {
+            _table = room.Members ?? throw new InvalidOperationException("no member table");
+            _profile = MemberChannel.ChatProfile(room.Tunnel.Mode);
+        }
+        else _cipher = new ChatCipher(room);
         foreach (var address in new[] { IPAddress.Loopback }.Concat(extraAddresses ?? []))
         {
             var listener = new TcpListener(address, port);
@@ -402,12 +656,130 @@ public sealed class ChatHub : IAsyncDisposable
         }
     }
 
-    private async Task ServeAsync(Guid id, Member member)
+    /// <summary>
+    /// 邀请房间换网络（踢人之后）：经每个在线成员自己的通道发新的网络名、密钥和版本号，等他们确认（最多 wait）。
+    /// 返回发给了谁、谁确认了。不在线的成员收不到，需要重新邀请。AMB- 房间不支持。
+    /// </summary>
+    public async Task<(IReadOnlyList<MemberEntry> Sent, IReadOnlyList<MemberEntry> Acked)> SendRekeyAsync(RoomRekey next, TimeSpan wait, CancellationToken ct = default)
     {
-        var writer = WriteLoopAsync(member);
+        if (_table is null) throw new InvalidOperationException("rekey is only for invite rooms");
+        var frame = KnockProtocol.Json(next.ToJson());
+        Volatile.Write(ref _rekeyEpoch, next.Epoch);
+        _rekeyAcks.Clear();
+        var sent = new List<MemberEntry>();
+        var waits = new List<Task>();
+        foreach (var member in _members.Values)
+        {
+            // 已经作废的钥匙（刚被踢、被换掉）不发：他不该拿到新网络。
+            if (!member.Authenticated || member.IsHost || member.Entry is not { IsHost: false, Revoked: false } entry) continue;
+            var ack = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _rekeyAcks[entry.Id] = ack;
+            if (!member.Outbox.Writer.TryWrite(frame))
+            {
+                _rekeyAcks.TryRemove(entry.Id, out _);
+                continue;
+            }
+            sent.Add(entry);
+            waits.Add(ack.Task);
+        }
+        try { await Task.WhenAll(waits).WaitAsync(wait, ct); }
+        catch (TimeoutException) { }
+        var acked = sent.Where(e => _rekeyAcks.TryGetValue(e.Id, out var a) && a.Task.IsCompletedSuccessfully).ToList();
+        return (sent, acked);
+    }
+
+    /// <summary>踢人通知默认最多等这么久的确认（旧客户端不回确认，等满了照样踢）。</summary>
+    public static readonly TimeSpan KickAckTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// 踢人之前：经这个成员自己的每条在线连接告诉他“你已被移出房间”（他那边收到后停止联机），
+    /// 等他回 "kicked-ack"（最多 timeout，默认 2 秒）再让调用方作废钥匙断开。
+    /// 不等确认就断开的话，帧可能还没写出去，或者房主这边还有没读完的数据，关连接时发 RST，他那边已经收到的帧也会被丢掉。
+    /// 只是通知，真正断开靠钥匙作废。全部确认返回 true；不在线、没发出去、超时（比如旧客户端）或者连接先断了返回 false。
+    /// </summary>
+    public async Task<bool> NotifyKickedAsync(MemberEntry entry, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        if (_table is null) return false;
+        var frame = ChatWire.Kicked();
+        var waits = new List<Task<bool>>();
+        foreach (var member in _members.Values)
+        {
+            if (!member.Authenticated || member.IsHost || !ReferenceEquals(member.Entry, entry)) continue;
+            var ack = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            member.KickAck = ack;
+            // 连接在放 KickAck 之前就断了：ServeAsync 的 finally 已经跑过，这里直接算没确认。
+            if (!_members.Values.Contains(member)) ack.TrySetResult(false);
+            if (!member.Outbox.Writer.TryWrite(frame))
+            {
+                member.KickAck = null;
+                continue;
+            }
+            waits.Add(ack.Task);
+        }
+        if (waits.Count == 0) return false;
         try
         {
-            var stream = member.Client.GetStream();
+            var results = await Task.WhenAll(waits).WaitAsync(timeout ?? KickAckTimeout, ct);
+            return results.All(r => r);
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>远程控制：成员回了“不同意”（会话号、成员都由 RemoteHub 再核对）。</summary>
+    public event Action<MemberEntry, string>? RemoteDeclined;
+
+    /// <summary>
+    /// 远程控制：经这个成员自己的通道发“请求查看/控制”。他同意后由他连回房主的远程控制服务（带这个会话号）。
+    /// 不在线（没加入聊天）时返回 false。
+    /// </summary>
+    public bool SendRemoteRequest(MemberEntry entry, string sessionId)
+    {
+        if (_table is null || entry.IsHost || entry.Revoked) return false;
+        var frame = ChatWire.RemoteRequest(sessionId, _table.Host is { } host ? ChatWire.NameOf(host) : null);
+        var sent = false;
+        foreach (var member in _members.Values)
+            if (member.Authenticated && !member.IsHost && ReferenceEquals(member.Entry, entry)) sent |= member.Outbox.Writer.TryWrite(frame);
+        return sent;
+    }
+
+    private void OnRekeyAck(MemberEntry who, int epoch)
+    {
+        if (epoch == Volatile.Read(ref _rekeyEpoch) && _rekeyAcks.TryGetValue(who.Id, out var ack)) ack.TrySetResult();
+    }
+
+    /// <summary>解开一帧：AMB- 房间用共享密钥验证；邀请房间里帧已经由 Noise 通道认证过，发送者按握手认出来的成员盖。</summary>
+    private ChatMessage? Open(byte[] frame, Member member, out bool contentTooLong)
+    {
+        if (_cipher is not null) return _cipher.Open(frame, out contentTooLong);
+        return ChatWire.ParseFromMember(frame, member.Entry!, out contentTooLong);
+    }
+
+    /// <summary>转发给大家的帧：AMB- 房间原样转发（或由转发自己加密）；邀请房间按盖过章的消息重新编码。</summary>
+    private byte[] Seal(ChatMessage message) => _cipher?.Seal(message) ?? ChatWire.Relay(message);
+
+    private async Task ServeAsync(Guid id, Member member)
+    {
+        Task? writer = null;
+        try
+        {
+            if (_table is not null)
+            {
+                // 邀请房间：先明文报成员编号，再用这个成员的 psk 握手。编号不认识、psk 不对都断开。
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(member.Cts.Token);
+                deadline.CancelAfter(FirstFrameTimeout);
+                var (secure, entry, _) = await MemberChannel.AcceptAsync(member.Stream, _table, _profile!, "chat", null, deadline.Token);
+                member.Stream = secure;
+                member.Entry = entry;
+                // 留给房主的本机端口只接房主自己的那把钥匙。
+                if (member.IsHost != entry.IsHost) throw new CryptographicException(L.T("core.mp.member.unknown"));
+                // 钥匙一作废（踢出、重新批准换了钥匙、房间结束）就断开；已经作废的立刻断开。
+                member.Revocation = entry.Revocation.Register(member.Kick);
+            }
+            writer = WriteLoopAsync(member);
+            var stream = member.Stream;
             while (!member.Cts.IsCancellationRequested)
             {
                 byte[]? frame;
@@ -423,7 +795,21 @@ public sealed class ChatHub : IAsyncDisposable
                     frame = await RoomChat.ReadFrameAsync(stream, deadline.Token);
                 }
                 if (frame is null) break;
-                var message = _cipher.Open(frame, out var contentTooLong);
+                if (_table is not null && ChatWire.ControlOf(frame, out var control) is { } ctl)
+                {
+                    // 控制帧从不转发。成员只能回“rekey-ack”和“kicked-ack”；成员发来的“rekey”“kicked”（想替房主操作）不理。
+                    Interlocked.Exchange(ref member.LastActivity, Clock().UtcTicks);
+                    if (ctl == "rekey-ack" && member.Authenticated && member.Entry is { } who && ChatWire.EpochOf(control!) is { } epoch) OnRekeyAck(who, epoch);
+                    else if (ctl == "remote-deny" && member.Authenticated && !member.IsHost && member.Entry is { } decliner && ChatWire.SessionOf(control!) is { } sid)
+                        RemoteDeclined?.Invoke(decliner, sid);
+                    // 只完成这条连接自己的等待：没收到过踢人通知的连接 KickAck 是 null，回了也没用。
+                    else if (ctl == "kicked-ack" && member.Authenticated && member.Entry is not null) member.KickAck?.TrySetResult(true);
+                    else if (ctl == "e2e" && member.Authenticated && member.Entry is { Revoked: false } from && ChatWire.ParsePrivateTo(control!) is { } request
+                             && member.PrivateLimiter.TryAcquire())
+                        Forward(from, request.To, request.Blob);
+                    continue;
+                }
+                var message = Open(frame, member, out var contentTooLong);
                 if (message is null)
                 {
                     if (contentTooLong && member.Authenticated) continue;
@@ -432,11 +818,18 @@ public sealed class ChatHub : IAsyncDisposable
                 Interlocked.Exchange(ref member.LastActivity, Clock().UtcTicks);
                 if (!member.Authenticated)
                 {
-                    // 第一帧必须是加入；别的连接正在用这个 id 就不让进。
+                    // 第一帧必须是加入。AMB- 房间：别的连接正在用这个 id 就不让进。
+                    // 邀请房间：id 是握手认出来的，同一个成员重新连上时顶掉他的旧连接（旧连接不再宣布离开）。
                     if (message.Kind != ChatKind.Join) break;
                     lock (_identityGate)
                     {
-                        if (_members.Values.Any(m => m != member && m.Authenticated && m.SenderId == message.SenderId)) break;
+                        var holders = _members.Values.Where(m => m != member && m.Authenticated && m.SenderId == message.SenderId).ToList();
+                        if (holders.Count > 0 && _table is null) break;
+                        foreach (var old in holders)
+                        {
+                            old.JoinAnnounced = false;
+                            old.Kick();
+                        }
                         member.SenderId = message.SenderId;
                         member.Name = message.Name;
                         member.Authenticated = true;
@@ -444,11 +837,14 @@ public sealed class ChatHub : IAsyncDisposable
                     if (member.IsHost || PresenceLimiter.TryAcquire())
                     {
                         member.JoinAnnounced = true;
-                        Broadcast(frame);
+                        Broadcast(_cipher is not null ? frame : Seal(message));
                     }
                     StartSweep();
+                    if (_table is not null) BroadcastRoster();
+                    // 邀请房间：告诉成员房主叫什么（远程控制的同意窗、提示里用）。
+                    if (_table?.Host is { } hostEntry && !member.IsHost) member.Outbox.Writer.TryWrite(ChatWire.HostInfo(ChatWire.NameOf(hostEntry)));
                     // 告诉这个客户端：这个转发支持心跳（旧客户端解不开，直接忽略）。
-                    member.Outbox.Writer.TryWrite(_cipher.Seal(new ChatMessage(ChatKind.Ping, HubSender, "", "", Clock())));
+                    member.Outbox.Writer.TryWrite(Seal(new ChatMessage(ChatKind.Ping, HubSender, "", "", Clock())));
                     continue;
                 }
                 // 一条连接只能代表一个人：换 id、换名字、再发一次加入都断开。
@@ -460,26 +856,54 @@ public sealed class ChatHub : IAsyncDisposable
                     continue;
                 }
                 if (frame.Length > MaxForwardFrame || !member.Limiter.TryAcquire() || !MessageLimiter.TryAcquire()) continue;
-                Broadcast(frame);
+                Broadcast(_cipher is not null ? frame : Seal(message));
             }
         }
-        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or ObjectDisposedException)
+        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or ObjectDisposedException
+            or CryptographicException or PlatformNotSupportedException)
         {
-            // 连接断了、超时了或者发了不合规的数据，按离开处理。
+            // 连接断了、超时了、握手不过或者发了不合规的数据，按离开处理。
         }
         finally
         {
             _members.TryRemove(id, out _);
+            member.KickAck?.TrySetResult(false);
             member.Outbox.Writer.TryComplete();
+            member.Revocation.Dispose();
+            (member.Stream as Transport.SecureStream)?.Abort();
             member.Kick();
-            try { await writer; } catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException) { }
+            if (writer is not null)
+            {
+                try { await writer; } catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException) { }
+            }
             member.Cts.Dispose();
             if (member.Authenticated && member.JoinAnnounced && member.SenderId is { } sender && !_cts.IsCancellationRequested)
             {
-                var leave = _cipher.Seal(new ChatMessage(ChatKind.Leave, sender, member.Name ?? "", "", DateTimeOffset.UtcNow));
+                var leave = Seal(new ChatMessage(ChatKind.Leave, sender, member.Name ?? "", "", DateTimeOffset.UtcNow) { Fingerprint = member.Entry?.Fingerprint ?? "" });
                 Broadcast(leave);
             }
+            if (member.Authenticated && _table is not null && !_cts.IsCancellationRequested) BroadcastRoster();
         }
+    }
+
+    /// <summary>端到端转交：只发给指纹是 to 的在线成员（可能有好几条连接），发方由成员表盖。收方队列满了就丢（传文件那边有确认和重发）。</summary>
+    private void Forward(MemberEntry from, string to, string blob)
+    {
+        byte[]? frame = null;
+        foreach (var target in _members.Values)
+        {
+            if (!target.Authenticated || target.Entry is not { Revoked: false } entry || entry.Fingerprint != to || ReferenceEquals(entry, from)) continue;
+            frame ??= ChatWire.PrivateFrom(from, blob);
+            target.Outbox.Writer.TryWrite(frame);
+        }
+    }
+
+    /// <summary>在线名单变了（有人加入、离开）：发给每个人。同一个人有多条连接时只列一次。</summary>
+    private void BroadcastRoster()
+    {
+        var online = _members.Values.Where(m => m.Authenticated && m.Entry is { Revoked: false }).Select(m => m.Entry!)
+            .DistinctBy(e => e.Fingerprint).ToList();
+        Broadcast(ChatWire.Roster(online));
     }
 
     /// <summary>放进每个已加入成员的发送队列。队列满了先丢这一帧；一直满着超过 BacklogKickAfter 才断开他。</summary>
@@ -503,7 +927,7 @@ public sealed class ChatHub : IAsyncDisposable
     {
         try
         {
-            var stream = member.Client.GetStream();
+            var stream = member.Stream;
             await foreach (var frame in member.Outbox.Reader.ReadAllAsync(member.Cts.Token))
             {
                 if (BeforeSendForTest is { } beforeSend)
@@ -511,7 +935,7 @@ public sealed class ChatHub : IAsyncDisposable
                 await RoomChat.WriteFrameAsync(stream, frame, member.Cts.Token);
             }
         }
-        catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or SocketException)
+        catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or SocketException or CryptographicException)
         {
             member.Kick();
         }
@@ -535,9 +959,17 @@ public sealed class ChatHub : IAsyncDisposable
 }
 
 /// <summary>房间成员一侧：连上房主的聊天转发，发消息、收消息。</summary>
-public sealed class ChatClient : IAsyncDisposable
+public sealed class ChatClient : IAsyncDisposable, IPrivateLink
 {
-    private readonly ChatCipher _cipher;
+    /// <summary>AMB- 房间的共享密钥加密；邀请房间是 null（改用自己的成员钥匙开 Noise 通道）。</summary>
+    private readonly ChatCipher? _cipher;
+    private readonly MemberKey? _key;
+    private readonly TransportProfile? _profile;
+    private readonly int _epoch;
+    private int _rekeyed;
+    /// <summary>收到过踢人通知：之后连接断开不再报 Disconnected（被踢了不该显示“正在重连”）。</summary>
+    private int _kicked;
+    private Stream? _stream;
     private readonly TcpClient _client = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -550,21 +982,74 @@ public sealed class ChatClient : IAsyncDisposable
     /// <summary>转发表示支持心跳后，多久发一次。</summary>
     internal static TimeSpan PingInterval { get; set; } = TimeSpan.FromSeconds(30);
 
-    public string SenderId { get; } = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+    /// <summary>自己的发送者 id：AMB- 房间随机生成；邀请房间是自己的成员编号（房主转发时盖的就是它）。</summary>
+    public string SenderId { get; }
     public string Name { get; }
     public event Action<ChatMessage>? Received;
     public event Action? Disconnected;
 
+    /// <summary>邀请房间：房主换了网络（踢人之后），发来新的网络名、密钥和版本。只认房主这条腿上来的、版本比当前大的，只认一次；已经回过确认。</summary>
+    public event Action<RoomRekey>? Rekeyed;
+
+    /// <summary>邀请房间：房主踢出了自己（经房主这条腿上来的通知）。只报一次；报过之后不再报 Disconnected。</summary>
+    public event Action? Kicked;
+
+    /// <summary>邀请房间：房主请求看/控自己的屏幕（会话号）。只认房主这条腿上来的。</summary>
+    public event Action<string>? RemoteRequested;
+
+    /// <summary>邀请房间：房主发来的在线名单（私聊、传文件按它找人）。</summary>
+    public event Action<IReadOnlyList<RosterEntry>>? RosterChanged;
+
+    /// <summary>邀请房间：别人经房主转交来的端到端消息（还没解密）。</summary>
+    public event Action<PrivateFrame>? PrivateReceived;
+
+    public IReadOnlyList<RosterEntry> Roster { get; private set; } = [];
+
+    /// <summary>经房主转交一条端到端消息给指纹是 <paramref name="to"/> 的人。不是邀请房间时返回 false。</summary>
+    public async Task<bool> SendPrivateAsync(string to, byte[] sealedData, CancellationToken ct)
+    {
+        if (_key is null) return false;
+        await SendControlAsync(ChatWire.PrivateTo(to, sealedData), ct);
+        return true;
+    }
+
+    /// <summary>邀请房间：房主自己报的名字（经房主这条腿的控制帧）；还没收到时 null。</summary>
+    public string? HostName { get; private set; }
+
+    /// <summary>远程控制：告诉房主“不同意”。</summary>
+    public async Task DeclineRemoteAsync(string sessionId, CancellationToken ct = default)
+    {
+        if (_key is null) return;
+        await SendControlAsync(ChatWire.RemoteDeny(sessionId), ct);
+    }
+
+    /// <summary>测试用：收到踢人通知时不回确认（模拟旧客户端）。</summary>
+    internal bool SkipKickAckForTest { get; init; }
+
     public ChatClient(RoomCode room, string name)
     {
-        _cipher = new ChatCipher(room);
+        _epoch = room.Epoch;
+        if (room.FromInvite)
+        {
+            _key = room.Member ?? throw new InvalidOperationException("no member key");
+            _profile = MemberChannel.ChatProfile(room.Tunnel.Mode);
+            SenderId = _key.IdHex;
+        }
+        else
+        {
+            _cipher = new ChatCipher(room);
+            SenderId = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+        }
         Name = RoomChat.Clean(name, RoomChat.MaxNameLength) is { Length: > 0 } n ? n : L.T("core.mp.chat.player");
     }
+
+    private Stream Stream => _stream ?? throw new InvalidOperationException();
 
     public async Task ConnectAsync(string host, int port, CancellationToken ct = default)
     {
         await _client.ConnectAsync(host, port, ct);
         RoomChat.EnableKeepAlive(_client.Client);
+        _stream = _key is null ? _client.GetStream() : await MemberChannel.ConnectAsync(_client.GetStream(), _key, _profile!, "chat", [], ct);
         _readLoop = ReadLoopAsync();
         await SendRawAsync(new ChatMessage(ChatKind.Join, SenderId, Name, "", DateTimeOffset.UtcNow), ct);
     }
@@ -584,14 +1069,15 @@ public sealed class ChatClient : IAsyncDisposable
         await _writeLock.WaitAsync(ct);
         try
         {
-            var frame = _cipher.Seal(message, out var nonce);
+            string nonce;
+            var frame = _cipher is not null ? _cipher.Seal(message, out nonce) : ChatWire.FromMember(message, out nonce);
             lock (_sentNonces)
             {
                 _sentNonces.Enqueue(nonce);
                 _unmatchedNonces.Add(nonce);
                 while (_sentNonces.Count > 256) _unmatchedNonces.Remove(_sentNonces.Dequeue());
             }
-            await RoomChat.WriteFrameAsync(_client.GetStream(), frame, ct);
+            await RoomChat.WriteFrameAsync(Stream, frame, ct);
         }
         finally
         {
@@ -610,26 +1096,64 @@ public sealed class ChatClient : IAsyncDisposable
         lock (_sentNonces) return _unmatchedNonces.Remove(message.Nonce);
     }
 
+    private async Task SendControlAsync(byte[] frame, CancellationToken ct)
+    {
+        await _writeLock.WaitAsync(ct);
+        try { await RoomChat.WriteFrameAsync(Stream, frame, ct); }
+        finally { _writeLock.Release(); }
+    }
+
     /// <summary>测试用：直接写原始帧。</summary>
     internal async Task SendFrameAsync(byte[] frame)
     {
-        var stream = _client.GetStream();
         var header = new byte[4];
         BinaryPrimitives.WriteInt32BigEndian(header, frame.Length);
-        await stream.WriteAsync(header);
-        await stream.WriteAsync(frame);
+        await Stream.WriteAsync((byte[])[.. header, .. frame]);
+        await Stream.FlushAsync();
     }
 
     private async Task ReadLoopAsync()
     {
         try
         {
-            var stream = _client.GetStream();
+            var stream = Stream;
             while (!_cts.IsCancellationRequested)
             {
                 var frame = await RoomChat.ReadFrameAsync(stream, _cts.Token);
                 if (frame is null) break;
-                if (_cipher.Open(frame) is not { } message) continue;
+                if (_key is not null && ChatWire.ControlOf(frame, out var control) is { } ctl)
+                {
+                    if (ctl == "rekey" && RoomRekey.FromJson(control!) is { } next && next.Epoch > _epoch && Interlocked.Exchange(ref _rekeyed, 1) == 0)
+                    {
+                        try { await SendControlAsync(ChatWire.RekeyAck(next.Epoch), _cts.Token); }
+                        catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or SocketException or CryptographicException) { }
+                        Rekeyed?.Invoke(next);
+                    }
+                    else if (ctl == "kicked" && Interlocked.Exchange(ref _kicked, 1) == 0)
+                    {
+                        // 先回确认（房主等到它才断开），再交给界面。发不出去也照样算被踢。
+                        if (!SkipKickAckForTest)
+                        {
+                            try { await SendControlAsync(ChatWire.KickedAck(), _cts.Token); }
+                            catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or SocketException or CryptographicException) { }
+                        }
+                        Kicked?.Invoke();
+                    }
+                    else if (ctl == "host-info" && ChatWire.NameField(control!) is { } hostName) HostName = hostName;
+                    else if (ctl == "roster")
+                    {
+                        Roster = ChatWire.ParseRoster(control!);
+                        RosterChanged?.Invoke(Roster);
+                    }
+                    else if (ctl == "e2e" && ChatWire.ParsePrivateFrom(control!) is { } incoming) PrivateReceived?.Invoke(incoming);
+                    else if (ctl == "remote-request" && ChatWire.SessionOf(control!) is { } sid)
+                    {
+                        if (ChatWire.NameField(control!) is { } requester) HostName = requester;
+                        RemoteRequested?.Invoke(sid);
+                    }
+                    continue;
+                }
+                if ((_cipher is not null ? _cipher.Open(frame) : ChatWire.ParseRelay(frame)) is not { } message) continue;
                 if (message.Kind == ChatKind.Ping)
                 {
                     // 转发支持心跳：开始定时发（只开一次）。心跳不交给界面。
@@ -639,10 +1163,10 @@ public sealed class ChatClient : IAsyncDisposable
                 Received?.Invoke(message);
             }
         }
-        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or ObjectDisposedException)
+        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or ObjectDisposedException or CryptographicException)
         {
         }
-        if (!_cts.IsCancellationRequested) Disconnected?.Invoke();
+        if (!_cts.IsCancellationRequested && Volatile.Read(ref _kicked) == 0) Disconnected?.Invoke();
     }
 
     private async Task PingLoopAsync()
@@ -655,21 +1179,22 @@ public sealed class ChatClient : IAsyncDisposable
                 await SendRawAsync(new ChatMessage(ChatKind.Ping, SenderId, Name, "", DateTimeOffset.UtcNow), _cts.Token);
             }
         }
-        catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException or InvalidOperationException or SocketException) { }
+        catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException or InvalidOperationException or SocketException or CryptographicException) { }
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_client.Connected)
+        if (_client.Connected && _stream is not null)
         {
             try
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
                 await SendRawAsync(new ChatMessage(ChatKind.Leave, SenderId, Name, "", DateTimeOffset.UtcNow), timeout.Token);
             }
-            catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException) { }
+            catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException or CryptographicException) { }
         }
         _cts.Cancel();
+        (_stream as Transport.SecureStream)?.Abort();
         _client.Dispose();
         if (_readLoop is not null)
         {

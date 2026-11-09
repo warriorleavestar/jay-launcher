@@ -31,18 +31,31 @@ public sealed class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         DevCrashGuard.HookDispatcher();
+        // Linux 系统没有中文字体时，系统画的标题栏会把中文显示成方框，标题改用「Jay」。
+        LinuxFonts.GuardWindowTitles();
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var settings = AppSettings.Load();
-            ApplyTheme(settings.Theme);
             Amber.Core.Localization.L.SetLanguage(settings.Language);
+            // 主题包在主窗口创建前套上（启动保护：上次这个主题让 Jay 崩了，这次就用默认主题）。
+            ThemeService.ApplyAtStartup(settings, desktop.Args ?? []);
+            Amber.Core.Localization.L.Changed += ThemeService.OnLanguageChanged;
             var service = new LauncherService(settings);
             var viewModel = new MainViewModel(service);
             StartupTrace.Mark("viewmodels");
             desktop.MainWindow = new MainWindow(settings) { DataContext = viewModel };
+            // 窗口打开并画完几帧以后才算主题没问题。
+            desktop.MainWindow.Opened += (_, _) => Avalonia.Threading.DispatcherTimer.RunOnce(ThemeService.StartupSucceeded, TimeSpan.FromSeconds(3));
+            // 关主窗口就退出：远程控制的小条、查看窗口这些不能让进程留在后台（被控时关 Jay 以为断了，其实还在被控制）。
+            desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnMainWindowClose;
             StartupTrace.Mark("window");
-            desktop.Exit += (_, _) => service.Dispose();
-            // 开发截图只查看界面，不清理游戏回收目录或真实用户的无痕配置。
+            desktop.Exit += (_, _) =>
+            {
+                // 开着的服务器先存盘停下，再清理别的。
+                ViewModels.HostServerViewModel.StopRunningServer();
+                service.Dispose();
+            };
+            // 开发截图和自检不清理游戏回收目录或真实用户的无痕配置。
             if (Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR") is not { Length: > 0 }
                 && Environment.GetEnvironmentVariable("AMBER_SELFTEST") is not { Length: > 0 })
             {
