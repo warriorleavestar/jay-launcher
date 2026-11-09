@@ -64,13 +64,14 @@ public sealed class RemoteConsentDialog : Window
         var name = request.Name.Length > 0 ? request.Name : L.T("multiplayer.peers.player");
         var viewOnly = new CheckBox { Content = L.T("remote.consent.view_only") };
         var countdown = new TextBlock { Classes = { "hint" }, FontSize = 12 };
-        var deny = new Button { Content = L.T("remote.consent.deny"), Classes = { "primary" }, IsDefault = true, IsCancel = true, MinWidth = 96 };
-        var allow = new Button { Content = L.T("remote.consent.allow"), Classes = { "secondary" }, MinWidth = 96 };
+        // 安全按钮：主题的 Button 样式匹配不到；“拒绝”是默认焦点的保留样式，“同意”是安全蓝。
+        var deny = new Amber.App.Controls.Safety.SafetyButton { Content = L.T("remote.consent.deny"), Kind = Amber.App.Controls.Safety.SafetyKind.Safe, IsDefault = true, IsCancel = true };
+        var allow = new Amber.App.Controls.Safety.SafetyButton { Content = L.T("remote.consent.allow"), Kind = Amber.App.Controls.Safety.SafetyKind.Confirm };
         deny.Click += (_, _) => Decide(RemoteConsent.Denied);
         allow.Click += (_, _) => Decide(new RemoteConsent(true, viewOnly.IsChecked == true));
         var warning = new Border
         {
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0xD9, 0x48, 0x2B)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xB3, 0x26, 0x1E)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(10),
@@ -134,6 +135,8 @@ public sealed class RemoteViewerWindow : Window
     public RemoteViewerWindow(RemoteViewer viewer)
     {
         _viewer = viewer;
+        // 查看窗也是安全界面：结束按钮和控制状态的样子主题改不了。
+        Amber.App.Services.ThemeService.LockToDefault(this);
         Title = L.F("remote.viewer.window_title", viewer.PeerName);
         Width = 1100;
         Height = 720;
@@ -142,7 +145,7 @@ public sealed class RemoteViewerWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         _surface = new RemoteSurface(viewer);
         _state = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontWeight = FontWeight.SemiBold };
-        var stop = new Button { Content = L.T("remote.viewer.stop"), Classes = { "danger" } };
+        var stop = new Amber.App.Controls.Safety.SafetyButton { Content = L.T("remote.viewer.stop"), Kind = Amber.App.Controls.Safety.SafetyKind.Danger };
         stop.Click += (_, _) => Close();
         var header = new Border
         {
@@ -526,7 +529,7 @@ internal sealed class RedFrameEdges : IDisposable
                 ShowInTaskbar = false,
                 CanResize = false,
                 Focusable = false,
-                Background = new SolidColorBrush(Color.FromRgb(0xE5, 0x1C, 0x1C)),
+                Background = new SolidColorBrush(Color.FromRgb(0xFF, 0x3B, 0x30)),
                 WindowStartupLocation = WindowStartupLocation.Manual,
                 Position = new PixelPoint(x, y),
                 Width = w / scaling,
@@ -566,10 +569,10 @@ public sealed class RemoteSharingBar : Window
         Topmost = true;
         SizeToContent = SizeToContent.WidthAndHeight;
         WindowStartupLocation = WindowStartupLocation.Manual;
-        Background = new SolidColorBrush(Color.FromRgb(0xB3, 0x16, 0x16));
+        Background = new SolidColorBrush(Color.FromRgb(0xB3, 0x26, 0x1E));
         _toggle = new Button { Padding = new Thickness(10, 4), Background = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), Foreground = Brushes.White };
         _toggle.Click += async (_, _) => await _sharer.SetControlAsync(!_sharer.ControlAllowed);
-        var stop = new Button { Content = L.T("remote.sharing.stop"), Padding = new Thickness(14, 4), Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(0xB3, 0x16, 0x16)), FontWeight = FontWeight.SemiBold };
+        var stop = new Button { Content = L.T("remote.sharing.stop"), Padding = new Thickness(14, 4), Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(0xB3, 0x26, 0x1E)), FontWeight = FontWeight.SemiBold };
         stop.Click += async (_, _) => await _sharer.StopAsync(RemoteStopReason.StoppedByUser);
         _hotkeyHint = new TextBlock { Foreground = Brushes.White, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.85 };
         var who = new TextBlock

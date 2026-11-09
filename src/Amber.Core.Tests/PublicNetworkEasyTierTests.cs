@@ -61,4 +61,66 @@ public sealed class PublicNetworkEasyTierTests
         Assert.Empty(await new RoomDirectoryClient(guest).ListAsync(default));
         try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
+
+    /// <summary>
+    /// 网络服务端框架 + 真 EasyTier：一个目录节点、一个只当种子的地区节点（连到目录节点）。房主经地区节点、加入方经目录节点，
+    /// 照样在同一个目录里碰面；屏蔽词经真网络把原因带回房主；封禁后房间马上消失。
+    /// </summary>
+    [Fact]
+    public async Task FrameworkDirectoryAndSeedOnlyNodeWorkThroughRealEasyTier()
+    {
+        if (EtDir is not { } dir) return;
+        var exe = OperatingSystem.IsWindows() ? ".exe" : "";
+        var core = Path.Combine(dir, "easytier-core" + exe);
+        var cli = Path.Combine(dir, "easytier-cli" + exe);
+        var work = Path.Combine(Path.GetTempPath(), "jay-netserver-e2e-" + Guid.NewGuid().ToString("N")[..8]);
+        var mainPort = EasyTierArgs.FreeTcpPort();
+        var regionPort = EasyTierArgs.FreeTcpPort();
+
+        await using var main = new Amber.NetworkServer.JayNetworkServerBuilder().UseDataDir(Path.Combine(work, "main")).UseEasyTier(core, cli)
+            .UseListenPort(mainPort).UseAdmin(0).UseBlockedWords(["广告"]).Build();
+        await main.StartAsync();
+        await using var region = new Amber.NetworkServer.JayNetworkServerBuilder().UseDataDir(Path.Combine(work, "region")).UseEasyTier(core, cli)
+            .UseListenPort(regionPort).UseSeeds([$"tcp://127.0.0.1:{mainPort}"]).SeedOnly().WithoutAdmin().Build();
+        await region.StartAsync();
+
+        var profile = PublicNetworkProfile.Jay();
+        using var host = PublicNetworkSession.Start(core, cli, new PublicNetworkOptions(profile with { Nodes = [$"tcp://127.0.0.1:{regionPort}"] },
+            EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()), Path.Combine(work, "host"));
+        using var guest = PublicNetworkSession.Start(core, cli, new PublicNetworkOptions(profile with { Nodes = [$"tcp://127.0.0.1:{mainPort}"] },
+            EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()), Path.Combine(work, "guest"));
+        await host.WaitForDirectoryAsync(TimeSpan.FromSeconds(60), default);
+        await guest.WaitForDirectoryAsync(TimeSpan.FromSeconds(60), default);
+
+        var hostKey = X25519KeyPair.Generate();
+        var standing = new InviteBook().CreateStanding(true, TunnelSettings.Default);
+        // 地址是 EasyTier 自动分配的，刚连上时可能还没分到。
+        string? myIp = null;
+        for (var i = 0; i < 60 && (myIp = await host.MyIpAsync(default)) is null; i++) await Task.Delay(500);
+        Assert.StartsWith(PublicNetworkProfile.Subnet, myIp);
+        Assert.NotNull(myIp);
+        RoomListing Room(string name) => new()
+        {
+            Id = "", Name = name, Host = "host", Mode = RoomVisibility.Public, HostKey = hostKey.PublicKey, Invite = standing.Invite.ToString(), Players = 1, Ip = myIp!,
+        };
+        var client = new RoomDirectoryClient(host);
+        var rejected = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Room("广告房"), DateTimeOffset.UtcNow), true, [], default));
+        Assert.Equal("name", rejected.Code);
+        Assert.Contains("不允许的词", rejected.Message);
+
+        var signer = new RoomSigner();
+        await client.AnnounceAsync(signer.Sign(Room("好房间"), DateTimeOffset.UtcNow), true, [], default);
+        var room = Assert.Single(await new RoomDirectoryClient(guest).ListAsync(default));
+        Assert.Equal("好房间", room.Name);
+        Assert.True(main.Health()["ok"]!.GetValue<bool>());
+        Assert.True(region.Health()["ok"]!.GetValue<bool>());
+
+        using var http = new HttpClient();
+        var admin = Amber.NetworkServer.AdminClient.ForDataDir(http, main.DataDir, main.AdminPort!.Value);
+        await admin.CallAsync("POST", "/ban", new System.Text.Json.Nodes.JsonObject { ["kind"] = "host", ["value"] = MemberIdentity.FingerprintOf(hostKey.PublicKey) });
+        Assert.Empty(await new RoomDirectoryClient(guest).ListAsync(default));
+        var banned = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(signer.Sign(Room("好房间"), DateTimeOffset.UtcNow.AddSeconds(1)), true, [], default));
+        Assert.Equal("banned", banned.Code);
+        try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
 }

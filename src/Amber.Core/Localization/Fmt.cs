@@ -35,10 +35,36 @@ public static class Fmt
         return L.F("format.duration.hours_minutes", minutes / 60, minutes % 60);
     }
 
+    /// <summary>Total play time: minutes under an hour, whole hours after that ("36 hours").</summary>
+    public static string PlayTime(TimeSpan time)
+    {
+        if (time.TotalMinutes < 60) return Minutes(time);
+        var hours = (long)Math.Round(time.TotalHours);
+        return L.P("format.duration.hours", hours, hours);
+    }
+
     /// <summary>“X 分钟”，不到 1 分钟按 1 分钟算。</summary>
     public static string Minutes(TimeSpan time)
     {
         var minutes = Math.Max(1, (long)Math.Round(time.TotalMinutes));
         return L.P("format.duration.minutes", minutes, minutes);
+    }
+
+    /// <summary>
+    /// How long ago, for "last played": just now, N minutes / hours ago, yesterday, N days ago (under a week),
+    /// otherwise the short date.
+    /// </summary>
+    public static string Ago(DateTimeOffset when, DateTimeOffset now)
+    {
+        var span = now - when;
+        if (span < TimeSpan.FromMinutes(1)) return L.T("format.ago.now");
+        if (span < TimeSpan.FromHours(1)) return L.P("format.ago.minutes", (long)span.TotalMinutes, (long)span.TotalMinutes);
+        var localWhen = when.ToLocalTime().Date;
+        var localNow = now.ToLocalTime().Date;
+        var days = (localNow - localWhen).Days;
+        if (days <= 0) return L.P("format.ago.hours", (long)span.TotalHours, (long)span.TotalHours);
+        if (days == 1) return L.T("format.ago.yesterday");
+        if (days < 7) return L.P("format.ago.days", days, days);
+        return when.ToLocalTime().ToString("d", L.Culture);
     }
 }

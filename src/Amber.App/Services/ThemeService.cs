@@ -54,11 +54,24 @@ public static class ThemeService
     /// 安全窗口（确认框、远程控制同意框和共享提示条）用 Jay 自带的配色、字号和字体：
     /// 窗口自己带一份默认 token，查资源时先找到它，主题包的值盖不到这里；组件样式本来就只加在主窗口上。
     /// </summary>
-    public static void LockToDefault(Window window) =>
+    public static void LockToDefault(Window window)
+    {
+        window.Resources.MergedDictionaries.Add(Controls.Safety.SafetySurface.DefaultTokens());
         window.Resources.MergedDictionaries.Add(new Avalonia.Markup.Xaml.Styling.ResourceInclude(new Uri("avares://Jay/"))
         {
-            Source = new Uri("avares://Jay/Themes/Tokens.axaml"),
+            Source = new Uri("avares://Jay/Themes/Safety.axaml"),
         });
+        window.FontFamily = Avalonia.Media.FontFamily.Parse(DefaultUiFont);
+        LockedWindows.Add(new WeakReference<Window>(window));
+    }
+
+    /// <summary>默认界面字体链（和 Tokens.axaml 的 UiFont 一致），锁定的窗口直接用它，主题换字体也不受影响。</summary>
+    public const string DefaultUiFont = "Segoe UI Variable Text, Segoe UI, $Default, Inter, Microsoft YaHei UI, PingFang SC, Noto Sans SC, Noto Sans CJK SC, Source Han Sans SC";
+
+    private static readonly List<WeakReference<Window>> LockedWindows = [];
+
+    /// <summary>这个窗口有没有锁到默认外观（自检断言用：每个安全窗口都要调用过 LockToDefault）。</summary>
+    public static bool IsLocked(Window window) => LockedWindows.Any(w => w.TryGetTarget(out var x) && ReferenceEquals(x, window));
 
     /// <summary>启动时调用（主窗口创建之前）。</summary>
     public static void ApplyAtStartup(AppSettings settings, string[] args)
@@ -337,7 +350,6 @@ public static class ThemeService
         if (resolve(pack.MonoFont) is { } mono) Set(resources, "MonoFont", new FontFamily(mono + ", Cascadia Mono, Consolas, monospace"));
     }
 
-    private const string DefaultUiFont = "Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, Source Han Sans SC, Segoe UI";
 
     /// <summary>语言换了：按语言指定的字体也要跟着换。</summary>
     public static void OnLanguageChanged()

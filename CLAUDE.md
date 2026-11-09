@@ -7,6 +7,8 @@ English comes first: write new code comments, docs, commit messages and PRs in E
 
 - `src/Amber.Core`: everything that isn't UI. That covers game launch (`Launch/`), version and loader install (`Install/`, `Game/`), mods and resources (`Content/`), accounts (`Auth/`), Java detection, the downloader with mirrors (`Net/`) and EasyTier-based multiplayer (`Multiplayer/`).
 - `src/Amber.App`: the Avalonia desktop app. `ViewModels/` holds one view model per page and `Views/` the XAML. `Services/LauncherService.cs` wires the Core services together. `Views/SelfTest.cs` is the end-to-end GUI self-check.
+- `src/Amber.NetworkServer`: the network server framework (assembly `Jay.NetworkServer`): public network node = EasyTier seed + room directory + login + room gates + local admin API. `jay-server directory` runs on it, and third parties can build their own nodes with it (`samples/MyJayNetwork`, `docs/network-server-framework.md`).
+- `src/Amber.Server`: `jay-server`, the server CLI (Jay-only MC server with gate/relays, and the public network node).
 - `src/Amber.Cli`: a developer CLI over the same Core. It is used for measurements and for scripted tests (`mods`, `launch`, `prewarm`, `add`, …).
 - `src/Amber.Core.Tests`: xUnit tests.
 - `tools/`: helper scripts (GUI self-check runner, multiplayer test).
@@ -33,10 +35,32 @@ GUI self-check: it drives the real window through install, launch, mods, multipl
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Report <dir>
 ```
 
-只验证联机页引导时，设置 `AMBER_SELFTEST_SCOPE=multiplayer-guide`；用 `AMBER_DATA_DIR` 指向独立测试配置，并在该配置中指定测试游戏目录。此范围不下载联机组件、不建立房间连接，输出真实窗口操作结果及四种语言的小中大布局截图。
+只验证联机页大厅和页签时，设置 `AMBER_SELFTEST_SCOPE=multiplayer-guide`；用 `AMBER_DATA_DIR` 指向独立测试配置，并在该配置中指定测试游戏目录。检查四个页签（一起玩、公开房间、服务器、联机设置）和 `play/…` 路由、开房间 / 加入朋友两张卡（宽窗并排、中等上下、紧凑加入在上）、万能粘贴框认出每种码、一盏灯（贴码后琥珀移到加入）、Ctrl+V 贴码只填好不敲门、贴错框的码转到对的地方、中转服务器在联机设置里、开服第一步。此范围不下载联机组件、不建立房间连接，输出真实窗口操作结果及截图。
 
 只验证资源页首次加载和来源切换时，先设置 `AMBER_SELFTEST_SCOPE=content`；同样输出报告和截图，跳过游戏安装与启动。
 只验证联机（邀请、敲门、房间、直连）时设置 `AMBER_SELFTEST_SCOPE=multiplayer`。
+只验证光影检查时设置 `AMBER_SELFTEST_SCOPE=shader`：在报告目录里建一个临时游戏目录（Fabric 和原版两个手写版本），检查实例光影页和资源页在缺 Iris、已装 Iris、原版三种情况下的提示和【安装 Iris】，不联网。
+只看控件库和新配色时设置 `AMBER_SELFTEST_SCOPE=gallery`：控件库每一格和现有每一页在深浅两色下截图，检查琥珀按钮每屏最多一个、图标都解析得到；不碰游戏目录、不联网。
+只验证新外壳时设置 `AMBER_SELFTEST_SCOPE=shell`：600×420 到 1440×900 四种窗口 × 四种语言截图，检查隐私行、三个入口、设置和账号都看得见，侧栏只在宽窗口展开；再走快捷键、返回前进、旧的九页都能走到、`settings#字段` 定位和带上下文返回。不碰游戏目录、不联网。
+只验证游戏库主页时设置 `AMBER_SELFTEST_SCOPE=library`：在报告目录里建一个临时游戏目录（五个手写版本），检查继续玩、需要你处理、固定排前、搜索、筛选、排序、封面和列表视图、打开、固定、空状态，三种宽度两种语言截图，不联网。
+只验证模组页签时设置 `AMBER_SELFTEST_SCOPE=mods`：在报告目录里建临时游戏目录和手写的模组 jar，检查搜索、筛选、检查器（宽档一栏、其余盖在右边）、勾选和批量栏、批量禁用 / 启用 / 删除和撤销、表格快捷键、检查出更新后才有【全部更新】、原版空状态，三种宽度两种语言截图；不联网。
+只验证实例详情页时设置 `AMBER_SELFTEST_SCOPE=instance`：在报告目录里建临时游戏目录，模拟开始按钮的每个状态（没账号、就绪、准备中、进入中、正在玩、退出中、崩溃后、没装完），检查“上一局”面板的就地修复（调内存、禁用模组、关光影）、概览页签、Alt+数字和 Ctrl+Tab，三种宽度两种语言截图；不启动游戏、不联网。
+只验证新建实例面板时设置 `AMBER_SELFTEST_SCOPE=new-instance`：在报告目录里建临时游戏目录，检查来源栏随宽度变分段、版本类型芯片、加载器按版本置灰并写原因、名字行内检查挡住【安装】、整合包文件预览、进发现页、复制实例（带不带存档）、其他启动器的游戏文件夹、Esc 关闭，三种宽度两种语言截图；只联网取版本列表和 Fabric 版本，不安装。
+只验证“最近删除”时设置 `AMBER_SELFTEST_SCOPE=recycle`：在报告目录里建临时游戏目录，把模组、世界、实例移进回收目录，检查设置里的列表（类型、来自哪个实例、剩几天）、【恢复】回原位（实例不改名）、保留天数、【永久删除】和【清空…】走锁定确认；不联网。
+只验证资源包和光影页签时设置 `AMBER_SELFTEST_SCOPE=packs`：在报告目录里建临时游戏目录和 Fabric 实例，检查已启用 / 未启用两栏（按 options.txt，越靠上越优先）、勾选和 ↑↓ / Alt+↑↓ 写回 options.txt、版本旧 / 版本新标签、删除进最近删除、没装 Iris 时的横幅、选光影写 iris.properties 和【不用光影】，宽窄两种宽度两种语言截图；不联网。
+只验证世界备份时设置 `AMBER_SELFTEST_SCOPE=backups`：在报告目录里建临时游戏目录和一个世界，检查 B 备份进活动中心、Enter 打开世界面板、备份按新到旧列出、【恢复…】走锁定确认（写明时间、会先备份现在的世界）、恢复后内容回到旧备份且自动备份进列表，宽窄两种截图；不联网。
+只验证实例日志页签时设置 `AMBER_SELFTEST_SCOPE=logs`：在报告目录里建临时游戏目录和两局存下的日志，检查运行记录（新的在前、宽窗左栏、窄了变下拉）、崩溃诊断行、堆栈收成一行、重复警告 ×N、筛选和搜索、F8 / Shift+F8 跳错误、导出错误报告先给锁定的隐私预览、报告里没有电脑用户名，三种宽度两种语言截图；不联网。
+只验证【帮我修…】时设置 `AMBER_SELFTEST_SCOPE=fix`：在报告目录里建临时游戏目录和七个占位模组文件，其中一个扮演致崩模组，检查一半一半地关模组、卡片写第几轮、换实例回来（等于重启）接着来、三轮内找到、【关掉 X】只关这一个、中途【全部恢复原样】，宽窄两种截图；不联网、不启动游戏。
+只验证命令面板时设置 `AMBER_SELFTEST_SCOPE=palette`：在报告目录里建临时游戏目录和两个实例，检查 Ctrl+K 打开且光标在输入框、拼音首字母和旧页面名搜得到、`#` 只列设置并 Enter 定位到字段、最近用过排前、“开始游戏…”第二步选实例和 Esc 退一步、Tab 进到选实例、贴邀请码排第一且只填好不敲门、找不到时的提示、Esc 还焦点，宽窄两种宽度两种语言截图；不联网、不启动游戏。
+只验证设置分组时设置 `AMBER_SELFTEST_SCOPE=settings-layout`：检查 10 个分组（宽窗左栏 + 说明栏、中等宽度顶部下拉、紧凑先列分组再点进去）、一次只显示一组、每个设置项都能用 `settings#字段` 定位并自动打开分组、命令面板能找到每个设置项、Ctrl+F 搜索写成“分组 › 设置”且 Enter 跳到字段、“开始游戏后”存进设置，三种宽度两种语言截图；不联网。
+只验证关于和隐私时设置 `AMBER_SELFTEST_SCOPE=privacy`：检查“关于和隐私”是锁定的独立页（路由 `about`）、联网清单 5 类和各自现在的状态、“改 ›”跳到对应设置、设置 › 隐私与安全显示同一张清单、“给孩子用”总开关打开六项并在联机里藏起远程控制 / 公共网络 / 经我经 TA / 免确认邀请、写上次改动时间、打开每一页没有清单外的请求，宽窄两种宽度两种语言截图；不联网（发现页的搜索请求除外，属于第 3 类）。
+只验证帮助时设置 `AMBER_SELFTEST_SCOPE=help`：检查 F1 在每个路由都打开本页帮助抽屉、抽屉里 Ctrl+F 搜索（拼音首字母）、文章里的 `jay:` 链接跳到设置、Esc 关闭、“打开帮助中心”和 Shift+F1、帮助中心三种宽度（左目录 / 下拉 / 先目录再文章）、命令面板 `?` 找文章，三种宽度两种语言截图；不联网。帮助文章在 `docs/help/{zh-Hans,zh-Hant,en,ja}/`，打包进 Amber.Core。
+只验证日志停靠和密度时设置 `AMBER_SELFTEST_SCOPE=dock-density`：检查 Ctrl+` 把游戏日志停靠到内容区底部（高 240、可拖、换页面还在）、弹出成独立窗口再停靠回来、矮窗口变成抽屉且 Esc 收起；密度改紧凑时控件变矮、存进设置、锁定的安全界面不变，改回标准去掉覆盖；两种密度截图；不联网。
+只验证拖放导入时设置 `AMBER_SELFTEST_SCOPE=drop`：在报告目录里建临时游戏目录和 Fabric 实例，对真实窗口发拖放事件，检查按类型给落点（模组、资源包、存档、整合包）、悬停高亮、放在落点外不做事、同名不覆盖、原版实例和认不出的文件写原因、整合包打开新建实例预览，宽窄两种截图；不联网。
+只验证首次启动向导时设置 `AMBER_SELFTEST_SCOPE=firstrun`（配一个全新的 `AMBER_DATA_DIR`）：检查向导盖住外壳、右上角换语言、名字为空或不合法挡住【继续】、Enter 加离线账号、第 2 步默认原版且只有一个琥珀按钮、发现的游戏【加进游戏库】、小知识手动翻页、锁定的隐私块和联网清单、Esc 不退出、【跳过】、“选别的版本”，四种窗口两种语言截图；只联网取版本列表，不安装。别的范围不会弹出向导。
+只验证发现页时设置 `AMBER_SELFTEST_SCOPE=discover`：在报告目录里建临时游戏目录和一个 Fabric 实例，检查类型芯片（窄窗变下拉）、来源分段、结果行【＋待装】和 Space、待装条【安装 N 个】一次装完（连前置）、详情三种宽度（右栏 / 抽屉 / 全区）、Esc、上下文模式【完成，返回】、整合包唯一的琥珀按钮，三种宽度两种语言截图；联网搜 Modrinth 并下载待装的模组。
+只验证活动中心时设置 `AMBER_SELFTEST_SCOPE=activity`：模拟任务、请求、一局游戏和启动失败，检查活动抽屉（Ctrl+J / Esc，三档宽度）、请求条（倒计时、去重、安全请求在最前、处理后同步收起）、出错通知不自动消失、正在玩胶囊、启动失败卡的修复按钮和关窗保护。不碰游戏目录、不联网。
+只验证安全外观锁定时设置 `AMBER_SELFTEST_SCOPE=safety-lock`：装上五个极端主题包，逐像素比对安全面板和隐私行在深浅两色下跟默认外观一致，并检查带保留词的主题包被拒、确认框默认焦点在“保留”。
 只验证界面主题包（导出、导入、立即生效、坏包被拒、恢复默认、删除）时设置 `AMBER_SELFTEST_SCOPE=theme`；主题包格式见 `docs/themes.md`。
 只验证联机安全（设置页“联机安全”卡片、熔断倒计时盖住窗口、空格取消、到点重启、10 分钟内不再自动重启、跳过等待）时设置 `AMBER_SELFTEST_SCOPE=security`；重启这一步换成计数，不会真的重启。
 开服端到端要开两个 Jay：一个 `AMBER_SELFTEST_SCOPE=host-server`（按“开服”卡片的按钮走完 填地址 → 准备服务端 → 启动 → 邀请 → 等进服 → 撤销 → 停服 → 再开后关窗口），一个 `AMBER_SELFTEST_SCOPE=jay-client`（离线账号 Steve，用 `AMBER_SELFTEST_VERSION` 指定的实例进服）。两边各用自己的 `AMBER_DATA_DIR`，`AMBER_SELFTEST_INVITE` 指向同一个邀请码文件。`AMBER_SELFTEST_SCOPE=host-exit` 只测“服务器开着时关 Jay 会先存盘”。

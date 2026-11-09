@@ -57,6 +57,8 @@ public class SpeedTestSecurityTests
         var limits = new SpeedTestServer.Limits(2, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5),
             TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
         await using var server = new SpeedTestServer(0, limits);
+        // The second listener is on IPv6 loopback; systems with IPv6 turned off can't run this.
+        if (!System.Net.Sockets.Socket.OSSupportsIPv6) return;
         var secondAddress = IPAddress.IPv6Loopback;
         Assert.True(server.TryAddListener(secondAddress));
         using var first = await ConnectAsync(server.BoundPort);

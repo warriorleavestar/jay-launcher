@@ -122,6 +122,7 @@ public sealed record NetworkConfig(string Network, string? Notice, IReadOnlyList
     /// </summary>
     public static async Task<NetworkConfig> GetAsync(HttpClient http, NetworkConfigRef reference, string networkId, string cacheDir, CancellationToken ct)
     {
+        using var scope = Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.Multiplayer);
         var sha = reference.Sha256.ToLowerInvariant();
         var cached = Path.Combine(cacheDir, sha + ".json");
         if (File.Exists(cached))

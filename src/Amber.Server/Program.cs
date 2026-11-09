@@ -5,6 +5,7 @@ using Amber.Core.Multiplayer.Gate;
 using Amber.Core.Multiplayer.Public;
 using Amber.Core.Multiplayer.Transport;
 using Amber.Core.Net;
+using Amber.NetworkServer;
 
 namespace Amber.Server;
 
@@ -57,8 +58,24 @@ public static class Program
           jay-server directory [--listen 11010] [--seeds tcp://别的种子:11010,...] [--easytier <放 easytier-core 的文件夹>]
               在有公网 IP 的机器上运行，要放行 TCP 和 UDP 的 11010 端口。房间目录只在公共网络里可达（10.235.0.1:47668），不对公网开放。
               目录只存房主签过名的房间信息（名字、人数、敲门地址），不经手任何密钥；90 秒没续期的房间自动消失。
+              --config <网络配置.json>        节点也按配置里允许的房间方式挡一道（防改过的客户端）
+              --blocked-words <文件>          屏蔽词，一行一个：公开房间的名字、房主名里有就不收
+              --rate-limit 3,6,600            每人同时几个房间、每人每分钟新发布几次、整个目录每分钟几个新房间（默认 3,6,600；--no-rate-limit 关掉）
+              --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
+              --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
+              --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
+                                              备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
+          jay-server node status|rooms|bans   看运行中节点的计数、公开房间、封禁名单
+          jay-server node ban host|room|account|room-host <房主指纹|房间编号|账号|房间编号> [--for 7d] [--reason 原因]
+              封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
+              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
+          jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
         自己的公共网络（连接串 JAYNET1-...）：
+          jay-server network init <编号> --name <名字> --host <公网地址> [--listen 11010] [--out <文件夹>]
+              一步生成签名钥匙、网络 JSON 和网络配置模板，并打印后面几步
+          jay-server network config-hash <配置.json> --network <网络.json> [--url https://...]
+              检查配置文件、算 SHA-256；给了 --url 就写进网络 JSON（版本号加一），然后重新 sign
           jay-server network keygen --out <钥匙文件>          生成签名钥匙（私钥存在文件里，只自己留着），打印公钥
           jay-server network sign <网络.json> [--key <钥匙文件>]  签名并打印连接串（也可以用环境变量 JAY_NETWORK_KEY 给钥匙）
           jay-server network check <网络.json> ...             只检查格式（注册表的 PR 检查用）
@@ -97,6 +114,7 @@ public static class Program
                 "directory" => await DirectoryAsync(root, options),
                 "network" => NetworkCommand(options, Console.Out),
                 "account" => AccountCommand(root, options, Console.Out, ReadPassword),
+                "node" => await NodeCommand(root, options, Console.Out),
                 null => Help(),
                 _ => Admin(root, options, Console.Out),
             };
@@ -188,7 +206,9 @@ public static class Program
                 if (line.StartsWith("jay ", StringComparison.Ordinal))
                 {
                     try { Admin(root, Options.Parse(Split(line[4..])), Console.Out); }
-                    catch (Exception e) when (e is ArgumentException or InvalidOperationException or IOException or FormatException) { Console.WriteLine("出错：" + e.Message); }
+                    // Any failure here (a corrupt store, a bad key file, ...) must not end this loop: it is also what forwards
+                    // console input to the Minecraft server.
+                    catch (Exception e) when (e is not OperationCanceledException) { Console.WriteLine("出错：" + e.Message); }
                 }
                 else runner.Command(line);
             }
@@ -237,7 +257,7 @@ public static class Program
     /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
     internal static int NetworkCommand(Options options, TextWriter output)
     {
-        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network keygen|sign|check|show");
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show");
         var rest = options.Positional.Skip(1).ToList();
         switch (sub)
         {
@@ -283,6 +303,51 @@ public static class Program
                 }
                 return bad == 0 ? 0 : 1;
             }
+            case "init":
+            {
+                // 一步准备好自己的公共网络：签名钥匙 + 网络 JSON + 网络配置模板。
+                var id = rest.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init <编号> --name <名字> --host <公网地址> [--listen 11010] [--out <文件夹>]");
+                var name = options.Get("name") ?? throw new ArgumentException("要用 --name 给网络起个名字");
+                var host = options.Get("host") ?? throw new ArgumentException("要用 --host 给节点的公网地址（IP 或域名）");
+                var port = options.GetInt("listen", 11010);
+                var dir = Path.GetFullPath(options.Get("out") ?? id);
+                var nodes = new List<string> { $"tcp://{host}:{port}", $"udp://{host}:{port}" };
+                var r = NetworkScaffold.Init(dir, id, name, nodes);
+                output.WriteLine($"已生成（在 {dir}）：");
+                output.WriteLine($"  {Path.GetFileName(r.KeyPath)}：签名私钥，只自己留着，不要提交、不要发给别人");
+                output.WriteLine($"  {Path.GetFileName(r.NetworkPath)}：网络信息（名字、EasyTier 网络名和密钥、节点）");
+                output.WriteLine($"  {Path.GetFileName(r.ConfigPath)}：网络配置（公告、链接、安全策略），按需修改");
+                output.WriteLine($"签名公钥：{Convert.ToBase64String(r.PublicKey)}");
+                output.WriteLine("下一步：");
+                output.WriteLine($"  1. 改好 config.json，传到一个 https 地址（比如 GitHub Pages），然后：");
+                output.WriteLine($"     jay-server network config-hash {r.ConfigPath} --network {r.NetworkPath} --url https://<地址>/config.json");
+                output.WriteLine($"  2. jay-server network sign {r.NetworkPath} --key {r.KeyPath} > {id}.jaynet");
+                output.WriteLine($"  3. jay-server directory --network {id}.jaynet --config {r.ConfigPath} --listen {port}");
+                output.WriteLine("  不要配置文件就跳过第 1 步。");
+                return 0;
+            }
+            case "config-hash":
+            {
+                // 检查配置文件 Jay 能不能读，算 SHA-256；给了 --network 和 --url 就顺手写进网络 JSON（版本号加一）。
+                var file = rest.FirstOrDefault() ?? throw new ArgumentException("要给配置文件");
+                var networkFile = options.Get("network");
+                var networkId = options.Get("id") ?? (networkFile is not null ? ReadNetwork(networkFile).Id
+                    : throw new ArgumentException("要用 --network <网络.json> 或 --id <编号> 说明是哪个网络的配置"));
+                var (config, sha) = NetworkScaffold.Hash(file, networkId);
+                output.WriteLine($"配置文件没问题：允许的房间方式 {string.Join("、", config.Policy.AllowedModes.Order())}，" +
+                    $"{(config.Login is { } l ? l.Required ? "要求登录" : "可选登录" : "不用登录")}，{config.Links.Count} 个链接，" +
+                    $"{(config.Policy.MinVersion is { } min ? $"最低 Jay {min}（节点挡更旧的）" : "不限 Jay 版本")}");
+                output.WriteLine($"SHA-256：{sha}");
+                if (options.Get("url") is { } url)
+                {
+                    if (networkFile is null) throw new ArgumentException("要写进网络 JSON 时要给 --network <网络.json>");
+                    var info = NetworkScaffold.AttachConfig(networkFile, url, sha);
+                    output.WriteLine($"已写进 {networkFile}（版本号 {info.Seq}）。重新签名：jay-server network sign {networkFile} --key <钥匙文件>");
+                }
+                else output.WriteLine($"写进网络 JSON：\"config\": {{ \"url\": \"https://<地址>\", \"sha256\": \"{sha}\" }}");
+                output.WriteLine("注意：改了配置文件就要重新算哈希、重新签连接串，玩家粘贴新连接串后才生效。");
+                return 0;
+            }
             case "show":
             {
                 var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
@@ -292,7 +357,7 @@ public static class Program
                 return 0;
             }
             default:
-                throw new ArgumentException("用法：jay-server network keygen|sign|check|show");
+                throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show");
         }
     }
 
@@ -305,47 +370,22 @@ public static class Program
         return info;
     }
 
-    /// <summary>公共网络的种子节点 + 房间目录：一个 EasyTier（固定地址 10.235.0.1，同时监听公网端口当节点）+ 本机 127.0.0.1:47668 的目录服务。</summary>
+    /// <summary>
+    /// 公共网络的种子节点 + 房间目录：用网络服务端框架（Jay.NetworkServer）跑一个 EasyTier（固定地址 10.235.0.1，同时监听公网端口当节点）
+    /// + 本机 127.0.0.1:47668 的目录服务 + 本机 127.0.0.1:47669 的管理接口。
+    /// </summary>
     private static async Task<int> DirectoryAsync(string root, Options options)
     {
         var log = (string line) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [Jay 公共节点] {line}");
+        var builder = DirectoryBuilder(root, options, Console.Out, log);
+        await using var server = builder.Build();
+        await server.StartAsync();
+        server.EasyTierOutput += line => { if (options.Has("verbose")) log(line); };
         var listen = options.GetInt("listen", 11010);
-        if (listen is < 1 or > 65535) throw new ArgumentException("--listen 要是 1–65535 的端口");
-        var seeds = (options.Get("seeds") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        foreach (var s in seeds) if (!RelayNodes.IsValid(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://1.2.3.4:11010）");
-
-        string core, cli;
-        if (options.Get("easytier") is { } dir)
-        {
-            var exe = OperatingSystem.IsWindows() ? ".exe" : "";
-            core = Path.Combine(Path.GetFullPath(dir), "easytier-core" + exe);
-            cli = Path.Combine(Path.GetFullPath(dir), "easytier-cli" + exe);
-            if (!File.Exists(core) || !File.Exists(cli)) throw new IOException($"{dir} 里没有 easytier-core 和 easytier-cli");
-        }
-        else
-        {
-            using var http = Downloader.CreateHttpClient();
-            var installer = new EasyTierInstaller(new Downloader(http, SourceChain.Default()), root);
-            if (!installer.IsInstalled) log("下载 EasyTier……");
-            await installer.EnsureAsync();
-            (core, cli) = (installer.CorePath, installer.CliPath);
-        }
-
-        var profile = PublicNetworkProfile.Jay(seeds);
-        if (options.Get("network") is { } networkText)
-        {
-            // 自己的公共网络：用连接串里的网络名和密钥（节点就是这台机器，种子另外给）。
-            var signed = NetworkString.Parse(File.Exists(networkText) ? File.ReadAllText(networkText) : networkText);
-            profile = signed.ToProfile() with { Nodes = seeds };
-            log($"用公共网络“{signed.Info.Name}”（{signed.Info.Id}，{(signed.Reviewed ? "Jay 审核过" : "未经 Jay 审核")}）");
-        }
-        var login = LoginFor(root, options, profile.Id, Console.Out);
-        await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort, log) { Login = login };
-        var options2 = new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true,
-            Listeners: [$"tcp://0.0.0.0:{listen}", $"udp://0.0.0.0:{listen}"]);
-        using var network = PublicNetworkSession.Start(core, cli, options2, Path.Combine(root, "public-node"));
-        network.Output += line => { if (options.Has("verbose")) log(line); };
-        log($"公共网络 {profile.NetworkName} 的节点在端口 {listen}（TCP/UDP）上运行，房间目录在 {PublicNetworkProfile.DirectoryIp}:{PublicNetworkProfile.DirectoryPort}");
+        log(server.SeedOnly
+            ? $"公共网络 {server.Profile.NetworkName} 的种子节点（不跑目录）在端口 {listen}（TCP/UDP）上运行"
+            : $"公共网络 {server.Profile.NetworkName} 的节点在端口 {listen}（TCP/UDP）上运行，房间目录在 {server.DirectoryIp}:{PublicNetworkProfile.DirectoryPort}");
+        if (server.AdminPort is { } admin) log($"管理接口在 127.0.0.1:{admin}（健康检查 /health；jay-server node status 看状态）");
         log($"在 Jay 的联机设置里把公共节点填成 tcp://<这台机器的公网地址>:{listen}");
 
         var stop = new CancellationTokenSource();
@@ -354,24 +394,116 @@ public static class Program
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Stop();
         using var sigterm = OperatingSystem.IsWindows() ? null
             : System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; Stop(); });
-        var last = -1;
-        while (!stop.IsCancellationRequested)
-        {
-            if (network.HasExited)
-            {
-                log("EasyTier 意外退出：" + string.Join(" / ", network.RecentOutput.TakeLast(3)));
-                return 1;
-            }
-            if (directory.Count != last)
-            {
-                last = directory.Count;
-                log($"目录里现在有 {last} 个房间");
-            }
-            try { await Task.Delay(TimeSpan.FromSeconds(10), stop.Token); }
-            catch (OperationCanceledException) { }
-        }
+        var code = await server.RunAsync(stop.Token);
         log("正在关闭……");
-        return 0;
+        return code;
+    }
+
+    /// <summary>按 directory 命令的选项配好网络服务端（不启动）。测试直接调。</summary>
+    internal static JayNetworkServerBuilder DirectoryBuilder(string root, Options options, TextWriter output, Action<string> log)
+    {
+        var listen = options.GetInt("listen", 11010);
+        if (listen is < 1 or > 65535) throw new ArgumentException("--listen 要是 1–65535 的端口");
+        var seeds = (options.Get("seeds") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var builder = new JayNetworkServerBuilder().UseDataDir(root).UseListenPort(listen).UseSeeds(seeds).UseLog(log);
+
+        if (options.Get("easytier") is { } dir)
+        {
+            var exe = OperatingSystem.IsWindows() ? ".exe" : "";
+            var core = Path.Combine(Path.GetFullPath(dir), "easytier-core" + exe);
+            var cli = Path.Combine(Path.GetFullPath(dir), "easytier-cli" + exe);
+            if (!File.Exists(core) || !File.Exists(cli)) throw new IOException($"{dir} 里没有 easytier-core 和 easytier-cli");
+            builder.UseEasyTier(core, cli);
+        }
+
+        var networkId = PublicNetworkProfile.Jay().Id;
+        if (options.Get("network") is { } networkText)
+        {
+            // 自己的公共网络：用连接串里的网络名和密钥（节点就是这台机器，种子另外给）。
+            var signed = NetworkString.Parse(File.Exists(networkText) ? File.ReadAllText(networkText) : networkText);
+            builder.UseNetwork(signed);
+            networkId = signed.Info.Id;
+            log($"用公共网络“{signed.Info.Name}”（{signed.Info.Id}，{(signed.Reviewed ? "Jay 审核过" : "未经 Jay 审核")}）");
+        }
+        if (options.Has("seed-only"))
+        {
+            if (options.Has("accounts") || options.Get("config") is not null || options.Get("blocked-words") is not null)
+                throw new ArgumentException("--seed-only 的节点不跑目录，不能同时用 --accounts、--config、--blocked-words");
+            builder.SeedOnly();
+        }
+        if (options.Get("directory-index") is not null)
+        {
+            if (options.Has("seed-only")) throw new ArgumentException("--seed-only 的节点不跑目录，不能用 --directory-index");
+            builder.UseDirectoryIndex(options.GetInt("directory-index", 1));
+        }
+        if (options.Get("config") is { } configPath)
+        {
+            // 节点这边也按网络配置的 policy.modes 挡一道（防改过的客户端）。
+            var (config, sha) = NetworkScaffold.Hash(configPath, networkId);
+            builder.UseConfig(config);
+            log($"网络配置 {Path.GetFileName(configPath)}（SHA-256 {sha[..12]}…）：允许的房间方式 {string.Join("、", config.Policy.AllowedModes.Order())}");
+        }
+        if (options.Get("blocked-words") is { } words)
+        {
+            var filter = NameFilterGate.FromFile(words);
+            builder.AddGate(filter);
+            log($"屏蔽词 {filter.Count} 个");
+        }
+        if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
+        else if (options.Get("rate-limit") is { } rate)
+        {
+            var parts = rate.Split(',', StringSplitOptions.TrimEntries);
+            if (parts.Length != 3 || !parts.All(p => int.TryParse(p, out var n) && n > 0))
+                throw new ArgumentException("--rate-limit 格式是 <每人同时几个房间>,<每人每分钟新发布几次>,<整个目录每分钟几个新房间>，比如 3,6,600");
+            var n = parts.Select(int.Parse).ToArray();
+            builder.UseRateLimit(n[0], n[1], n[2]);
+        }
+        if (options.Has("no-admin")) builder.WithoutAdmin();
+        else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
+        if (!options.Has("seed-only") && LoginFor(root, options, networkId, output) is { } login) builder.UseLogin(login);
+        return builder;
+    }
+
+    /// <summary>jay-server node：经本机管理接口看运行中的网络节点、封禁、删房间。</summary>
+    internal static async Task<int> NodeCommand(string root, Options options, TextWriter output, HttpClient? http = null)
+    {
+        var sub = options.Positional.FirstOrDefault() ?? "status";
+        var rest = options.Positional.Skip(1).ToList();
+        using var owned = http is null ? new HttpClient { Timeout = TimeSpan.FromSeconds(10) } : null;
+        var client = AdminClient.ForDataDir(http ?? owned!, root, options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
+        var pretty = new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        string Need(int i, string what) => rest.ElementAtOrDefault(i) ?? throw new ArgumentException("要给" + what);
+        System.Text.Json.Nodes.JsonObject reply;
+        try
+        {
+            reply = sub switch
+            {
+                "status" => await client.CallAsync("GET", "/stats"),
+                "rooms" => await client.CallAsync("GET", "/rooms"),
+                "bans" => await client.CallAsync("GET", "/bans"),
+                "ban" => await client.CallAsync("POST", "/ban", new()
+                {
+                    ["kind"] = Need(0, "host、room、account 或 room-host"), ["value"] = Need(1, "房主指纹、房间编号或账号"), ["reason"] = options.Get("reason"),
+                    ["for"] = options.Get("for") is { } span ? BanSeconds(span) : null,
+                }),
+                "unban" => await client.CallAsync("POST", "/unban", new() { ["kind"] = Need(0, "host、room 或 account"), ["value"] = Need(1, "房主指纹、房间编号或账号") }),
+                "remove" => await client.CallAsync("POST", "/remove", new() { ["id"] = Need(0, "房间编号") }),
+                _ => throw new ArgumentException("用法：jay-server node status|rooms|bans|ban|unban|remove"),
+            };
+        }
+        catch (HttpRequestException e)
+        {
+            throw new IOException("连不上节点的管理接口（节点在运行吗？--admin-port 对吗？）：" + e.Message);
+        }
+        if (sub == "rooms" && reply["ok"]?.GetValue<bool>() == true)
+        {
+            output.WriteLine($"目录里 {reply["total"]} 个房间，其中 {reply["hidden"]} 个不公开（不显示内容）。公开的：");
+            foreach (var r in reply["rooms"] as System.Text.Json.Nodes.JsonArray ?? [])
+                output.WriteLine($"  {r!["id"]}  {r["name"]}（房主 {r["host"]}，指纹 {r["hostFingerprint"]}，{r["mode"]}，{r["players"]} 人）");
+            return 0;
+        }
+        output.WriteLine(reply.ToJsonString(pretty));
+        return reply["ok"]?.GetValue<bool>() == true ? 0 : 1;
     }
 
     /// <summary>directory --accounts：账号表 + 登录钥匙 + 第二步验证。没开就是 null。</summary>
@@ -685,6 +817,12 @@ public static class Program
         output.WriteLine($"在节点电脑上运行：jay-server relay --origin <网关地址>:<网关端口> --listen {GateEndpoint.TryParse(address)?.Port} --code <上面这段>");
     }
 
+    private static long BanSeconds(string text)
+    {
+        var span = ParseDuration(text);
+        return span > TimeSpan.Zero ? (long)span.TotalSeconds : throw new ArgumentException("--for 要大于 0，比如 30m、24h、7d");
+    }
+
     internal static TimeSpan ParseDuration(string text)
     {
         if (text == "0") return TimeSpan.Zero;
@@ -708,7 +846,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];

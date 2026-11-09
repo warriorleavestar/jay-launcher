@@ -1,0 +1,457 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:c="using:Amber.App.Views.Controls"
+             xmlns:views="using:Amber.App.Views"
+             x:Class="Amber.App.Views.SettingsPage"
+             x:DataType="vm:SettingsViewModel">
+  <!-- Settings (official design §6.20): ten groups. Wide: group list 200 + form ≤ 720 + "what is this" note. Medium: a
+       group picker at the top. Compact: the group index with one-line summaries, then one group at a time.
+       Saves on change (combo boxes and check boxes at once, text boxes when they lose focus and pass the check).
+       Declaration order follows row order so Tab goes top to bottom. Each control's x:Name is its settings#Field. -->
+  <UserControl.Styles>
+    <Style Selector="StackPanel.group">
+      <Setter Property="Spacing" Value="0" />
+    </Style>
+    <Style Selector="TextBlock.group-title">
+      <Setter Property="FontSize" Value="{DynamicResource FontSubtitle}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,10" />
+    </Style>
+    <Style Selector="ListBox#GroupList > ListBoxItem, ListBox#GroupIndex > ListBoxItem, ListBox#SearchHitList > ListBoxItem">
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Grid x:Name="Header" ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8" Margin="0,0,0,8">
+      <Button x:Name="GroupBackButton" Classes="ghost" Content="‹" FontSize="20" Padding="8,0" VerticalAlignment="Center" IsVisible="False"
+              Command="{Binding BackToGroupsCommand}" ToolTip.Tip="{l:T settings.groups.back}" AutomationProperties.Name="{l:T settings.groups.back}" />
+      <TextBlock x:Name="SettingsTitle" Grid.Column="1" Classes="h1" Text="{Binding HeaderTitle}" Margin="0" VerticalAlignment="Center" />
+      <ComboBox x:Name="GroupPicker" Grid.Column="2" ItemsSource="{Binding Groups}" SelectedIndex="{Binding SelectedGroupIndex}" MinWidth="160"
+                HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,0" IsVisible="False" AutomationProperties.Name="{l:T settings.groups.picker}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" /></DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+      <TextBox x:Name="SettingsSearchBox" Grid.Column="3" Width="260" Text="{Binding SettingsSearch}" PlaceholderText="{l:T settings.search.placeholder}"
+               VerticalAlignment="Center" AutomationProperties.Name="{l:T settings.search.placeholder}" />
+    </Grid>
+
+    <Grid x:Name="Body" Grid.Row="1" ColumnDefinitions="200,*,240" ColumnSpacing="16">
+      <ListBox x:Name="GroupList" ItemsSource="{Binding Groups}" SelectedIndex="{Binding SelectedGroupIndex}" Background="Transparent"
+               AutomationProperties.Name="{l:T settings.groups.picker}">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" /></DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <ScrollViewer x:Name="FormScroll" Grid.Column="1">
+        <StackPanel x:Name="Form" MaxWidth="720" HorizontalAlignment="Stretch" Margin="0,0,14,0">
+
+          <!-- General -->
+          <StackPanel x:Name="Group_general" Classes="group">
+            <Border Classes="card">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                <TextBlock Text="{l:T settings.language.label}" VerticalAlignment="Center" />
+                <ComboBox x:Name="LanguageBox" Grid.Column="1" ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding SelectedLanguageIndex}" MinWidth="160"
+                          AutomationProperties.Name="{l:T settings.language.label}" />
+                <TextBlock Grid.Row="1" Text="{l:T settings.after_launch.label}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <ComboBox x:Name="AfterLaunchBox" ItemsSource="{Binding AfterLaunchOptions}" SelectedIndex="{Binding AfterLaunchIndex}" MinWidth="160"
+                            AutomationProperties.Name="{l:T settings.after_launch.label}" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.after_launch.hint}" TextWrapping="Wrap" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </StackPanel>
+
+          <!-- Appearance -->
+          <StackPanel x:Name="Group_appearance" Classes="group">
+            <Border Classes="card">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                <TextBlock Text="{l:T settings.theme.label}" VerticalAlignment="Center" />
+                <ComboBox x:Name="ThemeBox" Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedIndex="{Binding SelectedThemeIndex}" MinWidth="160"
+                          AutomationProperties.Name="{l:T settings.theme.label}" />
+                <Button Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,0,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="theme"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="1" Text="{l:T settings.motion.label}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <ComboBox x:Name="MotionBox" ItemsSource="{Binding MotionOptions}" SelectedIndex="{Binding SelectedMotionIndex}" MinWidth="160"
+                            AutomationProperties.Name="{l:T settings.motion.label}" />
+                  <TextBlock Classes="hint" Text="{l:T settings.motion.hint}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Row="1" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="motion"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="2" Text="{l:T settings.sidebar.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <ComboBox x:Name="SidebarBox" Grid.Row="2" Grid.Column="1" ItemsSource="{Binding SidebarOptions}" SelectedIndex="{Binding SelectedSidebarIndex}" MinWidth="160" Margin="0,12,0,0"
+                          AutomationProperties.Name="{l:T settings.sidebar.label}" />
+                <Button Grid.Row="2" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="sidebar"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="3" Text="{l:T settings.density.label}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <ComboBox x:Name="DensityBox" ItemsSource="{Binding DensityOptions}" SelectedIndex="{Binding SelectedDensityIndex}" MinWidth="160"
+                            AutomationProperties.Name="{l:T settings.density.label}" />
+                  <TextBlock Classes="hint" Text="{l:T settings.density.hint}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Row="3" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="density"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+              </Grid>
+            </Border>
+            <!-- Theme packs (.jaytheme): import, switch, remove, export. "Reset theme" stays here; theme packs cannot change it. -->
+            <Border Classes="card">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                <TextBlock Text="{l:T settings.themepack.label}" VerticalAlignment="Center" />
+                <ComboBox x:Name="ThemePackBox" Grid.Column="1" ItemsSource="{Binding ThemePacks}" SelectedItem="{Binding SelectedThemePack}"
+                          HorizontalAlignment="Stretch" AutomationProperties.Name="{l:T settings.themepack.label}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate DataType="vm:ThemePackOption">
+                      <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,0,0,0" Command="{Binding ResetThemePackCommand}"
+                        ToolTip.Tip="{l:T settings.themepack.reset}" AutomationProperties.Name="{l:T settings.themepack.reset}" />
+                <WrapPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,10,0,0" ItemSpacing="8" LineSpacing="8">
+                  <Button Classes="secondary" Content="{l:T settings.themepack.import}" Click="ImportTheme_Click" />
+                  <Button Classes="secondary" Content="{l:T settings.themepack.export}" Click="ExportTheme_Click" />
+                  <Button Classes="danger" Content="{l:T settings.themepack.remove}" Command="{Binding RemoveThemePackCommand}" IsEnabled="{Binding CanRemoveThemePack}" />
+                </WrapPanel>
+                <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Classes="hint" Margin="0,8,0,0" Text="{l:T settings.themepack.hint}" TextWrapping="Wrap" />
+                <CheckBox x:Name="AllowNetworkThemesBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" IsChecked="{Binding AllowNetworkThemes}">
+                  <TextBlock Text="{l:T settings.themepack.allow_network}" TextWrapping="Wrap" />
+                </CheckBox>
+              </Grid>
+            </Border>
+            <Border Classes="callout warning" Margin="0,0,0,12" IsVisible="{Binding ThemePackStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+              <TextBlock Classes="hint" Text="{Binding ThemePackStatus}" TextWrapping="Wrap" />
+            </Border>
+          </StackPanel>
+
+          <!-- Game defaults -->
+          <StackPanel x:Name="Group_game" Classes="group">
+            <Border Classes="card">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                <TextBlock Text="{l:T settings.java.label}" VerticalAlignment="Center" />
+                <ComboBox x:Name="JavaBox" Grid.Column="1" ItemsSource="{Binding JavaOptions}" SelectedItem="{Binding SelectedJava}" HorizontalAlignment="Stretch"
+                          AutomationProperties.Name="{l:T settings.java.label}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate DataType="vm:JavaOption">
+                      <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Label}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Grid.Column="2" Content="{l:T settings.java.rescan}" Margin="8,0,0,0" Command="{Binding RefreshJavaCommand}" />
+
+                <CheckBox x:Name="AutoJavaBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="{Binding AutoJavaDownload}" Margin="0,8,0,0">
+                  <TextBlock Text="{l:T settings.java.auto_download}" TextWrapping="Wrap" />
+                </CheckBox>
+
+                <TextBlock Grid.Row="2" Text="{l:T instance.settings.isolation}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <CheckBox x:Name="IsolationBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="{Binding IsolateVersions}" Margin="0,12,0,0">
+                  <TextBlock Text="{l:T settings.isolation.hint}" TextWrapping="Wrap" />
+                </CheckBox>
+
+                <TextBlock Grid.Row="3" Text="{l:T instance.settings.window_size}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <WrapPanel ItemSpacing="8" LineSpacing="8">
+                    <TextBox x:Name="WindowWidthBox" Text="{Binding WindowWidth, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
+                    <TextBlock Text="×" VerticalAlignment="Center" />
+                    <TextBox x:Name="WindowHeightBox" Text="{Binding WindowHeight, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.height}" />
+                    <CheckBox IsChecked="{Binding Fullscreen}" Content="{l:T instance.settings.fullscreen}" />
+                  </WrapPanel>
+                  <TextBlock Classes="field-error" Text="{Binding WindowError}" IsVisible="{Binding HasWindowError}" />
+                </StackPanel>
+                <Button Grid.Row="3" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="window"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="4" Text="{l:T instance.settings.jvm_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox x:Name="JvmArgsBox" Text="{Binding JvmArgs, UpdateSourceTrigger=LostFocus}" />
+                  <TextBlock Classes="field-error" Text="{Binding JvmArgsError}" IsVisible="{Binding HasJvmArgsError}" />
+                </StackPanel>
+                <Button Grid.Row="4" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="jvm"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="5" Text="{l:T instance.settings.game_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox x:Name="GameArgsBox" Text="{Binding GameArgs, UpdateSourceTrigger=LostFocus}" />
+                  <TextBlock Classes="field-error" Text="{Binding GameArgsError}" IsVisible="{Binding HasGameArgsError}" />
+                </StackPanel>
+                <Button Grid.Row="5" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="game_args"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="6" Text="{l:T instance.settings.pre_launch}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <TextBox x:Name="PreLaunchBox" Grid.Row="6" Grid.Column="1" Text="{Binding PreLaunch, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
+                <Button Grid.Row="6" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="pre"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="7" Text="{l:T instance.settings.post_exit}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <TextBox x:Name="PostExitBox" Grid.Row="7" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
+                <Button Grid.Row="7" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="post"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+              </Grid>
+            </Border>
+          </StackPanel>
+
+          <!-- Downloads and services -->
+          <StackPanel x:Name="Group_downloads" Classes="group">
+            <Border Classes="card">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
+                <TextBlock Text="{l:T settings.source.label}" VerticalAlignment="Center" />
+                <ComboBox x:Name="SourceBox" Grid.Column="1" ItemsSource="{Binding SourceOptions}" SelectedIndex="{Binding SourceIndex}" HorizontalAlignment="Stretch"
+                          AutomationProperties.Name="{l:T settings.source.label}" />
+                <Button Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,0,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="source"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+
+                <TextBlock Grid.Row="1" Text="{l:T settings.download.concurrency}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                  <TextBox x:Name="ConcurrencyBox" Text="{Binding Concurrency, UpdateSourceTrigger=LostFocus}" Width="90" HorizontalAlignment="Left" />
+                  <TextBlock Classes="field-error" Text="{Binding ConcurrencyError}" IsVisible="{Binding HasConcurrencyError}" />
+                </StackPanel>
+                <Button Grid.Row="1" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="concurrency"
+                        ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
+              </Grid>
+            </Border>
+            <Border Classes="card">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                <TextBlock Text="{l:T settings.curseforge.key}" VerticalAlignment="Center" />
+                <TextBox x:Name="CurseForgeKeyBox" Grid.Column="1" Text="{Binding CurseForgeKey, UpdateSourceTrigger=LostFocus}" PasswordChar="●" PlaceholderText="{l:T settings.curseforge.key_hint}" />
+                <TextBlock Grid.Row="1" Text="{l:T settings.curseforge.endpoint}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <TextBox x:Name="CurseForgeRootBox" Grid.Row="1" Grid.Column="1" Text="{Binding CurseForgeRoot, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" PlaceholderText="{l:T settings.curseforge.endpoint_hint}" />
+                <TextBlock Grid.Row="2" Text="{l:T settings.update.feed}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <TextBox x:Name="UpdateFeedBox" Grid.Row="2" Grid.Column="1" Text="{Binding UpdateFeed, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" PlaceholderText="{l:T settings.update.feed_hint}" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Classes="hint" FontSize="12" Margin="0,6,0,0" Text="{l:T settings.accounts.client_id_hint}" TextWrapping="Wrap" />
+              </Grid>
+            </Border>
+          </StackPanel>
+
+          <!-- Storage -->
+          <StackPanel x:Name="Group_storage" Classes="group">
+            <Border Classes="card">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Text="{l:T settings.directory.label}" VerticalAlignment="Center" />
+                <TextBox x:Name="GameDirectoryBox" Grid.Column="1" Text="{Binding GameDirectory, UpdateSourceTrigger=LostFocus}" />
+                <Button Grid.Column="2" Content="{l:T common.browse}" Margin="8,0,0,0" Click="BrowseGameDir_Click" />
+              </Grid>
+            </Border>
+            <!-- Storage › Recently deleted (§6.20): [Restore] on every row; [Delete forever] and [Empty] use the locked confirm. -->
+            <Border x:Name="RecycleCard" Classes="card">
+              <StackPanel Spacing="8">
+                <DockPanel>
+                  <c:ConfirmButton x:Name="EmptyRecycleButton" DockPanel.Dock="Right" Content="{l:T recycle.empty_all}" ConfirmText="{l:T recycle.empty_all.confirm}"
+                                   ObjectName="{l:T recycle.title}" Command="{Binding Recycle.EmptyAllCommand}" IsVisible="{Binding Recycle.HasRows}" VerticalAlignment="Center" />
+                  <StackPanel Spacing="2">
+                    <TextBlock Classes="h2" Text="{l:T recycle.title}" Margin="0" />
+                    <TextBlock Classes="hint" Text="{Binding Recycle.Summary}" IsVisible="{Binding Recycle.HasRows}" />
+                  </StackPanel>
+                </DockPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="{l:T recycle.keep.label}" VerticalAlignment="Center" />
+                  <ComboBox x:Name="RecycleKeepBox" ItemsSource="{Binding Recycle.KeepOptions}" SelectedIndex="{Binding Recycle.KeepIndex}" MinWidth="110"
+                            AutomationProperties.Name="{l:T recycle.keep.label}" />
+                </StackPanel>
+                <TextBlock x:Name="RecycleEmptyText" Classes="hint" Text="{Binding Recycle.EmptyText}" IsVisible="{Binding Recycle.IsEmpty}" TextWrapping="Wrap" />
+                <ItemsControl x:Name="RecycleList" ItemsSource="{Binding Recycle.Rows}" IsVisible="{Binding Recycle.HasRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:RecycledRow">
+                      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,4">
+                        <StackPanel Spacing="1" VerticalAlignment="Center">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Item.Entry.OriginalPath}" />
+                          <TextBlock Classes="hint" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Classes="hint" Text="{Binding When}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="secondary" Content="{l:T recycle.restore}" VerticalAlignment="Center"
+                                Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).Recycle.RestoreCommand}" CommandParameter="{Binding}" />
+                        <c:ConfirmButton Grid.Column="2" Content="{l:T recycle.delete_forever}" ConfirmText="{l:T recycle.delete_forever}" ObjectName="{Binding Name}"
+                                         VerticalAlignment="Center"
+                                         Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).Recycle.DeleteForeverCommand}" CommandParameter="{Binding}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <c:StatusBar Message="{Binding Recycle.Message}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- Privacy and security -->
+          <StackPanel x:Name="Group_privacy" Classes="group">
+            <Border Classes="card">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="h2" Text="{l:T settings.privacy.title}" Margin="0" />
+                <TextBlock Classes="hint" Text="{l:T settings.privacy.hint}" TextWrapping="Wrap" />
+                <views:NetworkListView x:Name="NetworkListBox" DataContext="{Binding NetworkList}" Margin="0,6,0,0" />
+                <Button Classes="ghost" Content="{l:T settings.privacy.open_about}" Command="{Binding GoAboutCommand}" HorizontalAlignment="Left" Padding="0,2" />
+              </StackPanel>
+            </Border>
+            <!-- For a child (§9.6): one main switch, six items, the time of the last change. No parent password. -->
+            <Border Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="h2" Text="{l:T settings.child.title}" Margin="0" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.child.hint}" TextWrapping="Wrap" />
+                <CheckBox x:Name="ChildModeBox" IsChecked="{Binding ChildMode}" Content="{l:T settings.child.toggle}" />
+                <StackPanel Spacing="4" Margin="24,0,0,0" IsEnabled="{Binding ChildMode}">
+                  <CheckBox x:Name="ChildNoRemoteBox" IsChecked="{Binding ChildNoRemote}" Content="{l:T settings.child.no_remote}" />
+                  <CheckBox x:Name="ChildNoPublicBox" IsChecked="{Binding ChildNoPublic}" Content="{l:T settings.child.no_public}" />
+                  <CheckBox x:Name="ChildNoExitBox" IsChecked="{Binding ChildNoExit}" Content="{l:T settings.child.no_exit}" />
+                  <CheckBox x:Name="ChildFriendsFilesBox" IsChecked="{Binding ChildFriendsFiles}" Content="{l:T settings.child.friends_files}" />
+                  <CheckBox x:Name="ChildAlwaysAskBox" IsChecked="{Binding ChildAlwaysAsk}" Content="{l:T settings.child.always_ask}" />
+                  <CheckBox x:Name="ChildQuietNotifyBox" IsChecked="{Binding ChildQuietNotify}" Content="{l:T settings.child.quiet_notify}" />
+                </StackPanel>
+                <TextBlock x:Name="ChildModeStatusLine" Text="{Binding ChildModeStatusText}" FontSize="12" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <Border Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{l:T settings.notrace.label}" FontWeight="SemiBold" />
+                <CheckBox x:Name="NoTraceBox" IsChecked="{Binding NoTrace}" Content="{l:T settings.notrace.toggle}" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.notrace.hint}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <!-- Multiplayer security: device check, circuit breaker and the countdown before a restart -->
+            <Border Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="h2" Text="{l:T settings.security.title}" Margin="0" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.security.hint}" TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="10">
+                  <TextBlock Text="{l:T settings.security.attest.label}" VerticalAlignment="Center" />
+                  <ComboBox x:Name="AttestationBox" Grid.Column="1" ItemsSource="{Binding AttestationOptions}" SelectedIndex="{Binding AttestationIndex}" HorizontalAlignment="Stretch" />
+                  <TextBlock Grid.Row="1" Text="{l:T settings.security.breaker.label}" VerticalAlignment="Center" />
+                  <CheckBox x:Name="BreakerBox" Grid.Row="1" Grid.Column="1" IsChecked="{Binding SecurityBreaker}" Content="{l:T settings.security.breaker.toggle}" />
+                  <TextBlock Grid.Row="2" Text="{l:T settings.security.delay.label}" VerticalAlignment="Top" Margin="0,6,0,0" />
+                  <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+                    <TextBox x:Name="BreakerDelayBox" Text="{Binding BreakerRestartDelay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding !BreakerSkipDelay}" MaxWidth="120" HorizontalAlignment="Left" />
+                    <TextBlock Classes="field-error" Text="{Binding BreakerDelayError}" IsVisible="{Binding HasBreakerDelayError}" />
+                  </StackPanel>
+                  <CheckBox x:Name="BreakerSkipBox" Grid.Row="3" Grid.Column="1" IsChecked="{Binding BreakerSkipDelay}" Content="{l:T settings.security.skip.toggle}" />
+                </Grid>
+              </StackPanel>
+            </Border>
+            <Border Classes="card">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{l:T settings.privacy.data_folder}" FontWeight="SemiBold" />
+                  <TextBlock Classes="hint" Text="{Binding SettingsPathLabel}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button x:Name="DataFolderBox" Grid.Column="1" Classes="secondary" Content="{l:T common.open}" Command="{Binding OpenDataFolderCommand}" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+          </StackPanel>
+
+          <!-- Multiplayer: the settings live in Multiplayer › Settings -->
+          <StackPanel x:Name="Group_multiplayer" Classes="group">
+            <Border Classes="card">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBlock Text="{l:T settings.multiplayer.card}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button x:Name="MultiplayerSettingsBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.multiplayer.go}" Command="{Binding GoMultiplayerSettingsCommand}" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+          </StackPanel>
+
+          <!-- Tools: the toolbox, plus where the other tools moved -->
+          <StackPanel x:Name="Group_tools" Classes="group">
+            <Border Classes="card">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{l:T settings.tools.card}" FontWeight="SemiBold" />
+                  <TextBlock Classes="hint" Text="{l:T settings.tools.card_hint}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button x:Name="OpenToolsBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.tools.open}" Command="{Binding GoToolsCommand}" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <Border Classes="card">
+              <WrapPanel ItemSpacing="8" LineSpacing="8">
+                <Button Classes="ghost" Content="{l:T settings.tools.go_storage}" Command="{Binding GoGroupCommand}" CommandParameter="storage" />
+                <Button Classes="ghost" Content="{l:T settings.tools.go_java}" Command="{Binding GoGroupCommand}" CommandParameter="game" />
+                <Button Classes="ghost" Content="{l:T settings.tools.go_about}" Command="{Binding GoGroupCommand}" CommandParameter="about" />
+              </WrapPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- Experimental -->
+          <StackPanel x:Name="Group_experimental" Classes="group">
+            <Border Classes="card">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="h2" Text="{l:T settings.bake.title}" Margin="0" />
+                <CheckBox x:Name="BakeBox" IsChecked="{Binding ExperimentalBake}" Content="{l:T settings.bake.toggle}" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.bake.hint}" TextWrapping="Wrap" />
+                <TextBox x:Name="BakeLoaderBox" Text="{Binding BakeLoaderPath, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding ExperimentalBake}" PlaceholderText="{l:T settings.bake.loader_hint}" />
+              </StackPanel>
+            </Border>
+            <Border Classes="card">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{l:T settings.themedev.label}" FontWeight="SemiBold" />
+                <SelectableTextBlock x:Name="ThemeDevBox" Classes="hint" Text="{l:T settings.themedev.hint}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- About -->
+          <StackPanel x:Name="Group_about" Classes="group">
+            <Border Classes="card">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <SelectableTextBlock x:Name="VersionBox" Text="{Binding VersionText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <Button x:Name="CheckUpdateBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.about.check_update}" Command="{Binding GoToolsCommand}" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <Border Classes="card">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBlock Text="{l:T about.title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <Button x:Name="AboutPageBox" Grid.Column="1" Classes="secondary" Content="{l:T common.open}" Command="{Binding GoAboutCommand}" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <Border Classes="card">
+              <TextBlock Classes="hint" Text="{l:T settings.about.licenses}" TextWrapping="Wrap" />
+            </Border>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- Wide: what this group is about -->
+      <Border x:Name="NotePane" Grid.Column="2" VerticalAlignment="Top" Padding="4,8,0,0">
+        <TextBlock x:Name="GroupNote" Classes="hint" Text="{Binding SelectedGroupNote}" TextWrapping="Wrap" />
+      </Border>
+
+      <!-- Compact: the group index first, one line of summary each -->
+      <ListBox x:Name="GroupIndex" Grid.ColumnSpan="3" ItemsSource="{Binding Groups}" Background="Transparent" IsVisible="False" Tapped="GroupIndex_Tapped"
+               KeyDown="GroupIndex_KeyDown" AutomationProperties.Name="{l:T settings.groups.picker}">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:SettingsGroupItem">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" MinHeight="40">
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                <TextBlock Classes="hint" FontSize="12" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <TextBlock Grid.Column="1" Text="›" Classes="hint" FontSize="18" VerticalAlignment="Center" />
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <!-- Search: "Group › Setting" as you type; Enter jumps to the field -->
+      <Border x:Name="SearchPane" Grid.ColumnSpan="3" Background="{DynamicResource Surface}" IsVisible="{Binding HasSearch}">
+        <DockPanel>
+          <TextBlock x:Name="SearchEmptyText" DockPanel.Dock="Top" Classes="hint" Text="{l:T settings.search.empty}" IsVisible="{Binding SearchEmpty}" Margin="4,8" TextWrapping="Wrap" />
+          <ListBox x:Name="SearchHitList" ItemsSource="{Binding SearchHits}" SelectedIndex="{Binding SelectedHitIndex}" Background="Transparent" Tapped="SearchHit_Tapped" MaxWidth="720" HorizontalAlignment="Left">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:SettingsSearchHit">
+                <StackPanel Spacing="1">
+                  <TextBlock Text="{Binding Path}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{Binding Hint}" IsVisible="{Binding HasHint}" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+    </Grid>
+
+    <c:StatusBar Grid.Row="2" x:Name="SettingsStatus" Message="{Binding StatusInfo}" Margin="0,4,0,0" />
+  </Grid>
+</UserControl>

@@ -20,6 +20,20 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
     public const string Subnet = "10.235.";
     public const string DirectoryIp = "10.235.0.1";
     public const int DirectoryPort = 47668;
+    /// <summary>最多几个目录节点（互为备用）。</summary>
+    public const int MaxDirectories = 4;
+    public static readonly string[] DirectoryIps = [.. Enumerable.Range(1, MaxDirectories).Select(DirectoryIpOf)];
+
+    /// <summary>
+    /// 第 <paramref name="index"/> 个目录节点的地址：1 是主目录 10.235.0.1，2–4 是备用 10.235.255.254 / .253 / .252。
+    /// 备用的放在网段最后：EasyTier 的自动分配从 .0.2 往上数，不会撞上。
+    /// </summary>
+    public static string DirectoryIpOf(int index) => index switch
+    {
+        1 => DirectoryIp,
+        >= 2 and <= MaxDirectories => Subnet + "255." + (256 - index).ToString(CultureInfo.InvariantCulture),
+        _ => throw new ArgumentOutOfRangeException(nameof(index)),
+    };
 
     /// <summary>内置的 Jay 公共网络的 EasyTier 网络名。</summary>
     public const string JayNetworkName = "jay-public-v1";
@@ -55,9 +69,11 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 }
 
 /// <summary>公共网络 EasyTier 的启动参数。</summary>
-/// <param name="Directory">目录服务那台机器：固定地址 10.235.0.1，只放行目录端口。</param>
+/// <param name="Directory">目录服务那台机器：固定地址 10.235.0.N（N = <paramref name="DirectoryIndex"/>），只放行目录端口。</param>
 /// <param name="Listeners">目录服务那台机器同时当节点时监听的地址（tcp://0.0.0.0:11010 等）。</param>
-public sealed record PublicNetworkOptions(PublicNetworkProfile Profile, int RpcPort, int SocksPort, bool Directory = false, IReadOnlyList<string>? Listeners = null)
+/// <param name="DirectoryIndex">第几个目录节点（1 是主目录，2–4 是备用）。</param>
+public sealed record PublicNetworkOptions(PublicNetworkProfile Profile, int RpcPort, int SocksPort, bool Directory = false, IReadOnlyList<string>? Listeners = null,
+    int DirectoryIndex = 1)
 {
     public override string ToString() => "PublicNetworkOptions";
 }
@@ -85,7 +101,7 @@ public static class PublicNetworkArgs
             "--socks5", o.SocksPort.ToString(CultureInfo.InvariantCulture),
             "--udp-whitelist", "1",
         };
-        if (o.Directory) args.AddRange(["--ipv4", DirectoryIpWithMask, "--tcp-whitelist", PublicNetworkProfile.DirectoryPort.ToString(CultureInfo.InvariantCulture)]);
+        if (o.Directory) args.AddRange(["--ipv4", PublicNetworkProfile.DirectoryIpOf(o.DirectoryIndex) + "/16", "--tcp-whitelist", PublicNetworkProfile.DirectoryPort.ToString(CultureInfo.InvariantCulture)]);
         // 普通成员：自动分配地址；只放行敲门端口（没开房间时本机没人监听，连过来直接被拒）。
         else args.AddRange(["--dhcp", "true", "--tcp-whitelist", KnockProtocol.Port.ToString(CultureInfo.InvariantCulture)]);
         if (o.Listeners is { Count: > 0 } listeners) foreach (var l in listeners) args.AddRange(["--listeners", l]);
@@ -108,6 +124,8 @@ public interface IPublicNetwork
     Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct);
     /// <summary>自己在公共网络里的地址（EasyTier 自动分配，可能中途变）；还没分到时是 null。</summary>
     Task<string?> MyIpAsync(CancellationToken ct);
+    /// <summary>现在在线的目录节点地址（按编号排）。默认只有主目录。</summary>
+    Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([PublicNetworkProfile.DirectoryIp]);
 }
 
 /// <summary>运行中的公共网络 EasyTier。Dispose 时结束进程。</summary>
@@ -166,7 +184,21 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
         return peers.FirstOrDefault(p => p.Cost == "Local") is { } me ? StripMask(me.Ip) : null;
     }
 
-    /// <summary>等到能看到目录服务（连上了节点、目录服务在线）。</summary>
+    private (DateTimeOffset At, IReadOnlyList<string> Ips) _directories = (DateTimeOffset.MinValue, []);
+
+    /// <summary>现在在线的目录节点（公共网络里看得到的 10.235.0.1–4，按编号排；查一次缓存 5 秒）。</summary>
+    public async Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct)
+    {
+        var cached = _directories;
+        if (DateTimeOffset.UtcNow - cached.At < TimeSpan.FromSeconds(5)) return cached.Ips;
+        var peers = await PeersAsync(ct);
+        var online = peers.Where(p => p.Cost != "Local").Select(p => StripMask(p.Ip)).ToHashSet();
+        IReadOnlyList<string> ips = [.. PublicNetworkProfile.DirectoryIps.Where(online.Contains)];
+        _directories = (DateTimeOffset.UtcNow, ips);
+        return ips;
+    }
+
+    /// <summary>等到能看到目录服务（连上了节点、至少一个目录节点在线）。</summary>
     public async Task WaitForDirectoryAsync(TimeSpan timeout, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -177,8 +209,9 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
             {
                 if (HasExited) throw new IOException(L.F("core.mp.public.exited", RecentOutput.LastOrDefault() ?? ""));
                 var peers = await PeersAsync(cts.Token);
-                if (peers.Any(p => StripMask(p.Ip) == PublicNetworkProfile.DirectoryIp && p.Cost != "Local")
-                    && peers.FirstOrDefault(p => p.Cost == "Local") is { Ip.Length: > 0 }) return;
+                if (peers.Any(p => PublicNetworkProfile.DirectoryIps.Contains(StripMask(p.Ip)) && p.Cost != "Local")
+                    // 自动分配的地址要已经在公共网络的网段里：刚连上、还没看到别人的路由时 EasyTier 会先给一个 10.126.126.x，过几秒才改过来。
+                    && peers.FirstOrDefault(p => p.Cost == "Local") is { Ip.Length: > 0 } me && StripMask(me.Ip).StartsWith(PublicNetworkProfile.Subnet, StringComparison.Ordinal)) return;
                 await Task.Delay(500, cts.Token);
             }
         }

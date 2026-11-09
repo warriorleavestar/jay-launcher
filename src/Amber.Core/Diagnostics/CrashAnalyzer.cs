@@ -6,7 +6,11 @@ namespace Amber.Core.Diagnostics;
 
 public enum CrashSeverity { Likely, Possible }
 
-public sealed record CrashFinding(string Title, string Advice, CrashSeverity Severity = CrashSeverity.Likely, string? Evidence = null);
+public sealed record CrashFinding(string Title, string Advice, CrashSeverity Severity = CrashSeverity.Likely, string? Evidence = null)
+{
+    /// <summary>The rule's translation key prefix, such as <c>core.crash.memory.exhausted</c>. Used to pick fix buttons.</summary>
+    public string? Key { get; init; }
+}
 
 public sealed record CrashAnalysis(IReadOnlyList<CrashFinding> Findings, IReadOnlyList<string> SuspectMods, IReadOnlyList<string> SourceFiles)
 {
@@ -25,7 +29,7 @@ public static partial class CrashAnalyzer
 
     /// <param name="key">翻译键的前缀：标题是 key.title，建议是 key.advice。匹配到时才取文字，换语言后马上生效。</param>
     private static Rule R(string pattern, string key, CrashSeverity severity = CrashSeverity.Likely) =>
-        new(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase), m => new CrashFinding(L.T(key + ".title"), L.T(key + ".advice"), severity, m.Value));
+        new(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase), m => new CrashFinding(L.T(key + ".title"), L.T(key + ".advice"), severity, m.Value) { Key = key });
 
     private static Rule R(string pattern, Func<Match, CrashFinding> build) =>
         new(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase), build);
@@ -39,13 +43,13 @@ public static partial class CrashAnalyzer
 
         // Java 版本
         R(@"has been compiled by a more recent version of the Java Runtime \(class file version (\d+)", m =>
-            new CrashFinding(L.F("core.crash.java.tooold.title", int.Parse(m.Groups[1].Value) - 44), L.T("core.crash.java.tooold.advice"), CrashSeverity.Likely, m.Value)),
+            new CrashFinding(L.F("core.crash.java.tooold.title", int.Parse(m.Groups[1].Value) - 44), L.T("core.crash.java.tooold.advice"), CrashSeverity.Likely, m.Value) { Key = "core.crash.java.tooold" }),
         R(@"AppClassLoader cannot be cast to (class )?java\.net\.URLClassLoader", "core.crash.java.eightrequired"),
         R(@"InaccessibleObjectException|Unable to make .{1,200} accessible", "core.crash.java.toonew"),
         R(@"Unsupported class file major version (\d+)", m =>
-            new CrashFinding(L.F("core.crash.java.unsupportedclass.title", m.Groups[1].Value), L.T("core.crash.java.unsupportedclass.advice"), CrashSeverity.Likely, m.Value)),
+            new CrashFinding(L.F("core.crash.java.unsupportedclass.title", m.Groups[1].Value), L.T("core.crash.java.unsupportedclass.advice"), CrashSeverity.Likely, m.Value) { Key = "core.crash.java.unsupportedclass" }),
         R(@"The downloaded file (\S+) has an invalid checksum|files\.minecraftforge\.net/fmllibs", m =>
-            new CrashFinding(m.Groups[1].Success ? L.F("core.crash.forge.librarydownload.file", m.Groups[1].Value) : L.T("core.crash.forge.librarydownload.title"), L.T("core.crash.forge.librarydownload.advice"), CrashSeverity.Likely, m.Value)),
+            new CrashFinding(m.Groups[1].Success ? L.F("core.crash.forge.librarydownload.file", m.Groups[1].Value) : L.T("core.crash.forge.librarydownload.title"), L.T("core.crash.forge.librarydownload.advice"), CrashSeverity.Likely, m.Value) { Key = "core.crash.forge.librarydownload" }),
         R(@"could not find java\.dll|Could not find Java SE Runtime Environment", "core.crash.java.missingfiles"),
         R(@"Error occurred during initialization of VM\s+.{0,120}", "core.crash.java.vmstartup"),
         R(@"Unrecognized (VM|command-line) option", "core.crash.java.unsupportedoption"),
@@ -54,21 +58,21 @@ public static partial class CrashAnalyzer
         R(@"(Found|Duplicate) .{0,40}duplicate mods?|DuplicateModsFoundException|Mod .{1,80} is (present|loaded) .{0,40}multiple", "core.crash.mods.duplicate"),
         R(@"Incompatible mods? found|net\.fabricmc\.loader\.impl\.FormattedException", "core.crash.mods.incompatible"),
         R(@"requires (version )?.{1,80} of (mod )?'?([\w-]+)'?,? (but|which)", m =>
-            new CrashFinding(L.F("core.crash.mods.dependencyversion.title", m.Groups[3].Value), L.T("core.crash.mods.dependencyversion.advice"), CrashSeverity.Likely, m.Value)),
+            new CrashFinding(L.F("core.crash.mods.dependencyversion.title", m.Groups[3].Value), L.T("core.crash.mods.dependencyversion.advice"), CrashSeverity.Likely, m.Value) { Key = "core.crash.mods.dependencyversion" }),
         R(@"Missing or unsupported mandatory dependencies:?[\s\S]{0,300}", m =>
-            new CrashFinding(L.T("core.crash.mods.mandatorydependencies.title"), L.T("core.crash.mods.mandatorydependencies.advice"), CrashSeverity.Likely, m.Value)),
+            new CrashFinding(L.T("core.crash.mods.mandatorydependencies.title"), L.T("core.crash.mods.mandatorydependencies.advice"), CrashSeverity.Likely, m.Value) { Key = "core.crash.mods.mandatorydependencies" }),
         R(@"Mod (\S+) requires (\S+)", m =>
-            new CrashFinding(L.F("core.crash.mods.requires.title", m.Groups[1].Value, m.Groups[2].Value), L.T("core.crash.mods.requires.advice"), CrashSeverity.Likely, m.Value)),
+            new CrashFinding(L.F("core.crash.mods.requires.title", m.Groups[1].Value, m.Groups[2].Value), L.T("core.crash.mods.requires.advice"), CrashSeverity.Likely, m.Value) { Key = "core.crash.mods.requires" }),
         R(@"(org\.sinytra\.connector|dev\.su5ed\.sinytra\.connector)[\s\S]{0,2000}?(Exception|Error)|Sinytra Connector.{0,60}(failed|error|incompatible)", m =>
-            new CrashFinding(L.T("core.crash.mods.connector.title"), L.T("core.crash.mods.connector.advice"), CrashSeverity.Likely, m.Value.Length > 300 ? m.Value[..300] : m.Value)),
+            new CrashFinding(L.T("core.crash.mods.connector.title"), L.T("core.crash.mods.connector.advice"), CrashSeverity.Likely, m.Value.Length > 300 ? m.Value[..300] : m.Value) { Key = "core.crash.mods.connector" }),
         R(@"(Invalid|Failed to apply) mixin|MixinApplyError|InvalidMixinException|Mixin apply for mod (\S+) failed|Mixin transformation of .{1,120} failed", m =>
-            new CrashFinding(m.Groups[2].Success ? L.F("core.crash.mods.mixin.namedtitle", m.Groups[2].Value) : L.T("core.crash.mods.mixin.title"), L.T("core.crash.mods.mixin.advice"), CrashSeverity.Likely, m.Value)),
+            new CrashFinding(m.Groups[2].Success ? L.F("core.crash.mods.mixin.namedtitle", m.Groups[2].Value) : L.T("core.crash.mods.mixin.title"), L.T("core.crash.mods.mixin.advice"), CrashSeverity.Likely, m.Value) { Key = "core.crash.mods.mixin" }),
         // 崩溃报告的系统信息里同时写着 OptiFine 和 Forge 版本：OptiFine 只适配某几个 Forge 版本，换 Forge 后最常见的就是 NoSuchMethodError。
         R(@"(NoSuchMethodError|NoSuchFieldError)[\s\S]{0,60000}OptiFine Version: (OptiFine_\S+)[\s\S]{0,20000}Forge: net\.minecraftforge:(\S+)", m =>
-            new CrashFinding(L.F("core.crash.mods.optifineforge.title", m.Groups[2].Value, m.Groups[3].Value), L.T("core.crash.mods.optifineforge.advice"), CrashSeverity.Likely, m.Groups[1].Value)),
+            new CrashFinding(L.F("core.crash.mods.optifineforge.title", m.Groups[2].Value, m.Groups[3].Value), L.T("core.crash.mods.optifineforge.advice"), CrashSeverity.Likely, m.Groups[1].Value) { Key = "core.crash.mods.optifineforge" }),
         R(@"NoSuchMethodError|NoSuchFieldError", "core.crash.mods.versionmismatch", CrashSeverity.Possible),
         R(@"ClassNotFoundException: (\S+)|NoClassDefFoundError: (\S+)", m =>
-            new CrashFinding(L.F("core.crash.mods.missingclass.title", (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)), L.T("core.crash.mods.missingclass.advice"), CrashSeverity.Possible, m.Value)),
+            new CrashFinding(L.F("core.crash.mods.missingclass.title", (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)), L.T("core.crash.mods.missingclass.advice"), CrashSeverity.Possible, m.Value) { Key = "core.crash.mods.missingclass" }),
         R(@"optifine[\s\S]{0,400}(ClassCastException|NoSuchMethodError|TransformerException)", "core.crash.mods.optifineconflict"),
 
         // 文件损坏

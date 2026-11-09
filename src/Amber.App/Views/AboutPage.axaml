@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:views="using:Amber.App.Views"
+             xmlns:safety="using:Amber.App.Controls.Safety"
+             x:Class="Amber.App.Views.AboutPage"
+             x:DataType="vm:AboutViewModel">
+  <!-- About and privacy (official design §6.21): one column, reading width 640, centred. The whole page is a locked
+       safety surface: a theme pack cannot change it. -->
+  <ScrollViewer x:Name="Scroll" HorizontalScrollBarVisibility="Disabled">
+    <safety:SafetySurface x:Name="Surface" HorizontalAlignment="Center" MaxWidth="640" CornerRadius="12" Padding="20" Margin="0,0,0,16">
+      <StackPanel Spacing="16">
+        <safety:SafetyPanel x:Name="Promise" Title="{l:T about.title}">
+          <safety:SafetyPanel.Body>
+            <TextBlock Text="{l:T about.promise}" TextWrapping="Wrap" />
+          </safety:SafetyPanel.Body>
+        </safety:SafetyPanel>
+
+        <StackPanel Spacing="10">
+          <TextBlock Text="{l:T about.net.heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+          <views:NetworkListView x:Name="NetList" DataContext="{Binding List}" />
+          <TextBlock Text="{l:T about.net.never}" TextWrapping="Wrap" FontSize="12" Opacity="0.8" />
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+          <TextBlock Text="{l:T about.stored.title}" FontWeight="SemiBold" />
+          <TextBlock x:Name="StoredText" Text="{Binding StoredText}" TextWrapping="Wrap" />
+          <TextBlock Text="{l:T about.stays}" TextWrapping="Wrap" />
+          <Button x:Name="DataFolderButton" Classes="secondary" Content="{l:T about.open_data_folder}" Command="{Binding OpenDataFolderCommand}" HorizontalAlignment="Left" />
+        </StackPanel>
+
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+          <TextBlock x:Name="ChildText" Text="{Binding ChildModeText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Classes="ghost" Content="{l:T about.net.change}" Command="{Binding OpenChildModeCommand}" VerticalAlignment="Center" />
+        </Grid>
+
+        <WrapPanel ItemSpacing="12" LineSpacing="6">
+          <TextBlock x:Name="VersionLine" Text="{Binding VersionText}" VerticalAlignment="Center" />
+          <Button x:Name="LicensesButton" Classes="ghost" Content="{l:T about.licenses}" Command="{Binding ToggleLicensesCommand}" Padding="0,2" />
+          <Button x:Name="HelpButton" Classes="ghost" Content="{l:T about.help}" Command="{Binding OpenHelpCommand}" Padding="0,2" />
+        </WrapPanel>
+        <StackPanel x:Name="LicenseText" Spacing="4" IsVisible="{Binding ShowLicenses}">
+          <TextBlock Text="{l:T about.licenses.body}" TextWrapping="Wrap" FontSize="12" />
+          <TextBlock Text="{l:T settings.about.licenses}" TextWrapping="Wrap" FontSize="12" />
+        </StackPanel>
+      </StackPanel>
+    </safety:SafetySurface>
+  </ScrollViewer>
+</UserControl>

@@ -85,15 +85,24 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 | Warning, WarningText, WarningTint | 警告 |
 | Danger, DangerText, DangerTint, OnDanger | 危险操作 |
 | DisabledFill, DisabledText | 禁用状态 |
+| Overlay / Sunken / InputBg / Scrim | 菜单和对话框 / 日志和代码的凹陷底 / 输入框底 / 对话框后的遮罩。没写时 Overlay 跟着 Surface，Sunken 和 InputBg 跟着 PageBg |
+| ControlBorder, ControlHover, ControlPressed, ControlSelected, Focus | 输入框和次按钮的边、悬停、按下、选中底、焦点环 |
+| Play, PlayHover, PlayPressed, OnPlay, PlayBorder, PlayText, PlayGlow, PlayTint | “开始游戏”这一类琥珀按钮（Accent 管普通主按钮） |
+| Badge, OnBadge, BadgeMuted, OnBadgeMuted | 角标 |
+| IlloLine, IlloFill | 线描插画 |
+| LoaderVanilla, LoaderFabric, LoaderForge, LoaderNeoForge, LoaderQuilt, LoaderOptiFine | 加载器标签的文字色 |
+| LogDebug, LogInfo, LogWarn, LogError, LogFatal, LogJay | 日志各级别的文字色 |
+
+Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥珀只给开始游戏），完整色表和对比度见官方设计 §4.2。
 
 ### 数字
 
 | 名字 | 默认 | 允许范围 |
 |---|---|---|
 | FontCaption / FontBodySmall / FontBody | 12 / 13 / 14 | 最小 11 |
-| FontSubtitle / FontTitle / FontDisplay | 16 / 20 / 26 | |
-| Space1 … Space6 | 4 8 12 16 24 32 | |
-| RadiusSm / RadiusMd / RadiusLg / RadiusPill | 4 / 6 / 10 / 999 | ≥ 0 |
+| FontSubtitle / FontTitle / FontHeadline / FontDisplay | 16 / 20 / 24 / 32 | |
+| Space0 … Space8 | 2 4 8 12 16 24 32 48 64 | |
+| RadiusXs / RadiusSm / RadiusMd / RadiusLg / RadiusXl / RadiusPill | 4 / 6 / 8 / 12 / 16 / 999 | ≥ 0 |
 
 超出范围的值会被拉回范围内并提示。
 
@@ -140,19 +149,28 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 
 ## layout/shell.json：窗口外壳
 
+侧栏上只有三个一级入口：游戏库、发现、联机。设置、账号和隐私行在侧栏底部，主题藏不掉。
+
 ```jsonc
 {
-  "nav": "top",              // 导航放在 left（默认）/ right / top / bottom
-  "navWidth": 200,           // 左右导航的宽度，56–360
-  "navStyle": "icons",       // full（图标加文字，默认）/ icons（只有图标，悬停显示名字）
+  "nav": "left",             // 导航放在 left（默认）/ right / top / bottom
+  "navStyle": "auto",        // auto（默认：窗口 ≥ 1340 时展开，否则图标栏）/ expanded（总是展开）/ rail（总是图标栏）
+  "sidebarWidth": 240,       // 展开时的宽度，200–320
+  "railWidth": 76,           // 图标栏的宽度，64–96
   "showBrand": true,         // 显示 Jay 的标志
+  "showShelf": true,         // 侧栏的“常玩”（后续版本）
   "contentMaxWidth": 1280,   // 页面内容最宽多少（大屏上居中），640–4000
-  "pages": ["home", "multiplayer", "settings"],  // 导航顺序；没写到的页面按原顺序接在后面
-  "hidden": ["tools", "log"] // 不在导航里显示（页面还在，从别的地方还能跳过去）
+  "pages": ["library", "multiplayer", "discover"],  // 入口顺序；没写到的按原顺序接在后面
+  "hidden": ["discover"]     // 只能藏 discover、multiplayer（入口还在，从别的地方还能跳过去）
 }
 ```
 
-页面名：`home` `accounts` `instances` `downloads` `content` `multiplayer` `tools` `settings` `log`。`home` 和 `settings` 不能隐藏（“恢复默认主题”在设置页里）。
+用户在 设置 › 侧栏 里选了“总是展开”或“总是只显示图标”时，以用户的为准。“总是展开”只在展开后内容区还有 640 宽时生效。
+
+旧版（format 1）的写法自动升级：
+- `navWidth` 小于 120 变成 `navStyle: "rail"`、`railWidth` 取 64–96；其余变成 `sidebarWidth`（夹到 200–320）。
+- `navStyle`：`full` → `expanded`，`icons` → `rail`。
+- `pages` / `hidden` 里的旧页面名：`home` `instances` `log` → `library`；`downloads` `content` → `discover`；`multiplayer` 不变；`accounts` `tools` `settings` 不再是导航项，忽略。`hidden` 里一个入口下的旧页面全藏了才藏这个入口（只藏 `content` 不会把整个发现藏掉）。`home`、`settings`、`library` 不能隐藏。
 
 ## layout/pages/*.json：页面布局
 
@@ -174,7 +192,7 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 | 页面文件 | 区块 |
 |---|---|
 | `accounts.json` | `accounts.title` `accounts.list` `accounts.add` `accounts.status` |
-| `instances.json` | `instances.header` `instances.picker` `instances.details` `instances.status` |
+| `instances.json` | `instances.header` (the hero) `instances.lastrun` `instances.details` `instances.status` |
 | `downloads.json` | `downloads.title` `downloads.search` `downloads.filters` `downloads.body` `downloads.status` |
 | `content.json` | `content.header` `content.filters` `content.body` `content.status` |
 | `multiplayer.json` | `multiplayer.title` `multiplayer.body` `multiplayer.status` |

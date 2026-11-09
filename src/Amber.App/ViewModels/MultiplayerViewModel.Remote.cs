@@ -41,13 +41,39 @@ public sealed partial class MultiplayerViewModel
     internal IRemoteConsentPolicy RemoteConsentPolicy => new AskEveryTimePolicy((request, ct) => RemoteUi.AskConsentAsync(request, ct));
 
     /// <summary>当前房间能用远程控制（邀请房间）。看 / 控制别人在哪个系统上都行；这台电脑能不能被看由对方请求时再判断。</summary>
-    public bool CanRemoteControl => _room is { FromInvite: true };
+    public bool CanRemoteControl => _room is { FromInvite: true } && !Child.HideRemoteControl;
+
+    /// <summary>"For a child" rules in effect now (official design §9.6).</summary>
+    internal Amber.Core.Safety.ChildModeEffects Child => _service.Settings.ChildMode?.Effects ?? default;
+
+    /// <summary>Child mode hides public networks and rooms.</summary>
+    public bool ShowRemoteControl => !Child.HideRemoteControl;
+
+    public bool ShowPublicNetworks => !Child.InviteOnly;
+
+    /// <summary>Child mode hides the network exit option.</summary>
+    public bool ShowNetworkExit => !Child.HideNetworkExit;
+
+    /// <summary>Child mode: every knock needs a yes, so "let them in without asking" is hidden.</summary>
+    public bool ShowInviteAutoApprove => !Child.AlwaysAskKnock;
+
+    /// <summary>Called after the child-mode settings change: hide what they hide, turn off what they forbid.</summary>
+    internal void ApplyChildMode()
+    {
+        if (Child.HideNetworkExit) AllowExitNode = false;
+        if (Child.AlwaysAskKnock) InviteAutoApprove = false;
+        OnPropertyChanged(nameof(ShowPublicNetworks));
+        OnPropertyChanged(nameof(ShowNetworkExit));
+        OnPropertyChanged(nameof(ShowInviteAutoApprove));
+        OnPropertyChanged(nameof(CanUseExit));
+        NotifyRemoteAvailability();
+    }
 
     /// <summary>
     /// 说明：AMB- 房间码的房间不能用；这台电脑不能被看 / 控制时写原因（Linux 的 Wayland、缺组件），
     /// macOS 还没授权屏幕录制 / 辅助功能时写去哪里开。
     /// </summary>
-    public string RemoteUnavailableText => _room is { FromInvite: false } ? L.T("multiplayer.remote.invite_only")
+    public string RemoteUnavailableText => Child.HideRemoteControl ? "" : _room is { FromInvite: false } ? L.T("multiplayer.remote.invite_only")
         : (RemotePlatform.UnavailableReason ?? RemotePlatform.SetupHint) is { } why ? L.F("multiplayer.remote.cannot_share", why) : "";
 
     public bool HasRemoteUnavailableText => _room is not null && RemoteUnavailableText.Length > 0;
@@ -58,6 +84,7 @@ public sealed partial class MultiplayerViewModel
     private void NotifyRemoteAvailability()
     {
         OnPropertyChanged(nameof(CanRemoteControl));
+        OnPropertyChanged(nameof(ShowRemoteControl));
         OnPropertyChanged(nameof(RemoteUnavailableText));
         OnPropertyChanged(nameof(HasRemoteUnavailableText));
     }
@@ -197,7 +224,7 @@ public sealed partial class MultiplayerViewModel
     {
         if (_chat != client || !IsJoined || _room is not { FromInvite: true } room) return;
         // 已经在被控或者正在问：直接拒绝（不叠弹窗）。
-        if (!RemotePlatform.Supported || _remoteSessions.OfType<RemoteSharer>().Any() || Interlocked.Exchange(ref _remotePrompting, 1) != 0)
+        if (Child.HideRemoteControl || !RemotePlatform.Supported || _remoteSessions.OfType<RemoteSharer>().Any() || Interlocked.Exchange(ref _remotePrompting, 1) != 0)
         {
             await DeclineRemote(client, sessionId);
             return;

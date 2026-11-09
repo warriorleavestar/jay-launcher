@@ -108,11 +108,13 @@ public sealed class OptionItem : ObservableObject
 {
     private readonly string? _key;
     private readonly string? _text;
+    private readonly long? _count;
 
-    private OptionItem(string? key, string? text)
+    private OptionItem(string? key, string? text, long? count = null)
     {
         _key = key;
         _text = text;
+        _count = count;
         if (key is not null) LanguageListeners.Add(this, o => ((OptionItem)o).OnPropertyChanged(nameof(Label)));
     }
 
@@ -124,7 +126,10 @@ public sealed class OptionItem : ObservableObject
 
     public static OptionItem[] Keys(params string[] keys) => [.. keys.Select(Key)];
 
-    public string Label => _key is null ? _text! : L.T(_key);
+    /// <summary>A plural key with its count ("7 days").</summary>
+    public static OptionItem Plural(string key, long count) => new(key, null, count);
+
+    public string Label => _key is null ? _text! : _count is { } n ? L.P(_key, n, n) : L.T(_key);
 
     public override string ToString() => Label;
 }

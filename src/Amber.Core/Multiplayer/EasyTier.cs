@@ -599,10 +599,13 @@ public sealed class EasyTierSession : IEasyTierSession
     {
         var info = new ProcessStartInfo(cliPath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in args) info.ArgumentList.Add(a);
+        Process? process = null;
         try
         {
-            using var process = Process.Start(info);
+            process = Process.Start(info);
             if (process is null) return null;
+            // Drain stderr too: a full stderr pipe would block the CLI until the timeout.
+            _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
             var text = await process.StandardOutput.ReadToEndAsync(timeout.Token);
@@ -611,8 +614,16 @@ public sealed class EasyTierSession : IEasyTierSession
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or OperationCanceledException or IOException)
         {
+            // Timed out or cancelled: end the CLI. The multiplayer page polls every 2 s, so a hung RPC would otherwise leave
+            // a growing pile of stuck easytier-cli processes behind.
+            try { if (process is { HasExited: false }) process.Kill(); }
+            catch (Exception killError) when (killError is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             if (ct.IsCancellationRequested) throw;
             return null;
+        }
+        finally
+        {
+            process?.Dispose();
         }
     }
 

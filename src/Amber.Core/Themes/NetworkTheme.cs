@@ -57,6 +57,7 @@ public static partial class NetworkTheme
     /// </summary>
     public static async Task<ThemePack> GetAsync(HttpClient http, NetworkThemeSpec spec, string cacheRoot, CancellationToken ct = default)
     {
+        using var scope = Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.Multiplayer);
         if (spec.IsInline) return ReadInline(spec.InlineTokens!);
         var store = new ThemeStore(Path.Combine(cacheRoot, spec.Sha256!));
         if (store.List().FirstOrDefault() is { } cached && store.TryLoad(cached.Id) is { } pack) return pack;

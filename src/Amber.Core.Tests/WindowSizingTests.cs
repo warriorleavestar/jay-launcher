@@ -35,10 +35,10 @@ public class WindowSizingTests
     [Fact]
     public void ScreensSmallerThanTheMinimumUseTheWholeWorkArea()
     {
-        var (w, h) = WindowSizing.Default(700, 400, chromeHeight: 30);
-        Assert.Equal(700, w);
+        var (w, h) = WindowSizing.Default(560, 400, chromeHeight: 30);
+        Assert.Equal(560, w);
         Assert.Equal(370, h);
-        Assert.Equal((700.0, 370.0), WindowSizing.Minimum(700, 400, 30));
+        Assert.Equal((560.0, 370.0), WindowSizing.Minimum(560, 400, 30));
     }
 
     [Fact]

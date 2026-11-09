@@ -243,8 +243,26 @@ public sealed partial class OnboardingViewModel : ObservableObject
         _ => ReferenceEquals(SourceChain.Default(), SourceChain.MirrorFirst),
     };
 
+    /// <summary>The first-run wizard asks for the latest release and a detected game folder without going through Home.</summary>
+    internal void EnsureLoaded()
+    {
+        if (!_detected) _ = DetectAsync();
+        if (LatestRelease is null && !_loadingLatest) _ = LoadLatestAsync();
+    }
+
+    /// <summary>Whether fetching the latest release failed (no network): the wizard says so and offers retry.</summary>
+    [ObservableProperty]
+    public partial bool LatestFailed { get; set; }
+
+    [RelayCommand]
+    private void RetryLatest()
+    {
+        if (!_loadingLatest) _ = LoadLatestAsync();
+    }
+
     private async Task LoadLatestAsync()
     {
+        LatestFailed = false;
         _loadingLatest = true;
         try
         {
@@ -255,6 +273,7 @@ public sealed partial class OnboardingViewModel : ObservableObject
         {
             // 拿不到版本列表时按钮写“正在获取”，点热门版本或去下载页照样能装。
             Trace.WriteLine("Jay: onboarding manifest failed: " + e.Message);
+            LatestFailed = true;
         }
         finally
         {
@@ -297,10 +316,14 @@ public sealed partial class OnboardingViewModel : ObservableObject
         RefreshTexts();
     }
 
-    /// <summary>装一个版本：loader 为空时只装原版。装好后把 Java 也准备好（同一条进度），设为当前实例。</summary>
-    internal async Task InstallAsync(string mcVersion, LoaderKind? loader, bool fallbackToVanilla)
+    /// <summary>
+    /// 装一个版本：loader 为空时只装原版。装好后把 Java 也准备好（同一条进度），设为当前实例。
+    /// Returns the installed instance id, or null when it failed or was cancelled.
+    /// </summary>
+    internal async Task<string?> InstallAsync(string mcVersion, LoaderKind? loader, bool fallbackToVanilla)
     {
-        if (IsInstalling) return;
+        if (IsInstalling) return null;
+        string? installed = null;
         _installing = (mcVersion, loader, fallbackToVanilla);
         IsInstalling = true;
         Message = null;
@@ -386,6 +409,7 @@ public sealed partial class OnboardingViewModel : ObservableObject
             Message ??= StatusMessage.Success("onboarding.install.done", id, (long)Math.Round(_waited.Elapsed.TotalSeconds));
             _service.SetCurrentInstance(id);
             _service.NotifyInstalledChanged();
+            installed = id;
         }
         catch (OperationCanceledException) when (_restartAfterCancel)
         {
@@ -421,8 +445,9 @@ public sealed partial class OnboardingViewModel : ObservableObject
             _restartAfterCancel = false;
             _service.SaveAndReload();
             RefreshTexts();
-            await InstallAsync(again.McVersion, again.Loader, again.FallbackToVanilla);
+            return await InstallAsync(again.McVersion, again.Loader, again.FallbackToVanilla);
         }
+        return installed;
     }
 
     private string? ResumePreparedGame(string root, string mcVersion, LoaderKind? loader, bool fallbackToVanilla)

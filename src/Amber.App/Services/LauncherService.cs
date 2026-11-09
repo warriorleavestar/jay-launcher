@@ -12,8 +12,13 @@ namespace Amber.App.Services;
 /// <summary>界面共用的核心对象。设置里的目录或下载源变了就调用 <see cref="Reload"/>。</summary>
 public sealed class LauncherService : IDisposable
 {
-    private readonly HttpClient _http = Downloader.CreateHttpClient();
+    // Downloads stream large files, so their client has no overall timeout (the downloader watches for stalls itself).
+    private readonly HttpClient _downloadHttp = Downloader.CreateHttpClient(category: NetworkCategory.Download);
 
+    // API calls, sign-in, update checks and small fetches get a hard limit, so a stalled connection cannot hang them forever.
+    private readonly HttpClient _http = Downloader.CreateHttpClient(Downloader.ApiTimeout);
+
+    /// <summary>For small requests (APIs, icons, config files). Has an overall timeout; don't use it for big downloads.</summary>
     public HttpClient Http => _http;
     public AppSettings Settings { get; }
     public AccountService Accounts { get; }
@@ -74,7 +79,33 @@ public sealed class LauncherService : IDisposable
     private Amber.Core.Multiplayer.Public.PublicNetworkList? _networks;
 
     /// <summary>认哪些注册表钥匙（自检里换成测试钥匙；null = 程序里内置的）。</summary>
-    internal IReadOnlyList<byte[]>? TrustedNetworkKeys { get; set; }
+    internal IReadOnlyList<byte[]>? TrustedNetworkKeys { get; set; } = TestRegistryKeys.Count > 0
+        ? [.. Amber.Core.Multiplayer.Public.NetworkString.RegistryKeys.Select(Convert.FromBase64String), .. TestRegistryKeys]
+        : null;
+
+    /// <summary>
+    /// Developer switch for test machines: AMBER_TEST_REGISTRY_KEY holds one or more registry public keys
+    /// (base64, comma separated) that this Jay also trusts. Networks signed by them are shown as "test review",
+    /// never as properly reviewed.
+    /// </summary>
+    internal static readonly IReadOnlyList<byte[]> TestRegistryKeys = ParseTestKeys(Environment.GetEnvironmentVariable("AMBER_TEST_REGISTRY_KEY"));
+
+    internal static IReadOnlyList<byte[]> ParseTestKeys(string? text)
+    {
+        var keys = new List<byte[]>();
+        foreach (var part in (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            try
+            {
+                if (Convert.FromBase64String(part) is { Length: 32 } key) keys.Add(key);
+            }
+            catch (FormatException) { }
+        }
+        return keys;
+    }
+
+    /// <summary>Signed by a key that only AMBER_TEST_REGISTRY_KEY trusts.</summary>
+    internal static bool IsTestReviewed(byte[] signer) => TestRegistryKeys.Any(k => k.AsSpan().SequenceEqual(signer));
 
     /// <summary>保存的公共网络（设置里的连接串验签后的结果，改了设置要 <see cref="ReloadNetworks"/>）。</summary>
     public Amber.Core.Multiplayer.Public.PublicNetworkList Networks => _networks ??= new(Settings.PublicNetworks, TrustedNetworkKeys);
@@ -90,9 +121,32 @@ public sealed class LauncherService : IDisposable
         var store = new AccountStore(Path.Combine(AppSettings.DataDir, "accounts.json"));
         store.Load();
         Accounts = new AccountService(_http, store, AppSettings.DataDir, () => Settings.MicrosoftClientId);
-        // 老版本只存了玩家名，第一次运行时转成离线账号。
-        if (store.Accounts.Count == 0 && !string.IsNullOrWhiteSpace(settings.PlayerName))
+        if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
+                Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
             Accounts.AddOffline(settings.PlayerName);
+        Reload();
+    }
+
+    /// <summary>
+    /// 老版本只存了玩家名，第一次运行时转成离线账号。A brand-new Jay (no settings file) has no old name: the first-run
+    /// wizard asks for one. Self-checks keep the default account so they can launch, except the first-run scope.
+    /// </summary>
+    internal static bool MigratesPlayerName(int accounts, string? playerName, bool freshSettings, string? selfTest, string? scope) =>
+        accounts == 0 && !string.IsNullOrWhiteSpace(playerName)
+        && (!freshSettings || (selfTest is { Length: > 0 } && scope != "firstrun"));
+
+    /// <summary>所有长任务（活动中心“进行中”）。</summary>
+    public Amber.Core.Activity.TaskCenter Tasks { get; } = new();
+
+    /// <summary>所有要你处理的请求（请求条、房间卡、小窗共用，一处处理处处撤掉）。</summary>
+    public Amber.Core.Activity.RequestCenter Requests { get; } = new();
+
+    /// <summary>换下载源（启动失败卡的“切换到镜像后重试”）：存进设置并按新源重建下载器。</summary>
+    public void SetDownloadSource(string source)
+    {
+        Settings.DownloadSource = source;
+        try { Settings.Save(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { SettingsSaveFailed?.Invoke(e); }
         Reload();
     }
 
@@ -105,7 +159,7 @@ public sealed class LauncherService : IDisposable
             "mirror" => SourceChain.MirrorFirst,
             _ => SourceChain.Default(),
         };
-        var downloader = new Downloader(_http, sources)
+        var downloader = new Downloader(_downloadHttp, sources)
         {
             MaxConcurrency = Math.Clamp(Settings.DownloadConcurrency, 1, 128),
             Hashes = new HashCache(Path.Combine(Settings.GameDirectory, ".amber-hashes")),
@@ -114,6 +168,7 @@ public sealed class LauncherService : IDisposable
         var java = new JavaManager(downloader, directory) { AutoDownload = Settings.AutoJavaDownload };
         var loaders = new LoaderContext(downloader, directory, installer, java.ForMajorAsync);
         Modrinth = new ModrinthProvider(_http);
+        NetworkPolicy.Register(Settings.CurseForgeApiRoot, NetworkCategory.ContentApi);
         CurseForge = new CurseForgeProvider(_http, CurseForgeKey,
             string.IsNullOrWhiteSpace(Settings.CurseForgeApiRoot) ? CurseForgeProvider.DefaultApiRoot : Settings.CurseForgeApiRoot.Trim().TrimEnd('/'));
         var contentInstaller = new ContentInstaller(downloader, new Dictionary<ContentSource, IContentProvider>
@@ -146,6 +201,49 @@ public sealed class LauncherService : IDisposable
 
     public void NotifyAccountsChanged() => AccountsChanged?.Invoke();
     public void NotifyContentChanged() => ContentChanged?.Invoke();
+
+    /// <summary>Raised when an instance's library data changed (played, pinned).</summary>
+    public event Action? LibraryChanged;
+
+    /// <summary>The launcher-side data of an instance (null when there is none yet).</summary>
+    public InstanceMeta? MetaOf(string id) => Settings.Instances?.GetValueOrDefault(id);
+
+    private InstanceMeta EnsureMeta(string id)
+    {
+        Settings.Instances ??= [];
+        if (!Settings.Instances.TryGetValue(id, out var meta)) Settings.Instances[id] = meta = new InstanceMeta();
+        return meta;
+    }
+
+    /// <summary>A game of this instance started: front of the recent list, last-played time.</summary>
+    public void RecordPlayed(string id, DateTimeOffset when)
+    {
+        Settings.RecentInstances = Amber.Core.GameLibrary.LibraryQuery.Touch(Settings.RecentInstances, id);
+        EnsureMeta(id).LastPlayed = when;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
+    /// <summary>A game of this instance ended after this long in game.</summary>
+    public void AddPlayTime(string id, TimeSpan played)
+    {
+        if (played <= TimeSpan.Zero) return;
+        EnsureMeta(id).PlayMinutes += played.TotalMinutes;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
+    public void SetPinned(string id, bool pinned)
+    {
+        EnsureMeta(id).Pinned = pinned;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
+    private void SaveQuietly()
+    {
+        try { Settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
     public void NotifyInstalledChanged() => InstalledVersionsChanged?.Invoke();
     public void RequestLaunch(LaunchRequest request) => LaunchRequested?.Invoke(request);
     public void NotifyGameOutput(string versionId, string line) => GameOutput?.Invoke(versionId, line);
@@ -353,6 +451,7 @@ public sealed class LauncherService : IDisposable
     {
         ActiveMultiplayer?.Dispose();
         _http.Dispose();
+        _downloadHttp.Dispose();
     }
 }
 

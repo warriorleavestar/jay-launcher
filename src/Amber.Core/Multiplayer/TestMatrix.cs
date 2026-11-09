@@ -199,9 +199,12 @@ public sealed class SpeedTestServer : IAsyncDisposable
         lock (_gate)
         {
             if (_disposed) return false;
-            var listener = new TcpListener(address, BoundPort);
+            TcpListener? listener = null;
             try
             {
+                // The constructor already creates the socket, so it belongs inside the try: on a system without IPv6 an IPv6
+                // address throws right there, and that must read as "can't listen there", not crash the caller.
+                listener = new TcpListener(address, BoundPort);
                 listener.Start();
                 _listeners.Add(listener);
                 _acceptLoops.Add(AcceptLoopAsync(listener));
@@ -209,7 +212,7 @@ public sealed class SpeedTestServer : IAsyncDisposable
             }
             catch (SocketException)
             {
-                listener.Stop();
+                listener?.Stop();
                 return false;
             }
         }

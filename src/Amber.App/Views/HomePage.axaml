@@ -12,6 +12,34 @@
     <TextBlock Classes="h1" Text="{l:T home.launch}" svc:ThemeRegion.Name="home.title" />
     <ScrollViewer Grid.Row="1">
       <StackPanel>
+        <!-- 启动失败（没进游戏就失败了）：一句话原因 + 按顺序排好的修复按钮（旧规格 N1） -->
+        <Border x:Name="FailureCard" Classes="error-bar" Margin="0,0,0,12" IsVisible="{Binding HasFailure}">
+          <StackPanel Spacing="8">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+              <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="20" Height="20" VerticalAlignment="Top" Stroke="{DynamicResource DangerText}" />
+              <StackPanel Grid.Column="1" Spacing="2">
+                <TextBlock Text="{Binding Failure.Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Failure.Reason}" Classes="hint" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <Button Grid.Column="2" Classes="ghost icon-only" Command="{Binding DismissFailureCommand}" VerticalAlignment="Top"
+                      ToolTip.Tip="{l:T home.failure.dismiss}" AutomationProperties.Name="{l:T home.failure.dismiss}">
+                <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="16" Height="16" />
+              </Button>
+            </Grid>
+            <WrapPanel ItemSpacing="8" LineSpacing="8">
+              <ItemsControl x:Name="FailureFixes" ItemsSource="{Binding Failure.Buttons}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:LaunchFixButton">
+                    <Button Content="{Binding Label}" Classes.secondary="{Binding !IsPrimary}"
+                            Command="{Binding $parent[ItemsControl].((vm:HomeViewModel)DataContext).FixCommand}" CommandParameter="{Binding Fix}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button Classes="secondary" Content="{l:T home.failure.export}" IsVisible="{Binding Failure.CanExport}" Click="ExportFailure_Click" />
+            </WrapPanel>
+          </StackPanel>
+        </Border>
         <!-- 游戏在运行时又要启动：问一声，允许同时开两个客户端 -->
         <Border Classes="callout warning" svc:ThemeRegion.Name="home.pending" IsVisible="{Binding HasPendingLaunch}" Margin="0,0,0,12">
           <DockPanel>
@@ -110,7 +138,7 @@
           </Button.Flyout>
         </Button>
         <StackPanel Grid.Column="2" Margin="12,0,0,0" Spacing="4" VerticalAlignment="Center">
-          <Button x:Name="PrimaryButton" Classes="primary" Content="{Binding PrimaryLabel}" Command="{Binding PrimaryCommand}" ToolTip.Tip="Ctrl+Enter"
+          <Button x:Name="PrimaryButton" Classes="play" Content="{Binding PrimaryLabel}" Command="{Binding PrimaryCommand}" ToolTip.Tip="Ctrl+Enter"
                   MinHeight="48" MinWidth="160" Padding="28,10" FontSize="16" FontWeight="SemiBold"
                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
           <TextBlock Classes="hint" Text="{Binding AccountHint}" HorizontalAlignment="Center" MaxWidth="200"

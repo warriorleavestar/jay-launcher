@@ -122,6 +122,17 @@ public static class MemoryPlanner
         return (info.TotalAvailableMemoryBytes - info.MemoryLoadBytes) / 1024 / 1024;
     }
 
+    /// <summary>
+    /// The next maximum after an out-of-memory crash: 2 GB more, in 512 MB steps, but never more than three quarters
+    /// of the computer's memory. Returns <paramref name="currentMb"/> when it is already at that cap.
+    /// </summary>
+    public static int RaisedMemoryMb(int currentMb, long totalMb)
+    {
+        var cap = (int)Math.Max(2048, totalMb * 3 / 4 / 512 * 512);
+        var next = (currentMb + 2048) / 512 * 512;
+        return Math.Max(currentMb, Math.Min(next, cap));
+    }
+
     public static long TotalPhysicalMb()
     {
         if (OperatingSystem.IsLinux())

@@ -106,7 +106,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     public ObservableCollection<PeerItem> Peers { get; } = [];
     public ObservableCollection<string> Instances { get; } = [];
 
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ComponentText))] public partial bool IsComponentReady { get; set; }
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ComponentText), nameof(LobbyStatusText), nameof(LobbyStatusWarns))] public partial bool IsComponentReady { get; set; }
     [ObservableProperty] public partial bool IsDownloading { get; set; }
     [ObservableProperty] public partial double DownloadPercent { get; set; }
 
@@ -140,7 +140,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     public bool UsingExit => ExitNodeIp.Length > 0;
     /// <summary>经别人上网（消费出口）：要完整局域网模式；Mac/Linux 上还没做（见 PlatformFeatures.FullTrafficExit）。</summary>
-    public bool CanUseExit => PlatformFeatures.FullTrafficExit && _session?.Options.Tun == true;
+    public bool CanUseExit => PlatformFeatures.FullTrafficExit && _session?.Options.Tun == true && !Child.HideNetworkExit;
     public string ExitBanner
     {
         get
@@ -692,7 +692,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task UseGameProxyAsync()
     {
-        if (SelectedExitPeer is not { } peer || _session is null || _currentOptions is not { } current) return;
+        if (Child.HideNetworkExit || SelectedExitPeer is not { } peer || _session is null || _currentOptions is not { } current) return;
         // 邀请房间的封装通道只在成员和房主之间有钥匙：只能经房主转发。
         if (current.Room.FromInvite && current.Room.Tunnel.Wraps && peer.Peer.Ip != EasyTierArgs.HostIp)
         {

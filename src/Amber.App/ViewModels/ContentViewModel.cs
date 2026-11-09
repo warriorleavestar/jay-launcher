@@ -196,6 +196,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         _providerForSource = providerForSource;
         _hasCurseForge = hasCurseForge;
         SourceOptions[1].Enabled = HasCurseForge;
+        HookQueue();
         _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _slowTimer.Tick += (_, _) => UpdateSlow();
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshInstances);
@@ -204,6 +205,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             if (_service.CurrentInstance is { } id && Instances.Contains(id)) TargetInstance = id;
             OnPropertyChanged(nameof(IsTemporaryTarget));
         });
+        service.ContentChanged += () => Dispatcher.UIThread.Post(UpdateShaderState);
         RefreshInstances();
     }
 
@@ -235,6 +237,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     {
         if (value < 0) return;
         OnPropertyChanged(nameof(IsSharedTarget));
+        UpdateShaderState();
         if (IsDatapack) RefreshWorlds();
         _ = SearchFromStart();
     }
@@ -262,9 +265,16 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         SetManualDownloadContext(value is not null && IsModpack ? ManualDownloadContext.ModpackArchive : ManualDownloadContext.Resource);
         LoadOptionalDependencies(value);
         InstallCommand.NotifyCanExecuteChanged();
+        QueueSelectedCommand.NotifyCanExecuteChanged();
+        InstallModpackAndPlayCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(InstallHint));
     }
-    partial void OnIsBusyChanged(bool value) => InstallCommand.NotifyCanExecuteChanged();
+    partial void OnIsBusyChanged(bool value)
+    {
+        InstallCommand.NotifyCanExecuteChanged();
+        InstallQueueCommand.NotifyCanExecuteChanged();
+        InstallModpackAndPlayCommand.NotifyCanExecuteChanged();
+    }
     /// <summary>“装到”临时换成了不是当前实例的那个（显示“仅本次”）。</summary>
     public bool IsTemporaryTarget => TargetInstance is { } t && _service.CurrentInstance is { } c && t != c && Instances.Contains(c);
 
@@ -277,6 +287,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     partial void OnTargetInstanceChanged(string? value)
     {
         OnPropertyChanged(nameof(IsTemporaryTarget));
+        UpdateShaderState();
         OnPropertyChanged(nameof(IsSharedTarget));
         if (IsDatapack) RefreshWorlds();
         if (Detail is not null) _ = LoadFilesAsync();
@@ -305,14 +316,23 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     /// 从别的页面跳来给某个实例找某类内容（实例页的【在线浏览…】、安装成功卡）。
     /// back 不为 null 时页面顶部显示上下文条和【← 返回实例】（改版规格 4.5）。
     /// </summary>
-    public void BrowseFor(string instanceId, ContentType type, Action? back = null)
+    public void BrowseFor(string instanceId, ContentType type, Action? back = null, string query = "")
     {
         if (Instances.Contains(instanceId)) TargetInstance = instanceId;
-        // 之前搜别的内容留下的关键词对这次没意义，清掉后显示热门。
-        Query = "";
+        // 之前搜别的内容留下的关键词对这次没意义，清掉后显示热门（或者带上调用方给的关键词，比如光影页的“Iris”）。
+        Query = query;
         if (TypeIndex != (int)type) TypeIndex = (int)type;
         else _ = SearchFromStart();
         SetReturn(instanceId, type, back);
+    }
+
+    /// <summary>The new-instance panel's "online modpack" source: Discover on modpacks, from the popular list.</summary>
+    public void BrowseModpacks()
+    {
+        Query = "";
+        if (TypeIndex != (int)ContentType.Modpack) TypeIndex = (int)ContentType.Modpack;
+        else _ = SearchFromStart();
+        SetReturn("", ContentType.Modpack, null);
     }
 
     /// <summary>从实例页的“下载数据包”跳过来：切到数据包，并选好版本和世界。</summary>
@@ -490,6 +510,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             foreach (var p in result.Items)
             {
                 var item = new ProjectItem(p);
+                item.Queued = Queue.Contains(item.Project.Source, item.Project.Id);
                 Results.Add(item);
                 _ = LoadIconAsync(item);
             }
@@ -522,7 +543,9 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         await _iconGate.WaitAsync();
         try
         {
-            var bytes = await _service.Http.GetByteArrayAsync(url);
+            byte[] bytes;
+            using (Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.ContentApi))
+                bytes = await _service.Http.GetByteArrayAsync(url);
             item.Icon = await Task.Run(() =>
             {
                 using var memory = new MemoryStream(bytes);
@@ -687,6 +710,13 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Warning("content.install.vanilla_blocked", instance.Id));
             return;
         }
+        var shaderState = CurrentType == ContentType.Shader ? ShaderRenderer.ReadinessOf(instance) : (ShaderReadiness?)null;
+        if (shaderState == ShaderReadiness.Vanilla)
+        {
+            // 原版实例用不了光影：和原版装模组一样装前拦下（旧规格 N3）。
+            SetStatus(StatusMessage.Warning("content.shader.vanilla", instance.Id));
+            return;
+        }
         var world = TargetWorld;
         if (IsDatapack && world is null)
         {
@@ -731,6 +761,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             var kind = problems.Length > 0 || noLoader.Length > 0 ? StatusKind.Warning : StatusKind.Success;
             SetStatus(new StatusMessage("content.install.completed", [file.DisplayName, extra, where, problems, noLoader], kind));
             _service.NotifyContentChanged();
+            if (shaderState is { } state) await AfterShaderInstallAsync(instance, state, file.DisplayName, _workCts.Token);
         }
         catch (ManualDownloadRequiredException e)
         {
@@ -802,8 +833,9 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     /// <summary>往没有加载器的原版实例里装模组：装了也不会生效，安装前拦下。</summary>
     internal static bool BlocksVanillaModInstall(ContentType type, GameInstance instance) => type == ContentType.Mod && instance.Loader is null;
 
-    private async Task InstallModpackFromFileAsync(ContentFile file)
+    private async Task<string?> InstallModpackFromFileAsync(ContentFile file)
     {
+        string? id = null;
         IsBusy = true;
         _workCts = new CancellationTokenSource();
         var importStarted = false;
@@ -813,7 +845,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Info("content.modpack.downloading"));
             await _service.Downloader.DownloadOneAsync(ContentInstaller.ToItem(file, Path.GetDirectoryName(temp)!), _workCts.Token);
             importStarted = true;
-            await ImportCoreAsync(temp, NewInstanceName, _workCts.Token);
+            id = await ImportCoreAsync(temp, NewInstanceName, _workCts.Token);
         }
         catch (ManualDownloadRequiredException e)
         {
@@ -834,44 +866,57 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             Progress = 0;
             try { Directory.Delete(Path.GetDirectoryName(temp)!, true); } catch { /* 临时文件 */ }
         }
+        return id;
     }
 
-    /// <summary>导入本地整合包文件（由界面的文件选择器调用）。</summary>
-    public async Task ImportLocalPackAsync(string path)
+    /// <summary>导入本地整合包文件（由界面的文件选择器调用）。Returns the new instance's id, or null when it did not finish.</summary>
+    public async Task<string?> ImportLocalPackAsync(string path)
     {
+        string? imported = null;
         ManualDownloadUrl = null;
         // 快捷导入会先进入资源页，取消首次搜索，避免它迟到后覆盖导入状态。
         _searchCts?.Cancel();
         // 被取消的搜索不会自己收起“正在搜索”：这里收起，不然转圈和慢速提示会一直留着。
         if (IsSearching) SetSearchState(false);
         IsBusy = true;
-        _workCts = new CancellationTokenSource();
+        var cts = _workCts = new CancellationTokenSource();
+        var task = _importTask = _service.Tasks.Track("import", L.F("activity.kind.import", Path.GetFileName(path)), () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
         try
         {
             var info = ModpackService.Inspect(path);
-            await ImportCoreAsync(path, SafeName(info.Name), _workCts.Token);
+            task.Rename(L.F("activity.kind.import", SafeName(info.Name)));
+            imported = await ImportCoreAsync(path, SafeName(info.Name), _workCts.Token);
+            task.Succeed(Status);
         }
         catch (ManualDownloadRequiredException e)
         {
             await Ui.FlushAsync();
+            task.Fail(L.T("activity.task.manual"));
             ShowManualDownload(e.File, ManualDownloadContext.ModpackImport);
         }
         catch (OperationCanceledException) when (_workCts?.IsCancellationRequested == true)
         {
+            task.Cancelled();
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
         catch (Exception e)
         {
+            task.Fail(ErrorText.Describe(e));
             SetStatus(StatusMessage.Failure("instance.worlds.import_failed", e, ErrorText.Of(e)));
         }
         finally
         {
+            task.Cancelled();
+            _importTask = null;
             IsBusy = false;
             Progress = 0;
         }
+        return imported;
     }
 
-    private async Task ImportCoreAsync(string path, string name, CancellationToken ct)
+    private Amber.Core.Activity.TaskHandle? _importTask;
+
+    private async Task<string> ImportCoreAsync(string path, string name, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException(L.T("content.modpack.name_required"));
         var skipped = new List<string>();
@@ -879,6 +924,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         {
             Status = p.Stage;
             if (p.Percent is { } percent) Progress = percent;
+            _importTask?.Report(p.Percent / 100.0, p.Stage);
         }), ct, onSkip: file => { lock (skipped) skipped.Add(file); });
         await Ui.FlushAsync();
         _service.ForceIsolated(id);
@@ -890,6 +936,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         _service.NotifyInstalledChanged();
         // 新装的整合包直接成为当前实例（改版规格 2.3）。
         _service.SetCurrentInstance(id);
+        return id;
     }
 
     [RelayCommand]

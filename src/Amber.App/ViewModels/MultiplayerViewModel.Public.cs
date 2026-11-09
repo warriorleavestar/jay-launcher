@@ -132,7 +132,7 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task ConnectPublicAsync()
     {
-        if (IsPublicConnected || IsPublicConnecting) return;
+        if (IsPublicConnected || IsPublicConnecting || Child.InviteOnly) return;
         if (!IsComponentReady)
         {
             SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
@@ -296,7 +296,7 @@ public sealed partial class MultiplayerViewModel
     {
         if (_public is not { } network || _announcer is not null || !IsHosting || _lobby is null) return;
         var announcer = new RoomAnnouncer(network, BuildListing, LookupKeys, OnDirectoryMail,
-            line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), searchKey: SearchKeyForAnnounce);
+            line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), searchKey: SearchKeyForAnnounce, account: () => AccountToken);
         announcer.StateChanged += () => Dispatcher.UIThread.Post(() =>
         {
             if (_announcer != announcer) return;

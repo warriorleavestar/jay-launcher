@@ -14,6 +14,8 @@
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <ResourceInclude Source="avares://Jay/Themes/Tokens.axaml" />
+        <ResourceInclude Source="avares://Jay/Themes/Icons.axaml" />
+        <ResourceInclude Source="avares://Jay/Themes/Safety.axaml" />
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>
@@ -52,7 +54,7 @@
       <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
     <!-- 三段式选择器：一排等宽的单选段，选中的用强调色底（改版规格 3.5） -->
-    <Style Selector="UniformGrid.segmented > RadioButton">
+    <Style Selector="UniformGrid.segmented > RadioButton, StackPanel.segmented > RadioButton">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
       <Setter Property="MinWidth" Value="0" />
@@ -68,18 +70,18 @@
         </ControlTemplate>
       </Setter>
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:checked /template/ Border#SegmentBorder">
+    <Style Selector="UniformGrid.segmented > RadioButton:checked /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:checked /template/ Border#SegmentBorder">
       <Setter Property="Background" Value="{DynamicResource Accent}" />
       <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:checked TextBlock">
+    <Style Selector="UniformGrid.segmented > RadioButton:checked TextBlock, StackPanel.segmented > RadioButton:checked TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder">
+    <Style Selector="UniformGrid.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder">
       <Setter Property="Background" Value="{DynamicResource NavHover}" />
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder">
+    <Style Selector="UniformGrid.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder">
       <Setter Property="BorderBrush" Value="{DynamicResource AccentText}" />
       <Setter Property="BorderThickness" Value="2" />
     </Style>
@@ -118,6 +120,20 @@
       <Setter Property="Padding" Value="{DynamicResource CardPadding}" />
       <Setter Property="Margin" Value="0,0,0,12" />
     </Style>
+    <!-- Drag-and-drop zones (§6.25): a dashed accent frame, filled when the files are over it. -->
+    <Style Selector="Border.drop-target">
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Width" Value="240" />
+    </Style>
+    <Style Selector="Border.compact Border.drop-target">
+      <Setter Property="Width" Value="320" />
+    </Style>
+    <Style Selector="Border.drop-target.hovered">
+      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
+    </Style>
+
     <Style Selector="TextBlock.h1">
       <Setter Property="TextWrapping" Value="Wrap" />
       <Setter Property="FontSize" Value="{DynamicResource FontTitle}" />
@@ -215,7 +231,7 @@
       <Setter Property="Foreground" Value="{DynamicResource DisabledText}" />
     </Style>
 
-    <!-- 导航：选中项左边一条琥珀色指示条（在 MainWindow 的模板里），背景稍亮 -->
+    <!-- 导航：选中项左边一条松鸦蓝指示条（在 MainWindow 的模板里），背景稍亮 -->
     <Style Selector="ListBox.nav ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource NavSelected}" />
     </Style>
@@ -229,5 +245,6 @@
       <Setter Property="Background" Value="{DynamicResource Accent}" />
       <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
     </Style>
+    <StyleInclude Source="avares://Jay/Themes/Controls.axaml" />
   </Application.Styles>
 </Application>
