@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Amber.Core.Localization;
+using Amber.Core.Multiplayer.Transport;
 
 namespace Amber.Core.Multiplayer.Public;
 
@@ -94,6 +95,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     public int Port { get; }
 
+    /// <summary>账号密码登录（jay-server directory --accounts 时才有）。</summary>
+    public LoginAuthority? Login { get; set; }
+
     public RoomDirectoryServer(IPAddress address, int port, Action<string>? log = null, Func<DateTimeOffset>? clock = null)
     {
         _now = clock ?? (() => DateTimeOffset.UtcNow);
@@ -160,10 +164,11 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "lookup" => Lookup(request),
                 "mail" => Mail(request),
                 "find" => Find(request),
+                "login" when Login is { } login => login.Handle(request),
                 _ => Error("op"),
             };
         }
-        catch (Exception e) when (e is InvalidOperationException or FormatException or ArgumentException)
+        catch (Exception e) when (e is InvalidOperationException or FormatException or ArgumentException or JsonException)
         {
             return Error("bad");
         }
@@ -390,6 +395,14 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, string ip = Publ
         var reply = await CallAsync(new JsonObject { ["op"] = "find", ["code"] = code }, ct);
         Check(reply);
         return RoomListing.FromJson(reply["room"]);
+    }
+
+    /// <summary>登录公共网络的账号：账号密码封给节点的登录公钥，回来的凭证绑定自己的联机身份。</summary>
+    public async Task<(string Token, AccountToken Parsed)> LoginAsync(X25519KeyPair me, NetworkLogin login, string network, string user, string password,
+        CancellationToken ct, IReadOnlyDictionary<string, string>? factors = null)
+    {
+        var reply = await CallAsync(NetworkLoginClient.Request(me, login, user, password, DateTimeOffset.UtcNow, factors), ct);
+        return NetworkLoginClient.Read(reply, me, login, network, DateTimeOffset.UtcNow);
     }
 
     public async Task MailAsync(string id, string text, CancellationToken ct) =>

@@ -1,7 +1,7 @@
 # Amber launcher: notes for coding agents
 
 Amber is an original cross-platform Minecraft Java launcher for Windows, macOS and Linux, built with .NET 10 and Avalonia 12 (MVVM via CommunityToolkit.Mvvm).
-The UI text, comments and docs are written in Simplified Chinese. Keep new ones in the same language and tone.
+English comes first: write new code comments, docs, commit messages and PRs in English. UI text is localized; `src/Amber.Core/Localization/en.json` is the source and fallback, so add new strings there first and then to every other language file. Some existing comments and docs are in Simplified Chinese; leave them unless you are substantially changing that code. See CONTRIBUTING.md for the translation workflow.
 
 ## Layout
 
@@ -38,6 +38,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Repo
 只验证资源页首次加载和来源切换时，先设置 `AMBER_SELFTEST_SCOPE=content`；同样输出报告和截图，跳过游戏安装与启动。
 只验证联机（邀请、敲门、房间、直连）时设置 `AMBER_SELFTEST_SCOPE=multiplayer`。
 只验证界面主题包（导出、导入、立即生效、坏包被拒、恢复默认、删除）时设置 `AMBER_SELFTEST_SCOPE=theme`；主题包格式见 `docs/themes.md`。
+只验证联机安全（设置页“联机安全”卡片、熔断倒计时盖住窗口、空格取消、到点重启、10 分钟内不再自动重启、跳过等待）时设置 `AMBER_SELFTEST_SCOPE=security`；重启这一步换成计数，不会真的重启。
 开服端到端要开两个 Jay：一个 `AMBER_SELFTEST_SCOPE=host-server`（按“开服”卡片的按钮走完 填地址 → 准备服务端 → 启动 → 邀请 → 等进服 → 撤销 → 停服 → 再开后关窗口），一个 `AMBER_SELFTEST_SCOPE=jay-client`（离线账号 Steve，用 `AMBER_SELFTEST_VERSION` 指定的实例进服）。两边各用自己的 `AMBER_DATA_DIR`，`AMBER_SELFTEST_INVITE` 指向同一个邀请码文件。`AMBER_SELFTEST_SCOPE=host-exit` 只测“服务器开着时关 Jay 会先存盘”。
 
 Other developer switches are environment variables:
@@ -47,6 +48,7 @@ Other developer switches are environment variables:
 | `AMBER_SNAPSHOT_DIR` | Render every page to PNG |
 | `AMBER_STARTUP_LOG` | Write startup timing |
 | `AMBER_ET_VERBOSE` | Verbose EasyTier output |
+| `AMBER_THEME_DEV` | Use an unpacked theme folder and reload it on every save (same as `--theme-dev <dir>`) |
 
 ## Rules
 

@@ -2,6 +2,8 @@
 
 Android 版是一个独立的 Avalonia 移动端工程，不会把桌面端的窗口、进程启动和 EasyTier 代码强行带到手机上。
 
+应用显示版本和整数构建号分别跟随 `src/Directory.Build.props` 的 `Version`、`MobileApplicationVersion`，不再需要在 Android 工程和界面中重复修改版本号。
+
 ## 现在能做什么
 
 - 在应用私有目录生成并加密保存设备身份。

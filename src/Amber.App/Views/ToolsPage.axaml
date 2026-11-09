@@ -1,13 +1,14 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
              xmlns:l="using:Amber.App.Localization"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:c="using:Amber.App.Views.Controls"
              x:Class="Amber.App.Views.ToolsPage"
              x:DataType="vm:ToolsViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
-    <TextBlock Classes="h1" Text="{l:T tools.title}" />
-    <ScrollViewer Grid.Row="1">
+    <TextBlock svc:ThemeRegion.Name="tools.title" Classes="h1" Text="{l:T tools.title}" />
+    <ScrollViewer svc:ThemeRegion.Name="tools.body" Grid.Row="1">
       <StackPanel>
         <Border Classes="card">
           <StackPanel Spacing="8">
@@ -68,7 +69,7 @@
         </Border>
       </StackPanel>
     </ScrollViewer>
-    <Border Grid.Row="2" Classes="card" Margin="0">
+    <Border svc:ThemeRegion.Name="tools.status" Grid.Row="2" Classes="card" Margin="0">
       <Border.IsVisible>
         <MultiBinding Converter="{x:Static BoolConverters.Or}">
           <Binding Path="IsShowing" ElementName="PageStatus" />

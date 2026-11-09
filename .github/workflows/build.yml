@@ -123,6 +123,18 @@ jobs:
           Copy-Item -Recurse ../out/win-x64/easytier ../out/win-x64-aot/easytier
           Compress-Archive -Path ../out/win-x64-aot/* -DestinationPath ../packages/Jay-win-x64-aot.zip
 
+      # Mac/Linux 也出 Native AOT 包（启动更快，不用解压运行时）：在各自的原生机器上编译，带上同一份 EasyTier。
+      - name: Publish macOS/Linux Native AOT
+        if: matrix.archive == 'tar'
+        shell: bash
+        run: |
+          dotnet publish Amber.App -c Release -r ${{ matrix.rid }} -p:PublishAot=true -p:DebugType=none -o ../out/${{ matrix.rid }}-aot
+          find ../out/${{ matrix.rid }}-aot \( -name '*.pdb' -o -name '*.dbg' -o -name '*.dSYM' \) -prune -exec rm -rf {} +
+          cp -R ../out/${{ matrix.rid }}/easytier ../out/${{ matrix.rid }}-aot/easytier
+          chmod +x ../out/${{ matrix.rid }}-aot/Jay
+          if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}-aot/NotoSansSC-OFL.txt; fi
+          tar -C ../out/${{ matrix.rid }}-aot -czf ../packages/Jay-${{ matrix.rid }}-aot.tar.gz .
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jay-${{ matrix.rid }}
@@ -166,8 +178,16 @@ jobs:
       - name: Stage APK
         shell: bash
         run: |
+          APK_PATH="Amber.Android/bin/Release/net10.0-android/publish/nz.work.minecraft.jay-Signed.apk"
+          DISPLAY_VERSION="$(dotnet msbuild Amber.Android/Amber.Android.csproj -getProperty:ApplicationDisplayVersion)"
+          BUILD_VERSION="$(dotnet msbuild Amber.Android/Amber.Android.csproj -getProperty:ApplicationVersion)"
+          AAPT_PATH="$(find "${{ runner.temp }}/android-sdk/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
+          test -n "$AAPT_PATH"
+          BADGING="$("$AAPT_PATH" dump badging "$APK_PATH" | head -n 1)"
+          [[ "$BADGING" == *"versionName='$DISPLAY_VERSION'"* ]]
+          [[ "$BADGING" == *"versionCode='$BUILD_VERSION'"* ]]
           mkdir -p ../packages
-          cp Amber.Android/bin/Release/net10.0-android/publish/nz.work.minecraft.jay-Signed.apk ../packages/Jay-android-experimental.apk
+          cp "$APK_PATH" ../packages/Jay-android-experimental.apk
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -205,6 +225,10 @@ jobs:
         run: |
           APP_PATH="$(find Amber.iOS/bin/Release/net10.0-ios/iossimulator-arm64 -type d -name 'Jay.app' -print -quit)"
           test -n "$APP_PATH"
+          DISPLAY_VERSION="$(dotnet msbuild Amber.iOS/Amber.iOS.csproj -getProperty:ApplicationDisplayVersion)"
+          BUILD_VERSION="$(dotnet msbuild Amber.iOS/Amber.iOS.csproj -getProperty:ApplicationVersion)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")" = "$DISPLAY_VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")" = "$BUILD_VERSION"
           mkdir -p ../packages
           tar -C "$(dirname "$APP_PATH")" -czf ../packages/Jay-ios-simulator-arm64-experimental.tar.gz "$(basename "$APP_PATH")"
 

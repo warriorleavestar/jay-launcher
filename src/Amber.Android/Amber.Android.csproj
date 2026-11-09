@@ -7,8 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationId>nz.work.minecraft.jay</ApplicationId>
     <ApplicationTitle>Jay</ApplicationTitle>
-    <ApplicationVersion>70</ApplicationVersion>
-    <ApplicationDisplayVersion>0.7.0</ApplicationDisplayVersion>
+    <ApplicationVersion>$(MobileApplicationVersion)</ApplicationVersion>
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
   </PropertyGroup>
