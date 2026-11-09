@@ -455,6 +455,8 @@ public sealed class DirectBridge : IAsyncDisposable
         limit.CancelAfter(timeout);
         var sent = 0;
         var random = new Random();
+        var targetAddresses = targets.Select(t => Stun.Normalize(t.EndPoint).Address)
+            .Concat(spray is null ? [] : [Stun.Normalize(spray).Address]).ToHashSet();
         _punches[round] = acknowledged;
         try
         {
@@ -481,8 +483,10 @@ public sealed class DirectBridge : IAsyncDisposable
                 if (confirmed is not null && (!_peers.TryGetValue(confirmed.Remote, out var active) || !ReferenceEquals(active, confirmed)))
                     confirmed = null;
                 // A peer that (re)connected since this punch started counts. Comparing peer counts instead would miss a newcomer
-                // whenever a stale peer was evicted at the same time.
-                var newest = confirmed ?? _peers.Values.Where(p => p.ConnectedMs >= start).OrderBy(p => p.ConnectedMs).FirstOrDefault();
+                // whenever a stale peer was evicted at the same time. When two guests punch at once, prefer the one whose address
+                // is among this punch's targets so each punch reports its own guest; a NAT may still rewrite the address, so any
+                // newcomer is the fallback.
+                var newest = confirmed ?? NewestSince(_peers.Values, start, targetAddresses);
                 if (newest is not null)
                 {
                     _log(L.P("core.mp.punch.success", sent, DirectText.Path(newest.Path), newest.Remote, _clock.ElapsedMilliseconds - start, sent));
@@ -501,6 +505,20 @@ public sealed class DirectBridge : IAsyncDisposable
         }
         _log(L.P("core.mp.punch.timeout", (long)Math.Round(timeout.TotalSeconds), timeout.TotalSeconds, sent));
         return null;
+    }
+
+    /// <summary>The earliest peer connected at or after <paramref name="start"/>, preferring one whose address is a punch target.</summary>
+    internal static DirectPeer? NewestSince(IEnumerable<DirectPeer> peers, long start, IReadOnlySet<IPAddress> targetAddresses)
+    {
+        DirectPeer? any = null, targeted = null;
+        foreach (var p in peers)
+        {
+            if (p.ConnectedMs < start) continue;
+            if (any is null || p.ConnectedMs < any.ConnectedMs) any = p;
+            if (targetAddresses.Contains(Stun.Normalize(p.Remote).Address) && (targeted is null || p.ConnectedMs < targeted.ConnectedMs))
+                targeted = p;
+        }
+        return targeted ?? any;
     }
 
     /// <summary>NAT 保活的间隔。很多运营商（尤其是国内的 CGNAT）几十秒没有包就回收 UDP 映射。</summary>

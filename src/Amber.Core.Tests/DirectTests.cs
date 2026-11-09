@@ -152,6 +152,24 @@ public class DirectBridgeTests
         stop.Cancel();
     }
 
+    /// <summary>Two guests punching the host at once: each host punch reports the guest it was aimed at, not just the earliest newcomer.</summary>
+    [Fact]
+    public void PunchPrefersNewcomerAmongItsTargets()
+    {
+        var other = new DirectPeer { Remote = new IPEndPoint(IPAddress.Parse("198.51.100.7"), 4000), Path = PathKind.Punch, ConnectedMs = 105 };
+        var mine = new DirectPeer { Remote = new IPEndPoint(IPAddress.Parse("::ffff:203.0.113.9"), 5000), Path = PathKind.Punch, ConnectedMs = 110 };
+        var stale = new DirectPeer { Remote = new IPEndPoint(IPAddress.Parse("203.0.113.9"), 6000), Path = PathKind.Punch, ConnectedMs = 50 };
+        var targets = new HashSet<IPAddress> { IPAddress.Parse("203.0.113.9") };
+
+        // The guest's NAT changed its port, but the address matches (also across the v4-mapped form).
+        Assert.Same(mine, DirectBridge.NewestSince([stale, other, mine], 100, targets));
+        // No targeted newcomer yet: any newcomer still counts (a NAT may rewrite the address).
+        Assert.Same(other, DirectBridge.NewestSince([stale, other], 100, targets));
+        // No targets (waiting for anyone): the earliest newcomer.
+        Assert.Same(other, DirectBridge.NewestSince([stale, other, mine], 100, new HashSet<IPAddress>()));
+        Assert.Null(DirectBridge.NewestSince([stale], 100, targets));
+    }
+
     [Fact]
     public async Task DisabledPathIsNotUsed()
     {
