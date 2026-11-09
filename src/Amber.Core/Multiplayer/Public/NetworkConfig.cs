@@ -22,6 +22,12 @@ public sealed record NetworkPolicy(IReadOnlySet<RoomVisibility> AllowedModes, bo
 {
     public static readonly NetworkPolicy Default = new(new HashSet<RoomVisibility>(Enum.GetValues<RoomVisibility>()));
 
+    /// <summary>
+    /// Does this network take volunteer nodes (players relaying for others)? Default yes; "volunteers": false turns them
+    /// off: the node refuses to list any, and Jay neither offers to volunteer nor connects to volunteers on this network.
+    /// </summary>
+    public bool Volunteers { get; init; } = true;
+
     public bool Allows(RoomVisibility mode) => AllowedModes.Contains(mode);
 
     /// <summary>这个大小的文件能不能传。</summary>
@@ -103,6 +109,7 @@ public sealed record NetworkConfig(string Network, string? Notice, IReadOnlyList
         return new NetworkPolicy(modes, p["requireDevice"]?.GetValue<bool>() ?? false, p["files"]?.GetValue<bool>() ?? true, max, min)
         {
             Security = ParseSecurity(p["security"]),
+            Volunteers = p["volunteers"]?.GetValue<bool>() ?? true,
         };
     }
 
