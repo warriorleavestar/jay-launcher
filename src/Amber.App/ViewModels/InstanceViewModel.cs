@@ -300,7 +300,10 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             CancelServerQueries();
             _loadedTabs.Remove((int)InstanceTab.Servers);
         }
+        // Logs: read the run list again each time (a run may have started or ended meanwhile).
+        if (value == (int)InstanceTab.Logs) _loadedTabs.Remove(value);
         LoadTab(value);
+        UpdateLiveTimer();
     }
 
     private void LoadTab(int tab)
@@ -316,6 +319,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             case InstanceTab.ResourcePacks: LoadResourcePacks(); break;
             case InstanceTab.ShaderPacks: LoadShaderPacks(); break;
             case InstanceTab.Servers: LoadServers(); break;
+            case InstanceTab.Logs: LoadLogs(); break;
         }
     }
 
@@ -1317,5 +1321,6 @@ public enum InstanceTab
     ShaderPacks,
     Servers,
     Screenshots,
+    Logs,
     Settings,
 }

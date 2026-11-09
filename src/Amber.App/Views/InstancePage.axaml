@@ -59,6 +59,28 @@
       <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
       <Setter Property="Padding" Value="12,10" />
     </Style>
+    <!-- Logs tab (§6.9): level colours; JAY lines in amber so Jay's own notes stand apart from the game's. -->
+    <Style Selector="TextBlock.log-tag, SelectableTextBlock.log-text">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    </Style>
+    <Style Selector="TextBlock.log-tag.muted, SelectableTextBlock.log-text.muted">
+      <Setter Property="Foreground" Value="{DynamicResource TextTertiary}" />
+    </Style>
+    <Style Selector="TextBlock.log-tag.warning, SelectableTextBlock.log-text.warning">
+      <Setter Property="Foreground" Value="{DynamicResource WarningText}" />
+    </Style>
+    <Style Selector="TextBlock.log-tag.error, SelectableTextBlock.log-text.error">
+      <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
+    </Style>
+    <Style Selector="TextBlock.log-tag.jay, SelectableTextBlock.log-text.jay">
+      <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
+    </Style>
+    <Style Selector="Border.highlight">
+      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
+    </Style>
+    <Style Selector="StackPanel.missing">
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
   </UserControl.Styles>
   <Grid RowDefinitions="Auto,Auto,*,Auto">
     <!-- 英雄区：封面、名字、事实行、开始按钮（状态机）、旁边单独的取消 / 退出按钮（官方设计 §6.3） -->
@@ -769,6 +791,105 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </ScrollViewer>
+          </Grid>
+        </TabItem>
+
+        <TabItem Header="{l:T logs.title}" FontSize="14">
+          <Grid x:Name="LogsGrid" ColumnDefinitions="240,*">
+            <!-- Wide: the run list on the left. Medium and compact: a picker above the log. -->
+            <Border x:Name="LogRunsPane" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,1,0" Padding="0,0,8,0" Margin="0,0,10,0">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="{l:T logs.runs}" FontWeight="SemiBold" Margin="4,0,0,6" />
+                <ListBox x:Name="LogRunList" ItemsSource="{Binding LogRuns}" SelectedItem="{Binding SelectedLogRun}" Background="Transparent"
+                         AutomationProperties.Name="{l:T logs.runs}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:LogRunRow">
+                      <StackPanel Orientation="Horizontal" Spacing="6" ToolTip.Tip="{Binding Tip}" Classes.missing="{Binding IsMissing}">
+                        <TextBlock Text="{Binding Glyph}" Width="14" />
+                        <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </DockPanel>
+            </Border>
+            <DockPanel Grid.Column="1">
+              <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,6">
+                <ComboBox x:Name="LogRunPicker" ItemsSource="{Binding LogRuns}" SelectedItem="{Binding SelectedLogRun}" HorizontalAlignment="Stretch"
+                          AutomationProperties.Name="{l:T logs.runs}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate DataType="vm:LogRunRow">
+                      <TextBlock>
+                        <Run Text="{l:T logs.this_run}" /><Run Text=" " /><Run Text="{Binding Glyph}" /><Run Text=" " /><Run Text="{Binding Label}" />
+                      </TextBlock>
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Border x:Name="LogDiagnosisCard" Classes="callout warning" IsVisible="{Binding HasLogDiagnosis}">
+                  <TextBlock Text="{Binding LogDiagnosis}" TextWrapping="Wrap" />
+                </Border>
+                <Border Classes="callout info" IsVisible="{Binding NoTraceOn}">
+                  <TextBlock Text="{l:T logs.no_trace}" TextWrapping="Wrap" />
+                </Border>
+                <WrapPanel ItemSpacing="6" LineSpacing="6">
+                  <TextBox x:Name="LogSearchBox" Text="{Binding LogSearch}" PlaceholderText="{l:T logs.search}" Width="220" AutomationProperties.Name="{l:T logs.search}" />
+                  <ListBox x:Name="LogFilterChips" Classes="subtabs" ItemsSource="{Binding LogFilters}" SelectedIndex="{Binding LogFilterIndex}" Background="Transparent"
+                           AutomationProperties.Name="{l:T logs.filter}">
+                    <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="2" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+                  </ListBox>
+                  <TextBlock Text="{Binding LogErrorBadge}" Foreground="{DynamicResource DangerText}" VerticalAlignment="Center" ToolTip.Tip="{l:T logs.errors_tip}" />
+                  <TextBlock Text="{Binding LogWarningBadge}" Foreground="{DynamicResource WarningText}" VerticalAlignment="Center" ToolTip.Tip="{l:T logs.warnings_tip}" />
+                  <Button Classes="ghost" Content="↑" Command="{Binding PreviousLogErrorCommand}" ToolTip.Tip="{l:T logs.prev_error}" AutomationProperties.Name="{l:T logs.prev_error}" />
+                  <Button Classes="ghost" Content="↓" Command="{Binding NextLogErrorCommand}" ToolTip.Tip="{l:T logs.next_error}" AutomationProperties.Name="{l:T logs.next_error}" />
+                </WrapPanel>
+                <WrapPanel x:Name="LogActions" ItemSpacing="6" LineSpacing="6">
+                  <ToggleSwitch IsChecked="{Binding LogFollow}" OnContent="{l:T log.follow_latest}" OffContent="{l:T log.follow_latest}" IsVisible="{Binding IsLiveRun}" />
+                  <Button Content="{l:T log.copy_all}" Command="{Binding CopyAllLogCommand}" IsEnabled="{Binding !LogEmpty}" />
+                  <Button x:Name="ExportReportButton" Content="{l:T logs.report.export}" Command="{Binding ExportErrorReportCommand}" IsEnabled="{Binding HasLogRun}" />
+                  <Button Classes="ghost" Content="⋯" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
+                    <Button.Flyout>
+                      <MenuFlyout>
+                        <MenuItem Header="{l:T logs.open_crash}" Command="{Binding OpenCrashReportCommand}" IsVisible="{Binding HasCrashReport}" />
+                        <MenuItem Header="{l:T logs.no_crash}" IsEnabled="False" IsVisible="{Binding !HasCrashReport}" />
+                        <MenuItem Header="{l:T logs.open_folder}" Command="{Binding OpenLogsFolderCommand}" />
+                      </MenuFlyout>
+                    </Button.Flyout>
+                  </Button>
+                </WrapPanel>
+              </StackPanel>
+              <Panel>
+                <TextBlock Classes="hint" Text="{Binding LogEmptyText}" IsVisible="{Binding LogEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="420" TextAlignment="Center" />
+                <ListBox x:Name="LogList" ItemsSource="{Binding LogRows}" SelectedItem="{Binding SelectedLogRow}" Background="Transparent" IsVisible="{Binding !LogEmpty}"
+                         FontFamily="{DynamicResource MonoFont}" FontSize="12">
+                  <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                      <Setter Property="Padding" Value="4,1" />
+                    </Style>
+                  </ListBox.Styles>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:LogRow">
+                      <Border Classes.highlight="{Binding IsHighlighted}">
+                        <StackPanel>
+                          <Grid ColumnDefinitions="64,48,*,Auto">
+                            <TextBlock Text="{Binding Time}" Classes="hint" />
+                            <TextBlock Grid.Column="1" Text="{Binding Tag}" Classes="log-tag" Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.jay="{Binding IsJay}" Classes.muted="{Binding IsMuted}" />
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                              <SelectableTextBlock Text="{Binding Message}" TextWrapping="Wrap" Classes="log-text" Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.jay="{Binding IsJay}" Classes.muted="{Binding IsMuted}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6">
+                              <Border Classes="pill" IsVisible="{Binding HasRepeats}"><TextBlock Text="{Binding RepeatsLabel}" /></Border>
+                              <Button Classes="ghost" Padding="6,0" Content="{Binding StackLabel}" IsVisible="{Binding HasStack}"
+                                      Command="{Binding $parent[ListBox].((vm:InstanceViewModel)DataContext).ToggleStackCommand}" CommandParameter="{Binding}" />
+                            </StackPanel>
+                          </Grid>
+                          <SelectableTextBlock Text="{Binding StackText}" IsVisible="{Binding Expanded}" Classes="hint" Margin="112,2,0,4" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Panel>
+            </DockPanel>
           </Grid>
         </TabItem>
 

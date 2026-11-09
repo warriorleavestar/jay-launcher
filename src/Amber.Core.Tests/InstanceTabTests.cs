@@ -16,7 +16,7 @@ public sealed class InstanceTabTests : IDisposable
     public void TabOrderPutsModsFirstAndSettingsLast()
     {
         Assert.Equal(
-            [InstanceTab.Overview, InstanceTab.Mods, InstanceTab.Worlds, InstanceTab.ResourcePacks, InstanceTab.ShaderPacks, InstanceTab.Servers, InstanceTab.Screenshots, InstanceTab.Settings],
+            [InstanceTab.Overview, InstanceTab.Mods, InstanceTab.Worlds, InstanceTab.ResourcePacks, InstanceTab.ShaderPacks, InstanceTab.Servers, InstanceTab.Screenshots, InstanceTab.Logs, InstanceTab.Settings],
             Enum.GetValues<InstanceTab>());
         Assert.Equal(0, (int)InstanceTab.Overview);
     }

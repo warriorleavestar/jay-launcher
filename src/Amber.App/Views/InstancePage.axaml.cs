@@ -4,6 +4,7 @@ using Amber.App.ViewModels;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 
@@ -26,6 +27,7 @@ public partial class InstancePage : UserControl
         ModsList.AddHandler(KeyDownEvent, OnModsKeyDown, RoutingStrategies.Tunnel);
         EnabledPackList.AddHandler(KeyDownEvent, OnPacksKeyDown, RoutingStrategies.Tunnel);
         WorldsList.AddHandler(KeyDownEvent, OnWorldsKeyDown, RoutingStrategies.Tunnel);
+        DataContextChanged += (_, _) => WireLogs();
         // The world panel opens under the list: scroll to it so it is seen even in a short window.
         WorldPanel.PropertyChanged += (_, e) =>
         {
@@ -109,6 +111,12 @@ public partial class InstancePage : UserControl
         ModInspector.Margin = wide ? new Thickness(10, 0, 0, 0) : new Thickness(0);
         ModInspector.BoxShadow = wide ? default : Avalonia.Media.BoxShadows.Parse("0 6 24 0 #40000000");
         CheckUpdatesButton.IsVisible = !compact;
+        // Logs (§6.9): the run list is a column only when wide; otherwise a picker above the log.
+        LogRunsPane.IsVisible = wide;
+        LogsGrid.ColumnDefinitions[0].Width = wide ? new GridLength(240) : new GridLength(0);
+        LogRunPicker.IsVisible = !wide;
+        LogSearchBox.Width = compact ? 160 : 220;
+        LogActions.IsVisible = true;
         AddModText.IsVisible = !compact;
         // Overview: two columns only when wide; otherwise "this instance" goes on top.
         if (wide)
@@ -170,6 +178,7 @@ public partial class InstancePage : UserControl
             e.Handled = true;
             return;
         }
+        if (vm.TabIndex == (int)InstanceTab.Logs && HandleLogsKey(vm, e)) return;
         if (e.Key == Key.Tab && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var step = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1;
@@ -186,6 +195,74 @@ public partial class InstancePage : UserControl
             vm.SideActionCommand.Execute(null);
             e.Handled = true;
         }
+    }
+
+    private InstanceViewModel? _logsWired;
+
+    /// <summary>Gives the Logs tab its clipboard, save picker, locked privacy preview and scrolling.</summary>
+    private void WireLogs()
+    {
+        if (Vm is not { } vm || ReferenceEquals(vm, _logsWired)) return;
+        if (_logsWired is { } old) old.LogJumpRequested -= OnLogJump;
+        _logsWired = vm;
+        vm.LogJumpRequested += OnLogJump;
+        vm.CopyText = async text =>
+        {
+            try
+            {
+                if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard) return false;
+                await clipboard.SetTextAsync(text);
+                return true;
+            }
+            catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException)
+            {
+                return false;
+            }
+        };
+        vm.SaveReportAs = async name =>
+        {
+            if (TopLevel.GetTopLevel(this) is not { } top) return null;
+            var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = L.T("logs.report.export"),
+                SuggestedFileName = name,
+                DefaultExtension = "txt",
+            });
+            return file?.TryGetLocalPath();
+        };
+        vm.AskExportReport = async () =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner) return Amber.App.Controls.Safety.SafetyChoice.Keep;
+            return await Amber.App.Controls.Safety.SafetyDialog.ChooseAsync(owner, L.T("logs.report.title"), L.T("logs.report.body"),
+                L.T("logs.report.save"), L.T("common.cancel"), L.T("logs.report.copy"),
+                [L.T("logs.report.has"), L.T("logs.report.removed")], Amber.App.Controls.Safety.SafetyKind.Safe);
+        };
+    }
+
+    private void OnLogJump(ViewModels.LogRow row) => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+    {
+        if (LogList.IsEffectivelyVisible) LogList.ScrollIntoView(row);
+    }, Avalonia.Threading.DispatcherPriority.Background);
+
+    /// <summary>§6.9 keys: F8 / Shift+F8 next / previous error, Ctrl+F search, End back to the latest (follow).</summary>
+    private bool HandleLogsKey(InstanceViewModel vm, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.F8 when e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift:
+                vm.JumpLogError(e.KeyModifiers == KeyModifiers.Shift ? -1 : 1);
+                break;
+            case Key.F when e.KeyModifiers == KeyModifiers.Control:
+                LogSearchBox.Focus(NavigationMethod.Tab);
+                break;
+            case Key.End when e.KeyModifiers == KeyModifiers.None && !LogSearchBox.IsFocused:
+                vm.LogFollow = true;
+                break;
+            default:
+                return false;
+        }
+        e.Handled = true;
+        return true;
     }
 
     private int _modAnchor = -1;

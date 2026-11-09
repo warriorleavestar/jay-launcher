@@ -231,6 +231,9 @@ public sealed partial class MainViewModel : ObservableObject
             await content.ImportLocalPackAsync(path);
         };
         instance.NavigateHome = () => shell.Navigate("library");
+        instance.LiveLogFor = id => log.Runs.LastOrDefault(r => r.Instance == id && r.Store?.Record.Outcome == RunOutcome.Running);
+        home.RunStarted += id => Avalonia.Threading.Dispatcher.UIThread.Post(() => instance.OnRunsChanged(id));
+        home.RunFinished += id => Avalonia.Threading.Dispatcher.UIThread.Post(() => instance.OnRunsChanged(id));
         instance.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
         content.NavigateToSettings = () => shell.Navigate("settings");
         instance.NavigateToContent = (id, type, query) =>
@@ -843,6 +846,9 @@ public sealed class RunLog : ObservableObject
     public DateTimeOffset StartedAt { get; }
     internal List<LogEntry> All { get; } = [];
 
+    /// <summary>The saved copy of this run's log (instance logs/jay), so earlier runs survive a restart.</summary>
+    internal RunLogStore? Store { get; set; }
+
     /// <summary>“实例 · 开始时间”，日志页页头和选择框里显示。</summary>
     public string Label => Instance is null ? "" : L.F("log.run_summary", Instance, Fmt.Time(StartedAt));
 
@@ -923,6 +929,7 @@ public sealed partial class LogViewModel : PageViewModel
     public void Add(RunLog? run, GameLogLine line)
     {
         var level = LogLevelParser.Parse(line.Message, line.Level);
+        run?.Store?.Add(line.Time, level, line.Message);
         Post(run, new LogEntry(line.Time, level.ToString().ToUpperInvariant(), line.Message, level));
     }
 
@@ -931,7 +938,9 @@ public sealed partial class LogViewModel : PageViewModel
     public void AddRaw(RunLog? run, string message)
     {
         var level = LogLevelParser.Parse(message);
-        Post(run, new LogEntry(DateTimeOffset.Now, level == GameLogLevel.Info ? "JAY" : level.ToString().ToUpperInvariant(), message, level));
+        var now = DateTimeOffset.Now;
+        run?.Store?.Add(now, level, message, fromJay: level == GameLogLevel.Info);
+        Post(run, new LogEntry(now, level == GameLogLevel.Info ? "JAY" : level.ToString().ToUpperInvariant(), message, level));
     }
 
     /// <summary>清空正在看的那次启动的日志（别的启动的不动）。</summary>

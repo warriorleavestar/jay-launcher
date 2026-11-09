@@ -511,6 +511,8 @@ public sealed partial class HomeViewModel : PageViewModel
         // 每局一份日志：多开时第二局不会清掉第一局的，也不会混在一起。
         // 从准备阶段就开始记：补文件、Java、登录这些步骤出错时，日志页也看得到原因。
         run.Log = _log.BeginRun(id, DateTimeOffset.Now);
+        run.Log.Store = RunLogStore.Begin(workDir, run.Log.StartedAt, _service.Settings.NoTrace);
+        RunStarted?.Invoke(id);
         _runs.Add(run);
         _sessions[id] = run.Session;
         _lastRequest = request;
@@ -694,11 +696,54 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         finally
         {
+            FinishStore(run, crashed);
             _runs.Remove(run);
             run.Cts.Dispose();
             Progress = 0;
             UpdateRunState();
             if (gameStarted && _runs.Count == 0) GameExited?.Invoke(crashed);
+        }
+    }
+
+    /// <summary>A run began (its saved log exists from now on): the Logs tab lists it.</summary>
+    public event Action<string>? RunStarted;
+
+    /// <summary>A run ended and its saved log is complete.</summary>
+    public event Action<string>? RunFinished;
+
+    /// <summary>Writes how the run ended next to its saved log (Logs tab › run records).</summary>
+    private void FinishStore(GameRun run, bool crashed)
+    {
+        if (run.Log?.Store is not { } store) return;
+        var session = run.Session;
+        var outcome = session.State switch
+        {
+            LaunchState.Crashed => RunOutcome.Crashed,
+            LaunchState.Failed => RunOutcome.Failed,
+            LaunchState.Cancelled => RunOutcome.Stopped,
+            _ when crashed => RunOutcome.Crashed,
+            _ when run.StoppedByUser => RunOutcome.Stopped,
+            _ => RunOutcome.Exited,
+        };
+        store.Finish(session.Ended ?? DateTimeOffset.Now, outcome, session.ExitCode, session.Reason, LatestCrashReport(run));
+        store.Dispose();
+        RunFinished?.Invoke(run.Id);
+    }
+
+    /// <summary>The crash report the game wrote during this run, if any.</summary>
+    private static string? LatestCrashReport(GameRun run)
+    {
+        try
+        {
+            var dir = Path.Combine(run.WorkDir, "crash-reports");
+            if (!Directory.Exists(dir)) return null;
+            var started = run.Log?.StartedAt.UtcDateTime ?? run.Started;
+            return new DirectoryInfo(dir).EnumerateFiles("crash-*.txt").Where(f => f.LastWriteTimeUtc >= started)
+                .OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()?.FullName;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 
