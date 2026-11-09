@@ -40,6 +40,17 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 
     public bool IsUsable => Nodes.Count > 0;
 
+    /// <summary>是不是 Jay 审核过的网络（内置的 Jay 网络和注册表签名的连接串）。</summary>
+    public bool Reviewed { get; init; } = true;
+
+    /// <summary>网络的服务器配置文件（第 5 期用；内置网络没有）。</summary>
+    public NetworkConfigRef? Config { get; init; }
+
+    /// <summary>网络主页（可选）。</summary>
+    public string? Home { get; init; }
+
+    public bool IsBuiltIn => Id == "jay";
+
     public override string ToString() => Name;
 }
 
