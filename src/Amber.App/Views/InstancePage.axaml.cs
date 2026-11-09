@@ -25,7 +25,32 @@ public partial class InstancePage : UserControl
         };
         ModsList.AddHandler(KeyDownEvent, OnModsKeyDown, RoutingStrategies.Tunnel);
         EnabledPackList.AddHandler(KeyDownEvent, OnPacksKeyDown, RoutingStrategies.Tunnel);
+        WorldsList.AddHandler(KeyDownEvent, OnWorldsKeyDown, RoutingStrategies.Tunnel);
+        // The world panel opens under the list: scroll to it so it is seen even in a short window.
+        WorldPanel.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == IsVisibleProperty && WorldPanel.IsVisible)
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => WorldPanel.BringIntoView(), Avalonia.Threading.DispatcherPriority.Background);
+        };
         DisabledPackList.AddHandler(KeyDownEvent, OnPacksKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>§6.6 world list: Enter opens the world panel (data packs, backups), B backs the world up.</summary>
+    private void OnWorldsKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (Vm is not { } vm || WorldsList.SelectedItem is not ViewModels.WorldItem world || e.KeyModifiers != KeyModifiers.None) return;
+        switch (e.Key)
+        {
+            case Key.Enter:
+                vm.ShowDatapacksCommand.Execute(world);
+                break;
+            case Key.B:
+                vm.BackupWorldCommand.Execute(world);
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
     }
 
     /// <summary>§6.7 pack lists: Space on / off, Alt+↑↓ move (enabled list only), Delete moves the pack to Recently deleted.</summary>

@@ -967,18 +967,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     }
 
     [RelayCommand]
-    private async Task BackupWorldAsync(WorldItem? item)
-    {
-        if (Current is not { } c || item is null) return;
-        await RunWorkAsync(async _ =>
-        {
-            SetStatus(StatusMessage.Info("instance.worlds.backing_up", item.Name));
-            var target = await Task.Run(() => WorldManager.Backup(item.World, Path.Combine(c.WorkDir, "backups")));
-            SetStatus(StatusMessage.Success("instance.worlds.backed_up", target));
-        });
-    }
-
-    [RelayCommand]
     private void OpenWorld(WorldItem? item)
     {
         if (item is not null) OpenPath(item.World.Path);
@@ -1018,7 +1006,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public partial WorldItem? DatapackWorld { get; set; }
 
     public bool HasDatapackWorld => DatapackWorld is not null;
-    public string DatapackTitle => DatapackWorld is { } w ? L.F("instance.datapacks.world_title", w.Name) : "";
+    public string DatapackTitle => DatapackWorld?.Name ?? "";
     public string? DatapacksDir => DatapackWorld is { } w ? DatapackManager.DirectoryOf(w.World.Path) : null;
 
     /// <summary>主窗口设置：去资源页搜索数据包（版本 id，世界文件夹名）。</summary>
@@ -1029,6 +1017,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     {
         DatapackWorld = item;
         LoadDatapacks();
+        LoadBackups();
     }
 
     [RelayCommand]

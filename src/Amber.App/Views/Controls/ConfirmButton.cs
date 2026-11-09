@@ -19,6 +19,9 @@ public class ConfirmButton : Button
     public static readonly StyledProperty<string?> ConfirmTextProperty =
         AvaloniaProperty.Register<ConfirmButton, string?>(nameof(ConfirmText));
 
+    public static readonly StyledProperty<string?> ConfirmMessageProperty =
+        AvaloniaProperty.Register<ConfirmButton, string?>(nameof(ConfirmMessage));
+
     public static readonly StyledProperty<string?> ObjectNameProperty =
         AvaloniaProperty.Register<ConfirmButton, string?>(nameof(ObjectName));
 
@@ -30,6 +33,13 @@ public class ConfirmButton : Button
     {
         get => GetValue(ConfirmTextProperty);
         set => SetValue(ConfirmTextProperty, value);
+    }
+
+    /// <summary>What happens, shown in the dialog body (default "This can't be undone.").</summary>
+    public string? ConfirmMessage
+    {
+        get => GetValue(ConfirmMessageProperty);
+        set => SetValue(ConfirmMessageProperty, value);
     }
 
     /// <summary>要删的东西叫什么（确认框标题、ToolTip、读屏用）。</summary>
@@ -72,7 +82,7 @@ public class ConfirmButton : Button
         {
             var action = Content as string ?? L.T("common.delete");
             var title = string.IsNullOrEmpty(ObjectName) ? action : L.F("safety.action_object", action, ObjectName);
-            if (await SafetyDialog.AskAsync(owner, title, L.T("safety.cannot_undo"), ConfirmText ?? L.T("common.confirm_delete"),
+            if (await SafetyDialog.AskAsync(owner, title, ConfirmMessage ?? L.T("safety.cannot_undo"), ConfirmText ?? L.T("common.confirm_delete"),
                     SafetyKind.Danger, keep: L.T("safety.keep")))
                 base.OnClick();
         }

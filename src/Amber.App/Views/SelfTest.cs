@@ -82,6 +82,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "backups")
+            {
+                await BackupsAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "packs")
             {
                 await PacksAsync();
@@ -1010,7 +1017,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await WaitAsync(() => instance.Worlds.Count > 0, 5);
         Check("世界列表", instance.Worlds.Any(w => w.Name == "自检世界"));
         await instance.BackupWorldCommand.ExecuteAsync(instance.Worlds.First());
-        Check("备份世界", instance.Status.Contains("备份完成"), instance.Status);
+        Check("备份世界", instance.Status.Contains("备份好了"), instance.Status);
         await ShotAsync("世界页");
         await LayoutHereAsync("世界页");
         await DatapacksAsync(instance, world);
