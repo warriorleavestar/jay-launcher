@@ -26,6 +26,7 @@ static class FullLanCheck
     private static TimeSpan _phaseLimit = TimeSpan.FromMinutes(3);
     private static EasyTierElevatedSession? _watchedGuest;
     private static bool _noExit;
+    private static bool _netWatch;
 
     /// <summary>进入下一步：打印带时间的进度；看门狗发现某一步超时就打印现场后直接退出（CI 卡住时能看出停在哪）。</summary>
     private static void Phase(string name, int limitSeconds = 180)
@@ -48,8 +49,18 @@ static class FullLanCheck
                 Thread.Sleep(2000);
                 string phase; TimeSpan over;
                 lock (Clock) { phase = _phase; over = Clock.Elapsed - _phaseStarted - _phaseLimit; }
-                if (over <= TimeSpan.Zero && Clock.Elapsed < TimeSpan.FromMinutes(15)) continue;
-                Console.WriteLine($"TIMEOUT  卡在：{phase}（总共 {Clock.Elapsed.TotalSeconds:0}s）");
+                // --net-watch: if this machine loses its own network (the CI runner then goes silent until the job times out and
+                // the log is lost), tear everything down at once so the runner reconnects and the log shows which phase did it.
+                var netLost = _netWatch && NetworkLost();
+                if (!netLost && over <= TimeSpan.Zero && Clock.Elapsed < TimeSpan.FromMinutes(15)) continue;
+                if (netLost)
+                {
+                    foreach (var pid in CorePids().Concat(GuardPids())) Run("kill", "-9", pid.ToString());
+                    if (OperatingSystem.IsMacOS()) Run("/sbin/pfctl", "-a", UnixExitAnchor, "-F", "all");
+                }
+                Console.WriteLine(netLost
+                    ? $"NETLOST  lost this machine's own network during: {phase} ({Clock.Elapsed.TotalSeconds:0}s)"
+                    : $"TIMEOUT  卡在：{phase}（总共 {Clock.Elapsed.TotalSeconds:0}s）");
                 try
                 {
                     Console.WriteLine("---- 加入方 easytier / 守护输出 ----");
@@ -58,6 +69,15 @@ static class FullLanCheck
                     Console.WriteLine(Run("ps", "axo", "pid,ppid,stat,etime,command").Output);
                     Console.WriteLine("---- 网卡 ----");
                     Console.WriteLine(Run("ifconfig", "-a").Output);
+                    Console.WriteLine("---- routes ----");
+                    Console.WriteLine(Run("netstat", "-rn", "-f", "inet").Output);
+                    if (OperatingSystem.IsMacOS())
+                    {
+                        Console.WriteLine("---- pf ----");
+                        Console.WriteLine(Run("/sbin/pfctl", "-s", "info").Output);
+                        Console.WriteLine(Run("/sbin/pfctl", "-s", "rules").Output);
+                        Console.WriteLine(Run("/sbin/pfctl", "-a", UnixExitAnchor, "-s", "rules").Output);
+                    }
                     Console.WriteLine("---- 托管线程栈 ----");
                     Console.WriteLine(Run("dotnet-stack", "report", "-p", Environment.ProcessId.ToString()).Output);
                 }
@@ -77,8 +97,11 @@ static class FullLanCheck
         // --no-exit：跳过经房主上网两步（GitHub 的 macOS 机器上用；环境变量经 sudo 不一定传得过去，所以用参数）。
         _noExit = args.Contains("--no-exit") || Environment.GetEnvironmentVariable("JAY_FULLLAN_NO_EXIT") == "1";
         args = [.. args.Where(a => a != "--no-exit")];
-        if (args.Length != 1) { Console.WriteLine("用法：sudo dotnet FullLanCheck.dll <测试数据目录> [--no-exit]"); return 2; }
         if (Environment.UserName != "root") { Console.WriteLine("要用 root 运行（sudo）"); return 2; }
+        _netWatch = args.Contains("--net-watch");
+        args = [.. args.Where(a => a != "--net-watch")];
+        if (args.Length != 1) { Console.WriteLine("用法：sudo dotnet FullLanCheck.dll <测试数据目录> [--no-exit] [--net-watch]"); return 2; }
+        if (_netWatch && !Reachable()) { Log("--net-watch: no baseline network, watch disabled"); _netWatch = false; }
         StartWatchdog();
         Phase("安装 easytier");
 
@@ -286,6 +309,34 @@ static class FullLanCheck
         string text;
         lock (output) text = output.ToString();
         return (text.Contains(guestIp + "."), text);
+    }
+
+    private const string UnixExitAnchor = "com.apple/250.JayExit";
+    private const string WatchHost = "github.com";
+    private static int _netMisses;
+    private static DateTime _nextProbe;
+
+    /// <summary>One TCP connect to github.com:443 (the runner's own control traffic goes to GitHub as well).</summary>
+    private static bool Reachable()
+    {
+        try
+        {
+            using var client = new TcpClient();
+            return client.ConnectAsync(WatchHost, 443).Wait(TimeSpan.FromSeconds(4)) && client.Connected;
+        }
+        catch (Exception e) when (e is SocketException or AggregateException or IOException) { return false; }
+    }
+
+    /// <summary>Probes about every 6 s; three misses in a row (about 20 s) count as lost. The exit phases cut the network on purpose, so they are not watched.</summary>
+    private static bool NetworkLost()
+    {
+        string phase;
+        lock (Clock) phase = _phase;
+        if (phase is "切到经房主上网" or "房主掉线" || DateTime.UtcNow < _nextProbe) return false;
+        _nextProbe = DateTime.UtcNow.AddSeconds(6);
+        _netMisses = Reachable() ? 0 : _netMisses + 1;
+        if (_netMisses > 0) Console.WriteLine($"net-watch: github.com:443 unreachable ({_netMisses}) during {phase}");
+        return _netMisses >= 3;
     }
 
     private static async Task<bool> InternetAsync()

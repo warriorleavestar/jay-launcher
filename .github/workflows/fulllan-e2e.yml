@@ -41,9 +41,11 @@ jobs:
 
       # 检查工具自己有看门狗（每一步限时、总共 15 分钟），卡住时打印停在哪一步和现场；这里再兜一层步骤超时，后面的现场步骤还能跑。
       # macOS 上跳过“经别人上网”两步：pf 防漏规则会把同一台机器上的 CI 代理也断网，任务失联到超时（2026-11-09 两次都这样）。
+      # --net-watch (macOS): runs still went silent with --no-exit, so the tool now notices when this machine loses its own
+      # network, tears the session down and prints which phase did it, letting the runner reconnect and keep the log.
       - name: Run (root)
         timeout-minutes: 18
-        run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan" ${{ runner.os == 'macOS' && '--no-exit' || '' }}
+        run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan" ${{ runner.os == 'macOS' && '--no-exit --net-watch' || '' }}
 
       - name: Leftovers on failure
         if: failure()
