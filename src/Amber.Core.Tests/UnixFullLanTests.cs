@@ -197,7 +197,6 @@ public sealed class UnixFullLanTests
             Assert.True(guard.StartAsync(["two"], new Dictionary<string, string>(), null, "10.233.144.250").Wait(TimeSpan.FromSeconds(10)));
             Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("started two", StringComparison.Ordinal)), 5000));
             Assert.False(guard.HasExited);
-            Assert.ThrowsAny<Exception>(() => guard.StartAsync(["x"], new Dictionary<string, string>(), new ExitNetworkPlan("10.233.144.250", []), "10.233.144.250").GetAwaiter().GetResult());
 
             guard.Dispose();
             Assert.True(guard.WaitForExit(TimeSpan.FromSeconds(10)));

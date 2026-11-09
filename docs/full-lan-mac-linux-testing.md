@@ -1,6 +1,6 @@
 # Mac/Linux 完整局域网模式：真机测试步骤
 
-完整局域网模式现在 Mac 和 Linux 上也能开了（设计见 `platform-porting-guide.md` 的“完整局域网模式”一节）。Linux 已在云端用两个网络命名空间测过（普通用户经 pkexec 提权、建网卡、虚拟 IP 互通、广播转发、换参数重启、关房间清理、Jay 被 `kill -9` 后清理、取消密码框）。下面是还需要在真机上确认的部分，**macOS 的部分只有真机能测**。
+完整局域网模式和“经别人上网”现在 Mac 和 Linux 上也能用了（设计见 `platform-porting-guide.md` 的“完整局域网模式”一节）。Linux 已在云端用两个网络命名空间测过（普通用户经 pkexec 提权、建网卡、虚拟 IP 互通、广播转发、换参数重启、关房间清理、Jay 被 `kill -9` 后清理、取消密码框）。下面是还需要在真机上确认的部分，**macOS 的部分只有真机能测**。
 
 测试时用单独的测试配置和测试游戏目录（`AMBER_DATA_DIR` 指向测试目录），不要用自己平时的 `.minecraft`。
 
@@ -39,6 +39,15 @@
 - **从虚拟网卡发包**：原始 UDP 套接字加 `IP_BOUND_IF` 绑定到 utun。如果第 5 步收不到来自虚拟 IP 的包，但第 4 步能通，多半是这一步，发回诊断。
 - **防火墙**：如果开了 macOS 防火墙的“阻止所有传入连接”，虚拟网卡上的连接也会被挡。
 
-## 还没做（第二步）
+## 经别人上网（出口）
 
-- Mac/Linux 上“经别人上网”（把全部流量交给房间里的出口成员）：要改系统路由、DNS 和防漏规则（pf / nftables），界面上暂时不显示，单独做。允许别人经自己上网（提供出口）三个系统都能用。
+Linux 已在云端测过：开出口后能经出口成员上网，出口成员掉线时本机不会退回直接上网，结束后路由、防漏规则和 DNS 都恢复原样。真机上请再确认：
+
+1. 房主勾“允许别人经自己上网”，加入方在房间页选房主当出口，点“开始”。
+2. 加入方打开 `https://ifconfig.me`（或 `curl ifconfig.me`），显示的应该是房主的公网 IP。
+3. 查规则和 DNS：
+   - macOS：`sudo pfctl -a com.apple/250.JayExit -s rules` 能看到 Jay 的规则；`scutil --dns | head -20` 第一个 resolver 是 1.1.1.1 / 8.8.8.8。
+   - Linux：`sudo nft list table inet jay_exit`；`resolvectl status` 里虚拟网卡（amberlan-端口号）的 DNS 是 1.1.1.1 / 8.8.8.8。
+4. 断开测试：房主直接关 Jay。加入方此时打不开任何网页（不会漏到自己的网络），房间页提示连接断了。
+5. 加入方停止出口或关房间：上网恢复正常，`pfctl -a com.apple/250.JayExit -s rules` / `nft list table inet jay_exit` 没有了，`scutil --dns` / `resolvectl status` 恢复原来的 DNS。
+6. macOS 额外留意：系统设置里如果本来就开着别的 VPN 或者第三方防火墙，记一下有没有冲突。

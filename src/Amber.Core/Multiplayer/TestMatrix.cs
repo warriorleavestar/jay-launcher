@@ -70,7 +70,7 @@ public static class TestMatrix
             steps.Add(new MatrixStep(steps.Count + 1, route, path, false, false));
             if (!input.FullLanAllowed) continue;
             steps.Add(new MatrixStep(steps.Count + 1, route, path, true, false));
-            // 经别人上网目前只有 Windows 能用（Mac/Linux 的完整局域网模式不带出口）。
+            // 经别人上网：Linux 缺 ip / nft 时不能用，这一步不排。
             if (PlatformFeatures.FullTrafficExit) steps.Add(new MatrixStep(steps.Count + 1, route, path, true, true));
         }
         return steps;

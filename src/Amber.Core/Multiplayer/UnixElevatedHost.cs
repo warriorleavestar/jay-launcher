@@ -59,6 +59,7 @@ public static class UnixElevatedGuardHost
         private readonly object _writeLock = new();
         private Process? _core;
         private IDisposable? _relay;
+        private UnixExitNetwork? _exit;
         private readonly ManualResetEventSlim _coreExited = new(false);
 
         public int Run()
@@ -106,6 +107,12 @@ public static class UnixElevatedGuardHost
         {
             StopCore();
             CheckCore(corePath);
+            // 经别人上网：承载地址的主机路由要在 EasyTier 加 /1 路由之前查好、加好。
+            if (cmd.Network is { } plan)
+            {
+                _exit = new UnixExitNetwork(plan);
+                _exit.EnterRoutes();
+            }
             var info = new ProcessStartInfo(corePath)
             {
                 UseShellExecute = false,
@@ -131,7 +138,15 @@ public static class UnixElevatedGuardHost
             process.BeginErrorReadLine();
             if (process.HasExited) throw new InvalidOperationException("easytier-core exited during startup");
             if (cmd.VirtualIp is { } vip && System.Net.IPAddress.TryParse(vip, out var ip))
+            {
+                if (_exit is { } exit)
+                {
+                    // 虚拟网卡就绪（带上本机虚拟 IP）之后才上防漏规则和 DNS；就绪之前不回“已启动”。
+                    var tun = WaitForTun(ip, process) ?? throw new IOException("virtual adapter did not come up");
+                    exit.EnterTunnel(tun);
+                }
                 _relay = UnixBroadcastRelay.Start(ip, message => Send("error " + B64(message)));
+            }
         }
 
         /// <summary>以 root 运行的程序：必须是普通文件（不是符号链接），别的用户和组不能改它。</summary>
@@ -142,10 +157,33 @@ public static class UnixElevatedGuardHost
             if ((File.GetUnixFileMode(path) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0) throw new IOException("easytier-core is writable by others");
         }
 
+        private static string? WaitForTun(System.Net.IPAddress ip, Process core)
+        {
+            for (var i = 0; i < 60 && !core.HasExited; i++)
+            {
+                if (UnixBroadcastRelay.FindByAddress(ip) is { } tun) return tun.Name;
+                Thread.Sleep(500);
+            }
+            return null;
+        }
+
         private void StopCore()
         {
             _relay?.Dispose();
             _relay = null;
+            // DNS 在虚拟网卡还在的时候换回来；路由和防漏规则等核心结束后再撤，中间不漏流量。
+            var exit = _exit;
+            _exit = null;
+            try { exit?.ExitDns(); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
+            try { StopCoreProcess(); }
+            finally
+            {
+                try { exit?.ExitRoutes(); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
+            }
+        }
+
+        private void StopCoreProcess()
+        {
             if (_core is not { } core) return;
             _core = null;
             try

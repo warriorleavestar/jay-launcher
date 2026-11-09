@@ -1715,5 +1715,5 @@
   "core.mp.component.elevationdeclined.linux": "你取消了管理員密碼確認，未啟用完整區域網路模式",
   "core.mp.component.elevationdeclined.mac": "你取消了 macOS 的管理員密碼確認，未啟用完整區域網路模式",
   "core.mp.guard.exitcode": "EasyTier 守護程序尚未連線就結束了（結束代碼 {0}）。",
-  "core.mp.exit.windowsonly": "經由他人上網目前僅支援 Windows；完整區域網路模式本身可以使用。"
+  "core.mp.exit.unixtools": "經由他人上網需要 ip 和 nft 兩個命令，這台電腦缺少（請安裝 iproute2 和 nftables 套件）"
 }

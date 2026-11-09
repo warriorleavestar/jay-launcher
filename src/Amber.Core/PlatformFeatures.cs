@@ -9,7 +9,7 @@ public static class PlatformFeatures
     /// <summary>不能用完整局域网模式的原因（已翻译）；能用时为 null。</summary>
     public static string? FullLanUnavailableReason => OperatingSystem.IsWindows() ? null : Multiplayer.UnixElevation.UnavailableReason();
 
-    /// <summary>经别人上网（消费出口）要接管系统路由、DNS 和防火墙，Mac/Linux 上还没做。</summary>
-    public static bool FullTrafficExit => OperatingSystem.IsWindows();
+    /// <summary>经别人上网（消费出口）：接管系统路由、DNS 和防漏规则。Windows 用 WFP；Linux 要 ip + nftables，macOS 用 route + pf + scutil。</summary>
+    public static bool FullTrafficExit => OperatingSystem.IsWindows() || FullLan && Multiplayer.UnixExitNetwork.Supported;
     public static bool RemoteControl => OperatingSystem.IsWindows();
 }

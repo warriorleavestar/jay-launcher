@@ -1715,5 +1715,5 @@
   "core.mp.component.elevationdeclined.linux": "你取消了管理员密码确认，没有开启完整局域网模式",
   "core.mp.component.elevationdeclined.mac": "你取消了 macOS 的管理员密码确认，没有开启完整局域网模式",
   "core.mp.guard.exitcode": "EasyTier 守护进程没连上就退出了（退出码 {0}）。",
-  "core.mp.exit.windowsonly": "经别人上网目前只支持 Windows；完整局域网模式本身可以用。"
+  "core.mp.exit.unixtools": "经别人上网要用 ip 和 nft 两个命令，这台电脑缺少（安装 iproute2 和 nftables 软件包）"
 }

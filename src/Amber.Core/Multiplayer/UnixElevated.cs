@@ -62,8 +62,8 @@ internal sealed class UnixElevatedGuard : IElevatedGuard
     /// </summary>
     public static UnixElevatedGuard Start(string corePath, IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp)
     {
-        // 出口（经别人上网）要改系统路由和 DNS，Mac/Linux 上还没做：在请求权限之前就拒绝。
-        if (network is not null) throw new PlatformNotSupportedException(L.T("core.mp.exit.windowsonly"));
+        // 经别人上网要 ip + nft（Linux）：缺的话在请求权限之前就拒绝。
+        if (network is not null && !UnixExitNetwork.Supported) throw new PlatformNotSupportedException(L.T("core.mp.exit.unixtools"));
         var dir = Directory.CreateTempSubdirectory("jay-et-");
         var socketPath = Path.Combine(dir.FullName, "s");
         var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
@@ -75,7 +75,7 @@ internal sealed class UnixElevatedGuard : IElevatedGuard
             launcher = Launch(GuardCommandLine(socketPath, corePath));
             var accepted = AcceptRoot(listener, launcher);
             var guard = new UnixElevatedGuard(accepted);
-            guard.Enqueue(args, env, virtualIp);
+            guard.Enqueue(args, env, virtualIp, network);
             return guard;
         }
         finally
@@ -225,11 +225,11 @@ internal sealed class UnixElevatedGuard : IElevatedGuard
 
     public Task StartAsync(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp)
     {
-        if (network is not null) return Task.FromException(new PlatformNotSupportedException(L.T("core.mp.exit.windowsonly")));
-        return Enqueue(args, env, virtualIp);
+        if (network is not null && !UnixExitNetwork.Supported) return Task.FromException(new PlatformNotSupportedException(L.T("core.mp.exit.unixtools")));
+        return Enqueue(args, env, virtualIp, network);
     }
 
-    private Task Enqueue(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, string virtualIp)
+    private Task Enqueue(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, string virtualIp, ExitNetworkPlan? network)
     {
         lock (_gate)
         {
@@ -239,7 +239,7 @@ internal sealed class UnixElevatedGuard : IElevatedGuard
             _starts.Add(n, completion);
             _ready = completion.Task;
             _ = _ready.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-            var message = JsonSerializer.Serialize(new UnixGuardCommand("start", n, [.. args], new Dictionary<string, string>(env), virtualIp), AmberJsonContext.Default.UnixGuardCommand);
+            var message = JsonSerializer.Serialize(new UnixGuardCommand("start", n, [.. args], new Dictionary<string, string>(env), virtualIp, network), AmberJsonContext.Default.UnixGuardCommand);
             try { _writer.WriteLine(message); }
             catch (Exception e) when (e is IOException or ObjectDisposedException or SocketException) { completion.TrySetException(new IOException(L.T("core.mp.guard.sendfailed"), e)); }
             if (HasExited) completion.TrySetException(new IOException(L.T("core.mp.guard.unavailable")));
@@ -277,7 +277,8 @@ public sealed record UnixGuardCommand(
     [property: JsonPropertyName("n")] int N,
     [property: JsonPropertyName("argv")] string[] Argv,
     [property: JsonPropertyName("env")] Dictionary<string, string>? Env,
-    [property: JsonPropertyName("vip")] string? VirtualIp);
+    [property: JsonPropertyName("vip")] string? VirtualIp,
+    [property: JsonPropertyName("network")] ExitNetworkPlan? Network = null);
 
 /// <summary>Mac/Linux 上能不能请求 root 权限。</summary>
 public static class UnixElevation

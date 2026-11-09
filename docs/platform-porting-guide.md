@@ -82,7 +82,7 @@
 | 联机：直连房间（IPv6、UPnP/NAT-PMP、打洞） | ✅ | 🟡 | 🟡 | `Multiplayer/DirectLink.cs`、`PortMapping.cs` |
 | 联机：房间聊天 | ✅ | 🟡 | 🟡 | `Multiplayer/RoomChat.cs` |
 | 联机：完整局域网模式（虚拟网卡） | ✅ 要管理员 | 🟡 管理员密码框 + utun，待真机验证 | 🟡 pkexec + tun，云端已测 | `Multiplayer/EasyTierElevated.cs`、`UnixElevated*.cs`、`UnixBroadcastRelay.cs` |
-| 联机：出口节点（全部流量经房主） | ✅ 要管理员 | 🪟 提供出口可以，经别人上网还没做 | 🪟 同左 | `Exit*Script.cs`（PowerShell + WFP） |
+| 联机：出口节点（全部流量经房主） | ✅ 要管理员 | 🟡 route + pf + scutil，待真机验证 | 🟡 ip + nftables + resolved，云端已测 | `Exit*Script.cs`（PowerShell + WFP） |
 | 联机：“仅游戏”出口（SOCKS5） | ✅ | 🟡 路由拦截、SRV 已补，待真机验证 | 🟡 同左 | `Transport/ExitPolicy.cs`、`Transport/JoinTarget.cs` |
 | 联机身份（X25519 私钥）加密 | ✅ DPAPI | 🟡 AES-GCM + 本机密钥文件 | 🟡 同左 | `Multiplayer/MemberIdentity.cs` |
 | 敏感文字复制后 60 秒清剪贴板 | ✅ | ✅ | 🟡 Wayland 下要测 | `App/Services/SensitiveClipboard.cs` |
@@ -238,7 +238,12 @@ EasyTier（组网，P2P 或经节点中继）
 - macOS：utun（系统编号，不传 `--dev-name`）。经 `osascript … with administrator privileges` 弹系统管理员密码框，守护放后台运行。
 - Mac/Linux 的通信：Jay 在 `mkdtemp` 建的 0700 临时目录里开一个 Unix 域套接字，守护连上来。Jay 只接受 root（`SO_PEERCRED` / `LOCAL_PEERCRED` 核对 uid），守护核对对端就是命令行里那个 Jay 的进程号和用户（`SO_PEERCRED` / `LOCAL_PEERPID`）。连上后套接字文件马上删掉。命令是一行一个 JSON（参数按数组传，不经过 shell），easytier-core 只拿到固定 PATH 和房间密钥两个环境变量。easytier-core 必须是普通文件（不是符号链接）、组和其他人不可写，否则拒绝运行。
 - Mac/Linux 的广播转发（`UnixBroadcastRelay.cs`）：root 守护抓本机从物理网卡发出、发往 255.255.255.255 或本机网段广播地址的 UDP（Linux 用 `AF_PACKET` + 内核 BPF 过滤，macOS 用系统自带的 `/usr/lib/libpcap.dylib`），保持源端口、目标端口和内容，从绑定到虚拟网卡的原始 UDP 套接字发往 255.255.255.255；EasyTier 会交给房间里所有人。只转发本机发出的包，虚拟网卡上的包不再抓，不会绕圈；每秒最多 200 个。和 Windows 一样只转发广播，不转发组播（MC 的 224.0.2.60 局域网世界由 `LanGames.cs` 另外处理）。
-- Mac/Linux 上“经别人上网”（使用出口）还没做：守护收到带出口计划的命令直接拒绝，界面不显示这个按钮，全条件测试不排出口步骤。提供出口（`--enable-exit-node`）不需要改系统路由，三个系统都能勾。
+- Mac/Linux 上“经别人上网”（`UnixExitNetwork.cs`，root 守护里运行，对应 Windows 的三个 Exit*Script）：
+  1. 启动 easytier-core 之前，按当前路由表给每个承载地址加经物理网关的主机路由（Linux `ip route replace … proto 201`，macOS `route add -host`），EasyTier 的两条 /1 路由不会把承载吸进隧道；
+  2. 虚拟网卡就绪后上防漏规则：只放行回环、虚拟网卡、发往承载地址（限定原网卡）的包和 DHCP，其他出站（含 IPv6、局域网）一律丢弃。Linux 用单独的 nftables 表 `inet jay_exit`，macOS 用 pf 锚点 `com.apple/250.JayExit`（`pfctl -E` 拿引用令牌，结束时 `-X` 放掉）；
+  3. DNS 换成 1.1.1.1 / 8.8.8.8（经隧道）：Linux 有 systemd-resolved 时用 `resolvectl dns/domain ~.`，没有时临时改写 `/etc/resolv.conf` 并在结束时写回；macOS 改主服务的 `State:/Network/Service/<id>/DNS`，结束时还原；
+  4. 结束顺序：先换回 DNS，再结束核心，最后撤路由和防漏规则，中间不漏。守护被强制结束来不及恢复时，下次开出口先清掉 `proto 201` 路由、`jay_exit` 表和 pf 锚点。
+  Linux 缺 `ip` 或 `nft` 时这个按钮不显示，全条件测试不排出口步骤。提供出口（`--enable-exit-node`）不用改系统路由（云端验证过 Linux 不需要 ip_forward）。
 
 
 #### 出口节点

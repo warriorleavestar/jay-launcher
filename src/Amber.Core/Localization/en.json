@@ -1746,5 +1746,5 @@
   "core.mp.component.elevationdeclined.linux": "You cancelled the administrator password prompt. Full LAN mode was not enabled",
   "core.mp.component.elevationdeclined.mac": "You cancelled the macOS administrator password prompt. Full LAN mode was not enabled",
   "core.mp.guard.exitcode": "The EasyTier guard process exited before connecting (exit code {0}).",
-  "core.mp.exit.windowsonly": "Using another member as your internet exit currently supports Windows only. Full LAN mode itself works."
+  "core.mp.exit.unixtools": "Using an exit needs the ip and nft commands, which are missing on this computer (install the iproute2 and nftables packages)"
 }

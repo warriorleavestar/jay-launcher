@@ -1715,5 +1715,5 @@
   "core.mp.component.elevationdeclined.linux": "管理者パスワードの確認をキャンセルしたため、フルLANモードは有効になりませんでした",
   "core.mp.component.elevationdeclined.mac": "macOS の管理者パスワードの確認をキャンセルしたため、フルLANモードは有効になりませんでした",
   "core.mp.guard.exitcode": "EasyTier の監視プロセスが接続前に終了しました（終了コード {0}）。",
-  "core.mp.exit.windowsonly": "他のメンバー経由でのインターネット接続は現在 Windows のみ対応です。フルLANモード自体は使えます。"
+  "core.mp.exit.unixtools": "他のメンバー経由でインターネットに接続するには ip と nft コマンドが必要ですが、このコンピューターにはありません（iproute2 と nftables をインストールしてください）"
 }
