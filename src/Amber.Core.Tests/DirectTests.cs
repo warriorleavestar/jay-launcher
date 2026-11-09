@@ -109,6 +109,49 @@ public class DirectBridgeTests
         stop.Cancel();
     }
 
+    /// <summary>
+    /// Systems with IPv6 turned off can't create the dual-stack socket. The bridge falls back to IPv4 and still punches and
+    /// forwards; IPv6 candidates from the other side are skipped instead of failing the send.
+    /// </summary>
+    [Fact]
+    public async Task Ipv4OnlySocketStillPunchesAndForwards()
+    {
+        using var echo = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var echoPort = ((IPEndPoint)echo.Client.LocalEndPoint!).Port;
+        using var stop = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                var r = await echo.ReceiveAsync(stop.Token);
+                await echo.SendAsync(r.Buffer, r.RemoteEndPoint, stop.Token);
+            }
+        });
+
+        var hostSocket = DirectBridge.CreateSocket(0, preferIPv6: false);
+        Assert.Equal(AddressFamily.InterNetwork, hostSocket.AddressFamily);
+        await using var host = new DirectBridge(hostSocket, DirectTestKeys.Bridge, true, echoPort, _ => { });
+        await using var guest = new DirectBridge(DirectBridge.CreateSocket(0, preferIPv6: false), DirectTestKeys.Bridge, false, null, _ => { });
+
+        var hostWait = host.WaitForPeerAsync(TimeSpan.FromSeconds(10));
+        // An IPv6 candidate first: unreachable from an IPv4 socket, it must be skipped, not abort the punch.
+        var targets = new List<Candidate> { new(PathKind.IPv6, new IPEndPoint(IPAddress.Parse("2001:db8::1"), host.SocketEndPoint.Port)) };
+        targets.AddRange(Loopback(host));
+        var peer = await guest.PunchAsync(targets, NatKind.Cone, TimeSpan.FromSeconds(10));
+        Assert.NotNull(peer);
+        Assert.NotNull(await hostWait);
+
+        using var app = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        for (var i = 0; i < 3; i++)
+        {
+            var payload = new byte[] { (byte)i, 1, 2, 3 };
+            await app.SendAsync(payload, new IPEndPoint(IPAddress.Loopback, guest.LocalPort));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            Assert.Equal(payload, (await app.ReceiveAsync(timeout.Token)).Buffer);
+        }
+        stop.Cancel();
+    }
+
     [Fact]
     public async Task DisabledPathIsNotUsed()
     {

@@ -71,7 +71,11 @@ public sealed class Downloader
         _sources = sources;
     }
 
-    public static HttpClient CreateHttpClient()
+    /// <summary>Overall limit for API-style requests (Modrinth, CurseForge, sign-in, update check). Same as HttpClient's own default.</summary>
+    public static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(100);
+
+    /// <param name="timeout">Overall limit per request. Null (the default) means none: use that for file downloads, which watch for stalls themselves.</param>
+    public static HttpClient CreateHttpClient(TimeSpan? timeout = null)
     {
         var handler = new SocketsHttpHandler
         {
@@ -81,7 +85,7 @@ public sealed class Downloader
             ConnectTimeout = TimeSpan.FromSeconds(10),
         };
         // 超时由调用方按请求控制，大文件不能有总时长限制。
-        var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        var http = new HttpClient(handler) { Timeout = timeout ?? Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"Jay/{typeof(Downloader).Assembly.GetName().Version?.ToString(3) ?? "0.1"}");
         return http;
     }
