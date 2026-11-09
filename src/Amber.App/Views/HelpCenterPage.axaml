@@ -1,0 +1,71 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:views="using:Amber.App.Views"
+             x:Class="Amber.App.Views.HelpCenterPage"
+             x:DataType="vm:HelpCenterViewModel">
+  <!-- Help center (§6.24): wide = catalog on the left + article 640; medium = the catalog becomes a menu; compact = the
+       catalog first, then the article with a back button. Everything is bundled with Jay and read offline. -->
+  <Grid RowDefinitions="Auto,*">
+    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="0,0,0,8">
+      <Button x:Name="CatalogBackButton" Classes="ghost" Content="‹" FontSize="20" Padding="8,0" IsVisible="False"
+              Command="{Binding BackToCatalogCommand}" ToolTip.Tip="{l:T help.center.back}" AutomationProperties.Name="{l:T help.center.back}" />
+      <TextBlock Grid.Column="1" Text="{l:T help.center.title}" FontSize="{DynamicResource FontTitle}" FontWeight="SemiBold" VerticalAlignment="Center" />
+      <TextBox x:Name="HelpSearchBox" Grid.Column="2" Width="260" Text="{Binding Query}" PlaceholderText="{l:T help.search}" />
+    </Grid>
+    <Grid x:Name="Body" Grid.Row="1" ColumnDefinitions="220,*" ColumnSpacing="16">
+      <!-- Wide: catalog by category -->
+      <ScrollViewer x:Name="CatalogPane">
+        <ItemsControl x:Name="CatalogList" ItemsSource="{Binding Groups}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:HelpCategoryGroup">
+              <StackPanel Spacing="2" Margin="0,0,0,10">
+                <TextBlock Text="{Binding Title}" Classes="hint" FontSize="12" FontWeight="SemiBold" />
+                <ItemsControl ItemsSource="{Binding Articles}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:HelpArticleItem">
+                      <Button Classes="ghost" Content="{Binding Title}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,4"
+                              Command="{Binding $parent[ItemsControl;1].((vm:HelpCenterViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+      <Grid Grid.Column="1" RowDefinitions="Auto,*">
+        <!-- Medium: the catalog as a menu -->
+        <ComboBox x:Name="ArticlePicker" ItemsSource="{Binding Articles}" SelectedItem="{Binding Selected}" HorizontalAlignment="Stretch" Margin="0,0,0,8" IsVisible="False">
+          <ComboBox.ItemTemplate>
+            <DataTemplate DataType="vm:HelpArticleItem"><TextBlock Text="{Binding Title}" /></DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <ScrollViewer x:Name="ArticleScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+          <Panel MaxWidth="640" HorizontalAlignment="Left" Margin="0,0,14,0">
+            <views:HelpArticleBody x:Name="ArticleBody" DataContext="{Binding Article}" IsVisible="{Binding !$parent[UserControl;1].((vm:HelpCenterViewModel)DataContext).HasQuery}"
+                                   LinkCommand="{Binding $parent[UserControl;1].((vm:HelpCenterViewModel)DataContext).FollowLinkCommand}"
+                                   ArticleCommand="{Binding $parent[UserControl;1].((vm:HelpCenterViewModel)DataContext).OpenCommand}" />
+            <StackPanel x:Name="SearchPane" Spacing="4" IsVisible="{Binding HasQuery}">
+              <TextBlock x:Name="SearchEmptyText" Classes="hint" Text="{l:T help.search.empty}" IsVisible="{Binding NoResults}" TextWrapping="Wrap" />
+              <ItemsControl x:Name="SearchResultList" ItemsSource="{Binding Results}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:HelpArticleItem">
+                    <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,6"
+                            Command="{Binding $parent[ItemsControl].((vm:HelpCenterViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}">
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Summary}" Classes="hint" FontSize="12" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Panel>
+        </ScrollViewer>
+      </Grid>
+    </Grid>
+  </Grid>
+</UserControl>
