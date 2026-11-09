@@ -608,17 +608,31 @@
 
         <!-- ===== Public rooms (§6.16) ===== -->
         <StackPanel x:Name="PublicPanel" Spacing="14" IsVisible="{Binding IsPublicTab}">
-          <Border Classes="card" Margin="0" IsVisible="{Binding ShowPublicNetworks}">
+          <!-- No public network yet (the default): where public rooms come from. -->
+          <Border x:Name="PublicSetupCard" Classes="card" Margin="0" IsVisible="{Binding ShowPublicSetup}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="h2" Text="{l:T multiplayer.public.title}" Margin="0" />
+              <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.public.setup_body}" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="{l:T multiplayer.public.setup_have_address}" />
+                <Button x:Name="AddPublicNetworkButton" Grid.Column="1" Classes="primary" Margin="12,0,0,0" Content="{l:T multiplayer.public.setup_add}" Command="{Binding AddPublicNetworkCommand}" />
+              </Grid>
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.setup_friend_code}" />
+            </StackPanel>
+          </Border>
+          <Border x:Name="PublicCard" Classes="card" Margin="0" IsVisible="{Binding !ShowPublicSetup}">
             <StackPanel Spacing="8">
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Spacing="2">
                   <TextBlock Classes="h2" Text="{l:T multiplayer.public.title}" Margin="0" />
                   <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding PublicStateText}" Classes.hint="{Binding !IsPublicConnected}" />
+                  <TextBlock Classes="caption" Text="{Binding PublicRefreshedText}" IsVisible="{Binding IsPublicConnected}" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Top">
                   <Button Classes="primary" Content="{l:T multiplayer.public.connect}" Command="{Binding ConnectPublicCommand}" IsVisible="{Binding !IsPublicConnected}" IsEnabled="{Binding !IsPublicConnecting}" />
                   <Button Content="{l:T multiplayer.public.refresh}" Command="{Binding RefreshRoomsCommand}" IsVisible="{Binding IsPublicConnected}" IsEnabled="{Binding !IsRefreshingRooms}" />
                   <Button Content="{l:T multiplayer.public.disconnect}" Command="{Binding DisconnectPublicCommand}" IsVisible="{Binding IsPublicConnected}" />
+                  <Button x:Name="CancelConnectButton" Content="{l:T common.cancel}" Command="{Binding DisconnectPublicCommand}" IsVisible="{Binding IsPublicConnecting}" />
                 </StackPanel>
               </Grid>
               <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.hint}" />
@@ -677,20 +691,40 @@
                   </WrapPanel>
                 </StackPanel>
               </Border>
-              <!-- 第一次连之前：别人能看到什么、看不到什么 -->
-              <Border Classes="card" Margin="0" IsVisible="{Binding PublicNoticeOpen}">
-                <StackPanel Spacing="8">
-                  <TextBlock Text="{l:T multiplayer.public.notice_title}" FontWeight="SemiBold" />
-                  <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.notice_body}" />
-                  <WrapPanel ItemSpacing="6" LineSpacing="6">
-                    <Button Classes="primary" Content="{l:T multiplayer.public.notice_accept}" Command="{Binding AcceptPublicNoticeCommand}" />
-                    <Button Content="{l:T common.cancel}" Command="{Binding ClosePublicNoticeCommand}" />
-                  </WrapPanel>
-                </StackPanel>
-              </Border>
+              <!-- Before the first connect: what others on the network can and cannot see (locked). -->
+              <safety:SafetyPanel x:Name="PublicNoticePanel" Title="{l:T multiplayer.public.notice_title}" IsVisible="{Binding PublicNoticeOpen}">
+                <safety:SafetyPanel.Body>
+                  <StackPanel Spacing="8">
+                    <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.public.notice_body}" />
+                    <WrapPanel ItemSpacing="8" LineSpacing="6">
+                      <safety:SafetyButton Kind="Safe" Content="{l:T common.cancel}" Command="{Binding ClosePublicNoticeCommand}" />
+                      <safety:SafetyButton Kind="Confirm" Content="{l:T multiplayer.public.notice_accept}" Command="{Binding AcceptPublicNoticeCommand}" />
+                    </WrapPanel>
+                  </StackPanel>
+                </safety:SafetyPanel.Body>
+              </safety:SafetyPanel>
               <!-- 房间列表（没在房间里时） -->
               <StackPanel Spacing="6" IsVisible="{Binding IsIdle}">
-                <ItemsControl ItemsSource="{Binding PublicRooms}" IsVisible="{Binding IsPublicConnected}">
+                <WrapPanel x:Name="RoomFilters" ItemSpacing="8" LineSpacing="6" IsVisible="{Binding IsPublicConnected}">
+                  <TextBox x:Name="RoomSearchBox" Text="{Binding RoomSearch}" PlaceholderText="{l:T multiplayer.public.search}" MinWidth="220" ToolTip.Tip="/" />
+                  <ComboBox x:Name="RoomGameBox" ItemsSource="{Binding RoomGameChoices}" SelectedItem="{Binding SelectedRoomGame}" MinWidth="140">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="vm:RoomGameChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <CheckBox x:Name="OpenRoomsBox" IsChecked="{Binding OpenRoomsOnly}"><TextBlock Text="{l:T multiplayer.public.open_only}" TextWrapping="Wrap" /></CheckBox>
+                  <ComboBox x:Name="RoomSortBox" ItemsSource="{Binding RoomSortChoices}" SelectedItem="{Binding SelectedRoomSort}" MinWidth="140">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="vm:RoomSortChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                </WrapPanel>
+                <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowNoPublicRooms}">
+                  <TextBlock Classes="hint" VerticalAlignment="Center" TextWrapping="Wrap" Text="{l:T multiplayer.public.empty}" />
+                  <Button Grid.Column="1" Content="{l:T multiplayer.public.refresh}" Command="{Binding RefreshRoomsCommand}" Margin="8,0,0,0" />
+                </Grid>
+                <TextBlock x:Name="NoMatchingRoomsText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.public.no_match}" IsVisible="{Binding ShowNoMatchingRooms}" />
+                <ItemsControl x:Name="PublicRoomList" ItemsSource="{Binding VisibleRooms}" IsVisible="{Binding IsPublicConnected}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:PublicRoomItem">
                       <Grid ColumnDefinitions="*,Auto" Margin="0,2">

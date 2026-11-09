@@ -261,6 +261,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitRoom();
         InitRequests();
         InitPublic();
+        InitPublicList();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
         HostServer = new HostServerViewModel(service);
     }

@@ -2757,5 +2757,18 @@
   "multiplayer.diag.switch_relay": "Try another relay server",
   "multiplayer.diag.debug_on": "Turn on debug mode",
   "multiplayer.diag.export_hint": "Exported diagnostics leave out room keys and every code; public IPs are hidden unless you tick the box.",
-  "multiplayer.diag.details": "Technical details"
+  "multiplayer.diag.details": "Technical details",
+  "multiplayer.public.setup_body": "Public rooms come from public networks run by communities or friends. Jay has no public network built in.",
+  "multiplayer.public.setup_have_address": "Someone gave you a public network address?",
+  "multiplayer.public.setup_add": "Add a public network…",
+  "multiplayer.public.setup_friend_code": "Have a friend code? Add the public network your friend uses first; once connected you can find their room with it.",
+  "multiplayer.public.refreshed": "Refreshed {0}",
+  "multiplayer.public.search": "Search rooms or hosts…",
+  "multiplayer.public.all_versions": "All versions",
+  "multiplayer.public.open_only": "Only rooms I can walk into",
+  "multiplayer.public.sort.players": "Most players",
+  "multiplayer.public.sort.name": "By name",
+  "multiplayer.public.sort.newest": "Recently updated",
+  "multiplayer.public.empty": "No public rooms right now.",
+  "multiplayer.public.no_match": "No rooms match. Try other words or fewer filters."
 }

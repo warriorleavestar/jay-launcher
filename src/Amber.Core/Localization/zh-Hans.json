@@ -2693,5 +2693,18 @@
   "multiplayer.diag.switch_relay": "换中转服务器",
   "multiplayer.diag.debug_on": "打开调试模式",
   "multiplayer.diag.export_hint": "导出的诊断去掉了房间密钥和所有码；公网 IP 默认遮住，勾上才包含。",
-  "multiplayer.diag.details": "技术细节"
+  "multiplayer.diag.details": "技术细节",
+  "multiplayer.public.setup_body": "公开房间来自“公共网络”，由社区或朋友运行。Jay 没有内置任何公共网络。",
+  "multiplayer.public.setup_have_address": "有人给了你公共网络地址？",
+  "multiplayer.public.setup_add": "添加公共网络…",
+  "multiplayer.public.setup_friend_code": "有朋友的好友码？先添加 TA 用的公共网络，连上后就能用好友码找 TA 的房间。",
+  "multiplayer.public.refreshed": "刷新于 {0}",
+  "multiplayer.public.search": "搜索房间或房主…",
+  "multiplayer.public.all_versions": "全部版本",
+  "multiplayer.public.open_only": "只看能直接进的",
+  "multiplayer.public.sort.players": "人多的在前",
+  "multiplayer.public.sort.name": "按名字",
+  "multiplayer.public.sort.newest": "最近更新",
+  "multiplayer.public.empty": "现在没有公开的房间。",
+  "multiplayer.public.no_match": "没有符合条件的房间。换个关键词或去掉筛选试试。"
 }

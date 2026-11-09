@@ -169,6 +169,17 @@ public partial class MultiplayerPage : UserControl
             e.Handled = true;
             return;
         }
+        // Public rooms: F5 refreshes, "/" jumps to the search box (not while typing).
+        if (vm.IsPublicTab && vm.IsPublicConnected)
+        {
+            if (e.Key == Key.F5 && e.KeyModifiers == KeyModifiers.None) { vm.RefreshRoomsCommand.Execute(null); e.Handled = true; return; }
+            if (e.Key is Key.Oem2 or Key.Divide && e.KeyModifiers == KeyModifiers.None && e.Source is not TextBox)
+            {
+                RoomSearchBox.Focus();
+                e.Handled = true;
+                return;
+            }
+        }
         if (vm.DiagnosticsOpen && e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
         {
             vm.DiagnosticsOpen = false;
