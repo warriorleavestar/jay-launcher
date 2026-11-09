@@ -14,6 +14,7 @@
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <ResourceInclude Source="avares://Jay/Themes/Tokens.axaml" />
+        <ResourceInclude Source="avares://Jay/Themes/Icons.axaml" />
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>
@@ -215,7 +216,7 @@
       <Setter Property="Foreground" Value="{DynamicResource DisabledText}" />
     </Style>
 
-    <!-- 导航：选中项左边一条琥珀色指示条（在 MainWindow 的模板里），背景稍亮 -->
+    <!-- 导航：选中项左边一条松鸦蓝指示条（在 MainWindow 的模板里），背景稍亮 -->
     <Style Selector="ListBox.nav ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource NavSelected}" />
     </Style>
@@ -229,5 +230,6 @@
       <Setter Property="Background" Value="{DynamicResource Accent}" />
       <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
     </Style>
+    <StyleInclude Source="avares://Jay/Themes/Controls.axaml" />
   </Application.Styles>
 </Application>

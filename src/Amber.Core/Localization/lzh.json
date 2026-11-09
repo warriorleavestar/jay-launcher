@@ -1877,5 +1877,10 @@
   "multiplayer.netconfig.failed": "不得「{0}」之網設：{1}",
   "multiplayer.netconfig.too_old": "「{0}」須 Jay {1} 或更新之版，請先更之",
   "multiplayer.netconfig.mode_not_allowed": "此公共網路不許「{0}」之房",
-  "multiplayer.netconfig.notice_title": "網之告"
+  "multiplayer.netconfig.notice_title": "網之告",
+  "settings.motion.label": "減動",
+  "settings.motion.system": "從系統",
+  "settings.motion.on": "開",
+  "settings.motion.off": "閉",
+  "settings.motion.hint": "開則易頁、抽屜、選單皆不滑動，唯留須臾之淡入淡出。從系統則讀系統之動效之設。"
 }

@@ -1944,5 +1944,10 @@
   "multiplayer.netconfig.theme_global": "このネットワークには独自のテーマがあり、今はマルチプレイページだけで使われています。Jay 全体に適用しますか？切断すると自分のテーマに戻ります。",
   "multiplayer.netconfig.theme_accept": "全体で使う",
   "multiplayer.netconfig.theme_decline": "マルチプレイページだけ",
+  "settings.motion.label": "アニメーションを減らす",
+  "settings.motion.system": "システムに合わせる",
+  "settings.motion.on": "オン",
+  "settings.motion.off": "オフ",
+  "settings.motion.hint": "オンにすると、ページ切り替えや引き出し、メニューが動かず、短いフェードだけになります。「システムに合わせる」ではシステムの「アニメーション効果 / 視差効果を減らす」設定を読み取ります。",
   "multiplayer.network.test_reviewed": "テスト用レジストリ鍵で署名（テスト専用、Jay の審査済みではありません）"
 }

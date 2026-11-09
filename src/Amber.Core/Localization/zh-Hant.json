@@ -1944,5 +1944,10 @@
   "multiplayer.netconfig.theme_global": "這個網路帶了自己的介面主題，現在只在聯機頁用。要整個 Jay 都換成它嗎？斷開網路後會換回你自己的主題。",
   "multiplayer.netconfig.theme_accept": "整個 Jay 都用",
   "multiplayer.netconfig.theme_decline": "只在聯機頁用",
+  "settings.motion.label": "減少動畫",
+  "settings.motion.system": "跟隨系統",
+  "settings.motion.on": "開",
+  "settings.motion.off": "關",
+  "settings.motion.hint": "開啟後頁面切換、抽屜和選單不再滑動，只保留很短的淡入淡出。跟隨系統時讀取系統的「動畫效果 / 減少動態效果」設定。",
   "multiplayer.network.test_reviewed": "用測試註冊表鑰匙簽的（只用於測試，不是 Jay 審核過的）"
 }

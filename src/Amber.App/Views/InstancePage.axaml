@@ -17,7 +17,7 @@
       <!-- 选择器占满一行；启动、打开文件夹、更多放下一行，放不下自动折行（853 宽、长译文时不挤压选择器）。 -->
       <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding SelectedId}" HorizontalAlignment="Stretch" PlaceholderText="{l:T instance.version.empty}" />
       <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding HasInstance}">
-        <Button Classes="primary" Content="{l:T instance.launch}" Command="{Binding LaunchCommand}" />
+        <Button Classes="play" Content="{l:T instance.launch}" Command="{Binding LaunchCommand}" />
         <Button Content="{l:T common.open_folder}" Command="{Binding OpenFolderCommand}" />
         <Button Content="{l:T instance.more}">
           <Button.Flyout>

@@ -196,6 +196,15 @@ public static partial class ThemeStyles
                 var fg = props.Foreground ?? normal?.Foreground;
                 var bg = props.Background ?? normal?.Background;
                 if (fg is null || bg is null || fg.Kind is not (PaintKind.Color or PaintKind.Token)) continue;
+                // 背景是 token 时深浅两套可能一亮一暗（比如松鸦蓝），一种固定颜色满足不了两边：改用一个两套都看得清的文字 token。
+                if (bg.Kind == PaintKind.Token && !ReadableInBoth(fg, bg, pack) &&
+                    TextTokens.Select(t => new Paint(PaintKind.Token, [], t, 0)).FirstOrDefault(t => ReadableInBoth(t, bg, pack)) is { } token)
+                {
+                    props.Foreground = token;
+                    fg = token;
+                    pack.Problems.Add(new("contrast_fixed", $"{component}{state}.foreground"));
+                    continue;
+                }
                 foreach (var dark in new[] { true, false })
                 {
                     var bgColors = Resolve(bg, pack, dark);
@@ -215,6 +224,13 @@ public static partial class ThemeStyles
             }
         }
     }
+
+    /// <summary>修正文字时按顺序试的 token：和各种底色配套的“上面的字”。</summary>
+    private static readonly string[] TextTokens = ["OnAccent", "TextPrimary", "SidebarText", "OnPlay", "OnDanger", "OnBadge"];
+
+    private static bool ReadableInBoth(Paint fg, Paint bg, ThemePack pack) =>
+        new[] { true, false }.All(dark => Resolve(bg, pack, dark) is { Count: > 0 } bgs && Resolve(fg, pack, dark) is { Count: > 0 } fgs
+            && bgs.All(b => ThemeColor.Contrast(fgs[0], b) >= 4.5));
 
     private static List<uint> Resolve(Paint paint, ThemePack pack, bool dark) => paint.Kind switch
     {
