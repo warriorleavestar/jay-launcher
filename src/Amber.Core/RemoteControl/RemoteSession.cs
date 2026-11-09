@@ -588,7 +588,8 @@ public sealed class RemoteViewer : RemoteEndpoint
     public event Action<bool>? ControlChanged;
     public event Action? CursorChanged;
 
-    internal static TimeSpan AcceptTimeout { get; set; } = TimeSpan.FromSeconds(45);
+    // Linux Wayland 上被控方同意后还要在系统授权框里再点一次（最多等 2 分钟），所以给够时间。
+    internal static TimeSpan AcceptTimeout { get; set; } = TimeSpan.FromSeconds(150);
 
     /// <summary>发 Hello，等对方决定。同意返回 Accept 的内容并开始收画面；拒绝或断开返回 null（DenyReason 说明原因）。</summary>
     public async Task<RemoteAccept?> StartAsync(CancellationToken ct = default)
