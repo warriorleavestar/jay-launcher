@@ -13,7 +13,7 @@ namespace Amber.App.Services;
 public sealed class LauncherService : IDisposable
 {
     // Downloads stream large files, so their client has no overall timeout (the downloader watches for stalls itself).
-    private readonly HttpClient _downloadHttp = Downloader.CreateHttpClient();
+    private readonly HttpClient _downloadHttp = Downloader.CreateHttpClient(category: NetworkCategory.Download);
 
     // API calls, sign-in, update checks and small fetches get a hard limit, so a stalled connection cannot hang them forever.
     private readonly HttpClient _http = Downloader.CreateHttpClient(Downloader.ApiTimeout);
@@ -168,6 +168,7 @@ public sealed class LauncherService : IDisposable
         var java = new JavaManager(downloader, directory) { AutoDownload = Settings.AutoJavaDownload };
         var loaders = new LoaderContext(downloader, directory, installer, java.ForMajorAsync);
         Modrinth = new ModrinthProvider(_http);
+        NetworkPolicy.Register(Settings.CurseForgeApiRoot, NetworkCategory.ContentApi);
         CurseForge = new CurseForgeProvider(_http, CurseForgeKey,
             string.IsNullOrWhiteSpace(Settings.CurseForgeApiRoot) ? CurseForgeProvider.DefaultApiRoot : Settings.CurseForgeApiRoot.Trim().TrimEnd('/'));
         var contentInstaller = new ContentInstaller(downloader, new Dictionary<ContentSource, IContentProvider>

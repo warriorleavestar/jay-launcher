@@ -3,6 +3,7 @@
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:l="using:Amber.App.Localization"
              xmlns:c="using:Amber.App.Views.Controls"
+             xmlns:views="using:Amber.App.Views"
              x:Class="Amber.App.Views.SettingsPage"
              x:DataType="vm:SettingsViewModel">
   <!-- Settings (official design §6.20): ten groups. Wide: group list 200 + form ≤ 720 + "what is this" note. Medium: a
@@ -276,7 +277,25 @@
               <StackPanel Spacing="6">
                 <TextBlock Classes="h2" Text="{l:T settings.privacy.title}" Margin="0" />
                 <TextBlock Classes="hint" Text="{l:T settings.privacy.hint}" TextWrapping="Wrap" />
-                <TextBlock Classes="hint" Text="{l:T settings.privacy.endpoints}" TextWrapping="Wrap" />
+                <views:NetworkListView x:Name="NetworkListBox" DataContext="{Binding NetworkList}" Margin="0,6,0,0" />
+                <Button Classes="ghost" Content="{l:T settings.privacy.open_about}" Command="{Binding GoAboutCommand}" HorizontalAlignment="Left" Padding="0,2" />
+              </StackPanel>
+            </Border>
+            <!-- For a child (§9.6): one main switch, six items, the time of the last change. No parent password. -->
+            <Border Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="h2" Text="{l:T settings.child.title}" Margin="0" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.child.hint}" TextWrapping="Wrap" />
+                <CheckBox x:Name="ChildModeBox" IsChecked="{Binding ChildMode}" Content="{l:T settings.child.toggle}" />
+                <StackPanel Spacing="4" Margin="24,0,0,0" IsEnabled="{Binding ChildMode}">
+                  <CheckBox x:Name="ChildNoRemoteBox" IsChecked="{Binding ChildNoRemote}" Content="{l:T settings.child.no_remote}" />
+                  <CheckBox x:Name="ChildNoPublicBox" IsChecked="{Binding ChildNoPublic}" Content="{l:T settings.child.no_public}" />
+                  <CheckBox x:Name="ChildNoExitBox" IsChecked="{Binding ChildNoExit}" Content="{l:T settings.child.no_exit}" />
+                  <CheckBox x:Name="ChildFriendsFilesBox" IsChecked="{Binding ChildFriendsFiles}" Content="{l:T settings.child.friends_files}" />
+                  <CheckBox x:Name="ChildAlwaysAskBox" IsChecked="{Binding ChildAlwaysAsk}" Content="{l:T settings.child.always_ask}" />
+                  <CheckBox x:Name="ChildQuietNotifyBox" IsChecked="{Binding ChildQuietNotify}" Content="{l:T settings.child.quiet_notify}" />
+                </StackPanel>
+                <TextBlock x:Name="ChildModeStatusLine" Text="{Binding ChildModeStatusText}" FontSize="12" TextWrapping="Wrap" />
               </StackPanel>
             </Border>
             <Border Classes="card">
@@ -370,6 +389,12 @@
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <SelectableTextBlock x:Name="VersionBox" Text="{Binding VersionText}" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <Button x:Name="CheckUpdateBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.about.check_update}" Command="{Binding GoToolsCommand}" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <Border Classes="card">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBlock Text="{l:T about.title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <Button x:Name="AboutPageBox" Grid.Column="1" Classes="secondary" Content="{l:T common.open}" Command="{Binding GoAboutCommand}" VerticalAlignment="Center" />
               </Grid>
             </Border>
             <Border Classes="card">

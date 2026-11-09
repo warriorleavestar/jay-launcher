@@ -139,7 +139,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial PeerItem? SelectedExitPeer { get; set; }
 
     public bool UsingExit => ExitNodeIp.Length > 0;
-    public bool CanUseExit => _session?.Options.Tun == true;
+    public bool CanUseExit => _session?.Options.Tun == true && !Child.HideNetworkExit;
     public string ExitBanner
     {
         get
@@ -691,7 +691,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task UseGameProxyAsync()
     {
-        if (SelectedExitPeer is not { } peer || _session is null || _currentOptions is not { } current) return;
+        if (Child.HideNetworkExit || SelectedExitPeer is not { } peer || _session is null || _currentOptions is not { } current) return;
         // 邀请房间的封装通道只在成员和房主之间有钥匙：只能经房主转发。
         if (current.Room.FromInvite && current.Room.Tunnel.Wraps && peer.Peer.Ip != EasyTierArgs.HostIp)
         {

@@ -213,7 +213,7 @@ public static partial class PortMapping
             if (!IsGatewayUri(gateway, location)) throw new InvalidDataException(L.T("core.mp.upnp.unsafeaddress"));
             _gateway = gateway;
             _timeout = timeout ?? TimeSpan.FromSeconds(5);
-            _http = new HttpClient(handler ?? CreateGatewayHandler(gateway, localIp)) { Timeout = Timeout.InfiniteTimeSpan };
+            _http = new HttpClient(new Amber.Core.Net.NetworkPolicyHandler(handler ?? CreateGatewayHandler(gateway, localIp), Amber.Core.Net.NetworkCategory.Multiplayer)) { Timeout = Timeout.InfiniteTimeSpan };
         }
 
         internal async Task<string> SendAsync(HttpRequestMessage request, CancellationToken ct)

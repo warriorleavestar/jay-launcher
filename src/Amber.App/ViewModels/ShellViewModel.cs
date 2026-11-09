@@ -117,7 +117,8 @@ public sealed partial class ShellViewModel : ObservableObject
             Section.Play => Find<MultiplayerViewModel>(),
             Section.Settings => route[1] == "tools" ? Find<ToolsViewModel>() : Find<SettingsViewModel>(),
             Section.Accounts => Find<AccountsViewModel>(),
-            // 关于和隐私、帮助还没有自己的页：先落在设置（隐私卡片在设置页里）。
+            Section.About => Find<AboutViewModel>(),
+            // Help has no page of its own yet: it lands on settings.
             _ => Find<SettingsViewModel>(),
         };
     }
@@ -133,6 +134,7 @@ public sealed partial class ShellViewModel : ObservableObject
         MultiplayerViewModel => Route.Parse("play"),
         ToolsViewModel => Route.Parse(LegacyRoutes.Tools),
         SettingsViewModel => Route.Parse("settings"),
+        AboutViewModel => Route.Parse("about"),
         AccountsViewModel => Route.Parse("accounts"),
         _ => Route.Library,
     };
@@ -195,6 +197,7 @@ public sealed partial class ShellViewModel : ObservableObject
         Section.Discover => L.T("shell.nav.discover"),
         Section.Play => L.T("shell.nav.multiplayer"),
         Section.Accounts => _main.Pages.OfType<AccountsViewModel>().First().Title,
+        Section.About => L.T("about.title"),
         _ => L.T("shell.settings"),
     };
 
@@ -349,7 +352,7 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         ContentViewModel => Section.Discover,
         MultiplayerViewModel => Section.Play,
-        SettingsViewModel or ToolsViewModel => Section.Settings,
+        SettingsViewModel or ToolsViewModel or AboutViewModel => Section.Settings,
         AccountsViewModel => Section.Accounts,
         _ => Section.Library,
     };

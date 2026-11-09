@@ -30,7 +30,7 @@ public sealed class ExternalAuth(HttpClient http)
             AutomaticDecompression = System.Net.DecompressionMethods.All,
             ConnectTimeout = TimeSpan.FromSeconds(10),
         };
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
+        var client = new HttpClient(new Amber.Core.Net.NetworkPolicyHandler(handler, Amber.Core.Net.NetworkCategory.Login)) { Timeout = TimeSpan.FromSeconds(60) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd($"Jay/{typeof(ExternalAuth).Assembly.GetName().Version?.ToString(3) ?? "0.1"}");
         return client;
     }
@@ -318,6 +318,7 @@ public sealed class AuthlibInjector(HttpClient http, string cacheDir)
 
     public async Task<string> EnsureJarAsync(CancellationToken ct = default)
     {
+        using var scope = Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.Download);
         Directory.CreateDirectory(cacheDir);
         var existing = Directory.EnumerateFiles(cacheDir, "authlib-injector-*.jar").OrderDescending().FirstOrDefault();
         JsonNode? latest = null;

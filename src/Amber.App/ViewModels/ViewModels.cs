@@ -214,6 +214,7 @@ public sealed partial class MainViewModel : ObservableObject
             new ToolsViewModel(service),
             new SettingsViewModel(service),
             log,
+            new AboutViewModel(service),
         ];
         var accounts = (AccountsViewModel)Pages[1];
         Shell = new ShellViewModel(this, service);
@@ -267,6 +268,13 @@ public sealed partial class MainViewModel : ObservableObject
         };
         var settingsPage = Pages.OfType<SettingsViewModel>().Single();
         settingsPage.Navigate = r => shell.Navigate(r);
+        var about = Pages.OfType<AboutViewModel>().Single();
+        about.Navigate = r => shell.Navigate(r);
+        about.List.Navigate = r => shell.Navigate(r);
+        about.List.Multiplayer = multiplayer;
+        settingsPage.NetworkList.Navigate = r => shell.Navigate(r);
+        settingsPage.NetworkList.Multiplayer = multiplayer;
+        settingsPage.ChildModeChanged = () => { multiplayer.ApplyChildMode(); about.Refresh(); };
         Drop = new DropViewModel(service)
         {
             PreviewPack = async path =>
@@ -506,7 +514,7 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
 
-    protected override void OnBecameCurrent() => Recycle.Refresh();
+    protected override void OnBecameCurrent() { Recycle.Refresh(); RefreshPrivacy(); }
 
     public Amber.App.Localization.OptionItem[] ThemeOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.theme.system", "settings.theme.light", "settings.theme.dark");
     private static readonly string[] ThemeKeys = ["system", "light", "dark"];
