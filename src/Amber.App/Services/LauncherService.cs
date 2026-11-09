@@ -161,6 +161,49 @@ public sealed class LauncherService : IDisposable
 
     public void NotifyAccountsChanged() => AccountsChanged?.Invoke();
     public void NotifyContentChanged() => ContentChanged?.Invoke();
+
+    /// <summary>Raised when an instance's library data changed (played, pinned).</summary>
+    public event Action? LibraryChanged;
+
+    /// <summary>The launcher-side data of an instance (null when there is none yet).</summary>
+    public InstanceMeta? MetaOf(string id) => Settings.Instances?.GetValueOrDefault(id);
+
+    private InstanceMeta EnsureMeta(string id)
+    {
+        Settings.Instances ??= [];
+        if (!Settings.Instances.TryGetValue(id, out var meta)) Settings.Instances[id] = meta = new InstanceMeta();
+        return meta;
+    }
+
+    /// <summary>A game of this instance started: front of the recent list, last-played time.</summary>
+    public void RecordPlayed(string id, DateTimeOffset when)
+    {
+        Settings.RecentInstances = Amber.Core.GameLibrary.LibraryQuery.Touch(Settings.RecentInstances, id);
+        EnsureMeta(id).LastPlayed = when;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
+    /// <summary>A game of this instance ended after this long in game.</summary>
+    public void AddPlayTime(string id, TimeSpan played)
+    {
+        if (played <= TimeSpan.Zero) return;
+        EnsureMeta(id).PlayMinutes += played.TotalMinutes;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
+    public void SetPinned(string id, bool pinned)
+    {
+        EnsureMeta(id).Pinned = pinned;
+        SaveQuietly();
+        LibraryChanged?.Invoke();
+    }
+
+    private void SaveQuietly()
+    {
+        try { Settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
     public void NotifyInstalledChanged() => InstalledVersionsChanged?.Invoke();
     public void RequestLaunch(LaunchRequest request) => LaunchRequested?.Invoke(request);
     public void NotifyGameOutput(string versionId, string line) => GameOutput?.Invoke(versionId, line);

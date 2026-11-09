@@ -202,6 +202,15 @@ public sealed class InstanceMeta
 
     /// <summary>null 表示正常；incomplete（安装未完成）/ broken（已损坏）。</summary>
     public string? State { get; set; }
+
+    /// <summary>Pinned to the top of the library.</summary>
+    public bool Pinned { get; set; }
+
+    /// <summary>When a game of this instance last started (local runs only).</summary>
+    public DateTimeOffset? LastPlayed { get; set; }
+
+    /// <summary>Total minutes played from this launcher.</summary>
+    public double PlayMinutes { get; set; }
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(AppSettings))]

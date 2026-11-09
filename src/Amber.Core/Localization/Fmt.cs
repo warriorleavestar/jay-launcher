@@ -41,4 +41,22 @@ public static class Fmt
         var minutes = Math.Max(1, (long)Math.Round(time.TotalMinutes));
         return L.P("format.duration.minutes", minutes, minutes);
     }
+
+    /// <summary>
+    /// How long ago, for "last played": just now, N minutes / hours ago, yesterday, N days ago (under a week),
+    /// otherwise the short date.
+    /// </summary>
+    public static string Ago(DateTimeOffset when, DateTimeOffset now)
+    {
+        var span = now - when;
+        if (span < TimeSpan.FromMinutes(1)) return L.T("format.ago.now");
+        if (span < TimeSpan.FromHours(1)) return L.P("format.ago.minutes", (long)span.TotalMinutes, (long)span.TotalMinutes);
+        var localWhen = when.ToLocalTime().Date;
+        var localNow = now.ToLocalTime().Date;
+        var days = (localNow - localWhen).Days;
+        if (days <= 0) return L.P("format.ago.hours", (long)span.TotalHours, (long)span.TotalHours);
+        if (days == 1) return L.T("format.ago.yesterday");
+        if (days < 7) return L.P("format.ago.days", days, days);
+        return when.ToLocalTime().ToString("d", L.Culture);
+    }
 }

@@ -118,7 +118,7 @@ internal sealed partial class SelfTest
         Check("Ctrl+, 去设置，侧栏设置按钮是选中状态", main.CurrentPage is SettingsViewModel && window.SettingsButton.Classes.Contains("active") && shell.SelectedSection is null);
         Press(Key.D1, KeyModifiers.Control);
         await Task.Delay(300);
-        Check("Ctrl+1 回游戏库", main.CurrentPage is HomeViewModel && shell.SelectedSection?.Id == "library");
+        Check("Ctrl+1 回游戏库", main.CurrentPage is LibraryViewModel && shell.SelectedSection?.Id == "library");
 
         // 游戏库里点子页签：新建实例 → 运行记录；返回、前进在游戏库自己的历史里走。
         shell.SelectedSubPage = main.Pages.OfType<DownloadViewModel>().Single();
@@ -145,7 +145,7 @@ internal sealed partial class SelfTest
         // 已经在游戏库时再点游戏库：回游戏库首页。
         shell.GoSectionCommand.Execute("library");
         await Task.Delay(300);
-        Check("再点一次当前入口回到入口首页", main.CurrentPage is HomeViewModel);
+        Check("再点一次当前入口回到入口首页", main.CurrentPage is LibraryViewModel);
         await ShotAsync("shell-history");
     }
 
@@ -168,7 +168,7 @@ internal sealed partial class SelfTest
         foreach (var sub in shell.SubPages.ToList()) await Visit(() => shell.SelectedSubPage = sub);
         await Visit(() => window.AccountButton.Command!.Execute(null));
         var missing = main.Pages.Select(p => p.GetType()).Where(t => !reached.Contains(t)).Select(t => t.Name).ToList();
-        Check("旧版九页都能从新外壳走到", missing.Count == 0 && reached.Count == 9, missing.Count == 0 ? $"{reached.Count} 页" : "走不到：" + string.Join("、", missing));
+        Check("旧版九页和游戏库主页都能从新外壳走到", missing.Count == 0 && reached.Count == 10, missing.Count == 0 ? $"{reached.Count} 页" : "走不到：" + string.Join("、", missing));
         await ShotAsync("shell-accounts");
     }
 
@@ -189,7 +189,7 @@ internal sealed partial class SelfTest
         await ShotAsync("shell-return");
         shell.ReturnCommand.Execute(null);
         await Task.Delay(300);
-        Check("【完成，返回】回到游戏库", main.CurrentPage is HomeViewModel && !shell.HasReturn);
+        Check("【完成，返回】回到游戏库", main.CurrentPage is LibraryViewModel && !shell.HasReturn);
     }
 
     private async Task SidebarSettingAsync()

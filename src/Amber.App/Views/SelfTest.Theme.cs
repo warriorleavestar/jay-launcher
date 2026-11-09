@@ -158,7 +158,7 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             && window.SidebarHost.Bounds.Height < 120, $"导航 {window.ShellNav} {window.SidebarHost.Bounds}");
         // format 1 的页面名升级成入口：home → 游戏库、multiplayer → 联机；下载和资源都藏了 → 藏掉发现。
         Check("旧版 shell.json 升级：入口按主题排序、藏掉发现，游戏库和联机还在",
-            main.Shell.Sections.Select(s => s.Id).SequenceEqual(["library", "multiplayer"]) && main.Pages.Count == 9,
+            main.Shell.Sections.Select(s => s.Id).SequenceEqual(["library", "multiplayer"]) && main.Pages.Count == 10,
             string.Join(",", main.Shell.Sections.Select(s => s.Id)));
         // 藏起来的入口还能跳过去，侧栏上没有选中项。
         main.Shell.Navigate("discover");

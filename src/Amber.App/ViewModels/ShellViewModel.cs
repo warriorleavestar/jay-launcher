@@ -107,7 +107,8 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             Section.Library => route[1] switch
             {
-                null => Find<HomeViewModel>(),
+                null => Find<LibraryViewModel>(),
+                "start" => Find<HomeViewModel>(),
                 "new" => Find<DownloadViewModel>(),
                 "logs" => Find<LogViewModel>(),
                 _ => Find<InstanceViewModel>(),
@@ -124,6 +125,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>页面的路由（从别处直接换了当前页时，按它补一条历史）。</summary>
     public Route RouteOf(PageViewModel page) => page switch
     {
+        HomeViewModel => Route.Parse("library/start"),
         InstanceViewModel => Route.Of(Section.Library, _service.CurrentInstance ?? "current"),
         DownloadViewModel => Route.Parse(LegacyRoutes.NewInstance),
         LogViewModel => Route.Parse(LegacyRoutes.Logs),
@@ -250,7 +252,7 @@ public sealed partial class ShellViewModel : ObservableObject
         var pages = _main.Pages;
         return section switch
         {
-            Section.Library => [.. pages.OfType<HomeViewModel>(), .. pages.OfType<InstanceViewModel>(), .. pages.OfType<DownloadViewModel>(), .. pages.OfType<LogViewModel>()],
+            Section.Library => [.. pages.OfType<LibraryViewModel>(), .. pages.OfType<HomeViewModel>(), .. pages.OfType<InstanceViewModel>(), .. pages.OfType<DownloadViewModel>(), .. pages.OfType<LogViewModel>()],
             Section.Settings => [.. pages.OfType<SettingsViewModel>(), .. pages.OfType<ToolsViewModel>()],
             _ => [],
         };

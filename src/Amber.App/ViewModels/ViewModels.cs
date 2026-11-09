@@ -241,6 +241,20 @@ public sealed partial class MainViewModel : ObservableObject
         };
         Activity = new ActivityViewModel(service) { OpenRun = _ => shell.Navigate("library") };
         home.SessionStarted += Activity.Track;
+        // 游戏库的“上次玩”和“共玩”：只记本机的运行记录。
+        home.SessionStarted += session =>
+        {
+            service.RecordPlayed(session.InstanceId, session.Started);
+            var counted = false;
+            session.Changed += s =>
+            {
+                if (counted || s.IsActive || s.Ended is not { } ended || s.ProcessStarted is null) return;
+                counted = true;
+                service.AddPlayTime(s.InstanceId, s.PlayTime(ended));
+            };
+        };
+        var library = new LibraryViewModel(service, home, Activity) { Navigate = r => shell.Navigate(r) };
+        Pages.Add(library);
         // 多开确认走请求条；启动页的卡片也还在，哪边处理都会让另一边一起消失。
         const string MultiKey = "multi-launch";
         home.MultiLaunchRequested += running => service.Requests.Post(new Amber.Core.Activity.RequestSpec("multi",
@@ -276,7 +290,7 @@ public sealed partial class MainViewModel : ObservableObject
             content.BrowseDatapacksFor(id, world, back: () => shell.Router.Navigate(back));
         };
         foreach (var page in Pages) Shell.Watch(page);
-        CurrentPage = Pages[0];
+        CurrentPage = library;
         CurrentPage.Activate();
     }
 }

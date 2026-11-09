@@ -13,6 +13,7 @@
         xmlns:safety="using:Amber.App.Controls.Safety">
 
   <Window.DataTemplates>
+    <DataTemplate DataType="vm:LibraryViewModel"><views:LibraryPage /></DataTemplate>
     <DataTemplate DataType="vm:HomeViewModel"><views:HomePage /></DataTemplate>
     <DataTemplate DataType="vm:AccountsViewModel"><views:AccountsPage /></DataTemplate>
     <DataTemplate DataType="vm:InstanceViewModel"><views:InstancePage /></DataTemplate>

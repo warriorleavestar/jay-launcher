@@ -132,6 +132,8 @@ internal sealed partial class SelfTest
 
             // ---- launch failure card (N1) ----
             var home = main.Pages.OfType<HomeViewModel>().First();
+            main.Shell.Navigate("library/start");
+            await Task.Delay(300);
             var page = window.PageHost.GetVisualDescendants().OfType<HomePage>().FirstOrDefault();
             async Task<List<string>> FailureButtonsAsync(Exception e)
             {
