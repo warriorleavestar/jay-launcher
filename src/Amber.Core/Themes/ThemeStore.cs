@@ -139,6 +139,35 @@ public sealed class ThemeStartupGuard(string path)
 /// <summary>把一套配色写成 .jaytheme（“导出当前主题”，做主题的人从这里改起）。</summary>
 public static class ThemePackWriter
 {
+    /// <summary>
+    /// 把做好的主题目录打成 .jaytheme：跳过隐藏文件（.git、.DS_Store 之类），打完按导入时的规则读一遍，
+    /// 通不过就删掉输出文件、把原因抛出来。返回读到的主题（带提示）。
+    /// </summary>
+    public static ThemePack PackDirectory(string directory, string output)
+    {
+        var root = Path.GetFullPath(directory);
+        var temp = output + ".tmp";
+        if (File.Exists(temp)) File.Delete(temp);
+        using (var zip = ZipFile.Open(temp, ZipArchiveMode.Create))
+            foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+            {
+                var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+                if (relative.Split('/').Any(part => part.StartsWith('.'))) continue;
+                zip.CreateEntryFromFile(file, relative, CompressionLevel.Optimal);
+            }
+        try
+        {
+            var pack = ThemePackReader.Read(temp);
+            File.Move(temp, output, true);
+            return pack;
+        }
+        catch
+        {
+            File.Delete(temp);
+            throw;
+        }
+    }
+
     public static void Write(string path, string id, string name, IReadOnlyDictionary<string, uint> dark, IReadOnlyDictionary<string, uint> light,
         IReadOnlyDictionary<string, double> numbers, IReadOnlyDictionary<string, double> radii)
     {

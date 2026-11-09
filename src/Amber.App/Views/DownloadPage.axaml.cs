@@ -15,9 +15,13 @@ public partial class DownloadPage : UserControl
     /// <summary>打开安装面板的那个控件；面板关掉后焦点回到它。</summary>
     private IInputElement? _opener;
 
+    /// <summary>主题包可以重新排这一页的区块（docs/themes.md 的“页面布局”）。</summary>
+    internal Amber.App.Services.ThemeLayoutHost ThemeLayout { get; }
+
     public DownloadPage()
     {
         InitializeComponent();
+        ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "downloads");
         VersionList.DoubleTapped += (_, e) => { if (ConfigureSelected()) e.Handled = true; };
         VersionList.KeyDown += (_, e) => { if (e.Key == Key.Enter && ConfigureSelected()) e.Handled = true; };
         InstallPanel.KeyDown += (_, e) =>

@@ -1,4 +1,5 @@
 using Amber.Mobile.ViewModels;
+using System.Reflection;
 
 namespace Amber.Core.Tests;
 
@@ -16,7 +17,9 @@ public sealed class MobilePortTests
             Assert.Matches("^[0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$", viewModel.DeviceFingerprint);
             Assert.True(viewModel.HasNoServers);
             Assert.Empty(viewModel.Servers);
-            Assert.Contains("0.7.0", viewModel.VersionText);
+            var version = typeof(MobileMainViewModel).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+            Assert.Contains(version, viewModel.VersionText);
             Assert.True(File.Exists(Path.Combine(root, "identity.key")));
         }
         finally
