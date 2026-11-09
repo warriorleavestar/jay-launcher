@@ -562,7 +562,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartHostLobby(credentials, members);
         StartAnnouncerIfHosting();
         Status = FullLanMode
-            ? L.T("multiplayer.room.created_full_lan")
+            ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
             : L.T("multiplayer.room.created");
     }
 
