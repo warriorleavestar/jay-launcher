@@ -153,6 +153,18 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Command palette, Ctrl+K (§6.23).</summary>
     public CommandPaletteViewModel Palette { get; }
 
+    /// <summary>Help drawer (F1) and the articles the help center reads (§6.24).</summary>
+    public HelpViewModel Help { get; } = new();
+
+    /// <summary>F1 or the help button: this page's article in the drawer.</summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    public void OpenHelp()
+    {
+        if (Help.IsOpen) { Help.Close(); return; }
+        Activity.Close();
+        Help.OpenFor(Shell.Router.Current, Shell.Title);
+    }
+
     partial void OnCurrentPageChanged(PageViewModel oldValue, PageViewModel newValue)
     {
         if (oldValue is not null) oldValue.IsCurrent = false;
@@ -215,6 +227,7 @@ public sealed partial class MainViewModel : ObservableObject
             new SettingsViewModel(service),
             log,
             new AboutViewModel(service),
+            new HelpCenterViewModel(Help),
         ];
         var accounts = (AccountsViewModel)Pages[1];
         Shell = new ShellViewModel(this, service);
@@ -268,6 +281,7 @@ public sealed partial class MainViewModel : ObservableObject
         };
         var settingsPage = Pages.OfType<SettingsViewModel>().Single();
         settingsPage.Navigate = r => shell.Navigate(r);
+        Help.Navigate = r => shell.Navigate(r);
         var about = Pages.OfType<AboutViewModel>().Single();
         about.Navigate = r => shell.Navigate(r);
         about.List.Navigate = r => shell.Navigate(r);
@@ -350,6 +364,7 @@ public sealed partial class MainViewModel : ObservableObject
         Palette = new CommandPaletteViewModel(() => library.AllCards.Select(c => (c.Id, c.Name, c.Facts)))
         {
             Navigate = r => shell.Navigate(r),
+            HelpArticles = () => Help.Library.Catalog,
             OpenInstance = library.OpenInstance,
             StartInstance = library.LaunchInstance,
             AddModsTo = id =>

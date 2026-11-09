@@ -168,8 +168,9 @@ internal sealed partial class SelfTest
         foreach (var sub in shell.SubPages.ToList()) await Visit(() => shell.SelectedSubPage = sub);
         await Visit(() => window.AccountButton.Command!.Execute(null));
         await Visit(() => Page<SettingsViewModel>().GoAboutCommand.Execute(null));
+        await Visit(() => main.Shell.Navigate("help"));
         var missing = main.Pages.Select(p => p.GetType()).Where(t => !reached.Contains(t)).Select(t => t.Name).ToList();
-        Check("旧版九页、游戏库主页和关于页都能从新外壳走到", missing.Count == 0 && reached.Count == 11, missing.Count == 0 ? $"{reached.Count} 页" : "走不到：" + string.Join("、", missing));
+        Check("旧版九页、游戏库主页、关于页和帮助中心都能从新外壳走到", missing.Count == 0 && reached.Count == 12, missing.Count == 0 ? $"{reached.Count} 页" : "走不到：" + string.Join("、", missing));
         await ShotAsync("shell-accounts");
     }
 

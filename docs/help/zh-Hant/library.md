@@ -1,0 +1,20 @@
+---
+id: library
+category: start
+routes: library, library/start
+related: instance, new-instance
+---
+
+# 遊戲庫
+
+遊戲庫是 Jay 的主頁：你裝過的每一套遊戲（例項）都在這裡，最近玩過的排在前面。
+
+## 怎麼做
+- 開始遊戲：點例項卡上的【開始】，或者選中後按 Enter。
+- 開啟例項：點卡片本身，進例項詳情頁。
+- 固定：在卡片的「⋯」裡點【固定】，它會一直排在前面。
+- 搜尋：在上面的搜尋框裡輸入名字或版本號（Ctrl+F）。
+- 新建：點【新建】（Ctrl+N）。
+
+## 出問題了
+- 找不到以前的遊戲：到 [設定 › 儲存](jay:settings#GameDirectory) 看遊戲目錄是不是選對了。

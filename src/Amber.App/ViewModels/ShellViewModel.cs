@@ -118,7 +118,7 @@ public sealed partial class ShellViewModel : ObservableObject
             Section.Settings => route[1] == "tools" ? Find<ToolsViewModel>() : Find<SettingsViewModel>(),
             Section.Accounts => Find<AccountsViewModel>(),
             Section.About => Find<AboutViewModel>(),
-            // Help has no page of its own yet: it lands on settings.
+            Section.Help => Find<HelpCenterViewModel>(),
             _ => Find<SettingsViewModel>(),
         };
     }
@@ -135,6 +135,7 @@ public sealed partial class ShellViewModel : ObservableObject
         ToolsViewModel => Route.Parse(LegacyRoutes.Tools),
         SettingsViewModel => Route.Parse("settings"),
         AboutViewModel => Route.Parse("about"),
+        HelpCenterViewModel help => Route.Parse(help.Selected is { } a ? "help/" + a.Id : "help"),
         AccountsViewModel => Route.Parse("accounts"),
         _ => Route.Library,
     };
@@ -172,6 +173,7 @@ public sealed partial class ShellViewModel : ObservableObject
                     instanceId = id;
                 }
                 _main.CurrentPage = PageFor(route);
+                if (_main.CurrentPage is HelpCenterViewModel help) help.ShowArticle(route[1]);
                 // The instance page was already showing another instance: it does not follow the focus change by itself
                 // (so work in progress is not moved to another instance), but an explicit library/{id} switches it.
                 if (instanceId is not null && _main.CurrentPage is InstanceViewModel page && !page.IsBusy
@@ -198,6 +200,7 @@ public sealed partial class ShellViewModel : ObservableObject
         Section.Play => L.T("shell.nav.multiplayer"),
         Section.Accounts => _main.Pages.OfType<AccountsViewModel>().First().Title,
         Section.About => L.T("about.title"),
+        Section.Help => L.T("help.center.title"),
         _ => L.T("shell.settings"),
     };
 
@@ -352,7 +355,7 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         ContentViewModel => Section.Discover,
         MultiplayerViewModel => Section.Play,
-        SettingsViewModel or ToolsViewModel or AboutViewModel => Section.Settings,
+        SettingsViewModel or ToolsViewModel or AboutViewModel or HelpCenterViewModel => Section.Settings,
         AccountsViewModel => Section.Accounts,
         _ => Section.Library,
     };

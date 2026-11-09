@@ -26,6 +26,7 @@
 
     <DataTemplate DataType="vm:SettingsViewModel"><views:SettingsPage /></DataTemplate>
     <DataTemplate DataType="vm:AboutViewModel"><views:AboutPage /></DataTemplate>
+    <DataTemplate DataType="vm:HelpCenterViewModel"><views:HelpCenterPage /></DataTemplate>
 
     <!-- 请求条上的一条请求（§6.22）：安全类用锁定的安全横幅和安全按钮，其余用普通横幅 -->
     <DataTemplate DataType="vm:RequestItem">
@@ -178,7 +179,7 @@
     <!-- 内容列：顶栏、子页页签、“东西搬到哪了”、页面 -->
     <Grid x:Name="ContentColumn" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto,*">
       <!-- 顶栏（§3.1）：← 返回 + 标题或面包屑；带上下文跳过来时有【完成，返回】 -->
-      <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" Margin="8,0,16,0">
+      <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" Margin="8,0,16,0">
         <Button x:Name="BackButton" Classes="ghost icon-only" Command="{Binding Shell.BackCommand}" IsEnabled="{Binding Shell.CanGoBack}"
                 ToolTip.Tip="{l:T shell.back_tip}" AutomationProperties.Name="{l:T shell.back}" VerticalAlignment="Center">
           <Path Classes="icon" Data="{StaticResource Icon.ChevronLeft}" Width="20" Height="20" />
@@ -212,6 +213,11 @@
             <Path Classes="icon" Data="{StaticResource Icon.Bell}" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
             <Ellipse Width="8" Height="8" Fill="{DynamicResource Danger}" HorizontalAlignment="Right" VerticalAlignment="Top" IsVisible="{Binding Activity.HasAttention}" />
           </Panel>
+        </Button>
+        <!-- Help: this page's article in a drawer. F1; Shift+F1 opens the help center -->
+        <Button x:Name="HelpButton" Grid.Column="6" Classes="ghost icon-only" Command="{Binding OpenHelpCommand}" Margin="4,0,0,0"
+                VerticalAlignment="Center" ToolTip.Tip="{l:T help.button_tip}" AutomationProperties.Name="{l:T help.title}">
+          <Path Classes="icon" Data="{StaticResource Icon.Help}" Width="18" Height="18" />
         </Button>
       </Grid>
       <!-- 请求条（§6.22）：要你处理、有时限的事。多条时折叠成“N 件事等你处理 ▾” -->
@@ -256,6 +262,49 @@
         </Grid>
       </Border>
       <ContentControl x:Name="PageHost" Grid.Row="4" Content="{Binding CurrentPage}" Margin="24,4,24,20" />
+
+      <!-- Help drawer (§6.24): 400 on the right, full width when compact. Esc or a click outside closes it -->
+      <Panel x:Name="HelpLayer" Grid.RowSpan="5" IsVisible="{Binding Help.IsOpen}">
+        <Border x:Name="HelpScrim" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="HelpScrim_Pressed" />
+        <Border x:Name="HelpDrawer" Width="400" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
+                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}">
+          <DockPanel Margin="16,12,16,16">
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+              <TextBlock x:Name="HelpHeader" Text="{Binding Help.Header}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              <Button x:Name="HelpClose" Grid.Column="1" Classes="ghost icon-only" Command="{Binding Help.CloseCommand}"
+                      ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}">
+                <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
+              </Button>
+            </Grid>
+            <TextBox x:Name="HelpDrawerSearch" DockPanel.Dock="Top" Text="{Binding Help.Query}" PlaceholderText="{l:T help.search}" Margin="0,0,0,10" />
+            <Button x:Name="HelpCenterLink" DockPanel.Dock="Bottom" Classes="ghost" Content="{l:T help.open_center}" Command="{Binding Help.OpenCenterCommand}"
+                    HorizontalAlignment="Left" Padding="0,4" Margin="0,8,0,0" />
+            <ScrollViewer x:Name="HelpScroll" HorizontalScrollBarVisibility="Disabled">
+              <Panel Margin="0,0,14,0">
+                <views:HelpArticleBody x:Name="HelpArticle" DataContext="{Binding Help.Article}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.ShowArticle}"
+                                       LinkCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.FollowLinkCommand}"
+                                       ArticleCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.OpenArticleCommand}" />
+                <StackPanel Spacing="4" IsVisible="{Binding Help.HasQuery}">
+                  <TextBlock x:Name="HelpNoResults" Classes="hint" Text="{l:T help.search.empty}" IsVisible="{Binding Help.NoResults}" TextWrapping="Wrap" />
+                  <ItemsControl x:Name="HelpResults" ItemsSource="{Binding Help.Results}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:HelpArticleItem">
+                        <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,6"
+                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.OpenArticleCommand}" CommandParameter="{Binding}">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Summary}" Classes="hint" FontSize="12" TextWrapping="Wrap" MaxLines="2" />
+                          </StackPanel>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Panel>
+            </ScrollViewer>
+          </DockPanel>
+        </Border>
+      </Panel>
 
       <!-- 活动中心（§6.22）：盖在内容区右侧的抽屉 400，紧凑档全宽。Esc 或点外面关 -->
       <Panel x:Name="ActivityLayer" Grid.RowSpan="5" IsVisible="{Binding Activity.IsOpen}">

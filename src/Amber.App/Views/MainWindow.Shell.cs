@@ -174,6 +174,8 @@ public partial class MainWindow
         // 活动抽屉：紧凑档铺满内容区，其余 400 宽从右边滑出（§5.3）。
         ActivityDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
         ActivityDrawer.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
+        HelpDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
+        HelpDrawer.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
         PalettePanel.Width = ContentTier == WidthTier.Compact ? double.NaN : 640;
         PalettePanel.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
         ContentColumn.Classes.Set("compact", ContentTier == WidthTier.Compact);
@@ -195,6 +197,19 @@ public partial class MainWindow
             return;
         }
         if (e.Key == Key.Escape && main.Activity.IsOpen) { main.Activity.Close(); e.Handled = true; return; }
+        // Help (§6.24): F1 this page's article, Shift+F1 the help center; in the drawer Ctrl+F searches and Esc closes.
+        if (e.Key == Key.F1 && !main.FirstRun.IsOpen)
+        {
+            if (e.KeyModifiers == KeyModifiers.Shift) { main.Help.Close(); shell.Navigate("help"); }
+            else if (e.KeyModifiers == KeyModifiers.None) main.OpenHelp();
+            e.Handled = true;
+            return;
+        }
+        if (main.Help.IsOpen)
+        {
+            if (e.Key == Key.Escape) { main.Help.Close(); HelpButton.Focus(); e.Handled = true; return; }
+            if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control) { HelpDrawerSearch.Focus(); HelpDrawerSearch.SelectAll(); e.Handled = true; return; }
+        }
         if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.J) { main.Activity.Toggle(); e.Handled = true; return; }
         if (e.KeyModifiers == KeyModifiers.Control)
         {
@@ -303,6 +318,12 @@ public partial class MainWindow
         main.Palette.Run(entry);
         if (!main.Palette.IsOpen) ClosedPalette();
         else PaletteBox.Focus();
+    }
+
+    private void HelpScrim_Pressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel main) main.Help.Close();
+        e.Handled = true;
     }
 
     private void ActivityScrim_Pressed(object? sender, PointerPressedEventArgs e)

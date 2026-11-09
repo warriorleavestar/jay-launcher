@@ -52,6 +52,9 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
 
     public CommandPaletteViewModel(Func<IEnumerable<(string Id, string Name, string Facts)>> instances) => _instances = instances;
 
+    /// <summary>The help articles in the current language (listed under "?").</summary>
+    public Func<IEnumerable<Amber.Core.Help.HelpArticle>>? HelpArticles { get; set; }
+
     public ObservableCollection<PaletteEntry> Results { get; } = [];
 
     [ObservableProperty] public partial bool IsOpen { get; private set; }
@@ -259,6 +262,16 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
         list.Add(Page(LegacyRoutes.Logs, "log.title", "log"));
         list.Add(Page("accounts", "accounts.title"));
         list.Add(Page("settings#RecycleKeep", "recycle.title", "trash", "recycle"));
+        list.Add(Page("about", "about.title", "privacy", "about"));
+        list.Add(Page("help", "help.center.title", "help", "F1"));
+
+        // Help articles ("?" lists only these): open in the help center.
+        if (HelpArticles?.Invoke() is { } articles)
+            foreach (var a in articles)
+            {
+                var id = a.Id;
+                list.Add(new PaletteEntry(new CommandItem("help:" + id, CommandKind.Help, a.Title, a.Summary, [id]), () => Navigate?.Invoke("help/" + id)));
+            }
         return list;
     }
 }
