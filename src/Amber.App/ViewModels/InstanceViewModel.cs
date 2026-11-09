@@ -260,6 +260,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
 
     partial void OnCurrentChanged(GameInstance? value)
     {
+        LoadBisect();
         CancelServerQueries();
         _loadedTabs.Remove((int)InstanceTab.Servers);
     }

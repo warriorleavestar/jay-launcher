@@ -2320,5 +2320,21 @@
   "logs.report.save": "出至檔…",
   "logs.report.copy": "錄至剪板",
   "logs.report.has": "報中有：遊戲與模組之列、誌末二千行、機之系統與 Java 之版。",
-  "logs.report.removed": "已為汝去：戲名以外之帳訊、令牌、機之用者名、檔徑中之用者名。"
+  "logs.report.removed": "已為汝去：戲名以外之帳訊、令牌、機之用者名、檔徑中之用者名。",
+  "fix.start": "助我修…",
+  "fix.bisect.title": "方以半分之法尋致崩之模組 · 第 {0} 輪，約餘 {1} 輪",
+  "fix.bisect.body": "Jay 暫閉模組 {0} 個（猶疑者 {1} 個）。啟戲少玩，乃告 Jay：",
+  "fix.bisect.still_crashes": "猶崩",
+  "fix.bisect.works": "不崩矣",
+  "fix.bisect.restore": "盡復其舊",
+  "fix.bisect.found_title": "得之矣",
+  "fix.bisect.found_body": "閉此模組則戲安。餘皆已復啟。",
+  "fix.bisect.found": "乃 {0}。",
+  "fix.bisect.disable_found": "閉 {0}",
+  "fix.bisect.running": "先閉遊戲：戲中不可啟閉模組。",
+  "fix.bisect.too_few": "所啟模組不及二，無可半分。可觀誌或出誤報。",
+  "fix.bisect.started": "暫閉模組 {0} 個。啟戲，觀其猶崩否。",
+  "fix.bisect.failed": "未能啟閉模組：{0}",
+  "fix.bisect.disabled": "已閉 {0}，餘皆如故。",
+  "fix.bisect.restored": "諸模組皆復其舊。"
 }

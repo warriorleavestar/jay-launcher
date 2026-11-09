@@ -168,7 +168,22 @@
     <TextBlock Classes="hint" Text="{Binding InfoText}" IsVisible="{Binding !HasInstance}" TextWrapping="Wrap" />
 
     <!-- 上一局：英雄区下面、页签上面；修复按钮挨着原因，就地做（官方设计 §6.3） -->
-    <Border x:Name="LastRunPanel" Grid.Row="1" Classes="lastrun" svc:ThemeRegion.Name="instances.lastrun" IsVisible="{Binding ShowLastRun}">
+    <StackPanel Grid.Row="1" Spacing="8">
+    <!-- [Help me fix…] in progress: survives restarts until the mod is found or everything is restored (§6.3, J6). -->
+    <Border x:Name="BisectCard" Classes="callout info" IsVisible="{Binding HasBisect}" Margin="0,0,0,0">
+      <StackPanel Spacing="6">
+        <TextBlock Text="{Binding BisectTitle}" FontWeight="SemiBold" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding BisectBody}" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding BisectFoundText}" FontWeight="SemiBold" IsVisible="{Binding BisectFound}" TextWrapping="Wrap" />
+        <WrapPanel ItemSpacing="8" LineSpacing="6">
+          <Button x:Name="BisectCrashesButton" Content="{l:T fix.bisect.still_crashes}" Command="{Binding BisectAnswerCommand}" CommandParameter="true" IsVisible="{Binding BisectAwaiting}" />
+          <Button x:Name="BisectWorksButton" Content="{l:T fix.bisect.works}" Command="{Binding BisectAnswerCommand}" CommandParameter="false" IsVisible="{Binding BisectAwaiting}" />
+          <Button Content="{Binding BisectDisableFoundLabel}" Command="{Binding BisectDisableFoundCommand}" IsVisible="{Binding BisectFound}" />
+          <Button Classes="ghost" Content="{l:T fix.bisect.restore}" Command="{Binding BisectRestoreCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+    <Border x:Name="LastRunPanel" Classes="lastrun" svc:ThemeRegion.Name="instances.lastrun" IsVisible="{Binding ShowLastRun}">
       <StackPanel Spacing="8">
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
           <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="18" Height="18" Stroke="{DynamicResource DangerText}" VerticalAlignment="Center" />
@@ -213,12 +228,14 @@
         <TextBlock Classes="hint" Text="{l:T instance.lastrun.unknown}" IsVisible="{Binding LastRunUnknown}" TextWrapping="Wrap" />
         <WrapPanel ItemSpacing="8" LineSpacing="6">
           <TextBlock Text="{l:T instance.lastrun.still_broken}" VerticalAlignment="Center" Classes="hint" />
+          <Button x:Name="HelpMeFixButton" Classes="secondary" Content="{l:T fix.start}" Command="{Binding StartFixCommand}" IsVisible="{Binding !HasBisect}" />
           <Button Classes="secondary" Content="{l:T home.crash.view_log}" Command="{Binding ViewLastRunLogCommand}" />
           <Button Classes="secondary" Content="{l:T home.crash.export}" Click="ExportLastRun_Click" />
           <Button Classes="ghost" Content="{l:T home.crash.open_report}" Command="{Binding OpenLastRunReportCommand}" />
         </WrapPanel>
       </StackPanel>
     </Border>
+    </StackPanel>
 
     <Border svc:ThemeRegion.Name="instances.details" Grid.Row="2" Classes="card" Padding="10" IsVisible="{Binding HasInstance}">
       <!-- 小窗口有状态提示时，页签和工具栏一起滚动；页签内容仍有有限高度，列表继续虚拟滚动。 -->

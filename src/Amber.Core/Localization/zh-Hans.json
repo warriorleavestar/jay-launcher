@@ -2383,5 +2383,21 @@
   "logs.report.save": "导出到文件…",
   "logs.report.copy": "复制到剪贴板",
   "logs.report.has": "报告里会有：游戏和模组列表、日志最后 2000 行、电脑系统和 Java 版本。",
-  "logs.report.removed": "已经替你去掉：玩家名以外的账号信息、令牌、电脑用户名和文件路径里的用户名。"
+  "logs.report.removed": "已经替你去掉：玩家名以外的账号信息、令牌、电脑用户名和文件路径里的用户名。",
+  "fix.start": "帮我修…",
+  "fix.bisect.title": "正在一半一半地找出问题模组 · 第 {0} 轮，大约还要 {1} 轮",
+  "fix.bisect.body": "Jay 暂时关掉了 {0} 个模组（还有 {1} 个嫌疑）。开始游戏玩一会儿，然后告诉 Jay：",
+  "fix.bisect.still_crashes": "还会崩",
+  "fix.bisect.works": "不崩了",
+  "fix.bisect.restore": "全部恢复原样",
+  "fix.bisect.found_title": "找到了",
+  "fix.bisect.found_body": "关掉这个模组游戏就正常了。其他模组都已开回来。",
+  "fix.bisect.found": "是 {0}。",
+  "fix.bisect.disable_found": "关掉 {0}",
+  "fix.bisect.running": "先关掉游戏：游戏开着时不能开关模组。",
+  "fix.bisect.too_few": "开着的模组不到两个，没法一半一半地找。可以看看日志或导出错误报告。",
+  "fix.bisect.started": "暂时关掉了 {0} 个模组。开始游戏，看看还会不会崩。",
+  "fix.bisect.failed": "没能开关模组：{0}",
+  "fix.bisect.disabled": "已关掉 {0}，其他都和原来一样。",
+  "fix.bisect.restored": "所有模组都恢复原样了。"
 }

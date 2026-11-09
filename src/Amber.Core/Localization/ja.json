@@ -2383,5 +2383,21 @@
   "logs.report.save": "ファイルに書き出す…",
   "logs.report.copy": "クリップボードにコピー",
   "logs.report.has": "レポートに含まれるもの：ゲームと MOD の一覧、ログの最後の 2000 行、OS と Java のバージョン。",
-  "logs.report.removed": "取り除き済み：プレイヤー名以外のアカウント情報、トークン、PC のユーザー名、ファイルパス内のユーザー名。"
+  "logs.report.removed": "取り除き済み：プレイヤー名以外のアカウント情報、トークン、PC のユーザー名、ファイルパス内のユーザー名。",
+  "fix.start": "直すのを手伝って…",
+  "fix.bisect.title": "原因の MOD を半分ずつ探しています · {0} 回目、あと約 {1} 回",
+  "fix.bisect.body": "Jay が MOD を {0} 個いったんオフにしました（容疑はあと {1} 個）。ゲームを始めて少し遊んでから、Jay に教えてください：",
+  "fix.bisect.still_crashes": "まだクラッシュする",
+  "fix.bisect.works": "直った",
+  "fix.bisect.restore": "すべて元に戻す",
+  "fix.bisect.found_title": "見つかりました",
+  "fix.bisect.found_body": "この MOD をオフにするとゲームが動きます。ほかの MOD はすべてオンに戻しました。",
+  "fix.bisect.found": "{0} です。",
+  "fix.bisect.disable_found": "{0} をオフにする",
+  "fix.bisect.running": "先にゲームを閉じてください。ゲーム中は MOD を切り替えられません。",
+  "fix.bisect.too_few": "オンの MOD が 2 個未満なので、半分ずつ探せません。ログを見るかエラーレポートを書き出してください。",
+  "fix.bisect.started": "MOD を {0} 個いったんオフにしました。ゲームを始めて、まだクラッシュするか確かめてください。",
+  "fix.bisect.failed": "MOD を切り替えられませんでした：{0}",
+  "fix.bisect.disabled": "{0} をオフにしました。ほかは元のままです。",
+  "fix.bisect.restored": "すべての MOD を元に戻しました。"
 }
