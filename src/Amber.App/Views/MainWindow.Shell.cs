@@ -61,6 +61,8 @@ public partial class MainWindow
             ApplyLogDock();
             // Short windows (§3.3): the "Jay has a new layout" banner keeps its title and [Got it]; the details are in help.
             MovedNoticeBody.IsVisible = e.NewSize.Height >= MovedNoticeShortBelow;
+            // Title only: one line, so a long translation can't push the page's last rows out of the window.
+            MovedNoticeTitle.TextWrapping = MovedNoticeBody.IsVisible ? Avalonia.Media.TextWrapping.Wrap : Avalonia.Media.TextWrapping.NoWrap;
             // Very short windows: the page needs every line; the banner comes back when the window is taller.
             _movedNoticeTooShort = e.NewSize.Height < MovedNoticeHiddenBelow;
             UpdateMovedNotice();
@@ -388,7 +390,7 @@ public partial class MainWindow
     internal const double MovedNoticeShortBelow = 600;
 
     /// <summary>Below this content height the moved-notice banner is not shown at all.</summary>
-    internal const double MovedNoticeHiddenBelow = 440;
+    internal const double MovedNoticeHiddenBelow = 500;
 
     private bool _movedNoticeTooShort;
 

@@ -620,7 +620,7 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>贴了邀请码：进大厅、敲门、等批准；批准后离开大厅，用拿到的凭据加入房间。</summary>
     /// <param name="knock">从公共网络的房间列表加入时：经公共网络敲门。不给时先在公共网络的目录里找（连着时），找不到再进邀请码的大厅。</param>
-    private async Task KnockAndJoinAsync(JayInvite invite, Func<X25519KeyPair, string, CancellationToken, Task<KnockOutcome>>? knock = null)
+    private async Task KnockAndJoinAsync(JayInvite invite, Func<X25519KeyPair, string, CancellationToken, Task<KnockOutcome>>? knock = null, byte[]? expectedHost = null)
     {
         IsKnocking = true;
         var cts = new CancellationTokenSource();
@@ -637,7 +637,7 @@ public sealed partial class MultiplayerViewModel
             if (knock is not null || _public is not null)
             {
                 SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
-                viaPublic = knock is not null ? await knock(me, name, cts.Token) : await TryPublicKnockAsync(invite, me, name, cts.Token);
+                viaPublic = knock is not null ? await knock(me, name, cts.Token) : await TryPublicKnockAsync(invite, me, name, cts.Token, expectedHost);
                 if (viaPublic is null && _knockCts == cts) SetStatus(StatusMessage.Info(peers.Count > 0 ? "multiplayer.invite.connecting_relay" : "multiplayer.invite.entering_lobby"));
             }
             var outcome = viaPublic ?? await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
@@ -648,7 +648,7 @@ public sealed partial class MultiplayerViewModel
                 }), cts.Token, () => Dispatcher.UIThread.Post(() =>
                 {
                     if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
-                }), device, AccountToken, jay));
+                }), device, AccountToken, jay, expectedHost));
             if (_knockCts != cts) return;
             if (outcome.Credentials is not { } credentials)
             {
