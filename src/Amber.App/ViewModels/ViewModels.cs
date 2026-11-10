@@ -103,6 +103,23 @@ public abstract class PageViewModel : ObservableObject
     /// <summary>没有消息时显示的内容（比如首页的“准备就绪”）。</summary>
     protected virtual StatusMessage? DefaultStatus => null;
 
+    /// <summary>
+    /// Writes a file the user picked a place for: a failure (the file is open elsewhere, no permission, disk full) becomes
+    /// an error status instead of an exception escaping into the UI thread, which would close Jay.
+    /// </summary>
+    protected void SaveFile(string path, Action write, string successKey)
+    {
+        try
+        {
+            write();
+            SetStatus(StatusMessage.Success(successKey, path));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            SetStatus(StatusMessage.Failure("common.save_file_failed", e, path, ErrorText.Of(e)));
+        }
+    }
+
     public void SetStatus(StatusMessage? message)
     {
         _statusInfo = message;
