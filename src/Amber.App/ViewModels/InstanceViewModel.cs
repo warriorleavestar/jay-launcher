@@ -927,14 +927,28 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
 
     public void AddFiles(IEnumerable<string> paths, string targetDir)
     {
-        System.IO.Directory.CreateDirectory(targetDir);
         var count = 0;
+        StatusMessage? failure = null;
         foreach (var path in paths)
         {
-            File.Copy(path, Path.Combine(targetDir, Path.GetFileName(path)), true);
-            count++;
+            var target = Path.Combine(targetDir, Path.GetFileName(path));
+            // Picked from the target folder itself: it is already there (copying a file onto itself throws).
+            if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(target), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                continue;
+            try
+            {
+                System.IO.Directory.CreateDirectory(targetDir);
+                File.Copy(path, target, true);
+                count++;
+            }
+            // A running game keeps its mods open on Windows; one locked or unreadable file must not stop the rest.
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                failure ??= StatusMessage.Failure("instance.files.add_failed", e, Path.GetFileName(path), ErrorText.Of(e));
+            }
         }
-        Status = L.P("instance.files.added", count, count);
+        if (failure is not null) SetStatus(failure);
+        else Status = L.P("instance.files.added", count, count);
         _loadedTabs.Clear();
         LoadTab(TabIndex);
     }
