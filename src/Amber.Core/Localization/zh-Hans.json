@@ -2680,5 +2680,12 @@
   "multiplayer.invite.change": "改…",
   "multiplayer.settings.knock_wait": "新房间里，敲门等我回答多久",
   "multiplayer.room.section.details": "详情",
-  "multiplayer.knock.more": "还有 {0} 人在敲门，处理完这个就轮到。"
+  "multiplayer.knock.more": "还有 {0} 人在敲门，处理完这个就轮到。",
+  "multiplayer.knock.request_body": "安全码 {0}。{1}",
+  "multiplayer.file.program_warning": "这是程序文件，只接收你信任的人发的。Jay 不会自动打开它。",
+  "multiplayer.file.never_runs": "接收后只会存到“下载/Jay”，Jay 不会自动打开它。",
+  "multiplayer.file.accept": "接收…",
+  "multiplayer.file.see_above": "有人想发文件给你，在上面处理。",
+  "multiplayer.settings.request_popup": "Jay 不在前面时，有人敲门或发文件用置顶小窗提醒（不抢游戏的键盘）",
+  "multiplayer.popup.window_title": "Jay 安全提示"
 }

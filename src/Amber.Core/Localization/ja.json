@@ -2680,5 +2680,12 @@
   "multiplayer.invite.change": "変更…",
   "multiplayer.settings.knock_wait": "新しいルームでノックの返事を待つ時間",
   "multiplayer.room.section.details": "詳細",
-  "multiplayer.knock.more": "ほかに {0} 人がノックしています。これが済んだら次に表示します。"
+  "multiplayer.knock.more": "ほかに {0} 人がノックしています。これが済んだら次に表示します。",
+  "multiplayer.knock.request_body": "安全コード {0}。{1}",
+  "multiplayer.file.program_warning": "これはプログラムファイルです。信頼できる人からのものだけ受け取ってください。Jay が自動で開くことはありません。",
+  "multiplayer.file.never_runs": "受け取ると「ダウンロード/Jay」に保存されるだけで、Jay が自動で開くことはありません。",
+  "multiplayer.file.accept": "受け取る…",
+  "multiplayer.file.see_above": "ファイルが届いています。上で対応してください。",
+  "multiplayer.settings.request_popup": "Jay が裏にあるとき、ノックやファイルを最前面の小さなウィンドウで知らせる（ゲームのキーボード操作は奪いません）",
+  "multiplayer.popup.window_title": "Jay 安全のお知らせ"
 }

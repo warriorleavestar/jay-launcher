@@ -424,6 +424,12 @@ public sealed partial class MainViewModel : ObservableObject
             },
         };
         multiplayer.Navigate = r => shell.Navigate(r);
+        // Knocks and files are answered in the room's locked panel while it is on screen; the bar has them everywhere else.
+        Activity.ShownElsewhere = r => r.Spec.Kind is "knock" or "file" && multiplayer.IsCurrent && multiplayer.ShowRoomHeader;
+        multiplayer.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(PageViewModel.IsCurrent) or nameof(MultiplayerViewModel.ShowRoomHeader)) Activity.Resync();
+        };
         foreach (var page in Pages) Shell.Watch(page);
         CurrentPage = library;
         CurrentPage.Activate();

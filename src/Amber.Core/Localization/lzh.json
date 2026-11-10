@@ -2602,5 +2602,12 @@
   "multiplayer.invite.change": "改…",
   "multiplayer.settings.knock_wait": "新室叩門待吾答幾何",
   "multiplayer.room.section.details": "詳",
-  "multiplayer.knock.more": "尚有 {0} 人叩門，此畢則及之。"
+  "multiplayer.knock.more": "尚有 {0} 人叩門，此畢則及之。",
+  "multiplayer.knock.request_body": "安碼 {0}。{1}",
+  "multiplayer.file.program_warning": "此乃程式之檔，唯受所信者所寄。Jay 不自啟之。",
+  "multiplayer.file.never_runs": "受之則存於「下載/Jay」，Jay 不自啟之。",
+  "multiplayer.file.accept": "受之…",
+  "multiplayer.file.see_above": "有人欲寄檔予汝，於上處之。",
+  "multiplayer.settings.request_popup": "Jay 在後時，叩門或寄檔以置頂小窗告之（不奪戲之鍵）",
+  "multiplayer.popup.window_title": "Jay 安之告"
 }
