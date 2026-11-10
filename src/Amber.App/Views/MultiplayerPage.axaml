@@ -917,6 +917,30 @@
                   <Button Content="{l:T multiplayer.public.save_nodes}" Command="{Binding SavePublicNodesCommand}" HorizontalAlignment="Left" />
                 </StackPanel>
               </Expander>
+              <Expander Header="{l:T multiplayer.volunteer.title}" HorizontalAlignment="Stretch" IsVisible="{Binding VolunteersAllowed}">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.hint}" />
+                  <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.privacy}" />
+                  <CheckBox IsChecked="{Binding VolunteerEnabled}" Content="{l:T multiplayer.volunteer.enable}" />
+                  <StackPanel Spacing="6" IsEnabled="{Binding VolunteerEnabled}">
+                    <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.address}" />
+                    <TextBox Text="{Binding VolunteerAddress}" FontFamily="Consolas,monospace" MaxLength="253" PlaceholderText="203.0.113.5 / jay.example.org" />
+                    <WrapPanel ItemSpacing="12" LineSpacing="6">
+                      <StackPanel Spacing="4">
+                        <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.port}" />
+                        <TextBox Text="{Binding VolunteerPort}" Width="110" MaxLength="5" />
+                      </StackPanel>
+                      <StackPanel Spacing="4">
+                        <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.limit}" />
+                        <TextBox Text="{Binding VolunteerLimit}" Width="110" MaxLength="7" />
+                      </StackPanel>
+                    </WrapPanel>
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.port_hint}" />
+                  </StackPanel>
+                  <Button Content="{l:T multiplayer.volunteer.save}" Command="{Binding SaveVolunteerCommand}" HorizontalAlignment="Left" />
+                  <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding VolunteerStatus}" IsVisible="{Binding VolunteerStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+              </Expander>
             </StackPanel>
           </Border>
 

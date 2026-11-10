@@ -12,6 +12,12 @@ namespace Amber.Core.Tests;
 public sealed class PrivacyPlusPlusTests : IAsyncLifetime
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMilliseconds(150);
+    /// <summary>
+    /// How long a relay may go without a heartbeat. 1.2 s (8 intervals) was too tight for a busy Windows CI runner, where a
+    /// healthy relay's heartbeat sometimes arrived later and tripped the breaker. 4 s still detects a dead relay well
+    /// within <see cref="Until"/>'s 10 s.
+    /// </summary>
+    private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(4);
     private readonly string _root = Path.Combine(Path.GetTempPath(), "jay-plusplus-test-" + Guid.NewGuid().ToString("N"));
     private GateStore _store = null!;
     private GateServer _server = null!;
@@ -30,7 +36,7 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         _serverKey = _store.LoadServerKey();
         _server = new GateServer(_store, config, _serverKey, _ => { })
         {
-            HeartbeatTimeoutOverride = TimeSpan.FromMilliseconds(1200),
+            HeartbeatTimeoutOverride = HeartbeatTimeout,
             RecoverDelay = TimeSpan.FromMilliseconds(300),
             CheckInterval = TimeSpan.FromMilliseconds(100),
         };
@@ -204,7 +210,8 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         _store.SetPrivacy(PrivacyLevel.PlusPlus);
         await Until(() => !_server.BreakerOpen && _relays.All(r => r.Relay.HeartbeatConnected), "ready");
         await _relays[2].Relay.DisposeAsync();
-        await Task.Delay(2000);
+        // Long enough for the server to notice the relay is gone.
+        await Task.Delay(HeartbeatTimeout + TimeSpan.FromSeconds(1));
         Assert.False(_server.BreakerOpen);
     }
 

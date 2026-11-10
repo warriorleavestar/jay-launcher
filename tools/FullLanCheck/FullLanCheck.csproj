@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Mac/Linux 完整局域网 + 出口的无界面端到端检查（CI 的 fulllan-e2e 用，要 root）。见 Program.cs。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Amber.Core/Amber.Core.csproj" />
+  </ItemGroup>
+</Project>

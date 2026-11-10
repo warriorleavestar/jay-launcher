@@ -1190,10 +1190,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
     {
         var host = Page<MultiplayerViewModel>();
         main.CurrentPage = host;
+        host.ShowTabCommand.Execute("play");
         await Task.Delay(500);
         host.JoinCode = "JAY2-123";
         await PasteBoxMaskedAsync(host);
-        Check("联机：邀请码格式错误有提示", Press(await FindAsync<Button>(b => b.Content as string == "加入房间")) && host.Status.Contains("格式") || !host.IsComponentReady && host.Status.Contains("组件"), host.Status);
+        // The lobby's join button (official §6.14): found by its command, not its text, which the terminology pass renamed.
+        Check("联机：邀请码格式错误有提示", Press(await FindAsync<Button>(b => b.Name == "LobbyJoinButton" && b.IsEffectivelyVisible))
+            && (host.IsComponentReady ? host.Status.Contains(L.T("multiplayer.room.invalid_code")) : host.Status.Contains(L.T("multiplayer.component.download_required"))), host.Status);
         if (host.IsComponentReady)
         {
             host.JoinCode = "AMB-K7Q2M9XD-4HZP8RW2N6TC-25565";

@@ -25,6 +25,12 @@ public static partial class NetworkString
     public const string Current = "JAYNET1-";
     public const int MaxLength = 8192;
     public const int MaxNodes = 16;
+    /// <summary>
+    /// At most this many directory keys: one per directory node (up to four) plus room for a new key per node while
+    /// rotating. Deliberately larger than <see cref="PublicNetworkProfile.MaxDirectories"/>: every shipped Jay refuses a
+    /// string with more keys than this, so it can't grow later without breaking older versions.
+    /// </summary>
+    public const int MaxDirectoryKeys = 8;
 
     /// <summary>
     /// Jay 注册表的签名公钥（base64）。可以有多把（换钥匙时新旧并存一段时间）。
@@ -95,6 +101,8 @@ public static partial class NetworkString
         if (info.Home is { } home && !IsHttps(home)) return L.T("core.mp.network.bad_link");
         if (info.Config is { } config && (!IsHttps(config.Url) || config.Sha256.Length != 64 || !config.Sha256.All(Uri.IsHexDigit)))
             return L.T("core.mp.network.bad_config");
+        if (info.DirectoryKeys is { } dirKeys && (dirKeys.Count is 0 or > MaxDirectoryKeys || dirKeys.Any(k => k.Length != DirectoryChannel.KeyLength)))
+            return L.T("core.mp.network.bad_dir_keys");
         return null;
     }
 
@@ -125,8 +133,13 @@ public sealed record NetworkConfigRef(string Url, string Sha256);
 /// <param name="Expires">过期时间（可选）。</param>
 /// <param name="Home">网络主页（可选，https）。</param>
 /// <param name="Config">服务器配置文件（可选）。</param>
+/// <param name="DirectoryKeys">
+/// The directory nodes' X25519 public keys ("dirKeys", optional, at most <see cref="NetworkString.MaxDirectoryKeys"/>).
+/// When present, Jay only talks to a directory that proves it holds one of them (see <see cref="DirectoryChannel"/>).
+/// Older Jay versions ignore the field.
+/// </param>
 public sealed record NetworkInfo(string Id, string Name, string NetworkName, string Secret, IReadOnlyList<string> Nodes, long Seq = 1,
-    DateTimeOffset? Expires = null, string? Home = null, NetworkConfigRef? Config = null)
+    DateTimeOffset? Expires = null, string? Home = null, NetworkConfigRef? Config = null, IReadOnlyList<byte[]>? DirectoryKeys = null)
 {
     public JsonObject ToJson()
     {
@@ -143,6 +156,7 @@ public sealed record NetworkInfo(string Id, string Name, string NetworkName, str
         if (Expires is { } exp) o["exp"] = exp.ToUnixTimeSeconds();
         if (Home is not null) o["home"] = Home;
         if (Config is not null) o["config"] = new JsonObject { ["url"] = Config.Url, ["sha256"] = Config.Sha256.ToLowerInvariant() };
+        if (DirectoryKeys is { Count: > 0 } keys) o["dirKeys"] = new JsonArray([.. keys.Select(k => (JsonNode)JsonValue.Create(Convert.ToBase64String(k)))]);
         return o;
     }
 
@@ -156,7 +170,8 @@ public sealed record NetworkInfo(string Id, string Name, string NetworkName, str
         return new NetworkInfo(Need("id"), Need("name"), Need("network"), Need("secret"), nodes,
             o["seq"]?.GetValue<long>() ?? 1,
             o["exp"] is { } exp ? DateTimeOffset.FromUnixTimeSeconds(exp.GetValue<long>()) : null,
-            o["home"]?.GetValue<string>(), config);
+            o["home"]?.GetValue<string>(), config,
+            o["dirKeys"] is JsonArray dk ? [.. dk.Select(k => Convert.FromBase64String(k?.GetValue<string>() ?? throw new FormatException("dirKeys")))] : null);
     }
 }
 
@@ -177,7 +192,10 @@ public sealed record SignedNetwork(NetworkInfo Info, byte[] SignerKey, bool Revi
         incoming.Info.Id == Info.Id && incoming.SignerKey.AsSpan().SequenceEqual(SignerKey) && incoming.Info.Seq > Info.Seq;
 
     public PublicNetworkProfile ToProfile() =>
-        new(Info.Id, Info.Name, Info.NetworkName, Info.Secret, Info.Nodes) { Reviewed = Reviewed, Config = Info.Config, Home = Info.Home };
+        new(Info.Id, Info.Name, Info.NetworkName, Info.Secret, Info.Nodes)
+        {
+            Reviewed = Reviewed, Config = Info.Config, Home = Info.Home, DirectoryKeys = Info.DirectoryKeys ?? [],
+        };
 }
 
 /// <summary>签连接串的 Ed25519 钥匙（注册表 CI 或者自己搭网络的人用）。私钥是 32 字节种子。</summary>
