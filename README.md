@@ -4,10 +4,10 @@
 
 # Jay
 
-### Play Minecraft with your friends, anywhere. Privately.
+### A private place for you and your friends: play, chat, share. Minecraft launcher built in.
 
-An open-source launcher for Minecraft: Java Edition with built-in cross-border and LAN multiplayer,<br>
-end-to-end encrypted chat and file transfer, and no telemetry at all.
+Play Minecraft or any LAN game together across borders, chat and send files end to end encrypted,<br>
+help a friend with remote control, or borrow a friend's connection. Open source, no telemetry at all.
 
 [![Latest release](https://img.shields.io/github/v/release/warriorleavestar/jay-launcher?color=d98a1f&label=release)](https://github.com/warriorleavestar/jay-launcher/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/warriorleavestar/jay-launcher/build.yml?branch=main&label=build)](https://github.com/warriorleavestar/jay-launcher/actions/workflows/build.yml)
@@ -19,7 +19,7 @@ end-to-end encrypted chat and file transfer, and no telemetry at all.
 
 **English** · [简体中文](README.zh-Hans.md) · [Download](#download) · [Features](#features) · [Privacy](#privacy) · [FAQ](#faq) · [Contributing](CONTRIBUTING.md)
 
-<img src="docs/images/readme/en/library.png" alt="Jay's game library" width="860">
+<img src="docs/images/readme/en/room.png" alt="A Jay room: people, encrypted group chat and private messages" width="860">
 
 </div>
 
@@ -27,23 +27,32 @@ end-to-end encrypted chat and file transfer, and no telemetry at all.
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
-### 🌏 Play together, anywhere
+### 🌏 Your friends, one LAN
 
-Share an invite, your friend "knocks", you let them in. Jay tries a direct connection first (IPv6, UPnP, hole punching) and only falls back to a relay when it has to. Works across countries, across networks and on the same LAN.
+Share an invite, your friend "knocks", you let them in, and you are on the same virtual LAN wherever you live. Minecraft, other LAN games and LAN apps just work. Jay connects directly when it can and only relays when it has to.
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
+
+### 💬 Chat and share, end to end
+
+Group chat for the room, private messages to one friend, and file transfer, all end-to-end encrypted with each person's own key. Relay nodes see nothing. Need a hand? Ask to remote-control a friend's screen, with their OK every time.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ### 🔒 Private by design
 
-Every member gets their own key. Invites are single-use and expire; leaked codes are useless. Chat, private messages and file transfer are encrypted end to end, so relay nodes can't read them. No telemetry, no device ID, no remote switches.
+Invites are single-use and expire; leaked codes are useless. Nobody gets in without your approval, and kicking someone rotates the room key. No telemetry, no device ID, no remote switches, and no Jay server in the middle.
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
-### 🪶 Light and complete
+### 🎮 A full Minecraft launcher
 
 The window opens in about 0.3 s. Fabric, Quilt, Forge, NeoForge and OptiFine in one click, Modrinth and CurseForge built in, modpack import and export, and crash analysis that tells you which mod to blame.
 
@@ -105,15 +114,17 @@ Jay's window needs a desktop session (X11, or Wayland with XWayland) and the lib
 
 ## Features
 
-### 🎮 Multiplayer that just works
+### 🌏 Play, chat and share with friends
 
 <img src="docs/images/readme/en/multiplayer.png" alt="Multiplayer page: open a room or join a friend" width="860">
 
-- **Invite and knock.** The host opens the world to LAN and opens a room; a friend pastes the invite and knocks. Nobody gets in until the host approves on a locked pop-up card.
+- **Invite and knock.** The host opens a room (for Minecraft, open your world to LAN first); a friend pastes the invite and knocks. Nobody gets in until the host approves on a locked pop-up card.
+- **Chat and files.** Group chat, private messages and file transfer, end-to-end encrypted with each member's own key, so relay nodes see nothing. Received files land in Downloads/Jay, are never opened for you, and programs get an extra warning.
 - **Direct first, relay last.** Jay tries IPv6, router port mapping (UPnP / NAT-PMP) and IPv4 hole punching with port prediction for strict NATs. With more players a reachable member relays, and a relay node is only used when all of that fails. "Check my network" tells you beforehand how easy you are to reach.
-- **Full-LAN mode.** Everyone gets a virtual IP and LAN broadcasts are forwarded, so other LAN games and apps work too. Members can opt in to route their traffic through one member's PC (exit node, with leak protection). Works on Windows, macOS and Linux.
+- **Any LAN game or app.** Full-LAN mode gives everyone a virtual IP and forwards LAN broadcasts, so other LAN games, file shares and self-hosted tools work between friends as if you were in one room. Works on Windows, macOS and Linux.
+- **Borrow a friend's connection.** With both sides opting in, route your traffic through a friend's PC (exit node, with leak protection). On Windows you can even share that route to your phone through the PC's mobile hotspot ([how](docs/hotspot-sharing.md)).
+- **Remote help.** Ask to see and control a friend's screen to fix something for them. They accept every time, see a red border while it runs, and Ctrl+Shift+F12 stops it at once.
 - **Public rooms** *(experimental)*. Browse a room list, request to join, or protect a room with a password. Rooms are signed by the host, so nobody can fake or replay them.
-- **Chat and files.** Room chat, private messages and file transfer, end-to-end encrypted with each member's own key, so relay nodes see nothing. Program files get an extra warning before you open them.
 - **Practice and diagnose.** A safe drill mode walks you through a knock without touching the network, and the "Connection trouble?" drawer runs a full test matrix and writes a report with secrets removed.
 - **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS1-` invite; unknown connections get not a single byte back.
 
@@ -130,6 +141,8 @@ Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-
 - **Locked safety UI.** Knock requests, file warnings and other safety panels look the same under every theme, so a theme can't disguise them.
 
 ### 🧩 Mods, modpacks and loaders
+
+<img src="docs/images/readme/en/library.png" alt="Jay's game library" width="860">
 
 - One-click Fabric, Quilt, Forge (including 1.5.2 and older), NeoForge and OptiFine.
 - Search and install mods, resource packs, shaders, data packs and modpacks from Modrinth and CurseForge, with required dependencies.
@@ -246,6 +259,12 @@ Settings live in `Amber/settings.json` under your system's app-data folder (`%AP
 <summary><b>Windows says it protected my PC. What should I do?</b></summary>
 
 The Windows builds aren't code-signed yet, so SmartScreen may block them. Make sure you downloaded the file from this project's Releases, then choose "More info" → "Run anyway". Release notes will say when signing takes effect; see the [code signing policy](docs/code-signing-policy.md).
+</details>
+
+<details>
+<summary><b>Is Jay only for Minecraft?</b></summary>
+
+No. Minecraft is where it started, but a Jay room is a private network between friends: full-LAN mode carries any LAN game or app, and chat, file transfer, remote help and the exit node work whether or not anyone is playing.
 </details>
 
 <details>

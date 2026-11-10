@@ -4,9 +4,10 @@
 
 # Jay
 
-### 和朋友一起玩 Minecraft，隔着国境也行，只有你们看得见。
+### 你和朋友的私密空间：一起玩、聊天、传东西，还自带 Minecraft 启动器。
 
-开源的 Minecraft Java 版启动器：自带跨国 / 局域网联机，聊天和传文件端到端加密，没有任何遥测。
+隔着国境也能一起玩 Minecraft 和任何局域网游戏，聊天和传文件端到端加密，<br>
+远程帮朋友修电脑，或者借朋友的网络上网。开源，没有任何遥测。
 
 [![最新版本](https://img.shields.io/github/v/release/warriorleavestar/jay-launcher?color=d98a1f&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/warriorleavestar/jay-launcher/releases/latest)
 [![构建](https://img.shields.io/github/actions/workflow/status/warriorleavestar/jay-launcher/build.yml?branch=main&label=%E6%9E%84%E5%BB%BA)](https://github.com/warriorleavestar/jay-launcher/actions/workflows/build.yml)
@@ -18,7 +19,7 @@
 
 [English](README.md) · **简体中文** · [下载](#下载) · [功能](#功能) · [隐私](#隐私) · [常见问题](#常见问题) · [参与贡献](CONTRIBUTING.zh-Hans.md)
 
-<img src="docs/images/readme/zh-Hans/library.png" alt="Jay 游戏库" width="860">
+<img src="docs/images/readme/zh-Hans/room.png" alt="Jay 房间：成员、加密群聊和私聊" width="860">
 
 </div>
 
@@ -26,23 +27,32 @@
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
-### 🌏 在哪都能一起玩
+### 🌏 朋友们，一个局域网
 
-发一个邀请，朋友“敲门”，你点批准就进来了。Jay 先试直连（IPv6、路由器端口映射、打洞），实在不通才走中转。跨国、跨网络、同一个局域网都行。
+发一个邀请，朋友“敲门”，你点批准，不管住在哪都进了同一个虚拟局域网。Minecraft、别的局域网游戏和软件都能直接用。能直连就直连，实在不通才中转。
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
+
+### 💬 聊天和传文件，端到端加密
+
+房间群聊、给某个朋友发私信、传文件，全都用每个人自己的钥匙端到端加密，中转节点什么也看不到。朋友电脑出问题？申请远程控制帮 TA 修，每次都要 TA 同意。
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ### 🔒 隐私是默认的
 
-每个成员一把自己的钥匙；邀请码一次性、会过期，泄露了也没用。聊天、私信和传文件端到端加密，中转节点看不到内容。没有遥测、没有设备识别码、没有远程开关。
+邀请码一次性、会过期，泄露了也没用。没有你批准谁也进不来，踢人会顺手换掉房间钥匙。没有遥测、没有设备识别码、没有远程开关，中间也没有 Jay 的服务器。
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
-### 🪶 轻快，也齐全
+### 🎮 完整的 Minecraft 启动器
 
 窗口约 0.3 秒打开。Fabric、Quilt、Forge、NeoForge、OptiFine 一键安装，内置 Modrinth 和 CurseForge，整合包导入导出，崩溃分析直接告诉你是哪个模组的锅。
 
@@ -104,15 +114,17 @@ Jay 的窗口需要桌面会话（X11，或带 XWayland 的 Wayland）和下面�
 
 ## 功能
 
-### 🎮 联机，开箱即用
+### 🌏 和朋友一起玩、聊天、分享
 
 <img src="docs/images/readme/zh-Hans/multiplayer.png" alt="联机页：开房间或加入朋友" width="860">
 
-- **邀请和敲门。** 房主在游戏里“对局域网开放”后开房间；朋友粘贴邀请码并敲门，房主在锁定的弹出卡片上批准之前，谁也进不来。
+- **邀请和敲门。** 房主开房间（玩 Minecraft 先在游戏里“对局域网开放”）；朋友粘贴邀请码并敲门，房主在锁定的弹出卡片上批准之前，谁也进不来。
+- **聊天和传文件。** 房间群聊、私信和传文件都用每个成员自己的钥匙端到端加密，中转节点什么也看不到。收到的文件只存进 下载/Jay，Jay 不会替你打开，是程序还会额外提醒。
 - **先直连，最后才中转。** Jay 会依次尝试 IPv6、路由器端口映射（UPnP / NAT-PMP）和 IPv4 打洞（严格 NAT 下带端口预测）；人多时由连得上的成员转发，都不行才用中转节点。“检查我的网络”可以提前告诉你别人连你有多容易。
-- **完整局域网模式。** 每人一个虚拟 IP，局域网广播也会转发，别的局域网游戏和软件同样能用。成员可以双方同意后经某个成员的电脑上网（出口节点，带防泄漏）。Windows、macOS、Linux 都支持。
+- **任何局域网游戏和软件。** 完整局域网模式给每人一个虚拟 IP 并转发局域网广播，别的局域网游戏、文件共享、自己搭的小工具在朋友之间都能用，就像坐在同一个房间。Windows、macOS、Linux 都支持。
+- **借朋友的网络。** 双方都同意后，可以经朋友的电脑上网（出口节点，带防泄漏）。Windows 上还能通过电脑的移动热点把这条线路分享给手机（[怎么用](docs/hotspot-sharing.md)）。
+- **远程帮忙。** 申请查看并控制朋友的屏幕帮 TA 解决问题。每次都要对方同意，控制期间屏幕有红框，按 Ctrl+Shift+F12 立刻停止。
 - **公开房间**（实验）。浏览房间列表、申请加入，也可以给房间设密码。房间由房主签名，别人伪造不了也重放不了。
-- **聊天和传文件。** 房间聊天、私信和传文件都用每个成员自己的钥匙端到端加密，中转节点什么也看不到。收到程序文件时会额外提醒。
 - **演练和排查。** 演练模式不联网，带你走一遍敲门流程；“连接有问题？”抽屉能跑完整测试矩阵，生成去掉了密钥的报告。
 - **Jay 服务器**（实验）。在 VPS 或局域网电脑上开一个只有 Jay 能进的 Minecraft 服务器。玩家用一次性的 `JAYS1-` 邀请加入；陌生连接一个字节都收不到。
 
@@ -129,6 +141,8 @@ Jay 的窗口需要桌面会话（X11，或带 XWayland 的 Wayland）和下面�
 - **锁定的安全界面。** 敲门请求、文件提醒等安全面板在任何主题下都长一个样，主题没法把它们伪装掉。
 
 ### 🧩 模组、整合包和加载器
+
+<img src="docs/images/readme/zh-Hans/library.png" alt="Jay 游戏库" width="860">
 
 - Fabric、Quilt、Forge（包括 1.5.2 及更早）、NeoForge 和 OptiFine 一键安装。
 - 从 Modrinth 和 CurseForge 搜索安装模组、资源包、光影、数据包和整合包，自动带上前置。
@@ -245,6 +259,12 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 <summary><b>Windows 提示“已保护你的电脑”怎么办？</b></summary>
 
 目前 Windows 版还没有代码签名，SmartScreen 可能会拦截。确认文件是从本项目的 Releases 下载的，点“更多信息”→“仍要运行”即可。签名生效后版本说明里会写明，见[代码签名政策](docs/code-signing-policy.md)。
+</details>
+
+<details>
+<summary><b>Jay 只能玩 Minecraft 吗？</b></summary>
+
+不是。Jay 从 Minecraft 起步，但一个 Jay 房间就是朋友之间的私密网络：完整局域网模式能跑任何局域网游戏和软件，聊天、传文件、远程帮忙和出口节点不玩游戏时也能用。
 </details>
 
 <details>
