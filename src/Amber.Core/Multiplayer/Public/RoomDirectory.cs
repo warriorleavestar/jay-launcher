@@ -34,10 +34,11 @@ public static class RoomDirectoryProtocol
         await stream.FlushAsync(ct);
     }
 
-    internal static async Task<JsonObject> ReadLineAsync(Stream stream, CancellationToken ct)
+    internal static async Task<JsonObject> ReadLineAsync(Stream stream, CancellationToken ct, byte? firstByte = null)
     {
         var buffer = new byte[MaxLine];
         var length = 0;
+        if (firstByte is { } b) buffer[length++] = b;
         while (true)
         {
             if (length == buffer.Length) throw new InvalidDataException(L.T("core.mp.public.too_large"));
@@ -109,6 +110,24 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Only hosts logged in to this network's accounts may publish rooms (set when the network config requires login).</summary>
     public bool RequireAccountToPublish { get; set; }
 
+    /// <summary>
+    /// This directory's X25519 identity. With one, clients of a network that pins it ("dirKeys") reach the directory
+    /// through <see cref="DirectoryChannel"/>. Without one, only the legacy protocol is spoken.
+    /// </summary>
+    public X25519KeyPair? Identity { get; set; }
+
+    /// <summary>The network's EasyTier secret, for <see cref="DirectoryChannel"/>'s psk.</summary>
+    public string NetworkSecret { get; set; } = "";
+
+    /// <summary>
+    /// Whether unauthenticated (legacy JSON line) requests are still answered. True by default so Jay versions without
+    /// directory pinning keep working; a network that requires a new enough Jay can turn it off.
+    /// </summary>
+    public bool AcceptLegacyClients { get; set; } = true;
+
+    /// <summary>Volunteer nodes ("volunteer" / "nodes" ops). Null = this network doesn't take volunteers (error "off").</summary>
+    public VolunteerRegistry? Volunteers { get; set; }
+
     /// <summary>房间审核规则（按顺序，任何一条拒绝就不收）。见 <see cref="IRoomGate"/>。</summary>
     public IReadOnlyList<IRoomGate> Gates { get; set; } = [];
 
@@ -171,9 +190,18 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         try
         {
             var stream = client.GetStream();
-            var request = await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token);
-            var reply = Handle(request);
-            await RoomDirectoryProtocol.WriteLineAsync(stream, reply, deadline.Token);
+            var first = new byte[1];
+            if (!await SecureStream.ReadExactAsync(stream, first, deadline.Token)) return;
+            if (first[0] == DirectoryChannel.LegacyFirstByte)
+            {
+                if (!AcceptLegacyClients) return;
+                var request = await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token, first[0]);
+                await RoomDirectoryProtocol.WriteLineAsync(stream, Handle(request), deadline.Token);
+                return;
+            }
+            if (Identity is null) return;
+            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity, NetworkSecret, deadline.Token) is not { } secure) return;
+            await secure.Reply(Handle(secure.Request), deadline.Token);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
     }
@@ -194,6 +222,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "lookup" => Lookup(request),
                 "mail" => Mail(request),
                 "find" => Find(request),
+                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
+                "nodes" => Volunteers is { } v ? new JsonObject { ["ok"] = true, ["nodes"] = new JsonArray([.. v.Pick().Select(u => (JsonNode)u)]) } : Error("off"),
                 "login" when Login is { } login => LoginRequest(login, request),
                 _ when DirectoryExtensions.IsValidOp(op) && Extensions.FirstOrDefault(x => x.Op == op) is { } extension => Extend(extension, request),
                 _ => Error("op"),
@@ -517,6 +547,16 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         catch (Exception e) when (e is IOException or InvalidOperationException or System.ComponentModel.Win32Exception) { return [PublicNetworkProfile.DirectoryIp]; }
     }
 
+    /// <summary>
+    /// The directory keys to insist on. Defaults to the network's pinned keys (<see cref="PublicNetworkProfile.DirectoryKeys"/>).
+    /// When there are any, every request goes through <see cref="DirectoryChannel"/> and a directory that can't prove it
+    /// holds one of them gets nothing; there is no fallback to the legacy protocol.
+    /// </summary>
+    public IReadOnlyList<byte[]> PinnedKeys { get; init; } = network.Profile?.DirectoryKeys ?? [];
+
+    /// <summary>The network's EasyTier secret, for the channel's psk. Defaults to the network's.</summary>
+    public string NetworkSecret { get; init; } = network.Profile?.Secret ?? "";
+
     private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -525,6 +565,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         {
             await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
             request["jay"] = Version;
+            if (PinnedKeys.Count > 0) return await DirectoryChannel.CallAsync(stream, PinnedKeys, NetworkSecret, request, deadline.Token);
             await RoomDirectoryProtocol.WriteLineAsync(stream, request, deadline.Token);
             return await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token);
         }
@@ -596,6 +637,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             "rate" => L.T("core.mp.public.err_rate"),
             "version" => L.F("core.mp.public.err_version", reply["min"]?.GetValue<string>() is { Length: <= 32 } min ? min : "?"),
             "login" => L.T("core.mp.public.err_login"),
+            "off" => L.T("core.mp.public.volunteer_off"),
             _ when !string.IsNullOrWhiteSpace(reason) => L.F("core.mp.public.err_policy", reason),
             _ => L.F("core.mp.public.err_other", code),
         });
@@ -630,6 +672,32 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         if (account is not null) request["account"] = account;
         var replies = NeedOne(await FanOutAsync(request, ct));
         return [.. replies.SelectMany(r => (r["mail"] as JsonArray ?? []).Select(m => m?.GetValue<string>()).OfType<string>()).Distinct()];
+    }
+
+    /// <summary>
+    /// Registers (or renews) this computer as a volunteer node with every online directory. Returns whether at least
+    /// one directory lists it already (the first registration is probed first, so it lists on the next renewal).
+    /// </summary>
+    public async Task<bool> VolunteerAsync(string url, CancellationToken ct)
+    {
+        var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
+        List<JsonObject> replies;
+        try { replies = NeedOne(await FanOutAsync(new JsonObject { ["op"] = "volunteer", ["url"] = address }, ct)); }
+        catch (DirectoryRejectedException e) when (e.Code == "op")
+        {
+            // Directories from before volunteer nodes existed.
+            throw new DirectoryRejectedException("off", L.T("core.mp.public.volunteer_off"));
+        }
+        return replies.Any(r => r["listed"]?.GetValue<bool>() == true);
+    }
+
+    /// <summary>Volunteer nodes the directories know (merged, public addresses only). Empty when the network takes none.</summary>
+    public async Task<IReadOnlyList<string>> NodesAsync(CancellationToken ct)
+    {
+        var results = await FanOutAsync(new JsonObject { ["op"] = "nodes" }, ct);
+        return [.. results.Select(r => r.Reply).OfType<JsonObject>().Where(IsOk)
+            .SelectMany(r => (r["nodes"] as JsonArray ?? []).Select(n => n?.GetValue<string>()))
+            .Select(VolunteerNodes.Normalize).OfType<string>().Distinct().Take(VolunteerNodes.PerRequest * 2)];
     }
 
     public async Task WithdrawAsync(RoomSigner signer, CancellationToken ct)

@@ -34,8 +34,19 @@ public partial class DownloadPage : UserControl
         };
         // After a search or filter rebuilt the rows, highlight the chosen version again if it is still listed.
         // Subscribed only while the page is shown: the view model outlives the page.
-        AttachedToVisualTree += (_, _) => { if (DataContext is DownloadViewModel vm) (_items = vm.Items).CollectionChanged += OnItemsChanged; };
-        DetachedFromVisualTree += (_, _) => { if (_items is not null) _items.CollectionChanged -= OnItemsChanged; _items = null; };
+        AttachedToVisualTree += (_, _) =>
+        {
+            if (DataContext is not DownloadViewModel vm) return;
+            (_items = vm.Items).CollectionChanged += OnItemsChanged;
+            (_vm = vm).PropertyChanged += OnVmChanged;
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            if (_items is not null) _items.CollectionChanged -= OnItemsChanged;
+            if (_vm is not null) _vm.PropertyChanged -= OnVmChanged;
+            _items = null;
+            _vm = null;
+        };
         VersionList.DoubleTapped += (_, e) =>
         {
             if (DataContext is DownloadViewModel vm && vm.InstallCommand.CanExecute(null)) vm.InstallCommand.Execute(null);
@@ -61,6 +72,18 @@ public partial class DownloadPage : UserControl
     }
 
     private System.Collections.ObjectModel.ObservableCollection<RemoteVersionItem>? _items;
+
+    private DownloadViewModel? _vm;
+
+    /// <summary>
+    /// The panel was closed: drop the highlight too, or picking the same row again would not count as a change
+    /// and the panel would not open.
+    /// </summary>
+    private void OnVmChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DownloadViewModel.Target) && _vm is { Target: null } && VersionList.SelectedItem is not null)
+            VersionList.SelectedItem = null;
+    }
 
     private void OnItemsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>

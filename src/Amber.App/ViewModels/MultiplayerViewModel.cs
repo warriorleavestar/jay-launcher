@@ -120,7 +120,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial bool FullLanMode { get; set; }
 
     public bool CanUseFullLan => PlatformFeatures.FullLan;
-    public string FullLanUnavailableText => CanUseFullLan ? "" : L.T("core.mp.component.windowsonly");
+    public string FullLanUnavailableText => PlatformFeatures.FullLanUnavailableReason ?? "";
 
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(MyVirtualIpText))] public partial string MyVirtualIp { get; set; } = "";
 
@@ -139,7 +139,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial PeerItem? SelectedExitPeer { get; set; }
 
     public bool UsingExit => ExitNodeIp.Length > 0;
-    public bool CanUseExit => _session?.Options.Tun == true && !Child.HideNetworkExit;
+    /// <summary>经别人上网（消费出口）：要完整局域网模式；Mac/Linux 上还没做（见 PlatformFeatures.FullTrafficExit）。</summary>
+    public bool CanUseExit => PlatformFeatures.FullTrafficExit && _session?.Options.Tun == true && !Child.HideNetworkExit;
     public string ExitBanner
     {
         get
@@ -561,7 +562,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartHostLobby(credentials, members);
         StartAnnouncerIfHosting();
         Status = FullLanMode
-            ? L.T("multiplayer.room.created_full_lan")
+            ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
             : L.T("multiplayer.room.created");
     }
 

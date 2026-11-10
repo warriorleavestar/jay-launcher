@@ -43,6 +43,7 @@ jay-server directory --network nz-friends.jaynet --config nz-friends/config.json
 
 - `network.key` 是签名私钥，只自己留着。丢了就只能换一把钥匙重新发连接串，玩家要先删掉旧的再加。
 - 改了配置文件就要重新 `config-hash` 和 `sign`，玩家粘贴新连接串后才生效。
+- Directory identity (recommended): before step 3, run `jay-server network dir-key nz-friends/nz-friends.json --dir <node data dir>` on each directory node. It adds the node's key to `"dirKeys"`, and Jay then refuses to talk to anyone else who takes the directory address. Back up `directory.key` in the data dir. Details: [security/directory-identity.md](security/directory-identity.md).
 - 想让 Jay 显示“已审核”：把 `nz-friends.json` 提交到仓库的 [networks/](../networks/README.md)。
 
 ## 三、开账号登录
@@ -68,6 +69,11 @@ jay-server node unban host <房主指纹>
 jay-server node bans
 jay-server node remove <房间编号>       # 只删这一次，房主续期时重新审核
 ```
+
+**网页管理面板**：`jay-server node panel` 打印一个链接（`http://127.0.0.1:47669/#token=...`），在节点那台机器的浏览器里打开就能看状态和计数、公开房间、志愿中转、封禁，并且能删房间、封房主（指纹 + 账号）、封禁和解封，手机宽度也能用。节点在远程服务器上时，先在自己电脑上运行 `ssh -L 47669:127.0.0.1:47669 <用户>@<服务器>`，再在自己电脑上打开这个链接。
+
+- 面板只听本机，用的还是 `admin.token`。口令放在链接的 `#` 后面，浏览器不会把它发给任何服务器；页面拿到后马上从地址栏去掉，只存在这个标签页里，关掉就没了。
+- 请求里的 Host 必须是 127.0.0.1、localhost 或 [::1]，别的网站发来的请求（Origin 不是本机）一律拒绝，防 DNS 重绑定和跨站请求。页面没有任何外部脚本、字体、图片（CSP `default-src 'none'`），房间名、房主名只当文字显示。
 
 - `node` 命令经本机管理接口操作运行中的节点，口令在数据目录的 `admin.token`（只有运行节点的用户能读）。要和 `directory` 用同一个 `--dir`（或 `JAY_SERVER_DIR`）。
 - 健康检查：`curl http://127.0.0.1:47669/health`，不用口令，给监控和 Docker 用。
@@ -166,6 +172,16 @@ docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-ser
 
 管理接口和日志只给数字和公开房间，不记录谁看了列表、谁敲了谁的门。
 
+## 七、志愿中转（玩家自愿帮忙转发）
+
+玩家可以在 Jay 的「联机设置 → 公共网络 → 志愿中转」里打开，把自己的电脑当这个网络的中转：填公网地址（IP 或域名）、端口（默认 11010，路由器上要转发 TCP 和 UDP）、限速。
+
+- 志愿者的 Jay 对公网监听这个端口，只帮这个网络转发（`--relay-network-whitelist`），按限速收流量（`--instance-recv-bps-limit`），每 3 分钟向目录登记一次。
+- 目录先自己连一次这个地址，连得上才列出来，之后每小时重新确认；10 分钟没登记就拿掉。只收公网地址（局域网、本机、运营商内网、文档用的地址都不收），域名解析出内网地址也不收，防止有人拿目录去探别人家里的网络。
+- 每个 Jay 连上公共网络后向目录要几个志愿中转，另外连上其中最多 3 个，并记住最近 16 个；下次官方节点连不上时，先试记住的这些。
+- 经过志愿中转的只有公共网络的流量（房间列表、敲门、目录请求），和经过任何节点一样；游戏、聊天、文件都在房间自己的加密子网里。志愿者的公网地址会给向目录要中转的人，界面上写明了。
+- 网络运营者：配置文件里 `"policy": { "volunteers": false }` 就不收（Jay 也不显示这个开关），或者节点加 `--no-volunteers`。`jay-server node nodes` 看列出的志愿中转，`jay-server node ban node tcp://<地址>:<端口>` 封掉。
+
 ## 以后
 
-- 志愿节点（玩家自愿把自己的电脑当种子节点）。
+- 志愿中转的真机测试（需要一台有公网 IP 或能做端口转发的电脑）。
