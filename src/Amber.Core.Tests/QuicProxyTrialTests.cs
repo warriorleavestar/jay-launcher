@@ -44,6 +44,8 @@ public class QuicProxyTrialTests
     {
         var args = EasyTierArgs.Build(new EasyTierOptions(Room, true, [], 16000, Tun: true) { QuicProxy = true });
         Assert.DoesNotContain("--enable-quic-proxy", args);
-        Assert.Contains("--enable-udp-broadcast-relay", args);
+        // Still gets its platform's adapter arguments (the else branch the QUIC line once split off).
+        Assert.True(EasyTierArgs.DeviceNameArgs(new EasyTierOptions(Room, true, [], 16000, Tun: true)).All(args.Contains));
+        Assert.DoesNotContain("--no-tun", args);
     }
 }

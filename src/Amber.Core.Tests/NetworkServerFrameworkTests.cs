@@ -336,7 +336,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         }
         Assert.Equal("", await Raw("GARBAGE\r\n\r\n"));
         Assert.Equal("", await Raw("POST /ban HTTP/1.1\r\nContent-Length: 999999\r\n\r\n"));
-        Assert.StartsWith("HTTP/1.1 404", await Raw("GET /nope HTTP/1.1\r\nAuthorization: Bearer " + File.ReadAllText(server.AdminTokenPath).Trim() + "\r\n\r\n"));
+        Assert.StartsWith("HTTP/1.1 404", await Raw("GET /nope HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer " + File.ReadAllText(server.AdminTokenPath).Trim() + "\r\n\r\n"));
     }
 
     [Fact]

@@ -151,6 +151,14 @@ public sealed class JayNetworkServerBuilder
 
     public JayNetworkServerBuilder UseLog(Action<string> log) { Log = log; return this; }
 
+    internal bool SecureDirectoryOnly;
+
+    /// <summary>
+    /// Answer only authenticated directory requests (see <c>docs/security/directory-identity.md</c>). Jay versions that
+    /// don't know "dirKeys" can then no longer use this directory, so pair it with policy.minVersion.
+    /// </summary>
+    public JayNetworkServerBuilder RequireDirectoryChannel() { SecureDirectoryOnly = true; return this; }
+
     /// <summary>测试用：换时钟。</summary>
     public JayNetworkServerBuilder UseClock(Func<DateTimeOffset> clock) { Clock = clock; return this; }
 
@@ -207,6 +215,22 @@ public sealed class JayNetworkServer : IAsyncDisposable
     public string AdminTokenPath => Path.Combine(_b.DataDir, "admin.token");
     public bool EasyTierRunning => _network is { HasExited: false };
 
+    /// <summary>
+    /// This directory node's identity key file (directory.key in the data dir, made on first start, readable by this user only).
+    /// Its public key (<see cref="DirectoryKey"/>) goes into the network string's "dirKeys" so Jay can check it is talking
+    /// to the real directory. Back up this file: a node with a new key is an impostor to every Jay that pinned the old one.
+    /// </summary>
+    public string DirectoryKeyPath => Path.Combine(_b.DataDir, "directory.key");
+
+    /// <summary>
+    /// This node's certificate from the network's root key (directory.cert in the data dir, written by
+    /// <c>jay-server network dir-cert</c>). Sent to Jay in the handshake when present and issued for this node's key.
+    /// </summary>
+    public string DirectoryCertificatePath => Path.Combine(_b.DataDir, "directory.cert");
+
+    /// <summary>The directory's public key (base64), once started. Null on a seed-only node.</summary>
+    public string? DirectoryKey => Directory?.Identity is { } id ? Convert.ToBase64String(id.PublicKey) : null;
+
     /// <summary>开了账号登录时，要写进网络配置文件 "login" 的那一段。</summary>
     public JsonObject? LoginSection => Login is not { } login ? null : new JsonObject
     {
@@ -245,7 +269,21 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Volunteers = Volunteers,
                 MinClientVersion = _b.Config?.Policy.MinVersion,
                 RequireAccountToPublish = Login is not null && _b.Config?.Login?.Required == true,
+                Identity = DirectoryChannel.LoadOrCreateIdentity(DirectoryKeyPath),
+                NetworkSecret = Profile.Secret,
+                AcceptLegacyClients = !_b.SecureDirectoryOnly,
             };
+            if (File.Exists(DirectoryCertificatePath))
+            {
+                var cert = File.ReadAllBytes(DirectoryCertificatePath);
+                if (DirectoryCertificate.Parse(cert) is { } parsed && parsed.DirectoryKey.AsSpan().SequenceEqual(Directory.Identity!.PublicKey))
+                {
+                    Directory.Certificate = cert;
+                    _b.Log($"目录证书 / directory certificate: root {Convert.ToBase64String(parsed.Root)}, until {parsed.Expires:yyyy-MM-dd}");
+                }
+                else _b.Log("directory.cert 不是这个节点的目录公钥签的，没有使用 / directory.cert doesn't match this node's key; not used");
+            }
+            _b.Log("目录公钥 / directory key (dirKeys): " + DirectoryKey);
         }
         if (Login is not null && Bans is { } banList) Login.Blocked = banList.IsAccountBanned;
         if (_b.AdminPort is { } port) _admin = AdminApi.Start(this, port, AdminToken.LoadOrCreate(AdminTokenPath), _b.Log);
@@ -313,6 +351,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             ["rooms"] = view?.Rooms ?? 0,
             ["listed"] = view?.Listed ?? 0,
             ["login"] = Login is not null,
+            ["directoryKey"] = DirectoryKey,
             ["minVersion"] = _b.Config?.Policy.MinVersion?.ToString(),
             ["volunteers"] = Volunteers?.Listed().Count,
             ["uptime"] = (long)(Now - _started).TotalSeconds,
