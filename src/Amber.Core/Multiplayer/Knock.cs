@@ -253,7 +253,7 @@ public static class KnockClient
             // An invite that came by sealed mail names its host: someone else holding the same invite can't pose as the host.
             // Checked before this side says anything about itself.
             if (expectedHost is not null && (handshake.RemoteStaticPublicKey is not { } proven || !CryptographicOperations.FixedTimeEquals(proven, expectedHost)))
-                throw new CryptographicException(L.T("core.mp.knock.wronghost"));
+                throw new WrongHostException(L.T("core.mp.knock.wronghost"));
             // attest = 1：这台电脑支持设备验证（旧版房主不认识这个字段，直接忽略）。
             var about = new JsonObject { ["v"] = 1, ["name"] = KnockProtocol.SanitizeName(name), ["ver"] = version, ["attest"] = 1 };
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
@@ -868,3 +868,6 @@ public sealed class KnockServer : IAsyncDisposable
         _stop.Dispose();
     }
 }
+
+/// <summary>The room's host proved a different key than the one named in a mailed invite.</summary>
+public sealed class WrongHostException(string message) : CryptographicException(message);

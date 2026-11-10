@@ -94,6 +94,7 @@ public sealed partial class MultiplayerViewModel
         PastedCodeKind.FriendCode => L.T("multiplayer.lobby.code.friend"),
         PastedCodeKind.NodeShare => L.T("multiplayer.lobby.code.relay_share"),
         PastedCodeKind.PublicNetwork => L.T("multiplayer.lobby.code.public_network"),
+        PastedCodeKind.ContactCode => L.T("multiplayer.lobby.code.contact"),
         PastedCodeKind.Room or PastedCodeKind.OldDirect => L.T("multiplayer.lobby.code.old"),
         _ => HasJoinCodeText ? L.T("multiplayer.lobby.code.unknown") : "",
     };
@@ -134,6 +135,12 @@ public sealed partial class MultiplayerViewModel
         {
             Tab = MultiplayerTab.Public;
             FindCodeInput = text.Trim();
+            return true;
+        }
+        if (kind == PastedCodeKind.ContactCode && ShowPublicNetworks)
+        {
+            Tab = MultiplayerTab.Settings;
+            ContactCodeInput = text.Trim();
             return true;
         }
         Tab = MultiplayerTab.Play;
