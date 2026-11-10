@@ -86,6 +86,99 @@ public partial class MultiplayerViewModel
         SetStatus(StatusMessage.Success(changed && IsPublicConnected ? "multiplayer.volunteer.saved_reconnect" : "multiplayer.volunteer.saved"));
     }
 
+    [ObservableProperty] private bool _isCheckingVolunteer;
+
+    /// <summary>Fills in this computer's public address as EasyTier's STUN check saw it (needs the public network).</summary>
+    [RelayCommand]
+    private async Task DetectVolunteerAddressAsync()
+    {
+        if (_public is not { } network)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.volunteer.connect_first"));
+            return;
+        }
+        IsCheckingVolunteer = true;
+        try
+        {
+            if (await network.PublicAddressAsync() is { } address)
+            {
+                VolunteerAddress = address;
+                SetStatus(StatusMessage.Success("multiplayer.volunteer.detected", address));
+            }
+            else SetStatus(StatusMessage.Warning("multiplayer.volunteer.detect_failed"));
+        }
+        finally { IsCheckingVolunteer = false; }
+    }
+
+    /// <summary>
+    /// Asks the directory to dial address:port. When this computer isn't already volunteering on that port, it listens
+    /// there just for the test so the directory has something to reach.
+    /// </summary>
+    [RelayCommand]
+    private async Task TestVolunteerPortAsync()
+    {
+        if (_public is not { } network)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.volunteer.connect_first"));
+            return;
+        }
+        if (!int.TryParse(VolunteerPort, NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1024 or > 65535)
+        {
+            SetStatus(StatusMessage.Error("multiplayer.volunteer.bad_port"));
+            return;
+        }
+        string url;
+        try { url = new VolunteerSettings(VolunteerAddress, port).Url; }
+        catch (ArgumentException e)
+        {
+            SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Error));
+            return;
+        }
+        IsCheckingVolunteer = true;
+        System.Net.Sockets.TcpListener? listener = null;
+        try
+        {
+            if (network.Options.Volunteer?.Port != port)
+            {
+                listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, port);
+                listener.Start();
+                _ = AcceptAndDropAsync(listener);
+            }
+            var reachable = await new RoomDirectoryClient(network).ProbeAsync(url, default);
+            VolunteerStatus = reachable ? L.F("multiplayer.volunteer.reachable", url) : L.F("multiplayer.volunteer.unreachable", port);
+            SetStatus(reachable ? StatusMessage.Success("multiplayer.volunteer.reachable", url) : StatusMessage.Warning("multiplayer.volunteer.unreachable", port));
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            SetStatus(StatusMessage.Error("multiplayer.volunteer.port_busy", port));
+        }
+        catch (DirectoryRejectedException e)
+        {
+            SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.volunteer.status_retry"));
+        }
+        finally
+        {
+            listener?.Stop();
+            IsCheckingVolunteer = false;
+        }
+    }
+
+    private static async Task AcceptAndDropAsync(System.Net.Sockets.TcpListener listener)
+    {
+        try
+        {
+            while (true)
+            {
+                using var client = await listener.AcceptTcpClientAsync();
+            }
+        }
+        catch (Exception e) when (e is System.Net.Sockets.SocketException or ObjectDisposedException or InvalidOperationException) { }
+    }
+
     /// <summary>After connecting: pick up volunteers from the directory and, when volunteering, start registering.</summary>
     private void StartVolunteerWork(PublicNetworkSession network, PublicNetworkProfile profile)
     {

@@ -250,6 +250,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
                 "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
+                // Blocks this connection's task for at most a few seconds while the directory dials the address.
+                "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
                 "nodes" => Volunteers is { } v ? new JsonObject { ["ok"] = true, ["nodes"] = new JsonArray([.. v.Pick().Select(u => (JsonNode)u)]) } : Error("off"),
                 "login" when Login is { } login => LoginRequest(login, request),
                 _ when DirectoryExtensions.IsValidOp(op) && Extensions.FirstOrDefault(x => x.Op == op) is { } extension => Extend(extension, request),
@@ -836,6 +838,19 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     }
 
     /// <summary>Volunteer nodes the directories know (merged, public addresses only). Empty when the network takes none.</summary>
+    /// <summary>
+    /// Asks a directory to dial <paramref name="url"/> now: true when it got through. Use it to test port forwarding
+    /// before volunteering (something must be listening on the port during the test).
+    /// </summary>
+    public async Task<bool> ProbeAsync(string url, CancellationToken ct)
+    {
+        var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
+        var reply = await FirstAsync(new JsonObject { ["op"] = "probe", ["url"] = address }, IsOk, ct);
+        if (!IsOk(reply) && reply["error"]?.GetValue<string>() == "op") throw new DirectoryRejectedException("off", L.T("core.mp.public.volunteer_off"));
+        Check(reply);
+        return reply["reachable"]?.GetValue<bool>() == true;
+    }
+
     public async Task<IReadOnlyList<string>> NodesAsync(CancellationToken ct)
     {
         var results = await FanOutAsync(new JsonObject { ["op"] = "nodes" }, ct);

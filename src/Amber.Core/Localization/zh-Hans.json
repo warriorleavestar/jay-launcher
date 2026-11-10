@@ -3022,5 +3022,13 @@
   "accounts.status.jay_bound": "已把 Jay 账户 {0} 绑定到 {1}",
   "accounts.status.jay_unbound": "已解除 {0} 的 Jay 账户绑定",
   "accounts.status.jay_address_copied": "地址已复制",
-  "accounts.status.jay_removed": "已从这台电脑移除 Jay 账户 {0}，用助记词仍能恢复"
+  "accounts.status.jay_removed": "已从这台电脑移除 Jay 账户 {0}，用助记词仍能恢复",
+  "multiplayer.volunteer.detect": "检测",
+  "multiplayer.volunteer.test": "测试端口",
+  "multiplayer.volunteer.connect_first": "请先连上公共网络",
+  "multiplayer.volunteer.detected": "你的公网地址看起来是 {0}",
+  "multiplayer.volunteer.detect_failed": "没测出公网地址（刚连上时可能要等一分钟）。也可以自己查到后填进去。",
+  "multiplayer.volunteer.reachable": "从外网能连到 {0}，可以当志愿中转了。",
+  "multiplayer.volunteer.unreachable": "从外网连不到端口 {0}。多半是路由器没把它（TCP 和 UDP）转发到这台电脑、防火墙挡了，或者运营商让很多家共用一个地址（这种情况做端口转发也没用）。",
+  "multiplayer.volunteer.port_busy": "端口 {0} 已经被这台电脑上的别的程序占用，换一个端口。"
 }

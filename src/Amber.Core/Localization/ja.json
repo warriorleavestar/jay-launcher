@@ -3022,5 +3022,13 @@
   "accounts.status.jay_bound": "Jay アカウント {0} を {1} と連携しました",
   "accounts.status.jay_unbound": "{0} の Jay アカウント連携を解除しました",
   "accounts.status.jay_address_copied": "アドレスをコピーしました",
-  "accounts.status.jay_removed": "このパソコンから Jay アカウント {0} を削除しました。リカバリーフレーズで復元できます"
+  "accounts.status.jay_removed": "このパソコンから Jay アカウント {0} を削除しました。リカバリーフレーズで復元できます",
+  "multiplayer.volunteer.detect": "検出",
+  "multiplayer.volunteer.test": "ポートをテスト",
+  "multiplayer.volunteer.connect_first": "先に公開ネットワークに接続してください",
+  "multiplayer.volunteer.detected": "グローバルアドレスは {0} のようです",
+  "multiplayer.volunteer.detect_failed": "グローバルアドレスを検出できませんでした（接続直後は 1 分ほどかかることがあります）。自分で調べて入力することもできます。",
+  "multiplayer.volunteer.reachable": "インターネットから {0} に接続できます。ボランティア中継になれます。",
+  "multiplayer.volunteer.unreachable": "インターネットからポート {0} に接続できません。ルーターがこのパソコンへ転送していない（TCP と UDP）、ファイアウォールが遮断している、またはプロバイダーが複数の家庭で 1 つのアドレスを共有している（この場合は転送しても直りません）ことが多いです。",
+  "multiplayer.volunteer.port_busy": "ポート {0} はこのパソコンの別のプログラムが使っています。別のポートを選んでください。"
 }
