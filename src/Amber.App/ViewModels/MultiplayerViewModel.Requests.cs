@@ -13,8 +13,10 @@ namespace Amber.App.ViewModels;
 /// </summary>
 public sealed partial class MultiplayerViewModel
 {
-    private readonly Dictionary<ApprovalCard, RequestHandle> _knockRequests = [];
-    private readonly Dictionary<FileOfferItem, RequestHandle> _fileRequests = [];
+    // By reference: the cards are records with settable members ("let them in next time"), so their value hash changes
+    // while they're shown and a value-keyed lookup would lose the request (it then lingered in the request bar).
+    private readonly Dictionary<ApprovalCard, RequestHandle> _knockRequests = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<FileOfferItem, RequestHandle> _fileRequests = new(ReferenceEqualityComparer.Instance);
 
     private void InitRequests()
     {

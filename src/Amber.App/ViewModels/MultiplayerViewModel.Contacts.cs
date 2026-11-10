@@ -15,6 +15,10 @@ namespace Amber.App.ViewModels;
 public sealed record EmojiItem(string Emoji, string Name);
 
 /// <summary>A verified contact in the list.</summary>
+/// <remarks>
+/// One person: every verified device that shares a Jay account is listed under one name; a contact without a Jay account
+/// is a person with one device. <see cref="Contact"/> is the newest device (the name comes from it).
+/// </remarks>
 public sealed class ContactItem(Contact contact)
 {
     public Contact Contact { get; } = contact;
@@ -22,6 +26,25 @@ public sealed class ContactItem(Contact contact)
     public string Initial => Name.Length > 0 ? char.ToUpperInvariant(Name[0]).ToString() : "?";
     public string Fingerprint => Contact.Fingerprint;
     public string Label => Name + " · " + Fingerprint;
+
+    /// <summary>All of this person's devices (at least <see cref="Contact"/>).</summary>
+    public IReadOnlyList<Contact> Devices { get; init; } = [contact];
+    public IReadOnlyList<ContactDeviceItem> DeviceItems => [.. Devices.Select(d => new ContactDeviceItem(d, this))];
+    public bool HasSeveralDevices => Devices.Count > 1;
+    public bool HasOneDevice => Devices.Count <= 1;
+    public string DevicesText => L.F("multiplayer.contacts.devices", Devices.Count);
+
+    public string? JayAccount => Contact.JayAccount;
+    public bool HasJay => JayAccount is not null;
+    public string JayText => MultiplayerViewModel.JayLine(JayAccount) ?? "";
+}
+
+/// <summary>One device of a person in the contact list (its safety code), with [Remove this device].</summary>
+public sealed class ContactDeviceItem(Contact device, ContactItem person)
+{
+    public Contact Device { get; } = device;
+    public ContactItem Person { get; } = person;
+    public string Fingerprint => Device.Fingerprint;
 }
 
 /// <summary>An add-contact exchange under way: waiting, asking me, or the emoji to compare.</summary>
@@ -29,9 +52,10 @@ public sealed class ContactRequestItem(PendingContact pending)
 {
     public PendingContact Pending { get; } = pending;
     public ContactStep Step { get; } = pending.Step;
-    public string Who => Pending.Name.Length > 0 ? Pending.Name + " · " + Pending.Fingerprint : Pending.Fingerprint;
+    public string Who => (Pending.Name.Length > 0 ? Pending.Name + " · " + Pending.Fingerprint : Pending.Fingerprint)
+        + (MultiplayerViewModel.JayLine(Pending.JayAccount) is { } jay ? " · " + jay : "");
 
-    public string Title => Step switch
+    public string Title => Pending.KnownFriend ? L.F("multiplayer.contacts.step.known", Who) : Step switch
     {
         ContactStep.WaitingForThem => L.F("multiplayer.contacts.step.waiting_them", Who),
         ContactStep.AskingMe => L.F("multiplayer.contacts.step.asking_me", Who),
@@ -106,6 +130,8 @@ public sealed partial class MultiplayerViewModel
         get
         {
             if (_public is not { } network) return null;
+            // Add-contact mail carries this device's Jay account certificate, so friends recognize me on my other devices.
+            Contacts.MyCertificate = JayCertificate;
             if (_post is null || !ReferenceEquals(_postNetwork, network))
             {
                 _postNetwork = network;
@@ -166,7 +192,12 @@ public sealed partial class MultiplayerViewModel
     {
         var book = Contacts;
         ContactList.Clear();
-        foreach (var c in book.All.Where(c => c.Verified).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(new ContactItem(c));
+        // One row per person: devices sharing a Jay account are grouped, the newest one names the person.
+        var people = book.All.Where(c => c.Verified)
+            .GroupBy(c => c.JayAccount ?? Convert.ToHexStringLower(c.PublicKey))
+            .Select(g => g.OrderByDescending(c => c.Added).ToList())
+            .Select(devices => new ContactItem(devices[0]) { Devices = devices });
+        foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
         ContactRequests.Clear();
         var pending = book.Pending;
         foreach (var p in pending.OrderByDescending(p => p.Step == ContactStep.Compare).ThenByDescending(p => p.Step == ContactStep.AskingMe))
@@ -286,12 +317,22 @@ public sealed partial class MultiplayerViewModel
         SetStatus(StatusMessage.Warning("multiplayer.contacts.mismatch"));
     }
 
+    /// <summary>Removes the person: all of their devices.</summary>
     [RelayCommand]
     private void RemoveContact(ContactItem? item)
     {
         if (item is null) return;
-        Contacts.Remove(item.Contact.PublicKey);
+        Contacts.RemovePerson(item.Contact.PublicKey);
         SetStatus(StatusMessage.Info("multiplayer.contacts.removed", item.Name));
+    }
+
+    /// <summary>Removes one device (say, a lost laptop); the person stays with their other devices.</summary>
+    [RelayCommand]
+    private void RemoveContactDevice(ContactDeviceItem? item)
+    {
+        if (item is null) return;
+        Contacts.Remove(item.Device.PublicKey);
+        SetStatus(StatusMessage.Info("multiplayer.contacts.device_removed", item.Person.Name));
     }
 
     // ---- mail pick-up ----
@@ -303,6 +344,7 @@ public sealed partial class MultiplayerViewModel
             _mailTimer ??= new DispatcherTimer(MailInterval, DispatcherPriority.Background, async (_, _) => await CheckMailAsync());
             _mailTimer.Start();
             _ = CheckMailAsync();
+            _ = RelinkFriendsAsync();
         }
         else _mailTimer?.Stop();
     }
@@ -397,19 +439,24 @@ public sealed partial class MultiplayerViewModel
         }
         lobby.Book.Game = await HostGameAsync();
         if (_lobby != lobby) return;
-        var pending = lobby.Book.Create(1, ContactInviteLifetime, Child.MayAutoAdmit(true), credentials.Tunnel, boundTo: item.Contact.PublicKey);
+        // One invite per device, each bound to that device's key: whichever computer they're at, they can come in.
+        var pendings = item.Devices.Select(d => (Device: d, Invite: lobby.Book.Create(1, ContactInviteLifetime, Child.MayAutoAdmit(true), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
         RefreshInvites();
         try
         {
             await lobby.UpdateAsync();
             var room = PublishRoomName.Trim().Length > 0 ? PublishRoomName.Trim() : L.F("multiplayer.public.default_name", ChatName);
-            var id = await post.SendInviteAsync(item.Contact, pending.Invite, Identity.PublicKey, room, DateTimeOffset.UtcNow + ContactInviteLifetime, default);
-            _sentInvites[id] = item.Name;
+            foreach (var (device, pending) in pendings)
+            {
+                var id = await post.SendInviteAsync(device, pending.Invite, Identity.PublicKey, room, DateTimeOffset.UtcNow + ContactInviteLifetime, default);
+                // Only the newest device's receipt counts: an older computer that's switched off shouldn't raise "held back".
+                if (ReferenceEquals(device, item.Devices[0])) _sentInvites[id] = item.Name;
+            }
             SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
         }
         catch (Exception e) when (IsMailError(e) || e is System.ComponentModel.Win32Exception)
         {
-            lobby.Book.Revoke(pending);
+            foreach (var (_, pending) in pendings) lobby.Book.Revoke(pending);
             RefreshInvites();
             SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
         }
