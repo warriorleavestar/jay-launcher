@@ -2615,5 +2615,18 @@
   "multiplayer.diag.switch_relay": "換轉驛",
   "multiplayer.diag.debug_on": "啟除錯之式",
   "multiplayer.diag.export_hint": "所出之診無室鑰與諸碼；公網 IP 默遮，勾之乃含。",
-  "multiplayer.diag.details": "技之詳"
+  "multiplayer.diag.details": "技之詳",
+  "multiplayer.public.setup_body": "公室出於「公網」，社群或友所營。Jay 未內置公網。",
+  "multiplayer.public.setup_have_address": "有人予汝公網之址乎？",
+  "multiplayer.public.setup_add": "增公網…",
+  "multiplayer.public.setup_friend_code": "有友碼乎？先增其所用之公網，連後乃可以友碼尋其室。",
+  "multiplayer.public.refreshed": "{0} 新之",
+  "multiplayer.public.search": "尋室或室主…",
+  "multiplayer.public.all_versions": "諸版",
+  "multiplayer.public.open_only": "唯可徑入者",
+  "multiplayer.public.sort.players": "人多者先",
+  "multiplayer.public.sort.name": "依名",
+  "multiplayer.public.sort.newest": "新者先",
+  "multiplayer.public.empty": "今無公室。",
+  "multiplayer.public.no_match": "無合者。易其辭或去其篩。"
 }

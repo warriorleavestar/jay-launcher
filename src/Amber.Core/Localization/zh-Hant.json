@@ -2693,5 +2693,18 @@
   "multiplayer.diag.switch_relay": "換中轉伺服器",
   "multiplayer.diag.debug_on": "開啟除錯模式",
   "multiplayer.diag.export_hint": "匯出的診斷去掉了房間密鑰和所有碼；公網 IP 預設遮住，勾上才包含。",
-  "multiplayer.diag.details": "技術細節"
+  "multiplayer.diag.details": "技術細節",
+  "multiplayer.public.setup_body": "公開房間來自「公共網路」，由社群或朋友運行。Jay 沒有內建任何公共網路。",
+  "multiplayer.public.setup_have_address": "有人給了你公共網路位址？",
+  "multiplayer.public.setup_add": "新增公共網路…",
+  "multiplayer.public.setup_friend_code": "有朋友的好友碼？先新增 TA 用的公共網路，連上後就能用好友碼找 TA 的房間。",
+  "multiplayer.public.refreshed": "重新整理於 {0}",
+  "multiplayer.public.search": "搜尋房間或房主…",
+  "multiplayer.public.all_versions": "全部版本",
+  "multiplayer.public.open_only": "只看能直接進的",
+  "multiplayer.public.sort.players": "人多的在前",
+  "multiplayer.public.sort.name": "按名字",
+  "multiplayer.public.sort.newest": "最近更新",
+  "multiplayer.public.empty": "現在沒有公開的房間。",
+  "multiplayer.public.no_match": "沒有符合條件的房間。換個關鍵字或去掉篩選試試。"
 }

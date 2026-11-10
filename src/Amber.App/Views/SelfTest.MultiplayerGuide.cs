@@ -147,7 +147,10 @@ internal sealed partial class SelfTest
         main.Shell.Navigate("play/public");
         await Task.Delay(200);
         Check("路由 play/public 打开公开房间", vm.IsPublicTab && HasText("multiplayer.public.title"));
+        Check("公开房间：没有公共网络时说明从哪来、给【添加公共网络…】", vm.ShowPublicSetup && Visible("AddPublicNetworkButton") is not null
+            && HasText("multiplayer.public.setup_body"));
         await ShotAsync("公开房间-1440");
+        await PublicListAsync(vm);
 
         // Width tiers: medium stacks the cards, compact puts "join" first. (Leaving the page rebuilt its view: find it again.)
         main.Shell.Navigate("play");
@@ -216,5 +219,69 @@ internal sealed partial class SelfTest
         window.Width = 1440;
         window.Height = 900;
         vm.ShowTabCommand.Execute("play");
+    }
+
+    /// <summary>The public room list with stand-in rooms (no network): search, version, walk-right-in, sort, empty states, keys.</summary>
+    private async Task PublicListAsync(MultiplayerViewModel vm)
+    {
+        var page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
+        Amber.Core.Multiplayer.Public.RoomListing Room(string name, string host, string game, int players, Amber.Core.Multiplayer.Public.RoomVisibility mode, bool approval) => new()
+        {
+            Id = name, Name = name, Host = host, Game = game, Players = players, Mode = mode, Approval = approval, HostKey = new byte[32], Updated = DateTimeOffset.Now,
+        };
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.IsPublicConnected = true;
+            vm.PublicRooms.Clear();
+        });
+        await Task.Delay(300);
+        Check("公开房间：连上但没有房间时写出来并给【刷新】", vm.ShowNoPublicRooms && !vm.ShowPublicSetup);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.PublicRooms.Add(new PublicRoomItem(Room("Sky island", "Alex", "1.20.1 Fabric", 5, Amber.Core.Multiplayer.Public.RoomVisibility.Public, true)));
+            vm.PublicRooms.Add(new PublicRoomItem(Room("Build contest", "Bo", "1.21.4", 2, Amber.Core.Multiplayer.Public.RoomVisibility.Password, true)));
+            vm.PublicRooms.Add(new PublicRoomItem(Room("Open farm", "Cy", "1.20.1 Fabric", 9, Amber.Core.Multiplayer.Public.RoomVisibility.Public, false)));
+        });
+        await Task.Delay(300);
+        Check("公开房间：人多的在前", vm.VisibleRooms.Select(r => r.Listing.Name).SequenceEqual(["Open farm", "Sky island", "Build contest"]));
+        Check("公开房间：版本筛选列出全部版本和每个版本", vm.RoomGameChoices.Count == 3 && vm.SelectedRoomGame?.Game == "");
+        await ShotAsync("公开房间-列表-1440");
+        var search = page.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(t => t.Name == "RoomSearchBox");
+        Dispatcher.UIThread.Invoke(() => PressKey(page.GetVisualDescendants().OfType<ItemsControl>().First(i => i.Name == "PublicRoomList"), Avalonia.Input.Key.Oem2));
+        await Task.Delay(200);
+        Check("公开房间：/ 跳到搜索框", search?.IsFocused == true);
+        Dispatcher.UIThread.Invoke(() => search!.Text = "alex");
+        await Task.Delay(200);
+        Check("公开房间：搜索房名或房主", vm.VisibleRooms.Count == 1 && vm.VisibleRooms[0].Listing.Name == "Sky island");
+        Dispatcher.UIThread.Invoke(() => search!.Text = "zzz");
+        await Task.Delay(200);
+        Check("公开房间：没有符合的写出来", vm.ShowNoMatchingRooms && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "NoMatchingRoomsText" && t.IsEffectivelyVisible));
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            search!.Text = "";
+            vm.OpenRoomsOnly = true;
+        });
+        await Task.Delay(200);
+        Check("公开房间：只看能直接进的", vm.VisibleRooms.Count == 1 && vm.VisibleRooms[0].Listing.Name == "Open farm");
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.OpenRoomsOnly = false;
+            vm.SelectedRoomGame = vm.RoomGameChoices.First(g => g.Game == "1.21.4");
+        });
+        await Task.Delay(200);
+        Check("公开房间：按版本筛选", vm.VisibleRooms.Count == 1 && vm.VisibleRooms[0].Listing.Name == "Build contest");
+        window.Width = 600;
+        window.Height = 420;
+        await Task.Delay(500);
+        await ShotAsync("公开房间-列表-600");
+        window.Width = 1440;
+        window.Height = 900;
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.SelectedRoomGame = vm.RoomGameChoices[0];
+            vm.PublicRooms.Clear();
+            vm.IsPublicConnected = false;
+        });
+        await Task.Delay(300);
     }
 }

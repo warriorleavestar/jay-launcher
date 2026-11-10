@@ -2693,5 +2693,18 @@
   "multiplayer.diag.switch_relay": "別の中継サーバーにする",
   "multiplayer.diag.debug_on": "デバッグモードをオンにする",
   "multiplayer.diag.export_hint": "書き出す診断にはルームの鍵とコードは含まれません。公開 IP はチェックしたときだけ含めます。",
-  "multiplayer.diag.details": "技術的な詳細"
+  "multiplayer.diag.details": "技術的な詳細",
+  "multiplayer.public.setup_body": "公開ルームは、コミュニティやフレンドが運営する「公開ネットワーク」にあります。Jay には公開ネットワークは組み込まれていません。",
+  "multiplayer.public.setup_have_address": "公開ネットワークのアドレスをもらいましたか？",
+  "multiplayer.public.setup_add": "公開ネットワークを追加…",
+  "multiplayer.public.setup_friend_code": "フレンドコードを持っていますか？まず相手が使っている公開ネットワークを追加してください。接続するとフレンドコードで相手のルームを探せます。",
+  "multiplayer.public.refreshed": "{0} に更新",
+  "multiplayer.public.search": "ルームやホストを検索…",
+  "multiplayer.public.all_versions": "すべてのバージョン",
+  "multiplayer.public.open_only": "すぐ入れるルームだけ",
+  "multiplayer.public.sort.players": "人が多い順",
+  "multiplayer.public.sort.name": "名前順",
+  "multiplayer.public.sort.newest": "最近更新された順",
+  "multiplayer.public.empty": "いま公開されているルームはありません。",
+  "multiplayer.public.no_match": "条件に合うルームがありません。キーワードや絞り込みを変えてみてください。"
 }
