@@ -104,6 +104,14 @@ internal sealed partial class SelfTest
         Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.IsEffectivelyVisible && b.Classes.Contains("file-decline")));
         Check("收文件：房间里拒绝，请求条同步撤掉", await WaitAsync(() => vm.FileOffers.Count == 0, 3) && !requests.Pending.Any(r => r.Spec.Kind == "file"));
 
+        // Room settings: the host can turn mod sync off.
+        Dispatcher.UIThread.Invoke(() => vm.RoomSettingsOpen = true);
+        await Task.Delay(300);
+        Check("房间设置：模组同步开关（默认开）", vm.AllowModSync && page.GetVisualDescendants().OfType<CheckBox>().Any(c => c.Name == "AllowModSyncBox" && c.IsEffectivelyVisible));
+        Dispatcher.UIThread.Invoke(() => vm.RoomSettingsOpen = false);
+
+        await ModCheckAsync(vm, page);
+
         // Settings: the popup can be turned off.
         vm.ShowTabCommand.Execute("settings");
         await Task.Delay(300);
@@ -124,6 +132,65 @@ internal sealed partial class SelfTest
         });
         await Task.Delay(200);
         Check("结束：没有留下的请求和小窗", !requests.Pending.Any(r => r.Spec.Kind is "knock" or "file") && RequestPopups.Open.Count == 0);
+    }
+
+    /// <summary>The joiner's “check the mods” card with stand-in mod lists (no connection).</summary>
+    private async Task ModCheckAsync(MultiplayerViewModel vm, MultiplayerPage page)
+    {
+        static ModManifestEntry Mod(string file, char hash, string id, string version) => new(file, new string(hash, 40), 1000, id, id switch
+        {
+            "create" => "Create",
+            "farmersdelight" => "Farmer's Delight",
+            "supplementaries" => "Supplementaries",
+            "sodium" => "Sodium",
+            "jei" => "JEI",
+            "journeymap" => "JourneyMap",
+            _ => id,
+        }, version);
+        var mine = new ModManifest([Mod("sodium-0.5.3.jar", '1', "sodium", "0.5.3"), Mod("jei-15.2.jar", '2', "jei", "15.2.0"), Mod("journeymap-5.9.jar", '3', "journeymap", "5.9.18"), Mod("same.jar", 's', "same", "1")]);
+        var host = new ModManifest([Mod("sodium-0.5.8.jar", '4', "sodium", "0.5.8"), Mod("jei-15.3.jar", '5', "jei", "15.3.0"), Mod("create-0.5.1.jar", '6', "create", "0.5.1"),
+            Mod("farmersdelight-1.2.jar", '7', "farmersdelight", "1.2"), Mod("supplementaries-2.4.jar", '8', "supplementaries", "2.4"), Mod("same.jar", 's', "same", "1")]);
+        TextBlock? Shown(string name) => page.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == name && t.IsEffectivelyVisible);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.Mode = "join";
+            vm.TestHostName = "Alex";
+            vm.ModCheckInstance = "selftest-modcheck";
+            vm.ModCheck = ModCheckState.Checking;
+        });
+        await Task.Delay(300);
+        Check("对一下模组：比对完之前只写“正在对”，不说一样", vm.ShowModCheck && Shown("ModCheckingText") is not null && Shown("ModCheckSameText") is null);
+        await Dispatcher.UIThread.InvokeAsync(() => vm.ShowModCheckAsync(new ModListReply(ModListAnswer.Sent, host), mine));
+        await Task.Delay(300);
+        Check("对一下模组：缺 3 个、版本不同 2 个、多 1 个（写明小地图没关系）", vm.ModCheck == ModCheckState.Different
+            && vm.ModMissingText == L.P("multiplayer.modcheck.missing", 3, 3, string.Join(L.T("common.list_separator"), "Create", "Farmer's Delight", "Supplementaries"))
+            && vm.ModDifferentText.Contains("0.5.3") && vm.ModDifferentText.Contains("0.5.8")
+            && vm.ModExtraText.Contains("JourneyMap") && vm.ModExtraText.Contains(L.T("multiplayer.modcheck.extra_harmless"))
+            && Shown("ModMissingText") is not null && Shown("ModDifferentText") is not null && Shown("ModExtraText") is not null, vm.ModMissingText);
+        Check("对一下模组：标题写我的实例和房主的名字", vm.ModCheckTitle == L.F("multiplayer.modcheck.title", "selftest-modcheck", "Alex"));
+        Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "ModDetailsButton" && b.IsEffectivelyVisible));
+        await Task.Delay(200);
+        Check("对一下模组：【看看差在哪】列出每一项", vm.ModDetailsOpen && vm.ModDiffLines.Count == 6
+            && page.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "ModDiffList" && i.IsEffectivelyVisible));
+        await ShotAsync("对一下模组-1440");
+        Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "SkipModCheckButton" && b.IsEffectivelyVisible));
+        await Task.Delay(200);
+        Check("对一下模组：【不管了，直接进】收起卡片并记下（崩了时第一条建议）", !vm.ShowModCheck && main.Service.MetaOf("selftest-modcheck")?.ModsDifferFromHost == "Alex");
+
+        await Dispatcher.UIThread.InvokeAsync(() => vm.ShowModCheckAsync(new ModListReply(ModListAnswer.Sent, host), host));
+        await Task.Delay(200);
+        Check("对一下模组：一样时打 ✓，并清掉之前的记录", vm.ModCheck == ModCheckState.Same && Shown("ModCheckSameText") is not null
+            && main.Service.MetaOf("selftest-modcheck")?.ModsDifferFromHost is null);
+        await Dispatcher.UIThread.InvokeAsync(() => vm.ShowModCheckAsync(new ModListReply(ModListAnswer.Off, null)));
+        await Task.Delay(200);
+        Check("对一下模组：房主关掉同步时写清楚", vm.ModCheck == ModCheckState.Off && Shown("ModCheckNoticeText")?.Text == L.T("multiplayer.modcheck.off"));
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.ModCheck = ModCheckState.None;
+            vm.TestHostName = null;
+            vm.Mode = "host";
+        });
+        await Task.Delay(200);
     }
 
     /// <summary>Screenshot of another window (the popup).</summary>

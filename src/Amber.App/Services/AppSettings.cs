@@ -142,6 +142,8 @@ public sealed class AppSettings
     public string MultiplayerKnockWait { get; set; } = "10m";
     /// <summary>Knocks and incoming files while Jay is in the background open a small topmost window.</summary>
     public bool MultiplayerRequestPopup { get; set; } = true;
+    /// <summary>Room settings › mod sync: people who join may get my mod list and the mod files that are not on public sites.</summary>
+    public bool MultiplayerAllowModSync { get; set; } = true;
 
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
@@ -231,6 +233,12 @@ public sealed class InstanceMeta
 
     /// <summary>Total minutes played from this launcher.</summary>
     public double PlayMinutes { get; set; }
+
+    /// <summary>
+    /// Joined a room with this instance although its mods differed from the host's (“never mind, just join”): the host's
+    /// name. If the game then crashes, the last-session panel names this first. Cleared when a later check matches.
+    /// </summary>
+    public string? ModsDifferFromHost { get; set; }
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(AppSettings))]
