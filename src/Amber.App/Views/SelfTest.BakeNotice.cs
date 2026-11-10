@@ -34,8 +34,6 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         if (!ok) throw new InvalidOperationException(name);
     }
 
-    private void Check(string name, bool ok, string detail) => Check(ok || detail.Length == 0 ? name : $"{name}（{detail}）", ok);
-
     private void Show(string id, Action? retry = null) => Toasts.BakeFailed(L.F("home.bake.crashed_toast", id), retry ?? (() => { }));
 
     private static Rect BoundsIn(Control control, Visual target) =>
