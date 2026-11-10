@@ -71,6 +71,12 @@ internal static class LinuxStartup
 
     // ---- ICU ----
 
+    /// <summary>只做 ICU 检查（缺 ICU 时以不变区域模式重新启动自己），给不开窗口的守护模式用。</summary>
+    public static void EnsureIcu(string[] args)
+    {
+        if (OperatingSystem.IsLinux()) EnsureIcuOrReexec(args);
+    }
+
     private static void EnsureIcuOrReexec(string[] args)
     {
         // 用户或打包者已经自己选了模式，就不插手。

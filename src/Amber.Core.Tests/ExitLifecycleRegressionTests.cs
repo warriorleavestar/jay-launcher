@@ -153,6 +153,8 @@ public sealed class ExitLifecycleRegressionTests
     [Fact]
     public void ViewModelKeepsDirectOwnerAndSynchronizesExitOptions() => UiTestThread.Run(() =>
     {
+        // 界面上的“经别人上网”只在 Windows 上开放（Mac/Linux 的完整局域网模式不带出口）。
+        if (!PlatformFeatures.FullTrafficExit) return;
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
         var session = NewSession((o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)));
         using var lifetime = new CancellationTokenSource();

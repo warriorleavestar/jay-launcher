@@ -8,6 +8,12 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Mac/Linux 完整局域网模式的 root 守护（经 pkexec / 管理员密码框启动），不开窗口。
+        if (!OperatingSystem.IsWindows() && Amber.Core.Multiplayer.UnixElevatedGuardHost.IsGuardInvocation(args))
+        {
+            LinuxStartup.EnsureIcu(args);
+            Environment.Exit(Amber.Core.Multiplayer.UnixElevatedGuardHost.Run(args));
+        }
         // Linux：先确认 ICU 和图形界面要用的库都在（缺了给出看得懂的提示）。必须排在任何区域、格式化代码之前。
         LinuxStartup.BeforeAnything(args);
         StartupTrace.Mark("main");

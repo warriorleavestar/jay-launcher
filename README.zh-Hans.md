@@ -44,7 +44,7 @@ Windows 版正在申请 SignPath Foundation 的免费代码签名，详见[代�
 
 发布包自带 .NET，不用安装。Jay 会按游戏版本选择本机 Java，并在 Mojang 提供对应平台运行时时自动下载；Linux ARM64 需要先安装合适版本的 64 位 Java。
 
-macOS Apple 芯片版已由合作者在真机上完整测过安装、启动和游玩；Intel Mac 和 Linux 版通过了自动构建和测试，但还没有真机验证，所以标为实验。macOS/Linux 版本目前没有代码签名。macOS 第一次运行若被 Gatekeeper 拦截，可在“系统设置 → 隐私与安全性”中确认打开。完整局域网和出口节点模式仍只支持 Windows；普通房间、直连、聊天和仅游戏转发可跨平台使用。
+macOS Apple 芯片版已由合作者在真机上完整测过安装、启动和游玩；Intel Mac 和 Linux 版通过了自动构建和测试，但还没有真机验证，所以标为实验。macOS/Linux 版本目前没有代码签名。macOS 第一次运行若被 Gatekeeper 拦截，可在“系统设置 → 隐私与安全性”中确认打开。完整局域网模式和出口节点在 Mac/Linux 上也能用（要输一次管理员密码；Linux 需要 pkexec，经别人上网还要 nftables）；普通房间、直连、聊天和仅游戏转发可跨平台使用。
 
 ### Linux 需要的系统组件
 
@@ -195,7 +195,7 @@ CurseForge 的接口需要 API Key，见上面的[配置](#配置)。Modrinth �
 在「设置」页切换下载源，试试官方源或 BMCLAPI 镜像。
 
 **支持 macOS 和 Linux 吗？**
-支持 macOS Intel/Apple 芯片和 Linux x64/ARM64。Apple 芯片版已真机验证，Intel Mac 和 Linux 版目前是实验。完整局域网、出口节点和极端加密仍受 Windows 系统能力限制；其他主要功能可跨平台使用。
+支持 macOS Intel/Apple 芯片和 Linux x64/ARM64。Apple 芯片版已真机验证，Intel Mac 和 Linux 版目前是实验。完整局域网模式和出口节点三个系统都能用（Mac/Linux 开的时候要输一次管理员密码）；极端加密仍受系统能力限制；其他主要功能可跨平台使用。
 
 **有哪些做不到的？**
 在 Fabric / Quilt 上运行 Forge 模组：目前没有可靠的兼容层，Jay 会直接说明。
