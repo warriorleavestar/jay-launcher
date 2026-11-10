@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Jay node</title>
+<link rel="stylesheet" href="/panel.css">
+<script src="/panel.js" defer></script>
+</head>
+<body>
+<header>
+  <h1 data-t="title">Jay node</h1>
+  <span id="network" class="muted"></span>
+  <span id="state" class="pill"></span>
+  <span class="grow"></span>
+  <button id="refresh" type="button" data-t="refresh">Refresh</button>
+  <button id="logout" type="button" data-t="logout" hidden>Sign out</button>
+</header>
+
+<main>
+  <section id="login" class="card" hidden>
+    <h2 data-t="login_title">Sign in</h2>
+    <p class="muted" data-t="login_hint">Paste the admin token from admin.token in the node's data folder, or run "jay-server node panel" on the node.</p>
+    <div class="row">
+      <input id="token" type="password" autocomplete="off" spellcheck="false" maxlength="128" aria-label="token">
+      <button id="signin" type="button" class="primary" data-t="signin">Sign in</button>
+    </div>
+    <p id="login-error" class="error" hidden></p>
+  </section>
+
+  <div id="app" hidden>
+    <section class="grid" id="numbers"></section>
+
+    <section class="card">
+      <h2 data-t="rooms">Public rooms</h2>
+      <p class="muted" id="rooms-summary"></p>
+      <div class="scroll"><table id="rooms"><thead><tr>
+        <th data-t="col_name">Name</th><th data-t="col_host">Host</th><th data-t="col_mode">Mode</th><th data-t="col_players">Players</th><th data-t="col_game">Game</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section class="card">
+      <h2 data-t="volunteers">Volunteer relays</h2>
+      <p class="muted" id="nodes-summary"></p>
+      <ul id="nodes" class="list"></ul>
+    </section>
+
+    <section class="card">
+      <h2 data-t="bans">Bans</h2>
+      <div class="scroll"><table id="bans"><thead><tr>
+        <th data-t="col_kind">Kind</th><th data-t="col_value">Value</th><th data-t="col_reason">Reason</th><th data-t="col_until">Until</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+      <h3 data-t="add_ban">Add a ban</h3>
+      <div class="row wrap">
+        <select id="ban-kind" aria-label="kind">
+          <option value="host" data-t="kind_host">Host</option>
+          <option value="room" data-t="kind_room">Room</option>
+          <option value="account" data-t="kind_account">Account</option>
+          <option value="node" data-t="kind_node">Volunteer relay</option>
+        </select>
+        <input id="ban-value" maxlength="300" spellcheck="false" aria-label="value">
+        <select id="ban-for" aria-label="duration"></select>
+        <input id="ban-reason" maxlength="120" aria-label="reason">
+        <button id="ban-add" type="button" class="danger" data-t="ban">Ban</button>
+      </div>
+    </section>
+  </div>
+
+  <p id="toast" role="status" hidden></p>
+</main>
+</body>
+</html>
