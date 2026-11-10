@@ -146,6 +146,7 @@ internal sealed partial class SelfTest
             await Task.Delay(300);
             await ShotAsync("help-1440-en");
             help.Close();
+            await TermHintsAsync();
         }
         finally
         {

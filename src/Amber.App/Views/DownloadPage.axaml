@@ -24,7 +24,10 @@
   <Grid x:Name="RootGrid" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
     <!-- Header: title and ✕ (Esc does the same). -->
     <Grid svc:ThemeRegion.Name="downloads.title" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto">
-      <TextBlock Classes="h1" Text="{l:T newinstance.title}" />
+      <WrapPanel ItemSpacing="2">
+        <TextBlock Classes="h1" Text="{l:T newinstance.title}" />
+        <c:TermHint x:Name="InstanceTermHint" Term="instance" />
+      </WrapPanel>
       <Button x:Name="CloseButton" Grid.Column="1" Classes="ghost" Content="✕" VerticalAlignment="Top"
               ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}" Click="Close_Click" />
     </Grid>
@@ -137,7 +140,10 @@
             <StackPanel Spacing="8" IsVisible="{Binding IsConfiguring}">
               <TextBlock Classes="h2" Margin="0" Text="{Binding InstallTitle}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding InstallTitle}" />
               <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
-                <TextBlock Text="{l:T download.loader.label}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="0,0,12,0">
+                  <TextBlock Text="{l:T download.loader.label}" VerticalAlignment="Center" />
+                  <c:TermHint x:Name="LoaderTermHint" Term="loader" />
+                </StackPanel>
                 <ListBox x:Name="LoaderSegment" Grid.Column="1" Classes="subtabs loaders" ItemsSource="{Binding LoaderChoices}" SelectedItem="{Binding SelectedLoader}"
                          Background="Transparent" AutomationProperties.Name="{l:T download.loader.label}">
                   <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -213,7 +219,10 @@
         <StackPanel Spacing="12" MaxWidth="680" HorizontalAlignment="Left">
           <Border Classes="card newinst-section">
             <StackPanel Spacing="10">
-              <TextBlock Classes="h2" Margin="0" Text="{l:T newinstance.pack.heading}" />
+              <WrapPanel ItemSpacing="2">
+                <TextBlock Classes="h2" Margin="0" Text="{l:T newinstance.pack.heading}" />
+                <c:TermHint x:Name="ModpackTermHint" Term="modpack" />
+              </WrapPanel>
               <TextBlock Classes="hint" Text="{l:T newinstance.pack.hint}" TextWrapping="Wrap" />
               <WrapPanel ItemSpacing="8" LineSpacing="8">
                 <Button x:Name="PickPackButton" Classes="secondary" Content="{l:T newinstance.pack.pick}" Click="PickPack_Click" />

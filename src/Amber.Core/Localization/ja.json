@@ -3019,5 +3019,19 @@
   "accounts.status.jay_bound": "Jay アカウント {0} を {1} と連携しました",
   "accounts.status.jay_unbound": "{0} の Jay アカウント連携を解除しました",
   "accounts.status.jay_address_copied": "アドレスをコピーしました",
-  "accounts.status.jay_removed": "このパソコンから Jay アカウント {0} を削除しました。リカバリーフレーズで復元できます"
+  "accounts.status.jay_removed": "このパソコンから Jay アカウント {0} を削除しました。リカバリーフレーズで復元できます",
+  "term.what_is": "「{0}」とは？",
+  "term.learn_more": "くわしく ›",
+  "term.instance": "インスタンス",
+  "term.instance.hint": "ひとつの独立したゲーム環境です。バージョンと、専用の MOD とワールドを持ちます。インスタンス同士は影響しません。",
+  "term.loader": "ローダー",
+  "term.loader.hint": "ゲームで MOD を動かすためのもの。Fabric、Forge、NeoForge、Quilt など。バニラにはありません。",
+  "term.modpack": "MODパック",
+  "term.modpack.hint": "ほかの人がまとめたセットです。バージョン、ローダー、MOD の一覧が入っていて、Jay は新しいインスタンスとして入れます。",
+  "term.relay": "中継サーバー",
+  "term.relay.hint": "あなたと友だちのパソコンが直接つながらないとき、中継サーバーがデータを受け渡します。",
+  "term.safety_code": "安全コード",
+  "term.safety_code.hint": "両方に表示されるコードです。あなたと友だちのコードが同じなら、間に誰もいません。",
+  "term.friend_code": "フレンドコード",
+  "term.friend_code.hint": "公開ルームで友だちの部屋を探すコードです。これだけでは入れず、ノックが必要です。"
 }

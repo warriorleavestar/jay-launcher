@@ -3019,5 +3019,19 @@
   "accounts.status.jay_bound": "已把 Jay 账户 {0} 绑定到 {1}",
   "accounts.status.jay_unbound": "已解除 {0} 的 Jay 账户绑定",
   "accounts.status.jay_address_copied": "地址已复制",
-  "accounts.status.jay_removed": "已从这台电脑移除 Jay 账户 {0}，用助记词仍能恢复"
+  "accounts.status.jay_removed": "已从这台电脑移除 Jay 账户 {0}，用助记词仍能恢复",
+  "term.what_is": "“{0}”是什么？",
+  "term.learn_more": "了解更多 ›",
+  "term.instance": "实例",
+  "term.instance.hint": "一套独立的游戏：一个版本，加上它自己的模组和世界。实例之间互不影响。",
+  "term.loader": "加载器",
+  "term.loader.hint": "让游戏能装模组的东西，比如 Fabric、Forge、NeoForge、Quilt。原版没有加载器。",
+  "term.modpack": "整合包",
+  "term.modpack.hint": "别人配好的一整套：版本、加载器和一串模组。Jay 会把它装成一个新实例。",
+  "term.relay": "中转服务器",
+  "term.relay.hint": "你和朋友的电脑直接连不上时，中转服务器帮你们转发数据。",
+  "term.safety_code": "安全码",
+  "term.safety_code.hint": "你们两边都能看到的码。你的和朋友的一样，就说明中间没有别人。",
+  "term.friend_code": "好友码",
+  "term.friend_code.hint": "在公开房间里找到朋友的房间。光有它进不了门，还是要敲门。"
 }

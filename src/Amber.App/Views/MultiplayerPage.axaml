@@ -367,7 +367,10 @@
                   </ListBox>
                   <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.people.pick}" IsVisible="{Binding !HasSelectedPerson}" />
                   <StackPanel x:Name="PersonDetails" Spacing="6" IsVisible="{Binding HasSelectedPerson}">
-                    <TextBlock Classes="caption" Text="{l:T multiplayer.knock.safety_code}" />
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                      <TextBlock Classes="caption" Text="{l:T multiplayer.knock.safety_code}" VerticalAlignment="Center" />
+                      <c:TermHint x:Name="SafetyCodeTermHint" Term="safety_code" />
+                    </StackPanel>
                     <SelectableTextBlock x:Name="PersonSafetyCode" Text="{Binding SelectedPerson.Fingerprint}" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" />
                     <WrapPanel ItemSpacing="6" LineSpacing="6">
                       <Button x:Name="PersonChatButton" Classes="small" Content="{l:T multiplayer.people.chat}" Command="{Binding ChatWithCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanPrivate}" />
@@ -831,7 +834,10 @@
                 <TextBox Text="{Binding PublicRoomPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.public.password_placeholder}" IsVisible="{Binding IsPublicConnected}" />
                 <!-- 用指纹码找房间 -->
                 <StackPanel Spacing="6" IsVisible="{Binding IsPublicConnected}">
-                  <TextBlock Text="{l:T multiplayer.device.find_title}" FontWeight="SemiBold" />
+                  <WrapPanel ItemSpacing="2">
+                    <TextBlock Text="{l:T multiplayer.device.find_title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <c:TermHint x:Name="FriendCodeTermHint" Term="friend_code" />
+                  </WrapPanel>
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBox Text="{Binding FindCodeInput}" PlaceholderText="{l:T multiplayer.device.find_placeholder}" FontFamily="Consolas,monospace" />
                     <Button Grid.Column="1" Content="{l:T multiplayer.device.find}" Command="{Binding FindByFingerprintCommand}" IsEnabled="{Binding !IsFindingRoom}" Margin="6,0,0,0" />
@@ -1095,7 +1101,10 @@
           <!-- Relay servers -->
           <Border x:Name="RelayGroup" Classes="card" Margin="0">
             <StackPanel Spacing="8">
-              <TextBlock x:Name="RelayHeader" Classes="h2" Text="{Binding NodesHeaderText}" Margin="0" TextWrapping="Wrap" />
+              <WrapPanel ItemSpacing="2">
+                <TextBlock x:Name="RelayHeader" Classes="h2" Text="{Binding NodesHeaderText}" Margin="0" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <c:TermHint x:Name="RelayTermHint" Term="relay" />
+              </WrapPanel>
             <StackPanel Spacing="6">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"

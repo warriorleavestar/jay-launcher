@@ -3019,5 +3019,19 @@
   "accounts.status.jay_bound": "已把 Jay 帳戶 {0} 綁定到 {1}",
   "accounts.status.jay_unbound": "已解除 {0} 的 Jay 帳戶綁定",
   "accounts.status.jay_address_copied": "位址已複製",
-  "accounts.status.jay_removed": "已從這台電腦移除 Jay 帳戶 {0}，用助記詞仍能復原"
+  "accounts.status.jay_removed": "已從這台電腦移除 Jay 帳戶 {0}，用助記詞仍能復原",
+  "term.what_is": "「{0}」是什麼？",
+  "term.learn_more": "了解更多 ›",
+  "term.instance": "實例",
+  "term.instance.hint": "一套獨立的遊戲：一個版本，加上它自己的模組和世界。實例之間互不影響。",
+  "term.loader": "載入器",
+  "term.loader.hint": "讓遊戲能裝模組的東西，比如 Fabric、Forge、NeoForge、Quilt。原版沒有載入器。",
+  "term.modpack": "模組包",
+  "term.modpack.hint": "別人配好的一整套：版本、載入器和一串模組。Jay 會把它裝成一個新實例。",
+  "term.relay": "中轉伺服器",
+  "term.relay.hint": "你和朋友的電腦直接連不上時，中轉伺服器幫你們轉發資料。",
+  "term.safety_code": "安全碼",
+  "term.safety_code.hint": "你們兩邊都能看到的碼。你的和朋友的一樣，就說明中間沒有別人。",
+  "term.friend_code": "好友碼",
+  "term.friend_code.hint": "在公開房間裡找到朋友的房間。光有它進不了門，還是要敲門。"
 }
