@@ -1,8 +1,11 @@
 using System.Net;
+using System.Text;
 using System.Text.Json.Nodes;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Public;
+using Amber.Core.Multiplayer.Transport;
 using Amber.Core.Net;
+using Amber.NetworkServer.Hardware;
 
 namespace Amber.NetworkServer;
 
@@ -159,6 +162,18 @@ public sealed class JayNetworkServerBuilder
     /// </summary>
     public JayNetworkServerBuilder RequireDirectoryChannel() { SecureDirectoryOnly = true; return this; }
 
+    internal NodeHardwareGuard? HardwareGuard;
+    internal bool HardwareDryRun;
+
+    /// <summary>
+    /// Replace the hardware check of a bound node (docs/security/node-hardware-binding.md). Tests inject fake hardware
+    /// this way; by default a node bound with <c>jay-server node bind</c> checks the real machine.
+    /// </summary>
+    public JayNetworkServerBuilder UseHardwareGuard(NodeHardwareGuard guard) { HardwareGuard = guard; return this; }
+
+    /// <summary>When the hardware check fails, only log what would be wiped; delete nothing (the node still refuses to run).</summary>
+    public JayNetworkServerBuilder WipeDryRun() { HardwareDryRun = true; return this; }
+
     /// <summary>测试用：换时钟。</summary>
     public JayNetworkServerBuilder UseClock(Func<DateTimeOffset> clock) { Clock = clock; return this; }
 
@@ -170,22 +185,36 @@ public sealed class JayNetworkServer : IAsyncDisposable
 {
     public const int DefaultAdminPort = 47669;
 
+    /// <summary>Exit code when a bound node stops because its runtime was tampered with (sysexits EX_CONFIG).</summary>
+    public const int NodeIntegrityExitCode = 78;
+
     private readonly JayNetworkServerBuilder _b;
     private readonly DateTimeOffset _started;
     private PublicNetworkSession? _network;
     private AdminApi? _admin;
+    private readonly Dictionary<string, byte[]>? _sealedKeys;
+
+    /// <summary>The hardware check of this node, when it is bound to its hardware (null otherwise).</summary>
+    public NodeHardwareGuard? Guard { get; }
 
     internal JayNetworkServer(JayNetworkServerBuilder b)
     {
         _b = b;
         _started = Now;
         Profile = b.Network is { } n ? n.ToProfile() with { Nodes = b.Seeds } : PublicNetworkProfile.Jay(b.Seeds);
+        // A node bound to its hardware checks the machine before it reads any key or opens any port.
+        // Wrong hardware: its files are wiped and this throws HardwareMismatchException. Tampered runtime: NodeIntegrityException.
+        Guard = b.HardwareGuard ?? new NodeHardwareGuard(b.DataDir) { TrustedRoots = Profile.DirectoryRoots, DryRun = b.HardwareDryRun, Log = b.Log };
+        _sealedKeys = Guard.Enforce();
+        if (_sealedKeys is null) Guard = null;
         Bans = b.BanListOn ? new BanList(Path.Combine(b.DataDir, "bans.json"), b.Clock) : null;
         Stats = new DirectoryStats();
         if (b.Login is { } login) Login = login;
         else if (b.Accounts is { } accounts)
         {
-            var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(b.DataDir, "login.key"));
+            var (key, signer) = _sealedKeys is null ? LoginAuthority.LoadOrCreateKeys(Path.Combine(b.DataDir, "login.key"))
+                : _sealedKeys.TryGetValue("login.key", out var sealedLogin) && LoginAuthority.ParseKeys(Encoding.ASCII.GetString(sealedLogin)) is { } parsed ? parsed
+                : throw new InvalidOperationException("This node was bound to its hardware without a login key; bind it again after `jay-server account` set-up.");
             var store = accounts.Store ?? (Builtin = new AccountStore(Path.Combine(b.DataDir, "accounts.json")));
             Login = new LoginAuthority(store, key, signer, Profile.Id, b.Clock)
             {
@@ -243,7 +272,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        System.IO.Directory.CreateDirectory(_b.DataDir);
+        NodeWiper.Mark(_b.DataDir);
         if (!_b.SeedOnlyMode)
         {
             if (_b.VolunteersOn && _b.Config?.Policy.Volunteers != false)
@@ -269,7 +298,9 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Volunteers = Volunteers,
                 MinClientVersion = _b.Config?.Policy.MinVersion,
                 RequireAccountToPublish = Login is not null && _b.Config?.Login?.Required == true,
-                Identity = DirectoryChannel.LoadOrCreateIdentity(DirectoryKeyPath),
+                Identity = _sealedKeys is not null && _sealedKeys.TryGetValue("directory.key", out var sealedDir)
+                    ? X25519KeyPair.FromPrivateKey(Convert.FromBase64String(Encoding.ASCII.GetString(sealedDir).Trim()))
+                    : DirectoryChannel.LoadOrCreateIdentity(DirectoryKeyPath),
                 NetworkSecret = Profile.Secret,
                 AcceptLegacyClients = !_b.SecureDirectoryOnly,
             };
@@ -320,6 +351,11 @@ public sealed class JayNetworkServer : IAsyncDisposable
         var last = -1;
         while (!ct.IsCancellationRequested)
         {
+            if (Guard?.Recheck() is { Count: > 0 } problems)
+            {
+                _b.Log("Refusing to keep running: " + string.Join("; ", problems));
+                return NodeIntegrityExitCode;
+            }
             if (_network is { HasExited: true })
             {
                 _b.Log("EasyTier 意外退出：" + string.Join(" / ", _network.RecentOutput.TakeLast(3)));

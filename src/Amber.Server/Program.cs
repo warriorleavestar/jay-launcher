@@ -6,6 +6,7 @@ using Amber.Core.Multiplayer.Public;
 using Amber.Core.Multiplayer.Transport;
 using Amber.Core.Net;
 using Amber.NetworkServer;
+using Amber.NetworkServer.Hardware;
 
 namespace Amber.Server;
 
@@ -68,6 +69,10 @@ public static class Program
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
           jay-server node status|rooms|bans|nodes  看运行中节点的计数、公开房间、封禁名单、志愿中转
+          jay-server node bind [--check | --install <证书>]  把节点绑定到这台机器的硬件（TPM、硬盘、主板、machine-id），全程离线：
+              不带参数：生成 hardware.request.json（只有加盐哈希）→ 在离线电脑上 network hw-cert 签名 → 拷回来 --install。
+              绑定后 directory.key、login.key 只以加密形式存在；硬件对不上时节点删除数据目录里的 Jay 文件，运行环境被动过（调试器、注入、
+              文件可被别人改、要求的安全启动关了、TPM 不解封）时拒绝运行。--check 只检查不删除。directory --wipe-dry-run 只列出会删什么。
           jay-server node panel               打印网页管理面板的链接（只能在本机打开；远程服务器用 ssh -L 转发端口）
           jay-server node ban host|room|account|room-host|node <房主指纹|房间编号|账号|房间编号|志愿节点地址> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
@@ -88,6 +93,8 @@ public static class Program
           jay-server network dir-cert --root <根钥匙文件> --network <EasyTier 网络名> --dir-key <目录公钥> --out <证书文件> [--days 365]
               在离线电脑上用根钥匙给节点的目录公钥（dir-key 打印的）签证书，再把证书拷到节点数据目录，命名为 directory.cert
               （根钥匙和节点在同一台电脑时也可以用 --dir <节点数据目录> 直接写进去，但根钥匙不该放在服务器上）
+          jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
+              在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
 
@@ -387,8 +394,7 @@ public static class Program
                 else
                 {
                     var dataDir = root ?? throw new ArgumentException("要用 --dir-key <目录公钥> --out <文件>，或 --dir <节点数据目录>");
-                    using var key = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(dataDir, "directory.key"));
-                    directoryKey = key.PublicKey;
+                    directoryKey = DirectoryPublicKey(dataDir);
                     target = Path.Combine(dataDir, "directory.cert");
                 }
                 var expires = DateTimeOffset.UtcNow.AddDays(days);
@@ -401,16 +407,36 @@ public static class Program
             {
                 // This node's directory key (made on first use, same file `jay-server directory` uses), optionally pinned in the network JSON.
                 var dataDir = root ?? throw new ArgumentException("要用 --dir 指定节点的数据目录");
-                using var key = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(dataDir, "directory.key"));
-                output.WriteLine($"目录公钥 / directory key：{Convert.ToBase64String(key.PublicKey)}");
+                var publicKey = DirectoryPublicKey(dataDir);
+                output.WriteLine($"目录公钥 / directory key：{Convert.ToBase64String(publicKey)}");
                 if (rest.FirstOrDefault() is { } networkFile)
                 {
-                    var (info, added) = NetworkScaffold.AttachDirectoryKey(networkFile, key.PublicKey);
+                    var (info, added) = NetworkScaffold.AttachDirectoryKey(networkFile, publicKey);
                     output.WriteLine(added
                         ? $"已写进 {networkFile} 的 dirKeys（版本号 {info.Seq}）。重新签名：jay-server network sign {networkFile} --key <钥匙文件>"
                         : $"{networkFile} 的 dirKeys 里已经有这把钥匙");
                 }
                 output.WriteLine("把 directory.key 备份好：换了钥匙的目录在已经粘贴连接串的 Jay 看来就是冒充的。");
+                return 0;
+            }
+            case "hw-cert":
+            {
+                // Offline: sign a node's hardware.request.json with the directory root key (docs/security/node-hardware-binding.md).
+                var rootFile = options.Get("root") ?? throw new ArgumentException("要用 --root 指定根钥匙文件");
+                var requestFile = options.Get("request") ?? rest.FirstOrDefault() ?? throw new ArgumentException("要用 --request 指定节点生成的 hardware.request.json");
+                var target = options.Get("out") ?? throw new ArgumentException("要用 --out 指定证书文件（拷回节点后用 node bind --install 装上）");
+                var request = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(requestFile)) as System.Text.Json.Nodes.JsonObject
+                    ?? throw new InvalidDataException(requestFile + " 不是硬件绑定请求");
+                int? need = options.Get("need") is { } n ? int.Parse(n, System.Globalization.CultureInfo.InvariantCulture) : null;
+                bool? tpm = options.Has("no-tpm") ? false : null;
+                var cert = HardwareCertificate.Issue(NetworkSigner.FromSeed(File.ReadAllText(rootFile)), request, options.Get("network"), need, tpm, options.Has("secure-boot"));
+                var parsed = HardwareCertificate.Parse(cert)!;
+                File.WriteAllBytes(target, cert);
+                output.WriteLine($"已写 {target}：硬件标识 {parsed.Factors.Count} 项（{string.Join("、", parsed.Factors.Keys)}），至少 {parsed.Need} 项要对上"
+                    + (parsed.Must.Count > 0 ? $"，必须对上：{string.Join("、", parsed.Must)}" : "")
+                    + (parsed.RequireTpm ? "，钥匙封存进 TPM" : "，没有 TPM（钥匙只靠硬件标识加密，强度较弱）")
+                    + (parsed.RequireSecureBoot ? "，要求开着安全启动" : ""));
+                output.WriteLine("硬件对不上时节点会删除自己数据目录里的 Jay 文件。把证书拷回节点，运行 jay-server node bind --install <证书>。");
                 return 0;
             }
             case "show":
@@ -443,7 +469,19 @@ public static class Program
     {
         var log = (string line) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [Jay 公共节点] {line}");
         var builder = DirectoryBuilder(root, options, Console.Out, log);
-        await using var server = builder.Build();
+        JayNetworkServer built;
+        try { built = builder.Build(); }
+        catch (HardwareMismatchException e)
+        {
+            log(e.DryRun ? $"硬件检查没通过（只演练，没删除）：{e.Reason}" : $"硬件检查没通过，已删除这个节点的 Jay 文件（{e.Wiped.Count} 项）：{e.Reason}");
+            return 77;
+        }
+        catch (NodeIntegrityException e)
+        {
+            log("拒绝运行：" + string.Join("；", e.Problems));
+            return JayNetworkServer.NodeIntegrityExitCode;
+        }
+        await using var server = built;
         await server.StartAsync();
         server.EasyTierOutput += line => { if (options.Has("verbose")) log(line); };
         var listen = options.GetInt("listen", 11010);
@@ -471,6 +509,7 @@ public static class Program
         if (listen is < 1 or > 65535) throw new ArgumentException("--listen 要是 1–65535 的端口");
         var seeds = (options.Get("seeds") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         var builder = new JayNetworkServerBuilder().UseDataDir(root).UseListenPort(listen).UseSeeds(seeds).UseLog(log);
+        if (options.Has("wipe-dry-run")) builder.WipeDryRun();
 
         if (options.Get("easytier") is { } dir)
         {
@@ -536,10 +575,60 @@ public static class Program
     }
 
     /// <summary>jay-server node：经本机管理接口看运行中的网络节点、封禁、删房间。</summary>
+    /// <summary>The node's directory public key: from hardware.cert once the node is bound (the key itself is sealed), else directory.key.</summary>
+    private static byte[] DirectoryPublicKey(string dataDir)
+    {
+        if (HardwareBinding.IsBound(dataDir))
+        {
+            var certPath = Path.Combine(dataDir, HardwareBinding.CertificateFile);
+            return (File.Exists(certPath) ? HardwareCertificate.Parse(File.ReadAllBytes(certPath)) : null)?.DirectoryKey
+                ?? throw new InvalidDataException("这个节点绑定过硬件，但 hardware.cert 缺失或损坏");
+        }
+        using var key = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(dataDir, "directory.key"));
+        return key.PublicKey;
+    }
+
+    /// <summary>
+    /// jay-server node bind: bind this node to its hardware (docs/security/node-hardware-binding.md). All offline.
+    /// No option: write hardware.request.json. --install &lt;cert&gt;: check and seal the keys. --check: report only.
+    /// </summary>
+    internal static int NodeBind(string root, Options options, TextWriter output, IHardwareSource hardware, ITpmSealer tpm)
+    {
+        if (options.Has("check"))
+        {
+            var factors = hardware.Read();
+            output.WriteLine($"能读到的硬件标识：{(factors.Count == 0 ? "没有" : string.Join("、", factors.Select(f => f.Kind)))}；TPM：{(tpm.Available ? (tpm.BindsBootState ? "有（绑定安全启动状态）" : "有") : "没有")}；安全启动：{RuntimeIntegrity.SecureBootEnabled() switch { true => "开", false => "关", null => "不知道" }}");
+            var problems = RuntimeIntegrity.Instance.Problems(root, false);
+            foreach (var p in problems) output.WriteLine("运行环境问题：" + p);
+            if (!HardwareBinding.IsBound(root)) { output.WriteLine("这个节点还没有绑定硬件。"); return 0; }
+            var cert = HardwareCertificate.Parse(File.Exists(Path.Combine(root, HardwareBinding.CertificateFile)) ? File.ReadAllBytes(Path.Combine(root, HardwareBinding.CertificateFile)) : []);
+            if (cert is null) { output.WriteLine("hardware.cert 缺失或签名不对：节点启动时会删除自己的文件。"); return 2; }
+            var match = cert.Match(factors);
+            output.WriteLine(match.Ok ? $"硬件对得上（{match.Reason}）。" : $"硬件对不上：{match.Reason}。现在启动节点会删除它的文件；换硬件前先重新绑定。");
+            return match.Ok && problems.Count == 0 ? 0 : 2;
+        }
+        if (options.Get("install") is { } certFile)
+        {
+            var sealedFiles = HardwareBinding.Install(root, File.ReadAllBytes(certFile), hardware, tpm, []);
+            output.WriteLine($"已绑定硬件。{string.Join("、", sealedFiles)} 现在只以加密形式存在（{string.Join("、", sealedFiles.Select(f => f + HardwareBinding.SealedSuffix))}），只有这台机器能打开。");
+            output.WriteLine("硬件对不上时节点会删除数据目录里的 Jay 文件；换硬件或迁移虚拟机之前先跑 jay-server node bind --check。");
+            return 0;
+        }
+        var request = HardwareBinding.CreateRequest(root, hardware, tpm);
+        var ids = (System.Text.Json.Nodes.JsonObject)request["f"]!;
+        output.WriteLine($"已写 {Path.Combine(root, HardwareBinding.RequestFile)}：硬件标识 {ids.Count} 项（{string.Join("、", ids.Select(p => p.Key))}），只含加盐后的哈希，没有原始编号。");
+        output.WriteLine(tpm.Available ? "有 TPM：钥匙会封存进 TPM" + (tpm.BindsBootState ? "，并绑定安全启动状态（PCR 7）。" : "。") : "没有 TPM：钥匙只靠硬件标识加密，强度较弱。");
+        output.WriteLine("先把 directory.key 和 login.key 离线备份好（装上证书后它们只以加密形式存在）。");
+        output.WriteLine("然后把请求文件拷到放根钥匙的离线电脑：jay-server network hw-cert --root <根钥匙文件> --request hardware.request.json --out hardware.cert");
+        output.WriteLine("再把 hardware.cert 拷回来：jay-server node bind --install hardware.cert");
+        return 0;
+    }
+
     internal static async Task<int> NodeCommand(string root, Options options, TextWriter output, HttpClient? http = null)
     {
         var sub = options.Positional.FirstOrDefault() ?? "status";
         var rest = options.Positional.Skip(1).ToList();
+        if (sub == "bind") return NodeBind(root, options, output, SystemHardwareSource.Instance, TpmSealers.ForThisMachine());
         using var owned = http is null ? new HttpClient { Timeout = TimeSpan.FromSeconds(10) } : null;
         var client = AdminClient.ForDataDir(http ?? owned!, root, options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
         var pretty = new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -928,7 +1017,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "wipe-dry-run", "check", "secure-boot", "no-tpm"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];

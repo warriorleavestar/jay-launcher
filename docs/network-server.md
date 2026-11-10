@@ -162,6 +162,10 @@ docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-ser
 
 **Windows**：解压后在文件夹里打开终端运行 `jay-server directory ...`；防火墙询问时允许。想开机自动运行，用“任务计划程序”建一个开机任务。
 
+## 把节点绑定到硬件（防止被整盘拷走冒充）
+
+在节点上 `jay-server node bind`（生成只含加盐哈希的 hardware.request.json）→ 拷到放根钥匙的离线电脑 `jay-server network hw-cert --root <根钥匙> --request hardware.request.json --out hardware.cert` → 拷回节点 `jay-server node bind --install hardware.cert`。之后 directory.key、login.key 只以加密形式存在（有 TPM 就封存进 TPM，Linux 上还绑定安全启动状态）。硬件对不上时节点删除数据目录里的 Jay 文件；运行环境被动过（调试器、注入、文件可被别人改、TPM 不解封）时拒绝运行。不需要 root：Linux 上把服务账号加进 tss 组即可（安装脚本会自动加）。换硬件、迁移虚拟机前先 `jay-server node bind --check`。细节和限制见 [security/node-hardware-binding.md](security/node-hardware-binding.md)。
+
 ## 节点能看到什么
 
 - 公开房间的名字、房主名、人数、游戏版本、房主在公共网络里的地址（就是房间列表的内容）。
