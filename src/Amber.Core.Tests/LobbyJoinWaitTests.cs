@@ -23,7 +23,9 @@ public sealed class LobbyJoinWaitTests
     {
         var calls = 0;
         var found = 0;
-        await Wait(() => ++calls < 3 ? [Self, Relay] : [Self, Relay, Host], Nodes, () => found++);
+        // The host shows up on the third poll (~40 ms); the generous timeouts only keep a busy CI runner from failing it.
+        await Wait(() => ++calls < 3 ? [Self, Relay] : [Self, Relay, Host], Nodes, () => found++,
+            relayTimeout: TimeSpan.FromSeconds(10), hostTimeout: TimeSpan.FromSeconds(10));
         Assert.Equal(1, found);
     }
 

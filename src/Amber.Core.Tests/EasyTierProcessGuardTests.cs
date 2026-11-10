@@ -103,7 +103,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         _started.Add(watch);
         Assert.True(await Until(() => Children(watch.Id).Count > 0));
         var core = Children(watch.Id)[0];
-        Assert.NotNull(EasyTierProcessTracker.Track(watch, _dir, EasyTierProcessGuard.TrackedExecutable(info)));
+        Assert.NotNull(EasyTierProcessTracker.Track(watch, _dir, EasyTierProcessGuard.TrackedExecutable(info), Environment.ProcessId, ownerStartTicks: 1));
         EasyTierProcessTracker.Cleanup(_dir, "/opt/not-easytier", EasyTierProcessGuard.WatcherExecutable);
         Assert.True(await Until(() => watch.HasExited && !Alive(core)));
     }
