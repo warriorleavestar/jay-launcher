@@ -222,6 +222,12 @@ public sealed class JayNetworkServer : IAsyncDisposable
     /// </summary>
     public string DirectoryKeyPath => Path.Combine(_b.DataDir, "directory.key");
 
+    /// <summary>
+    /// This node's certificate from the network's root key (directory.cert in the data dir, written by
+    /// <c>jay-server network dir-cert</c>). Sent to Jay in the handshake when present and issued for this node's key.
+    /// </summary>
+    public string DirectoryCertificatePath => Path.Combine(_b.DataDir, "directory.cert");
+
     /// <summary>The directory's public key (base64), once started. Null on a seed-only node.</summary>
     public string? DirectoryKey => Directory?.Identity is { } id ? Convert.ToBase64String(id.PublicKey) : null;
 
@@ -267,6 +273,16 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 NetworkSecret = Profile.Secret,
                 AcceptLegacyClients = !_b.SecureDirectoryOnly,
             };
+            if (File.Exists(DirectoryCertificatePath))
+            {
+                var cert = File.ReadAllBytes(DirectoryCertificatePath);
+                if (DirectoryCertificate.Parse(cert) is { } parsed && parsed.DirectoryKey.AsSpan().SequenceEqual(Directory.Identity!.PublicKey))
+                {
+                    Directory.Certificate = cert;
+                    _b.Log($"目录证书 / directory certificate: root {Convert.ToBase64String(parsed.Root)}, until {parsed.Expires:yyyy-MM-dd}");
+                }
+                else _b.Log("directory.cert 不是这个节点的目录公钥签的，没有使用 / directory.cert doesn't match this node's key; not used");
+            }
             _b.Log("目录公钥 / directory key (dirKeys): " + DirectoryKey);
         }
         if (Login is not null && Bans is { } banList) Login.Blocked = banList.IsAccountBanned;
