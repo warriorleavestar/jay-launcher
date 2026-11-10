@@ -44,7 +44,7 @@ Free code signing for the Windows builds from SignPath Foundation is being set u
 
 The packages include .NET. Jay selects a suitable local Java for each game version and downloads one when Mojang publishes a runtime for that platform. Linux ARM64 needs a compatible 64-bit Java installed through the system.
 
-The Apple silicon build was fully tested on a real Mac (install, launch, play). The Intel Mac and Linux builds pass the automated builds and tests but have not been tried on real hardware, so they are marked experimental. The macOS and Linux builds are currently unsigned. If Gatekeeper blocks the first macOS launch, approve it under System Settings → Privacy & Security. Full-LAN and exit-node modes remain Windows-only; ordinary rooms, direct connections, chat and game-only forwarding work across platforms.
+The Apple silicon build was fully tested on a real Mac (install, launch, play). The Intel Mac and Linux builds pass the automated builds and tests but have not been tried on real hardware, so they are marked experimental. The macOS and Linux builds are currently unsigned. If Gatekeeper blocks the first macOS launch, approve it under System Settings → Privacy & Security. Full-LAN and exit-node modes also work on macOS and Linux (they ask for your administrator password once; Linux needs pkexec, and nftables for using an exit); ordinary rooms, direct connections, chat and game-only forwarding work across platforms.
 
 ### Linux system requirements
 
@@ -195,7 +195,7 @@ The CurseForge API needs a key; see [Configuration](#configuration). Modrinth do
 Switch the download source on the Settings page and try the official source or the BMCLAPI mirror.
 
 **Does it run on macOS or Linux?**
-Yes: Intel and Apple silicon Macs, plus Linux x64 and ARM64. The Apple silicon build is verified on real hardware; Intel Mac and Linux are experimental for now. Full-LAN, exit-node and Extreme encryption modes still depend on Windows system capabilities; the other main features are cross-platform.
+Yes: Intel and Apple silicon Macs, plus Linux x64 and ARM64. The Apple silicon build is verified on real hardware; Intel Mac and Linux are experimental for now. Full-LAN and exit-node modes work on all three (macOS and Linux ask for your administrator password once); Extreme encryption still depends on system capabilities; the other main features are cross-platform.
 
 **What can't it do?**
 Run Forge mods on Fabric / Quilt: there is no reliable compatibility layer, and Jay says so plainly.

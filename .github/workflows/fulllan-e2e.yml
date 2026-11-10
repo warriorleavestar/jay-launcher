@@ -1,0 +1,71 @@
+name: fulllan-e2e
+
+# Mac/Linux 完整局域网 + 经别人上网的无界面端到端检查（tools/FullLanCheck）。
+# 在一台机器上开房主（不建网卡）和加入方（root 守护 + 虚拟网卡），查网卡、互通、广播转发、重启、防漏规则、DNS、清理和 kill -9。
+# 已经是 root 时不弹密码框，所以 pkexec / osascript 密码框这一步只能在真机上测（见 docs/full-lan-mac-linux-testing.md）。
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/Amber.Core/Multiplayer/**'
+      - 'src/Amber.Core/PlatformFeatures.cs'
+      - 'tools/FullLanCheck/**'
+      - '.github/workflows/fulllan-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Linux tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nftables tcpdump
+
+      - name: Build
+        run: dotnet build tools/FullLanCheck -c Release
+
+      # 检查工具自己有看门狗（每一步限时、总共 15 分钟），卡住时打印停在哪一步和现场；这里再兜一层步骤超时，后面的现场步骤还能跑。
+      - name: Run (root)
+        if: runner.os == 'Linux'
+        timeout-minutes: 18
+        run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan"
+
+      # macOS runners kept going silent until the job timed out, losing the whole log. The check is split into three steps so
+      # every finished step keeps its log and the step left "in progress" names the culprit: tunnel up to restart then a hard
+      # stop, the same with the graceful teardown, and the kill -9 check. The exit steps are skipped (--no-exit): the pf
+      # leak-guard rules also cut the runner's own connection. --net-watch tears the session down if the network drops.
+      - name: Run (root, macOS) tunnel, broadcast, restart
+        if: runner.os == 'macOS'
+        timeout-minutes: 8
+        run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan" --no-exit --net-watch --part lan
+
+      - name: Run (root, macOS) graceful stop and cleanup
+        if: runner.os == 'macOS' && !cancelled()
+        timeout-minutes: 8
+        run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan" --no-exit --net-watch --part stop
+
+      - name: Run (root, macOS) kill -9
+        if: runner.os == 'macOS' && !cancelled()
+        timeout-minutes: 8
+        run: sudo -E "$(command -v dotnet)" tools/FullLanCheck/bin/Release/net10.0/FullLanCheck.dll "$RUNNER_TEMP/jay-fulllan" --net-watch --part kill
+
+      - name: Leftovers on failure
+        if: failure()
+        run: |
+          ps aux | grep -E "easytier|amber-et-guard" | grep -v grep || true
+          if [ "$RUNNER_OS" = Linux ]; then ip addr; sudo nft list ruleset; cat /etc/resolv.conf; else ifconfig; sudo pfctl -a com.apple/250.JayExit -s rules; scutil --dns | head -30; fi
