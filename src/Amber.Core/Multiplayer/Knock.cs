@@ -219,6 +219,9 @@ public static partial class KnockProtocol
 public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, byte[] HostPublicKey)
 {
     public bool Approved => Credentials is not null;
+
+    /// <summary>The host's Jay account, when the host sent a certificate for the key it proved in the handshake (only after approving).</summary>
+    public string? HostJayAccount { get; init; }
     public string HostFingerprint => MemberIdentity.FingerprintOf(HostPublicKey);
 }
 
@@ -234,9 +237,13 @@ public static class KnockClient
 
     /// <param name="device">本机的设备指纹（打开了才有）。房主要求时才把设备证明发过去，房主不问就不发。</param>
     /// <param name="account">公共网络的登录凭证（登录过才有）。房主要求时才发。</param>
+    /// <param name="jay">
+    /// This device's Jay account certificate (when the player bound a Jay account). Sent only inside the encrypted handshake,
+    /// after the host proved its key, and only to hosts that ask for it, so the host can recognize the person on any of their devices.
+    /// </param>
     public static async Task<KnockOutcome> KnockAsync(Stream stream, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct = default, TimeSpan? handshakeTimeout = null, TimeSpan? decisionTimeout = null, Public.DeviceFingerprint? device = null,
-        string? account = null, byte[]? expectedHost = null)
+        string? account = null, byte[]? expectedHost = null, Identity.DeviceCertificate? jay = null)
     {
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
         var psk = LobbyKeys.KnockPsk(invite.Token);
@@ -259,6 +266,7 @@ public static class KnockClient
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
                 about["device"] = device.Prove(host, me.PublicKey, KnockProtocol.ReadChallenges(ask)).ToJson();
             if (account is not null && hello["account"]?.GetValue<bool>() == true) about["account"] = account;
+            if (jay is not null && jay.DeviceKey.AsSpan().SequenceEqual(me.PublicKey) && hello["jay"]?.GetValue<bool>() == true) about["jay"] = jay.ToJson();
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(about)), timeout.Token);
         }
         var hostPub = handshake.RemoteStaticPublicKey ?? throw new CryptographicException();
@@ -292,7 +300,7 @@ public static class KnockClient
             using var ack = CancellationTokenSource.CreateLinkedTokenSource(ct);
             ack.CancelAfter(handshakeTimeout ?? HandshakeTimeout);
             await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(new JsonObject { ["ack"] = true })), ack.Token);
-            return new KnockOutcome(credentials, null, hostPub);
+            return new KnockOutcome(credentials, null, hostPub) { HostJayAccount = Identity.DeviceCertificate.VerifiedAccount(reply["jay"], hostPub) };
         }
     }
 }
@@ -526,6 +534,12 @@ public sealed record KnockRequest(string Name, byte[] PublicKey, string Version,
     /// <summary>对方在公共网络上登录的账号（网络要求登录时才有，凭证验过）。</summary>
     public string? Account { get; init; }
 
+    /// <summary>The guest's Jay account (jay1…), when they sent a certificate that the account signed for the key they proved.</summary>
+    public string? JayAccount { get; init; }
+
+    /// <summary>Let in because the host trusts the Jay account, not this device's key (a trusted friend on a new device).</summary>
+    public bool TrustedByAccount { get; init; }
+
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
 }
 
@@ -608,6 +622,12 @@ public sealed class KnockServer : IAsyncDisposable
 
     /// <summary>房主对敲门的人的账号要求（公共网络要求登录时才有；每次敲门时取）。</summary>
     public Func<Public.AccountPolicy?>? AccountPolicy { get; init; }
+
+    /// <summary>Whether the host trusts a Jay account (any device the account certified). Null: trust goes by device key only.</summary>
+    public Func<string, bool>? IsTrustedJayAccount { get; init; }
+
+    /// <summary>The host's own Jay account certificate, sent to a guest only once they are let in.</summary>
+    public Func<Identity.DeviceCertificate?>? JayCertificate { get; init; }
 
     /// <summary>测试用：包一层连接的流（模拟写失败）。</summary>
     internal Func<Stream, Stream>? StreamForTest { get; init; }
@@ -699,6 +719,8 @@ public sealed class KnockServer : IAsyncDisposable
                 var hello = new JsonObject { ["v"] = 1 };
                 if (policy.IsActive) hello["device"] = KnockProtocol.WriteChallenges(policy.Allowed);
                 if (accountPolicy is not null) hello["account"] = true;
+                // Ask for a Jay account certificate; older guests ignore the field.
+                hello["jay"] = true;
                 await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(hello)), timeout.Token);
                 about = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token)));
                 if (about["v"]?.GetValue<int>() != 1) throw new InvalidDataException(L.T("core.mp.knock.badreply"));
@@ -770,10 +792,15 @@ public sealed class KnockServer : IAsyncDisposable
                         return;
                     }
                 }
-                var request = new KnockRequest(name ?? "", (byte[])guestPub.Clone(), version ?? "", _isTrusted(guestPub), invite)
+                var jayAccount = Identity.DeviceCertificate.VerifiedAccount(about["jay"], guestPub);
+                var trustedKey = _isTrusted(guestPub);
+                var trustedAccount = !trustedKey && jayAccount is not null && IsTrustedJayAccount?.Invoke(jayAccount) == true;
+                var request = new KnockRequest(name ?? "", (byte[])guestPub.Clone(), version ?? "", trustedKey || trustedAccount, invite)
                 {
                     DeviceId = deviceOk ? proof!.DeviceId : null,
                     Account = account?.User,
+                    JayAccount = jayAccount,
+                    TrustedByAccount = trustedAccount,
                 };
                 JsonObject reply;
                 MemberEntry? member = null;
@@ -786,6 +813,7 @@ public sealed class KnockServer : IAsyncDisposable
                     var attestation = guestAttests ? _members.Attestation : null;
                     member.Attests = attestation is not null;
                     reply = (_credentials() with { Member = member.Key, Scheme = attestation?.Scheme }).ToJson();
+                    if (JayCertificate?.Invoke() is { } hostCert && hostCert.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["jay"] = hostCert.ToJson();
                 }
                 else reply = Reject("denied");
                 _log?.Invoke(L.F(member is not null ? "core.mp.knock.approved" : "core.mp.knock.rejected", request.Name, request.Fingerprint));

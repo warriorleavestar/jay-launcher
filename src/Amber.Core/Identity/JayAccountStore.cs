@@ -20,6 +20,11 @@ public sealed record JayAccountEntry(string Address, string Label, bool BackedUp
 public sealed class JayAccountStore(string directory)
 {
     public const string FileName = "jay-accounts.json";
+
+    /// <summary>What other people see as this device's name: only the operating system, never the computer or user name.</summary>
+    public static string ThisDeviceName() =>
+        OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : OperatingSystem.IsLinux() ? "Linux"
+        : OperatingSystem.IsAndroid() ? "Android" : OperatingSystem.IsIOS() ? "iOS" : "Jay";
     private readonly Lock _gate = new();
     private readonly List<(JayAccountEntry Entry, string ProtectedSeed)> _items = [];
 

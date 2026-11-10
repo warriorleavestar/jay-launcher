@@ -95,6 +95,7 @@
                   <CheckBox IsChecked="{Binding TrustAfter}" IsVisible="{Binding CanTrustAfter}">
                     <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" />
                   </CheckBox>
+                  <TextBlock x:Name="KnockJayHint" Text="{Binding JayHint}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasJayAccount}" />
                   <WrapPanel ItemSpacing="8" LineSpacing="6">
                     <safety:SafetyButton Classes="knock-deny" Kind="Safe" Content="{l:T multiplayer.invite.deny}"
                                          Command="{Binding $parent[ScrollViewer].((vm:MultiplayerViewModel)DataContext).DenyKnockCommand}" CommandParameter="{Binding}" />
@@ -399,6 +400,9 @@
                   <StackPanel x:Name="PersonDetails" Spacing="6" IsVisible="{Binding HasSelectedPerson}">
                     <TextBlock Classes="caption" Text="{l:T multiplayer.knock.safety_code}" />
                     <SelectableTextBlock x:Name="PersonSafetyCode" Text="{Binding SelectedPerson.Fingerprint}" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" />
+                    <TextBlock Classes="caption" Text="{l:T multiplayer.people.jay}" IsVisible="{Binding SelectedPerson.HasJayAccount}" />
+                    <SelectableTextBlock x:Name="PersonJayAccount" Text="{Binding SelectedPerson.JayAccount}" FontFamily="Consolas,Menlo,monospace" FontSize="12"
+                                         TextWrapping="Wrap" IsVisible="{Binding SelectedPerson.HasJayAccount}" />
                     <WrapPanel ItemSpacing="6" LineSpacing="6">
                       <Button x:Name="PersonChatButton" Classes="small" Content="{l:T multiplayer.people.chat}" Command="{Binding ChatWithCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanPrivate}" />
                       <Button x:Name="PersonTrustButton" Classes="small" Content="{l:T multiplayer.invite.trust}" Command="{Binding TrustPersonCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanTrust}" />

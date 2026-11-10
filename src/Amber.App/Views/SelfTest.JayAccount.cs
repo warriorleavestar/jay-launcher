@@ -1,14 +1,19 @@
 using Amber.App.ViewModels;
 using Amber.Core.Identity;
+using Amber.Core.Localization;
+using Amber.Core.Multiplayer;
+using Amber.Core.Multiplayer.Transport;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 
 namespace Amber.App.Views;
 
 /// <summary>
 /// AMBER_SELFTEST_SCOPE=jay-account: Jay account on the accounts page. Add an offline account → offered a Jay account →
 /// 12 words → backup check (wrong answer refused, right answer creates and binds) → copy address → forget → restore from the
-/// same words gives the same address and binds again; a typo names the word's position. No network.
+/// same words gives the same address and binds again; a typo names the word's position. Then multiplayer (phase 2) with a
+/// stand-in room: the knock certificate, the account on the knock card, trusting the account, and the person details. No network.
 /// </summary>
 internal sealed partial class SelfTest
 {
@@ -77,6 +82,7 @@ internal sealed partial class SelfTest
             await WaitAsync(() => accounts.JayAccountCount == 1, 3) && Dispatcher.UIThread.Invoke(() => accounts.JayAccounts[0].Address) == address
             && Dispatcher.UIThread.Invoke(() => accounts.Accounts.FirstOrDefault(a => a.Name == "JaySelfTest")?.HasJay == true));
         await ShotAsync("Jay账户-已恢复");
+        await JayAccountMultiplayerAsync(address);
 
         // Leave the test data dir as it was: unbind, forget and remove the offline account.
         Dispatcher.UIThread.Invoke(() =>
@@ -85,5 +91,65 @@ internal sealed partial class SelfTest
             if (accounts.Accounts.FirstOrDefault(a => a.Name == "JaySelfTest") is { } item) accounts.RemoveCommand.Execute(item);
         });
         _ = steve;
+    }
+
+    private async Task JayAccountMultiplayerAsync(string? address)
+    {
+        var vm = Page<MultiplayerViewModel>();
+        var cert = Dispatcher.UIThread.Invoke(() => vm.JayCertificate);
+        Check("Jay 账户联机：敲门带的证书是这个账户签给本机联机密钥的",
+            cert is not null && cert.Account == address && Dispatcher.UIThread.Invoke(() => cert.Verify(vm.Identity.PublicKey)), cert?.Account ?? "none");
+
+        main.Shell.Navigate("play");
+        await Task.Delay(400);
+        var page = await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible);
+        if (page is null || address is null)
+        {
+            Check("Jay 账户联机：联机页显示", false);
+            return;
+        }
+        T? Named<T>(string name) where T : Control => page.GetVisualDescendants().OfType<T>().FirstOrDefault(c => c.Name == name);
+        var key = new byte[32];
+        key[0] = 7;
+        Dispatcher.UIThread.Invoke(() => vm.Mode = "host");
+        await Task.Delay(300);
+
+        var book = new InviteBook();
+        var request = new KnockRequest("Casey", key, "Jay 0.8", false, book.Create(1, null, false, TunnelSettings.Default)) { JayAccount = address };
+        var decision = vm.AskApprovalAsync(request, CancellationToken.None);
+        await WaitAsync(() => vm.HasKnocks, 5);
+        var card = Dispatcher.UIThread.Invoke(() => vm.ApprovalCards.FirstOrDefault());
+        Check("Jay 账户联机：敲门卡片写出对方的 Jay 账户",
+            card is not null && card.Facts.Contains(JayAddress.Short(address)), card?.Facts ?? "");
+        Check("Jay 账户联机：卡片说明信任后 TA 的其他设备也能直接进",
+            await WaitAsync(() => Named<TextBlock>("KnockJayHint") is { IsEffectivelyVisible: true } hint && hint.Text == L.T("multiplayer.knock.jay_hint"), 3));
+        await ShotAsync("Jay账户-敲门卡片");
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            card!.TrustAfter = true;
+            vm.ApproveKnockCommand.Execute(card);
+        });
+        Check("Jay 账户联机：批准并信任后，信任列表记下的是账户",
+            await decision && Dispatcher.UIThread.Invoke(() => vm.TrustedPeople.Any(t => t.Member.JayAccount == address && t.Label.Contains(JayAddress.Short(address)))));
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.Members.Add(new MemberItem("Casey", key, true, true) { JayAccount = address });
+            vm.RefreshPeople();
+            vm.SelectedPerson = vm.People.FirstOrDefault(p => p.Name == "Casey");
+        });
+        Check("Jay 账户联机：房间里选中这个人，详情里有完整的 Jay 地址",
+            await WaitAsync(() => Named<SelectableTextBlock>("PersonJayAccount") is { IsEffectivelyVisible: true } text && text.Text == address, 3));
+        await ShotAsync("Jay账户-房间成员");
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            foreach (var item in vm.TrustedPeople.Where(t => t.Member.JayAccount == address).ToList()) vm.RemoveTrustedCommand.Execute(item);
+            vm.Members.Clear();
+            vm.Mode = "";
+        });
+        Check("Jay 账户联机：取消信任时这个账户的设备一起移除", Dispatcher.UIThread.Invoke(() => vm.TrustedPeople.All(t => t.Member.JayAccount != address)));
+        main.CurrentPage = Page<AccountsViewModel>();
+        await Task.Delay(300);
     }
 }
