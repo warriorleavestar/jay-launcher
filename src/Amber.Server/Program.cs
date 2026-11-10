@@ -63,6 +63,7 @@ public static class Program
               --rate-limit 3,6,600            每人同时几个房间、每人每分钟新发布几次、整个目录每分钟几个新房间（默认 3,6,600；--no-rate-limit 关掉）
               --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
               --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
+              --secure-directory-only         只回应验证过目录公钥的请求（目录公钥在数据目录的 directory.key，启动时打印，写进连接串的 dirKeys）
               --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
@@ -82,6 +83,7 @@ public static class Program
           jay-server network sign <网络.json> [--key <钥匙文件>]  签名并打印连接串（也可以用环境变量 JAY_NETWORK_KEY 给钥匙）
           jay-server network check <网络.json> ...             只检查格式（注册表的 PR 检查用）
           jay-server network show <连接串或文件>              显示连接串里的内容和签名
+          jay-server network dir-key [<网络.json>] --dir <节点数据目录>  打印目录公钥（没有就生成 directory.key），给了网络 JSON 就写进 dirKeys
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
 
@@ -114,7 +116,7 @@ public static class Program
                 "run" => await RunAsync(root, options),
                 "relay" => await RelayAsync(options),
                 "directory" => await DirectoryAsync(root, options),
-                "network" => NetworkCommand(options, Console.Out),
+                "network" => NetworkCommand(options, Console.Out, root),
                 "account" => AccountCommand(root, options, Console.Out, ReadPassword),
                 "node" => await NodeCommand(root, options, Console.Out),
                 null => Help(),
@@ -257,9 +259,9 @@ public static class Program
     }
 
     /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
-    internal static int NetworkCommand(Options options, TextWriter output)
+    internal static int NetworkCommand(Options options, TextWriter output, string? root = null)
     {
-        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show");
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show|dir-key");
         var rest = options.Positional.Skip(1).ToList();
         switch (sub)
         {
@@ -350,6 +352,22 @@ public static class Program
                 output.WriteLine("注意：改了配置文件就要重新算哈希、重新签连接串，玩家粘贴新连接串后才生效。");
                 return 0;
             }
+            case "dir-key":
+            {
+                // This node's directory key (made on first use, same file `jay-server directory` uses), optionally pinned in the network JSON.
+                var dataDir = root ?? throw new ArgumentException("要用 --dir 指定节点的数据目录");
+                using var key = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(dataDir, "directory.key"));
+                output.WriteLine($"目录公钥 / directory key：{Convert.ToBase64String(key.PublicKey)}");
+                if (rest.FirstOrDefault() is { } networkFile)
+                {
+                    var (info, added) = NetworkScaffold.AttachDirectoryKey(networkFile, key.PublicKey);
+                    output.WriteLine(added
+                        ? $"已写进 {networkFile} 的 dirKeys（版本号 {info.Seq}）。重新签名：jay-server network sign {networkFile} --key <钥匙文件>"
+                        : $"{networkFile} 的 dirKeys 里已经有这把钥匙");
+                }
+                output.WriteLine("把 directory.key 备份好：换了钥匙的目录在已经粘贴连接串的 Jay 看来就是冒充的。");
+                return 0;
+            }
             case "show":
             {
                 var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
@@ -359,7 +377,7 @@ public static class Program
                 return 0;
             }
             default:
-                throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show");
+                throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show|dir-key");
         }
     }
 
@@ -450,6 +468,11 @@ public static class Program
             var filter = NameFilterGate.FromFile(words);
             builder.AddGate(filter);
             log($"屏蔽词 {filter.Count} 个");
+        }
+        if (options.Has("secure-directory-only"))
+        {
+            if (options.Has("seed-only")) throw new ArgumentException("--seed-only 的节点不跑目录，不能用 --secure-directory-only");
+            builder.RequireDirectoryChannel();
         }
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
         if (options.Has("no-volunteers")) builder.WithoutVolunteers();
@@ -860,7 +883,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "no-volunteers"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];
