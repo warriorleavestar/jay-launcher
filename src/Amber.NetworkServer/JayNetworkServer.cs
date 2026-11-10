@@ -37,6 +37,8 @@ public sealed class JayNetworkServerBuilder
     internal readonly List<IDirectoryObserver> Observers = [];
     internal readonly List<IDirectoryExtension> Extensions = [];
     internal bool BanListOn = true;
+    internal bool VolunteersOn = true;
+    internal Func<string, CancellationToken, Task<bool>>? VolunteerProbe;
     internal RateLimitGate? RateLimit = new();
     internal int? AdminPort = JayNetworkServer.DefaultAdminPort;
     internal Action<string> Log = _ => { };
@@ -133,6 +135,15 @@ public sealed class JayNetworkServerBuilder
     /// <summary>不要封禁名单（默认开着，存在数据目录的 bans.json）。</summary>
     public JayNetworkServerBuilder WithoutBanList() { BanListOn = false; return this; }
 
+    /// <summary>
+    /// Don't list volunteer nodes (players relaying for others). They are on by default unless the network config says
+    /// "volunteers": false.
+    /// </summary>
+    public JayNetworkServerBuilder WithoutVolunteers() { VolunteersOn = false; return this; }
+
+    /// <summary>Replaces the reachability check run before a volunteer is listed (tests, or your own checks).</summary>
+    public JayNetworkServerBuilder UseVolunteerProbe(Func<string, CancellationToken, Task<bool>> probe) { VolunteerProbe = probe; return this; }
+
     /// <summary>本机管理接口的端口（只听 127.0.0.1，默认 47669；0 = 随便挑一个空端口）。</summary>
     public JayNetworkServerBuilder UseAdmin(int port) { AdminPort = port; return this; }
 
@@ -189,6 +200,8 @@ public sealed class JayNetworkServer : IAsyncDisposable
     public PublicNetworkProfile Profile { get; }
     public RoomDirectoryServer? Directory { get; private set; }
     public BanList? Bans { get; }
+    /// <summary>Volunteer nodes this directory lists (null when they are off or this is a seed-only node).</summary>
+    public VolunteerRegistry? Volunteers { get; private set; }
     public DirectoryStats Stats { get; }
     public LoginAuthority? Login { get; }
     /// <summary>用内置账号表时是它（jay-server account 管的那个）。</summary>
@@ -233,6 +246,11 @@ public sealed class JayNetworkServer : IAsyncDisposable
         System.IO.Directory.CreateDirectory(_b.DataDir);
         if (!_b.SeedOnlyMode)
         {
+            if (_b.VolunteersOn && _b.Config?.Policy.Volunteers != false)
+            {
+                Volunteers = new VolunteerRegistry(_b.VolunteerProbe, _b.Clock) { Blocked = Bans is { } b ? b.IsNodeBanned : null };
+                Volunteers.Probed += (url, ok) => _b.Log(ok ? $"Volunteer node listed: {url}" : $"Volunteer node not reachable, not listed: {url}");
+            }
             var gates = new List<IRoomGate>();
             if (Bans is not null) gates.Add(Bans);
             if (_b.Config is { } config) gates.Add(new PolicyGate(config.Policy));
@@ -248,6 +266,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Gates = gates,
                 Observers = observers,
                 Extensions = [.. _b.Extensions],
+                Volunteers = Volunteers,
                 MinClientVersion = _b.Config?.Policy.MinVersion,
                 RequireAccountToPublish = Login is not null && _b.Config?.Login?.Required == true,
                 Identity = DirectoryChannel.LoadOrCreateIdentity(DirectoryKeyPath),
@@ -334,6 +353,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             ["login"] = Login is not null,
             ["directoryKey"] = DirectoryKey,
             ["minVersion"] = _b.Config?.Policy.MinVersion?.ToString(),
+            ["volunteers"] = Volunteers?.Listed().Count,
             ["uptime"] = (long)(Now - _started).TotalSeconds,
         };
     }
@@ -351,6 +371,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
         {
             "host" => d.RemoveHost(ban.Value),
             "account" => d.RemoveAccount(ban.Value),
+            "node" => Volunteers?.Remove(ban.Value) == true ? 1 : 0,
             _ => d.Remove(ban.Value) ? 1 : 0,
         };
     }
