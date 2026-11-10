@@ -3149,5 +3149,14 @@
   "accounts.status.jay_bound": "Linked Jay account {0} to {1}",
   "accounts.status.jay_unbound": "Unlinked the Jay account from {0}",
   "accounts.status.jay_address_copied": "Address copied",
-  "accounts.status.jay_removed": "Forgot Jay account {0} on this computer. The recovery phrase still restores it"
+  "accounts.status.jay_removed": "Forgot Jay account {0} on this computer. The recovery phrase still restores it",
+  "tip.ok": "Got it",
+  "tip.mute": "Don't show tips like this",
+  "tip.mods_toggle": "Click a mod's switch to turn it off for now. No need to delete it.",
+  "tip.first_crash": "Jay guessed why the game crashed. The fix button is right next to it, and you can undo it.",
+  "tip.first_knock": "Check the safety code with them first. Let them in only if it's the same.",
+  "tip.theme_import": "If a theme ever stops Jay from opening, hold Shift while Jay starts.",
+  "tip.narrow_window": "The sidebar folded up. Make the window wider and it opens again.",
+  "tip.reset": "Show all tips again",
+  "tip.reset_done": "All tips will show again."
 }

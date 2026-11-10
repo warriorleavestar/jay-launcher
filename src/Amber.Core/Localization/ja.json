@@ -3074,5 +3074,14 @@
   "accounts.status.jay_bound": "Jay アカウント {0} を {1} と連携しました",
   "accounts.status.jay_unbound": "{0} の Jay アカウント連携を解除しました",
   "accounts.status.jay_address_copied": "アドレスをコピーしました",
-  "accounts.status.jay_removed": "このパソコンから Jay アカウント {0} を削除しました。リカバリーフレーズで復元できます"
+  "accounts.status.jay_removed": "このパソコンから Jay アカウント {0} を削除しました。リカバリーフレーズで復元できます",
+  "tip.ok": "わかった",
+  "tip.mute": "この種類のヒントは出さない",
+  "tip.mods_toggle": "スイッチで MOD を一時的にオフにできます。削除しなくて大丈夫です。",
+  "tip.first_crash": "Jay がクラッシュの原因を推測しました。修正ボタンはすぐ横にあり、元に戻せます。",
+  "tip.first_knock": "まず相手と安全コードを確認し、同じなら入れてあげましょう。",
+  "tip.theme_import": "テーマのせいで Jay が開かなくなったら、起動中に Shift を押し続けてください。",
+  "tip.narrow_window": "サイドバーをたたみました。ウィンドウを広げるとまた開きます。",
+  "tip.reset": "すべてのヒントをもう一度表示",
+  "tip.reset_done": "すべてのヒントがまた表示されます。"
 }

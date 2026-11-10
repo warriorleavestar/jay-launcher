@@ -177,6 +177,7 @@ public partial class MainWindow
         }
         // 图标栏和横排导航：图标在上、短名在下；隐私行只留盾牌加“无遥测”。
         var compactNav = rail || horizontal;
+        if (compactNav) TutorialService.Request(Amber.Core.Tutorial.Tips.NarrowWindow);
         NavList.Classes.Set("rail", compactNav);
         NavList.Classes.Set("tight", tight);
         SidebarHost.Classes.Set("rail", compactNav);
@@ -206,6 +207,7 @@ public partial class MainWindow
         TopBar.Margin = new Thickness(pad - 8, 0, pad, 0);
         SubPageTabs.Margin = new Thickness(pad - 4, 0, pad, 4);
         MovedNotice.Margin = new Thickness(pad, 0, pad, 8);
+        TipBar.Margin = new Thickness(pad, 0, pad, 8);
         RequestBar.Margin = new Thickness(pad, 0, pad, 8);
         // 活动抽屉：紧凑档铺满内容区，其余 400 宽从右边滑出（§5.3）。
         ActivityDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
