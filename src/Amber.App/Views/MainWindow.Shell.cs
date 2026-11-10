@@ -47,17 +47,47 @@ public partial class MainWindow
                 main.Shell.FieldRequested += field => Dispatcher.UIThread.Post(() => RevealField(field), DispatcherPriority.Loaded);
                 main.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.LogDocked)) ApplyLogDock(); };
                 main.LogPopOutRequested += PopOutLog;
-                MovedNotice.IsVisible = _settings is { ShellMovedNoticeSeen: false };
+                // Knocks and incoming files while Jay is in the background: a small topmost window (on by default).
+                Popups = new RequestPopups(this, main.Service.Requests, () => main.Service.Settings.MultiplayerRequestPopup);
+                UpdateMovedNotice();
+                main.Shell.AccountMenu.Done += () => AccountMenuFlyout.Hide();
             }
             ApplyShell();
         };
         SizeChanged += (_, _) => ApplyShell();
-        ContentColumn.SizeChanged += (_, e) => { ApplyContentTier(e.NewSize.Width); ApplyLogDock(); };
+        ContentColumn.SizeChanged += (_, e) =>
+        {
+            ApplyContentTier(e.NewSize.Width);
+            ApplyLogDock();
+            // Short windows (§3.3): the "Jay has a new layout" banner keeps its title and [Got it]; the details are in help.
+            MovedNoticeBody.IsVisible = e.NewSize.Height >= MovedNoticeShortBelow;
+            // Very short windows: the page needs every line; the banner comes back when the window is taller.
+            _movedNoticeTooShort = e.NewSize.Height < MovedNoticeHiddenBelow;
+            UpdateMovedNotice();
+        };
+        AccountMenuFlyout.Opening += (_, _) =>
+        {
+            // Open away from the navigation bar, wherever a theme pack put it.
+            AccountMenuFlyout.Placement = ShellNav switch
+            {
+                "right" => PlacementMode.LeftEdgeAlignedBottom,
+                "top" => PlacementMode.BottomEdgeAlignedRight,
+                "bottom" => PlacementMode.TopEdgeAlignedRight,
+                _ => PlacementMode.RightEdgeAlignedBottom,
+            };
+            (DataContext as MainViewModel)?.Shell.AccountMenu.Refresh();
+        };
         AttachLogDock();
         AddHandler(KeyDownEvent, OnShellKeyDown, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, OnShellPointerPressed, RoutingStrategies.Tunnel);
         ApplyShell();
     }
+
+    /// <summary>The account menu behind the sidebar avatar.</summary>
+    internal Flyout AccountMenuFlyout => (Flyout)AccountButton.Flyout!;
+
+    /// <summary>Topmost request popups (self-check uses it to open one directly).</summary>
+    internal RequestPopups? Popups { get; private set; }
 
     /// <summary>当前导航位置（自检用）。</summary>
     internal string ShellNav { get; private set; } = "left";
@@ -353,6 +383,16 @@ public partial class MainWindow
         if (DataContext is MainViewModel main) main.Activity.Close();
         e.Handled = true;
     }
+
+    /// <summary>Below this content height the moved-notice banner shows only its title.</summary>
+    internal const double MovedNoticeShortBelow = 600;
+
+    /// <summary>Below this content height the moved-notice banner is not shown at all.</summary>
+    internal const double MovedNoticeHiddenBelow = 440;
+
+    private bool _movedNoticeTooShort;
+
+    private void UpdateMovedNotice() => MovedNotice.IsVisible = _settings is { ShellMovedNoticeSeen: false } && !_movedNoticeTooShort;
 
     private void MovedNotice_Close(object? sender, RoutedEventArgs e)
     {

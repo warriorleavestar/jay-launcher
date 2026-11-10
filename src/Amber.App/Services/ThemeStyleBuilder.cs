@@ -44,20 +44,97 @@ internal static class ThemeStyleBuilder
                 Button.BorderThicknessProperty, Button.CornerRadiusProperty, Button.PaddingProperty, Button.FontWeightProperty);
             else Box(styles, presenter, pack, p, ContentPresenter.BackgroundProperty, ContentPresenter.ForegroundProperty, ContentPresenter.BorderBrushProperty,
                 ContentPresenter.BorderThicknessProperty, ContentPresenter.CornerRadiusProperty, ContentPresenter.PaddingProperty, null);
-            if (p.Shadow is { } shadow) Set(styles, presenter, ContentPresenter.BoxShadowProperty, BoxShadows.Parse(shadow == "none" ? "0 0 0 0 #00000000" : shadow));
+            if ((p.Glow ?? p.Shadow) is { } shadow) Set(styles, presenter, ContentPresenter.BoxShadowProperty, BoxShadows.Parse(shadow == "none" ? "0 0 0 0 #00000000" : shadow));
             return;
         }
         switch (component)
         {
             case "card": BorderLike(styles, x => x.OfType<Border>().Class("card"), pack, p); break;
-            case "pill":
-                BorderLike(styles, x => x.OfType<Border>().Class("pill"), pack, p);
-                if (Brush(p.Foreground, pack) is { } pillText) Set(styles, x => x.OfType<Border>().Class("pill").Child().OfType<TextBlock>(), TextBlock.ForegroundProperty, pillText);
+            case "card.cover":
+                BorderLike(styles, x => state == ":hover" ? x.OfType<Border>().Class("cover").Class(":pointerover") : x.OfType<Border>().Class("cover"), pack, p);
                 break;
-            case "callout": BorderLike(styles, x => x.OfType<Border>().Class("callout"), pack, p); break;
+            case "hero": BorderLike(styles, x => x.OfType<Border>().Class("hero"), pack, p); break;
+            // Small labels: the theme's foreground goes on the label inside.
+            case "chip":
+                Labeled(styles, x =>
+                {
+                    var s = x.OfType<Border>().Class("chip");
+                    return state switch { ":hover" => s.Class(":pointerover"), ":selected" => s.Class("selected"), _ => s };
+                }, pack, p);
+                break;
+            case "badge": Labeled(styles, x => x.OfType<Border>().Class("badge"), pack, p); break;
+            case "tag":
+                Labeled(styles, x => x.OfType<Border>().Class("loader"), pack, p);
+                Labeled(styles, x => x.OfType<Border>().Class("fact-tag"), pack, p);
+                break;
+            case "pill": Labeled(styles, x => x.OfType<Border>().Class("pill"), pack, p); break;
+            // Banners: never the request bar's rows (their look is part of the safety rules).
+            case "banner":
+            case "callout":
+                BorderLike(styles, x => x.OfType<Border>().Class("banner").Not(y => y.Class("request")), pack, p);
+                BorderLike(styles, x => x.OfType<Border>().Class("callout"), pack, p);
+                break;
             case "sidebar": BorderLike(styles, x => x.OfType<Border>().Class("sidebar"), pack, p); break;
+            case "topbar":
+                if (Value(p.Background, pack) is { } topBg) Set(styles, x => x.OfType<Grid>().Name("TopBar"), Panel.BackgroundProperty, topBg);
+                break;
+            case "tab":
+            {
+                Selector item(Selector? x) => x.OfType<ListBox>().Class("subtabs").Descendant().OfType<ListBoxItem>();
+                Selector presenter(Selector? x)
+                {
+                    var s = item(x);
+                    s = state switch { ":hover" => s.Class(":pointerover"), ":selected" => s.Class(":selected"), _ => s };
+                    return s.Template().OfType<ContentPresenter>().Name("PART_ContentPresenter");
+                }
+                Box(styles, presenter, pack, p, ContentPresenter.BackgroundProperty, ContentPresenter.ForegroundProperty, ContentPresenter.BorderBrushProperty,
+                    ContentPresenter.BorderThicknessProperty, ContentPresenter.CornerRadiusProperty, ContentPresenter.PaddingProperty, null);
+                if (p.FontWeight is { } w) Set(styles, x => state == ":selected" ? item(x).Class(":selected") : item(x), ListBoxItem.FontWeightProperty, Weight(w));
+                break;
+            }
+            case "switch":
+                if (state == ":checked" && Value(p.Background, pack) is { } on)
+                    Set(styles, x => x.OfType<ToggleSwitch>().Class(":checked").Template().OfType<Border>().Name("SwitchKnobBounds"), Border.BackgroundProperty, on);
+                break;
+            case "checkbox":
+                Box(styles, x => state switch
+                {
+                    ":hover" => x.OfType<CheckBox>().Class(":pointerover"),
+                    ":checked" => x.OfType<CheckBox>().Class(":checked"),
+                    _ => x.OfType<CheckBox>(),
+                }, pack, p, null, CheckBox.ForegroundProperty, null, null, null, null, CheckBox.FontWeightProperty);
+                break;
+            case "progress":
+                if (Value(p.Track ?? p.Background, pack) is { } track) Set(styles, x => x.OfType<ProgressBar>(), ProgressBar.BackgroundProperty, track);
+                if (Value(p.Fill ?? p.Foreground, pack) is { } fill) Set(styles, x => x.OfType<ProgressBar>(), ProgressBar.ForegroundProperty, fill);
+                if (p.Radius is { } pr) Set(styles, x => x.OfType<ProgressBar>(), ProgressBar.CornerRadiusProperty, new CornerRadius(pr));
+                break;
+            case "menu":
+                foreach (var pick in new Pick[] { x => x.OfType<ContextMenu>(), x => x.OfType<MenuFlyoutPresenter>() })
+                    Box(styles, pick, pack, p, Avalonia.Controls.Primitives.TemplatedControl.BackgroundProperty, Avalonia.Controls.Primitives.TemplatedControl.ForegroundProperty, Avalonia.Controls.Primitives.TemplatedControl.BorderBrushProperty,
+                        Avalonia.Controls.Primitives.TemplatedControl.BorderThicknessProperty, Avalonia.Controls.Primitives.TemplatedControl.CornerRadiusProperty, Avalonia.Controls.Primitives.TemplatedControl.PaddingProperty, null);
+                break;
+            case "tooltip":
+                Box(styles, x => x.OfType<ToolTip>(), pack, p, ToolTip.BackgroundProperty, ToolTip.ForegroundProperty, ToolTip.BorderBrushProperty,
+                    ToolTip.BorderThicknessProperty, ToolTip.CornerRadiusProperty, ToolTip.PaddingProperty, null);
+                break;
+            case "rail.item":
+            {
+                // The icon rail: the same list as the full sidebar, in the narrow state.
+                Selector item(Selector? x) => x.OfType<Border>().Class("sidebar").Class("rail").Descendant().OfType<ListBox>().Class("nav").Descendant().OfType<ListBoxItem>();
+                Selector presenter(Selector? x)
+                {
+                    var s = item(x);
+                    s = state switch { ":hover" => s.Class(":pointerover"), ":selected" => s.Class(":selected"), _ => s };
+                    return s.Template().OfType<ContentPresenter>().Name("PART_ContentPresenter");
+                }
+                Box(styles, presenter, pack, p, ContentPresenter.BackgroundProperty, ContentPresenter.ForegroundProperty, null,
+                    null, ContentPresenter.CornerRadiusProperty, ContentPresenter.PaddingProperty, null);
+                break;
+            }
             case "nav.item":
             {
+                if (Value(p.Indicator, pack) is { } indicator) Set(styles, x => x.OfType<Border>().Class("nav-indicator"), Border.BackgroundProperty, indicator);
                 Selector item(Selector? x) => x.OfType<ListBox>().Class("nav").Descendant().OfType<ListBoxItem>();
                 Selector presenter(Selector? x)
                 {
@@ -102,6 +179,14 @@ internal static class ThemeStyleBuilder
         }
     }
 
+    /// <summary>A small labelled box (chip, badge, tag): box properties on the border, the foreground on its label.</summary>
+    private static void Labeled(Styles styles, Pick pick, ThemePack pack, StyleProps p)
+    {
+        BorderLike(styles, pick, pack, p);
+        if (Value(p.Foreground, pack) is { } text) Set(styles, x => pick(x).Child().OfType<TextBlock>(), TextBlock.ForegroundProperty, text);
+        if (p.FontWeight is { } w) Set(styles, x => pick(x).Child().OfType<TextBlock>(), TextBlock.FontWeightProperty, Weight(w));
+    }
+
     private static void BorderLike(Styles styles, Pick pick, ThemePack pack, StyleProps p)
     {
         Box(styles, pick, pack, p, Border.BackgroundProperty, null, Border.BorderBrushProperty, Border.BorderThicknessProperty, Border.CornerRadiusProperty, Border.PaddingProperty, null);
@@ -135,7 +220,10 @@ internal static class ThemeStyleBuilder
         styles.Add(style);
     }
 
-    private static FontWeight Weight(string w) => w switch
+    /// <summary>Chinese and Japanese fonts only really have normal and bold: in-between weights go to the nearer one (§10.3).</summary>
+    private static FontWeight Weight(string w) => Amber.Core.Localization.L.Language is "zh-Hans" or "zh-Hant" or "ja" or "lzh"
+        ? (w is "semibold" or "bold" ? FontWeight.Bold : FontWeight.Normal)
+        : w switch
     {
         "medium" => FontWeight.Medium,
         "semibold" => FontWeight.SemiBold,

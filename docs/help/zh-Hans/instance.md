@@ -2,7 +2,7 @@
 id: instance
 category: play
 routes: library/*
-related: library, logs, discover
+related: library, logs, discover, mods, packs, crash, backups
 ---
 
 # 实例详情

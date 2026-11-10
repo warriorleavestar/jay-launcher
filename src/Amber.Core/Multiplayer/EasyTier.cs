@@ -293,10 +293,26 @@ public sealed record EasyTierOptions(
     public IReadOnlyList<string> DirectUnderlayAddresses { get; init; } = [];
     /// <summary>当前有 IPv6 直连承载；现有全局出口门禁只支持明确识别的 IPv4 承载。</summary>
     public bool DirectUnderlayUsesIpv6 { get; init; }
+
+    /// <summary>
+    /// Carry this member's forwarded TCP streams (game, chat, tunnel) over EasyTier's QUIC proxy instead of its
+    /// user-space TCP stack, whose small window caps one connection at roughly 15 KB per round trip without a TUN device.
+    /// On by default since the 2026-11-10 real-device test (Korea to New Zealand: about 0.05 → 0.88 MB/s); setting
+    /// <see cref="EasyTierArgs.QuicProxyVariable"/> to "0" turns it off. The other side needs nothing (EasyTier accepts
+    /// QUIC-proxied streams by default) and the port whitelist still applies.
+    /// </summary>
+    public bool QuicProxy { get; init; } = EasyTierArgs.QuicProxyRequested;
 }
 
 public static class EasyTierArgs
 {
+    /// <summary>Developer switch for the QUIC proxy: "0" turns it off (it is on by default).</summary>
+    public const string QuicProxyVariable = "AMBER_ET_QUIC";
+
+    public static bool QuicProxyRequested => QuicProxyFrom(System.Environment.GetEnvironmentVariable(QuicProxyVariable));
+
+    internal static bool QuicProxyFrom(string? value) => value?.Trim() != "0";
+
     /// <summary>房主固定用这个虚拟地址，加入方用同网段的随机地址。</summary>
     public const string HostIp = "10.233.144.1";
     public const string Subnet = "10.233.144.";
@@ -344,6 +360,8 @@ public static class EasyTierArgs
         // 完整局域网模式下转发本机游戏发出的 UDP 广播，很多游戏靠广播找局域网房间（EasyTier 的这个功能只在 Windows 上、要管理员权限，正好这个模式已经有；
         // Mac/Linux 上由 root 守护自己转发）。
         else args.AddRange(DeviceNameArgs(o));
+        // Only useful without a TUN device; with one the kernel's TCP stack is used anyway.
+        if (!o.Tun && o.QuicProxy) args.Add("--enable-quic-proxy");
         // 出口节点：两边都要用户明确打开。允许别人经自己上网的一方加 --enable-exit-node；
         // 要经别人上网的一方把所有流量导进虚拟网卡，所以必须是完整局域网模式。
         if (o.AllowExit) args.Add("--enable-exit-node");

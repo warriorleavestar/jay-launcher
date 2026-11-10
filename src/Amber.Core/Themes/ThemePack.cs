@@ -17,6 +17,25 @@ public sealed class ThemePack
     public string? Author { get; init; }
     public string Version { get; init; } = "1.0.0";
 
+    /// <summary>The pack's own format (theme.json "format"; missing = 1). Format 1 packs are upgraded on read (official §10.8).</summary>
+    public int Format { get; init; } = ThemePackReader.FormatVersion;
+
+    /// <summary>Oldest Jay the author says the pack needs (theme.json "minJay"), or null.</summary>
+    public string? MinJay { get; init; }
+
+    /// <summary>Read from format 1 and upgraded in memory (the file itself is not changed).</summary>
+    public bool Upgraded => Format < 2;
+
+    /// <summary>What the upgrade kept, renamed or dropped (shown on the theme card, copyable for the author).</summary>
+    public List<ThemeProblem> Migration { get; } = [];
+
+    /// <summary>Animation lengths in milliseconds (tokens.json "motion"), key = Jay resource name (MotionFast…).</summary>
+    public Dictionary<string, double> Durations { get; } = [];
+
+    /// <summary>Hero area: cover / blur / flat, and the scrim (at least 0.85).</summary>
+    public string? HeroMode { get; init; }
+    public double? HeroScrim { get; init; }
+
     /// <summary>both（深浅色都有）/ dark / light（只有一种，强制用这一种）。</summary>
     public string Variants { get; init; } = "both";
 
@@ -79,7 +98,10 @@ public static partial class ThemePackReader
     public const int MaxImageSide = 4096;
 
     /// <summary>当前主题格式版本。包里写的比这个大，说明是给更新的 Jay 做的：能读的照常读，并提示。</summary>
-    public const int FormatVersion = 1;
+    public const int FormatVersion = 2;
+
+    /// <summary>This Jay's version, for theme.json "minJay". Set by the app at start; tests may change it.</summary>
+    public static Version JayVersion { get; set; } = typeof(ThemePackReader).Assembly.GetName().Version ?? new Version(0, 0);
 
     /// <summary>颜色 token：和 Themes/Tokens.axaml 的名字一一对应。</summary>
     public static readonly string[] ColorKeys =
@@ -103,6 +125,8 @@ public static partial class ThemePackReader
         ["Space0"] = (0, 16), ["Space7"] = (0, 160), ["Space8"] = (0, 192),
         ["Space1"] = (0, 32), ["Space2"] = (0, 48), ["Space3"] = (0, 64),
         ["Space4"] = (0, 80), ["Space5"] = (0, 96), ["Space6"] = (0, 128),
+        // Controls may only get taller than Jay's defaults (hit targets); the start button stays at least 40 high.
+        ["ControlHeightSm"] = (28, 48), ["ControlHeight"] = (36, 56), ["ControlHeightLg"] = (44, 72), ["PlayButtonHeight"] = (40, 80),
     };
 
     public static readonly Dictionary<string, (double Min, double Max)> RadiusKeys = new()
@@ -220,8 +244,12 @@ public static partial class ThemePackReader
         if (SafetyWords.Contains(name)) throw new ThemePackException("reserved_words", "name");
         if (SafetyWords.Contains(Str(m, "author"))) throw new ThemePackException("reserved_words", "author");
         var problems = new List<ThemeProblem>();
-        if (m.TryGetProperty("format", out var fmt) && fmt.TryGetInt32(out var format) && format > FormatVersion)
-            problems.Add(new("newer_format", $"{format}"));
+        // No "format" at all: the pack was written for format 1 (format 2 packs always say so).
+        var format = m.TryGetProperty("format", out var fmt) && fmt.TryGetInt32(out var f) ? Math.Max(1, f) : 1;
+        if (format > FormatVersion) problems.Add(new("newer_format", $"{format}"));
+        var minJay = Str(m, "minJay") is { } mj ? Clip(mj, 32) : null;
+        if (minJay is not null && ThemeFormat.NeedsNewerJay(minJay, JayVersion)) problems.Add(new("needs_newer_jay", minJay));
+        var migration = new List<ThemeProblem>();
 
         // tokens.json 先读成中间结果，再组装 ThemePack（ThemePack 的部分属性是 init）。
         var tokensBytes = open("tokens.json");
@@ -268,6 +296,21 @@ public static partial class ThemePackReader
             }
         }
 
+        string? heroMode = null;
+        double? heroScrim = null;
+        if (has("hero", out var hero) && hero.ValueKind == JsonValueKind.Object)
+        {
+            if (Str(hero, "mode") is { } hm)
+            {
+                if (hm is "cover" or "blur" or "flat") heroMode = hm; else problems.Add(new("bad_value", "hero.mode"));
+            }
+            if (hero.TryGetProperty("scrim", out var hs) && hs.ValueKind == JsonValueKind.Number && hs.TryGetDouble(out var scrim) && double.IsFinite(scrim))
+            {
+                heroScrim = Math.Clamp(scrim, ThemeFormat.MinHeroScrim, 1);
+                if (heroScrim != scrim) problems.Add(new("value_clamped", $"hero.scrim {scrim.ToString(CultureInfo.InvariantCulture)}"));
+            }
+        }
+
         var pack = new ThemePack
         {
             Id = id,
@@ -278,8 +321,13 @@ public static partial class ThemePackReader
             BackgroundImage = background,
             BackgroundOpacity = backgroundOpacity,
             MonoFont = mono,
+            Format = format,
+            MinJay = minJay,
+            HeroMode = heroMode,
+            HeroScrim = heroScrim,
         };
         pack.Problems.AddRange(problems);
+        pack.Migration.AddRange(migration);
         foreach (var (k, val) in uiFonts) pack.UiFonts[k] = val;
 
         if (has("seed", out var seed) && seed.ValueKind == JsonValueKind.Object)
@@ -290,11 +338,11 @@ public static partial class ThemePackReader
             {
                 switch (p.Name)
                 {
-                    case "dark": ReadColors(p.Value, pack.DarkColors, pack.Problems, "colors.dark"); break;
-                    case "light": ReadColors(p.Value, pack.LightColors, pack.Problems, "colors.light"); break;
+                    case "dark": ReadColors(p.Value, pack.DarkColors, pack, "colors.dark"); break;
+                    case "light": ReadColors(p.Value, pack.LightColors, pack, "colors.light"); break;
                     case "both":
-                        ReadColors(p.Value, pack.DarkColors, pack.Problems, "colors.both");
-                        ReadColors(p.Value, pack.LightColors, pack.Problems, "colors.both");
+                        ReadColors(p.Value, pack.DarkColors, pack, "colors.both");
+                        ReadColors(p.Value, pack.LightColors, pack, "colors.both");
                         break;
                     default: pack.Problems.Add(new("unknown_key", "colors." + p.Name)); break;
                 }
@@ -305,7 +353,13 @@ public static partial class ThemePackReader
         if (variants == "light") Copy(pack.LightColors, pack.DarkColors);
         if (has("sizes", out var sizes)) ReadNumbers(sizes, NumberKeys, pack.Numbers, pack.Problems, "sizes");
         if (has("radius", out var radius)) ReadNumbers(radius, RadiusKeys, pack.Radii, pack.Problems, "radius");
-
+        if (has("motion", out var motion)) ThemeFormat.ReadMotion(pack, motion);
+        if (has("illustration", out var illo) && illo.ValueKind == JsonValueKind.Object)
+        {
+            ReadColors(illo, pack.DarkColors, pack, "illustration");
+            ReadColors(illo, pack.LightColors, pack, "illustration");
+        }
+        if (pack.Format < 2) ThemeFormat.UpgradeTokens(pack);
 
         ThemeContrast.Enforce(pack);
         // 组件样式在配色修正之后读：组件里引用的 token 要按修正后的颜色算对比度。
@@ -362,18 +416,26 @@ public static partial class ThemePackReader
     {
         uint? accent = Str(seed, "accent") is { } a && TryColor(a, out var ac) ? ac : null;
         uint? background = Str(seed, "background") is { } b && TryColor(b, out var bc) ? bc : null;
-        if (accent is null && background is null) { pack.Problems.Add(new("bad_seed", "seed")); return; }
+        // Format 2: "play" is the start button's color; a one-color theme (accent only) puts its accent on the start button too.
+        uint? play = Str(seed, "play") is { } pl && TryColor(pl, out var pc) ? pc : accent;
+        if (accent is null && background is null && play is null) { pack.Problems.Add(new("bad_seed", "seed")); return; }
         foreach (var (dark, target) in new[] { (true, pack.DarkColors), (false, pack.LightColors) })
+        {
             foreach (var (k, val) in ThemeColor.Derive(accent, background, dark)) target[k] = val;
+            if (play is { } p0) foreach (var (k, val) in ThemeColor.DerivePlay(p0, target.GetValueOrDefault("PageBg", (dark ? ThemeDefaults.Dark : ThemeDefaults.Light)["PageBg"]), dark)) target[k] = val;
+        }
     }
 
-    private static void ReadColors(JsonElement obj, Dictionary<string, uint> into, List<ThemeProblem> problems, string where)
+    private static void ReadColors(JsonElement obj, Dictionary<string, uint> into, ThemePack pack, string where)
     {
+        var problems = pack.Problems;
         if (obj.ValueKind != JsonValueKind.Object) { problems.Add(new("bad_value", where)); return; }
         foreach (var p in obj.EnumerateObject())
         {
-            if (!ColorKeys.Contains(p.Name)) { problems.Add(new("unknown_key", $"{where}.{p.Name}")); continue; }
-            if (p.Value.ValueKind == JsonValueKind.String && TryColor(p.Value.GetString()!, out var c)) into[p.Name] = c;
+            // Format 2 names (Base, Text, Frame…) are the same colors as Jay's resource names (PageBg, TextPrimary, SidebarBg…).
+            var key = ThemeFormat.ColorAliases.GetValueOrDefault(p.Name, p.Name);
+            if (!ColorKeys.Contains(key)) { problems.Add(new("unknown_key", $"{where}.{p.Name}")); continue; }
+            if (p.Value.ValueKind == JsonValueKind.String && TryColor(p.Value.GetString()!, out var c)) into[key] = c;
             else problems.Add(new("bad_color", $"{where}.{p.Name}"));
         }
     }
@@ -383,11 +445,12 @@ public static partial class ThemePackReader
         if (obj.ValueKind != JsonValueKind.Object) { problems.Add(new("bad_value", where)); return; }
         foreach (var p in obj.EnumerateObject())
         {
-            if (!allowed.TryGetValue(p.Name, out var range)) { problems.Add(new("unknown_key", $"{where}.{p.Name}")); continue; }
-            if (!p.Value.TryGetDouble(out var value) || double.IsNaN(value)) { problems.Add(new("bad_value", $"{where}.{p.Name}")); continue; }
+            var key = ThemeFormat.NumberAliases.GetValueOrDefault(p.Name, p.Name);
+            if (!allowed.TryGetValue(key, out var range)) { problems.Add(new("unknown_key", $"{where}.{p.Name}")); continue; }
+            if (p.Value.ValueKind != JsonValueKind.Number || !p.Value.TryGetDouble(out var value) || !double.IsFinite(value)) { problems.Add(new("bad_value", $"{where}.{p.Name}")); continue; }
             var clamped = Math.Clamp(value, range.Min, range.Max);
             if (clamped != value) problems.Add(new("value_clamped", $"{where}.{p.Name} {value.ToString(CultureInfo.InvariantCulture)}"));
-            into[p.Name] = clamped;
+            into[key] = clamped;
         }
     }
 

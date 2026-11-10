@@ -46,6 +46,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `src/Amber.Core/Layout/` | UI-independent layout rules: width tiers, density, motion, window sizing. | `LayoutTiers.cs` |
 | `src/Amber.Core/Localization/` | UI strings (`en.json` is the source, then one JSON per language), error text, number formatting. | `L.cs`, `en.json` |
 | `src/Amber.Core/Multiplayer/` | EasyTier-based rooms: invites, knock, lobby, members, chat, private messages and files, direct link and hole punching, exit (VPN-like) mode helpers. | `Invite.cs`, `Knock.cs`, `Lobby.cs`, `EasyTier.cs`, `DirectLink.cs` |
+| `src/Amber.Core/Multiplayer/Contacts/` | Contacts and sealed mail: contact codes (JAYC1), the four-emoji check, mail through the room directories, mailed invites and receipts. | `ContactCode.cs`, `ContactBook.cs`, `SealedMail.cs`, `ContactPost.cs` |
 | `src/Amber.Core/Multiplayer/Gate/` | Jay server: gate daemon, invites, relays, MC login sniffing, the MC server host. | `GateServer.cs`, `JayServerRunner.cs`, `JayServers.cs` |
 | `src/Amber.Core/Multiplayer/Public/` | Public networks: connection strings, room directory protocol, announcer, accounts and login factors, device fingerprints. | `PublicNetwork.cs`, `RoomDirectory.cs`, `NetworkString.cs` |
 | `src/Amber.Core/Multiplayer/Transport/` | Crypto and tunnels: Noise, ML-KEM-768, secure record stream, device attestation, security policy, SOCKS5 and game-only exit rules. | `Noise.cs`, `SecureStream.cs`, `SecurityPolicy.cs`, `Tunnel.cs` |
@@ -67,6 +68,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `JAY2D-`, `JAY2R-` | Direct link offer / reply | `Multiplayer/DirectLink.cs` |
 | `AMB-` | Legacy room code | `Multiplayer/RoomCode.cs` |
 | `JAYS1-` | Jay server invite | `Multiplayer/Gate/GateInvite.cs` |
+| `JAYC1-` | Contact code (identity public key) | `Multiplayer/Contacts/ContactCode.cs` |
 | `JAYR1-` | Relay node code | `Multiplayer/Gate/GateRelayCode.cs` |
 | `JAYNET1-` | Public network connection string | `Multiplayer/Public/NetworkString.cs` |
 | `JAYF1-` | Device fingerprint | `Multiplayer/Public/DeviceFingerprint.cs` |

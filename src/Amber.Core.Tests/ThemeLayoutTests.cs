@@ -24,6 +24,15 @@ public class ThemeLayoutTests
         (n.Region is { } r ? [r] : Enumerable.Empty<string>()).Concat(n.Children.SelectMany(RegionsIn));
 
     [Fact]
+    public void MultiplayerTabsAndRoomHeaderCannotBeLeftOut()
+    {
+        // The room header carries the knock panel: a theme that forgets it still gets it.
+        var (_, required) = ThemeLayout.Regions["multiplayer"];
+        Assert.Contains("multiplayer.tabs", required);
+        Assert.Contains("multiplayer.room", required);
+    }
+
+    [Fact]
     public void ReadsShell()
     {
         var pack = Read(("layout/shell.json", """
