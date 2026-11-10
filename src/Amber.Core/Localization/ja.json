@@ -2706,5 +2706,11 @@
   "multiplayer.public.sort.name": "名前順",
   "multiplayer.public.sort.newest": "最近更新された順",
   "multiplayer.public.empty": "いま公開されているルームはありません。",
-  "multiplayer.public.no_match": "条件に合うルームがありません。キーワードや絞り込みを変えてみてください。"
+  "multiplayer.public.no_match": "条件に合うルームがありません。キーワードや絞り込みを変えてみてください。",
+  "multiplayer.hostserver.wizard.address": "アドレス",
+  "multiplayer.hostserver.wizard.prepare": "サーバーを準備",
+  "multiplayer.hostserver.wizard.start": "起動",
+  "multiplayer.hostserver.wizard.invite": "招待",
+  "multiplayer.hostserver.running": "● 実行中",
+  "multiplayer.jayserver.empty": "まだ Jay サーバーに参加していません。フレンドからサーバー招待コードをもらったら上に貼ってください。"
 }

@@ -2628,5 +2628,11 @@
   "multiplayer.public.sort.name": "依名",
   "multiplayer.public.sort.newest": "新者先",
   "multiplayer.public.empty": "今無公室。",
-  "multiplayer.public.no_match": "無合者。易其辭或去其篩。"
+  "multiplayer.public.no_match": "無合者。易其辭或去其篩。",
+  "multiplayer.hostserver.wizard.address": "址",
+  "multiplayer.hostserver.wizard.prepare": "備服器",
+  "multiplayer.hostserver.wizard.start": "啟",
+  "multiplayer.hostserver.wizard.invite": "請",
+  "multiplayer.hostserver.running": "● 運行",
+  "multiplayer.jayserver.empty": "未嘗赴 Jay 服器。友予汝服器之帖，則貼於上。"
 }

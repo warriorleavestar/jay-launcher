@@ -181,6 +181,8 @@ internal sealed partial class SelfTest
         if (!server.IsInitialized)
         {
             Check("开服：未初始化时显示填地址这一步", HasText("multiplayer.hostserver.step_address") && !HasText("multiplayer.hostserver.step_setup"));
+            Check("开服：步骤条写第一步（地址 ●）、四步都在", server.WizardStep == 1 && server.WizardSteps.Count == 4 && server.WizardSteps[0].IsCurrent
+                && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == server.WizardSteps[0].Label));
             Dispatcher.UIThread.Invoke(() => server.PublicHost = "http://bad host");
             Check("开服：地址填错时提示", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, server.InitCommand)))
                 && server.Status == L.T("multiplayer.hostserver.bad_host") && !server.IsInitialized);
@@ -193,6 +195,10 @@ internal sealed partial class SelfTest
         }
         else Check("开服：测试配置里已经初始化过，跳过第一步检查", true);
         vm.ShowMyServer = false;
+        vm.ShowJayServerList = true;
+        await Task.Delay(200);
+        Check("Jay 服务器：没加入过时写怎么做", vm.JayServers.Servers.Count > 0
+            || page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "NoJayServersText" && t.IsEffectivelyVisible));
         vm.ShowTabCommand.Execute("play");
 
         // "Connection problems?" drawer (§6.18): from the lobby footer, Esc closes, Ctrl+Shift+D toggles, 560 wide (full width when compact).
