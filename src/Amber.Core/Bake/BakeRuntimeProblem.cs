@@ -101,7 +101,8 @@ public sealed partial record BakeRuntimeProblem(string Code, string Severity, st
         "fabric_api_bridge_version" => L.F("core.bake.runtime.bridge_version", Mod, Detail),
         "fabric_init_not_run" => L.F("core.bake.runtime.init_not_run", Mod),
         "launch_rebaked" => L.F("core.bake.runtime.rebaked", Detail.Length > 0 ? Detail : "?"),
-        _ when Raw is not null => BakeService.DescribeProblem(Raw),
+        // Dependency codes, and unknown codes that are errors (read like unsupported_feature); unknown notes keep the loader's words.
+        _ when Raw is not null && (IsError || BakeService.IsKnownProblem(Code)) => BakeService.DescribeProblem(Raw),
         _ => Mod.Length > 0 ? $"{Mod}: {(Message.Length > 0 ? Message : Code)}" : (Message.Length > 0 ? Message : Code),
     };
 

@@ -2669,6 +2669,7 @@
   "core.bake.problem.nested_unresolved": "同梱された Mod を解決できません",
   "core.bake.problem.unsupported_feature": "汎用ローダーがまだ対応していない機能を使っています",
   "core.bake.problem.forge_api_missing": "汎用ローダーが NeoForge 上ではまだ提供できない Forge の機能を使っているため、読み込みませんでした",
+  "core.bake.problem.quilt_api_missing": "汎用ローダーがまだ提供できない Quilt の機能を使っているため、読み込みませんでした",
   "core.bake.problem.mixin_incompatible": "Mixin の一部が無効化されました",
   "core.bake.problem.dependency": "{0} {1} が必要（{2}）",
   "core.bake.problem.found": "現在 {0}",

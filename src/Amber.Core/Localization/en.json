@@ -2728,6 +2728,7 @@
   "core.bake.problem.nested_unresolved": "a mod bundled inside it cannot be resolved",
   "core.bake.problem.unsupported_feature": "uses something the universal loader does not support yet",
   "core.bake.problem.forge_api_missing": "uses Forge features the universal loader cannot provide on NeoForge yet, so it was not loaded",
+  "core.bake.problem.quilt_api_missing": "uses Quilt features the universal loader cannot provide yet, so it was not loaded",
   "core.bake.problem.mixin_incompatible": "one of its Mixins was switched off",
   "core.bake.problem.dependency": "needs {0} {1} ({2})",
   "core.bake.problem.found": "found {0}",

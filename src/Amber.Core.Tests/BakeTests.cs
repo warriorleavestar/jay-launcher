@@ -5,6 +5,7 @@ using Amber.Core.Bake;
 using Amber.Core.Content;
 using Amber.Core.Game;
 using Amber.Core.Launch;
+using Amber.Core.Localization;
 using Amber.Core.Net;
 
 namespace Amber.Core.Tests;
@@ -573,9 +574,39 @@ public sealed class BakeTests : IDisposable
         Assert.StartsWith("sodium: ", text);
         Assert.Contains("fabric-api", text);
         Assert.Contains(">=0.100", text);
-        // Unknown codes keep the loader's own message.
-        var other = BakeService.ParseLine("""{"type":"problem","severity":"warning","code":"something_new","file":"x.jar","message":"loader says so"}""")!;
-        Assert.Equal("x.jar: loader says so", BakeService.DescribeProblem(other));
+        // A code newer than this Jay reads like unsupported_feature, with the mod's name (the interface asks for this).
+        var other = BakeService.ParseLine("""{"type":"problem","severity":"error","code":"something_new","modId":"newmod","file":"x.jar","message":"loader says so"}""")!;
+        Assert.Equal("newmod: " + L.T("core.bake.problem.unsupported_feature"), BakeService.DescribeProblem(other));
+        var noId = BakeService.ParseLine("""{"type":"problem","severity":"error","code":"something_new","file":"x.jar","message":"loader says so"}""")!;
+        Assert.Equal("x.jar: " + L.T("core.bake.problem.unsupported_feature"), BakeService.DescribeProblem(noId));
+        // A problem without a code keeps the loader's own message.
+        var bare = BakeService.ParseLine("""{"type":"problem","severity":"error","file":"x.jar","message":"loader says so"}""")!;
+        Assert.Equal("x.jar: loader says so", BakeService.DescribeProblem(bare));
+    }
+
+    [Theory]
+    [InlineData("forge_api_missing")]
+    [InlineData("quilt_api_missing")]
+    public void LoaderMatrixRefusalsHaveTheirOwnText(string code)
+    {
+        Assert.True(BakeService.IsKnownProblem(code));
+        var problem = BakeService.ParseLine($$"""{"type":"problem","severity":"error","code":"{{code}}","modId":"somemod","file":"s.jar","message":"needs net.example.Api"}""")!;
+        var text = BakeService.DescribeProblem(problem);
+        Assert.Equal("somemod: " + L.T("core.bake.problem." + code), text);
+        Assert.NotEqual(L.T("core.bake.problem.unsupported_feature"), L.T("core.bake.problem." + code));
+        // The same code arriving while the game runs reads the same way.
+        var runtime = BakeRuntimeProblem.Parse(BakeRuntimeProblem.Prefix + problem.ToJsonString())!;
+        Assert.Equal(text, runtime.Describe());
+        Assert.True(runtime.IsError);
+    }
+
+    [Fact]
+    public void UnknownRuntimeCodesReadLikeUnsupportedFeatureOnlyWhenTheyAreErrors()
+    {
+        var error = BakeRuntimeProblem.Parse(BakeRuntimeProblem.Prefix + """{"type":"problem","schema":"amber-ul/runtime-problem@1","code":"brand_new","severity":"error","modId":"m","message":"x"}""")!;
+        Assert.Equal("m: " + L.T("core.bake.problem.unsupported_feature"), error.Describe());
+        var note = BakeRuntimeProblem.Parse(BakeRuntimeProblem.Prefix + """{"type":"problem","schema":"amber-ul/runtime-problem@1","code":"brand_new","severity":"info","modId":"m","message":"just so you know"}""")!;
+        Assert.Equal("m: just so you know", note.Describe());
     }
 
     [Fact]

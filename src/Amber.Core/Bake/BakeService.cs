@@ -689,7 +689,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
 
     /// <summary>
     /// Problem codes Jay explains in its own words (the loader's message is English and stays in the log).
-    /// Unknown codes fall back to the loader's message.
+    /// Codes added to the interface later than this Jay are explained like <c>unsupported_feature</c> (see <see cref="DescribeProblem"/>).
     /// </summary>
     private static string? ProblemKey(string code) => code switch
     {
@@ -702,16 +702,24 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         "nested_unresolved" => "core.bake.problem.nested_unresolved",
         "unsupported_feature" => "core.bake.problem.unsupported_feature",
         "forge_api_missing" => "core.bake.problem.forge_api_missing",
+        "quilt_api_missing" => "core.bake.problem.quilt_api_missing",
         "mixin_incompatible" => "core.bake.problem.mixin_incompatible",
         _ => null,
     };
 
+    /// <summary>Whether Jay has its own text for this problem code.</summary>
+    public static bool IsKnownProblem(string? code) => code is not null && ProblemKey(code) is not null;
+
+    /// <summary>
+    /// "mod: localized explanation". An unknown code (the loader is newer than this Jay) reads like
+    /// <c>unsupported_feature</c>, as the interface asks; the loader's English message stays in the log.
+    /// </summary>
     public static string DescribeProblem(JsonObject problem)
     {
         var mod = Str(problem, "modId") ?? Str(problem, "file") ?? "";
         var code = Str(problem, "code");
         var message = Str(problem, "message") ?? code ?? "";
-        if (code is not null && ProblemKey(code) is { } key)
+        if (code is { Length: > 0 } && (ProblemKey(code) ?? ProblemKey("unsupported_feature")) is { } key)
         {
             var dependency = problem["dependency"] as JsonObject;
             var depId = dependency is null ? null : Str(dependency, "id");

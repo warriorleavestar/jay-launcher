@@ -2669,6 +2669,7 @@
   "core.bake.problem.nested_unresolved": "內嵌的模組無法解析",
   "core.bake.problem.unsupported_feature": "用到了通用載入器還不支援的功能",
   "core.bake.problem.forge_api_missing": "用到了通用載入器在 NeoForge 上還提供不了的 Forge 功能，沒有載入",
+  "core.bake.problem.quilt_api_missing": "用到了通用載入器還提供不了的 Quilt 功能，沒有載入",
   "core.bake.problem.mixin_incompatible": "有 Mixin 被關掉了",
   "core.bake.problem.dependency": "需要 {0} {1}（{2}）",
   "core.bake.problem.found": "現有 {0}",
