@@ -1,5 +1,9 @@
 using System.Collections.ObjectModel;
+using Amber.App.Services;
+using Amber.Core.Content;
+using Amber.Core.GameLibrary;
 using Amber.Core.Localization;
+using Amber.Core.Net;
 using Amber.Core.Multiplayer;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -44,7 +48,7 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>The comparison, once the host's list has arrived.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ModCheckTitle), nameof(ModMissingText), nameof(ModDifferentText), nameof(ModExtraText),
+    [NotifyPropertyChangedFor(nameof(ModSyncSummary), nameof(ModCheckTitle), nameof(ModMissingText), nameof(ModDifferentText), nameof(ModExtraText),
         nameof(HasModMissing), nameof(HasModDifferent), nameof(HasModExtra))]
     public partial ModDiff? ModDifference { get; set; }
 
@@ -179,6 +183,131 @@ public sealed partial class MultiplayerViewModel
 
     [RelayCommand]
     private void ToggleModDetails() => ModDetailsOpen = !ModDetailsOpen;
+
+    // ---- one-click sync ----
+
+    /// <summary>A sync is running (the card shows its progress instead of the buttons).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModCheckButtonsShown))]
+    public partial bool ModSyncing { get; set; }
+
+    [ObservableProperty] public partial string ModSyncText { get; set; } = "";
+
+    public bool ModCheckButtonsShown => !ModSyncing;
+
+    /// <summary>“Change my &lt;instance&gt; directly”.</summary>
+    public string SyncIntoMineText => L.F("multiplayer.modcheck.into_mine", ModCheckInstance);
+
+    partial void OnModCheckInstanceChanged(string value) => OnPropertyChanged(nameof(SyncIntoMineText));
+
+    /// <summary>The summary under the buttons: how many from public sites, how many from the host.</summary>
+    public string ModSyncSummary => ModDifference is { } diff
+        ? L.P("multiplayer.modcheck.sync_summary", diff.Missing.Count + diff.Different.Count, diff.Missing.Count + diff.Different.Count)
+        : "";
+
+    /// <summary>Self-check: where an instance's mods are, and a runner without network.</summary>
+    internal Func<string, string>? TestModsDirOf { get; set; }
+
+    internal Func<PrivateMessenger?, ModSyncRunner>? TestRunner { get; set; }
+
+    private CancellationTokenSource? _syncCts;
+
+    /// <summary>
+    /// “Sync and join”: copy my instance (default) or change it directly, then fetch what is missing or different. Public
+    /// files come from Modrinth (by SHA-1), the rest from the host over the room's encrypted channel; each file is checked
+    /// against the host's list. Afterwards the mods are compared again, and the synced instance is the one to play.
+    /// </summary>
+    [RelayCommand]
+    private async Task SyncModsAsync()
+    {
+        if (ModSyncing || ModDifference is not { } diff || ModCheckInstance is not { Length: > 0 } source || _hostMods is not { } hostMods) return;
+        var messenger = _messenger;
+        if (messenger is null && TestRunner is null) return;
+        ModSyncing = true;
+        _syncCts = new CancellationTokenSource();
+        var ct = _syncCts.Token;
+        var intoNew = SyncIntoNewInstance;
+        var ctx = _service.Context;
+        var task = _service.Tasks.Track("modsync", L.F("multiplayer.modcheck.task", source), () => { try { _syncCts?.Cancel(); } catch (ObjectDisposedException) { } });
+        var target = source;
+        try
+        {
+            if (intoNew)
+            {
+                target = NewInstanceNames.Unique(L.F("multiplayer.modcheck.new_instance", HostName), _service.InstalledVersions());
+                ModSyncText = L.F("multiplayer.modcheck.copying", source, target);
+                if (TestModsDirOf is { } testDirs)
+                {
+                    var from = testDirs(source);
+                    var to = testDirs(target);
+                    await Task.Run(() => CopyFolder(from, to), ct);
+                }
+                else
+                {
+                    var isolated = !_service.UsesSharedDir(source);
+                    await Task.Run(() => InstanceCopier.Copy(ctx.Directory, source, target, includeSaves: false, ct), ct);
+                    if (isolated) _service.ForceIsolated(target);
+                    _service.NotifyInstalledChanged();
+                }
+            }
+            var modsDir = TestModsDirOf?.Invoke(target) ?? _service.GetInstance(target).ModsDir;
+            var runner = TestRunner?.Invoke(messenger) ?? new ModSyncRunner
+            {
+                FindPublic = async (sha1s, token) => (await _service.Modrinth.IdentifyBySha1Async(sha1s, token))
+                    .Where(p => !string.IsNullOrWhiteSpace(p.Value.Url)).ToDictionary(p => p.Key, p => p.Value.Url),
+                Download = (url, path, token) => _service.Downloader.DownloadAllAsync([new DownloadItem(url, path)], null, token),
+                FromHost = (sha1, token) => messenger!.RequestModFileAsync(HostFingerprint, sha1, token),
+                Recycle = path => TrashService.MoveToTrash(path, ctx.Directory.Root),
+            };
+            var progress = new Progress<ModSyncProgress>(p =>
+            {
+                ModSyncText = p.Current.Length > 0 ? L.F("multiplayer.modcheck.syncing", p.Done + 1, p.Total, p.Current) : "";
+                task.Report(p.Total == 0 ? null : (double)p.Done / p.Total, ModSyncText);
+            });
+            var result = await runner.RunAsync(diff, modsDir, intoNew, progress, ct);
+            if (result.Succeeded) task.Succeed(L.F("multiplayer.modcheck.synced", target));
+            else task.Fail(L.P("multiplayer.modcheck.sync_failed", result.Failed.Count, result.Failed.Count, Names(result.Failed.Select(m => m.DisplayName))));
+            if (Instances.Contains(target)) TargetInstance = target;
+            ModCheckInstance = target;
+            var mine = await Task.Run(() => ModManifest.Read(modsDir), CancellationToken.None);
+            await ShowModCheckAsync(new ModListReply(ModListAnswer.Sent, hostMods), mine);
+            ModCheckInstance = target;
+            SetStatus(result.Succeeded
+                ? StatusMessage.Success("multiplayer.modcheck.synced", target)
+                : StatusMessage.Warning("multiplayer.modcheck.sync_failed", result.Failed.Count, Names(result.Failed.Select(m => m.DisplayName))));
+        }
+        catch (OperationCanceledException)
+        {
+            task.Cancelled();
+            SetStatus(StatusMessage.Warning("common.cancelled"));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or HttpRequestException or System.Text.Json.JsonException or InvalidOperationException)
+        {
+            task.Fail(ErrorText.Describe(e));
+            SetStatus(StatusMessage.Failure("multiplayer.modcheck.sync_error", e, ErrorText.Of(e)));
+        }
+        finally
+        {
+            ModSyncing = false;
+            ModSyncText = "";
+            _syncCts?.Dispose();
+            _syncCts = null;
+        }
+    }
+
+    [RelayCommand]
+    private void CancelModSync()
+    {
+        try { _syncCts?.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
+
+    private static void CopyFolder(string from, string to)
+    {
+        Directory.CreateDirectory(to);
+        if (!Directory.Exists(from)) return;
+        foreach (var file in Directory.EnumerateFiles(from)) File.Copy(file, Path.Combine(to, Path.GetFileName(file)), overwrite: true);
+    }
 
     /// <summary>“Never mind, just join”: the card goes; the game's last-session panel will name the mod difference first if it crashes.</summary>
     [RelayCommand]

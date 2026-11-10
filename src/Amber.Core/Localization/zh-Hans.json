@@ -2739,5 +2739,17 @@
   "multiplayer.room.mod_sync": "模组同步",
   "multiplayer.room.mod_sync_allow": "允许加入的人从我这里同步模组（他们会看到我的模组清单；不在公开网站上的模组文件经房间加密发给他们）",
   "instance.lastrun.mods_differ": "上次和 {0} 联机时模组不一样",
-  "instance.lastrun.mods_differ_advice": "进房间时选了“不管了，直接进”。再加入时点【一键同步】，或者请房主把整合包发给你。"
+  "instance.lastrun.mods_differ_advice": "进房间时选了“不管了，直接进”。再加入时点【一键同步】，或者请房主把整合包发给你。",
+  "multiplayer.modcheck.sync_to": "同步到：",
+  "multiplayer.modcheck.into_new": "新实例（你的原实例不动）",
+  "multiplayer.modcheck.into_mine": "直接改 {0}（换下来的进最近删除）",
+  "multiplayer.modcheck.sync": "一键同步",
+  "multiplayer.modcheck.sync_summary": "要装 {0} 个：Modrinth 上有的从那里下，其余请房主经房间加密发过来。每个文件都按房主清单里的哈希核对。",
+  "multiplayer.modcheck.new_instance": "{0} 的房间",
+  "multiplayer.modcheck.task": "同步模组：{0}",
+  "multiplayer.modcheck.copying": "正在把 {0} 复制成 {1}……",
+  "multiplayer.modcheck.syncing": "第 {0}/{1} 个：{2}",
+  "multiplayer.modcheck.synced": "模组同步好了，用 {0} 进入。",
+  "multiplayer.modcheck.sync_failed": "有 {0} 个没拿到：{1}。可以再点一次同步，或者请房主发给你。",
+  "multiplayer.modcheck.sync_error": "同步没完成：{0}"
 }
