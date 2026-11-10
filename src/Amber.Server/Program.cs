@@ -82,6 +82,9 @@ public static class Program
           jay-server network check <网络.json> ...             只检查格式（注册表的 PR 检查用）
           jay-server network show <连接串或文件>              显示连接串里的内容和签名
           jay-server network dir-key [<网络.json>] --dir <节点数据目录>  打印目录公钥（没有就生成 directory.key），给了网络 JSON 就写进 dirKeys
+          jay-server network root-key --out <根钥匙文件>     生成目录根钥匙（离线保管，不放服务器、不进仓库），打印公钥（写进 dirRoots）
+          jay-server network dir-cert --root <根钥匙文件> --dir <节点数据目录> --network <EasyTier 网络名> [--days 365]
+              用根钥匙给这个节点的目录公钥签证书，写到节点数据目录的 directory.cert（在离线电脑上签，再把证书拷过去）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
 
@@ -348,6 +351,34 @@ public static class Program
                 }
                 else output.WriteLine($"写进网络 JSON：\"config\": {{ \"url\": \"https://<地址>\", \"sha256\": \"{sha}\" }}");
                 output.WriteLine("注意：改了配置文件就要重新算哈希、重新签连接串，玩家粘贴新连接串后才生效。");
+                return 0;
+            }
+            case "root-key":
+            {
+                var path = options.Get("out") ?? throw new ArgumentException("要用 --out 指定根钥匙文件");
+                if (File.Exists(path)) throw new IOException($"{path} 已经存在，不覆盖（换钥匙请换个文件名）");
+                var signer = NetworkSigner.Generate(out var seed);
+                var write = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+                if (!OperatingSystem.IsWindows()) write.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                using (var file = new StreamWriter(path, System.Text.Encoding.ASCII, write)) file.Write(Convert.ToBase64String(seed) + "\n");
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(seed);
+                output.WriteLine($"根私钥已存到 {path}：离线保管（U 盘、纸），不要放在服务器、CI、网盘或仓库里");
+                output.WriteLine($"根公钥（写进网络 JSON 的 dirRoots）：{Convert.ToBase64String(signer.PublicKey)}");
+                return 0;
+            }
+            case "dir-cert":
+            {
+                var rootFile = options.Get("root") ?? throw new ArgumentException("要用 --root 指定根钥匙文件");
+                var dataDir = root ?? throw new ArgumentException("要用 --dir 指定节点的数据目录");
+                var networkName = options.Get("network") ?? throw new ArgumentException("要用 --network 指定 EasyTier 网络名（Jay 公共网络是 " + PublicNetworkProfile.JayNetworkName + "）");
+                var days = int.Parse(options.Get("days") ?? "365", System.Globalization.CultureInfo.InvariantCulture);
+                if (days is < 1 or > 3650) throw new ArgumentException("--days 要在 1 到 3650 之间");
+                using var key = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(dataDir, "directory.key"));
+                var expires = DateTimeOffset.UtcNow.AddDays(days);
+                var cert = DirectoryCertificate.Issue(NetworkSigner.FromSeed(File.ReadAllText(rootFile)), key.PublicKey, networkName, expires);
+                var target = Path.Combine(dataDir, "directory.cert");
+                File.WriteAllBytes(target, cert);
+                output.WriteLine($"已写 {target}（到 {expires:yyyy-MM-dd} 有效）。证书不是秘密，可以随节点数据目录一起备份。");
                 return 0;
             }
             case "dir-key":

@@ -15,6 +15,11 @@ namespace Amber.Core.Multiplayer.Public;
 /// withdraw 撤下；list 看公开列表；lookup 按大厅名找房主（拿着邀请码的人用它找到隐藏房间）；mail 给房主捎一句话（直连房间的回复码）；
 /// find 按设备指纹码找房间（房主打开了“可以用指纹码找到这个房间”时，发布时带上指纹密钥，目录拿它认码）。
 /// 目录服务只存这些，不经手任何钥匙；房主 90 秒没续期就从列表里消失。
+/// <para>
+/// post / fetch / drop are mailboxes for sealed mail between identities (<see cref="Contacts.SealedMail"/>): contact
+/// requests and room invites that never touch a chat platform. The directory keeps opaque blobs under a daily mailbox id
+/// for <see cref="MailTtl"/>; it can't read them, can't tell who sent them, and only the recipient can delete one early.
+/// </para>
 /// </summary>
 public static class RoomDirectoryProtocol
 {
@@ -22,6 +27,11 @@ public static class RoomDirectoryProtocol
     public const int MaxLookupKeys = 4;
     public const int MaxMailLength = 4096;
     public const int MaxMailPerRoom = 16;
+    /// <summary>Sealed mail kept per mailbox; more is refused with "full" until the recipient picks some up or it expires.</summary>
+    public const int MaxMailPerBox = 32;
+    /// <summary>Mailboxes asked for in one fetch (yesterday's, today's and tomorrow's).</summary>
+    public const int MaxFetchBoxes = 3;
+    public static readonly TimeSpan MailTtl = TimeSpan.FromHours(48);
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan RenewEvery = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
@@ -82,6 +92,11 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         public string? Account;
     }
 
+    private sealed record SealedItem(string Blob, string DropHash, DateTimeOffset Expires);
+
+    /// <summary>All mailboxes together hold at most this many items (about 32 MB of blobs at the largest size).</summary>
+    public const int MaxSealedMail = 8000;
+
     private readonly TcpListener _listener;
     private readonly Func<DateTimeOffset> _now;
     private readonly Action<string>? _log;
@@ -92,6 +107,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     private readonly Dictionary<string, string> _search = new(StringComparer.Ordinal);
     /// <summary>撤下过的房间和撤下时的序号（之后拿旧签名重新发布的不认）。只留最近的一些。</summary>
     private readonly Dictionary<string, long> _withdrawn = new(StringComparer.Ordinal);
+    /// <summary>Mailbox id → sealed mail waiting there.</summary>
+    private readonly Dictionary<string, List<SealedItem>> _mailboxes = new(StringComparer.Ordinal);
+    private int _sealedCount;
     private readonly SemaphoreSlim _slots = new(MaxConcurrent, MaxConcurrent);
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _accept;
@@ -118,6 +136,12 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>The network's EasyTier secret, for <see cref="DirectoryChannel"/>'s psk.</summary>
     public string NetworkSecret { get; set; } = "";
+
+    /// <summary>
+    /// This directory's certificate from the network's root key (<see cref="DirectoryCertificate"/>), sent in the
+    /// handshake so Jay can accept a key that isn't pinned in the connection string. Null: none.
+    /// </summary>
+    public byte[]? Certificate { get; set; }
 
     /// <summary>
     /// Whether unauthenticated (legacy JSON line) requests are still answered. True by default so Jay versions without
@@ -197,7 +221,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 return;
             }
             if (Identity is null) return;
-            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity, NetworkSecret, deadline.Token) is not { } secure) return;
+            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
             await secure.Reply(Handle(secure.Request), deadline.Token);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
@@ -219,6 +243,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "lookup" => Lookup(request),
                 "mail" => Mail(request),
                 "find" => Find(request),
+                "post" => Post(request),
+                "fetch" => Fetch(request),
+                "drop" => Drop(request),
                 "login" when Login is { } login => LoginRequest(login, request),
                 _ when DirectoryExtensions.IsValidOp(op) && Extensions.FirstOrDefault(x => x.Op == op) is { } extension => Extend(extension, request),
                 _ => Error("op"),
@@ -492,6 +519,74 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
+    private static bool IsHex(string? text, int length) => text is not null && text.Length == length && text.All(char.IsAsciiHexDigit);
+
+    private JsonObject Post(JsonObject request)
+    {
+        var box = request["box"]?.GetValue<string>()?.ToLowerInvariant();
+        var blob = request["blob"]?.GetValue<string>();
+        var drop = request["drop"]?.GetValue<string>()?.ToLowerInvariant();
+        if (!IsHex(box, 32) || !IsHex(drop, 64) || blob is null || blob.Length > (Contacts.SealedMail.MaxBlob + 2) / 3 * 4) return Error("bad");
+        try { if (Convert.FromBase64String(blob).Length is 0 or > Contacts.SealedMail.MaxBlob) return Error("bad"); }
+        catch (FormatException) { return Error("bad"); }
+        lock (_gate)
+        {
+            PruneMail();
+            if (!_mailboxes.TryGetValue(box!, out var items))
+            {
+                if (_sealedCount >= MaxSealedMail) return Error("full");
+                _mailboxes[box!] = items = [];
+            }
+            if (items.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
+            if (items.Count >= RoomDirectoryProtocol.MaxMailPerBox || _sealedCount >= MaxSealedMail) return Error("full");
+            items.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl));
+            _sealedCount++;
+            return new JsonObject { ["ok"] = true };
+        }
+    }
+
+    private JsonObject Fetch(JsonObject request)
+    {
+        var boxes = (request["boxes"] as JsonArray ?? []).Select(b => b?.GetValue<string>()?.ToLowerInvariant()).Where(b => IsHex(b, 32))
+            .Distinct().Take(RoomDirectoryProtocol.MaxFetchBoxes).ToList();
+        lock (_gate)
+        {
+            PruneMail();
+            var found = new JsonArray();
+            foreach (var box in boxes)
+                if (_mailboxes.TryGetValue(box!, out var items))
+                    foreach (var item in items) found.Add((JsonNode)new JsonObject { ["box"] = box, ["blob"] = item.Blob });
+            return new JsonObject { ["ok"] = true, ["items"] = found };
+        }
+    }
+
+    private JsonObject Drop(JsonObject request)
+    {
+        var box = request["box"]?.GetValue<string>()?.ToLowerInvariant();
+        var token = request["token"]?.GetValue<string>();
+        if (!IsHex(box, 32) || !IsHex(token, Contacts.MailMessage.TokenLength * 2)) return Error("bad");
+        var hash = Contacts.SealedMail.DropHash(Convert.FromHexString(token!));
+        lock (_gate)
+        {
+            if (_mailboxes.TryGetValue(box!, out var items))
+            {
+                _sealedCount -= items.RemoveAll(i => i.DropHash == hash);
+                if (items.Count == 0) _mailboxes.Remove(box!);
+            }
+            return new JsonObject { ["ok"] = true };
+        }
+    }
+
+    private void PruneMail()
+    {
+        var now = _now();
+        foreach (var (box, items) in _mailboxes.ToList())
+        {
+            _sealedCount -= items.RemoveAll(i => i.Expires <= now);
+            if (items.Count == 0) _mailboxes.Remove(box);
+        }
+    }
+
     private void Prune()
     {
         var now = _now();
@@ -549,18 +644,50 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// </summary>
     public IReadOnlyList<byte[]> PinnedKeys { get; init; } = network.Profile?.DirectoryKeys ?? [];
 
+    /// <summary>Root keys that certify directory keys (<see cref="PublicNetworkProfile.DirectoryRoots"/>). Same rule as pinned keys.</summary>
+    public IReadOnlyList<byte[]> RootKeys { get; init; } = network.Profile?.DirectoryRoots ?? [];
+
+    /// <summary>
+    /// Where to remember directory keys of networks that pin nothing (trust on first use). Null: such networks use the
+    /// legacy protocol as before.
+    /// </summary>
+    public DirectoryKeyMemory? KeyMemory { get; init; }
+
     /// <summary>The network's EasyTier secret, for the channel's psk. Defaults to the network's.</summary>
     public string NetworkSecret { get; init; } = network.Profile?.Secret ?? "";
 
+    private DirectoryTrust Trust => new()
+    {
+        Network = network.Profile?.NetworkName ?? "",
+        Pinned = PinnedKeys,
+        Roots = RootKeys,
+        Memory = KeyMemory,
+    };
+
     private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct)
+    {
+        var trust = Trust;
+        request["jay"] = Version;
+        // Pinned keys, roots, or a key already remembered for this address: authenticated only.
+        if (trust.IsStrict || trust.Remembers(ip)) return await CallOnceAsync(ip, request, trust, ct);
+        if (trust.Memory is not null)
+        {
+            // First contact with a network that pins nothing: try the authenticated channel and remember the key; a
+            // directory too old for it closes the connection, and only then does Jay fall back to the legacy protocol.
+            try { return await CallOnceAsync(ip, request, trust, ct); }
+            catch (Exception e) when (e is EndOfStreamException or InvalidDataException && !trust.Remembers(ip)) { }
+        }
+        return await CallOnceAsync(ip, request, null, ct);
+    }
+
+    private async Task<JsonObject> CallOnceAsync(string ip, JsonObject request, DirectoryTrust? trust, CancellationToken ct)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
         try
         {
             await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
-            request["jay"] = Version;
-            if (PinnedKeys.Count > 0) return await DirectoryChannel.CallAsync(stream, PinnedKeys, NetworkSecret, request, deadline.Token);
+            if (trust is not null) return await DirectoryChannel.CallAsync(stream, trust, ip, NetworkSecret, request, deadline.Token);
             await RoomDirectoryProtocol.WriteLineAsync(stream, request, deadline.Token);
             return await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token);
         }
@@ -705,6 +832,38 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         var reply = await FirstAsync(request, r => r["error"]?.GetValue<string>() != "op", ct);
         return NetworkLoginClient.Read(reply, me, login, network, DateTimeOffset.UtcNow);
     }
+
+    /// <summary>
+    /// Leaves sealed mail in a mailbox at every directory that takes it (so one directory that drops it can't make it
+    /// disappear). Throws when none took it.
+    /// </summary>
+    public async Task PostMailAsync(string box, byte[] blob, string dropHash, CancellationToken ct) =>
+        NeedOne(await FanOutAsync(new JsonObject { ["op"] = "post", ["box"] = box, ["blob"] = Convert.ToBase64String(blob), ["drop"] = dropHash }, ct));
+
+    /// <summary>Everything waiting in these mailboxes at any directory, each blob once.</summary>
+    public async Task<IReadOnlyList<(string Box, byte[] Blob)>> FetchMailAsync(IReadOnlyList<string> boxes, CancellationToken ct)
+    {
+        var replies = NeedOne(await FanOutAsync(new JsonObject { ["op"] = "fetch", ["boxes"] = new JsonArray([.. boxes.Select(b => (JsonNode)JsonValue.Create(b))]) }, ct));
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<(string, byte[])>();
+        foreach (var item in replies.SelectMany(r => (r["items"] as JsonArray ?? []).OfType<JsonObject>()))
+        {
+            var box = item["box"]?.GetValue<string>();
+            var blob = item["blob"]?.GetValue<string>();
+            if (box is null || blob is null || !boxes.Contains(box) || !seen.Add(blob)) continue;
+            try
+            {
+                var bytes = Convert.FromBase64String(blob);
+                if (bytes.Length <= Contacts.SealedMail.MaxBlob) result.Add((box, bytes));
+            }
+            catch (FormatException) { }
+        }
+        return result;
+    }
+
+    /// <summary>Deletes mail this Jay has read, at every directory (best effort: it expires anyway).</summary>
+    public async Task DropMailAsync(string box, byte[] token, CancellationToken ct) =>
+        await FanOutAsync(new JsonObject { ["op"] = "drop", ["box"] = box, ["token"] = Convert.ToHexStringLower(token) }, ct);
 
     /// <summary>给直连房间的房主捎话：交给第一个肯收的目录（房主续期时会从每个目录取一遍）。</summary>
     public async Task MailAsync(string id, string text, CancellationToken ct) =>

@@ -32,6 +32,9 @@ public static partial class NetworkString
     /// </summary>
     public const int MaxDirectoryKeys = 8;
 
+    /// <summary>At most this many directory root keys ("dirRoots"): the current one and a few for rotation.</summary>
+    public const int MaxDirectoryRoots = 4;
+
     /// <summary>
     /// Jay 注册表的签名公钥（base64）。可以有多把（换钥匙时新旧并存一段时间）。
     /// 还没生成注册表钥匙时为空：这时所有连接串都按“未审核”处理，要用户确认。
@@ -103,6 +106,8 @@ public static partial class NetworkString
             return L.T("core.mp.network.bad_config");
         if (info.DirectoryKeys is { } dirKeys && (dirKeys.Count is 0 or > MaxDirectoryKeys || dirKeys.Any(k => k.Length != DirectoryChannel.KeyLength)))
             return L.T("core.mp.network.bad_dir_keys");
+        if (info.DirectoryRoots is { } roots && (roots.Count is 0 or > MaxDirectoryRoots || roots.Any(k => k.Length != 32)))
+            return L.T("core.mp.network.bad_dir_keys");
         return null;
     }
 
@@ -138,8 +143,13 @@ public sealed record NetworkConfigRef(string Url, string Sha256);
 /// When present, Jay only talks to a directory that proves it holds one of them (see <see cref="DirectoryChannel"/>).
 /// Older Jay versions ignore the field.
 /// </param>
+/// <param name="DirectoryRoots">
+/// Ed25519 root keys that certify directory keys ("dirRoots", optional, at most <see cref="NetworkString.MaxDirectoryRoots"/>),
+/// see <see cref="DirectoryCertificate"/>. Older Jay versions ignore the field.
+/// </param>
 public sealed record NetworkInfo(string Id, string Name, string NetworkName, string Secret, IReadOnlyList<string> Nodes, long Seq = 1,
-    DateTimeOffset? Expires = null, string? Home = null, NetworkConfigRef? Config = null, IReadOnlyList<byte[]>? DirectoryKeys = null)
+    DateTimeOffset? Expires = null, string? Home = null, NetworkConfigRef? Config = null, IReadOnlyList<byte[]>? DirectoryKeys = null,
+    IReadOnlyList<byte[]>? DirectoryRoots = null)
 {
     public JsonObject ToJson()
     {
@@ -157,6 +167,7 @@ public sealed record NetworkInfo(string Id, string Name, string NetworkName, str
         if (Home is not null) o["home"] = Home;
         if (Config is not null) o["config"] = new JsonObject { ["url"] = Config.Url, ["sha256"] = Config.Sha256.ToLowerInvariant() };
         if (DirectoryKeys is { Count: > 0 } keys) o["dirKeys"] = new JsonArray([.. keys.Select(k => (JsonNode)JsonValue.Create(Convert.ToBase64String(k)))]);
+        if (DirectoryRoots is { Count: > 0 } roots) o["dirRoots"] = new JsonArray([.. roots.Select(k => (JsonNode)JsonValue.Create(Convert.ToBase64String(k)))]);
         return o;
     }
 
@@ -171,7 +182,8 @@ public sealed record NetworkInfo(string Id, string Name, string NetworkName, str
             o["seq"]?.GetValue<long>() ?? 1,
             o["exp"] is { } exp ? DateTimeOffset.FromUnixTimeSeconds(exp.GetValue<long>()) : null,
             o["home"]?.GetValue<string>(), config,
-            o["dirKeys"] is JsonArray dk ? [.. dk.Select(k => Convert.FromBase64String(k?.GetValue<string>() ?? throw new FormatException("dirKeys")))] : null);
+            o["dirKeys"] is JsonArray dk ? [.. dk.Select(k => Convert.FromBase64String(k?.GetValue<string>() ?? throw new FormatException("dirKeys")))] : null,
+            o["dirRoots"] is JsonArray dr ? [.. dr.Select(k => Convert.FromBase64String(k?.GetValue<string>() ?? throw new FormatException("dirRoots")))] : null);
     }
 }
 
@@ -195,6 +207,7 @@ public sealed record SignedNetwork(NetworkInfo Info, byte[] SignerKey, bool Revi
         new(Info.Id, Info.Name, Info.NetworkName, Info.Secret, Info.Nodes)
         {
             Reviewed = Reviewed, Config = Info.Config, Home = Info.Home, DirectoryKeys = Info.DirectoryKeys ?? [],
+            DirectoryRoots = Info.DirectoryRoots ?? [],
         };
 }
 
