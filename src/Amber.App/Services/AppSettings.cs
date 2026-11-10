@@ -142,6 +142,8 @@ public sealed class AppSettings
     public string MultiplayerKnockWait { get; set; } = "10m";
     /// <summary>Knocks and incoming files while Jay is in the background open a small topmost window.</summary>
     public bool MultiplayerRequestPopup { get; set; } = true;
+    /// <summary>The last room I opened, for the lobby's “Open like last time”.</summary>
+    public LastRoom? MultiplayerLastRoom { get; set; }
     /// <summary>Room settings › mod sync: people who join may get my mod list and the mod files that are not on public sites.</summary>
     public bool MultiplayerAllowModSync { get; set; } = true;
 
@@ -239,6 +241,21 @@ public sealed class InstanceMeta
     /// name. If the game then crashes, the last-session panel names this first. Cleared when a later check matches.
     /// </summary>
     public string? ModsDifferFromHost { get; set; }
+}
+
+/// <summary>What “Open like last time” repeats: the world, the first invite's terms and who can find the room (never a password).</summary>
+public sealed class LastRoom
+{
+    /// <summary>The world's name as the game announces it on the LAN.</summary>
+    public string? World { get; set; }
+    public int Uses { get; set; } = 1;
+    /// <summary>Minutes the invite stays valid; null = while the room is open.</summary>
+    public int? LifetimeMinutes { get; set; } = 10;
+    public bool AutoApprove { get; set; }
+    /// <summary>A <c>RoomVisibility</c> name.</summary>
+    public string Visibility { get; set; } = "Hidden";
+    public string? RoomName { get; set; }
+    public bool PublishAutoApprove { get; set; }
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(AppSettings))]

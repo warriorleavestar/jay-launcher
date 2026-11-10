@@ -215,6 +215,12 @@
                   <Button Grid.Column="2" Content="{l:T common.find}" Command="{Binding ScanCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
                 </Grid>
                 <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" />
+                <Grid x:Name="LastRoomRow" ColumnDefinitions="*,Auto" IsVisible="{Binding HasLastRoom}">
+                  <TextBlock x:Name="LastRoomText" Classes="hint" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding LastRoomText}" />
+                  <Button x:Name="RepeatLastRoomButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" Command="{Binding RepeatLastRoomCommand}">
+                    <TextBlock Text="{l:T multiplayer.lobby.repeat_room}" TextWrapping="Wrap" />
+                  </Button>
+                </Grid>
                 <Button x:Name="LobbyHostButton" Classes.play="{Binding HostButtonIsAmber}" Content="{l:T multiplayer.lobby.host_button}" Command="{Binding HostFromLobbyCommand}"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                 <CheckBox x:Name="AutoCopyInviteBox" IsChecked="{Binding AutoCopyInvite}">
@@ -1040,6 +1046,33 @@
               <CheckBox x:Name="RequestPopupBox" IsChecked="{Binding RequestPopup}">
                 <TextBlock Text="{l:T multiplayer.settings.request_popup}" TextWrapping="Wrap" />
               </CheckBox>
+              <!-- Long-lived invites for regular friends: 30 days, revoke any time, still asks me and shows the safety code. -->
+              <TextBlock Text="{l:T multiplayer.longinvite.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.longinvite.hint}" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox x:Name="LongInviteLabelBox" Text="{Binding LongInviteLabel}" PlaceholderText="{l:T multiplayer.longinvite.label_placeholder}" MaxLength="40"
+                         c:EnterSubmit.Command="{Binding CreateLongInviteCommand}" />
+                <Button x:Name="CreateLongInviteButton" Grid.Column="1" Margin="6,0,0,0" Command="{Binding CreateLongInviteCommand}">
+                  <TextBlock Text="{l:T multiplayer.longinvite.create}" TextWrapping="Wrap" />
+                </Button>
+              </Grid>
+              <ItemsControl x:Name="LongInviteList" ItemsSource="{Binding LongInviteItems}" IsVisible="{Binding HasLongInvites}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:LongInviteItem">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                      <StackPanel Spacing="2">
+                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Label}" FontWeight="SemiBold" /><Run Text=" · " /><Run Text="{Binding Left}" /></TextBlock>
+                        <SelectableTextBlock Text="{Binding CodeDisplay}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <WrapPanel Grid.Column="1" ItemSpacing="6" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <Button Classes="small" Content="{l:T multiplayer.invite.show}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).ToggleLongInviteShownCommand}" CommandParameter="{Binding}" />
+                        <Button Classes="small" Content="{l:T common.copy}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).CopyLongInviteCommand}" CommandParameter="{Binding}" />
+                        <Button Classes="small long-revoke" Content="{l:T multiplayer.longinvite.revoke}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RevokeLongInviteCommand}" CommandParameter="{Binding}" />
+                      </WrapPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
             </StackPanel>
           </Border>
 

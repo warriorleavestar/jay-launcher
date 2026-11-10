@@ -2822,5 +2822,19 @@
   "multiplayer.modcheck.synced": "Mods synced. Join with {0}.",
   "multiplayer.modcheck.sync_failed": "{0} could not be fetched: {1}. Try syncing again, or ask the host to send them.",
   "multiplayer.modcheck.sync_failed.one": "1 could not be fetched: {1}. Try syncing again, or ask the host to send it.",
-  "multiplayer.modcheck.sync_error": "The sync didn't finish: {0}"
+  "multiplayer.modcheck.sync_error": "The sync didn't finish: {0}",
+  "multiplayer.lobby.last_room": "Last time: {0}",
+  "multiplayer.lobby.repeat_room": "Open like last time",
+  "multiplayer.lobby.last_room_password": "Last time it was a password room. Jay doesn't keep passwords: enter it again in room settings and publish.",
+  "multiplayer.longinvite.title": "Long-lived invites for regular friends",
+  "multiplayer.longinvite.hint": "For 30 days this code gets into every room you open, so you don't need a new code each time. You still approve each knock and check the safety code, and you can revoke it any time. Only give it to people you trust.",
+  "multiplayer.longinvite.label_placeholder": "Who it's for (e.g. Bob)",
+  "multiplayer.longinvite.create": "Make one (30 days) and copy",
+  "multiplayer.longinvite.unnamed": "No name",
+  "multiplayer.longinvite.days_left": "{0} days left",
+  "multiplayer.longinvite.days_left.one": "1 day left",
+  "multiplayer.longinvite.revoke": "Revoke",
+  "multiplayer.longinvite.created": "Long-lived invite made and copied (it is cleared from the clipboard in a while).",
+  "multiplayer.longinvite.revoked": "Revoked {0}'s long-lived invite. The code stops working now.",
+  "multiplayer.longinvite.too_many": "You can have at most {0} long-lived invites. Revoke some first."
 }

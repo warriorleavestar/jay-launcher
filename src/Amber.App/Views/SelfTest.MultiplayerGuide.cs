@@ -88,6 +88,19 @@ internal sealed partial class SelfTest
         await Task.Delay(100);
         Check("万能粘贴框：认不出时写邀请码长什么样", vm.JoinCodeRecognition == L.T("multiplayer.lobby.code.unknown") && host?.Classes.Contains("play") == true);
         Dispatcher.UIThread.Invoke(() => roomCode!.Text = "");
+        // "Open like last time": hidden until a room was opened once; says what it repeats.
+        Check("和上次一样开：没开过房间时不显示", !vm.HasLastRoom && Shown("LastRoomRow") is null);
+        main.Service.Settings.MultiplayerLastRoom = new Amber.App.Services.LastRoom { World = "新世界", Visibility = "Public" };
+        vm.NotifyLastRoom();
+        await Task.Delay(200);
+        Check("和上次一样开：写上次的世界、要我同意、谁能找到", Shown("LastRoomRow") is not null && Visible("RepeatLastRoomButton") is not null
+            && vm.LastRoomText == L.F("multiplayer.lobby.last_room", "新世界 · " + L.T("multiplayer.invite.terms_ask") + " · " + L.T("multiplayer.public.visibility.public")), vm.LastRoomText);
+        await ShotAsync("和上次一样开");
+        Press(Visible("RepeatLastRoomButton"));
+        await Task.Delay(300);
+        Check("和上次一样开：组件没装时先说要下载，不出错", vm.IsIdle && vm.Status == L.T("multiplayer.component.download_required"), vm.Status);
+        main.Service.Settings.MultiplayerLastRoom = null;
+        vm.NotifyLastRoom();
         await ShotAsync("联机大厅-1440");
         await LayoutHereAsync("联机大厅");
 
@@ -96,6 +109,21 @@ internal sealed partial class SelfTest
         await Task.Delay(300);
         Check("联机设置：分组都在", HasText("multiplayer.settings.identity") && HasText("multiplayer.settings.invites") && HasText("multiplayer.settings.component")
             && HasText("multiplayer.settings.diagnostics"));
+
+        // Long-lived invites for regular friends: made here, 30 days, masked, revoke.
+        Check("长期邀请：开始时没有", !vm.HasLongInvites);
+        Dispatcher.UIThread.Invoke(() => vm.LongInviteLabel = "Bob");
+        Press(Visible("CreateLongInviteButton"));
+        await WaitAsync(() => vm.HasLongInvites, 3);
+        await Task.Delay(200);
+        var longItem = vm.LongInviteItems.FirstOrDefault();
+        Check("长期邀请：做好一张给 Bob 的，30 天、默认打码、能被认出是邀请", longItem is { Label: "Bob" } && longItem.Left == L.P("multiplayer.longinvite.days_left", 30, 30)
+            && longItem.CodeDisplay.Contains('•') && JayInvite.TryParse(longItem.Code, out _) && vm.LongInviteLabel.Length == 0
+            && page.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "LongInviteList" && i.IsEffectivelyVisible), longItem?.Left);
+        await ShotAsync("长期邀请");
+        Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Classes.Contains("long-revoke") && b.IsEffectivelyVisible));
+        await Task.Delay(200);
+        Check("长期邀请：作废后列表清空", !vm.HasLongInvites);
         var relayHeader = page.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "RelayHeader");
         Check("联机设置：默认开着内置中转服务器，开箱就有", vm.UseBuiltInNodes && vm.HasNodes && HasText("multiplayer.nodes.builtin_toggle")
             && relayHeader?.Text == vm.NodesHeaderText,

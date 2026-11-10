@@ -2751,5 +2751,18 @@
   "multiplayer.modcheck.syncing": "第 {0}/{1} 個：{2}",
   "multiplayer.modcheck.synced": "模組同步好了，用 {0} 進入。",
   "multiplayer.modcheck.sync_failed": "有 {0} 個沒拿到：{1}。可以再點一次同步，或者請房主發給你。",
-  "multiplayer.modcheck.sync_error": "同步沒完成：{0}"
+  "multiplayer.modcheck.sync_error": "同步沒完成：{0}",
+  "multiplayer.lobby.last_room": "上次：{0}",
+  "multiplayer.lobby.repeat_room": "和上次一樣開",
+  "multiplayer.lobby.last_room_password": "上次是密碼房間：Jay 不保存密碼，請在房間設定裡重新填密碼再發布。",
+  "multiplayer.longinvite.title": "給固定朋友的長期邀請",
+  "multiplayer.longinvite.hint": "30 天內你開的每個房間都能用這張碼進來，不用每次發新碼。朋友敲門時仍要你同意、仍要核對安全碼；隨時可以作廢。只發給你信任的人。",
+  "multiplayer.longinvite.label_placeholder": "給誰的（比如 Bob）",
+  "multiplayer.longinvite.create": "做一張（30 天）並複製",
+  "multiplayer.longinvite.unnamed": "沒寫名字",
+  "multiplayer.longinvite.days_left": "還剩 {0} 天",
+  "multiplayer.longinvite.revoke": "作廢",
+  "multiplayer.longinvite.created": "長期邀請做好了，已複製（過一會兒會從剪貼簿清掉）。",
+  "multiplayer.longinvite.revoked": "已作廢 {0} 的長期邀請，這張碼馬上失效。",
+  "multiplayer.longinvite.too_many": "長期邀請最多 {0} 張，先作廢一些。"
 }
