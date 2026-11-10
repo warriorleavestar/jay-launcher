@@ -5,13 +5,15 @@ English comes first: write new code comments, docs, commit messages and PRs in E
 
 ## Layout
 
+For a folder-by-folder map with entry points and "where to start" pointers, read `docs/CODEMAP.md`. `python3 tools/build-code-index.py` builds a local symbol index in `.code-index/` (not committed); `--check` fails when a source folder is missing from the map, so update the map when you add a folder.
+
 - `src/Amber.Core`: everything that isn't UI. That covers game launch (`Launch/`), version and loader install (`Install/`, `Game/`), mods and resources (`Content/`), accounts (`Auth/`), Java detection, the downloader with mirrors (`Net/`) and EasyTier-based multiplayer (`Multiplayer/`).
 - `src/Amber.App`: the Avalonia desktop app. `ViewModels/` holds one view model per page and `Views/` the XAML. `Services/LauncherService.cs` wires the Core services together. `Views/SelfTest.cs` is the end-to-end GUI self-check.
 - `src/Amber.NetworkServer`: the network server framework (assembly `Jay.NetworkServer`): public network node = EasyTier seed + room directory + login + room gates + local admin API. `jay-server directory` runs on it, and third parties can build their own nodes with it (`samples/MyJayNetwork`, `docs/network-server-framework.md`).
 - `src/Amber.Server`: `jay-server`, the server CLI (Jay-only MC server with gate/relays, and the public network node).
 - `src/Amber.Cli`: a developer CLI over the same Core. It is used for measurements and for scripted tests (`mods`, `launch`, `prewarm`, `add`, …).
 - `src/Amber.Core.Tests`: xUnit tests.
-- `tools/`: helper scripts (GUI self-check runner, multiplayer test).
+- `tools/`: helper scripts (GUI self-check runner, multiplayer test, code index builder).
 
 ## Build and test
 
