@@ -97,7 +97,8 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
             Validate(host, port, keyHash, token, name);
             return new GateInvite(host, port, keyHash, token, name, rotation);
         }
-        catch (Exception e) when (e is FormatException or ArgumentException or ArgumentOutOfRangeException)
+        // A length byte that points past the end makes bytes[p++] throw IndexOutOfRangeException: a crafted code is just corrupt.
+        catch (Exception e) when (e is FormatException or ArgumentException or IndexOutOfRangeException)
         {
             error = L.T("core.gate.invite.corrupt");
             return null;

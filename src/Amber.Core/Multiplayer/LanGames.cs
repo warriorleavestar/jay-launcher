@@ -17,14 +17,24 @@ public static partial class LanGames
     public const string MulticastAddress = "224.0.2.60";
     public const int MulticastPort = 4445;
 
-    /// <summary>从游戏日志认出开放端口。新版写 “Started serving on 12345”，聊天栏提示有中英文两种。</summary>
+    /// <summary>
+    /// Finds the "open to LAN" port in a game log line: the integrated server's "Started serving on 12345", or the
+    /// system chat notice ("Local game hosted on port 12345" and its translations).
+    /// The text has to start the message. Player chat ("[CHAT] &lt;Steve&gt; Started serving on 22") and server
+    /// broadcasts ("[CHAT] [Server] …") don't count, so nobody in the room can point the room at another local port by chatting.
+    /// </summary>
     public static int? PortFromLog(string line)
     {
-        var m = PortPattern().Match(line);
+        var message = LogPrefix().Replace(line, "", 1);
+        var m = PortPattern().Match(message);
         return m.Success && int.TryParse(m.Groups[1].Value, out var port) && port is > 0 and < 65536 ? port : null;
     }
 
-    [GeneratedRegex(@"(?:Started serving on|hosted on port|在端口\s*)\s*(\d{2,5})")]
+    /// <summary>"[12:00:01] [Server thread/INFO]: " (each part optional), then an optional "[System] [CHAT] ".</summary>
+    [GeneratedRegex(@"^\s*(?:\[[^\]/]*\]\s*)?(?:\[[^\]]*/[A-Z]+\]:?\s*)?(?:\[System\]\s*)?(?:\[CHAT\]\s*)?", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex LogPrefix();
+
+    [GeneratedRegex(@"^(?:Started serving on|Local game hosted on port|(?:本地游戏已|本地遊戲已)?在端口)\s*(\d{2,5})\b", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex PortPattern();
 
     public static LanGame? Parse(string message)
