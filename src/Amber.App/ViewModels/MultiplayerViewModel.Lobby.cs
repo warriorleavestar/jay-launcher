@@ -163,6 +163,7 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task HostFromLobbyAsync()
     {
+        if (StartGameToHost()) return;
         await CreateRoomAsync();
         if (!IsHosting) return;
         SelectedInviteExpiry ??= InviteExpiryChoices[0];

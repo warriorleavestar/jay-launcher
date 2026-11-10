@@ -286,7 +286,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // 不自动听局域网广播：绑定端口可能让 Windows 弹防火墙询问。用 Amber 启动的游戏从日志就能认出端口。
     }
 
-    partial void OnTargetInstanceChanged(string? value) => _service.SetCurrentInstance(value);
+    partial void OnTargetInstanceChanged(string? value)
+    {
+        _service.SetCurrentInstance(value);
+        NotifyPlayAndHost();
+    }
 
     private void RefreshInstances()
     {
@@ -294,6 +298,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         foreach (var v in _service.InstalledVersions()) Instances.Add(v);
         TargetInstance = _service.CurrentOr(Instances, Instances.FirstOrDefault());
         RepickJoinInstance();
+        NotifyPlayAndHost();
     }
 
     private void OnGameOutput(string versionId, string line)
@@ -305,6 +310,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             LanGames.Insert(0, item);
             SelectedLanGame = item;
             if (IsIdle) SetStatus(StatusMessage.Success("multiplayer.lan.opened", versionId, port));
+            OnLanOpenedWhileWaiting();
         });
     }
 

@@ -318,6 +318,11 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private void OpenAccounts() => Router.SwitchTo(Section.Accounts);
 
+    private AccountMenuViewModel? _accountMenu;
+
+    /// <summary>The menu behind the sidebar avatar (§6.13).</summary>
+    public AccountMenuViewModel AccountMenu => _accountMenu ??= new(_main, this);
+
     // ---- 侧栏底部 ----
 
     /// <summary>账号按钮上的名字（没有账号时是“添加账号”）。</summary>

@@ -369,6 +369,8 @@ public sealed partial class MainViewModel : ObservableObject
             };
         };
         var library = new LibraryViewModel(service, home, Activity) { Navigate = r => shell.Navigate(r) };
+        // [▶ Play and open a room]: the lobby starts the focus instance the same way the library's ▶ does.
+        multiplayer.StartInstance = library.LaunchInstance;
         Pages.Add(library);
         // 多开确认走请求条；启动页的卡片也还在，哪边处理都会让另一边一起消失。
         const string MultiKey = "multi-launch";

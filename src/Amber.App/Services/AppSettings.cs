@@ -138,6 +138,9 @@ public sealed class AppSettings
 
     /// <summary>Multiplayer lobby: copy the first invite when a room is opened (cleared from the clipboard later).</summary>
     public bool MultiplayerAutoCopyInvite { get; set; } = true;
+
+    /// <summary>New-instance panel: "Add mods while you're at it" stays open once opened (§6.11).</summary>
+    public bool NewInstanceModsOpen { get; set; }
     /// <summary>How long a room waits for the host to answer a knock: "2m", "10m" or "forever".</summary>
     public string MultiplayerKnockWait { get; set; } = "10m";
     /// <summary>Knocks and incoming files while Jay is in the background open a small topmost window.</summary>

@@ -221,8 +221,20 @@
                     <TextBlock Text="{l:T multiplayer.lobby.repeat_room}" TextWrapping="Wrap" />
                   </Button>
                 </Grid>
-                <Button x:Name="LobbyHostButton" Classes.play="{Binding HostButtonIsAmber}" Content="{l:T multiplayer.lobby.host_button}" Command="{Binding HostFromLobbyCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                <Button x:Name="LobbyHostButton" Classes.play="{Binding HostButtonIsAmber}" Command="{Binding HostFromLobbyCommand}"
+                        IsVisible="{Binding ShowHostButton}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                  <TextBlock Text="{Binding HostButtonText}" TextWrapping="Wrap" TextAlignment="Center" />
+                </Button>
+                <TextBlock x:Name="PlayAndHostHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding PlayAndHostHint}"
+                           IsVisible="{Binding StartsGameToHost}" />
+                <!-- Started from the lobby: the three steps in the game; the room opens by itself when the log says Open to LAN. -->
+                <Border x:Name="WaitingForLanPanel" Background="{DynamicResource AccentTint}" CornerRadius="6" Padding="10" IsVisible="{Binding IsWaitingForLan}">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="{Binding WaitingForLanText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <Button x:Name="CancelWaitForLanButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" VerticalAlignment="Center"
+                            Content="{l:T common.cancel}" Command="{Binding CancelWaitForLanCommand}" />
+                  </Grid>
+                </Border>
                 <CheckBox x:Name="AutoCopyInviteBox" IsChecked="{Binding AutoCopyInvite}">
                   <TextBlock Text="{l:T multiplayer.lobby.auto_copy}" TextWrapping="Wrap" />
                 </CheckBox>

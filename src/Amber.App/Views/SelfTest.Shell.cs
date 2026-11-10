@@ -166,12 +166,13 @@ internal sealed partial class SelfTest
         await Visit(() => shell.GoSectionCommand.Execute("multiplayer"));
         await Visit(() => window.SettingsButton.Command!.Execute(null));
         foreach (var sub in shell.SubPages.ToList()) await Visit(() => shell.SelectedSubPage = sub);
-        await Visit(() => window.AccountButton.Command!.Execute(null));
+        await Visit(() => main.Shell.AccountMenu.ManageCommand.Execute(null));
         await Visit(() => Page<SettingsViewModel>().GoAboutCommand.Execute(null));
         await Visit(() => main.Shell.Navigate("help"));
         var missing = main.Pages.Select(p => p.GetType()).Where(t => !reached.Contains(t)).Select(t => t.Name).ToList();
         Check("旧版九页、游戏库主页、关于页和帮助中心都能从新外壳走到", missing.Count == 0 && reached.Count == 12, missing.Count == 0 ? $"{reached.Count} 页" : "走不到：" + string.Join("、", missing));
         await ShotAsync("shell-accounts");
+        await AccountMenuAsync();
     }
 
     private async Task FieldAndReturnAsync(ShellViewModel shell)
@@ -214,5 +215,51 @@ internal sealed partial class SelfTest
         settings.ResetFieldCommand.Execute("sidebar");
         await Task.Delay(300);
         Check("恢复默认：自动", settings.SelectedSidebarIndex == 0 && !File.ReadAllText(AppSettings.FilePath).Contains("\"SidebarMode\": \"expanded\"", StringComparison.Ordinal));
+    }
+
+    /// <summary>Account menu (§6.13): rows, one-click dark mode and language that stay in sync with settings, about.</summary>
+    private async Task AccountMenuAsync()
+    {
+        var settings = Page<SettingsViewModel>();
+        var menu = main.Shell.AccountMenu;
+        var theme = settings.SelectedThemeIndex;
+        var language = settings.SelectedLanguageIndex;
+        Dispatcher.UIThread.Invoke(() => window.AccountButton.Flyout!.ShowAt(window.AccountButton));
+        var open = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.AccountMenuFlyout.IsOpen && window.AccountMenuDark.IsEffectivelyVisible), 3);
+        Check("Account menu opens from the sidebar avatar", open);
+        var rows = Dispatcher.UIThread.Invoke(() => menu.Accounts.Count);
+        var expected = Page<HomeViewModel>().Accounts.Count;
+        Check("Account menu lists every account and marks the default", rows == expected
+            && Dispatcher.UIThread.Invoke(() => menu.Accounts.Count(a => a.IsDefault)) == (expected > 0 ? 1 : 0), $"{rows}/{expected}");
+        Dispatcher.UIThread.Invoke(() => window.AccountMenuDark.IsChecked = true);
+        await Task.Delay(300);
+        Check("Account menu: dark in one click, settings in sync", Dispatcher.UIThread.Invoke(() =>
+            Application.Current!.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Dark && settings.SelectedThemeIndex == 2));
+        await ShotAsync("shell-account-menu");
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            // The menu is its own popup: render it on its own.
+            if (TopLevel.GetTopLevel(window.AccountMenuPanel) is not { } popup || popup.Bounds.Width < 1) return;
+            using var bitmap = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)popup.Bounds.Width, (int)popup.Bounds.Height));
+            bitmap.Render(popup);
+            bitmap.Save(Path.Combine(reportDir, $"{++_shot:D2}-shell-account-menu-popup.png"));
+        });
+        Dispatcher.UIThread.Invoke(() => settings.SelectedThemeIndex = 1);
+        await Task.Delay(200);
+        Check("Account menu follows a change made in settings", Dispatcher.UIThread.Invoke(() => window.AccountMenuLight.IsChecked == true));
+        var before = L.Language;
+        var target = before == "en" ? "zh-Hans" : "en";
+        var index = 1 + L.Languages.Select((l, i) => (l, i)).First(p => p.l.Code == target).i;
+        Dispatcher.UIThread.Invoke(() => window.AccountMenuLanguage.SelectedIndex = index);
+        var changed = await WaitAsync(() => L.Language == target, 3);
+        Check("Account menu: language changes at once, settings in sync", changed && Dispatcher.UIThread.Invoke(() => settings.SelectedLanguageIndex) == index);
+        Dispatcher.UIThread.Invoke(() => settings.SelectedLanguageIndex = language);
+        L.SetLanguage(before);
+        await Task.Delay(200);
+        Dispatcher.UIThread.Invoke(() => menu.AboutCommand.Execute(null));
+        await Task.Delay(300);
+        Check("Account menu: About and privacy opens the about page and closes the menu", Dispatcher.UIThread.Invoke(() =>
+            main.CurrentPage is AboutViewModel && !window.AccountMenuFlyout.IsOpen));
+        Dispatcher.UIThread.Invoke(() => settings.SelectedThemeIndex = theme);
     }
 }

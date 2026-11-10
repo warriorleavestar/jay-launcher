@@ -224,23 +224,32 @@ internal sealed partial class SelfTest
     {
         await ToLibraryAsync();
         var j = Begin("J5a", 3);
-        var start = await FindAsync<Button>(b => b.Name == "LobbyStartAndHostButton", 0);
-        if (start is null)
+        // Starting the game is the last real step here: count the press, but don't start a game.
+        var started = new List<string>();
+        var startInstance = mp.StartInstance;
+        Dispatcher.UIThread.Invoke(() => { mp.StartInstance = started.Add; mp.SelectedLanGame = null; mp.ManualPort = ""; });
+        try
         {
-            // Today the game is started from the library first, then the lobby picks up the LAN world.
-            j.Problems.Add("no [Play and open a room] in the lobby (§6.14); the game is started from the library");
-            await FinalAsync((await PageAsync<LibraryPage>())?.ContinuePlay, "play (library)");
+            await TapNavAsync("multiplayer");
+            // The page re-checks the component when it opens; this journey is "component installed".
+            Dispatcher.UIThread.Invoke(() => { mp.ShowTabCommand.Execute("play"); mp.IsComponentReady = true; });
+            await Task.Delay(300);
+            var host = await FindAsync<Button>(b => b.Name == "LobbyHostButton");
+            if (!Dispatcher.UIThread.Invoke(() => mp.StartsGameToHost)) j.Problems.Add("the lobby button doesn't start the game (no [Play and open a room])");
+            await TapAsync(host, "play and open a room");
+            if (started.Count != 1) j.Problems.Add("the game wasn't started");
+            var panel = await FindAsync<Border>(b => b.Name == "WaitingForLanPanel", 1);
+            if (panel is null || !Dispatcher.UIThread.Invoke(() => panel.IsEffectivelyVisible)) j.Problems.Add("no in-game steps while waiting for Open to LAN");
+            // In the game: enter a world → Esc → Open to LAN (not counted); Jay opens the room and copies the invite (0).
+            // The knock: one press on the locked panel (focus starts on Deny; checked by the room scope).
+            j.Clicks++;
+            j.Steps.Add("let them in (knock panel)");
+            await EndAsync(where);
         }
-        var lan = new LanGameItem(new LanGame("Survival+", 51234), L.T("multiplayer.lan.amber_source"));
-        await TapNavAsync("multiplayer");
-        Dispatcher.UIThread.Invoke(() => { mp.ShowTabCommand.Execute("play"); mp.LanGames.Insert(0, lan); mp.SelectedLanGame = lan; });
-        await Task.Delay(300);
-        await FinalAsync(start ?? await FindAsync<Button>(b => b.Name == "LobbyHostButton"), "open a room");
-        // The knock: one press on the locked panel (focus starts on Deny; checked by the room scope).
-        j.Clicks++;
-        j.Steps.Add("let them in (knock panel)");
-        await EndAsync(where);
-        Dispatcher.UIThread.Invoke(() => { mp.LanGames.Remove(lan); mp.SelectedLanGame = null; });
+        finally
+        {
+            Dispatcher.UIThread.Invoke(() => { mp.CancelWaitForLanCommand.Execute(null); mp.StartInstance = startInstance; });
+        }
     }
 
     /// <summary>J5b: Ctrl+V the invite anywhere (keyboard, free) → it is recognised and an instance picked → [▶ Join]. Target 2.</summary>
@@ -300,27 +309,27 @@ internal sealed partial class SelfTest
 
         await ToLibraryAsync();
         Begin("J7 dark", 2);
-        if (await OpenSettingsGroupAsync(SettingsCatalog.Appearance) && await PageAsync<SettingsPage>() is { } page)
+        if (await OpenAccountMenuAsync())
         {
-            // ThemeOptions: system, light, dark.
-            await PickAsync(page.ThemeBox, 2, "theme: dark");
+            await TapAsync(window.AccountMenuDark, "theme: dark");
             if (!await WaitAsync(() => Dispatcher.UIThread.Invoke(() => Application.Current!.ActualThemeVariant == ThemeVariant.Dark), 3)) _journey!.Problems.Add("not dark");
         }
         await EndAsync(where);
-        Dispatcher.UIThread.Invoke(() => settings.SelectedThemeIndex = theme);
+        Dispatcher.UIThread.Invoke(() => { window.AccountMenuFlyout.Hide(); settings.SelectedThemeIndex = theme; });
 
         await ToLibraryAsync();
         Begin("J7 language", 3);
-        if (await OpenSettingsGroupAsync(SettingsCatalog.General) && await PageAsync<SettingsPage>() is { } page2)
+        if (await OpenAccountMenuAsync())
         {
             var target = lang == "en" ? "zh-Hans" : "en";
             // LanguageOptions: "system", then L.Languages.
             var index = 1 + L.Languages.Select((l, i) => (l, i)).First(p => p.l.Code == target).i;
             var original = settings.SelectedLanguageIndex;
-            await PickAsync(page2.LanguageBox, index, "language: " + target);
+            await PickAsync(window.AccountMenuLanguage, index, "language: " + target);
             if (!await WaitAsync(() => L.Language != lang, 3)) _journey!.Problems.Add("language didn't change");
+            if (Dispatcher.UIThread.Invoke(() => settings.SelectedLanguageIndex) != index) _journey!.Problems.Add("settings page not in sync");
             await EndAsync(where);
-            Dispatcher.UIThread.Invoke(() => settings.SelectedLanguageIndex = original);
+            Dispatcher.UIThread.Invoke(() => { window.AccountMenuFlyout.Hide(); settings.SelectedLanguageIndex = original; });
             L.SetLanguage(lang);
             await Task.Delay(200);
         }
@@ -367,13 +376,33 @@ internal sealed partial class SelfTest
         await WaitAsync(() => download.Target is not null, 3);
         var fabric = download.LoaderChoices.FirstOrDefault(c => c.Kind == Amber.Core.Install.LoaderKind.Fabric);
         if (page is not null && fabric is not null) await TapItemAsync(page.LoaderSegment, Array.IndexOf(download.LoaderChoices, fabric), "Fabric");
-        var addMods = await FindAsync<Control>(c => c.Name == "NewInstanceModsExpander", 1);
-        if (addMods is null) j.Problems.Add("no \"add mods\" in the new-instance panel (§6.11); mods need the success card and Discover afterwards");
+        var addMods = await FindAsync<Expander>(c => c.Name == "NewInstanceModsExpander", 1);
+        if (addMods is null) j.Problems.Add("no \"add mods\" in the new-instance panel (§6.11)");
+        else
+        {
+            Dispatcher.UIThread.Invoke(() => { addMods.IsExpanded = false; download.PickedMods.Clear(); });
+            await TapAsync(addMods, "add mods (open)");
+            foreach (var query in new[] { "sodium", "iris", "journeymap" })
+            {
+                // Typing is free; the list searches by itself.
+                Dispatcher.UIThread.Invoke(() => download.ModQuery = query);
+                await Task.Delay(500);
+                if (!await WaitAsync(() => !download.IsSearchingMods && download.ModResults.Count > 0, 20))
+                {
+                    j.Problems.Add($"no results for \"{query}\"");
+                    continue;
+                }
+                await Task.Delay(200);
+                var box = await FindAsync<CheckBox>(c => c.DataContext is ExtraModItem { IsPicked: false } && c.IsEffectivelyVisible, 1);
+                await TapAsync(box, "tick " + query);
+            }
+            if (Dispatcher.UIThread.Invoke(() => download.PickedMods.Count) != 3) j.Problems.Add($"{download.PickedMods.Count} mods picked, not 3");
+        }
         await FinalAsync(page?.InstallButton, "install");
         j.Clicks++;
         j.Steps.Add("play (result card)");
         await EndAsync(where);
-        Dispatcher.UIThread.Invoke(() => download.SourceIndex = 0);
+        Dispatcher.UIThread.Invoke(() => { download.PickedMods.Clear(); download.ModQuery = ""; download.SourceIndex = 0; });
     }
 
     /// <summary>J3′: Mods tab [+ Add mods] → Discover in context → [+ Queue] ×3 → [Install 3] → [Done, go back]. Target 6.</summary>
@@ -500,7 +529,12 @@ internal sealed partial class SelfTest
         {
             if (!c.IsEffectivelyVisible) return "hidden";
             if (!c.IsEffectivelyEnabled) return "disabled";
-            if (c.TranslatePoint(new Point(c.Bounds.Width / 2, c.Bounds.Height / 2), window) is not { } p) return "not in the window";
+            var mid = new Point(c.Bounds.Width / 2, c.Bounds.Height / 2);
+            // A menu or flyout lives in its own popup: it only has to be inside that popup.
+            if (TopLevel.GetTopLevel(c) is { } root && !ReferenceEquals(root, window))
+                return c.TranslatePoint(mid, root) is { } q && q.X >= 0 && q.Y >= 0 && q.X <= root.ClientSize.Width && q.Y <= root.ClientSize.Height
+                    ? null : "outside its popup";
+            if (c.TranslatePoint(mid, window) is not { } p) return "not in the window";
             return p.X >= 0 && p.Y >= 0 && p.X <= window.ClientSize.Width && p.Y <= window.ClientSize.Height ? null : $"outside the window at {p.X:0},{p.Y:0}";
         });
     }
@@ -518,6 +552,14 @@ internal sealed partial class SelfTest
         j.Steps.Add(label);
         var done = c switch
         {
+            RadioButton r => Dispatcher.UIThread.Invoke(() => { r.IsChecked = true; return true; }),
+            CheckBox box => Dispatcher.UIThread.Invoke(() =>
+            {
+                if (box.Command is { } command) { command.Execute(box.CommandParameter); return true; }
+                box.IsChecked = box.IsChecked != true;
+                return true;
+            }),
+            Expander e => Dispatcher.UIThread.Invoke(() => { e.IsExpanded = !e.IsExpanded; return true; }),
             Button b => Press(b),
             ListBoxItem item => Dispatcher.UIThread.Invoke(() => item.IsSelected = true),
             _ => false,
@@ -574,6 +616,15 @@ internal sealed partial class SelfTest
         }
         await TapItemAsync(window.NavList, index, "sidebar: " + sectionId);
         await Task.Delay(300);
+    }
+
+    /// <summary>The sidebar avatar opens the account menu (1 click).</summary>
+    private async Task<bool> OpenAccountMenuAsync()
+    {
+        if (!await TapAsync(window.AccountButton, "account menu")) return false;
+        if (await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.AccountMenuFlyout.IsOpen && window.AccountMenuDark.IsEffectivelyVisible), 3)) return true;
+        _journey!.Problems.Add("account menu didn't open");
+        return false;
     }
 
     /// <summary>Settings (sidebar footer) → a group: a list item when the list shows, else the drop-down.</summary>

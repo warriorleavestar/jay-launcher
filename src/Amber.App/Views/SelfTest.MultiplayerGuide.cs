@@ -47,6 +47,9 @@ internal sealed partial class SelfTest
         var host = Visible("LobbyHostButton");
         var join = Visible("LobbyJoinButton");
         Check("一盏灯：没贴码时开房间是琥珀，加入是蓝色", host?.Classes.Contains("play") == true && join?.Classes.Contains("play") == false && join?.Classes.Contains("primary") == true);
+        if (vm.StartsGameToHost)
+            Check("Lobby: with no LAN world the button is [Play and open a room] and names the game it starts",
+                HasText("multiplayer.lobby.play_and_host") && Shown("PlayAndHostHint") is not null, vm.PlayAndHostHint);
         var relayInvite = JayInvite.Create(new byte[16], Amber.Core.Multiplayer.Transport.TunnelSettings.Default).ToString();
         var roomCode = await FindAsync<TextBox>(t => t.Name == "JoinCodeBox");
         Dispatcher.UIThread.Invoke(() => roomCode!.Text = relayInvite);

@@ -12,6 +12,7 @@ Jay can follow your system, or always be light or dark. Theme packs change colou
 ![Settings › Appearance](shot:appearance)
 
 ## How to
+- Quickest: click your avatar at the bottom of the sidebar and pick Light or Dark there. The language is in the same menu.
 - **Settings › Appearance › Theme**: System, Light or Dark.
 - Theme packs: import a .jaytheme file, or drag it onto the window. It applies at once.
 - Built in: **Jay classic amber** and **High contrast**. They can't be deleted.

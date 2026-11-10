@@ -39,7 +39,7 @@
     </ListBox>
 
     <!-- Version: type chips, search, refresh. -->
-    <Grid svc:ThemeRegion.Name="downloads.search" Grid.Row="2" Grid.Column="1" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,8" IsVisible="{Binding IsVersionSource}">
+    <Grid x:Name="VersionToolbar" svc:ThemeRegion.Name="downloads.search" Grid.Row="2" Grid.Column="1" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,8" IsVisible="{Binding IsVersionSource}">
       <ListBox x:Name="TypeChips" Classes="subtabs" ItemsSource="{Binding Filters}" SelectedItem="{Binding Filter}" Background="Transparent"
                AutomationProperties.Name="{l:T newinstance.version.type}">
         <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -48,7 +48,7 @@
         </ListBox.ItemTemplate>
       </ListBox>
       <TextBox x:Name="SearchBox" Grid.Column="1" Text="{Binding Search}" PlaceholderText="{l:T download.search.placeholder}" Margin="10,0" MinWidth="120" />
-      <Button Grid.Column="2" Content="{l:T common.refresh}" Command="{Binding RefreshCommand}" />
+      <Button x:Name="RefreshButton" Grid.Column="2" Content="{l:T common.refresh}" Command="{Binding RefreshCommand}" />
     </Grid>
 
     <!-- Hot versions (and the latest release): pick the version and its loader in one click. -->
@@ -170,6 +170,39 @@
                   <TextBlock Classes="hint" Text="{l:T download.version.name_hint}" TextWrapping="Wrap" IsVisible="{Binding !HasNameProblem}" />
                 </StackPanel>
               </Grid>
+              <!-- "Add mods while you're at it" (§6.11): searched only once opened; ticked mods go in with the instance. -->
+              <Expander x:Name="NewInstanceModsExpander" HorizontalAlignment="Stretch" Margin="0,12,0,0" IsExpanded="{Binding ModsOpen}">
+                <Expander.Header>
+                  <TextBlock Text="{Binding ModsHeader}" TextWrapping="Wrap" />
+                </Expander.Header>
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="hint" Text="{l:T newinstance.mods.need_loader}" TextWrapping="Wrap" IsVisible="{Binding ShowModsNeedLoader}" />
+                  <StackPanel Spacing="8" IsVisible="{Binding CanAddMods}">
+                    <TextBox x:Name="NewInstanceModsSearch" Text="{Binding ModQuery}" PlaceholderText="{l:T newinstance.mods.search}" MaxWidth="420" HorizontalAlignment="Stretch"
+                             c:EnterSubmit.Command="{Binding SearchModsCommand}" AutomationProperties.Name="{l:T newinstance.mods.search}" />
+                    <TextBlock Classes="hint" Text="{l:T newinstance.mods.hint}" TextWrapping="Wrap" />
+                    <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsSearchingMods}" MaxWidth="420" HorizontalAlignment="Left" />
+                    <TextBlock Text="{Binding ModSearchError}" Foreground="{DynamicResource DangerText}" TextWrapping="Wrap"
+                               IsVisible="{Binding ModSearchError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <ItemsControl x:Name="NewInstanceModsList" ItemsSource="{Binding ModResults}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:ExtraModItem">
+                          <CheckBox IsChecked="{Binding IsPicked, Mode=OneWay}" Margin="0,2"
+                                    Command="{Binding $parent[ItemsControl].((vm:DownloadViewModel)DataContext).TogglePickCommand}" CommandParameter="{Binding}"
+                                    AutomationProperties.Name="{Binding Title}">
+                            <StackPanel>
+                              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Classes="hint" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                          </CheckBox>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="hint" Text="{l:T newinstance.mods.empty}"
+                               IsVisible="{Binding ShowModsEmpty}" />
+                  </StackPanel>
+                </StackPanel>
+              </Expander>
             </StackPanel>
           </Grid>
         </Border>

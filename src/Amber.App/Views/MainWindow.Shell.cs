@@ -50,6 +50,7 @@ public partial class MainWindow
                 // Knocks and incoming files while Jay is in the background: a small topmost window (on by default).
                 Popups = new RequestPopups(this, main.Service.Requests, () => main.Service.Settings.MultiplayerRequestPopup);
                 UpdateMovedNotice();
+                main.Shell.AccountMenu.Done += () => AccountMenuFlyout.Hide();
             }
             ApplyShell();
         };
@@ -64,11 +65,26 @@ public partial class MainWindow
             _movedNoticeTooShort = e.NewSize.Height < MovedNoticeHiddenBelow;
             UpdateMovedNotice();
         };
+        AccountMenuFlyout.Opening += (_, _) =>
+        {
+            // Open away from the navigation bar, wherever a theme pack put it.
+            AccountMenuFlyout.Placement = ShellNav switch
+            {
+                "right" => PlacementMode.LeftEdgeAlignedBottom,
+                "top" => PlacementMode.BottomEdgeAlignedRight,
+                "bottom" => PlacementMode.TopEdgeAlignedRight,
+                _ => PlacementMode.RightEdgeAlignedBottom,
+            };
+            (DataContext as MainViewModel)?.Shell.AccountMenu.Refresh();
+        };
         AttachLogDock();
         AddHandler(KeyDownEvent, OnShellKeyDown, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, OnShellPointerPressed, RoutingStrategies.Tunnel);
         ApplyShell();
     }
+
+    /// <summary>The account menu behind the sidebar avatar.</summary>
+    internal Flyout AccountMenuFlyout => (Flyout)AccountButton.Flyout!;
 
     /// <summary>Topmost request popups (self-check uses it to open one directly).</summary>
     internal RequestPopups? Popups { get; private set; }
