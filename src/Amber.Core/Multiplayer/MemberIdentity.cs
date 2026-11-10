@@ -8,6 +8,7 @@ namespace Amber.Core.Multiplayer;
 /// <summary>
 /// 这台电脑上 Amber 的联机身份：一把长期的 X25519 密钥（每次安装一把），房主靠它认出“还是那个人”。
 /// 保存在数据目录的 identity.key，和账号一样加密：Windows 用 DPAPI（当前用户），macOS/Linux 用仅当前用户可读（0600）的本机密钥文件 + AES-GCM。
+/// DPAPI 拒绝时（比如 SSH 密钥登录、没有密码），Windows 也退回本机密钥文件。
 /// 私钥绝不写进日志；ToString 只给指纹。文件坏了不会崩：换一把新的并给出提示（之前认识你的房主会把你当新成员）。
 /// </summary>
 public sealed class MemberIdentity : IDisposable
@@ -84,7 +85,17 @@ public sealed class MemberIdentity : IDisposable
             }
         }
         var created = new MemberIdentity(directory, X25519KeyPair.Generate(), null);
-        created.Save();
+        try
+        {
+            created.Save();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            // Can't write the identity (read-only data folder, no key protection available): keep a temporary
+            // in-memory identity so the multiplayer page still opens, and say so.
+            created.IsPersisted = false;
+            created.Warning = L.T("core.mp.identity.unsaved");
+        }
         return created;
     }
 
@@ -165,10 +176,24 @@ public sealed class MemberIdentity : IDisposable
         }
     }
 
+    /// <summary>Set once DPAPI has refused on this machine (or by tests); later saves go straight to the wrap-key file.</summary>
+    internal static bool DpapiUnavailable { get; set; }
+
     internal static byte[] Protect(string directory, byte[] raw)
     {
-        if (OperatingSystem.IsWindows())
-            return [.. MagicDpapi, .. ProtectedData.Protect(raw, Entropy, DataProtectionScope.CurrentUser)];
+        if (OperatingSystem.IsWindows() && !DpapiUnavailable)
+        {
+            try
+            {
+                return [.. MagicDpapi, .. ProtectedData.Protect(raw, Entropy, DataProtectionScope.CurrentUser)];
+            }
+            catch (CryptographicException)
+            {
+                // DPAPI refuses when the user profile's master key can't be opened, e.g. an SSH key logon without a password.
+                // Fall back to the same wrap-key file that macOS and Linux use, kept next to the identity in the user's data folder.
+                DpapiUnavailable = true;
+            }
+        }
         var nonce = RandomNumberGenerator.GetBytes(12);
         var cipher = new byte[raw.Length];
         var tag = new byte[16];

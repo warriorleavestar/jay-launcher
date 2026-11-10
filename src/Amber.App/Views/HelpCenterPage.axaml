@@ -21,11 +21,11 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate DataType="vm:HelpCategoryGroup">
               <StackPanel Spacing="2" Margin="0,0,0,10">
-                <TextBlock Text="{Binding Title}" Classes="hint" FontSize="12" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Title}" Classes="hint" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
                 <ItemsControl ItemsSource="{Binding Articles}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:HelpArticleItem">
-                      <!-- Long English titles wrap instead of running past the catalog column. -->
+                      <!-- Long titles (English, Japanese) wrap in the 220px catalog instead of running under the article. -->
                       <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,4"
                               Command="{Binding $parent[ItemsControl;1].((vm:HelpCenterViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}">
                         <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />

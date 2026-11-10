@@ -5,6 +5,7 @@ using Amber.App.Views.Controls;
 using Amber.Core.Diagnostics;
 using Amber.Core.Localization;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Automation.Peers;
 using Avalonia.Automation.Provider;
 using Avalonia.Controls;
@@ -23,10 +24,12 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
     private BakeNoticeState State => Toasts.BakeNotices!;
     private HomeViewModel Home => main.Pages.OfType<HomeViewModel>().Single();
     private HomePage HomeView => window.GetVisualDescendants().OfType<HomePage>().Single();
+    // The home page has more than one StatusBar (the onboarding card has its own); pick the launch status by name.
+    private StatusBar LaunchStatus => HomeView.FindControl<StatusBar>("LaunchStatus")!;
 
-    private void Check(string name, bool ok)
+    private void Check(string name, bool ok, string detail = "")
     {
-        _report.Add($"{(ok ? "PASS" : "FAIL")} {name}");
+        _report.Add($"{(ok ? "PASS" : "FAIL")} {name}{(detail.Length > 0 ? " — " + detail : "")}");
         File.WriteAllLines(Path.Combine(reportDir, "report.txt"), _report);
         if (!ok) throw new InvalidOperationException(name);
     }
@@ -78,11 +81,19 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         Check(name + "：长说明最多两行且完整内容保留在提示框", description.Bounds.Height <= 36 && ToolTip.GetTip(description)?.ToString() == State.Current!.Text);
         var homeScroller = homePage.GetVisualDescendants().OfType<ScrollViewer>().First();
         Check(name + "：崩溃详情保留可滚动区域", homeScroller.Bounds.Height >= 60);
-        homeScroller.Offset = new Vector(0, homeScroller.Extent.Height);
-        await Task.Delay(100);
+        // Scroll to the end until it sticks: the crash card can still grow (text wrapping) after the first scroll,
+        // which left the log button a few pixels below the viewport.
+        for (var i = 0; i < 5; i++)
+        {
+            homeScroller.ScrollToEnd();
+            window.UpdateLayout();
+            await Task.Delay(100);
+            if (homeScroller.Offset.Y >= homeScroller.Extent.Height - homeScroller.Viewport.Height - 1) break;
+        }
         var log = homePage.GetVisualDescendants().OfType<Button>().Single(b => b.Content?.ToString() == L.T("home.crash.view_log"));
         var logBounds = BoundsIn(log, homeScroller);
-        Check(name + "：滚动后崩溃操作可达", logBounds.Top >= 0 && logBounds.Bottom <= homeScroller.Bounds.Height);
+        Check(name + "：滚动后崩溃操作可达", logBounds.Top >= 0 && logBounds.Bottom <= homeScroller.Bounds.Height,
+            $"log {logBounds}, viewport {homeScroller.Bounds.Height:F0}, offset {homeScroller.Offset.Y:F0}/{homeScroller.Extent.Height:F0}");
         if (multiple) Check(name + "：三条通知只呈现最新一条", State.Notices.Count == 3 && retry.Command == State.Current!.RetryCommand
             && Host.GetVisualDescendants().OfType<Button>().Count() == 1);
         await ShotAsync(name);
@@ -156,7 +167,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             Check("按钮只回调一次且保留实例/加入目标/SkipBake", calls.Count == 1 && calls[0] == request && request.VersionId == original.VersionId);
             Check("按钮移除通知，烘焙设置未改变", State.Notices.Count == 0 && File.ReadAllText(AppSettings.FilePath) == settingsBefore);
             window.UpdateLayout();
-            Check("通知结束后原状态文字恢复", !Host.IsVisible && HomeView.GetVisualDescendants().OfType<StatusBar>().Single().IsVisible);
+            Check("通知结束后原状态文字恢复", !Host.IsVisible && LaunchStatus.IsVisible);
             using (var simulatedGame = Process.GetCurrentProcess())
             {
                 var run = Home.AddRunForTest(instance, simulatedGame);
@@ -167,7 +178,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                     await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                     window.UpdateLayout();
                     Check("活动局的状态及进度优先显示，不被旧通知遮住", State.Notices.Count == 2 && !Host.IsEffectivelyVisible
-                        && HomeView.GetVisualDescendants().OfType<StatusBar>().Single().IsEffectivelyVisible && Home.ShowProgress);
+                        && LaunchStatus.IsEffectivelyVisible && Home.ShowProgress);
                     var stale = State.Notices.ToArray();
                     // 已有模拟运行局：真实启动请求进入多开确认后返回，不进入下载或启动流程。
                     Home.Service.RequestLaunch(original);
@@ -194,6 +205,10 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             while (State.Notices.Count > 0 && clock.Elapsed < TimeSpan.FromSeconds(11)) await Task.Delay(100);
             Check("回到启动页不重置八秒期限且不调用重试", State.Notices.Count == 0 && clock.Elapsed >= TimeSpan.FromSeconds(7.8) && calls.Count == 1);
             await CheckInstanceBakeEntryAsync(instance);
+            await CheckProblemNoticeAsync();
+            await CheckSettingsCleanupAsync();
+            await CheckSettingsInstallLoaderAsync();
+            await CheckLoaderDownloadOfferAsync();
         }
         catch (Exception ex)
         {
@@ -219,7 +234,10 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         }
     }
 
-    /// <summary>合并后的实例页仍使用现有模组工具栏；只检查入口，不触发补文件或烘焙进程。</summary>
+    /// <summary>
+    /// The bake entry on the instance page: since the mods-tab redesign it is "Bake now" in the toolbar's ⋯ menu. Checks
+    /// that the ⋯ button is reachable at small and medium sizes and that its menu offers the localized entry. Doesn't bake.
+    /// </summary>
     private async Task CheckInstanceBakeEntryAsync(string instance)
     {
         var page = main.Pages.OfType<InstanceViewModel>().Single();
@@ -227,7 +245,15 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         await Task.Delay(200);
         page.SelectedId = instance;
         page.TabIndex = (int)InstanceTab.Mods;
-        Check("实例页保留模组页签及实验烘焙入口", page.Current?.Id == instance && page.BakeEnabled);
+        await Task.Delay(200);
+        if (page.Current?.Id != instance)
+        {
+            // The test profile has no such instance (it is prepared by hand on the test machines).
+            _report.Add($"SKIP 实例页烘焙入口：测试目录里没有实例 {instance}");
+            File.WriteAllLines(Path.Combine(reportDir, "report.txt"), _report);
+            return;
+        }
+        Check("实例页保留模组页签及实验烘焙入口", page.BakeEnabled);
         foreach (var language in new[] { "zh-Hans", "zh-Hant", "en", "ja" })
         {
             L.SetLanguage(language);
@@ -237,19 +263,276 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                 window.Height = height;
                 await Task.Delay(200);
                 window.UpdateLayout();
-                var button = window.GetVisualDescendants().OfType<Button>()
-                    .Single(b => ReferenceEquals(b.Command, page.BakeNowCommand));
-                button.BringIntoView();
+                // The ⋯ button sits next to the mod search box. Menu item bindings only resolve once the menu has opened,
+                // so find the button by place and look for the bake item after opening it.
+                var search = window.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(t => t.Name == "ModSearchBox" && t.IsEffectivelyVisible);
+                var more = (search?.Parent as Panel)?.Children.OfType<Button>()
+                    .FirstOrDefault(b => b.IsEffectivelyVisible && b.Flyout is MenuFlyout && AutomationProperties.GetName(b) == L.T("common.more_actions"));
+                Check($"实例烘焙 {language}-{width}：模组工具栏有 ⋯ 按钮", more is not null);
+                more!.BringIntoView();
                 await Task.Delay(100);
-                var bounds = BoundsIn(button, window);
+                window.UpdateLayout();
+                var bounds = BoundsIn(more, window);
                 var hit = window.InputHitTest(bounds.Center) as Visual;
-                Check($"实例烘焙 {language}-{width}：入口完整可见且中心命中", button.IsEffectivelyVisible
-                    && button.IsEffectivelyEnabled && new Rect(window.ClientSize).Contains(bounds)
-                    && hit is not null && (ReferenceEquals(hit, button) || hit.GetVisualAncestors().Contains(button)));
-                Check($"实例烘焙 {language}-{width}：按钮文案及提示随语言切换", button.Content?.ToString() == L.T("instance.bake.now")
-                    && ToolTip.GetTip(button)?.ToString() == L.T("instance.bake.now_hint"));
+                Check($"实例烘焙 {language}-{width}：⋯ 按钮完整可见且中心命中", more.IsEffectivelyEnabled && new Rect(window.ClientSize).Contains(bounds)
+                    && hit is not null && (ReferenceEquals(hit, more) || hit.GetVisualAncestors().Contains(more)));
+                var flyout = (MenuFlyout)more.Flyout!;
+                flyout.ShowAt(more);
+                await Task.Delay(200);
+                var item = flyout.Items.OfType<MenuItem>().FirstOrDefault(m => m.Command == page.BakeNowCommand);
+                Check($"实例烘焙 {language}-{width}：⋯ 菜单里有烘焙，文案随语言切换且可用", item is not null && item.IsVisible && item.Header?.ToString() == L.T("instance.bake.now")
+                    && page.BakeNowCommand.CanExecute(item.CommandParameter));
                 await ShotAsync($"instance-bake-{language}-{width}x{height}");
+                flyout.Hide();
+                await Task.Delay(100);
             }
         }
+        L.SetLanguage("zh-Hans");
     }
+
+    /// <summary>A bake problem with nothing to retry (dependency problem, loader too old): text only, no retry button.</summary>
+    private async Task CheckProblemNoticeAsync()
+    {
+        main.CurrentPage = Home;
+        foreach (var language in new[] { "zh-Hans", "en" })
+        {
+            L.SetLanguage(language);
+            window.Width = 1280;
+            window.Height = 700;
+            State.Clear();
+            Home.Crash = null;
+            Toasts.BakeProblem(L.F("home.bake.fallback", L.F("core.bake.dependency_failed", "modmenu: " + L.T("core.bake.problem.missing_dep"))));
+            for (var i = 0; i < 40 && !(State.HasNotice && Host.IsEffectivelyVisible); i++) { await Task.Delay(50); window.UpdateLayout(); }
+            Check($"烘焙问题提示 {language}：显示在状态框", State.HasNotice && Host.IsEffectivelyVisible && State.Current!.Text.Contains("modmenu"));
+            var retry = Host.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content?.ToString() == L.T("home.bake.retry_without"));
+            Check($"烘焙问题提示 {language}：没有重试按钮", retry is null || !retry.IsEffectivelyVisible);
+            await ShotAsync($"bake-problem-{language}");
+            State.Current!.RetryCommand.Execute(null);
+            Check($"烘焙问题提示 {language}：点不到的重试不会出错并收起", !State.HasNotice);
+        }
+        Toasts.BakeFailed(L.F("home.bake.mixin_disabled", 2, "sodium" + L.T("core.mp.format.listseparator") + "lithium"), () => { });
+        for (var i = 0; i < 40 && !Host.IsEffectivelyVisible; i++) { await Task.Delay(50); window.UpdateLayout(); }
+        Check("Mixin 被关提示：带“不烘焙再启动”", Host.GetVisualDescendants().OfType<Button>().Any(b => b.IsEffectivelyVisible && b.Content?.ToString() == L.T("home.bake.retry_without")));
+        await ShotAsync("bake-mixin-disabled-en");
+        State.Clear();
+    }
+
+    /// <summary>Settings › Experimental: the cleanup button is there, reachable by settings#BakeCleanup, and reports without a loader.</summary>
+    private async Task CheckSettingsCleanupAsync()
+    {
+        var settings = main.Pages.OfType<SettingsViewModel>().Single();
+        foreach (var language in new[] { "zh-Hans", "en", "ja" })
+        {
+            L.SetLanguage(language);
+            foreach (var (width, height) in new[] { (760, 440), (1280, 700) })
+            {
+                window.Width = width;
+                window.Height = height;
+                main.Shell.Navigate("settings#BakeCleanup");
+                for (var i = 0; i < 60 && window.RevealedField?.Name != "BakeCleanup"; i++) await Task.Delay(50);
+                Check($"清理烘焙缓存 {language}-{width}：settings#BakeCleanup 定位到按钮", window.RevealedField?.Name == "BakeCleanup");
+                var button = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => ReferenceEquals(b.Command, settings.CleanBakeCacheCommand));
+                button.BringIntoView();
+                await Task.Delay(150);
+                window.UpdateLayout();
+                Check($"清理烘焙缓存 {language}-{width}：按钮完整可见、文案随语言", button.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(button, window))
+                    && button.Content?.ToString() == L.T("settings.bake.gc"));
+                await ShotAsync($"settings-bake-cleanup-{language}-{width}x{height}");
+            }
+        }
+        // No loader build in this test data folder: the button says so and never deletes anything.
+        L.SetLanguage("en");
+        await settings.CleanBakeCacheCommand.ExecuteAsync(null);
+        Check("没有加载器时清理只给出原因", settings.BakeCleanupStatus == L.T("core.bake.loader_missing_short") || settings.BakeCleanupStatus == L.T("core.bake.gc_empty"));
+        await ShotAsync("settings-bake-cleanup-status-en");
+    }
+
+    /// <summary>
+    /// Settings › Experimental › "Install loader from zip…": the entry is findable and visible, a good package is
+    /// checked, unpacked into the data folder and selected, a tampered one is refused without changing the selection.
+    /// With AMBER_SELFTEST_BAKE_ZIP the real loader zip is installed the same way (and stays selected).
+    /// </summary>
+    private async Task CheckSettingsInstallLoaderAsync()
+    {
+        var settings = main.Pages.OfType<SettingsViewModel>().Single();
+        foreach (var language in new[] { "zh-Hans", "en", "ja" })
+        {
+            L.SetLanguage(language);
+            foreach (var (width, height) in new[] { (760, 440), (1280, 700) })
+            {
+                window.Width = width;
+                window.Height = height;
+                main.Shell.Navigate("settings#BakeLoaderInstall");
+                for (var i = 0; i < 60 && window.RevealedField?.Name != "BakeLoaderInstall"; i++) await Task.Delay(50);
+                Check($"安装加载器 {language}-{width}：settings#BakeLoaderInstall 定位到按钮", window.RevealedField?.Name == "BakeLoaderInstall");
+                var button = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeInstallButton");
+                await ScrollIntoViewAsync(button);
+                Check($"安装加载器 {language}-{width}：按钮完整可见、文案随语言", button.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(button, window))
+                    && button.Content?.ToString() == L.T("settings.bake.install"));
+                var download = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadButton");
+                await ScrollIntoViewAsync(download);
+                var published = Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished;
+                Check($"下载加载器 {language}-{width}：按钮完整可见、文案随语言、有说明", download.IsVisible && new Rect(window.ClientSize).Contains(BoundsIn(download, window))
+                    && download.Content?.ToString() == L.T("settings.bake.download")
+                    && ToolTip.GetTip(download)?.ToString() == L.T(published ? "settings.bake.download_hint" : "core.bake.download_unpublished"));
+                var unpublished = window.PageHost.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "BakeDownloadUnpublishedText");
+                Check($"下载加载器 {language}-{width}：未发布时按钮关着并写明原因", published
+                    ? download.IsEffectivelyEnabled && !unpublished.IsVisible
+                    : !download.IsEffectivelyEnabled && unpublished.IsEffectivelyVisible && unpublished.Text == L.T("core.bake.download_unpublished"));
+                var cancel = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadCancelButton");
+                Check($"下载加载器 {language}-{width}：没在下载时不显示取消", !cancel.IsVisible);
+                await ShotAsync($"settings-bake-install-{language}-{width}x{height}");
+            }
+        }
+
+        L.SetLanguage("en");
+        window.Width = 1280;
+        window.Height = 700;
+        var before = settings.BakeLoaderPath;
+        var good = FakeLoaderZip("good", tamper: false);
+        await settings.InstallBakeLoaderAsync(good);
+        var installed = Path.Combine(LauncherService.BakeLoaderInstallRoot, "0.0.0-selftest");
+        Check("从压缩包安装：核对后解压到数据文件夹并选用", settings.BakeLoaderPath == installed && File.Exists(Path.Combine(installed, "loader.jar"))
+            && settings.BakeLoaderStatus.Contains("0.0.0-selftest", StringComparison.Ordinal), settings.BakeLoaderStatus);
+        main.Shell.Navigate("settings#BakeLoaderInstall");
+        await Task.Delay(300);
+        await ShotAsync("settings-bake-install-done-en");
+
+        var bad = FakeLoaderZip("bad", tamper: true);
+        settings.BakeLoaderPath = before;
+        await settings.InstallBakeLoaderAsync(bad);
+        Check("被改过的加载器包被拒，选用的文件夹不变", settings.BakeLoaderPath == before
+            && settings.BakeLoaderStatus.StartsWith(L.F("settings.bake.install_failed", ""), StringComparison.Ordinal)
+            && settings.BakeLoaderStatus.Contains("loader.jar", StringComparison.Ordinal), settings.BakeLoaderStatus);
+        await ShotAsync("settings-bake-install-refused-en");
+
+        if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_BAKE_DOWNLOAD") == "1")
+        {
+            // Opt-in, real network: "Download loader" fetches the pinned release, checks it and selects it.
+            settings.BakeLoaderPath = "";
+            main.Shell.Navigate("settings#BakeLoaderInstall");
+            await Task.Delay(300);
+            var download = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadButton");
+            await ScrollIntoViewAsync(download);
+            Check("下载加载器：已发布时按钮可用", Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished && download.IsEffectivelyEnabled);
+            await ShotAsync("settings-bake-download-enabled-en");
+            download.Command!.Execute(null);
+            for (var i = 0; i < 40 && !settings.IsDownloadingBakeLoader; i++) await Task.Delay(50);
+            var sawProgress = false;
+            for (var i = 0; i < 2400 && settings.IsDownloadingBakeLoader; i++)
+            {
+                if (!sawProgress && settings.BakeLoaderStatus.Contains('%'))
+                {
+                    sawProgress = true;
+                    await ShotAsync("settings-bake-download-progress-en");
+                }
+                await Task.Delay(100);
+            }
+            var pin = Amber.Core.Bake.BakeLoaderRelease.Pinned;
+            var toolkit = Amber.Core.Bake.BakeToolkit.Find(settings.BakeLoaderPath);
+            Check("下载加载器：按固定的大小和 SHA-256 下好、装好并选用", toolkit?.Package is { } pkg && pkg.LoaderVersion == pin.LoaderVersion
+                && settings.BakeLoaderPath == Path.Combine(LauncherService.BakeLoaderInstallRoot, pin.LoaderVersion)
+                && settings.BakeLoaderStatus.Contains(pin.Sha256[..12], StringComparison.Ordinal), settings.BakeLoaderStatus);
+            var package = toolkit!.Package!;
+            package.Verify();
+            Check("下载加载器：清单里每个文件都核对过（含许可文件）", package.Files.ContainsKey("LICENSE") && package.Files.ContainsKey("THIRD_PARTY_NOTICES.md")
+                && package.Files.Keys.Any(f => f.StartsWith("licenses/", StringComparison.Ordinal)), $"{package.Files.Count} files");
+            _report.Add("INFO 下载的加载器装在 " + settings.BakeLoaderPath + "，" + package.Files.Count + " 个文件");
+            await ShotAsync("settings-bake-download-done-en");
+        }
+        else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_BAKE_ZIP") is { Length: > 0 } real && File.Exists(real))
+        {
+            await settings.InstallBakeLoaderAsync(real);
+            var ok = Amber.Core.Bake.BakeToolkit.Find(settings.BakeLoaderPath) is { Package: { } p } && p.Interface >= new Version(1, 3);
+            Check("真实加载器包从压缩包装好并选用", ok, settings.BakeLoaderStatus);
+            _report.Add("INFO 加载器装在 " + settings.BakeLoaderPath);
+            await ShotAsync("settings-bake-install-real-en");
+        }
+        else settings.BakeLoaderPath = before;
+    }
+
+    /// <summary>
+    /// Baking on and no loader installed: the launch status box offers "Download loader" in place of the retry button.
+    /// The button's action is a stand-in here (the self-test never touches download services); the real one is wired.
+    /// </summary>
+    private async Task CheckLoaderDownloadOfferAsync()
+    {
+        Check("没有加载器时的下载入口已接到设置页", Home.DownloadBakeLoader is not null);
+        main.CurrentPage = Home;
+        foreach (var language in new[] { "zh-Hans", "en", "ja" })
+        {
+            L.SetLanguage(language);
+            window.Width = 1280;
+            window.Height = 700;
+            var cardHeight = await EmptyCardHeightAsync();
+            var clicked = false;
+            Toasts.BakeAction(L.T("home.bake.loader_missing_notice"), L.T("home.bake.download_loader"), L.T("settings.bake.download_hint"), () => clicked = true);
+            Button? action = null;
+            for (var i = 0; i < 40; i++)
+            {
+                window.UpdateLayout();
+                action = Host.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "BakeNoticeAction" && b.IsEffectivelyVisible);
+                if (action is not null) break;
+                await Task.Delay(50);
+            }
+            Check($"缺加载器提示 {language}：按钮是“下载加载器”", action?.Content?.ToString() == L.T("home.bake.download_loader")
+                && ToolTip.GetTip(action)?.ToString() == L.T("settings.bake.download_hint"), action?.Content?.ToString() ?? "无按钮");
+            var card = HomeView.FindControl<Border>("LaunchStatusCard")!;
+            Check($"缺加载器提示 {language}：完整在状态框内、不增高", BoundsIn(card, window).Contains(BoundsIn(action!, window)) && card.Bounds.Height <= cardHeight + 1);
+            await ShotAsync($"bake-loader-missing-offer-{language}");
+            action!.Command!.Execute(null);
+            Check($"缺加载器提示 {language}：点按钮执行下载并收起", clicked && !State.HasNotice);
+        }
+        Show("x");
+        for (var i = 0; i < 40 && !Host.IsEffectivelyVisible; i++) { await Task.Delay(50); window.UpdateLayout(); }
+        Check("其他提示仍是“不烘焙再启动”", Host.GetVisualDescendants().OfType<Button>().Any(b => b.IsEffectivelyVisible && b.Content?.ToString() == L.T("home.bake.retry_without")));
+        State.Clear();
+        L.SetLanguage("en");
+    }
+
+    /// <summary>Scrolls a control into the window and waits until the layout has settled there (wrapping text can move it after the first pass).</summary>
+    private async Task ScrollIntoViewAsync(Control control)
+    {
+        for (var i = 0; i < 20; i++)
+        {
+            control.BringIntoView();
+            await Task.Delay(50);
+            window.UpdateLayout();
+            if (new Rect(window.ClientSize).Contains(BoundsIn(control, window))) return;
+        }
+    }
+
+    /// <summary>A tiny loader package zip for the install check (not a real loader). tamper: one file differs from its manifest.</summary>
+    private string FakeLoaderZip(string name, bool tamper)
+    {
+        var source = Path.Combine(reportDir, "fake-loader-" + name);
+        if (Directory.Exists(source)) Directory.Delete(source, true);
+        var folder = Path.Combine(source, "amber-ul-0.0.0-selftest");
+        var files = new System.Text.Json.Nodes.JsonObject();
+        foreach (var (relative, text) in new[] { ("loader.jar", "loader"), ("libs/asm.jar", "asm"), ("bridges/fmlbridge.jar", "fml") })
+        {
+            var path = Path.Combine(folder, relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+            files[relative] = new System.Text.Json.Nodes.JsonObject { ["sha256"] = Amber.Core.Bake.BakePackage.Sha256(path), ["size"] = new FileInfo(path).Length };
+        }
+        var manifest = new System.Text.Json.Nodes.JsonObject
+        {
+            ["schema"] = Amber.Core.Bake.BakePackage.Schema,
+            ["loaderVersion"] = "0.0.0-selftest",
+            ["protocol"] = 1,
+            ["interface"] = "1.3",
+            ["platforms"] = new System.Text.Json.Nodes.JsonObject { ["vanilla"] = new System.Text.Json.Nodes.JsonArray("1.21.1") },
+            ["javaMin"] = new System.Text.Json.Nodes.JsonObject { ["vanilla"] = 21 },
+            ["classpath"] = new System.Text.Json.Nodes.JsonArray("loader.jar", "libs/asm.jar"),
+            ["files"] = files,
+        };
+        File.WriteAllText(Path.Combine(folder, Amber.Core.Bake.BakePackage.ManifestName), manifest.ToJsonString());
+        if (tamper) File.WriteAllText(Path.Combine(folder, "loader.jar"), "changed");
+        var zip = Path.Combine(reportDir, $"fake-loader-{name}.zip");
+        if (File.Exists(zip)) File.Delete(zip);
+        System.IO.Compression.ZipFile.CreateFromDirectory(source, zip);
+        return zip;
+    }
+
 }

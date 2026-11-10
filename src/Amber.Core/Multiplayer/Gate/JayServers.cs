@@ -367,7 +367,16 @@ public sealed class JayServerList
     private string Protect(byte[] key)
     {
         if (OperatingSystem.IsWindows())
-            return "dpapi:" + Convert.ToBase64String(ProtectedData.Protect(key, Entropy, DataProtectionScope.CurrentUser));
+        {
+            try
+            {
+                return "dpapi:" + Convert.ToBase64String(ProtectedData.Protect(key, Entropy, DataProtectionScope.CurrentUser));
+            }
+            catch (CryptographicException)
+            {
+                // DPAPI can refuse (SSH key logon without a password); use the 0600-style key file like macOS and Linux.
+            }
+        }
         var nonce = RandomNumberGenerator.GetBytes(12);
         var cipher = new byte[key.Length];
         var tag = new byte[16];

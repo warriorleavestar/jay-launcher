@@ -123,6 +123,11 @@ public sealed partial class MultiplayerViewModel
             if (!IsCurrent) Badge++;
         });
         messenger.Progress += p => Dispatcher.UIThread.Post(() => OnTransfer(messenger, p));
+        messenger.FileOfferExpired += id => Dispatcher.UIThread.Post(() =>
+        {
+            if (_messenger != messenger) return;
+            if (FileOffers.FirstOrDefault(o => o.Offer.Id == id) is { } expired) FileOffers.Remove(expired);
+        });
         if (IsHosting) ServeMods(messenger);
         OnRoster(chat, chat.Roster);
     }
