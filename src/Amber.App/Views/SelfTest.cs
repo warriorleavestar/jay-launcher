@@ -310,6 +310,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "journeys")
+            {
+                await JourneysAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "help-shots")
             {
                 await HelpShotsAsync();
@@ -539,6 +546,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
     {
         var content = Page<ContentViewModel>();
         var previous = main.CurrentPage;
+        Check("Discover starts on modpacks (§6.12)", content.TypeIndex == (int)ContentType.Modpack);
+        content.TypeIndex = (int)ContentType.Mod;
         main.CurrentPage = content;
         await WaitAsync(() => content.Results.Count > 0 || content.StatusInfo?.Kind == StatusKind.Error, 30);
         Check("首次进入资源页自动加载 Modrinth 列表（不点搜索）", content.Query == "" && content.Results.Count > 0, content.Status);

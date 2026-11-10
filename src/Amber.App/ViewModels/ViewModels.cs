@@ -293,8 +293,9 @@ public sealed partial class MainViewModel : ObservableObject
         instance.NavigateToContent = (id, type, query) =>
         {
             var back = shell.Router.Current;
-            shell.Navigate("discover");
+            // Context first, then the page: the move into Discover is already a context sub-view (§2.5, journeys).
             content.BrowseFor(id, type, back: () => shell.Router.Navigate(back), query: query ?? "");
+            shell.Navigate("discover");
         };
         multiplayer.NavigateHome = () => shell.Navigate("library");
         // 开始游戏不换页（§2.5 第 5 条）：进度在顶栏胶囊和启动页。
