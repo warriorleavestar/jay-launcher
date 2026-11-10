@@ -83,8 +83,9 @@ public static class Program
           jay-server network show <连接串或文件>              显示连接串里的内容和签名
           jay-server network dir-key [<网络.json>] --dir <节点数据目录>  打印目录公钥（没有就生成 directory.key），给了网络 JSON 就写进 dirKeys
           jay-server network root-key --out <根钥匙文件>     生成目录根钥匙（离线保管，不放服务器、不进仓库），打印公钥（写进 dirRoots）
-          jay-server network dir-cert --root <根钥匙文件> --dir <节点数据目录> --network <EasyTier 网络名> [--days 365]
-              用根钥匙给这个节点的目录公钥签证书，写到节点数据目录的 directory.cert（在离线电脑上签，再把证书拷过去）
+          jay-server network dir-cert --root <根钥匙文件> --network <EasyTier 网络名> --dir-key <目录公钥> --out <证书文件> [--days 365]
+              在离线电脑上用根钥匙给节点的目录公钥（dir-key 打印的）签证书，再把证书拷到节点数据目录，命名为 directory.cert
+              （根钥匙和节点在同一台电脑时也可以用 --dir <节点数据目录> 直接写进去，但根钥匙不该放在服务器上）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
 
@@ -369,14 +370,27 @@ public static class Program
             case "dir-cert":
             {
                 var rootFile = options.Get("root") ?? throw new ArgumentException("要用 --root 指定根钥匙文件");
-                var dataDir = root ?? throw new ArgumentException("要用 --dir 指定节点的数据目录");
                 var networkName = options.Get("network") ?? throw new ArgumentException("要用 --network 指定 EasyTier 网络名（Jay 公共网络是 " + PublicNetworkProfile.JayNetworkName + "）");
                 var days = int.Parse(options.Get("days") ?? "365", System.Globalization.CultureInfo.InvariantCulture);
                 if (days is < 1 or > 3650) throw new ArgumentException("--days 要在 1 到 3650 之间");
-                using var key = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(dataDir, "directory.key"));
+                // On the offline machine: only the node's public key (printed by dir-key) is needed, never its private key.
+                byte[] directoryKey;
+                string target;
+                if (options.Get("dir-key") is { } given)
+                {
+                    directoryKey = Convert.FromBase64String(given.Trim());
+                    if (directoryKey.Length != DirectoryChannel.KeyLength) throw new ArgumentException("--dir-key 不是目录公钥（32 字节 base64）");
+                    target = options.Get("out") ?? throw new ArgumentException("用 --dir-key 时要用 --out 指定证书文件");
+                }
+                else
+                {
+                    var dataDir = root ?? throw new ArgumentException("要用 --dir-key <目录公钥> --out <文件>，或 --dir <节点数据目录>");
+                    using var key = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(dataDir, "directory.key"));
+                    directoryKey = key.PublicKey;
+                    target = Path.Combine(dataDir, "directory.cert");
+                }
                 var expires = DateTimeOffset.UtcNow.AddDays(days);
-                var cert = DirectoryCertificate.Issue(NetworkSigner.FromSeed(File.ReadAllText(rootFile)), key.PublicKey, networkName, expires);
-                var target = Path.Combine(dataDir, "directory.cert");
+                var cert = DirectoryCertificate.Issue(NetworkSigner.FromSeed(File.ReadAllText(rootFile)), directoryKey, networkName, expires);
                 File.WriteAllBytes(target, cert);
                 output.WriteLine($"已写 {target}（到 {expires:yyyy-MM-dd} 有效）。证书不是秘密，可以随节点数据目录一起备份。");
                 return 0;

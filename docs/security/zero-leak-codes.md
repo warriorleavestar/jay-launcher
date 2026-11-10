@@ -104,9 +104,12 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 jay-server network root-key --out <usb>/jay-directory-root.key
 # prints the root public key → paste it into PublicNetworkProfile.JayDirectoryRoots and release
 
-# for each directory node, on the offline machine with a copy of the node's directory.key public part:
-jay-server network dir-cert --root <usb>/jay-directory-root.key --dir <node data dir> --network jay-public-v1 --days 365
-# copy the resulting directory.cert into the node's data dir; the node logs "directory certificate" at start
+# on each directory node: print its directory public key (makes directory.key on first use)
+jay-server network dir-key --dir <node data dir>
+
+# on the offline machine, with only that public key:
+jay-server network dir-cert --root <usb>/jay-directory-root.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# copy directory.cert into the node's data dir; the node logs "directory certificate" at start
 ```
 
 Keep the root private key off servers, CI, cloud drives and the repository. Certificates are not secret. A new or

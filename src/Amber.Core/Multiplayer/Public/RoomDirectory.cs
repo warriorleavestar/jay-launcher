@@ -545,18 +545,31 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
+    /// <summary>Room left for blobs in one fetch reply (the reply is one line of at most <see cref="RoomDirectoryProtocol.MaxLine"/>).</summary>
+    private const int FetchBudget = 12 * 1024;
+
     private JsonObject Fetch(JsonObject request)
     {
         var boxes = (request["boxes"] as JsonArray ?? []).Select(b => b?.GetValue<string>()?.ToLowerInvariant()).Where(b => IsHex(b, 32))
             .Distinct().Take(RoomDirectoryProtocol.MaxFetchBoxes).ToList();
+        var from = Math.Max(0, request["from"]?.GetValue<int>() ?? 0);
         lock (_gate)
         {
             PruneMail();
+            var all = boxes.SelectMany(box => _mailboxes.TryGetValue(box!, out var items) ? items.Select(i => (Box: box!, i.Blob)) : []).ToList();
             var found = new JsonArray();
-            foreach (var box in boxes)
-                if (_mailboxes.TryGetValue(box!, out var items))
-                    foreach (var item in items) found.Add((JsonNode)new JsonObject { ["box"] = box, ["blob"] = item.Blob });
-            return new JsonObject { ["ok"] = true, ["items"] = found };
+            var used = 0;
+            var next = from;
+            for (; next < all.Count; next++)
+            {
+                var (box, blob) = all[next];
+                if (used > 0 && used + blob.Length + 64 > FetchBudget) break;
+                used += blob.Length + 64;
+                found.Add((JsonNode)new JsonObject { ["box"] = box, ["blob"] = blob });
+            }
+            var reply = new JsonObject { ["ok"] = true, ["items"] = found };
+            if (next < all.Count) reply["next"] = next;
+            return reply;
         }
     }
 
@@ -840,13 +853,42 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     public async Task PostMailAsync(string box, byte[] blob, string dropHash, CancellationToken ct) =>
         NeedOne(await FanOutAsync(new JsonObject { ["op"] = "post", ["box"] = box, ["blob"] = Convert.ToBase64String(blob), ["drop"] = dropHash }, ct));
 
-    /// <summary>Everything waiting in these mailboxes at any directory, each blob once.</summary>
+    /// <summary>Most pages read from one directory per fetch (a flooded mailbox can't keep Jay busy forever).</summary>
+    public const int MaxFetchPages = 16;
+
+    /// <summary>Everything waiting in these mailboxes at any directory, each blob once. Throws when no directory answered.</summary>
     public async Task<IReadOnlyList<(string Box, byte[] Blob)>> FetchMailAsync(IReadOnlyList<string> boxes, CancellationToken ct)
     {
-        var replies = NeedOne(await FanOutAsync(new JsonObject { ["op"] = "fetch", ["boxes"] = new JsonArray([.. boxes.Select(b => (JsonNode)JsonValue.Create(b))]) }, ct));
+        var targets = await TargetsAsync(ct);
+        var pages = await Task.WhenAll(targets.Select(async ip =>
+        {
+            var replies = new List<JsonObject>();
+            Exception? error = null;
+            var from = 0;
+            try
+            {
+                for (var page = 0; page < MaxFetchPages; page++)
+                {
+                    var request = new JsonObject
+                    {
+                        ["op"] = "fetch",
+                        ["boxes"] = new JsonArray([.. boxes.Select(b => (JsonNode)JsonValue.Create(b))]),
+                        ["from"] = from,
+                    };
+                    var reply = await CallAsync(ip, request, ct);
+                    replies.Add(reply);
+                    if (!IsOk(reply) || reply["next"]?.GetValue<int>() is not { } next || next <= from) break;
+                    from = next;
+                }
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException or EndOfStreamException or InvalidOperationException or FormatException) { error = e; }
+            return (replies, error);
+        }));
+        ct.ThrowIfCancellationRequested();
+        NeedOne([.. pages.Select(p => (p.replies.FirstOrDefault(), p.replies.Count > 0 ? null : p.error))]);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var result = new List<(string, byte[])>();
-        foreach (var item in replies.SelectMany(r => (r["items"] as JsonArray ?? []).OfType<JsonObject>()))
+        foreach (var item in pages.SelectMany(p => p.replies).Where(IsOk).SelectMany(r => (r["items"] as JsonArray ?? []).OfType<JsonObject>()))
         {
             var box = item["box"]?.GetValue<string>();
             var blob = item["blob"]?.GetValue<string>();

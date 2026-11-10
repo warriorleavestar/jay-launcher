@@ -332,6 +332,22 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         Assert.Equal("full", e.Code);
     }
 
+    [Fact]
+    public async Task FetchPagesThroughAFullMailbox()
+    {
+        var server = StartDirectory();
+        var client = new RoomDirectoryClient(new Loopback(server.Port));
+        var box = new string('c', 32);
+        for (var i = 0; i < RoomDirectoryProtocol.MaxMailPerBox; i++)
+        {
+            var blob = new byte[3000];
+            blob[0] = (byte)i;
+            await client.PostMailAsync(box, blob, SealedMail.DropHash(new byte[16]), default);
+        }
+        // 32 × 4 KB of base64 doesn't fit one reply line; the client reads it page by page.
+        Assert.Equal(RoomDirectoryProtocol.MaxMailPerBox, (await client.FetchMailAsync([box], default)).Count);
+    }
+
     // ---- invites bound to one person, and the host named in the invite ----
 
     private (InviteBook Book, KnockServer Server, X25519KeyPair Host) StartKnock(List<KnockRequest> seen)

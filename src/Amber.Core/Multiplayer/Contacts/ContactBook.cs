@@ -119,6 +119,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     /// </summary>
     public MailMessage? Receive(ReadOnlySpan<byte> sender, MailMessage message, string myName)
     {
+        if (Me.Length != X25519KeyPair.Length || sender.Length != X25519KeyPair.Length) return null;
         var key = Convert.ToHexStringLower(sender);
         MailMessage? reply = null;
         lock (_gate)
