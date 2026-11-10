@@ -75,6 +75,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Amber.Core.Localization.L.SetLanguage("zh-Hans");
         try
         {
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "hotspot")
+            {
+                await HotspotAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "shell")
             {
                 await ShellAsync();

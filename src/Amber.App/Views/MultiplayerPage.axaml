@@ -790,6 +790,9 @@
 
         <!-- ===== Multiplayer settings (§6.18) ===== -->
         <StackPanel x:Name="MpSettingsPanel" Spacing="14" IsVisible="{Binding IsSettingsTab}">
+          <!-- 手机通过当前网络出口上网。共享状态由提权守护确认。 -->
+          <c:HotspotSharingPanel DataContext="{Binding Hotspot}" />
+
           <!-- Safety code and friends -->
           <Border Classes="card" Margin="0">
             <StackPanel Spacing="8">
