@@ -125,6 +125,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// </summary>
     public bool AcceptLegacyClients { get; set; } = true;
 
+    /// <summary>Volunteer nodes ("volunteer" / "nodes" ops). Null = this network doesn't take volunteers (error "off").</summary>
+    public VolunteerRegistry? Volunteers { get; set; }
+
     /// <summary>房间审核规则（按顺序，任何一条拒绝就不收）。见 <see cref="IRoomGate"/>。</summary>
     public IReadOnlyList<IRoomGate> Gates { get; set; } = [];
 
@@ -219,6 +222,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "lookup" => Lookup(request),
                 "mail" => Mail(request),
                 "find" => Find(request),
+                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
+                "nodes" => Volunteers is { } v ? new JsonObject { ["ok"] = true, ["nodes"] = new JsonArray([.. v.Pick().Select(u => (JsonNode)u)]) } : Error("off"),
                 "login" when Login is { } login => LoginRequest(login, request),
                 _ when DirectoryExtensions.IsValidOp(op) && Extensions.FirstOrDefault(x => x.Op == op) is { } extension => Extend(extension, request),
                 _ => Error("op"),
@@ -632,6 +637,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             "rate" => L.T("core.mp.public.err_rate"),
             "version" => L.F("core.mp.public.err_version", reply["min"]?.GetValue<string>() is { Length: <= 32 } min ? min : "?"),
             "login" => L.T("core.mp.public.err_login"),
+            "off" => L.T("core.mp.public.volunteer_off"),
             _ when !string.IsNullOrWhiteSpace(reason) => L.F("core.mp.public.err_policy", reason),
             _ => L.F("core.mp.public.err_other", code),
         });
@@ -666,6 +672,32 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         if (account is not null) request["account"] = account;
         var replies = NeedOne(await FanOutAsync(request, ct));
         return [.. replies.SelectMany(r => (r["mail"] as JsonArray ?? []).Select(m => m?.GetValue<string>()).OfType<string>()).Distinct()];
+    }
+
+    /// <summary>
+    /// Registers (or renews) this computer as a volunteer node with every online directory. Returns whether at least
+    /// one directory lists it already (the first registration is probed first, so it lists on the next renewal).
+    /// </summary>
+    public async Task<bool> VolunteerAsync(string url, CancellationToken ct)
+    {
+        var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
+        List<JsonObject> replies;
+        try { replies = NeedOne(await FanOutAsync(new JsonObject { ["op"] = "volunteer", ["url"] = address }, ct)); }
+        catch (DirectoryRejectedException e) when (e.Code == "op")
+        {
+            // Directories from before volunteer nodes existed.
+            throw new DirectoryRejectedException("off", L.T("core.mp.public.volunteer_off"));
+        }
+        return replies.Any(r => r["listed"]?.GetValue<bool>() == true);
+    }
+
+    /// <summary>Volunteer nodes the directories know (merged, public addresses only). Empty when the network takes none.</summary>
+    public async Task<IReadOnlyList<string>> NodesAsync(CancellationToken ct)
+    {
+        var results = await FanOutAsync(new JsonObject { ["op"] = "nodes" }, ct);
+        return [.. results.Select(r => r.Reply).OfType<JsonObject>().Where(IsOk)
+            .SelectMany(r => (r["nodes"] as JsonArray ?? []).Select(n => n?.GetValue<string>()))
+            .Select(VolunteerNodes.Normalize).OfType<string>().Distinct().Take(VolunteerNodes.PerRequest * 2)];
     }
 
     public async Task WithdrawAsync(RoomSigner signer, CancellationToken ct)

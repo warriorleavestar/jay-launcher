@@ -54,6 +54,7 @@ await server.RunAsync(CancellationToken.None);
 - `NetworkScaffold`：生成签名钥匙、网络信息、配置模板，算配置哈希（`jay-server network init` / `config-hash` 用的就是它）。
 - `server.LoginSection`：开了账号登录时，要写进网络配置 `login` 的那一段。
 - `server.Ban(kind, value, reason, duration)`、`server.BanRoomHost(roomId, ...)`：封禁并马上拿掉相关房间。
+- `WithoutVolunteers()` / `UseVolunteerProbe(...)`：不收志愿中转，或者换掉“列出前先连一次”的检查。`server.Volunteers` 是列表（`VolunteerRegistry`）。
 - `UseConfig(config)` 时，`policy.minVersion` 会挡旧版 Jay，`login.required` 会要求发布房间的人先登录（`RoomDirectoryServer.MinClientVersion` / `RequireAccountToPublish`，也可以自己设）。
 - `RoomAnnouncement.Account`：房主登录过时是他的账号名（凭证核对过），审核规则可以按账号判断。
 
@@ -66,8 +67,9 @@ await server.RunAsync(CancellationToken.None);
 | `GET /health` | `{ok, network, role: directory\|seed, easytier: running\|stopped\|external, rooms, listed, login, uptime}` |
 | `GET /stats` | `{ok, health, stats: {published, renewed, withdrawn, expired, removed, rejected: {code: n}, loginOk, loginFail}}` |
 | `GET /rooms` | `{ok, total, hidden, rooms: [{id, name, host, hostFingerprint, mode, players, game, account, updated}]}`（只有公开房间） |
+| `GET /nodes` | `{ok, enabled, nodes: ["tcp://...", ...]}`：列出的志愿中转 |
 | `GET /bans` | `{ok, bans: [{kind, value, reason, at, until}]}`（`until` 为 null 是永久） |
-| `POST /ban` `{kind: host\|room\|account, value, reason?, for?}` | `{ok, removed}`；`for` 是秒数 |
+| `POST /ban` `{kind: host\|room\|account\|node, value, reason?, for?}` | `{ok, removed}`；`for` 是秒数，`node` 的值是志愿中转地址 |
 | `POST /ban` `{kind: room-host, value: <房间编号>, reason?, for?}` | `{ok, removed, host, account}`：封这个房间房主的指纹和账号；房间不在回 404 |
 | `POST /unban` `{kind, value}` | `{ok}` 或 404 |
 | `POST /remove` `{id}` | `{ok}` 或 404 |
@@ -99,6 +101,8 @@ await server.RunAsync(CancellationToken.None);
 | `find` | `{code: "JAYF1-..."}` | `{ok, room?}`：用登记的指纹密钥算标签，见 `FingerprintCode.Matches` |
 | `mail` | `{id, text}`（最多 4 KB）：给直连房间的房主捎回复码 | `{ok}`；房间不在或不是直连回 `gone` |
 | `login` | 见 `NetworkLoginClient.Request` / `LoginAuthority.Handle` | 加密的凭证或 `factor` 提示 |
+| `volunteer` | `{url: "tcp://<公网地址>:<端口>"}`：登记或续期志愿中转（每 3 分钟） | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad` |
+| `nodes` | `{}` | `{ok, nodes: ["tcp://...", ...最多 8 个，随机]}`：探测过、还在续期的志愿中转 |
 | `x-*` | 你自己的 | 你自己的 |
 
 Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别人占着、旧版本）、`full`（满了）、`gone`、`rate`（限流）、`version`（Jay 太旧，带 `min`）、`login`（要先登录），其他码有 `reason` 就显示 `reason`。

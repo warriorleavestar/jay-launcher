@@ -159,6 +159,13 @@ public sealed class AdminApi : IAsyncDisposable
                         })]),
                     });
                 }
+                case ("GET", "/nodes"):
+                    return (200, new JsonObject
+                    {
+                        ["ok"] = true,
+                        ["enabled"] = _server.Volunteers is not null,
+                        ["nodes"] = new JsonArray([.. (_server.Volunteers?.Listed() ?? []).Select(n => (JsonNode)n)]),
+                    });
                 case ("GET", "/bans"):
                     return (200, new JsonObject
                     {
