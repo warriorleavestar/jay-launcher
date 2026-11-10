@@ -6,6 +6,7 @@ namespace Amber.Core.Tests;
 /// <summary>
 /// 多语言的检查：界面代码里没有写死的中文；用到的键都在英文原文表（en.json）里；每种语言的键齐全、占位符一致。
 /// </summary>
+[Collection("GlobalLanguage")]
 public partial class LocalizationTests
 {
     private static readonly string Src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
