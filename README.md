@@ -1,52 +1,91 @@
 <div align="center">
 
-<img src="docs/brand/jay-feather-amber-v1.png" alt="Jay" width="96">
+<img src="docs/brand/jay-feather-amber-v1.png" alt="Jay feather logo" width="112">
 
 # Jay
 
-**A clean, lightweight launcher for Minecraft: Java Edition**
+### Play Minecraft with your friends, anywhere. Privately.
 
-No telemetry, no remote switches. Download, unzip, run.
+An open-source launcher for Minecraft: Java Edition with built-in cross-border and LAN multiplayer,<br>
+end-to-end encrypted chat and file transfer, and no telemetry at all.
 
-[![Latest release](https://img.shields.io/github/v/release/warriorleavestar/jay-launcher?color=d98a1f)](https://github.com/warriorleavestar/jay-launcher/releases/latest)
-[![License](https://img.shields.io/github/license/warriorleavestar/jay-launcher)](LICENSE)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
+[![Latest release](https://img.shields.io/github/v/release/warriorleavestar/jay-launcher?color=d98a1f&label=release)](https://github.com/warriorleavestar/jay-launcher/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/warriorleavestar/jay-launcher/build.yml?branch=main&label=build)](https://github.com/warriorleavestar/jay-launcher/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/github/license/warriorleavestar/jay-launcher?color=4b6584)](LICENSE)
 
-English | [简体中文](README.zh-Hans.md) | [Code signing policy](docs/code-signing-policy.md) | [Contributing](CONTRIBUTING.md)
+[![Download for Windows](https://img.shields.io/badge/Windows-Download-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64-aot.zip)
+[![Download for macOS](https://img.shields.io/badge/macOS-Download-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz)
+[![Download for Linux](https://img.shields.io/badge/Linux-Download-4b6584?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz)
 
-![Jay home page](docs/images/jay-home.png)
+**English** · [简体中文](README.zh-Hans.md) · [Download](#download) · [Features](#features) · [Privacy](#privacy) · [FAQ](#faq) · [Contributing](CONTRIBUTING.md)
+
+<img src="docs/images/readme/en/library.png" alt="Jay's game library" width="860">
 
 </div>
 
-The project was called Amber; from v0.7.0 it is named **Jay**, with the Jay name and feather icon. Existing accounts and settings carry over. See the [rename and compatibility notice](docs/announcements/2026-11-06-jay-rename.md) (Chinese).
+<br>
 
-> **v0.7.0 multiplayer does not work with older versions.** Multiplayer encryption and joining were rebuilt: rooms use new `JAY2-` invite codes and direct connections use `JAY2D-` / `JAY2R-` codes. Old `AMB-` room and direct codes are no longer accepted, so everyone playing together needs v0.7.0.
->
-> Features marked **(experimental)** are complete and pass the automated tests but have not been fully verified in real-world use yet. Please [report problems](https://github.com/warriorleavestar/jay-launcher/issues/new/choose).
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### 🌏 Play together, anywhere
+
+Share an invite, your friend "knocks", you let them in. Jay tries a direct connection first (IPv6, UPnP, hole punching) and only falls back to a relay when it has to. Works across countries, across networks and on the same LAN.
+
+</td>
+<td width="33%" valign="top">
+
+### 🔒 Private by design
+
+Every member gets their own key. Invites are single-use and expire; leaked codes are useless. Chat, private messages and file transfer are encrypted end to end, so relay nodes can't read them. No telemetry, no device ID, no remote switches.
+
+</td>
+<td width="33%" valign="top">
+
+### 🪶 Light and complete
+
+The window opens in about 0.3 s. Fabric, Quilt, Forge, NeoForge and OptiFine in one click, Modrinth and CurseForge built in, modpack import and export, and crash analysis that tells you which mod to blame.
+
+</td>
+</tr>
+</table>
+
+> [!NOTE]
+> Jay was called **Amber** until v0.7.0; accounts and settings carry over ([rename notice](docs/announcements/2026-11-06-jay-rename.md)). Everyone in a multiplayer room needs v0.7.0 or newer.
+> Features marked *experimental* pass the automated tests but have not been fully proven in real-world use. [Tell us](https://github.com/warriorleavestar/jay-launcher/issues/new/choose) when something breaks.
 
 ## Download
 
-Get the package for your computer from [Releases](https://github.com/warriorleavestar/jay-launcher/releases/latest). v0.5.9 and earlier use the `Amber-` archive prefix and `Amber.exe`.
+Grab the file for your computer from the [latest release](https://github.com/warriorleavestar/jay-launcher/releases/latest), unzip it and run. Nothing to install: .NET is included, and Jay finds or downloads the right Java for each game version.
 
-| System | File | Run |
+| System | File | Status |
 |---|---|---|
-| Windows 10+ x64 | `Jay-win-x64-aot.zip` (recommended) | Unzip and run `Jay.exe` |
-| Apple silicon Mac | `Jay-osx-arm64.tar.gz` | Extract and run `./Jay` in Terminal |
-| Intel Mac (experimental) | `Jay-osx-x64.tar.gz` | Extract and run `./Jay` in Terminal |
-| Linux x64 (experimental) | `Jay-linux-x64.tar.gz` | Extract and run `./Jay` |
-| Linux ARM64 (experimental) | `Jay-linux-arm64.tar.gz` | Extract and run `./Jay`; install Java through your distribution |
-| Jay Server (experimental) | `JayServer-<platform>.zip` / `.tar.gz` | See [server/README.md](server/README.md) |
+| **Windows 10+** x64 | [`Jay-win-x64-aot.zip`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64-aot.zip) (recommended) | ✅ Stable |
+| **macOS** Apple silicon | [`Jay-osx-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz) | ✅ Tested on a real Mac |
+| **macOS** Intel | [`Jay-osx-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.tar.gz) | 🧪 Experimental |
+| **Linux** x64 | [`Jay-linux-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz) | 🧪 Experimental |
+| **Linux** ARM64 | [`Jay-linux-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-arm64.tar.gz) | 🧪 Experimental (bring your own Java) |
+| **Jay Server** | `JayServer-<platform>.zip` / `.tar.gz` | 🧪 Experimental, see [server/README.md](server/README.md) |
 
-The recommended zip is compiled ahead of time to native code (Native AOT): the window opens in about 0.3 seconds and it uses less memory. It unzips to 4 files that must stay in the same folder.
-Each release also has `Jay-win-x64.zip`, which holds a single `Jay.exe` that runs straight after unzipping if you prefer one file; it starts a little slower. Both builds have the same features and share the same data, so you can switch at any time.
+<details>
+<summary><b>Which Windows file should I pick?</b></summary>
 
-Free code signing for the Windows builds from SignPath Foundation is being set up; see the [code signing policy](docs/code-signing-policy.md).
+`Jay-win-x64-aot.zip` is compiled ahead of time to native code: it opens in about 0.3 seconds and uses less memory. It unzips to 4 files that must stay in the same folder.
 
-The packages include .NET. Jay selects a suitable local Java for each game version and downloads one when Mojang publishes a runtime for that platform. Linux ARM64 needs a compatible 64-bit Java installed through the system.
+`Jay-win-x64.zip` holds a single `Jay.exe` if you prefer one file; it starts a little slower. Both have the same features and share the same data, so you can switch at any time. v0.5.9 and older use the `Amber-` prefix and `Amber.exe`.
 
-The Apple silicon build was fully tested on a real Mac (install, launch, play). The Intel Mac and Linux builds pass the automated builds and tests but have not been tried on real hardware, so they are marked experimental. The macOS and Linux builds are currently unsigned. If Gatekeeper blocks the first macOS launch, approve it under System Settings → Privacy & Security. Full-LAN and exit-node modes also work on macOS and Linux (they ask for your administrator password once; Linux needs pkexec, and nftables for using an exit); ordinary rooms, direct connections, chat and game-only forwarding work across platforms.
+The builds aren't code-signed yet, so Windows SmartScreen may warn you the first time. See the [FAQ](#faq).
+</details>
 
-### Linux system requirements
+<details>
+<summary><b>macOS notes</b></summary>
+
+Extract the archive and run `./Jay` in Terminal. The macOS builds are unsigned for now: if Gatekeeper blocks the first launch, allow it under System Settings → Privacy & Security. Full-LAN and exit-node modes ask for your administrator password once.
+</details>
+
+<details>
+<summary><b>Linux system requirements</b></summary>
 
 Jay's window needs a desktop session (X11, or Wayland with XWayland) and the libraries below. Desktop distributions normally ship them already; on minimal systems, containers or WSL, Jay lists what is missing and which package to install when it starts.
 
@@ -60,109 +99,124 @@ Jay's window needs a desktop session (X11, or Wayland with XWayland) and the lib
 
 - Without ICU, Jay restarts itself in compatibility mode. The UI language still follows `LANG`; dates and numbers use a neutral format.
 - The Linux build bundles Noto Sans SC, so Chinese and Japanese text inside the window renders even without system CJK fonts. The title bar is drawn by the system, so Jay shows the title as "Jay" in that case; install `fonts-noto-cjk` to get the localized title.
+- Full-LAN mode needs `pkexec`, and `nftables` for using an exit node.
 - WSL: WSLg on Windows 11 shows Jay's window directly. On Ubuntu, install everything at once with `sudo apt install libx11-6 libice6 libsm6 libxi6 libxcursor1 libxrandr2 libfontconfig1 fonts-noto-cjk`.
+</details>
 
 ## Features
 
-### Versions and loaders
+### 🎮 Multiplayer that just works
 
-- Install releases and snapshots
-- One-click Fabric, Quilt, Forge (including 1.5.2 and older), NeoForge and OptiFine
-- Old Forge gets its FML libraries pre-verified in the instance, and old versions never write into your own .minecraft
-- Optional separate saves, mods and config folders for each version
+<img src="docs/images/readme/en/multiplayer.png" alt="Multiplayer page: open a room or join a friend" width="860">
 
-### Accounts
+- **Invite and knock.** The host opens the world to LAN and opens a room; a friend pastes the invite and knocks. Nobody gets in until the host approves on a locked pop-up card.
+- **Direct first, relay last.** Jay tries IPv6, router port mapping (UPnP / NAT-PMP) and IPv4 hole punching with port prediction for strict NATs. With more players a reachable member relays, and a relay node is only used when all of that fails. "Check my network" tells you beforehand how easy you are to reach.
+- **Full-LAN mode.** Everyone gets a virtual IP and LAN broadcasts are forwarded, so other LAN games and apps work too. Members can opt in to route their traffic through one member's PC (exit node, with leak protection). Works on Windows, macOS and Linux.
+- **Public rooms** *(experimental)*. Browse a room list, request to join, or protect a room with a password. Rooms are signed by the host, so nobody can fake or replay them.
+- **Chat and files.** Room chat, private messages and file transfer, end-to-end encrypted with each member's own key, so relay nodes see nothing. Program files get an extra warning before you open them.
+- **Practice and diagnose.** A safe drill mode walks you through a knock without touching the network, and the "Connection trouble?" drawer runs a full test matrix and writes a report with secrets removed.
+- **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS1-` invite; unknown connections get not a single byte back.
 
-- Microsoft (device code), authlib-injector and offline accounts
-- Multiple accounts and skin preview
-- Passwords are never stored. Login tokens use Windows DPAPI on Windows and a per-user local encryption key on macOS/Linux
+Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), which Jay downloads and verifies the first time you use multiplayer. The default mode needs no admin rights and installs no driver.
 
-### Mods and modpacks
+### 🔐 Privacy and safety
 
-- Search and install mods, resource packs, shaders, data packs and modpacks from Modrinth and CurseForge, with required dependencies
-- Import mrpack, CurseForge, MultiMC / Prism Launcher instances, HMCL and MCBBS modpacks, as well as PCL packs bundled with a launcher, zipped .minecraft folders and packs wrapped in an extra folder; export mrpack and CurseForge
-- Manage the mods in each instance and the data packs in each world (enable, disable, delete)
-- Mod compatibility check: reads each mod's declared loader, game version and dependencies, flags mismatches and finds the matching version in one click
-- Fabric mods on Forge / NeoForge via the open-source Sinytra Connector and Forgified Fabric API, installed automatically (not every Fabric mod works); Quilt instances use Fabric mods directly
-- Connector pre-processing: convert Fabric mods ahead of time so later launches skip the wait
-- Mod baking (experimental, off by default): pre-process mods with a local universal loader before launch and cache the result; currently Minecraft 1.21.1 Fabric, Quilt and vanilla only, falling back to a normal launch on failure
-- CurseForge files whose authors disabled third-party distribution are never downloaded behind their back; Jay links to the official page for a manual download instead
-- Fast mod scanning: a folder of a few hundred mods reads in under a second, and unchanged folders reopen in milliseconds
+<img src="docs/images/readme/en/privacy.png" alt="About and privacy page listing every kind of network access" width="860">
 
-### Game management and crash analysis
+- **Codes that are useless when leaked.** Invites are single-use, expire after 10 minutes by default and contain no room secret. Codes are masked on screen, cleared from the clipboard after 60 seconds, and never written to logs or reports.
+- **One key per member.** Kicking someone disconnects them at once, bans them and rotates the room to a new key. Members can't impersonate each other in chat.
+- **An honest network list.** The About and privacy page lists the five kinds of network access Jay can make, which ones are on right now, and where to turn each off.
+- **Kid mode, incognito mode and a safety breaker** for shared or younger players' computers.
+- **Locked safety UI.** Knock requests, file warnings and other safety panels look the same under every theme, so a theme can't disguise them.
 
-- Per-version Java, memory, JVM arguments, window size and pre-launch / post-exit commands
-- Manage worlds, screenshots, resource packs, shaders and server lists
-- Find the likely cause of a crash, list suspect mods and export an error report
-- Toolbox: clean up game junk, download files, install Java ahead of time
+### 🧩 Mods, modpacks and loaders
 
-### Multiplayer
+- One-click Fabric, Quilt, Forge (including 1.5.2 and older), NeoForge and OptiFine.
+- Search and install mods, resource packs, shaders, data packs and modpacks from Modrinth and CurseForge, with required dependencies.
+- Import mrpack, CurseForge, MultiMC / Prism, HMCL, MCBBS and PCL packs; export mrpack and CurseForge.
+- A compatibility check reads each mod's loader, game version and dependencies, flags mismatches and finds the right version in one click.
+- Fabric mods on Forge / NeoForge through Sinytra Connector and Forgified Fabric API, installed automatically.
+- Mod baking *(experimental, off by default)*: pre-process mods with a local universal loader before launch and cache the result. See [jay-loader](https://github.com/warriorleavestar/jay-loader).
+- Mods whose authors disabled third-party downloads are never fetched behind their back; Jay links to the official page instead.
 
-- Play together without being on the same LAN: the host opens the world to LAN, creates a room and shares an invite code; a friend pastes it and "knocks", and gets in only after the host approves on a pop-up card
-- New multiplayer encryption (experimental): invite codes are single-use and expire after 10 minutes by default, and contain no room secret; every member has their own key; the host can kick, which disconnects that person at once, bans them from the room and switches the room to a new key. Codes are masked on screen, cleared from the clipboard 60 seconds after copying, and never appear in logs or diagnostic reports. Tested on one network; not yet tested between two different networks
-- Built on the open-source networking tool [EasyTier](https://github.com/EasyTier/EasyTier), downloaded from its GitHub releases and verified on first use; the default mode needs no admin rights and installs no driver
-- Room chat: peer-to-peer, no server in between; each member encrypts with their own key and the host fills in the sender, so members can't impersonate each other
-- Direct rooms (no relay node): swap one invite / reply code (no room secret inside), then Jay tries IPv6, router port mapping (UPnP / NAT-PMP) and IPv4 hole punching (with port prediction and spraying for strict NATs); with more players, a reachable member relays; a node is used only if all of that fails and you added one. "Check my network" tells you beforehand how easy you are to reach
-- Multiplayer debug mode with a diagnostic report (room secrets removed, public IPs masked by default), plus a one-click full test matrix that switches both sides through every path and mode and records connectivity, time, latency, throughput and failure reasons
-- Optional full-LAN mode: everyone gets a virtual IP and games' LAN broadcasts are forwarded, so other LAN games and apps work too (needs admin rights); members can also route their internet traffic through one member's PC (exit node, opt-in on both sides; all traffic stays inside the tunnel with leak protection)
-- Incognito mode (off by default): game logs don't record chat; full-LAN mode no longer writes secrets to disk
-- A "how to play together" guide on the Multiplayer page, which also recognises codes pasted into the wrong box
-- You add the relay nodes yourself: the [node folder](node/README.md) has one-step scripts for Linux, Docker and Windows, and a share code to send to friends
+<details>
+<summary><b>More: accounts, game management, crash analysis, downloads</b></summary>
 
-### Jay Server (experimental)
+**Accounts**
+- Microsoft (device code), authlib-injector and offline accounts, with multiple accounts and skin preview.
+- Passwords are never stored. Login tokens use Windows DPAPI on Windows and a per-user local encryption key on macOS and Linux.
 
-- A Minecraft server only Jay can join, on a VPS or a computer on your LAN. The `jay-server` command-line tool downloads the official server (SHA-1 checked) and a suitable Java
-- The admin hands each player a single-use `JAYS1-` invite; the player pastes it into the "Jay servers" card on the Multiplayer page and joins in one click. Each device has its own identity bound to a username, so a stolen access key doesn't work on another computer
-- Unknown connections get not a single byte back, so scanners can't see a Minecraft server
-- Passes the automated tests but has not been tried end to end with a real Minecraft server yet. See [server/README.md](server/README.md)
+**Game management**
+- Per-instance Java, memory, JVM arguments, window size and pre-launch / post-exit commands.
+- Manage worlds and world backups, screenshots, resource packs, shaders and server lists.
+- Optional separate saves, mods and config for each version; old versions never write into your own `.minecraft`.
+- Deleted mods, worlds and instances go to "Recently deleted" first, so you can undo.
 
-### Downloads
+**Crash analysis**
+- Finds the likely cause of a crash, lists suspect mods and offers one-click fixes (more memory, disable a mod, turn off shaders).
+- "Help me fix it" bisects your mods half by half to find the one that crashes the game.
+- Export an error report, with a privacy preview first and no computer user name inside.
 
-- Parallel chunked downloads, resume and SHA1 verification
-- Choose the official source or the BMCLAPI mirror, or pick automatically by time zone, with automatic fallback on failure
+**Downloads**
+- Parallel chunked downloads with resume and SHA-1 verification.
+- Official source or BMCLAPI mirror, picked automatically by time zone, with fallback on failure.
+- Fast mod scanning: a folder of a few hundred mods reads in under a second.
 
-## Screenshots
+**Everyday comfort**
+- Command palette (Ctrl+K), F1 help on every page, drag and drop to install, light and dark themes, and importable theme packs ([docs/themes.md](docs/themes.md)).
+- English, 简体中文, 繁體中文 and 日本語, plus a few playful languages.
+</details>
 
-| Download | Instance settings |
-|---|---|
-| ![Download page](docs/images/download.png) | ![Instance settings](docs/images/instance.png) |
-
-![Launcher settings](docs/images/settings.png)
+> [!TIP]
+> The new interface shown on this page (game library, Discover, Play) is on `main` and comes with the next release. v0.7.0 still uses the classic layout.
 
 ## Privacy
 
-- **No telemetry:** Jay collects no usage data and creates no device ID.
-- **No remote control:** no remote switch or cloud config can change what Jay does. The time zone is only used to pick the default download source.
-- **Updates are up to you:** Jay doesn't check for updates unless you set an update URL, and even then it only tells you. It never downloads or replaces anything by itself.
-- **Network access only for what you're doing:** signing in, fetching version lists, downloading and searching. The services involved are Microsoft and Xbox sign-in, any skin site you add, Mojang's game file servers, your chosen download source, loader download sites (OptiFine via BMCLAPI, authlib-injector via its official site or BMCLAPI), Modrinth and CurseForge.
-- **Multiplayer only connects to nodes you added:** only while you host or join a room on the Multiplayer page, Jay connects to the relay nodes you added there and to the other players in the room; joining a Jay server connects only to the server named in its invite. Jay ships no nodes and fetches no node list; room codes are generated randomly on your computer and never pass through an Jay server (Jay has none). The EasyTier component is downloaded from the releases page of `github.com/EasyTier/EasyTier`. Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address; they only answer that and carry no game data. They may also ask your router for a temporary port mapping, removed when the session ends.
+Jay is built on a simple promise: **it only goes online to do what you asked.**
 
-The code is open source, so you can check all of this yourself. The full privacy policy and the changes Jay makes to your system are in the [code signing policy](docs/code-signing-policy.md#隐私政策--privacy-policy).
+- **No telemetry.** Jay collects no usage data and creates no device ID.
+- **No remote control.** No remote switch or cloud config can change what Jay does.
+- **Updates are up to you.** Jay doesn't check for updates unless you set an update URL, and even then it only tells you.
+- **No Jay servers in the middle.** Room codes are generated on your computer. Multiplayer connects only to the relay nodes listed on the Multiplayer page (you can turn the built-in ones off or add your own) and to the players in your room.
 
-## Configuration
+<details>
+<summary><b>Every service Jay may contact</b></summary>
 
-Most features need no setup. Both of these are optional:
+- Signing in: Microsoft and Xbox sign-in, and any skin site you add.
+- Games: Mojang's game file servers, your chosen download source, loader download sites (OptiFine via BMCLAPI, authlib-injector via its official site or BMCLAPI).
+- Mods: Modrinth and CurseForge, only when you browse or install.
+- Multiplayer, only while you host or join: the relay nodes listed on the Multiplayer page, the other players in the room, the server named in a Jay Server invite, and EasyTier's GitHub releases page (first use only).
+- Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address. They carry no game data. Jay may also ask your router for a temporary port mapping, removed when the session ends.
+</details>
 
-| Item | Where | Environment variable | Notes |
-|---|---|---|---|
-| Microsoft Client ID | Accounts page | `AMBER_MS_CLIENT_ID` | A built-in default is used if empty. Order: UI, then environment variable, then default |
-| CurseForge API key | Settings page | `AMBER_CF_KEY` | Free from [console.curseforge.com](https://console.curseforge.com). CurseForge is unavailable without one; everything else still works |
+The code is open, so you can check all of this yourself. The full privacy policy and the system changes Jay makes are in the [code signing and privacy policy](docs/code-signing-policy.md#隐私政策--privacy-policy).
 
-Settings are stored under the system application-data directory in `Amber/settings.json` (`%APPDATA%\Amber` on Windows, `~/Library/Application Support/Amber` on macOS, and usually `~/.config/Amber` on Linux).
+## The Jay family
+
+| Project | What it is |
+|---|---|
+| [**Jay Server**](server/README.md) | A Minecraft server that only Jay players with an invite can join |
+| [**Network server framework**](docs/network-server-framework.md) | Run your own public network: seed node, room directory, login and admin API |
+| [**Relay node scripts**](node/README.md) | One-step relay nodes for Linux, Docker and Windows |
+| [**Public network registry**](networks/README.md) | Submit a community network so Jay shows it as reviewed |
+| [**jay-loader**](https://github.com/warriorleavestar/jay-loader) | The universal mod loader behind mod baking |
 
 ## Build from source
 
-You need the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download). Jay is written in C# with [Avalonia](https://avaloniaui.net/).
 
 ```shell
 git clone https://github.com/warriorleavestar/jay-launcher.git
 cd jay-launcher/src
 dotnet build
-dotnet test
+dotnet test Amber.Core.Tests
 dotnet run --project Amber.App
 ```
 
-To publish a single-file build, replace the RID with `win-x64`, `osx-arm64`, `osx-x64`, `linux-x64` or `linux-arm64`:
+<details>
+<summary><b>Publishing, CLI and mobile experiments</b></summary>
+
+Publish a single-file build (use `win-x64`, `osx-arm64`, `osx-x64`, `linux-x64` or `linux-arm64`):
 
 ```shell
 dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishReadyToRun=true -p:DebugType=none -o ../publish
@@ -170,44 +224,79 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 
 There is also a command-line version, for example `dotnet run --project Amber.Cli -- list-remote`.
 
-Jay is built with C#, .NET 10 and [Avalonia](https://avaloniaui.net/).
+The experimental [Android](docs/android.md) and [iOS](docs/ios.md) projects provide Jay Server enrollment and a localhost gateway; they can't launch Minecraft yet.
 
-The experimental Android and iOS projects currently provide Jay Server enrollment and a localhost gateway; they cannot launch Minecraft themselves yet. See the [Android](docs/android.md) and [iOS](docs/ios.md) experiment notes for build steps and current limitations.
+New to the code? Start with [docs/CODEMAP.md](docs/CODEMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+</details>
+
+### Configuration
+
+Everything works out of the box. Two settings are optional:
+
+| Item | Where | Environment variable | Notes |
+|---|---|---|---|
+| Microsoft Client ID | Accounts | `AMBER_MS_CLIENT_ID` | A built-in default is used if empty |
+| CurseForge API key | Settings | `AMBER_CF_KEY` | Free from [console.curseforge.com](https://console.curseforge.com). Without one, CurseForge is unavailable and everything else still works |
+
+Settings live in `Amber/settings.json` under your system's app-data folder (`%APPDATA%\Amber`, `~/Library/Application Support/Amber` or `~/.config/Amber`).
 
 ## FAQ
 
-**Windows says it protected my PC. What should I do?**
-Current Windows releases aren't code-signed yet, so SmartScreen may block them. Make sure you downloaded the file from this project's Releases, then choose "More info" → "Run anyway". Free signing from SignPath Foundation is being set up; see the [code signing policy](docs/code-signing-policy.md). Release notes will say when it takes effect.
+<details>
+<summary><b>Windows says it protected my PC. What should I do?</b></summary>
 
-**Why is the exe so large?**
-It includes the .NET runtime and UI libraries, so you don't have to install anything else.
+The Windows builds aren't code-signed yet, so SmartScreen may block them. Make sure you downloaded the file from this project's Releases, then choose "More info" → "Run anyway". Release notes will say when signing takes effect; see the [code signing policy](docs/code-signing-policy.md).
+</details>
 
-**Can I use my existing `.minecraft` folder?**
-Yes. Point the game directory at it on the Settings page.
+<details>
+<summary><b>Do my friends need Jay too?</b></summary>
 
-**Microsoft sign-in fails. What can I try?**
+Yes. Rooms, chat and file transfer happen between Jay launchers, and everyone in a room needs v0.7.0 or newer. Jay Server is also Jay-only by design.
+</details>
+
+<details>
+<summary><b>Can I use my existing <code>.minecraft</code> folder?</b></summary>
+
+Yes. Point the game directory at it in Settings, or add it to your game library.
+</details>
+
+<details>
+<summary><b>Microsoft sign-in fails. What can I try?</b></summary>
+
 Read the error message and make sure the account owns Minecraft. You can also use your own Azure app: register a public client that allows personal accounts, has device code flow enabled and has Minecraft API access, then enter its Client ID on the Accounts page.
+</details>
 
-**Why can't I find anything on CurseForge?**
+<details>
+<summary><b>Why can't I find anything on CurseForge?</b></summary>
+
 The CurseForge API needs a key; see [Configuration](#configuration). Modrinth doesn't.
+</details>
 
-**Downloads are slow. What can I do?**
-Switch the download source on the Settings page and try the official source or the BMCLAPI mirror.
+<details>
+<summary><b>Downloads are slow. What can I do?</b></summary>
 
-**Does it run on macOS or Linux?**
-Yes: Intel and Apple silicon Macs, plus Linux x64 and ARM64. The Apple silicon build is verified on real hardware; Intel Mac and Linux are experimental for now. Full-LAN and exit-node modes work on all three (macOS and Linux ask for your administrator password once); Extreme encryption still depends on system capabilities; the other main features are cross-platform.
+Switch the download source in Settings and try the official source or the BMCLAPI mirror.
+</details>
 
-**What can't it do?**
-Run Forge mods on Fabric / Quilt: there is no reliable compatibility layer, and Jay says so plainly.
+<details>
+<summary><b>Why is the download so large?</b></summary>
+
+It includes the .NET runtime and UI libraries, so you don't have to install anything else.
+</details>
+
+<details>
+<summary><b>What can't it do?</b></summary>
+
+Run Forge mods on Fabric or Quilt: there is no reliable compatibility layer, and Jay says so plainly.
+</details>
 
 ## License
 
-[MIT](LICENSE)
+Jay is released under the [MIT License](LICENSE).
 
-The multiplayer feature uses EasyTier, a separate open-source project (LGPL-3.0). Jay does not bundle it; it is downloaded separately the first time you use multiplayer.
+Multiplayer uses [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), a separate project that Jay downloads on first use and does not bundle. The Linux build bundles Noto Sans SC under the SIL Open Font License 1.1 ([OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)).
 
-The Linux build bundles the Noto Sans SC font under the SIL Open Font License 1.1; see [src/Amber.App/Assets/Fonts/OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt).
-
----
-
-Jay is not an official Minecraft product and is not affiliated with Mojang or Microsoft.
+<div align="center">
+<br>
+<sub>Jay is not an official Minecraft product and is not affiliated with Mojang or Microsoft.<br>The name comes from Jayfeather; the icon is a single feather.</sub>
+</div>
