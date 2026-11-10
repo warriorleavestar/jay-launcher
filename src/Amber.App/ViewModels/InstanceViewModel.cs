@@ -1045,7 +1045,11 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [RelayCommand]
     private void OpenDatapacksFolder()
     {
-        if (DatapacksDir is { } dir) OpenPath(dir);
+        if (DatapacksDir is not { } dir) return;
+        // A world without data packs has no datapacks folder yet; create it so the file manager has something to open.
+        try { Directory.CreateDirectory(dir); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        OpenPath(dir);
     }
 
     [RelayCommand]

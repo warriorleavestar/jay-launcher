@@ -241,7 +241,7 @@ try
         {
             // 检查选中的微软账号能不能正常进服务器，只打印不涉密的结果。--force-refresh：在内存里强制走一次刷新令牌（不写回文件）。
             var force = argList.Remove("--force-refresh");
-            var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Amber");
+            var dataDir = Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
             var store = new AccountStore(Path.Combine(dataDir, "accounts.json"));
             store.Load();
             var account = store.Selected;
@@ -685,7 +685,7 @@ catch (Exception e)
     return 1;
 }
 
-static string AmberDataDir() => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Amber");
+static string AmberDataDir() => Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
 
 static List<string> TakeAll(List<string> list, string name)
 {

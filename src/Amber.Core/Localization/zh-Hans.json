@@ -1400,6 +1400,7 @@
   "multiplayer.trusted.empty": "还没有信任的人",
   "multiplayer.trusted.remove": "移除",
   "core.mp.identity.unreadable": "暂时读不到联机身份文件（可能被其他程序占用或权限不对），这次先用临时身份，原文件没有改动，下次启动会再读。",
+  "core.mp.identity.unsaved": "联机身份保存不了（数据文件夹不能写，或者系统不给加密）。这次先用临时身份；认识你的房主会把你当新成员。",
   "instance.launch": "▶ 启动",
   "instance.more": "⋯ 更多",
   "instance.new": "+ 新建实例",
