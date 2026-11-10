@@ -160,6 +160,18 @@ public partial class SettingsPage : UserControl
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) _vm.ImportThemePack(path);
     }
 
+    private async void InstallBakeLoader_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || Storage is not { } storage) return;
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = L.T("settings.bake.install"),
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType(L.T("settings.bake.install_filetype")) { Patterns = ["*.zip"] }],
+        });
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await _vm.InstallBakeLoaderAsync(path);
+    }
+
     private async void ExportTheme_Click(object? sender, RoutedEventArgs e)
     {
         if (_vm is null || Storage is not { } storage) return;

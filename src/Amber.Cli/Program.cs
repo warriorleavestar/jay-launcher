@@ -554,6 +554,15 @@ try
         case "java-install":
             Console.WriteLine(await javaManager.ForMajorAsync(int.Parse(argList[1]), cts.Token));
             break;
+        case "bake-install":
+        {
+            // bake-install <loader zip> [install root]: the same check and unpacking as the app's "Install loader from zip".
+            if (argList.Count < 2) { Console.WriteLine("用法：bake-install <zip> [安装目录]"); return 1; }
+            var installRoot = argList.Count > 2 ? argList[2] : Path.Combine(AmberDataDir(), "universal-loader");
+            var package = Amber.Core.Bake.BakePackage.InstallFromZip(argList[1], installRoot);
+            Console.WriteLine($"BAKE INSTALLED {package.LoaderVersion} interface {package.Interface} -> {package.Root}");
+            break;
+        }
         case "launch":
         {
             var mem = int.Parse(TakeOption(argList, "--mem") ?? "4096");
@@ -601,8 +610,8 @@ try
                 var bake = new Amber.Core.Bake.BakeService(toolkit, Path.Combine(bakeData, "cache"), bakeData,
                     (items, ct) => downloader.DownloadAllAsync(items, null, ct));
                 var instance = Instance(id, isolate);
-                var versionMajor = version.JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.MinJavaMajor;
-                var major = Amber.Core.Bake.BakeService.JavaMajorFor(versionMajor);
+                var versionMajor = version.JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin;
+                var major = bake.JavaMajorFor(instance, versionMajor);
                 if (major != versionMajor)
                 {
                     javaPath = await javaManager.ForMajorAsync(major, cts.Token);
@@ -613,7 +622,7 @@ try
                 var events = new SyncProgress<Amber.Core.Bake.BakeEvent>(e => Console.WriteLine((e.IsProblem ? "BAKE PROBLEM " : "BAKE ") + e.Message));
                 var prepared = await bake.PrepareAsync(javaPath, major, dir, instance, argList.Remove("--bake-warm"), events, cts.Token);
                 var baked = prepared.Launch ?? throw new InvalidOperationException(prepared.Reason);
-                Console.WriteLine($"BAKE READY {bakeWatch.Elapsed.TotalSeconds:F1}s reused={prepared.Reused} {prepared.Reason} {baked.StateFile}");
+                Console.WriteLine($"BAKE READY {bakeWatch.Elapsed.TotalSeconds:F1}s reused={prepared.Reused} cache={prepared.Cache?.State ?? "-"} warm={(prepared.Warm is null ? "no" : "yes")} {prepared.Reason} {baked.StateFile}");
                 options = options with { Baked = baked };
             }
             var launcher = new GameLauncher(dir);
@@ -628,8 +637,11 @@ try
                 var reached = new TaskCompletionSource<string>();
                 var tail = new Queue<string>();
                 var smokeParser = new GameLogParser();
+                var legacyProblems = options.Baked is { ProblemsFile: null };
                 var game = launcher.Launch(options, line =>
                 {
+                    if (options.Baked is not null && Amber.Core.Bake.BakeRuntimeProblem.Parse(line, legacyProblems) is { } runtimeProblem)
+                        Console.WriteLine($"BAKE RUNTIME {runtimeProblem.Severity} {runtimeProblem.Code} {runtimeProblem.Describe()}");
                     lock (tail)
                     {
                         var parsed = smokeParser.Feed(line);
@@ -647,6 +659,11 @@ try
                 ok = ok && !game.HasExited;
                 var exitedByItself = game.HasExited;
                 if (!game.HasExited) game.Kill(true);
+                if (options.Baked?.ProblemsFile is { } problemsFile && File.Exists(problemsFile))
+                {
+                    var fileProblems = Amber.Core.Bake.BakeRuntimeProblem.ReadFile(problemsFile);
+                    Console.WriteLine($"BAKE PROBLEMS FILE {fileProblems.Count}: {string.Join(", ", fileProblems.GroupBy(p => p.Code).Select(g => $"{g.Key}×{g.Count()}"))}");
+                }
                 Console.WriteLine(ok ? $"SMOKE PASS {id}" : $"SMOKE FAIL {id}（{(game.HasExited ? "退出代码 " + game.ExitCode : "超时")}）");
                 if (!ok) lock (tail) foreach (var l in tail) Console.WriteLine("  " + l);
                 return ok ? 0 : 2;

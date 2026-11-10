@@ -93,6 +93,19 @@ public sealed partial class HomeViewModel : PageViewModel
         public bool Baked { get; set; }
         /// <summary>Problems the universal loader reported while this baked run was going (for example Mixins it switched off).</summary>
         public List<Amber.Core.Bake.BakeRuntimeProblem> BakeProblems { get; } = [];
+        /// <summary>Where the loader writes this run's problems (interface 1.3); null for an older loader, whose text lines are read instead.</summary>
+        public string? BakeProblemsFile { get; set; }
+
+        /// <summary>Adds a runtime problem once (the same one comes on stdout and in the problems file). True when it is new.</summary>
+        public bool AddBakeProblem(Amber.Core.Bake.BakeRuntimeProblem problem)
+        {
+            lock (BakeProblems)
+            {
+                if (BakeProblems.Any(p => p.Key == problem.Key)) return false;
+                BakeProblems.Add(problem);
+                return true;
+            }
+        }
         /// <summary>这一局的状态机（正在玩胶囊、活动中心“运行记录”看它）。</summary>
         public LaunchSession Session { get; } = new(id, DateTimeOffset.Now);
     }
@@ -109,12 +122,27 @@ public sealed partial class HomeViewModel : PageViewModel
     internal static bool HasClearCause(CrashAnalysis analysis) =>
         analysis.Findings.Count > 0 && analysis.Findings[0].Severity == CrashSeverity.Likely;
 
-    /// <summary>The mods the loader had to switch Mixins off for in this run, as one list ("" when none).</summary>
+    /// <summary>
+    /// The mods the loader had to switch Mixins off for, or reported an error for, in this run, as one list ("" when
+    /// none). Informational lines (a bridged Fabric API module, a launch-time rebake) don't count.
+    /// </summary>
     private static string BakeProblemMods(GameRun run)
     {
+        List<string> mods;
         lock (run.BakeProblems)
-            return string.Join(L.T("core.mp.format.listseparator"), run.BakeProblems.Select(p => p.Mod).Distinct(StringComparer.Ordinal).Take(3))
-                   + (run.BakeProblems.Select(p => p.Mod).Distinct(StringComparer.Ordinal).Count() > 3 ? "…" : "");
+            mods = run.BakeProblems.Where(p => (p.DisablesFeatures || p.IsError) && p.Mod.Length > 0).Select(p => p.Mod).Distinct(StringComparer.Ordinal).ToList();
+        return string.Join(L.T("core.mp.format.listseparator"), mods.Take(3)) + (mods.Count > 3 ? "…" : "");
+    }
+
+    /// <summary>
+    /// After a baked run: the problems file has every problem even when the game died before stdout was read to the
+    /// end, so it is merged in; new ones go to the log too.
+    /// </summary>
+    private void MergeBakeProblemsFile(GameRun run)
+    {
+        if (run.BakeProblemsFile is not { } file || !File.Exists(file)) return;
+        foreach (var problem in Amber.Core.Bake.BakeRuntimeProblem.ReadFile(file))
+            if (run.AddBakeProblem(problem)) _log.AddRaw(run.Log, "[Bake] " + problem.Describe());
     }
 
     internal static bool LikelyBakeCrash(bool baked, bool stoppedByUser, int exitCode, bool inGame, bool inGameGuessed) =>
@@ -595,6 +623,7 @@ public sealed partial class HomeViewModel : PageViewModel
                         options = options with { Baked = baked, JavaPath = bakeJava };
                         javaPath = bakeJava;
                         run.Baked = true;
+                        run.BakeProblemsFile = baked.ProblemsFile;
                     }
                 }
                 catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or InvalidDataException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException
@@ -626,11 +655,9 @@ public sealed partial class HomeViewModel : PageViewModel
                 {
                     run.Output.Add(line);
                     if (parser.Feed(line) is { } entry) _log.Add(run.Log, entry);
-                    if (run.Baked && Amber.Core.Bake.BakeRuntimeProblem.Parse(line) is { } bakeProblem)
-                    {
-                        lock (run.BakeProblems) run.BakeProblems.Add(bakeProblem);
+                    if (run.Baked && Amber.Core.Bake.BakeRuntimeProblem.Parse(line, legacy: run.BakeProblemsFile is null) is { } bakeProblem
+                        && run.AddBakeProblem(bakeProblem))
                         _log.AddRaw(run.Log, "[Bake] " + bakeProblem.Describe());
-                    }
                 }
                 if (!run.InGame && IsEnterGameLine(line)) Dispatcher.UIThread.Post(() => EnterGame(run, guessed: false));
                 _service.NotifyGameOutput(id, line);
@@ -648,6 +675,7 @@ public sealed partial class HomeViewModel : PageViewModel
             await game.WaitForExitAsync();
 
             var code = game.ExitCode;
+            if (run.Baked) MergeBakeProblemsFile(run);
             // 退出码 0 但没进主界面：比如没有 OpenGL 时游戏弹个框就“正常”退出了，也要看一眼日志。
             CrashInput? input = null;
             CrashAnalysis? analysis = null;
@@ -696,15 +724,22 @@ public sealed partial class HomeViewModel : PageViewModel
                 GameCrashed?.Invoke(id);
             }
 
-            // A baked run that did not crash but had Mixins switched off: say which mods may be missing features, with a way back.
+            // A baked run that did not crash but had Mixins switched off (or a mod whose Fabric entrypoints never ran):
+            // say which mods may be missing features, with a way back.
             if (!crashed && BakeProblemMods(run) is { Length: > 0 } partial)
             {
-                Toasts.BakeFailed(L.F("home.bake.mixin_disabled", run.BakeProblems.Count, partial), () =>
+                int count;
+                lock (run.BakeProblems) count = run.BakeProblems.Count(p => p.DisablesFeatures || p.IsError);
+                Toasts.BakeFailed(L.F("home.bake.mixin_disabled", count, partial), () =>
                 {
                     if (!TryRequestBakeRetry(_service, ctx, request))
                         Toasts.Show(L.T("home.bake.retry_directory_changed"));
                 });
             }
+            // The launch had to bake something itself: warm again in the background so the next launch starts from a full cache.
+            bool rebaked;
+            lock (run.BakeProblems) rebaked = run.BakeProblems.Any(p => p.AsksForWarm);
+            if (run.Baked && rebaked) _service.WarmBakeInBackground(ctx, id);
             if (!string.IsNullOrWhiteSpace(settings.PostExitCommand))
                 await RunUserCommandAsync(settings.PostExitCommand, id, workDir, run.Log, CancellationToken.None);
         }

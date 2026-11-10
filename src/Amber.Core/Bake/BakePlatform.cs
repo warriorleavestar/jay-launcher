@@ -182,24 +182,3 @@ public static partial class BakePlatform
     private static partial Regex VersionCheckLine();
 }
 
-/// <summary>
-/// A problem the loader reports while the game runs (stdout of amber.ul.Launcher), for example a Mixin it had to
-/// switch off: <c>[amber-ul] 问题 mixin_incompatible (warning) 模组=… mixin=… 目标=… 原因=…</c>.
-/// </summary>
-public sealed partial record BakeRuntimeProblem(string Code, string Severity, string Mod, string Mixin, string Target, string Reason)
-{
-    public static BakeRuntimeProblem? Parse(string line)
-    {
-        if (!line.Contains("[amber-ul]", StringComparison.Ordinal)) return null;
-        var m = Pattern().Match(line);
-        return m.Success ? new BakeRuntimeProblem(m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value, m.Groups[4].Value, m.Groups[5].Value, m.Groups[6].Value) : null;
-    }
-
-    /// <summary>Localized one-liner for the log.</summary>
-    public string Describe() => Code == "mixin_incompatible"
-        ? L.F("core.bake.runtime.mixin", Mod, Mixin, Target)
-        : $"{Mod}: {Code} ({Mixin} → {Target})";
-
-    [GeneratedRegex(@"\[amber-ul\] \S+ ([a-z_]+) \((error|warning)\) \S+?=(\S+) mixin=(\S+) \S+?=(\S+) \S+?=(\S+)")]
-    private static partial Regex Pattern();
-}

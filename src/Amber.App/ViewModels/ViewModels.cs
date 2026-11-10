@@ -470,6 +470,52 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// <summary>Result of the last bake cache cleanup (or why it did not run); empty before the first one.</summary>
     [ObservableProperty] public partial string BakeCleanupStatus { get; set; } = "";
     [ObservableProperty] public partial bool IsCleaningBake { get; set; }
+    /// <summary>What the loader folder holds (a checked package, a developer build, nothing), or the last install's result.</summary>
+    [ObservableProperty] public partial string BakeLoaderStatus { get; set; } = "";
+    [ObservableProperty] public partial bool IsInstallingBakeLoader { get; set; }
+
+    /// <summary>
+    /// "Install loader from zip…": checks the package against its manifest, unpacks it under Jay's data folder and
+    /// selects it. Jay never downloads the loader; the player brings the zip.
+    /// </summary>
+    public async Task InstallBakeLoaderAsync(string zipPath)
+    {
+        if (IsInstallingBakeLoader) return;
+        IsInstallingBakeLoader = true;
+        try
+        {
+            BakeLoaderStatus = L.T("settings.bake.installing");
+            var sha = await Task.Run(() => Amber.Core.Bake.BakePackage.Sha256(zipPath));
+            var package = await _service.InstallBakeLoaderAsync(zipPath, CancellationToken.None);
+            BakeLoaderPath = package.Root;
+            BakeLoaderStatus = L.F("settings.bake.installed", package.LoaderVersion, package.Interface.ToString(2), package.Files.Count, sha[..12]);
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            BakeLoaderStatus = L.F("settings.bake.install_failed", e.Message);
+        }
+        finally
+        {
+            IsInstallingBakeLoader = false;
+        }
+    }
+
+    /// <summary>One line about the selected loader folder; reads the manifest only (files are checked before each bake).</summary>
+    private static string DescribeBakeLoader(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        try
+        {
+            return Amber.Core.Bake.BakeToolkit.Find(path) switch
+            {
+                { Package: { } p } => L.F("settings.bake.loader_package", p.LoaderVersion, p.Interface.ToString(2)),
+                { } => L.T("settings.bake.loader_devbuild"),
+                null => L.T("settings.bake.loader_none"),
+            };
+        }
+        catch (Amber.Core.Bake.BakeException e) { return e.Message; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return L.T("settings.bake.loader_none"); }
+    }
 
     /// <summary>
     /// Bake cache cleanup: a dry run first, then the totals in a confirmation, then the real gc. Only the loader's
@@ -557,6 +603,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         BreakerSkipDelay = s.BreakerSkipDelay;
         ExperimentalBake = s.ExperimentalBake;
         BakeLoaderPath = s.BakeLoaderPath ?? "";
+        BakeLoaderStatus = DescribeBakeLoader(BakeLoaderPath);
         IsolateVersions = s.IsolateVersions;
         WindowWidth = s.WindowWidth?.ToString() ?? "";
         WindowHeight = s.WindowHeight?.ToString() ?? "";
@@ -812,7 +859,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnBreakerRestartDelayChanged(string value) => Persist();
     partial void OnBreakerSkipDelayChanged(bool value) => Persist();
     partial void OnExperimentalBakeChanged(bool value) => Persist();
-    partial void OnBakeLoaderPathChanged(string value) => Persist();
+    partial void OnBakeLoaderPathChanged(string value)
+    {
+        Persist();
+        if (!IsInstallingBakeLoader) BakeLoaderStatus = DescribeBakeLoader(value);
+        BakeCleanupStatus = "";   // the last cleanup's answer was about the previous folder
+    }
     partial void OnIsolateVersionsChanged(bool value) => Persist();
     partial void OnConcurrencyChanged(string value) => Persist();
     partial void OnWindowWidthChanged(string value) => Persist();

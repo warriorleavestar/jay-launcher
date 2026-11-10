@@ -10,7 +10,7 @@ using Amber.Core.Net;
 namespace Amber.Core.Tests;
 
 /// <summary>
-/// Experimental baking against the universal loader's interface v1.2. No real loader: a fake process answers each
+/// Experimental baking against the universal loader's interface v1.3. No real loader: a fake process answers each
 /// stage with JSON lines, the way amber.ul.Bake does.
 /// </summary>
 public sealed class BakeTests : IDisposable
@@ -155,6 +155,314 @@ public sealed class BakeTests : IDisposable
         return loader;
     }
 
+    // ---- Interface v1.3: packaged loader, javaMin, cache state, runtime problems ----
+
+    private const string Version13 = """{"type":"result","schema":"amber-ul/version-result@1","loaderVersion":"0.3.0-proto","pipelineVersion":"ul-proto-9","protocol":1,"interface":"1.3","supportedMc":["1.20.1","1.21.1"],"platforms":{"vanilla":["1.21.1"],"neoforge":["1.21.1"],"forge":["1.20.1"]},"javaMin":{"vanilla":21,"neoforge":21,"forge":21},"javaRuntime":21}""";
+
+    /// <summary>A loader package folder (loader.jar, libs/, bridges/, manifest.json with the real hashes).</summary>
+    private string Package(string? folder = null, string javaMin = """{"vanilla":21,"neoforge":21,"forge":21}""", Action<JsonObject>? tweak = null)
+    {
+        var root = folder ?? Path.Combine(_root, "pkg", "amber-ul-0.3.0-proto");
+        var contents = new Dictionary<string, string>
+        {
+            ["loader.jar"] = "loader",
+            ["libs/asm-9.10.1.jar"] = "asm",
+            ["libs/sponge-mixin-0.17.5.jar"] = "mixin",
+            ["bridges/fmlbridge.jar"] = "fml",
+            ["bridges/fmlbridge-forge.jar"] = "fmlforge",
+        };
+        var files = new JsonObject();
+        foreach (var (name, text) in contents)
+        {
+            var path = Path.Combine(root, name.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+            files[name] = new JsonObject { ["sha256"] = BakePackage.Sha256(path), ["sha1"] = "x", ["size"] = new FileInfo(path).Length };
+        }
+        var manifest = new JsonObject
+        {
+            ["schema"] = "amber-ul/package@1",
+            ["loaderVersion"] = "0.3.0-proto",
+            ["protocol"] = 1,
+            ["interface"] = "1.3",
+            ["platforms"] = JsonNode.Parse("""{"vanilla":["1.21.1"],"neoforge":["1.21.1"],"forge":["1.20.1"]}"""),
+            ["javaMin"] = JsonNode.Parse(javaMin),
+            ["entry"] = JsonNode.Parse("""{"bake":"amber.ul.Bake","launch":"amber.ul.Launcher"}"""),
+            ["classpath"] = new JsonArray("loader.jar", "libs/asm-9.10.1.jar", "libs/sponge-mixin-0.17.5.jar"),
+            ["bridges"] = JsonNode.Parse("""{"fmlbridge.jar":"bridges/fmlbridge.jar","fmlbridge-forge.jar":"bridges/fmlbridge-forge.jar"}"""),
+            ["files"] = files,
+        };
+        tweak?.Invoke(manifest);
+        File.WriteAllText(Path.Combine(root, BakePackage.ManifestName), manifest.ToJsonString());
+        return root;
+    }
+
+    private string PackageZip(string name = "loader.zip", Action<string>? beforeZip = null, Action<ZipArchive>? extra = null)
+    {
+        var folder = Path.Combine(_root, "zip-src-" + Guid.NewGuid().ToString("N")[..6], "amber-ul-0.3.0-proto");
+        Package(folder);
+        beforeZip?.Invoke(folder);
+        var zip = Path.Combine(_root, name);
+        ZipFile.CreateFromDirectory(Path.GetDirectoryName(folder)!, zip);
+        if (extra is not null)
+        {
+            using var archive = ZipFile.Open(zip, ZipArchiveMode.Update);
+            extra(archive);
+        }
+        return zip;
+    }
+
+    private BakeService PackagedService(string packageRoot, FakeLoader loader) =>
+        new(BakeToolkit.Find(packageRoot)!, Cache, Data, (items, _) =>
+        {
+            foreach (var item in items)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(item.LocalPath)!);
+                File.WriteAllText(item.LocalPath, new string('x', (int)(item.Size ?? 1)));
+            }
+            return Task.CompletedTask;
+        }, loader);
+
+    [Fact]
+    public void PackagedLoaderIsFoundFromItsManifestAndChecked()
+    {
+        var root = Package();
+        var toolkit = BakeToolkit.Find(root)!;
+        Assert.NotNull(toolkit.Package);
+        Assert.Equal("0.3.0-proto", toolkit.Package!.LoaderVersion);
+        Assert.Equal(new Version(1, 3), toolkit.Package.Interface);
+        Assert.Equal(3, toolkit.Classpath.Count);
+        Assert.EndsWith("loader.jar", toolkit.Classpath[0]);
+        Assert.All(toolkit.Classpath, p => Assert.StartsWith(root, p));
+        Assert.Equal(["fmlbridge-forge.jar", "fmlbridge.jar"], toolkit.BridgeJars.Select(Path.GetFileName));
+        toolkit.Verify();
+
+        // One changed byte in a library: refused, naming the file.
+        File.WriteAllText(Path.Combine(root, "libs", "asm-9.10.1.jar"), "asX");
+        var e = Assert.Throws<BakeException>(toolkit.Verify);
+        Assert.Equal("package_mismatch", e.Code);
+        Assert.Contains("libs/asm-9.10.1.jar", e.Message);
+        // A missing bridge: refused too.
+        Package(root);
+        File.Delete(Path.Combine(root, "bridges", "fmlbridge.jar"));
+        Assert.Equal("package_mismatch", Assert.Throws<BakeException>(BakeToolkit.Find(root)!.Verify).Code);
+    }
+
+    [Theory]
+    [InlineData("schema")]
+    [InlineData("classpath-outside")]
+    [InlineData("file-escapes")]
+    [InlineData("bad-hash")]
+    public void MalformedManifestsAreRefusedWithAClearMessage(string what)
+    {
+        var root = Package(tweak: m =>
+        {
+            switch (what)
+            {
+                case "schema": m["schema"] = "amber-ul/package@9"; break;
+                case "classpath-outside": m["classpath"] = new JsonArray("loader.jar", "../elsewhere.jar"); break;
+                case "file-escapes": m["files"]!["../evil.jar"] = new JsonObject { ["sha256"] = new string('0', 64), ["size"] = 1 }; break;
+                case "bad-hash": m["files"]!["loader.jar"]!["sha256"] = "short"; break;
+            }
+        });
+        var e = Assert.Throws<BakeException>(() => BakeToolkit.Find(root));
+        Assert.Equal("package_bad", e.Code);
+    }
+
+    [Fact]
+    public async Task TamperedPackageStopsBeforeAnyLoaderProcess()
+    {
+        Version("1.21.1");
+        var root = Package();
+        var loader = VanillaLoader();
+        loader.Stages["version"] = _ => ([Version13], 0);
+        var bake = PackagedService(root, loader);
+        File.AppendAllText(Path.Combine(root, "loader.jar"), "!");
+        var e = await Assert.ThrowsAsync<BakeException>(() => bake.PrepareAsync("java", 21, new GameDirectory(Game), Instance(), false, null, CancellationToken.None));
+        Assert.Equal("package_mismatch", e.Code);
+        Assert.Empty(loader.Calls);
+    }
+
+    [Fact]
+    public async Task PackageBakesWithItsOwnClasspathAndBridgesCountInTheInputKey()
+    {
+        Version("1.21.1");
+        var root = Package();
+        var loader = VanillaLoader();
+        loader.Stages["version"] = _ => ([Version13], 0);
+        var bake = PackagedService(root, loader);
+        var dir = new GameDirectory(Game);
+        var instance = Instance();
+        var done = await bake.PrepareAsync("java", 21, dir, instance, false, null, CancellationToken.None);
+        Assert.NotNull(done.Launch);
+        Assert.NotNull(bake.Current(dir, instance, 21));
+
+        // Swapping a bridge for a different build means a new bake (and the package check refuses it before that).
+        File.WriteAllText(Path.Combine(root, "bridges", "fmlbridge.jar"), "fml2");
+        Assert.Null(bake.Current(dir, instance, 21));
+    }
+
+    [Fact]
+    public void InstallingFromZipChecksUnpacksAndReplacesTheSameVersion()
+    {
+        var install = Path.Combine(_root, "installed");
+        var package = BakePackage.InstallFromZip(PackageZip(), install);
+        Assert.Equal(Path.Combine(install, "0.3.0-proto"), package.Root);
+        Assert.True(File.Exists(Path.Combine(package.Root, "loader.jar")));
+        Assert.True(File.Exists(Path.Combine(package.Root, "bridges", "fmlbridge-forge.jar")));
+        Assert.NotNull(BakeToolkit.Find(package.Root)!.Package);
+        // Installing the same version again replaces it, leaving no temporary folders.
+        File.WriteAllText(Path.Combine(package.Root, "stray.txt"), "old");
+        BakePackage.InstallFromZip(PackageZip("again.zip"), install);
+        Assert.False(File.Exists(Path.Combine(package.Root, "stray.txt")));
+        Assert.Equal(["0.3.0-proto"], Directory.GetDirectories(install).Select(Path.GetFileName));
+    }
+
+    [Theory]
+    [InlineData("changed")]
+    [InlineData("extra")]
+    [InlineData("escape")]
+    [InlineData("no-manifest")]
+    public void BadZipsAreRefusedAndNothingIsInstalled(string what)
+    {
+        var install = Path.Combine(_root, "installed");
+        var zip = what switch
+        {
+            "changed" => PackageZip(beforeZip: folder => File.WriteAllText(Path.Combine(folder, "libs", "asm-9.10.1.jar"), "tampered")),
+            "extra" => PackageZip(beforeZip: folder => File.WriteAllText(Path.Combine(folder, "libs", "surprise.jar"), "x")),
+            "escape" => PackageZip(extra: archive =>
+            {
+                using var writer = new StreamWriter(archive.CreateEntry("amber-ul-0.3.0-proto/../../evil.jar").Open());
+                writer.Write("evil");
+            }),
+            _ => PackageZip(beforeZip: folder => File.Delete(Path.Combine(folder, BakePackage.ManifestName))),
+        };
+        var e = Assert.Throws<BakeException>(() => BakePackage.InstallFromZip(zip, install));
+        Assert.Contains(e.Code, new[] { "package_bad", "package_mismatch" });
+        Assert.False(Directory.Exists(Path.Combine(install, "0.3.0-proto")));
+        Assert.False(File.Exists(Path.Combine(_root, "evil.jar")));
+        Assert.Empty(Directory.Exists(install) ? Directory.GetDirectories(install) : []);
+    }
+
+    [Fact]
+    public async Task JavaMinComesFromTheLoader()
+    {
+        Version("1.21.1");
+        Version("1.20.1");
+        // The manifest says Forge needs 25: the instance's 17 becomes 25, and 21 is refused before any process.
+        var root = Package(javaMin: """{"vanilla":21,"neoforge":21,"forge":25}""");
+        var loader = VanillaLoader();
+        loader.Stages["version"] = _ => ([Version13], 0);
+        var bake = PackagedService(root, loader);
+        var forge = Instance("forge", "1.20.1", "47.4.28", "1.20.1");
+        Assert.Equal(25, bake.JavaMajorFor(forge, 17));
+        Assert.Equal(21, bake.JavaMajorFor(Instance(), 17));
+        var e = await Assert.ThrowsAsync<BakeException>(() => bake.PrepareAsync("java", 21, new GameDirectory(Game), forge, false, null, CancellationToken.None));
+        Assert.Equal("java_too_old", e.Code);
+        Assert.Contains("25", e.Message);
+        Assert.Empty(loader.Calls);
+
+        // version's javaMin counts too (a build folder has no manifest).
+        var dev = VanillaLoader();
+        dev.Stages["version"] = _ => ([Version13.Replace("\"vanilla\":21", "\"vanilla\":22")], 0);
+        e = await Assert.ThrowsAsync<BakeException>(() => Service(dev).PrepareAsync("java", 21, new GameDirectory(Game), Instance(), false, null, CancellationToken.None));
+        Assert.Equal("java_too_old", e.Code);
+        Assert.Equal(0, dev.Count("bake-instance"));
+
+        // bake-instance's own java_too_old error reads the same.
+        var refusing = VanillaLoader();
+        refusing.Stages["version"] = _ => ([Version13], 0);
+        refusing.Stages["bake-instance"] = _ => (["""{"type":"error","code":"java_too_old","message":"javaMajor 21 is below 21"}"""], 1);
+        e = await Assert.ThrowsAsync<BakeException>(() => Service(refusing).PrepareAsync("java", 21, new GameDirectory(Game), Instance(), false, null, CancellationToken.None));
+        Assert.Equal("java_too_old", e.Code);
+        Assert.Contains("Java 21", e.Message);
+    }
+
+    /// <summary>bake-instance answering with interface 1.3's cache object and problems file.</summary>
+    private static Func<JsonObject?, (string[], int)> BakeInstance13(string state, bool warm) => request =>
+    {
+        var (lines, exit) = BakeInstanceOk("c1")(request);
+        var result = JsonNode.Parse(lines[0])!.AsObject();
+        result["cache"] = new JsonObject { ["state"] = state, ["stateKeyChanged"] = state != "reused", ["bakeMisses"] = state == "reused" ? 0 : 3, ["newCacheFiles"] = 0, ["warm"] = warm };
+        result["launch"]!["problemsFile"] = Path.Combine(request!["instanceDir"]!.GetValue<string>(), ".amber-ul", "runtime-problems.jsonl");
+        result["launch"]!["javaMin"] = 21;
+        return ([result.ToJsonString()], exit);
+    };
+
+    [Theory]
+    [InlineData("new", true, true)]
+    [InlineData("rebuilt", true, true)]
+    [InlineData("reused", false, false)]
+    [InlineData("rebuilt", false, false)]
+    public async Task WarmRunsOnlyWhenTheLoaderAsksForIt(string state, bool warmFlag, bool expectWarm)
+    {
+        Version("1.21.1");
+        var loader = VanillaLoader();
+        loader.Stages["version"] = _ => ([Version13], 0);
+        loader.Stages["bake-instance"] = BakeInstance13(state, warmFlag);
+        var done = await Service(loader).PrepareAsync("java", 21, new GameDirectory(Game), Instance(), warm: true, null, CancellationToken.None);
+        Assert.Equal(state, done.Cache!.State);
+        Assert.Equal(expectWarm ? 1 : 0, loader.Count("warm"));
+        Assert.Equal(expectWarm, done.Warm is not null);
+        if (state == "reused") Assert.Equal(Amber.Core.Localization.L.T("core.bake.done_reused"), done.Reason);
+        // The problems file travels with the launch block and the bake record.
+        Assert.EndsWith("runtime-problems.jsonl", done.Launch!.ProblemsFile);
+        Assert.Equal(done.Launch.ProblemsFile, BakeRecord.Read(Instance().WorkDir)!.Launch.ProblemsFile);
+    }
+
+    [Fact]
+    public void RuntimeProblemsAreReadFromPrefixedLinesAndTheProblemsFile()
+    {
+        var mixin = """{"type":"problem","schema":"amber-ul/runtime-problem@1","severity":"warning","code":"mixin_incompatible","modId":"sodium","mixin":"me.jellysquid.FooMixin","target":"net.minecraft.client.Foo","category":"target_missing","providesApi":"false","message":"switched off"}""";
+        // The game's logger may put a timestamp in front of the prefix.
+        var problem = BakeRuntimeProblem.Parse("[12:00:01] [main/INFO]: " + BakeRuntimeProblem.Prefix + mixin)!;
+        Assert.Equal("mixin_incompatible", problem.Code);
+        Assert.Equal("sodium", problem.Mod);
+        Assert.Equal("me.jellysquid.FooMixin", problem.Mixin);
+        Assert.True(problem.DisablesFeatures);
+        Assert.Contains("sodium", problem.Describe());
+        Assert.Null(BakeRuntimeProblem.Parse(BakeRuntimeProblem.Prefix + "{not json"));
+        // Without the prefix (and not legacy), the Chinese line is for people only.
+        Assert.Null(BakeRuntimeProblem.Parse("[amber-ul] 问题 mixin_incompatible (warning) 模组=sodium mixin=a 目标=b 原因=c"));
+
+        var file = Path.Combine(_root, "runtime-problems.jsonl");
+        File.WriteAllLines(file,
+        [
+            """{"type":"launch","schema":"amber-ul/runtime-problem@1","loaderVersion":"0.3.0-proto","interface":"1.3","time":"2026-11-10T00:00:00Z"}""",
+            mixin,
+            """{"type":"problem","schema":"amber-ul/runtime-problem@1","severity":"warning","code":"mixin_semantic_risk","modId":"lithium","mixin":"a.B","handler":"onTick","action":"injector_removed","message":"m"}""",
+            """{"type":"problem","schema":"amber-ul/runtime-problem@1","severity":"info","code":"fabric_api_bridged","modId":"fabric-networking-api-v1","mixins":"3","platform":"neoforge","message":"m"}""",
+            """{"type":"problem","schema":"amber-ul/runtime-problem@1","severity":"warning","code":"fabric_api_bridge_version","modId":"fabric-api-base","detail":"0.4.42 vs 0.4.40","message":"m"}""",
+            """{"type":"problem","schema":"amber-ul/runtime-problem@1","severity":"error","code":"fabric_init_not_run","modId":"examplemod","message":"m"}""",
+            """{"type":"problem","schema":"amber-ul/runtime-problem@1","severity":"info","code":"launch_rebaked","bakeMisses":"4","message":"m"}""",
+            """{"type":"problem","schema":"amber-ul/runtime-problem@1","severity":"error","code":"missing_dep","modId":"forgedemo","file":"forgedemo.jar","dependency":{"id":"fabricdemo","range":"[1.0,)"},"message":"m"}""",
+            """{"type":"problem","schema":"amber-ul/runtime-pro""",   // cut off by a crash
+        ]);
+        var all = BakeRuntimeProblem.ReadFile(file);
+        Assert.Equal(["mixin_incompatible", "mixin_semantic_risk", "fabric_api_bridged", "fabric_api_bridge_version", "fabric_init_not_run", "launch_rebaked", "missing_dep"], all.Select(p => p.Code));
+        Assert.Equal(problem.Key, all[0].Key);   // the same problem from stdout and the file counts once
+        Assert.Contains("onTick", all[1].Describe());
+        Assert.False(all[2].IsNotable);
+        Assert.Contains("0.4.42", all[3].Describe());
+        Assert.True(all[4].IsError);
+        Assert.True(all[5].AsksForWarm);
+        Assert.Contains("4", all[5].Describe());
+        Assert.Contains("fabricdemo", all[6].Describe());
+        Assert.All(all, p => Assert.False(string.IsNullOrWhiteSpace(p.Describe())));
+        Assert.Empty(BakeRuntimeProblem.ReadFile(Path.Combine(_root, "missing.jsonl")));
+    }
+
+    [Fact]
+    public void SupportedPlatformsComeFromTheLoaderNotFromJay()
+    {
+        var wider = BakeLoaderInfo.Parse(JsonNode.Parse(Version13.Replace("\"forge\":[\"1.20.1\"]", "\"forge\":[\"1.20.1\",\"1.21.1\"]"))!.AsObject());
+        Assert.True(BakeService.Supports(Instance("forge", "1.21.1", "52.0.1"), wider, out _));
+        var today = BakeLoaderInfo.Parse(JsonNode.Parse(Version13)!.AsObject());
+        Assert.False(BakeService.Supports(Instance("forge", "1.21.1", "52.0.1"), today, out var reason));
+        Assert.Contains("1.20.1", reason);
+        Assert.Equal(21, today.JavaMinFor("forge"));
+    }
+
     [Fact]
     public void ToolkitNeedsOnlyTheBuiltLoader()
     {
@@ -274,13 +582,15 @@ public sealed class BakeTests : IDisposable
     public void RuntimeMixinProblemsAreReadFromTheGameOutput()
     {
         var line = "[12:00:01] [main/INFO]: [amber-ul] 问题 mixin_incompatible (warning) 模组=sodium mixin=me.jellysquid.FooMixin 目标=net.minecraft.client.Foo 原因=target_missing";
-        var problem = BakeRuntimeProblem.Parse(line)!;
+        // Only a loader without a problems file (before interface 1.3) is read from its text lines.
+        Assert.Null(BakeRuntimeProblem.Parse(line));
+        var problem = BakeRuntimeProblem.Parse(line, legacy: true)!;
         Assert.Equal("mixin_incompatible", problem.Code);
         Assert.Equal("sodium", problem.Mod);
         Assert.Equal("me.jellysquid.FooMixin", problem.Mixin);
         Assert.Equal("net.minecraft.client.Foo", problem.Target);
         Assert.Contains("sodium", problem.Describe());
-        Assert.Null(BakeRuntimeProblem.Parse("[amber-ul] 映射图 新建 1.21.1"));
+        Assert.Null(BakeRuntimeProblem.Parse("[amber-ul] 映射图 新建 1.21.1", legacy: true));
         Assert.Null(BakeRuntimeProblem.Parse("ordinary game line"));
     }
 
@@ -392,9 +702,14 @@ public sealed class BakeTests : IDisposable
         var loader = VanillaLoader();
         loader.Crash["version"] = ["Error: LinkageError occurred while loading main class amber.ul.Bake",
             "	java.lang.UnsupportedClassVersionError: amber/ul/Bake has been compiled by a more recent version of the Java Runtime (class file version 65.0)"];
+        // Asked for 17: refused before any process starts.
         var e = await Assert.ThrowsAsync<BakeException>(() => Service(loader).PrepareAsync("java", 17, new GameDirectory(Game), Instance(), false, null, CancellationToken.None));
         Assert.Equal("java_too_old", e.Code);
         Assert.Contains("21", e.Message);
+        Assert.Empty(loader.Calls);
+        // A hand-picked Java that only claims to be 21: the JVM error on stderr becomes the same clear message.
+        e = await Assert.ThrowsAsync<BakeException>(() => Service(loader).PrepareAsync("java", 21, new GameDirectory(Game), Instance(), false, null, CancellationToken.None));
+        Assert.Equal("java_too_old", e.Code);
         Assert.Equal(0, loader.Count("bake-instance"));
     }
 
@@ -403,7 +718,7 @@ public sealed class BakeTests : IDisposable
     [InlineData(17, 21)]
     [InlineData(21, 21)]
     [InlineData(25, 25)]
-    public void BakeUsesAtLeastJava21(int versionMajor, int expected) => Assert.Equal(expected, BakeService.JavaMajorFor(versionMajor));
+    public void BakeUsesAtLeastJava21(int versionMajor, int expected) => Assert.Equal(expected, Service().JavaMajorFor(Instance("forge", "1.20.1", "47.4.28"), versionMajor));
 
     [Fact]
     public async Task ProtocolMismatchStopsBeforeAnyBake()

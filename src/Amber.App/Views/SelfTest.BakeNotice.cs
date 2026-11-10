@@ -31,6 +31,8 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         if (!ok) throw new InvalidOperationException(name);
     }
 
+    private void Check(string name, bool ok, string detail) => Check(ok || detail.Length == 0 ? name : $"{name}（{detail}）", ok);
+
     private void Show(string id, Action? retry = null) => Toasts.BakeFailed(L.F("home.bake.crashed_toast", id), retry ?? (() => { }));
 
     private static Rect BoundsIn(Control control, Visual target) =>
@@ -196,6 +198,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             await CheckInstanceBakeEntryAsync(instance);
             await CheckProblemNoticeAsync();
             await CheckSettingsCleanupAsync();
+            await CheckSettingsInstallLoaderAsync();
         }
         catch (Exception ex)
         {
@@ -323,4 +326,98 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         Check("没有加载器时清理只给出原因", settings.BakeCleanupStatus == L.T("core.bake.loader_missing_short") || settings.BakeCleanupStatus == L.T("core.bake.gc_empty"));
         await ShotAsync("settings-bake-cleanup-status-en");
     }
+
+    /// <summary>
+    /// Settings › Experimental › "Install loader from zip…": the entry is findable and visible, a good package is
+    /// checked, unpacked into the data folder and selected, a tampered one is refused without changing the selection.
+    /// With AMBER_SELFTEST_BAKE_ZIP the real loader zip is installed the same way (and stays selected).
+    /// </summary>
+    private async Task CheckSettingsInstallLoaderAsync()
+    {
+        var settings = main.Pages.OfType<SettingsViewModel>().Single();
+        foreach (var language in new[] { "zh-Hans", "en", "ja" })
+        {
+            L.SetLanguage(language);
+            foreach (var (width, height) in new[] { (760, 440), (1280, 700) })
+            {
+                window.Width = width;
+                window.Height = height;
+                main.Shell.Navigate("settings#BakeLoaderInstall");
+                for (var i = 0; i < 60 && window.RevealedField?.Name != "BakeLoaderInstall"; i++) await Task.Delay(50);
+                Check($"安装加载器 {language}-{width}：settings#BakeLoaderInstall 定位到按钮", window.RevealedField?.Name == "BakeLoaderInstall");
+                var button = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeInstallButton");
+                button.BringIntoView();
+                await Task.Delay(150);
+                window.UpdateLayout();
+                Check($"安装加载器 {language}-{width}：按钮完整可见、文案随语言", button.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(button, window))
+                    && button.Content?.ToString() == L.T("settings.bake.install"));
+                await ShotAsync($"settings-bake-install-{language}-{width}x{height}");
+            }
+        }
+
+        L.SetLanguage("en");
+        window.Width = 1280;
+        window.Height = 700;
+        var before = settings.BakeLoaderPath;
+        var good = FakeLoaderZip("good", tamper: false);
+        await settings.InstallBakeLoaderAsync(good);
+        var installed = Path.Combine(LauncherService.BakeLoaderInstallRoot, "0.0.0-selftest");
+        Check("从压缩包安装：核对后解压到数据文件夹并选用", settings.BakeLoaderPath == installed && File.Exists(Path.Combine(installed, "loader.jar"))
+            && settings.BakeLoaderStatus.Contains("0.0.0-selftest", StringComparison.Ordinal), settings.BakeLoaderStatus);
+        main.Shell.Navigate("settings#BakeLoaderInstall");
+        await Task.Delay(300);
+        await ShotAsync("settings-bake-install-done-en");
+
+        var bad = FakeLoaderZip("bad", tamper: true);
+        settings.BakeLoaderPath = before;
+        await settings.InstallBakeLoaderAsync(bad);
+        Check("被改过的加载器包被拒，选用的文件夹不变", settings.BakeLoaderPath == before
+            && settings.BakeLoaderStatus.StartsWith(L.F("settings.bake.install_failed", ""), StringComparison.Ordinal)
+            && settings.BakeLoaderStatus.Contains("loader.jar", StringComparison.Ordinal), settings.BakeLoaderStatus);
+        await ShotAsync("settings-bake-install-refused-en");
+
+        if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_BAKE_ZIP") is { Length: > 0 } real && File.Exists(real))
+        {
+            await settings.InstallBakeLoaderAsync(real);
+            var ok = Amber.Core.Bake.BakeToolkit.Find(settings.BakeLoaderPath) is { Package: { } p } && p.Interface >= new Version(1, 3);
+            Check("真实加载器包从压缩包装好并选用", ok, settings.BakeLoaderStatus);
+            _report.Add("INFO 加载器装在 " + settings.BakeLoaderPath);
+            await ShotAsync("settings-bake-install-real-en");
+        }
+        else settings.BakeLoaderPath = before;
+    }
+
+    /// <summary>A tiny loader package zip for the install check (not a real loader). tamper: one file differs from its manifest.</summary>
+    private string FakeLoaderZip(string name, bool tamper)
+    {
+        var source = Path.Combine(reportDir, "fake-loader-" + name);
+        if (Directory.Exists(source)) Directory.Delete(source, true);
+        var folder = Path.Combine(source, "amber-ul-0.0.0-selftest");
+        var files = new System.Text.Json.Nodes.JsonObject();
+        foreach (var (relative, text) in new[] { ("loader.jar", "loader"), ("libs/asm.jar", "asm"), ("bridges/fmlbridge.jar", "fml") })
+        {
+            var path = Path.Combine(folder, relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+            files[relative] = new System.Text.Json.Nodes.JsonObject { ["sha256"] = Amber.Core.Bake.BakePackage.Sha256(path), ["size"] = new FileInfo(path).Length };
+        }
+        var manifest = new System.Text.Json.Nodes.JsonObject
+        {
+            ["schema"] = Amber.Core.Bake.BakePackage.Schema,
+            ["loaderVersion"] = "0.0.0-selftest",
+            ["protocol"] = 1,
+            ["interface"] = "1.3",
+            ["platforms"] = new System.Text.Json.Nodes.JsonObject { ["vanilla"] = new System.Text.Json.Nodes.JsonArray("1.21.1") },
+            ["javaMin"] = new System.Text.Json.Nodes.JsonObject { ["vanilla"] = 21 },
+            ["classpath"] = new System.Text.Json.Nodes.JsonArray("loader.jar", "libs/asm.jar"),
+            ["files"] = files,
+        };
+        File.WriteAllText(Path.Combine(folder, Amber.Core.Bake.BakePackage.ManifestName), manifest.ToJsonString());
+        if (tamper) File.WriteAllText(Path.Combine(folder, "loader.jar"), "changed");
+        var zip = Path.Combine(reportDir, $"fake-loader-{name}.zip");
+        if (File.Exists(zip)) File.Delete(zip);
+        System.IO.Compression.ZipFile.CreateFromDirectory(source, zip);
+        return zip;
+    }
+
 }

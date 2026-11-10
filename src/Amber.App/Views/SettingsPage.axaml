@@ -382,6 +382,11 @@
                 <CheckBox x:Name="BakeBox" IsChecked="{Binding ExperimentalBake}" Content="{l:T settings.bake.toggle}" />
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.bake.hint}" TextWrapping="Wrap" />
                 <TextBox x:Name="BakeLoaderBox" Text="{Binding BakeLoaderPath, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding ExperimentalBake}" PlaceholderText="{l:T settings.bake.loader_hint}" />
+                <WrapPanel x:Name="BakeLoaderInstall" Orientation="Horizontal" IsEnabled="{Binding ExperimentalBake}">
+                  <Button x:Name="BakeInstallButton" Classes="secondary" Content="{l:T settings.bake.install}" Click="InstallBakeLoader_Click" IsEnabled="{Binding !IsInstallingBakeLoader}"
+                          ToolTip.Tip="{l:T settings.bake.install_hint}" Margin="0,0,8,0" />
+                  <TextBlock x:Name="BakeLoaderStatusText" Classes="hint" FontSize="12" Text="{Binding BakeLoaderStatus}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </WrapPanel>
                 <WrapPanel x:Name="BakeCleanup" Orientation="Horizontal" IsEnabled="{Binding ExperimentalBake}">
                   <Button Classes="secondary" Content="{l:T settings.bake.gc}" Command="{Binding CleanBakeCacheCommand}" IsEnabled="{Binding !IsCleaningBake}"
                           ToolTip.Tip="{l:T settings.bake.gc_hint}" Margin="0,0,8,0" />

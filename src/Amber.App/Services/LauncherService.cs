@@ -430,8 +430,9 @@ public sealed class LauncherService : IDisposable
 
     /// <summary>The bake uses the launch's own game directory; switching directories meanwhile never mixes up two instances of the same name.</summary>
     /// <remarks>
-    /// The returned JavaPath is the Java to launch the baked game with: the loader needs Java 21, so for a version that
-    /// asks for less (Forge 1.20.1 asks for 17) the bake switches to Java 21 and the launch must use it too.
+    /// The returned JavaPath is the Java to launch the baked game with: the loader says which Java it needs (its
+    /// manifest's <c>javaMin</c>, 21 today), so for a version that asks for less (Forge 1.20.1 asks for 17) the bake
+    /// switches to that Java and the launch must use it too.
     /// </remarks>
     public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false)
     {
@@ -439,10 +440,11 @@ public sealed class LauncherService : IDisposable
         await _bakeLock.WaitAsync(ct);
         try
         {
-            var versionMajor = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.MinJavaMajor;
-            var major = Amber.Core.Bake.BakeService.JavaMajorFor(versionMajor);
+            var instance = GetInstance(ctx, id);
+            var versionMajor = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin;
+            var major = bake.JavaMajorFor(instance, versionMajor);
             if (major != versionMajor) javaPath = await ctx.Java.ForMajorAsync(major, ct);
-            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, GetInstance(ctx, id), warm, progress, ct);
+            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct);
             return (done.Launch, done.Reason, javaPath);
         }
         finally
@@ -463,12 +465,69 @@ public sealed class LauncherService : IDisposable
         if (!await _bakeLock.WaitAsync(0, ct)) return (null, Amber.Core.Localization.L.T("core.bake.gc_busy"));
         try
         {
-            var java = await ctx.Java.ForMajorAsync(21, ct);
+            var java = await ctx.Java.ForMajorAsync(bake.Toolkit.JavaMinForAll, ct);
+            bake.Toolkit.Verify();
             var loader = await bake.VersionAsync(java, ct);
             loader.EnsureCompatible();
             if (!loader.CanWarm) return (null, Amber.Core.Localization.L.F("core.bake.interface_old", loader.Interface.ToString(2), Amber.Core.Bake.BakeLoaderInfo.WarmInterface.ToString(2), loader.LoaderVersion));
             var result = await bake.CollectGarbageAsync(java, apply, null, ct);
             return (result, result is null ? Amber.Core.Localization.L.T("core.bake.gc_empty") : "");
+        }
+        finally
+        {
+            _bakeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// The loader reported that a launch had to bake something itself (<c>launch_rebaked</c>, interface 1.3): run
+    /// <c>warm</c> on the instance's state in the background after the game exits, so the next launch and gc see the
+    /// full cache list. Skipped while another bake runs; the next launch just fills in again.
+    /// </summary>
+    public void WarmBakeInBackground(GameContext ctx, string id)
+    {
+        if (!Settings.ExperimentalBake) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // warm only adds finished cache entries (atomically), so a game running elsewhere is fine; a bake is not.
+                if (BakeFor(ctx) is not { } bake || !await _bakeLock.WaitAsync(0)) return;
+                try
+                {
+                    var instance = GetInstance(ctx, id);
+                    if (Amber.Core.Bake.BakeRecord.Read(instance.WorkDir) is not { } record || !File.Exists(record.Launch.StateFile)) return;
+                    var major = bake.JavaMajorFor(instance, ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin);
+                    var java = await ctx.Java.ForMajorAsync(major, CancellationToken.None);
+                    bake.Toolkit.Verify();
+                    await bake.WarmAsync(java, record.Launch.StateFile, null, CancellationToken.None);
+                }
+                finally
+                {
+                    _bakeLock.Release();
+                }
+            }
+            catch (Exception e) when (e is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine("bake warm: " + e.Message); }
+        });
+    }
+
+    /// <summary>Where loader packages installed from a zip live: <c>&lt;data&gt;/universal-loader/&lt;version&gt;</c>.</summary>
+    public static string BakeLoaderInstallRoot => Path.Combine(AppSettings.DataDir, "universal-loader");
+
+    /// <summary>
+    /// Installs a universal loader package from its zip (checked file by file against its manifest) and selects it.
+    /// No download: the player brings the zip. Refused while a bake is running, since the folder may be replaced.
+    /// </summary>
+    public async Task<Amber.Core.Bake.BakePackage> InstallBakeLoaderAsync(string zipPath, CancellationToken ct)
+    {
+        if (!await _bakeLock.WaitAsync(0, ct)) throw new Amber.Core.Bake.BakeException(Amber.Core.Localization.L.T("core.bake.gc_busy"), []);
+        try
+        {
+            if (AnyRunning) throw new Amber.Core.Bake.BakeException(Amber.Core.Localization.L.T("core.bake.gc_busy"), []);
+            var package = await Task.Run(() => Amber.Core.Bake.BakePackage.InstallFromZip(zipPath, BakeLoaderInstallRoot), ct);
+            Settings.BakeLoaderPath = package.Root;
+            Settings.Save();
+            return package;
         }
         finally
         {
