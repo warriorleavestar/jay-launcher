@@ -128,6 +128,8 @@ public partial class DownloadPage : UserControl
         var wrap = _searchWrapped == true ? needed > available - 8 : needed > available;
         if (_searchWrapped == wrap) return;
         _searchWrapped = wrap;
+        // Wrapped, the chips span the whole first row, so their Auto column doesn't push Refresh past the right edge.
+        Grid.SetColumnSpan(TypeChips, wrap ? 3 : 1);
         Grid.SetRow(SearchBox, wrap ? 1 : 0);
         Grid.SetColumn(SearchBox, wrap ? 0 : 1);
         Grid.SetColumnSpan(SearchBox, wrap ? 2 : 1);
