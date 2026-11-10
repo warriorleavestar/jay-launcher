@@ -59,6 +59,17 @@ public static class Toasts
         });
     }
 
+    /// <summary>A bake notice whose button does something other than retry (download the missing loader).</summary>
+    public static void BakeAction(string text, string actionText, string? actionTip, Action action)
+    {
+        var host = _bakeHost;
+        if (host is null) { Show(text); return; }
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (ReferenceEquals(_bakeHost, host)) host.Show(text, action, actionText, actionTip);
+        });
+    }
+
     /// <summary>A bake problem with nothing to retry (the game already launched normally, or nothing was launched).</summary>
     public static void BakeProblem(string text)
     {

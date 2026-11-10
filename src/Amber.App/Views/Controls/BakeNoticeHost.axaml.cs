@@ -29,10 +29,10 @@ public sealed class BakeNoticeState : ObservableObject
         OnPropertyChanged(nameof(HasNotice));
     };
 
-    internal BakeNotice Show(string text, Action? retry)
+    internal BakeNotice Show(string text, Action? retry, string? actionText = null, string? actionTip = null)
     {
         if (Notices.Count == 3) Notices[^1].DismissCommand.Execute(null);
-        var notice = new BakeNotice(text, retry, item => Notices.Remove(item));
+        var notice = new BakeNotice(text, retry, item => Notices.Remove(item), actionText, actionTip);
         Notices.Insert(0, notice);
         return notice;
     }
@@ -53,12 +53,17 @@ public sealed class BakeNotice
     public string Text { get; }
     /// <summary>False for problems that have nothing to retry (the button is hidden).</summary>
     public bool CanRetry => _retry is not null;
+    /// <summary>The button's label: "retry without baking" unless the notice offers something else (downloading the loader).</summary>
+    public string ActionText { get; }
+    public string ActionTip { get; }
     public IRelayCommand RetryCommand { get; }
     public IRelayCommand DismissCommand { get; }
 
-    internal BakeNotice(string text, Action? retry, Action<BakeNotice> remove)
+    internal BakeNotice(string text, Action? retry, Action<BakeNotice> remove, string? actionText = null, string? actionTip = null)
     {
         Text = text;
+        ActionText = actionText ?? Amber.Core.Localization.L.T("home.bake.retry_without");
+        ActionTip = actionTip ?? Amber.Core.Localization.L.T("home.bake.retry_once");
         _retry = retry;
         _remove = remove;
         RetryCommand = new RelayCommand(() => Finish(true));

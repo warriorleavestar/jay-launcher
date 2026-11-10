@@ -292,6 +292,9 @@ public sealed partial class HomeViewModel : PageViewModel
     /// <summary>没有账号或没有实例时替换实例卡的新手卡（改版规格 3.1）。</summary>
     public OnboardingViewModel Onboarding { get; }
 
+    /// <summary>Opens Settings at the loader and starts "Download loader" (set by the main view model).</summary>
+    public Action? DownloadBakeLoader { get; set; }
+
     public HomeViewModel(LauncherService service, LogViewModel log)
     {
         _service = service;
@@ -617,6 +620,9 @@ public sealed partial class HomeViewModel : PageViewModel
                         if (e.IsProblem) _log.AddRaw(run.Log, "[Bake] " + e.Message);
                     }), ct);
                     if (reason.Length > 0) _log.AddRaw(run.Log, "[Bake] " + reason);
+                    // Baking is on but no loader is installed: offer the download right where the launch status is.
+                    if (baked is null && reason == L.T("core.bake.loader_missing") && DownloadBakeLoader is { } download)
+                        Toasts.BakeAction(L.T("home.bake.loader_missing_notice"), L.T("home.bake.download_loader"), L.T("settings.bake.download_hint"), download);
                     if (baked is not null)
                     {
                         // The loader's launcher needs Java 21 even where the version asks for less.

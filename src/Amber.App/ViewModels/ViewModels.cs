@@ -318,6 +318,11 @@ public sealed partial class MainViewModel : ObservableObject
         };
         var settingsPage = Pages.OfType<SettingsViewModel>().Single();
         settingsPage.Navigate = r => shell.Navigate(r);
+        home.DownloadBakeLoader = () =>
+        {
+            shell.Navigate("settings#BakeLoaderInstall");
+            _ = settingsPage.DownloadBakeLoaderAsync();
+        };
         Help.Navigate = r => shell.Navigate(r);
         var about = Pages.OfType<AboutViewModel>().Single();
         about.Navigate = r => shell.Navigate(r);
@@ -474,9 +479,63 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial string BakeLoaderStatus { get; set; } = "";
     [ObservableProperty] public partial bool IsInstallingBakeLoader { get; set; }
 
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanStartBakeLoaderDownload))] public partial bool IsDownloadingBakeLoader { get; set; }
+    public bool CanStartBakeLoaderDownload => !IsDownloadingBakeLoader;
+    private CancellationTokenSource? _bakeLoaderDownload;
+
+    /// <summary>The loader version "Download loader" fetches (shown on the button's tooltip).</summary>
+    public string BakeLoaderDownloadVersion => Amber.Core.Bake.BakeLoaderRelease.Pinned.LoaderVersion;
+
+    /// <summary>
+    /// "Download loader": the pinned zip from Jay's own GitHub release (mirrors and resume as other downloads),
+    /// accepted only with the pinned SHA-256, then installed like a zip the player picked. Cancel keeps the partial
+    /// file so the next try resumes.
+    /// </summary>
+    public async Task DownloadBakeLoaderAsync()
+    {
+        if (IsDownloadingBakeLoader || IsInstallingBakeLoader) return;
+        using var cts = new CancellationTokenSource();
+        _bakeLoaderDownload = cts;
+        IsDownloadingBakeLoader = true;
+        IsInstallingBakeLoader = true;
+        var release = Amber.Core.Bake.BakeLoaderRelease.Pinned;
+        try
+        {
+            BakeLoaderStatus = L.F("settings.bake.downloading", "GitHub", 0, Fmt.Size(release.Size));
+            var progress = new Progress<Amber.Core.Net.DownloadProgress>(p =>
+            {
+                if (IsDownloadingBakeLoader)
+                    BakeLoaderStatus = L.F("settings.bake.downloading", p.CurrentFile ?? "", (int)(100 * Math.Min(p.BytesDownloaded, release.Size) / release.Size), Fmt.Size(release.Size));
+            });
+            var package = await _service.DownloadBakeLoaderAsync(progress, cts.Token);
+            BakeLoaderPath = package.Root;
+            BakeLoaderStatus = L.F("settings.bake.installed", package.LoaderVersion, package.Interface.ToString(2), package.Files.Count, release.Sha256[..12]);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            BakeLoaderStatus = L.T("settings.bake.download_cancelled");
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or UnauthorizedAccessException or InvalidDataException or HttpRequestException)
+        {
+            BakeLoaderStatus = L.F("settings.bake.install_failed", e.Message);
+        }
+        finally
+        {
+            _bakeLoaderDownload = null;
+            IsInstallingBakeLoader = false;
+            IsDownloadingBakeLoader = false;
+        }
+    }
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private Task DownloadBakeLoader() => DownloadBakeLoaderAsync();
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private void CancelBakeLoaderDownload() => _bakeLoaderDownload?.Cancel();
+
     /// <summary>
     /// "Install loader from zip…": checks the package against its manifest, unpacks it under Jay's data folder and
-    /// selects it. Jay never downloads the loader; the player brings the zip.
+    /// selects it. The zip comes from the player (or from "Download loader").
     /// </summary>
     public async Task InstallBakeLoaderAsync(string zipPath)
     {
@@ -574,6 +633,11 @@ public sealed partial class SettingsViewModel : PageViewModel
         _service = service;
         Recycle = new RecycleViewModel(service);
         _loading = true;
+        // The loader line is built from text in the current language; a language switch rebuilds it (not during an install or download).
+        L.Changed += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsInstallingBakeLoader) BakeLoaderStatus = DescribeBakeLoader(BakeLoaderPath);
+        });
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
             var automatic = JavaOptions.FirstOrDefault(o => o.Path is null);

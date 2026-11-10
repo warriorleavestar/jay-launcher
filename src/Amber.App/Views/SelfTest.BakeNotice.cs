@@ -199,6 +199,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             await CheckProblemNoticeAsync();
             await CheckSettingsCleanupAsync();
             await CheckSettingsInstallLoaderAsync();
+            await CheckLoaderDownloadOfferAsync();
         }
         catch (Exception ex)
         {
@@ -351,6 +352,11 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                 window.UpdateLayout();
                 Check($"安装加载器 {language}-{width}：按钮完整可见、文案随语言", button.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(button, window))
                     && button.Content?.ToString() == L.T("settings.bake.install"));
+                var download = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadButton");
+                Check($"下载加载器 {language}-{width}：按钮完整可见、文案随语言、有说明", download.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(download, window))
+                    && download.Content?.ToString() == L.T("settings.bake.download") && ToolTip.GetTip(download)?.ToString() == L.T("settings.bake.download_hint"));
+                var cancel = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadCancelButton");
+                Check($"下载加载器 {language}-{width}：没在下载时不显示取消", !cancel.IsVisible);
                 await ShotAsync($"settings-bake-install-{language}-{width}x{height}");
             }
         }
@@ -385,6 +391,45 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             await ShotAsync("settings-bake-install-real-en");
         }
         else settings.BakeLoaderPath = before;
+    }
+
+    /// <summary>
+    /// Baking on and no loader installed: the launch status box offers "Download loader" in place of the retry button.
+    /// The button's action is a stand-in here (the self-test never touches download services); the real one is wired.
+    /// </summary>
+    private async Task CheckLoaderDownloadOfferAsync()
+    {
+        Check("没有加载器时的下载入口已接到设置页", Home.DownloadBakeLoader is not null);
+        main.CurrentPage = Home;
+        foreach (var language in new[] { "zh-Hans", "en", "ja" })
+        {
+            L.SetLanguage(language);
+            window.Width = 1280;
+            window.Height = 700;
+            var cardHeight = await EmptyCardHeightAsync();
+            var clicked = false;
+            Toasts.BakeAction(L.T("home.bake.loader_missing_notice"), L.T("home.bake.download_loader"), L.T("settings.bake.download_hint"), () => clicked = true);
+            Button? action = null;
+            for (var i = 0; i < 40; i++)
+            {
+                window.UpdateLayout();
+                action = Host.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "BakeNoticeAction" && b.IsEffectivelyVisible);
+                if (action is not null) break;
+                await Task.Delay(50);
+            }
+            Check($"缺加载器提示 {language}：按钮是“下载加载器”", action?.Content?.ToString() == L.T("home.bake.download_loader")
+                && ToolTip.GetTip(action)?.ToString() == L.T("settings.bake.download_hint"), action?.Content?.ToString() ?? "无按钮");
+            var card = HomeView.FindControl<Border>("LaunchStatusCard")!;
+            Check($"缺加载器提示 {language}：完整在状态框内、不增高", BoundsIn(card, window).Contains(BoundsIn(action!, window)) && card.Bounds.Height <= cardHeight + 1);
+            await ShotAsync($"bake-loader-missing-offer-{language}");
+            action!.Command!.Execute(null);
+            Check($"缺加载器提示 {language}：点按钮执行下载并收起", clicked && !State.HasNotice);
+        }
+        Show("x");
+        for (var i = 0; i < 40 && !Host.IsEffectivelyVisible; i++) { await Task.Delay(50); window.UpdateLayout(); }
+        Check("其他提示仍是“不烘焙再启动”", Host.GetVisualDescendants().OfType<Button>().Any(b => b.IsEffectivelyVisible && b.Content?.ToString() == L.T("home.bake.retry_without")));
+        State.Clear();
+        L.SetLanguage("en");
     }
 
     /// <summary>A tiny loader package zip for the install check (not a real loader). tamper: one file differs from its manifest.</summary>

@@ -516,7 +516,7 @@ public sealed class LauncherService : IDisposable
 
     /// <summary>
     /// Installs a universal loader package from its zip (checked file by file against its manifest) and selects it.
-    /// No download: the player brings the zip. Refused while a bake is running, since the folder may be replaced.
+    /// The zip comes from the player or from <see cref="DownloadBakeLoaderAsync"/>. Refused while a bake is running, since the folder may be replaced.
     /// </summary>
     public async Task<Amber.Core.Bake.BakePackage> InstallBakeLoaderAsync(string zipPath, CancellationToken ct)
     {
@@ -533,6 +533,20 @@ public sealed class LauncherService : IDisposable
         {
             _bakeLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Downloads the pinned loader zip from Jay's GitHub release (mirrors, resume, cancel as other downloads) and
+    /// installs it through <see cref="InstallBakeLoaderAsync"/>. The download runs outside the bake lock, so games
+    /// keep baking meanwhile; only the install waits for them.
+    /// </summary>
+    public async Task<Amber.Core.Bake.BakePackage> DownloadBakeLoaderAsync(IProgress<DownloadProgress>? progress, CancellationToken ct)
+    {
+        var fetcher = new Amber.Core.Bake.BakeLoaderDownloader(Downloader, BakeLoaderInstallRoot);
+        var zip = await fetcher.FetchAsync(progress, ct);
+        var package = await InstallBakeLoaderAsync(zip, ct);
+        Amber.Core.Bake.BakeLoaderDownloader.Discard(zip);
+        return package;
     }
 
     /// <summary>After an instance is deleted or the recycle bin is emptied: drop bake cache files nothing uses any more.</summary>
