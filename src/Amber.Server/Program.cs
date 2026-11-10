@@ -63,10 +63,11 @@ public static class Program
               --rate-limit 3,6,600            每人同时几个房间、每人每分钟新发布几次、整个目录每分钟几个新房间（默认 3,6,600；--no-rate-limit 关掉）
               --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
               --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
+              --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
-          jay-server node status|rooms|bans   看运行中节点的计数、公开房间、封禁名单
-          jay-server node ban host|room|account|room-host <房主指纹|房间编号|账号|房间编号> [--for 7d] [--reason 原因]
+          jay-server node status|rooms|bans|nodes  看运行中节点的计数、公开房间、封禁名单、志愿节点
+          jay-server node ban host|room|account|room-host|node <房主指纹|房间编号|账号|房间编号|志愿节点地址> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
               马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
@@ -450,6 +451,7 @@ public static class Program
             log($"屏蔽词 {filter.Count} 个");
         }
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
+        if (options.Has("no-volunteers")) builder.WithoutVolunteers();
         else if (options.Get("rate-limit") is { } rate)
         {
             var parts = rate.Split(',', StringSplitOptions.TrimEntries);
@@ -481,6 +483,7 @@ public static class Program
                 "status" => await client.CallAsync("GET", "/stats"),
                 "rooms" => await client.CallAsync("GET", "/rooms"),
                 "bans" => await client.CallAsync("GET", "/bans"),
+                "nodes" => await client.CallAsync("GET", "/nodes"),
                 "ban" => await client.CallAsync("POST", "/ban", new()
                 {
                     ["kind"] = Need(0, "host、room、account 或 room-host"), ["value"] = Need(1, "房主指纹、房间编号或账号"), ["reason"] = options.Get("reason"),
@@ -488,7 +491,7 @@ public static class Program
                 }),
                 "unban" => await client.CallAsync("POST", "/unban", new() { ["kind"] = Need(0, "host、room 或 account"), ["value"] = Need(1, "房主指纹、房间编号或账号") }),
                 "remove" => await client.CallAsync("POST", "/remove", new() { ["id"] = Need(0, "房间编号") }),
-                _ => throw new ArgumentException("用法：jay-server node status|rooms|bans|ban|unban|remove"),
+                _ => throw new ArgumentException("用法：jay-server node status|rooms|bans|nodes|ban|unban|remove"),
             };
         }
         catch (HttpRequestException e)
@@ -846,7 +849,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "no-volunteers"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];

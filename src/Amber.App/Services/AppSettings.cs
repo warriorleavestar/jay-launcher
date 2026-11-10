@@ -81,6 +81,18 @@ public sealed class AppSettings
     /// <summary>Jay 公共网络的种子节点（程序里内置的之外，自己加的；比如朋友的 VPS 上跑的 jay-server directory）。</summary>
     public List<string>? PublicNetworkNodes { get; set; }
 
+    /// <summary>Volunteer node: let other players reach the public network through this computer (off by default).</summary>
+    public bool VolunteerNode { get; set; }
+
+    /// <summary>This computer's public address (IP or domain) for volunteering.</summary>
+    public string? VolunteerAddress { get; set; }
+
+    /// <summary>Public port to listen on when volunteering (forward it on the router, TCP and UDP).</summary>
+    public int VolunteerPort { get; set; } = 11010;
+
+    /// <summary>Most a volunteer receives from the public network, KB/s (0 = no limit).</summary>
+    public int VolunteerLimitKBps { get; set; } = 1024;
+
     /// <summary>自己加的别的公共网络（连接串原文，每次读出来都重新验签）。</summary>
     public List<string>? PublicNetworks { get; set; }
 

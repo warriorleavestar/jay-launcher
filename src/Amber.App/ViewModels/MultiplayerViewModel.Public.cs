@@ -107,6 +107,7 @@ public sealed partial class MultiplayerViewModel
     {
         SelectedVisibility = VisibilityChoices[0];
         PublicNodesText = string.Join("\n", _service.Settings.PublicNetworkNodes ?? []);
+        InitVolunteer();
         LoadNetworks();
     }
 
@@ -156,7 +157,8 @@ public sealed partial class MultiplayerViewModel
         {
             var profile = _service.PublicNetwork;
             if (!await LoadNetworkConfigAsync(profile, cts.Token) || _publicCts != cts) return;
-            session = PublicNetworkSession.Start(_service.EasyTier, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()),
+            session = PublicNetworkSession.Start(_service.EasyTier, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(),
+                    ExtraPeers: RememberedVolunteers(profile), Volunteer: VolunteerFor(profile)),
                 Path.Combine(EasyTierWorkRoot, "public"));
             session.Output += line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line);
             await session.WaitForDirectoryAsync(TimeSpan.FromSeconds(45), cts.Token);
@@ -166,6 +168,7 @@ public sealed partial class MultiplayerViewModel
             IsPublicConnected = true;
             SetStatus(StatusMessage.Success("multiplayer.public.connected", profile.Name));
             StartAnnouncerIfHosting();
+            StartVolunteerWork(_public, profile);
             await RefreshRoomsAsync();
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
@@ -202,6 +205,8 @@ public sealed partial class MultiplayerViewModel
     {
         _publicCts?.Cancel();
         StopAnnouncer();
+        StopVolunteering();
+        if (VolunteerEnabled) VolunteerStatus = L.T("multiplayer.volunteer.status_next_connect");
         _public?.Dispose();
         _public = null;
         IsPublicConnected = false;

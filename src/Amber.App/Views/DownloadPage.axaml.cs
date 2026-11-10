@@ -38,12 +38,12 @@ public partial class DownloadPage : UserControl
         {
             if (DataContext is not DownloadViewModel vm) return;
             (_items = vm.Items).CollectionChanged += OnItemsChanged;
-            (_vm = vm).PropertyChanged += OnViewModelChanged;
+            (_vm = vm).PropertyChanged += OnVmChanged;
         };
         DetachedFromVisualTree += (_, _) =>
         {
             if (_items is not null) _items.CollectionChanged -= OnItemsChanged;
-            if (_vm is not null) _vm.PropertyChanged -= OnViewModelChanged;
+            if (_vm is not null) _vm.PropertyChanged -= OnVmChanged;
             _items = null;
             _vm = null;
         };
@@ -78,22 +78,24 @@ public partial class DownloadPage : UserControl
 
     private System.Collections.ObjectModel.ObservableCollection<RemoteVersionItem>? _items;
 
+    private DownloadViewModel? _vm;
+
+    /// <summary>
+    /// The panel was closed: drop the highlight too, or picking the same row again would not count as a change
+    /// and the panel would not open.
+    /// </summary>
+    private void OnVmChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DownloadViewModel.Target) && _vm is { Target: null } && VersionList.SelectedItem is not null)
+            VersionList.SelectedItem = null;
+    }
+
     private void OnItemsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             if (DataContext is DownloadViewModel { Target: { } target } vm && VersionList.SelectedItem is null
                 && vm.Items.FirstOrDefault(i => i.Id == target.Id) is { } row) VersionList.SelectedItem = row;
         });
-
-    private DownloadViewModel? _vm;
-
-    // Closing the configure panel clears the row highlight too; otherwise clicking the same version again is not a
-    // selection change and the panel would not open.
-    private void OnViewModelChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(DownloadViewModel.Target) && sender is DownloadViewModel { Target: null })
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => VersionList.SelectedItem = null);
-    }
 
     private bool? _rail;
 
