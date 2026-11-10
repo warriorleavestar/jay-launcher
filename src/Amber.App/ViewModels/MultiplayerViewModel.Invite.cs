@@ -45,6 +45,30 @@ public sealed record PendingInviteItem(PendingInvite Invite) : LocalizedRecord
 public sealed record ApprovalCard(KnockRequest Request, string? Warning) : LocalizedRecord
 {
     internal TaskCompletionSource<bool> Decision { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>When the card is declined by itself (null: the room keeps waiting).</summary>
+    public DateTimeOffset? Deadline { get; init; }
+
+    /// <summary>"Let them in automatically next time (add as a friend)".</summary>
+    public bool TrustAfter { get; set; }
+
+    /// <summary>The checkbox is hidden in child mode (every knock is asked).</summary>
+    public bool CanTrustAfter { get; init; } = true;
+
+    public string Who => Request.Name.Length > 0 ? Request.Name : L.T("multiplayer.peers.player");
+    public string Headline => L.F("multiplayer.knock.wants_in", Who);
+    public string SafetyCode => Request.Fingerprint;
+    public string Facts => string.Join(" · ", new[] { Request.Version, Request.DeviceId is { } device ? L.F("multiplayer.device.id", device) : null }
+        .Where(s => !string.IsNullOrEmpty(s)));
+    public string VerifyHint => L.F("multiplayer.knock.verify", Who);
+    public string TrustLabel => L.F("multiplayer.knock.trust_after", Who);
+
+    /// <summary>"9:47 left" or "waiting".</summary>
+    public string RemainingText => Deadline is { } d
+        ? L.F("multiplayer.knock.remaining", (d - DateTimeOffset.Now) is var left && left > TimeSpan.Zero ? $"{(int)left.TotalMinutes}:{left.Seconds:D2}" : "0:00")
+        : L.T("multiplayer.knock.waiting_forever");
+
+    internal void Tick() => OnPropertyChanged(nameof(RemainingText));
     public string Title => L.F("multiplayer.invite.knocking", Request.Name.Length > 0 ? Request.Name : L.T("multiplayer.peers.player"));
     public string Detail => L.F("multiplayer.invite.fingerprint", Request.Fingerprint) + (Request.Version.Length > 0 ? " · " + Request.Version : "")
         + (Request.DeviceId is { } device ? " · " + L.F("multiplayer.device.id", device) : "");
@@ -190,7 +214,8 @@ public sealed partial class MultiplayerViewModel
         ConfigureSecurity(members);
         var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => !Child.AlwaysAskKnock && Trusted.IsTrusted(pub), AskApprovalAsync, members,
-            line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy);
+            line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy,
+            () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)));
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.StateChanged += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.Paused += () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Warning("multiplayer.invite.paused")));
@@ -392,10 +417,15 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>敲门的人通过了握手：在界面上放一张卡片，等房主点；超时或者房间关了算拒绝。</summary>
-    private Task<bool> AskApprovalAsync(KnockRequest request, CancellationToken ct)
+    internal Task<bool> AskApprovalAsync(KnockRequest request, CancellationToken ct)
     {
         var sameName = Trusted.All.Any(m => m.Name.Length > 0 && m.Name == request.Name && !m.PublicKey.AsSpan().SequenceEqual(request.PublicKey));
-        var card = new ApprovalCard(request, sameName ? L.T("multiplayer.invite.name_mismatch") : null);
+        var wait = RoomKnockWait.ToTimeSpan();
+        var card = new ApprovalCard(request, sameName ? L.T("multiplayer.invite.name_mismatch") : null)
+        {
+            Deadline = wait == Timeout.InfiniteTimeSpan ? null : DateTimeOffset.Now + wait,
+            CanTrustAfter = !Child.AlwaysAskKnock,
+        };
         ct.Register(() => card.Decision.TrySetResult(false));
         Dispatcher.UIThread.Post(() =>
         {
@@ -408,7 +438,17 @@ public sealed partial class MultiplayerViewModel
     }
 
     [RelayCommand]
-    private void ApproveKnock(ApprovalCard? card) => card?.Decision.TrySetResult(true);
+    private void ApproveKnock(ApprovalCard? card)
+    {
+        if (card is null || card.Decision.Task.IsCompleted) return;
+        // "Let them in automatically next time": add to friends before answering.
+        if (card.TrustAfter && card.CanTrustAfter && !Trusted.IsTrusted(card.Request.PublicKey))
+        {
+            Trusted.Add(card.Request.PublicKey, card.Request.Name);
+            RefreshTrusted();
+        }
+        card.Decision.TrySetResult(true);
+    }
 
     [RelayCommand]
     private void DenyKnock(ApprovalCard? card) => card?.Decision.TrySetResult(false);
@@ -439,8 +479,11 @@ public sealed partial class MultiplayerViewModel
     private async Task<PendingInvite?> IssueInviteAsync(int uses, TimeSpan? lifetime, bool autoApprove)
     {
         if (_lobby is not { } lobby || _credentials is not { } credentials) return null;
+        lobby.Book.Game = await HostGameAsync();
+        if (_lobby != lobby) return null;
         var invite = lobby.Book.Create(uses, lifetime, Child.MayAutoAdmit(autoApprove), credentials.Tunnel);
         _lastInvite = invite.Invite;
+        RememberInviteTerms(uses, lifetime, Child.MayAutoAdmit(autoApprove));
         if (_direct is { IsHost: true } direct) MyDirectCode = direct.InviteCode(invite.Invite).Encode();
         InviteShown = false;
         DirectCodeShown = false;

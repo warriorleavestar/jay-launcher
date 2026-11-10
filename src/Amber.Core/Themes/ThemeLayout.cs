@@ -34,7 +34,7 @@ public static partial class ThemeLayout
         ["instances"] = Page("instances", ["header", "picker", "details", "status"]),
         ["downloads"] = Page("downloads", ["search", "filters", "body", "status"], "title"),
         ["content"] = Page("content", ["header", "filters", "body", "status"]),
-        ["multiplayer"] = Page("multiplayer", ["body", "status"], "title"),
+        ["multiplayer"] = Page("multiplayer", ["tabs", "room", "body", "status"], "title"),
         ["tools"] = Page("tools", ["body", "status"], "title"),
         ["log"] = Page("log", ["header", "jump", "filters", "list"]),
     };

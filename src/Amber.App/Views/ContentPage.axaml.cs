@@ -22,6 +22,9 @@ public partial class ContentPage : UserControl
     {
         InitializeComponent();
         ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "content");
+        // Another language changes the labels' widths: lay the header out again (only while the page is shown).
+        AttachedToVisualTree += (_, _) => Amber.Core.Localization.L.Changed += OnLanguageChanged;
+        DetachedFromVisualTree += (_, _) => Amber.Core.Localization.L.Changed -= OnLanguageChanged;
         SizeChanged += (_, e) =>
         {
             var width = e.NewSize.Width;
@@ -51,20 +54,10 @@ public partial class ContentPage : UserControl
     private void ApplyWidth(double width)
     {
         var tier = width >= WideFrom ? "wide" : width >= CompactBelow ? "medium" : "compact";
+        ApplyHeader(width, tier);
         if (tier == _tier) return;
         _tier = tier;
         Classes.Set("compact", tier == "compact");
-        TypeChips.IsVisible = tier != "compact";
-        TypeCombo.IsVisible = tier == "compact";
-        // Compact: the source segment and the import button move to a second header row so the type drop-down fits.
-        var stacked = tier == "compact";
-        Grid.SetRow(SourceChips, stacked ? 1 : 0);
-        Grid.SetColumn(SourceChips, stacked ? 0 : 2);
-        Grid.SetColumnSpan(SourceChips, stacked ? 2 : 1);
-        SourceChips.HorizontalAlignment = stacked ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
-        SourceChips.Margin = stacked ? new Thickness(0, 6, 8, 0) : new Thickness(8, 0);
-        Grid.SetRow(ImportPackButton, stacked ? 1 : 0);
-        ImportPackButton.Margin = stacked ? new Thickness(0, 6, 0, 0) : new Thickness(0);
         var overlay = tier != "wide";
         Grid.SetColumn(DetailPane, overlay ? 0 : 1);
         Grid.SetColumnSpan(DetailPane, overlay ? 2 : 1);
@@ -75,6 +68,62 @@ public partial class ContentPage : UserControl
         if (tier == "compact") DetailPane.HorizontalAlignment = HorizontalAlignment.Stretch;
     }
 
+    /// <summary>
+    /// The header by what fits, not only by tier (long languages): everything on one row; else the source segment and
+    /// [Import modpack file…] move to a second row; and when even the type chips don't fit next to the title (or the page
+    /// is compact), the chips become a drop-down.
+    /// </summary>
+    private void ApplyHeader(double width, string tier)
+    {
+        if (width <= 0) return;
+        // Measured unconstrained, then handed back to the real layout pass.
+        static double Wanted(Control c)
+        {
+            c.Measure(Size.Infinity);
+            var w = c.DesiredSize.Width;
+            c.InvalidateMeasure();
+            return w;
+        }
+        var title = Wanted(ContentTitle);
+        var chips = ChipsWidth();
+        var oneRow = title + chips + Wanted(SourceChips) + 16 + Wanted(ImportPackButton) <= width;
+        var combo = tier == "compact" || title + chips > width;
+        TypeChips.IsVisible = !combo;
+        TypeCombo.IsVisible = combo;
+        var stacked = !oneRow || tier == "compact";
+        Grid.SetRow(SourceChips, stacked ? 1 : 0);
+        Grid.SetColumn(SourceChips, stacked ? 0 : 2);
+        Grid.SetColumnSpan(SourceChips, stacked ? 2 : 1);
+        SourceChips.HorizontalAlignment = stacked ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
+        SourceChips.Margin = stacked ? new Thickness(0, 6, 8, 0) : new Thickness(8, 0);
+        // Row 2 uses only the first two columns, so the auto columns on the right don't steal width from the chips.
+        Grid.SetRow(ImportPackButton, stacked ? 1 : 0);
+        Grid.SetColumn(ImportPackButton, stacked ? 1 : 3);
+        ImportPackButton.HorizontalAlignment = stacked ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+        ImportPackButton.Margin = stacked ? new Thickness(0, 6, 0, 0) : new Thickness(0);
+        Stacked = stacked;
+        HeaderGrid.InvalidateMeasure();
+    }
+
+    private void OnLanguageChanged() => Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyWidth(Bounds.Width));
+
+    /// <summary>The type chips on one line (measured from their labels, so it also works while the drop-down shows).</summary>
+    private double ChipsWidth()
+    {
+        if (DataContext is not ContentViewModel vm) return 0;
+        var total = 0.0;
+        foreach (var name in vm.TypeNames)
+        {
+            var text = new TextBlock { Text = name.Label, FontSize = FontSize, FontFamily = FontFamily };
+            text.Measure(Size.Infinity);
+            total += text.DesiredSize.Width + 24 + 4; // chip padding 12 + 12, spacing 4
+        }
+        return total;
+    }
+
+    /// <summary>The source segment is on the header's second row (self-check).</summary>
+    internal bool Stacked { get; private set; }
+
     /// <summary>Below this page height the whole page scrolls and the result list keeps a fixed height.</summary>
     internal const double ShortBelow = 520;
 
@@ -83,6 +132,13 @@ public partial class ContentPage : UserControl
         var tall = height >= ShortBelow;
         PageScroll.VerticalScrollBarVisibility = tall ? Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled : Avalonia.Controls.Primitives.ScrollBarVisibility.Auto;
         BodyGrid.Height = tall ? double.NaN : 320;
+        // Short windows: the body is taller than what is visible, so the state cards sit at its top where their
+        // buttons ([Retry], [Show all], …) can be reached without scrolling.
+        foreach (var state in new Control[] { SearchingState, EmptyState, ErrorState, KeyState })
+        {
+            state.VerticalAlignment = tall ? Avalonia.Layout.VerticalAlignment.Center : Avalonia.Layout.VerticalAlignment.Top;
+            state.Margin = tall ? default : new Avalonia.Thickness(0, 12, 0, 0);
+        }
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
