@@ -223,6 +223,13 @@ public partial class MainWindow : Window
             if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
             Activate();
         }
+        // Journey J6 (§7): Jay goes straight to this instance, where the last-session panel names the cause and the fixes.
+        if (DataContext is MainViewModel main && !main.Shell.Router.Current.ToString().StartsWith("library/" + id, StringComparison.Ordinal)
+            && main.Service.InstalledVersions().Contains(id))
+        {
+            main.Shell.Navigate("library/" + id);
+            return;
+        }
         // 不在启动页时启动页自己已经弹了 Toast；在启动页但窗口刚才看不见时，这里补一条。
         if (wasHidden && home.IsCurrent) Toasts.WithAction(L.F("home.crash.toast", id), L.T("home.crash.show"), () => home.NavigateHere?.Invoke());
         CrashToastsShown++;

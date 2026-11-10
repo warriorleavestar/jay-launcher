@@ -7,7 +7,7 @@ related: instance, network-list
 
 # 探索：模組、整合包、資源包、光影
 
-在這裡搜 Modrinth 和 CurseForge 上的內容，裝進你的例項。
+在這裡搜 Modrinth 和 CurseForge 上的內容，裝進你的實例。
 
 ## 怎麼做
 - 上面的晶片選型別，來源分段選 Modrinth 或 CurseForge。

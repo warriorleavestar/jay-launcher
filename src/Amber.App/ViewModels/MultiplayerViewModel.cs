@@ -260,7 +260,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitDirect();
         InitHotspot();
         InitGuide();
+        InitRoom();
+        InitRequests();
         InitPublic();
+        InitPublicList();
+        RefreshLongInvites();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
         HostServer = new HostServerViewModel(service);
     }
@@ -284,13 +288,19 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // 不自动听局域网广播：绑定端口可能让 Windows 弹防火墙询问。用 Amber 启动的游戏从日志就能认出端口。
     }
 
-    partial void OnTargetInstanceChanged(string? value) => _service.SetCurrentInstance(value);
+    partial void OnTargetInstanceChanged(string? value)
+    {
+        _service.SetCurrentInstance(value);
+        NotifyPlayAndHost();
+    }
 
     private void RefreshInstances()
     {
         Instances.Clear();
         foreach (var v in _service.InstalledVersions()) Instances.Add(v);
         TargetInstance = _service.CurrentOr(Instances, Instances.FirstOrDefault());
+        RepickJoinInstance();
+        NotifyPlayAndHost();
     }
 
     private void OnGameOutput(string versionId, string line)
@@ -302,6 +312,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             LanGames.Insert(0, item);
             SelectedLanGame = item;
             if (IsIdle) SetStatus(StatusMessage.Success("multiplayer.lan.opened", versionId, port));
+            OnLanOpenedWhileWaiting();
         });
     }
 
@@ -561,6 +572,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         RestoreChatHistory(room);
         StartHub(room);
         StartHostLobby(credentials, members);
+        if (_lobby is { } lobby) SeedLongInvites(lobby, credentials.Tunnel);
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
@@ -751,7 +763,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         return true;
     }
 
-    private string ChatName => _service.Accounts.Store.Selected?.Name ?? _service.Settings.PlayerName;
+    internal string ChatName => _service.Accounts.Store.Selected?.Name ?? _service.Settings.PlayerName;
 
     private void StartHub(RoomCode room)
     {

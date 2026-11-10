@@ -89,7 +89,11 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(HasRemoteUnavailableText));
     }
 
-    partial void OnModeChanged(string value) => NotifyRemoteAvailability();
+    partial void OnModeChanged(string value)
+    {
+        NotifyRemoteAvailability();
+        OnPropertyChanged(nameof(ShowModCheck));
+    }
 
     private ITileCodec RemoteCodec => new SkiaTileCodec();
 

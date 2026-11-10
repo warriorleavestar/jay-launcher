@@ -52,6 +52,13 @@ public partial class DownloadPage : UserControl
             if (DataContext is DownloadViewModel vm && vm.InstallCommand.CanExecute(null)) vm.InstallCommand.Execute(null);
             e.Handled = true;
         };
+        VersionToolbar.SizeChanged += (_, e) => Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyToolbar(e.NewSize.Width));
+        // Another language changes the chip widths without changing the toolbar's size.
+        Amber.Core.Localization.L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _toolbarStacked = null;
+            ApplyToolbar(VersionToolbar.Bounds.Width);
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
         SizeChanged += (_, e) =>
         {
             var size = e.NewSize;
@@ -93,6 +100,26 @@ public partial class DownloadPage : UserControl
         });
 
     private bool? _rail;
+    private bool? _toolbarStacked;
+
+    /// <summary>
+    /// The type chips, search box and [Refresh] share a row while the search box keeps its minimum width; otherwise
+    /// (long labels, narrow content) the search box moves to its own row under them.
+    /// </summary>
+    private void ApplyToolbar(double width)
+    {
+        if (width <= 0) return;
+        TypeChips.Measure(Size.Infinity);
+        RefreshButton.Measure(Size.Infinity);
+        var stacked = TypeChips.DesiredSize.Width + SearchBox.MinWidth + 20 + RefreshButton.DesiredSize.Width > width;
+        if (_toolbarStacked == stacked) return;
+        _toolbarStacked = stacked;
+        Grid.SetRow(SearchBox, stacked ? 1 : 0);
+        Grid.SetColumn(SearchBox, stacked ? 0 : 1);
+        Grid.SetColumnSpan(SearchBox, stacked ? 3 : 1);
+        SearchBox.Margin = stacked ? new Thickness(0, 8, 0, 0) : new Thickness(10, 0);
+        Grid.SetColumnSpan(TypeChips, stacked ? 2 : 1);
+    }
 
     private void ApplyWidth(double width)
     {

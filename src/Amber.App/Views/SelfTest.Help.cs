@@ -1,4 +1,5 @@
 using Amber.App.ViewModels;
+using Amber.Core.Help;
 using Amber.Core.Layout;
 using Amber.Core.Localization;
 using Avalonia.Controls;
@@ -33,6 +34,10 @@ internal sealed partial class SelfTest
                 help.Article?.Article.Id ?? "none");
             Check("抽屉标题写“帮助 · 页面名”", help.Header == L.F("help.drawer.title", L.T("shell.nav.library")), help.Header);
             await ShotAsync("help-drawer-1440");
+            var shotBlock = help.Article?.Blocks.FirstOrDefault(b => b.Block.Kind == HelpBlockKind.Shot);
+            var shownImages = Dispatcher.UIThread.Invoke(() => window.HelpDrawer.GetVisualDescendants().OfType<Image>()
+                .Count(i => i.IsEffectivelyVisible && i.Source is not null && i.Bounds.Width > 100));
+            Check("文章里的截图显示出来（游戏库）", shotBlock is { IsShot: true } && shownImages > 0, $"{shotBlock?.Block.Shot} images={shownImages}");
             PressKey(window, Key.F1);
             Check("再按 F1 关上", !help.IsOpen);
 

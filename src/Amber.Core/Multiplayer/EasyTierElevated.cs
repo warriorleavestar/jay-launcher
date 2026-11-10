@@ -476,7 +476,7 @@ internal sealed class ElevatedGuard : IElevatedGuard
         lock (_gate) return _ready.WaitAsync(ct);
     }
 
-    internal Task SetHotspotSharingAsync(bool enabled)
+    public Task SetHotspotSharingAsync(bool enabled)
     {
         lock (_gate)
         {
@@ -736,6 +736,12 @@ internal interface IElevatedGuard : IDisposable
     IReadOnlyList<string> RecentOutput { get; }
     Task StartAsync(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp);
     Task WaitForReadyAsync(CancellationToken ct = default);
+
+    /// <summary>Windows only: the remote exit is shared with the mobile hotspot. Other guards never share.</summary>
+    bool HotspotSharingActive => false;
+
+    /// <summary>Windows only: turn hotspot sharing on or off through the guard.</summary>
+    Task SetHotspotSharingAsync(bool enabled) => Task.FromException(new PlatformNotSupportedException());
 }
 
 /// <summary>守护脚本的一条命令（JSON 一行）。</summary>

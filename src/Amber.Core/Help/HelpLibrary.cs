@@ -3,7 +3,7 @@ using Amber.Core.Navigation;
 namespace Amber.Core.Help;
 
 /// <summary>One block of an article: a heading, a paragraph or a bullet. Links stay inline as <c>[text](target)</c> spans.</summary>
-public enum HelpBlockKind { Heading, Paragraph, Bullet }
+public enum HelpBlockKind { Heading, Paragraph, Bullet, Shot }
 
 /// <summary>A link inside a block: <c>jay:</c> routes open in Jay, <c>help:</c> opens another article. Nothing goes online.</summary>
 public sealed record HelpLink(string Text, string Target)
@@ -13,7 +13,8 @@ public sealed record HelpLink(string Text, string Target)
     public string Value => Target[(Target.IndexOf(':') + 1)..];
 }
 
-public sealed record HelpBlock(HelpBlockKind Kind, string Text, IReadOnlyList<HelpLink> Links);
+/// <summary>A block; for <see cref="HelpBlockKind.Shot"/>, <see cref="Shot"/> names the screenshot and <c>Text</c> describes it.</summary>
+public sealed record HelpBlock(HelpBlockKind Kind, string Text, IReadOnlyList<HelpLink> Links, string? Shot = null);
 
 /// <summary>
 /// A help article (official design §9.7): what this is → how to (mouse first, then the shortcut) → if something goes
@@ -57,6 +58,13 @@ public sealed record HelpArticle(string Id, string Category, string Title, strin
             if (line.StartsWith("# ", StringComparison.Ordinal)) { Flush(); title = line[2..].Trim(); continue; }
             if (line.StartsWith("## ", StringComparison.Ordinal)) { Flush(); blocks.Add(Block(HelpBlockKind.Heading, line[3..].Trim())); continue; }
             var trimmed = line.TrimStart();
+            // A screenshot on its own line: ![what it shows](shot:name). Made by the help-shots self-check, per language.
+            if (trimmed.StartsWith("![", StringComparison.Ordinal) && trimmed.IndexOf("](shot:", StringComparison.Ordinal) is var at and > 1 && trimmed.EndsWith(')'))
+            {
+                Flush();
+                blocks.Add(new HelpBlock(HelpBlockKind.Shot, trimmed[2..at], [], trimmed[(at + 7)..^1].Trim()));
+                continue;
+            }
             if (trimmed.StartsWith("- ", StringComparison.Ordinal) || trimmed.StartsWith("* ", StringComparison.Ordinal))
             {
                 Flush();
@@ -121,10 +129,32 @@ public sealed class HelpLibrary
 
     public static readonly IReadOnlyList<string> Languages = ["zh-Hans", "zh-Hant", "en", "ja"];
 
+    /// <summary>The screenshots the help-shots self-check makes for every language (<c>docs/help/shots/{lang}/{name}.png</c>).</summary>
+    public static readonly IReadOnlyList<string> ShotNames = ["library", "multiplayer-lobby", "connection", "drill", "appearance"];
+
     private readonly Dictionary<string, HelpArticle> _articles;
 
-    public HelpLibrary(IEnumerable<HelpArticle> articles) =>
+    public HelpLibrary(IEnumerable<HelpArticle> articles, string language = "en")
+    {
         _articles = articles.GroupBy(a => a.Id, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        Language = language;
+    }
+
+    /// <summary>The help language (one of <see cref="Languages"/>), for the screenshots.</summary>
+    public string Language { get; }
+
+    /// <summary>A screenshot as PNG, in this library's language or else English; null when there is none.</summary>
+    public Stream? OpenShot(string name) => OpenShot(Language, name) ?? OpenShot("en", name);
+
+    /// <summary>One language's screenshot (<c>docs/help/shots/{lang}/{name}.png</c>, embedded), or null.</summary>
+    public static Stream? OpenShot(string lang, string name)
+    {
+        if (name.Length == 0 || name.Any(c => !(char.IsAsciiLetterOrDigit(c) || c == '-'))) return null;
+        var assembly = typeof(HelpLibrary).Assembly;
+        var wanted = $"help/shots/{lang}/{name}.png";
+        var resource = assembly.GetManifestResourceNames().FirstOrDefault(n => n.Replace('\\', '/') == wanted);
+        return resource is null ? null : assembly.GetManifestResourceStream(resource);
+    }
 
     public IReadOnlyCollection<HelpArticle> All => _articles.Values;
 
@@ -214,7 +244,7 @@ public sealed class HelpLibrary
         if (lang != "en")
             foreach (var en in LoadLanguage("en"))
                 if (!mine.Any(a => string.Equals(a.Id, en.Id, StringComparison.OrdinalIgnoreCase))) mine.Add(en);
-        return new HelpLibrary(mine);
+        return new HelpLibrary(mine, lang);
     }
 
     /// <summary>Every article of one language as embedded (tests check that the four languages match).</summary>

@@ -50,7 +50,9 @@ internal sealed partial class SelfTest
         Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
         await Task.Delay(400);
         bool HasText(string key) => page!.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == L.T(key));
-        Check("公共网络：联机页有公共网络卡片和说明", page is not null && host.IsPublicTab && HasText("multiplayer.public.title") && HasText("multiplayer.public.hint"));
+        // No public network added yet: the setup card explains where public rooms come from; with one: the card and its hint.
+        Check("公共网络：联机页有公共网络卡片和说明", page is not null && host.IsPublicTab && HasText("multiplayer.public.title")
+            && (host.ShowPublicSetup ? HasText("multiplayer.public.setup_body") : HasText("multiplayer.public.hint")));
         if (!host.IsComponentReady)
         {
             Log("SKIP 公共网络：联机组件没有下载");
