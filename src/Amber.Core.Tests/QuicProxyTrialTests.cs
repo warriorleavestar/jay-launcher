@@ -28,6 +28,18 @@ public class QuicProxyTrialTests
     }
 
     [Fact]
+    public void OnByDefault()
+    {
+        Assert.True(EasyTierArgs.QuicProxyFrom(null));
+        Assert.True(EasyTierArgs.QuicProxyFrom(""));
+        Assert.True(EasyTierArgs.QuicProxyFrom("1"));
+        Assert.False(EasyTierArgs.QuicProxyFrom("0"));
+        Assert.False(EasyTierArgs.QuicProxyFrom(" 0 "));
+        if (System.Environment.GetEnvironmentVariable(EasyTierArgs.QuicProxyVariable) is null)
+            Assert.Contains("--enable-quic-proxy", EasyTierArgs.Build(new EasyTierOptions(Room, false, [], 16000, 40000)));
+    }
+
+    [Fact]
     public void NotUsedWithFullLan()
     {
         var args = EasyTierArgs.Build(new EasyTierOptions(Room, true, [], 16000, Tun: true) { QuicProxy = true });

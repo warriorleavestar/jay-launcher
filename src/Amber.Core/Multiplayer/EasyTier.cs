@@ -295,9 +295,10 @@ public sealed record EasyTierOptions(
     public bool DirectUnderlayUsesIpv6 { get; init; }
 
     /// <summary>
-    /// Trial: carry this member's forwarded TCP streams (game, chat, tunnel) over EasyTier's QUIC proxy instead of its
+    /// Carry this member's forwarded TCP streams (game, chat, tunnel) over EasyTier's QUIC proxy instead of its
     /// user-space TCP stack, whose small window caps one connection at roughly 15 KB per round trip without a TUN device.
-    /// Off unless <see cref="EasyTierArgs.QuicProxyVariable"/> is "1"; the other side needs nothing (EasyTier accepts
+    /// On by default since the 2026-11-10 real-device test (Korea to New Zealand: about 0.05 → 0.88 MB/s); setting
+    /// <see cref="EasyTierArgs.QuicProxyVariable"/> to "0" turns it off. The other side needs nothing (EasyTier accepts
     /// QUIC-proxied streams by default) and the port whitelist still applies.
     /// </summary>
     public bool QuicProxy { get; init; } = EasyTierArgs.QuicProxyRequested;
@@ -305,10 +306,12 @@ public sealed record EasyTierOptions(
 
 public static class EasyTierArgs
 {
-    /// <summary>Developer switch for the QUIC proxy trial (real-device test of slow invite rooms).</summary>
+    /// <summary>Developer switch for the QUIC proxy: "0" turns it off (it is on by default).</summary>
     public const string QuicProxyVariable = "AMBER_ET_QUIC";
 
-    public static bool QuicProxyRequested => System.Environment.GetEnvironmentVariable(QuicProxyVariable) == "1";
+    public static bool QuicProxyRequested => QuicProxyFrom(System.Environment.GetEnvironmentVariable(QuicProxyVariable));
+
+    internal static bool QuicProxyFrom(string? value) => value?.Trim() != "0";
 
     /// <summary>房主固定用这个虚拟地址，加入方用同网段的随机地址。</summary>
     public const string HostIp = "10.233.144.1";

@@ -72,7 +72,7 @@ Other developer switches are environment variables:
 | `AMBER_SNAPSHOT_DIR` | Render every page to PNG |
 | `AMBER_STARTUP_LOG` | Write startup timing |
 | `AMBER_ET_VERBOSE` | Verbose EasyTier output |
-| `AMBER_ET_QUIC` | `1`: trial EasyTier's QUIC proxy for room traffic without a TUN device (faster single connections at high latency) |
+| `AMBER_ET_QUIC` | `0`: turn off EasyTier's QUIC proxy for room traffic without a TUN device (on by default; much faster single connections at high latency) |
 | `AMBER_THEME_DEV` | Use an unpacked theme folder and reload it on every save (same as `--theme-dev <dir>`) |
 
 ## Rules
