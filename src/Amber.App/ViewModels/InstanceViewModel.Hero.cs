@@ -246,6 +246,9 @@ public sealed partial class InstanceViewModel
         if (!show || crash is null) return;
         var when = _home!.CrashTime is { } t ? Fmt.Ago(t, DateTimeOffset.Now) : "";
         LastRunTitle = L.F("instance.lastrun.title", when);
+        // Joined a room with other mods than the host's: that comes first.
+        if (Current is { } instance && _service.MetaOf(instance.Id)?.ModsDifferFromHost is { } host)
+            LastRunCauses.Add(new LastRunCause(new CrashFinding(L.F("instance.lastrun.mods_differ", host), L.T("instance.lastrun.mods_differ_advice")), []));
         foreach (var finding in crash.Findings)
         {
             var fixes = CrashFixes.For(finding, crash.SuspectMods)
@@ -253,8 +256,8 @@ public sealed partial class InstanceViewModel
                 .ToList();
             LastRunCauses.Add(new LastRunCause(finding, fixes));
         }
-        LastRunUnknown = crash.Findings.Count == 0;
-        HasLikelyCause = crash.Findings.Any(f => f.Severity == CrashSeverity.Likely);
+        LastRunUnknown = LastRunCauses.Count == 0;
+        HasLikelyCause = LastRunCauses.Any(c => c.IsLikely);
     }
 
     [RelayCommand]

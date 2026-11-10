@@ -58,14 +58,20 @@ public sealed class HostLobby : IAsyncDisposable
     public static HostLobby Create(EasyTierInstaller installer, string workDir, Func<IReadOnlyList<string>> peers, X25519KeyPair identity,
         Func<RoomCredentials> credentials, Func<byte[], bool> isTrusted, Func<KnockRequest, CancellationToken, Task<bool>> approve, MemberTable members, Action<string>? log = null,
         InviteBook? book = null, int? listenUdpPort = null, Func<Public.DevicePolicy>? devicePolicy = null,
-        Func<Public.AccountPolicy?>? accountPolicy = null)
+        Func<Public.AccountPolicy?>? accountPolicy = null, Func<TimeSpan>? decisionWait = null, Action<KnockRequest>? timedOut = null)
     {
         HostLobby? lobby = null;
         lobby = new HostLobby(
             options => EasyTierLobby.Start(installer, options, workDir),
             peers,
             // 不建网卡时 EasyTier 把发往房主大厅地址 10.234.0.1:47660 的连接交给本机 127.0.0.1:47660。
-            book => new KnockServer(book, identity, credentials, isTrusted, approve, IPAddress.Loopback, KnockProtocol.Port, log, members: members) { DevicePolicy = devicePolicy, AccountPolicy = accountPolicy },
+            book =>
+            {
+                var server = new KnockServer(book, identity, credentials, isTrusted, approve, IPAddress.Loopback, KnockProtocol.Port, log, members: members)
+                    { DevicePolicy = devicePolicy, AccountPolicy = accountPolicy, DecisionWait = decisionWait };
+                if (timedOut is not null) server.TimedOut += timedOut;
+                return server;
+            },
             log, book) { ListenUdpPort = listenUdpPort };
         return lobby;
     }

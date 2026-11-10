@@ -40,12 +40,18 @@ public static class SystemMotion
         _ = Task.Run(() => SystemReduces).ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(() => Apply(mode)), TaskScheduler.Default);
     }
 
+    private static string? _mode;
+
+    /// <summary>The theme changed: its animation lengths apply unless motion is reduced (reduced motion always wins).</summary>
+    public static void Reapply() => Apply(_mode);
+
     public static void Apply(string? mode)
     {
+        _mode = mode;
         var reduce = MotionPreference.ShouldReduce(mode, MotionPreference.Normalize(mode) == MotionPreference.System ? SystemReduces : null);
         if (Application.Current?.Resources is { } resources)
             foreach (var (key, ms) in MotionPreference.Durations(reduce))
-                resources[key] = TimeSpan.FromMilliseconds(ms);
+                resources[key] = TimeSpan.FromMilliseconds(!reduce && ThemeService.Current?.Durations.TryGetValue(key, out var themed) == true ? themed : ms);
         var changed = reduce != Reduced;
         Reduced = reduce;
         if (changed) Changed?.Invoke();

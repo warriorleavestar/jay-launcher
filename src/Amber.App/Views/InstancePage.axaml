@@ -171,7 +171,9 @@
     <TextBlock Classes="hint" Text="{Binding InfoText}" IsVisible="{Binding !HasInstance}" TextWrapping="Wrap" />
 
     <!-- 上一局：英雄区下面、页签上面；修复按钮挨着原因，就地做（官方设计 §6.3） -->
-    <StackPanel Grid.Row="1" Spacing="8">
+    <!-- Short windows: the notices scroll on their own so the fix buttons can always be reached (§3.3, J6). -->
+    <ScrollViewer x:Name="NoticeScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Spacing="8">
     <!-- [Help me fix…] in progress: survives restarts until the mod is found or everything is restored (§6.3, J6). -->
     <Border x:Name="BisectCard" Classes="callout info" IsVisible="{Binding HasBisect}" Margin="0,0,0,0">
       <StackPanel Spacing="6">
@@ -239,6 +241,7 @@
       </StackPanel>
     </Border>
     </StackPanel>
+    </ScrollViewer>
 
     <Border x:Name="DetailsCard" svc:ThemeRegion.Name="instances.details" Grid.Row="2" Classes="card" Padding="10" IsVisible="{Binding HasInstance}">
       <!-- 小窗口有状态提示时，页签和工具栏一起滚动；页签内容仍有有限高度，列表继续虚拟滚动。 -->
@@ -349,19 +352,25 @@
           <Grid x:Name="ModsLayout" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,*,Auto,Auto">
             <!-- 工具栏：添加 ▾、检查更新、搜索、筛选、⋯（官方设计 §6.5） -->
             <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6" Margin="0,0,0,6" IsVisible="{Binding !IsVanilla}">
-              <Button x:Name="AddModButton" Classes="primary">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                  <Path Classes="icon" Data="{StaticResource Icon.Plus}" Width="14" Height="14" Stroke="{Binding $parent[Button].Foreground}" />
-                  <TextBlock x:Name="AddModText" Text="{l:T instance.mods.add}" />
+              <!-- One press goes to Discover (journey J3′); ▾ has the other ways in. -->
+              <StackPanel Orientation="Horizontal" Spacing="2">
+                <Button x:Name="AddModButton" Classes="primary" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Mod}"
+                        ToolTip.Tip="{l:T instance.mods.add_online}" AutomationProperties.Name="{l:T instance.mods.add}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="icon" Data="{StaticResource Icon.Plus}" Width="14" Height="14" Stroke="{Binding $parent[Button].Foreground}" />
+                    <TextBlock x:Name="AddModText" Text="{l:T instance.mods.add}" />
+                  </StackPanel>
+                </Button>
+                <Button x:Name="AddModMoreButton" Classes="primary" Padding="6,0" ToolTip.Tip="{l:T common.more_actions}" AutomationProperties.Name="{l:T common.more_actions}">
                   <Path Classes="icon" Data="{StaticResource Icon.ChevronDown}" Width="12" Height="12" Stroke="{Binding $parent[Button].Foreground}" />
-                </StackPanel>
-                <Button.Flyout>
-                  <MenuFlyout Placement="BottomEdgeAlignedLeft">
-                    <MenuItem Header="{l:T instance.mods.add_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Mod}" />
-                    <MenuItem Header="{l:T instance.mods.add_file}" Click="AddMods_Click" />
-                  </MenuFlyout>
-                </Button.Flyout>
-              </Button>
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                      <MenuItem Header="{l:T instance.mods.add_online}" Command="{Binding BrowseOnlineCommand}" CommandParameter="{x:Static core:ContentType.Mod}" />
+                      <MenuItem Header="{l:T instance.mods.add_file}" Click="AddMods_Click" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                </Button>
+              </StackPanel>
               <Button x:Name="CheckUpdatesButton" Grid.Column="1" Classes="secondary" Content="{l:T common.check_updates}" Command="{Binding CheckModUpdatesCommand}" />
               <TextBox x:Name="ModSearchBox" Grid.Column="2" Text="{Binding ModSearch}" PlaceholderText="{l:T instance.mods.search}" MinWidth="120"
                        AutomationProperties.Name="{l:T instance.mods.search}" />

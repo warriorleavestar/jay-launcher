@@ -226,8 +226,11 @@ public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, 
 public static class KnockClient
 {
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
-    /// <summary>等房主点批准：房主那边 120 秒没点算拒绝，这边多等一会儿。</summary>
-    public static readonly TimeSpan DecisionTimeout = TimeSpan.FromSeconds(135);
+    /// <summary>
+    /// How long a guest waits for the host's answer. The host chooses 2 minutes, 10 minutes or "keep waiting"
+    /// (<see cref="KnockWaits"/>); the guest cannot know which, so it waits up to an hour and can cancel at any time.
+    /// </summary>
+    public static readonly TimeSpan DecisionTimeout = TimeSpan.FromHours(1);
 
     /// <param name="device">本机的设备指纹（打开了才有）。房主要求时才把设备证明发过去，房主不问就不发。</param>
     /// <param name="account">公共网络的登录凭证（登录过才有）。房主要求时才发。</param>
@@ -355,6 +358,9 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         lock (_gate) return (byte[])(_lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength)).Clone();
     }
 
+    /// <summary>The host's game, written into new invites (invite v3) so the joiner can pick a matching instance.</summary>
+    public InviteGame? Game { get; set; }
+
     /// <param name="boundTo">Only this identity key may use the invite (see <see cref="PendingInvite.BoundTo"/>).</param>
     public PendingInvite Create(int uses, TimeSpan? lifetime, bool autoApprove, TunnelSettings tunnel, byte[]? boundTo = null)
     {
@@ -365,7 +371,7 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         {
             PruneLocked();
             _lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength);
-            invite = new PendingInvite(JayInvite.Create(_lobbyKey, tunnel), uses, lifetime is { } l ? _now() + l : null, autoApprove)
+            invite = new PendingInvite(JayInvite.Create(_lobbyKey, tunnel, Game), uses, lifetime is { } l ? _now() + l : null, autoApprove)
             {
                 BoundTo = boundTo is null ? null : (byte[])boundTo.Clone(),
             };
@@ -389,6 +395,28 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
             _lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength);
             var jay = token is null ? JayInvite.Create(_lobbyKey, tunnel) : new JayInvite((byte[])_lobbyKey.Clone(), (byte[])token.Clone(), tunnel);
             invite = new PendingInvite(jay, int.MaxValue, null, autoApprove, standing: true);
+            _invites.Add(invite);
+        }
+        Changed?.Invoke();
+        return invite;
+    }
+
+    /// <summary>
+    /// A long-lived invite for a trusted friend (<see cref="LongLivedInvites"/>): it brings its own lobby key, which must be
+    /// added before any other invite of the room so they all share it. Unlimited uses until it expires or is revoked; the
+    /// host still approves every knock (and checks the safety code) unless the person is a trusted friend.
+    /// Returns null when this room already uses another lobby key.
+    /// </summary>
+    public PendingInvite? AddLongLived(byte[] lobbyKey, byte[] token, DateTimeOffset expiresAt, TunnelSettings tunnel)
+    {
+        if (lobbyKey.Length != JayInvite.KeyLength || token.Length != JayInvite.KeyLength) throw new ArgumentException(null, nameof(token));
+        PendingInvite invite;
+        lock (_gate)
+        {
+            PruneLocked();
+            if (_lobbyKey is { } current && !CryptographicOperations.FixedTimeEquals(current, lobbyKey)) return null;
+            _lobbyKey ??= (byte[])lobbyKey.Clone();
+            invite = new PendingInvite(new JayInvite((byte[])lobbyKey.Clone(), (byte[])token.Clone(), tunnel, Game), int.MaxValue, expiresAt, false, standing: true);
             _invites.Add(invite);
         }
         Changed?.Invoke();
@@ -798,21 +826,36 @@ public sealed class KnockServer : IAsyncDisposable
 
     private static JsonObject Reject(string reason) => new() { ["ok"] = false, ["reason"] = reason };
 
+    /// <summary>
+    /// How long the host has to answer, read at each knock (the room setting can change while the room is open).
+    /// <see cref="Timeout.InfiniteTimeSpan"/> keeps waiting. When not set, <see cref="KnockLimits.DecisionTimeout"/>.
+    /// </summary>
+    public Func<TimeSpan>? DecisionWait { get; set; }
+
+    /// <summary>A knock was not answered in time and counted as declined (the host's card says so).</summary>
+    public event Action<KnockRequest>? TimedOut;
+
     /// <summary>问房主；超时或者服务关了算拒绝。</summary>
     private async Task<bool> AskAsync(KnockRequest request, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(_limits.DecisionTimeout);
+        var wait = DecisionWait?.Invoke() ?? _limits.DecisionTimeout;
+        if (wait != Timeout.InfiniteTimeSpan) timeout.CancelAfter(wait);
         try
         {
             var decision = _approve(request, timeout.Token);
             var finished = await Task.WhenAny(decision, Task.Delay(Timeout.Infinite, timeout.Token));
             // 超时之后才给出的答案（包括被取消时回的 true）一律不算。
-            if (finished != decision || timeout.IsCancellationRequested) return false;
+            if (finished != decision || timeout.IsCancellationRequested)
+            {
+                if (!ct.IsCancellationRequested) TimedOut?.Invoke(request);
+                return false;
+            }
             return await decision;
         }
         catch (OperationCanceledException)
         {
+            if (!ct.IsCancellationRequested) TimedOut?.Invoke(request);
             return false;
         }
     }

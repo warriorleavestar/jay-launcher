@@ -424,6 +424,7 @@
   <Style Selector="Button.pill-play.crash Ellipse.pill-dot"><Setter Property="Fill" Value="{DynamicResource Danger}" /></Style>
   <Style Selector="TextBlock.error"><Setter Property="Foreground" Value="{DynamicResource DangerText}" /></Style>
   <Style Selector="TextBlock.warn"><Setter Property="Foreground" Value="{DynamicResource WarningText}" /></Style>
+  <Style Selector="TextBlock.ok"><Setter Property="Foreground" Value="{DynamicResource SuccessText}" /></Style>
   <!-- 请求条：普通请求（非安全）。和横幅一样，但更醒目一点 -->
   <Style Selector="Border.banner.request">
     <Setter Property="BorderThickness" Value="1,1,1,1" />
