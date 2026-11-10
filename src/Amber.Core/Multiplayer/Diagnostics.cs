@@ -82,7 +82,7 @@ public static partial class NetDiagnostics
     [GeneratedRegex(@"(AMBDIRECT\d+|AMBREPLY\d+|JAY2D|JAY2R)-[A-Za-z0-9_-]+", RegexOptions.IgnoreCase)]
     private static partial Regex DirectCodePattern();
 
-    [GeneratedRegex(@"JAY2-(?:T[1-3]D?-)?[0-9A-Z]{26}-[0-9A-Z]{26}(?:-[0-9A-Z*~$=])?", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"JAY2-(?:T[1-3]D?-)?[0-9A-Z]{26}-[0-9A-Z]{26}(?:-[0-9A-Z*~$=](?:-G[0-9A-Z*~$=]+)?)?", RegexOptions.IgnoreCase)]
     private static partial Regex InvitePattern();
 
     [GeneratedRegex(@"\bjay-(?:l-)?[0-9a-f]{16}\b", RegexOptions.IgnoreCase)]

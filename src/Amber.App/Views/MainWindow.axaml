@@ -162,8 +162,64 @@
               <TextBlock Classes="foot-title" Text="{l:T shell.settings}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </StackPanel>
           </Button>
-          <Button x:Name="AccountButton" Classes="ghost shell-foot" Command="{Binding Shell.OpenAccountsCommand}"
-                  Classes.active="{Binding Shell.IsAccountsActive}" ToolTip.Tip="{Binding Shell.AccountName}" AutomationProperties.Name="{l:T shell.account}">
+          <!-- Account menu (§6.13): switch account, add / manage, light-dark and language in one place. -->
+          <Button x:Name="AccountButton" Classes="ghost shell-foot"
+                  Classes.active="{Binding Shell.IsAccountsActive}" ToolTip.Tip="{l:T shell.account_menu.tip}" AutomationProperties.Name="{l:T shell.account}">
+            <Button.Flyout>
+              <Flyout Placement="RightEdgeAlignedBottom">
+                <Border DataContext="{Binding Shell.AccountMenu}">
+                <StackPanel x:Name="AccountMenuPanel" Width="300" Spacing="2" x:DataType="vm:AccountMenuViewModel">
+                  <ItemsControl x:Name="AccountMenuList" ItemsSource="{Binding Accounts}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:AccountMenuItem">
+                        <Button Classes="ghost" Padding="8,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                Command="{Binding $parent[ItemsControl].((vm:AccountMenuViewModel)DataContext).SwitchCommand}" CommandParameter="{Binding}"
+                                AutomationProperties.Name="{Binding Name}">
+                          <Grid ColumnDefinitions="Auto,*">
+                            <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource AccentTint}" VerticalAlignment="Center">
+                              <TextBlock Text="{Binding Initial}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentText}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Classes="hint" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Button x:Name="AccountMenuAdd" Classes="ghost" Padding="8,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Content="{l:T shell.account_menu.add}" Command="{Binding AddAccountCommand}" />
+                  <Button x:Name="AccountMenuManage" Classes="ghost" Padding="8,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Content="{l:T shell.account_menu.manage}" Command="{Binding ManageCommand}" IsVisible="{Binding HasAccounts}" />
+                  <Separator Margin="0,4" />
+                  <Grid ColumnDefinitions="Auto,*" Margin="8,2">
+                    <TextBlock Text="{l:T shell.account_menu.theme}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <UniformGrid x:Name="AccountMenuTheme" Grid.Column="1" Columns="3" Classes="segmented">
+                      <RadioButton x:Name="AccountMenuSystem" GroupName="MenuTheme" IsChecked="{Binding IsSystemTheme}" ToolTip.Tip="{l:T settings.theme.system}">
+                        <TextBlock Text="{l:T settings.theme.system}" TextTrimming="CharacterEllipsis" />
+                      </RadioButton>
+                      <RadioButton x:Name="AccountMenuLight" GroupName="MenuTheme" IsChecked="{Binding IsLightTheme}" ToolTip.Tip="{l:T settings.theme.light}">
+                        <TextBlock Text="{l:T settings.theme.light}" TextTrimming="CharacterEllipsis" />
+                      </RadioButton>
+                      <RadioButton x:Name="AccountMenuDark" GroupName="MenuTheme" IsChecked="{Binding IsDarkTheme}" ToolTip.Tip="{l:T settings.theme.dark}">
+                        <TextBlock Text="{l:T settings.theme.dark}" TextTrimming="CharacterEllipsis" />
+                      </RadioButton>
+                    </UniformGrid>
+                  </Grid>
+                  <Grid ColumnDefinitions="Auto,*" Margin="8,2">
+                    <TextBlock Text="{l:T shell.account_menu.language}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <ComboBox x:Name="AccountMenuLanguage" Grid.Column="1" HorizontalAlignment="Stretch"
+                              ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding LanguageIndex}"
+                              AutomationProperties.Name="{l:T shell.account_menu.language}" />
+                  </Grid>
+                  <Button x:Name="AccountMenuAbout" Classes="ghost" Padding="8,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Content="{l:T about.title}" Command="{Binding AboutCommand}" />
+                </StackPanel>
+                </Border>
+              </Flyout>
+            </Button.Flyout>
             <StackPanel Classes="foot-row" Orientation="Horizontal" Spacing="12">
               <Border Width="24" Height="24" CornerRadius="12" Background="{DynamicResource AccentTint}">
                 <TextBlock Text="{Binding Shell.AccountInitial}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentText}"
@@ -255,8 +311,8 @@
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
           <Path Classes="icon" Data="{StaticResource Icon.Info}" Width="20" Height="20" VerticalAlignment="Top" />
           <StackPanel Grid.Column="1" Spacing="2">
-            <TextBlock Text="{l:T shell.moved.title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock Text="{l:T shell.moved.body}" TextWrapping="Wrap" Classes="hint" />
+            <TextBlock Text="{l:T shell.moved.title}" FontWeight="SemiBold" TextWrapping="Wrap" MaxWidth="720" HorizontalAlignment="Left" />
+            <TextBlock x:Name="MovedNoticeBody" Text="{l:T shell.moved.body}" TextWrapping="Wrap" Classes="hint" MaxWidth="720" HorizontalAlignment="Left" />
           </StackPanel>
           <Button x:Name="MovedNoticeClose" Grid.Column="2" Classes="ghost small" Content="{l:T shell.moved.ok}" VerticalAlignment="Top" Click="MovedNotice_Close" />
         </Grid>

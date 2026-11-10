@@ -234,6 +234,9 @@ internal sealed class LayoutCheck(MainWindow window, MainViewModel main, string 
         {
             if (!c.IsEffectivelyVisible || c.Bounds.Width <= 2 || c.Bounds.Height <= 2 || InsideInput(c)) continue;
             if (c is Image { Source: null }) continue;
+            // Decoration drawn behind content on purpose (the faded big initial on the library's "continue" card):
+            // faint and not clickable, so text on top of it is not "two controls on top of each other".
+            if (!c.IsHitTestVisible && c.Opacity < 0.5) continue;
             if (Describe(c) is not { } label) continue;
             if (c.TranslatePoint(new Point(0, 0), root) is not { } p) continue;
             // 只算真正画出来的部分：滚动区域、列表这类会裁剪的上级之外的部分看不见，不算重叠（比如滚到底栏下面的内容）。

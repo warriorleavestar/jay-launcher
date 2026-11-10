@@ -264,9 +264,15 @@ public sealed partial class ActivityViewModel : ObservableObject
     [RelayCommand]
     private void ToggleRequests() => RequestsExpanded = !RequestsExpanded;
 
+    /// <summary>Requests already on screen somewhere better (a knock while the room is open): left off the bar.</summary>
+    public Func<RequestHandle, bool>? ShownElsewhere { get; set; }
+
+    /// <summary>Re-read the requests (the page that shows some of them came or went).</summary>
+    public void Resync() => SyncRequests();
+
     private void SyncRequests()
     {
-        var pending = _service.Requests.Pending;
+        var pending = _service.Requests.Pending.Where(r => ShownElsewhere?.Invoke(r) != true).ToList();
         Requests.Clear();
         foreach (var r in pending) Requests.Add(new RequestItem(_service.Requests, r));
         if (Requests.Count <= 1) RequestsExpanded = false;

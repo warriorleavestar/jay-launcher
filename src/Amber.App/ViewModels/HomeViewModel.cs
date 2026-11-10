@@ -991,6 +991,13 @@ public sealed partial class HomeViewModel : PageViewModel
         Crash = analysis;
     }
 
+    /// <summary>A crash as the window sees it (journeys self-check): the last session plus <see cref="GameCrashed"/>.</summary>
+    internal void SimulateCrashForTest(string id, CrashAnalysis analysis)
+    {
+        ShowCrashForTest(id, analysis);
+        GameCrashed?.Invoke(id);
+    }
+
     internal void RemoveRunForTest(object run)
     {
         _runs.Remove((GameRun)run);

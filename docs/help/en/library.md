@@ -9,6 +9,8 @@ related: instance, new-instance
 
 The library is Jay's home: every game you installed (an instance) is here, the most recently played first.
 
+![The library with the Continue playing card and instance cards](shot:library)
+
 ## How to
 - Play: click **Play** on an instance card, or select it and press Enter.
 - Open an instance: click the card itself to open its details.

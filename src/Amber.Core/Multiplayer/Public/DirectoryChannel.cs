@@ -51,9 +51,20 @@ public static class DirectoryChannel
     /// <paramref name="request"/> and return the reply. A directory holding none of the pinned keys gets nothing:
     /// the request is never written. Throws <see cref="DirectoryImpostorException"/> in that case.
     /// </summary>
-    public static async Task<JsonObject> CallAsync(Stream stream, IReadOnlyList<byte[]> pinned, string networkSecret, JsonObject request, CancellationToken ct)
+    public static Task<JsonObject> CallAsync(Stream stream, IReadOnlyList<byte[]> pinned, string networkSecret, JsonObject request, CancellationToken ct)
     {
         if (pinned.Count == 0) throw new ArgumentException("No directory keys to check against.", nameof(pinned));
+        return CallAsync(stream, new DirectoryTrust { Network = "", Pinned = pinned }, "", networkSecret, request, ct);
+    }
+
+    /// <summary>
+    /// Jay's side with the network's full trust rules (<see cref="DirectoryTrust"/>): pinned keys, keys certified by a
+    /// root, or the key remembered for <paramref name="address"/>. The directory's certificate, if it has one, is the
+    /// payload of its handshake message. Throws <see cref="DirectoryImpostorException"/> before writing the request when
+    /// the key isn't accepted, or <see cref="DirectoryKeyChangedException"/> when it differs from the remembered one.
+    /// </summary>
+    public static async Task<JsonObject> CallAsync(Stream stream, DirectoryTrust trust, string address, string networkSecret, JsonObject request, CancellationToken ct)
+    {
         var payload = Encoding.UTF8.GetBytes(request.ToJsonString());
         if (payload.Length > RoomDirectoryProtocol.MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
         var psk = Psk(networkSecret);
@@ -62,9 +73,11 @@ public static class DirectoryChannel
         try
         {
             await WriteFrameAsync(stream, hs.WriteMessage([]), ct);
-            hs.ReadMessage(await ReadFrameAsync(stream, ct));
+            var certificate = hs.ReadMessage(await ReadFrameAsync(stream, ct));
             var key = hs.RemoteStaticPublicKey ?? throw new CryptographicException(L.T("core.mp.public.bad_reply"));
-            if (!IsPinned(key, pinned)) throw new DirectoryImpostorException();
+            var remembered = !trust.IsStrict && trust.Remembers(address);
+            if (!trust.Accepts(address, key, certificate))
+                throw remembered ? new DirectoryKeyChangedException() : new DirectoryImpostorException();
             await WriteFrameAsync(stream, hs.WriteMessage(payload), ct);
             var (send, receive) = hs.Split();
             using (send)
@@ -94,7 +107,7 @@ public static class DirectoryChannel
     /// Returns the request and a function that sends the reply, or null when the handshake fails (the caller just closes).
     /// </summary>
     public static async Task<(JsonObject Request, Func<JsonObject, CancellationToken, Task> Reply)?> AcceptAsync(
-        Stream stream, byte firstByte, X25519KeyPair identity, string networkSecret, CancellationToken ct)
+        Stream stream, byte firstByte, X25519KeyPair identity, string networkSecret, CancellationToken ct, byte[]? certificate = null)
     {
         var psk = Psk(networkSecret);
         var hs = new NoiseHandshake(NoisePattern.XXpsk0, initiator: false, Prologue, psk, identity);
@@ -104,7 +117,9 @@ public static class DirectoryChannel
             // Anything else isn't a Jay client; skip the DH work.
             if (first.Length != FirstMessageLength) return null;
             hs.ReadMessage(first);
-            await WriteFrameAsync(stream, hs.WriteMessage([]), ct);
+            // The certificate (if this directory has one) rides in the handshake message, encrypted to the client's
+            // ephemeral key; clients that don't know certificates just ignore the payload.
+            await WriteFrameAsync(stream, hs.WriteMessage(certificate ?? []), ct);
             var payload = hs.ReadMessage(await ReadFrameAsync(stream, ct));
             JsonObject request;
             try { request = JsonNode.Parse(payload) as JsonObject ?? throw new InvalidDataException(); }
@@ -191,3 +206,9 @@ public static class DirectoryChannel
 /// An <see cref="IOException"/> so callers treat that address like an unreachable directory and try the next one.
 /// </summary>
 public sealed class DirectoryImpostorException() : IOException(L.T("core.mp.public.directory_impostor"));
+
+/// <summary>
+/// A network that pins nothing: the directory at this address now has a different key from the one Jay saw first.
+/// Nothing was sent to it. An <see cref="IOException"/> like <see cref="DirectoryImpostorException"/>.
+/// </summary>
+public sealed class DirectoryKeyChangedException() : IOException(L.T("core.mp.public.directory_changed"));

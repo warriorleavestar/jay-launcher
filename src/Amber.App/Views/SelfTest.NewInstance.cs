@@ -55,7 +55,7 @@ internal sealed partial class SelfTest
             await Task.Delay(400);
             Check("宽窗：来源是左侧一栏", Dispatcher.UIThread.Invoke(() => Grid.GetColumn(page.SourceList) == 0 && page.SourceList.Bounds.Width > 100));
             Check("装到：写出游戏库位置", download.InstallToText.Contains(game), download.InstallToText);
-            Check("没选版本时【安装】不可用，并提示先选版本", !download.InstallCommand.CanExecute(null));
+            Check("Opens with the latest release picked and [Install] ready (§6.11)", download.Target is not null && download.Target.Id == download.LatestRelease && download.InstallCommand.CanExecute(null), download.Target?.Id);
             Check("琥珀色：新建实例里没有琥珀按钮（安装是蓝色）", AmberButtons() == 0, $"{AmberButtons()}");
             await ShotAsync("new-1440");
 
@@ -109,6 +109,29 @@ internal sealed partial class SelfTest
             Dispatcher.UIThread.Invoke(() => page.NameBox.Text = "我的整合包");
             await Task.Delay(100);
             Check("改回合格的名字后【安装】可用", download.InstallCommand.CanExecute(null) && !download.HasNameProblem);
+
+            // "Add mods while you're at it" (§6.11): offline here, results are filled in by hand.
+            var wasOpen = download.ModsOpen;
+            download.SearchModsOffline = true;
+            Dispatcher.UIThread.Invoke(() => download.ModsOpen = true);
+            ContentProject Fake(string id) => new(ContentSource.Modrinth, id, id, "A test mod", null, null, 0, null);
+            Dispatcher.UIThread.Invoke(() => download.ShowModResults([Fake("Sodium"), Fake("Iris"), Fake("JourneyMap")]));
+            await Task.Delay(300);
+            var ticks = Dispatcher.UIThread.Invoke(() => page.NewInstanceModsList.GetVisualDescendants().OfType<CheckBox>().Where(c => c.IsEffectivelyVisible).ToList());
+            Check("Add mods: the panel has a mod list once Fabric is picked", ticks.Count == 3 && download.CanAddMods, $"{ticks.Count}");
+            foreach (var tick in ticks.Take(2)) Dispatcher.UIThread.Invoke(() => tick.Command?.Execute(tick.CommandParameter));
+            await Task.Delay(200);
+            Check("Add mods: ticking shows the picks in the header", download.PickedMods.Count == 2
+                && download.ModsHeader == L.P("newinstance.mods.header_picked", 2, 2, "Sodium" + L.T("common.list_separator") + "Iris"), download.ModsHeader);
+            await ShotAsync("new-1440-add-mods");
+            Dispatcher.UIThread.Invoke(() => page.LoaderSegment.SelectedIndex = 0);
+            await Task.Delay(200);
+            Check("Add mods: vanilla drops the picks and says to pick a loader", download.PickedMods.Count == 0 && download.ShowModsNeedLoader);
+            Dispatcher.UIThread.Invoke(() => { page.LoaderSegment.SelectedItem = fabric; download.ModsOpen = wasOpen; });
+            download.SearchModsOffline = false;
+            await WaitAsync(() => download.SelectedLoaderVersion is not null, 30);
+            Dispatcher.UIThread.Invoke(() => page.NameBox.Text = "我的整合包");
+            await Task.Delay(100);
             download.Search = "";
             await WaitAsync(() => download.Items.Count > 10, 5);
             Check("搜索清空后列表重建，已选的版本、加载器和名字都还在",
