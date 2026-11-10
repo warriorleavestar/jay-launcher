@@ -155,7 +155,8 @@
             </Border>
 
             <!-- Client ID 一般不用填，收进默认折叠的“高级”。 -->
-            <Expander x:Name="MicrosoftAdvanced" Header="{l:T accounts.microsoft.advanced}" HorizontalAlignment="Stretch">
+            <Expander x:Name="MicrosoftAdvanced" HorizontalAlignment="Stretch">
+              <Expander.Header><TextBlock Text="{l:T accounts.microsoft.advanced}" TextWrapping="Wrap" /></Expander.Header>
               <StackPanel Spacing="8">
                 <TextBlock Text="{l:T accounts.microsoft.client_id_label}" TextWrapping="Wrap" />
                 <TextBox Text="{Binding ClientIdInput}" PlaceholderText="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />

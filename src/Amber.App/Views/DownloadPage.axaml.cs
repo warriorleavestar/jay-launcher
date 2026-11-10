@@ -52,6 +52,13 @@ public partial class DownloadPage : UserControl
             if (DataContext is DownloadViewModel vm && vm.InstallCommand.CanExecute(null)) vm.InstallCommand.Execute(null);
             e.Handled = true;
         };
+        VersionToolbar.SizeChanged += (_, e) => Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyToolbar(e.NewSize.Width));
+        // Another language changes the chip widths without changing the toolbar's size.
+        Amber.Core.Localization.L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _toolbarStacked = null;
+            ApplyToolbar(VersionToolbar.Bounds.Width);
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
         SizeChanged += (_, e) =>
         {
             var size = e.NewSize;
@@ -61,11 +68,6 @@ public partial class DownloadPage : UserControl
                 ApplyHeight(size.Height);
             });
         };
-        // The type chips, the search box and Refresh share one row until the chips leave the search box less than its
-        // minimum width (long languages, narrow windows); then search and Refresh move to a second row instead of overlapping.
-        SearchRow.SizeChanged += (_, _) => LayoutSearchRow();
-        TypeChips.SizeChanged += (_, _) => LayoutSearchRow();
-        RefreshButton.SizeChanged += (_, _) => LayoutSearchRow();
         // Loaders the chosen version can't have are greyed out, with the reason as a tooltip (§6.11).
         LoaderSegment.ContainerPrepared += (_, e) =>
         {
@@ -98,6 +100,26 @@ public partial class DownloadPage : UserControl
         });
 
     private bool? _rail;
+    private bool? _toolbarStacked;
+
+    /// <summary>
+    /// The type chips, search box and [Refresh] share a row while the search box keeps its minimum width; otherwise
+    /// (long labels, narrow content) the search box moves to its own row under them.
+    /// </summary>
+    private void ApplyToolbar(double width)
+    {
+        if (width <= 0) return;
+        TypeChips.Measure(Size.Infinity);
+        RefreshButton.Measure(Size.Infinity);
+        var stacked = TypeChips.DesiredSize.Width + SearchBox.MinWidth + 20 + RefreshButton.DesiredSize.Width > width;
+        if (_toolbarStacked == stacked) return;
+        _toolbarStacked = stacked;
+        Grid.SetRow(SearchBox, stacked ? 1 : 0);
+        Grid.SetColumn(SearchBox, stacked ? 0 : 1);
+        Grid.SetColumnSpan(SearchBox, stacked ? 3 : 1);
+        SearchBox.Margin = stacked ? new Thickness(0, 8, 0, 0) : new Thickness(10, 0);
+        Grid.SetColumnSpan(TypeChips, stacked ? 2 : 1);
+    }
 
     private void ApplyWidth(double width)
     {
@@ -113,29 +135,6 @@ public partial class DownloadPage : UserControl
             ? new FuncTemplate<Panel?>(() => new StackPanel { Spacing = 2 })
             : new FuncTemplate<Panel?>(() => new WrapPanel { ItemSpacing = 4, LineSpacing = 4 });
         SourceList.Classes.Set("subtabs", !rail);
-    }
-
-    private bool? _searchWrapped;
-
-    internal bool SearchWrapped => _searchWrapped == true;
-
-    private void LayoutSearchRow()
-    {
-        var available = SearchRow.Bounds.Width;
-        if (available <= 0) return;
-        var needed = TypeChips.DesiredSize.Width + SearchBox.MinWidth + SearchBox.Margin.Left + SearchBox.Margin.Right + RefreshButton.DesiredSize.Width;
-        // A little slack so the row doesn't flip back and forth at the exact boundary.
-        var wrap = _searchWrapped == true ? needed > available - 8 : needed > available;
-        if (_searchWrapped == wrap) return;
-        _searchWrapped = wrap;
-        // Wrapped, the chips span the whole first row, so their Auto column doesn't push Refresh past the right edge.
-        Grid.SetColumnSpan(TypeChips, wrap ? 3 : 1);
-        Grid.SetRow(SearchBox, wrap ? 1 : 0);
-        Grid.SetColumn(SearchBox, wrap ? 0 : 1);
-        Grid.SetColumnSpan(SearchBox, wrap ? 2 : 1);
-        SearchBox.Margin = wrap ? new Thickness(0, 8, 10, 0) : new Thickness(10, 0);
-        Grid.SetRow(RefreshButton, wrap ? 1 : 0);
-        RefreshButton.Margin = wrap ? new Thickness(0, 8, 0, 0) : default;
     }
 
     /// <summary>Below this page height the page scrolls and the version list gets a fixed height, so nothing is cut off.</summary>

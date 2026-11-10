@@ -146,6 +146,8 @@ public partial class InstancePage : UserControl
         var scrolls = height < ScrollBelow;
         PageScroll.VerticalScrollBarVisibility = scrolls ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
         DetailsCard.Height = scrolls ? DetailsHeightWhenScrolling : double.NaN;
+        // The last session / [Help me fix…] cards may take at most about half the page, then scroll.
+        NoticeScroll.MaxHeight = Math.Max(160, height * 0.5);
         if (Short)
         {
             Hero.MinHeight = 0;

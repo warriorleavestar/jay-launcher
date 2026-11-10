@@ -190,8 +190,13 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     public ContentViewModel(LauncherService service)
         : this(service, source => source == 0 ? service.Modrinth : service.CurseForge, () => service.CurseForgeIfConfigured is not null) { }
 
-    internal ContentViewModel(LauncherService service, Func<int, IContentProvider> providerForSource, Func<bool>? hasCurseForge = null)
+    /// <param name="startType">The type shown first; top-level Discover starts on modpacks (official §6.12).</param>
+    internal ContentViewModel(LauncherService service, Func<int, IContentProvider> providerForSource, Func<bool>? hasCurseForge = null,
+        ContentType startType = ContentType.Modpack)
     {
+        _starting = true;
+        TypeIndex = (int)startType;
+        _starting = false;
         _service = service;
         _providerForSource = providerForSource;
         _hasCurseForge = hasCurseForge;
@@ -233,9 +238,11 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         TargetInstance = keep is not null && Instances.Contains(keep) ? keep : _service.CurrentOr(Instances, Instances.FirstOrDefault());
     }
 
+    private bool _starting;
+
     partial void OnTypeIndexChanged(int value)
     {
-        if (value < 0) return;
+        if (value < 0 || _starting) return;
         OnPropertyChanged(nameof(IsSharedTarget));
         UpdateShaderState();
         if (IsDatapack) RefreshWorlds();
@@ -319,6 +326,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     public void BrowseFor(string instanceId, ContentType type, Action? back = null, string query = "")
     {
         if (Instances.Contains(instanceId)) TargetInstance = instanceId;
+        // Context mode borrows the page: remember the top-level type so [Done, go back] leaves Discover as it was (§6.12).
+        if (back is not null && _back is null) _topLevelType = TypeIndex;
         // 之前搜别的内容留下的关键词对这次没意义，清掉后显示热门（或者带上调用方给的关键词，比如光影页的“Iris”）。
         Query = query;
         if (TypeIndex != (int)type) TypeIndex = (int)type;
@@ -346,6 +355,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     // ---- 从实例页跳来时的上下文条 ----
 
     private Action? _back;
+    private int? _topLevelType;
 
     /// <summary>上下文条的文字，比如“正在给 1.21.1-Fabric 找光影”；没有上下文时为 null。</summary>
     [ObservableProperty]
@@ -366,8 +376,15 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     {
         var back = _back;
         _back = null;
-        ReturnContext = null;
+        // Go back while still in context (the shell sees a context sub-view closing), then drop the context bar.
         back?.Invoke();
+        ReturnContext = null;
+        if (_topLevelType is { } type)
+        {
+            _topLevelType = null;
+            Query = "";
+            if (TypeIndex != type) TypeIndex = type;
+        }
     }
 
     private Task SearchFromStart()

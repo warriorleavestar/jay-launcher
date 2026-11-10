@@ -37,7 +37,7 @@ GUI self-check: it drives the real window through install, launch, mods, multipl
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Report <dir>
 ```
 
-只验证联机页大厅和页签时，设置 `AMBER_SELFTEST_SCOPE=multiplayer-guide`；用 `AMBER_DATA_DIR` 指向独立测试配置，并在该配置中指定测试游戏目录。检查四个页签（一起玩、公开房间、服务器、联机设置）和 `play/…` 路由、开房间 / 加入朋友两张卡（宽窗并排、中等上下、紧凑加入在上）、万能粘贴框认出每种码、一盏灯（贴码后琥珀移到加入）、Ctrl+V 贴码只填好不敲门、贴错框的码转到对的地方、中转服务器在联机设置里、开服第一步。此范围不下载联机组件、不建立房间连接，输出真实窗口操作结果及截图。
+只验证联机页大厅和页签时，设置 `AMBER_SELFTEST_SCOPE=multiplayer-guide`；用 `AMBER_DATA_DIR` 指向独立测试配置，并在该配置中指定测试游戏目录。检查四个页签（一起玩、公开房间、服务器、联机设置）和 `play/…` 路由、开房间 / 加入朋友两张卡（宽窗并排、中等上下、紧凑加入在上）、万能粘贴框认出每种码、邀请 v3（写出房主的游戏、自动挑最接近的实例、没有时给【装一个再加入】）、一盏灯（贴码后琥珀移到加入）、Ctrl+V 贴码只填好不敲门、贴错框的码转到对的地方、中转服务器在联机设置里、【和上次一样开】（写上次的世界和设置）、联机设置里的长期邀请（30 天、打码、作废）、开服第一步和步骤条、Jay 服务器空状态、公开房间（没有公共网络时的说明、模拟的房间列表：搜索、版本筛选、只看能直接进的、排序、空状态、/ 跳搜索）、“连接有问题？”抽屉（大厅入口、宽 560 / 紧凑铺满、Esc 和 Ctrl+Shift+D、【换中转服务器】，不点检测）、演练模式（【演练一遍】、小松鸦四步、焦点在安全的那个按钮、讲解和成绩、再来一次、紧凑铺满、Esc、全程没有网络请求）、联机小课堂和安全小课（各 5 张卡和线描插画、← →、末页接“连接有问题？”/ 演练一遍、矮窗口藏插画、Esc、看完整文章去帮助）。此范围不下载联机组件、不建立房间连接，输出真实窗口操作结果及截图。
 
 只验证资源页首次加载和来源切换时，先设置 `AMBER_SELFTEST_SCOPE=content`；同样输出报告和截图，跳过游戏安装与启动。
 只验证联机（邀请、敲门、房间、直连）时设置 `AMBER_SELFTEST_SCOPE=multiplayer`。
@@ -58,12 +58,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Repo
 只验证关于和隐私时设置 `AMBER_SELFTEST_SCOPE=privacy`：检查“关于和隐私”是锁定的独立页（路由 `about`）、联网清单 5 类和各自现在的状态、“改 ›”跳到对应设置、设置 › 隐私与安全显示同一张清单、“给孩子用”总开关打开六项并在联机里藏起远程控制 / 公共网络 / 经我经 TA / 免确认邀请、写上次改动时间、打开每一页没有清单外的请求，宽窄两种宽度两种语言截图；不联网（发现页的搜索请求除外，属于第 3 类）。
 只验证帮助时设置 `AMBER_SELFTEST_SCOPE=help`：检查 F1 在每个路由都打开本页帮助抽屉、抽屉里 Ctrl+F 搜索（拼音首字母）、文章里的 `jay:` 链接跳到设置、Esc 关闭、“打开帮助中心”和 Shift+F1、帮助中心三种宽度（左目录 / 下拉 / 先目录再文章）、命令面板 `?` 找文章，三种宽度两种语言截图；不联网。帮助文章在 `docs/help/{zh-Hans,zh-Hant,en,ja}/`，打包进 Amber.Core。
 只验证日志停靠和密度时设置 `AMBER_SELFTEST_SCOPE=dock-density`：检查 Ctrl+` 把游戏日志停靠到内容区底部（高 240、可拖、换页面还在）、弹出成独立窗口再停靠回来、矮窗口变成抽屉且 Esc 收起；密度改紧凑时控件变矮、存进设置、锁定的安全界面不变，改回标准去掉覆盖；两种密度截图；不联网。
+只验证联机房间控制台时设置 `AMBER_SELFTEST_SCOPE=room`：把联机页放进模拟的房主状态（两个人、一条聊天、几次敲门），检查顶栏（房间名、人数、邀请朋友、⋯、结束房间，不随内容滚动）、人 | 聊天 | 详情三栏（中等两栏、紧凑分段）、选人看安全码和私聊、锁定的敲门面板（默认焦点在【拒绝】、Alt+Y / Alt+N / Esc、“以后直接让 TA 进来”）、敲门等多久（2 分钟 / 10 分钟 / 一直等）、房间设置抽屉、邀请条款、Ctrl+Shift+I，三种宽度两种语言截图；不下载组件、不建立连接。
+只验证敲门和收文件的几处同步时设置 `AMBER_SELFTEST_SCOPE=mp-requests`：模拟房主状态，检查敲门同时进请求条（安全类、默认拒绝、倒计时）、在请求条 / 置顶小窗 / 房间里任一处处理其余同步撤掉、置顶小窗不抢焦点（宽 360、最矮 200、关窗算拒绝）、收文件的锁定卡片和程序文件警告、聊天里只留一行、设置里的小窗开关、房间设置里的模组同步开关、加入方的“对一下模组”卡片（比对完之前不说一样、缺 / 版本不同 / 多、看看差在哪、不管了直接进并记进上一局、一样打 ✓、房主关掉同步、一键同步到新实例：进度、向房主要私有文件、原实例不动、同步后重新对过），截图；不下载组件、不建立连接。
 只验证拖放导入时设置 `AMBER_SELFTEST_SCOPE=drop`：在报告目录里建临时游戏目录和 Fabric 实例，对真实窗口发拖放事件，检查按类型给落点（模组、资源包、存档、整合包）、悬停高亮、放在落点外不做事、同名不覆盖、原版实例和认不出的文件写原因、整合包打开新建实例预览，宽窄两种截图；不联网。
 只验证首次启动向导时设置 `AMBER_SELFTEST_SCOPE=firstrun`（配一个全新的 `AMBER_DATA_DIR`）：检查向导盖住外壳、右上角换语言、名字为空或不合法挡住【继续】、Enter 加离线账号、第 2 步默认原版且只有一个琥珀按钮、发现的游戏【加进游戏库】、小知识手动翻页、锁定的隐私块和联网清单、Esc 不退出、【跳过】、“选别的版本”，四种窗口两种语言截图；只联网取版本列表，不安装。别的范围不会弹出向导。
 只验证发现页时设置 `AMBER_SELFTEST_SCOPE=discover`：在报告目录里建临时游戏目录和一个 Fabric 实例，检查类型芯片（窄窗变下拉）、来源分段、结果行【＋待装】和 Space、待装条【安装 N 个】一次装完（连前置）、详情三种宽度（右栏 / 抽屉 / 全区）、Esc、上下文模式【完成，返回】、整合包唯一的琥珀按钮，三种宽度两种语言截图；联网搜 Modrinth 并下载待装的模组。
 只验证活动中心时设置 `AMBER_SELFTEST_SCOPE=activity`：模拟任务、请求、一局游戏和启动失败，检查活动抽屉（Ctrl+J / Esc，三档宽度）、请求条（倒计时、去重、安全请求在最前、处理后同步收起）、出错通知不自动消失、正在玩胶囊、启动失败卡的修复按钮和关窗保护。不碰游戏目录、不联网。
+生成帮助文章截图时设置 `AMBER_SELFTEST_SCOPE=help-shots`：在报告目录里建临时游戏目录（三个手写实例），1100×700 窗口按四种语言截游戏库、一起玩、“连接有问题？”抽屉、演练、设置 › 外观五张图，裁到内容区，写到 `AMBER_HELP_SHOTS_DIR`（默认报告目录下 `shots/`）；把结果复制到 `docs/help/shots/{语言}/` 即更新文章里的 `![说明](shot:名字)`。不联网。
+数关键旅程时设置 `AMBER_SELFTEST_SCOPE=journeys`（官方设计 §7.9）：在报告目录里建临时游戏目录，用真实窗口走 J1–J8，数点击（点一下、回车、拖放各 1，下拉 2，打字和粘贴不算）和换页（侧栏导航、面板、抽屉、带返回的上下文子视图不算），和 §7 的目标比；600×420、1024×700、1440×900 × 四种语言，要联网的 J3、J3′、J4′ 只跑简体中文。要下载或启动游戏的最后一步只检查看得见、在窗口里、能按，不真的按。结果另写 `journeys.txt`，超出目标的截图。`AMBER_JOURNEYS_QUICK=1` 只跑最小窗口的简体中文和英文。
+只看页面 × 窗口大小 × 语言的裁切矩阵时设置 `AMBER_SELFTEST_SCOPE=layout`：和 full 里的布局检查一样（含伪本地化），不装游戏、不启动，报告在 `layout/layout.txt`。
 只验证安全外观锁定时设置 `AMBER_SELFTEST_SCOPE=safety-lock`：装上五个极端主题包，逐像素比对安全面板和隐私行在深浅两色下跟默认外观一致，并检查带保留词的主题包被拒、确认框默认焦点在“保留”。
-只验证界面主题包（导出、导入、立即生效、坏包被拒、恢复默认、删除）时设置 `AMBER_SELFTEST_SCOPE=theme`；主题包格式见 `docs/themes.md`。
+只验证界面主题包（导出、导入、立即生效、坏包被拒、恢复默认、删除、format 1 自动升级：主题卡标记、说明条和【复制给作者看】、侧栏色给顶栏、开始按钮跟强调色；format 2：minJay 提示、新颜色名、种子 play、动效时长；内置的经典琥珀和高对比：列表里有、套上生效、删不掉）时设置 `AMBER_SELFTEST_SCOPE=theme`；主题包格式见 `docs/themes.md`。
 只验证联机安全（设置页“联机安全”卡片、熔断倒计时盖住窗口、空格取消、到点重启、10 分钟内不再自动重启、跳过等待）时设置 `AMBER_SELFTEST_SCOPE=security`；重启这一步换成计数，不会真的重启。
 开服端到端要开两个 Jay：一个 `AMBER_SELFTEST_SCOPE=host-server`（按“开服”卡片的按钮走完 填地址 → 准备服务端 → 启动 → 邀请 → 等进服 → 撤销 → 停服 → 再开后关窗口），一个 `AMBER_SELFTEST_SCOPE=jay-client`（离线账号 Steve，用 `AMBER_SELFTEST_VERSION` 指定的实例进服）。两边各用自己的 `AMBER_DATA_DIR`，`AMBER_SELFTEST_INVITE` 指向同一个邀请码文件。`AMBER_SELFTEST_SCOPE=host-exit` 只测“服务器开着时关 Jay 会先存盘”。
 
@@ -74,6 +79,7 @@ Other developer switches are environment variables:
 | `AMBER_SNAPSHOT_DIR` | Render every page to PNG |
 | `AMBER_STARTUP_LOG` | Write startup timing |
 | `AMBER_ET_VERBOSE` | Verbose EasyTier output |
+| `AMBER_ET_QUIC` | `0`: turn off EasyTier's QUIC proxy for room traffic without a TUN device (on by default; much faster single connections at high latency) |
 | `AMBER_THEME_DEV` | Use an unpacked theme folder and reload it on every save (same as `--theme-dev <dir>`) |
 
 ## Rules

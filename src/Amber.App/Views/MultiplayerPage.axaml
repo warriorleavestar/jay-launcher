@@ -5,9 +5,10 @@
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:pub="using:Amber.Core.Multiplayer.Public"
              xmlns:c="using:Amber.App.Views.Controls"
+             xmlns:safety="using:Amber.App.Controls.Safety"
              x:Class="Amber.App.Views.MultiplayerPage"
              x:DataType="vm:MultiplayerViewModel">
-  <Grid RowDefinitions="Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <TextBlock svc:ThemeRegion.Name="multiplayer.title" Classes="h1" Text="{l:T multiplayer.title}" />
 
     <!-- Tabs (official §6.14): play · public rooms · servers · settings. A scrolling segmented strip in compact windows. -->
@@ -20,7 +21,145 @@
       </StackPanel>
     </ScrollViewer>
 
-    <ScrollViewer x:Name="MpBody" svc:ThemeRegion.Name="multiplayer.body" Grid.Row="2">
+        <!-- In a room: the sticky header (official §6.15) and, under it, the locked knock panel. Both stay put while the body scrolls. -->
+    <StackPanel x:Name="RoomHeaderArea" svc:ThemeRegion.Name="multiplayer.room" Grid.Row="2" Spacing="8" Margin="0,0,0,10" IsVisible="{Binding ShowRoomHeader}">
+      <Border x:Name="RoomHeader" Classes="card" Margin="0" Padding="12,8">
+        <Grid x:Name="RoomHeaderGrid" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+          <StackPanel VerticalAlignment="Center" Spacing="2">
+            <TextBlock x:Name="RoomHeaderText" Text="{Binding RoomHeaderText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <Button x:Name="CopyAddressButton" Classes="ghost small" Content="{Binding VirtualIpLabel}" Command="{Binding CopyVirtualIpCommand}" IsVisible="{Binding HasVirtualIp}"
+                    HorizontalAlignment="Left" Padding="0,2" ToolTip.Tip="{l:T common.copy}" />
+          </StackPanel>
+          <StackPanel x:Name="RoomHeaderActions" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" HorizontalAlignment="Right">
+            <Button x:Name="HeaderInviteButton" Classes="primary" Content="{l:T multiplayer.invite.button}" Command="{Binding InviteFriendsCommand}" IsVisible="{Binding IsHosting}" ToolTip.Tip="Ctrl+Shift+I" />
+            <Button x:Name="RoomMenuButton" Content="⋯" ToolTip.Tip="{l:T multiplayer.room.menu}" AutomationProperties.Name="{l:T multiplayer.room.menu}">
+              <Button.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                  <MenuItem x:Name="RoomSettingsItem" Header="{l:T multiplayer.room.settings}" Command="{Binding ToggleRoomSettingsCommand}" IsVisible="{Binding IsHosting}" />
+                  <MenuItem x:Name="RoomProblemsItem" Header="{l:T multiplayer.room.problems}" Command="{Binding OpenDiagnosticsCommand}" />
+                  <MenuItem Header="{l:T multiplayer.chat.export}" Click="ExportChat_Click" />
+                  <MenuItem x:Name="CopyRoomInfoItem" Header="{l:T multiplayer.room.copy_info}" Command="{Binding CopyRoomInfoCommand}" />
+                </MenuFlyout>
+              </Button.Flyout>
+            </Button>
+            <Button x:Name="EndRoomButton" Content="{Binding EndRoomLabel}" Command="{Binding AskStopCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- Someone knocks: a locked panel (theme packs cannot restyle it). "No" has the focus; Alt+Y / Alt+N / Esc. -->
+      <ScrollViewer x:Name="KnockScroll" IsVisible="{Binding HasKnocks}" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="4">
+      <!-- One knock at a time; the rest wait in line ("2 more knocking"). -->
+      <ContentControl x:Name="KnockList" Content="{Binding FirstKnock}">
+        <ContentControl.ContentTemplate>
+          <DataTemplate DataType="vm:ApprovalCard">
+            <safety:SafetyPanel Title="{Binding Headline}" Margin="0,0,0,6">
+              <safety:SafetyPanel.Body>
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{l:T multiplayer.knock.safety_code}" FontSize="12" />
+                  <SelectableTextBlock Text="{Binding SafetyCode}" FontFamily="Consolas,Menlo,monospace" FontSize="16" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Facts}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding Facts, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <TextBlock Text="{Binding VerifyHint}" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding Warning}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding HasWarning}" />
+                  <CheckBox IsChecked="{Binding TrustAfter}" IsVisible="{Binding CanTrustAfter}">
+                    <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" />
+                  </CheckBox>
+                  <WrapPanel ItemSpacing="8" LineSpacing="6">
+                    <safety:SafetyButton Classes="knock-deny" Kind="Safe" Content="{l:T multiplayer.invite.deny}"
+                                         Command="{Binding $parent[ScrollViewer].((vm:MultiplayerViewModel)DataContext).DenyKnockCommand}" CommandParameter="{Binding}" />
+                    <safety:SafetyButton Classes="knock-approve" Kind="Confirm" Content="{l:T multiplayer.invite.approve}"
+                                         Command="{Binding $parent[ScrollViewer].((vm:MultiplayerViewModel)DataContext).ApproveKnockCommand}" CommandParameter="{Binding}" />
+                  </WrapPanel>
+                  <TextBlock Text="{Binding RemainingText}" FontSize="12" />
+                  <TextBlock Text="{l:T multiplayer.knock.keys}" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
+              </safety:SafetyPanel.Body>
+            </safety:SafetyPanel>
+          </DataTemplate>
+        </ContentControl.ContentTemplate>
+      </ContentControl>
+      <TextBlock x:Name="MoreKnocksText" Text="{Binding MoreKnocksText}" IsVisible="{Binding HasMoreKnocks}" FontWeight="SemiBold" />
+      </StackPanel>
+      </ScrollViewer>
+
+      <!-- Someone wants to send me a file: locked card in the same safety layer; programs get an extra warning. Never opened by Jay. -->
+      <ItemsControl x:Name="FileOfferList" ItemsSource="{Binding FileOffers}" IsVisible="{Binding HasFileOffers}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate DataType="vm:FileOfferItem">
+            <safety:SafetyPanel Title="{Binding Headline}" Margin="0,0,0,6">
+              <safety:SafetyPanel.Body>
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{Binding Warning}" TextWrapping="Wrap" FontWeight="SemiBold" IsVisible="{Binding IsProgram}" />
+                  <TextBlock Text="{Binding Warning}" TextWrapping="Wrap" IsVisible="{Binding !IsProgram}" />
+                  <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding SafetyCode, StringFormat='▦ {0}'}" />
+                  <WrapPanel ItemSpacing="8" LineSpacing="6">
+                    <safety:SafetyButton Classes="file-decline" Kind="Safe" Content="{l:T multiplayer.private.decline}"
+                                         Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DeclineFileCommand}" CommandParameter="{Binding}" />
+                    <safety:SafetyButton Classes="file-accept" Kind="Confirm" Content="{l:T multiplayer.file.accept}"
+                                         Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).AcceptFileCommand}" CommandParameter="{Binding}" />
+                  </WrapPanel>
+                </StackPanel>
+              </safety:SafetyPanel.Body>
+            </safety:SafetyPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <!-- Joiner: check the mods against the host's (official §6.14). Never says "same" before the lists were compared. -->
+      <Border x:Name="ModCheckCard" Classes="card" Margin="0,0,0,6" IsVisible="{Binding ShowModCheck}">
+        <StackPanel Spacing="6">
+          <TextBlock Classes="h2" Margin="0" Text="{l:T multiplayer.modcheck.heading}" />
+          <TextBlock x:Name="ModCheckingText" Text="{l:T multiplayer.modcheck.checking}" IsVisible="{Binding ModCheckChecking}" TextWrapping="Wrap" />
+          <TextBlock x:Name="ModCheckSameText" Text="{l:T multiplayer.modcheck.same}" IsVisible="{Binding ModCheckSame}" FontWeight="SemiBold" TextWrapping="Wrap" />
+          <TextBlock x:Name="ModCheckNoticeText" Text="{Binding ModCheckNotice}" IsVisible="{Binding HasModCheckNotice}" TextWrapping="Wrap" />
+          <StackPanel x:Name="ModDifferencePanel" Spacing="4" IsVisible="{Binding ModCheckDifferent}">
+            <TextBlock Text="{Binding ModCheckTitle}" TextWrapping="Wrap" />
+            <TextBlock x:Name="ModMissingText" Text="{Binding ModMissingText}" IsVisible="{Binding HasModMissing}" TextWrapping="Wrap" />
+            <TextBlock x:Name="ModDifferentText" Text="{Binding ModDifferentText}" IsVisible="{Binding HasModDifferent}" TextWrapping="Wrap" />
+            <TextBlock x:Name="ModExtraText" Classes="hint" Text="{Binding ModExtraText}" IsVisible="{Binding HasModExtra}" TextWrapping="Wrap" />
+            <TextBlock FontSize="12" Margin="0,4,0,0" Text="{l:T multiplayer.modcheck.sync_to}" />
+            <WrapPanel ItemSpacing="16" LineSpacing="4" IsEnabled="{Binding ModCheckButtonsShown}">
+              <RadioButton x:Name="SyncIntoNewRadio" GroupName="ModSyncTarget" IsChecked="{Binding SyncIntoNewInstance}">
+                <TextBlock Text="{l:T multiplayer.modcheck.into_new}" TextWrapping="Wrap" />
+              </RadioButton>
+              <RadioButton x:Name="SyncIntoMineRadio" GroupName="ModSyncTarget" IsChecked="{Binding SyncIntoMine}">
+                <TextBlock Text="{Binding SyncIntoMineText}" TextWrapping="Wrap" />
+              </RadioButton>
+            </WrapPanel>
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ModSyncSummary}" />
+            <StackPanel x:Name="ModSyncProgress" Spacing="4" IsVisible="{Binding ModSyncing}">
+              <ProgressBar IsIndeterminate="True" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock x:Name="ModSyncText" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding ModSyncText}" />
+                <Button Grid.Column="1" Classes="small" Content="{l:T common.cancel}" Command="{Binding CancelModSyncCommand}" Margin="8,0,0,0" />
+              </Grid>
+            </StackPanel>
+            <WrapPanel x:Name="ModCheckButtons" ItemSpacing="8" LineSpacing="6" Margin="0,4,0,0" IsVisible="{Binding ModCheckButtonsShown}">
+              <Button x:Name="SyncModsButton" Classes="primary" Command="{Binding SyncModsCommand}">
+                <TextBlock Text="{l:T multiplayer.modcheck.sync}" TextWrapping="Wrap" />
+              </Button>
+              <Button x:Name="ModDetailsButton" Content="{l:T multiplayer.modcheck.details}" Command="{Binding ToggleModDetailsCommand}" />
+              <Button x:Name="SkipModCheckButton" Classes="ghost" Content="{l:T multiplayer.modcheck.skip}" Command="{Binding SkipModCheckCommand}" />
+            </WrapPanel>
+            <ScrollViewer MaxHeight="240" IsVisible="{Binding ModDetailsOpen}">
+            <ItemsControl x:Name="ModDiffList" ItemsSource="{Binding ModDiffLines}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:ModDiffLine">
+                  <Grid ColumnDefinitions="24,*" Margin="0,1">
+                    <TextBlock Text="{Binding Mark}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            </ScrollViewer>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <ScrollViewer x:Name="MpBody" svc:ThemeRegion.Name="multiplayer.body" Grid.Row="3">
       <StackPanel Spacing="14" Margin="0,0,14,14">
 
 <!-- 加入方：房主发起的测试正在进行 -->
@@ -45,13 +184,13 @@
           <Panel IsVisible="{Binding !IsComponentReady}">
             <Border Classes="card" Margin="0">
               <StackPanel Spacing="8">
-                <Grid ColumnDefinitions="*,Auto">
+                <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                   <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" IsVisible="{Binding !IsComponentReady}">
+                  <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
                     <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
                     <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
                     <Button Content="{l:T common.cancel}" Command="{Binding CancelDownloadCommand}" IsVisible="{Binding IsDownloading}" />
-                  </StackPanel>
+                  </WrapPanel>
                 </Grid>
                 <ProgressBar Value="{Binding DownloadPercent}" Maximum="100" IsVisible="{Binding IsDownloading}" />
                 <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
@@ -76,8 +215,26 @@
                   <Button Grid.Column="2" Content="{l:T common.find}" Command="{Binding ScanCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
                 </Grid>
                 <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" />
-                <Button x:Name="LobbyHostButton" Classes.play="{Binding HostButtonIsAmber}" Content="{l:T multiplayer.lobby.host_button}" Command="{Binding HostFromLobbyCommand}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                <Grid x:Name="LastRoomRow" ColumnDefinitions="*,Auto" IsVisible="{Binding HasLastRoom}">
+                  <TextBlock x:Name="LastRoomText" Classes="hint" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" Text="{Binding LastRoomText}" />
+                  <Button x:Name="RepeatLastRoomButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" Command="{Binding RepeatLastRoomCommand}">
+                    <TextBlock Text="{l:T multiplayer.lobby.repeat_room}" TextWrapping="Wrap" />
+                  </Button>
+                </Grid>
+                <Button x:Name="LobbyHostButton" Classes.play="{Binding HostButtonIsAmber}" Command="{Binding HostFromLobbyCommand}"
+                        IsVisible="{Binding ShowHostButton}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                  <TextBlock Text="{Binding HostButtonText}" TextWrapping="Wrap" TextAlignment="Center" />
+                </Button>
+                <TextBlock x:Name="PlayAndHostHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding PlayAndHostHint}"
+                           IsVisible="{Binding StartsGameToHost}" />
+                <!-- Started from the lobby: the three steps in the game; the room opens by itself when the log says Open to LAN. -->
+                <Border x:Name="WaitingForLanPanel" Background="{DynamicResource AccentTint}" CornerRadius="6" Padding="10" IsVisible="{Binding IsWaitingForLan}">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="{Binding WaitingForLanText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <Button x:Name="CancelWaitForLanButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" VerticalAlignment="Center"
+                            Content="{l:T common.cancel}" Command="{Binding CancelWaitForLanCommand}" />
+                  </Grid>
+                </Border>
                 <CheckBox x:Name="AutoCopyInviteBox" IsChecked="{Binding AutoCopyInvite}">
                   <TextBlock Text="{l:T multiplayer.lobby.auto_copy}" TextWrapping="Wrap" />
                 </CheckBox>
@@ -140,6 +297,21 @@
                 </Grid>
                 <TextBlock x:Name="JoinCodeRecognitionText" FontSize="12" TextWrapping="Wrap" Text="{Binding JoinCodeRecognition}" IsVisible="{Binding HasJoinCodeText}"
                            Classes.warn="{Binding JoinCodeRecognitionWarns}" />
+                <!-- Invite v3: the host's game, the instance Jay picked, or "install one and join". -->
+                <StackPanel x:Name="JoinGamePanel" Spacing="4" IsVisible="{Binding HasJoinGame}">
+                  <TextBlock x:Name="JoinGameText" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding JoinGameText}" />
+                  <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding ShowJoinInstancePicker}">
+                    <TextBlock FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0" Text="{l:T multiplayer.lobby.game.use}" />
+                    <ComboBox x:Name="JoinInstanceBox" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" />
+                  </Grid>
+                  <TextBlock x:Name="JoinMatchText" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding JoinMatchText}"
+                             IsVisible="{Binding JoinMatchText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <TextBlock x:Name="JoinNoInstanceText" Classes="warn" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.lobby.game.none}" IsVisible="{Binding JoinNeedsInstall}" />
+                  <Button x:Name="InstallForInviteButton" Command="{Binding InstallForInviteGameCommand}" IsVisible="{Binding JoinNeedsInstall}"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                    <TextBlock Text="{Binding InstallForInviteText}" TextWrapping="Wrap" TextAlignment="Center" />
+                  </Button>
+                </StackPanel>
                 <Button x:Name="LobbyJoinButton" Classes.primary="{Binding !JoinCodeRecognized}" Classes.play="{Binding JoinCodeRecognized}" Content="{l:T multiplayer.lobby.join_button}" Command="{Binding JoinCommand}"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                 <Button Content="{l:T multiplayer.invite.cancel}" Command="{Binding CancelKnockCommand}" IsVisible="{Binding IsKnocking}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
@@ -147,10 +319,12 @@
             </Border>
 
             <!-- Footer: first time? · safety · component and relay servers -->
-            <Grid x:Name="LobbyFooter" Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="Auto,*" Margin="0,4,0,0">
+            <Grid x:Name="LobbyFooter" Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="*,*" Margin="0,4,0,0">
               <WrapPanel ItemSpacing="12" LineSpacing="4" VerticalAlignment="Center">
-                <Button Classes="ghost small" Content="{l:T multiplayer.lobby.first_time}" Command="{Binding OpenHelpCommand}" CommandParameter="multiplayer" />
-                <Button Classes="ghost small" Content="{l:T multiplayer.lobby.safety}" Command="{Binding OpenHelpCommand}" CommandParameter="child-mode" />
+                <Button x:Name="LobbyLessonButton" Classes="ghost small" Command="{Binding OpenLessonCommand}" CommandParameter="multiplayer"><TextBlock Text="{l:T multiplayer.lobby.first_time}" TextWrapping="Wrap" /></Button>
+                <Button x:Name="LobbySafetyButton" Classes="ghost small" Command="{Binding OpenLessonCommand}" CommandParameter="safety"><TextBlock Text="{l:T multiplayer.lobby.safety}" TextWrapping="Wrap" /></Button>
+                <Button x:Name="LobbyDrillButton" Classes="ghost small" Command="{Binding OpenDrillCommand}"><TextBlock Text="{l:T multiplayer.lobby.drill}" TextWrapping="Wrap" /></Button>
+                <Button x:Name="LobbyProblemsButton" Classes="ghost small" Command="{Binding OpenDiagnosticsCommand}"><TextBlock Text="{l:T multiplayer.room.problems}" TextWrapping="Wrap" /></Button>
               </WrapPanel>
               <Button Grid.Column="1" Classes="ghost small" HorizontalAlignment="Right" Command="{Binding ShowTabCommand}" CommandParameter="settings">
                 <TextBlock Text="{Binding LobbyStatusText}" TextWrapping="Wrap" TextAlignment="Right" Classes.warn="{Binding LobbyStatusWarns}" />
@@ -158,376 +332,397 @@
             </Grid>
           </Grid>
 
-          <!-- In a room (the console is reorganised in the next batch) -->
+          <!-- ===== In a room (official §6.15): people | chat | details.
+               Wide: three columns; medium: people and chat side by side, details below; compact: one section at a time. ===== -->
+          <StackPanel x:Name="RoomPanel" Spacing="10" IsVisible="{Binding !IsIdle}">
+            <StackPanel x:Name="RoomSections" Orientation="Horizontal" Classes="segmented" Spacing="4" IsVisible="False">
+              <RadioButton x:Name="PeopleSectionButton" GroupName="RoomSection" IsChecked="{Binding CompactPeople}"><TextBlock Text="{l:T multiplayer.room.section.people}" /></RadioButton>
+              <RadioButton x:Name="ChatSectionButton" GroupName="RoomSection" IsChecked="{Binding CompactChat}"><TextBlock Text="{l:T multiplayer.room.section.chat}" /></RadioButton>
+              <RadioButton x:Name="DetailsSectionButton" GroupName="RoomSection" IsChecked="{Binding CompactInvite}">
+                <Panel>
+                  <TextBlock Text="{l:T multiplayer.room.section.invite}" IsVisible="{Binding IsHosting}" />
+                  <TextBlock Text="{l:T multiplayer.room.section.details}" IsVisible="{Binding !IsHosting}" />
+                </Panel>
+              </RadioButton>
+            </StackPanel>
 
-          <!-- 房主 -->
-          <Border Classes="card" Margin="0" IsVisible="{Binding IsHosting}">
-            <StackPanel Spacing="8">
-              <TextBlock Classes="h2" Text="{l:T multiplayer.host.active}" Margin="0" />
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.hint}" />
-              <Button Classes="primary" Content="{l:T multiplayer.invite.button}" Command="{Binding OpenInviteDialogCommand}" IsVisible="{Binding !InviteDialogOpen}" HorizontalAlignment="Left" />
-              <!-- 邀请朋友：次数、有效期、自动批准；生成后默认打码显示 -->
-              <Border Classes="card" Margin="0" IsVisible="{Binding InviteDialogOpen}">
-                <StackPanel Spacing="8">
-                  <TextBlock Text="{l:T multiplayer.invite.dialog_title}" FontWeight="SemiBold" />
-                  <WrapPanel ItemSpacing="8" LineSpacing="6">
-                    <TextBlock Text="{l:T multiplayer.invite.uses}" VerticalAlignment="Center" />
-                    <NumericUpDown Value="{Binding InviteUses}" Minimum="1" Maximum="20" Increment="1" FormatString="0" MinWidth="110" />
-                    <TextBlock Text="{l:T multiplayer.invite.expiry}" VerticalAlignment="Center" />
-                    <ComboBox ItemsSource="{Binding InviteExpiryChoices}" SelectedItem="{Binding SelectedInviteExpiry}" MinWidth="150">
+            <Grid x:Name="RoomGrid" ColumnDefinitions="250,14,*,14,300" RowDefinitions="Auto,Auto">
+              <!-- People in the room: me first; pick someone for their safety code and actions. -->
+              <Border x:Name="PeopleColumn" Classes="card" Margin="0" VerticalAlignment="Top">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="h2" Text="{l:T multiplayer.people.title}" Margin="0" />
+                  <ListBox x:Name="PeopleList" ItemsSource="{Binding People}" SelectedItem="{Binding SelectedPerson}" Background="Transparent">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate DataType="vm:PersonItem">
+                        <Grid ColumnDefinitions="Auto,*">
+                          <Ellipse Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center" Fill="{DynamicResource Success}" IsVisible="{Binding IsOnline}" />
+                          <Ellipse Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center" Stroke="{DynamicResource TextSecondary}" StrokeThickness="1" IsVisible="{Binding !IsOnline}" />
+                          <StackPanel Grid.Column="1">
+                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding Status}" Classes="caption" TextTrimming="CharacterEllipsis" />
+                          </StackPanel>
+                        </Grid>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.people.pick}" IsVisible="{Binding !HasSelectedPerson}" />
+                  <StackPanel x:Name="PersonDetails" Spacing="6" IsVisible="{Binding HasSelectedPerson}">
+                    <TextBlock Classes="caption" Text="{l:T multiplayer.knock.safety_code}" />
+                    <SelectableTextBlock x:Name="PersonSafetyCode" Text="{Binding SelectedPerson.Fingerprint}" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" />
+                    <WrapPanel ItemSpacing="6" LineSpacing="6">
+                      <Button x:Name="PersonChatButton" Classes="small" Content="{l:T multiplayer.people.chat}" Command="{Binding ChatWithCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanPrivate}" />
+                      <Button x:Name="PersonTrustButton" Classes="small" Content="{l:T multiplayer.invite.trust}" Command="{Binding TrustPersonCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanTrust}" />
+                      <TextBlock Classes="hint" Text="{l:T multiplayer.invite.trusted_badge}" VerticalAlignment="Center" IsVisible="{Binding SelectedPerson.IsTrusted}" />
+                      <Panel IsVisible="{Binding ShowRemoteControl}">
+                        <Button Classes="small" Content="{l:T multiplayer.remote.button}" Command="{Binding RemoteControlPersonCommand}" CommandParameter="{Binding SelectedPerson}"
+                                IsEnabled="{Binding CanRemoteControl}" IsVisible="{Binding SelectedPerson.CanRemove}" />
+                      </Panel>
+                      <Button x:Name="PersonRemoveButton" Classes="small" Content="{l:T multiplayer.kick.button}" Command="{Binding RemovePersonCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanRemove}" />
+                    </WrapPanel>
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.kick.hint}" IsVisible="{Binding SelectedPerson.CanRemove}" />
+                  </StackPanel>
+                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.remote.hint}" IsVisible="{Binding CanRemoteControl}" />
+                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding RemoteUnavailableText}" IsVisible="{Binding HasRemoteUnavailableText}" />
+                </StackPanel>
+              </Border>
+
+              <!-- Chat: the room, or private (end-to-end; the host only passes it on). Files offered to me show under either. -->
+              <Border x:Name="ChatColumn" Grid.Column="2" Classes="card" Margin="0" VerticalAlignment="Top">
+                <StackPanel Spacing="6">
+                  <Panel>
+                    <TextBlock Classes="h2" Text="{l:T multiplayer.chat.title}" Margin="0" IsVisible="{Binding !HasOnlinePeers}" />
+                    <StackPanel x:Name="ChatModes" Orientation="Horizontal" Classes="segmented" Spacing="4" IsVisible="{Binding HasOnlinePeers}" HorizontalAlignment="Left">
+                      <RadioButton x:Name="RoomChatButton" GroupName="ChatMode" IsChecked="{Binding RoomChatMode}"><TextBlock Text="{l:T multiplayer.room.chat_room}" /></RadioButton>
+                      <RadioButton x:Name="PrivateChatButton" GroupName="ChatMode" IsChecked="{Binding PrivateChatMode}"><TextBlock Text="{l:T multiplayer.room.chat_private}" /></RadioButton>
+                    </StackPanel>
+                  </Panel>
+                  <StackPanel x:Name="RoomChat" Spacing="6" IsVisible="{Binding RoomChatMode}">
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ChatStatus}" />
+                    <Border Background="{DynamicResource PageBg}" CornerRadius="6" Padding="8" Height="260">
+                      <ScrollViewer Name="ChatScroll">
+                        <ItemsControl ItemsSource="{Binding ChatLines}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ChatLine">
+                              <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                <TextBlock Text="{Binding Time}" Classes="caption" Margin="0,2,8,0" />
+                                <StackPanel Grid.Column="1">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" IsVisible="{Binding !IsNotice}" />
+                                  <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" Classes.hint="{Binding IsNotice}" />
+                                </StackPanel>
+                              </Grid>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Border>
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBox x:Name="ChatInputBox" Text="{Binding ChatInput}" PlaceholderText="{l:T multiplayer.chat.input_placeholder}" MaxLength="500" KeyDown="ChatInput_KeyDown" IsEnabled="{Binding ChatReady}" />
+                      <Button Grid.Column="1" Classes="primary" Content="{l:T common.send}" Command="{Binding SendChatCommand}" IsEnabled="{Binding ChatReady}" Margin="6,0,0,0" />
+                    </Grid>
+                  </StackPanel>
+                  <StackPanel x:Name="PrivateChat" Spacing="6" IsVisible="{Binding PrivateChatMode}">
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.private.hint}" />
+                    <ComboBox x:Name="PrivatePeerBox" ItemsSource="{Binding OnlinePeers}" SelectedItem="{Binding SelectedPeer}" HorizontalAlignment="Stretch" PlaceholderText="{l:T multiplayer.private.choose}">
                       <ComboBox.ItemTemplate>
-                        <DataTemplate DataType="vm:InviteExpiryChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                        <DataTemplate DataType="vm:OnlinePeerItem"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate>
                       </ComboBox.ItemTemplate>
                     </ComboBox>
-                  </WrapPanel>
-                  <CheckBox Content="{l:T multiplayer.invite.auto_approve}" IsChecked="{Binding InviteAutoApprove}" IsVisible="{Binding ShowInviteAutoApprove}" />
-                  <WrapPanel ItemSpacing="6" LineSpacing="6">
-                    <Button Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" />
-                    <Button Content="{l:T multiplayer.invite.close}" Command="{Binding CloseInviteDialogCommand}" />
-                  </WrapPanel>
-                  <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding HasInvite}">
-                    <TextBox Text="{Binding InviteDisplay}" IsReadOnly="True" FontFamily="Consolas,monospace" TextWrapping="Wrap" />
-                    <Button Grid.Column="1" Command="{Binding ToggleInviteShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
-                      <Panel>
-                        <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !InviteShown}" />
-                        <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding InviteShown}" />
-                      </Panel>
-                    </Button>
-                    <Button Grid.Column="2" Content="{l:T multiplayer.invite.copy}" Command="{Binding CopyInviteCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
-                  </Grid>
-                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.clipboard.autoclear_hint}" IsVisible="{Binding HasInvite}" />
-                </StackPanel>
-              </Border>
-              <!-- 有人敲门：批准 / 拒绝（120 秒没点算拒绝） -->
-              <StackPanel Spacing="6" IsVisible="{Binding !!ApprovalCards.Count}">
-                <TextBlock Text="{l:T multiplayer.invite.approvals_title}" FontWeight="SemiBold" />
-                <ItemsControl ItemsSource="{Binding ApprovalCards}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:ApprovalCard">
-                      <Border Classes="card" Margin="0,2" BorderBrush="{DynamicResource Warning}" BorderThickness="1">
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                          <TextBlock Text="{Binding Detail}" FontFamily="Consolas,monospace" TextWrapping="Wrap" />
-                          <TextBlock Text="{Binding Warning}" IsVisible="{Binding HasWarning}" Foreground="{DynamicResource WarningText}" TextWrapping="Wrap" FontSize="12" />
-                          <WrapPanel ItemSpacing="6" LineSpacing="6">
-                            <Button Classes="primary" Content="{l:T multiplayer.invite.approve}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).ApproveKnockCommand}" CommandParameter="{Binding}" />
-                            <Button Content="{l:T multiplayer.invite.deny}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DenyKnockCommand}" CommandParameter="{Binding}" />
-                          </WrapPanel>
-                        </StackPanel>
-                      </Border>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </StackPanel>
-              <!-- 待用的邀请：可撤销 -->
-              <StackPanel Spacing="4" IsVisible="{Binding !!PendingInvites.Count}">
-                <TextBlock Text="{l:T multiplayer.invite.pending_title}" FontWeight="SemiBold" />
-                <ItemsControl ItemsSource="{Binding PendingInvites}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:PendingInviteItem">
-                      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2">
-                        <TextBlock Text="{Binding Label}" FontFamily="Consolas,monospace" VerticalAlignment="Center" TextWrapping="Wrap" />
-                        <Button Grid.Column="1" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).TogglePendingInviteShownCommand}" CommandParameter="{Binding}" Margin="6,0,0,0">
-                          <Panel>
-                            <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !Shown}" />
-                            <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding Shown}" />
-                          </Panel>
-                        </Button>
-                        <Button Grid.Column="2" Content="{l:T multiplayer.invite.revoke}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RevokeInviteCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
-                      </Grid>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </StackPanel>
-              <!-- 经邀请加入的人：名字和指纹，可加入信任列表 -->
-              <StackPanel Spacing="4" IsVisible="{Binding !!Members.Count}">
-                <TextBlock Text="{l:T multiplayer.invite.members_title}" FontWeight="SemiBold" />
-                <ItemsControl ItemsSource="{Binding Members}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:MemberItem">
-                      <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,2">
-                        <TextBlock Text="{Binding Label}" FontFamily="Consolas,monospace" VerticalAlignment="Center" TextWrapping="Wrap" />
-                        <Button Grid.Column="1" Content="{l:T multiplayer.invite.trust}" IsVisible="{Binding CanTrust}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).TrustMemberCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
-                        <TextBlock Grid.Column="1" Text="{l:T multiplayer.invite.trusted_badge}" IsVisible="{Binding Trusted}" Classes="hint" VerticalAlignment="Center" Margin="6,0,0,0" />
-                        <!-- 远程控制：请求看/控这个成员的屏幕（他那边每次都要点同意） -->
-                        <Button Grid.Column="2" Content="{l:T multiplayer.remote.button}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RequestRemoteCommand}" CommandParameter="{Binding}"
-                                IsEnabled="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).CanRemoteControl}"
-                                IsVisible="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).ShowRemoteControl}" Margin="6,0,0,0" />
-                        <Button Grid.Column="3" Content="{l:T multiplayer.kick.button}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).AskKickMemberCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
-                      </Grid>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.kick.hint}" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.remote.hint}" IsVisible="{Binding CanRemoteControl}" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding RemoteUnavailableText}" IsVisible="{Binding HasRemoteUnavailableText}" />
-              </StackPanel>
-              <!-- 这个房间里踢出的人：不许再敲门进来，可以解除 -->
-              <StackPanel Spacing="4" IsVisible="{Binding !!BannedPeople.Count}">
-                <TextBlock Text="{l:T multiplayer.kick.banned_title}" FontWeight="SemiBold" />
-                <ItemsControl ItemsSource="{Binding BannedPeople}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:BannedItem">
-                      <Grid ColumnDefinitions="*,Auto" Margin="0,2">
-                        <TextBlock Text="{Binding Label}" FontFamily="Consolas,monospace" VerticalAlignment="Center" TextWrapping="Wrap" />
-                        <Button Grid.Column="1" Content="{l:T multiplayer.kick.unban}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).UnbanCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
-                      </Grid>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </StackPanel>
-              <TextBlock Text="{Binding MyVirtualIpText}" IsVisible="{Binding MyVirtualIp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-            </StackPanel>
-          </Border>
-
-          <!-- 加入方 -->
-          <Border Classes="card" Margin="0" IsVisible="{Binding IsJoined}">
-            <StackPanel Spacing="8">
-              <TextBlock Classes="h2" Text="{l:T multiplayer.join.active}" Margin="0" />
-              <TextBlock Text="{l:T multiplayer.join.address_label}" />
-              <TextBox Text="{Binding JoinAddress}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="16" />
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.join.address_hint}" />
-              <TextBlock Text="{Binding HostFingerprintText}" FontFamily="Consolas,monospace" IsVisible="{Binding HasHostFingerprint}" TextWrapping="Wrap" />
-              <TextBlock Text="{Binding MyVirtualIpText}" IsVisible="{Binding MyVirtualIp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-              <!-- 远程控制房主（房主那边每次都要点同意） -->
-              <StackPanel Spacing="4" IsVisible="{Binding ShowRemoteControl}">
-                <Button Content="{l:T multiplayer.remote.control_host}" Command="{Binding ControlHostCommand}" IsEnabled="{Binding CanRemoteControl}" HorizontalAlignment="Left" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.remote.hint}" IsVisible="{Binding CanRemoteControl}" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding RemoteUnavailableText}" IsVisible="{Binding HasRemoteUnavailableText}" />
-              </StackPanel>
-              <!-- 窄窗口、长译文时按钮换到下一行。 -->
-              <WrapPanel ItemSpacing="6" LineSpacing="6">
-                <TextBlock Text="{l:T multiplayer.join.version_label}" VerticalAlignment="Center" />
-                <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" MinWidth="220" />
-                <Button Content="{l:T multiplayer.join.add_to_servers}" Command="{Binding AddToServersCommand}" />
-                <Button Classes="primary" Content="{l:T multiplayer.join.launch}" Command="{Binding LaunchAndJoinCommand}" />
-              </WrapPanel>
-            </StackPanel>
-          </Border>
-
-          <!-- 直连房间：码、路径、全条件测试 -->
-          <Border Classes="card" Margin="0" IsVisible="{Binding IsDirect}">
-            <StackPanel Spacing="8">
-              <TextBlock Classes="h2" Text="{l:T multiplayer.direct.title}" Margin="0" />
-              <TextBlock Text="{Binding CurrentPathText}" FontWeight="SemiBold" TextWrapping="Wrap" />
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding DirectHint}" />
-              <StackPanel IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                <TextBlock Text="{l:T multiplayer.direct.invite_label}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding IsDirectHost}" />
-                <TextBlock Text="{l:T multiplayer.direct.reply_label}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding !IsDirectHost}" />
-              </StackPanel>
-              <!-- 直连码默认打码；两种码都带着本机的公网地址 -->
-              <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                <TextBox Text="{Binding MyDirectCodeDisplay}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" MaxHeight="70" />
-                <Button Grid.Column="1" Command="{Binding ToggleDirectCodeShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
-                  <Panel>
-                    <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !DirectCodeShown}" />
-                    <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding DirectCodeShown}" />
-                  </Panel>
-                </Button>
-                <Button Grid.Column="2" Content="{l:T common.copy}" Command="{Binding CopyDirectCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
-              </Grid>
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.clipboard.autoclear_hint}"
-                         IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.direct.ip_warning}"
-                         IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-              <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding IsDirectHost}">
-                <TextBox Text="{Binding DirectReplyInput}" PlaceholderText="{l:T multiplayer.direct.reply_placeholder}" PasswordChar="•" RevealPassword="{Binding DirectReplyInputShown}" />
-                <Button Grid.Column="1" Command="{Binding ToggleDirectReplyInputShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
-                    <Panel>
-                      <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !DirectReplyInputShown}" />
-                      <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding DirectReplyInputShown}" />
-                    </Panel>
-                  </Button>
-                <Button Grid.Column="2" Content="{l:T multiplayer.direct.connect}" Command="{Binding AddDirectReplyCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
-              </Grid>
-              <StackPanel Spacing="6" IsVisible="{Binding IsDirectHost}">
-                <TextBlock Text="{l:T multiplayer.matrix.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
-                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap"
-                           Text="{l:T multiplayer.matrix.hint}" />
-                <CheckBox Content="{l:T multiplayer.matrix.include_full_lan}" IsChecked="{Binding MatrixFullLan}" IsEnabled="{Binding CanUseFullLan}" />
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                  <Button Classes="primary" Content="{l:T multiplayer.matrix.start}" Command="{Binding RunMatrixCommand}" IsEnabled="{Binding !MatrixRunning}" />
-                  <Button Content="{l:T common.stop}" Command="{Binding CancelMatrixCommand}" IsVisible="{Binding MatrixRunning}" />
-                </StackPanel>
-              </StackPanel>
-              <!-- 加入方：房主请求全条件测试，用户确认后才开始 -->
-              <Border Classes="card" Margin="0" IsVisible="{Binding TestRequestPending}">
-                <StackPanel Spacing="6">
-                  <TextBlock Text="{l:T multiplayer.matrix.request_title}" FontWeight="SemiBold" />
-                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.matrix.request_hint}" />
-                  <CheckBox Content="{l:T multiplayer.matrix.allow_full_lan}" IsChecked="{Binding TestAllowFullLan}" IsVisible="{Binding TestRequestWantsFullLan}" IsEnabled="{Binding CanUseFullLan}" />
-                  <CheckBox Content="{l:T multiplayer.matrix.allow_exit}" IsChecked="{Binding TestAllowExit}" IsVisible="{Binding TestRequestWantsFullLan}" IsEnabled="{Binding TestAllowFullLan}" />
-                  <StackPanel Orientation="Horizontal" Spacing="6">
-                    <Button Classes="amber" Content="{l:T multiplayer.matrix.accept}" Command="{Binding AcceptTestRequestCommand}" />
-                    <Button Content="{l:T multiplayer.matrix.decline}" Command="{Binding DeclineTestRequestCommand}" />
+                    <ItemsControl ItemsSource="{Binding PrivateLines}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:PrivateLine">
+                          <SelectableTextBlock Text="{Binding Display}" TextWrapping="Wrap" FontSize="13" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding HasPrivatePeer}">
+                      <TextBox Text="{Binding PrivateInput}" PlaceholderText="{l:T multiplayer.private.input_placeholder}" MaxLength="2000" />
+                      <Button Grid.Column="1" Classes="primary" Content="{l:T common.send}" Command="{Binding SendPrivateCommand}" Margin="6,0,0,0" />
+                      <Button Grid.Column="2" Content="{l:T multiplayer.private.send_file}" Command="{Binding SendFileCommand}" Margin="6,0,0,0" />
+                    </Grid>
                   </StackPanel>
-                </StackPanel>
-              </Border>
-              <ItemsControl ItemsSource="{Binding MatrixLines}" IsVisible="{Binding !!MatrixLines.Count}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,monospace" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" /></DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </Border>
-
-          <!-- 聊天 -->
-          <Border Classes="card" Margin="0" IsVisible="{Binding !IsIdle}">
-            <StackPanel Spacing="6">
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Classes="h2" Text="{l:T multiplayer.chat.title}" Margin="0" VerticalAlignment="Center" />
-                <Button Grid.Column="1" Content="{l:T multiplayer.chat.export}" Click="ExportChat_Click" />
-              </Grid>
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ChatStatus}" />
-              <Border Background="{DynamicResource PageBg}" CornerRadius="6" Padding="8" Height="220">
-                <ScrollViewer Name="ChatScroll">
-                  <ItemsControl ItemsSource="{Binding ChatLines}">
+                  <TextBlock x:Name="FileOfferPointer" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.file.see_above}" IsVisible="{Binding HasFileOffers}" />
+                  <ItemsControl ItemsSource="{Binding Transfers}">
                     <ItemsControl.ItemTemplate>
-                      <DataTemplate DataType="vm:ChatLine">
-                        <Grid ColumnDefinitions="Auto,*" Margin="0,2">
-                          <TextBlock Text="{Binding Time}" Classes="caption" Margin="0,2,8,0" />
-                          <StackPanel Grid.Column="1">
-                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" IsVisible="{Binding !IsNotice}" />
-                            <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" Classes.hint="{Binding IsNotice}" />
-                          </StackPanel>
+                      <DataTemplate DataType="vm:TransferItem">
+                        <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2">
+                          <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center" />
+                          <Button Grid.Column="1" Content="{l:T common.cancel}" Margin="8,0,0,0" IsVisible="{Binding IsActive}"
+                                  Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).CancelTransferCommand}" CommandParameter="{Binding}" />
+                          <Button Grid.Column="2" Content="{l:T multiplayer.private.open_folder}" Margin="6,0,0,0" IsVisible="{Binding CanOpen}"
+                                  Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).OpenTransferFolderCommand}" CommandParameter="{Binding}" />
                         </Grid>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
-                </ScrollViewer>
+                </StackPanel>
               </Border>
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBox Text="{Binding ChatInput}" PlaceholderText="{l:T multiplayer.chat.input_placeholder}" MaxLength="500" KeyDown="ChatInput_KeyDown" IsEnabled="{Binding ChatReady}" />
-                <Button Grid.Column="1" Classes="primary" Content="{l:T common.send}" Command="{Binding SendChatCommand}" IsEnabled="{Binding ChatReady}" Margin="6,0,0,0" />
-              </Grid>
-            </StackPanel>
-          </Border>
 
-          <!-- 私聊和传文件（邀请房间）：端到端加密，房主只转交 -->
-          <Border Classes="card" Margin="0" IsVisible="{Binding HasOnlinePeers}">
-            <StackPanel Spacing="6">
-              <TextBlock Classes="h2" Text="{l:T multiplayer.private.title}" Margin="0" />
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.private.hint}" />
-              <ItemsControl ItemsSource="{Binding OnlinePeers}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate DataType="vm:OnlinePeerItem">
-                    <Grid ColumnDefinitions="*,Auto" Margin="0,2">
-                      <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                      <Button Grid.Column="1" Content="{l:T multiplayer.private.choose}" Margin="8,0,0,0"
-                              Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).ChoosePeerCommand}" CommandParameter="{Binding}" />
+              <!-- Details: room settings (host), the invite card (host), how to get in (guest), direct room, connection. -->
+              <StackPanel x:Name="DetailsColumn" Grid.Column="4" Spacing="14">
+                <!-- Room settings drawer (⋯ › Room settings) -->
+                <Border x:Name="RoomSettingsCard" Classes="card" Margin="0" IsVisible="{Binding RoomSettingsOpen}">
+                  <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h2" Text="{l:T multiplayer.room.settings}" Margin="0" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding ToggleRoomSettingsCommand}" ToolTip.Tip="{l:T common.close}" />
                     </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-              <StackPanel Spacing="6" IsVisible="{Binding HasPrivatePeer}">
-                <TextBlock FontWeight="SemiBold" Text="{Binding SelectedPeer.Label}" />
-                <Grid ColumnDefinitions="*,Auto,Auto">
-                  <TextBox Text="{Binding PrivateInput}" PlaceholderText="{l:T multiplayer.private.input_placeholder}" MaxLength="2000" />
-                  <Button Grid.Column="1" Classes="primary" Content="{l:T common.send}" Command="{Binding SendPrivateCommand}" Margin="6,0,0,0" />
-                  <Button Grid.Column="2" Content="{l:T multiplayer.private.send_file}" Command="{Binding SendFileCommand}" Margin="6,0,0,0" />
-                </Grid>
-              </StackPanel>
-              <ItemsControl ItemsSource="{Binding PrivateLines}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate DataType="vm:PrivateLine">
-                    <SelectableTextBlock Text="{Binding Display}" TextWrapping="Wrap" FontSize="13" />
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-              <ItemsControl ItemsSource="{Binding FileOffers}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate DataType="vm:FileOfferItem">
-                    <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2">
-                      <TextBlock Text="{Binding Label}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                      <Button Grid.Column="1" Classes="primary" Content="{l:T multiplayer.private.accept}" Margin="8,0,0,0"
-                              Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).AcceptFileCommand}" CommandParameter="{Binding}" />
-                      <Button Grid.Column="2" Content="{l:T multiplayer.private.decline}" Margin="6,0,0,0"
-                              Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DeclineFileCommand}" CommandParameter="{Binding}" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-              <ItemsControl ItemsSource="{Binding Transfers}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate DataType="vm:TransferItem">
-                    <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2">
-                      <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center" />
-                      <Button Grid.Column="1" Content="{l:T common.cancel}" Margin="8,0,0,0" IsVisible="{Binding IsActive}"
-                              Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).CancelTransferCommand}" CommandParameter="{Binding}" />
-                      <Button Grid.Column="2" Content="{l:T multiplayer.private.open_folder}" Margin="6,0,0,0" IsVisible="{Binding CanOpen}"
-                              Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).OpenTransferFolderCommand}" CommandParameter="{Binding}" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </Border>
+                    <TextBlock Text="{l:T multiplayer.room.who_join}" FontWeight="SemiBold" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.room.who_join_body}" />
+                    <TextBlock Text="{l:T multiplayer.room.who_find}" FontWeight="SemiBold" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.room.who_find_body}" />
+                    <Button x:Name="PublishRoomButton" Classes="ghost small" Content="{l:T multiplayer.room.publish}" Command="{Binding ShowTabCommand}" CommandParameter="public"
+                            IsVisible="{Binding ShowPublicNetworks}" HorizontalAlignment="Left" Padding="0,2" />
+                    <TextBlock Text="{l:T multiplayer.room.wait}" FontWeight="SemiBold" />
+                    <ComboBox x:Name="RoomKnockWaitBox" ItemsSource="{Binding KnockWaitChoices}" SelectedItem="{Binding SelectedRoomKnockWait}" MinWidth="160">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="vm:KnockWaitChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Text="{l:T multiplayer.room.mod_sync}" FontWeight="SemiBold" />
+                    <CheckBox x:Name="AllowModSyncBox" IsChecked="{Binding AllowModSync}">
+                      <TextBlock Text="{l:T multiplayer.room.mod_sync_allow}" TextWrapping="Wrap" />
+                    </CheckBox>
+                    <TextBlock Text="{l:T multiplayer.kick.banned_title}" FontWeight="SemiBold" />
+                    <TextBlock Classes="hint" FontSize="12" Text="{l:T multiplayer.room.removed_none}" IsVisible="{Binding !BannedPeople.Count}" />
+                    <ItemsControl x:Name="RemovedList" ItemsSource="{Binding BannedPeople}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:BannedItem">
+                          <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                            <TextBlock Text="{Binding Label}" FontFamily="Consolas,monospace" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            <Button Grid.Column="1" Classes="small" Content="{l:T multiplayer.kick.unban}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).UnbanCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
 
-          <!-- 房间成员 -->
-          <Border Classes="card" Margin="0" IsVisible="{Binding !IsIdle}">
-            <StackPanel Spacing="6">
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Classes="h2" Text="{l:T multiplayer.peers.title}" Margin="0" VerticalAlignment="Center" />
-                <Button Grid.Column="1" Content="{l:T multiplayer.room.stop}" Command="{Binding AskStopCommand}" />
-              </Grid>
-              <TextBlock Classes="hint" Text="{l:T multiplayer.peers.empty}" IsVisible="{Binding !Peers.Count}" />
-              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding TransportText}" />
-              <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource WarningText}" Text="{Binding ExitWarning}"
-                         IsVisible="{Binding ExitWarning, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-              <Panel IsVisible="{Binding ShowNetworkExit}">
-              <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !UsingGameProxy}">
-                <TextBlock Text="{l:T multiplayer.proxy.peer_label}" VerticalAlignment="Center" />
-                <ComboBox ItemsSource="{Binding ExitCandidates}" SelectedItem="{Binding SelectedExitPeer}" MinWidth="200">
-                  <ComboBox.ItemTemplate>
-                    <DataTemplate DataType="vm:PeerItem"><TextBlock Text="{Binding Meta}" /></DataTemplate>
-                  </ComboBox.ItemTemplate>
-                </ComboBox>
-                <Button Content="{l:T multiplayer.proxy.start}" Command="{Binding UseGameProxyCommand}" IsEnabled="{Binding CanUseGameProxy}"
-                        ToolTip.Tip="{l:T multiplayer.proxy.start_tip}" />
-              </WrapPanel>
-              </Panel>
-              <Border IsVisible="{Binding UsingGameProxy}" BorderBrush="{DynamicResource Warning}" BorderThickness="1" CornerRadius="6" Padding="8">
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="{Binding GameProxyBanner}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                  <Button Grid.Column="1" Content="{l:T multiplayer.proxy.stop}" Command="{Binding StopGameProxyCommand}" Margin="8,0,0,0" />
-                </Grid>
-              </Border>
-              <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding CanUseExit}">
-                <TextBlock Text="{l:T multiplayer.exit.peer_label}" VerticalAlignment="Center" />
-                <ComboBox ItemsSource="{Binding ExitCandidates}" SelectedItem="{Binding SelectedExitPeer}" MinWidth="200">
-                  <ComboBox.ItemTemplate>
-                    <DataTemplate DataType="vm:PeerItem"><TextBlock Text="{Binding Meta}" /></DataTemplate>
-                  </ComboBox.ItemTemplate>
-                </ComboBox>
-                <Button Content="{l:T common.start}" Command="{Binding UseExitNodeCommand}" IsEnabled="{Binding !UsingExit}" ToolTip.Tip="{l:T multiplayer.exit.start_tooltip}" />
-              </WrapPanel>
-              <ItemsControl ItemsSource="{Binding Peers}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate DataType="vm:PeerItem">
-                    <StackPanel Margin="0,3">
-                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                      <TextBlock Text="{Binding Meta}" Classes="caption" />
+                <!-- Invite card: the code (masked), copy, copy a message, what this invite allows; "Change…" folds out the options. -->
+                <Border x:Name="InviteCard" Classes="card" Margin="0" IsVisible="{Binding IsHosting}">
+                  <StackPanel Spacing="8">
+                    <TextBlock Classes="h2" Text="{l:T multiplayer.invite.button}" Margin="0" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.hint}" IsVisible="{Binding !HasInvite}" />
+                    <Button x:Name="CreateFirstInviteButton" Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" IsVisible="{Binding !HasInvite}" HorizontalAlignment="Left" />
+                    <StackPanel Spacing="6" IsVisible="{Binding HasInvite}">
+                      <TextBox x:Name="InviteCodeBox" Text="{Binding InviteDisplay}" IsReadOnly="True" FontFamily="Consolas,monospace" TextWrapping="Wrap" />
+                      <WrapPanel ItemSpacing="6" LineSpacing="6">
+                        <Button x:Name="CopyInviteButton" Classes="primary" Content="{l:T multiplayer.invite.copy}" Command="{Binding CopyInviteCommand}" />
+                        <Button x:Name="CopyInviteMessageButton" Content="{l:T multiplayer.invite.copy_message}" Command="{Binding CopyInviteMessageCommand}" />
+                        <Button Command="{Binding ToggleInviteShownCommand}">
+                          <Panel>
+                            <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !InviteShown}" />
+                            <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding InviteShown}" />
+                          </Panel>
+                        </Button>
+                      </WrapPanel>
+                      <TextBlock x:Name="InviteTermsText" FontSize="12" TextWrapping="Wrap" Text="{Binding InviteTerms}" />
+                      <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.clipboard.autoclear_hint}" />
                     </StackPanel>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </Border>
+                    <Button x:Name="InviteChangeButton" Classes="ghost small" Content="{l:T multiplayer.invite.change}" Command="{Binding ToggleInviteOptionsCommand}" HorizontalAlignment="Left" Padding="0,2" />
+                    <StackPanel x:Name="InviteOptions" Spacing="8" IsVisible="{Binding InviteOptionsOpen}">
+                      <TextBlock Text="{l:T multiplayer.invite.dialog_title}" FontWeight="SemiBold" />
+                      <WrapPanel ItemSpacing="8" LineSpacing="6">
+                        <TextBlock Text="{l:T multiplayer.invite.uses}" VerticalAlignment="Center" />
+                        <NumericUpDown Value="{Binding InviteUses}" Minimum="1" Maximum="20" Increment="1" FormatString="0" MinWidth="110" />
+                        <TextBlock Text="{l:T multiplayer.invite.expiry}" VerticalAlignment="Center" />
+                        <ComboBox ItemsSource="{Binding InviteExpiryChoices}" SelectedItem="{Binding SelectedInviteExpiry}" MinWidth="150">
+                          <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="vm:InviteExpiryChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                          </ComboBox.ItemTemplate>
+                        </ComboBox>
+                      </WrapPanel>
+                      <CheckBox Content="{l:T multiplayer.invite.auto_approve}" IsChecked="{Binding InviteAutoApprove}" IsVisible="{Binding ShowInviteAutoApprove}" />
+                      <WrapPanel ItemSpacing="6" LineSpacing="6">
+                        <Button Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" />
+                        <Button Content="{l:T multiplayer.invite.close}" Command="{Binding ToggleInviteOptionsCommand}" />
+                      </WrapPanel>
+                    </StackPanel>
+                    <!-- Invites not used up yet: can be revoked -->
+                    <StackPanel Spacing="4" IsVisible="{Binding !!PendingInvites.Count}">
+                      <TextBlock Text="{l:T multiplayer.invite.pending_title}" FontWeight="SemiBold" />
+                      <ItemsControl ItemsSource="{Binding PendingInvites}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate DataType="vm:PendingInviteItem">
+                            <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2">
+                              <TextBlock Text="{Binding Label}" FontFamily="Consolas,monospace" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" />
+                              <Button Grid.Column="1" Classes="small" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).TogglePendingInviteShownCommand}" CommandParameter="{Binding}" Margin="6,0,0,0">
+                                <Panel>
+                                  <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !Shown}" />
+                                  <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding Shown}" />
+                                </Panel>
+                              </Button>
+                              <Button Grid.Column="2" Classes="small" Content="{l:T multiplayer.invite.revoke}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RevokeInviteCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
+                <!-- Guest: how to get into the game -->
+                <Border x:Name="GuestCard" Classes="card" Margin="0" IsVisible="{Binding IsJoined}">
+                  <StackPanel Spacing="8">
+                    <TextBlock Classes="h2" Text="{l:T multiplayer.join.active}" Margin="0" />
+                    <TextBlock Text="{l:T multiplayer.join.address_label}" />
+                    <TextBox Text="{Binding JoinAddress}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="16" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.join.address_hint}" />
+                    <TextBlock Text="{Binding HostFingerprintText}" FontFamily="Consolas,monospace" IsVisible="{Binding HasHostFingerprint}" TextWrapping="Wrap" />
+                    <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" HorizontalAlignment="Stretch" ToolTip.Tip="{l:T multiplayer.join.version_label}" />
+                    <WrapPanel ItemSpacing="6" LineSpacing="6">
+                      <Button Classes="primary" Content="{l:T multiplayer.join.launch}" Command="{Binding LaunchAndJoinCommand}" />
+                      <Button Content="{l:T multiplayer.join.add_to_servers}" Command="{Binding AddToServersCommand}" />
+                    </WrapPanel>
+                    <!-- Remote control of the host (they say yes every time) -->
+                    <StackPanel Spacing="4" IsVisible="{Binding ShowRemoteControl}">
+                      <Button Content="{l:T multiplayer.remote.control_host}" Command="{Binding ControlHostCommand}" IsEnabled="{Binding CanRemoteControl}" HorizontalAlignment="Left" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
+                <!-- 直连房间：码、路径、全条件测试 -->
+                <Border Classes="card" Margin="0" IsVisible="{Binding IsDirect}">
+                  <StackPanel Spacing="8">
+                    <TextBlock Classes="h2" Text="{l:T multiplayer.direct.title}" Margin="0" />
+                    <TextBlock Text="{Binding CurrentPathText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding DirectHint}" />
+                    <StackPanel IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <TextBlock Text="{l:T multiplayer.direct.invite_label}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding IsDirectHost}" />
+                      <TextBlock Text="{l:T multiplayer.direct.reply_label}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding !IsDirectHost}" />
+                    </StackPanel>
+                    <!-- 直连码默认打码；两种码都带着本机的公网地址 -->
+                    <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <TextBox Text="{Binding MyDirectCodeDisplay}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" MaxHeight="70" />
+                      <Button Grid.Column="1" Command="{Binding ToggleDirectCodeShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
+                        <Panel>
+                          <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !DirectCodeShown}" />
+                          <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding DirectCodeShown}" />
+                        </Panel>
+                      </Button>
+                      <Button Grid.Column="2" Content="{l:T common.copy}" Command="{Binding CopyDirectCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                    </Grid>
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.clipboard.autoclear_hint}"
+                               IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.direct.ip_warning}"
+                               IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding IsDirectHost}">
+                      <TextBox Text="{Binding DirectReplyInput}" PlaceholderText="{l:T multiplayer.direct.reply_placeholder}" PasswordChar="•" RevealPassword="{Binding DirectReplyInputShown}" />
+                      <Button Grid.Column="1" Command="{Binding ToggleDirectReplyInputShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
+                        <Panel>
+                          <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !DirectReplyInputShown}" />
+                          <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding DirectReplyInputShown}" />
+                        </Panel>
+                      </Button>
+                      <Button Grid.Column="2" Content="{l:T multiplayer.direct.connect}" Command="{Binding AddDirectReplyCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                    </Grid>
+                    <StackPanel Spacing="6" IsVisible="{Binding IsDirectHost}">
+                      <TextBlock Text="{l:T multiplayer.matrix.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
+                      <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.matrix.hint}" />
+                      <CheckBox Content="{l:T multiplayer.matrix.include_full_lan}" IsChecked="{Binding MatrixFullLan}" IsEnabled="{Binding CanUseFullLan}" />
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Button Classes="primary" Content="{l:T multiplayer.matrix.start}" Command="{Binding RunMatrixCommand}" IsEnabled="{Binding !MatrixRunning}" />
+                        <Button Content="{l:T common.stop}" Command="{Binding CancelMatrixCommand}" IsVisible="{Binding MatrixRunning}" />
+                      </StackPanel>
+                    </StackPanel>
+                    <!-- 加入方：房主请求全条件测试，用户确认后才开始 -->
+                    <Border Classes="card" Margin="0" IsVisible="{Binding TestRequestPending}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="{l:T multiplayer.matrix.request_title}" FontWeight="SemiBold" />
+                        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.matrix.request_hint}" />
+                        <CheckBox Content="{l:T multiplayer.matrix.allow_full_lan}" IsChecked="{Binding TestAllowFullLan}" IsVisible="{Binding TestRequestWantsFullLan}" IsEnabled="{Binding CanUseFullLan}" />
+                        <CheckBox Content="{l:T multiplayer.matrix.allow_exit}" IsChecked="{Binding TestAllowExit}" IsVisible="{Binding TestRequestWantsFullLan}" IsEnabled="{Binding TestAllowFullLan}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Button Classes="amber" Content="{l:T multiplayer.matrix.accept}" Command="{Binding AcceptTestRequestCommand}" />
+                          <Button Content="{l:T multiplayer.matrix.decline}" Command="{Binding DeclineTestRequestCommand}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding MatrixLines}" IsVisible="{Binding !!MatrixLines.Count}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,monospace" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" /></DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+
+                <!-- Connection: how each computer is reached; using someone's computer to get online. -->
+                <Expander x:Name="ConnectionExpander" Header="{l:T multiplayer.peers.title}" HorizontalAlignment="Stretch">
+                  <StackPanel Spacing="6">
+                    <TextBlock Classes="hint" Text="{l:T multiplayer.peers.empty}" IsVisible="{Binding !Peers.Count}" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding TransportText}" />
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource WarningText}" Text="{Binding ExitWarning}"
+                               IsVisible="{Binding ExitWarning, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <Panel IsVisible="{Binding ShowNetworkExit}">
+                      <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !UsingGameProxy}">
+                        <TextBlock Text="{l:T multiplayer.proxy.peer_label}" VerticalAlignment="Center" />
+                        <ComboBox ItemsSource="{Binding ExitCandidates}" SelectedItem="{Binding SelectedExitPeer}" MinWidth="200">
+                          <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="vm:PeerItem"><TextBlock Text="{Binding Meta}" /></DataTemplate>
+                          </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <Button Content="{l:T multiplayer.proxy.start}" Command="{Binding UseGameProxyCommand}" IsEnabled="{Binding CanUseGameProxy}"
+                                ToolTip.Tip="{l:T multiplayer.proxy.start_tip}" />
+                      </WrapPanel>
+                    </Panel>
+                    <Border IsVisible="{Binding UsingGameProxy}" BorderBrush="{DynamicResource Warning}" BorderThickness="1" CornerRadius="6" Padding="8">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="{Binding GameProxyBanner}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="{l:T multiplayer.proxy.stop}" Command="{Binding StopGameProxyCommand}" Margin="8,0,0,0" />
+                      </Grid>
+                    </Border>
+                    <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding CanUseExit}">
+                      <TextBlock Text="{l:T multiplayer.exit.peer_label}" VerticalAlignment="Center" />
+                      <ComboBox ItemsSource="{Binding ExitCandidates}" SelectedItem="{Binding SelectedExitPeer}" MinWidth="200">
+                        <ComboBox.ItemTemplate>
+                          <DataTemplate DataType="vm:PeerItem"><TextBlock Text="{Binding Meta}" /></DataTemplate>
+                        </ComboBox.ItemTemplate>
+                      </ComboBox>
+                      <Button Content="{l:T common.start}" Command="{Binding UseExitNodeCommand}" IsEnabled="{Binding !UsingExit}" ToolTip.Tip="{l:T multiplayer.exit.start_tooltip}" />
+                    </WrapPanel>
+                    <ItemsControl ItemsSource="{Binding Peers}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:PeerItem">
+                          <StackPanel Margin="0,3">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Meta}" Classes="caption" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Expander>
+              </StackPanel>
+            </Grid>
+          </StackPanel>
         </StackPanel>
 
         <!-- ===== Public rooms (§6.16) ===== -->
         <StackPanel x:Name="PublicPanel" Spacing="14" IsVisible="{Binding IsPublicTab}">
-          <Border Classes="card" Margin="0" IsVisible="{Binding ShowPublicNetworks}">
+          <!-- No public network yet (the default): where public rooms come from. -->
+          <Border x:Name="PublicSetupCard" Classes="card" Margin="0" IsVisible="{Binding ShowPublicSetup}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="h2" Text="{l:T multiplayer.public.title}" Margin="0" />
+              <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.public.setup_body}" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="{l:T multiplayer.public.setup_have_address}" />
+                <Button x:Name="AddPublicNetworkButton" Grid.Column="1" Classes="primary" Margin="12,0,0,0" Content="{l:T multiplayer.public.setup_add}" Command="{Binding AddPublicNetworkCommand}" />
+              </Grid>
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.setup_friend_code}" />
+            </StackPanel>
+          </Border>
+          <Border x:Name="PublicCard" Classes="card" Margin="0" IsVisible="{Binding !ShowPublicSetup}">
             <StackPanel Spacing="8">
               <Grid ColumnDefinitions="*,Auto">
                 <StackPanel Spacing="2">
                   <TextBlock Classes="h2" Text="{l:T multiplayer.public.title}" Margin="0" />
                   <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding PublicStateText}" Classes.hint="{Binding !IsPublicConnected}" />
+                  <TextBlock Classes="caption" Text="{Binding PublicRefreshedText}" IsVisible="{Binding IsPublicConnected}" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Top">
                   <Button Classes="primary" Content="{l:T multiplayer.public.connect}" Command="{Binding ConnectPublicCommand}" IsVisible="{Binding !IsPublicConnected}" IsEnabled="{Binding !IsPublicConnecting}" />
                   <Button Content="{l:T multiplayer.public.refresh}" Command="{Binding RefreshRoomsCommand}" IsVisible="{Binding IsPublicConnected}" IsEnabled="{Binding !IsRefreshingRooms}" />
                   <Button Content="{l:T multiplayer.public.disconnect}" Command="{Binding DisconnectPublicCommand}" IsVisible="{Binding IsPublicConnected}" />
+                  <Button x:Name="CancelConnectButton" Content="{l:T common.cancel}" Command="{Binding DisconnectPublicCommand}" IsVisible="{Binding IsPublicConnecting}" />
                 </StackPanel>
               </Grid>
               <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.hint}" />
@@ -586,20 +781,40 @@
                   </WrapPanel>
                 </StackPanel>
               </Border>
-              <!-- 第一次连之前：别人能看到什么、看不到什么 -->
-              <Border Classes="card" Margin="0" IsVisible="{Binding PublicNoticeOpen}">
-                <StackPanel Spacing="8">
-                  <TextBlock Text="{l:T multiplayer.public.notice_title}" FontWeight="SemiBold" />
-                  <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.notice_body}" />
-                  <WrapPanel ItemSpacing="6" LineSpacing="6">
-                    <Button Classes="primary" Content="{l:T multiplayer.public.notice_accept}" Command="{Binding AcceptPublicNoticeCommand}" />
-                    <Button Content="{l:T common.cancel}" Command="{Binding ClosePublicNoticeCommand}" />
-                  </WrapPanel>
-                </StackPanel>
-              </Border>
+              <!-- Before the first connect: what others on the network can and cannot see (locked). -->
+              <safety:SafetyPanel x:Name="PublicNoticePanel" Title="{l:T multiplayer.public.notice_title}" IsVisible="{Binding PublicNoticeOpen}">
+                <safety:SafetyPanel.Body>
+                  <StackPanel Spacing="8">
+                    <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.public.notice_body}" />
+                    <WrapPanel ItemSpacing="8" LineSpacing="6">
+                      <safety:SafetyButton Kind="Safe" Content="{l:T common.cancel}" Command="{Binding ClosePublicNoticeCommand}" />
+                      <safety:SafetyButton Kind="Confirm" Content="{l:T multiplayer.public.notice_accept}" Command="{Binding AcceptPublicNoticeCommand}" />
+                    </WrapPanel>
+                  </StackPanel>
+                </safety:SafetyPanel.Body>
+              </safety:SafetyPanel>
               <!-- 房间列表（没在房间里时） -->
               <StackPanel Spacing="6" IsVisible="{Binding IsIdle}">
-                <ItemsControl ItemsSource="{Binding PublicRooms}" IsVisible="{Binding IsPublicConnected}">
+                <WrapPanel x:Name="RoomFilters" ItemSpacing="8" LineSpacing="6" IsVisible="{Binding IsPublicConnected}">
+                  <TextBox x:Name="RoomSearchBox" Text="{Binding RoomSearch}" PlaceholderText="{l:T multiplayer.public.search}" MinWidth="220" ToolTip.Tip="/" />
+                  <ComboBox x:Name="RoomGameBox" ItemsSource="{Binding RoomGameChoices}" SelectedItem="{Binding SelectedRoomGame}" MinWidth="140">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="vm:RoomGameChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <CheckBox x:Name="OpenRoomsBox" IsChecked="{Binding OpenRoomsOnly}"><TextBlock Text="{l:T multiplayer.public.open_only}" TextWrapping="Wrap" /></CheckBox>
+                  <ComboBox x:Name="RoomSortBox" ItemsSource="{Binding RoomSortChoices}" SelectedItem="{Binding SelectedRoomSort}" MinWidth="140">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="vm:RoomSortChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                </WrapPanel>
+                <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowNoPublicRooms}">
+                  <TextBlock Classes="hint" VerticalAlignment="Center" TextWrapping="Wrap" Text="{l:T multiplayer.public.empty}" />
+                  <Button Grid.Column="1" Content="{l:T multiplayer.public.refresh}" Command="{Binding RefreshRoomsCommand}" Margin="8,0,0,0" />
+                </Grid>
+                <TextBlock x:Name="NoMatchingRoomsText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.public.no_match}" IsVisible="{Binding ShowNoMatchingRooms}" />
+                <ItemsControl x:Name="PublicRoomList" ItemsSource="{Binding VisibleRooms}" IsVisible="{Binding IsPublicConnected}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:PublicRoomItem">
                       <Grid ColumnDefinitions="*,Auto" Margin="0,2">
@@ -677,6 +892,7 @@
                   <TextBox Text="{Binding InviteText}" PlaceholderText="{l:T multiplayer.jayserver.invite_placeholder}" />
                   <Button Grid.Column="1" Classes="primary" Margin="6,0,0,0" Content="{l:T multiplayer.jayserver.join}" Command="{Binding JoinCommand}" IsEnabled="{Binding !IsBusy}" />
                 </Grid>
+                <TextBlock x:Name="NoJayServersText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.jayserver.empty}" IsVisible="{Binding !Servers.Count}" />
                 <ItemsControl ItemsSource="{Binding Servers}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:JayServerItem">
@@ -707,6 +923,18 @@
               <StackPanel Spacing="8">
                 <TextBlock Classes="h2" Text="{l:T multiplayer.hostserver.title}" Margin="0" />
                 <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.hint}" />
+                <!-- Step bar: ① address ── ② prepare ── ③ start ── ④ invite (done ✓, current ●) -->
+                <ItemsControl x:Name="ServerWizardSteps" ItemsSource="{Binding WizardSteps}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel ItemSpacing="14" LineSpacing="4" /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:WizardStepItem">
+                      <TextBlock Text="{Binding Label}" Classes.hint="{Binding !IsCurrent}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock x:Name="ServerRunningText" Text="{l:T multiplayer.hostserver.running}" Foreground="{DynamicResource SuccessText}" FontWeight="SemiBold" IsVisible="{Binding IsRunning}" />
 
                 <!-- 第一步：玩家连的地址 -->
                 <StackPanel Spacing="6" IsVisible="{Binding NeedsInit}">
@@ -774,7 +1002,7 @@
                     <StackPanel Spacing="6">
                       <TextBox x:Name="HostServerLog" IsReadOnly="True" FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" MaxHeight="220" Text="{Binding LogText}" />
                       <Grid ColumnDefinitions="*,Auto">
-                        <TextBox Text="{Binding McCommand}" PlaceholderText="{l:T multiplayer.hostserver.command_placeholder}" />
+                        <TextBox x:Name="ServerCommandBox" Text="{Binding McCommand}" PlaceholderText="{l:T multiplayer.hostserver.command_placeholder}" KeyDown="ServerCommand_KeyDown" />
                         <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.send}" Command="{Binding SendCommandCommand}" />
                       </Grid>
                     </StackPanel>
@@ -790,6 +1018,9 @@
 
         <!-- ===== Multiplayer settings (§6.18) ===== -->
         <StackPanel x:Name="MpSettingsPanel" Spacing="14" IsVisible="{Binding IsSettingsTab}">
+          <!-- 手机通过当前网络出口上网。共享状态由提权守护确认。 -->
+          <c:HotspotSharingPanel DataContext="{Binding Hotspot}" />
+
           <!-- Safety code and friends -->
           <Border Classes="card" Margin="0">
             <StackPanel Spacing="8">
@@ -822,6 +1053,42 @@
                 <TextBlock Text="{l:T multiplayer.lobby.auto_copy}" TextWrapping="Wrap" />
               </CheckBox>
               <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.clipboard.autoclear_hint}" />
+              <TextBlock Text="{l:T multiplayer.settings.knock_wait}" TextWrapping="Wrap" />
+              <ComboBox x:Name="DefaultKnockWaitBox" ItemsSource="{Binding KnockWaitChoices}" SelectedItem="{Binding SelectedDefaultKnockWait}" MinWidth="160">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate DataType="vm:KnockWaitChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <CheckBox x:Name="RequestPopupBox" IsChecked="{Binding RequestPopup}">
+                <TextBlock Text="{l:T multiplayer.settings.request_popup}" TextWrapping="Wrap" />
+              </CheckBox>
+              <!-- Long-lived invites for regular friends: 30 days, revoke any time, still asks me and shows the safety code. -->
+              <TextBlock Text="{l:T multiplayer.longinvite.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.longinvite.hint}" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox x:Name="LongInviteLabelBox" Text="{Binding LongInviteLabel}" PlaceholderText="{l:T multiplayer.longinvite.label_placeholder}" MaxLength="40"
+                         c:EnterSubmit.Command="{Binding CreateLongInviteCommand}" />
+                <Button x:Name="CreateLongInviteButton" Grid.Column="1" Margin="6,0,0,0" Command="{Binding CreateLongInviteCommand}">
+                  <TextBlock Text="{l:T multiplayer.longinvite.create}" TextWrapping="Wrap" />
+                </Button>
+              </Grid>
+              <ItemsControl x:Name="LongInviteList" ItemsSource="{Binding LongInviteItems}" IsVisible="{Binding HasLongInvites}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:LongInviteItem">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                      <StackPanel Spacing="2">
+                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Label}" FontWeight="SemiBold" /><Run Text=" · " /><Run Text="{Binding Left}" /></TextBlock>
+                        <SelectableTextBlock Text="{Binding CodeDisplay}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <WrapPanel Grid.Column="1" ItemSpacing="6" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <Button Classes="small" Content="{l:T multiplayer.invite.show}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).ToggleLongInviteShownCommand}" CommandParameter="{Binding}" />
+                        <Button Classes="small" Content="{l:T common.copy}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).CopyLongInviteCommand}" CommandParameter="{Binding}" />
+                        <Button Classes="small long-revoke" Content="{l:T multiplayer.longinvite.revoke}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RevokeLongInviteCommand}" CommandParameter="{Binding}" />
+                      </WrapPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
             </StackPanel>
           </Border>
 
@@ -972,13 +1239,13 @@
             <TextBlock Classes="h2" Text="{l:T multiplayer.settings.component}" Margin="0" />
           <Border Classes="card" Margin="0">
             <StackPanel Spacing="8">
-              <Grid ColumnDefinitions="*,Auto">
+              <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                 <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" IsVisible="{Binding !IsComponentReady}">
+                <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
                   <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
                   <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
                   <Button Content="{l:T common.cancel}" Command="{Binding CancelDownloadCommand}" IsVisible="{Binding IsDownloading}" />
-                </StackPanel>
+                </WrapPanel>
               </Grid>
               <ProgressBar Value="{Binding DownloadPercent}" Maximum="100" IsVisible="{Binding IsDownloading}" />
               <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
@@ -1082,8 +1349,132 @@
     </ScrollViewer>
 
     <!-- 消息被 ✕ 关掉后整张卡片一起收起，不留空卡片 -->
-    <Border svc:ThemeRegion.Name="multiplayer.status" Grid.Row="3" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
+    <Border svc:ThemeRegion.Name="multiplayer.status" Grid.Row="4" Classes="card" Margin="0" IsVisible="{Binding #PageStatus.IsShowing}">
       <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
+    </Border>
+
+    <!-- "Connection problems?" (official §6.18): a 560 drawer over the page (full width in compact windows). One check, a plain
+         conclusion, suggestions, and the technical details folded away. Esc closes; Ctrl+Shift+D opens. -->
+    <Border x:Name="DiagnosticsDrawer" Grid.Row="0" Grid.RowSpan="5" Width="560" HorizontalAlignment="Right" ZIndex="10"
+            Classes="card" Margin="0" Padding="16" BoxShadow="0 4 24 0 #40000000" IsVisible="{Binding DiagnosticsOpen}">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+          <TextBlock Classes="h2" Text="{l:T multiplayer.room.problems}" Margin="0" VerticalAlignment="Center" />
+          <Button x:Name="CloseDiagnosticsButton" Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding CloseDiagnosticsCommand}" ToolTip.Tip="{l:T common.close}" />
+        </Grid>
+        <ScrollViewer>
+          <StackPanel Spacing="10">
+            <TextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.diag.intro}" />
+            <Button x:Name="DiagnosticsCheckButton" Classes="primary" Content="{l:T multiplayer.network.check}" Command="{Binding CheckNetworkCommand}" IsEnabled="{Binding !IsCheckingNetwork}" HorizontalAlignment="Left" />
+            <TextBlock x:Name="DiagnosticsVerdict" Text="{Binding NetworkVerdict}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding HasNetworkVerdict}" />
+            <TextBlock Text="{l:T multiplayer.diag.suggest}" FontWeight="SemiBold" />
+            <WrapPanel ItemSpacing="6" LineSpacing="6">
+              <Button x:Name="SwitchRelayButton" Content="{l:T multiplayer.diag.switch_relay}" Command="{Binding SwitchRelayCommand}" />
+              <Button x:Name="DebugOnButton" Content="{l:T multiplayer.diag.debug_on}" Command="{Binding TurnOnDebugModeCommand}" IsVisible="{Binding !DebugMode}" />
+              <Button x:Name="DrawerExportButton" Content="{l:T multiplayer.diagnostics.export}" Click="ExportDiagnostics_Click" />
+            </WrapPanel>
+            <CheckBox Content="{l:T multiplayer.diagnostics.include_ips}" IsChecked="{Binding IncludePublicIps}" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.diag.export_hint}" />
+            <Expander x:Name="DiagnosticsDetails" Header="{l:T multiplayer.diag.details}" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="8">
+                <SelectableTextBlock Text="{Binding NetworkDetails}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap"
+                                     IsVisible="{Binding NetworkDetails, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <SelectableTextBlock Text="{Binding TransportText}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding !IsIdle}" />
+                <ItemsControl ItemsSource="{Binding Peers}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:PeerItem">
+                      <SelectableTextBlock FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" Text="{Binding Meta}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <ItemsControl ItemsSource="{Binding DebugLines}" IsVisible="{Binding DebugMode}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" /></DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Expander>
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- Drill mode (official §9.5): a pretend friend plays the risky moments; each answer is explained on the spot.
+         Same drawer shape as the diagnostics one. Nothing in it connects anywhere. -->
+    <Border x:Name="DrillDrawer" Grid.Row="0" Grid.RowSpan="5" Width="560" HorizontalAlignment="Right" ZIndex="11"
+            Classes="card" Margin="0" Padding="16" BoxShadow="0 4 24 0 #40000000" IsVisible="{Binding DrillOpen}">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+          <TextBlock Classes="h2" Text="{l:T drill.title}" Margin="0" VerticalAlignment="Center" TextWrapping="Wrap" />
+          <Button x:Name="CloseDrillButton" Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding CloseDrillCommand}" ToolTip.Tip="{l:T common.close}" />
+        </Grid>
+        <ScrollViewer>
+          <StackPanel Spacing="12">
+            <TextBlock Classes="hint" TextWrapping="Wrap" Text="{l:T drill.intro}" />
+            <StackPanel Spacing="12" IsVisible="{Binding !DrillDone}">
+              <TextBlock x:Name="DrillProgressText" Classes="hint" Text="{Binding DrillProgress}" />
+              <Border Classes="card" Padding="14" Margin="0">
+                <StackPanel Spacing="10">
+                  <TextBlock x:Name="DrillPromptText" Text="{Binding DrillPrompt}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                  <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="6" IsVisible="{Binding DrillShowsCodes}">
+                    <TextBlock Classes="hint" Text="{l:T drill.code_shown}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="DrillShownCodeText" Grid.Column="1" Text="{Binding DrillShownCode}" FontFamily="Consolas,Menlo,monospace" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="1" Classes="hint" Text="{l:T drill.code_said}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="DrillSaidCodeText" Grid.Row="1" Grid.Column="1" Text="{Binding DrillSaidCode}" FontFamily="Consolas,Menlo,monospace" FontSize="18" FontWeight="SemiBold" />
+                  </Grid>
+                  <WrapPanel ItemSpacing="8" LineSpacing="6" IsVisible="{Binding DrillAsking}">
+                    <Button x:Name="DrillNoButton" Content="{Binding DrillNoText}" Command="{Binding DrillAnswerNoCommand}" />
+                    <Button x:Name="DrillYesButton" Content="{Binding DrillYesText}" Command="{Binding DrillAnswerYesCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+              <StackPanel x:Name="DrillFeedback" Spacing="6" IsVisible="{Binding DrillExplaining}">
+                <TextBlock x:Name="DrillVerdictText" Text="{Binding DrillVerdict}" FontWeight="SemiBold" Classes.ok="{Binding DrillRight}" Classes.warn="{Binding !DrillRight}" />
+                <TextBlock x:Name="DrillLessonText" Text="{Binding DrillLesson}" TextWrapping="Wrap" />
+                <Button x:Name="DrillNextButton" Classes="primary" Content="{l:T drill.next}" Command="{Binding DrillNextCommand}" HorizontalAlignment="Left" />
+              </StackPanel>
+            </StackPanel>
+            <StackPanel x:Name="DrillDonePanel" Spacing="10" IsVisible="{Binding DrillDone}">
+              <TextBlock x:Name="DrillScoreText" Text="{Binding DrillScore}" TextWrapping="Wrap" FontWeight="SemiBold" />
+              <WrapPanel ItemSpacing="8" LineSpacing="6">
+                <Button x:Name="DrillRestartButton" Content="{l:T drill.again}" Command="{Binding DrillRestartCommand}" />
+                <Button x:Name="DrillFinishButton" Content="{l:T common.close}" Command="{Binding CloseDrillCommand}" />
+              </WrapPanel>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- The two short lessons (official §9.5): five illustrated cards each, ← → to page, Esc closes. -->
+    <Border x:Name="LessonDrawer" Grid.Row="0" Grid.RowSpan="5" Width="560" HorizontalAlignment="Right" ZIndex="11"
+            Classes="card" Margin="0" Padding="16" BoxShadow="0 4 24 0 #40000000" IsVisible="{Binding LessonOpen}">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+          <TextBlock x:Name="LessonHeadingText" Classes="h2" Text="{Binding LessonHeading}" Margin="0" VerticalAlignment="Center" TextWrapping="Wrap" />
+          <Button x:Name="CloseLessonButton" Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding CloseLessonCommand}" ToolTip.Tip="{l:T common.close}" />
+        </Grid>
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="0,12,0,0">
+          <Button x:Name="LessonPreviousButton" Content="{l:T lesson.previous}" Command="{Binding LessonPreviousCommand}" IsVisible="{Binding LessonHasPrevious}" />
+          <TextBlock x:Name="LessonStepText" Grid.Column="1" Classes="hint" Text="{Binding LessonStep}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <Panel Grid.Column="2">
+            <Button x:Name="LessonNextButton" Classes="primary" Content="{l:T lesson.next}" Command="{Binding LessonNextCommand}" IsVisible="{Binding LessonHasNext}" />
+            <Button x:Name="LessonDoneButton" Classes="primary" Content="{l:T lesson.done}" Command="{Binding LessonNextCommand}" IsVisible="{Binding LessonIsLast}" />
+          </Panel>
+        </Grid>
+        <ScrollViewer>
+          <StackPanel Spacing="12">
+            <c:LineArt x:Name="LessonArt" Picture="{Binding LessonPicture}" MaxHeight="160" HorizontalAlignment="Center" />
+            <TextBlock x:Name="LessonTitleText" Text="{Binding LessonTitle}" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="{DynamicResource FontSubtitle}" />
+            <TextBlock x:Name="LessonBodyText" Text="{Binding LessonBody}" TextWrapping="Wrap" />
+            <WrapPanel ItemSpacing="8" LineSpacing="6" IsVisible="{Binding LessonIsLast}">
+              <Button x:Name="LessonDiagnosticsButton" Content="{l:T multiplayer.room.problems}" Command="{Binding LessonDiagnosticsCommand}" IsVisible="{Binding LessonOffersDiagnostics}" />
+              <Button x:Name="LessonDrillButton" Content="{l:T multiplayer.lobby.drill}" Command="{Binding LessonDrillCommand}" IsVisible="{Binding LessonOffersDrill}" />
+              <Button x:Name="LessonArticleButton" Classes="ghost" Content="{l:T lesson.article}" Command="{Binding LessonArticleCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
     </Border>
   </Grid>
 </UserControl>

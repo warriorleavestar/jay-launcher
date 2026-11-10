@@ -2,7 +2,7 @@
 id: new-instance
 category: start
 routes: library/new
-related: library, discover
+related: library, discover, modpacks, import-launcher
 ---
 
 # New instance

@@ -34,7 +34,7 @@ public interface IPrivateLink
 /// 传文件：发方先发“要发这个文件”（名字、大小、SHA-256），收方点接收后发方按 3 KB 一块发，最多 16 块没确认；
 /// 收方每收到一块回确认，写进临时文件，收完核对 SHA-256 后改成正式文件名。中途断开、被拒、被取消都会清掉临时文件。
 /// </summary>
-public sealed class PrivateMessenger : IAsyncDisposable
+public sealed partial class PrivateMessenger : IAsyncDisposable
 {
     public const int ChunkSize = 3 * 1024;
     public const int Window = 16;
@@ -77,6 +77,8 @@ public sealed class PrivateMessenger : IAsyncDisposable
         public IncrementalHash? Hasher;
         public long Next;
         public long Received;
+        /// <summary>A mod file this side asked for (mod sync): accepted without asking, and its SHA-1 is checked on arrival.</summary>
+        public string? ModSha1;
     }
 
     private readonly ConcurrentDictionary<string, Outgoing> _outgoing = new();
@@ -138,7 +140,9 @@ public sealed class PrivateMessenger : IAsyncDisposable
     /// 发文件：先问对方，对方接收后开始传。返回 true 表示对方完整收到；拒绝、超时、断开返回 false。
     /// 进度经 <see cref="Progress"/> 报告。
     /// </summary>
-    public async Task<bool> SendFileAsync(string to, string path, CancellationToken ct = default)
+    public Task<bool> SendFileAsync(string to, string path, CancellationToken ct = default) => SendFileAsync(to, path, null, ct);
+
+    private async Task<bool> SendFileAsync(string to, string path, string? modSha1, CancellationToken ct)
     {
         var info = new FileInfo(path);
         if (!info.Exists) throw new FileNotFoundException(path);
@@ -158,7 +162,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _cts.Token);
         try
         {
-            if (!await SendAsync(to, new JsonObject { ["t"] = "offer", ["id"] = job.Id, ["name"] = job.Name, ["size"] = job.Size, ["sha"] = Convert.ToHexStringLower(hash) }, linked.Token))
+            if (!await SendAsync(to, OfferBody(job, modSha1), linked.Token))
                 return Fail(job, L.T("core.mp.private.offline"));
             Report(job, 0);
             bool accepted;
@@ -324,8 +328,14 @@ public sealed class PrivateMessenger : IAsyncDisposable
                         return;
                     }
                     var offer = new FileOffer(id, frame.FromFingerprint, frame.FromName, name, size);
-                    _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey };
-                    FileOffered?.Invoke(offer);
+                    var wanted = WantedMod(frame.FromFingerprint, body["mod"]?.GetValue<string>(), size);
+                    _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey, ModSha1 = wanted };
+                    // A mod file we asked for during a sync: take it without a card. Anything else asks the user as before.
+                    if (wanted is not null) await AcceptAsync(id);
+                    else FileOffered?.Invoke(offer);
+                    break;
+                case "mods?" or "mods" or "modsoff" or "modfile?" or "modfileno":
+                    await HandleModsAsync(frame, type, body);
                     break;
                 case "accept" or "decline" when id is not null && _outgoing.TryGetValue(id, out var job) && job.To == frame.FromFingerprint:
                     if (type == "accept") Interlocked.Exchange(ref job.From, Math.Max(0, body["from"]?.GetValue<long>() ?? 0));
@@ -412,9 +422,15 @@ public sealed class PrivateMessenger : IAsyncDisposable
                 Abort(job, L.T("core.mp.private.corrupt"), discard: true);
                 return;
             }
+            if (job.ModSha1 is { } expected && !MatchesSha1(job.TempPath!, expected))
+            {
+                Abort(job, L.T("core.mp.private.corrupt"), discard: true);
+                return;
+            }
             var target = File.Exists(job.TargetPath!) ? UniquePath(_downloads, job.Offer.Name) : job.TargetPath!;
             File.Move(job.TempPath!, target);
             Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Finished = true, SavedPath = target });
+            CompleteMod(job, target);
         }
         finally
         {
@@ -437,6 +453,7 @@ public sealed class PrivateMessenger : IAsyncDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         job.Hasher?.Dispose();
         Progress?.Invoke(new FileProgress(job.Offer.Id, job.Offer.FromFingerprint, job.Offer.Name, job.Offer.Size, job.Received, false) { Finished = true, Error = error });
+        CompleteMod(job, null);
     }
 
     /// <summary>公共网络的策略：这个大小的文件能不能传（网络配置里可以关掉传文件或限大小）。收发两头都查。</summary>
