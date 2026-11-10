@@ -115,12 +115,17 @@ public sealed class LauncherService : IDisposable
     /// <summary>现在用的公共网络：选中的连接串网络，或者内置的 Jay 公共网络（内置节点 + 设置里加的节点）。</summary>
     public Amber.Core.Multiplayer.Public.PublicNetworkProfile PublicNetwork => Networks.Current(Settings.PublicNetworkId, Settings.PublicNetworkNodes);
 
+    /// <summary>Jay accounts (recovery-phrase identities) saved on this computer; MC accounts bind to them by address.</summary>
+    public Amber.Core.Identity.JayAccountStore JayAccounts { get; }
+
     public LauncherService(AppSettings settings)
     {
         Settings = settings;
         var store = new AccountStore(Path.Combine(AppSettings.DataDir, "accounts.json"));
         store.Load();
         Accounts = new AccountService(_http, store, AppSettings.DataDir, () => Settings.MicrosoftClientId);
+        JayAccounts = new Amber.Core.Identity.JayAccountStore(AppSettings.DataDir);
+        JayAccounts.Load();
         if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
             Accounts.AddOffline(settings.PlayerName);
