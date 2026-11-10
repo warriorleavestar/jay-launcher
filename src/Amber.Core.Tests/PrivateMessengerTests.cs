@@ -37,6 +37,8 @@ public sealed class PrivateMessengerTests : IDisposable
     [InlineData("..", "file")]
     [InlineData("CON.txt", "_CON.txt")]
     [InlineData("a<b>c?.png", "abc.png")]
+    [InlineData("photo\u202Egnp.exe", "photognp.exe")]
+    [InlineData("in\u200Bvoice\u2066.pdf\u2069.exe", "invoice.pdf.exe")]
     public void FileNamesFromOthersAreMadeSafe(string name, string expected) => Assert.Equal(expected, PrivateMessenger.SafeName(name));
 
     // ---- 不经网络：两头直接连 ----
@@ -57,13 +59,86 @@ public sealed class PrivateMessengerTests : IDisposable
 
     private (PrivateMessenger Alice, PrivateMessenger Bob) Pair()
     {
+        var (alice, bob, _) = PairWithLink();
+        return (alice, bob);
+    }
+
+    /// <summary>Like <see cref="Pair"/>, plus Alice's side of the link so a test can cut her off.</summary>
+    private (PrivateMessenger Alice, PrivateMessenger Bob, Link AliceLink) PairWithLink()
+    {
         var a = new Link(Fp(_alice), _alice.PublicKey, "Alice");
         var b = new Link(Fp(_bob), _bob.PublicKey, "Bob");
         a.Peer = b;
         b.Peer = a;
         var keys = new Dictionary<string, byte[]> { [Fp(_alice)] = _alice.PublicKey, [Fp(_bob)] = _bob.PublicKey };
         return (new PrivateMessenger(a, _alice, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "alice")),
-            new PrivateMessenger(b, _bob, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "bob")));
+            new PrivateMessenger(b, _bob, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "bob")), a);
+    }
+
+    [Fact]
+    public async Task UnansweredOfferExpiresAndFreesItsSlot()
+    {
+        var (alice, bob) = Pair();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "a.txt");
+        await File.WriteAllTextAsync(source, "hello");
+        var offered = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var expired = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.FileOffered += offer => offered.TrySetResult(offer.Id);
+        bob.FileOfferExpired += id => expired.TrySetResult(id);
+        var sending = alice.SendFileAsync(Fp(_bob), source);
+        var id = await offered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await bob.SweepIdle();
+        Assert.False(expired.Task.IsCompleted);
+
+        bob.Clock = () => DateTime.UtcNow + TimeSpan.FromMinutes(6);
+        await bob.SweepIdle();
+        Assert.Equal(id, await expired.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        // The sender hears about it instead of waiting out its own timeout.
+        Assert.False(await sending.WaitAsync(TimeSpan.FromSeconds(10)));
+        // Accepting afterwards does nothing.
+        await bob.AcceptAsync(id);
+        Assert.False(Directory.Exists(Path.Combine(_dir, "bob")) && Directory.EnumerateFiles(Path.Combine(_dir, "bob")).Any());
+    }
+
+    [Fact]
+    public async Task StalledReceiveIsGivenUp()
+    {
+        var (alice, bob, aliceLink) = PairWithLink();
+        await using var _a = alice;
+        await using var _b = bob;
+        Directory.CreateDirectory(_dir);
+        var source = Path.Combine(_dir, "big.bin");
+        await File.WriteAllBytesAsync(source, RandomNumberGenerator.GetBytes(PrivateMessenger.ChunkSize * 200));
+        bob.FileOffered += offer => _ = bob.AcceptAsync(offer.Id);
+        var cut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ended = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bob.Progress += p =>
+        {
+            if (!p.Finished && p.Done >= PrivateMessenger.ChunkSize * 5)
+            {
+                // Alice goes silent mid-transfer.
+                aliceLink.Drop = true;
+                cut.TrySetResult();
+            }
+            if (p.Finished) ended.TrySetResult(p.Error);
+        };
+        _ = alice.SendFileAsync(Fp(_bob), source);
+        await cut.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        // Let the chunks already on their way land before moving the clock.
+        await Task.Delay(500);
+
+        await bob.SweepIdle();
+        Assert.False(ended.Task.IsCompleted);
+
+        bob.Clock = () => DateTime.UtcNow + PrivateMessenger.ReceiveIdleTimeout + TimeSpan.FromSeconds(1);
+        await bob.SweepIdle();
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.private.stalled"), await ended.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        // The partial file stays so that sending again resumes.
+        Assert.Single(Directory.GetFiles(Path.Combine(_dir, "bob"), "*.jaypart"));
     }
 
     [Fact]

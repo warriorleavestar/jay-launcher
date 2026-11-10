@@ -34,8 +34,7 @@ public static class NetworkScaffold
         if (NetworkString.Validate(info) is { } problem) throw new ArgumentException(problem);
 
         var signer = NetworkSigner.Generate(out var seed);
-        File.WriteAllText(keyPath, Convert.ToBase64String(seed) + "\n");
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        Amber.Core.PrivateFile.WriteAllText(keyPath, Convert.ToBase64String(seed) + "\n");
         File.WriteAllText(networkPath, info.ToJson().ToJsonString(Pretty) + "\n");
         File.WriteAllText(configPath, ConfigTemplate(id, name).ToJsonString(Pretty) + "\n");
         return new Result(keyPath, networkPath, configPath, signer.PublicKey);
@@ -80,5 +79,21 @@ public static class NetworkScaffold
         if (NetworkString.Validate(info) is { } problem) throw new InvalidDataException(problem);
         File.WriteAllText(networkPath, info.ToJson().ToJsonString(Pretty) + "\n");
         return info;
+    }
+
+    /// <summary>
+    /// Pins a directory node's public key in the network JSON ("dirKeys"; version bumped). Adding a key that is already
+    /// there changes nothing and returns the info as it is. Re-sign the network afterwards.
+    /// </summary>
+    public static (NetworkInfo Info, bool Added) AttachDirectoryKey(string networkPath, byte[] publicKey)
+    {
+        var o = JsonNode.Parse(File.ReadAllText(networkPath)) as JsonObject ?? throw new InvalidDataException("网络 JSON 要是一个对象");
+        var info = NetworkInfo.FromJson(o);
+        var keys = info.DirectoryKeys ?? [];
+        if (keys.Any(k => k.AsSpan().SequenceEqual(publicKey))) return (info, false);
+        info = info with { DirectoryKeys = [.. keys, publicKey], Seq = info.Seq + 1 };
+        if (NetworkString.Validate(info) is { } problem) throw new InvalidDataException(problem);
+        File.WriteAllText(networkPath, info.ToJson().ToJsonString(Pretty) + "\n");
+        return (info, true);
     }
 }

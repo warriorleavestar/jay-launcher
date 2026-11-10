@@ -77,7 +77,7 @@ public static class AsciiPaths
             ? Path.GetFullPath(explicitDirectory)
             : Environment.GetEnvironmentVariable("AMBER_DATA_DIR") is { Length: > 0 } configured
                 ? Path.GetFullPath(configured)
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Amber");
+                : Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber");
         var parent = Path.Combine(dataRoot, "legacyhome", name);
         if (!OperatingSystem.IsWindows()) return UnixLegacyHome(parent, full, log);
         if (!Representable(parent)) parent = Path.Combine(Environment.GetEnvironmentVariable("PUBLIC") ?? @"C:\Users\Public", "AmberLegacyHome", name);
@@ -148,7 +148,7 @@ public static class AsciiPaths
     {
         var candidates = new[]
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Amber", "links"),
+            Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber", "links"),
             Path.Combine(Environment.GetEnvironmentVariable("PUBLIC") ?? @"C:\Users\Public", "AmberLinks"),
             Path.Combine(Path.GetPathRoot(target) ?? @"C:\", "AmberLinks"),
         };

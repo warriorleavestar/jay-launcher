@@ -71,7 +71,7 @@ public sealed class GameLauncher(GameDirectory dir)
     internal string NoTraceRoot { get; init; } = DefaultNoTraceRoot;
 
     public static string DefaultNoTraceRoot { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Amber", "notrace");
+        Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber", "notrace");
 
     /// <summary>生成本次启动的完整命令行（不含 java 本身）。需要长期保存的脚本用 WriteLaunchScript，避免引用临时配置。</summary>
     public List<string> BuildArguments(LaunchOptions options, Action<string>? notice = null) => BuildArguments(options, notice, out _);

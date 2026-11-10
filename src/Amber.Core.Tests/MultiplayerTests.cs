@@ -45,10 +45,18 @@ public class MultiplayerTests
 
     [Theory]
     [InlineData("[12:00:01] [Server thread/INFO]: Started serving on 51234", 51234)]
+    [InlineData("[Server thread/INFO]: Started serving on 51235", 51235)]
     [InlineData("[CHAT] Local game hosted on port 25566", 25566)]
     [InlineData("[CHAT] 本地游戏已在端口 61000 上开启", 61000)]
     [InlineData("[Render thread/INFO]: Sound engine started", null)]
     [InlineData("Started serving on 99999", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [System] [CHAT] Local game hosted on port 25566", 25566)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] <Steve> Started serving on 22", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] <Steve> Local game hosted on port 3389", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] [Server] Started serving on 8080", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] Steve: 在端口 445", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] Steve:在端口 445", null)]
+    [InlineData("[12:00:01] [Render thread/INFO]: [CHAT] <史蒂夫> 本地游戏已在端口 445 上开启", null)]
     public void PortFromLog(string line, int? port) => Assert.Equal(port, LanGames.PortFromLog(line));
 
     [Fact]
@@ -128,8 +136,18 @@ public class MultiplayerTests
         var guest = EasyTierArgs.Build(new EasyTierOptions(room, false, [], 1, null, null, "g", Tun: true));
         Assert.DoesNotContain("--no-tun", guest);
         Assert.DoesNotContain("--port-forward", guest);
-        Assert.Equal("Amber LAN", guest[guest.IndexOf("--dev-name") + 1]);
-        Assert.Contains("--enable-udp-broadcast-relay", guest);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("Amber LAN", guest[guest.IndexOf("--dev-name") + 1]);
+            Assert.Contains("--enable-udp-broadcast-relay", guest);
+        }
+        else
+        {
+            // Linux 网卡名不能有空格；macOS 的 utun 不能自己起名。广播由 Jay 的守护转发，EasyTier 的开关只在 Windows 上有。
+            if (OperatingSystem.IsLinux()) Assert.Equal("amberlan", guest[guest.IndexOf("--dev-name") + 1]);
+            else Assert.DoesNotContain("--dev-name", guest);
+            Assert.DoesNotContain("--enable-udp-broadcast-relay", guest);
+        }
         Assert.DoesNotContain("--enable-udp-broadcast-relay", EasyTierArgs.Build(new EasyTierOptions(room, false, [], 1, 2)));
     }
 }

@@ -44,7 +44,10 @@
   <Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="*,Auto" Container.Name="AccountsPageRoot" Container.Sizing="Width">
     <TextBlock svc:ThemeRegion.Name="accounts.title" Classes="h1" Text="{l:T accounts.title}" Grid.ColumnSpan="2" />
 
-    <Border svc:ThemeRegion.Name="accounts.list" Grid.Row="1" Classes="card" Padding="8">
+    <!-- Left column scrolls as a whole: the MC account list, then the Jay account card (its create / restore steps can be tall). -->
+    <ScrollViewer x:Name="AccountsLeftScroll" Grid.Row="1" Margin="0,0,0,14">
+    <StackPanel Spacing="14">
+    <Border svc:ThemeRegion.Name="accounts.list" Classes="card" Padding="8" Margin="0">
       <!-- 皮肤预览放在列表左边一块固定大小的区域里，不再挤在下面留一大块空白；页面窄时收起，给列表让位置 -->
       <Grid ColumnDefinitions="Auto,*">
         <Panel x:Name="SkinPreviewHost">
@@ -74,9 +77,11 @@
                   <TextBlock Text="{Binding KindText}" Classes="hint" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding KindText}" />
                   <TextBlock Text="{l:T accounts.external.insecure_saved}" IsVisible="{Binding InsecureServer}" Foreground="{DynamicResource AmberAccent}"
                              FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Text="{Binding JayText}" IsVisible="{Binding HasJay}" Classes="hint" FontSize="12" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <WrapPanel Classes="account-actions" ItemSpacing="6" LineSpacing="6" VerticalAlignment="Center">
                   <Button Content="{l:T common.use}" IsVisible="{Binding !IsCurrent}" Command="{Binding $parent[ListBox].((vm:AccountsViewModel)DataContext).UseCommand}" CommandParameter="{Binding}" />
+                  <Button Content="{l:T accounts.jay.unbind}" IsVisible="{Binding HasJay}" Command="{Binding $parent[ListBox].((vm:AccountsViewModel)DataContext).UnbindJayCommand}" CommandParameter="{Binding}" />
                   <c:ConfirmButton Content="{l:T common.remove}" ConfirmText="{l:T common.confirm_remove}" ObjectName="{Binding Name}" Command="{Binding $parent[ListBox].((vm:AccountsViewModel)DataContext).RemoveCommand}" CommandParameter="{Binding}" />
                 </WrapPanel>
               </Grid>
@@ -85,6 +90,128 @@
         </ListBox>
       </Grid>
     </Border>
+
+
+    <!-- Jay account (recovery-phrase identity): list, create (words → check → save), restore. Words are never copied or saved. -->
+    <Border svc:ThemeRegion.Name="accounts.jay" x:Name="JayCard" Classes="card" Margin="0">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="{l:T accounts.jay.title}" Margin="0" />
+
+          <Border x:Name="JaySuggestion" Classes="callout info" IsVisible="{Binding HasJaySuggestion}">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{Binding JaySuggestionText}" TextWrapping="Wrap" />
+              <WrapPanel ItemSpacing="8" LineSpacing="8">
+                <Button Classes="primary" Content="{l:T accounts.jay.suggest_create}" Command="{Binding StartCreateJayCommand}" />
+                <Button Content="{l:T accounts.jay.suggest_later}" Command="{Binding DismissJaySuggestionCommand}" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Classes="hint" Text="{l:T accounts.jay.intro}" TextWrapping="Wrap" IsVisible="{Binding ShowJayIntro}" />
+
+          <ItemsControl x:Name="JayAccountList" ItemsSource="{Binding JayAccounts}" IsVisible="{Binding JayIdle}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:JayAccountItem">
+                <Border Background="{DynamicResource PageBg}" CornerRadius="8" Padding="10" Margin="0,0,0,6">
+                  <StackPanel Spacing="4">
+                    <SelectableTextBlock Text="{Binding Address}" FontFamily="{DynamicResource MonoFont}" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding CheckWords}" Classes="hint" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding BoundText}" Classes="hint" FontSize="12" TextWrapping="Wrap" />
+                    <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,4,0,0">
+                      <Button Content="{l:T accounts.jay.bind}" Command="{Binding #JayAccountList.((vm:AccountsViewModel)DataContext).BindJayCommand}" CommandParameter="{Binding}" />
+                      <Button Content="{l:T accounts.jay.copy_address}" Command="{Binding #JayAccountList.((vm:AccountsViewModel)DataContext).CopyJayAddressCommand}" CommandParameter="{Binding}" />
+                      <c:ConfirmButton Content="{l:T accounts.jay.remove}" ConfirmText="{l:T accounts.jay.remove_confirm}" ObjectName="{Binding ShortAddress}"
+                                       Command="{Binding #JayAccountList.((vm:AccountsViewModel)DataContext).RemoveJayCommand}" CommandParameter="{Binding}" />
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding JayIdle}">
+            <Button x:Name="CreateJayButton" Content="{l:T accounts.jay.create}" Command="{Binding StartCreateJayCommand}" />
+            <Button x:Name="RestoreJayButton" Content="{l:T accounts.jay.restore}" Command="{Binding StartRestoreJayCommand}" />
+          </WrapPanel>
+
+          <!-- Step 1: the new words, numbered, in a grid that wraps. -->
+          <StackPanel Spacing="10" IsVisible="{Binding JayShowingWords}">
+            <TextBlock FontWeight="SemiBold" FontSize="15" Text="{l:T accounts.jay.words_title}" />
+            <Border Classes="callout warning">
+              <TextBlock Text="{l:T accounts.jay.words_warning}" TextWrapping="Wrap" />
+            </Border>
+            <CheckBox Content="{l:T accounts.jay.words_chinese}" IsChecked="{Binding JayChineseWords}" />
+            <ItemsControl x:Name="NewWordsList" ItemsSource="{Binding NewWords}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel ItemSpacing="6" LineSpacing="6" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:MnemonicWord">
+                  <Border Background="{DynamicResource PageBg}" CornerRadius="6" Padding="8,4" MinWidth="104">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{Binding Number}" Classes="hint" FontSize="12" VerticalAlignment="Center" MinWidth="18" />
+                      <TextBlock Text="{Binding Word}" FontWeight="SemiBold" FontSize="15" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Expander Header="{l:T accounts.jay.passphrase_title}" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="hint" Text="{l:T accounts.jay.passphrase_hint}" TextWrapping="Wrap" />
+                <TextBox Text="{Binding NewPassphrase}" PasswordChar="●" PlaceholderText="{l:T accounts.jay.passphrase_placeholder}" />
+                <TextBox Text="{Binding NewPassphraseRepeat}" PasswordChar="●" PlaceholderText="{l:T accounts.jay.passphrase_repeat_placeholder}" />
+              </StackPanel>
+            </Expander>
+            <WrapPanel ItemSpacing="8" LineSpacing="8">
+              <Button x:Name="WordsWrittenButton" Classes="primary" Content="{l:T accounts.jay.written}" Command="{Binding WordsWrittenDownCommand}" />
+              <Button Content="{l:T common.cancel}" Command="{Binding CancelJayCommand}" />
+            </WrapPanel>
+          </StackPanel>
+
+          <!-- Step 2: three random words by position. -->
+          <StackPanel Spacing="10" IsVisible="{Binding JayQuiz}">
+            <TextBlock FontWeight="SemiBold" FontSize="15" Text="{l:T accounts.jay.quiz_title}" />
+            <ItemsControl x:Name="QuizList" ItemsSource="{Binding QuizQuestions}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:QuizQuestion">
+                  <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                    <TextBlock Text="{Binding Label}" VerticalAlignment="Center" MinWidth="90" />
+                    <TextBox Grid.Column="1" Text="{Binding Answer}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <WrapPanel ItemSpacing="8" LineSpacing="8">
+              <Button x:Name="FinishJayButton" Classes="primary" Content="{l:T accounts.jay.quiz_finish}" Command="{Binding FinishCreateJayCommand}" />
+              <Button Content="{l:T accounts.jay.quiz_back}" Command="{Binding BackToWordsCommand}" />
+              <Button Content="{l:T common.cancel}" Command="{Binding CancelJayCommand}" />
+            </WrapPanel>
+          </StackPanel>
+
+          <!-- Restore: words + optional extra password. -->
+          <StackPanel Spacing="10" IsVisible="{Binding JayRestoring}">
+            <TextBlock FontWeight="SemiBold" FontSize="15" Text="{l:T accounts.jay.restore_title}" />
+            <TextBox x:Name="RestoreWordsBox" Text="{Binding RestoreText}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72"
+                     PlaceholderText="{l:T accounts.jay.restore_placeholder}" />
+            <Expander Header="{l:T accounts.jay.passphrase_title}" HorizontalAlignment="Stretch">
+              <TextBox Text="{Binding RestorePassphrase}" PasswordChar="●" PlaceholderText="{l:T accounts.jay.passphrase_placeholder}" />
+            </Expander>
+            <WrapPanel ItemSpacing="8" LineSpacing="8">
+              <Button x:Name="RestoreJayConfirm" Classes="primary" Content="{l:T accounts.jay.restore_button}" Command="{Binding RestoreJayCommand}" />
+              <Button Content="{l:T common.cancel}" Command="{Binding CancelJayCommand}" />
+            </WrapPanel>
+          </StackPanel>
+
+          <Border Classes="callout warning" IsVisible="{Binding HasJayError}">
+            <TextBlock x:Name="JayErrorText" Text="{Binding JayError}" TextWrapping="Wrap" />
+          </Border>
+        </StackPanel>
+    </Border>
+    </StackPanel>
+    </ScrollViewer>
 
     <Border svc:ThemeRegion.Name="accounts.add" x:Name="AddCard" Grid.Row="1" Grid.Column="1" Classes="card" Margin="14,0,0,14">
       <ScrollViewer>
@@ -155,7 +282,8 @@
             </Border>
 
             <!-- Client ID 一般不用填，收进默认折叠的“高级”。 -->
-            <Expander x:Name="MicrosoftAdvanced" Header="{l:T accounts.microsoft.advanced}" HorizontalAlignment="Stretch">
+            <Expander x:Name="MicrosoftAdvanced" HorizontalAlignment="Stretch">
+              <Expander.Header><TextBlock Text="{l:T accounts.microsoft.advanced}" TextWrapping="Wrap" /></Expander.Header>
               <StackPanel Spacing="8">
                 <TextBlock Text="{l:T accounts.microsoft.client_id_label}" TextWrapping="Wrap" />
                 <TextBox Text="{Binding ClientIdInput}" PlaceholderText="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />

@@ -33,7 +33,7 @@
       <ComboBox x:Name="GroupPicker" Grid.Column="2" ItemsSource="{Binding Groups}" SelectedIndex="{Binding SelectedGroupIndex}" MinWidth="160"
                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0,0,0" IsVisible="False" AutomationProperties.Name="{l:T settings.groups.picker}">
         <ComboBox.ItemTemplate>
-          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" /></DataTemplate>
+          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" /></DataTemplate>
         </ComboBox.ItemTemplate>
       </ComboBox>
       <TextBox x:Name="SettingsSearchBox" Grid.Column="3" Width="260" Text="{Binding SettingsSearch}" PlaceholderText="{l:T settings.search.placeholder}"
@@ -44,7 +44,7 @@
       <ListBox x:Name="GroupList" ItemsSource="{Binding Groups}" SelectedIndex="{Binding SelectedGroupIndex}" Background="Transparent"
                AutomationProperties.Name="{l:T settings.groups.picker}">
         <ListBox.ItemTemplate>
-          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" /></DataTemplate>
+          <DataTemplate DataType="vm:SettingsGroupItem"><TextBlock Text="{Binding Title}" TextWrapping="Wrap" /></DataTemplate>
         </ListBox.ItemTemplate>
       </ListBox>
 
@@ -126,6 +126,13 @@
                 <CheckBox x:Name="AllowNetworkThemesBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" IsChecked="{Binding AllowNetworkThemes}">
                   <TextBlock Text="{l:T settings.themepack.allow_network}" TextWrapping="Wrap" />
                 </CheckBox>
+              </Grid>
+            </Border>
+            <Border x:Name="ThemeReportBanner" Classes="banner" Margin="0,0,0,12" IsVisible="{Binding HasThemeReport}">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBlock x:Name="ThemeReportText" Text="{Binding ThemeReportText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button x:Name="CopyThemeReportButton" Grid.Column="1" Classes="ghost" Content="{l:T settings.themepack.copy_report}"
+                        Command="{Binding CopyThemeReportCommand}" VerticalAlignment="Center" />
               </Grid>
             </Border>
             <Border Classes="callout warning" Margin="0,0,0,12" IsVisible="{Binding ThemePackStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
@@ -382,6 +389,23 @@
                 <CheckBox x:Name="BakeBox" IsChecked="{Binding ExperimentalBake}" Content="{l:T settings.bake.toggle}" />
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.bake.hint}" TextWrapping="Wrap" />
                 <TextBox x:Name="BakeLoaderBox" Text="{Binding BakeLoaderPath, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding ExperimentalBake}" PlaceholderText="{l:T settings.bake.loader_hint}" />
+                <WrapPanel x:Name="BakeLoaderInstall" Orientation="Horizontal" IsEnabled="{Binding ExperimentalBake}">
+                  <Button x:Name="BakeInstallButton" Classes="secondary" Content="{l:T settings.bake.install}" Click="InstallBakeLoader_Click" IsEnabled="{Binding !IsInstallingBakeLoader}"
+                          ToolTip.Tip="{l:T settings.bake.install_hint}" Margin="0,0,8,0" />
+                  <Button x:Name="BakeDownloadButton" Classes="secondary" Content="{l:T settings.bake.download}" Command="{Binding DownloadBakeLoaderCommand}"
+                          IsEnabled="{Binding CanStartBakeLoaderDownload}" IsVisible="{Binding !IsDownloadingBakeLoader}"
+                          ToolTip.Tip="{Binding BakeLoaderDownloadTip}" ToolTip.ShowOnDisabled="True" Margin="0,0,8,0" />
+                  <Button x:Name="BakeDownloadCancelButton" Classes="secondary" Content="{l:T common.cancel}" Command="{Binding CancelBakeLoaderDownloadCommand}"
+                          IsVisible="{Binding IsDownloadingBakeLoader}" Margin="0,0,8,0" />
+                  <TextBlock x:Name="BakeDownloadUnpublishedText" Classes="hint" FontSize="12" Text="{l:T core.bake.download_unpublished}" IsVisible="{Binding !BakeLoaderPublished}"
+                             VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0" />
+                  <TextBlock x:Name="BakeLoaderStatusText" Classes="hint" FontSize="12" Text="{Binding BakeLoaderStatus}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </WrapPanel>
+                <WrapPanel x:Name="BakeCleanup" Orientation="Horizontal" IsEnabled="{Binding ExperimentalBake}">
+                  <Button Classes="secondary" Content="{l:T settings.bake.gc}" Command="{Binding CleanBakeCacheCommand}" IsEnabled="{Binding !IsCleaningBake}"
+                          ToolTip.Tip="{l:T settings.bake.gc_hint}" Margin="0,0,8,0" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{Binding BakeCleanupStatus}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </WrapPanel>
               </StackPanel>
             </Border>
             <Border Classes="card">
@@ -425,7 +449,7 @@
           <DataTemplate DataType="vm:SettingsGroupItem">
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" MinHeight="40">
               <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
                 <TextBlock Classes="hint" FontSize="12" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
               </StackPanel>
               <TextBlock Grid.Column="1" Text="›" Classes="hint" FontSize="18" VerticalAlignment="Center" />

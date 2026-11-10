@@ -26,6 +26,16 @@ public sealed record FileOfferItem(FileOffer Offer) : LocalizedRecord
 {
     public string Label => L.F("multiplayer.private.offer", Offer.FromName.Length > 0 ? Offer.FromName : Offer.FromFingerprint, Offer.Name, Size(Offer.Size));
 
+    /// <summary>"Alex wants to send you map.zip (38 MB)" on the locked card.</summary>
+    public string Headline => Label;
+
+    public string SafetyCode => Offer.FromFingerprint;
+
+    /// <summary>Programs and scripts get an extra warning (Jay never opens a received file by itself).</summary>
+    public bool IsProgram => ReceivedFiles.IsProgram(Offer.Name);
+
+    public string Warning => L.T(IsProgram ? "multiplayer.file.program_warning" : "multiplayer.file.never_runs");
+
     internal static string Size(long bytes) => bytes switch
     {
         < 1024 => $"{bytes} B",
@@ -113,6 +123,12 @@ public sealed partial class MultiplayerViewModel
             if (!IsCurrent) Badge++;
         });
         messenger.Progress += p => Dispatcher.UIThread.Post(() => OnTransfer(messenger, p));
+        messenger.FileOfferExpired += id => Dispatcher.UIThread.Post(() =>
+        {
+            if (_messenger != messenger) return;
+            if (FileOffers.FirstOrDefault(o => o.Offer.Id == id) is { } expired) FileOffers.Remove(expired);
+        });
+        if (IsHosting) ServeMods(messenger);
         OnRoster(chat, chat.Roster);
     }
 
@@ -123,6 +139,7 @@ public sealed partial class MultiplayerViewModel
         _messengerChat = null;
         OnlinePeers.Clear();
         FileOffers.Clear();
+        ResetModCheck();
         SelectedPeer = null;
         OnPropertyChanged(nameof(HasOnlinePeers));
         if (messenger is not null) _ = messenger.DisposeAsync().AsTask();
@@ -137,6 +154,7 @@ public sealed partial class MultiplayerViewModel
         foreach (var entry in roster.Where(r => r.Fingerprint != me)) OnlinePeers.Add(new OnlinePeerItem(entry));
         SelectedPeer = OnlinePeers.FirstOrDefault(p => p.Entry.Fingerprint == selected);
         OnPropertyChanged(nameof(HasOnlinePeers));
+        MaybeCheckMods();
     }
 
     private void OnTransfer(PrivateMessenger messenger, FileProgress p)
@@ -203,8 +221,9 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task AcceptFileAsync(FileOfferItem? offer)
     {
-        if (offer is null || _messenger is not { } messenger) return;
+        if (offer is null) return;
         FileOffers.Remove(offer);
+        if (_messenger is not { } messenger) return;
         try { await messenger.AcceptAsync(offer.Offer.Id); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -215,8 +234,9 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task DeclineFileAsync(FileOfferItem? offer)
     {
-        if (offer is null || _messenger is not { } messenger) return;
+        if (offer is null) return;
         FileOffers.Remove(offer);
+        if (_messenger is not { } messenger) return;
         await messenger.DeclineAsync(offer.Offer.Id);
     }
 

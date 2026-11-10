@@ -49,6 +49,7 @@ public static class ThemeDefaults
     {
         ["FontCaption"] = 12, ["FontBodySmall"] = 13, ["FontBody"] = 14, ["FontSubtitle"] = 16, ["FontTitle"] = 20, ["FontHeadline"] = 24, ["FontDisplay"] = 32,
         ["Space0"] = 2, ["Space1"] = 4, ["Space2"] = 8, ["Space3"] = 12, ["Space4"] = 16, ["Space5"] = 24, ["Space6"] = 32, ["Space7"] = 48, ["Space8"] = 64,
+        ["ControlHeightSm"] = 28, ["ControlHeight"] = 36, ["ControlHeightLg"] = 44, ["PlayButtonHeight"] = 48,
     };
 
     public static readonly IReadOnlyDictionary<string, double> Radii = new Dictionary<string, double>
@@ -134,7 +135,8 @@ public static class ThemeColor
             result["PageBg"] = bg;
             result["Surface"] = dark ? Mix(bg, White, 0.06) : Mix(bg, White, 0.7);
             result["SurfaceRaised"] = dark ? Mix(bg, White, 0.10) : Mix(bg, White, 0.4);
-            result["BorderSubtle"] = Mix(bg, ink, dark ? 0.16 : 0.13);
+            // Dark cards barely differ from the page, so their outline must (§10.4 rule 4: divider ≥ 1.6:1 on the page).
+            result["BorderSubtle"] = dark ? EnsureContrast(Mix(bg, ink, 0.16), bg, 1.6) : Mix(bg, ink, 0.13);
             result["SidebarBg"] = dark ? Mix(bg, Black, 0.3) : Mix(bg, Black, 0.78);
             result["TextPrimary"] = Mix(ink, bg, 0.08);
             result["TextSecondary"] = Mix(ink, bg, 0.32);
@@ -161,9 +163,8 @@ public static class ThemeColor
             var a = a0 | 0xFF000000;
             var page = result.GetValueOrDefault("PageBg", defaults["PageBg"]);
             result["Accent"] = a;
-            result["AccentHover"] = Mix(a, White, 0.12);
-            result["AccentPressed"] = Mix(a, Black, 0.15);
             result["OnAccent"] = Contrast(Black, a) >= Contrast(White, a) ? 0xFF1C1408 : White;
+            (result["AccentHover"], result["AccentPressed"]) = StatesFor(a, result["OnAccent"]);
             result["AccentText"] = EnsureContrast(dark ? Mix(a, White, 0.12) : Mix(a, Black, 0.3), page, 4.5);
             result["AccentTint"] = (a & 0x00FFFFFF) | 0x26000000;
             result["ControlSelected"] = result["AccentTint"];
@@ -171,6 +172,44 @@ public static class ThemeColor
             result["IlloLine"] = result["AccentHover"];
         }
         return result;
+    }
+
+    /// <summary>
+    /// Hover and pressed fills for a solid button whose label is <paramref name="on"/>: hover a little lighter, pressed a
+    /// little darker, each only as far as the label stays readable (4.5:1); if darker can't work, pressed goes lighter.
+    /// </summary>
+    public static (uint Hover, uint Pressed) StatesFor(uint fill, uint on)
+    {
+        static uint Pick(uint fill, uint on, uint toward, double[] steps)
+        {
+            foreach (var t in steps)
+            {
+                var c = Mix(fill, toward, t);
+                if (Contrast(on, c) >= 4.5) return c;
+            }
+            return 0;
+        }
+        var hover = Pick(fill, on, White, [0.12, 0.08, 0.04]) is var h and not 0 ? h : Pick(fill, on, Black, [0.06, 0.1]) is var h2 and not 0 ? h2 : fill;
+        var pressed = Pick(fill, on, Black, [0.15, 0.1, 0.05]) is var pr and not 0 ? pr : Pick(fill, on, White, [0.2, 0.15, 0.25, 0.3]) is var pr2 and not 0 ? pr2 : fill;
+        return (hover, pressed);
+    }
+
+    /// <summary>The start button's family from one color (format 2 seed "play", or the accent of a one-color theme).</summary>
+    public static Dictionary<string, uint> DerivePlay(uint play, uint page, bool dark)
+    {
+        var p = play | 0xFF000000;
+        var on = Contrast(Black, p) >= Contrast(White, p) ? 0xFF1E1404 : White;
+        var states = StatesFor(p, on);
+        return new Dictionary<string, uint>
+        {
+            ["Play"] = p,
+            ["OnPlay"] = on,
+            ["PlayHover"] = states.Hover,
+            ["PlayPressed"] = states.Pressed,
+            ["PlayText"] = EnsureContrast(dark ? Mix(p, White, 0.1) : Mix(p, Black, 0.35), page, 4.5),
+            ["PlayGlow"] = (p & 0x00FFFFFF) | (dark ? 0x40000000u : 0x4D000000u),
+            ["PlayTint"] = dark ? Mix(page, p, 0.18) : Mix(page, p, 0.1),
+        };
     }
 }
 
@@ -193,7 +232,24 @@ public static class ThemeContrast
         ("DisabledText", "DisabledFill", 3.0),
         ("TextPrimary", "Overlay", 4.5), ("TextSecondary", "Overlay", 4.5), ("TextTertiary", "Overlay", 4.5),
         ("OnPlay", "Play", 4.5), ("PlayText", "Surface", 4.5), ("OnBadge", "Badge", 4.5), ("OnBadgeMuted", "BadgeMuted", 4.5),
+        // Format 2 (§10.4): text on every surface it sits on, tints composited onto the card first; On* on their hover / pressed fills.
+        ("TextPrimary", "SurfaceRaised", 4.5), ("TextSecondary", "SurfaceRaised", 4.5),
+        ("TextPrimary", "ControlSelected", 4.5), ("TextPrimary", "AccentTint", 4.5), ("TextPrimary", "SuccessTint", 4.5),
+        ("TextPrimary", "WarningTint", 4.5), ("TextPrimary", "DangerTint", 4.5),
+        ("OnAccent", "AccentHover", 4.5), ("OnAccent", "AccentPressed", 4.5), ("OnPlay", "PlayHover", 4.5), ("OnPlay", "PlayPressed", 4.5),
+        ("DisabledText", "Surface", 3.0), ("DisabledText", "PageBg", 3.0),
+        // Things that are not text but must be seen: control outlines and the focus ring (3:1).
+        ("ControlBorder", "Surface", 3.0), ("Focus", "PageBg", 3.0), ("Focus", "Surface", 3.0),
     ];
+
+    /// <summary>A semi-transparent background as it is actually seen: laid over the card it sits on.</summary>
+    private static uint Seen(uint bg, Dictionary<string, uint> colors, IReadOnlyDictionary<string, uint> defaults)
+    {
+        var alpha = (bg >> 24) / 255.0;
+        if (alpha >= 1) return bg;
+        var under = colors.GetValueOrDefault("Surface", defaults["Surface"]) | 0xFF000000;
+        return ThemeColor.Mix(under, bg | 0xFF000000, alpha);
+    }
 
     public static void Enforce(ThemePack pack)
     {
@@ -212,7 +268,18 @@ public static class ThemeContrast
         if (colors.Count == 0) return;
         // format 1 的主题不知道新加的表面：改了卡片色、底色却没写菜单、日志、输入框的底时，让它们跟着走，
         // 不然浅色主题会配上 Jay 默认的墨蓝菜单，文字两边都顾不上。
-        if (colors.TryGetValue("Surface", out var surface) && !colors.ContainsKey("Overlay")) colors["Overlay"] = surface;
+        if (colors.TryGetValue("Surface", out var surface))
+        {
+            if (!colors.ContainsKey("Overlay")) colors["Overlay"] = surface;
+            // Format 2 checks text on raised cards and tinted banners too: a theme that changed the card color gets
+            // matching raised cards and tints instead of Jay's defaults (which were made for Jay's card color).
+            var ink = ThemeColor.IsDark(surface) ? 0xFFFFFFFFu : 0xFF000000u;
+            if (!colors.ContainsKey("SurfaceRaised")) colors["SurfaceRaised"] = ThemeColor.Mix(surface | 0xFF000000, ink, 0.05);
+            foreach (var (tint, from) in new[] { ("AccentTint", "Accent"), ("SuccessTint", "Success"), ("WarningTint", "Warning"), ("DangerTint", "Danger") })
+                if (!colors.ContainsKey(tint))
+                    colors[tint] = ThemeColor.Mix(surface | 0xFF000000, colors.GetValueOrDefault(from, defaults[from]) | 0xFF000000, ThemeColor.IsDark(surface) ? 0.18 : 0.1);
+            if (!colors.ContainsKey("ControlSelected")) colors["ControlSelected"] = colors["AccentTint"];
+        }
         if (colors.TryGetValue("PageBg", out var page))
         {
             if (!colors.ContainsKey("Sunken")) colors["Sunken"] = page;
@@ -226,13 +293,36 @@ public static class ThemeContrast
             {
                 if (!colors.ContainsKey(fgKey) && !colors.ContainsKey(bgKey)) continue;
                 var fg = colors.GetValueOrDefault(fgKey, defaults[fgKey]);
-                var bg = colors.GetValueOrDefault(bgKey, defaults[bgKey]);
+                var bg = Seen(colors.GetValueOrDefault(bgKey, defaults[bgKey]), colors, defaults);
                 if (ThemeColor.Contrast(fg, bg) >= min) continue;
                 colors[fgKey] = ThemeColor.EnsureContrast(fg, bg, min);
                 if (pass == 0) problems.Add(new("contrast_fixed", $"{variant}.{fgKey} on {bgKey}"));
                 changed = true;
             }
             if (!changed) break;
+        }
+        var pageBg = colors.GetValueOrDefault("PageBg", defaults["PageBg"]);
+        // Dark cards that melt into the page: lift the divider so cards still read as cards (§10.4 rule 4).
+        if (colors.ContainsKey("Surface") || colors.ContainsKey("PageBg") || colors.ContainsKey("BorderSubtle"))
+        {
+            var cardOnPage = ThemeColor.Contrast(colors.GetValueOrDefault("Surface", defaults["Surface"]), pageBg);
+            var divider = colors.GetValueOrDefault("BorderSubtle", defaults["BorderSubtle"]);
+            if (ThemeColor.IsDark(pageBg) && cardOnPage < 1.25 && ThemeColor.Contrast(divider, pageBg) < 1.6)
+            {
+                colors["BorderSubtle"] = ThemeColor.EnsureContrast(divider, pageBg, 1.6);
+                problems.Add(new("contrast_fixed", $"{variant}.BorderSubtle on PageBg"));
+            }
+        }
+        // A start button that blends into the page gets an outline (only when the theme did not draw one).
+        if (colors.ContainsKey("Play") || colors.ContainsKey("PageBg"))
+        {
+            var play = colors.GetValueOrDefault("Play", defaults["Play"]);
+            var border = colors.GetValueOrDefault("PlayBorder", defaults["PlayBorder"]);
+            if (ThemeColor.Contrast(play, pageBg) < 3.0 && (border >> 24) == 0)
+            {
+                colors["PlayBorder"] = ThemeColor.EnsureContrast(play, pageBg, 3.0);
+                problems.Add(new("contrast_fixed", $"{variant}.PlayBorder on PageBg"));
+            }
         }
     }
 }

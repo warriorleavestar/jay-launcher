@@ -38,6 +38,21 @@ public static class NewInstanceNames
     }
 
     /// <summary>
+    /// A name made from text that is not the player's own typing (such as “Alex's room”): forbidden characters dropped,
+    /// trimmed, Windows device names and taken names get “-2”, “-3”….
+    /// </summary>
+    public static string Unique(string wanted, IEnumerable<string> taken, string fallback = "instance")
+    {
+        var used = taken.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var clean = new string([.. wanted.Where(c => Array.IndexOf(Forbidden, c) < 0 && !char.IsControl(c))]).Trim().TrimEnd('.', ' ');
+        if (clean.Length == 0 || clean is "." or "..") clean = fallback;
+        if (clean.Length > 60) clean = clean[..60].TrimEnd('.', ' ');
+        if (Check(clean, used) == InstanceNameProblem.None) return clean;
+        for (var n = 2; ; n++)
+            if (Check($"{clean}-{n}", used) == InstanceNameProblem.None) return $"{clean}-{n}";
+    }
+
+    /// <summary>
     /// Checks a name the player typed. The same rules as <see cref="GameDirectory.CheckId"/> on every platform, so a name
     /// made on Linux still opens on Windows, plus Windows device names and names already in the library.
     /// </summary>

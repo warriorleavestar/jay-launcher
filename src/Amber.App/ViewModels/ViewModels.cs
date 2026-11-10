@@ -293,8 +293,9 @@ public sealed partial class MainViewModel : ObservableObject
         instance.NavigateToContent = (id, type, query) =>
         {
             var back = shell.Router.Current;
-            shell.Navigate("discover");
+            // Context first, then the page: the move into Discover is already a context sub-view (§2.5, journeys).
             content.BrowseFor(id, type, back: () => shell.Router.Navigate(back), query: query ?? "");
+            shell.Navigate("discover");
         };
         multiplayer.NavigateHome = () => shell.Navigate("library");
         // 开始游戏不换页（§2.5 第 5 条）：进度在顶栏胶囊和启动页。
@@ -305,6 +306,11 @@ public sealed partial class MainViewModel : ObservableObject
         };
         download.CloseAfterStart = () => shell.Navigate("library");
         content.LaunchInstance = id => download.LaunchInstance?.Invoke(id);
+        multiplayer.InstallForInvite = (version, loader) =>
+        {
+            shell.Navigate(LegacyRoutes.NewInstance);
+            _ = download.PrefillAsync(version, loader, () => shell.Navigate("play"));
+        };
         download.BrowseModpacks = () =>
         {
             shell.Navigate("discover");
@@ -318,6 +324,11 @@ public sealed partial class MainViewModel : ObservableObject
         };
         var settingsPage = Pages.OfType<SettingsViewModel>().Single();
         settingsPage.Navigate = r => shell.Navigate(r);
+        home.DownloadBakeLoader = () =>
+        {
+            shell.Navigate("settings#BakeLoaderInstall");
+            _ = settingsPage.DownloadBakeLoaderAsync();
+        };
         Help.Navigate = r => shell.Navigate(r);
         var about = Pages.OfType<AboutViewModel>().Single();
         about.Navigate = r => shell.Navigate(r);
@@ -363,6 +374,8 @@ public sealed partial class MainViewModel : ObservableObject
             };
         };
         var library = new LibraryViewModel(service, home, Activity) { Navigate = r => shell.Navigate(r) };
+        // [▶ Play and open a room]: the lobby starts the focus instance the same way the library's ▶ does.
+        multiplayer.StartInstance = library.LaunchInstance;
         Pages.Add(library);
         // 多开确认走请求条；启动页的卡片也还在，哪边处理都会让另一边一起消失。
         const string MultiKey = "multi-launch";
@@ -424,6 +437,12 @@ public sealed partial class MainViewModel : ObservableObject
             },
         };
         multiplayer.Navigate = r => shell.Navigate(r);
+        // Knocks and files are answered in the room's locked panel while it is on screen; the bar has them everywhere else.
+        Activity.ShownElsewhere = r => r.Spec.Kind is "knock" or "file" && multiplayer.IsCurrent && multiplayer.ShowRoomHeader;
+        multiplayer.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(PageViewModel.IsCurrent) or nameof(MultiplayerViewModel.ShowRoomHeader)) Activity.Resync();
+        };
         foreach (var page in Pages) Shell.Watch(page);
         CurrentPage = library;
         CurrentPage.Activate();
@@ -467,6 +486,148 @@ public sealed partial class SettingsViewModel : PageViewModel
     public bool HasBreakerDelayError => BreakerDelayError is not null;
     [ObservableProperty] public partial bool ExperimentalBake { get; set; }
     [ObservableProperty] public partial string BakeLoaderPath { get; set; }
+    /// <summary>Result of the last bake cache cleanup (or why it did not run); empty before the first one.</summary>
+    [ObservableProperty] public partial string BakeCleanupStatus { get; set; } = "";
+    [ObservableProperty] public partial bool IsCleaningBake { get; set; }
+    /// <summary>What the loader folder holds (a checked package, a developer build, nothing), or the last install's result.</summary>
+    [ObservableProperty] public partial string BakeLoaderStatus { get; set; } = "";
+    [ObservableProperty] public partial bool IsInstallingBakeLoader { get; set; }
+
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanStartBakeLoaderDownload))] public partial bool IsDownloadingBakeLoader { get; set; }
+    /// <summary>The pin names a published zip (until the loader project publishes one, the button stays off and says why).</summary>
+    public bool BakeLoaderPublished => Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished;
+    public bool CanStartBakeLoaderDownload => !IsDownloadingBakeLoader && BakeLoaderPublished;
+    public string BakeLoaderDownloadTip => BakeLoaderPublished ? L.T("settings.bake.download_hint") : L.T("core.bake.download_unpublished");
+    private CancellationTokenSource? _bakeLoaderDownload;
+
+    /// <summary>The loader version "Download loader" fetches (shown on the button's tooltip).</summary>
+    public string BakeLoaderDownloadVersion => Amber.Core.Bake.BakeLoaderRelease.Pinned.LoaderVersion;
+
+    /// <summary>
+    /// "Download loader": the pinned zip from Jay's own GitHub release (mirrors and resume as other downloads),
+    /// accepted only with the pinned SHA-256, then installed like a zip the player picked. Cancel keeps the partial
+    /// file so the next try resumes.
+    /// </summary>
+    public async Task DownloadBakeLoaderAsync()
+    {
+        if (IsDownloadingBakeLoader || IsInstallingBakeLoader) return;
+        if (!BakeLoaderPublished) { BakeLoaderStatus = L.T("core.bake.download_unpublished"); return; }
+        using var cts = new CancellationTokenSource();
+        _bakeLoaderDownload = cts;
+        IsDownloadingBakeLoader = true;
+        IsInstallingBakeLoader = true;
+        var release = Amber.Core.Bake.BakeLoaderRelease.Pinned;
+        try
+        {
+            BakeLoaderStatus = L.F("settings.bake.downloading", "GitHub", 0, Fmt.Size(release.Size));
+            var progress = new Progress<Amber.Core.Net.DownloadProgress>(p =>
+            {
+                if (IsDownloadingBakeLoader)
+                    BakeLoaderStatus = L.F("settings.bake.downloading", p.CurrentFile ?? "", (int)(100 * Math.Min(p.BytesDownloaded, release.Size) / release.Size), Fmt.Size(release.Size));
+            });
+            var package = await _service.DownloadBakeLoaderAsync(progress, cts.Token);
+            BakeLoaderPath = package.Root;
+            BakeLoaderStatus = L.F("settings.bake.installed", package.LoaderVersion, package.Interface.ToString(2), package.Files.Count, release.Sha256[..12]);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            BakeLoaderStatus = L.T("settings.bake.download_cancelled");
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or UnauthorizedAccessException or InvalidDataException or HttpRequestException)
+        {
+            BakeLoaderStatus = L.F("settings.bake.install_failed", e.Message);
+        }
+        finally
+        {
+            _bakeLoaderDownload = null;
+            IsInstallingBakeLoader = false;
+            IsDownloadingBakeLoader = false;
+        }
+    }
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private Task DownloadBakeLoader() => DownloadBakeLoaderAsync();
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private void CancelBakeLoaderDownload() => _bakeLoaderDownload?.Cancel();
+
+    /// <summary>
+    /// "Install loader from zip…": checks the package against its manifest, unpacks it under Jay's data folder and
+    /// selects it. The zip comes from the player (or from "Download loader").
+    /// </summary>
+    public async Task InstallBakeLoaderAsync(string zipPath)
+    {
+        if (IsInstallingBakeLoader) return;
+        IsInstallingBakeLoader = true;
+        try
+        {
+            BakeLoaderStatus = L.T("settings.bake.installing");
+            var sha = await Task.Run(() => Amber.Core.Bake.BakePackage.Sha256(zipPath));
+            var package = await _service.InstallBakeLoaderAsync(zipPath, CancellationToken.None);
+            BakeLoaderPath = package.Root;
+            BakeLoaderStatus = L.F("settings.bake.installed", package.LoaderVersion, package.Interface.ToString(2), package.Files.Count, sha[..12]);
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            BakeLoaderStatus = L.F("settings.bake.install_failed", e.Message);
+        }
+        finally
+        {
+            IsInstallingBakeLoader = false;
+        }
+    }
+
+    /// <summary>One line about the selected loader folder; reads the manifest only (files are checked before each bake).</summary>
+    private static string DescribeBakeLoader(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        try
+        {
+            return Amber.Core.Bake.BakeToolkit.Find(path) switch
+            {
+                { Package: { } p } => L.F("settings.bake.loader_package", p.LoaderVersion, p.Interface.ToString(2)),
+                { } => L.T("settings.bake.loader_devbuild"),
+                null => L.T("settings.bake.loader_none"),
+            };
+        }
+        catch (Amber.Core.Bake.BakeException e) { return e.Message; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return L.T("settings.bake.loader_none"); }
+    }
+
+    /// <summary>
+    /// Bake cache cleanup: a dry run first, then the totals in a confirmation, then the real gc. Only the loader's
+    /// cache and mapping cache are touched; everything removed is rebuilt on the next bake.
+    /// </summary>
+    [RelayCommand]
+    private async Task CleanBakeCacheAsync()
+    {
+        if (IsCleaningBake) return;
+        IsCleaningBake = true;
+        try
+        {
+            BakeCleanupStatus = L.T("settings.bake.gc_checking");
+            var (dry, reason) = await _service.CleanBakeCacheAsync(apply: false, CancellationToken.None);
+            if (dry is null) { BakeCleanupStatus = reason; return; }
+            if (dry.Removable == 0) { BakeCleanupStatus = L.T("settings.bake.gc_nothing"); return; }
+            if (Avalonia.Application.Current?.ApplicationLifetime is not Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner })
+                return;
+            var ok = await Views.ConfirmDialog.AskAsync(owner, L.T("settings.bake.gc"),
+                L.F("settings.bake.gc_body", dry.Removable, Fmt.Size(dry.RemovableBytes), dry.LiveStates), L.T("settings.bake.gc_confirm"));
+            if (!ok) { BakeCleanupStatus = ""; return; }
+            var (done, why) = await _service.CleanBakeCacheAsync(apply: true, CancellationToken.None);
+            BakeCleanupStatus = done is null ? why
+                : done.Failed > 0 ? L.F("settings.bake.gc_partial", done.Removed, done.Failed)
+                : L.F("settings.bake.gc_done", done.Removed, Fmt.Size(done.RemovableBytes));
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException)
+        {
+            BakeCleanupStatus = e.Message;
+        }
+        finally
+        {
+            IsCleaningBake = false;
+        }
+    }
     [ObservableProperty] public partial bool IsolateVersions { get; set; }
     [ObservableProperty] public partial string WindowWidth { get; set; }
     [ObservableProperty] public partial string WindowHeight { get; set; }
@@ -490,6 +651,11 @@ public sealed partial class SettingsViewModel : PageViewModel
         _service = service;
         Recycle = new RecycleViewModel(service);
         _loading = true;
+        // The loader line is built from text in the current language; a language switch rebuilds it (not during an install or download).
+        L.Changed += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsInstallingBakeLoader) BakeLoaderStatus = DescribeBakeLoader(BakeLoaderPath);
+        });
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
             var automatic = JavaOptions.FirstOrDefault(o => o.Path is null);
@@ -519,6 +685,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         BreakerSkipDelay = s.BreakerSkipDelay;
         ExperimentalBake = s.ExperimentalBake;
         BakeLoaderPath = s.BakeLoaderPath ?? "";
+        BakeLoaderStatus = DescribeBakeLoader(BakeLoaderPath);
         IsolateVersions = s.IsolateVersions;
         WindowWidth = s.WindowWidth?.ToString() ?? "";
         WindowHeight = s.WindowHeight?.ToString() ?? "";
@@ -634,7 +801,30 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// <summary>主题包的说明：作者、读取时发现的问题、安全模式提示。</summary>
     [ObservableProperty] public partial string ThemePackStatus { get; set; } = "";
 
-    public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false };
+    public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false } option && !Amber.Core.Themes.BuiltInThemes.IsBuiltIn(option.Id);
+
+    /// <summary>What Jay changed in the current theme: the format upgrade and the automatic color fixes (official §10.4, §10.8).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasThemeReport))]
+    public partial string ThemeReportText { get; set; } = "";
+
+    public bool HasThemeReport => ThemeReportText.Length > 0;
+
+    /// <summary>Copy text to the clipboard (tests swap this so the real clipboard is never touched).</summary>
+    internal Func<string, Task<bool>> CopyText { get; set; } = async text =>
+    {
+        if (Amber.App.Services.AvaloniaClipboard.FromMainWindow() is not { } clipboard) return false;
+        await clipboard.SetTextAsync(text);
+        return true;
+    };
+
+    /// <summary>【复制给作者看】: the upgrade notes and fixes as plain text, for the theme's author.</summary>
+    [RelayCommand]
+    private async Task CopyThemeReportAsync()
+    {
+        if (ThemeService.Current is not { } pack) return;
+        if (await CopyText(Amber.Core.Themes.ThemeFormat.Report(pack))) Toasts.Show(L.T("settings.themepack.report_copied"));
+    }
 
     private bool _themeLoading;
 
@@ -643,8 +833,19 @@ public sealed partial class SettingsViewModel : PageViewModel
         _themeLoading = true;
         ThemePacks.Clear();
         ThemePacks.Add(new ThemePackOption(ThemeService.DefaultId, L.T("settings.themepack.default"), true));
-        foreach (var pack in ThemeService.Store.List())
-            ThemePacks.Add(new ThemePackOption(pack.Id, pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name, false));
+        foreach (var pack in ThemeService.Store.ListAll())
+        {
+            // Jay's own themes are named in the UI language; imported ones by their author.
+            var label = pack.Id switch
+            {
+                Amber.Core.Themes.BuiltInThemes.ClassicAmber => L.T("settings.themepack.builtin.jay-classic-amber"),
+                Amber.Core.Themes.BuiltInThemes.HighContrast => L.T("settings.themepack.builtin.jay-high-contrast"),
+                _ => pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name,
+            };
+            // Format 1 packs are upgraded on read (official §10.8): the card says so.
+            if (pack.Upgraded) label += " · " + L.T("settings.themepack.upgraded_tag");
+            ThemePacks.Add(new ThemePackOption(pack.Id, label, false));
+        }
         var id = select ?? _service.Settings.ThemePack ?? ThemeService.DefaultId;
         SelectedThemePack = ThemePacks.FirstOrDefault(o => o.Id == id) ?? ThemePacks[0];
         _themeLoading = false;
@@ -671,9 +872,18 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
         if (ThemeService.DevDirectory is { } devDir) lines.Add(L.F("settings.themepack.dev", devDir));
         if (ThemeService.DevError is { } devError) lines.Add(L.F("settings.themepack.dev_error", devError));
-        if (ThemeService.Current is { } pack && pack.Problems.Count > 0)
-            lines.Add(L.F("settings.themepack.problems", pack.Problems.Count, string.Join("; ", pack.Problems.Take(4))));
+        var report = new List<string>();
+        if (ThemeService.Current is { } pack)
+        {
+            if (pack.Problems.FirstOrDefault(p => p.Code == "needs_newer_jay") is { } newer) lines.Add(L.F("settings.themepack.needs_newer", newer.Detail));
+            var others = pack.Problems.Where(p => p.Code is not ("contrast_fixed" or "needs_newer_jay")).ToList();
+            if (others.Count > 0) lines.Add(L.F("settings.themepack.problems", others.Count, string.Join("; ", others.Take(4))));
+            if (pack.Upgraded) report.Add(L.F("settings.themepack.upgraded", pack.Format));
+            var fixes = pack.Problems.Count(p => p.Code == "contrast_fixed");
+            if (fixes > 0) report.Add(L.P("settings.themepack.fixed", fixes, fixes));
+        }
         ThemePackStatus = string.Join("\n", lines);
+        ThemeReportText = string.Join("\n", report);
     }
 
     /// <summary>导入 .jaytheme：读取、校验、安装，然后直接切换过去。</summary>
@@ -714,7 +924,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     [RelayCommand]
     private void RemoveThemePack()
     {
-        if (SelectedThemePack is not { IsDefault: false } option) return;
+        if (SelectedThemePack is not { IsDefault: false } option || Amber.Core.Themes.BuiltInThemes.IsBuiltIn(option.Id)) return;
         var wasCurrent = (_service.Settings.ThemePack ?? ThemeService.DefaultId) == option.Id;
         if (wasCurrent) ThemeService.Select(_service.Settings, ThemeService.DefaultId);
         try { ThemeService.Store.Remove(option.Id); }
@@ -774,7 +984,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnBreakerRestartDelayChanged(string value) => Persist();
     partial void OnBreakerSkipDelayChanged(bool value) => Persist();
     partial void OnExperimentalBakeChanged(bool value) => Persist();
-    partial void OnBakeLoaderPathChanged(string value) => Persist();
+    partial void OnBakeLoaderPathChanged(string value)
+    {
+        Persist();
+        if (!IsInstallingBakeLoader) BakeLoaderStatus = DescribeBakeLoader(value);
+        BakeCleanupStatus = "";   // the last cleanup's answer was about the previous folder
+    }
     partial void OnIsolateVersionsChanged(bool value) => Persist();
     partial void OnConcurrencyChanged(string value) => Persist();
     partial void OnWindowWidthChanged(string value) => Persist();

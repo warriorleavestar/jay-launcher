@@ -234,6 +234,9 @@ internal sealed class LayoutCheck(MainWindow window, MainViewModel main, string 
         {
             if (!c.IsEffectivelyVisible || c.Bounds.Width <= 2 || c.Bounds.Height <= 2 || InsideInput(c)) continue;
             if (c is Image { Source: null }) continue;
+            // Decoration drawn behind content on purpose (the faded big initial on the library's "continue" card):
+            // faint and not clickable, so text on top of it is not "two controls on top of each other".
+            if (!c.IsHitTestVisible && c.Opacity < 0.5) continue;
             if (Describe(c) is not { } label) continue;
             if (c.TranslatePoint(new Point(0, 0), root) is not { } p) continue;
             // 只算真正画出来的部分：滚动区域、列表这类会裁剪的上级之外的部分看不见，不算重叠（比如滚到底栏下面的内容）。
@@ -252,9 +255,21 @@ internal sealed class LayoutCheck(MainWindow window, MainViewModel main, string 
                 var overlap = a.Rect.Intersect(b.Rect);
                 if (overlap.Width <= 2 || overlap.Height <= 2) continue;
                 if (a.Control.IsVisualAncestorOf(b.Control) || b.Control.IsVisualAncestorOf(a.Control)) continue;
+                // A drawer raised over the page on purpose (an opaque panel with ZIndex > 0, like Discover's detail pane on
+                // medium widths) covers what is under it; that is not two controls drawn on top of each other.
+                if (!ReferenceEquals(RaisedLayer(a.Control, root), RaisedLayer(b.Control, root))) continue;
                 result.Add($"控件叠在一起：{a.Label} 和 {b.Label}");
             }
         return result;
+    }
+
+    /// <summary>The nearest opaque panel at or above <paramref name="control"/> that is raised over its siblings, or null.</summary>
+    internal static Control? RaisedLayer(Control control, Control root)
+    {
+        for (Visual? v = control; v is not null && !ReferenceEquals(v, root); v = v.GetVisualParent())
+            if (v is Border { ZIndex: > 0, Background: not null } or Panel { ZIndex: > 0, Background: not null })
+                return (Control)v;
+        return null;
     }
 
     /// <summary>自适应方面的问题：横向滚动、主要按钮要滚动才看得到、宽窗口下大片空白而内容挤在一边要滚动。</summary>

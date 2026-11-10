@@ -32,6 +32,9 @@ public sealed class Account
     public string? ServerName { get; set; }
     public string? ClientToken { get; set; }
 
+    /// <summary>The Jay account (jay1… address) bound to this Minecraft account, if any. See <c>Amber.Core.Identity.JayAccountStore</c>.</summary>
+    public string? JayAddress { get; set; }
+
     [JsonIgnore]
     public string KindText => Kind switch
     {
@@ -107,6 +110,8 @@ public sealed class AccountStore(string path)
         if (existing >= 0)
         {
             account.Id = Accounts[existing].Id;
+            // Logging in again must not drop the Jay account binding.
+            account.JayAddress ??= Accounts[existing].JayAddress;
             Accounts[existing] = account;
         }
         else
@@ -129,7 +134,16 @@ public sealed class AccountStore(string path)
         if (secret is null) return null;
         var bytes = Encoding.UTF8.GetBytes(secret);
         if (OperatingSystem.IsWindows())
-            return Convert.ToBase64String(ProtectedData.Protect(bytes, Entropy, DataProtectionScope.CurrentUser));
+        {
+            try
+            {
+                return Convert.ToBase64String(ProtectedData.Protect(bytes, Entropy, DataProtectionScope.CurrentUser));
+            }
+            catch (CryptographicException)
+            {
+                // DPAPI can refuse (SSH key logon without a password); use the user-only key file like macOS and Linux.
+            }
+        }
 
         var nonce = RandomNumberGenerator.GetBytes(12);
         var cipher = new byte[bytes.Length];
@@ -143,7 +157,8 @@ public sealed class AccountStore(string path)
         if (stored is null) return null;
         try
         {
-            if (OperatingSystem.IsWindows())
+            // "v2:" never starts a DPAPI blob (Base64 has no ':'), so Windows can read the key-file fallback too.
+            if (OperatingSystem.IsWindows() && !stored.StartsWith("v2:", StringComparison.Ordinal))
                 return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(stored), Entropy, DataProtectionScope.CurrentUser));
 
             // v0.5.x 在非 Windows 上只是 Base64。仍能读，下一次保存会自动迁移到加密格式。

@@ -49,7 +49,7 @@ internal sealed class ContentPageSelfTest(MainWindow window, MainViewModel main,
             WriteVersion(game, "1.21.1", """{"id":"1.21.1","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":[]}""");
             WriteVersion(game, "layout-fabric", """{"id":"layout-fabric","inheritsFrom":"1.21.1","mainClass":"net.fabricmc.loader.impl.launch.knot.KnotClient","libraries":[{"name":"net.fabricmc:fabric-loader:0.16.0"}]}""");
             using var service = new LauncherService(new AppSettings { GameDirectory = game, PlayerName = "", LastVersion = "1.21.1", IsolateVersions = true, SavePathForTest = Path.Combine(reportDir, "settings.json") });
-            _vm = new ContentViewModel(service, _ => _provider, () => _hasKey) { NavigateToSettings = () => _openedSettings = true };
+            _vm = new ContentViewModel(service, _ => _provider, () => _hasKey, Amber.Core.Content.ContentType.Mod) { NavigateToSettings = () => _openedSettings = true };
             main.Pages[index] = _vm;
             main.CurrentPage = _vm;
             L.Pseudo = false;

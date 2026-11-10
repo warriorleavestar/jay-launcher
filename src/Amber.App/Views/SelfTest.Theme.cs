@@ -78,6 +78,8 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             Check("安全窗口不受主题影响（强调色仍是默认）",
                 locked.TryFindResource("Accent", ThemeVariant.Dark, out var lockedAccent) && lockedAccent is ISolidColorBrush lb && lb.Color.ToUInt32() == defaultAccent);
             Check("设置文件记下了主题包", File.ReadAllText(AppSettings.FilePath).Contains("\"ThemePack\": \"selftest-blue\"", StringComparison.Ordinal));
+            await Format2Async(settings);
+            await BuiltInAsync(settings);
             foreach (var lang in new[] { "zh-Hans", "zh-Hant", "en", "ja" })
                 foreach (var (w, h) in new[] { (760, 440), (1024, 640), (1600, 900) })
                 {
@@ -230,6 +232,75 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         ThemeService.SetNetworkTheme(null);
         await Task.Delay(300);
         Check("离开网络后换回自己的主题", Brush("Accent", ThemeVariant.Dark) == mine && settings.SelectedThemePack?.Id == "selftest-topbar");
+    }
+
+    /// <summary>
+    /// Format 2 (official §10): the old pack above has no "format", so it is upgraded on read — the theme card says so,
+    /// the banner offers 【复制给作者看】, the old sidebar color reaches the top bar and the start button takes the accent.
+    /// A format 2 pack is not marked, warns about minJay, and its motion lengths apply.
+    /// </summary>
+    private async Task Format2Async(SettingsViewModel settings)
+    {
+        var tag = L.T("settings.themepack.upgraded_tag");
+        Check("format 1 主题：主题卡写“已自动升级”", settings.SelectedThemePack?.Label.Contains(tag, StringComparison.Ordinal) == true, settings.SelectedThemePack?.Label ?? "");
+        var banner = window.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Name == "ThemeReportBanner");
+        Check("format 1 主题：设置里有升级说明条", settings.HasThemeReport && banner?.IsVisible == true && settings.ThemeReportText.Contains("1", StringComparison.Ordinal), settings.ThemeReportText);
+        string? copied = null;
+        settings.CopyText = text => { copied = text; return Task.FromResult(true); };
+        var copy = window.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "CopyThemeReportButton");
+        copy?.Command?.Execute(null);
+        await Task.Delay(200);
+        Check("【复制给作者看】复制出升级说明（不碰真剪贴板）", copied?.Contains("(format 1)", StringComparison.Ordinal) == true && copied.Contains("migrated_", StringComparison.Ordinal), copied ?? "(没复制)");
+        var topBar = window.GetVisualDescendants().OfType<Grid>().FirstOrDefault(g => g.Name == "TopBar");
+        Check("format 1 的侧栏底色同时给了顶栏", topBar?.Background is ISolidColorBrush { Color: var tb } && tb.ToUInt32() == 0xFF123456,
+            topBar?.Background?.ToString() ?? "(无)");
+        Check("format 1 的强调色也用在开始按钮上", Brush("Play", ThemeVariant.Dark) == 0xFF2F80ED);
+        var group = settings.SelectedGroupIndex;
+        settings.SelectedGroupIndex = Math.Max(0, settings.Groups.ToList().FindIndex(g => g.Id == "appearance"));
+        await ShotAsync("theme-upgraded");
+
+        var v2 = Path.Combine(reportDir, "selftest-v2.jaytheme");
+        WritePack(v2, """{ "format": 2, "id": "selftest-v2", "name": "自检二", "minJay": "999.0.0" }""",
+            """{ "seed": { "accent": "#7C3AED", "play": "#E07B00" }, "colors": { "dark": { "Base": "#14101C" } }, "motion": { "DurationBase": 200 } }""",
+            ("styles.json", """{ "chip": { "radius": 0 }, "button.play": { "glow": "#80E07B00" } }"""));
+        settings.ImportThemePack(v2);
+        await Task.Delay(400);
+        var upgradedLine = L.F("settings.themepack.upgraded", 1);
+        Check("format 2 主题：不写“已自动升级”、说明条里没有升级这一句", settings.SelectedThemePack?.Id == "selftest-v2"
+            && settings.SelectedThemePack?.Label.Contains(tag, StringComparison.Ordinal) == false && !settings.ThemeReportText.Contains(upgradedLine, StringComparison.Ordinal),
+            settings.ThemeReportText);
+        Check("format 2 主题：minJay 比现在的 Jay 新时提示", settings.ThemePackStatus.Contains("999.0.0", StringComparison.Ordinal), settings.ThemePackStatus);
+        Check("format 2 主题：新名字 Base 和种子 play 生效", Brush("PageBg", ThemeVariant.Dark) == 0xFF14101C && Brush("Play", ThemeVariant.Dark) == 0xFFE07B00);
+        Check("format 2 主题：动效时长生效（没减少动画时）", Amber.App.Services.SystemMotion.Reduced || Resource("MotionBase") is TimeSpan { TotalMilliseconds: 200 },
+            Resource("MotionBase")?.ToString() ?? "");
+        await ShotAsync("theme-format2");
+        settings.SelectedGroupIndex = group;
+        settings.SelectedThemePack = settings.ThemePacks.First(o => o.Id == "selftest-blue");
+        await Task.Delay(300);
+    }
+
+    /// <summary>Jay's own themes (§10.9): listed with names in the UI language, applied like any pack, never removable.</summary>
+    private async Task BuiltInAsync(SettingsViewModel settings)
+    {
+        var classic = settings.ThemePacks.FirstOrDefault(o => o.Id == BuiltInThemes.ClassicAmber);
+        var contrast = settings.ThemePacks.FirstOrDefault(o => o.Id == BuiltInThemes.HighContrast);
+        Check("内置主题出现在列表里（默认之后），名字跟着界面语言", classic is not null && contrast is not null
+            && settings.ThemePacks.IndexOf(classic) == 1 && classic.Label == L.T("settings.themepack.builtin.jay-classic-amber"),
+            string.Join(" | ", settings.ThemePacks.Select(o => o.Label)));
+        settings.SelectedThemePack = contrast;
+        await Task.Delay(400);
+        Check("选高对比：底色变纯黑 / 纯白，不能删", Brush("PageBg", ThemeVariant.Dark) == 0xFF000000 && Brush("PageBg", ThemeVariant.Light) == 0xFFFFFFFF
+            && !settings.CanRemoveThemePack && settings.ThemePackStatus.Length == 0, settings.ThemePackStatus);
+        settings.RemoveThemePackCommand.Execute(null);
+        await Task.Delay(200);
+        Check("内置主题删不掉（按删除也不动）", ThemeService.Current?.Id == BuiltInThemes.HighContrast);
+        await ShotAsync("theme-high-contrast");
+        settings.SelectedThemePack = classic;
+        await Task.Delay(400);
+        Check("选经典琥珀：暖棕底、开始按钮是琥珀", Brush("PageBg", ThemeVariant.Dark) == 0xFF1C1A18 && Brush("Play", ThemeVariant.Dark) == 0xFFE89B32);
+        await ShotAsync("theme-classic-amber");
+        settings.SelectedThemePack = settings.ThemePacks.First(o => o.Id == "selftest-blue");
+        await Task.Delay(300);
     }
 
     internal static void WritePack(string path, string manifest, string tokens, params (string Name, string Text)[] extra)

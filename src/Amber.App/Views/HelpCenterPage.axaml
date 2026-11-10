@@ -21,12 +21,15 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate DataType="vm:HelpCategoryGroup">
               <StackPanel Spacing="2" Margin="0,0,0,10">
-                <TextBlock Text="{Binding Title}" Classes="hint" FontSize="12" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Title}" Classes="hint" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
                 <ItemsControl ItemsSource="{Binding Articles}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:HelpArticleItem">
-                      <Button Classes="ghost" Content="{Binding Title}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,4"
-                              Command="{Binding $parent[ItemsControl;1].((vm:HelpCenterViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}" />
+                      <!-- Long titles (English, Japanese) wrap in the 220px catalog instead of running under the article. -->
+                      <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,4"
+                              Command="{Binding $parent[ItemsControl;1].((vm:HelpCenterViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}">
+                        <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                      </Button>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -39,7 +42,7 @@
         <!-- Medium: the catalog as a menu -->
         <ComboBox x:Name="ArticlePicker" ItemsSource="{Binding Articles}" SelectedItem="{Binding Selected}" HorizontalAlignment="Stretch" Margin="0,0,0,8" IsVisible="False">
           <ComboBox.ItemTemplate>
-            <DataTemplate DataType="vm:HelpArticleItem"><TextBlock Text="{Binding Title}" /></DataTemplate>
+            <DataTemplate DataType="vm:HelpArticleItem"><TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" /></DataTemplate>
           </ComboBox.ItemTemplate>
         </ComboBox>
         <ScrollViewer x:Name="ArticleScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
@@ -55,7 +58,7 @@
                     <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,6"
                             Command="{Binding $parent[ItemsControl].((vm:HelpCenterViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}">
                       <StackPanel Spacing="2">
-                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding Summary}" Classes="hint" FontSize="12" TextWrapping="Wrap" />
                       </StackPanel>
                     </Button>

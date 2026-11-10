@@ -293,10 +293,26 @@ public sealed record EasyTierOptions(
     public IReadOnlyList<string> DirectUnderlayAddresses { get; init; } = [];
     /// <summary>当前有 IPv6 直连承载；现有全局出口门禁只支持明确识别的 IPv4 承载。</summary>
     public bool DirectUnderlayUsesIpv6 { get; init; }
+
+    /// <summary>
+    /// Carry this member's forwarded TCP streams (game, chat, tunnel) over EasyTier's QUIC proxy instead of its
+    /// user-space TCP stack, whose small window caps one connection at roughly 15 KB per round trip without a TUN device.
+    /// On by default since the 2026-11-10 real-device test (Korea to New Zealand: about 0.05 → 0.88 MB/s); setting
+    /// <see cref="EasyTierArgs.QuicProxyVariable"/> to "0" turns it off. The other side needs nothing (EasyTier accepts
+    /// QUIC-proxied streams by default) and the port whitelist still applies.
+    /// </summary>
+    public bool QuicProxy { get; init; } = EasyTierArgs.QuicProxyRequested;
 }
 
 public static class EasyTierArgs
 {
+    /// <summary>Developer switch for the QUIC proxy: "0" turns it off (it is on by default).</summary>
+    public const string QuicProxyVariable = "AMBER_ET_QUIC";
+
+    public static bool QuicProxyRequested => QuicProxyFrom(System.Environment.GetEnvironmentVariable(QuicProxyVariable));
+
+    internal static bool QuicProxyFrom(string? value) => value?.Trim() != "0";
+
     /// <summary>房主固定用这个虚拟地址，加入方用同网段的随机地址。</summary>
     public const string HostIp = "10.233.144.1";
     public const string Subnet = "10.233.144.";
@@ -310,7 +326,18 @@ public static class EasyTierArgs
     public const string SecretVariable = "ET_NETWORK_SECRET";
 
     /// <summary>消费出口使用独立网卡名，守护只信任本次启动后新出现的 Wintun GUID。</summary>
-    public static string DeviceName(EasyTierOptions options) => options.ExitNode is null ? "Amber LAN" : $"Amber LAN-{options.RpcPort}";
+    /// Linux 的网卡名不能有空格、最长 15 个字符，所以用 amberlan；macOS 的 utun 网卡由系统编号，不能自己起名（见 <see cref="DeviceNameArgs"/>）。
+    public static string DeviceName(EasyTierOptions options) => OperatingSystem.IsWindows()
+        ? options.ExitNode is null ? "Amber LAN" : $"Amber LAN-{options.RpcPort}"
+        : options.ExitNode is null ? "amberlan" : $"amberlan-{options.RpcPort}";
+
+    /// <summary>完整局域网模式下给 easytier-core 的网卡参数。广播转发（--enable-udp-broadcast-relay）EasyTier 只在 Windows 上实现，Mac/Linux 由 Jay 的守护自己转发（见 UnixBroadcastRelay）。</summary>
+    internal static IEnumerable<string> DeviceNameArgs(EasyTierOptions o)
+    {
+        if (OperatingSystem.IsMacOS()) return [];
+        if (OperatingSystem.IsWindows()) return ["--dev-name", DeviceName(o), "--enable-udp-broadcast-relay"];
+        return ["--dev-name", DeviceName(o)];
+    }
 
     /// <summary>经环境变量传给 easytier-core 的值。</summary>
     public static Dictionary<string, string> Environment(EasyTierOptions o) => new() { [SecretVariable] = o.Room.EasyTierSecret };
@@ -330,8 +357,11 @@ public static class EasyTierArgs
         };
         // 默认不建虚拟网卡；完整局域网模式才建（要管理员权限和 wintun）。
         if (!o.Tun) args.Add("--no-tun");
-        // 完整局域网模式下转发本机游戏发出的 UDP 广播，很多游戏靠广播找局域网房间（EasyTier 的这个功能只在 Windows 上、要管理员权限，正好这个模式已经有）。
-        else args.AddRange(["--dev-name", DeviceName(o), "--enable-udp-broadcast-relay"]);
+        // 完整局域网模式下转发本机游戏发出的 UDP 广播，很多游戏靠广播找局域网房间（EasyTier 的这个功能只在 Windows 上、要管理员权限，正好这个模式已经有；
+        // Mac/Linux 上由 root 守护自己转发）。
+        else args.AddRange(DeviceNameArgs(o));
+        // Only useful without a TUN device; with one the kernel's TCP stack is used anyway.
+        if (!o.Tun && o.QuicProxy) args.Add("--enable-quic-proxy");
         // 出口节点：两边都要用户明确打开。允许别人经自己上网的一方加 --enable-exit-node；
         // 要经别人上网的一方把所有流量导进虚拟网卡，所以必须是完整局域网模式。
         if (o.AllowExit) args.Add("--enable-exit-node");
@@ -547,6 +577,9 @@ public sealed class EasyTierSession : IEasyTierSession
         var text = await RunCliAsync(cliPath, ["-p", $"127.0.0.1:{rpcPort}", "-o", "json", "peer"], ct);
         return text is null ? [] : ParsePeers(text);
     }
+
+    internal static async Task<bool> AddConnectorAsync(string cliPath, int rpcPort, string url, CancellationToken ct) =>
+        await RunCliAsync(cliPath, ["-p", $"127.0.0.1:{rpcPort}", "connector", "add", url], ct) is not null;
 
     internal static List<PeerInfo> ParsePeers(string json)
     {

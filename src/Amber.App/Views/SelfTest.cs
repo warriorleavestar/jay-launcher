@@ -75,6 +75,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Amber.Core.Localization.L.SetLanguage("zh-Hans");
         try
         {
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "hotspot")
+            {
+                await HotspotAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "shell")
             {
                 await ShellAsync();
@@ -229,6 +236,20 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "mp-requests")
+            {
+                await MultiplayerRequestsAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "room")
+            {
+                await RoomConsoleAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "multiplayer-guide")
             {
                 await MultiplayerGuideAsync();
@@ -246,6 +267,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "security")
             {
                 await SecurityBreakerAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "jay-account")
+            {
+                await JayAccountAsync();
                 Log("DONE");
                 window.Close();
                 return;
@@ -292,6 +320,31 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             {
                 await MultiplayerAsync();
                 await DirectRoomAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "journeys")
+            {
+                await JourneysAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "help-shots")
+            {
+                await HelpShotsAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            // Only the page × window size × language matrix (no install, no launch): AMBER_SELFTEST_SCOPE=layout.
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "layout")
+            {
+                var matrix = await new LayoutCheck(window, main, Path.Combine(reportDir, "layout")).RunAsync(Log);
+                var clipped = matrix.Where(p => p.Kind == LayoutCheck.Kind.Clipped).ToList();
+                Check($"界面尺寸：{main.Pages.Count} 个页面 × {LayoutCheck.Sizes.Length} 种窗口大小 × 5 种语言没有被切掉的内容", clipped.Count == 0,
+                    string.Join("；", clipped.Take(12).Select(p => $"{p.Page}@{p.Size} {p.What}")));
                 Log("DONE");
                 window.Close();
                 return;
@@ -410,6 +463,22 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             .Any(t => t.IsEffectivelyVisible && t.Text == L.T("content.curseforge.manual_hint")), content.ManualDownloadHint);
         var instance = Page<InstanceViewModel>();
         main.CurrentPage = instance;
+        // Run on its own (scope "curseforge") the test profile has no instance yet, and the instance checks below need one
+        // with an empty mods folder. Use a hand-written Fabric version in the report folder, like the shader scope does.
+        var service = Page<HomeViewModel>().Service;
+        var originalGameDir = service.Settings.GameDirectory;
+        var fixtureGame = instance.Current is null ? Path.Combine(reportDir, "game") : null;
+        if (fixtureGame is not null)
+        {
+            WriteVersion(fixtureGame, "cf-fabric", """[{"name":"net.fabricmc:fabric-loader:0.16.0"}]""");
+            service.Settings.GameDirectory = fixtureGame;
+            service.SaveAndReload();
+            await WaitAsync(() => service.InstalledVersions().Contains("cf-fabric"), 10);
+            instance.SelectedId = "cf-fabric";
+            await WaitAsync(() => instance.Current?.Id == "cf-fabric", 10);
+        }
+        instance.TabIndex = (int)InstanceTab.Mods;
+        await Ui.FlushAsync();
         var oldPath = Path.Combine(reportDir, "manual-update-old.jar");
         await File.WriteAllTextAsync(oldPath, "old");
         var mod = new ModItem(new LocalMod(oldPath, "manual-update-old.jar", true, "example", "示例模组", "0.9", null, null, null))
@@ -423,6 +492,11 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await ShotAsync("CurseForge更新手动下载");
         await LayoutHereAsync("CurseForge更新手动下载");
         await CheckInstanceScrollReachabilityAsync(instance, oldPath);
+        if (fixtureGame is not null)
+        {
+            service.Settings.GameDirectory = originalGameDir;
+            service.SaveAndReload();
+        }
         main.CurrentPage = previous;
         main.Pages[pageIndex] = originalContent;
     }
@@ -448,13 +522,19 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             window.Height = 440;
             await Ui.FlushAsync();
             var buttons = window.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible).ToList();
-            var manual = buttons.Single(b => b.Command == instance.OpenManualDownloadCommand);
-            Check($"实例窄窗 {language}：CurseForge 官网入口完整可见且中心命中", await ReachAsync(manual));
+            // A missing button is a failed check with the visible buttons listed, not an exception that ends the run.
+            var seen = string.Join(", ", buttons.Select(b => b.Content?.ToString() ?? b.Name ?? "?"));
+            var manual = buttons.FirstOrDefault(b => b.Command == instance.OpenManualDownloadCommand);
+            Check($"实例窄窗 {language}：CurseForge 官网入口完整可见且中心命中", manual is not null && await ReachAsync(manual), seen);
+            // Since the mods-tab redesign "Browse online" in the toolbar is an item of the [Add ▾] menu; the empty state
+            // keeps its own button.
             var browse = buttons.Where(b => b.Command == instance.BrowseOnlineCommand).ToList();
-            Check($"实例窄窗 {language}：模组工具栏可滚动到达且中心命中", await ReachAsync(browse.First()));
+            var add = buttons.FirstOrDefault(b => b.Name == "AddModButton");
+            Check($"实例窄窗 {language}：模组工具栏可滚动到达且中心命中", add is not null && await ReachAsync(add), seen);
             if (instance.BakeEnabled)
-                Check($"实例窄窗 {language}：烘焙入口可滚动到达且中心命中", await ReachAsync(buttons.Single(b => b.Command == instance.BakeNowCommand)));
-            Check($"实例窄窗 {language}：空态在线浏览可滚动到达且中心命中", browse.Count == 2 && await ReachAsync(browse.Last()));
+                Check($"实例窄窗 {language}：烘焙入口可滚动到达且中心命中",
+                    buttons.FirstOrDefault(b => b.Command == instance.BakeNowCommand) is { } bake && await ReachAsync(bake), seen);
+            Check($"实例窄窗 {language}：空态在线浏览可滚动到达且中心命中", browse.Count > 0 && await ReachAsync(browse[^1]), seen);
             await ShotAsync($"实例窄窗滚动命中-{language}");
         }
 
@@ -507,6 +587,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
     {
         var content = Page<ContentViewModel>();
         var previous = main.CurrentPage;
+        Check("Discover starts on modpacks (§6.12)", content.TypeIndex == (int)ContentType.Modpack);
+        content.TypeIndex = (int)ContentType.Mod;
         main.CurrentPage = content;
         await WaitAsync(() => content.Results.Count > 0 || content.StatusInfo?.Kind == StatusKind.Error, 30);
         Check("首次进入资源页自动加载 Modrinth 列表（不点搜索）", content.Query == "" && content.Results.Count > 0, content.Status);
@@ -966,7 +1048,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("进入游戏后显示运行时长，主按钮变成“退出游戏”", home.Status.Contains("运行中 ·") && home.PrimaryLabel == "退出游戏" && !home.ShowProgress,
             $"{home.Status} / {home.PrimaryLabel}");
         // 过滤后的配置放在 Amber 自己的数据目录里，游戏目录里一个都不能有；游戏退出后删掉。
-        var noTraceRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Amber", "notrace");
+        var noTraceRoot = Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber", "notrace");
         var filtered = Directory.Exists(noTraceRoot)
             ? Directory.EnumerateFiles(noTraceRoot, "*.amber-notrace.xml", SearchOption.AllDirectories).Where(f => File.GetLastWriteTime(f) >= launchStart).ToList()
             : [];
@@ -982,10 +1064,14 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         main.CurrentPage = log;
         await ShotAsync("日志页");
 
-        // 游戏在运行时从别的页面再请求启动：启动页给出多开警告，【仍然启动】能同时开第二个客户端。
+        // 游戏在运行时从别的页面再请求启动：多开警告进请求条（不换页，§2.5 第 5 条），启动页的卡片也在；【仍然启动】能同时开第二个客户端。
+        var pageBefore = main.CurrentPage;
         home.Service.RequestLaunch(new Amber.App.Services.LaunchRequest(FabricName));
-        await WaitAsync(() => home.HasPendingLaunch && main.CurrentPage == home, 5);
-        Check("多开：游戏运行中再启动出现警告并回到启动页", home.HasPendingLaunch && main.CurrentPage == home && home.PendingLaunchText.Contains(FabricName), home.PendingLaunchText);
+        bool MultiAsked() => home.Service.Requests.Pending.Any(r => r.Spec.Kind == "multi");
+        await WaitAsync(() => home.HasPendingLaunch && MultiAsked(), 5);
+        Check("多开：游戏运行中再启动出现警告（请求条 + 启动页卡片，不换页）",
+            home.HasPendingLaunch && MultiAsked() && main.CurrentPage == pageBefore && home.PendingLaunchText.Contains(FabricName),
+            $"{home.PendingLaunchText} / 请求条 {MultiAsked()} / 页面 {main.CurrentPage?.GetType().Name}");
         await ShotAsync("多开警告");
         home.LaunchAnywayCommand.Execute(null);
         // 第二个客户端自己的输出里出现进入主界面的标志，状态才会变成“运行中 ·”。
@@ -1172,7 +1258,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             if (installed) break;
         }
         var dir = DatapackManager.DirectoryOf(world);
-        Check("下载数据包进世界", installed && Directory.EnumerateFiles(dir, "*.zip").Count() >= 2, content.Status);
+        // The folder only exists once a pack was added; if an earlier step failed, report that instead of throwing.
+        Check("下载数据包进世界", installed && Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.zip").Count() >= 2, content.Status);
         await ShotAsync("资源页数据包");
         content.TypeIndex = 0;
         main.CurrentPage = instance;
@@ -1190,10 +1277,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
     {
         var host = Page<MultiplayerViewModel>();
         main.CurrentPage = host;
+        host.ShowTabCommand.Execute("play");
         await Task.Delay(500);
         host.JoinCode = "JAY2-123";
         await PasteBoxMaskedAsync(host);
-        Check("联机：邀请码格式错误有提示", Press(await FindAsync<Button>(b => b.Content as string == "加入房间")) && host.Status.Contains("格式") || !host.IsComponentReady && host.Status.Contains("组件"), host.Status);
+        // The lobby's join button (official §6.14): found by its command, not its text, which the terminology pass renamed.
+        Check("联机：邀请码格式错误有提示", Press(await FindAsync<Button>(b => b.Name == "LobbyJoinButton" && b.IsEffectivelyVisible))
+            && (host.IsComponentReady ? host.Status.Contains(L.T("multiplayer.room.invalid_code")) : host.Status.Contains(L.T("multiplayer.component.download_required"))), host.Status);
         if (host.IsComponentReady)
         {
             host.JoinCode = "AMB-K7Q2M9XD-4HZP8RW2N6TC-25565";
@@ -1669,9 +1759,17 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var download = Page<DownloadViewModel>();
         main.CurrentPage = download;
         await WaitAsync(() => download.Items.Count > 0, 30);
+        // Earlier steps leave a search or a type chip behind: list releases again, or 1.5.2 isn't in the rows.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            download.Filter = download.Filters[0];
+            download.Search = "";
+        });
+        await WaitAsync(() => download.Items.Any(i => i.Id == "1.5.2"), 10);
         download.ConfigureCommand.Execute(download.Items.FirstOrDefault(i => i.Id == "1.5.2"));
+        Check("下载页：列表里找到 1.5.2", download.Target?.Id == "1.5.2", $"{download.Items.Count} 行，搜索“{download.Search}”");
         download.SelectedLoader = download.LoaderChoices.First(c => c.Label == "Forge");
-        await WaitAsync(() => download.LoaderVersions.Count > 0 || download.LoaderHint.Length > 0 && !download.LoaderHint.StartsWith("正在", StringComparison.Ordinal), 45);
+        await WaitAsync(() => download.LoaderVersions.Count > 0 || download.LoaderHint.Length > 0 && download.LoaderHint != L.T("download.status.fetching_versions"), 45);
         Check("下载页：1.5.2 能选 Forge 版本", download.LoaderVersions.Any(v => v.Version.StartsWith("1.5.2-", StringComparison.Ordinal)), $"{download.LoaderVersions.Count} 个 {download.LoaderHint}");
         // 换语言时 Forge 的“推荐 / 最新”备注跟着换，但不能把用户填的名字改回默认。
         Dispatcher.UIThread.Invoke(() => download.CustomName = "MyPack");

@@ -120,7 +120,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial bool FullLanMode { get; set; }
 
     public bool CanUseFullLan => PlatformFeatures.FullLan;
-    public string FullLanUnavailableText => CanUseFullLan ? "" : L.T("core.mp.component.windowsonly");
+    public string FullLanUnavailableText => PlatformFeatures.FullLanUnavailableReason ?? "";
 
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(MyVirtualIpText))] public partial string MyVirtualIp { get; set; } = "";
 
@@ -139,7 +139,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial PeerItem? SelectedExitPeer { get; set; }
 
     public bool UsingExit => ExitNodeIp.Length > 0;
-    public bool CanUseExit => _session?.Options.Tun == true && !Child.HideNetworkExit;
+    /// <summary>经别人上网（消费出口）：要完整局域网模式；Mac/Linux 上还没做（见 PlatformFeatures.FullTrafficExit）。</summary>
+    public bool CanUseExit => PlatformFeatures.FullTrafficExit && _session?.Options.Tun == true && !Child.HideNetworkExit;
     public string ExitBanner
     {
         get
@@ -257,8 +258,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (_service.CurrentInstance is { } id && Instances.Contains(id)) TargetInstance = id;
         });
         InitDirect();
+        InitHotspot();
         InitGuide();
+        InitRoom();
+        InitRequests();
         InitPublic();
+        InitPublicList();
+        RefreshLongInvites();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
         HostServer = new HostServerViewModel(service);
     }
@@ -282,13 +288,19 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // 不自动听局域网广播：绑定端口可能让 Windows 弹防火墙询问。用 Amber 启动的游戏从日志就能认出端口。
     }
 
-    partial void OnTargetInstanceChanged(string? value) => _service.SetCurrentInstance(value);
+    partial void OnTargetInstanceChanged(string? value)
+    {
+        _service.SetCurrentInstance(value);
+        NotifyPlayAndHost();
+    }
 
     private void RefreshInstances()
     {
         Instances.Clear();
         foreach (var v in _service.InstalledVersions()) Instances.Add(v);
         TargetInstance = _service.CurrentOr(Instances, Instances.FirstOrDefault());
+        RepickJoinInstance();
+        NotifyPlayAndHost();
     }
 
     private void OnGameOutput(string versionId, string line)
@@ -300,6 +312,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             LanGames.Insert(0, item);
             SelectedLanGame = item;
             if (IsIdle) SetStatus(StatusMessage.Success("multiplayer.lan.opened", versionId, port));
+            OnLanOpenedWhileWaiting();
         });
     }
 
@@ -559,9 +572,10 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         RestoreChatHistory(room);
         StartHub(room);
         StartHostLobby(credentials, members);
+        if (_lobby is { } lobby) SeedLongInvites(lobby, credentials.Tunnel);
         StartAnnouncerIfHosting();
         Status = FullLanMode
-            ? L.T("multiplayer.room.created_full_lan")
+            ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
             : L.T("multiplayer.room.created");
     }
 
@@ -647,6 +661,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         _timer = new DispatcherTimer(TimeSpan.FromSeconds(2), DispatcherPriority.Background, (_, _) => _ = RefreshPeersAsync());
         _timer.Start();
         OnPropertyChanged(nameof(CanUseExit));
+        SyncHotspotSharing();
         return true;
     }
 
@@ -748,7 +763,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         return true;
     }
 
-    private string ChatName => _service.Accounts.Store.Selected?.Name ?? _service.Settings.PlayerName;
+    internal string ChatName => _service.Accounts.Store.Selected?.Name ?? _service.Settings.PlayerName;
 
     private void StartHub(RoomCode room)
     {
@@ -925,6 +940,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (_session is not { HasExited: false } ready) throw new IOException(L.T("core.mp.component.startfailed"));
             _currentOptions = ready.Options;
             ExitNodeIp = ready.Options.ExitNode ?? "";
+            SyncHotspotSharing();
             MarkJoinStarted(newRoom: false);
             return true;
         }
@@ -938,6 +954,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 {
                     _currentOptions = preserved.Options;
                     ExitNodeIp = preserved.Options.ExitNode ?? "";
+                    SyncHotspotSharing();
                 }
                 else StopSession();
                 SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed", e, ErrorText.Of(e)));
@@ -990,11 +1007,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         _refreshing = true;
         try
         {
+            SyncHotspotSharing();
             ExitWarning = _transport?.ExitProblem ?? "";
             var peers = await session.PeersAsync();
             TickDirect(peers);
             if (UsingExit) OnPropertyChanged(nameof(ExitBanner));
             if (_session != session) return;
+            SyncHotspotSharing();
             Peers.Clear();
             foreach (var p in peers.Where(p => p.Ip.StartsWith(EasyTierArgs.Subnet, StringComparison.Ordinal)).OrderBy(p => p.Ip)) Peers.Add(new PeerItem(p));
             var others = Peers.Where(p => p.Peer.Cost != "Local").ToList();
@@ -1120,6 +1139,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         else _session?.Dispose();
         _session = null;
         _service.ActiveMultiplayer = null;
+        SyncHotspotSharing();
         StopTransport();
         Peers.Clear();
         if (_room is { } leftRoom) SaveChatHistory(leftRoom);
