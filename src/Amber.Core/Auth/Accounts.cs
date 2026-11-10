@@ -32,6 +32,9 @@ public sealed class Account
     public string? ServerName { get; set; }
     public string? ClientToken { get; set; }
 
+    /// <summary>The Jay account (jay1… address) bound to this Minecraft account, if any. See <c>Amber.Core.Identity.JayAccountStore</c>.</summary>
+    public string? JayAddress { get; set; }
+
     [JsonIgnore]
     public string KindText => Kind switch
     {
@@ -107,6 +110,8 @@ public sealed class AccountStore(string path)
         if (existing >= 0)
         {
             account.Id = Accounts[existing].Id;
+            // Logging in again must not drop the Jay account binding.
+            account.JayAddress ??= Accounts[existing].JayAddress;
             Accounts[existing] = account;
         }
         else

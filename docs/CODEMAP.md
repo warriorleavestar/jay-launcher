@@ -39,6 +39,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `src/Amber.Core/Game/` | `.minecraft` layout, version JSON model, rules, libraries, NBT (`servers.dat`, `level.dat`), datapacks, world backups. | `GameDirectory.cs`, `VersionModels.cs` |
 | `src/Amber.Core/GameLibrary/` | Library home data: instance list, new-instance rules, copy instance, start button state. | `LibraryQuery.cs`, `StartButton.cs` |
 | `src/Amber.Core/Help/` | Help center articles (Markdown in `docs/help/`, embedded) and search. | `HelpLibrary.cs` |
+| `src/Amber.Core/Identity/` | Jay accounts: BIP39 recovery phrases (embedded wordlists), SLIP-0010 Ed25519 with Jay's own root key, `jay1` Bech32m addresses, device certificates, encrypted account store. | `JayAccount.cs`, `JayAccountStore.cs`, `Bip39.cs` |
 | `src/Amber.Core/Install/` | Vanilla, Fabric/Quilt, Forge/NeoForge (new and legacy), OptiFine installers. | `VanillaInstaller.cs`, `ForgeInstaller.cs` |
 | `src/Amber.Core/Interop/` | P/Invoke library names for macOS frameworks. | `MacFrameworks.cs` |
 | `src/Amber.Core/Java/` | Find local Java, or download the Mojang runtime / Temurin. | `JavaManager.cs`, `JavaFinder.cs` |

@@ -29,6 +29,10 @@ public sealed partial class AccountItem(Account account) : LocalizedObservable
 
     public bool HasNoAvatar => Head is null;
 
+    /// <summary>"Jay account jay1qxy7…k3pf" when a Jay account is bound, else null.</summary>
+    public string? JayText => Account.JayAddress is { } address ? L.F("accounts.jay.bound_line", Amber.Core.Identity.JayAddress.Short(address)) : null;
+    public bool HasJay => Account.JayAddress is not null;
+
     /// <summary>旧版本存下的 http 外置账号：现在不能再用，提示用 https 重新添加。</summary>
     public bool InsecureServer { get; } = ExternalAuth.HasInsecureServer(account);
 }
@@ -214,6 +218,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             _ = LoadSkinAsync(item);
         }
         Current = Accounts.FirstOrDefault(a => a.IsCurrent);
+        RebuildJay();
     }
 
     private async Task LoadSkinAsync(AccountItem item)
@@ -267,6 +272,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             ? StatusMessage.Warning("accounts.status.offline_added_not_ascii", name)
             : StatusMessage.Success("accounts.status.offline_added", name));
         Changed();
+        OfferJayFor(_service.Accounts.Store.Selected);
     }
 
     /// <summary>硬性规则见 OfflineNameRules：3–16 个字符、没有空格；非英文字母数字只提醒。</summary>
@@ -324,6 +330,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             LoginSuccess = L.F("accounts.microsoft.logged_in_current", account.Name);
             SetStatus(StatusMessage.Success("accounts.status.logged_in", account.Name));
             Changed();
+            OfferJayFor(_service.Accounts.Store.Selected);
         }
         catch (OperationCanceledException) when (_loginCts?.IsCancellationRequested == true)
         {
