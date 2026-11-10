@@ -59,6 +59,28 @@ public static class Toasts
         });
     }
 
+    /// <summary>A bake notice whose button does something other than retry (download the missing loader).</summary>
+    public static void BakeAction(string text, string actionText, string? actionTip, Action action)
+    {
+        var host = _bakeHost;
+        if (host is null) { Show(text); return; }
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (ReferenceEquals(_bakeHost, host)) host.Show(text, action, actionText, actionTip);
+        });
+    }
+
+    /// <summary>A bake problem with nothing to retry (the game already launched normally, or nothing was launched).</summary>
+    public static void BakeProblem(string text)
+    {
+        var host = _bakeHost;
+        if (host is null) { Show(text); return; }
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (ReferenceEquals(_bakeHost, host)) host.Show(text, null);
+        });
+    }
+
     /// <summary>开始处理新的启动请求后，旧失败提示不能遮住这次的状态或留下过时重试入口。</summary>
     internal static void DismissBakeFailures() => _bakeHost?.Clear();
 

@@ -414,6 +414,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             var entry = await Task.Run(() => TrashService.MoveToTrash(dir, _service.Directory.Root));
             SetStatus(StatusMessage.Success("instance.delete.done", c.Id));
             _service.NotifyInstalledChanged();
+            // Baked instances: their cache files are no longer used by anything (a restore simply bakes again).
+            _service.CleanBakeCacheInBackground();
             // 同名实例已经存在（比如删完又装了一个）时不恢复，免得多出一个打不开的“A (1)”；记录留着，删掉或改名新的以后还能撤销。
             Toasts.Deleted(entry, _ => _service.NotifyInstalledChanged(), keepName: true);
         }
@@ -520,8 +522,17 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             var version = ctx.Directory.ResolveVersion(c.Id);
             var java = !string.IsNullOrEmpty(settings.JavaPath) && File.Exists(settings.JavaPath) ? settings.JavaPath : await ctx.Java.ForVersionAsync(version, ct);
             SetStatus(StatusMessage.Info("home.status.baking"));
-            var (baked, reason) = await _service.PrepareBakeAsync(ctx, c.Id, java, new Progress<Amber.Core.Bake.BakeEvent>(e => Status = e.Message), ct);
-            SetStatus(baked is null ? StatusMessage.Warning("instance.bake.skipped", reason) : StatusMessage.Success("instance.bake.done", reason));
+            try
+            {
+                var (baked, reason, _) = await _service.PrepareBakeAsync(ctx, c.Id, java, new Progress<Amber.Core.Bake.BakeEvent>(e => Status = e.Message), ct, warm: true);
+                SetStatus(baked is null ? StatusMessage.Warning("instance.bake.skipped", reason) : StatusMessage.Success("instance.bake.done", reason));
+            }
+            catch (Amber.Core.Bake.BakeException e)
+            {
+                // Dependency problems, an incompatible loader, a platform install that is not complete: say what, in the status line and the bake notice.
+                SetStatus(StatusMessage.Warning("instance.bake.failed", e.Message));
+                Toasts.BakeProblem(L.F("instance.bake.failed", e.Message));
+            }
         });
     }
 

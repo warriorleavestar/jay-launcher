@@ -85,6 +85,8 @@ public static class SettingsCatalog
 
         new("Bake", Experimental, "settings.bake.title", "settings.bake.hint"),
         new("BakeLoader", Experimental, "settings.bake.loader_hint"),
+        new("BakeLoaderInstall", Experimental, "settings.bake.install", "settings.bake.install_hint"),
+        new("BakeCleanup", Experimental, "settings.bake.gc", "settings.bake.gc_hint"),
         new("ThemeDev", Experimental, "settings.themedev.label", "settings.themedev.hint"),
 
         new("Version", About, "settings.about.version"),

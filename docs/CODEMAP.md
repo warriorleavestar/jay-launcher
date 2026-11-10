@@ -33,7 +33,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | --- | --- | --- |
 | `src/Amber.Core/Activity/` | Activity center: background tasks and user-facing requests (knocks, file offers). | `TaskCenter.cs`, `RequestCenter.cs` |
 | `src/Amber.Core/Auth/` | Microsoft (device code), offline and external (authlib-injector) accounts; secret storage. | `AccountService.cs`, `MicrosoftAuth.cs`, `Accounts.cs` |
-| `src/Amber.Core/Bake/` | Experimental "bake" step that calls the universal loader prototype. | `BakeService.cs` |
+| `src/Amber.Core/Bake/` | Experimental "bake" step that calls the universal loader prototype; the pinned loader download. | `BakeService.cs`, `BakeLoaderRelease.cs` |
 | `src/Amber.Core/Content/` | Mods, resource packs, shaders, modpacks (Modrinth, CurseForge, MultiMC/Prism and other archives), install queue, recycle bin, crash bisect. | `ModManager.cs`, `ContentInstaller.cs`, `ModpackService.cs`, `ModrinthProvider.cs` |
 | `src/Amber.Core/Diagnostics/` | Crash log analysis and the one-click fixes on the "last session" panel. | `CrashAnalyzer.cs`, `CrashFixes.cs` |
 | `src/Amber.Core/Game/` | `.minecraft` layout, version JSON model, rules, libraries, NBT (`servers.dat`, `level.dat`), datapacks, world backups. | `GameDirectory.cs`, `VersionModels.cs` |
@@ -106,7 +106,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `networks/` | Registry of third-party public networks; CI (`networks.yml`) signs them into `JAYNET1-` strings after merge. |
 | `node/` | Install scripts and compose file for a community relay node. |
 | `server/` | `jay-server` deployment: systemd units, Docker, public node installer. |
-| `scripts/` | Release helpers: bundle EasyTier, publish and package macOS. |
+| `scripts/` | Release helpers: bundle EasyTier, publish and package macOS, attach the universal loader zip to its release (`attach-loader.ps1`, see `docs/universal-loader-release.md`). |
 | `tools/` | GUI self-check runner, multiplayer test, NAT bench, brand icon export, this code index builder. |
 | `.github/` | CI (`build.yml`), security regression tests, network registry checks, issue templates. |
 

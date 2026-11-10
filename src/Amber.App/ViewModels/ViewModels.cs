@@ -324,6 +324,11 @@ public sealed partial class MainViewModel : ObservableObject
         };
         var settingsPage = Pages.OfType<SettingsViewModel>().Single();
         settingsPage.Navigate = r => shell.Navigate(r);
+        home.DownloadBakeLoader = () =>
+        {
+            shell.Navigate("settings#BakeLoaderInstall");
+            _ = settingsPage.DownloadBakeLoaderAsync();
+        };
         Help.Navigate = r => shell.Navigate(r);
         var about = Pages.OfType<AboutViewModel>().Single();
         about.Navigate = r => shell.Navigate(r);
@@ -481,6 +486,148 @@ public sealed partial class SettingsViewModel : PageViewModel
     public bool HasBreakerDelayError => BreakerDelayError is not null;
     [ObservableProperty] public partial bool ExperimentalBake { get; set; }
     [ObservableProperty] public partial string BakeLoaderPath { get; set; }
+    /// <summary>Result of the last bake cache cleanup (or why it did not run); empty before the first one.</summary>
+    [ObservableProperty] public partial string BakeCleanupStatus { get; set; } = "";
+    [ObservableProperty] public partial bool IsCleaningBake { get; set; }
+    /// <summary>What the loader folder holds (a checked package, a developer build, nothing), or the last install's result.</summary>
+    [ObservableProperty] public partial string BakeLoaderStatus { get; set; } = "";
+    [ObservableProperty] public partial bool IsInstallingBakeLoader { get; set; }
+
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanStartBakeLoaderDownload))] public partial bool IsDownloadingBakeLoader { get; set; }
+    /// <summary>The pin names a published zip (until the loader project publishes one, the button stays off and says why).</summary>
+    public bool BakeLoaderPublished => Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished;
+    public bool CanStartBakeLoaderDownload => !IsDownloadingBakeLoader && BakeLoaderPublished;
+    public string BakeLoaderDownloadTip => BakeLoaderPublished ? L.T("settings.bake.download_hint") : L.T("core.bake.download_unpublished");
+    private CancellationTokenSource? _bakeLoaderDownload;
+
+    /// <summary>The loader version "Download loader" fetches (shown on the button's tooltip).</summary>
+    public string BakeLoaderDownloadVersion => Amber.Core.Bake.BakeLoaderRelease.Pinned.LoaderVersion;
+
+    /// <summary>
+    /// "Download loader": the pinned zip from Jay's own GitHub release (mirrors and resume as other downloads),
+    /// accepted only with the pinned SHA-256, then installed like a zip the player picked. Cancel keeps the partial
+    /// file so the next try resumes.
+    /// </summary>
+    public async Task DownloadBakeLoaderAsync()
+    {
+        if (IsDownloadingBakeLoader || IsInstallingBakeLoader) return;
+        if (!BakeLoaderPublished) { BakeLoaderStatus = L.T("core.bake.download_unpublished"); return; }
+        using var cts = new CancellationTokenSource();
+        _bakeLoaderDownload = cts;
+        IsDownloadingBakeLoader = true;
+        IsInstallingBakeLoader = true;
+        var release = Amber.Core.Bake.BakeLoaderRelease.Pinned;
+        try
+        {
+            BakeLoaderStatus = L.F("settings.bake.downloading", "GitHub", 0, Fmt.Size(release.Size));
+            var progress = new Progress<Amber.Core.Net.DownloadProgress>(p =>
+            {
+                if (IsDownloadingBakeLoader)
+                    BakeLoaderStatus = L.F("settings.bake.downloading", p.CurrentFile ?? "", (int)(100 * Math.Min(p.BytesDownloaded, release.Size) / release.Size), Fmt.Size(release.Size));
+            });
+            var package = await _service.DownloadBakeLoaderAsync(progress, cts.Token);
+            BakeLoaderPath = package.Root;
+            BakeLoaderStatus = L.F("settings.bake.installed", package.LoaderVersion, package.Interface.ToString(2), package.Files.Count, release.Sha256[..12]);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            BakeLoaderStatus = L.T("settings.bake.download_cancelled");
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or UnauthorizedAccessException or InvalidDataException or HttpRequestException)
+        {
+            BakeLoaderStatus = L.F("settings.bake.install_failed", e.Message);
+        }
+        finally
+        {
+            _bakeLoaderDownload = null;
+            IsInstallingBakeLoader = false;
+            IsDownloadingBakeLoader = false;
+        }
+    }
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private Task DownloadBakeLoader() => DownloadBakeLoaderAsync();
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private void CancelBakeLoaderDownload() => _bakeLoaderDownload?.Cancel();
+
+    /// <summary>
+    /// "Install loader from zip…": checks the package against its manifest, unpacks it under Jay's data folder and
+    /// selects it. The zip comes from the player (or from "Download loader").
+    /// </summary>
+    public async Task InstallBakeLoaderAsync(string zipPath)
+    {
+        if (IsInstallingBakeLoader) return;
+        IsInstallingBakeLoader = true;
+        try
+        {
+            BakeLoaderStatus = L.T("settings.bake.installing");
+            var sha = await Task.Run(() => Amber.Core.Bake.BakePackage.Sha256(zipPath));
+            var package = await _service.InstallBakeLoaderAsync(zipPath, CancellationToken.None);
+            BakeLoaderPath = package.Root;
+            BakeLoaderStatus = L.F("settings.bake.installed", package.LoaderVersion, package.Interface.ToString(2), package.Files.Count, sha[..12]);
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            BakeLoaderStatus = L.F("settings.bake.install_failed", e.Message);
+        }
+        finally
+        {
+            IsInstallingBakeLoader = false;
+        }
+    }
+
+    /// <summary>One line about the selected loader folder; reads the manifest only (files are checked before each bake).</summary>
+    private static string DescribeBakeLoader(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        try
+        {
+            return Amber.Core.Bake.BakeToolkit.Find(path) switch
+            {
+                { Package: { } p } => L.F("settings.bake.loader_package", p.LoaderVersion, p.Interface.ToString(2)),
+                { } => L.T("settings.bake.loader_devbuild"),
+                null => L.T("settings.bake.loader_none"),
+            };
+        }
+        catch (Amber.Core.Bake.BakeException e) { return e.Message; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return L.T("settings.bake.loader_none"); }
+    }
+
+    /// <summary>
+    /// Bake cache cleanup: a dry run first, then the totals in a confirmation, then the real gc. Only the loader's
+    /// cache and mapping cache are touched; everything removed is rebuilt on the next bake.
+    /// </summary>
+    [RelayCommand]
+    private async Task CleanBakeCacheAsync()
+    {
+        if (IsCleaningBake) return;
+        IsCleaningBake = true;
+        try
+        {
+            BakeCleanupStatus = L.T("settings.bake.gc_checking");
+            var (dry, reason) = await _service.CleanBakeCacheAsync(apply: false, CancellationToken.None);
+            if (dry is null) { BakeCleanupStatus = reason; return; }
+            if (dry.Removable == 0) { BakeCleanupStatus = L.T("settings.bake.gc_nothing"); return; }
+            if (Avalonia.Application.Current?.ApplicationLifetime is not Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner })
+                return;
+            var ok = await Views.ConfirmDialog.AskAsync(owner, L.T("settings.bake.gc"),
+                L.F("settings.bake.gc_body", dry.Removable, Fmt.Size(dry.RemovableBytes), dry.LiveStates), L.T("settings.bake.gc_confirm"));
+            if (!ok) { BakeCleanupStatus = ""; return; }
+            var (done, why) = await _service.CleanBakeCacheAsync(apply: true, CancellationToken.None);
+            BakeCleanupStatus = done is null ? why
+                : done.Failed > 0 ? L.F("settings.bake.gc_partial", done.Removed, done.Failed)
+                : L.F("settings.bake.gc_done", done.Removed, Fmt.Size(done.RemovableBytes));
+        }
+        catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or InvalidOperationException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException)
+        {
+            BakeCleanupStatus = e.Message;
+        }
+        finally
+        {
+            IsCleaningBake = false;
+        }
+    }
     [ObservableProperty] public partial bool IsolateVersions { get; set; }
     [ObservableProperty] public partial string WindowWidth { get; set; }
     [ObservableProperty] public partial string WindowHeight { get; set; }
@@ -504,6 +651,11 @@ public sealed partial class SettingsViewModel : PageViewModel
         _service = service;
         Recycle = new RecycleViewModel(service);
         _loading = true;
+        // The loader line is built from text in the current language; a language switch rebuilds it (not during an install or download).
+        L.Changed += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsInstallingBakeLoader) BakeLoaderStatus = DescribeBakeLoader(BakeLoaderPath);
+        });
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
             var automatic = JavaOptions.FirstOrDefault(o => o.Path is null);
@@ -533,6 +685,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         BreakerSkipDelay = s.BreakerSkipDelay;
         ExperimentalBake = s.ExperimentalBake;
         BakeLoaderPath = s.BakeLoaderPath ?? "";
+        BakeLoaderStatus = DescribeBakeLoader(BakeLoaderPath);
         IsolateVersions = s.IsolateVersions;
         WindowWidth = s.WindowWidth?.ToString() ?? "";
         WindowHeight = s.WindowHeight?.ToString() ?? "";
@@ -831,7 +984,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnBreakerRestartDelayChanged(string value) => Persist();
     partial void OnBreakerSkipDelayChanged(bool value) => Persist();
     partial void OnExperimentalBakeChanged(bool value) => Persist();
-    partial void OnBakeLoaderPathChanged(string value) => Persist();
+    partial void OnBakeLoaderPathChanged(string value)
+    {
+        Persist();
+        if (!IsInstallingBakeLoader) BakeLoaderStatus = DescribeBakeLoader(value);
+        BakeCleanupStatus = "";   // the last cleanup's answer was about the previous folder
+    }
     partial void OnIsolateVersionsChanged(bool value) => Persist();
     partial void OnConcurrencyChanged(string value) => Persist();
     partial void OnWindowWidthChanged(string value) => Persist();

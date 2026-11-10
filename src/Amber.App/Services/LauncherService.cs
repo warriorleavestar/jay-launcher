@@ -421,30 +421,157 @@ public sealed class LauncherService : IDisposable
 
     public GameInstance GetInstance(GameContext ctx, string id) => GameInstance.Detect(ctx.Directory, id, WorkDirFor(ctx, id));
 
-    /// <summary>实验功能“烘焙”：开了并且找到了加载器原型时返回服务，否则 null。缓存放在数据目录，所有实例共用。</summary>
-    public Amber.Core.Bake.BakeService? Bake =>
+    /// <summary>Experimental baking: the service when it is on and a loader build was found, else null. Caches live in the data directory and are shared by every instance.</summary>
+    public Amber.Core.Bake.BakeService? Bake => BakeFor(Context);
+
+    public Amber.Core.Bake.BakeService? BakeFor(GameContext ctx) =>
         Settings.ExperimentalBake && Amber.Core.Bake.BakeToolkit.Find(Settings.BakeLoaderPath) is { } toolkit
-            ? new Amber.Core.Bake.BakeService(toolkit, Path.Combine(AppSettings.DataDir, "bake-cache"))
+            ? new Amber.Core.Bake.BakeService(toolkit, Path.Combine(AppSettings.DataDir, "bake-cache"), Path.Combine(AppSettings.DataDir, "bake-data"),
+                (items, ct) => ctx.Downloader.DownloadAllAsync(items, null, ct))
             : null;
 
+    /// <summary>One bake, warm or cleanup at a time: gc must never run while an instance using the cache is baking.</summary>
+    private readonly SemaphoreSlim _bakeLock = new(1, 1);
+
     /// <summary>
-    /// 启动前的烘焙：实例支持时，输入没变就直接用上次的结果，变了就先烘焙模组和实例。
-    /// 返回 null 表示这次按普通方式启动（没开、不支持）；reason 是给日志看的原因。
+    /// Bake before a launch: when the instance is supported, reuse the previous bake if nothing changed, otherwise
+    /// download what the loader asks for, prepare the NeoForge/Forge platform and run bake-instance. warm (interface
+    /// 1.2) runs only when asked, for "Bake now"; a launch fills in anything missing itself.
+    /// A null launch means "launch normally" (off, not supported); reason is for the log and status line.
     /// </summary>
-    public Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason)> PrepareBakeAsync(string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct)
+    public Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct)
         => PrepareBakeAsync(Context, id, javaPath, progress, ct);
 
-    /// <summary>烘焙与本次启动共用固定的游戏目录；中途切换目录不会混用另一个同名实例。</summary>
-    public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct)
+    /// <summary>The bake uses the launch's own game directory; switching directories meanwhile never mixes up two instances of the same name.</summary>
+    /// <remarks>
+    /// The returned JavaPath is the Java to launch the baked game with: the loader says which Java it needs (its
+    /// manifest's <c>javaMin</c>, 21 today), so for a version that asks for less (Forge 1.20.1 asks for 17) the bake
+    /// switches to that Java and the launch must use it too.
+    /// </remarks>
+    public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false)
     {
-        if (Bake is not { } bake) return (null, Settings.ExperimentalBake ? Amber.Core.Localization.L.T("core.bake.loader_missing") : "");
-        var instance = GetInstance(ctx, id);
-        var (_, _, supported) = await bake.VersionAsync(javaPath, ct);
-        if (!Amber.Core.Bake.BakeService.Supports(instance, supported, out var reason)) return (null, reason);
-        var major = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? 21;
-        if (bake.Current(ctx.Directory, instance, major) is { } current) return (current, Amber.Core.Localization.L.T("core.bake.reused"));
-        await bake.BakeModsAsync(javaPath, ctx.Directory, instance, progress, ct);
-        return (await bake.BakeInstanceAsync(javaPath, major, ctx.Directory, instance, progress, ct), Amber.Core.Localization.L.T("core.bake.done"));
+        if (BakeFor(ctx) is not { } bake) return (null, Settings.ExperimentalBake ? Amber.Core.Localization.L.T("core.bake.loader_missing") : "", javaPath);
+        await _bakeLock.WaitAsync(ct);
+        try
+        {
+            var instance = GetInstance(ctx, id);
+            var versionMajor = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin;
+            var major = bake.JavaMajorFor(instance, versionMajor);
+            if (major != versionMajor) javaPath = await ctx.Java.ForMajorAsync(major, ct);
+            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct);
+            return (done.Launch, done.Reason, javaPath);
+        }
+        finally
+        {
+            _bakeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Bake cache cleanup (gc, interface 1.2): a dry run unless apply. Refused while a game is running or another bake
+    /// is in progress (returns null with a reason). Only the loader's cache and mapping cache are touched.
+    /// </summary>
+    public async Task<(Amber.Core.Bake.BakeGcResult? Result, string Reason)> CleanBakeCacheAsync(bool apply, CancellationToken ct)
+    {
+        var ctx = Context;
+        if (BakeFor(ctx) is not { } bake) return (null, Amber.Core.Localization.L.T("core.bake.loader_missing_short"));
+        if (AnyRunning) return (null, Amber.Core.Localization.L.T("core.bake.gc_busy"));
+        if (!await _bakeLock.WaitAsync(0, ct)) return (null, Amber.Core.Localization.L.T("core.bake.gc_busy"));
+        try
+        {
+            var java = await ctx.Java.ForMajorAsync(bake.Toolkit.JavaMinForAll, ct);
+            bake.Toolkit.Verify();
+            var loader = await bake.VersionAsync(java, ct);
+            loader.EnsureCompatible();
+            if (!loader.CanWarm) return (null, Amber.Core.Localization.L.F("core.bake.interface_old", loader.Interface.ToString(2), Amber.Core.Bake.BakeLoaderInfo.WarmInterface.ToString(2), loader.LoaderVersion));
+            var result = await bake.CollectGarbageAsync(java, apply, null, ct);
+            return (result, result is null ? Amber.Core.Localization.L.T("core.bake.gc_empty") : "");
+        }
+        finally
+        {
+            _bakeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// The loader reported that a launch had to bake something itself (<c>launch_rebaked</c>, interface 1.3): run
+    /// <c>warm</c> on the instance's state in the background after the game exits, so the next launch and gc see the
+    /// full cache list. Skipped while another bake runs; the next launch just fills in again.
+    /// </summary>
+    public void WarmBakeInBackground(GameContext ctx, string id)
+    {
+        if (!Settings.ExperimentalBake) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // warm only adds finished cache entries (atomically), so a game running elsewhere is fine; a bake is not.
+                if (BakeFor(ctx) is not { } bake || !await _bakeLock.WaitAsync(0)) return;
+                try
+                {
+                    var instance = GetInstance(ctx, id);
+                    if (Amber.Core.Bake.BakeRecord.Read(instance.WorkDir) is not { } record || !File.Exists(record.Launch.StateFile)) return;
+                    var major = bake.JavaMajorFor(instance, ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin);
+                    var java = await ctx.Java.ForMajorAsync(major, CancellationToken.None);
+                    bake.Toolkit.Verify();
+                    await bake.WarmAsync(java, record.Launch.StateFile, null, CancellationToken.None);
+                }
+                finally
+                {
+                    _bakeLock.Release();
+                }
+            }
+            catch (Exception e) when (e is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine("bake warm: " + e.Message); }
+        });
+    }
+
+    /// <summary>Where loader packages installed from a zip live: <c>&lt;data&gt;/universal-loader/&lt;version&gt;</c>.</summary>
+    public static string BakeLoaderInstallRoot => Path.Combine(AppSettings.DataDir, "universal-loader");
+
+    /// <summary>
+    /// Installs a universal loader package from its zip (checked file by file against its manifest) and selects it.
+    /// The zip comes from the player or from <see cref="DownloadBakeLoaderAsync"/>. Refused while a bake is running, since the folder may be replaced.
+    /// </summary>
+    public async Task<Amber.Core.Bake.BakePackage> InstallBakeLoaderAsync(string zipPath, CancellationToken ct)
+    {
+        if (!await _bakeLock.WaitAsync(0, ct)) throw new Amber.Core.Bake.BakeException(Amber.Core.Localization.L.T("core.bake.gc_busy"), []);
+        try
+        {
+            if (AnyRunning) throw new Amber.Core.Bake.BakeException(Amber.Core.Localization.L.T("core.bake.gc_busy"), []);
+            var package = await Task.Run(() => Amber.Core.Bake.BakePackage.InstallFromZip(zipPath, BakeLoaderInstallRoot), ct);
+            Settings.BakeLoaderPath = package.Root;
+            Settings.Save();
+            return package;
+        }
+        finally
+        {
+            _bakeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Downloads the pinned loader zip from Jay's GitHub release (mirrors, resume, cancel as other downloads) and
+    /// installs it through <see cref="InstallBakeLoaderAsync"/>. The download runs outside the bake lock, so games
+    /// keep baking meanwhile; only the install waits for them.
+    /// </summary>
+    public async Task<Amber.Core.Bake.BakePackage> DownloadBakeLoaderAsync(IProgress<DownloadProgress>? progress, CancellationToken ct)
+    {
+        var fetcher = new Amber.Core.Bake.BakeLoaderDownloader(Downloader, BakeLoaderInstallRoot);
+        var zip = await fetcher.FetchAsync(progress, ct);
+        var package = await InstallBakeLoaderAsync(zip, ct);
+        Amber.Core.Bake.BakeLoaderDownloader.Discard(zip);
+        return package;
+    }
+
+    /// <summary>After an instance is deleted or the recycle bin is emptied: drop bake cache files nothing uses any more.</summary>
+    public void CleanBakeCacheInBackground()
+    {
+        if (!Settings.ExperimentalBake) return;
+        _ = Task.Run(async () =>
+        {
+            try { await CleanBakeCacheAsync(apply: true, CancellationToken.None); }
+            catch (Exception e) when (e is not OutOfMemoryException) { System.Diagnostics.Debug.WriteLine("bake gc: " + e.Message); }
+        });
     }
 
     /// <summary>整合包的文件都在版本目录里，这个版本必须固定开启隔离。</summary>
