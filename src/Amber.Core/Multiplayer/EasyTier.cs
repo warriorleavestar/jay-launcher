@@ -25,6 +25,13 @@ public static class EasyTierRelease
     public sealed record Asset(string Platform, string Name, string Sha256, long Size, string CoreName, string CliName)
     {
         public string Url => BaseUrl + Name;
+
+        /// <summary>
+        /// The WinDivert driver the Windows package ships (full-LAN broadcast relay): WinDivert32.sys in the
+        /// 32-bit package, WinDivert64.sys in the x64 and arm64 ones (arm64's is upstream's placeholder). Null elsewhere.
+        /// </summary>
+        public string? DriverName => Platform == "windows-i686" ? "WinDivert32.sys"
+            : Platform.StartsWith("windows-", StringComparison.Ordinal) ? "WinDivert64.sys" : null;
     }
 
     /// <summary>当前系统对应的官方命令行包。哈希和大小来自 EasyTier 的 GitHub Release。</summary>
@@ -134,8 +141,9 @@ public sealed class EasyTierInstaller
     public string BundledPath => Path.Combine(_bundledDir, Asset.Name);
     /// <summary>手动导入时需要的文件名。</summary>
     public string ExpectedFileName => Asset.Name;
-    /// <summary>WinDivert64.sys 是完整局域网模式转发游戏局域网广播要用的驱动文件，缺了也重新解压。</summary>
-    public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath) && (!OperatingSystem.IsWindows() || File.Exists(Path.Combine(InstallDir, "WinDivert64.sys")));
+    /// <summary>The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again.</summary>
+    public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath)
+        && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)));
 
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
@@ -240,7 +248,7 @@ public sealed class EasyTierInstaller
                 var name = Path.GetFileName(entry.FullName);
                 if (name.Length == 0 || name.Contains("..")) continue;
                 // 只要命令行程序、它们用的库和 WinDivert 驱动文件（完整局域网模式转发广播用）；网页控制台用不到。
-                if (name != asset.CoreName && name != asset.CliName && name != "WinDivert64.sys"
+                if (name != asset.CoreName && name != asset.CliName && name != asset.DriverName
                     && !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
                     && !name.EndsWith(".so", StringComparison.Ordinal)
                     && !name.EndsWith(".dylib", StringComparison.Ordinal)) continue;

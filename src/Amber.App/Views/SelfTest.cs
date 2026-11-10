@@ -1590,7 +1590,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("转发：停止后恢复", !guest.UsingGameProxy, guest.Status);
         guest.StopCommand.Execute(null);
         host.StopCommand.Execute(null);
-        host.SelectedTransport = host.TransportChoices[0];
+        host.SelectedTransport = host.TransportChoices.First(c => c.Mode == MultiplayerViewModel.DefaultTransport);
         host.DisguiseAsMinecraft = false;
         host.AllowGameProxy = false;
     }

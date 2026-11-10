@@ -69,7 +69,7 @@ public sealed partial class MultiplayerViewModel
             if (FullLanMode) on.Add(L.T("multiplayer.advanced.item.full_lan"));
             if (FullLanMode && AllowExitNode) on.Add(L.T("multiplayer.advanced.item.exit"));
             if (AllowGameProxy) on.Add(L.T("multiplayer.advanced.item.proxy"));
-            if (SelectedTransport.Mode != TransportMode.General) on.Add(L.F("multiplayer.advanced.item.transport", SelectedTransport.Label));
+            if (SelectedTransport.Mode != DefaultTransport) on.Add(L.F("multiplayer.advanced.item.transport", SelectedTransport.Label));
             return on.Count == 0
                 ? L.T("multiplayer.advanced.title")
                 : L.F("multiplayer.advanced.enabled", string.Join(L.T("multiplayer.advanced.separator"), on));
