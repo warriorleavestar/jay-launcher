@@ -67,6 +67,20 @@ internal sealed partial class SelfTest
         Dispatcher.UIThread.Invoke(() => host.PublicNodesText = node);
         host.SavePublicNodesCommand.Execute(null);
         Check("公共网络：保存种子节点", host.HasPublicNodes, host.Status);
+
+        // Volunteer relay settings: the card is there, a home-network address is refused, a public one is saved, then off again
+        // (the self-check must not listen on a public port).
+        Check("Volunteer relay: offered on this network", host.VolunteersAllowed);
+        Dispatcher.UIThread.Invoke(() => { host.VolunteerEnabled = true; host.VolunteerAddress = "192.168.1.20"; });
+        host.SaveVolunteerCommand.Execute(null);
+        Check("Volunteer relay: home-network address refused", !service.Settings.VolunteerNode, host.Status);
+        Dispatcher.UIThread.Invoke(() => host.VolunteerAddress = "jay.example.org");
+        host.SaveVolunteerCommand.Execute(null);
+        Check("Volunteer relay: public address saved", service.Settings.VolunteerNode && service.Settings.VolunteerAddress == "jay.example.org", host.Status);
+        await ShotAsync("Volunteer relay settings");
+        Dispatcher.UIThread.Invoke(() => host.VolunteerEnabled = false);
+        host.SaveVolunteerCommand.Execute(null);
+        Check("Volunteer relay: turned off again", !service.Settings.VolunteerNode, host.Status);
         service.Settings.PublicNetworkNoticeAccepted = false;
         Check("公共网络：第一次连接先显示隐私说明", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, host.ConnectPublicCommand))) && host.PublicNoticeOpen && !host.IsPublicConnecting);
         await ShotAsync("公共网络隐私说明");
