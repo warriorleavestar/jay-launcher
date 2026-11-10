@@ -293,8 +293,9 @@ public sealed partial class MainViewModel : ObservableObject
         instance.NavigateToContent = (id, type, query) =>
         {
             var back = shell.Router.Current;
-            shell.Navigate("discover");
+            // Context first, then the page: the move into Discover is already a context sub-view (§2.5, journeys).
             content.BrowseFor(id, type, back: () => shell.Router.Navigate(back), query: query ?? "");
+            shell.Navigate("discover");
         };
         multiplayer.NavigateHome = () => shell.Navigate("library");
         // 开始游戏不换页（§2.5 第 5 条）：进度在顶栏胶囊和启动页。
@@ -305,6 +306,11 @@ public sealed partial class MainViewModel : ObservableObject
         };
         download.CloseAfterStart = () => shell.Navigate("library");
         content.LaunchInstance = id => download.LaunchInstance?.Invoke(id);
+        multiplayer.InstallForInvite = (version, loader) =>
+        {
+            shell.Navigate(LegacyRoutes.NewInstance);
+            _ = download.PrefillAsync(version, loader, () => shell.Navigate("play"));
+        };
         download.BrowseModpacks = () =>
         {
             shell.Navigate("discover");
@@ -363,6 +369,8 @@ public sealed partial class MainViewModel : ObservableObject
             };
         };
         var library = new LibraryViewModel(service, home, Activity) { Navigate = r => shell.Navigate(r) };
+        // [▶ Play and open a room]: the lobby starts the focus instance the same way the library's ▶ does.
+        multiplayer.StartInstance = library.LaunchInstance;
         Pages.Add(library);
         // 多开确认走请求条；启动页的卡片也还在，哪边处理都会让另一边一起消失。
         const string MultiKey = "multi-launch";
@@ -424,6 +432,12 @@ public sealed partial class MainViewModel : ObservableObject
             },
         };
         multiplayer.Navigate = r => shell.Navigate(r);
+        // Knocks and files are answered in the room's locked panel while it is on screen; the bar has them everywhere else.
+        Activity.ShownElsewhere = r => r.Spec.Kind is "knock" or "file" && multiplayer.IsCurrent && multiplayer.ShowRoomHeader;
+        multiplayer.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(PageViewModel.IsCurrent) or nameof(MultiplayerViewModel.ShowRoomHeader)) Activity.Resync();
+        };
         foreach (var page in Pages) Shell.Watch(page);
         CurrentPage = library;
         CurrentPage.Activate();
@@ -672,7 +686,30 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// <summary>主题包的说明：作者、读取时发现的问题、安全模式提示。</summary>
     [ObservableProperty] public partial string ThemePackStatus { get; set; } = "";
 
-    public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false };
+    public bool CanRemoveThemePack => SelectedThemePack is { IsDefault: false } option && !Amber.Core.Themes.BuiltInThemes.IsBuiltIn(option.Id);
+
+    /// <summary>What Jay changed in the current theme: the format upgrade and the automatic color fixes (official §10.4, §10.8).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasThemeReport))]
+    public partial string ThemeReportText { get; set; } = "";
+
+    public bool HasThemeReport => ThemeReportText.Length > 0;
+
+    /// <summary>Copy text to the clipboard (tests swap this so the real clipboard is never touched).</summary>
+    internal Func<string, Task<bool>> CopyText { get; set; } = async text =>
+    {
+        if (Amber.App.Services.AvaloniaClipboard.FromMainWindow() is not { } clipboard) return false;
+        await clipboard.SetTextAsync(text);
+        return true;
+    };
+
+    /// <summary>【复制给作者看】: the upgrade notes and fixes as plain text, for the theme's author.</summary>
+    [RelayCommand]
+    private async Task CopyThemeReportAsync()
+    {
+        if (ThemeService.Current is not { } pack) return;
+        if (await CopyText(Amber.Core.Themes.ThemeFormat.Report(pack))) Toasts.Show(L.T("settings.themepack.report_copied"));
+    }
 
     private bool _themeLoading;
 
@@ -681,8 +718,19 @@ public sealed partial class SettingsViewModel : PageViewModel
         _themeLoading = true;
         ThemePacks.Clear();
         ThemePacks.Add(new ThemePackOption(ThemeService.DefaultId, L.T("settings.themepack.default"), true));
-        foreach (var pack in ThemeService.Store.List())
-            ThemePacks.Add(new ThemePackOption(pack.Id, pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name, false));
+        foreach (var pack in ThemeService.Store.ListAll())
+        {
+            // Jay's own themes are named in the UI language; imported ones by their author.
+            var label = pack.Id switch
+            {
+                Amber.Core.Themes.BuiltInThemes.ClassicAmber => L.T("settings.themepack.builtin.jay-classic-amber"),
+                Amber.Core.Themes.BuiltInThemes.HighContrast => L.T("settings.themepack.builtin.jay-high-contrast"),
+                _ => pack.Author is { Length: > 0 } a ? $"{pack.Name} · {a}" : pack.Name,
+            };
+            // Format 1 packs are upgraded on read (official §10.8): the card says so.
+            if (pack.Upgraded) label += " · " + L.T("settings.themepack.upgraded_tag");
+            ThemePacks.Add(new ThemePackOption(pack.Id, label, false));
+        }
         var id = select ?? _service.Settings.ThemePack ?? ThemeService.DefaultId;
         SelectedThemePack = ThemePacks.FirstOrDefault(o => o.Id == id) ?? ThemePacks[0];
         _themeLoading = false;
@@ -709,9 +757,18 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
         if (ThemeService.DevDirectory is { } devDir) lines.Add(L.F("settings.themepack.dev", devDir));
         if (ThemeService.DevError is { } devError) lines.Add(L.F("settings.themepack.dev_error", devError));
-        if (ThemeService.Current is { } pack && pack.Problems.Count > 0)
-            lines.Add(L.F("settings.themepack.problems", pack.Problems.Count, string.Join("; ", pack.Problems.Take(4))));
+        var report = new List<string>();
+        if (ThemeService.Current is { } pack)
+        {
+            if (pack.Problems.FirstOrDefault(p => p.Code == "needs_newer_jay") is { } newer) lines.Add(L.F("settings.themepack.needs_newer", newer.Detail));
+            var others = pack.Problems.Where(p => p.Code is not ("contrast_fixed" or "needs_newer_jay")).ToList();
+            if (others.Count > 0) lines.Add(L.F("settings.themepack.problems", others.Count, string.Join("; ", others.Take(4))));
+            if (pack.Upgraded) report.Add(L.F("settings.themepack.upgraded", pack.Format));
+            var fixes = pack.Problems.Count(p => p.Code == "contrast_fixed");
+            if (fixes > 0) report.Add(L.P("settings.themepack.fixed", fixes, fixes));
+        }
         ThemePackStatus = string.Join("\n", lines);
+        ThemeReportText = string.Join("\n", report);
     }
 
     /// <summary>导入 .jaytheme：读取、校验、安装，然后直接切换过去。</summary>
@@ -752,7 +809,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     [RelayCommand]
     private void RemoveThemePack()
     {
-        if (SelectedThemePack is not { IsDefault: false } option) return;
+        if (SelectedThemePack is not { IsDefault: false } option || Amber.Core.Themes.BuiltInThemes.IsBuiltIn(option.Id)) return;
         var wasCurrent = (_service.Settings.ThemePack ?? ThemeService.DefaultId) == option.Id;
         if (wasCurrent) ThemeService.Select(_service.Settings, ThemeService.DefaultId);
         try { ThemeService.Store.Remove(option.Id); }

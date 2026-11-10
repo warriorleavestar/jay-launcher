@@ -180,6 +180,8 @@ public sealed partial class ShellViewModel : ObservableObject
                 if (instanceId is not null && _main.CurrentPage is InstanceViewModel page && !page.IsBusy
                     && page.SelectedId != instanceId && page.Instances.Contains(instanceId))
                     page.SelectedId = instanceId;
+                // library/{id}/{tab} opens that tab (help links, the command palette, journeys).
+                if (_main.CurrentPage is InstanceViewModel shown && InstanceTabs.IndexOf(route[2]) is { } tab) shown.TabIndex = tab;
             }
             finally { _syncing = false; }
         }
@@ -315,6 +317,11 @@ public sealed partial class ShellViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenAccounts() => Router.SwitchTo(Section.Accounts);
+
+    private AccountMenuViewModel? _accountMenu;
+
+    /// <summary>The menu behind the sidebar avatar (§6.13).</summary>
+    public AccountMenuViewModel AccountMenu => _accountMenu ??= new(_main, this);
 
     // ---- 侧栏底部 ----
 

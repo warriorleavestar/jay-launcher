@@ -328,7 +328,7 @@ public class ThemePackTests : IDisposable
             {
               "remote.consent": { "background": "#00FF00" },
               "confirm.dialog": { "background": "#00FF00" },
-              "card": { "foreground": "#FFFFFF", ":hover": { "background": "#000000" }, "background": "image:../../etc/x.png", "radius": 999 },
+              "card": { "glow": "#FFFFFF", ":hover": { "background": "#000000" }, "background": "image:../../etc/x.png", "radius": 999 },
               "button": { "background": "url(https://evil.example/x.png)", "shadow": "0 0 500 400 #FF000000", "fontWeight": "900" },
               "heading": { "foreground": "token:NotAToken" },
               "pill": { "background": "image:assets/x.png" }
@@ -336,7 +336,7 @@ public class ThemePackTests : IDisposable
             """));
         var codes = pack.Problems.Select(p => p.Code).ToList();
         Assert.Equal(2, codes.Count(c => c == "unknown_component")); // 安全界面不是组件，改不了
-        Assert.Contains("unknown_key", codes);   // card 没有 foreground
+        Assert.Contains("unknown_key", codes);   // card 没有 glow（只有开始按钮有）
         Assert.Contains("unknown_state", codes); // card 没有 :hover
         Assert.Contains("bad_shadow", codes);
         Assert.Contains("value_clamped", codes);

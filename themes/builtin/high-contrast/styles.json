@@ -1,0 +1,9 @@
+{
+  // Thicker outlines so every control and card edge is easy to find.
+  "button": { "borderWidth": 2 },
+  "button.primary": { "borderWidth": 2, "border": "token:Text" },
+  "card": { "borderWidth": 2, "border": "token:Divider" },
+  "input": { "borderWidth": 2 },
+  "combobox": { "borderWidth": 2 },
+  "banner": { "borderWidth": 2, "border": "token:Divider" }
+}

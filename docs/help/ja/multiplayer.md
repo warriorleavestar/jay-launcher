@@ -2,12 +2,14 @@
 id: multiplayer
 category: multiplayer
 routes: play, play/*
-related: child-mode, network-list
+related: child-mode, network-list, knock, connection, public-rooms, glossary
 ---
 
 # マルチプレイ
 
 友だちと遊ぶ：ルームを開いて招待コードを送ります。友だちがコードを貼ってノックし、あなたが許可すると入れます。
+
+![「一緒に遊ぶ」タブ：「ルームを開く」カードと「フレンドに参加」カード](shot:multiplayer-lobby)
 
 ## 使い方
 - ルームを開く：マルチプレイのページで **ルームを開く** を押し、インスタンスを選んで **友だちを招待**（Ctrl+Shift+I）。

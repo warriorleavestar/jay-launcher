@@ -208,6 +208,20 @@ public sealed class LauncherService : IDisposable
     /// <summary>The launcher-side data of an instance (null when there is none yet).</summary>
     public InstanceMeta? MetaOf(string id) => Settings.Instances?.GetValueOrDefault(id);
 
+    /// <summary>Remember (or with null, forget) that this instance joined a room whose host had other mods.</summary>
+    public void MarkModsDifferFromHost(string id, string? host)
+    {
+        Settings.Instances ??= new(StringComparer.OrdinalIgnoreCase);
+        if (!Settings.Instances.TryGetValue(id, out var meta))
+        {
+            if (host is null) return;
+            Settings.Instances[id] = meta = new InstanceMeta();
+        }
+        if (meta.ModsDifferFromHost == host) return;
+        meta.ModsDifferFromHost = host;
+        Settings.Save();
+    }
+
     private InstanceMeta EnsureMeta(string id)
     {
         Settings.Instances ??= [];

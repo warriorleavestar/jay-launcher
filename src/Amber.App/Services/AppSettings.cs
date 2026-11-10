@@ -151,6 +151,17 @@ public sealed class AppSettings
     /// <summary>Multiplayer lobby: copy the first invite when a room is opened (cleared from the clipboard later).</summary>
     public bool MultiplayerAutoCopyInvite { get; set; } = true;
 
+    /// <summary>New-instance panel: "Add mods while you're at it" stays open once opened (§6.11).</summary>
+    public bool NewInstanceModsOpen { get; set; }
+    /// <summary>How long a room waits for the host to answer a knock: "2m", "10m" or "forever".</summary>
+    public string MultiplayerKnockWait { get; set; } = "10m";
+    /// <summary>Knocks and incoming files while Jay is in the background open a small topmost window.</summary>
+    public bool MultiplayerRequestPopup { get; set; } = true;
+    /// <summary>The last room I opened, for the lobby's “Open like last time”.</summary>
+    public LastRoom? MultiplayerLastRoom { get; set; }
+    /// <summary>Room settings › mod sync: people who join may get my mod list and the mod files that are not on public sites.</summary>
+    public bool MultiplayerAllowModSync { get; set; } = true;
+
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 
@@ -239,6 +250,27 @@ public sealed class InstanceMeta
 
     /// <summary>Total minutes played from this launcher.</summary>
     public double PlayMinutes { get; set; }
+
+    /// <summary>
+    /// Joined a room with this instance although its mods differed from the host's (“never mind, just join”): the host's
+    /// name. If the game then crashes, the last-session panel names this first. Cleared when a later check matches.
+    /// </summary>
+    public string? ModsDifferFromHost { get; set; }
+}
+
+/// <summary>What “Open like last time” repeats: the world, the first invite's terms and who can find the room (never a password).</summary>
+public sealed class LastRoom
+{
+    /// <summary>The world's name as the game announces it on the LAN.</summary>
+    public string? World { get; set; }
+    public int Uses { get; set; } = 1;
+    /// <summary>Minutes the invite stays valid; null = while the room is open.</summary>
+    public int? LifetimeMinutes { get; set; } = 10;
+    public bool AutoApprove { get; set; }
+    /// <summary>A <c>RoomVisibility</c> name.</summary>
+    public string Visibility { get; set; } = "Hidden";
+    public string? RoomName { get; set; }
+    public bool PublishAutoApprove { get; set; }
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(AppSettings))]

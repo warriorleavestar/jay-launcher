@@ -18,6 +18,8 @@
     <!-- 界面文字：每种语言一个 JSON，嵌进程序集（Native AOT 版本也能读） -->
     <EmbeddedResource Include="Localization\*.json" LogicalName="Amber.Core.Localization.%(Filename).json" />
     <EmbeddedResource Include="..\..\docs\help\**\*.md" LogicalName="help/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\docs\help\shots\**\*.png" LogicalName="help/shots/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\themes\builtin\**\*.json" LogicalName="themes/builtin/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

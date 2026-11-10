@@ -17,6 +17,11 @@
           <StackPanel Spacing="2">
             <TextBlock Text="{Binding Text}" IsVisible="{Binding IsHeading}" FontWeight="SemiBold" Margin="0,8,0,0" TextWrapping="Wrap" />
             <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding IsParagraph}" TextWrapping="Wrap" />
+            <!-- A screenshot (made per language by the help-shots self-check); the text says what it shows. -->
+            <Border IsVisible="{Binding IsShot}" Classes="card" Padding="0" Margin="0,4" HorizontalAlignment="Left" ClipToBounds="True"
+                    ToolTip.Tip="{Binding Text}" AutomationProperties.Name="{Binding Text}">
+              <Image Source="{Binding Shot}" MaxWidth="560" Stretch="Uniform" />
+            </Border>
             <Grid ColumnDefinitions="16,*" IsVisible="{Binding IsBullet}">
               <TextBlock Text="•" />
               <SelectableTextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />

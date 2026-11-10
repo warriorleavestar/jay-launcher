@@ -2,7 +2,7 @@
 id: first-time
 category: start
 routes: help
-related: library, accounts, network-list
+related: library, accounts, network-list, moved, glossary
 ---
 
 # 第一次用 Jay

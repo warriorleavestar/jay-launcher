@@ -140,6 +140,8 @@ public partial class InstancePage : UserControl
     {
         if (height <= 0) return;
         Short = height < 520;
+        // The last session / [Help me fix…] cards may take at most about half the page, then scroll.
+        NoticeScroll.MaxHeight = Math.Max(160, height * 0.5);
         if (Short)
         {
             Hero.MinHeight = 0;

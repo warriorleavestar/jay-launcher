@@ -536,8 +536,20 @@ try
             var pack = Directory.Exists(path) ? ThemePackReader.ReadDirectory(path) : ThemePackReader.Read(path);
             Console.WriteLine($"{pack.Id}  {pack.Name}  {pack.Version}  ({pack.Variants})");
             Console.WriteLine($"颜色 深 {pack.DarkColors.Count} / 浅 {pack.LightColors.Count}，组件样式 {pack.Styles.Count}，外壳 {(pack.Shell is null ? "无" : pack.Shell.Nav)}，页面布局 {string.Join(",", pack.Pages.Keys)}");
+            Console.WriteLine($"format {pack.Format}{(pack.Upgraded ? "（读的时候自动升级到 format 2）" : "")}{(pack.MinJay is { } minJay ? $"，minJay {minJay}" : "")}");
+            foreach (var note in pack.Migration) Console.WriteLine("升级：" + note);
             foreach (var problem in pack.Problems) Console.WriteLine("提示：" + problem);
             return pack.Problems.Count == 0 ? 0 : 2;
+        }
+        case "theme-migrate":
+        {
+            // 把 format 1 主题（目录或 .jaytheme）写成 format 2 的 .jaytheme：升级说明照常列出，原文件不动。
+            var migrated = ThemeMigrator.Migrate(argList[1], argList[2]);
+            Console.WriteLine($"已写出 {migrated.Id} format {migrated.Format} → {argList[2]}（{migrated.Problems.Count} 个提示）");
+            var source = Directory.Exists(argList[1]) ? ThemePackReader.ReadDirectory(argList[1]) : ThemePackReader.Read(argList[1]);
+            foreach (var note in source.Migration) Console.WriteLine("升级：" + note);
+            foreach (var problem in migrated.Problems) Console.WriteLine("提示：" + problem);
+            break;
         }
         case "theme-pack":
         {
