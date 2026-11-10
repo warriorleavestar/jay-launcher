@@ -49,12 +49,21 @@ public partial class MainWindow
                 main.LogPopOutRequested += PopOutLog;
                 // Knocks and incoming files while Jay is in the background: a small topmost window (on by default).
                 Popups = new RequestPopups(this, main.Service.Requests, () => main.Service.Settings.MultiplayerRequestPopup);
-                MovedNotice.IsVisible = _settings is { ShellMovedNoticeSeen: false };
+                UpdateMovedNotice();
             }
             ApplyShell();
         };
         SizeChanged += (_, _) => ApplyShell();
-        ContentColumn.SizeChanged += (_, e) => { ApplyContentTier(e.NewSize.Width); ApplyLogDock(); };
+        ContentColumn.SizeChanged += (_, e) =>
+        {
+            ApplyContentTier(e.NewSize.Width);
+            ApplyLogDock();
+            // Short windows (§3.3): the "Jay has a new layout" banner keeps its title and [Got it]; the details are in help.
+            MovedNoticeBody.IsVisible = e.NewSize.Height >= MovedNoticeShortBelow;
+            // Very short windows: the page needs every line; the banner comes back when the window is taller.
+            _movedNoticeTooShort = e.NewSize.Height < MovedNoticeHiddenBelow;
+            UpdateMovedNotice();
+        };
         AttachLogDock();
         AddHandler(KeyDownEvent, OnShellKeyDown, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, OnShellPointerPressed, RoutingStrategies.Tunnel);
@@ -358,6 +367,16 @@ public partial class MainWindow
         if (DataContext is MainViewModel main) main.Activity.Close();
         e.Handled = true;
     }
+
+    /// <summary>Below this content height the moved-notice banner shows only its title.</summary>
+    internal const double MovedNoticeShortBelow = 600;
+
+    /// <summary>Below this content height the moved-notice banner is not shown at all.</summary>
+    internal const double MovedNoticeHiddenBelow = 440;
+
+    private bool _movedNoticeTooShort;
+
+    private void UpdateMovedNotice() => MovedNotice.IsVisible = _settings is { ShellMovedNoticeSeen: false } && !_movedNoticeTooShort;
 
     private void MovedNotice_Close(object? sender, RoutedEventArgs e)
     {

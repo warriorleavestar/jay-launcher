@@ -255,8 +255,8 @@
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
           <Path Classes="icon" Data="{StaticResource Icon.Info}" Width="20" Height="20" VerticalAlignment="Top" />
           <StackPanel Grid.Column="1" Spacing="2">
-            <TextBlock Text="{l:T shell.moved.title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock Text="{l:T shell.moved.body}" TextWrapping="Wrap" Classes="hint" />
+            <TextBlock Text="{l:T shell.moved.title}" FontWeight="SemiBold" TextWrapping="Wrap" MaxWidth="720" HorizontalAlignment="Left" />
+            <TextBlock x:Name="MovedNoticeBody" Text="{l:T shell.moved.body}" TextWrapping="Wrap" Classes="hint" MaxWidth="720" HorizontalAlignment="Left" />
           </StackPanel>
           <Button x:Name="MovedNoticeClose" Grid.Column="2" Classes="ghost small" Content="{l:T shell.moved.ok}" VerticalAlignment="Top" Click="MovedNotice_Close" />
         </Grid>
