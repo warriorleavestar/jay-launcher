@@ -13,14 +13,17 @@ public sealed class ExitRoutingPlanTests
     {
         var plan = Assert.IsType<ExitNetworkPlan>(ExitNetworkPlan.Create(Guest));
         Assert.Equal(["192.168.1.2", "203.0.113.10"], plan.UnderlayAddresses);
-        Assert.Equal("Amber LAN-10000", plan.AdapterName);
+        Assert.Equal(OperatingSystem.IsWindows() ? "Amber LAN-10000" : "amberlan-10000", plan.AdapterName);
         var args = EasyTierArgs.Build(Guest);
         var offset = args.IndexOf("--manual-routes");
         Assert.True(offset >= 0);
         Assert.Equal(["0.0.0.0/1", "128.0.0.0/1"], args.Skip(offset + 1).Take(2));
         Assert.Contains("--disable-p2p", args);
-        Assert.Contains("--enable-udp-broadcast-relay", args);
-        Assert.Equal(plan.AdapterName, args[args.IndexOf("--dev-name") + 1]);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Contains("--enable-udp-broadcast-relay", args);
+            Assert.Equal(plan.AdapterName, args[args.IndexOf("--dev-name") + 1]);
+        }
     }
 
     [Fact]

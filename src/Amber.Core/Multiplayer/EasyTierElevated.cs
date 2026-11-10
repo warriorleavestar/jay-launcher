@@ -26,12 +26,12 @@ namespace Amber.Core.Multiplayer;
 public sealed class EasyTierElevatedSession : IEasyTierSession
 {
     private readonly string _cliPath;
-    private readonly ElevatedGuard _guard;
+    private readonly IElevatedGuard _guard;
     private readonly SemaphoreSlim _restartLock = new(1, 1);
 
     public EasyTierOptions Options { get; private set; }
 
-    private EasyTierElevatedSession(EasyTierOptions options, string cliPath, ElevatedGuard guard)
+    private EasyTierElevatedSession(EasyTierOptions options, string cliPath, IElevatedGuard guard)
     {
         Options = options;
         _cliPath = cliPath;
@@ -48,10 +48,19 @@ public sealed class EasyTierElevatedSession : IEasyTierSession
     /// <summary>弹出 UAC 确认。用户拒绝时抛 <see cref="OperationCanceledException"/>。workDir 只用来清掉旧版本留下的文件（旧版本把参数写在这里）。</summary>
     public static EasyTierElevatedSession Start(EasyTierInstaller installer, EasyTierOptions options, string workDir)
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException(L.T("core.mp.component.windowsonly"));
+        if (!PlatformFeatures.FullLan) throw new PlatformNotSupportedException(L.T("core.mp.component.windowsonly"));
         if (!options.Tun) throw new ArgumentException(L.T("core.mp.component.tunrequired"));
-        LegacyFiles.Remove(workDir);
-        var guard = ElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), elevate: true, network: ExitNetworkPlan.Create(options));
+        IElevatedGuard guard;
+        if (OperatingSystem.IsWindows())
+        {
+            LegacyFiles.Remove(workDir);
+            guard = ElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), elevate: true, network: ExitNetworkPlan.Create(options));
+        }
+        else
+        {
+            // Mac/Linux：经 pkexec（Linux）或系统管理员密码框（macOS）以 root 运行 Jay 自己的守护模式，见 UnixElevatedGuard。
+            guard = UnixElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options), EasyTierArgs.VirtualIp(options));
+        }
         return new EasyTierElevatedSession(options, installer.CliPath, guard);
     }
 
@@ -65,7 +74,7 @@ public sealed class EasyTierElevatedSession : IEasyTierSession
         try
         {
             ct.ThrowIfCancellationRequested();
-            var ready = _guard.StartAsync(EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options));
+            var ready = _guard.StartAsync(EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options), EasyTierArgs.VirtualIp(options));
             await ready.WaitAsync(ct).ConfigureAwait(false);
             Options = options;
         }
@@ -177,7 +186,7 @@ public sealed class EasyTierElevatedSession : IEasyTierSession
 /// elevate 为 false 时不弹 UAC，直接以当前权限运行（测试用）。
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class ElevatedGuard : IDisposable
+internal sealed class ElevatedGuard : IElevatedGuard
 {
     private static readonly UTF8Encoding Utf8 = new(false);
 
@@ -417,6 +426,8 @@ internal sealed class ElevatedGuard : IDisposable
     /// <summary>（重新）启动 easytier-core：参数和环境变量只经管道传过去。</summary>
     public void Start(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network = null) => _ = StartAsync(args, env, network);
 
+    Task IElevatedGuard.StartAsync(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp) => StartAsync(args, env, network);
+
     public Task StartAsync(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network = null)
     {
         lock (_gate)
@@ -633,6 +644,17 @@ internal sealed class ElevatedGuard : IDisposable
             foreach ($s in @($ack, $outPipe, $errPipe, $ackPipe, $cmdPipe)) { try { $s.Dispose() } catch {} }
         }
         """;
+}
+
+/// <summary>以管理员 / root 身份运行 easytier-core 的守护：Windows 是 PowerShell 守护脚本，Mac/Linux 是 Jay 自己的守护模式。</summary>
+internal interface IElevatedGuard : IDisposable
+{
+    bool HasExited { get; }
+    bool ConnectFailed { get; }
+    bool StartPending { get; }
+    IReadOnlyList<string> RecentOutput { get; }
+    Task StartAsync(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp);
+    Task WaitForReadyAsync(CancellationToken ct = default);
 }
 
 /// <summary>守护脚本的一条命令（JSON 一行）。</summary>

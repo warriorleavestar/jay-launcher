@@ -84,12 +84,45 @@ public sealed class AdminApi : IAsyncDisposable
         deadline.CancelAfter(TimeSpan.FromSeconds(10));
         var stream = client.GetStream();
         var (method, path, headers, body) = await ReadRequestAsync(stream, deadline.Token);
-        var (status, reply) = Route(method, path, headers.GetValueOrDefault("authorization"), body);
-        var bytes = Encoding.UTF8.GetBytes(reply.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
-        var head = $"HTTP/1.1 {status} {(status == 200 ? "OK" : "Error")}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {bytes.Length}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+        int status;
+        string contentType;
+        byte[] bytes;
+        if (!IsLocalHost(headers.GetValueOrDefault("host")) || !IsLocalOrigin(headers.GetValueOrDefault("origin")))
+        {
+            // DNS rebinding or a cross-site page: refuse before anything else.
+            (status, contentType, bytes) = (403, "application/json; charset=utf-8", Json(Fail("host")));
+        }
+        else if (method == "GET" && AdminPanel.Find(path.Split('?')[0]) is { } file)
+        {
+            (status, contentType, bytes) = (200, file.ContentType, file.Bytes);
+        }
+        else
+        {
+            var (code, reply) = Route(method, path, headers.GetValueOrDefault("authorization"), body);
+            (status, contentType, bytes) = (code, "application/json; charset=utf-8", Json(reply));
+        }
+        var head = $"HTTP/1.1 {status} {(status == 200 ? "OK" : "Error")}\r\nContent-Type: {contentType}\r\nContent-Length: {bytes.Length}\r\n" +
+            "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: DENY\r\n" +
+            $"Content-Security-Policy: {AdminPanel.ContentSecurityPolicy}\r\nConnection: close\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(head), deadline.Token);
         await stream.WriteAsync(bytes, deadline.Token);
     }
+
+    private static byte[] Json(JsonObject reply) => Encoding.UTF8.GetBytes(reply.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
+
+    /// <summary>The Host header must name this machine (127.0.0.1, localhost or [::1], any port so SSH tunnels work).</summary>
+    internal static bool IsLocalHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return false;
+        var h = host.Trim().ToLowerInvariant();
+        var name = h.StartsWith('[') ? h[..(h.IndexOf(']') + 1)] : h.Split(':')[0];
+        var port = h[name.Length..];
+        return name is "127.0.0.1" or "localhost" or "[::1]" && (port.Length == 0 || (port[0] == ':' && port.Length <= 6 && port[1..].All(char.IsAsciiDigit) && port.Length > 1));
+    }
+
+    /// <summary>Browsers send Origin on cross-site requests; only this machine's own pages may call the API.</summary>
+    internal static bool IsLocalOrigin(string? origin) =>
+        origin is null || (Uri.TryCreate(origin, UriKind.Absolute, out var uri) && uri.Scheme == "http" && IsLocalHost(uri.Authority));
 
     /// <summary>读一个 HTTP/1.1 请求：请求行、头（最多 8 KB）、按 Content-Length 读正文（最多 16 KB）。</summary>
     internal static async Task<(string Method, string Path, Dictionary<string, string> Headers, string Body)> ReadRequestAsync(Stream stream, CancellationToken ct)
