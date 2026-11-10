@@ -89,10 +89,11 @@ public sealed class BakeLoaderDownloadTests : IDisposable
     }
 
     [Fact]
-    public void ThePinPointsAtJaysReleasesAndIsEitherUnsetOrComplete()
+    public void ThePinPointsAtTheLoadersReleasesAndIsEitherUnsetOrComplete()
     {
         var pinned = BakeLoaderRelease.Pinned;
-        Assert.Equal(BakeLoaderRelease.JayReleases, pinned.ReleasesBase);
+        Assert.Equal(BakeLoaderRelease.LoaderReleases, pinned.ReleasesBase);
+        Assert.Matches(@"^https://github\.com/[^/]+/[^/]+/releases/download/$", pinned.ReleasesBase);
         if (!pinned.IsPublished)
         {
             // Placeholder until the loader project publishes its first release: nothing half filled in.
@@ -103,6 +104,7 @@ public sealed class BakeLoaderDownloadTests : IDisposable
         Assert.Matches("^[0-9a-f]{64}$", pinned.Sha256);
         Assert.True(pinned.Size > 0);
         Assert.Contains(pinned.LoaderVersion, pinned.AssetName);
+        Assert.Equal($"{pinned.ReleasesBase}{pinned.Tag}/{pinned.AssetName}", pinned.Url);
     }
 
     [Fact]

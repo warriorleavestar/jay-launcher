@@ -406,7 +406,41 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             && settings.BakeLoaderStatus.Contains("loader.jar", StringComparison.Ordinal), settings.BakeLoaderStatus);
         await ShotAsync("settings-bake-install-refused-en");
 
-        if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_BAKE_ZIP") is { Length: > 0 } real && File.Exists(real))
+        if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_BAKE_DOWNLOAD") == "1")
+        {
+            // Opt-in, real network: "Download loader" fetches the pinned release, checks it and selects it.
+            settings.BakeLoaderPath = "";
+            main.Shell.Navigate("settings#BakeLoaderInstall");
+            await Task.Delay(300);
+            var download = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadButton");
+            await ScrollIntoViewAsync(download);
+            Check("下载加载器：已发布时按钮可用", Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished && download.IsEffectivelyEnabled);
+            await ShotAsync("settings-bake-download-enabled-en");
+            download.Command!.Execute(null);
+            for (var i = 0; i < 40 && !settings.IsDownloadingBakeLoader; i++) await Task.Delay(50);
+            var sawProgress = false;
+            for (var i = 0; i < 2400 && settings.IsDownloadingBakeLoader; i++)
+            {
+                if (!sawProgress && settings.BakeLoaderStatus.Contains('%'))
+                {
+                    sawProgress = true;
+                    await ShotAsync("settings-bake-download-progress-en");
+                }
+                await Task.Delay(100);
+            }
+            var pin = Amber.Core.Bake.BakeLoaderRelease.Pinned;
+            var toolkit = Amber.Core.Bake.BakeToolkit.Find(settings.BakeLoaderPath);
+            Check("下载加载器：按固定的大小和 SHA-256 下好、装好并选用", toolkit?.Package is { } pkg && pkg.LoaderVersion == pin.LoaderVersion
+                && settings.BakeLoaderPath == Path.Combine(LauncherService.BakeLoaderInstallRoot, pin.LoaderVersion)
+                && settings.BakeLoaderStatus.Contains(pin.Sha256[..12], StringComparison.Ordinal), settings.BakeLoaderStatus);
+            var package = toolkit!.Package!;
+            package.Verify();
+            Check("下载加载器：清单里每个文件都核对过（含许可文件）", package.Files.ContainsKey("LICENSE") && package.Files.ContainsKey("THIRD_PARTY_NOTICES.md")
+                && package.Files.Keys.Any(f => f.StartsWith("licenses/", StringComparison.Ordinal)), $"{package.Files.Count} files");
+            _report.Add("INFO 下载的加载器装在 " + settings.BakeLoaderPath + "，" + package.Files.Count + " 个文件");
+            await ShotAsync("settings-bake-download-done-en");
+        }
+        else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_BAKE_ZIP") is { Length: > 0 } real && File.Exists(real))
         {
             await settings.InstallBakeLoaderAsync(real);
             var ok = Amber.Core.Bake.BakeToolkit.Find(settings.BakeLoaderPath) is { Package: { } p } && p.Interface >= new Version(1, 3);

@@ -10,23 +10,26 @@ namespace Amber.Core.Bake;
 /// A zip that does not match the pin is never unpacked; one that does then goes through the same install as
 /// "Install loader from zip…" (every file checked against the package's manifest).
 /// <para>
-/// <see cref="ReleasesBase"/> is the repository's release download root, so moving the asset to another repository
-/// (the loader's own) is a one-line change. Until the loader project publishes a release, <see cref="Pinned"/> has no
-/// tag or hash and "Download loader" says so instead of downloading. See docs/universal-loader-release.md.
+/// <see cref="ReleasesBase"/> is the repository's release download root (the loader's own repository today), so moving
+/// the asset is a one-line change. With an empty pin (no tag or hash) "Download loader" says the loader is not
+/// published instead of downloading. See docs/universal-loader-release.md.
 /// </para>
 /// </summary>
 public sealed record BakeLoaderRelease(string ReleasesBase, string LoaderVersion, string Tag, string AssetName, string Sha256, long Size)
 {
     public const string JayReleases = "https://github.com/warriorleavestar/jay-launcher/releases/download/";
 
-    /// <summary>The pin. Filled in when the loader project publishes a release (tag, asset, SHA-256 and size of that exact zip).</summary>
+    /// <summary>The loader's own repository, where its packages are released.</summary>
+    public const string LoaderReleases = "https://github.com/warriorleavestar/jay-loader/releases/download/";
+
+    /// <summary>The pin: the loader project's release (tag, asset, SHA-256 and size of that exact zip).</summary>
     public static BakeLoaderRelease Pinned { get; } = new(
-        JayReleases,
-        "",
-        "",
-        "",
-        "",
-        0);
+        LoaderReleases,
+        "0.3.0",
+        "v0.3.0",
+        "amber-ul-0.3.0.zip",
+        "3f6e8a40040bad1e362d71f8ebde3236105d776325b5f420acb1e44a14f97c8a",
+        4_878_654);
 
     /// <summary>False until the pin names a published zip: then nothing is downloaded.</summary>
     public bool IsPublished => Tag.Length > 0 && AssetName.Length > 0 && Size > 0 && Sha256.Length == 64 && Sha256.All(Uri.IsHexDigit);
