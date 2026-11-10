@@ -136,6 +136,12 @@ public sealed partial class MultiplayerViewModel
         PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(Mode) or nameof(Tab)) OnPropertyChanged(nameof(ShowRoomHeader));
+            if (e.PropertyName == nameof(NetworkCheckText))
+            {
+                OnPropertyChanged(nameof(NetworkVerdict));
+                OnPropertyChanged(nameof(NetworkDetails));
+                OnPropertyChanged(nameof(HasNetworkVerdict));
+            }
             if (e.PropertyName is nameof(Mode) or nameof(MyVirtualIp))
             {
                 RefreshPeople();
@@ -348,13 +354,36 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private void ToggleRoomSettings() => RoomSettingsOpen = !RoomSettingsOpen;
 
-    /// <summary>"Connection problems?": multiplayer settings › diagnostics.</summary>
+    // ---- "Connection problems?" drawer (official §6.18) ----
+
+    /// <summary>The diagnostics drawer (lobby footer, room ⋯ menu, Ctrl+Shift+D).</summary>
+    [ObservableProperty] public partial bool DiagnosticsOpen { get; set; }
+
     [RelayCommand]
-    private void OpenDiagnostics()
+    private void OpenDiagnostics() => DiagnosticsOpen = true;
+
+    [RelayCommand]
+    private void CloseDiagnostics() => DiagnosticsOpen = false;
+
+    /// <summary>The plain-language conclusion of the last check (its first line).</summary>
+    public string NetworkVerdict => NetworkCheckText.Split('\n', 2)[0];
+
+    /// <summary>What the check saw (addresses, NAT, STUN), under "technical details".</summary>
+    public string NetworkDetails => NetworkCheckText.Split('\n', 2) is [_, var rest] ? rest : "";
+
+    public bool HasNetworkVerdict => NetworkCheckText.Length > 0;
+
+    /// <summary>"Try another relay server": multiplayer settings › relay servers.</summary>
+    [RelayCommand]
+    private void SwitchRelay()
     {
+        DiagnosticsOpen = false;
         Tab = MultiplayerTab.Settings;
         Navigate?.Invoke("play/settings");
     }
+
+    [RelayCommand]
+    private void TurnOnDebugMode() => DebugMode = true;
 
     [RelayCommand]
     private async Task CopyRoomInfoAsync()

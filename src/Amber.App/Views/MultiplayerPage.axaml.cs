@@ -25,6 +25,9 @@ public partial class MultiplayerPage : UserControl
             ApplyRoomLayout(e.NewSize.Width);
             // A knock never takes the whole page: past this it scrolls.
             KnockScroll.MaxHeight = Math.Max(180, e.NewSize.Height * 0.55);
+            // The diagnostics drawer covers the page in compact windows.
+            DiagnosticsDrawer.Width = e.NewSize.Width < 640 ? double.NaN : 560;
+            DiagnosticsDrawer.HorizontalAlignment = e.NewSize.Width < 640 ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Right;
         };
         AddHandler(KeyDownEvent, OnRoomKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         DataContextChanged += (_, _) =>
@@ -52,6 +55,8 @@ public partial class MultiplayerPage : UserControl
                 };
                 vm.PropertyChanged += (_, e) =>
                 {
+                    if (e.PropertyName == nameof(MultiplayerViewModel.DiagnosticsOpen) && vm.DiagnosticsOpen)
+                        Dispatcher.UIThread.Post(() => DiagnosticsCheckButton.Focus(), DispatcherPriority.Background);
                     if (e.PropertyName is nameof(MultiplayerViewModel.CompactSection) or nameof(MultiplayerViewModel.Mode)) ApplyRoomLayout(Bounds.Width);
                 };
                 vm.ChatLines.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(() => this.FindControl<ScrollViewer>("ChatScroll")?.ScrollToEnd(), DispatcherPriority.Background);
@@ -158,6 +163,18 @@ public partial class MultiplayerPage : UserControl
     private void OnRoomKeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not MultiplayerViewModel vm) return;
+        if (e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.D)
+        {
+            vm.DiagnosticsOpen = !vm.DiagnosticsOpen;
+            e.Handled = true;
+            return;
+        }
+        if (vm.DiagnosticsOpen && e.Key == Key.Escape && e.KeyModifiers == KeyModifiers.None)
+        {
+            vm.DiagnosticsOpen = false;
+            e.Handled = true;
+            return;
+        }
         if (vm.HasKnocks)
         {
             if (e.KeyModifiers == KeyModifiers.Alt && e.Key == Key.Y) { vm.ApproveFirstKnockCommand.Execute(null); e.Handled = true; return; }

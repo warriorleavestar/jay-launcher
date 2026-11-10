@@ -2609,5 +2609,11 @@
   "multiplayer.file.accept": "受之…",
   "multiplayer.file.see_above": "有人欲寄檔予汝，於上處之。",
   "multiplayer.settings.request_popup": "Jay 在後時，叩門或寄檔以置頂小窗告之（不奪戲之鍵）",
-  "multiplayer.popup.window_title": "Jay 安之告"
+  "multiplayer.popup.window_title": "Jay 安之告",
+  "multiplayer.diag.intro": "察之數秒，畢則一言告汝其狀與其法。",
+  "multiplayer.diag.suggest": "可試",
+  "multiplayer.diag.switch_relay": "換轉驛",
+  "multiplayer.diag.debug_on": "啟除錯之式",
+  "multiplayer.diag.export_hint": "所出之診無室鑰與諸碼；公網 IP 默遮，勾之乃含。",
+  "multiplayer.diag.details": "技之詳"
 }
