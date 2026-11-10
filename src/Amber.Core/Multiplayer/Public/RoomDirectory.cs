@@ -686,12 +686,16 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         if (trust.Memory is not null)
         {
             // First contact with a network that pins nothing: try the authenticated channel and remember the key; a
-            // directory too old for it closes the connection, and only then does Jay fall back to the legacy protocol.
+            // directory too old for it closes the connection (on Windows often as a reset), and only then does Jay fall
+            // back to the legacy protocol.
             try { return await CallOnceAsync(ip, request, trust, ct); }
-            catch (Exception e) when (e is EndOfStreamException or InvalidDataException && !trust.Remembers(ip)) { }
+            catch (Exception e) when (ClosedByOldDirectory(e) && !trust.Remembers(ip)) { }
         }
         return await CallOnceAsync(ip, request, null, ct);
     }
+
+    private static bool ClosedByOldDirectory(Exception e) =>
+        e is EndOfStreamException or InvalidDataException || e is IOException { InnerException: SocketException } and not DirectoryImpostorException and not DirectoryKeyChangedException;
 
     private async Task<JsonObject> CallOnceAsync(string ip, JsonObject request, DirectoryTrust? trust, CancellationToken ct)
     {
