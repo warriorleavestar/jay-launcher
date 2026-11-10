@@ -307,7 +307,8 @@
         </ListBox.ItemTemplate>
       </ListBox>
       <!-- 第一次打开新版：东西搬到哪了（可关闭） -->
-      <Border x:Name="MovedNotice" Grid.Row="3" Classes="banner" Margin="16,0,16,8" IsVisible="False">
+      <StackPanel Grid.Row="3">
+      <Border x:Name="MovedNotice" Classes="banner" Margin="16,0,16,8" IsVisible="False">
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
           <Path Classes="icon" Data="{StaticResource Icon.Info}" Width="20" Height="20" VerticalAlignment="Top" />
           <StackPanel Grid.Column="1" Spacing="2">
@@ -317,6 +318,32 @@
           <Button x:Name="MovedNoticeClose" Grid.Column="2" Classes="ghost small" Content="{l:T shell.moved.ok}" VerticalAlignment="Top" Click="MovedNotice_Close" />
         </Grid>
       </Border>
+      <!-- Contextual tip on short windows, or when it has nothing to point at (§9.3 rule 5): one line, read out politely. -->
+      <Border x:Name="TipBar" Classes="banner" Margin="16,0,16,8" Padding="12,6" IsVisible="False">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+          <Path Classes="icon" Data="{StaticResource Icon.Info}" Width="18" Height="18" VerticalAlignment="Center" />
+          <TextBlock x:Name="TipBarText" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+          <Button x:Name="TipBarMute" Grid.Column="2" Classes="ghost small" Content="{l:T tip.mute}" VerticalAlignment="Center" Click="TipMute_Click" />
+          <Button x:Name="TipBarOk" Grid.Column="3" Classes="ghost small" Content="{l:T tip.ok}" VerticalAlignment="Center" Click="TipOk_Click" />
+        </Grid>
+      </Border>
+      </StackPanel>
+      <!-- Contextual tip bubble (Coachmark, §5): up to 320 wide, with an arrow, next to what it explains. It never takes focus. -->
+      <Popup x:Name="TipPopup" Placement="BottomEdgeAlignedLeft" IsLightDismissEnabled="False" Focusable="False">
+        <StackPanel>
+          <Path x:Name="TipArrow" Data="M 0,8 L 8,0 L 16,8 Z" Fill="{DynamicResource Overlay}" Stroke="{DynamicResource BorderSubtle}" StrokeThickness="1"
+                Margin="16,0,0,-1" HorizontalAlignment="Left" />
+          <Border Background="{DynamicResource Overlay}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="8" Padding="12,10" MaxWidth="320">
+            <StackPanel Spacing="8">
+              <TextBlock x:Name="TipBubbleText" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+              <WrapPanel ItemSpacing="8" LineSpacing="4" HorizontalAlignment="Right">
+                <Button x:Name="TipBubbleMute" Classes="ghost small" Content="{l:T tip.mute}" Click="TipMute_Click" />
+                <Button x:Name="TipBubbleOk" Classes="secondary small" Content="{l:T tip.ok}" Click="TipOk_Click" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Popup>
       <ContentControl x:Name="PageHost" Grid.Row="4" Content="{Binding CurrentPage}" Margin="24,4,24,20" />
 
       <!-- Docked game log (§6.9): Ctrl+` docks the running game's log at the bottom, 240 high and draggable; in a short

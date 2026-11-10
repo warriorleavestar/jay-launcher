@@ -3022,5 +3022,14 @@
   "accounts.status.jay_bound": "已把 Jay 账户 {0} 绑定到 {1}",
   "accounts.status.jay_unbound": "已解除 {0} 的 Jay 账户绑定",
   "accounts.status.jay_address_copied": "地址已复制",
-  "accounts.status.jay_removed": "已从这台电脑移除 Jay 账户 {0}，用助记词仍能恢复"
+  "accounts.status.jay_removed": "已从这台电脑移除 Jay 账户 {0}，用助记词仍能恢复",
+  "tip.ok": "知道了",
+  "tip.mute": "这类提示都别出了",
+  "tip.mods_toggle": "点开关能临时关掉一个模组，不用删。",
+  "tip.first_crash": "Jay 猜了崩溃的原因，修复按钮就在旁边，做错了能撤销。",
+  "tip.first_knock": "先和 TA 核对安全码，一样再让进。",
+  "tip.theme_import": "主题让 Jay 打不开了？启动时按住 Shift。",
+  "tip.narrow_window": "侧栏收起来了，窗口拉宽一些就会展开。",
+  "tip.reset": "重新看所有提示",
+  "tip.reset_done": "所有提示会重新出现。"
 }
