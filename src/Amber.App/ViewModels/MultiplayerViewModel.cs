@@ -1147,6 +1147,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StopAnnouncer();
         StopHostLobby();
         HostFingerprint = "";
+        HostJayAccount = null;
         _localChatPort = null;
         _hubOnVirtualIp = false;
         StopRemote();

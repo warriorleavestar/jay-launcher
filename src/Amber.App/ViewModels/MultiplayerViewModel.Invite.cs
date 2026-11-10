@@ -2,6 +2,7 @@ using Amber.App.Localization;
 using Amber.App.Services;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
+using Amber.Core.Identity;
 using Amber.Core.Multiplayer.Transport;
 using Avalonia.Input.Platform;
 using Avalonia.Threading;
@@ -58,8 +59,13 @@ public sealed record ApprovalCard(KnockRequest Request, string? Warning) : Local
     public string Who => Request.Name.Length > 0 ? Request.Name : L.T("multiplayer.peers.player");
     public string Headline => L.F("multiplayer.knock.wants_in", Who);
     public string SafetyCode => Request.Fingerprint;
-    public string Facts => string.Join(" · ", new[] { Request.Version, Request.DeviceId is { } device ? L.F("multiplayer.device.id", device) : null }
+    public string Facts => string.Join(" · ", new[] { Request.Version, Request.DeviceId is { } device ? L.F("multiplayer.device.id", device) : null,
+            MultiplayerViewModel.JayLine(Request.JayAccount) }
         .Where(s => !string.IsNullOrEmpty(s)));
+
+    /// <summary>The guest showed a Jay account: trusting them covers their other devices too.</summary>
+    public bool HasJayAccount => Request.JayAccount is not null && CanTrustAfter;
+    public string JayHint => L.T("multiplayer.knock.jay_hint");
     public string VerifyHint => L.F("multiplayer.knock.verify", Who);
     public string TrustLabel => L.F("multiplayer.knock.trust_after", Who);
 
@@ -71,15 +77,19 @@ public sealed record ApprovalCard(KnockRequest Request, string? Warning) : Local
     internal void Tick() => OnPropertyChanged(nameof(RemainingText));
     public string Title => L.F("multiplayer.invite.knocking", Request.Name.Length > 0 ? Request.Name : L.T("multiplayer.peers.player"));
     public string Detail => L.F("multiplayer.invite.fingerprint", Request.Fingerprint) + (Request.Version.Length > 0 ? " · " + Request.Version : "")
-        + (Request.DeviceId is { } device ? " · " + L.F("multiplayer.device.id", device) : "");
+        + (Request.DeviceId is { } device ? " · " + L.F("multiplayer.device.id", device) : "")
+        + (MultiplayerViewModel.JayLine(Request.JayAccount) is { } jay ? " · " + jay : "");
     public bool HasWarning => Warning is not null;
 }
 
 /// <summary>经邀请进来的成员（房主看）。发出凭据时就列上；对方回了确认再标“已确认”。换网络时不在线的标“需要重新邀请”。</summary>
 public sealed record MemberItem(string Name, byte[] PublicKey, bool Trusted, bool Confirmed = false, bool NeedsInvite = false) : LocalizedRecord
 {
+    /// <summary>Their Jay account, verified when they knocked.</summary>
+    public string? JayAccount { get; init; }
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
     public string Label => (Name.Length > 0 ? Name : L.T("multiplayer.peers.player")) + " · " + Fingerprint
+        + (MultiplayerViewModel.JayLine(JayAccount) is { } jay ? " · " + jay : "")
         + " · " + L.T(NeedsInvite ? "multiplayer.kick.needs_invite" : Confirmed ? "multiplayer.invite.member_confirmed" : "multiplayer.invite.member_unconfirmed");
     public bool CanTrust => !Trusted;
 }
@@ -93,7 +103,8 @@ public sealed record BannedItem(BannedMember Member) : LocalizedRecord
 /// <summary>信任列表里的一个人（联机设置里管理）。</summary>
 public sealed record TrustedItem(TrustedMember Member) : LocalizedRecord
 {
-    public string Label => (Member.Name.Length > 0 ? Member.Name : L.T("multiplayer.peers.player")) + " · " + Member.Fingerprint;
+    public string Label => (Member.Name.Length > 0 ? Member.Name : L.T("multiplayer.peers.player")) + " · " + Member.Fingerprint
+        + (MultiplayerViewModel.JayLine(Member.JayAccount) is { } jay ? " · " + jay : "");
 }
 
 /// <summary>
@@ -176,7 +187,11 @@ public sealed partial class MultiplayerViewModel
     /// <summary>加入方：房主的指纹（敲门握手里证明过的身份）。</summary>
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasHostFingerprint), nameof(HostFingerprintText))] public partial string HostFingerprint { get; set; } = "";
     public bool HasHostFingerprint => HostFingerprint.Length > 0;
-    public string HostFingerprintText => L.F("multiplayer.invite.host_fingerprint", HostFingerprint);
+    public string HostFingerprintText => L.F("multiplayer.invite.host_fingerprint", HostFingerprint)
+        + (JayLine(HostJayAccount) is { } jay ? " · " + jay : "");
+
+    /// <summary>The host's Jay account, when they sent a valid certificate with the approval.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HostFingerprintText))] public partial string? HostJayAccount { get; set; }
 
     /// <summary>测试用：最近一次发出的完整邀请码（界面上默认打码）。</summary>
     internal string? TestInviteText => _lastInvite?.ToString();
@@ -212,10 +227,12 @@ public sealed partial class MultiplayerViewModel
         _credentials = credentials;
         _members = members;
         ConfigureSecurity(members);
+        var jayCertificate = JayCertificate;
         var lobby = HostLobby.Create(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby"), peers ?? (() => LobbyPeers(host: true)),
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => !Child.AlwaysAskKnock && Trusted.IsTrusted(pub), AskApprovalAsync, members,
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy,
-            () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)));
+            () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)),
+            account => !Child.AlwaysAskKnock && Trusted.IsTrustedJayAccount(account), () => jayCertificate);
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.StateChanged += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.Paused += () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Warning("multiplayer.invite.paused")));
@@ -225,8 +242,14 @@ public sealed partial class MultiplayerViewModel
             if (_lobby != lobby) return;
             for (var i = Members.Count - 1; i >= 0; i--)
                 if (Members[i].PublicKey.AsSpan().SequenceEqual(request.PublicKey)) Members.RemoveAt(i);
-            Members.Insert(0, new MemberItem(request.Name, request.PublicKey, request.Trusted));
-            SetStatus(StatusMessage.Success("multiplayer.invite.admitted", request.Name, request.Fingerprint));
+            Members.Insert(0, new MemberItem(request.Name, request.PublicKey, request.Trusted) { JayAccount = request.JayAccount });
+            // A trusted friend on a new device: remember this device too, so the list shows it.
+            if (request.TrustedByAccount)
+            {
+                Trusted.Add(request.PublicKey, request.Name, request.JayAccount);
+                SetStatus(StatusMessage.Success("multiplayer.invite.admitted_account", request.Name, JayAddress.Short(request.JayAccount!)));
+            }
+            else SetStatus(StatusMessage.Success("multiplayer.invite.admitted", request.Name, request.Fingerprint));
         });
         // 凭据没发出去（连接断了）：钥匙已经撤回，列表里也去掉。
         lobby.Withdrawn += (request, _) => Dispatcher.UIThread.Post(() =>
@@ -444,7 +467,7 @@ public sealed partial class MultiplayerViewModel
         // "Let them in automatically next time": add to friends before answering.
         if (card.TrustAfter && card.CanTrustAfter && !Trusted.IsTrusted(card.Request.PublicKey))
         {
-            Trusted.Add(card.Request.PublicKey, card.Request.Name);
+            Trusted.Add(card.Request.PublicKey, card.Request.Name, card.Request.JayAccount);
             RefreshTrusted();
         }
         card.Decision.TrySetResult(true);
@@ -568,7 +591,7 @@ public sealed partial class MultiplayerViewModel
     private void TrustMember(MemberItem? member)
     {
         if (member is null || member.Trusted) return;
-        Trusted.Add(member.PublicKey, member.Name);
+        Trusted.Add(member.PublicKey, member.Name, member.JayAccount);
         RefreshTrusted();
         var index = Members.IndexOf(member);
         if (index >= 0) Members[index] = member with { Trusted = true };
@@ -609,6 +632,7 @@ public sealed partial class MultiplayerViewModel
             var me = Identity.KeyPair;
             var name = ChatName;
             var device = Device;
+            var jay = JayCertificate;
             KnockOutcome? viaPublic = null;
             if (knock is not null || _public is not null)
             {
@@ -624,7 +648,7 @@ public sealed partial class MultiplayerViewModel
                 }), cts.Token, () => Dispatcher.UIThread.Post(() =>
                 {
                     if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
-                }), device, AccountToken));
+                }), device, AccountToken, jay));
             if (_knockCts != cts) return;
             if (outcome.Credentials is not { } credentials)
             {
@@ -637,7 +661,11 @@ public sealed partial class MultiplayerViewModel
                 return;
             }
             IsKnocking = false;
-            if (StartJoin(credentials.ToRoom())) HostFingerprint = outcome.HostFingerprint;
+            if (StartJoin(credentials.ToRoom()))
+            {
+                HostFingerprint = outcome.HostFingerprint;
+                HostJayAccount = outcome.HostJayAccount;
+            }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {

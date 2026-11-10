@@ -190,6 +190,16 @@ public sealed record DeviceCertificate(string Account, byte[] DeviceKey, string 
         return JayAccount.Verify(accountKey, Domain, SignedBytes(accountKey), Signature);
     }
 
+    /// <summary>
+    /// Reads a certificate someone sent and checks it names <paramref name="deviceKey"/> (the key they just proved in a handshake).
+    /// Returns the account address in its canonical lowercase form, or null when there is no certificate or it doesn't check out.
+    /// </summary>
+    public static string? VerifiedAccount(System.Text.Json.Nodes.JsonNode? node, ReadOnlySpan<byte> deviceKey)
+    {
+        if (FromJson(node) is not { } cert || !cert.Verify(deviceKey) || !JayAddress.TryDecode(cert.Account, out var key)) return null;
+        return JayAddress.Encode(key);
+    }
+
     public System.Text.Json.Nodes.JsonObject ToJson() => new()
     {
         ["account"] = Account,

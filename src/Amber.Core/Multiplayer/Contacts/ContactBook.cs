@@ -10,6 +10,12 @@ public sealed record Contact(byte[] PublicKey, string Name, bool Verified, DateT
 {
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
     public string Code => ContactCode.Format(PublicKey);
+
+    /// <summary>
+    /// Their Jay account (jay1…), when they sent a certificate the account signed for this device key while adding.
+    /// A later add-contact request from another device of the same account is recognized as the same person.
+    /// </summary>
+    public string? JayAccount { get; init; }
 }
 
 /// <summary>Where an add-contact exchange stands, as the UI shows it.</summary>
@@ -42,6 +48,15 @@ public sealed class PendingContact
     /// <summary>The four emoji to compare (indexes into <see cref="ContactHandshake.Emoji"/>), once <see cref="Step"/> is Compare.</summary>
     public int[]? Sas { get; internal set; }
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
+
+    /// <summary>Their Jay account, from a certificate that checked out for <see cref="PublicKey"/>.</summary>
+    public string? JayAccount { get; internal set; }
+
+    /// <summary>
+    /// The Jay account belongs to someone already verified in the list: this is a friend on another device. Their request is
+    /// accepted without asking, and the emoji can be skipped because the account itself vouches for the device.
+    /// </summary>
+    public bool KnownFriend { get; internal set; }
 
     internal byte[]? MyNonce;
     internal byte[]? TheirCommit;
@@ -94,6 +109,31 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
 
     public bool IsVerified(ReadOnlySpan<byte> publicKey) => Find(publicKey)?.Verified == true;
 
+    /// <summary>A verified contact with this Jay account (any of their devices), or null.</summary>
+    public Contact? FindVerifiedByJayAccount(string? account)
+    {
+        if (account is null) return null;
+        lock (_gate) return Load().FirstOrDefault(c => c.Verified && c.JayAccount is not null && string.Equals(c.JayAccount, account, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// This device's Jay account certificate, sent in add-contact mail so the other person can recognize me on my other devices.
+    /// Null when no Jay account is bound. Set by the owner, like <see cref="Me"/>.
+    /// </summary>
+    public Identity.DeviceCertificate? MyCertificate { get; set; }
+
+    private void AddMyCertificate(JsonObject body)
+    {
+        if (MyCertificate is { } cert && cert.DeviceKey.AsSpan().SequenceEqual(Me)) body["jay"] = cert.ToJson();
+    }
+
+    private string? KnownAccountLocked(MailMessage message, ReadOnlySpan<byte> sender, out bool knownFriend)
+    {
+        var account = Identity.DeviceCertificate.VerifiedAccount(message.Body["jay"], sender);
+        knownFriend = account is not null && Load().Any(c => c.Verified && c.JayAccount == account);
+        return account;
+    }
+
     /// <summary>
     /// Starts adding someone from their contact code: returns the hello to mail them. Adding myself or someone
     /// already verified returns null.
@@ -106,11 +146,13 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         pending.MyNonce = ContactHandshake.NewNonce();
         lock (_gate) _pending[key] = pending;
         Changed?.Invoke();
-        return MailMessage.Create(MailKind.Hello, theirs, new JsonObject
+        var body = new JsonObject
         {
             ["name"] = KnockProtocol.SanitizeName(myName),
             ["c"] = Convert.ToHexStringLower(ContactHandshake.Commit(pending.MyNonce)),
-        }, _now());
+        };
+        AddMyCertificate(body);
+        return MailMessage.Create(MailKind.Hello, theirs, body, _now());
     }
 
     /// <summary>
@@ -135,21 +177,27 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     // hello; the larger one answers it as if it had been asked (it wanted the contact anyway).
                     var crossed = pending is { Initiator: true, Step: ContactStep.WaitingForThem };
                     if (crossed && string.CompareOrdinal(key, Convert.ToHexStringLower(Me)) > 0) return null;
-                    if (pending is null && _pending.Values.Count(p => !p.Initiator) >= MaxRequests) return null;
+                    var account = KnownAccountLocked(message, sender, out var knownFriend);
+                    if (pending is null && !knownFriend && _pending.Values.Count(p => !p.Initiator) >= MaxRequests) return null;
                     var asking = new PendingContact(sender.ToArray(), initiator: false, _now())
                     {
                         Name = Name(message),
                         Step = ContactStep.AskingMe,
                         TheirCommit = commit,
+                        JayAccount = account,
+                        KnownFriend = knownFriend,
                     };
                     _pending[key] = asking;
-                    if (crossed) reply = AcceptLocked(asking, myName);
+                    // A friend on another device (their account vouches for it): no need to ask me first.
+                    if (crossed || knownFriend) reply = AcceptLocked(asking, myName);
                     break;
                 }
                 case MailKind.HelloReply when pending is { Initiator: true, Step: ContactStep.WaitingForThem }:
                 {
                     if (MailMessage.Hex(message.Body["n"], ContactHandshake.NonceLength) is not { } nonce) return null;
                     pending.Name = Name(message);
+                    pending.JayAccount = KnownAccountLocked(message, sender, out var knownFriend);
+                    pending.KnownFriend = knownFriend;
                     pending.TheirNonce = nonce;
                     pending.Sas = ContactHandshake.Sas(Me, sender, pending.MyNonce!, nonce);
                     pending.Step = ContactStep.Compare;
@@ -198,11 +246,13 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     {
         pending.MyNonce = ContactHandshake.NewNonce();
         pending.Step = ContactStep.WaitingForNonce;
-        return MailMessage.Create(MailKind.HelloReply, pending.PublicKey, new JsonObject
+        var body = new JsonObject
         {
             ["name"] = KnockProtocol.SanitizeName(myName),
             ["n"] = Convert.ToHexStringLower(pending.MyNonce),
-        }, _now());
+        };
+        AddMyCertificate(body);
+        return MailMessage.Create(MailKind.HelloReply, pending.PublicKey, body, _now());
     }
 
     /// <summary>The emoji matched: the contact is saved as verified.</summary>
@@ -217,7 +267,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             var list = Load();
             var key2 = theirs.ToArray();
             list.RemoveAll(c => c.PublicKey.AsSpan().SequenceEqual(key2));
-            contact = new Contact(pending.PublicKey, pending.Name, Verified: true, _now());
+            contact = new Contact(pending.PublicKey, pending.Name, Verified: true, _now()) { JayAccount = pending.JayAccount };
             list.Add(contact);
             Save(list);
         }
@@ -282,7 +332,11 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             {
                 if (MailMessage.Hex(item["pub"], X25519KeyPair.Length) is not { } pub) continue;
                 var added = item["added"]?.GetValue<long>() is { } s ? DateTimeOffset.FromUnixTimeSeconds(s) : DateTimeOffset.UnixEpoch;
-                _contacts.Add(new Contact(pub, KnockProtocol.SanitizeName(item["name"]?.GetValue<string>()), item["verified"]?.GetValue<bool>() == true, added));
+                var jay = item["jay"]?.GetValue<string>();
+                _contacts.Add(new Contact(pub, KnockProtocol.SanitizeName(item["name"]?.GetValue<string>()), item["verified"]?.GetValue<bool>() == true, added)
+                {
+                    JayAccount = Identity.JayAddress.TryDecode(jay, out var account) ? Identity.JayAddress.Encode(account) : null,
+                });
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException or ArgumentOutOfRangeException)
@@ -297,13 +351,17 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         _contacts = list;
         var array = new JsonArray();
         foreach (var c in list)
-            array.Add((JsonNode)new JsonObject
+        {
+            var item = new JsonObject
             {
                 ["pub"] = Convert.ToHexStringLower(c.PublicKey),
                 ["name"] = c.Name,
                 ["verified"] = c.Verified,
                 ["added"] = c.Added.ToUnixTimeSeconds(),
-            });
+            };
+            if (c.JayAccount is not null) item["jay"] = c.JayAccount;
+            array.Add((JsonNode)item);
+        }
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         var temp = path + ".tmp";
         MemberIdentity.WritePrivate(temp, System.Text.Encoding.UTF8.GetBytes(array.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
