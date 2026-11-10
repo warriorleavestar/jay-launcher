@@ -10,41 +10,65 @@ namespace Amber.Core.Themes;
 /// </summary>
 public static partial class ThemeStyles
 {
-    /// <summary>组件名 → 允许的状态（"" 是普通状态）。</summary>
+    /// <summary>Component → allowed states ("" is the normal state). Official §10.3.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> Components = new Dictionary<string, string[]>
     {
         ["button"] = ["", ":hover", ":pressed", ":disabled"],
-        ["button.primary"] = ["", ":hover", ":pressed"],
-        ["button.secondary"] = ["", ":hover", ":pressed"],
-        ["button.ghost"] = ["", ":hover", ":pressed"],
-        ["button.danger"] = ["", ":hover", ":pressed"],
+        ["button.primary"] = ["", ":hover", ":pressed", ":disabled"],
+        ["button.secondary"] = ["", ":hover", ":pressed", ":disabled"],
+        ["button.tonal"] = ["", ":hover", ":pressed", ":disabled"],
+        ["button.ghost"] = ["", ":hover", ":pressed", ":disabled"],
+        ["button.danger"] = ["", ":hover", ":pressed", ":disabled"],
+        ["button.icon"] = ["", ":hover", ":pressed", ":disabled"],
+        ["button.play"] = ["", ":hover", ":pressed"],
         ["card"] = [""],
-        ["pill"] = [""],
-        ["callout"] = [""],
+        ["card.cover"] = ["", ":hover"],
+        ["hero"] = [""],
+        ["chip"] = ["", ":hover", ":selected"],
+        ["badge"] = [""],
+        ["tag"] = [""],
+        ["tab"] = ["", ":hover", ":selected"],
         ["sidebar"] = [""],
+        ["rail.item"] = ["", ":hover", ":selected"],
         ["nav.item"] = ["", ":hover", ":selected"],
+        ["topbar"] = [""],
         ["input"] = ["", ":hover", ":focus"],
-        ["combobox"] = ["", ":hover"],
+        ["combobox"] = ["", ":hover", ":focus"],
+        ["segmented"] = ["", ":hover", ":checked"],
+        ["switch"] = ["", ":hover", ":checked"],
+        ["checkbox"] = ["", ":hover", ":checked"],
+        ["list.row"] = ["", ":hover", ":selected"],
+        ["table.header"] = [""],
+        ["banner"] = [""],
+        ["toast"] = [""],
+        ["menu"] = [""],
+        ["tooltip"] = [""],
+        ["drawer"] = [""],
+        ["dialog"] = [""],
+        ["coachmark"] = [""],
+        ["progress"] = [""],
+        ["capsule"] = [""],
+        ["requestbar"] = [""],
         ["heading"] = [""],
         ["window"] = [""],
     };
 
-    /// <summary>每种组件能设的属性（不是每个组件都有背景、阴影这些）。</summary>
-    private static readonly IReadOnlyDictionary<string, string[]> AllowedProps = new Dictionary<string, string[]>
+    /// <summary>Every component takes these (§10.3); a few take extra ones.</summary>
+    private static readonly string[] CommonProps = ["background", "foreground", "border", "borderWidth", "radius", "padding", "fontWeight", "shadow"];
+
+    private static readonly IReadOnlyDictionary<string, string[]> ExtraProps = new Dictionary<string, string[]>
     {
-        ["button"] = ["background", "foreground", "border", "borderWidth", "radius", "padding", "fontWeight", "shadow"],
-        ["card"] = ["background", "border", "borderWidth", "radius", "padding", "shadow"],
-        ["pill"] = ["background", "foreground", "border", "borderWidth", "radius", "padding"],
-        ["callout"] = ["background", "border", "borderWidth", "radius", "padding"],
-        ["sidebar"] = ["background", "border", "borderWidth", "shadow"],
-        ["nav.item"] = ["background", "foreground", "radius", "padding", "fontWeight"],
-        ["input"] = ["background", "foreground", "border", "borderWidth", "radius", "padding"],
-        ["combobox"] = ["background", "foreground", "border", "borderWidth", "radius", "padding"],
-        ["heading"] = ["foreground", "fontWeight"],
-        ["window"] = ["background"],
+        ["button.play"] = ["glow"],
+        ["hero"] = ["scrim"],
+        ["tab"] = ["indicator", "indicatorHeight"],
+        ["sidebar"] = ["indicator"],
+        ["rail.item"] = ["indicator"],
+        ["nav.item"] = ["indicator"],
+        ["topbar"] = ["indicator"],
+        ["progress"] = ["track", "fill"],
     };
 
-    public static string[] PropsFor(string component) => AllowedProps[component.StartsWith("button", StringComparison.Ordinal) ? "button" : component];
+    public static string[] PropsFor(string component) => [.. CommonProps, .. ExtraProps.GetValueOrDefault(component, [])];
 
     [GeneratedRegex(@"^linear\(\s*(-?\d{1,3})\s*,(.+)\)$")]
     private static partial Regex LinearPattern();
@@ -57,8 +81,39 @@ public static partial class ThemeStyles
         if (root.ValueKind != JsonValueKind.Object) { pack.Problems.Add(new("bad_value", "styles.json")); return; }
         foreach (var component in root.EnumerateObject())
         {
-            if (!Components.TryGetValue(component.Name, out var states)) { pack.Problems.Add(new("unknown_component", component.Name)); continue; }
-            if (component.Value.ValueKind != JsonValueKind.Object) { pack.Problems.Add(new("bad_value", component.Name)); continue; }
+            // Format 1 names: callout → banner, pill → chip / badge / tag, nav.item also styles rail.item (§10.8).
+            if (ThemeFormat.ComponentRenames.TryGetValue(component.Name, out var targets) && (pack.Format < 2 || !Components.ContainsKey(component.Name)))
+            {
+                // Read once (problems are reported once), then share the result with the other new names the pack didn't write itself.
+                // A new name the pack also writes itself keeps the pack's own style.
+                var free = targets.Where(t => t == component.Name || !root.TryGetProperty(t, out _)).ToList();
+                if (free.Count > 0)
+                {
+                    ReadComponent(pack, free[0], component.Value, open);
+                    if (pack.Styles.TryGetValue(free[0], out var read))
+                        foreach (var target in free.Skip(1)) pack.Styles[target] = read;
+                }
+                pack.Migration.Add(new("migrated_component", $"{component.Name} → {string.Join(", ", targets)}"));
+                continue;
+            }
+            ReadComponent(pack, component.Name, component.Value, open);
+        }
+        // Format 1 had no top bar: the sidebar's background is the top bar's too.
+        if (pack.Format < 2 && pack.Styles.TryGetValue("sidebar", out var sidebar) && !pack.Styles.ContainsKey("topbar")
+            && sidebar.GetValueOrDefault("")?.Background is { } sidebarBg)
+        {
+            pack.Styles["topbar"] = new() { [""] = new StyleProps { Background = sidebarBg } };
+            pack.Migration.Add(new("migrated_component", "sidebar.background → topbar"));
+        }
+        EnforceContrast(pack);
+    }
+
+    private static void ReadComponent(ThemePack pack, string name, JsonElement value, Func<string, byte[]?> open)
+    {
+        var component = (Name: name, Value: value);
+        {
+            if (!Components.TryGetValue(component.Name, out var states)) { pack.Problems.Add(new("unknown_component", component.Name)); return; }
+            if (component.Value.ValueKind != JsonValueKind.Object) { pack.Problems.Add(new("bad_value", component.Name)); return; }
             var allowed = PropsFor(component.Name);
             var byState = new Dictionary<string, StyleProps>();
             var normal = new StyleProps();
@@ -78,7 +133,6 @@ public static partial class ThemeStyles
             if (!normal.IsEmpty) byState[""] = normal;
             if (byState.Count > 0) pack.Styles[component.Name] = byState;
         }
-        EnforceContrast(pack);
     }
 
     private static void ReadProp(ThemePack pack, Func<string, byte[]?> open, StyleProps props, string[] allowed, string where, JsonProperty p)
@@ -91,11 +145,29 @@ public static partial class ThemeStyles
             case "background":
             case "foreground":
             case "border":
+            case "indicator":
+            case "track":
+            case "fill":
                 var paint = v.ValueKind == JsonValueKind.String ? ParsePaint(v.GetString()!, open, p.Name == "background") : null;
                 if (paint is null) { pack.Problems.Add(new("bad_paint", at)); return; }
-                if (p.Name == "background") props.Background = paint;
-                else if (p.Name == "foreground") props.Foreground = paint;
-                else props.Border = paint;
+                switch (p.Name)
+                {
+                    case "background": props.Background = paint; break;
+                    case "foreground": props.Foreground = paint; break;
+                    case "border": props.Border = paint; break;
+                    case "indicator": props.Indicator = paint; break;
+                    case "track": props.Track = paint; break;
+                    default: props.Fill = paint; break;
+                }
+                break;
+            case "indicatorHeight": props.IndicatorHeight = Number(pack, v, at, 2, 4); break;
+            case "scrim": props.Scrim = Number(pack, v, at, ThemeFormat.MinHeroScrim, 1); break;
+            case "glow":
+                // The start button's glow: a shadow, or just a color (soft glow around the button).
+                if (v.ValueKind == JsonValueKind.String && ThemePackReader.TryColor(v.GetString()!.Trim(), out var glowColor))
+                    props.Glow = $"0 0 16 0 {ThemePackReader.FormatColor(glowColor)}";
+                else if (v.ValueKind == JsonValueKind.String && ParseShadow(v.GetString()!) is { } glow) props.Glow = glow;
+                else pack.Problems.Add(new("bad_shadow", at));
                 break;
             case "borderWidth": props.BorderWidth = Number(pack, v, at, 0, 8); break;
             case "radius": props.Radius = Number(pack, v, at, 0, 64); break;
@@ -139,7 +211,10 @@ public static partial class ThemeStyles
         text = text.Trim();
         if (ThemePackReader.TryColor(text, out var c)) return new Paint(PaintKind.Color, [c], null, 0);
         if (TokenPattern().Match(text) is { Success: true } t)
-            return ThemePackReader.ColorKeys.Contains(t.Groups[1].Value) ? new Paint(PaintKind.Token, [], t.Groups[1].Value, 0) : null;
+        {
+            var key = ThemeFormat.ColorAliases.GetValueOrDefault(t.Groups[1].Value, t.Groups[1].Value);
+            return ThemePackReader.ColorKeys.Contains(key) ? new Paint(PaintKind.Token, [], key, 0) : null;
+        }
         if (LinearPattern().Match(text) is { Success: true } lin)
         {
             var colors = new List<uint>();
@@ -259,7 +334,14 @@ public sealed class StyleProps
     public (double H, double V)? Padding { get; set; }
     public string? FontWeight { get; set; }
     public string? Shadow { get; set; }
+    public string? Glow { get; set; }
+    public Paint? Indicator { get; set; }
+    public double? IndicatorHeight { get; set; }
+    public Paint? Track { get; set; }
+    public Paint? Fill { get; set; }
+    public double? Scrim { get; set; }
 
     public bool IsEmpty => Background is null && Foreground is null && Border is null && BorderWidth is null && Radius is null
-        && Padding is null && FontWeight is null && Shadow is null;
+        && Padding is null && FontWeight is null && Shadow is null && Glow is null && Indicator is null && IndicatorHeight is null
+        && Track is null && Fill is null && Scrim is null;
 }

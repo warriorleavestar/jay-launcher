@@ -75,4 +75,13 @@ public sealed class NewInstanceNameTests
     [InlineData("1.21-pre1", "release", LoaderKind.NeoForge, LoaderBlock.None)]
     public void LoaderAvailability(string version, string type, LoaderKind kind, LoaderBlock expected) =>
         Assert.Equal(expected, LoaderSupport.Check(version, type, kind));
+
+    [Theory]
+    [InlineData("Alex 的房间", "Alex 的房间")]
+    [InlineData("A/l:e*x's room.", "Alex's room")]
+    [InlineData("CON", "CON-2")]
+    [InlineData("???", "instance")]
+    [InlineData("taken", "taken-3")]
+    public void UniqueNamesAreSafeAndFree(string wanted, string expected) =>
+        Assert.Equal(expected, NewInstanceNames.Unique(wanted, ["TAKEN", "taken-2"]));
 }

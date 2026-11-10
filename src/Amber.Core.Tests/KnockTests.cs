@@ -125,6 +125,56 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.True(await WaitAsync(() => cancelled));
     }
 
+    /// <summary>The room's "how long to wait" is read at each knock and overrides the default; a timeout is reported.</summary>
+    [Fact]
+    public async Task RoomWaitSettingOverridesTheDefaultAndReportsTimeouts()
+    {
+        _decide = async (_, ct) =>
+        {
+            try { await Task.Delay(Timeout.Infinite, ct); } catch (OperationCanceledException) { }
+            return true;
+        };
+        var server = Server(new KnockLimits { HandshakeTimeout = TimeSpan.FromSeconds(3), DecisionTimeout = TimeSpan.FromSeconds(30) });
+        var timedOut = new List<string>();
+        server.TimedOut += r => { lock (timedOut) timedOut.Add(r.Name); };
+        server.DecisionWait = () => TimeSpan.FromMilliseconds(300);
+        var started = DateTime.UtcNow;
+        var outcome = await KnockAsync(Invite().Invite, "Bob");
+        Assert.False(outcome.Approved);
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10));
+        Assert.True(await WaitAsync(() => { lock (timedOut) return timedOut.Count == 1; }));
+        Assert.Equal("Bob", timedOut[0]);
+    }
+
+    /// <summary>"Keep waiting": no timeout on the host side; the answer still arrives whenever the host clicks.</summary>
+    [Fact]
+    public async Task KeepWaitingWaitsForTheAnswer()
+    {
+        var answer = new TaskCompletionSource<bool>();
+        _decide = (_, _) => answer.Task;
+        var server = Server(new KnockLimits { HandshakeTimeout = TimeSpan.FromSeconds(3), DecisionTimeout = TimeSpan.FromMilliseconds(200) });
+        server.DecisionWait = () => KnockWait.Forever.ToTimeSpan();
+        var knock = KnockAsync(Invite().Invite);
+        await Task.Delay(800);
+        Assert.False(knock.IsCompleted);
+        answer.SetResult(true);
+        Assert.True((await knock).Approved);
+    }
+
+    [Theory]
+    [InlineData("2m", KnockWait.TwoMinutes, 120)]
+    [InlineData("10m", KnockWait.TenMinutes, 600)]
+    [InlineData(null, KnockWait.TenMinutes, 600)]
+    [InlineData("whatever", KnockWait.TenMinutes, 600)]
+    public void KnockWaitSettings(string? value, KnockWait expected, int seconds)
+    {
+        var wait = KnockWaits.Parse(value);
+        Assert.Equal(expected, wait);
+        Assert.Equal(TimeSpan.FromSeconds(seconds), wait.ToTimeSpan());
+        Assert.Equal(wait, KnockWaits.Parse(wait.ToSetting()));
+        Assert.Equal(Timeout.InfiniteTimeSpan, KnockWaits.Parse("forever").ToTimeSpan());
+    }
+
     [Fact]
     public async Task TrustedAndAutoApproveSkipTheQuestion()
     {

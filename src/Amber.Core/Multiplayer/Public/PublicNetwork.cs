@@ -49,7 +49,10 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
         var nodes = new List<string>(JayNodes);
         foreach (var n in extraNodes ?? [])
             if (RelayNodes.IsValid(n) && !nodes.Contains(n.Trim())) nodes.Add(n.Trim());
-        return new PublicNetworkProfile("jay", L.T("core.mp.public.jay_name"), JayNetworkName, JaySecret, nodes);
+        return new PublicNetworkProfile("jay", L.T("core.mp.public.jay_name"), JayNetworkName, JaySecret, nodes)
+        {
+            DirectoryRoots = [.. JayDirectoryRoots.Select(Convert.FromBase64String)],
+        };
     }
 
     public bool IsUsable => Nodes.Count > 0;
@@ -63,6 +66,27 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
     /// <summary>网络主页（可选）。</summary>
     public string? Home { get; init; }
 
+    /// <summary>
+    /// The directory nodes' pinned X25519 public keys, from the signed connection string. Empty means the network doesn't
+    /// pin its directory (the built-in network until its nodes are deployed, and older strings): Jay then uses the legacy
+    /// unauthenticated protocol. Non-empty means Jay never sends a request to a directory that can't prove it holds one.
+    /// </summary>
+    public IReadOnlyList<byte[]> DirectoryKeys { get; init; } = [];
+
+    /// <summary>
+    /// Ed25519 root keys whose certificates (<see cref="DirectoryCertificate"/>) make a directory key acceptable, from
+    /// the connection string's "dirRoots", or <see cref="JayDirectoryRoots"/> for the built-in network. Lets a network
+    /// add or re-key directory nodes without re-issuing its string, while the root private key stays offline.
+    /// </summary>
+    public IReadOnlyList<byte[]> DirectoryRoots { get; init; } = [];
+
+    /// <summary>
+    /// The built-in Jay network's directory root public keys (base64). Empty until the root key is made; until then the
+    /// built-in network's directory is trusted on first use. The root private key is kept offline by the project owner
+    /// and never goes into the repository, CI or a server.
+    /// </summary>
+    public static readonly string[] JayDirectoryRoots = [];
+
     public bool IsBuiltIn => Id == "jay";
 
     public override string ToString() => Name;
@@ -72,10 +96,22 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 /// <param name="Directory">目录服务那台机器：固定地址 10.235.0.N（N = <paramref name="DirectoryIndex"/>），只放行目录端口。</param>
 /// <param name="Listeners">目录服务那台机器同时当节点时监听的地址（tcp://0.0.0.0:11010 等）。</param>
 /// <param name="DirectoryIndex">第几个目录节点（1 是主目录，2–4 是备用）。</param>
+/// <param name="ExtraPeers">More peers to try besides the network's nodes (volunteer nodes remembered from last time).</param>
+/// <param name="Volunteer">Run this member as a volunteer node (listen publicly and relay for this network only).</param>
 public sealed record PublicNetworkOptions(PublicNetworkProfile Profile, int RpcPort, int SocksPort, bool Directory = false, IReadOnlyList<string>? Listeners = null,
-    int DirectoryIndex = 1)
+    int DirectoryIndex = 1, IReadOnlyList<string>? ExtraPeers = null, VolunteerSettings? Volunteer = null)
 {
     public override string ToString() => "PublicNetworkOptions";
+}
+
+/// <summary>This computer as a volunteer node.</summary>
+/// <param name="Address">Public address (IP or domain) other players reach this computer at.</param>
+/// <param name="LimitKBps">Most it will receive from the public network, in KB/s (0 = no limit).</param>
+public sealed record VolunteerSettings(string Address, int Port = VolunteerNodes.DefaultPort, int LimitKBps = 1024)
+{
+    /// <summary>The address registered with the directory, or throws <see cref="ArgumentException"/> when it isn't a public address.</summary>
+    public string Url => VolunteerNodes.Normalize($"tcp://{Address.Trim()}:{Port.ToString(CultureInfo.InvariantCulture)}")
+        ?? throw new ArgumentException(Amber.Core.Localization.L.T("core.mp.public.volunteer_bad_address"));
 }
 
 public static class PublicNetworkArgs
@@ -104,10 +140,21 @@ public static class PublicNetworkArgs
         if (o.Directory) args.AddRange(["--ipv4", PublicNetworkProfile.DirectoryIpOf(o.DirectoryIndex) + "/16", "--tcp-whitelist", PublicNetworkProfile.DirectoryPort.ToString(CultureInfo.InvariantCulture)]);
         // 普通成员：自动分配地址；只放行敲门端口（没开房间时本机没人监听，连过来直接被拒）。
         else args.AddRange(["--dhcp", "true", "--tcp-whitelist", KnockProtocol.Port.ToString(CultureInfo.InvariantCulture)]);
-        if (o.Listeners is { Count: > 0 } listeners) foreach (var l in listeners) args.AddRange(["--listeners", l]);
+        var listenOn = o.Listeners is { Count: > 0 } given ? given
+            : o.Volunteer is { } v ? [$"tcp://0.0.0.0:{v.Port.ToString(CultureInfo.InvariantCulture)}", $"udp://0.0.0.0:{v.Port.ToString(CultureInfo.InvariantCulture)}"] : [];
+        if (listenOn.Count > 0) foreach (var l in listenOn) args.AddRange(["--listeners", l]);
         else args.Add("--no-listener");
-        foreach (var peer in o.Profile.Nodes.Where(p => !string.IsNullOrWhiteSpace(p))) args.AddRange(["--peers", peer.Trim()]);
-        if (o.Profile.Nodes.Concat(o.Listeners ?? []).Any(IsLoopback)) args.AddRange(["--bind-device", "false"]);
+        if (o.Volunteer is { } volunteer)
+        {
+            // Tell peers the public address, relay only this network, and cap what strangers can cost the volunteer.
+            args.AddRange(["--mapped-listeners", volunteer.Url]);
+            args.AddRange(["--relay-network-whitelist", o.Profile.NetworkName]);
+            if (volunteer.LimitKBps > 0) args.AddRange(["--instance-recv-bps-limit", (volunteer.LimitKBps * 1024L).ToString(CultureInfo.InvariantCulture)]);
+        }
+        var peers = o.Profile.Nodes.Concat(o.ExtraPeers ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim())
+            .Where(p => o.Volunteer is not { } self || p != self.Url).Distinct().ToList();
+        foreach (var peer in peers) args.AddRange(["--peers", peer]);
+        if (peers.Concat(listenOn).Any(IsLoopback)) args.AddRange(["--bind-device", "false"]);
         return args;
     }
 
@@ -126,6 +173,8 @@ public interface IPublicNetwork
     Task<string?> MyIpAsync(CancellationToken ct);
     /// <summary>现在在线的目录节点地址（按编号排）。默认只有主目录。</summary>
     Task<IReadOnlyList<string>> DirectoriesAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([PublicNetworkProfile.DirectoryIp]);
+    /// <summary>The network this is, for its pinned directory keys. Null: unknown, use the legacy directory protocol.</summary>
+    PublicNetworkProfile? Profile => null;
 }
 
 /// <summary>运行中的公共网络 EasyTier。Dispose 时结束进程。</summary>
@@ -137,6 +186,7 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
     private readonly Queue<string> _output = new();
 
     public PublicNetworkOptions Options { get; }
+    public PublicNetworkProfile Profile => Options.Profile;
     public bool HasExited => _process.HasExited;
     public event Action<string>? Output;
 
@@ -176,6 +226,10 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
     }
 
     public Task<List<PeerInfo>> PeersAsync(CancellationToken ct = default) => EasyTierSession.QueryPeersAsync(_cliPath, Options.RpcPort, ct);
+
+    /// <summary>Adds another peer to the running EasyTier (a volunteer node). Returns false when EasyTier refused it.</summary>
+    public Task<bool> AddPeerAsync(string url, CancellationToken ct = default) =>
+        VolunteerNodes.Normalize(url) is { } address ? EasyTierSession.AddConnectorAsync(_cliPath, Options.RpcPort, address, ct) : Task.FromResult(false);
 
     public async Task<string?> MyIpAsync(CancellationToken ct)
     {

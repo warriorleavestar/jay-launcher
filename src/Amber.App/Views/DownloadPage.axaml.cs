@@ -34,13 +34,31 @@ public partial class DownloadPage : UserControl
         };
         // After a search or filter rebuilt the rows, highlight the chosen version again if it is still listed.
         // Subscribed only while the page is shown: the view model outlives the page.
-        AttachedToVisualTree += (_, _) => { if (DataContext is DownloadViewModel vm) (_items = vm.Items).CollectionChanged += OnItemsChanged; };
-        DetachedFromVisualTree += (_, _) => { if (_items is not null) _items.CollectionChanged -= OnItemsChanged; _items = null; };
+        AttachedToVisualTree += (_, _) =>
+        {
+            if (DataContext is not DownloadViewModel vm) return;
+            (_items = vm.Items).CollectionChanged += OnItemsChanged;
+            (_vm = vm).PropertyChanged += OnVmChanged;
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            if (_items is not null) _items.CollectionChanged -= OnItemsChanged;
+            if (_vm is not null) _vm.PropertyChanged -= OnVmChanged;
+            _items = null;
+            _vm = null;
+        };
         VersionList.DoubleTapped += (_, e) =>
         {
             if (DataContext is DownloadViewModel vm && vm.InstallCommand.CanExecute(null)) vm.InstallCommand.Execute(null);
             e.Handled = true;
         };
+        VersionToolbar.SizeChanged += (_, e) => Avalonia.Threading.Dispatcher.UIThread.Post(() => ApplyToolbar(e.NewSize.Width));
+        // Another language changes the chip widths without changing the toolbar's size.
+        Amber.Core.Localization.L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _toolbarStacked = null;
+            ApplyToolbar(VersionToolbar.Bounds.Width);
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
         SizeChanged += (_, e) =>
         {
             var size = e.NewSize;
@@ -62,6 +80,18 @@ public partial class DownloadPage : UserControl
 
     private System.Collections.ObjectModel.ObservableCollection<RemoteVersionItem>? _items;
 
+    private DownloadViewModel? _vm;
+
+    /// <summary>
+    /// The panel was closed: drop the highlight too, or picking the same row again would not count as a change
+    /// and the panel would not open.
+    /// </summary>
+    private void OnVmChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DownloadViewModel.Target) && _vm is { Target: null } && VersionList.SelectedItem is not null)
+            VersionList.SelectedItem = null;
+    }
+
     private void OnItemsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
@@ -70,6 +100,26 @@ public partial class DownloadPage : UserControl
         });
 
     private bool? _rail;
+    private bool? _toolbarStacked;
+
+    /// <summary>
+    /// The type chips, search box and [Refresh] share a row while the search box keeps its minimum width; otherwise
+    /// (long labels, narrow content) the search box moves to its own row under them.
+    /// </summary>
+    private void ApplyToolbar(double width)
+    {
+        if (width <= 0) return;
+        TypeChips.Measure(Size.Infinity);
+        RefreshButton.Measure(Size.Infinity);
+        var stacked = TypeChips.DesiredSize.Width + SearchBox.MinWidth + 20 + RefreshButton.DesiredSize.Width > width;
+        if (_toolbarStacked == stacked) return;
+        _toolbarStacked = stacked;
+        Grid.SetRow(SearchBox, stacked ? 1 : 0);
+        Grid.SetColumn(SearchBox, stacked ? 0 : 1);
+        Grid.SetColumnSpan(SearchBox, stacked ? 3 : 1);
+        SearchBox.Margin = stacked ? new Thickness(0, 8, 0, 0) : new Thickness(10, 0);
+        Grid.SetColumnSpan(TypeChips, stacked ? 2 : 1);
+    }
 
     private void ApplyWidth(double width)
     {

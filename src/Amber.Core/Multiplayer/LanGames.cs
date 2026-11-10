@@ -31,7 +31,7 @@ public static partial class LanGames
     }
 
     /// <summary>"[12:00:01] [Server thread/INFO]: " (each part optional), then an optional "[System] [CHAT] ".</summary>
-    [GeneratedRegex(@"^\s*(?:\[[^\]]*\]\s*)?(?:\[[^\]]*/[A-Z]+\]:?\s*)?(?:\[System\]\s*)?(?:\[CHAT\]\s*)?", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"^\s*(?:\[[^\]/]*\]\s*)?(?:\[[^\]]*/[A-Z]+\]:?\s*)?(?:\[System\]\s*)?(?:\[CHAT\]\s*)?", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex LogPrefix();
 
     [GeneratedRegex(@"^(?:Started serving on|Local game hosted on port|(?:本地游戏已|本地遊戲已)?在端口)\s*(\d{2,5})\b", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]

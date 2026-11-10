@@ -2,7 +2,7 @@
 id: shortcuts
 category: reference
 routes: 
-related: settings
+related: settings, moved
 ---
 
 # 快捷鍵
@@ -10,7 +10,7 @@ related: settings
 所有操作都能用滑鼠點，下面是對應的快捷鍵。
 
 ## 全域性
-- Ctrl+K：命令面板（搜例項、設定、頁面）。
+- Ctrl+K：命令面板（搜實例、設定、頁面）。
 - Ctrl+1 / Ctrl+2 / Ctrl+3：遊戲庫 / 發現 / 連線。
 - Ctrl+,：設定。
 - Ctrl+J：活動中心。

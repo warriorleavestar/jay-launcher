@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The local admin web panel (served by AdminApi). -->
+    <EmbeddedResource Include="Panel\*" LogicalName="Panel.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Amber.Core.Tests" />
   </ItemGroup>
 

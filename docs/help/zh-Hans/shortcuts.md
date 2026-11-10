@@ -2,7 +2,7 @@
 id: shortcuts
 category: reference
 routes: 
-related: settings
+related: settings, moved
 ---
 
 # 快捷键

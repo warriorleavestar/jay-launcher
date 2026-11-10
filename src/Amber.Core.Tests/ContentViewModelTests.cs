@@ -24,6 +24,30 @@ public sealed class ContentViewModelTests
     });
 
     [Fact]
+    public void TopLevelDiscoverStartsOnModpacks()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "amber-cvm-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            UiTestThread.Run(() =>
+            {
+                using var service = new LauncherService(new AppSettings { GameDirectory = root, PlayerName = "" });
+                var provider = new FakeProvider(ContentSource.Modrinth);
+                var vm = new ContentViewModel(service, _ => provider, () => false);
+                Assert.Equal((int)ContentType.Modpack, vm.TypeIndex);
+                Assert.Empty(provider.Queries);
+                vm.Activate();
+                Assert.Equal(ContentType.Modpack, Assert.Single(provider.Queries).Type);
+            });
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void PagingKeepsTheDetailPanelOpen() => Run((vm, modrinth, _) =>
     {
         // #22：点“下一页”时右侧详情不收起，鼠标不用挪就能接着翻。
@@ -473,7 +497,7 @@ public sealed class ContentViewModelTests
                 using var service = new LauncherService(new AppSettings { GameDirectory = root, PlayerName = "" });
                 var modrinth = new FakeProvider(ContentSource.Modrinth);
                 var curseForge = new FakeProvider(ContentSource.CurseForge);
-                var vm = new ContentViewModel(service, index => index == 0 ? modrinth : curseForge, () => hasCurseForge);
+                var vm = new ContentViewModel(service, index => index == 0 ? modrinth : curseForge, () => hasCurseForge, ContentType.Mod);
                 test(vm, modrinth, curseForge);
             });
         }

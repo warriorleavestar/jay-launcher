@@ -266,6 +266,7 @@ public static class ThemeService
         else UnloadFonts();
         ApplyComponentStyles();
         ApplyVariant();
+        SystemMotion.Reapply();
         Changed?.Invoke();
     }
 

@@ -57,6 +57,7 @@ public sealed partial class MultiplayerViewModel
     {
         OnPropertyChanged(nameof(HasHostGame));
         OnPropertyChanged(nameof(GameStatusText));
+        NotifyPlayAndHost();
     }
 
     /// <summary>高级选项折叠区的标题：收起时也能看出哪些不是默认值。</summary>

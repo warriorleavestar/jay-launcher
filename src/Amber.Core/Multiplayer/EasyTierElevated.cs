@@ -23,15 +23,15 @@ namespace Amber.Core.Multiplayer;
 /// </summary>
 // 只能经 Start 创建，Start 先检查是不是 Windows：调用方不用再各自判断。
 #pragma warning disable CA1416
-public sealed class EasyTierElevatedSession : IEasyTierSession
+public sealed class EasyTierElevatedSession : IEasyTierSession, IHotspotSharingSession
 {
     private readonly string _cliPath;
-    private readonly ElevatedGuard _guard;
+    private readonly IElevatedGuard _guard;
     private readonly SemaphoreSlim _restartLock = new(1, 1);
 
     public EasyTierOptions Options { get; private set; }
 
-    private EasyTierElevatedSession(EasyTierOptions options, string cliPath, ElevatedGuard guard)
+    private EasyTierElevatedSession(EasyTierOptions options, string cliPath, IElevatedGuard guard)
     {
         Options = options;
         _cliPath = cliPath;
@@ -48,10 +48,19 @@ public sealed class EasyTierElevatedSession : IEasyTierSession
     /// <summary>弹出 UAC 确认。用户拒绝时抛 <see cref="OperationCanceledException"/>。workDir 只用来清掉旧版本留下的文件（旧版本把参数写在这里）。</summary>
     public static EasyTierElevatedSession Start(EasyTierInstaller installer, EasyTierOptions options, string workDir)
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException(L.T("core.mp.component.windowsonly"));
+        if (!PlatformFeatures.FullLan) throw new PlatformNotSupportedException(L.T("core.mp.component.windowsonly"));
         if (!options.Tun) throw new ArgumentException(L.T("core.mp.component.tunrequired"));
-        LegacyFiles.Remove(workDir);
-        var guard = ElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), elevate: true, network: ExitNetworkPlan.Create(options));
+        IElevatedGuard guard;
+        if (OperatingSystem.IsWindows())
+        {
+            LegacyFiles.Remove(workDir);
+            guard = ElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), elevate: true, network: ExitNetworkPlan.Create(options));
+        }
+        else
+        {
+            // Mac/Linux：经 pkexec（Linux）或系统管理员密码框（macOS）以 root 运行 Jay 自己的守护模式，见 UnixElevatedGuard。
+            guard = UnixElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options), EasyTierArgs.VirtualIp(options));
+        }
         return new EasyTierElevatedSession(options, installer.CliPath, guard);
     }
 
@@ -65,7 +74,7 @@ public sealed class EasyTierElevatedSession : IEasyTierSession
         try
         {
             ct.ThrowIfCancellationRequested();
-            var ready = _guard.StartAsync(EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options));
+            var ready = _guard.StartAsync(EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options), EasyTierArgs.VirtualIp(options));
             await ready.WaitAsync(ct).ConfigureAwait(false);
             Options = options;
         }
@@ -81,6 +90,23 @@ public sealed class EasyTierElevatedSession : IEasyTierSession
 
     /// <summary>守护脚本还没按最近一次的参数重启好。</summary>
     public bool RestartPending => _guard.StartPending;
+
+    public bool HotspotSharingActive => !HasExited && _guard.HotspotSharingActive;
+
+    /// <summary>沿用已提权的守护，并和出口重启共用锁；不另起可脱离会话的共享进程。</summary>
+    public async Task SetHotspotSharingAsync(bool enabled, CancellationToken ct = default)
+    {
+        await _restartLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            if (enabled && (!Options.Tun || Options.ExitNode is null))
+                throw new InvalidOperationException(L.T("core.mp.hotspot.requires_exit"));
+            await _guard.SetHotspotSharingAsync(enabled).WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { _guard.Dispose(); throw; }
+        finally { _restartLock.Release(); }
+    }
 
     /// <summary>让守护脚本结束 easytier-core 后退出。</summary>
     public void Dispose() => _guard.Dispose();
@@ -177,7 +203,7 @@ public sealed class EasyTierElevatedSession : IEasyTierSession
 /// elevate 为 false 时不弹 UAC，直接以当前权限运行（测试用）。
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class ElevatedGuard : IDisposable
+internal sealed class ElevatedGuard : IElevatedGuard
 {
     private static readonly UTF8Encoding Utf8 = new(false);
 
@@ -195,6 +221,7 @@ internal sealed class ElevatedGuard : IDisposable
     private readonly Dictionary<int, TaskCompletionSource> _starts = new();
     private Task _ready = Task.CompletedTask;
     private volatile bool _disposed;
+    private volatile bool _hotspotSharingActive;
     private readonly TimeSpan _connectTimeout;
 
     /// <summary>传给守护脚本的命令行（测试用：确认里面没有密钥）。</summary>
@@ -226,6 +253,8 @@ internal sealed class ElevatedGuard : IDisposable
 
     public bool StartPending => !HasExited && !ConnectFailed && Volatile.Read(ref _acked) < Volatile.Read(ref _sent);
 
+    public bool HotspotSharingActive => !_disposed && !HasExited && _hotspotSharingActive;
+
     public IReadOnlyList<string> RecentOutput { get { lock (_output) return _output.ToList(); } }
 
     private void Keep(string line)
@@ -239,6 +268,11 @@ internal sealed class ElevatedGuard : IDisposable
 
     private void ReceiveAck(string line)
     {
+        if (line is "hotspot on" or "hotspot off")
+        {
+            _hotspotSharingActive = line == "hotspot on";
+            return;
+        }
         var parts = line.Split(' ', 3);
         if (parts.Length >= 2 && int.TryParse(parts[1], out var n) && parts[0] is "started" or "failed")
         {
@@ -417,6 +451,8 @@ internal sealed class ElevatedGuard : IDisposable
     /// <summary>（重新）启动 easytier-core：参数和环境变量只经管道传过去。</summary>
     public void Start(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network = null) => _ = StartAsync(args, env, network);
 
+    Task IElevatedGuard.StartAsync(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp) => StartAsync(args, env, network);
+
     public Task StartAsync(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network = null)
     {
         lock (_gate)
@@ -438,6 +474,22 @@ internal sealed class ElevatedGuard : IDisposable
     public Task WaitForReadyAsync(CancellationToken ct = default)
     {
         lock (_gate) return _ready.WaitAsync(ct);
+    }
+
+    public Task SetHotspotSharingAsync(bool enabled)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var n = Interlocked.Increment(ref _sent);
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _starts.Add(n, completion);
+            _ = completion.Task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            var message = JsonSerializer.Serialize(new GuardCommand("hotspot", n, "", null, Hotspot: enabled), AmberJsonContext.Default.GuardCommand);
+            Enqueue(w => w.WriteLine(message), isStart: true);
+            if (ConnectFailed || HasExited) completion.TrySetException(new IOException(L.T("core.mp.guard.unavailable")));
+            return completion.Task;
+        }
     }
 
     /// <summary>
@@ -499,7 +551,8 @@ internal sealed class ElevatedGuard : IDisposable
     private static extern bool GetNamedPipeClientProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint clientProcessId);
 
     // 可增长的逻辑不放在 Windows 命令行：命令行只带固定摘要，内容经已认证管道加载。
-    internal const string SetupScript = ExitRoutingScript.Script + "\n" + ExitDnsScript.Script + "\n" + ExitTrafficPolicyScript.Script;
+    internal const string SetupScript = ExitRoutingScript.Script + "\n" + ExitDnsScript.Script + "\n" + ExitTrafficPolicyScript.Script
+        + "\n" + HotspotTrafficPolicyScript.Script + "\n" + HotspotSharingScript.Script;
 
     /// <summary>
     /// 守护脚本（Windows PowerShell 5.1，以管理员身份运行）：连上四根管道，按命令启动、重启、结束 easytier-core，
@@ -540,6 +593,8 @@ internal sealed class ElevatedGuard : IDisposable
         $ack.AutoFlush = $true
         $script:p = $null
         $script:copies = @()
+        $script:activeExitPlan = $null
+        $hotspotChecked = [DateTime]::MinValue
         $setupLoaded = $false
         function Write-GuardError([string]$message) {
             $ack.WriteLine('error ' + [Convert]::ToBase64String($enc.GetBytes($message)))
@@ -560,6 +615,15 @@ internal sealed class ElevatedGuard : IDisposable
             $dnsFailure = $null
             try {
                 if ($setupLoaded) {
+                    try { Exit-HotspotSharing }
+                    catch {
+                        # Retry once while the public Wintun connection still exists; COM may be finishing a sharing transition.
+                        Start-Sleep -Milliseconds 100
+                        try { Exit-HotspotSharing }
+                        catch { $dnsFailure = $_.Exception.Message; Write-GuardError $dnsFailure }
+                    }
+                    $ack.WriteLine('hotspot off')
+                    $script:activeExitPlan = $null
                     try { Exit-ExitDns 3>&1 | ForEach-Object { Forward-Warning $_ } }
                     catch { $dnsFailure = $_.Exception.Message; Write-GuardError $dnsFailure }
                 }
@@ -610,6 +674,7 @@ internal sealed class ElevatedGuard : IDisposable
                                 $adapter = Wait-ExitReady $msg.network $script:p
                                 Enter-ExitDns $adapter 3>&1 | ForEach-Object { Forward-Warning $_ }
                                 Enter-ExitTrafficPolicy $adapter $msg.network
+                                $script:activeExitPlan = $msg.network
                             }
                             if ($script:p.HasExited) { throw 'Core exited during startup' }
                             $ack.WriteLine('started ' + $msg.n)
@@ -619,12 +684,39 @@ internal sealed class ElevatedGuard : IDisposable
                             $ack.WriteLine('failed ' + $msg.n + ' ' + [Convert]::ToBase64String($enc.GetBytes($failure)))
                             throw
                         }
+                    } elseif ($msg.cmd -eq 'hotspot') {
+                        try {
+                            if (-not $setupLoaded -or -not $script:p -or $script:p.HasExited) { throw 'The multiplayer session has ended' }
+                            if ($msg.hotspot -eq $true) {
+                                if (-not $script:activeExitPlan -or -not $script:exitAdapter) { throw 'Select a remote exit in full LAN mode before sharing a hotspot' }
+                                Enter-HotspotSharing $script:exitAdapter
+                            } else { Exit-HotspotSharing }
+                            $ack.WriteLine($(if ($script:HotspotSharingActive) { 'hotspot on' } else { 'hotspot off' }))
+                            $ack.WriteLine('started ' + $msg.n)
+                        } catch {
+                            $failure = $_.Exception.Message
+                            try { if ($setupLoaded) { Exit-HotspotSharing } }
+                            catch { Write-GuardError $_.Exception.Message; throw }
+                            $ack.WriteLine('hotspot off')
+                            $ack.WriteLine('failed ' + $msg.n + ' ' + [Convert]::ToBase64String($enc.GetBytes($failure)))
+                        }
                     }
                     $pending = $reader.ReadLineAsync()
                 } elseif ($script:p -and $script:p.HasExited) {
                     break
                 }
-                if ($setupLoaded) { Renew-ExitRoutes }
+                if ($setupLoaded) {
+                    Renew-ExitRoutes
+                    if ($script:HotspotSharingActive -and ([DateTime]::UtcNow - $hotspotChecked).TotalSeconds -ge 2) {
+                        $hotspotChecked = [DateTime]::UtcNow
+                        try { Assert-HotspotSharing }
+                        catch {
+                            Write-GuardError $_.Exception.Message
+                            Exit-HotspotSharing
+                            $ack.WriteLine('hotspot off')
+                        }
+                    }
+                }
             }
         } catch {
             try { Write-GuardError $_.Exception.Message } catch {}
@@ -635,6 +727,23 @@ internal sealed class ElevatedGuard : IDisposable
         """;
 }
 
+/// <summary>以管理员 / root 身份运行 easytier-core 的守护：Windows 是 PowerShell 守护脚本，Mac/Linux 是 Jay 自己的守护模式。</summary>
+internal interface IElevatedGuard : IDisposable
+{
+    bool HasExited { get; }
+    bool ConnectFailed { get; }
+    bool StartPending { get; }
+    IReadOnlyList<string> RecentOutput { get; }
+    Task StartAsync(IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, ExitNetworkPlan? network, string virtualIp);
+    Task WaitForReadyAsync(CancellationToken ct = default);
+
+    /// <summary>Windows only: the remote exit is shared with the mobile hotspot. Other guards never share.</summary>
+    bool HotspotSharingActive => false;
+
+    /// <summary>Windows only: turn hotspot sharing on or off through the guard.</summary>
+    Task SetHotspotSharingAsync(bool enabled) => Task.FromException(new PlatformNotSupportedException());
+}
+
 /// <summary>守护脚本的一条命令（JSON 一行）。</summary>
 public sealed record GuardCommand(
     [property: System.Text.Json.Serialization.JsonPropertyName("cmd")] string Cmd,
@@ -642,7 +751,8 @@ public sealed record GuardCommand(
     [property: System.Text.Json.Serialization.JsonPropertyName("args")] string Args,
     [property: System.Text.Json.Serialization.JsonPropertyName("env")] Dictionary<string, string>? Env,
     [property: System.Text.Json.Serialization.JsonPropertyName("network")] ExitNetworkPlan? Network = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("setup")] string? Setup = null);
+    [property: System.Text.Json.Serialization.JsonPropertyName("setup")] string? Setup = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("hotspot")] bool? Hotspot = null);
 
 /// <summary>按 Windows 程序解析命令行的规则（CommandLineToArgvW / MSVC）把参数拼成一个字符串。</summary>
 public static class WindowsCommandLine

@@ -8,9 +8,27 @@ using CommunityToolkit.Mvvm.Input;
 namespace Amber.App.ViewModels;
 
 /// <summary>A block of an article as shown: one of three kinds, plus its links as buttons.</summary>
-public sealed record HelpBlockItem(HelpBlock Block)
+public sealed record HelpBlockItem(HelpBlock Block, HelpLibrary? Library = null)
 {
+    private Avalonia.Media.Imaging.Bitmap? _shot;
+    private bool _shotLoaded;
+
     public string Text => Block.Text;
+    public bool IsShot => Block.Kind == HelpBlockKind.Shot && Shot is not null;
+
+    /// <summary>The screenshot in the help language (English when that language has none); null when missing.</summary>
+    public Avalonia.Media.Imaging.Bitmap? Shot
+    {
+        get
+        {
+            if (_shotLoaded) return _shot;
+            _shotLoaded = true;
+            if (Block.Shot is { } name && Library?.OpenShot(name) is { } stream)
+                using (stream) _shot = new Avalonia.Media.Imaging.Bitmap(stream);
+            return _shot;
+        }
+    }
+
     public bool IsHeading => Block.Kind == HelpBlockKind.Heading;
     public bool IsParagraph => Block.Kind == HelpBlockKind.Paragraph;
     public bool IsBullet => Block.Kind == HelpBlockKind.Bullet;
@@ -96,7 +114,7 @@ public sealed partial class HelpViewModel : ObservableObject
     });
 
     public HelpArticleView? View(string? id) => Library.Get(id) is { } a
-        ? new HelpArticleView(a, [.. a.Blocks.Select(b => new HelpBlockItem(b))], [.. a.Related.Select(Library.Get).OfType<HelpArticle>().Select(Item)])
+        ? new HelpArticleView(a, [.. a.Blocks.Select(b => new HelpBlockItem(b, Library))], [.. a.Related.Select(Library.Get).OfType<HelpArticle>().Select(Item)])
         : null;
 
     /// <summary>F1: the drawer with the article for this route.</summary>

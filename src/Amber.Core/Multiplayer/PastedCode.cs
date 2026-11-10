@@ -22,6 +22,8 @@ public enum PastedCodeKind
     FriendCode,
     /// <summary>公共网络地址 JAYNET…：到联机设置里先看内容再确认添加。</summary>
     PublicNetwork,
+    /// <summary>A contact code JAYC1-… (someone's identity public key): add them as a contact and compare emoji.</summary>
+    ContactCode,
 }
 
 /// <summary>
@@ -60,6 +62,7 @@ public static class PastedCode
         ("JAY2-", PastedCodeKind.Invite),
         ("JAYS1-", PastedCodeKind.JayServer),
         ("JAYF1-", PastedCodeKind.FriendCode),
+        ("JAYC1-", PastedCodeKind.ContactCode),
         ("JAYNET", PastedCodeKind.PublicNetwork),
     ];
 }

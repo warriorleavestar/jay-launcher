@@ -145,6 +145,17 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     [ObservableProperty] public partial string WaitText { get; set; } = "";
     private Avalonia.Threading.DispatcherTimer? _waitTimer;
 
+    /// <summary>Opened from a multiplayer invite: where to go once the install has started (instead of the library).</summary>
+    public Action? ReturnAfterStart { get; set; }
+
+    /// <summary>Fill the panel in for a version and loader (multiplayer: “install one and join”).</summary>
+    public async Task PrefillAsync(string mcVersion, LoaderKind? loader, Action? returnAfterStart)
+    {
+        ReturnAfterStart = returnAfterStart;
+        if (_all.Count == 0) await RefreshAsync();
+        ConfigureHot(new HotVersion(mcVersion, loader));
+    }
+
     /// <summary>点热门版本芯片：打开那个版本的安装面板并选好加载器。</summary>
     [RelayCommand]
     private void ConfigureHot(HotVersion? hot)
@@ -198,6 +209,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     {
         foreach (var choice in LoaderChoices)
             choice.Block = value is null || choice.Kind is not { } kind ? LoaderBlock.None : LoaderSupport.Check(value.Id, value.Entry.Type, kind);
+        OnModsContextChanged();
     }
 
     public bool IsConfiguring => Target is not null;
@@ -343,6 +355,12 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
 
     protected override void OnFirstActivated() => _ = RefreshAsync();
 
+    /// <summary>Back to the panel after an install (the target was cleared): pick the latest release again.</summary>
+    protected override void OnBecameCurrent()
+    {
+        if (Target is null && !IsBusy && _all.Count > 0) ConfigureLatest();
+    }
+
     partial void OnSearchChanged(string value) => ApplyFilter();
     partial void OnSelectedLoaderChanged(LoaderChoice value)
     {
@@ -352,6 +370,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
             SelectedLoader = LoaderChoices[0];
             return;
         }
+        OnModsContextChanged();
         _ = LoadLoaderVersionsAsync();
     }
     partial void OnShowUnstableLoadersChanged(bool value) => _ = LoadLoaderVersionsAsync();
@@ -372,6 +391,8 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
             _all = manifest.Versions;
             LatestRelease = manifest.Latest.GetValueOrDefault("release");
             ApplyFilter();
+            // §6.11 / J3: the panel opens with the latest release already picked.
+            if (Target is null && !IsBusy) ConfigureLatest();
             SetStatus(StatusMessage.Success("download.status.latest", manifest.Latest.GetValueOrDefault("release"), manifest.Latest.GetValueOrDefault("snapshot")));
         }
         catch (Exception e)
@@ -497,8 +518,18 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
 
         IsBusy = true;
         StartWaitTimer();
+        // "Add mods while you're at it": what was ticked when [Install] was pressed.
+        var picks = loader is null ? [] : PickedMods.ToList();
+        _modProblems = [];
+        _modsInstalled = 0;
         // §6.11: the panel closes and the install carries on as a task in the activity centre.
-        CloseAfterStart?.Invoke();
+        // Opened from a multiplayer invite: go back to the lobby instead, which picks the new instance once it is installed.
+        if (ReturnAfterStart is { } back)
+        {
+            ReturnAfterStart = null;
+            back();
+        }
+        else CloseAfterStart?.Invoke();
         var installCts = _installCts = new CancellationTokenSource();
         var watch = Stopwatch.StartNew();
         var ct = installCts.Token;
@@ -542,10 +573,19 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
                 }), ct);
                 item.Installed = true;
             }
+            if (picks.Count > 0) await InstallPickedModsAsync(picks, ctx, id, task, ct);
             await Ui.FlushAsync();
             acceptingProgress = false;
             var elapsedSeconds = watch.Elapsed.TotalSeconds;
             Status = L.P("download.status.installed", (long)Math.Round(elapsedSeconds), id, elapsedSeconds);
+            if (picks.Count > 0)
+            {
+                Status += " " + L.P("newinstance.mods.installed", _modsInstalled, _modsInstalled);
+                if (_modProblems.Count > 0) Status += " " + string.Join(L.T("common.list_separator"), _modProblems);
+                PickedMods.Clear();
+                foreach (var row in ModResults) row.IsPicked = false;
+                OnPropertyChanged(nameof(ModsHeader));
+            }
             task.Succeed(Status);
             Target = null;
             _service.MarkInstallFinished(ctx, id);

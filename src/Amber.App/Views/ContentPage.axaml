@@ -12,7 +12,7 @@
   <Grid x:Name="RootGrid" RowDefinitions="Auto,Auto,*,Auto,Auto">
     <!-- Title, type chips (a drop-down when compact), source segment: official design §6.12. -->
     <Grid x:Name="HeaderGrid" svc:ThemeRegion.Name="content.header" ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,6">
-      <TextBlock Classes="h1" Text="{l:T content.title}" Margin="0,0,16,0" VerticalAlignment="Center" />
+      <TextBlock x:Name="ContentTitle" Classes="h1" Text="{l:T content.title}" Margin="0,0,16,0" VerticalAlignment="Center" />
       <ListBox x:Name="TypeChips" Grid.Column="1" Classes="subtabs" ItemsSource="{Binding TypeNames}" SelectedIndex="{Binding TypeIndex}" Background="Transparent"
                VerticalAlignment="Center" AutomationProperties.Name="{l:T content.type.label}">
         <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -42,7 +42,7 @@
         </DockPanel>
       </Border>
       <!-- 先占用可用宽度再限宽，避免左对齐时搜索框缩到占位文字大小。 -->
-      <Grid x:Name="SearchToolbar" ColumnDefinitions="*,Auto" Width="{Binding #ContentFilters.Bounds.Width}" MaxWidth="1000" HorizontalAlignment="Left">
+      <Grid x:Name="SearchToolbar" ColumnDefinitions="*,Auto" Width="{Binding #ContentFilters.Bounds.Width}" MaxWidth="720" HorizontalAlignment="Left">
         <TextBox x:Name="SearchInput" Text="{Binding Query}" PlaceholderText="{l:T common.search_placeholder}" Margin="0,0,8,0" KeyDown="Query_KeyDown" />
         <Button Grid.Column="1" Classes="secondary" Content="{l:T common.search}" Command="{Binding SearchCommand}" Padding="20,6" />
       </Grid>
@@ -71,7 +71,7 @@
           <TextBlock Classes="hint" Text="{l:T content.search.empty_hint}" HorizontalAlignment="Center" VerticalAlignment="Center"
                      IsVisible="{Binding IsIdle}" />
           <!-- 三种状态（改版规格 4.5）：加载中（超过 10 秒补一句并给【切换来源】）、空结果（一键取消过滤）、出错（【重试】）。 -->
-          <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding IsSearching}">
+          <StackPanel x:Name="SearchingState" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding IsSearching}">
             <ProgressBar IsIndeterminate="True" Width="180" HorizontalAlignment="Center" />
             <TextBlock Classes="hint" Text="{Binding SearchingText}" TextAlignment="Center" TextWrapping="Wrap" />
             <StackPanel Spacing="6" IsVisible="{Binding IsSlow}">
@@ -79,18 +79,18 @@
               <Button HorizontalAlignment="Center" Content="{l:T content.search.switch_source}" Command="{Binding SwitchSourceCommand}" IsVisible="{Binding CanSwitchSource}" />
             </StackPanel>
           </StackPanel>
-          <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding IsEmptyResult}">
+          <StackPanel x:Name="EmptyState" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding IsEmptyResult}">
             <TextBlock Text="{Binding EmptyText}" TextAlignment="Center" TextWrapping="Wrap" />
             <Button x:Name="ShowAllVersionsButton" HorizontalAlignment="Center" Content="{l:T content.search.show_all}" Command="{Binding ShowAllVersionsCommand}" IsVisible="{Binding CanShowAllVersions}" />
           </StackPanel>
-          <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding IsSearchError}">
+          <StackPanel x:Name="ErrorState" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding IsSearchError}">
             <TextBlock Text="{Binding SearchError}" Foreground="{DynamicResource DangerText}" TextAlignment="Center" TextWrapping="Wrap" />
             <WrapPanel HorizontalAlignment="Center" ItemSpacing="8">
               <Button x:Name="RetrySearchButton" Classes="primary" Content="{l:T common.retry}" Command="{Binding SearchCommand}" />
               <Button Content="{l:T content.search.switch_source}" Command="{Binding SwitchSourceCommand}" IsVisible="{Binding CanSwitchSource}" />
             </WrapPanel>
           </StackPanel>
-          <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding NeedsCurseForgeKey}">
+          <StackPanel x:Name="KeyState" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" IsVisible="{Binding NeedsCurseForgeKey}">
             <TextBlock Text="{l:T content.source.needs_key}" TextAlignment="Center" TextWrapping="Wrap" />
             <WrapPanel HorizontalAlignment="Center" ItemSpacing="8">
               <Button x:Name="ConfigureCurseForgeButton" Classes="primary" Content="{l:T content.source.go_fill}" Command="{Binding GoToCurseForgeKeyCommand}" />

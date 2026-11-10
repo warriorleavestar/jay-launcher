@@ -26,6 +26,7 @@ namespace Amber.Core;
 [JsonSerializable(typeof(Downloader.ChunkState))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(Amber.Core.Multiplayer.GuardCommand))]
+[JsonSerializable(typeof(Amber.Core.Multiplayer.UnixGuardCommand))]
 [JsonSerializable(typeof(string[]))]
 [JsonSerializable(typeof(List<string[]>))]
 [JsonSerializable(typeof(JsonObject))]
