@@ -10,3 +10,6 @@ publish/
 CLAUDE.local.md
 .tmp/
 attest.index
+
+# Local code index (tools/build-code-index.py)
+.code-index/
