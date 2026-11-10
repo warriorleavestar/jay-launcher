@@ -34,8 +34,7 @@ public static class NetworkScaffold
         if (NetworkString.Validate(info) is { } problem) throw new ArgumentException(problem);
 
         var signer = NetworkSigner.Generate(out var seed);
-        File.WriteAllText(keyPath, Convert.ToBase64String(seed) + "\n");
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        Amber.Core.PrivateFile.WriteAllText(keyPath, Convert.ToBase64String(seed) + "\n");
         File.WriteAllText(networkPath, info.ToJson().ToJsonString(Pretty) + "\n");
         File.WriteAllText(configPath, ConfigTemplate(id, name).ToJsonString(Pretty) + "\n");
         return new Result(keyPath, networkPath, configPath, signer.PublicKey);

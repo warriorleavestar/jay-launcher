@@ -1230,15 +1230,7 @@ public sealed partial class HomeViewModel : PageViewModel
     public void ExportCrashBundle(string zipPath)
     {
         // 先写内存中的输出，再附上崩溃当时的磁盘快照；导出时绝不重新打开原日志路径。
-        CrashAnalyzer.ExportBundle(zipPath, [], _lastRunOutput);
-        using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Update))
-        {
-            foreach (var attachment in _lastRunAttachments)
-            {
-                using var writer = new StreamWriter(zip.CreateEntry(attachment.Name).Open(), new UTF8Encoding(false));
-                writer.Write(attachment.ExportText);
-            }
-        }
+        CrashAnalyzer.ExportBundle(zipPath, [], _lastRunOutput, _lastRunAttachments.Select(a => (a.Name, a.ExportText)));
         SetStatus(StatusMessage.Success("home.status.report_exported", zipPath));
     }
 
