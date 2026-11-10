@@ -10,7 +10,7 @@
     <TextBlock Text="{Binding Current.Text}" Foreground="{DynamicResource WarningText}"
                FontSize="{DynamicResource FontBody}" LineHeight="18" MaxLines="2"
                TextWrapping="Wrap" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Current.Text}" />
-    <Button Classes="secondary" Content="{l:T home.bake.retry_without}" Command="{Binding Current.RetryCommand}"
-            MinHeight="28" Padding="10,4" HorizontalAlignment="Left" ToolTip.Tip="{l:T home.bake.retry_once}" />
+    <Button x:Name="BakeNoticeAction" Classes="secondary" Content="{Binding Current.ActionText}" Command="{Binding Current.RetryCommand}" IsVisible="{Binding Current.CanRetry}"
+            MinHeight="28" Padding="10,4" HorizontalAlignment="Left" ToolTip.Tip="{Binding Current.ActionTip}" />
   </StackPanel>
 </UserControl>

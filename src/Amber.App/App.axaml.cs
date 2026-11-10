@@ -65,7 +65,7 @@ public sealed class App : Application
                 // 回收目录里过期的条目放到后台清，不拖慢启动。
                 _ = Task.Run(() =>
                 {
-                    try { service.PurgeTrash(); }
+                    try { if (service.PurgeTrash() > 0) service.CleanBakeCacheInBackground(); }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
                 });
                 // 清掉以前留下的无痕模式临时配置（Amber 没等到游戏退出就关了、崩溃了之类）。
