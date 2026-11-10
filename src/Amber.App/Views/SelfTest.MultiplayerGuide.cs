@@ -128,6 +128,7 @@ internal sealed partial class SelfTest
         Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Classes.Contains("long-revoke") && b.IsEffectivelyVisible));
         await Task.Delay(200);
         Check("长期邀请：作废后列表清空", !vm.HasLongInvites);
+        await ContactsAsync(vm, page);
         var relayHeader = page.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "RelayHeader");
         // "On by default" is about a fresh install, not about this test profile: a reused profile may have it switched off
         // (earlier runs, or a tester who turned it off). Check the default itself, then show the switch on for the UI checks
@@ -487,5 +488,84 @@ internal sealed partial class SelfTest
             vm.IsPublicConnected = false;
         });
         await Task.Delay(300);
+    }
+
+    /// <summary>
+    /// Contacts (zero-leak codes): my contact code, a pasted JAYC1 lands in the card, a request from someone, the four-emoji
+    /// card with names for screen readers, confirming, and a mailed invite in the activity centre. The other side is a
+    /// second contact book fed by hand, so nothing goes over the network.
+    /// </summary>
+    private async Task ContactsAsync(MultiplayerViewModel vm, MultiplayerPage page)
+    {
+        Control? Shown(string name) => page.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible);
+        Button? Visible(string name) => page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == name && b.IsEffectivelyVisible);
+        var dir = Path.Combine(reportDir, "contacts");
+        Directory.CreateDirectory(dir);
+        foreach (var f in new[] { Amber.Core.Multiplayer.Contacts.ContactBook.FileName, "peer.json" })
+            if (File.Exists(Path.Combine(dir, f))) File.Delete(Path.Combine(dir, f));
+        Dispatcher.UIThread.Invoke(() => vm.ContactsDir = dir);
+        await Task.Delay(200);
+        Check("Contacts: card with my JAYC1 contact code and the add box", Shown("ContactsCard") is not null && Shown("MyContactCodeText") is not null
+            && vm.MyContactCode.StartsWith("JAYC1-") && Shown("ContactCodeBox") is not null && Shown("ContactsEmpty") is not null);
+
+        using var peer = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        var code = Amber.Core.Multiplayer.Contacts.ContactCode.Format(peer.PublicKey);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.ShowTabCommand.Execute("play");
+            vm.JoinCode = code;
+        });
+        await Task.Delay(200);
+        Check("Contacts: the paste box recognises a contact code", vm.JoinCodeRecognition == L.T("multiplayer.lobby.code.contact") && !vm.JoinCodeRecognitionWarns);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.JoinCode = "";
+            vm.PasteCode(code);
+        });
+        await Task.Delay(300);
+        Check("Contacts: Ctrl+V of a contact code fills the contacts box, nothing sent", vm.IsSettingsTab && vm.ContactCodeInput == code && !vm.HasContactRequests);
+        Dispatcher.UIThread.Invoke(() => vm.ContactCodeInput = "");
+
+        // They add me: request in the card and in the activity centre; I accept, they send their nonce, the emoji appear.
+        var peerBook = new Amber.Core.Multiplayer.Contacts.ContactBook(Path.Combine(dir, "peer.json")) { Me = peer.PublicKey };
+        var me = vm.Identity.PublicKey;
+        Dispatcher.UIThread.Invoke(() => vm.Contacts.Receive(peer.PublicKey, peerBook.StartAdd(peer.PublicKey, me, "Robin")!, "Me"));
+        await Task.Delay(300);
+        Check("Contacts: someone asking shows Accept / Ignore and an activity request", vm.ContactRequests.FirstOrDefault()?.IsAskingMe == true
+            && main.Service.Requests.Pending.Any(r => r.Spec.Kind == "contact" && r.Spec.Title.Contains("Robin")));
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            var reply = vm.Contacts.Accept(peer.PublicKey, "Me")!;
+            var nonce = peerBook.Receive(me, reply, "Robin")!;
+            vm.Contacts.Receive(peer.PublicKey, nonce, "Me");
+        });
+        await Task.Delay(400);
+        var item = vm.ContactRequests.FirstOrDefault();
+        var emoji = page.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault(i => i.Name == "ContactEmoji" && i.IsEffectivelyVisible);
+        Check("Contacts: the four emoji, big, each named for screen readers, same as the other side", item is { IsComparing: true } && emoji is not null
+            && Avalonia.Automation.AutomationProperties.GetName(emoji) == item.EmojiSpoken && item.Emoji.Count == 4
+            && item.Emoji.Select(e => e.Emoji).SequenceEqual(peerBook.Pending.Single().Sas!.Select(i => Amber.Core.Multiplayer.Contacts.ContactHandshake.Emoji[i]))
+            && Visible("ConfirmContactButton") is not null && Visible("RejectContactButton") is not null, item?.EmojiSpoken);
+        Dispatcher.UIThread.Invoke(() => emoji?.BringIntoView());
+        await Task.Delay(300);
+        await ShotAsync("contacts-emoji");
+        Press(Visible("ConfirmContactButton"));
+        await Task.Delay(300);
+        Check("Contacts: confirming saves Robin as a contact", vm.ContactList.SingleOrDefault()?.Name == "Robin" && !vm.HasContactRequests && Shown("ContactsEmpty") is null);
+
+        // A mailed invite from Robin: a request in the activity centre with [Join], timing out to Ignore.
+        using var host = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        var invite = new InviteBook().Create(1, TimeSpan.FromMinutes(30), true, Amber.Core.Multiplayer.Transport.TunnelSettings.Default, boundTo: me).Invite;
+        Dispatcher.UIThread.Invoke(() => vm.ShowMailedInvites([new Amber.Core.Multiplayer.Contacts.MailedInvite(vm.ContactList[0].Contact, invite, host.PublicKey, "Robin's world", DateTimeOffset.UtcNow.AddMinutes(30))]));
+        var mailed = main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-invite");
+        Check("Contacts: a mailed invite is an activity request with Join, defaulting to Ignore", mailed is not null && mailed.Spec.Title.Contains("Robin's world")
+            && mailed.Spec.Choices.Any(c => c.Id == "join") && mailed.Spec.TimeoutChoice == "ignore");
+        if (mailed is not null) main.Service.Requests.Resolve(mailed, "ignore", Amber.Core.Activity.RequestSource.Bar);
+        Dispatcher.UIThread.Invoke(() => Shown("ContactListView")?.BringIntoView());
+        await Task.Delay(300);
+        await ShotAsync("contacts-list");
+        Dispatcher.UIThread.Invoke(() => vm.RemoveContactCommand.Execute(vm.ContactList[0]));
+        await Task.Delay(200);
+        Check("Contacts: removing empties the list", !vm.HasContacts);
     }
 }

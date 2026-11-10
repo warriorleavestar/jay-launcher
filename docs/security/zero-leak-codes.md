@@ -1,7 +1,7 @@
 # Codes that are useless when leaked
 
-Status: core pieces implemented (contact codes, emoji check, sealed mail, bound invites, directory roots, trust on first use).
-The UI and the remaining items below are follow-ups.
+Status: implemented, including the UI (Multiplayer settings › Contacts, room header [Invite a contact], mailed invites in
+the activity centre) and first-use directory keys in `directory-keys.json`. The remaining items below are follow-ups.
 
 People paste Jay's codes into QQ, WeChat, Discord, forums and screenshots. Those platforms keep and scan what they carry,
 and anyone else in the group can copy it. The goal: **nothing pasted on a third-party platform lets anyone else in**.
@@ -116,19 +116,24 @@ Keep the root private key off servers, CI, cloud drives and the repository. Cert
 re-keyed node needs only a new certificate, not a Jay release. Rotating the root itself needs a release with both roots
 listed for a while (up to 4).
 
+## In the app
+
+- **Contacts card** (Multiplayer settings): my contact code (shown as "contact code", unlike the JAYF1 "friend code"),
+  a box for theirs, exchanges in progress and the contact list. A JAYC1 pasted anywhere (Ctrl+V, the join box) lands
+  in this box; nothing is mailed until [Add].
+- **Emoji card**: four large emoji, each with its localized name under it and as its accessible name
+  (`multiplayer.contacts.emoji_names`, 64 names per language). [They match] saves the contact; [They don't match]
+  drops the exchange and suggests sending the code another way.
+- **Mail pick-up**: `ContactPost.CheckAsync` every 30 s while the public network is connected, and right after
+  connecting. Add requests and ready-to-compare exchanges are mirrored as activity-centre requests.
+- **Invite a contact** (room header, host only): a one-use, 30-minute invite bound to the contact's key and let in
+  without asking, mailed with the host's key. Joining from the request knocks with `expectedHost`; a different host
+  stops the knock before the guest says anything (`WrongHostException`, also for public-network and lobby knocks).
+- **Held back**: no receipt after 3 minutes shows a banner in the room naming the other ways in: the invite dialog
+  (direct link) or the game's LAN list when both are on the same network.
+
 ## Still to do
 
-- **UI**:
-  - "add contact" from a pasted JAYC1;
-  - the emoji compare card (with emoji names for screen readers);
-  - contacts list;
-  - "invite a contact" on the room card, creating a bound, auto-approved invite;
-  - mailed invites in the activity centre;
-  - "may have been held back" with direct-link and LAN fallback;
-  - polling `CheckAsync` while the public network is on (every 30 s, like room renewals).
-
-  The UI redesign thread owns those pages.
-- **App wiring**: `RoomDirectoryClient.KeyMemory` in the data folder, so third-party networks get first-use pinning.
 - **Direct links without an IP in the code**: rendezvous through mail (each side mails its candidates, sealed), so
   JAY2D/JAY2R no longer carry public IPs.
 - **Relay enrollment the other way around**: a relay generates its own key and the admin approves its fingerprint, so
