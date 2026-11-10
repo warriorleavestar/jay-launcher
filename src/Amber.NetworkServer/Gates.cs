@@ -49,7 +49,7 @@ public sealed class NameFilterGate : IRoomGate
 /// </summary>
 public sealed class BanList : IRoomGate
 {
-    public static readonly string[] Kinds = ["host", "room", "account"];
+    public static readonly string[] Kinds = ["host", "room", "account", "node"];
 
     /// <param name="Until">When the ban ends; null = permanent.</param>
     public sealed record Ban(string Kind, string Value, string? Reason, DateTimeOffset At, DateTimeOffset? Until = null)
@@ -119,6 +119,7 @@ public sealed class BanList : IRoomGate
     public Ban Add(string kind, string value, string? reason, DateTimeOffset now, TimeSpan? duration = null)
     {
         Validate(kind, value);
+        if (kind == "node") value = VolunteerNodes.Normalize(value) ?? throw new ArgumentException("node bans take a volunteer address like tcp://203.0.113.5:11010");
         if (duration is { } d && d <= TimeSpan.Zero) throw new ArgumentException("ban duration must be positive");
         var ban = new Ban(kind, value.Trim(), string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(), now, now + duration);
         lock (_gate)
@@ -133,6 +134,7 @@ public sealed class BanList : IRoomGate
     public bool Remove(string kind, string value)
     {
         Validate(kind, value);
+        if (kind == "node") value = VolunteerNodes.Normalize(value) ?? value;
         lock (_gate)
         {
             Refresh();
@@ -144,8 +146,8 @@ public sealed class BanList : IRoomGate
 
     private static void Validate(string kind, string value)
     {
-        if (!Kinds.Contains(kind)) throw new ArgumentException("ban kind must be host, room or account");
-        if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > 128) throw new ArgumentException("missing fingerprint, room id or account");
+        if (!Kinds.Contains(kind)) throw new ArgumentException("ban kind must be host, room, account or node");
+        if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > 300) throw new ArgumentException("missing fingerprint, room id or account");
     }
 
     private void Save()
@@ -194,6 +196,17 @@ public sealed class BanList : IRoomGate
         {
             Refresh();
             return _bans.TryGetValue(Key("account", account), out var ban) && ban.ActiveAt(_now());
+        }
+    }
+
+    /// <summary>Is this volunteer node address banned?</summary>
+    public bool IsNodeBanned(string url)
+    {
+        if (VolunteerNodes.Normalize(url) is not { } address) return true;
+        lock (_gate)
+        {
+            Refresh();
+            return _bans.TryGetValue(Key("node", address), out var ban) && ban.ActiveAt(_now());
         }
     }
 
