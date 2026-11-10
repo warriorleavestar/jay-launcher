@@ -138,9 +138,19 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     /// Starts adding someone from their contact code: returns the hello to mail them. Adding myself or someone
     /// already verified returns null.
     /// </summary>
-    public MailMessage? StartAdd(ReadOnlySpan<byte> me, ReadOnlySpan<byte> theirs, string myName)
+    public MailMessage? StartAdd(ReadOnlySpan<byte> me, ReadOnlySpan<byte> theirs, string myName) => Start(me, theirs, myName, relink: false);
+
+    /// <summary>
+    /// After restoring a friend list backup on a new device: says hello again to a verified friend's device so they learn
+    /// this device's key. Needs my Jay account certificate: the friend's side recognizes the account and accepts without
+    /// asking, and both sides confirm without the emoji. Returns null without a certificate or for someone not in the list.
+    /// </summary>
+    public MailMessage? StartRelink(ReadOnlySpan<byte> me, ReadOnlySpan<byte> theirs, string myName) =>
+        MyCertificate is not null && IsVerified(theirs) ? Start(me, theirs, myName, relink: true) : null;
+
+    private MailMessage? Start(ReadOnlySpan<byte> me, ReadOnlySpan<byte> theirs, string myName, bool relink)
     {
-        if (theirs.Length != X25519KeyPair.Length || theirs.SequenceEqual(me) || IsVerified(theirs)) return null;
+        if (theirs.Length != X25519KeyPair.Length || theirs.SequenceEqual(me) || (!relink && IsVerified(theirs))) return null;
         var key = Convert.ToHexStringLower(theirs);
         var pending = new PendingContact(theirs.ToArray(), initiator: true, _now()) { Step = ContactStep.WaitingForThem };
         pending.MyNonce = ContactHandshake.NewNonce();
@@ -202,6 +212,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     pending.Sas = ContactHandshake.Sas(Me, sender, pending.MyNonce!, nonce);
                     pending.Step = ContactStep.Compare;
                     reply = MailMessage.Create(MailKind.HelloNonce, sender, new JsonObject { ["n"] = Convert.ToHexStringLower(pending.MyNonce!) }, _now());
+                    if (pending.KnownFriend) ConfirmLocked(pending);
                     break;
                 }
                 case MailKind.HelloNonce when pending is { Initiator: false, Step: ContactStep.WaitingForNonce }:
@@ -216,6 +227,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     pending.TheirNonce = nonce;
                     pending.Sas = ContactHandshake.Sas(sender, Me, nonce, pending.MyNonce!);
                     pending.Step = ContactStep.Compare;
+                    if (pending.KnownFriend) ConfirmLocked(pending);
                     break;
                 }
                 default:
@@ -261,18 +273,75 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         Contact contact;
         lock (_gate)
         {
-            var key = Convert.ToHexStringLower(theirs);
-            if (!_pending.TryGetValue(key, out var pending) || pending.Step != ContactStep.Compare) return null;
-            _pending.Remove(key);
-            var list = Load();
-            var key2 = theirs.ToArray();
-            list.RemoveAll(c => c.PublicKey.AsSpan().SequenceEqual(key2));
-            contact = new Contact(pending.PublicKey, pending.Name, Verified: true, _now()) { JayAccount = pending.JayAccount };
-            list.Add(contact);
-            Save(list);
+            if (!_pending.TryGetValue(Convert.ToHexStringLower(theirs), out var pending) || pending.Step != ContactStep.Compare) return null;
+            contact = ConfirmLocked(pending);
         }
         Changed?.Invoke();
         return contact;
+    }
+
+    /// <summary>
+    /// Saves a finished exchange as a verified contact. A known friend's new device is confirmed this way without the emoji:
+    /// the Jay account (verified earlier) signed the device key, which says more than four emoji would.
+    /// </summary>
+    private Contact ConfirmLocked(PendingContact pending)
+    {
+        _pending.Remove(Convert.ToHexStringLower(pending.PublicKey));
+        var list = Load();
+        var old = list.FirstOrDefault(c => c.PublicKey.AsSpan().SequenceEqual(pending.PublicKey));
+        list.RemoveAll(c => c.PublicKey.AsSpan().SequenceEqual(pending.PublicKey));
+        // A known friend keeps the name I gave them, wherever the device came from.
+        var name = pending.KnownFriend && list.FirstOrDefault(c => c.Verified && c.JayAccount == pending.JayAccount) is { } friend ? friend.Name
+            : old?.Name is { Length: > 0 } kept && pending.KnownFriend ? kept : pending.Name;
+        var contact = new Contact(pending.PublicKey, name, Verified: true, old?.Added ?? _now()) { JayAccount = pending.JayAccount ?? old?.JayAccount };
+        list.Add(contact);
+        Save(list);
+        return contact;
+    }
+
+    /// <summary>
+    /// Adds contacts from a friend list backup made by my own Jay account. Ones already in the list stay as they are.
+    /// Returns how many were added.
+    /// </summary>
+    public int Import(IEnumerable<Contact> contacts)
+    {
+        var added = 0;
+        lock (_gate)
+        {
+            var list = Load();
+            foreach (var c in contacts)
+            {
+                if (c.PublicKey.Length != X25519KeyPair.Length || c.PublicKey.AsSpan().SequenceEqual(Me) || list.Any(x => x.PublicKey.AsSpan().SequenceEqual(c.PublicKey))) continue;
+                list.Add(c with { Name = KnockProtocol.SanitizeName(c.Name) });
+                added++;
+            }
+            if (added > 0) Save(list);
+        }
+        if (added > 0) Changed?.Invoke();
+        return added;
+    }
+
+    /// <summary>One person in the list: everyone sharing a Jay account is one person; a contact without one is a person of its own.</summary>
+    public IReadOnlyList<Contact> DevicesOf(Contact contact)
+    {
+        lock (_gate)
+            return contact.JayAccount is { } account
+                ? [.. Load().Where(c => c.Verified && c.JayAccount == account)]
+                : [.. Load().Where(c => c.PublicKey.AsSpan().SequenceEqual(contact.PublicKey))];
+    }
+
+    /// <summary>Removes the person: every device of theirs under the same Jay account (or just this one without an account).</summary>
+    public void RemovePerson(ReadOnlySpan<byte> anyDevice)
+    {
+        lock (_gate)
+        {
+            var list = Load();
+            var key = anyDevice.ToArray();
+            var account = list.FirstOrDefault(c => c.PublicKey.AsSpan().SequenceEqual(key))?.JayAccount;
+            if (list.RemoveAll(c => c.PublicKey.AsSpan().SequenceEqual(key) || (account is not null && c.JayAccount == account)) == 0) return;
+            Save(list);
+        }
+        Changed?.Invoke();
     }
 
     /// <summary>Ignore a request, cancel my own, or reject after the emoji didn't match.</summary>

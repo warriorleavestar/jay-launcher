@@ -14,7 +14,8 @@ namespace Amber.Core.Identity;
 /// </summary>
 /// <remarks>
 /// Derivation (all hardened, SLIP-0010 with <see cref="Slip10.JayRootKey"/>):
-/// m/0'/0' account key · m/1'/n' per-network identities (later) · m/2'/0' inbox key (later) · m/9'/… reserved for post-quantum keys.
+/// m/0'/0' account key · m/1'/n' per-network identities (later) · m/2'/0' inbox key (later) · m/3'/0' friend list backup key
+/// (<see cref="DeriveFriendBackupKey"/>) · m/9'/… reserved for post-quantum keys.
 /// </remarks>
 public sealed class JayAccount : IDisposable
 {
@@ -64,6 +65,15 @@ public sealed class JayAccount : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return (byte[])_seed.Clone();
+    }
+
+    /// <summary>The 32-byte symmetric key that encrypts this account's friend list backups (m/3'/0'). Zero it after use.</summary>
+    internal byte[] DeriveFriendBackupKey()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var (key, chain) = Slip10.Derive(_seed, Slip10.JayRootKey, 3, 0);
+        CryptographicOperations.ZeroMemory(chain);
+        return key;
     }
 
     /// <summary>Signs <paramref name="domain"/> ‖ <paramref name="message"/>. Every use has its own domain string so a signature can't be replayed elsewhere.</summary>
