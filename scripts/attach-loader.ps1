@@ -13,7 +13,6 @@ Needs the GitHub CLI (gh) signed in with write access to the repository for the 
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Zip,
-    [string]$Repo = "warriorleavestar/jay-launcher",
     [switch]$Check,
     [switch]$Replace
 )
@@ -22,8 +21,21 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $pinFile = Join-Path $root "src\Amber.Core\Bake\BakeLoaderRelease.cs"
 $source = Get-Content -Raw -Encoding UTF8 $pinFile
-$m = [regex]::Match($source, 'Pinned \{ get; \} = new\(\s*"(?<ver>[^"]+)",\s*"(?<tag>[^"]+)",\s*"(?<asset>[^"]+)",\s*"(?<sha>[0-9a-fA-F]{64})",\s*(?<size>[0-9_]+)\)')
+$m = [regex]::Match($source, 'Pinned \{ get; \} = new\(\s*(?<base>\w+|"[^"]*"),\s*"(?<ver>[^"]*)",\s*"(?<tag>[^"]*)",\s*"(?<asset>[^"]*)",\s*"(?<sha>[^"]*)",\s*(?<size>[0-9_]+)\)')
 if (-not $m.Success) { throw "Could not read the pinned loader release from $pinFile" }
+$base = $m.Groups["base"].Value
+if ($base -notmatch '^"') {
+    $c = [regex]::Match($source, "const string $base = ""(?<url>[^""]+)""")
+    if (-not $c.Success) { throw "Could not read $base from $pinFile" }
+    $base = $c.Groups["url"].Value
+} else { $base = $base.Trim('"') }
+$r = [regex]::Match($base, '^https://github\.com/(?<repo>[^/]+/[^/]+)/releases/download/?$')
+if (-not $r.Success) { throw "The pinned release base $base is not a GitHub releases download root" }
+$Repo = $r.Groups["repo"].Value
+if ($m.Groups["sha"].Value -notmatch '^[0-9a-fA-F]{64}$' -or $m.Groups["tag"].Value -eq "") {
+    Write-Host "The pin in $pinFile is not filled in yet (no tag / SHA-256). Fill in the loader version, tag, asset name, SHA-256 and size of the zip first." -ForegroundColor Red
+    exit 1
+}
 $pin = [pscustomobject]@{
     Version = $m.Groups["ver"].Value
     Tag     = $m.Groups["tag"].Value
@@ -31,7 +43,7 @@ $pin = [pscustomobject]@{
     Sha256  = $m.Groups["sha"].Value.ToLowerInvariant()
     Size    = [long]($m.Groups["size"].Value -replace "_", "")
 }
-Write-Host "Pinned: loader $($pin.Version), release tag $($pin.Tag), asset $($pin.Asset), $($pin.Size) bytes, sha256 $($pin.Sha256)"
+Write-Host "Pinned: $Repo, loader $($pin.Version), release tag $($pin.Tag), asset $($pin.Asset), $($pin.Size) bytes, sha256 $($pin.Sha256)"
 
 $zipPath = (Resolve-Path $Zip).Path
 $file = Get-Item $zipPath

@@ -347,14 +347,19 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                 for (var i = 0; i < 60 && window.RevealedField?.Name != "BakeLoaderInstall"; i++) await Task.Delay(50);
                 Check($"安装加载器 {language}-{width}：settings#BakeLoaderInstall 定位到按钮", window.RevealedField?.Name == "BakeLoaderInstall");
                 var button = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeInstallButton");
-                button.BringIntoView();
-                await Task.Delay(150);
-                window.UpdateLayout();
+                await ScrollIntoViewAsync(button);
                 Check($"安装加载器 {language}-{width}：按钮完整可见、文案随语言", button.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(button, window))
                     && button.Content?.ToString() == L.T("settings.bake.install"));
                 var download = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadButton");
-                Check($"下载加载器 {language}-{width}：按钮完整可见、文案随语言、有说明", download.IsEffectivelyVisible && new Rect(window.ClientSize).Contains(BoundsIn(download, window))
-                    && download.Content?.ToString() == L.T("settings.bake.download") && ToolTip.GetTip(download)?.ToString() == L.T("settings.bake.download_hint"));
+                await ScrollIntoViewAsync(download);
+                var published = Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished;
+                Check($"下载加载器 {language}-{width}：按钮完整可见、文案随语言、有说明", download.IsVisible && new Rect(window.ClientSize).Contains(BoundsIn(download, window))
+                    && download.Content?.ToString() == L.T("settings.bake.download")
+                    && ToolTip.GetTip(download)?.ToString() == L.T(published ? "settings.bake.download_hint" : "core.bake.download_unpublished"));
+                var unpublished = window.PageHost.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "BakeDownloadUnpublishedText");
+                Check($"下载加载器 {language}-{width}：未发布时按钮关着并写明原因", published
+                    ? download.IsEffectivelyEnabled && !unpublished.IsVisible
+                    : !download.IsEffectivelyEnabled && unpublished.IsEffectivelyVisible && unpublished.Text == L.T("core.bake.download_unpublished"));
                 var cancel = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadCancelButton");
                 Check($"下载加载器 {language}-{width}：没在下载时不显示取消", !cancel.IsVisible);
                 await ShotAsync($"settings-bake-install-{language}-{width}x{height}");
@@ -430,6 +435,18 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         Check("其他提示仍是“不烘焙再启动”", Host.GetVisualDescendants().OfType<Button>().Any(b => b.IsEffectivelyVisible && b.Content?.ToString() == L.T("home.bake.retry_without")));
         State.Clear();
         L.SetLanguage("en");
+    }
+
+    /// <summary>Scrolls a control into the window and waits until the layout has settled there (wrapping text can move it after the first pass).</summary>
+    private async Task ScrollIntoViewAsync(Control control)
+    {
+        for (var i = 0; i < 20; i++)
+        {
+            control.BringIntoView();
+            await Task.Delay(50);
+            window.UpdateLayout();
+            if (new Rect(window.ClientSize).Contains(BoundsIn(control, window))) return;
+        }
     }
 
     /// <summary>A tiny loader package zip for the install check (not a real loader). tamper: one file differs from its manifest.</summary>

@@ -2688,6 +2688,7 @@
   "core.bake.runtime.rebaked": "这次启动时通用加载器临时烘焙了 {0} 项；游戏退出后 Jay 会在后台重新准备好",
   "core.bake.loader_missing_short": "没找到通用加载器",
   "core.bake.download_failed": "无法下载 {0}：\n{1}",
+  "core.bake.download_unpublished": "通用加载器还没有发布可供下载，目前请从压缩包安装。",
   "core.bake.download_hash": "{0} 不是 Jay 预期的文件（SHA-256 {1}），已丢弃",
   "core.bake.download_size": "{0} 大小不对（应为 {1} 字节，实际 {2}）",
   "core.bake.gc_busy": "有游戏在运行或正在烘焙，稍后再试",

@@ -2603,6 +2603,7 @@
   "core.bake.runtime.rebaked": "此番啟時通用載入器臨烘 {0} 項；遊戲罷後 Jay 將於背景重備",
   "core.bake.loader_missing_short": "未得通用載入器",
   "core.bake.download_failed": "不能下載 {0}：\n{1}",
+  "core.bake.download_unpublished": "通用載入器尚未發布以供下載；今且自壓縮檔裝之。",
   "core.bake.download_hash": "{0} 非 Jay 所期之檔（SHA-256 {1}），已棄之",
   "core.bake.download_size": "{0} 之大小不合（當為 {1} 位元組，得 {2}）",
   "core.bake.gc_busy": "有遊戲方行或方烘，俟後再試",

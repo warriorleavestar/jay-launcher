@@ -480,7 +480,10 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial bool IsInstallingBakeLoader { get; set; }
 
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanStartBakeLoaderDownload))] public partial bool IsDownloadingBakeLoader { get; set; }
-    public bool CanStartBakeLoaderDownload => !IsDownloadingBakeLoader;
+    /// <summary>The pin names a published zip (until the loader project publishes one, the button stays off and says why).</summary>
+    public bool BakeLoaderPublished => Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished;
+    public bool CanStartBakeLoaderDownload => !IsDownloadingBakeLoader && BakeLoaderPublished;
+    public string BakeLoaderDownloadTip => BakeLoaderPublished ? L.T("settings.bake.download_hint") : L.T("core.bake.download_unpublished");
     private CancellationTokenSource? _bakeLoaderDownload;
 
     /// <summary>The loader version "Download loader" fetches (shown on the button's tooltip).</summary>
@@ -494,6 +497,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     public async Task DownloadBakeLoaderAsync()
     {
         if (IsDownloadingBakeLoader || IsInstallingBakeLoader) return;
+        if (!BakeLoaderPublished) { BakeLoaderStatus = L.T("core.bake.download_unpublished"); return; }
         using var cts = new CancellationTokenSource();
         _bakeLoaderDownload = cts;
         IsDownloadingBakeLoader = true;

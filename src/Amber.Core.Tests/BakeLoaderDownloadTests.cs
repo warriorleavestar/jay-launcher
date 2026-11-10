@@ -18,7 +18,7 @@ public sealed class BakeLoaderDownloadTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         _good = PackageZip();
-        _release = new BakeLoaderRelease("0.0.0-test", "universal-loader-0.0.0-test", "amber-ul-0.0.0-test.zip",
+        _release = new BakeLoaderRelease(BakeLoaderRelease.JayReleases, "0.0.0-test", "universal-loader-0.0.0-test", "amber-ul-0.0.0-test.zip",
             Convert.ToHexStringLower(SHA256.HashData(_good)), _good.Length);
     }
 
@@ -89,17 +89,45 @@ public sealed class BakeLoaderDownloadTests : IDisposable
     }
 
     [Fact]
-    public void PinnedReleaseIsAnAssetOnJaysOwnReleases()
+    public void ThePinPointsAtJaysReleasesAndIsEitherUnsetOrComplete()
     {
         var pinned = BakeLoaderRelease.Pinned;
-        Assert.Equal($"https://github.com/warriorleavestar/jay-launcher/releases/download/{pinned.Tag}/{pinned.AssetName}", pinned.Url);
+        Assert.Equal(BakeLoaderRelease.JayReleases, pinned.ReleasesBase);
+        if (!pinned.IsPublished)
+        {
+            // Placeholder until the loader project publishes its first release: nothing half filled in.
+            Assert.Equal("", pinned.Tag);
+            Assert.Equal("", pinned.Sha256);
+            return;
+        }
         Assert.Matches("^[0-9a-f]{64}$", pinned.Sha256);
         Assert.True(pinned.Size > 0);
         Assert.Contains(pinned.LoaderVersion, pinned.AssetName);
-        var official = pinned.Sources(mirrorsFirst: false);
-        Assert.Equal(("GitHub", pinned.Url), official[0]);
-        Assert.All(official.Skip(1), s => Assert.EndsWith(pinned.Url, s.Url));
-        Assert.Equal(("GitHub", pinned.Url), pinned.Sources(mirrorsFirst: true)[^1]);
+    }
+
+    [Fact]
+    public void TheUrlComesFromTheReleaseBaseSoTheRepositoryIsOneValue()
+    {
+        Assert.Equal("https://github.com/warriorleavestar/jay-launcher/releases/download/universal-loader-0.0.0-test/amber-ul-0.0.0-test.zip", _release.Url);
+        var other = _release with { ReleasesBase = "https://github.com/warriorleavestar/jay-loader/releases/download" };
+        Assert.Equal("https://github.com/warriorleavestar/jay-loader/releases/download/universal-loader-0.0.0-test/amber-ul-0.0.0-test.zip", other.Url);
+        var official = _release.Sources(mirrorsFirst: false);
+        Assert.Equal(("GitHub", _release.Url), official[0]);
+        Assert.All(official.Skip(1), s => Assert.EndsWith(_release.Url, s.Url));
+        Assert.Equal(("GitHub", _release.Url), _release.Sources(mirrorsFirst: true)[^1]);
+    }
+
+    [Fact]
+    public async Task AnUnpublishedPinDownloadsNothing()
+    {
+        var unset = new BakeLoaderRelease(BakeLoaderRelease.JayReleases, "", "", "", "", 0);
+        Assert.False(unset.IsPublished);
+        Assert.False((_release with { Sha256 = "not-a-hash" }).IsPublished);
+        var handler = new Handler((_, _) => throw new InvalidOperationException("no network expected"));
+        var fetcher = new BakeLoaderDownloader(new Downloader(new HttpClient(handler), new SourceChain([new OfficialSource()])), InstallRoot, unset);
+        var e = await Assert.ThrowsAsync<BakeException>(() => fetcher.FetchAsync());
+        Assert.Equal("not_published", e.Code);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]

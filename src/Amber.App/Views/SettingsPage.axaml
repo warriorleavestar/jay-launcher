@@ -386,10 +386,12 @@
                   <Button x:Name="BakeInstallButton" Classes="secondary" Content="{l:T settings.bake.install}" Click="InstallBakeLoader_Click" IsEnabled="{Binding !IsInstallingBakeLoader}"
                           ToolTip.Tip="{l:T settings.bake.install_hint}" Margin="0,0,8,0" />
                   <Button x:Name="BakeDownloadButton" Classes="secondary" Content="{l:T settings.bake.download}" Command="{Binding DownloadBakeLoaderCommand}"
-                          IsEnabled="{Binding !IsInstallingBakeLoader}" IsVisible="{Binding CanStartBakeLoaderDownload}"
-                          ToolTip.Tip="{l:T settings.bake.download_hint}" Margin="0,0,8,0" />
+                          IsEnabled="{Binding CanStartBakeLoaderDownload}" IsVisible="{Binding !IsDownloadingBakeLoader}"
+                          ToolTip.Tip="{Binding BakeLoaderDownloadTip}" ToolTip.ShowOnDisabled="True" Margin="0,0,8,0" />
                   <Button x:Name="BakeDownloadCancelButton" Classes="secondary" Content="{l:T common.cancel}" Command="{Binding CancelBakeLoaderDownloadCommand}"
                           IsVisible="{Binding IsDownloadingBakeLoader}" Margin="0,0,8,0" />
+                  <TextBlock x:Name="BakeDownloadUnpublishedText" Classes="hint" FontSize="12" Text="{l:T core.bake.download_unpublished}" IsVisible="{Binding !BakeLoaderPublished}"
+                             VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0" />
                   <TextBlock x:Name="BakeLoaderStatusText" Classes="hint" FontSize="12" Text="{Binding BakeLoaderStatus}" VerticalAlignment="Center" TextWrapping="Wrap" />
                 </WrapPanel>
                 <WrapPanel x:Name="BakeCleanup" Orientation="Horizontal" IsEnabled="{Binding ExperimentalBake}">

@@ -621,8 +621,14 @@ public sealed partial class HomeViewModel : PageViewModel
                     }), ct);
                     if (reason.Length > 0) _log.AddRaw(run.Log, "[Bake] " + reason);
                     // Baking is on but no loader is installed: offer the download right where the launch status is.
-                    if (baked is null && reason == L.T("core.bake.loader_missing") && DownloadBakeLoader is { } download)
-                        Toasts.BakeAction(L.T("home.bake.loader_missing_notice"), L.T("home.bake.download_loader"), L.T("settings.bake.download_hint"), download);
+                    // Before the loader is published there is nothing to download: the notice just says why baking was skipped.
+                    if (baked is null && reason == L.T("core.bake.loader_missing"))
+                    {
+                        if (Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished && DownloadBakeLoader is { } download)
+                            Toasts.BakeAction(L.T("home.bake.loader_missing_notice"), L.T("home.bake.download_loader"), L.T("settings.bake.download_hint"), download);
+                        else
+                            Toasts.BakeProblem(L.T("home.bake.loader_missing_notice") + " " + L.T("core.bake.download_unpublished"));
+                    }
                     if (baked is not null)
                     {
                         // The loader's launcher needs Java 21 even where the version asks for less.

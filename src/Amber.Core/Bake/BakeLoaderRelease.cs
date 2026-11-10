@@ -6,24 +6,32 @@ using Amber.Core.Net;
 namespace Amber.Core.Bake;
 
 /// <summary>
-/// The universal loader package this Jay downloads: one zip attached to a release on Jay's own GitHub repository,
-/// pinned by size and SHA-256. A zip that does not match the pin is never unpacked; one that does then goes through
-/// the same install as "Install loader from zip…" (every file checked against the package's manifest).
-/// The zip is built by the loader project and attached to the release by hand (scripts/attach-loader.ps1); a new
-/// loader build means a new pin here.
+/// The universal loader package this Jay downloads: one zip attached to a GitHub release, pinned by size and SHA-256.
+/// A zip that does not match the pin is never unpacked; one that does then goes through the same install as
+/// "Install loader from zip…" (every file checked against the package's manifest).
+/// <para>
+/// <see cref="ReleasesBase"/> is the repository's release download root, so moving the asset to another repository
+/// (the loader's own) is a one-line change. Until the loader project publishes a release, <see cref="Pinned"/> has no
+/// tag or hash and "Download loader" says so instead of downloading. See docs/universal-loader-release.md.
+/// </para>
 /// </summary>
-public sealed record BakeLoaderRelease(string LoaderVersion, string Tag, string AssetName, string Sha256, long Size)
+public sealed record BakeLoaderRelease(string ReleasesBase, string LoaderVersion, string Tag, string AssetName, string Sha256, long Size)
 {
-    public const string ReleasesBase = "https://github.com/warriorleavestar/jay-launcher/releases/download/";
+    public const string JayReleases = "https://github.com/warriorleavestar/jay-launcher/releases/download/";
 
+    /// <summary>The pin. Filled in when the loader project publishes a release (tag, asset, SHA-256 and size of that exact zip).</summary>
     public static BakeLoaderRelease Pinned { get; } = new(
-        "0.3.0-proto",
-        "universal-loader-0.3.0-proto",
-        "amber-ul-0.3.0-proto.zip",
-        "8bf1f785211121c843499c70e139fb86bbc881e04d6fa0b8321a5f112cfb6319",
-        4_837_788);
+        JayReleases,
+        "",
+        "",
+        "",
+        "",
+        0);
 
-    public string Url => ReleasesBase + Tag + "/" + AssetName;
+    /// <summary>False until the pin names a published zip: then nothing is downloaded.</summary>
+    public bool IsPublished => Tag.Length > 0 && AssetName.Length > 0 && Size > 0 && Sha256.Length == 64 && Sha256.All(Uri.IsHexDigit);
+
+    public string Url => ReleasesBase.TrimEnd('/') + "/" + Tag + "/" + AssetName;
 
     /// <summary>GitHub first, then the same GitHub download mirrors as the multiplayer component (mirrors first when Jay prefers mirrors). The pin decides, not the host.</summary>
     public IReadOnlyList<(string Name, string Url)> Sources(bool mirrorsFirst)
@@ -57,11 +65,12 @@ public sealed class BakeLoaderDownloader(Downloader downloader, string installRo
     public IReadOnlyList<(string Name, string Url)> Sources => sources ?? Release.Sources(SourceChain.PrefersMirrors());
 
     /// <summary>Where the zip is downloaded (outside the version folders the install writes).</summary>
-    public string ZipPath => Path.Combine(installRoot, ".download", Release.AssetName);
+    public string ZipPath => Path.Combine(installRoot, ".download", Release.AssetName.Length > 0 ? Release.AssetName : "loader.zip");
 
     /// <summary>progress: CurrentFile is the source being tried, BytesDownloaded the bytes so far of <see cref="BakeLoaderRelease.Size"/>.</summary>
     public async Task<string> FetchAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
+        if (!Release.IsPublished) throw new BakeException(L.T("core.bake.download_unpublished"), [], "not_published");
         var zip = ZipPath;
         if (File.Exists(zip))
         {
