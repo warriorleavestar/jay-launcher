@@ -33,6 +33,7 @@ internal sealed partial class SelfTest
         vm.IsComponentReady = false;
         bool HasText(string key) => page.GetVisualDescendants().OfType<TextBlock>()
             .Any(t => t.IsEffectivelyVisible && t.Text == L.T(key));
+        Control? Shown(string name) => page.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible);
         Button? Visible(string name) => page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == name && b.IsEffectivelyVisible);
 
         Check("联机页：四个页签", HasText("multiplayer.tab.play") && HasText("multiplayer.tab.public") && HasText("multiplayer.tab.servers") && HasText("multiplayer.tab.settings"));
@@ -53,6 +54,33 @@ internal sealed partial class SelfTest
         Check("一盏灯：贴进邀请后琥珀移到加入", host?.Classes.Contains("play") == false && join?.Classes.Contains("play") == true);
         Check("万能粘贴框：认出房间邀请", vm.JoinCodeRecognition == L.T("multiplayer.lobby.code.invite") && !vm.JoinCodeRecognitionWarns && HasText("multiplayer.lobby.code.invite"));
         Check("万能粘贴框：邀请码默认打码", roomCode?.PasswordChar == '•' && !vm.JoinCodeShown);
+
+        // Invite v3: the host's game is in the code; Jay picks the closest instance or offers to install one.
+        var hostMods = new ModManifest([new ModManifestEntry("a.jar", new string('a', 40), 1), new ModManifestEntry("b.jar", new string('b', 40), 1)]);
+        var v3 = JayInvite.Create(new byte[16], Amber.Core.Multiplayer.Transport.TunnelSettings.Default, hostMods.ToInviteGame("1.20.1", "fabric")).ToString();
+        vm.TestCandidates = () => [new("vanilla", "1.20.1", null, 0), new("close", "1.20.1", "fabric", 5), new("closer", "1.20.1", "fabric", 3)];
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = v3);
+        await WaitAsync(() => vm.JoinMatch is not null, 5);
+        Check("邀请 v3：写出房主的游戏（版本 · 加载器 · 模组数）", vm.JoinGameText == "1.20.1 · Fabric · " + L.P("multiplayer.lobby.game.mods", 2, 2)
+            && Shown("JoinGameText") is not null, vm.JoinGameText);
+        Check("邀请 v3：自动挑最接近的实例，不说“和房主一样”", vm.JoinMatch is { Kind: InstanceMatchKind.SameGame, Instance.Id: "closer" }
+            && vm.JoinMatchText == L.T("multiplayer.lobby.game.pick_close") && Shown("JoinMatchText") is not null);
+        vm.TestCandidates = () => [new("other", "1.20.1", "fabric", 9), new("exact", "1.20.1", "fabric", 2, hostMods.Fingerprint)];
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = v3 + " ");
+        await WaitAsync(() => vm.JoinMatch?.Instance.Id == "exact", 5);
+        Check("邀请 v3：模组清单一样的实例排第一", vm.JoinMatch is { Kind: InstanceMatchKind.Exact } && vm.JoinMatchText == L.T("multiplayer.lobby.game.pick_exact"));
+        await ShotAsync("邀请v3-挑实例");
+        vm.TestCandidates = () => [new("old", "1.19.2", "fabric", 2)];
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = v3);
+        await WaitAsync(() => vm.JoinNeedsInstall, 5);
+        await Task.Delay(100);
+        Check("邀请 v3：没有合适的实例时给【装一个 1.20.1 Fabric 再加入】", vm.JoinNeedsInstall && Visible("InstallForInviteButton") is not null && Shown("JoinNoInstanceText") is not null
+            && vm.InstallForInviteText == L.F("multiplayer.lobby.game.install", "1.20.1", "Fabric"));
+        await ShotAsync("邀请v3-没有实例");
+        vm.TestCandidates = null;
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = relayInvite);
+        await Task.Delay(100);
+        Check("邀请 v2：没有游戏信息时不显示这一块", !vm.HasJoinGame && Shown("JoinGameText") is null);
         Dispatcher.UIThread.Invoke(() => roomCode!.Text = "AMB-K7Q2M9XD-4HZP8RW2N6TC-25565");
         await Task.Delay(100);
         Check("万能粘贴框：旧 AMB- 码说请朋友更新", vm.JoinCodeRecognition == L.T("multiplayer.lobby.code.old") && vm.JoinCodeRecognitionWarns);

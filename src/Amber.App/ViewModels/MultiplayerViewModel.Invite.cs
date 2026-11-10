@@ -479,6 +479,8 @@ public sealed partial class MultiplayerViewModel
     private async Task<PendingInvite?> IssueInviteAsync(int uses, TimeSpan? lifetime, bool autoApprove)
     {
         if (_lobby is not { } lobby || _credentials is not { } credentials) return null;
+        lobby.Book.Game = await HostGameAsync();
+        if (_lobby != lobby) return null;
         var invite = lobby.Book.Create(uses, lifetime, Child.MayAutoAdmit(autoApprove), credentials.Tunnel);
         _lastInvite = invite.Invite;
         RememberInviteTerms(uses, lifetime, Child.MayAutoAdmit(autoApprove));

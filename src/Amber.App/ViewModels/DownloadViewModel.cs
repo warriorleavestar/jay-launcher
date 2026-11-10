@@ -145,6 +145,17 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     [ObservableProperty] public partial string WaitText { get; set; } = "";
     private Avalonia.Threading.DispatcherTimer? _waitTimer;
 
+    /// <summary>Opened from a multiplayer invite: where to go once the install has started (instead of the library).</summary>
+    public Action? ReturnAfterStart { get; set; }
+
+    /// <summary>Fill the panel in for a version and loader (multiplayer: “install one and join”).</summary>
+    public async Task PrefillAsync(string mcVersion, LoaderKind? loader, Action? returnAfterStart)
+    {
+        ReturnAfterStart = returnAfterStart;
+        if (_all.Count == 0) await RefreshAsync();
+        ConfigureHot(new HotVersion(mcVersion, loader));
+    }
+
     /// <summary>点热门版本芯片：打开那个版本的安装面板并选好加载器。</summary>
     [RelayCommand]
     private void ConfigureHot(HotVersion? hot)
@@ -498,7 +509,13 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         IsBusy = true;
         StartWaitTimer();
         // §6.11: the panel closes and the install carries on as a task in the activity centre.
-        CloseAfterStart?.Invoke();
+        // Opened from a multiplayer invite: go back to the lobby instead, which picks the new instance once it is installed.
+        if (ReturnAfterStart is { } back)
+        {
+            ReturnAfterStart = null;
+            back();
+        }
+        else CloseAfterStart?.Invoke();
         var installCts = _installCts = new CancellationTokenSource();
         var watch = Stopwatch.StartNew();
         var ct = installCts.Token;

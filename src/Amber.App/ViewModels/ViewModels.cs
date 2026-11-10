@@ -305,6 +305,11 @@ public sealed partial class MainViewModel : ObservableObject
         };
         download.CloseAfterStart = () => shell.Navigate("library");
         content.LaunchInstance = id => download.LaunchInstance?.Invoke(id);
+        multiplayer.InstallForInvite = (version, loader) =>
+        {
+            shell.Navigate(LegacyRoutes.NewInstance);
+            _ = download.PrefillAsync(version, loader, () => shell.Navigate("play"));
+        };
         download.BrowseModpacks = () =>
         {
             shell.Navigate("discover");

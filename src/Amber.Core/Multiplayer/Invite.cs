@@ -12,7 +12,11 @@ namespace Amber.Core.Multiplayer;
 /// 模式段只用来提前判断“这台电脑支不支持这种加密”；真正用的封装方式以房主批准时发来的为准。
 /// 校验位按 Crockford 的 mod-37 写法（多出来的 5 个符号是 *~$=U），抄错一位多半能当场发现。解析和 <see cref="RoomCode"/> 一样宽松。
 /// </summary>
-public sealed record JayInvite(byte[] LobbyKey, byte[] Token, TunnelSettings Tunnel)
+/// <remarks>
+/// Invite v3 adds an optional game segment after the check symbol (<see cref="InviteGame"/>): -G…, the host's game version,
+/// loader and mod list fingerprint. Older versions ignore it; this version reads codes with or without it.
+/// </remarks>
+public sealed record JayInvite(byte[] LobbyKey, byte[] Token, TunnelSettings Tunnel, InviteGame? Game = null)
 {
     public const string Prefix = "JAY2-";
     public const int KeyLength = 16;
@@ -25,6 +29,7 @@ public sealed record JayInvite(byte[] LobbyKey, byte[] Token, TunnelSettings Tun
         var builder = new StringBuilder(Prefix);
         if (Tunnel.Wraps) builder.Append('T').Append((int)Tunnel.Mode).Append(Tunnel.Disguise ? "D" : "").Append('-');
         builder.Append(Encode(LobbyKey)).Append('-').Append(Encode(Token)).Append('-').Append(CheckSymbol(LobbyKey, Token, Tunnel));
+        if (Game is not null) builder.Append('-').Append(Game.ToSegment(LobbyKey, Token));
         return builder.ToString();
     }
 
@@ -38,10 +43,10 @@ public sealed record JayInvite(byte[] LobbyKey, byte[] Token, TunnelSettings Tun
         }
     }
 
-    public static JayInvite Create(byte[] lobbyKey, TunnelSettings tunnel)
+    public static JayInvite Create(byte[] lobbyKey, TunnelSettings tunnel, InviteGame? game = null)
     {
         if (lobbyKey.Length != KeyLength) throw new ArgumentException(null, nameof(lobbyKey));
-        return new JayInvite(lobbyKey, RandomNumberGenerator.GetBytes(KeyLength), tunnel);
+        return new JayInvite(lobbyKey, RandomNumberGenerator.GetBytes(KeyLength), tunnel, game);
     }
 
     /// <summary>16 字节按大端整数写成 26 位 Crockford Base32。</summary>
@@ -115,14 +120,24 @@ public sealed record JayInvite(byte[] LobbyKey, byte[] Token, TunnelSettings Tun
         var b = Normalize(bText[..bEnd]);
         if (a is null || b is null || Decode(a) is not { } lobbyKey || Decode(b) is not { } token) return false;
 
+        InviteGame? game = null;
         if (rest.StartsWith('-') && rest.Length >= 2 && CheckAlphabet.Contains(NormalizeCheck(rest[1])))
         {
             // 校验位后面只能是普通文字（空格、标点、中文），不能紧跟字母数字（那多半是码被改坏了）。
             if (rest.Length > 2 && char.IsAsciiLetterOrDigit(rest[2])) return false;
             if (NormalizeCheck(rest[1]) != CheckSymbol(lobbyKey, token, tunnel)) return false;
+            // v3: the game segment. A damaged one is dropped (it is only a hint); the keys above were already checked.
+            if (rest.Length > 4 && rest[2] == '-' && rest[3] == 'G')
+            {
+                var end = 3;
+                while (end < rest.Length && char.IsAsciiLetterOrDigit(rest[end])) end++;
+                // The segment's own check symbol may be one of the non-alphanumeric ones.
+                if (end < rest.Length && "*~$=".Contains(rest[end])) end++;
+                game = InviteGame.FromSegment(rest[3..end], lobbyKey, token);
+            }
         }
         else if (rest.Length > 0 && char.IsAsciiLetterOrDigit(rest[0])) return false;
-        invite = new JayInvite(lobbyKey, token, tunnel);
+        invite = new JayInvite(lobbyKey, token, tunnel, game);
         return true;
     }
 

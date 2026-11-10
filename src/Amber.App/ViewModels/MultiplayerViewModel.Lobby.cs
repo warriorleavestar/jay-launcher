@@ -112,6 +112,7 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(JoinCodeRecognition));
         OnPropertyChanged(nameof(JoinCodeRecognitionWarns));
         OnPropertyChanged(nameof(HostButtonIsAmber));
+        RepickJoinInstance();
     }
 
     /// <summary>
