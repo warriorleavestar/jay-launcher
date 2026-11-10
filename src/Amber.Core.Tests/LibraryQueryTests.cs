@@ -76,8 +76,8 @@ public class LibraryQueryTests
         Assert.InRange(CoverArt.SlotFor(""), 0, CoverArt.Slots - 1);
         var slots = Enumerable.Range(0, 200).Select(i => CoverArt.SlotFor("instance-" + i)).Distinct().Count();
         Assert.Equal(CoverArt.Slots, slots);
-        // Pinned value: changing the hash would recolor every user's library.
-        Assert.Equal(5, CoverArt.SlotFor("1.20.1"));
+        // Pinned value: changing the hash or the slot count recolors every user's library (9 since the §12 cover review).
+        Assert.Equal(1, CoverArt.SlotFor("1.20.1"));
     }
 
     [Theory]

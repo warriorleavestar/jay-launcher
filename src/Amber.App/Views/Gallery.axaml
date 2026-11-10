@@ -138,6 +138,14 @@
 
       <Border Classes="card">
         <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="Automatic covers" />
+          <ItemsControl x:Name="CoverGrid">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="12" LineSpacing="12" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+      <Border Classes="card">
+        <StackPanel Spacing="8">
           <TextBlock Classes="h2" Text="图标" />
           <ItemsControl x:Name="IconGrid">
             <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="12" LineSpacing="12" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
