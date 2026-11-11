@@ -314,6 +314,8 @@ Jay 以 [PolyForm Noncommercial 1.0.0 许可证](LICENSE)公开源码。个人�
 
 这次改动之前发布的版本（到 v0.7.0 为止）仍然适用 MIT 许可证。
 
+任何地方（包括旧文档、发布说明和别处的副本）如果还说 Jay 是“开源”或“MIT”，都是过时的描述，以 [LICENSE](LICENSE) 和 [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) 为准。发现这样的描述，请[提 issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose)。
+
 联机使用的 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0）加固版（源码在 [jay-easytier](https://github.com/Yumao-Feather/jay-easytier)）是独立项目，Jay 不内置它，第一次使用联机时才下载。Linux 版内置的思源黑体（Noto Sans SC）使用 SIL Open Font License 1.1（[OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)）。
 
 <div align="center">

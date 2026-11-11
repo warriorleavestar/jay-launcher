@@ -57,3 +57,6 @@ every decision under this permission.
 
 Versions of Jay released before this change (up to and including v0.7.0)
 were released under the MIT License, and those copies stay under it.
+Any description of Jay as "open source" or "MIT" elsewhere, including in
+older docs and release notes, is outdated; this file and LICENSE take
+precedence. Please open an issue if you find one.
