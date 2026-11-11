@@ -17,7 +17,7 @@ public static class Terms
         new("modpack", "term.modpack", "term.modpack.hint", "modpacks"),
         new("relay", "term.relay", "term.relay.hint", "connection"),
         new("safety_code", "term.safety_code", "term.safety_code.hint", "knock"),
-        new("friend_code", "term.friend_code", "term.friend_code.hint", "public-rooms"),
+        new("device_code", "term.device_code", "term.device_code.hint", "public-rooms"),
     ];
 
     public static Term? Get(string? id) => All.FirstOrDefault(t => t.Id == id);

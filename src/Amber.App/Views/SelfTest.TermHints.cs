@@ -59,7 +59,7 @@ internal sealed partial class SelfTest
         main.Shell.Navigate("play/public");
         await Task.Delay(600);
         var all = Hints().Select(h => h.Term).ToList();
-        Check("Terms: multiplayer page has safety code and friend code marks", all.Contains("safety_code") && all.Contains("friend_code"), string.Join(",", all));
+        Check("Terms: multiplayer page has safety code and device code marks", all.Contains("safety_code") && all.Contains("device_code"), string.Join(",", all));
         var articles = HelpLibrary.LoadLanguage("en").Select(a => a.Id).ToHashSet();
         Check("Terms: every mark has a help article", Terms.All.All(t => articles.Contains(t.Article)));
         main.Shell.Navigate("library");

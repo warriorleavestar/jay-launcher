@@ -14,7 +14,7 @@ Jay has no telemetry, statistics, ads or remote switches. It goes online only in
 - Microsoft sign-in: signing in, refreshing it, your own skin.
 - Modrinth / CurseForge: only while you use Discover or click "Check for updates".
 - Checking for a new Jay: sends only the current version number to the address you set.
-- Multiplayer: rooms, joining, public rooms, Jay servers.
+- Multiplayer: rooms, joining, public rooms, joining servers.
 
 ## How to
 - Open [About and privacy](jay:about): each case has "Change ›", which goes straight to its setting.

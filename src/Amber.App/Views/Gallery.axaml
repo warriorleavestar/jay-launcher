@@ -103,7 +103,7 @@
             <Panel>
               <Border Classes="wing-edge" />
               <StackPanel Margin="18,10,14,10" Spacing="2">
-                <TextBlock Classes="caption" Text="邀请码（30 分钟内有效）" />
+                <TextBlock Classes="caption" Text="邀请（30 分钟内有效）" />
                 <SelectableTextBlock Classes="mono" FontSize="{DynamicResource FontSubtitle}" Text="JAY3-7F3K-Q9MX-2WPD" />
               </StackPanel>
             </Panel>

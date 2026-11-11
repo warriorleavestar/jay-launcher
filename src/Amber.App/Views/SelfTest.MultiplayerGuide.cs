@@ -221,7 +221,12 @@ internal sealed partial class SelfTest
         // Routes: play/public, play/servers, play/settings.
         main.Shell.Navigate("play/servers");
         await Task.Delay(200);
-        Check("路由 play/servers 打开服务器页签", vm.IsServersTab && HasText("multiplayer.servers.jay") && HasText("multiplayer.jayserver.title"));
+        // The two segments have their own labels ("Joined" / "Hosted by me"); the card title belongs to the Joined segment.
+        // A segment's label is read from its content: the template may not be applied yet right after the tab first shows.
+        bool Segment(string name, string key) => page.GetVisualDescendants().OfType<RadioButton>()
+            .Any(r => r.Name == name && r.IsEffectivelyVisible && (r.Content as TextBlock)?.Text == L.T(key));
+        Check("路由 play/servers 打开服务器页签", vm.IsServersTab && Segment("JayServersSegment", "multiplayer.servers.jay") && Segment("MyServerSegment", "multiplayer.servers.mine")
+            && (!vm.ShowJayServerList || HasText("multiplayer.jayserver.title")));
         main.Shell.Navigate("play/public");
         await Task.Delay(200);
         Check("路由 play/public 打开公开房间", vm.IsPublicTab && HasText("multiplayer.public.title"));
