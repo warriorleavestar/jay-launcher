@@ -85,6 +85,11 @@ while IFS= read -r -d '' library; do
   # Symlinks are deliberately dereferenced because Jay's installer rejects links.
   cp -L "$library" "$output/$(basename "$library")"
 done < <(find "$work/install/opt/jay-mesa" \( -type f -o -type l \) \( -name '*.so' -o -name '*.so.*' \) -print0)
+# Mesa's Android install omits the desktop DRI megadriver aliases. Zink still
+# loads the same gallium DRI binary through its conventional driver filename.
+if [[ ! -f "$output/zink_dri.so" && -f "$output/libgallium_dri.so" ]]; then
+  cp "$output/libgallium_dri.so" "$output/zink_dri.so"
+fi
 cp "$source/docs/license.rst" "$output/MESA-LICENSE.rst"
 cp "$source/licenses/MIT" "$output/MESA-MIT.txt"
 
