@@ -252,7 +252,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         : L.F("multiplayer.component.required", EasyTierRelease.Version, EasyTierRelease.Current.Size / 1024 / 1024);
 
     public string LicenseText =>
-        L.F("multiplayer.component.license", EasyTierRelease.License, EasyTierRelease.ProjectUrl);
+        L.F("multiplayer.component.license", EasyTierRelease.License, EasyTierRelease.SourceUrl);
 
     public MultiplayerViewModel(LauncherService service)
     {

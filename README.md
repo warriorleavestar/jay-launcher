@@ -127,7 +127,7 @@ Jay's window needs a desktop session (X11, or Wayland with XWayland) and the lib
 - **Practice and diagnose.** A safe drill mode walks you through a knock without touching the network, and the "Connection trouble?" drawer runs a full test matrix and writes a report with secrets removed.
 - **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS1-` invite; unknown connections get not a single byte back.
 
-Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), which Jay downloads and verifies the first time you use multiplayer. The default mode needs no admin rights and installs no driver.
+Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), in Jay's hardened build ([jay-easytier](https://github.com/Yumao-Feather/jay-easytier)), which Jay downloads and verifies the first time you use multiplayer. The default mode needs no admin rights and installs no driver.
 
 ### 🔐 Privacy and safety
 
@@ -312,7 +312,7 @@ Run Forge mods on Fabric or Quilt: there is no reliable compatibility layer, and
 
 Jay is released under the [MIT License](LICENSE).
 
-Multiplayer uses [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), a separate project that Jay downloads on first use and does not bundle. The Linux build bundles Noto Sans SC under the SIL Open Font License 1.1 ([OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)).
+Multiplayer uses [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0) in a hardened build whose source is at [jay-easytier](https://github.com/Yumao-Feather/jay-easytier), a separate project that Jay downloads on first use and does not bundle. The Linux build bundles Noto Sans SC under the SIL Open Font License 1.1 ([OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)).
 
 <div align="center">
 <br>
