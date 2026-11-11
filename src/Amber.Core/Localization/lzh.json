@@ -2985,5 +2985,7 @@
   "term.safety_code": "安碼",
   "term.safety_code.hint": "兩方皆可見之碼。君與友之碼同，則中間無他人。",
   "term.friend_code": "友碼",
-  "term.friend_code.hint": "於公開之房尋友之房。徒有此碼不得入，猶須叩門。"
+  "term.friend_code.hint": "於公開之房尋友之房。徒有此碼不得入，猶須叩門。",
+  "shortcut.look.restored": "已復常貌。",
+  "shortcut.look.already": "今即常貌。"
 }

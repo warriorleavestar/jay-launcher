@@ -3119,5 +3119,7 @@
   "term.safety_code": "安全コード",
   "term.safety_code.hint": "両方に表示されるコードです。あなたと友だちのコードが同じなら、間に誰もいません。",
   "term.friend_code": "フレンドコード",
-  "term.friend_code.hint": "公開ルームで友だちの部屋を探すコードです。これだけでは入れず、ノックが必要です。"
+  "term.friend_code.hint": "公開ルームで友だちの部屋を探すコードです。これだけでは入れず、ノックが必要です。",
+  "shortcut.look.restored": "標準の見た目に戻しました。",
+  "shortcut.look.already": "すでに標準の見た目です。"
 }

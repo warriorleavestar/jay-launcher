@@ -3119,5 +3119,7 @@
   "term.safety_code": "安全碼",
   "term.safety_code.hint": "你們兩邊都能看到的碼。你的和朋友的一樣，就說明中間沒有別人。",
   "term.friend_code": "好友碼",
-  "term.friend_code.hint": "在公開房間裡找到朋友的房間。光有它進不了門，還是要敲門。"
+  "term.friend_code.hint": "在公開房間裡找到朋友的房間。光有它進不了門，還是要敲門。",
+  "shortcut.look.restored": "已恢復預設外觀。",
+  "shortcut.look.already": "現在就是預設外觀。"
 }

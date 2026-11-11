@@ -3194,5 +3194,7 @@
   "term.safety_code": "Safety code",
   "term.safety_code.hint": "A code both of you can see. If yours and your friend's are the same, nobody is in between.",
   "term.friend_code": "Friend code",
-  "term.friend_code.hint": "Finds a friend's room in public rooms. It doesn't let anyone in by itself: they still knock."
+  "term.friend_code.hint": "Finds a friend's room in public rooms. It doesn't let anyone in by itself: they still knock.",
+  "shortcut.look.restored": "Back to the default look.",
+  "shortcut.look.already": "Jay already has the default look."
 }

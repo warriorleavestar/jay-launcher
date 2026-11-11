@@ -253,9 +253,39 @@ public partial class MainWindow
         if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.OemTilde) { main.ToggleLogDock(); e.Handled = true; return; }
         if (e.Key == Key.Escape && main.LogDocked && LogDockIsDrawer) { main.LogDocked = false; e.Handled = true; return; }
         // Ctrl+V outside a text box: a pasted invite (or any other Jay code) opens multiplayer with it filled in.
-        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.V && FocusManager?.GetFocusedElement() is not TextBox)
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.V && KeyboardScope.Allows(KeyScope.OutsideText, this, e))
         {
             _ = PasteCodeAsync(main);
+            return;
+        }
+        // Ctrl+N: new instance from anywhere (§8.5); in a text box Ctrl+N stays with the text box.
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.N && !main.FirstRun.IsOpen && KeyboardScope.Allows(KeyScope.OutsideText, this, e))
+        {
+            shell.Navigate("library/new");
+            e.Handled = true;
+            return;
+        }
+        // Ctrl+Shift+Q: quit the running game, from any page (§8.5 "global, while playing").
+        if (e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.Q)
+        {
+            if (main.Pages.OfType<InstanceViewModel>().FirstOrDefault() is { Start.Side: Amber.Core.GameLibrary.StartSide.QuitGame } running)
+            {
+                running.SideActionCommand.Execute(null);
+                e.Handled = true;
+            }
+            return;
+        }
+        // F6 / Shift+F6: jump between the sidebar, the top bar, the request bar and the page (§8.5, §8.6).
+        if (e.Key == Key.F6 && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift && !main.FirstRun.IsOpen)
+        {
+            e.Handled = CycleRegion(back: e.KeyModifiers == KeyModifiers.Shift);
+            return;
+        }
+        // Ctrl+Alt+Shift+T: back to the default look, with Undo in the toast (§8.5, §10).
+        if (e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Shift) && e.Key == Key.T)
+        {
+            main.Pages.OfType<SettingsViewModel>().FirstOrDefault()?.RestoreDefaultLook();
+            e.Handled = true;
             return;
         }
         if (e.KeyModifiers == KeyModifiers.Control)
@@ -271,6 +301,35 @@ public partial class MainWindow
         else if (e.Key == Key.BrowserBack) e.Handled = shell.Router.Back();
         else if (e.Key == Key.BrowserForward) e.Handled = shell.Router.Forward();
     }
+
+    /// <summary>The keyboard regions in F6 order; ones that are hidden right now are skipped.</summary>
+    internal IReadOnlyList<Control> FocusRegions => [SidebarHost, TopBar, RequestBar, PageHost];
+
+    /// <summary>The region that has focus now (for F6 and the self-check), or null.</summary>
+    internal Control? FocusedRegion
+    {
+        get
+        {
+            var focused = FocusManager?.GetFocusedElement() as Visual;
+            return FocusRegions.FirstOrDefault(r => focused is not null && (focused == r || r.IsVisualAncestorOf(focused)));
+        }
+    }
+
+    /// <summary>The regions F6 stops at right now: visible and with something to focus.</summary>
+    internal IReadOnlyList<Control> ActiveFocusRegions => FocusRegions.Where(r => r.IsEffectivelyVisible && FirstFocusable(r) is not null).ToList();
+
+    private bool CycleRegion(bool back)
+    {
+        var regions = ActiveFocusRegions;
+        if (regions.Count == 0) return false;
+        var at = FocusedRegion is { } now ? regions.ToList().IndexOf(now) : -1;
+        var next = at < 0 ? (back ? regions.Count - 1 : 0) : (at + (back ? -1 : 1) + regions.Count) % regions.Count;
+        return FirstFocusable(regions[next])?.Focus(NavigationMethod.Tab) == true;
+    }
+
+    private static InputElement? FirstFocusable(Control region) =>
+        region.GetVisualDescendants().OfType<InputElement>().FirstOrDefault(c => c.Focusable && c.IsEffectivelyVisible && c.IsEffectivelyEnabled
+            && c is not ScrollViewer && c is not ContentControl { Content: null } && c.Bounds.Width > 0 && KeyboardNavigation.GetIsTabStop(c));
 
     private static async Task PasteCodeAsync(MainViewModel main)
     {

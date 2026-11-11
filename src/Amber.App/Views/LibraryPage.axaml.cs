@@ -67,7 +67,7 @@ public partial class LibraryPage : UserControl
         base.OnDetachedFromVisualTree(e);
     }
 
-    /// <summary>§6.2 keys: / or Ctrl+F search, Ctrl+N new instance. Typing in a text box keeps "/".</summary>
+    /// <summary>§6.2 keys: / or Ctrl+F search (Ctrl+N new instance is global, in the main window). Typing in a text box keeps "/".</summary>
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (!IsEffectivelyVisible || DataContext is not LibraryViewModel vm) return;
@@ -75,11 +75,6 @@ public partial class LibraryPage : UserControl
         if ((e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control) || (e.Key == Key.Oem2 && e.KeyModifiers == KeyModifiers.None && !inText))
         {
             SearchBox.Focus(NavigationMethod.Tab);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.N && e.KeyModifiers == KeyModifiers.Control)
-        {
-            vm.NewInstanceCommand.Execute(null);
             e.Handled = true;
         }
     }

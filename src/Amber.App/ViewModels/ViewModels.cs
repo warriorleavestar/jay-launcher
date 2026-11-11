@@ -947,6 +947,20 @@ public sealed partial class SettingsViewModel : PageViewModel
         ReloadThemePacks();
     }
 
+    /// <summary>Ctrl+Alt+Shift+T (§8.5): back to the default look from anywhere; the toast can undo it.</summary>
+    public void RestoreDefaultLook()
+    {
+        var before = SelectedThemePack;
+        if (before is null || before.IsDefault)
+        {
+            Toasts.Show(L.T("shortcut.look.already"));
+            return;
+        }
+        ResetThemePack();
+        Toasts.WithAction(L.T("shortcut.look.restored"), L.T("common.undo"),
+            () => SelectedThemePack = ThemePacks.FirstOrDefault(p => p.Id == before.Id) ?? SelectedThemePack);
+    }
+
     /// <summary>恢复默认主题：设置页固定位置的按钮，主题改不了它。</summary>
     [RelayCommand]
     private void ResetThemePack() => SelectedThemePack = ThemePacks.FirstOrDefault();
