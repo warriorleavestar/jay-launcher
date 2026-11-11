@@ -30,6 +30,14 @@
           <Button x:Name="DataFolderButton" Classes="secondary" Content="{l:T about.open_data_folder}" Command="{Binding OpenDataFolderCommand}" HorizontalAlignment="Left" />
         </StackPanel>
 
+        <StackPanel x:Name="VerifyBox" Spacing="6">
+          <TextBlock Text="{l:T about.verify.title}" FontWeight="SemiBold" />
+          <TextBlock Text="{l:T about.verify.body}" TextWrapping="Wrap" />
+          <Button x:Name="VerifyButton" Classes="secondary" Content="{l:T about.verify.pick}" Click="Verify_Click" HorizontalAlignment="Left" />
+          <TextBlock x:Name="VerifyResult" Text="{Binding VerifyText}" TextWrapping="Wrap" FontWeight="SemiBold"
+                     IsVisible="{Binding VerifyText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        </StackPanel>
+
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
           <TextBlock x:Name="ChildText" Text="{Binding ChildModeText}" TextWrapping="Wrap" VerticalAlignment="Center" />
           <Button Grid.Column="1" Classes="ghost" Content="{l:T about.net.change}" Command="{Binding OpenChildModeCommand}" VerticalAlignment="Center" />

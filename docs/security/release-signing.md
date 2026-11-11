@@ -1,72 +1,108 @@
 # Release signatures
 
-Jay releases carry a `SHA256SUMS.txt` built by CI. The maintainer signs it offline with Jay's
-**release key** and uploads `SHA256SUMS.txt.sig` to the same GitHub Release.
+A Jay release counts only when **2 of the 3 Jay trustees** have signed it, each with both **Ed25519 and
+ML-DSA-65** (privacy plan, items 2 and 3). There is no separate release key: the trustee keys in
+`JayTrust.Keys` (`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`) are the only keys that count, and
+nobody can outrank two of them.
 
-A Jay that already has the release public key built in (`ReleaseSignature.TrustedKeys` in
-`src/Amber.Core/Launch/ReleaseSignature.cs`) can then check any downloaded package. Three things must
-hold:
+Each release carries, next to its packages:
 
-- The signature comes from a trusted release key.
-- It covers this exact `SHA256SUMS.txt` and the version the user asked for. Binding the tag stops an
-  old signed release being passed off as a new one.
-- The package's file name and SHA-256 are listed in it.
+| File | Made by | What it is |
+|---|---|---|
+| `SHA256SUMS.txt` | CI | `sha256sum` output, one `<64 hex>  <file name>` line per asset, sorted by name |
+| `SHA256SUMS.txt.sigs` | trustees, offline | JSON: what is signed, plus one `{k, ed, ml}` entry per trustee |
+| `trust-chain.json` | trustees, offline | only once the trustee list has changed: every change, signed by the list it replaces |
+
+## What the app checks
+
+The update check (`UpdateCheck.cs`, Tools › Check for updates) downloads those three files from the newer
+release's assets and offers the update only when:
+
+- `SHA256SUMS.txt.sigs` is for exactly this `SHA256SUMS.txt` and this tag;
+- at least 2 distinct trustees on the list signed it, each with **both** algorithms valid (one valid and
+  one wrong is no vote; a key outside the list is no vote; a key signing twice is one vote);
+- the trustee list it names is the one built into this Jay, or reachable from it through
+  `trust-chain.json`, each step signed by enough of the list before it;
+- its release seq is not lower than the highest this Jay has accepted (kept in `release-seq.txt` in the
+  data folder), so an old signed release can't be passed off as new.
+
+Anything else: the app says the version was found but did not pass verification, and shows no button.
+When the user downloads a package from a verified release, it is kept only when its SHA-256 matches the
+signed list.
+
+About › **Verify a Jay download** runs the same check on a file the user already downloaded (with
+`SHA256SUMS.txt`, `.sigs` and `trust-chain.json` next to it). `jay-server release verify` does the same on
+the command line.
 
 ## What this protects and what it doesn't
 
 - **Protects:** updates and re-downloads for people who already run a genuine Jay. A stolen GitHub
-  account, a compromised CI run or a download mirror that swaps files cannot produce a valid
-  signature, because the private key never leaves the maintainer's offline machine.
-- **Doesn't protect:** the very first download, because that copy of Jay has no reason to trust
-  anything yet. It also doesn't remove Windows SmartScreen / Smart App Control or macOS Gatekeeper
-  warnings. Those need real code signing (see `docs/code-signing-policy.md`).
-- A self-signed Authenticode certificate is not a substitute. Windows doesn't trust it, and asking
-  users to install it as a trusted root would weaken their whole system.
+  account, a compromised CI run, a swapped mirror file or **a single trustee** cannot produce a valid
+  release; ML-DSA-65 keeps that true against a future quantum computer that breaks Ed25519.
+- **Doesn't protect:** two trustees acting together, or the very first download (that copy of Jay has
+  no reason to trust anything yet). It also doesn't remove Windows SmartScreen / Smart App Control or
+  macOS Gatekeeper warnings; those need real code signing (see `docs/code-signing-policy.md`).
+- Losing two of the three keys can't be repaired by a trust-chain step; old installs then have to
+  reinstall from a fresh download.
 
-## Keys
+## Signed bytes
 
-- The release key is an Ed25519 key, separate from the directory root key and from network signing
-  keys. Never reuse one key for two jobs.
-- Keep the private key offline: a USB stick, plus a paper backup of the base64 seed. Never put it in
-  the repo, CI secrets, a server or a cloud drive.
-- To rotate, add the new public key to `TrustedKeys` and ship a release signed with the **old** key.
-  Remove the old key later.
+Release: the lines `jay-release-v2`, tag, seq, commit (40 hex), SHA-256 of `SHA256SUMS.txt` (hex), trustee
+list hash, release log head (64 zeros until the log exists), each followed by `\n`.
 
-## Maintainer steps
+Trustee list hash: SHA-256 (hex) of `jay-trust-list-v1\n`, the number needed, `\n`, then each full public key
+(base64, Ed25519 ‖ ML-DSA-65) followed by `\n`, sorted by key id.
 
-One time:
+Trustee list change: the lines `jay-trust-change-v1`, old list hash, new list hash, seq, each followed by `\n`.
 
-```bash
-jay-server release key --out jay-release.key
-# Prints the public key; add it to ReleaseSignature.TrustedKeys in a PR.
+`SHA256SUMS.txt.sigs`:
+
+```json
+{ "v": 2, "tag": "v0.9.0", "seq": 12, "commit": "…40 hex…", "sums": "…64 hex…",
+  "trust": "…64 hex…", "log": "…64 hex…",
+  "sigs": [ { "k": "<key id>", "ed": "<Ed25519 sig>", "ml": "<ML-DSA-65 sig>" } ] }
 ```
 
-For every release, after the CI release job has published the assets:
+Unknown fields make the file invalid.
+
+## Release steps
+
+The CI release job publishes the packages and `SHA256SUMS.txt` as a **draft** release. Then:
 
 ```bash
-gh release download v0.9.0 --pattern 'SHA256SUMS.txt' --dir rel   # or download it from the Release page
-jay-server release sign --key jay-release.key --tag v0.9.0 --sums rel/SHA256SUMS.txt
-gh release upload v0.9.0 rel/SHA256SUMS.txt.sig
+# Anyone (no key needed): make the unsigned signature file. --seq is one more than the last release.
+gh release download v0.9.0 --pattern 'SHA256SUMS.txt' --dir rel
+jay-server release prepare --tag v0.9.0 --seq 12 --commit <full commit id> --sums rel/SHA256SUMS.txt
+
+# Each of two trustees, on their own offline machine:
+jay-server release cosign --key my-trust.key --sums rel/SHA256SUMS.txt
 ```
 
-Before uploading, it's worth checking one package end to end:
+`cosign` prints the version, seq, commit, every file and hash, the trustee list and who already signed
+(with whether each signature is valid), then asks the trustee to type the version. Check the commit
+against the repository before typing. The file is passed from one trustee to the next on a USB stick;
+the private keys never move.
+
+Finally upload `SHA256SUMS.txt.sigs` (and `trust-chain.json`, if there is one) to the draft, check one
+package end to end, and publish:
 
 ```bash
+gh release upload v0.9.0 rel/SHA256SUMS.txt.sigs
 gh release download v0.9.0 --pattern 'Jay-win-x64.zip' --dir rel
 jay-server release verify rel/Jay-win-x64.zip --tag v0.9.0
+gh release edit v0.9.0 --draft=false
 ```
 
-## File formats
+## Changing a trustee
 
-- `SHA256SUMS.txt`: `sha256sum` output, one `<64 hex>  <file name>` line per asset, sorted by name.
-  Lines with paths, and names listed twice with different hashes, are ignored.
-- `SHA256SUMS.txt.sig`:
+A new list (one full public key per line, from `jay-server key-public`) must be signed by enough of the
+**old** list:
 
-  ```
-  jay-release-signature-v1
-  tag: v0.9.0
-  key: <base64 Ed25519 public key>
-  sig: <base64 signature>
-  ```
+```bash
+jay-server release trust-change --key my-trust.key --to new-trustees.txt --need 2 --seq 13
+```
 
-  The signed message is `"jay-release-v1\n" + tag + "\n" + hex(SHA-256(SHA256SUMS.txt)) + "\n"`.
+The review shows who stays, who leaves, who joins, and the new list hash; the trustee types its last 6
+characters. Once enough old trustees have signed, put the new keys in `JayTrust.Keys`, and ship
+`trust-chain.json` with every later release so old installs can follow. A change's seq must not be
+lower than the last release's seq.

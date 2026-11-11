@@ -111,10 +111,14 @@ public static class Program
           jay-server account 2fa off <账号>提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
 
         发版签名（维护者在离线电脑上用，见 docs/security/release-signing.md）：
-          jay-server release key --out <发布钥匙文件>            生成发布钥匙（离线保管），打印公钥（写进 ReleaseSignature.TrustedKeys）
           jay-server release sums <文件...> [--out SHA256SUMS.txt]  算发布包的 SHA-256 清单
-          jay-server release sign --key <发布钥匙文件> --tag <v0.9.0> [--sums SHA256SUMS.txt] [--out SHA256SUMS.txt.sig]
-          jay-server release verify <安装包> [--tag <v0.9.0>] [--pub <公钥>]  核对安装包、清单和签名（清单和签名放在安装包旁边）
+          jay-server release prepare --tag <v0.9.0> --seq <序号> --commit <40 位提交号> [--sums SHA256SUMS.txt] [--out SHA256SUMS.txt.sigs]
+              写出还没人签的发布签名文件（序号每次发布加 1）
+          jay-server release cosign --key <信任钥匙文件> [--sums SHA256SUMS.txt] [--sigs SHA256SUMS.txt.sigs]
+              信任人在离线电脑上看清要签的版本、提交号和文件清单，手打版本号后签；3 人里要 2 人
+          jay-server release trust-change --key <信任钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
+              换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）
+          jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
 
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
@@ -279,26 +283,17 @@ public static class Program
     }
 
     /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
-    /// <summary>Release signing for maintainers: run on an offline machine; the private key never goes to CI or the repo.</summary>
-    internal static int ReleaseCommand(Options options, TextWriter output)
+    /// <summary>
+    /// Release signing for trustees (privacy plan items 2 and 3). Every trustee signs on their own offline machine with
+    /// their own trust key; a release needs 2 of the 3. There is no release key of its own and nothing here can run in CI.
+    /// </summary>
+    internal static int ReleaseCommand(Options options, TextWriter output, Func<IReadOnlyList<string>, string, string, bool>? confirm = null)
     {
-        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server release key|sums|sign|verify");
+        confirm ??= TrustCommands.ConfirmOnConsole;
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server release sums|prepare|cosign|trust-change|verify");
         var rest = options.Positional.Skip(1).ToList();
         switch (sub)
         {
-            case "key":
-            {
-                var path = options.Get("out") ?? throw new ArgumentException("要用 --out 指定发布钥匙文件");
-                if (File.Exists(path)) throw new IOException($"{path} 已经存在，不覆盖（换钥匙请换个文件名）");
-                var signer = NetworkSigner.Generate(out var seed);
-                var write = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
-                if (!OperatingSystem.IsWindows()) write.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-                using (var file = new StreamWriter(path, Encoding.ASCII, write)) file.Write(Convert.ToBase64String(seed) + "\n");
-                System.Security.Cryptography.CryptographicOperations.ZeroMemory(seed);
-                output.WriteLine($"发布私钥已存到 {path}：离线保管（U 盘、纸），不要放在 CI、服务器、网盘或仓库里，也不要和目录根钥匙混用");
-                output.WriteLine($"发布公钥（写进 src/Amber.Core/Launch/ReleaseSignature.cs 的 TrustedKeys）：{Convert.ToBase64String(signer.PublicKey)}");
-                return 0;
-            }
             case "sums":
             {
                 if (rest.Count == 0) throw new ArgumentException("要给出发布包文件");
@@ -309,45 +304,92 @@ public static class Program
                 else { File.WriteAllText(outPath, text); output.WriteLine($"已写入 {outPath}（{rest.Count} 个文件）"); }
                 return 0;
             }
-            case "sign":
+            case "prepare":
             {
-                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定发布钥匙文件");
-                var tag = options.Get("tag") ?? throw new ArgumentException("要用 --tag 指定版本（例如 v0.9.0）");
+                var tag = ReleaseSignature.NormalizeTag(options.Get("tag") ?? throw new ArgumentException("要用 --tag 指定版本（例如 v0.9.0）"));
+                var seq = long.Parse(options.Get("seq") ?? throw new ArgumentException("要用 --seq 指定发布序号（比上一版大 1）"), System.Globalization.CultureInfo.InvariantCulture);
+                var commit = (options.Get("commit") ?? throw new ArgumentException("要用 --commit 指定完整的 40 位提交号")).ToLowerInvariant();
                 var sumsPath = options.Get("sums") ?? ReleaseSignature.SumsFileName;
-                var outPath = options.Get("out") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(sumsPath)) ?? ".", ReleaseSignature.SignatureFileName);
                 var sums = File.ReadAllBytes(sumsPath);
-                var listed = ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums));
-                if (listed.Count == 0) throw new InvalidDataException($"{sumsPath} 里没有可用的 SHA-256 行");
-                var signer = NetworkSigner.FromSeed(File.ReadAllText(keyPath));
-                File.WriteAllText(outPath, ReleaseSignature.Sign(signer, tag, sums));
-                var trusted = ReleaseSignature.TrustedKeys.Contains(Convert.ToBase64String(signer.PublicKey));
-                output.WriteLine($"已签名 {listed.Count} 个文件（{ReleaseSignature.NormalizeTag(tag)}），写入 {outPath}。把它上传到同一个 Release。");
-                if (!trusted) output.WriteLine("注意：这把钥匙的公钥还不在 ReleaseSignature.TrustedKeys 里，现有的 Jay 认不出这个签名。");
+                if (ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums)).Count == 0) throw new InvalidDataException($"{sumsPath} 里没有可用的 SHA-256 行");
+                var trust = options.Get("trust") is { } t ? ReadTrustList(t, options.Get("need")).Hash : TrustList.Jay.Hash;
+                var statement = new ReleaseStatement(tag, seq, commit, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(sums)), trust,
+                    (options.Get("log") ?? ReleaseStatement.NoLog).ToLowerInvariant());
+                if (!statement.IsValid) throw new ArgumentException("--tag、--seq、--commit 或 --log 的格式不对");
+                var outPath = options.Get("out") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(sumsPath)) ?? ".", ReleaseSignature.SignatureFileName);
+                if (File.Exists(outPath)) throw new IOException($"{outPath} 已经存在，不覆盖");
+                File.WriteAllText(outPath, ReleaseSignature.Create(statement));
+                output.WriteLine($"已写入 {outPath}（还没有人签）。拿到离线电脑上，至少 2 位信任人各自用 release cosign 签。");
+                return 0;
+            }
+            case "cosign":
+            {
+                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定你的信任钥匙文件");
+                var sumsPath = options.Get("sums") ?? ReleaseSignature.SumsFileName;
+                var sigsPath = options.Get("sigs") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(sumsPath)) ?? ".", ReleaseSignature.SignatureFileName);
+                var manifest = File.ReadAllText(sigsPath);
+                var sums = File.ReadAllBytes(sumsPath);
+                var lines = TrustCommands.DescribeRelease(manifest, sums, options.Get("trust") is { } t ? ReadTrustList(t, options.Get("need")) : TrustList.Jay);
+                var tag = ReleaseManifest.Parse(manifest)!.Statement.Tag;
+                if (!confirm(lines, "版本号", tag)) return 3;
+                var signed = ReleaseSignature.Cosign(manifest, TrustCommands.LoadKey(keyPath));
+                var outPath = options.Get("out") ?? sigsPath;
+                File.WriteAllText(outPath, signed);
+                output.WriteLine($"已签 {tag}，写入 {outPath}。签够 2 位后，把它和 SHA256SUMS.txt 一起上传到同一个 Release。");
+                return 0;
+            }
+            case "trust-change":
+            {
+                // From the list this Jay was built with (or --from), to the list in --to: one public key per line.
+                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定你的信任钥匙文件");
+                var from = options.Get("from") is { } f ? ReadTrustList(f, options.Get("from-need")) : TrustList.Jay;
+                var to = ReadTrustList(options.Get("to") ?? throw new ArgumentException("要用 --to 指定新名单（每行一把完整公钥）"), options.Get("need"));
+                var seq = long.Parse(options.Get("seq") ?? throw new ArgumentException("要用 --seq 指定这次换名单的序号（不小于上一版发布序号）"), System.Globalization.CultureInfo.InvariantCulture);
+                var chainPath = options.Get("chain") ?? ReleaseSignature.ChainFileName;
+                var chain = File.Exists(chainPath) ? File.ReadAllText(chainPath) : null;
+                if (!confirm(TrustCommands.DescribeTrustChange(from, to, seq), "新名单编号", TrustCommands.CodeOf(to.Hash))) return 3;
+                File.WriteAllText(options.Get("out") ?? chainPath, TrustChain.Cosign(chain, from, to.Keys, to.Need, seq, TrustCommands.LoadKey(keyPath)));
+                output.WriteLine($"已签换名单，写入 {options.Get("out") ?? chainPath}。旧名单里签够 {from.Need} 位后，把它放进之后每个 Release。");
                 return 0;
             }
             case "verify":
             {
                 var package = rest.FirstOrDefault() ?? throw new ArgumentException("要给出安装包文件");
-                var keys = options.Get("pub") is { } pub ? new[] { pub } : null;
-                var check = ReleaseSignature.VerifyPackageAsync(package, options.Get("tag"), options.Get("sums"), options.Get("sig"), keys).GetAwaiter().GetResult();
-                output.WriteLine(check.Verdict switch
-                {
-                    ReleaseVerdict.Valid => $"通过：{Path.GetFileName(package)} 是 {check.Tag} 的正式发布包，签名来自 Jay 发布钥匙。",
-                    ReleaseVerdict.Unsigned => "没有签名：安装包旁边找不到 SHA256SUMS.txt 和 SHA256SUMS.txt.sig。",
-                    ReleaseVerdict.NoTrustedKey => "这个版本的程序里还没有发布公钥，没法核对（可以用 --pub 指定）。",
-                    ReleaseVerdict.Malformed => "签名文件格式不对。",
-                    ReleaseVerdict.UnknownKey => "签名不是 Jay 的发布钥匙签的。不要安装。",
-                    ReleaseVerdict.BadSignature => "签名和清单对不上（清单被改过）。不要安装。",
-                    ReleaseVerdict.WrongTag => $"签名属于 {check.Tag}，不是你要的版本。不要安装。",
-                    ReleaseVerdict.NotListed => "清单里没有这个文件名。",
-                    ReleaseVerdict.HashMismatch => "安装包的 SHA-256 和清单不一样（文件被改过或没下载完整）。不要安装。",
-                    _ => check.Verdict.ToString(),
-                });
+                var own = options.Get("trust") is { } t ? ReadTrustList(t, options.Get("need")) : null;
+                var check = ReleaseSignature.VerifyPackageAsync(package, options.Get("tag"), options.Get("sums"), options.Get("sigs"), options.Get("chain"), own)
+                    .GetAwaiter().GetResult();
+                output.WriteLine(DescribeVerdict(check, Path.GetFileName(package)));
                 return check.IsValid ? 0 : 2;
             }
             default:
                 throw new ArgumentException($"不认识的 release 子命令：{sub}");
         }
+    }
+
+    internal static string DescribeVerdict(ReleaseCheck check, string package) => check.Verdict switch
+    {
+        ReleaseVerdict.Valid => $"通过：{package} 是 {check.Tag}（第 {check.Seq} 版）的正式发布包，够数的 Jay 信任人签过。",
+        ReleaseVerdict.Unsigned => "没有签名：安装包旁边找不到 SHA256SUMS.txt 和 SHA256SUMS.txt.sigs。",
+        ReleaseVerdict.NoTrustedKey => "这个版本的程序里还没有信任人公钥，没法核对。",
+        ReleaseVerdict.Malformed => "签名文件格式不对。",
+        ReleaseVerdict.SumsMismatch => "签名文件和 SHA256SUMS.txt 对不上（清单被改过）。不要安装。",
+        ReleaseVerdict.Rollback => $"{check.Tag} 比已经装过的版本旧。不要安装。",
+        ReleaseVerdict.BrokenChain => "这个版本写的信任人名单，从程序自带的名单接不上（trust-chain.json 缺了或签得不够）。不要安装。",
+        ReleaseVerdict.NotEnoughSignatures => "签的信任人不够（要 3 人里 2 人，两种签名都要对）。不要安装。",
+        ReleaseVerdict.WrongTag => $"签名属于 {check.Tag}，不是你要的版本。不要安装。",
+        ReleaseVerdict.NotListed => "清单里没有这个文件名。",
+        ReleaseVerdict.HashMismatch => "安装包的 SHA-256 和清单不一样（文件被改过或没下载完整）。不要安装。",
+        _ => check.Verdict.ToString(),
+    };
+
+    /// <summary>A trustee list file: one full public key (base64) per line; # starts a comment.</summary>
+    private static TrustList ReadTrustList(string path, string? need)
+    {
+        var keys = File.ReadAllLines(path).Select(l => l.Split('#')[0].Trim()).Where(l => l.Length > 0).Select(Convert.FromBase64String).ToList();
+        if (keys.Count == 0 || keys.Any(k => k.Length != TrustSigner.PublicKeySize)) throw new InvalidDataException($"{path} 里要每行一把完整公钥（{TrustSigner.PublicKeySize} 字节）");
+        var n = need is null ? keys.Count / 2 + 1 : int.Parse(need, System.Globalization.CultureInfo.InvariantCulture);
+        if (n < 1 || n > keys.Count) throw new ArgumentException("--need 要在 1 和公钥数之间");
+        return new TrustList(keys, n);
     }
 
     internal static int NetworkCommand(Options options, TextWriter output, string? root = null)

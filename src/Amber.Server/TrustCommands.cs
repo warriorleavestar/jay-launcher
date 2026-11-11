@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using Amber.Core.Launch;
 using Amber.Core.Multiplayer.Public;
 
 namespace Amber.Server;
@@ -131,6 +132,52 @@ internal static class TrustCommands
         $"网络：{network}",
         $"到期：{expires.ToString("yyyy-MM-dd HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture)}",
     ];
+
+    /// <summary>
+    /// What a release signature file says, checked against the SHA256SUMS.txt next to it: every file and hash, the commit,
+    /// the trustee list, and who already signed (and whether each of those signatures is valid). Throws when the file is
+    /// malformed or names a different SHA256SUMS.txt.
+    /// </summary>
+    internal static List<string> DescribeRelease(string manifestJson, byte[] sums, TrustList own)
+    {
+        var manifest = ReleaseManifest.Parse(manifestJson) ?? throw new InvalidDataException("不是有效的发布签名文件（格式不对或有不认识的字段），拒绝签名");
+        var s = manifest.Statement;
+        if (Convert.ToHexStringLower(SHA256.HashData(sums)) != s.SumsHash)
+            throw new InvalidDataException("签名文件写的 SHA256SUMS.txt 和手上这份不一样，拒绝签名");
+        var files = ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums));
+        var lines = new List<string>
+        {
+            $"版本号：{s.Tag}",
+            $"发布序号：{s.Seq}",
+            $"提交号：{s.Commit}（到仓库里对一下，是不是要发的那个提交）",
+            $"信任人名单：{Group(s.TrustHash[..16].ToUpperInvariant())}{(s.TrustHash == own.Hash ? "（就是现在这份）" : "（不是程序自带的名单，要有 trust-chain.json 才认）")}",
+            $"发布日志：{(s.LogHead == ReleaseStatement.NoLog ? "还没有" : s.LogHead)}",
+            $"文件（{files.Count} 个）：",
+        };
+        foreach (var (name, hash) in files.OrderBy(p => p.Key, StringComparer.Ordinal)) lines.Add($"  {hash}  {name}");
+        var message = s.Bytes();
+        if (manifest.Signatures.Count == 0) lines.Add("已经签过的：还没有人");
+        for (var i = 0; i < manifest.Signatures.Count; i++)
+        {
+            var sig = manifest.Signatures[i];
+            var valid = own.Votes(message, [sig]) == 1;
+            lines.Add($"已签 {i + 1}：{Fingerprint(sig.KeyId)}{(valid ? "（Jay 信任人，签名对）" : "（不是这份名单里的人，或签名不对）")}");
+        }
+        lines.Add($"被签内容的 SHA-256（和另一位信任人对一下）：{Digest(message)}");
+        return lines;
+    }
+
+    /// <summary>What a trustee list change says: who leaves, who joins, how many must sign, seq.</summary>
+    internal static List<string> DescribeTrustChange(TrustList from, TrustList to, long seq)
+    {
+        var lines = new List<string> { $"旧名单：{Group(from.Hash[..16].ToUpperInvariant())}，{from.Ids.Count} 人里要 {from.Need} 人签" };
+        foreach (var id in from.Ids) lines.Add($"  {(to.Ids.Any(x => x.AsSpan().SequenceEqual(id)) ? "留下" : "移除")}：{Fingerprint(id)}");
+        lines.Add($"新名单：{Group(to.Hash[..16].ToUpperInvariant())}，{to.Ids.Count} 人里要 {to.Need} 人签");
+        foreach (var id in to.Ids.Where(id => !from.Ids.Any(x => x.AsSpan().SequenceEqual(id)))) lines.Add($"  新加：{Fingerprint(id)}");
+        lines.Add($"序号：{seq}");
+        lines.Add($"新名单编号（完整）：{to.Hash}");
+        return lines;
+    }
 
     private static IEnumerable<string> SignerLines(IEnumerable<byte[]> signers)
     {
