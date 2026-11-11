@@ -10,7 +10,8 @@ desktop OpenGL API used by Minecraft Java Edition to Android's Vulkan driver.
 - License: Mesa's MIT, SGI and Khronos notices from the source archive
 
 The small Jay patch selects Mesa's portable mutex/condition-variable barrier
-on Android API 23, where the NDK does not expose `pthread_barrier_*`.
+on Android API 23, where the NDK does not expose `pthread_barrier_*`, and omits
+the unused software DRI winsys that requires unavailable System V shared memory.
 
 This is a graphics library component, not a dependency on FCL, PojavLauncher,
 Amethyst, or any other Minecraft launcher.

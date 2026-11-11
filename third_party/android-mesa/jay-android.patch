@@ -12,7 +12,7 @@ diff --git a/src/util/u_thread.c b/src/util/u_thread.c
 diff --git a/src/util/u_thread.h b/src/util/u_thread.h
 --- a/src/util/u_thread.h
 +++ b/src/util/u_thread.h
-@@ -116,8 +116,8 @@ static inline bool u_thread_is_self(thrd_t thread)
+@@ -116,7 +116,7 @@ static inline bool u_thread_is_self(thrd_t thread)
   * util_barrier
   */
  
@@ -21,3 +21,15 @@ diff --git a/src/util/u_thread.h b/src/util/u_thread.h
  
  typedef pthread_barrier_t util_barrier;
  
+diff --git a/src/gallium/meson.build b/src/gallium/meson.build
+--- a/src/gallium/meson.build
++++ b/src/gallium/meson.build
+@@ -29,7 +29,7 @@ inc_gallium_winsys_sw = include_directories('winsys/sw')
+ subdir('auxiliary')
+ subdir('auxiliary/pipe-loader')
+ subdir('winsys/sw/null')
+-if with_dri
++if with_dri and not with_platform_android
+   subdir('winsys/sw/dri')
+ else
+   libswdri = []
