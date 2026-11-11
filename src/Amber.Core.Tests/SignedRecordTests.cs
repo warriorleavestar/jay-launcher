@@ -91,9 +91,9 @@ public class SignedRecordTests
         var now = DateTimeOffset.UtcNow;
         var older = signer.Sign(lookup, [1], TimeSpan.FromHours(1), now);
         var newer = signer.Sign(lookup, [2], TimeSpan.FromHours(1), now);
-        Assert.True(server.Handle(PutOp(newer), secure: true, source: null)["ok"]?.GetValue<bool>());
-        Assert.True(server.Handle(PutOp(newer), secure: true, source: null)["ok"]?.GetValue<bool>());
-        Assert.Equal("stale", server.Handle(PutOp(older), secure: true, source: null)["error"]?.GetValue<string>());
+        Assert.True(server.Handle(PutOp(newer), source: null)["ok"]?.GetValue<bool>());
+        Assert.True(server.Handle(PutOp(newer), source: null)["ok"]?.GetValue<bool>());
+        Assert.Equal("stale", server.Handle(PutOp(older), source: null)["error"]?.GetValue<string>());
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class SignedRecordTests
         var lookup = SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16));
         var good = signer.Sign(lookup, [1, 2, 3], TimeSpan.FromHours(1), now);
 
-        string? Put(SignedRecord r) => server.Handle(PutOp(r), secure: true, source: null)["error"]?.GetValue<string>();
+        string? Put(SignedRecord r) => server.Handle(PutOp(r), source: null)["error"]?.GetValue<string>();
         Assert.Equal("bad", Put(good with { Blob = [1, 2, 4] }));
         Assert.Equal("bad", Put(good with { Seq = good.Seq + 1 }));
         Assert.Equal("bad", Put(good with { LookupKey = SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)) }));
@@ -114,9 +114,6 @@ public class SignedRecordTests
         Assert.Equal("bad", Put(signer.Sign(lookup, [1], TimeSpan.FromHours(1), now - TimeSpan.FromHours(2))));
         var tooLong = new SignedRecord(lookup, signer.PublicKey, 1, now + SignedRecord.MaxLifetime + TimeSpan.FromHours(1), [1], []);
         Assert.Equal("bad", Put(tooLong));
-        // Legacy (unauthenticated) requests never reach the store.
-        Assert.Equal("secure", server.Handle(PutOp(good))["error"]?.GetValue<string>());
-        Assert.Equal("secure", server.Handle(new JsonObject { ["op"] = "rec.get", ["lookup"] = Convert.ToHexStringLower(lookup) })["error"]?.GetValue<string>());
         Assert.Equal(0, server.RecordCount);
     }
 
@@ -128,12 +125,12 @@ public class SignedRecordTests
         await using var server = Server(key, () => now);
         var lookup = SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16));
         var first = new RecordSigner();
-        Assert.True(server.Handle(PutOp(first.Sign(lookup, [1], TimeSpan.FromMinutes(5), now)), secure: true, source: null)["ok"]?.GetValue<bool>());
+        Assert.True(server.Handle(PutOp(first.Sign(lookup, [1], TimeSpan.FromMinutes(5), now)), source: null)["ok"]?.GetValue<bool>());
         now += TimeSpan.FromMinutes(6);
         Assert.Equal(0, server.RecordCount);
-        Assert.Equal("not_found", server.Handle(new JsonObject { ["op"] = "rec.get", ["lookup"] = Convert.ToHexStringLower(lookup) }, secure: true, source: null)["error"]?.GetValue<string>());
+        Assert.Equal("not_found", server.Handle(new JsonObject { ["op"] = "rec.get", ["lookup"] = Convert.ToHexStringLower(lookup) }, source: null)["error"]?.GetValue<string>());
         // Once expired, another signer may claim it.
-        Assert.True(server.Handle(PutOp(new RecordSigner().Sign(lookup, [2], TimeSpan.FromMinutes(5), now)), secure: true, source: null)["ok"]?.GetValue<bool>());
+        Assert.True(server.Handle(PutOp(new RecordSigner().Sign(lookup, [2], TimeSpan.FromMinutes(5), now)), source: null)["ok"]?.GetValue<bool>());
     }
 
     [Fact]
@@ -144,7 +141,7 @@ public class SignedRecordTests
         await using var server = Server(key, () => now);
         var signer = new RecordSigner();
         JsonObject PutFrom(string source) =>
-            server.Handle(PutOp(signer.Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now)), secure: true, source);
+            server.Handle(PutOp(signer.Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now)), source);
         for (var i = 0; i < RoomDirectoryServer.MaxRecordPutsPerSource; i++) Assert.True(PutFrom("10.235.0.9")["ok"]?.GetValue<bool>());
         Assert.Equal("rate", PutFrom("10.235.0.9")["error"]?.GetValue<string>());
         Assert.True(PutFrom("10.235.0.10")["ok"]?.GetValue<bool>());
@@ -162,8 +159,8 @@ public class SignedRecordTests
         var now = DateTimeOffset.UtcNow;
         var old = signer.Sign(lookup, [1], TimeSpan.FromHours(1), now);
         var fresh = signer.Sign(lookup, [2], TimeSpan.FromHours(1), now);
-        s1.Handle(PutOp(fresh), secure: true, source: null);
-        s2.Handle(PutOp(old), secure: true, source: null);
+        s1.Handle(PutOp(fresh), source: null);
+        s2.Handle(PutOp(old), source: null);
         Assert.Equal([2], (await Client((s1, k1), (s2, k2)).GetRecordAsync(lookup, Is(signer), default))!.Blob);
     }
 

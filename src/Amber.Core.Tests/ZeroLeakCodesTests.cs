@@ -31,7 +31,7 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         }
 
         public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.7");
-        public PublicNetworkProfile? Profile => profile;
+        public PublicNetworkProfile? Profile => profile ?? ZeroLeakCodesTests.Profile();
     }
 
     private static PublicNetworkProfile Profile(IReadOnlyList<byte[]>? pinned = null, IReadOnlyList<byte[]>? roots = null) =>
@@ -453,7 +453,7 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         var client = new RoomDirectoryClient(net) { KeyMemory = memory };
         Assert.Empty(await client.ListAsync(default));
         Assert.Equal(real.PublicKey, memory.Get("jay-net-test", PublicNetworkProfile.DirectoryIp));
-        // Someone else takes the address with another key, or speaks only the old protocol: refused either way.
+        // Someone else takes the address with another key, or with a throwaway one: refused either way.
         net.Port = StartDirectory(impostor).Port;
         await Assert.ThrowsAsync<DirectoryKeyChangedException>(() => client.ListAsync(default));
         net.Port = StartDirectory(null).Port;
@@ -461,13 +461,13 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task UnpinnedNetworkStillWorksWithAnOldDirectory()
+    public async Task DirectoryWithoutAConfiguredKeyIsStillEncrypted()
     {
         var memory = new DirectoryKeyMemory(Path.Combine(_dir, DirectoryKeyMemory.FileName));
-        var old = StartDirectory(null);
-        var client = new RoomDirectoryClient(new Loopback(old.Port, Profile())) { KeyMemory = memory };
+        var throwaway = StartDirectory(null);
+        var client = new RoomDirectoryClient(new Loopback(throwaway.Port, Profile())) { KeyMemory = memory };
         Assert.Empty(await client.ListAsync(default));
-        Assert.Null(memory.Get("jay-net-test", PublicNetworkProfile.DirectoryIp));
+        Assert.NotNull(memory.Get("jay-net-test", PublicNetworkProfile.DirectoryIp));
     }
 
     [Fact]

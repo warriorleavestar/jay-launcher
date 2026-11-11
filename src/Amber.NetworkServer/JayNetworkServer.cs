@@ -154,14 +154,6 @@ public sealed class JayNetworkServerBuilder
 
     public JayNetworkServerBuilder UseLog(Action<string> log) { Log = log; return this; }
 
-    internal bool SecureDirectoryOnly;
-
-    /// <summary>
-    /// Answer only authenticated directory requests (see <c>docs/security/directory-identity.md</c>). Jay versions that
-    /// don't know "dirKeys" can then no longer use this directory, so pair it with policy.minVersion.
-    /// </summary>
-    public JayNetworkServerBuilder RequireDirectoryChannel() { SecureDirectoryOnly = true; return this; }
-
     internal NodeHardwareGuard? HardwareGuard;
     internal bool HardwareDryRun;
 
@@ -302,7 +294,6 @@ public sealed class JayNetworkServer : IAsyncDisposable
                     ? X25519KeyPair.FromPrivateKey(Convert.FromBase64String(Encoding.ASCII.GetString(sealedDir).Trim()))
                     : DirectoryChannel.LoadOrCreateIdentity(DirectoryKeyPath),
                 NetworkSecret = Profile.Secret,
-                AcceptLegacyClients = !_b.SecureDirectoryOnly,
             };
             if (File.Exists(DirectoryCertificatePath))
             {

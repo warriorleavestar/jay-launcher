@@ -23,7 +23,8 @@ public class DirectoryIdentityTests
         }
 
         public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.7");
-        public PublicNetworkProfile? Profile => profile;
+        // Pinning nothing still needs the network's secret: the channel's psk comes from it.
+        public PublicNetworkProfile? Profile => profile ?? Pinned();
     }
 
     /// <summary>Announces a public room: a directory that got the request would hold it afterwards.</summary>
@@ -41,8 +42,8 @@ public class DirectoryIdentityTests
     private static PublicNetworkProfile Pinned(params byte[][] keys) =>
         new("test", "Test", "jay-net-test", Secret, ["tcp://127.0.0.1:1"]) { DirectoryKeys = keys };
 
-    private static RoomDirectoryServer Server(X25519KeyPair? identity, bool legacy = true, string secret = Secret) =>
-        new(IPAddress.Loopback, 0) { Identity = identity, NetworkSecret = secret, AcceptLegacyClients = legacy };
+    private static RoomDirectoryServer Server(X25519KeyPair? identity, string secret = Secret) =>
+        new(IPAddress.Loopback, 0) { Identity = identity, NetworkSecret = secret };
 
     [Fact]
     public async Task PinnedClientTalksToTheRealDirectory()
@@ -101,29 +102,36 @@ public class DirectoryIdentityTests
     }
 
     [Fact]
-    public async Task PinnedClientNeverFallsBackToALegacyDirectory()
+    public async Task PinnedClientRefusesADirectoryWithAnotherKey()
     {
         using var real = X25519KeyPair.Generate();
         await using var server = Server(identity: null);
         var client = new RoomDirectoryClient(new Loopback(server.Port, Pinned(real.PublicKey)));
         await Assert.ThrowsAnyAsync<IOException>(() => Announce(client));
         Assert.Equal(0, server.Count);
-        // The same server answers a legacy client, so it was the pinning that stopped the request.
+        // The same server answers a client that pins nothing (encrypted, unauthenticated), so it was the pinning that stopped the request.
         await Announce(new RoomDirectoryClient(new Loopback(server.Port)));
         Assert.Equal(1, server.Count);
     }
 
     [Fact]
-    public async Task LegacyClientsStillWorkUnlessTurnedOff()
+    public async Task PlaintextJsonRequestsGetNoReply()
     {
         using var identity = X25519KeyPair.Generate();
-        await using (var server = Server(identity))
-            Assert.Empty(await new RoomDirectoryClient(new Loopback(server.Port)).ListAsync(default));
-        await using (var strict = Server(identity, legacy: false))
-        {
-            await Assert.ThrowsAnyAsync<IOException>(() => new RoomDirectoryClient(new Loopback(strict.Port)).ListAsync(default));
-            Assert.Empty(await new RoomDirectoryClient(new Loopback(strict.Port, Pinned(identity.PublicKey))).ListAsync(default));
-        }
+        await using var server = Server(identity);
+        using var raw = new TcpClient();
+        await raw.ConnectAsync(IPAddress.Loopback, server.Port);
+        var stream = raw.GetStream();
+        await stream.WriteAsync("{\"op\":\"list\"}\n"u8.ToArray());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var buffer = new byte[64];
+        // The server drops the connection without answering. Closing with our request still unread can arrive as a reset, not a clean end of stream.
+        int read;
+        try { read = await stream.ReadAsync(buffer, timeout.Token); }
+        catch (IOException) { read = 0; }
+        Assert.Equal(0, read);
+        // A client that pins nothing still gets through, over the encrypted channel.
+        Assert.Empty(await new RoomDirectoryClient(new Loopback(server.Port)).ListAsync(default));
     }
 
     [Fact]
@@ -193,7 +201,7 @@ public class DirectoryIdentityTests
         Assert.Equal(key.PublicKey, Assert.Single(parsed.Info.DirectoryKeys!));
         Assert.Equal(key.PublicKey, Assert.Single(parsed.ToProfile().DirectoryKeys));
 
-        // No dirKeys: nothing pinned (legacy protocol).
+        // No dirKeys: nothing pinned (trust on first use).
         var plain = NetworkString.Parse(NetworkString.Create(info with { DirectoryKeys = null }, signer), []);
         Assert.Null(plain.Info.DirectoryKeys);
         Assert.Empty(plain.ToProfile().DirectoryKeys);

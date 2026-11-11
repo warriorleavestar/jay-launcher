@@ -16,7 +16,6 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     private readonly Func<IReadOnlyList<string>> _lookupKeys;
     private readonly Func<byte[]?>? _searchKey;
     private readonly Func<string?>? _account;
-    private readonly Action<string>? _mail;
     private readonly Action<string>? _log;
     private readonly TimeSpan _every;
     private readonly CancellationTokenSource _cts = new();
@@ -33,8 +32,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
 
     /// <param name="listing">当前的房间信息（每次续期时取，地址由这里填）。</param>
     /// <param name="lookupKeys">现在还能用的邀请码对应的查找键（<see cref="RoomDirectoryProtocol.LookupKey"/>）。</param>
-    /// <param name="mail">目录捎来的话（直连房间的回复码）。</param>
-    public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<string>> lookupKeys, Action<string>? mail = null,
+    public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<string>> lookupKeys,
         Action<string>? log = null, TimeSpan? every = null, RoomDirectoryClient? client = null, Func<byte[]?>? searchKey = null, Func<string?>? account = null)
     {
         _account = account;
@@ -43,7 +41,6 @@ public sealed class RoomAnnouncer : IAsyncDisposable
         _client = client ?? new RoomDirectoryClient(network);
         _listing = listing;
         _lookupKeys = lookupKeys;
-        _mail = mail;
         _log = log;
         _every = every ?? RoomDirectoryProtocol.RenewEvery;
         _loop = Task.Run(LoopAsync);
@@ -98,8 +95,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                     }
                     return;
                 }
-                var mails = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
-                foreach (var m in mails) _mail?.Invoke(m);
+                await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }

@@ -65,7 +65,6 @@ public static class Program
               --rate-limit 3,6,600            每人同时几个房间、每人每分钟新发布几次、整个目录每分钟几个新房间（默认 3,6,600；--no-rate-limit 关掉）
               --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
               --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
-              --secure-directory-only         只回应验证过目录公钥的请求（目录公钥在数据目录的 directory.key，启动时打印，写进连接串的 dirKeys）
               --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
@@ -750,11 +749,8 @@ public static class Program
             builder.AddGate(filter);
             log($"屏蔽词 {filter.Count} 个");
         }
-        if (options.Has("secure-directory-only"))
-        {
-            if (options.Has("seed-only")) throw new ArgumentException("--seed-only 的节点不跑目录，不能用 --secure-directory-only");
-            builder.RequireDirectoryChannel();
-        }
+        // The directory only speaks the authenticated channel now; the old flag is accepted so existing scripts keep running.
+        if (options.Has("secure-directory-only")) log("--secure-directory-only is the default now and can be removed");
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
         if (options.Has("no-volunteers")) builder.WithoutVolunteers();
         else if (options.Get("rate-limit") is { } rate)
