@@ -201,7 +201,7 @@ Jay 只有一个承诺：**只为你要做的事联网。**
 - 直连房间会向你设置的 STUN 服务器（默认 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`，可改可清空）询问你的外部地址，它们不经过游戏数据；也可能请你的路由器临时映射一个端口，结束联机时删掉。
 </details>
 
-代码完全开源，欢迎自己查。完整的隐私政策和 Jay 对系统的改动见[代码签名与隐私政策](docs/code-signing-policy.md#隐私政策--privacy-policy)。
+代码完全开源，欢迎自己查。完整的隐私政策和 Jay 对系统的改动见[隐私政策](docs/privacy.md)。
 
 ## Jay 家族
 
@@ -257,7 +257,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 <details>
 <summary><b>Windows 提示“已保护你的电脑”怎么办？</b></summary>
 
-目前 Windows 版还没有代码签名，SmartScreen 可能会拦截。确认文件是从本项目的 Releases 下载的，点“更多信息”→“仍要运行”即可。签名生效后版本说明里会写明，见[代码签名政策](docs/code-signing-policy.md)。
+目前 Windows 版还没有代码签名，SmartScreen 可能会拦截。确认文件是从本项目的 Releases 下载的，点“更多信息”→“仍要运行”即可。
 </details>
 
 <details>

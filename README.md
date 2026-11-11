@@ -201,7 +201,7 @@ Jay is built on a simple promise: **it only goes online to do what you asked.**
 - Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address. They carry no game data. Jay may also ask your router for a temporary port mapping, removed when the session ends.
 </details>
 
-The code is open, so you can check all of this yourself. The full privacy policy and the system changes Jay makes are in the [code signing and privacy policy](docs/code-signing-policy.md#隐私政策--privacy-policy).
+The code is open, so you can check all of this yourself. The full privacy policy and the system changes Jay makes are in the [privacy policy](docs/privacy.md).
 
 ## The Jay family
 
@@ -257,7 +257,7 @@ Settings live in `Amber/settings.json` under your system's app-data folder (`%AP
 <details>
 <summary><b>Windows says it protected my PC. What should I do?</b></summary>
 
-The Windows builds aren't code-signed yet, so SmartScreen may block them. Make sure you downloaded the file from this project's Releases, then choose "More info" → "Run anyway". Release notes will say when signing takes effect; see the [code signing policy](docs/code-signing-policy.md).
+The Windows builds aren't code-signed yet, so SmartScreen may block them. Make sure you downloaded the file from this project's Releases, then choose "More info" → "Run anyway".
 </details>
 
 <details>
