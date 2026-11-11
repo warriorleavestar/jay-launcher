@@ -552,31 +552,32 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
             return;
         }
-        var port = int.TryParse(ManualPort.Trim(), out var manual) && manual is > 0 and < 65536 ? manual : SelectedLanGame?.Game.Port;
-        if (port is null)
-        {
-            SetStatus(StatusMessage.Warning("multiplayer.lan.port_required"));
-            return;
-        }
-        if (!await GamePortReadyAsync(port.Value, manual: port == manual))
-        {
-            SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
-            return;
-        }
         if ((TestPeers ?? _service.MultiplayerPeers).Count == 0 && TestListeners is null)
         {
             SetStatus(StatusMessage.Warning("multiplayer.nodes.host_required"));
             return;
         }
+        // No LAN world yet: the room opens on a relay and picks the game up when it's opened to LAN.
+        if (await HostGamePortAsync(checkManual: true) is not (var gamePort, var relay)) return;
+        if (!IsIdle)
+        {
+            if (relay is not null) await relay.DisposeAsync();
+            return;
+        }
         // 房间的网络名和密钥随机生成，只在批准加入时经加密的敲门通道发给对方；没有可以直接分享的房间码，靠“邀请”。
-        var credentials = NewCredentials(port.Value, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft));
+        var credentials = NewCredentials(gamePort, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft));
         // 成员表：批准一个人时发给他自己的钥匙（游戏通道和聊天按它认人）；房主自己的聊天客户端也有一把。
         var members = new MemberTable();
         var room = credentials.ToHostRoom(members, ChatName);
         if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
                 AllowProxy = AllowGameProxy,
-            })) return;
+            }))
+        {
+            if (relay is not null) await relay.DisposeAsync();
+            return;
+        }
+        AdoptGameRelay(relay);
         Mode = "host";
         RoomCodeText = "";
         _room = room;
@@ -587,7 +588,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
-            : L.T("multiplayer.room.created");
+            : relay is not null ? L.T("multiplayer.relay.created") : L.T("multiplayer.room.created");
     }
 
     [RelayCommand]
@@ -1165,6 +1166,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // 直连房间的 EasyTier 归直连会话管，由它一起关掉。
         if (_direct is not null) _ = StopDirectAsync();
         else _session?.Dispose();
+        StopGameRelay();
         _session = null;
         _service.ActiveMultiplayer = null;
         SyncHotspotSharing();

@@ -50,8 +50,17 @@ public sealed partial class MultiplayerViewModel
             ? L.F("multiplayer.guide.game_ready", game.Label)
             : L.T("multiplayer.guide.game_missing");
 
-    partial void OnSelectedLanGameChanged(LanGameItem? value) => NotifyGameStatus();
-    partial void OnManualPortChanged(string value) => NotifyGameStatus();
+    partial void OnSelectedLanGameChanged(LanGameItem? value)
+    {
+        NotifyGameStatus();
+        _ = RetargetGameRelayAsync(typed: false);
+    }
+
+    partial void OnManualPortChanged(string value)
+    {
+        NotifyGameStatus();
+        _ = RetargetGameRelayAsync(typed: true);
+    }
 
     private void NotifyGameStatus()
     {

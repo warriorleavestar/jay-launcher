@@ -312,7 +312,7 @@ CurseForge 的接口需要 API Key，见上面的[配置](#配置)。Modrinth �
 
 Jay 以 [PolyForm Noncommercial 1.0.0 许可证](LICENSE)公开源码。个人使用和其他非商业用途免费。个人和小团队可以按[商用例外条款](COMMERCIAL-EXCEPTION.md)申请免费商用；其他商用都需要 Jay 开发团队的书面授权。（以英文条款为准。）
 
-这次改动之前发布的版本（到 v0.7.0 为止）仍然适用 MIT 许可证。
+这个许可证现在适用于 Jay 的所有版本，包括最初以 MIT 许可证发布的 v0.7.0 及更早版本。Jay 开发团队不再以 MIT 提供任何版本；已经按 MIT 拿到旧版本副本的人，对那份副本的 MIT 权利不受影响。
 
 任何地方（包括旧文档、发布说明和别处的副本）如果还说 Jay 是“开源”或“MIT”，都是过时的描述，以 [LICENSE](LICENSE) 和 [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) 为准。发现这样的描述，请[提 issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose)。
 

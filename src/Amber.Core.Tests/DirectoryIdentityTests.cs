@@ -163,14 +163,16 @@ public class DirectoryIdentityTests
     [Fact]
     public async Task ClientsFirstMessageHasTheExpectedLength()
     {
-        // The directory drops any first frame that isn't 48 bytes before doing DH; make sure a real client's is.
+        // The directory drops any first frame that isn't exactly e + encrypted e1 + encrypted empty payload before doing any
+        // DH or ML-KEM work; make sure a real client's is.
         using var identity = X25519KeyPair.Generate();
         var stream = new MemoryStream();
         await Assert.ThrowsAnyAsync<Exception>(() =>
             DirectoryChannel.CallAsync(stream, [identity.PublicKey], Secret, new JsonObject { ["op"] = "list" }, default));
         var written = stream.ToArray();
-        Assert.Equal(2 + 48, written.Length);
-        Assert.Equal(48, (written[0] << 8) | written[1]);
+        const int expected = 32 + 1184 + 16 + 16;
+        Assert.Equal(2 + expected, written.Length);
+        Assert.Equal(expected, (written[0] << 8) | written[1]);
     }
 
     [Fact]

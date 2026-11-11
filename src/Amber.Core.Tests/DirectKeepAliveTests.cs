@@ -102,6 +102,8 @@ public class DirectKeepAliveTests
         var peer = await guest.PunchAsync([new Candidate(PathKind.Lan, target)], NatKind.Cone, TimeSpan.FromSeconds(10));
         Assert.NotNull(peer);
         Assert.NotNull(await hostWait);
+        // On loopback the punch can finish before the first keep-alive reaches the fake STUN server, so wait for it.
+        await WaitUntil(() => count() > 0, TimeSpan.FromSeconds(5));
         Assert.True(count() > 0);
         stop.Cancel();
     }

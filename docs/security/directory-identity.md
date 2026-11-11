@@ -34,22 +34,22 @@ A network can pin its directory nodes' keys in its signed connection string. Whe
 
 ### Protocol
 
-Each connection carries one request, using `Noise_XXpsk0_25519_ChaChaPoly_SHA256`. This is the same Noise implementation (`Transport/Noise.cs`) that the knock and the room gate use.
+Each connection carries one request, using `Noise_XXhfspsk0_25519+MLKEM768_ChaChaPoly_SHA256` (X25519 plus ML-KEM-768, like every other Jay handshake since privacy-plan item 6). This is the same Noise implementation (`Transport/Noise.cs`) that the knock and the room gate use.
 
 | Step | Direction | Content |
 |---|---|---|
-| 1 | Jay → directory | `psk, e` with an empty payload (48 bytes) |
-| 2 | directory → Jay | `e, ee, s, es` with an empty payload. Jay decrypts the directory's static key `s` and checks the tag, which proves the directory holds the private half of `s` (the `es` DH). Jay compares `s` in constant time against every pinned key. If none matches, Jay throws `DirectoryImpostorException` and closes the connection. Message 3 is never written, so the request never leaves the machine. |
+| 1 | Jay → directory | `psk, e, e1` with an empty payload (32 + 1184 + 16 + 16 = 1248 bytes) |
+| 2 | directory → Jay | `e, ee, ekem1, s, es` with an empty payload. Jay decrypts the directory's static key `s` and checks the tag, which proves the directory holds the private half of `s` (the `es` DH). Jay compares `s` in constant time against every pinned key. If none matches, Jay throws `DirectoryImpostorException` and closes the connection. Message 3 is never written, so the request never leaves the machine. |
 | 3 | Jay → directory | `s, se`, with the JSON request as payload. Jay's static key is a throwaway generated for this connection, so the directory learns nothing that links two requests. |
-| 4 | directory → Jay | One ChaCha20-Poly1305 record: the JSON reply under the responder's split key, with nonce 0 and AD `"jay-directory-v1"`. |
+| 4 | directory → Jay | One ChaCha20-Poly1305 record: the JSON reply under the responder's split key, with nonce 0 and AD `"jay-directory-v2"`. |
 
 Details:
 
-- **Prologue.** `"jay-directory-v1"`.
+- **Prologue.** `"jay-directory-v2"` (v1 was the classic X25519-only handshake; a v1 client and a v2 directory never complete a handshake).
 - **Psk.** `HKDF-SHA256(ikm = network EasyTier secret, salt = prologue, info = "jay-directory-psk-v1")`. The secret is public for public networks, so the psk only keeps handshakes of different networks apart. It is not an authentication factor; the pinned static key is.
 - **Framing.** Every message is a 2-byte big-endian length followed by the bytes. The maximum is `RoomDirectoryProtocol.MaxLine + 256`, and the request and reply JSON are each capped at `MaxLine`.
-- **Telling the protocols apart.** A legacy request is a JSON line that starts with `{` (0x7B). A Noise frame starts with the high byte of its length, which is 0x00 for every allowed size. The server reads one byte and dispatches on it (`RoomDirectoryServer.HandleAsync`).
-- **Server failures.** A first frame that isn't exactly 48 bytes is dropped before any DH work. Any other handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to both protocols.
+- **Telling the protocols apart.** A legacy request is a JSON line that starts with `{` (0x7B). A Noise frame starts with the high byte of its length, which is 0x04 for the 1248-byte first message and below 0x7B for every allowed size. The server reads one byte and dispatches on it (`RoomDirectoryServer.HandleAsync`).
+- **Server failures.** A first frame that isn't exactly 1248 bytes is dropped before any DH or ML-KEM work. Any other handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to both protocols.
 
 ### Downgrade
 
@@ -72,8 +72,8 @@ Details:
 
 ## Questions for the reviewer
 
-1. Is `XXpsk0` with a throwaway initiator static the right pattern, or should this be `NKpsk0` (the responder's static key known in advance)? XX was chosen to reuse the reviewed implementation and the knock code path. It costs one extra DH per side and an extra 48 bytes in message 3. NK would send the request one round trip earlier, but it would need a new pattern in `Noise.cs`.
+1. Is `XXhfspsk0` with a throwaway initiator static the right pattern, or should this be `NKpsk0` (the responder's static key known in advance)? XX was chosen to reuse the reviewed implementation and the knock code path. It costs one extra DH per side and an extra 48 bytes in message 3 (small next to the 1.2 KB ML-KEM key and 1.1 KB ciphertext). NK would send the request one round trip earlier, but it would need a new pattern in `Noise.cs`.
 2. Jay checks the pin after message 2 and before message 3. Is there any information in message 1 (an ephemeral key only) that matters to an impostor?
 3. The psk is derived from a public secret. Does mixing it in weaken anything compared with no psk?
 4. Should the reply AD include anything besides the prologue, such as the request's op?
-5. Is a 0x00 or 0x01 first byte safe as a discriminator against a legacy client that sends leading whitespace? Current clients never do.
+5. Is a 0x04 first byte safe as a discriminator against a legacy client that sends leading whitespace? Current clients never do.
