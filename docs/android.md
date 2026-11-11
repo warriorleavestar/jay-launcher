@@ -9,14 +9,15 @@ Android 版是一个独立的 Avalonia 移动端工程，不会把桌面端的�
 - 在应用私有目录生成并加密保存设备身份。
 - 解析 Jay 服务器的一次性邀请码，登记手机并加密保存访问密钥。
 - 给已保存的 Jay 服务器开一个 `127.0.0.1:<端口>` 网关。其他 Android Minecraft Java 启动器如果能访问同一手机的回环端口，可以把这个地址当服务器地址手动连接。
+- 网关连接期间启动 Android 前台服务，切到游戏后仍尽量保持回环端口可用。
+- 一键复制网关地址并打开 [Fold Craft Launcher (FCL)](https://github.com/FCL-Team/FoldCraftLauncher)。在 FCL 的 Minecraft 多人游戏页添加这个地址，游戏内的虚拟摇杆、按键和鼠标操作由 FCL 提供。
 - 跟随系统语言，提供简中、繁中、英文和日文。
 
 ## 现在不能做什么
 
-- 不能在 Android 上直接下载、安装或启动 Minecraft Java。桌面版依赖外部 JVM 进程、LWJGL 桌面原生库和窗口系统；Android 需要单独的 JVM/LWJGL 适配层，不是换个目标框架就能运行。
+- Jay 不内置 Minecraft Java 运行时。FCL 需要另行安装，并由 FCL 负责 JVM/LWJGL、图形桥、微软账号登录和触屏控制。FCL 使用 GPL-3.0，Jay 只通过 Android 启动 Intent 与其协作，不包含或复制 FCL 源码/二进制。
 - 不能创建普通 Jay 房间。EasyTier 2.6.4 没有在本项目中集成 Android 可执行文件。
-- 网关还没有 Android 前台服务。切到后台后，系统可能暂停或结束进程。
-- 当前 CI 产物使用 Android 调试证书签名，只用于测试，不能直接上架 Google Play。
+- PR 的 CI 产物使用测试签名；`android-preview` 发布包使用固定的预览版签名，可覆盖升级并保留数据，但尚未上架 Google Play。
 
 ## 本地构建
 
@@ -42,7 +43,6 @@ CI 会用 Android Build Tools 的 `zipalign -P 16` 检查 APK，并逐个检查 
 
 ## 下一步
 
-1. 用 Android 前台服务承载本机网关，增加常驻通知和明确的停止按钮。
-2. 在真机上验证回环端口能否被目标 Android Java 启动器访问。
-3. 决定是与现有开源 Android Java 运行时集成，还是只保留为 Jay 服务器伴侣应用。
-4. 给正式包配置专用签名密钥，再考虑发布 APK/AAB。
+1. 在 Android 真机上用 FCL 完成从 Jay 网关到进服的端到端验证。
+2. 为前台服务增加通知权限引导和明确的停止操作。
+3. 如果 FCL 以后提供官方 deep link，传入服务器地址，去掉手动粘贴步骤。
