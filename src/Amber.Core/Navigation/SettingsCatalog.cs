@@ -10,7 +10,7 @@ public sealed record SettingsGroup(string Id, string TitleKey, string SummaryKey
 public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null);
 
 /// <summary>
-/// The ten settings groups and every setting with a control, in page order. The settings search and the command
+/// The nine settings groups and every setting with a control, in page order. The settings search and the command
 /// palette both read this list, so every setting is findable from either.
 /// </summary>
 public static class SettingsCatalog
@@ -22,7 +22,6 @@ public static class SettingsCatalog
     public const string Storage = "storage";
     public const string Privacy = "privacy";
     public const string Multiplayer = "multiplayer";
-    public const string Tools = "tools";
     public const string Experimental = "experimental";
     public const string About = "about";
 
@@ -35,7 +34,6 @@ public static class SettingsCatalog
         new(Storage, "settings.group.storage", "settings.group.storage.summary", "settings.group.storage.note"),
         new(Privacy, "settings.group.privacy", "settings.group.privacy.summary", "settings.group.privacy.note"),
         new(Multiplayer, "settings.group.multiplayer", "settings.group.multiplayer.summary", "settings.group.multiplayer.note"),
-        new(Tools, "settings.group.tools", "settings.group.tools.summary", "settings.group.tools.note"),
         new(Experimental, "settings.group.experimental", "settings.group.experimental.summary", "settings.group.experimental.note"),
         new(About, "settings.group.about", "settings.group.about.summary", "settings.group.about.note"),
     ];
@@ -54,12 +52,14 @@ public static class SettingsCatalog
 
         new("Java", Game, "settings.java.label"),
         new("AutoJava", Game, "settings.java.auto_download"),
+        new("Memory", Game, "settings.memory.label", "settings.memory.by_mod_count"),
         new("Isolation", Game, "instance.settings.isolation", "settings.isolation.hint"),
         new("WindowWidth", Game, "instance.settings.window_size", "instance.settings.fullscreen"),
         new("JvmArgs", Game, "instance.settings.jvm_args"),
         new("GameArgs", Game, "instance.settings.game_args"),
         new("PreLaunch", Game, "instance.settings.pre_launch"),
         new("PostExit", Game, "instance.settings.post_exit"),
+        new("JavaDownload", Game, "tools.java.title", "tools.java.hint"),
 
         new("Source", Downloads, "settings.source.label"),
         new("Concurrency", Downloads, "settings.download.concurrency"),
@@ -68,6 +68,7 @@ public static class SettingsCatalog
         new("UpdateFeed", Downloads, "settings.update.feed"),
 
         new("GameDirectory", Storage, "settings.directory.label"),
+        new("Junk", Storage, "tools.junk.title", "tools.junk.initial"),
         new("RecycleKeep", Storage, "recycle.keep.label", "recycle.title"),
 
         new("NoTrace", Privacy, "settings.notrace.label", "settings.notrace.hint"),
@@ -81,8 +82,6 @@ public static class SettingsCatalog
 
         new("MultiplayerSettings", Multiplayer, "settings.multiplayer.card"),
 
-        new("OpenTools", Tools, "settings.tools.card", "settings.tools.card_hint"),
-
         new("Bake", Experimental, "settings.bake.title", "settings.bake.hint"),
         new("BakeLoader", Experimental, "settings.bake.loader_hint"),
         new("BakeLoaderInstall", Experimental, "settings.bake.install", "settings.bake.install_hint"),
@@ -90,7 +89,7 @@ public static class SettingsCatalog
         new("ThemeDev", Experimental, "settings.themedev.label", "settings.themedev.hint"),
 
         new("Version", About, "settings.about.version"),
-        new("CheckUpdate", About, "settings.about.check_update"),
+        new("CheckUpdate", About, "settings.about.check_update", "tools.update.hint"),
         new("AboutPage", About, "about.title", "about.promise"),
     ];
 

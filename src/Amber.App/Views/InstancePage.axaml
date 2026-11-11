@@ -174,6 +174,50 @@
     <!-- Short windows: the notices scroll on their own so the fix buttons can always be reached (§3.3, J6). -->
     <ScrollViewer x:Name="NoticeScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
     <StackPanel Spacing="8">
+    <!-- Starting: the one progress line, in place under the start button. Cancel is the button next to start. -->
+    <Border x:Name="LaunchLineCard" Classes="card" Margin="0" Padding="12,10" IsVisible="{Binding ShowLaunchLine}">
+      <c:ProgressLine x:Name="LaunchLine" Title="{Binding HeroName}" Step="{Binding LaunchStep}" Percent="{Binding LaunchPercent}"
+                      IsIndeterminate="{Binding LaunchIndeterminate}" BytesPerSecond="{Binding LaunchSpeed}" Remaining="{Binding LaunchRemaining}" />
+    </Border>
+    <c:StatusBar x:Name="LaunchStatus" Message="{Binding LaunchMessage}" />
+    <!-- The universal loader's notices about the last start (retry without it, download it). -->
+    <Border x:Name="BakeNoticeCard" Classes="callout warning">
+      <Border.IsVisible>
+        <MultiBinding Converter="{x:Static BoolConverters.And}">
+          <Binding Path="IsVisible" ElementName="BakeWarnings" />
+          <Binding Path="!ShowLaunchLine" />
+        </MultiBinding>
+      </Border.IsVisible>
+      <c:BakeNoticeHost x:Name="BakeWarnings" />
+    </Border>
+    <!-- The start failed before the game came up: one sentence and the fixes, in order. -->
+    <Border x:Name="FailureCard" Classes="error-bar" IsVisible="{Binding HasLaunchFailure}">
+      <StackPanel Spacing="8">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+          <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="20" Height="20" VerticalAlignment="Top" Stroke="{DynamicResource DangerText}" />
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock Text="{Binding LaunchFailure.Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding LaunchFailure.Reason}" Classes="hint" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+          <Button Grid.Column="2" Classes="ghost icon-only" Command="{Binding DismissLaunchFailureCommand}" VerticalAlignment="Top"
+                  ToolTip.Tip="{l:T home.failure.dismiss}" AutomationProperties.Name="{l:T home.failure.dismiss}">
+            <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="16" Height="16" />
+          </Button>
+        </Grid>
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <ItemsControl x:Name="FailureFixes" ItemsSource="{Binding LaunchFailure.Buttons}">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:LaunchFixButton">
+                <Button Content="{Binding Label}" Classes.secondary="{Binding !IsPrimary}"
+                        Command="{Binding $parent[ItemsControl].((vm:InstanceViewModel)DataContext).FixLaunchCommand}" CommandParameter="{Binding Fix}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Button Classes="secondary" Content="{l:T home.failure.export}" IsVisible="{Binding LaunchFailure.CanExport}" Click="ExportFailure_Click" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
     <!-- [Help me fix…] in progress: survives restarts until the mod is found or everything is restored (§6.3, J6). -->
     <Border x:Name="BisectCard" Classes="callout info" IsVisible="{Binding HasBisect}" Margin="0,0,0,0">
       <StackPanel Spacing="6">
@@ -1004,14 +1048,16 @@
           <Binding Path="HasManualDownload" />
         </MultiBinding>
       </Border.IsVisible>
-      <Grid ColumnDefinitions="*,Auto">
-        <StackPanel Spacing="6" VerticalAlignment="Center">
+      <StackPanel Spacing="6" VerticalAlignment="Center">
+        <!-- Working: the one progress line (step, percent, speed, time left, [Cancel]). Otherwise the status. -->
+        <c:ProgressLine x:Name="WorkLine" IsVisible="{Binding IsBusy}" Step="{Binding Status}" Percent="{Binding Work.Percent}"
+                        IsIndeterminate="{Binding Work.IsIndeterminate}" BytesPerSecond="{Binding Work.BytesPerSecond}"
+                        Remaining="{Binding Work.Remaining}" CancelCommand="{Binding CancelWorkCommand}" />
+        <Panel IsVisible="{Binding !IsBusy}">
           <c:StatusBar x:Name="PageStatus" Message="{Binding StatusInfo}" />
-          <Button Content="{l:T content.curseforge.open_manual}" Command="{Binding OpenManualDownloadCommand}" IsVisible="{Binding HasManualDownload}" />
-          <ProgressBar Value="{Binding Progress}" Maximum="100" IsVisible="{Binding IsBusy}" />
-        </StackPanel>
-        <Button Grid.Column="1" Content="{l:T common.cancel}" Command="{Binding CancelWorkCommand}" IsVisible="{Binding IsBusy}" Margin="12,0,0,0" />
-      </Grid>
+        </Panel>
+        <Button Content="{l:T content.curseforge.open_manual}" Command="{Binding OpenManualDownloadCommand}" IsVisible="{Binding HasManualDownload}" />
+      </StackPanel>
     </Border>
   </Grid>
   </ScrollViewer>

@@ -232,8 +232,10 @@ public partial class MainWindow : Window
             main.Shell.Navigate("library/" + id);
             return;
         }
-        // 不在启动页时启动页自己已经弹了 Toast；在启动页但窗口刚才看不见时，这里补一条。
-        if (wasHidden && home.IsCurrent) Toasts.WithAction(L.F("home.crash.toast", id), L.T("home.crash.show"), () => home.NavigateHere?.Invoke());
+        // The launch engine already raised a toast when another page was showing. Here the instance was on screen but
+        // the window was not, so say it once.
+        if (wasHidden && home.IsShowingInstance?.Invoke(id) == true)
+            Toasts.WithAction(L.F("home.crash.toast", id), L.T("home.crash.show"), () => home.NavigateToInstance?.Invoke(id));
         CrashToastsShown++;
     }
 
@@ -281,33 +283,34 @@ public partial class MainWindow : Window
         Directory.CreateDirectory(dir);
         if (DataContext is not MainViewModel vm) return;
         var delay = int.TryParse(Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DELAY"), out var d) ? d : 3000;
-        for (var i = 0; i < vm.Pages.Count; i++)
+        var pages = vm.Pages.Where(p => p.HasView).ToList();
+        for (var i = 0; i < pages.Count; i++)
         {
-            vm.CurrentPage = vm.Pages[i];
+            vm.CurrentPage = pages[i];
             await Task.Delay(delay);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 var size = new PixelSize((int)Bounds.Width, (int)Bounds.Height);
                 using var bitmap = new RenderTargetBitmap(size);
                 bitmap.Render(this);
-                bitmap.Save(Path.Combine(dir, $"{i + 1}-{vm.Pages[i].Title}.png"));
+                bitmap.Save(Path.Combine(dir, $"{i + 1}-{pages[i].Title}.png"));
             });
             // AMBER_SNAPSHOT_DEMO=1：页面带演示流程的，走一遍真实操作后再截一张。
-            if (Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DEMO") == "1" && vm.Pages[i] is ISnapshotDemo demo)
+            if (Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DEMO") == "1" && pages[i] is ISnapshotDemo demo)
             {
                 await demo.RunSnapshotDemoAsync();
                 await Task.Delay(500);
-                await Dispatcher.UIThread.InvokeAsync(() => Save(Path.Combine(dir, $"{i + 1}-{vm.Pages[i].Title}-demo.png")));
+                await Dispatcher.UIThread.InvokeAsync(() => Save(Path.Combine(dir, $"{i + 1}-{pages[i].Title}-demo.png")));
             }
         }
-        // AMBER_SNAPSHOT_LAUNCH=秒数：再用启动页真实启动一次游戏，等待后截日志页并结束游戏。
-        if (int.TryParse(Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_LAUNCH"), out var seconds) && vm.Pages[0] is HomeViewModel home)
+        // AMBER_SNAPSHOT_LAUNCH=seconds: start the focused instance for real, wait, shoot its page and its log tab, then stop the game.
+        if (int.TryParse(Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_LAUNCH"), out var seconds) && vm.Pages.OfType<HomeViewModel>().FirstOrDefault() is { } home)
         {
-            vm.CurrentPage = home;
+            vm.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.CurrentInstance);
             _ = home.LaunchCommand.ExecuteAsync(null);
             await Task.Delay(TimeSpan.FromSeconds(seconds));
             await Dispatcher.UIThread.InvokeAsync(() => Save(Path.Combine(dir, "5-launching.png")));
-            vm.CurrentPage = vm.Pages[^1];
+            vm.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.Logs);
             await Task.Delay(1500);
             await Dispatcher.UIThread.InvokeAsync(() => Save(Path.Combine(dir, "6-game-log.png")));
             home.CancelCommand.Execute(null);

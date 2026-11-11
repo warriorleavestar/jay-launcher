@@ -24,6 +24,30 @@ public class FormatTests
         Assert.Equal(L.P("format.duration.minutes", 1, 1), Fmt.Minutes(TimeSpan.FromSeconds(10)));
     }
 
+    [Theory]
+    [InlineData(0, "0 B")]
+    [InlineData(1536, "1.5 KB")]
+    [InlineData(4.2 * 1024 * 1024, "4.2 MB")]
+    [InlineData(-5, "0 B")]
+    public void SpeedIsASizePerSecond(double bytesPerSecond, string size) => Assert.Equal(L.F("format.speed", size), Fmt.Speed(bytesPerSecond));
+
+    [Fact]
+    public void RemainingIsRoundedSoItDoesNotFlicker()
+    {
+        // Under a minute: steps of 5 seconds, never "0".
+        Assert.Equal(L.F("format.remaining.seconds", 5), Fmt.Remaining(TimeSpan.FromSeconds(1)));
+        Assert.Equal(L.F("format.remaining.seconds", 40), Fmt.Remaining(TimeSpan.FromSeconds(41.9)));
+        Assert.Equal(L.F("format.remaining.seconds", 40), Fmt.Remaining(TimeSpan.FromSeconds(38)));
+        Assert.Equal(L.F("format.remaining.seconds", 55), Fmt.Remaining(TimeSpan.FromSeconds(57)));
+        // Then whole minutes, then whole hours.
+        Assert.Equal(L.F("format.remaining.minutes", 1), Fmt.Remaining(TimeSpan.FromSeconds(58)));
+        Assert.Equal(L.F("format.remaining.minutes", 3), Fmt.Remaining(TimeSpan.FromSeconds(170)));
+        Assert.Equal(L.F("format.remaining.minutes", 59), Fmt.Remaining(TimeSpan.FromMinutes(59.4)));
+        Assert.Equal(L.F("format.remaining.hours", 1), Fmt.Remaining(TimeSpan.FromMinutes(59.6)));
+        Assert.Equal(L.F("format.remaining.hours", 2), Fmt.Remaining(TimeSpan.FromMinutes(125)));
+        Assert.Equal(L.F("format.remaining.seconds", 5), Fmt.Remaining(TimeSpan.FromSeconds(-3)));
+    }
+
     [Fact]
     public void StatusMessageFormatsWhenShown()
     {

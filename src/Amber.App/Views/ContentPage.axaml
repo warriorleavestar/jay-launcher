@@ -12,7 +12,7 @@
   <Grid x:Name="RootGrid" RowDefinitions="Auto,Auto,*,Auto,Auto">
     <!-- Title, type chips (a drop-down when compact), source segment: official design §6.12. -->
     <Grid x:Name="HeaderGrid" svc:ThemeRegion.Name="content.header" ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,6">
-      <TextBlock x:Name="ContentTitle" Classes="h1" Text="{l:T content.title}" Margin="0,0,16,0" VerticalAlignment="Center" />
+      <TextBlock x:Name="ContentTitle" Classes="h1" Text="{l:T shell.nav.discover}" Margin="0,0,16,0" VerticalAlignment="Center" />
       <ListBox x:Name="TypeChips" Grid.Column="1" Classes="subtabs" ItemsSource="{Binding TypeNames}" SelectedIndex="{Binding TypeIndex}" Background="Transparent"
                VerticalAlignment="Center" AutomationProperties.Name="{l:T content.type.label}">
         <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -47,8 +47,22 @@
         <Button Grid.Column="1" Classes="secondary" Content="{l:T common.search}" Command="{Binding SearchCommand}" Padding="20,6" />
       </Grid>
       <WrapPanel ItemSpacing="10" LineSpacing="4" IsVisible="{Binding !IsModpack}">
-        <TextBlock Text="{l:T content.install.target}" VerticalAlignment="Center" />
-        <ComboBox ItemsSource="{Binding Instances}" SelectedItem="{Binding TargetInstance}" MinWidth="260" />
+        <!-- "Install to: Survival ▾": the instance you were just looking at, by the name the library shows. Modpacks make
+             their own instance, so the marker is not there for them. -->
+        <ComboBox x:Name="TargetMarker" ItemsSource="{Binding TargetChoices}" SelectedItem="{Binding TargetChoice}" MinWidth="200" MaxWidth="360"
+                  AutomationProperties.Name="{l:T content.install.target}">
+          <ComboBox.SelectionBoxItemTemplate>
+            <DataTemplate DataType="vm:InstanceChoice">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="{l:T content.install.target_prefix}" Classes="hint" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              </StackPanel>
+            </DataTemplate>
+          </ComboBox.SelectionBoxItemTemplate>
+          <ComboBox.ItemTemplate>
+            <DataTemplate DataType="vm:InstanceChoice"><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
         <Border IsVisible="{Binding IsSharedTarget}" Background="{DynamicResource AccentTint}" CornerRadius="{DynamicResource RadiusPill}" Padding="8,2" VerticalAlignment="Center"
                 ToolTip.Tip="{l:T content.install.shared_hint}">
           <TextBlock Text="{l:T content.install.shared}" Foreground="{DynamicResource AccentText}" FontSize="{DynamicResource FontCaption}" />
@@ -215,17 +229,19 @@
     </Border>
 
     <Border svc:ThemeRegion.Name="content.status" Grid.Row="4" Classes="card" Margin="0,10,0,0">
-      <Grid ColumnDefinitions="*,Auto">
-        <StackPanel Spacing="6" VerticalAlignment="Center">
+      <StackPanel Spacing="6" VerticalAlignment="Center">
+        <!-- Working: the one progress line (step, percent, speed, time left, [Cancel]). Otherwise the status. -->
+        <c:ProgressLine x:Name="WorkLine" IsVisible="{Binding IsBusy}" Step="{Binding Status}" Percent="{Binding Work.Percent}"
+                        IsIndeterminate="{Binding Work.IsIndeterminate}" BytesPerSecond="{Binding Work.BytesPerSecond}"
+                        Remaining="{Binding Work.Remaining}" CancelCommand="{Binding CancelCommand}" />
+        <Panel IsVisible="{Binding !IsBusy}">
           <c:StatusBar Message="{Binding StatusInfo}" />
-          <StackPanel Spacing="6" IsVisible="{Binding HasManualDownload}" MaxWidth="640" HorizontalAlignment="Left">
-            <TextBlock Text="{Binding ManualDownloadHint}" TextWrapping="Wrap" />
-            <Button Content="{l:T content.curseforge.open_manual}" Command="{Binding OpenManualDownloadCommand}" />
-          </StackPanel>
-          <ProgressBar Value="{Binding Progress}" Maximum="100" IsVisible="{Binding IsBusy}" />
+        </Panel>
+        <StackPanel Spacing="6" IsVisible="{Binding HasManualDownload}" MaxWidth="640" HorizontalAlignment="Left">
+          <TextBlock Text="{Binding ManualDownloadHint}" TextWrapping="Wrap" />
+          <Button Content="{l:T content.curseforge.open_manual}" Command="{Binding OpenManualDownloadCommand}" />
         </StackPanel>
-        <Button Grid.Column="1" Content="{l:T common.cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" Margin="12,0,0,0" />
-      </Grid>
+      </StackPanel>
     </Border>
   </Grid>
   </ScrollViewer>

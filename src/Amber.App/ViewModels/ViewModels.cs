@@ -30,6 +30,12 @@ public abstract class PageViewModel : ObservableObject
 
     public abstract string Title { get; }
 
+    /// <summary>
+    /// False for view models that sit in the page list for their state only (the launch engine, the live log): they
+    /// are never the current page, and loops over pages for screenshots or layout checks skip them.
+    /// </summary>
+    public virtual bool HasView => true;
+
     /// <summary>导航图标的路径数据（24×24）。</summary>
     public abstract string Icon { get; }
 
@@ -194,6 +200,16 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The log is docked at the bottom of the content area (Ctrl+`).</summary>
     [ObservableProperty] public partial bool LogDocked { get; set; }
 
+    /// <summary>The log popped out into its own window is on screen (the window tells us).</summary>
+    public bool LogPoppedOut
+    {
+        get;
+        set { field = value; Log.IsCurrent = LogDocked || value; }
+    }
+
+    // The live log has no page of its own: it counts unread errors only while neither the dock nor its window shows it.
+    partial void OnLogDockedChanged(bool value) => Log.IsCurrent = value || LogPoppedOut;
+
     /// <summary>Asks the window to pop the log out into its own window.</summary>
     public event Action? LogPopOutRequested;
 
@@ -269,6 +285,8 @@ public sealed partial class MainViewModel : ObservableObject
         var multiplayer = new MultiplayerViewModel(service);
         Multiplayer = multiplayer;
         var download = new DownloadViewModel(service);
+        var settings = new SettingsViewModel(service);
+        multiplayer.Tools = settings.Tools;
         Pages =
         [
             home,
@@ -277,8 +295,7 @@ public sealed partial class MainViewModel : ObservableObject
             download,
             content,
             multiplayer,
-            new ToolsViewModel(service),
-            new SettingsViewModel(service),
+            settings,
             log,
             new AboutViewModel(service),
             new HelpCenterViewModel(Help),
@@ -288,8 +305,10 @@ public sealed partial class MainViewModel : ObservableObject
         var shell = Shell;
         home.NavigateToAccounts = () => shell.Navigate("accounts");
         home.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
-        home.NavigateToLog = () => shell.Navigate(LegacyRoutes.Logs);
-        home.NavigateHere = () => shell.Navigate("library");
+        // The live log has no page: "view log" on a failure opens it docked under the page the player is on.
+        home.NavigateToLog = () => LogDocked = true;
+        home.NavigateToInstance = id => shell.Navigate(Route.Of(Section.Library, id).ToString());
+        home.IsShowingInstance = id => instance.IsCurrent && string.Equals(instance.SelectedId, id, StringComparison.OrdinalIgnoreCase);
         home.Onboarding.MicrosoftLogin = () =>
         {
             accounts.LoginTab = AccountsViewModel.MicrosoftTab;
@@ -315,7 +334,7 @@ public sealed partial class MainViewModel : ObservableObject
             shell.Navigate("discover");
         };
         multiplayer.NavigateHome = () => shell.Navigate("library");
-        // 开始游戏不换页（§2.5 第 5 条）：进度在顶栏胶囊和启动页。
+        // Starting a game does not change the page (§2.5 rule 5): progress shows on the instance, the pill and the activity drawer.
         download.LaunchInstance = id =>
         {
             service.SetCurrentInstance(id);
@@ -378,7 +397,11 @@ public sealed partial class MainViewModel : ObservableObject
             Launch = id => download.LaunchInstance?.Invoke(id),
             ImportPackAndPlay = path => download.ImportPackFile!(path, true),
         };
-        Activity = new ActivityViewModel(service) { OpenRun = _ => shell.Navigate("library") };
+        // The playing pill and a run in the activity drawer open that run's instance.
+        Activity = new ActivityViewModel(service)
+        {
+            OpenRun = s => shell.Navigate(service.InstalledVersions().Contains(s.InstanceId) ? Route.Of(Section.Library, s.InstanceId).ToString() : "library"),
+        };
         home.SessionStarted += Activity.Track;
         // 游戏库的“上次玩”和“共玩”：只记本机的运行记录。
         home.SessionStarted += session =>
@@ -396,7 +419,7 @@ public sealed partial class MainViewModel : ObservableObject
         // [▶ Play and open a room]: the lobby starts the focus instance the same way the library's ▶ does.
         multiplayer.StartInstance = library.LaunchInstance;
         Pages.Add(library);
-        // 多开确认走请求条；启动页的卡片也还在，哪边处理都会让另一边一起消失。
+        // The multi-launch question lives on the request bar.
         const string MultiKey = "multi-launch";
         home.MultiLaunchRequested += running => service.Requests.Post(new Amber.Core.Activity.RequestSpec("multi",
             L.F("home.multi.warning", running), null,
@@ -648,6 +671,12 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
     }
     [ObservableProperty] public partial bool IsolateVersions { get; set; }
+
+    /// <summary>Default memory for instances that follow the global setting: automatic (by mod count) or a fixed maximum.</summary>
+    [ObservableProperty] public partial bool AutoMemory { get; set; }
+    [ObservableProperty] public partial int MaxMemoryMb { get; set; }
+    public int TotalMemoryMb { get; } = (int)Amber.Core.Launch.MemoryPlanner.TotalPhysicalMb();
+
     [ObservableProperty] public partial string WindowWidth { get; set; }
     [ObservableProperty] public partial string WindowHeight { get; set; }
     [ObservableProperty] public partial bool Fullscreen { get; set; }
@@ -665,10 +694,14 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// <summary>Storage › Recently deleted (§6.20).</summary>
     public RecycleViewModel Recycle { get; }
 
+    /// <summary>Clean-up (Storage), Java download (Game) and the update check (About): what the toolbox page used to hold.</summary>
+    public ToolsViewModel Tools { get; }
+
     public SettingsViewModel(LauncherService service)
     {
         _service = service;
         Recycle = new RecycleViewModel(service);
+        Tools = new ToolsViewModel(service);
         _loading = true;
         // The loader line is built from text in the current language; a language switch rebuilds it (not during an install or download).
         L.Changed += () => Dispatcher.UIThread.Post(() =>
@@ -706,6 +739,8 @@ public sealed partial class SettingsViewModel : PageViewModel
         BakeLoaderPath = s.BakeLoaderPath ?? "";
         BakeLoaderStatus = DescribeBakeLoader(BakeLoaderPath);
         IsolateVersions = s.IsolateVersions;
+        AutoMemory = s.AutoMemory;
+        MaxMemoryMb = s.MaxMemoryMb;
         WindowWidth = s.WindowWidth?.ToString() ?? "";
         WindowHeight = s.WindowHeight?.ToString() ?? "";
         Fullscreen = s.Fullscreen;
@@ -1021,6 +1056,8 @@ public sealed partial class SettingsViewModel : PageViewModel
         BakeCleanupStatus = "";   // the last cleanup's answer was about the previous folder
     }
     partial void OnIsolateVersionsChanged(bool value) => Persist();
+    partial void OnAutoMemoryChanged(bool value) => Persist();
+    partial void OnMaxMemoryMbChanged(int value) => Persist();
     partial void OnConcurrencyChanged(string value) => Persist();
     partial void OnWindowWidthChanged(string value) => Persist();
     partial void OnWindowHeightChanged(string value) => Persist();
@@ -1096,6 +1133,8 @@ public sealed partial class SettingsViewModel : PageViewModel
         s.ExperimentalBake = ExperimentalBake;
         s.BakeLoaderPath = Blank(BakeLoaderPath);
         s.IsolateVersions = IsolateVersions;
+        s.AutoMemory = AutoMemory;
+        if (MaxMemoryMb >= 1024) s.MaxMemoryMb = MaxMemoryMb;
         if (SettingInput.TryParsePositiveInt(WindowWidth, out var w, 16384) && SettingInput.TryParsePositiveInt(WindowHeight, out var h, 16384))
         {
             s.WindowWidth = w;
@@ -1225,6 +1264,9 @@ public sealed partial class LogViewModel : PageViewModel
 
     public override string Title => L.T("log.title");
     public override string Icon => "M4 5h16v2H4zM4 11h16v2H4zM4 17h11v2H4z";
+
+    /// <summary>The live log shows in the dock and its pop-out window; an instance's Logs tab has the saved runs.</summary>
+    public override bool HasView => false;
 
     public ObservableCollection<LogEntry> Lines { get; } = [];
 

@@ -45,14 +45,32 @@ public sealed class TaskHandle
     public bool IsRunning => State == TaskState.Running;
     public bool CancelRequested { get; private set; }
 
-    /// <summary>报告进度。任务已经结束时忽略（迟到的进度回调不能把结果改回“进行中”）。</summary>
-    public void Report(double? progress, string? detail = null)
+    private readonly ProgressMeter _meter = new();
+
+    /// <summary>Download speed over the last few seconds, when the task reports byte counts.</summary>
+    public double? BytesPerSecond
+    {
+        get { lock (_owner.Gate) return State == TaskState.Running ? _meter.BytesPerSecond : null; }
+    }
+
+    /// <summary>Time left at the current pace; null while it cannot be told.</summary>
+    public TimeSpan? Remaining
+    {
+        get { lock (_owner.Gate) return State == TaskState.Running ? _meter.Remaining : null; }
+    }
+
+    /// <summary>
+    /// 报告进度。任务已经结束时忽略（迟到的进度回调不能把结果改回“进行中”）。
+    /// <paramref name="bytes"/> is the total transferred so far; with it the progress line shows a speed.
+    /// </summary>
+    public void Report(double? progress, string? detail = null, long? bytes = null)
     {
         lock (_owner.Gate)
         {
             if (State != TaskState.Running) return;
             Progress = progress is { } p ? Math.Clamp(p, 0, 1) : null;
             if (detail is not null) Detail = detail;
+            _meter.Add(_owner.Now(), Progress, bytes);
         }
         _owner.RaiseChanged(this);
     }
@@ -98,7 +116,7 @@ public sealed class TaskHandle
 public sealed class TaskContext(TaskHandle handle)
 {
     public TaskHandle Handle { get; } = handle;
-    public void Report(double? progress, string? detail = null) => Handle.Report(progress, detail);
+    public void Report(double? progress, string? detail = null, long? bytes = null) => Handle.Report(progress, detail, bytes);
 }
 
 /// <summary>

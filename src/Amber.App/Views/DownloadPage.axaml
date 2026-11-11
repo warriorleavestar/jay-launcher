@@ -316,12 +316,16 @@
       <Grid ColumnDefinitions="*,Auto">
         <StackPanel Spacing="6" VerticalAlignment="Center">
           <TextBlock x:Name="InstallToText" Classes="hint" Text="{Binding InstallToText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding InstallToText}" />
-          <c:StatusBar Message="{Binding StatusInfo}" />
-          <ProgressBar Value="{Binding Progress}" Maximum="100" IsVisible="{Binding IsBusy}" />
+          <!-- Installing: the one progress line (step, percent, speed, time left, [Cancel]). Otherwise the status. -->
+          <c:ProgressLine x:Name="InstallLine" IsVisible="{Binding IsBusy}" Step="{Binding Status}" Percent="{Binding Work.Percent}"
+                          IsIndeterminate="{Binding Work.IsIndeterminate}" BytesPerSecond="{Binding Work.BytesPerSecond}"
+                          Remaining="{Binding Work.Remaining}" CancelCommand="{Binding CancelInstallCommand}" />
+          <Panel IsVisible="{Binding !IsBusy}">
+            <c:StatusBar Message="{Binding StatusInfo}" />
+          </Panel>
           <TextBlock x:Name="WaitTextBlock" Classes="hint" Text="{Binding WaitText}" IsVisible="{Binding IsBusy}" TextTrimming="CharacterEllipsis" />
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="12,0,0,0">
-          <Button Content="{l:T common.cancel}" Command="{Binding CancelInstallCommand}" IsVisible="{Binding IsBusy}" />
           <Button x:Name="InstallButton" Classes="primary" Content="{l:T newinstance.install}" Command="{Binding InstallCommand}" Padding="26,8"
                   IsVisible="{Binding IsVersionSource}" HotKey="Ctrl+Enter" />
         </StackPanel>

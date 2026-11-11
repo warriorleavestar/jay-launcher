@@ -16,7 +16,12 @@ public static partial class ThemeLayout
     public const int MaxDepth = 12; // 每层在 JSON 里占两层（对象 + children 数组），JSON 本身最多 32 层
     public const int MaxTextLength = 200;
 
-    /// <summary>页面 id，和导航顺序（默认顺序）一致。</summary>
+    /// <summary>
+    /// 页面 id，和导航顺序（默认顺序）一致。
+    /// "home", "tools" and "log" have no page any more (starting is on each instance, the toolbox moved into Settings, the
+    /// live log is a dock). Their ids and regions stay here so packs that carry layouts for them keep validating; nothing
+    /// applies those layouts.
+    /// </summary>
     public static readonly string[] PageIds = ["home", "accounts", "instances", "downloads", "content", "multiplayer", "tools", "settings", "log"];
 
     /// <summary>不能隐藏的页面：启动页和设置页（设置页里有“恢复默认主题”）。</summary>

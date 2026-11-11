@@ -110,6 +110,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial bool IsDownloading { get; set; }
     [ObservableProperty] public partial double DownloadPercent { get; set; }
 
+    /// <summary>The progress line of the multiplayer component download: percent, speed, time left.</summary>
+    public WorkProgress ComponentWork { get; } = new();
+
+    partial void OnDownloadPercentChanged(double value) => ComponentWork.Report(value);
+
+    partial void OnIsDownloadingChanged(bool value) => ComponentWork.Reset();
+
     [ObservableProperty] public partial LanGameItem? SelectedLanGame { get; set; }
     [ObservableProperty] public partial string ManualPort { get; set; } = "";
     [ObservableProperty] public partial bool IsScanning { get; set; }
@@ -373,6 +380,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                     source = name;
                     SetStatus(StatusMessage.Info("multiplayer.component.downloading_from", name));
                 }
+                ComponentWork.Bytes(p.BytesDownloaded);
                 DownloadPercent = Math.Min(100, 100.0 * p.BytesDownloaded / EasyTierRelease.Current.Size);
             }), _downloadCts.Token);
             IsComponentReady = true;

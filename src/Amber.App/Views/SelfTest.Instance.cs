@@ -8,6 +8,7 @@ using Amber.Core.Localization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 
@@ -96,6 +97,24 @@ internal sealed partial class SelfTest
             Check("紧凑：只留 ⋯，固定和文件夹收起", page?.HeroPin.IsVisible == false && page.HeroMore.IsEffectivelyVisible);
             window.Width = 1024;
             await Task.Delay(300);
+
+            // ---- The launch line: in place under the start button while game files come down ----
+            var filesAt = DateTimeOffset.Now.AddSeconds(-4);
+            var fetching = home.AddPreparingRunForTest(id);
+            home.ReportFilesForTest(100, 480, 10_000_000, filesAt);
+            home.ReportFilesForTest(312, 480, 27_600_000, filesAt.AddSeconds(4));
+            await WaitAsync(() => instance.ShowLaunchLine, 3);
+            await Task.Delay(200);
+            var facts = Dispatcher.UIThread.Invoke(() => page?.LaunchLine.Facts ?? "");
+            Check("开始游戏：进度行就在开始按钮下面，写步骤、百分比、速度和大约还要多久",
+                Dispatcher.UIThread.Invoke(() => page?.LaunchLineCard.IsEffectivelyVisible == true && page.LaunchLine.Step == L.F("home.status.completing_files", 312, 480))
+                && facts.Split(" · ") is [var percent, var speed, var left] && percent == "65%" && speed == Fmt.Speed(4_400_000) && left == Fmt.Remaining(home.LaunchRemaining ?? default),
+                $"{instance.LaunchStep} | {facts}");
+            await ShotAsync("instance-launch-line");
+            home.RemoveRunForTest(fetching);
+            home.Status = "";
+            await Task.Delay(200);
+            Check("准备完了进度行收起，不留空位", !instance.ShowLaunchLine && Dispatcher.UIThread.Invoke(() => page?.LaunchLineCard.IsVisible == false));
 
             // ---- Start states, simulated ----
             var now = DateTimeOffset.Now;

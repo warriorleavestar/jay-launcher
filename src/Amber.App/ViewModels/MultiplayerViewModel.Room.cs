@@ -362,6 +362,9 @@ public sealed partial class MultiplayerViewModel
     /// <summary>The diagnostics drawer (lobby footer, room ⋯ menu, Ctrl+Shift+D).</summary>
     [ObservableProperty] public partial bool DiagnosticsOpen { get; set; }
 
+    /// <summary>The drawer's "Try a download" (it used to be in the toolbox). Set once by the main view model.</summary>
+    public ToolsViewModel? Tools { get; set; }
+
     [RelayCommand]
     private void OpenDiagnostics() => DiagnosticsOpen = true;
 

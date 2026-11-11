@@ -23,9 +23,35 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
     private BakeNoticeHost Host => window.GetVisualDescendants().OfType<BakeNoticeHost>().Single();
     private BakeNoticeState State => Toasts.BakeNotices!;
     private HomeViewModel Home => main.Pages.OfType<HomeViewModel>().Single();
-    private HomePage HomeView => window.GetVisualDescendants().OfType<HomePage>().Single();
-    // The home page has more than one StatusBar (the onboarding card has its own); pick the launch status by name.
-    private StatusBar LaunchStatus => HomeView.FindControl<StatusBar>("LaunchStatus")!;
+    // Launch notices show on the instance's own page (the separate launch page is gone).
+    private InstancePage Page => window.GetVisualDescendants().OfType<InstancePage>().Single();
+    private StatusBar LaunchStatus => Page.FindControl<StatusBar>("LaunchStatus")!;
+    private Border NoticeCard => Page.FindControl<Border>("BakeNoticeCard")!;
+    private const string Instance = "E2E-Bake-Sodium";
+
+    /// <summary>The test profile had no such instance, so a bare stand-in was written: enough for the notices, not for baking.</summary>
+    private bool _standIn;
+
+    private async Task GoInstanceAsync()
+    {
+        main.Shell.Navigate("library/" + Instance);
+        var page = main.Pages.OfType<InstanceViewModel>().Single();
+        for (var i = 0; i < 60 && !(page.IsCurrent && page.Current?.Id == Instance); i++) await Task.Delay(50);
+        await Task.Delay(100);
+        window.UpdateLayout();
+    }
+
+    private async Task GoElsewhereAsync()
+    {
+        main.Shell.Navigate("settings");
+        await Task.Delay(150);
+    }
+
+    private void ShowCrash()
+    {
+        Home.Crash = CrashAnalyzer.Analyze("java.lang.NoClassDefFoundError: net/fabricmc/loader/api/FabricLoader", []);
+        Home.CrashInstance = Instance;
+    }
 
     private void Check(string name, bool ok, string detail = "")
     {
@@ -58,17 +84,16 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         bitmap.Save(Path.Combine(reportDir, name + ".png"));
     }
 
-    private async Task<double> EmptyCardHeightAsync()
+    private async Task ClearAsync()
     {
         State.Clear();
         await Task.Delay(100);
         window.UpdateLayout();
-        return HomeView.FindControl<Border>("LaunchStatusCard")!.Bounds.Height;
     }
 
-    private async Task CheckLayoutAsync(string name, double originalCardHeight, bool multiple = false)
+    private async Task CheckLayoutAsync(string name, bool multiple = false)
     {
-        // 新增内容的模板可能晚于通知集合更新；等真实控件出现再检查，不用固定延时猜布局完成。
+        // The notice's template can arrive after the collection changed: wait for the real control, not a fixed delay.
         for (var i = 0; i < 40; i++)
         {
             window.UpdateLayout();
@@ -76,35 +101,45 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                 && Host.GetVisualDescendants().OfType<Button>().Any(b => b.Content?.ToString() == L.T("home.bake.retry_without"))) break;
             await Task.Delay(50);
         }
-        Check(name + "：警告已在状态框呈现", Host.IsVisible && State.HasNotice && Host.Bounds.Height > 0);
-        var homePage = HomeView;
-        var primary = homePage.FindControl<Button>("PrimaryButton")!;
-        var primaryBounds = BoundsIn(primary, window);
-        var noticeBounds = BoundsIn(Host, window);
-        var card = homePage.FindControl<Border>("LaunchStatusCard")!;
-        Check(name + "：提示完整位于原状态框", BoundsIn(card, window).Contains(noticeBounds));
-        Check(name + "：状态框不因提示增高", card.Bounds.Height <= originalCardHeight + 1);
-        Check(name + "：主启动按钮不被遮挡且仍可操作", primaryBounds.Bottom <= window.Bounds.Height
-            && noticeBounds.Right <= primaryBounds.Left && primary.IsEffectivelyEnabled);
+        Check(name + "：警告已在实例页呈现", Host.IsEffectivelyVisible && State.HasNotice && Host.Bounds.Height > 0);
+        var page = Page;
+        var client = new Rect(window.ClientSize);
+        var pageScroll = page.FindControl<ScrollViewer>("PageScroll")!;
+        var notices = page.FindControl<ScrollViewer>("NoticeScroll")!;
+        pageScroll.Offset = default;
+        notices.Offset = default;
+        window.UpdateLayout();
+        await Task.Delay(50);
+        var start = page.FindControl<Button>("StartButton")!;
+        var startBounds = BoundsIn(start, window);
+        var card = NoticeCard;
+        var cardBounds = BoundsIn(card, window);
+        Check(name + "：开始按钮不被遮挡且仍可操作", client.Contains(startBounds) && !cardBounds.Intersects(startBounds) && start.IsEffectivelyEnabled,
+            $"start {startBounds}, notice {cardBounds}");
+        Check(name + "：通知区最多占半页", notices.Bounds.Height <= Math.Max(160, page.Bounds.Height * 0.5) + 1,
+            $"notices {notices.Bounds.Height:F0}, page {page.Bounds.Height:F0}");
+        card.BringIntoView();
+        window.UpdateLayout();
+        await Task.Delay(100);
+        cardBounds = BoundsIn(card, window);
+        Check(name + "：提示完整位于通知区和窗口内", client.Contains(cardBounds) && BoundsIn(notices, window).Inflate(1).Contains(cardBounds),
+            $"notice {cardBounds}, area {BoundsIn(notices, window)}");
         var retry = Host.GetVisualDescendants().OfType<Button>().First(b => b.Command is not null && b.Content?.ToString() == L.T("home.bake.retry_without"));
-        Check(name + "：紧凑重试按钮完整可见", BoundsIn(card, window).Contains(BoundsIn(retry, window)));
+        Check(name + "：紧凑重试按钮完整可见", cardBounds.Contains(BoundsIn(retry, window)));
         var description = Host.GetVisualDescendants().OfType<TextBlock>().First(t => t.Text == State.Current!.Text);
         Check(name + "：长说明最多两行且完整内容保留在提示框", description.Bounds.Height <= 36 && ToolTip.GetTip(description)?.ToString() == State.Current!.Text);
-        var homeScroller = homePage.GetVisualDescendants().OfType<ScrollViewer>().First();
-        Check(name + "：崩溃详情保留可滚动区域", homeScroller.Bounds.Height >= 60);
-        // Scroll to the end until it sticks: the crash card can still grow (text wrapping) after the first scroll,
-        // which left the log button a few pixels below the viewport.
+        // The last-session panel sits under the notice in the same scrolling area: its actions must stay reachable.
+        var log = page.GetVisualDescendants().OfType<Button>().Single(b => b.Content?.ToString() == L.T("home.crash.view_log"));
         for (var i = 0; i < 5; i++)
         {
-            homeScroller.ScrollToEnd();
+            log.BringIntoView();
             window.UpdateLayout();
             await Task.Delay(100);
-            if (homeScroller.Offset.Y >= homeScroller.Extent.Height - homeScroller.Viewport.Height - 1) break;
+            if (client.Contains(BoundsIn(log, window))) break;
         }
-        var log = homePage.GetVisualDescendants().OfType<Button>().Single(b => b.Content?.ToString() == L.T("home.crash.view_log"));
-        var logBounds = BoundsIn(log, homeScroller);
-        Check(name + "：滚动后崩溃操作可达", logBounds.Top >= 0 && logBounds.Bottom <= homeScroller.Bounds.Height,
-            $"log {logBounds}, viewport {homeScroller.Bounds.Height:F0}, offset {homeScroller.Offset.Y:F0}/{homeScroller.Extent.Height:F0}");
+        var logBounds = BoundsIn(log, window);
+        Check(name + "：滚动后崩溃操作可达", log.IsEffectivelyVisible && client.Contains(logBounds),
+            $"log {logBounds}, window {client}");
         if (multiple) Check(name + "：三条通知只呈现最新一条", State.Notices.Count == 3 && retry.Command == State.Current!.RetryCommand
             && Host.GetVisualDescendants().OfType<Button>().Count() == 1);
         await ShotAsync(name);
@@ -118,9 +153,18 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             var dataDir = Environment.GetEnvironmentVariable("AMBER_DATA_DIR");
             Check("自检使用显式独立数据/游戏目录", !string.IsNullOrWhiteSpace(dataDir)
                 && Path.GetFullPath(Home.Service.Directory.Root).StartsWith(Path.GetFullPath(dataDir) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
-            main.CurrentPage = Home;
+            var versionJson = Path.Combine(Home.Service.Directory.Root, "versions", Instance, Instance + ".json");
+            if (!File.Exists(versionJson))
+            {
+                _standIn = true;
+                Directory.CreateDirectory(Path.GetDirectoryName(versionJson)!);
+                File.WriteAllText(versionJson, $$"""{"id":"{{Instance}}","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":[]}""");
+                Home.Service.SaveAndReload();
+            }
+            await GoInstanceAsync();
+            Check("启动提示所在的实例页已打开", main.Pages.OfType<InstanceViewModel>().Single().Current?.Id == Instance);
             var settingsBefore = BakeSettingsSnapshot();
-            const string instance = "E2E-Bake-Sodium";
+            const string instance = Instance;
             var original = new LaunchRequest(instance, JoinServer: "localhost:25565", JoinWorld: null);
             var request = original with { SkipBake = true };
             var calls = new List<LaunchRequest>();
@@ -132,37 +176,35 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                     L.SetLanguage("zh-Hans");
                     window.Width = size.Item1;
                     window.Height = size.Item2;
-                    Home.Crash = CrashAnalyzer.Analyze("java.lang.NoClassDefFoundError: net/fabricmc/loader/api/FabricLoader", []);
-                    var cardHeight = await EmptyCardHeightAsync();
+                    ShowCrash();
+                    await ClearAsync();
                     Show(instance, () => calls.Add(request));
-                    await CheckLayoutAsync($"{theme}-{size.Item1}x{size.Item2}", cardHeight);
+                    await CheckLayoutAsync($"{theme}-{size.Item1}x{size.Item2}");
                     Check("截图尺寸与文件名一致", window.Bounds.Width == size.Item1 && window.Bounds.Height == size.Item2);
                 }
-                var threeCardHeight = await EmptyCardHeightAsync();
+                await ClearAsync();
                 Show("Earlier-instance-A");
                 Show("Earlier-instance-B");
                 Show(instance, () => calls.Add(request));
-                await CheckLayoutAsync($"{theme}-minimum-three-notices", threeCardHeight, multiple: true);
+                await CheckLayoutAsync($"{theme}-minimum-three-notices", multiple: true);
             }
             App.ApplyTheme("dark");
-            main.CurrentPage = main.Pages.OfType<LogViewModel>().Single();
+            await GoElsewhereAsync();
             State.Clear();
             Show(instance, () => calls.Add(request));
             await Task.Delay(100);
             var beforeNavigation = State.Current;
-            Check("非启动页发生的失败仍保存通知", beforeNavigation is not null);
-            main.CurrentPage = Home;
-            await Task.Delay(100);
-            window.UpdateLayout();
-            Check("返回启动页绑定原通知状态和实例回调", ReferenceEquals(Host.DataContext, State) && State.Current == beforeNavigation);
+            Check("在别的页面时发生的失败仍保存通知", beforeNavigation is not null);
+            await GoInstanceAsync();
+            Check("回到实例页绑定原通知状态和实例回调", ReferenceEquals(Host.DataContext, State) && State.Current == beforeNavigation);
             foreach (var language in new[] { "zh-Hant", "en", "ja" })
             {
                 L.SetLanguage(language);
-                Home.Crash = CrashAnalyzer.Analyze("java.lang.NoClassDefFoundError: net/fabricmc/loader/api/FabricLoader", []);
-                var cardHeight = await EmptyCardHeightAsync();
+                ShowCrash();
+                await ClearAsync();
                 var displayedInstance = language == "zh-Hant" ? instance : "Sodium-Fabric-1.21.1-with-extra-long-instance-name-for-layout-validation";
                 Show(displayedInstance);
-                await CheckLayoutAsync($"{language}-minimum", cardHeight);
+                await CheckLayoutAsync($"{language}-minimum");
             }
             State.Clear();
             Show(instance, () => calls.Add(request));
@@ -181,7 +223,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             Check("按钮移除通知，烘焙设置未改变", State.Notices.Count == 0 && settingsAfter == settingsBefore,
                 $"before={settingsBefore}; after={settingsAfter}");
             window.UpdateLayout();
-            Check("通知结束后原状态文字恢复", !Host.IsVisible && LaunchStatus.IsVisible);
+            Check("通知结束后提示卡收起", !Host.IsVisible && !NoticeCard.IsVisible);
             using (var simulatedGame = Process.GetCurrentProcess())
             {
                 var run = Home.AddRunForTest(instance, simulatedGame);
@@ -191,8 +233,8 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                     Show("Earlier-instance-B", () => calls.Add(request));
                     await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
                     window.UpdateLayout();
-                    Check("活动局的状态及进度优先显示，不被旧通知遮住", State.Notices.Count == 2 && !Host.IsEffectivelyVisible
-                        && LaunchStatus.IsEffectivelyVisible && Home.ShowProgress);
+                    Check("活动局的进度行优先显示，不被旧通知遮住", State.Notices.Count == 2 && !Host.IsEffectivelyVisible
+                        && Page.FindControl<Border>("LaunchLineCard")!.IsEffectivelyVisible && Home.ShowProgress);
                     var stale = State.Notices.ToArray();
                     // 已有模拟运行局：真实启动请求进入多开确认后返回，不进入下载或启动流程。
                     Home.Service.RequestLaunch(original);
@@ -209,15 +251,15 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                     Home.RemoveRunForTest(run);
                 }
             }
-            main.CurrentPage = main.Pages.OfType<LogViewModel>().Single();
+            await GoElsewhereAsync();
             Show(instance, () => calls.Add(request));
             await Task.Delay(50);
             var clock = Stopwatch.StartNew();
             await Task.Delay(6500);
             Check("停留在其他页面时八秒前仍保留重试机会", State.Notices.Count == 1);
-            main.CurrentPage = Home;
+            await GoInstanceAsync();
             while (State.Notices.Count > 0 && clock.Elapsed < TimeSpan.FromSeconds(11)) await Task.Delay(100);
-            Check("回到启动页不重置八秒期限且不调用重试", State.Notices.Count == 0 && clock.Elapsed >= TimeSpan.FromSeconds(7.8) && calls.Count == 1);
+            Check("回到实例页不重置八秒期限且不调用重试", State.Notices.Count == 0 && clock.Elapsed >= TimeSpan.FromSeconds(7.8) && calls.Count == 1);
             await CheckInstanceBakeEntryAsync(instance);
             await CheckProblemNoticeAsync();
             await CheckSettingsCleanupAsync();
@@ -260,7 +302,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         page.SelectedId = instance;
         page.TabIndex = (int)InstanceTab.Mods;
         await Task.Delay(200);
-        if (page.Current?.Id != instance)
+        if (page.Current?.Id != instance || _standIn)
         {
             // The test profile has no such instance (it is prepared by hand on the test machines).
             _report.Add($"SKIP 实例页烘焙入口：测试目录里没有实例 {instance}");
@@ -307,7 +349,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
     /// <summary>A bake problem with nothing to retry (dependency problem, loader too old): text only, no retry button.</summary>
     private async Task CheckProblemNoticeAsync()
     {
-        main.CurrentPage = Home;
+        await GoInstanceAsync();
         foreach (var language in new[] { "zh-Hans", "en" })
         {
             L.SetLanguage(language);
@@ -317,7 +359,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             Home.Crash = null;
             Toasts.BakeProblem(L.F("home.bake.fallback", L.F("core.bake.dependency_failed", "modmenu: " + L.T("core.bake.problem.missing_dep"))));
             for (var i = 0; i < 40 && !(State.HasNotice && Host.IsEffectivelyVisible); i++) { await Task.Delay(50); window.UpdateLayout(); }
-            Check($"烘焙问题提示 {language}：显示在状态框", State.HasNotice && Host.IsEffectivelyVisible && State.Current!.Text.Contains("modmenu"));
+            Check($"烘焙问题提示 {language}：显示在实例页", State.HasNotice && Host.IsEffectivelyVisible && State.Current!.Text.Contains("modmenu"));
             var retry = Host.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content?.ToString() == L.T("home.bake.retry_without"));
             Check($"烘焙问题提示 {language}：没有重试按钮", retry is null || !retry.IsEffectivelyVisible);
             await ShotAsync($"bake-problem-{language}");
@@ -473,13 +515,13 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
     private async Task CheckLoaderDownloadOfferAsync()
     {
         Check("没有加载器时的下载入口已接到设置页", Home.DownloadBakeLoader is not null);
-        main.CurrentPage = Home;
+        await GoInstanceAsync();
         foreach (var language in new[] { "zh-Hans", "en", "ja" })
         {
             L.SetLanguage(language);
             window.Width = 1280;
             window.Height = 700;
-            var cardHeight = await EmptyCardHeightAsync();
+            await ClearAsync();
             var clicked = false;
             Toasts.BakeAction(L.T("home.bake.loader_missing_notice"), L.T("home.bake.download_loader"), L.T("settings.bake.download_hint"), () => clicked = true);
             Button? action = null;
@@ -492,8 +534,10 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             }
             Check($"缺加载器提示 {language}：按钮是“下载加载器”", action?.Content?.ToString() == L.T("home.bake.download_loader")
                 && ToolTip.GetTip(action)?.ToString() == L.T("settings.bake.download_hint"), action?.Content?.ToString() ?? "无按钮");
-            var card = HomeView.FindControl<Border>("LaunchStatusCard")!;
-            Check($"缺加载器提示 {language}：完整在状态框内、不增高", BoundsIn(card, window).Contains(BoundsIn(action!, window)) && card.Bounds.Height <= cardHeight + 1);
+            NoticeCard.BringIntoView();
+            window.UpdateLayout();
+            Check($"缺加载器提示 {language}：按钮完整在提示卡和窗口内", BoundsIn(NoticeCard, window).Contains(BoundsIn(action!, window))
+                && new Rect(window.ClientSize).Contains(BoundsIn(action!, window)));
             await ShotAsync($"bake-loader-missing-offer-{language}");
             action!.Command!.Execute(null);
             Check($"缺加载器提示 {language}：点按钮执行下载并收起", clicked && !State.HasNotice);

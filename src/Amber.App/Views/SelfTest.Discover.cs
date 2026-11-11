@@ -49,6 +49,8 @@ internal sealed partial class SelfTest
             var page = window.PageHost.GetVisualDescendants().OfType<ContentPage>().First();
             Check("发现：类型是一排芯片，来源是分段", Dispatcher.UIThread.Invoke(() => page.TypeChips.IsEffectivelyVisible && !page.TypeCombo.IsVisible && page.SourceChips.IsEffectivelyVisible));
             Check("发现：搜到结果，装到的是测试实例", content.Results.Count > 0 && content.TargetInstance == id, $"{content.Results.Count} 个");
+            Check("发现：“装到”标记写实例的名字，默认是刚看的那个实例", Dispatcher.UIThread.Invoke(() => page.TargetMarker.IsEffectivelyVisible
+                && page.TargetMarker.SelectedItem is InstanceChoice { Id: id } choice && choice.Name == (main.Service.MetaOf(id)?.DisplayName is { Length: > 0 } name ? name : id)), content.TargetChoice?.Name ?? "");
 
             // [+ Queue] on a row.
             var first = content.Results[0];
@@ -135,6 +137,7 @@ internal sealed partial class SelfTest
             Check("整合包：详情给【安装并开始游戏】（这一屏唯一的琥珀按钮）和【只安装】，结果行没有【＋待装】",
                 await WaitAsync(() => AmberCount() == 1, 5) && Dispatcher.UIThread.Invoke(() => page.InstallOnlyButton.IsEffectivelyVisible)
                 && !window.GetVisualDescendants().OfType<Button>().Any(b => ReferenceEquals(b.Command, content.ToggleQueueCommand) && b.IsEffectivelyVisible), $"{AmberCount()}");
+            Check("整合包：自己建实例，不问“装到”", Dispatcher.UIThread.Invoke(() => !page.TargetMarker.IsEffectivelyVisible));
             await ShotAsync("discover-modpack");
         }
         finally

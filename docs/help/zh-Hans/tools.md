@@ -1,17 +1,19 @@
 ---
 id: tools
 category: storage
-routes: settings/tools
+routes: 
 related: settings
 ---
 
-# 工具箱
+# 清理、Java 和更新
 
-工具箱里是不常用但有时很有用的东西：检查 Jay 更新、修复游戏文件、清理缓存等。
+原来的工具箱没有了，里面的东西各自放到了你会去找它的地方。
 
 ## 怎么做
-- 从 [设置 › 工具](jay:settings#OpenTools) 打开，或者在设置页上面点“工具箱”页签。
-- 每个工具都写着它会做什么；会删东西的操作会先让你确认。
+- 清理游戏垃圾：[设置 › 存储](jay:settings#Junk)。点**扫描**列出能清的东西和大小，勾上要清的再清理。
+- 手动下载 Java：[设置 › 游戏默认](jay:settings#JavaDownload)。平时 Jay 会自己下载合适的 Java。
+- 检查 Jay 更新：[设置 › 关于](jay:settings#CheckUpdate)。
+- 试着下载一个文件：在联机页打开“连接有问题？”，展开**下载文件**。
 
 ## 出问题了
 - 检查更新没有反应：需要先在 [设置 › 下载与服务](jay:settings#UpdateFeed) 填更新地址；不填 Jay 不会为此联网。

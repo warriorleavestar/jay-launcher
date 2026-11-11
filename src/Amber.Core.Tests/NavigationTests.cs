@@ -118,13 +118,56 @@ public class NavigationTests
     [InlineData("home", "library")]
     [InlineData("instances", "library/current")]
     [InlineData("downloads", "library/new")]
-    [InlineData("log", "library/logs")]
+    [InlineData("log", "library/current/logs")]
     [InlineData("content", "discover")]
     [InlineData("multiplayer", "play")]
-    [InlineData("tools", "settings/tools")]
+    [InlineData("tools", "settings#Junk")]
     [InlineData("settings", "settings")]
     [InlineData("accounts", "accounts")]
     public void EveryOldPageHasANewHome(string page, string route) => Assert.Equal(route, LegacyRoutes.For(page)?.ToString());
+
+    [Theory]
+    [InlineData("library/start", "library")]              // the launch page: starting happens on each instance
+    [InlineData("library/logs", "library/current/logs")]  // the standalone log page: the focused instance's Logs tab
+    [InlineData("settings/tools", "settings#Junk")]       // the toolbox: Settings › Storage
+    [InlineData("library", "library")]
+    [InlineData("library/new", "library/new")]
+    [InlineData("library/1.21.1", "library/1.21.1")]
+    [InlineData("library/start/mods", "library/start/mods")] // an instance that happens to be called "start"
+    [InlineData("library/1.21.1/logs", "library/1.21.1/logs")]
+    [InlineData("settings#Source", "settings#Source")]
+    [InlineData("play/servers", "play/servers")]
+    public void RoutesOfRemovedPagesGoToWhatReplacedThem(string saved, string expected) =>
+        Assert.Equal(expected, LegacyRoutes.Resolve(Route.Parse(saved)).ToString());
+
+    [Fact]
+    public void TheToolboxRouteLandsOnARealSetting()
+    {
+        var route = Route.Parse(LegacyRoutes.Tools);
+        Assert.Equal(Section.Settings, route.Section);
+        Assert.Equal(SettingsCatalog.Storage, SettingsCatalog.Find(route.Fragment)?.Group);
+    }
+
+    [Fact]
+    public void RouterRewritesBeforeItNavigates()
+    {
+        var router = new Router { Rewrite = LegacyRoutes.Resolve };
+        Route? seen = null;
+        router.Navigated += (to, _) => seen = to;
+        router.Navigate("library/new");
+        router.Navigate("library/start");
+        // The retired route never becomes current or enters history: back goes to where the player really was.
+        Assert.Equal("library", router.Current.ToString());
+        Assert.Equal("library", seen?.ToString());
+        Assert.True(router.Back());
+        Assert.Equal("library/new", router.Current.ToString());
+        router.Navigate("settings/tools");
+        Assert.Equal("settings#Junk", router.Current.ToString());
+        // A host can keep a route as it is (an instance really called "start").
+        router.Rewrite = route => route[1] == "start" ? route : LegacyRoutes.Resolve(route);
+        router.Navigate("library/start");
+        Assert.Equal("library/start", router.Current.ToString());
+    }
 
     [Fact]
     public void EveryThemePageIdIsMapped() => Assert.All(ThemeLayout.PageIds, id => Assert.NotNull(LegacyRoutes.For(id)));

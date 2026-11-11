@@ -143,7 +143,7 @@
           <!-- Game defaults -->
           <StackPanel x:Name="Group_game" Classes="group">
             <Border Classes="card">
-              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+              <Grid Classes="form" ColumnSpacing="12" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Text="{l:T settings.java.label}" VerticalAlignment="Center" />
                 <ComboBox x:Name="JavaBox" Grid.Column="1" ItemsSource="{Binding JavaOptions}" SelectedItem="{Binding SelectedJava}" HorizontalAlignment="Stretch"
                           AutomationProperties.Name="{l:T settings.java.label}">
@@ -159,13 +159,23 @@
                   <TextBlock Text="{l:T settings.java.auto_download}" TextWrapping="Wrap" />
                 </CheckBox>
 
-                <TextBlock Grid.Row="2" Text="{l:T instance.settings.isolation}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <CheckBox x:Name="IsolationBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="{Binding IsolateVersions}" Margin="0,12,0,0">
+                <!-- Default memory for instances that follow the global setting (it used to sit on the launch page) -->
+                <TextBlock Grid.Row="2" Text="{l:T settings.memory.label}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" Margin="0,12,0,0">
+                  <CheckBox x:Name="AutoMemoryBox" Content="{l:T common.automatic}" IsChecked="{Binding AutoMemory}" />
+                  <Slider x:Name="MemoryBox" Grid.Column="1" Minimum="1024" Maximum="{Binding TotalMemoryMb}" Value="{Binding MaxMemoryMb}"
+                          TickFrequency="512" IsSnapToTickEnabled="True" IsEnabled="{Binding !AutoMemory}" AutomationProperties.Name="{l:T settings.memory.label}" />
+                  <TextBlock Grid.Column="2" VerticalAlignment="Center" IsVisible="{Binding !AutoMemory}" Text="{Binding MaxMemoryMb, StringFormat='{}{0} MB'}" />
+                  <TextBlock Grid.Column="2" VerticalAlignment="Center" IsVisible="{Binding AutoMemory}" Classes="hint" Text="{l:T settings.memory.by_mod_count}" />
+                </Grid>
+
+                <TextBlock Grid.Row="3" Text="{l:T instance.settings.isolation}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <CheckBox x:Name="IsolationBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="{Binding IsolateVersions}" Margin="0,12,0,0">
                   <TextBlock Text="{l:T settings.isolation.hint}" TextWrapping="Wrap" />
                 </CheckBox>
 
-                <TextBlock Grid.Row="3" Text="{l:T instance.settings.window_size}" VerticalAlignment="Top" Margin="0,18,0,0" />
-                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                <TextBlock Grid.Row="4" Text="{l:T instance.settings.window_size}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
                   <WrapPanel ItemSpacing="8" LineSpacing="8">
                     <TextBox x:Name="WindowWidthBox" Text="{Binding WindowWidth, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
                     <TextBlock Text="×" VerticalAlignment="Center" />
@@ -174,35 +184,50 @@
                   </WrapPanel>
                   <TextBlock Classes="field-error" Text="{Binding WindowError}" IsVisible="{Binding HasWindowError}" />
                 </StackPanel>
-                <Button Grid.Row="3" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="window"
+                <Button Grid.Row="4" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="window"
                         ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
-                <TextBlock Grid.Row="4" Text="{l:T instance.settings.jvm_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
-                <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                <TextBlock Grid.Row="5" Text="{l:T instance.settings.jvm_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
                   <TextBox x:Name="JvmArgsBox" Text="{Binding JvmArgs, UpdateSourceTrigger=LostFocus}" />
                   <TextBlock Classes="field-error" Text="{Binding JvmArgsError}" IsVisible="{Binding HasJvmArgsError}" />
                 </StackPanel>
-                <Button Grid.Row="4" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="jvm"
+                <Button Grid.Row="5" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="jvm"
                         ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
-                <TextBlock Grid.Row="5" Text="{l:T instance.settings.game_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
-                <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
+                <TextBlock Grid.Row="6" Text="{l:T instance.settings.game_args}" VerticalAlignment="Top" Margin="0,18,0,0" />
+                <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,12,0,0" Spacing="4">
                   <TextBox x:Name="GameArgsBox" Text="{Binding GameArgs, UpdateSourceTrigger=LostFocus}" />
                   <TextBlock Classes="field-error" Text="{Binding GameArgsError}" IsVisible="{Binding HasGameArgsError}" />
                 </StackPanel>
-                <Button Grid.Row="5" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="game_args"
+                <Button Grid.Row="6" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" VerticalAlignment="Top" Command="{Binding ResetFieldCommand}" CommandParameter="game_args"
                         ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
-                <TextBlock Grid.Row="6" Text="{l:T instance.settings.pre_launch}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox x:Name="PreLaunchBox" Grid.Row="6" Grid.Column="1" Text="{Binding PreLaunch, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
-                <Button Grid.Row="6" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="pre"
+                <TextBlock Grid.Row="7" Text="{l:T instance.settings.pre_launch}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <TextBox x:Name="PreLaunchBox" Grid.Row="7" Grid.Column="1" Text="{Binding PreLaunch, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
+                <Button Grid.Row="7" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="pre"
                         ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
 
-                <TextBlock Grid.Row="7" Text="{l:T instance.settings.post_exit}" VerticalAlignment="Center" Margin="0,12,0,0" />
-                <TextBox x:Name="PostExitBox" Grid.Row="7" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
-                <Button Grid.Row="7" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="post"
+                <TextBlock Grid.Row="8" Text="{l:T instance.settings.post_exit}" VerticalAlignment="Center" Margin="0,12,0,0" />
+                <TextBox x:Name="PostExitBox" Grid.Row="8" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,12,0,0" />
+                <Button Grid.Row="8" Grid.Column="2" Classes="ghost reset" Content="↺" Margin="8,12,0,0" Command="{Binding ResetFieldCommand}" CommandParameter="post"
                         ToolTip.Tip="{l:T settings.reset}" AutomationProperties.Name="{l:T settings.reset}" />
               </Grid>
+            </Border>
+            <!-- Download a Java runtime by hand (it used to be in the toolbox) -->
+            <Border x:Name="JavaDownloadCard" Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="h2" Text="{l:T tools.java.title}" Margin="0" />
+                <TextBlock Classes="hint" Text="{l:T tools.java.hint}" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <ComboBox x:Name="JavaDownloadBox" ItemsSource="{Binding Tools.JavaMajors}" SelectedItem="{Binding Tools.SelectedJavaMajor}" MinWidth="90"
+                            AutomationProperties.Name="{l:T tools.java.title}" />
+                  <Button x:Name="JavaDownloadButton" Classes="secondary" Content="{l:T settings.java.download}" Command="{Binding Tools.InstallJavaCommand}" IsEnabled="{Binding !Tools.IsBusy}" />
+                </StackPanel>
+                <c:ProgressLine x:Name="JavaDownloadLine" Title="{Binding Tools.BusyTitle}" Step="{Binding Tools.Status}" Percent="{Binding Tools.Progress}"
+                                CancelCommand="{Binding Tools.CancelCommand}" IsVisible="{Binding Tools.IsInstallingJava}" />
+                <c:StatusBar Message="{Binding Tools.JavaMessage}" />
+              </StackPanel>
             </Border>
           </StackPanel>
 
@@ -246,6 +271,28 @@
                 <TextBox x:Name="GameDirectoryBox" Grid.Column="1" Text="{Binding GameDirectory, UpdateSourceTrigger=LostFocus}" />
                 <Button Grid.Column="2" Content="{l:T common.browse}" Margin="8,0,0,0" Click="BrowseGameDir_Click" />
               </Grid>
+            </Border>
+            <!-- Storage › Clean up (it used to be in the toolbox): scan, tick, clean -->
+            <Border x:Name="JunkCard" Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="h2" Text="{l:T tools.junk.title}" Margin="0" />
+                <TextBlock x:Name="JunkStatusText" Classes="hint" Text="{Binding Tools.JunkStatus}" TextWrapping="Wrap" />
+                <ItemsControl x:Name="JunkList" ItemsSource="{Binding Tools.Junk}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:JunkItem">
+                      <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
+                        <CheckBox IsChecked="{Binding Selected}" Content="{Binding Name}" />
+                        <TextBlock Grid.Column="1" Classes="hint" FontSize="12" Text="{Binding Description}" VerticalAlignment="Center" Margin="10,0" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" />
+                        <TextBlock Grid.Column="2" Text="{Binding Size}" VerticalAlignment="Center" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button x:Name="JunkBox" Classes="secondary" Content="{l:T tools.junk.scan}" Command="{Binding Tools.ScanJunkCommand}" />
+                  <Button x:Name="JunkCleanButton" Classes="secondary" Content="{l:T tools.junk.clean}" Command="{Binding Tools.CleanJunkCommand}" IsVisible="{Binding Tools.HasJunk}" />
+                </StackPanel>
+              </StackPanel>
             </Border>
             <!-- Storage › Recently deleted (§6.20): [Restore] on every row; [Delete forever] and [Empty] use the locked confirm. -->
             <Border x:Name="RecycleCard" Classes="card">
@@ -361,26 +408,6 @@
             </Border>
           </StackPanel>
 
-          <!-- Tools: the toolbox, plus where the other tools moved -->
-          <StackPanel x:Name="Group_tools" Classes="group">
-            <Border Classes="card">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Text="{l:T settings.tools.card}" FontWeight="SemiBold" />
-                  <TextBlock Classes="hint" Text="{l:T settings.tools.card_hint}" TextWrapping="Wrap" />
-                </StackPanel>
-                <Button x:Name="OpenToolsBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.tools.open}" Command="{Binding GoToolsCommand}" VerticalAlignment="Center" />
-              </Grid>
-            </Border>
-            <Border Classes="card">
-              <WrapPanel ItemSpacing="8" LineSpacing="8">
-                <Button Classes="ghost" Content="{l:T settings.tools.go_storage}" Command="{Binding GoGroupCommand}" CommandParameter="storage" />
-                <Button Classes="ghost" Content="{l:T settings.tools.go_java}" Command="{Binding GoGroupCommand}" CommandParameter="game" />
-                <Button Classes="ghost" Content="{l:T settings.tools.go_about}" Command="{Binding GoGroupCommand}" CommandParameter="about" />
-              </WrapPanel>
-            </Border>
-          </StackPanel>
-
           <!-- Experimental -->
           <StackPanel x:Name="Group_experimental" Classes="group">
             <Border Classes="card">
@@ -419,9 +446,14 @@
           <!-- About -->
           <StackPanel x:Name="Group_about" Classes="group">
             <Border Classes="card">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+              <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12">
                 <SelectableTextBlock x:Name="VersionBox" Text="{Binding VersionText}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <Button x:Name="CheckUpdateBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.about.check_update}" Command="{Binding GoToolsCommand}" VerticalAlignment="Center" />
+                <Button x:Name="CheckUpdateBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.about.check_update}" Command="{Binding Tools.CheckUpdateCommand}" VerticalAlignment="Center" />
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Classes="hint" Text="{l:T tools.update.hint}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                <TextBlock x:Name="UpdateStatusText" Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding Tools.UpdateStatus}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           IsVisible="{Binding Tools.UpdateStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <Button x:Name="OpenUpdatePageButton" Grid.Row="3" Grid.ColumnSpan="2" Classes="secondary" Content="{l:T tools.update.open_page}" Command="{Binding Tools.OpenUpdateUrlCommand}"
+                        IsVisible="{Binding Tools.UpdateUrl, Converter={x:Static ObjectConverters.IsNotNull}}" HorizontalAlignment="Left" Margin="0,8,0,0" />
               </Grid>
             </Border>
             <Border Classes="card">

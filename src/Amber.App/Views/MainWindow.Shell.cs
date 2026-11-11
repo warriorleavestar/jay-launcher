@@ -217,7 +217,6 @@ public partial class MainWindow
         var vertical = HeightTierNow == HeightTier.Normal ? 16 : 8;
         PageHost.Margin = new Thickness(pad, 4, pad, vertical);
         TopBar.Margin = new Thickness(pad - 8, 0, pad, 0);
-        SubPageTabs.Margin = new Thickness(pad - 4, 0, pad, 4);
         MovedNotice.Margin = new Thickness(pad, 0, pad, 8);
         TipBar.Margin = new Thickness(pad, 0, pad, 8);
         RequestBar.Margin = new Thickness(pad, 0, pad, 8);
@@ -308,7 +307,7 @@ public partial class MainWindow
     }
 
     /// <summary>The keyboard regions in F6 order; ones that are hidden right now are skipped.</summary>
-    internal IReadOnlyList<Control> FocusRegions => [SidebarHost, TopBar, RequestBar, SubPageTabs, PageHost, LogDock];
+    internal IReadOnlyList<Control> FocusRegions => [SidebarHost, TopBar, RequestBar, PageHost, LogDock];
 
     /// <summary>A drawer, the palette, the first-run wizard or a full-window overlay is up: F6 and Ctrl+N leave focus where it is.</summary>
     private static bool OverlayOpen(MainViewModel main) =>
@@ -548,8 +547,13 @@ public partial class MainWindow
         if (DataContext is not MainViewModel main) return;
         if (_logWindow is { } open) { open.Activate(); return; }
         _logWindow = new LogWindow(main.Log, () => main.LogDocked = true);
-        _logWindow.Closed += (_, _) => _logWindow = null;
+        _logWindow.Closed += (_, _) =>
+        {
+            _logWindow = null;
+            main.LogPoppedOut = false;
+        };
         _logWindow.Show(this);
+        main.LogPoppedOut = true;
     }
 
     /// <summary>The popped-out log window, if open (self-check).</summary>

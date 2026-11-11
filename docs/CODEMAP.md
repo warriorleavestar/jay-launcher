@@ -88,7 +88,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `src/Amber.App/Services/` | App-level services: `LauncherService.cs` wires Core together; settings, themes, density, toasts, sensitive clipboard, restart, skin rendering. | `LauncherService.cs`, `AppSettings.cs`, `ThemeService.cs` |
 | `src/Amber.App/ViewModels/` | One view model per page, split into partial files by tab (`InstanceViewModel.*.cs`, `MultiplayerViewModel.*.cs`, …). `ShellViewModel.cs` owns navigation. | `ShellViewModel.cs` |
 | `src/Amber.App/Views/` | XAML pages and windows. `MainWindow.*.cs` is the shell; `SelfTest*.cs` is the GUI self-check, one file per `AMBER_SELFTEST_SCOPE`. | `MainWindow.axaml`, `SelfTest.cs` |
-| `src/Amber.App/Views/Controls/` | Small reusable controls (status bar, confirm button, middle ellipsis). | |
+| `src/Amber.App/Views/Controls/` | Small reusable controls (status bar, the one progress line, confirm button, middle ellipsis). | |
 | `src/Amber.App/Controls/Safety/` | Locked safety UI that theme packs cannot restyle (dialogs, panels, privacy row). | `SafetySurface.cs`, `SafetyDialog.cs` |
 | `src/Amber.App/Themes/` | Default tokens, control styles, icons, and the locked safety styles. | `Tokens.axaml`, `Safety.axaml` |
 | `src/Amber.App/Localization/` | `{l:T key}` markup extension that follows the current language. | `T.cs` |

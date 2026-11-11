@@ -57,6 +57,9 @@ public sealed partial class InstanceViewModel
         {
             if (e.PropertyName is nameof(HomeViewModel.SelectedAccount) or nameof(HomeViewModel.ShowForceKill)) UpdateHero();
             else if (e.PropertyName is nameof(HomeViewModel.Crash) or nameof(HomeViewModel.CrashInstance)) UpdateLastRun();
+            else if (e.PropertyName is nameof(HomeViewModel.Failure)) UpdateLaunchFailure();
+            else if (e.PropertyName is nameof(HomeViewModel.Progress) or nameof(HomeViewModel.ProgressIndeterminate) or nameof(HomeViewModel.ShowProgress)
+                     or nameof(Status) or nameof(StatusInfo) or null) UpdateLaunchLine();
         };
         _service.LibraryChanged += () => Dispatcher.UIThread.Post(UpdateHero);
         _service.InstanceStateChanged += id => Dispatcher.UIThread.Post(() => { if (Current?.Id == id) UpdateHero(); });
@@ -69,11 +72,61 @@ public sealed partial class InstanceViewModel
         });
         PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(Current)) { UpdateHero(); UpdateLastRun(); }
+            if (e.PropertyName == nameof(Current)) { UpdateHero(); UpdateLastRun(); UpdateLaunchFailure(); }
         };
         UpdateHero();
         UpdateLastRun();
+        UpdateLaunchFailure();
     }
+
+    // ---- Launch progress and messages (the engine has no page of its own) ----
+
+    /// <summary>This instance is being prepared or is loading: the one progress line shows under the hero.</summary>
+    [ObservableProperty] public partial bool ShowLaunchLine { get; set; }
+    [ObservableProperty] public partial string LaunchStep { get; set; } = "";
+    [ObservableProperty] public partial double LaunchPercent { get; set; }
+    [ObservableProperty] public partial bool LaunchIndeterminate { get; set; }
+    [ObservableProperty] public partial double? LaunchSpeed { get; set; }
+    [ObservableProperty] public partial TimeSpan? LaunchRemaining { get; set; }
+
+    /// <summary>The engine's last warning or error about this instance (stopped early, another one is preparing).</summary>
+    [ObservableProperty] public partial StatusMessage? LaunchMessage { get; set; }
+
+    private void UpdateLaunchLine()
+    {
+        var mine = _home is { } home && Current is { } c && string.Equals(home.LastRunInstance, c.Id, StringComparison.OrdinalIgnoreCase);
+        ShowLaunchLine = mine && _home!.ShowProgress && string.Equals(_home.LatestInstance, Current!.Id, StringComparison.OrdinalIgnoreCase);
+        if (ShowLaunchLine)
+        {
+            LaunchStep = _home!.Status;
+            LaunchPercent = _home.Progress;
+            LaunchIndeterminate = _home.ProgressIndeterminate;
+            LaunchSpeed = _home.LaunchBytesPerSecond;
+            LaunchRemaining = _home.LaunchRemaining;
+        }
+        LaunchMessage = mine && !ShowLaunchLine && _home!.StatusInfo is { Kind: StatusKind.Warning or StatusKind.Error } message ? message : null;
+    }
+
+    // ---- Launch failure (it never got as far as the game) ----
+
+    /// <summary>The last start of this instance failed before the game came up: one sentence and the fixes, in order.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasLaunchFailure))]
+    public partial LaunchFailureCard? LaunchFailure { get; set; }
+
+    public bool HasLaunchFailure => LaunchFailure is not null;
+
+    private void UpdateLaunchFailure() =>
+        LaunchFailure = _home?.Failure is { } failure && Current is { } c
+                        && string.Equals(failure.Request.VersionId, c.Id, StringComparison.OrdinalIgnoreCase) ? failure : null;
+
+    [RelayCommand]
+    private void FixLaunch(LaunchFix fix) => _home?.FixCommand.Execute(fix);
+
+    [RelayCommand]
+    private void DismissLaunchFailure() => _home?.DismissFailureCommand.Execute(null);
+
+    internal void ExportLaunchFailure(string path) => _home?.ExportFailureReport(path);
 
     // ---- Hero ----
 
@@ -150,6 +203,7 @@ public sealed partial class InstanceViewModel
         HasHeroNote = HeroNote.Length > 0;
         AccountText = _home?.SelectedAccount is { } account ? L.F("instance.hero.as_account", account.Name) : "";
         UpdateGameRunning();
+        UpdateLaunchLine();
         if (session?.IsActive == true) _heroClock.Start();
         else _heroClock.Stop();
     }

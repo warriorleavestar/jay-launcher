@@ -169,8 +169,9 @@ public sealed partial class DownloadViewModel
         var plan = await NewInstanceMods.PlanAsync(_service.Modrinth, ctx.ContentInstaller, picks, instance, ct);
         await ctx.ContentInstaller.InstallAsync(plan, instance.DirectoryFor(ContentType.Mod), new Progress<Amber.Core.Net.DownloadProgress>(p =>
         {
+            Work.Bytes(p.BytesDownloaded);
             Progress = 100.0 * p.CompletedFiles / Math.Max(1, plan.Files.Count);
-            task.Report(Progress / 100, p.CurrentFile);
+            task.Report(Progress / 100, p.CurrentFile, p.BytesDownloaded);
         }), ct);
         _modProblems = plan.Problems;
         _modsInstalled = plan.Files.Count;

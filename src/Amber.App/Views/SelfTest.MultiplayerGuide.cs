@@ -295,6 +295,19 @@ internal sealed partial class SelfTest
             && page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "DiagnosticsCheckButton")?.IsFocused == true, drawer?.Bounds.Width.ToString() ?? "none");
         Check("连接有问题？：有建议按钮和折叠的技术细节", page.GetVisualDescendants().OfType<Button>().Any(b => b.Name == "SwitchRelayButton" && b.IsEffectivelyVisible)
             && page.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => e.Name == "DiagnosticsDetails") is { IsExpanded: false });
+        // The toolbox's "download a file" lives here now: folded away, a download test when the network looks wrong.
+        var downloadTest = page.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => e.Name == "DownloadTest");
+        Check("连接有问题？：最下面有折叠的【下载文件】（原来在工具箱）", downloadTest is { IsEffectivelyVisible: true, IsExpanded: false } && vm.Tools is not null);
+        if (downloadTest is not null)
+        {
+            Dispatcher.UIThread.Invoke(() => downloadTest.IsExpanded = true);
+            await Task.Delay(300);
+            Check("下载文件：展开后有网址框和【开始下载】，没在下载时没有进度行", Dispatcher.UIThread.Invoke(() =>
+                downloadTest.GetVisualDescendants().OfType<TextBox>().Any(t => t.Name == "DownloadUrlBox" && t.IsEffectivelyVisible)
+                && downloadTest.GetVisualDescendants().OfType<Button>().Any(b => b.Name == "DownloadTestButton" && b.IsEffectivelyVisible)
+                && !downloadTest.GetVisualDescendants().OfType<Controls.ProgressLine>().Any(l => l.IsVisible)));
+            Dispatcher.UIThread.Invoke(() => downloadTest.IsExpanded = false);
+        }
         await ShotAsync("连接有问题-1440");
         Dispatcher.UIThread.Invoke(() => PressKey(page.GetVisualDescendants().OfType<Button>().First(b => b.Name == "DiagnosticsCheckButton"), Avalonia.Input.Key.Escape));
         Check("连接有问题？：Esc 关掉", !vm.DiagnosticsOpen);

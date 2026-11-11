@@ -26,15 +26,17 @@ internal sealed partial class SelfTest
         {
             window.Width = 1440;
             window.Height = 900;
+            var memoryAtStart = settings.MaxMemoryMb;
             main.Shell.Navigate("settings");
             await WaitAsync(() => main.CurrentPage is SettingsViewModel, 5);
             await Task.Delay(500);
             var page = Dispatcher.UIThread.Invoke(() => window.PageHost.GetVisualDescendants().OfType<SettingsPage>().First());
+            Check("打开设置页不改已存的内存", settings.MaxMemoryMb == memoryAtStart, $"{memoryAtStart} → {settings.MaxMemoryMb}");
             settings.SelectedGroupIndex = 0;
             await Task.Delay(200);
             string[] Shown() => Dispatcher.UIThread.Invoke(() => page.Form.Children.Where(c => c.IsVisible).Select(c => c.Name ?? "").ToArray());
-            Check("宽窗口：左边 10 个分组、右边说明栏、没有下拉", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide && page.GroupList.IsEffectivelyVisible
-                && page.NotePane.IsEffectivelyVisible && !page.GroupPicker.IsVisible) && settings.Groups.Count == 10);
+            Check("宽窗口：左边 9 个分组、右边说明栏、没有下拉", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide && page.GroupList.IsEffectivelyVisible
+                && page.NotePane.IsEffectivelyVisible && !page.GroupPicker.IsVisible) && settings.Groups.Count == 9);
             Check("一次只显示一组（常规）", Shown() is ["Group_general"], string.Join(",", Shown()));
             await ShotAsync("settings-1440");
             settings.SelectedGroupIndex = 1;
@@ -91,6 +93,36 @@ internal sealed partial class SelfTest
             settings.AfterLaunchIndex = 1;
             Check("常规 › 开始游戏后：改成“不动”存进设置", File.ReadAllText(AppSettings.FilePath).Contains("\"AfterLaunch\": \"keep\"", StringComparison.Ordinal));
             settings.AfterLaunchIndex = 0;
+
+            // What the toolbox held now sits where one would look for it; the toolbox page and its group are gone.
+            main.Shell.Navigate("settings#Memory");
+            await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "MemoryBox" && window.RevealedField.IsEffectivelyVisible), 3);
+            var autoMemory = settings.AutoMemory;
+            settings.AutoMemory = false;
+            settings.MaxMemoryMb = 3072;
+            await Task.Delay(200);
+            Check("游戏默认 › 内存：关掉“自动”后滑块能拖，改的数存进设置",
+                Dispatcher.UIThread.Invoke(() => page.MemoryBox.IsEffectivelyEnabled && Math.Abs(page.MemoryBox.Value - 3072) < 1)
+                && File.ReadAllText(AppSettings.FilePath).Contains("\"MaxMemoryMb\": 3072", StringComparison.Ordinal),
+                Dispatcher.UIThread.Invoke(() => $"{page.MemoryBox.Value}"));
+            settings.AutoMemory = true;
+            await Task.Delay(200);
+            Check("游戏默认 › 内存：开着“自动”时滑块停用，数值留着", Dispatcher.UIThread.Invoke(() => !page.MemoryBox.IsEffectivelyEnabled) && settings.MaxMemoryMb == 3072);
+            settings.MaxMemoryMb = memoryAtStart;
+            settings.AutoMemory = autoMemory;
+            Check("游戏默认 › 下载 Java：选版本和【下载】都在，没在下载时不占进度行", Dispatcher.UIThread.Invoke(() => page.JavaDownloadBox.IsEffectivelyVisible
+                && page.JavaDownloadButton.IsEffectivelyVisible && page.JavaDownloadButton.IsEffectivelyEnabled && !page.JavaDownloadLine.IsVisible));
+            await ShotAsync("settings-game-1440");
+            main.Shell.Navigate("settings#Junk");
+            await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "JunkBox" && window.RevealedField.IsEffectivelyVisible), 3);
+            var junkBefore = settings.Tools.JunkStatus;
+            Dispatcher.UIThread.Invoke(() => page.JunkBox.Command!.Execute(null));
+            var scanned = await WaitAsync(() => settings.Tools.JunkStatus != junkBefore && settings.Tools.JunkStatus != L.T("tools.junk.scanning"), 10);
+            Check("存储 › 清理：【扫描】后写出每一类能清多少，扫过才有【清理】", scanned && settings.SelectedGroupId == SettingsCatalog.Storage
+                && Dispatcher.UIThread.Invoke(() => page.JunkCleanButton.IsVisible == settings.Tools.HasJunk), settings.Tools.JunkStatus);
+            await ShotAsync("settings-storage-junk-1440");
+            Check("关于 › 检查更新用的是同一个更新检查", Dispatcher.UIThread.Invoke(() => ReferenceEquals(page.CheckUpdateBox.Command, settings.Tools.CheckUpdateCommand)));
+            Check("设置里没有“工具”分组", settings.Groups.All(g => g.Id != "tools"));
 
             // Medium: the group picker.
             window.Width = 900;
