@@ -9,10 +9,12 @@ using Amber.Core.Localization;
 namespace Amber.Core.Multiplayer.Public;
 
 /// <summary>
-/// A public network's connection string: name, EasyTier secret, nodes, optional config hash, and one or more Ed25519
-/// signatures.
-/// Format: <c>JAYNET2-</c> + base64url(content JSON) + <c>.</c> + base64url(signature entries), each entry being
-/// public key 32 ‖ signature 64. Every entry signs <c>"jay-network-v2\n"</c> + the raw content JSON bytes.
+/// A public network's connection string: name, EasyTier secret, nodes, optional config hash, and one or more hybrid
+/// Ed25519 + ML-DSA-65 signatures (<see cref="TrustSignature"/>).
+/// Format: <c>JAYNET2-</c> + base64url(content JSON) + <c>.</c> + base64url(signature entries), each entry being one
+/// encoded <see cref="TrustSignature"/> (both public keys and both signatures, 5,357 bytes). Every entry signs
+/// <c>"jay-network-v2\n"</c> + the raw content JSON bytes. A string with the owner and two trustees is about 23 KB, so
+/// reviewed networks travel as files (.jaynet) or through the network list rather than being typed.
 /// <para>
 /// The first entry is the network owner's key: it identifies the network (a string with the same id and another owner
 /// key is a conflict). Further entries are co-signatures. A string counts as reviewed when the Jay trustees' quorum
@@ -26,7 +28,7 @@ public static partial class NetworkString
     public const string Prefix = "JAYNET";
     public const int Version = 2;
     public const string Current = "JAYNET2-";
-    public const int MaxLength = 8192;
+    public const int MaxLength = 40960;
     public const int MaxNodes = 16;
     /// <summary>
     /// At most this many directory keys: one per directory node (up to four) plus room for a new key per node while
@@ -38,8 +40,8 @@ public static partial class NetworkString
     /// <summary>At most this many directory root keys ("dirRoots"): the current one and a few for rotation.</summary>
     public const int MaxDirectoryRoots = 4;
 
-    /// <summary>At most this many signatures: the owner plus co-signers.</summary>
-    public const int MaxSignatures = 8;
+    /// <summary>At most this many signatures: the owner plus three trustees.</summary>
+    public const int MaxSignatures = 4;
 
     private static readonly byte[] Domain = "jay-network-v2\n"u8.ToArray();
 
@@ -50,11 +52,11 @@ public static partial class NetworkString
     public static bool IsValidId(string? id) => id is not null && IdPattern().IsMatch(id);
 
     /// <summary>Makes a connection string signed by its owner, then by any co-signers in order.</summary>
-    public static string Create(NetworkInfo info, NetworkSigner owner, params NetworkSigner[] cosigners)
+    public static string Create(NetworkInfo info, TrustSigner owner, params TrustSigner[] cosigners)
     {
         if (Validate(info) is { } problem) throw new InvalidDataException(problem);
         var payload = Encoding.UTF8.GetBytes(info.ToJson().ToJsonString());
-        var text = Format(payload, [new TrustSignature(owner.PublicKey, owner.Sign([.. Domain, .. payload]))]);
+        var text = Format(payload, [owner.Sign([.. Domain, .. payload])]);
         foreach (var c in cosigners) text = Cosign(text, c);
         return text;
     }
@@ -63,19 +65,19 @@ public static partial class NetworkString
     /// Adds one more signature to an existing string without changing its content. Checks every existing signature first.
     /// A key that already signed is refused.
     /// </summary>
-    public static string Cosign(string text, NetworkSigner signer)
+    public static string Cosign(string text, TrustSigner signer)
     {
         var (payload, signatures) = Split(text);
-        if (signatures.Any(s => s.Key.AsSpan().SequenceEqual(signer.PublicKey))) throw new InvalidDataException(L.T("core.mp.network.already_signed"));
+        if (signatures.Any(s => s.Key.AsSpan().SequenceEqual(signer.Id))) throw new InvalidDataException(L.T("core.mp.network.already_signed"));
         if (signatures.Count >= MaxSignatures) throw Bad("core.mp.network.bad_string");
-        return Format(payload, [.. signatures, new TrustSignature(signer.PublicKey, signer.Sign([.. Domain, .. payload]))]);
+        return Format(payload, [.. signatures, signer.Sign([.. Domain, .. payload])]);
     }
 
     private static string Format(byte[] payload, IReadOnlyList<TrustSignature> signatures) =>
-        Current + Base64Url(payload) + "." + Base64Url(signatures.SelectMany(s => s.Key.Concat(s.Signature)).ToArray());
+        Current + Base64Url(payload) + "." + Base64Url(signatures.SelectMany(s => s.Encode()).ToArray());
 
-    /// <summary>Reads the envelope and verifies every signature. Doesn't look at the content.</summary>
-    private static (byte[] Payload, List<TrustSignature> Signatures) Split(string text)
+    /// <summary>Reads the envelope and verifies every signature. Doesn't look at the content (signing review uses it).</summary>
+    public static (byte[] Payload, List<TrustSignature> Signatures) Split(string text)
     {
         text = (text ?? "").Trim();
         if (text.Length is 0 or > MaxLength || !text.StartsWith(Prefix, StringComparison.Ordinal)) throw Bad("core.mp.network.bad_string");
@@ -91,7 +93,7 @@ public static partial class NetworkString
         var signatures = new List<TrustSignature>();
         for (var i = 0; i < tail.Length; i += TrustSignature.Size)
         {
-            var entry = new TrustSignature(tail[i..(i + 32)], tail[(i + 32)..(i + TrustSignature.Size)]);
+            var entry = TrustSignature.Decode(tail.AsSpan(i, TrustSignature.Size));
             if (signatures.Any(s => s.Key.AsSpan().SequenceEqual(entry.Key))) throw Bad("core.mp.network.bad_string");
             if (!entry.Verify([.. Domain, .. payload])) throw Bad("core.mp.network.bad_signature");
             signatures.Add(entry);
@@ -228,7 +230,7 @@ public sealed record NetworkInfo(string Id, string Name, string NetworkName, str
 }
 
 /// <summary>验过签的连接串。</summary>
-/// <param name="SignerKey">The owner's key, the first signature (a network whose owner key changed must be removed and re-added).</param>
+/// <param name="SignerKey">The owner's key id (<see cref="TrustSigner.Id"/>), the first signature (a network whose owner key changed must be removed and re-added).</param>
 /// <param name="Reviewed">Whether a trusted quorum (normally the Jay trustees) signed it.</param>
 /// <param name="Text">原始连接串（保存在设置里，每次启动重新验签）。</param>
 public sealed record SignedNetwork(NetworkInfo Info, byte[] SignerKey, bool Reviewed, string Text)

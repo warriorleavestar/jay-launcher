@@ -32,7 +32,8 @@ namespace Amber.Core.Multiplayer.Public;
 public static class DirectoryChannel
 {
     private static readonly byte[] Prologue = "jay-directory-v1"u8.ToArray();
-    private const int MaxMessage = RoomDirectoryProtocol.MaxLine + 256;
+    // Room for a request line, or for a handshake message carrying a certificate with several hybrid signatures.
+    private const int MaxMessage = (RoomDirectoryProtocol.MaxLine > DirectoryCertificate.MaxSize ? RoomDirectoryProtocol.MaxLine : DirectoryCertificate.MaxSize) + 256;
     /// <summary>The first handshake message with an empty payload: ephemeral key (32) + tag (16).</summary>
     private const int FirstMessageLength = 48;
 

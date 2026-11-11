@@ -17,10 +17,10 @@ public sealed class NodeHardwareBindingTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("jay-hw-test-").FullName;
     private readonly string _dir;
-    private readonly NetworkSigner _rootKey = NetworkSigner.Generate(out _);
-    private readonly NetworkSigner _rootKey2 = NetworkSigner.Generate(out _);
-    private readonly NetworkSigner _rootKey3 = NetworkSigner.Generate(out _);
-    private TrustQuorum Trustees => new([_rootKey.PublicKey, _rootKey2.PublicKey, _rootKey3.PublicKey], 2);
+    private readonly TrustSigner _rootKey = TrustSigner.Generate(out _);
+    private readonly TrustSigner _rootKey2 = TrustSigner.Generate(out _);
+    private readonly TrustSigner _rootKey3 = TrustSigner.Generate(out _);
+    private TrustQuorum Trustees => new([_rootKey.Id, _rootKey2.Id, _rootKey3.Id], 2);
 
     public NodeHardwareBindingTests()
     {
@@ -221,7 +221,7 @@ public sealed class NodeHardwareBindingTests : IDisposable
         var hw = Machine();
         var tpm = new FakeTpm();
         Bind(hw, tpm);
-        var otherNetwork = new TrustQuorum([NetworkSigner.Generate(out _).PublicKey, _rootKey.PublicKey], 2);
+        var otherNetwork = new TrustQuorum([TrustSigner.Generate(out _).Id, _rootKey.Id], 2);
         var guard = new NodeHardwareGuard(_dir) { Hardware = hw, Tpm = tpm, Integrity = new FakeIntegrity(), Trust = otherNetwork };
         Assert.Throws<NodeIntegrityException>(guard.Enforce);
         Assert.True(Has("directory.key.hw"));
@@ -236,7 +236,7 @@ public sealed class NodeHardwareBindingTests : IDisposable
         Assert.Throws<InvalidDataException>(() => HardwareBinding.Install(_dir, one, hw, new FakeTpm(), Trustees));
         Assert.Throws<InvalidDataException>(() => HardwareBinding.Install(_dir, one, hw, new FakeTpm(), TrustQuorum.None));
         Assert.Throws<InvalidDataException>(() => HardwareCertificate.Cosign(one, _rootKey)); // same trustee twice
-        var outsider = HardwareCertificate.Cosign(one, NetworkSigner.Generate(out _));
+        var outsider = HardwareCertificate.Cosign(one, TrustSigner.Generate(out _));
         Assert.Throws<InvalidDataException>(() => HardwareBinding.Install(_dir, outsider, hw, new FakeTpm(), Trustees));
         Assert.True(Has("directory.key"));
         HardwareBinding.Install(_dir, HardwareCertificate.Cosign(one, _rootKey3), hw, new FakeTpm(), Trustees);
@@ -250,10 +250,10 @@ public sealed class NodeHardwareBindingTests : IDisposable
         var cert = HardwareCertificate.Cosign(HardwareCertificate.Issue(_rootKey, request, null), _rootKey2);
         Assert.Equal(2, HardwareCertificate.Parse(cert)!.Signatures.Count);
         var wire = (JsonObject)JsonNode.Parse(cert)!;
-        var second = (JsonObject)((JsonArray)wire["sigs"]!)[1]!;
-        var sig = Convert.FromBase64String(second["s"]!.GetValue<string>());
-        sig[0] ^= 1;
-        second["s"] = Convert.ToBase64String(sig);
+        var second = ((JsonArray)wire["sigs"]!)[1]!;
+        var sig = Convert.FromBase64String(second.GetValue<string>());
+        sig[^1] ^= 1; // inside the ML-DSA signature: the Ed25519 half still verifies
+        ((JsonArray)wire["sigs"]!)[1] = Convert.ToBase64String(sig);
         Assert.Null(HardwareCertificate.Parse(Encoding.UTF8.GetBytes(wire.ToJsonString())));
     }
 
@@ -351,7 +351,9 @@ public sealed class NodeHardwareBindingTests : IDisposable
         Assert.Equal(["abc", "abd", "acd", "bcd"], all);
     }
 
-    private static string Hex6(string certFile) => Convert.ToHexString(HardwareCertificate.Parse(File.ReadAllBytes(certFile))!.DirectoryKey)[^6..];
+    private static string Code6(string requestFile) => JsonNode.Parse(File.ReadAllText(requestFile))!["key"]!.GetValue<string>().TrimEnd('=')[^6..];
+
+    private static string CertCode6(string certFile) => Convert.ToBase64String(HardwareCertificate.Parse(File.ReadAllBytes(certFile))!.DirectoryKey).TrimEnd('=')[^6..];
 
     [Fact]
     public void CliShowsEveryFieldAndNeedsTwoTrusteesTypingTheKey()
@@ -361,13 +363,13 @@ public sealed class NodeHardwareBindingTests : IDisposable
         var output = new StringWriter();
         var root1 = Path.Combine(_root, "root1.key");
         var root2 = Path.Combine(_root, "root2.key");
-        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "root-key", "--out", root1]), output));
-        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "root-key", "--out", root2]), output));
-        var trustees = new TrustQuorum([NetworkSigner.FromSeed(File.ReadAllText(root1)).PublicKey, NetworkSigner.FromSeed(File.ReadAllText(root2)).PublicKey], 2);
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "root-key", "--out", root1, "--no-passphrase"]), output));
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "root-key", "--out", root2, "--no-passphrase"]), output));
+        var trustees = new TrustQuorum([TrustCommands.LoadKey(root1).Id, TrustCommands.LoadKey(root2).Id], 2);
 
         Assert.Equal(0, Program.NodeBind(_dir, Options.Parse(["node", "bind"]), output, hw, tpm));
         var requestFile = Path.Combine(_dir, HardwareBinding.RequestFile);
-        var keyHex = Convert.ToHexString(Convert.FromBase64String(JsonNode.Parse(File.ReadAllText(requestFile))!["key"]!.GetValue<string>()));
+        var keyText = JsonNode.Parse(File.ReadAllText(requestFile))!["key"]!.GetValue<string>();
         var certFile = Path.Combine(_root, "hardware.cert");
         string[] issue = ["network", "hw-cert", "--root", root1, "--request", requestFile, "--out", certFile];
         var oldInput = Program.ConfirmInput;
@@ -376,22 +378,22 @@ public sealed class NodeHardwareBindingTests : IDisposable
         {
             // Piped input: refused, nothing signed.
             Program.ConfirmIsTerminal = () => false;
-            Assert.Throws<InvalidOperationException>(() => Program.NetworkCommand(Options.Parse(issue), output));
+            Assert.Equal(3, Program.NetworkCommand(Options.Parse(issue), output));
             Assert.False(File.Exists(certFile));
 
             // Wrong confirmation: every field shown, nothing signed.
             Program.ConfirmIsTerminal = () => true;
             var shown = new StringWriter();
             Program.ConfirmInput = new StringReader("000000\n");
-            Assert.Equal(1, Program.NetworkCommand(Options.Parse(issue), shown));
+            Assert.Equal(3, Program.NetworkCommand(Options.Parse(issue), shown));
             Assert.False(File.Exists(certFile));
-            foreach (var word in new[] { keyHex, "board, disk, machine, tpm", "3 / 4", "must", "secureBoot", "digest" }) Assert.Contains(word, shown.ToString());
+            foreach (var word in new[] { keyText, "board, disk, machine, tpm", "3 / 4", "must", "secureBoot", "SHA-256" }) Assert.Contains(word, shown.ToString());
 
-            Program.ConfirmInput = new StringReader(keyHex[^6..] + "\n");
+            Program.ConfirmInput = new StringReader(Code6(requestFile) + "\n");
             Assert.Equal(0, Program.NetworkCommand(Options.Parse(issue), output));
             Assert.Throws<InvalidDataException>(() => HardwareBinding.Install(_dir, File.ReadAllBytes(certFile), hw, tpm, trustees));
 
-            Program.ConfirmInput = new StringReader(Hex6(certFile).ToLowerInvariant() + "\n");
+            Program.ConfirmInput = new StringReader(CertCode6(certFile) + "\n");
             Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "hw-cert", "--cosign", certFile, "--root", root2]), output));
             Assert.Equal(2, HardwareCertificate.Parse(File.ReadAllBytes(certFile))!.Signatures.Count);
         }

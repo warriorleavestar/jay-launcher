@@ -243,7 +243,7 @@ public sealed record HardwareMatch(bool Ok, int Matched, int Need, string Reason
 /// wipe itself because a date passed.
 /// <para>
 /// Signed bytes: <c>"jay-hardware-cert-v1\n"</c> + the JSON content. On disk, like <see cref="DirectoryCertificate"/>:
-/// {"c": base64(content), "sigs": [{"r": root public key, "s": signature}, …]}. The network's roots sign one after another,
+/// {"c": base64(content), "sigs": [base64(encoded hybrid Ed25519 + ML-DSA-65 <see cref="TrustSignature"/>), …]}. The network's roots sign one after another,
 /// offline (<c>network hw-cert</c>, then <c>hw-cert --cosign</c>); a node accepts it only when the network's root quorum
 /// (<see cref="JayTrust"/> for the built-in network, "dirRoots" + "dirRootsNeed" otherwise) is met. One bad signature
 /// rejects the whole certificate.
@@ -254,8 +254,8 @@ public sealed record HardwareCertificate(
     bool RequireTpm, bool RequireSecureBoot, IReadOnlyList<TrustSignature> Signatures, byte[] Content)
 {
     private static readonly byte[] Domain = "jay-hardware-cert-v1\n"u8.ToArray();
-    public const int MaxSize = 4096;
-    public const int MaxSignatures = 8;
+    public const int MaxSize = 32768;
+    public const int MaxSignatures = 4;
 
     /// <summary>The roots that signed (all verified).</summary>
     public IEnumerable<byte[]> Signers => Signatures.Select(sig => sig.Key);
@@ -264,22 +264,18 @@ public sealed record HardwareCertificate(
     public byte[] Digest => SHA256.HashData([.. Domain, .. Content]);
 
     /// <summary>Adds another root's signature. Refuses a certificate that doesn't verify, or a root that already signed.</summary>
-    public static byte[] Cosign(ReadOnlySpan<byte> certificate, NetworkSigner root)
+    public static byte[] Cosign(ReadOnlySpan<byte> certificate, TrustSigner root)
     {
         var cert = Parse(certificate) ?? throw new InvalidDataException("not a valid hardware certificate");
-        if (cert.Signers.Any(k => k.AsSpan().SequenceEqual(root.PublicKey))) throw new InvalidDataException("this root already signed");
+        if (cert.Signers.Any(k => k.AsSpan().SequenceEqual(root.Id))) throw new InvalidDataException("this root already signed");
         if (cert.Signatures.Count >= MaxSignatures) throw new InvalidDataException("too many signatures");
-        return Write(cert.Content, [.. cert.Signatures, new TrustSignature(root.PublicKey, root.Sign([.. Domain, .. cert.Content]))]);
+        return Write(cert.Content, [.. cert.Signatures, root.Sign([.. Domain, .. cert.Content])]);
     }
 
     private static byte[] Write(byte[] content, IEnumerable<TrustSignature> signatures) => Encoding.UTF8.GetBytes(new JsonObject
     {
         ["c"] = Convert.ToBase64String(content),
-        ["sigs"] = new JsonArray([.. signatures.Select(sig => (JsonNode)new JsonObject
-        {
-            ["r"] = Convert.ToBase64String(sig.Key),
-            ["s"] = Convert.ToBase64String(sig.Signature),
-        })]),
+        ["sigs"] = new JsonArray([.. signatures.Select(sig => (JsonNode)JsonValue.Create(Convert.ToBase64String(sig.Encode())))]),
     }.ToJsonString());
 
     /// <summary>The unsigned content a first signer would sign for this request (to show it before signing).</summary>
@@ -291,10 +287,10 @@ public sealed record HardwareCertificate(
     /// Signs a node's hardware.request.json (run offline). <paramref name="need"/> defaults to all identifiers but one
     /// (at least two); a TPM identifier, when present, is always mandatory.
     /// </summary>
-    public static byte[] Issue(NetworkSigner root, JsonObject request, string? network, int? need = null, bool? requireTpm = null, bool requireSecureBoot = false)
+    public static byte[] Issue(TrustSigner root, JsonObject request, string? network, int? need = null, bool? requireTpm = null, bool requireSecureBoot = false)
     {
         var bytes = BuildContent(request, network, need, requireTpm, requireSecureBoot);
-        return Write(bytes, [new TrustSignature(root.PublicKey, root.Sign([.. Domain, .. bytes]))]);
+        return Write(bytes, [root.Sign([.. Domain, .. bytes])]);
     }
 
     private static byte[] BuildContent(JsonObject request, string? network, int? need, bool? requireTpm, bool requireSecureBoot)
@@ -337,8 +333,9 @@ public sealed record HardwareCertificate(
             var signatures = new List<TrustSignature>();
             foreach (var entry in sigs)
             {
-                if (entry is not JsonObject e) return null;
-                var sig = new TrustSignature(Convert.FromBase64String(e["r"]?.GetValue<string>() ?? ""), Convert.FromBase64String(e["s"]?.GetValue<string>() ?? ""));
+                var encoded = Convert.FromBase64String(entry?.GetValue<string>() ?? "");
+                if (encoded.Length != TrustSignature.Size) return null;
+                var sig = TrustSignature.Decode(encoded);
                 if (signatures.Any(x => x.Key.AsSpan().SequenceEqual(sig.Key)) || !sig.Verify([.. Domain, .. content])) return null;
                 signatures.Add(sig);
             }

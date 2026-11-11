@@ -87,11 +87,13 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 `Public/DirectoryTrust.cs`, `Public/DirectoryChannel.cs`. Jay picks one of these before sending a directory anything:
 
 1. **Pinned**: keys in the signed connection string (`dirKeys`, #145).
-2. **Root-certified**: the connection string lists Ed25519 root keys (`dirRoots`, at most 4) and how many of them must
+2. **Root-certified**: the connection string lists root key ids (`dirRoots`, at most 4; each the SHA-256 id of a hybrid
+   Ed25519 + ML-DSA-65 key, see `TrustSigner`) and how many of them must
    sign (`dirRootsNeed`, default 1). The built-in network uses the Jay trustees (`JayTrust`): 2 of 3.
    - A directory sends `{"c","sigs"}` as the payload of its handshake message.
-   - `c` is `{"key","net","exp"}`; `sigs` is a list of `{"r","s"}`, each `s` being root `r`'s signature over
-     `"jay-directory-cert-v2\n" ‖ c`. One bad signature rejects the certificate.
+   - `c` is `{"key","net","exp"}`; `sigs` is a list of base64 `TrustSignature` entries (both public keys, an Ed25519
+     and an ML-DSA-65 signature over `"jay-directory-cert-v2\n" ‖ c`, about 5.3 KB each). Both algorithms must verify;
+     one bad signature rejects the certificate.
    - Jay accepts the key if enough distinct listed roots signed, `net` is this network's EasyTier name, it hasn't
      expired, and `key` is the key the directory just proved.
 3. **First use** (networks with neither): the first key seen at each directory address is remembered in
@@ -105,8 +107,10 @@ The built-in network's directory certificates, and reviewed network strings, nee
 (`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
 
 ```bash
-jay-server network root-key --out <usb>/jay-trustee.key
-# prints the public key → it goes into JayTrust.Keys, then a release
+jay-server network root-key --out <usb>/jay-trustee.key --paper
+# asks for a passphrase (the file is sealed with Argon2id + ChaCha20-Poly1305), shows the two paper lines once,
+# prints the full public key → it goes into JayTrust.Keys, then a release
+jay-server network paper-check --key <usb>/jay-trustee.key   # check the hand-copied lines
 
 # on each directory node: print its directory public key (makes directory.key on first use)
 jay-server network dir-key --dir <node data dir>

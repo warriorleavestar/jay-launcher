@@ -6,9 +6,9 @@ namespace Amber.Core.Tests;
 /// <summary>公共网络连接串：签名、改动检测、审核钥匙、版本、过期，以及本机保存的网络列表（替换、冲突、保留编号）。</summary>
 public sealed class NetworkStringTests
 {
-    private static readonly NetworkSigner Registry = NetworkSigner.Generate(out _);
-    private static readonly NetworkSigner Someone = NetworkSigner.Generate(out _);
-    private static readonly TrustQuorum[] Trusted = [new([Registry.PublicKey], 1)];
+    private static readonly TrustSigner Registry = TrustSigner.Generate(out _);
+    private static readonly TrustSigner Someone = TrustSigner.Generate(out _);
+    private static readonly TrustQuorum[] Trusted = [new([Registry.Id], 1)];
 
     private static NetworkInfo Info(string id = "nz-friends", long seq = 1) =>
         new(id, "新西兰朋友服", "jay-" + id, id + "-public-v1", ["tcp://node1.example.org:11010", "udp://node1.example.org:11010"], seq,
@@ -24,7 +24,7 @@ public sealed class NetworkStringTests
         Assert.Equal(Info().Nodes, reviewed.Info.Nodes);
         Assert.Equal("新西兰朋友服", reviewed.Info.Name);
         Assert.Equal(new string('a', 64), reviewed.Info.Config!.Sha256);
-        Assert.Equal(Registry.PublicKey, reviewed.SignerKey);
+        Assert.Equal(Registry.Id, reviewed.SignerKey);
         // 别人签的：签名对，但不算审核过。
         Assert.False(NetworkString.Parse(NetworkString.Create(Info(), Someone), Trusted).Reviewed);
         // The Jay trustees have no keys yet: nothing counts as reviewed.
@@ -117,7 +117,7 @@ public sealed class NetworkStringTests
         Assert.Equal(["tcp://node2.example.org:11010"], list.Find("nz-friends")!.Info.Nodes);
         // 别的钥匙用同一个编号：不替换，要用户先删。
         Assert.Equal(NetworkAddResult.Conflict, list.Add(NetworkString.Create(Info(seq: 9), Someone), true, out _));
-        Assert.Equal(Registry.PublicKey, list.Find("nz-friends")!.SignerKey);
+        Assert.Equal(Registry.Id, list.Find("nz-friends")!.SignerKey);
         Assert.True(list.Remove("nz-friends"));
         Assert.Equal(NetworkAddResult.Added, list.Add(NetworkString.Create(Info(seq: 9), Someone), true, out _));
     }
