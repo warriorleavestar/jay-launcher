@@ -292,12 +292,26 @@ jobs:
 
           此发布从本版起使用固定的预览版签名，以后可覆盖升级并保留语言、设备身份和已保存的服务器。若此前安装过其他签名的测试包，Android 仍会拒绝首次覆盖安装。
           NOTES
-          gh release create android-preview Jay-android-experimental.apk SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Jay Android 预览版" \
-            --notes-file release-notes.md \
-            --prerelease
+          if gh release view android-preview --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # android-preview is a moving preview channel. Keep its tag, assets and notes on the
+            # exact commit that produced the APK instead of failing after the first publication.
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/android-preview" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release upload android-preview Jay-android-experimental.apk SHA256SUMS.txt \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit android-preview \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Jay Android 预览版" \
+              --notes-file release-notes.md \
+              --prerelease
+          else
+            gh release create android-preview Jay-android-experimental.apk SHA256SUMS.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Jay Android 预览版" \
+              --notes-file release-notes.md \
+              --prerelease
+          fi
 
   ios:
     if: github.event_name != 'workflow_dispatch' || !inputs.publish_android_preview
