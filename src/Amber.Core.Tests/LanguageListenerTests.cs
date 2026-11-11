@@ -25,7 +25,7 @@ public class LanguageListenerTests
         var changed = 0;
         ((INotifyPropertyChanged)item).PropertyChanged += (_, e) => { if (e.PropertyName == nameof(OptionItem.Label)) changed++; };
         Assert.Equal(L.T("common.all"), item.Label);
-        LanguageListeners.Notify();
+        LanguageListeners.NotifyOnly(item);
         Assert.Equal(1, changed);
         Assert.Equal("日本語", OptionItem.Fixed("日本語").Label);
         GC.KeepAlive(item);
@@ -37,10 +37,10 @@ public class LanguageListenerTests
         var recorder = new Recorder();
         var subscription = new LocalizedText("common.all").Subscribe(recorder);
         Assert.Single(recorder.Values);
-        LanguageListeners.Notify();
+        LanguageListeners.NotifyOnly(recorder);
         Assert.Equal(2, recorder.Values.Count);
         subscription.Dispose();
-        LanguageListeners.Notify();
+        LanguageListeners.NotifyOnly(recorder);
         Assert.Equal(2, recorder.Values.Count);
     }
 
