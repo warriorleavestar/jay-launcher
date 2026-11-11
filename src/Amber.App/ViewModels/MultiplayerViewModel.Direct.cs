@@ -337,11 +337,11 @@ public sealed partial class MultiplayerViewModel
         {
             var me = Identity.KeyPair;
             var name = ChatName;
-            var (device, account) = await Dispatcher.UIThread.InvokeAsync(() => (Device, AccountToken));
+            var (device, account, jay) = await Dispatcher.UIThread.InvokeAsync(() => (Device, AccountToken, JayCertificate));
             var outcome = await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
                 me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
                 () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"))), ct,
-                () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"))), device, account));
+                () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"))), device, account, jay));
             return await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (outcome.Credentials is not { } credentials)
@@ -355,6 +355,7 @@ public sealed partial class MultiplayerViewModel
                     return null;
                 }
                 HostFingerprint = outcome.HostFingerprint;
+                HostJayAccount = outcome.HostJayAccount;
                 SetStatus(StatusMessage.Info("multiplayer.direct.admitting"));
                 return (RoomCode?)credentials.ToRoom();
             });

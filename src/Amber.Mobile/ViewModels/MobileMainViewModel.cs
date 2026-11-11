@@ -43,11 +43,13 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
     private readonly string _dataDirectory;
     private readonly JayServerList _serverList;
     private readonly MemberIdentity _identity;
+    private readonly IMobilePlatformServices _platformServices;
     private TunnelClient? _tunnel;
     private MobileServerItem? _connected;
 
-    public MobileMainViewModel(string? dataDirectory = null)
+    public MobileMainViewModel(string? dataDirectory = null, IMobilePlatformServices? platformServices = null)
     {
+        _platformServices = platformServices ?? NoMobilePlatformServices.Instance;
         _dataDirectory = dataDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Jay");
         Directory.CreateDirectory(_dataDirectory);
         _serverList = new JayServerList(_dataDirectory);
@@ -81,6 +83,12 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
     public string TunnelTitle => L.T("mobile.tunnel.title");
     public string TunnelHint => PlatformString("mobile.tunnel.hint");
     public string DisconnectButtonText => L.T("mobile.tunnel.disconnect");
+    public bool ShowGameLauncher => _platformServices.CanOpenGameLauncher;
+    public string GameLauncherTitle => L.T("mobile.game.title");
+    public string GameLauncherHint => IsConnected
+        ? L.F("mobile.game.hint.ready", _platformServices.GameLauncherName, LocalAddress)
+        : L.F("mobile.game.hint.idle", _platformServices.GameLauncherName);
+    public string OpenGameLauncherText => L.F("mobile.game.open", _platformServices.GameLauncherName);
     public string SavedServersTitle => L.T("mobile.servers.title");
     public string NoServersText => L.T("mobile.servers.empty");
     public bool HasNoServers => Servers.Count == 0;
@@ -92,8 +100,12 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
     [NotifyPropertyChangedFor(nameof(HasStatus))]
     public partial string Status { get; set; } = "";
     [ObservableProperty] public partial bool IsBusy { get; set; }
-    [ObservableProperty] public partial bool IsConnected { get; set; }
-    [ObservableProperty] public partial string LocalAddress { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GameLauncherHint))]
+    public partial bool IsConnected { get; set; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GameLauncherHint))]
+    public partial string LocalAddress { get; set; } = "";
 
     [RelayCommand]
     private async Task EnrollAsync()
@@ -140,11 +152,36 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
             item.IsConnected = true;
             IsConnected = true;
             LocalAddress = $"127.0.0.1:{_tunnel.Port}";
+            _platformServices.SetGatewayActive(true);
             Status = L.F("mobile.tunnel.ready", item.Title, LocalAddress);
         }
         catch (Exception e) when (e is IOException or FormatException or CryptographicException or System.Net.Sockets.SocketException)
         {
             Status = L.F("multiplayer.jayserver.enroll_failed", e.Message);
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenGameLauncherAsync()
+    {
+        var address = IsConnected ? LocalAddress : null;
+        try
+        {
+            var result = await _platformServices.OpenGameLauncherAsync(address);
+            Status = result switch
+            {
+                MobileGameLauncherResult.Launched when address is not null =>
+                    L.F("mobile.game.launched_ready", _platformServices.GameLauncherName, address),
+                MobileGameLauncherResult.Launched =>
+                    L.F("mobile.game.launched_idle", _platformServices.GameLauncherName),
+                MobileGameLauncherResult.InstallPageOpened =>
+                    L.F("mobile.game.install", _platformServices.GameLauncherName),
+                _ => L.F("mobile.game.unavailable", _platformServices.GameLauncherName)
+            };
+        }
+        catch (Exception e)
+        {
+            Status = L.F("mobile.game.failed", e.Message);
         }
     }
 
@@ -174,6 +211,7 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
         _connected = null;
         IsConnected = false;
         LocalAddress = "";
+        _platformServices.SetGatewayActive(false);
     }
 
     private void ReloadServers()

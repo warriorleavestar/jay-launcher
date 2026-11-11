@@ -91,6 +91,21 @@ public sealed partial class HomeViewModel : PageViewModel
         public bool SharedWorkDir { get; set; }
         /// <summary>这一局用的是烘焙后的 classpath。</summary>
         public bool Baked { get; set; }
+        /// <summary>Problems the universal loader reported while this baked run was going (for example Mixins it switched off).</summary>
+        public List<Amber.Core.Bake.BakeRuntimeProblem> BakeProblems { get; } = [];
+        /// <summary>Where the loader writes this run's problems (interface 1.3); null for an older loader, whose text lines are read instead.</summary>
+        public string? BakeProblemsFile { get; set; }
+
+        /// <summary>Adds a runtime problem once (the same one comes on stdout and in the problems file). True when it is new.</summary>
+        public bool AddBakeProblem(Amber.Core.Bake.BakeRuntimeProblem problem)
+        {
+            lock (BakeProblems)
+            {
+                if (BakeProblems.Any(p => p.Key == problem.Key)) return false;
+                BakeProblems.Add(problem);
+                return true;
+            }
+        }
         /// <summary>这一局的状态机（正在玩胶囊、活动中心“运行记录”看它）。</summary>
         public LaunchSession Session { get; } = new(id, DateTimeOffset.Now);
     }
@@ -106,6 +121,29 @@ public sealed partial class HomeViewModel : PageViewModel
     /// <summary>崩溃分析里有“确定”的原因（比如显卡不支持 OpenGL）；只有“可能”的猜测不算。</summary>
     internal static bool HasClearCause(CrashAnalysis analysis) =>
         analysis.Findings.Count > 0 && analysis.Findings[0].Severity == CrashSeverity.Likely;
+
+    /// <summary>
+    /// The mods the loader had to switch Mixins off for, or reported an error for, in this run, as one list ("" when
+    /// none). Informational lines (a bridged Fabric API module, a launch-time rebake) don't count.
+    /// </summary>
+    private static string BakeProblemMods(GameRun run)
+    {
+        List<string> mods;
+        lock (run.BakeProblems)
+            mods = run.BakeProblems.Where(p => (p.DisablesFeatures || p.IsError) && p.Mod.Length > 0).Select(p => p.Mod).Distinct(StringComparer.Ordinal).ToList();
+        return string.Join(L.T("core.mp.format.listseparator"), mods.Take(3)) + (mods.Count > 3 ? "…" : "");
+    }
+
+    /// <summary>
+    /// After a baked run: the problems file has every problem even when the game died before stdout was read to the
+    /// end, so it is merged in; new ones go to the log too.
+    /// </summary>
+    private void MergeBakeProblemsFile(GameRun run)
+    {
+        if (run.BakeProblemsFile is not { } file || !File.Exists(file)) return;
+        foreach (var problem in Amber.Core.Bake.BakeRuntimeProblem.ReadFile(file))
+            if (run.AddBakeProblem(problem)) _log.AddRaw(run.Log, "[Bake] " + problem.Describe());
+    }
 
     internal static bool LikelyBakeCrash(bool baked, bool stoppedByUser, int exitCode, bool inGame, bool inGameGuessed) =>
         baked && !stoppedByUser && exitCode != 0 && (!inGame || inGameGuessed);
@@ -253,6 +291,9 @@ public sealed partial class HomeViewModel : PageViewModel
 
     /// <summary>没有账号或没有实例时替换实例卡的新手卡（改版规格 3.1）。</summary>
     public OnboardingViewModel Onboarding { get; }
+
+    /// <summary>Opens Settings at the loader and starts "Download loader" (set by the main view model).</summary>
+    public Action? DownloadBakeLoader { get; set; }
 
     public HomeViewModel(LauncherService service, LogViewModel log)
     {
@@ -573,16 +614,28 @@ public sealed partial class HomeViewModel : PageViewModel
                 SetStatus(StatusMessage.Info("home.status.baking"));
                 try
                 {
-                    var (baked, reason) = await _service.PrepareBakeAsync(ctx, id, javaPath, new Progress<Amber.Core.Bake.BakeEvent>(e =>
+                    var (baked, reason, bakeJava) = await _service.PrepareBakeAsync(ctx, id, javaPath, new Progress<Amber.Core.Bake.BakeEvent>(e =>
                     {
                         Status = e.Message;
                         if (e.IsProblem) _log.AddRaw(run.Log, "[Bake] " + e.Message);
                     }), ct);
                     if (reason.Length > 0) _log.AddRaw(run.Log, "[Bake] " + reason);
+                    // Baking is on but no loader is installed: offer the download right where the launch status is.
+                    // Before the loader is published there is nothing to download: the notice just says why baking was skipped.
+                    if (baked is null && reason == L.T("core.bake.loader_missing"))
+                    {
+                        if (Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished && DownloadBakeLoader is { } download)
+                            Toasts.BakeAction(L.T("home.bake.loader_missing_notice"), L.T("home.bake.download_loader"), L.T("settings.bake.download_hint"), download);
+                        else
+                            Toasts.BakeProblem(L.T("home.bake.loader_missing_notice") + " " + L.T("core.bake.download_unpublished"));
+                    }
                     if (baked is not null)
                     {
-                        options = options with { Baked = baked };
+                        // The loader's launcher needs Java 21 even where the version asks for less.
+                        options = options with { Baked = baked, JavaPath = bakeJava };
+                        javaPath = bakeJava;
                         run.Baked = true;
+                        run.BakeProblemsFile = baked.ProblemsFile;
                     }
                 }
                 catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or InvalidDataException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException
@@ -591,6 +644,8 @@ public sealed partial class HomeViewModel : PageViewModel
                     // 实验功能失败时不挡住游戏：记下原因，按普通方式启动。
                     _log.AddRaw(run.Log, "[Bake] " + L.F("home.bake.fallback", e.Message));
                     Toasts.Show(L.T("home.bake.fallback_toast"));
+                    // The reason (a missing dependency, an unsupported platform, a loader that is too old) in the launch status box too.
+                    Toasts.BakeProblem(L.F("home.bake.fallback", e.Message));
                 }
             }
             if (!string.IsNullOrWhiteSpace(settings.PreLaunchCommand))
@@ -612,6 +667,9 @@ public sealed partial class HomeViewModel : PageViewModel
                 {
                     run.Output.Add(line);
                     if (parser.Feed(line) is { } entry) _log.Add(run.Log, entry);
+                    if (run.Baked && Amber.Core.Bake.BakeRuntimeProblem.Parse(line, legacy: run.BakeProblemsFile is null) is { } bakeProblem
+                        && run.AddBakeProblem(bakeProblem))
+                        _log.AddRaw(run.Log, "[Bake] " + bakeProblem.Describe());
                 }
                 if (!run.InGame && IsEnterGameLine(line)) Dispatcher.UIThread.Post(() => EnterGame(run, guessed: false));
                 _service.NotifyGameOutput(id, line);
@@ -629,6 +687,7 @@ public sealed partial class HomeViewModel : PageViewModel
             await game.WaitForExitAsync();
 
             var code = game.ExitCode;
+            if (run.Baked) MergeBakeProblemsFile(run);
             // 退出码 0 但没进主界面：比如没有 OpenGL 时游戏弹个框就“正常”退出了，也要看一眼日志。
             CrashInput? input = null;
             CrashAnalysis? analysis = null;
@@ -666,7 +725,7 @@ public sealed partial class HomeViewModel : PageViewModel
                 {
                     // 烘焙成功了但游戏没进主界面就退出：多半是加载器原型不兼容某个模组（比如 Sodium 的 Mixin），给一个不烘焙再启动的入口。
                     _log.AddRaw(run.Log, "[Bake] " + L.T("home.bake.crashed"));
-                    Toasts.BakeFailed(L.F("home.bake.crashed_toast", id), () =>
+                    Toasts.BakeFailed(BakeProblemMods(run) is { Length: > 0 } suspects ? L.F("home.bake.crashed_mixin_toast", id, suspects) : L.F("home.bake.crashed_toast", id), () =>
                     {
                         if (!TryRequestBakeRetry(_service, ctx, request))
                             Toasts.Show(L.T("home.bake.retry_directory_changed"));
@@ -677,6 +736,22 @@ public sealed partial class HomeViewModel : PageViewModel
                 GameCrashed?.Invoke(id);
             }
 
+            // A baked run that did not crash but had Mixins switched off (or a mod whose Fabric entrypoints never ran):
+            // say which mods may be missing features, with a way back.
+            if (!crashed && BakeProblemMods(run) is { Length: > 0 } partial)
+            {
+                int count;
+                lock (run.BakeProblems) count = run.BakeProblems.Count(p => p.DisablesFeatures || p.IsError);
+                Toasts.BakeFailed(L.F("home.bake.mixin_disabled", count, partial), () =>
+                {
+                    if (!TryRequestBakeRetry(_service, ctx, request))
+                        Toasts.Show(L.T("home.bake.retry_directory_changed"));
+                });
+            }
+            // The launch had to bake something itself: warm again in the background so the next launch starts from a full cache.
+            bool rebaked;
+            lock (run.BakeProblems) rebaked = run.BakeProblems.Any(p => p.AsksForWarm);
+            if (run.Baked && rebaked) _service.WarmBakeInBackground(ctx, id);
             if (!string.IsNullOrWhiteSpace(settings.PostExitCommand))
                 await RunUserCommandAsync(settings.PostExitCommand, id, workDir, run.Log, CancellationToken.None);
         }

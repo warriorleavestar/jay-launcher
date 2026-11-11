@@ -263,6 +263,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitRoom();
         InitRequests();
         InitPublic();
+        InitContacts();
         InitPublicList();
         RefreshLongInvites();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
@@ -1147,6 +1148,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StopAnnouncer();
         StopHostLobby();
         HostFingerprint = "";
+        HostJayAccount = null;
         _localChatPort = null;
         _hubOnVirtualIp = false;
         StopRemote();

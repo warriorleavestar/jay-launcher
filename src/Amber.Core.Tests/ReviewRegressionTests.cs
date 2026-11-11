@@ -6,6 +6,7 @@ using Amber.Core.Localization;
 namespace Amber.Core.Tests;
 
 /// <summary>PR #7 评审里确认的问题：每条一个回归测试。</summary>
+[Collection("GlobalLanguage")]
 public sealed class ReviewRegressionTests : IDisposable
 {
     private readonly string _game = Path.Combine(Path.GetTempPath(), "amber-review-test-" + Guid.NewGuid().ToString("N")[..8]);

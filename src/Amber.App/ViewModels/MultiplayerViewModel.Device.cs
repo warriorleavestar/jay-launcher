@@ -164,7 +164,7 @@ public sealed partial class MultiplayerViewModel
         IsFindingRoom = true;
         try
         {
-            var room = await new RoomDirectoryClient(network).FindAsync(code, default);
+            var room = await DirectoryClient(network).FindAsync(code, default);
             if (room is null)
             {
                 SetStatus(StatusMessage.Info("multiplayer.device.not_found"));

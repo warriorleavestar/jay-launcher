@@ -13,7 +13,7 @@ help a friend with remote control, or borrow a friend's connection. Open source,
 [![Build](https://img.shields.io/github/actions/workflow/status/warriorleavestar/jay-launcher/build.yml?branch=main&label=build)](https://github.com/warriorleavestar/jay-launcher/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/github/license/warriorleavestar/jay-launcher?color=4b6584)](LICENSE)
 
-[![Download for Windows](https://img.shields.io/badge/Windows-Download-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64-aot.zip)
+[![Download for Windows](https://img.shields.io/badge/Windows-Download-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip)
 [![Download for macOS](https://img.shields.io/badge/macOS-Download-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz)
 [![Download for Linux](https://img.shields.io/badge/Linux-Download-4b6584?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz)
 
@@ -54,7 +54,7 @@ Invites are single-use and expire; leaked codes are useless. Nobody gets in with
 
 ### 🎮 A full Minecraft launcher
 
-The window opens in about 0.3 s. Fabric, Quilt, Forge, NeoForge and OptiFine in one click, Modrinth and CurseForge built in, modpack import and export, and crash analysis that tells you which mod to blame.
+Fabric, Quilt, Forge, NeoForge and OptiFine in one click, Modrinth and CurseForge built in, modpack import and export, and crash analysis that tells you which mod to blame.
 
 </td>
 </tr>
@@ -70,19 +70,18 @@ Grab the file for your computer from the [latest release](https://github.com/war
 
 | System | File | Status |
 |---|---|---|
-| **Windows 10+** x64 | [`Jay-win-x64-aot.zip`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64-aot.zip) (recommended) | ✅ Stable |
+| **Windows 10+** x64 | [`Jay-win-x64.zip`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip) | ✅ Stable |
 | **macOS** Apple silicon | [`Jay-osx-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz) | ✅ Tested on a real Mac |
 | **macOS** Intel | [`Jay-osx-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.tar.gz) | 🧪 Experimental |
 | **Linux** x64 | [`Jay-linux-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz) | 🧪 Experimental |
 | **Linux** ARM64 | [`Jay-linux-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-arm64.tar.gz) | 🧪 Experimental (bring your own Java) |
+| **Android** companion | [`Jay-android-experimental.apk`](https://github.com/warriorleavestar/jay-launcher/releases/download/android-preview/Jay-android-experimental.apk) | 🧪 Experimental, see [docs/android.md](docs/android.md) |
 | **Jay Server** | `JayServer-<platform>.zip` / `.tar.gz` | 🧪 Experimental, see [server/README.md](server/README.md) |
 
 <details>
-<summary><b>Which Windows file should I pick?</b></summary>
+<summary><b>Windows notes</b></summary>
 
-`Jay-win-x64-aot.zip` is compiled ahead of time to native code: it opens in about 0.3 seconds and uses less memory. It unzips to 4 files that must stay in the same folder.
-
-`Jay-win-x64.zip` holds a single `Jay.exe` if you prefer one file; it starts a little slower. Both have the same features and share the same data, so you can switch at any time. v0.5.9 and older use the `Amber-` prefix and `Amber.exe`.
+`Jay-win-x64.zip` holds a single self-contained `Jay.exe` (ReadyToRun) that runs straight after unzipping. Native AOT packages are paused for now because they exhaust the memory or time limits of GitHub's build runners. v0.5.9 and older use the `Amber-` prefix and `Amber.exe`.
 
 The builds aren't code-signed yet, so Windows SmartScreen may warn you the first time. See the [FAQ](#faq).
 </details>
@@ -237,7 +236,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 
 There is also a command-line version, for example `dotnet run --project Amber.Cli -- list-remote`.
 
-The experimental [Android](docs/android.md) and [iOS](docs/ios.md) projects provide Jay Server enrollment and a localhost gateway; they can't launch Minecraft yet.
+The experimental [Android](docs/android.md) and [iOS](docs/ios.md) projects provide Jay Server enrollment and a localhost gateway. Android keeps that gateway alive and opens the separately installed FCL app to run Minecraft (Jay does not bundle FCL); iOS still needs a separate compatible client.
 
 New to the code? Start with [docs/CODEMAP.md](docs/CODEMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 </details>

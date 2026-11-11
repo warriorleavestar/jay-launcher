@@ -108,7 +108,7 @@
                   <StackPanel Grid.Column="1" Margin="10,0,0,0">
                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
                     <TextBlock x:Name="ProjectSummary" Text="{Binding Summary}" Classes="hint" MaxWidth="640" HorizontalAlignment="Left" MaxLines="2" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Summary}" />
-                    <TextBlock Text="{Binding Meta}" Classes="caption" />
+                    <TextBlock Text="{Binding Meta}" Classes="caption" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Meta}" />
                   </StackPanel>
                   <Button Grid.Column="2" Classes="secondary small" Content="{Binding QueueLabel}" Classes.queued="{Binding Queued}" VerticalAlignment="Center" Margin="10,0,0,0"
                           Command="{Binding $parent[ListBox].((vm:ContentViewModel)DataContext).ToggleQueueCommand}" CommandParameter="{Binding}"

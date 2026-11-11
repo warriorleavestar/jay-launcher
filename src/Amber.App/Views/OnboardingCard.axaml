@@ -66,7 +66,7 @@
           <WrapPanel ItemSpacing="8" LineSpacing="8">
             <Button Classes="ghost" Content="{l:T onboarding.install.choose}" Command="{Binding ChooseCommand}" />
             <Button Classes="ghost" Content="{l:T onboarding.install.import}" Click="ImportPack_Click" />
-            <Button Classes="ghost" Content="{l:T onboarding.detect.pick}" Click="PickDirectory_Click" IsVisible="{Binding ShowPickDirectory}" />
+            <Button Classes="ghost" Click="PickDirectory_Click" IsVisible="{Binding ShowPickDirectory}"><TextBlock Text="{l:T onboarding.detect.pick}" TextWrapping="Wrap" /></Button>
           </WrapPanel>
         </StackPanel>
 

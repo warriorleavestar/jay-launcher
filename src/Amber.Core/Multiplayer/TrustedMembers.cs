@@ -8,6 +8,12 @@ namespace Amber.Core.Multiplayer;
 public sealed record TrustedMember(byte[] PublicKey, string Name)
 {
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
+
+    /// <summary>
+    /// The person's Jay account (jay1…), when they showed a valid certificate at the time. Any device that account certifies
+    /// is trusted too, so a trusted friend on a new computer is let in without asking.
+    /// </summary>
+    public string? JayAccount { get; init; }
 }
 
 /// <summary>
@@ -36,25 +42,37 @@ public sealed class TrustedMembers(string path)
         }
     }
 
-    public void Add(byte[] publicKey, string name)
+    /// <summary>True when the Jay account was trusted along with one of its devices. Pass only a verified account.</summary>
+    public bool IsTrustedJayAccount(string? account)
+    {
+        if (!Identity.JayAddress.IsValid(account)) return false;
+        lock (_gate) return Load().Any(m => m.JayAccount is not null && string.Equals(m.JayAccount, account, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <param name="jayAccount">The person's verified Jay account, if they showed one: their other devices are trusted too.</param>
+    public void Add(byte[] publicKey, string name, string? jayAccount = null)
     {
         if (publicKey.Length != 32) throw new ArgumentException(null, nameof(publicKey));
+        var account = Identity.JayAddress.TryDecode(jayAccount, out var key) ? Identity.JayAddress.Encode(key) : null;
         lock (_gate)
         {
             var list = Load();
+            var old = list.FirstOrDefault(m => m.PublicKey.AsSpan().SequenceEqual(publicKey));
             list.RemoveAll(m => m.PublicKey.AsSpan().SequenceEqual(publicKey));
-            list.Add(new TrustedMember((byte[])publicKey.Clone(), KnockProtocol.SanitizeName(name)));
+            list.Add(new TrustedMember((byte[])publicKey.Clone(), KnockProtocol.SanitizeName(name)) { JayAccount = account ?? old?.JayAccount });
             Save(list);
         }
         Changed?.Invoke();
     }
 
+    /// <summary>Stops trusting the person: this device, and every other device of theirs trusted under the same Jay account.</summary>
     public void Remove(byte[] publicKey)
     {
         lock (_gate)
         {
             var list = Load();
-            if (list.RemoveAll(m => m.PublicKey.AsSpan().SequenceEqual(publicKey)) == 0) return;
+            var account = list.FirstOrDefault(m => m.PublicKey.AsSpan().SequenceEqual(publicKey))?.JayAccount;
+            if (list.RemoveAll(m => m.PublicKey.AsSpan().SequenceEqual(publicKey) || (account is not null && m.JayAccount == account)) == 0) return;
             Save(list);
         }
         Changed?.Invoke();
@@ -71,7 +89,11 @@ public sealed class TrustedMembers(string path)
             foreach (var item in array)
             {
                 if (item?["pub"]?.GetValue<string>() is not { Length: 64 } hex || !hex.All(char.IsAsciiHexDigit)) continue;
-                _members.Add(new TrustedMember(Convert.FromHexString(hex), KnockProtocol.SanitizeName(item["name"]?.GetValue<string>())));
+                var jay = item["jay"]?.GetValue<string>();
+                _members.Add(new TrustedMember(Convert.FromHexString(hex), KnockProtocol.SanitizeName(item["name"]?.GetValue<string>()))
+                {
+                    JayAccount = Identity.JayAddress.TryDecode(jay, out var account) ? Identity.JayAddress.Encode(account) : null,
+                });
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException)
@@ -85,7 +107,12 @@ public sealed class TrustedMembers(string path)
     {
         _members = list;
         var array = new JsonArray();
-        foreach (var m in list) array.Add((JsonNode)new JsonObject { ["pub"] = Convert.ToHexStringLower(m.PublicKey), ["name"] = m.Name });
+        foreach (var m in list)
+        {
+            var item = new JsonObject { ["pub"] = Convert.ToHexStringLower(m.PublicKey), ["name"] = m.Name };
+            if (m.JayAccount is not null) item["jay"] = m.JayAccount;
+            array.Add((JsonNode)item);
+        }
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         var temp = path + ".tmp";
         File.WriteAllText(temp, array.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));

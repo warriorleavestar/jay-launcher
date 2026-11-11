@@ -13,7 +13,7 @@
 [![构建](https://img.shields.io/github/actions/workflow/status/warriorleavestar/jay-launcher/build.yml?branch=main&label=%E6%9E%84%E5%BB%BA)](https://github.com/warriorleavestar/jay-launcher/actions/workflows/build.yml)
 [![许可证: MIT](https://img.shields.io/github/license/warriorleavestar/jay-launcher?color=4b6584&label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
 
-[![下载 Windows 版](https://img.shields.io/badge/Windows-%E4%B8%8B%E8%BD%BD-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64-aot.zip)
+[![下载 Windows 版](https://img.shields.io/badge/Windows-%E4%B8%8B%E8%BD%BD-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip)
 [![下载 macOS 版](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz)
 [![下载 Linux 版](https://img.shields.io/badge/Linux-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz)
 
@@ -54,7 +54,7 @@
 
 ### 🎮 完整的 Minecraft 启动器
 
-窗口约 0.3 秒打开。Fabric、Quilt、Forge、NeoForge、OptiFine 一键安装，内置 Modrinth 和 CurseForge，整合包导入导出，崩溃分析直接告诉你是哪个模组的锅。
+Fabric、Quilt、Forge、NeoForge、OptiFine 一键安装，内置 Modrinth 和 CurseForge，整合包导入导出，崩溃分析直接告诉你是哪个模组的锅。
 
 </td>
 </tr>
@@ -70,19 +70,18 @@
 
 | 系统 | 文件 | 状态 |
 |---|---|---|
-| **Windows 10+** x64 | [`Jay-win-x64-aot.zip`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64-aot.zip)（推荐） | ✅ 稳定 |
+| **Windows 10+** x64 | [`Jay-win-x64.zip`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip) | ✅ 稳定 |
 | **macOS** Apple 芯片 | [`Jay-osx-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz) | ✅ 已真机测试 |
 | **macOS** Intel | [`Jay-osx-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-x64.tar.gz) | 🧪 实验 |
 | **Linux** x64 | [`Jay-linux-x64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-x64.tar.gz) | 🧪 实验 |
 | **Linux** ARM64 | [`Jay-linux-arm64.tar.gz`](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-linux-arm64.tar.gz) | 🧪 实验（需自备 Java） |
+| **Android** 伴侣 | [`Jay-android-experimental.apk`](https://github.com/warriorleavestar/jay-launcher/releases/download/android-preview/Jay-android-experimental.apk) | 🧪 实验，见 [docs/android.md](docs/android.md) |
 | **Jay 服务器** | `JayServer-<平台>.zip` / `.tar.gz` | 🧪 实验，见 [server/README.md](server/README.md) |
 
 <details>
-<summary><b>Windows 该下哪个？</b></summary>
+<summary><b>Windows 说明</b></summary>
 
-`Jay-win-x64-aot.zip` 预先编译成本机代码（Native AOT）：窗口约 0.3 秒打开，占用内存更少。解压后有 4 个文件，要放在同一个文件夹里。
-
-`Jay-win-x64.zip` 里只有一个 `Jay.exe`，喜欢单文件可以用它，启动稍慢一点。两个版本功能相同、数据共用，随时可以换。v0.5.9 及更早的版本使用 `Amber-` 前缀和 `Amber.exe`。
+`Jay-win-x64.zip` 里是一个自带运行时的单文件 `Jay.exe`（ReadyToRun），解压就能运行。Native AOT 包暂时停发，因为它在 GitHub 的构建机上会耗尽内存或超时。v0.5.9 及更早的版本使用 `Amber-` 前缀和 `Amber.exe`。
 
 目前 Windows 版还没有代码签名，第一次运行时 SmartScreen 可能会拦，见[常见问题](#常见问题)。
 </details>
@@ -237,7 +236,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 
 还有一个命令行版本，例如 `dotnet run --project Amber.Cli -- list-remote`。
 
-[Android](docs/android.md) 和 [iOS](docs/ios.md) 实验版目前只提供 Jay 服务器登记和本机网关，还不能直接启动 Minecraft。
+[Android](docs/android.md) 和 [iOS](docs/ios.md) 实验版提供 Jay 服务器登记和本机网关。Android 版能让网关常驻，并打开另行安装的 FCL 来运行 Minecraft（Jay 不内置 FCL）；iOS 仍需要另外兼容的客户端。
 
 第一次看代码？从 [docs/CODEMAP.md](docs/CODEMAP.md) 和 [参与贡献](CONTRIBUTING.zh-Hans.md) 开始。
 </details>

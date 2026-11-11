@@ -73,6 +73,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Directory.CreateDirectory(reportDir);
         // 下面的检查按简体中文的文字判断，不管这台电脑是什么系统语言都先切到简体中文。
         Amber.Core.Localization.L.SetLanguage("zh-Hans");
+        // Contextual tips would pop up over other scopes' screenshots and layout checks; only the tips scope shows them.
+        Services.TutorialService.Suspended = Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") != "tips";
         try
         {
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "hotspot")
@@ -92,6 +94,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "dock-density")
             {
                 await DockDensityAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "tips")
+            {
+                await TipsAsync();
                 Log("DONE");
                 window.Close();
                 return;
@@ -267,6 +276,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "security")
             {
                 await SecurityBreakerAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "jay-account")
+            {
+                await JayAccountAsync();
                 Log("DONE");
                 window.Close();
                 return;

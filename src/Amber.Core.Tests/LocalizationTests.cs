@@ -6,12 +6,13 @@ namespace Amber.Core.Tests;
 /// <summary>
 /// 多语言的检查：界面代码里没有写死的中文；用到的键都在英文原文表（en.json）里；每种语言的键齐全、占位符一致。
 /// </summary>
+[Collection("GlobalLanguage")]
 public partial class LocalizationTests
 {
     private static readonly string Src = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
     /// <summary>开发用的自检文件不翻译。</summary>
-    private static readonly string[] Excluded = ["SelfTest.cs", "SelfTest.Hotspot.cs", "SelfTest.Shader.cs", "SelfTest.MultiplayerGuide.cs", "ContentPageSelfTest.cs", "SelfTest.BakeNotice.cs", "SelfTest.CodeHygiene.cs", "SelfTest.Remote.cs", "SelfTest.Settings.cs", "SelfTest.HostServer.cs", "SelfTest.MicrosoftLogin.cs", "SelfTest.PublicNetwork.cs", "SelfTest.Theme.cs", "SelfTest.Security.cs", "SelfTest.Gallery.cs", "SelfTest.SafetyLock.cs", "SelfTest.Shell.cs", "SelfTest.Activity.cs", "SelfTest.Library.cs", "SelfTest.Instance.cs", "SelfTest.Mods.cs", "SelfTest.NewInstance.cs", "SelfTest.Discover.cs", "SelfTest.FirstRun.cs", "SelfTest.Drop.cs", "SelfTest.Recycle.cs", "SelfTest.Packs.cs", "SelfTest.Backups.cs", "SelfTest.Logs.cs", "SelfTest.Fix.cs", "SelfTest.Palette.cs", "SelfTest.SettingsLayout.cs", "SelfTest.Privacy.cs", "SelfTest.Help.cs", "SelfTest.DockDensity.cs", "Gallery.axaml", "Gallery.axaml.cs", "LayoutCheck.cs", "Spike.cs", "SelfTest.Room.cs", "SelfTest.Requests.cs"];
+    private static readonly string[] Excluded = ["SelfTest.cs", "SelfTest.JayAccount.cs", "SelfTest.Hotspot.cs", "SelfTest.Shader.cs", "SelfTest.MultiplayerGuide.cs", "ContentPageSelfTest.cs", "SelfTest.BakeNotice.cs", "SelfTest.CodeHygiene.cs", "SelfTest.Remote.cs", "SelfTest.Settings.cs", "SelfTest.HostServer.cs", "SelfTest.MicrosoftLogin.cs", "SelfTest.PublicNetwork.cs", "SelfTest.Theme.cs", "SelfTest.Security.cs", "SelfTest.Gallery.cs", "SelfTest.SafetyLock.cs", "SelfTest.Shell.cs", "SelfTest.Activity.cs", "SelfTest.Library.cs", "SelfTest.Instance.cs", "SelfTest.Mods.cs", "SelfTest.NewInstance.cs", "SelfTest.Discover.cs", "SelfTest.FirstRun.cs", "SelfTest.Drop.cs", "SelfTest.Recycle.cs", "SelfTest.Packs.cs", "SelfTest.Backups.cs", "SelfTest.Logs.cs", "SelfTest.Fix.cs", "SelfTest.Palette.cs", "SelfTest.SettingsLayout.cs", "SelfTest.Privacy.cs", "SelfTest.Help.cs", "SelfTest.DockDensity.cs", "Gallery.axaml", "Gallery.axaml.cs", "LayoutCheck.cs", "Spike.cs", "SelfTest.Room.cs", "SelfTest.Requests.cs"];
 
     // 汉字（含扩展 A）、假名、中日文标点和全角符号，以及中文里常用的 …“”—：写死在代码里的标点换语言后也会留在文字中间。
     [GeneratedRegex(@"[㐀-䶿一-鿿぀-ヿ　-〿＀-￯…“”—]")]
