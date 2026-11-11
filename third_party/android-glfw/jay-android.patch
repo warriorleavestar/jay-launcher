@@ -1,0 +1,223 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 1057a6f..b0e5483 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -136,6 +136,10 @@ target_include_directories(glfw PRIVATE
+                            "${GLFW_SOURCE_DIR}/src"
+                            "${GLFW_BINARY_DIR}/src")
+ target_link_libraries(glfw PRIVATE Threads::Threads)
++if (ANDROID)
++    target_link_libraries(glfw PRIVATE android log)
++    target_link_options(glfw PRIVATE "-Wl,-z,max-page-size=16384")
++endif()
+ 
+ # Workaround for CMake not knowing about .m files before version 3.16
+ if (CMAKE_VERSION VERSION_LESS "3.16" AND APPLE)
+diff --git a/src/null_platform.h b/src/null_platform.h
+index 4843a76..baa02ca 100644
+--- a/src/null_platform.h
++++ b/src/null_platform.h
+@@ -172,6 +172,12 @@ typedef struct _GLFWwindowNull
+     GLFWbool        floating;
+     GLFWbool        transparent;
+     float           opacity;
++#if defined(__ANDROID__)
++    void*           nativeWindow;
++    uint32_t        jayActions;
++    uint32_t        jayMovementKeys;
++    uint64_t        jayInputGeneration;
++#endif
+ } _GLFWwindowNull;
+ 
+ // Null-specific per-monitor data
+diff --git a/src/null_window.c b/src/null_window.c
+index 1db0811..b84b668 100644
+--- a/src/null_window.c
++++ b/src/null_window.c
+@@ -29,6 +29,39 @@
+ 
+ #include <stdlib.h>
+ 
++#if defined(__ANDROID__)
++#include <android/native_window.h>
++#include <dlfcn.h>
++
++typedef ANativeWindow* (*JaySurfaceAcquire)(void);
++typedef void (*JaySurfaceRelease)(ANativeWindow*);
++typedef struct JayInputSnapshot
++{
++    float moveX;
++    float moveY;
++    float lookX;
++    float lookY;
++    uint32_t actions;
++    uint64_t generation;
++} JayInputSnapshot;
++typedef void (*JayInputRead)(JayInputSnapshot*);
++
++static JaySurfaceAcquire jaySurfaceAcquire;
++static JaySurfaceRelease jaySurfaceRelease;
++static JayInputRead jayInputRead;
++
++static GLFWbool connectJayBridge(void)
++{
++    if (!jaySurfaceAcquire)
++        jaySurfaceAcquire = (JaySurfaceAcquire) dlsym(RTLD_DEFAULT, "jay_surface_acquire");
++    if (!jaySurfaceRelease)
++        jaySurfaceRelease = (JaySurfaceRelease) dlsym(RTLD_DEFAULT, "jay_surface_release");
++    if (!jayInputRead)
++        jayInputRead = (JayInputRead) dlsym(RTLD_DEFAULT, "jay_input_read");
++    return jaySurfaceAcquire && jaySurfaceRelease && jayInputRead;
++}
++#endif
++
+ static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
+ {
+     if (window->numer != GLFW_DONT_CARE && window->denom != GLFW_DONT_CARE)
+@@ -76,6 +109,21 @@ static int createNativeWindow(_GLFWwindow* window,
+                               const _GLFWwndconfig* wndconfig,
+                               const _GLFWfbconfig* fbconfig)
+ {
++#if defined(__ANDROID__)
++    if (!connectJayBridge())
++    {
++        _glfwInputError(GLFW_PLATFORM_ERROR, "Android: Jay surface bridge is unavailable");
++        return GLFW_FALSE;
++    }
++    window->null.nativeWindow = jaySurfaceAcquire();
++    if (!window->null.nativeWindow)
++    {
++        _glfwInputError(GLFW_PLATFORM_ERROR, "Android: game surface is not ready");
++        return GLFW_FALSE;
++    }
++    window->null.width = ANativeWindow_getWidth((ANativeWindow*) window->null.nativeWindow);
++    window->null.height = ANativeWindow_getHeight((ANativeWindow*) window->null.nativeWindow);
++#else
+     if (window->monitor)
+         fitToMonitor(window);
+     else
+@@ -94,6 +142,7 @@ static int createNativeWindow(_GLFWwindow* window,
+         window->null.width = wndconfig->width;
+         window->null.height = wndconfig->height;
+     }
++#endif
+ 
+     window->null.visible = wndconfig->visible;
+     window->null.decorated = wndconfig->decorated;
+@@ -121,18 +170,18 @@ GLFWbool _glfwCreateWindowNull(_GLFWwindow* window,
+     if (ctxconfig->client != GLFW_NO_API)
+     {
+         if (ctxconfig->source == GLFW_NATIVE_CONTEXT_API ||
+-            ctxconfig->source == GLFW_OSMESA_CONTEXT_API)
++            ctxconfig->source == GLFW_EGL_CONTEXT_API)
+         {
+-            if (!_glfwInitOSMesa())
++            if (!_glfwInitEGL())
+                 return GLFW_FALSE;
+-            if (!_glfwCreateContextOSMesa(window, ctxconfig, fbconfig))
++            if (!_glfwCreateContextEGL(window, ctxconfig, fbconfig))
+                 return GLFW_FALSE;
+         }
+-        else if (ctxconfig->source == GLFW_EGL_CONTEXT_API)
++        else if (ctxconfig->source == GLFW_OSMESA_CONTEXT_API)
+         {
+-            if (!_glfwInitEGL())
++            if (!_glfwInitOSMesa())
+                 return GLFW_FALSE;
+-            if (!_glfwCreateContextEGL(window, ctxconfig, fbconfig))
++            if (!_glfwCreateContextOSMesa(window, ctxconfig, fbconfig))
+                 return GLFW_FALSE;
+         }
+ 
+@@ -175,6 +224,11 @@ void _glfwDestroyWindowNull(_GLFWwindow* window)
+ 
+     if (window->context.destroy)
+         window->context.destroy(window);
++#if defined(__ANDROID__)
++    if (window->null.nativeWindow && jaySurfaceRelease)
++        jaySurfaceRelease((ANativeWindow*) window->null.nativeWindow);
++    window->null.nativeWindow = NULL;
++#endif
+ }
+ 
+ void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title)
+@@ -486,6 +540,50 @@ GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
+ 
+ void _glfwPollEventsNull(void)
+ {
++#if defined(__ANDROID__)
++    _GLFWwindow* window = _glfw.windowListHead;
++    JayInputSnapshot input = {0};
++    if (!window || !jayInputRead)
++        return;
++    jayInputRead(&input);
++    if (input.generation == window->null.jayInputGeneration)
++        return;
++    window->null.jayInputGeneration = input.generation;
++    const uint32_t previous = window->null.jayActions;
++    window->null.jayActions = input.actions;
++    const int keys[] = { GLFW_KEY_UNKNOWN, GLFW_MOUSE_BUTTON_LEFT, GLFW_MOUSE_BUTTON_RIGHT,
++                         GLFW_KEY_SPACE, GLFW_KEY_E, GLFW_KEY_ESCAPE, GLFW_KEY_UNKNOWN };
++    for (int action = 1; action <= 5; action++)
++    {
++        const uint32_t bit = 1u << action;
++        if ((previous & bit) == (input.actions & bit))
++            continue;
++        if (action <= 2)
++            _glfwInputMouseClick(window, keys[action], (input.actions & bit) ? GLFW_PRESS : GLFW_RELEASE, 0);
++        else
++            _glfwInputKey(window, keys[action], keys[action], (input.actions & bit) ? GLFW_PRESS : GLFW_RELEASE, 0);
++    }
++    const float threshold = 0.25f;
++    const int movementKeys[] = { GLFW_KEY_A, GLFW_KEY_D, GLFW_KEY_W, GLFW_KEY_S };
++    const uint32_t movement = (input.moveX < -threshold ? 1u : 0u) |
++                              (input.moveX > threshold ? 2u : 0u) |
++                              (input.moveY < -threshold ? 4u : 0u) |
++                              (input.moveY > threshold ? 8u : 0u);
++    for (int index = 0; index < 4; index++)
++    {
++        const uint32_t bit = 1u << index;
++        if ((window->null.jayMovementKeys & bit) != (movement & bit))
++            _glfwInputKey(window, movementKeys[index], movementKeys[index],
++                          (movement & bit) ? GLFW_PRESS : GLFW_RELEASE, 0);
++    }
++    window->null.jayMovementKeys = movement;
++    if (input.lookX != 0.f || input.lookY != 0.f)
++    {
++        _glfw.null.xcursor += (int) (input.lookX * window->null.width);
++        _glfw.null.ycursor += (int) (input.lookY * window->null.height);
++        _glfwInputCursorPos(window, _glfw.null.xcursor, _glfw.null.ycursor);
++    }
++#endif
+ }
+ 
+ void _glfwWaitEventsNull(void)
+@@ -562,7 +660,11 @@ EGLNativeDisplayType _glfwGetEGLNativeDisplayNull(void)
+ 
+ EGLNativeWindowType _glfwGetEGLNativeWindowNull(_GLFWwindow* window)
+ {
++#if defined(__ANDROID__)
++    return (EGLNativeWindowType) window->null.nativeWindow;
++#else
+     return 0;
++#endif
+ }
+ 
+ const char* _glfwGetScancodeNameNull(int scancode)
+diff --git a/src/platform.c b/src/platform.c
+index af1b0f4..12f274f 100644
+--- a/src/platform.c
++++ b/src/platform.c
+@@ -79,8 +79,12 @@ GLFWbool _glfwSelectPlatform(int desiredID, _GLFWplatform* platform)
+         return _glfwConnectNull(desiredID, platform);
+     else if (count == 0)
+     {
++#if defined(__ANDROID__)
++        return _glfwConnectNull(GLFW_PLATFORM_NULL, platform);
++#else
+         _glfwInputError(GLFW_PLATFORM_UNAVAILABLE, "This binary only supports the Null platform");
+         return GLFW_FALSE;
++#endif
+     }
+ 
+ #if defined(_GLFW_WAYLAND) && defined(_GLFW_X11)

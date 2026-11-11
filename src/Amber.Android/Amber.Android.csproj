@@ -20,7 +20,10 @@
     </AndroidResource>
     <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so" Abi="arm64-v8a" />
     <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so" Abi="x86_64" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so" Abi="x86_64" />
     <AndroidAsset Include="$(IntermediateOutputPath)jay-runtime-probe.jar" LogicalName="jay-runtime-probe.jar" />
+    <AndroidAsset Include="..\..\third_party\android-glfw\LICENSE.md" LogicalName="licenses/GLFW-LICENSE.md" />
   </ItemGroup>
 
   <Target Name="BuildJayRuntimeProbe" AfterTargets="_ResolveAndroidTooling" BeforeTargets="_BuildApkEmbed">
@@ -36,6 +39,8 @@
   <Target Name="RequireJayJvmHost" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
     <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" Text="Build the Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" Text="Build the Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
   </Target>
 
   <ItemGroup>
