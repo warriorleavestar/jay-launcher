@@ -110,7 +110,8 @@ core_sources=(
 # io_uring is neither needed by Minecraft nor part of Android's public native API.
 filtered_core=()
 for source_file in "${core_sources[@]}"; do
-  [[ "$source_file" == *LibIOURing.c || "$source_file" == *LibURing.c ]] || filtered_core+=("$source_file")
+  [[ "$source_file" == *LibIOURing.c || "$source_file" == *LibURing.c || "$source_file" == *linux_UIO.c ]] ||
+    filtered_core+=("$source_file")
 done
 build_library lwjgl "$work/libffi-install/include" "${filtered_core[@]}"
 
