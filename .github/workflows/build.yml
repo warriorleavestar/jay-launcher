@@ -114,26 +114,8 @@ jobs:
           chmod +x ../out/server-${{ matrix.rid }}/install-network-node.sh
           tar -C ../out/server-${{ matrix.rid }} -czf ../packages/JayServer-${{ matrix.rid }}.tar.gz .
 
-      - name: Publish Windows Native AOT
-        if: matrix.rid == 'win-x64'
-        shell: pwsh
-        run: |
-          dotnet publish Amber.App -c Release -r win-x64 -p:PublishAot=true -p:DebugType=none -o ../out/win-x64-aot
-          Get-ChildItem ../out/win-x64-aot -Recurse -Filter *.pdb | Remove-Item
-          Copy-Item -Recurse ../out/win-x64/easytier ../out/win-x64-aot/easytier
-          Compress-Archive -Path ../out/win-x64-aot/* -DestinationPath ../packages/Jay-win-x64-aot.zip
-
-      # Mac/Linux 也出 Native AOT 包（启动更快，不用解压运行时）：在各自的原生机器上编译，带上同一份 EasyTier。
-      - name: Publish macOS/Linux Native AOT
-        if: matrix.archive == 'tar'
-        shell: bash
-        run: |
-          dotnet publish Amber.App -c Release -r ${{ matrix.rid }} -p:PublishAot=true -p:DebugType=none -o ../out/${{ matrix.rid }}-aot
-          find ../out/${{ matrix.rid }}-aot \( -name '*.pdb' -o -name '*.dbg' -o -name '*.dSYM' \) -prune -exec rm -rf {} +
-          cp -R ../out/${{ matrix.rid }}/easytier ../out/${{ matrix.rid }}-aot/easytier
-          chmod +x ../out/${{ matrix.rid }}-aot/Jay
-          if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}-aot/NotoSansSC-OFL.txt; fi
-          tar -C ../out/${{ matrix.rid }}-aot -czf ../packages/Jay-${{ matrix.rid }}-aot.tar.gz .
+      # Native AOT 会在 Windows/macOS/Linux 托管 runner 上超时或耗尽内存，
+      # 并让前面已打好的标准包来不及上传。发布链只生成可靠的 ReadyToRun 自包含包。
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -235,6 +217,7 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || !inputs.publish_android_preview
     # Keep the platform compile independent so a desktop-only/flaky test cannot hide iOS compiler failures.
     # .NET 10.0.403 installs the iOS 27.1 workload; this image has matching Xcode 27.1 as its default.
+    # Pinned: 10.0.404 brings iOS 27.2, which refuses Xcode 27.1. Move both together when the image gets Xcode 27.2.
     runs-on: xcode-27
     timeout-minutes: 45
     defaults:
@@ -247,10 +230,11 @@ jobs:
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.403'
 
       - name: Install iOS workload
-        run: dotnet workload install ios
+        # setup-dotnet 只锁 SDK 还不够；workload 默认会更新到最新 feature band。
+        run: dotnet workload install ios --version 10.0.403
 
       - name: Build experimental iOS Simulator app
         run: >-
@@ -346,7 +330,7 @@ jobs:
       - name: Use signed Windows packages
         if: needs.sign-windows.result == 'success'
         run: |
-          for f in Jay-win-x64.zip Jay-win-x64-aot.zip JayServer-win-x64.zip; do
+          for f in Jay-win-x64.zip JayServer-win-x64.zip; do
             test -f "signed-assets/$f"
             cp -f "signed-assets/$f" "release-assets/$f"
           done
