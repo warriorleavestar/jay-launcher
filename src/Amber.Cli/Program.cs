@@ -681,6 +681,9 @@ try
                 var legacyProblems = options.Baked is { ProblemsFile: null };
                 var game = launcher.Launch(options, line =>
                 {
+                    // Jay's own notes about the sandbox (which level this launch really uses) are not game log lines.
+                    if (line.Contains("sandbox", StringComparison.OrdinalIgnoreCase) && !line.TrimStart().StartsWith('<') && !line.StartsWith('['))
+                        Console.WriteLine("SANDBOX NOTE " + line);
                     if (options.Baked is not null && Amber.Core.Bake.BakeRuntimeProblem.Parse(line, legacyProblems) is { } runtimeProblem)
                         Console.WriteLine($"BAKE RUNTIME {runtimeProblem.Severity} {runtimeProblem.Code} {runtimeProblem.Describe()}");
                     lock (tail)
