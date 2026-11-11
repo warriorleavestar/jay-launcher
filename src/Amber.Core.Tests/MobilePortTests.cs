@@ -5,6 +5,7 @@ using Amber.Mobile.Views;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
+using System.Security.Cryptography;
 
 namespace Amber.Core.Tests;
 
@@ -122,6 +123,40 @@ public sealed class MobilePortTests
         Assert.Equal(1, sink.LastMovement.X, 6);
         Assert.True(router.Release(10));
         Assert.Equal((0d, 0d), sink.LastMovement);
+    }
+
+    [Fact]
+    public async Task AndroidRuntimeManifestRequiresSafeLicensedVerifiedFiles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-runtime-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "lib"));
+        try
+        {
+            var bytes = "verified runtime"u8.ToArray();
+            var path = Path.Combine(root, "lib", "libjvm.so");
+            await File.WriteAllBytesAsync(path, bytes);
+            var file = new RuntimeBundleFile(
+                "lib/libjvm.so",
+                bytes.Length,
+                Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+                "GPL-2.0-with-classpath-exception",
+                "https://example.invalid/openjdk-source");
+            var manifest = new RuntimeBundleManifest(1, "test-runtime", "arm64-v8a", [file]);
+
+            Assert.Empty(manifest.Validate());
+            Assert.True(await RuntimeBundleVerifier.VerifyAsync(root, manifest, "arm64-v8a"));
+            Assert.False(await RuntimeBundleVerifier.VerifyAsync(root, manifest, "x86_64"));
+
+            await File.AppendAllTextAsync(path, "tampered");
+            Assert.False(await RuntimeBundleVerifier.VerifyAsync(root, manifest, "arm64-v8a"));
+            Assert.NotEmpty((manifest with { Files = [file with { Path = "../libjvm.so" }] }).Validate());
+            Assert.NotEmpty((manifest with { Files = [file with { License = "" }] }).Validate());
+            Assert.NotEmpty((manifest with { Files = [file with { SourceUrl = "http://example.invalid/source" }] }).Validate());
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
     }
 
     private sealed class FakeMobilePlatformServices : IMobilePlatformServices
