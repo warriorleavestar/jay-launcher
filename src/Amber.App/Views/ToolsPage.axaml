@@ -8,7 +8,7 @@
              x:DataType="vm:ToolsViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
     <TextBlock svc:ThemeRegion.Name="tools.title" Classes="h1" Text="{l:T tools.title}" />
-    <ScrollViewer svc:ThemeRegion.Name="tools.body" Grid.Row="1">
+    <ScrollViewer Classes="page-scroll" svc:ThemeRegion.Name="tools.body" Grid.Row="1">
       <StackPanel>
         <Border Classes="card">
           <StackPanel Spacing="8">
