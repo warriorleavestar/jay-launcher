@@ -39,6 +39,8 @@ internal sealed partial class SelfTest
             settings.BakeLoaderPath = "";
             service.SaveAndReload();
             service.NotifyInstalledChanged();
+            // Let the posted instance-list refreshes run first: they put the current instance back otherwise.
+            await Task.Delay(1500);
             service.SetCurrentInstance(id);
             var instance = service.GetInstance(id);
             Check("测试实例认成 NeoForge 1.21.1", instance is { Loader: "neoforge", McVersion: "1.21.1" }, $"{instance.Loader} {instance.McVersion}");
@@ -127,6 +129,71 @@ internal sealed partial class SelfTest
             settings.GameDirectory = originalDir;
             service.SaveAndReload();
             service.NotifyInstalledChanged();
+        }
+    }
+
+    /// <summary>
+    /// AMBER_SELFTEST_SCOPE=mixed-e2e: the browser half of the mixed-pack end-to-end test. In the game directory
+    /// AMBER_SELFTEST_MIXED_GAME, for the existing NeoForge 1.21.1 instance AMBER_SELFTEST_MIXED_INSTANCE (a test
+    /// instance), with baking on and a real loader package selected in the settings: installs a Fabric-only mod
+    /// (with its Fabric dependencies) and a NeoForge mod from Modrinth through Discover. The launch with baking is
+    /// then run from the CLI (`launch … --bake … --smoke`).
+    /// </summary>
+    private async Task MixedEndToEndAsync()
+    {
+        var service = Page<HomeViewModel>().Service;
+        var content = main.Pages.OfType<ContentViewModel>().First();
+        var game = Environment.GetEnvironmentVariable("AMBER_SELFTEST_MIXED_GAME");
+        var id = Environment.GetEnvironmentVariable("AMBER_SELFTEST_MIXED_INSTANCE");
+        if (string.IsNullOrEmpty(game) || string.IsNullOrEmpty(id)) { Check("AMBER_SELFTEST_MIXED_GAME / _INSTANCE 已设置", false); return; }
+        try
+        {
+            Check("烘焙已开、加载器已装（真实加载器包）", service.CrossLoaderFor(service.GetInstance(id)) is { Ready: true, Extras.Count: > 0 },
+                service.Settings.BakeLoaderPath);
+            service.Settings.GameDirectory = game;
+            service.SaveAndReload();
+            service.NotifyInstalledChanged();
+            service.SetCurrentInstance(id);
+            var instance = service.GetInstance(id);
+            main.Shell.Navigate("discover");
+            await WaitAsync(() => main.CurrentPage is ContentViewModel, 5);
+            content.TypeIndex = (int)ContentType.Mod;
+            content.SourceIndex = 0;
+            content.FilterByInstance = true;
+            content.TargetInstance = id;
+            Check("装到的是测试实例", await WaitAsync(() => content.TargetInstance == id, 5), content.TargetInstance ?? "");
+
+            // AMBER_SELFTEST_MIXED_FABRIC: the Fabric-only mod's Modrinth slug (default visuality, which needs Fabric API and Cloth Config).
+            var fabricSlug = Environment.GetEnvironmentVariable("AMBER_SELFTEST_MIXED_FABRIC") is { Length: > 0 } f ? f : "visuality";
+            foreach (var (query, title, cross) in new[] { (fabricSlug, fabricSlug, true), ("appleskin", "appleskin", false) })
+            {
+                await SearchMixedAsync(content, query);
+                var item = content.Results.FirstOrDefault(r => r.Project.PageUrl?.EndsWith("/" + title, StringComparison.OrdinalIgnoreCase) == true);
+                Check($"搜到 {title}，标记{(cross ? "经通用加载器" : "原生")}", item is not null && item.ViaUniversalLoader == cross,
+                    string.Join(", ", content.Results.Select(r => r.Title + (r.ViaUniversalLoader ? "*" : "")).Take(6)));
+                if (item is null) continue;
+                content.Selected = item;
+                content.Detail = item;
+                await WaitAsync(() => content.SelectedFile is not null, 30);
+                if (content.TargetInstance != id) content.TargetInstance = id;
+                Check($"装 {title} 前目标仍是测试实例", content.TargetInstance == id, content.TargetInstance ?? "");
+                content.InstallCommand.Execute(null);
+                await Task.Delay(300);
+                await WaitAsync(() => !content.IsBusy, 180);
+                Check($"装好 {title}", content.Status.Contains(item.Title, StringComparison.OrdinalIgnoreCase), content.Status);
+            }
+            var jars = Directory.Exists(instance.ModsDir) ? Directory.EnumerateFiles(instance.ModsDir, "*.jar").Select(Path.GetFileName).Order().ToList() : [];
+            _report.Add("INFO mods: " + string.Join(" | ", jars));
+            if (fabricSlug == "visuality")
+                Check("Fabric 模组的依赖装的是 Fabric 版（Fabric API、Cloth Config Fabric）",
+                jars.Any(j => j!.StartsWith("fabric-api", StringComparison.OrdinalIgnoreCase)) && jars.Any(j => j!.Contains("cloth-config", StringComparison.OrdinalIgnoreCase) && j.Contains("fabric", StringComparison.OrdinalIgnoreCase)),
+                string.Join(" | ", jars));
+            Check("NeoForge 模组装的是 NeoForge 版", jars.Any(j => j!.Contains("appleskin", StringComparison.OrdinalIgnoreCase) && j.Contains("neoforge", StringComparison.OrdinalIgnoreCase)),
+                string.Join(" | ", jars));
+        }
+        catch (Exception e)
+        {
+            Check("自检没有异常", false, e.ToString());
         }
     }
 

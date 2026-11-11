@@ -11,7 +11,7 @@ If the pin is ever left empty (no tag or hash), **Download loader** stays disabl
   2. Accepts the file only if its size and SHA-256 equal the pin in `src/Amber.Core/Bake/BakeLoaderRelease.cs`. A different file is thrown away, and the next source starts clean.
   3. Installs it exactly like **Install loader from zip…**:
      - Every file is checked against the package's `manifest.json`, and a file the manifest does not list is refused.
-     - The package is unpacked to `<Jay data>/universal-loader/<loaderVersion>`, then selected.
+     - The package is unpacked to `<Jay data>-runtime/universal-loader/<loaderVersion>` (the runtime folder beside the data folder, which holds no settings, accounts or keys; older installs are moved there once), then selected.
 - Before every bake, warm or cleanup, every file of the selected package is checked again against its manifest.
 
 ## Releasing a new loader
