@@ -49,9 +49,9 @@ The zip is redistributed to players, so it must carry the licence notices of eve
 - a top-level licence / third-party notice file (or folder)
 - each notice file listed in `manifest.json` `files`, because Jay refuses files the manifest does not list
 
-The released 0.3.0 package does: `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/*`, all listed in its manifest, so Jay checks them on install like every other file.
+The released 0.3.1 package does: `LICENSE`, `THIRD_PARTY_NOTICES.md` and `licenses/*`, all listed in its manifest, so Jay checks them on install like every other file.
 
-Third-party pieces in the 0.3.0 package:
+Third-party pieces in the 0.3.1 package:
 
 | Piece | Licence |
 | --- | --- |
