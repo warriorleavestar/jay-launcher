@@ -121,6 +121,10 @@ public sealed partial class MultiplayerViewModel
         }
         _service.Settings.PublicNetworkNodes = nodes.Distinct().ToList();
         _service.Settings.Save();
+        // Saving the nodes is how the user accepts a new directory key for the built-in network (its directory moved, or
+        // its owner re-keyed it; core.mp.public.directory_changed): the network can't be removed and added again. Only
+        // matters while the built-in network trusts its directory on first use (no trustee roots yet).
+        DirectoryKeys.Forget(PublicNetworkProfile.JayNetworkName);
         LoadNetworks();
         OnPropertyChanged(nameof(HasPublicNodes));
         OnPropertyChanged(nameof(PublicStateText));

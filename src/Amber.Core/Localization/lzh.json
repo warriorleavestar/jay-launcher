@@ -1399,7 +1399,7 @@
   "core.mp.knock.banned": "此人已見逐於此房",
   "core.mp.knock.bound": "此邀乃遺他人者",
   "core.mp.knock.wronghost": "此房之主非遺汝邀者，已止入",
-  "core.mp.public.directory_changed": "此網目錄之鑰異於 Jay 所記，Jay 不復與之通。若網主有意易之，請去此網而復加之。",
+  "core.mp.public.directory_changed": "此網目錄之鑰異於 Jay 所記，Jay 不復與之通。若網主有意易之，請去此網而復加之（Jay 公共網路則於聯機之設再存其種址）。",
   "multiplayer.kick.button": "逐",
   "multiplayer.kick.hint": "逐之，則此人立斷，不可復叩此房之門；房易新鑰，他在者自復連。",
   "multiplayer.kick.confirm_body": "{0} 將立斷，後不可復叩此房之門（可於「已逐」解之）。房易新鑰，他在者自復連。",

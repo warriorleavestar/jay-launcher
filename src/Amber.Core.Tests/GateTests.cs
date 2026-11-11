@@ -245,6 +245,22 @@ public sealed class GateTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ConnectionResetDuringInitialHandshakeReportsSilentGate()
+    {
+        using var identity = Identity("reset");
+        await using var stream = new ResetOnReadStream();
+        var error = await Assert.ThrowsAsync<IOException>(() => GateProtocol.EnrollAsync(stream, Invite("Steve"), identity.KeyPair));
+        Assert.Equal(L.T("core.gate.protocol.silent"), error.Message);
+        Assert.IsType<SocketException>(error.InnerException?.InnerException);
+    }
+
+    private sealed class ResetOnReadStream : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(new IOException("Connection reset", new SocketException((int)SocketError.ConnectionReset)));
+    }
+
+    [Fact]
     public async Task WrongUsernameGetsDisconnectAndNeverReachesBackend()
     {
         using var identity = Identity("a");

@@ -1449,7 +1449,7 @@
   "core.mp.knock.banned": "这个人在本房间已被踢出",
   "core.mp.knock.bound": "这张邀请是发给别人的",
   "core.mp.knock.wronghost": "这个房间的房主不是给你发邀请的人，已停止加入",
-  "core.mp.public.directory_changed": "这个网络的目录公钥和 Jay 记住的不一样，Jay 不会再向它发送任何东西。如果是网络管理员有意更换的，请删掉这个网络再重新添加。",
+  "core.mp.public.directory_changed": "这个网络的目录公钥和 Jay 记住的不一样，Jay 不会再向它发送任何东西。如果是网络管理员有意更换的，请删掉这个网络再重新添加（Jay 公共网络：在联机设置里重新保存一次种子地址）。",
   "multiplayer.kick.button": "踢出",
   "multiplayer.kick.hint": "踢出后这个人马上断开，本房间里不能再敲门进来；房间会换一套新密钥，其他在线的人自动重连。",
   "multiplayer.kick.confirm_body": "{0} 会马上断开，之后不能再敲门进本房间（可以在「已踢出」里解除）。房间会换一套新密钥，其他在线的人会自动重连。",

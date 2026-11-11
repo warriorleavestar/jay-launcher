@@ -1650,9 +1650,18 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         });
 
         // 直连房间也只发普通邀请（JAY2-）：加入方经中继敲门，批准后两边在加密的敲门里交换地址，再打洞。
+        // A direct room has no room EasyTier to listen on TestListeners (its lobby only dials out), so run a stand-alone
+        // relay node on loopback for both lobbies, like a relay server would be.
         var relayPort = Amber.Core.Multiplayer.EasyTierArgs.FreeTcpPort();
-        host.TestListeners = [$"tcp://127.0.0.1:{relayPort}"];
-        host.TestPeers = [];
+        var relayUrl = $"tcp://127.0.0.1:{relayPort}";
+        using var relayNode = Amber.Core.Multiplayer.Public.PublicNetworkSession.Start(host.TestService.EasyTier,
+            new Amber.Core.Multiplayer.Public.PublicNetworkOptions(
+                new Amber.Core.Multiplayer.Public.PublicNetworkProfile("selftest-relay", "selftest-relay", "jay-selftest-relay-" + Guid.NewGuid().ToString("N")[..8],
+                    Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)), []),
+                Amber.Core.Multiplayer.EasyTierArgs.FreeTcpPort(), Amber.Core.Multiplayer.EasyTierArgs.FreeTcpPort(), Listeners: [relayUrl]),
+            Path.Combine(reportDir, "direct-relay"));
+        host.TestListeners = null;
+        host.TestPeers = [relayUrl];
         host.DirectSimulate = true;
         host.DirectUseNodes = false;
         host.DebugMode = true;
@@ -1670,7 +1679,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         guest.Activate();
         guest.DirectSimulate = true;
         guest.DirectUseNodes = false;
-        guest.TestPeers = [$"tcp://127.0.0.1:{relayPort}"];
+        guest.TestPeers = [relayUrl];
         guest.JoinCode = "JAY2D-eyJhIjoxfQ";
         await guest.JoinCommand.ExecuteAsync(null);
         Check("直连：旧的直连码（JAY2D-，带公网 IP）不认，提示更新", guest.IsIdle && guest.Status == L.T("multiplayer.direct.old_code"), guest.Status);
@@ -1688,13 +1697,14 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("直连：房主的成员列表里有这个人", await WaitAsync(() => host.Members.Count == 1, 10), string.Join(" | ", host.Members.Select(m => m.Label)));
 
         string? reply = null;
-        for (var attempt = 0; attempt < 20 && reply is null; attempt++)
+        // Not joined (the knock or the punch failed): there is no address to dial, and the checks above already say why.
+        var joinParts = guest.JoinAddress.Split(':');
+        for (var attempt = 0; attempt < 20 && reply is null && joinParts.Length == 2 && int.TryParse(joinParts[1], out var joinPort); attempt++)
         {
             try
             {
                 using var client = new System.Net.Sockets.TcpClient();
-                var parts = guest.JoinAddress.Split(':');
-                await client.ConnectAsync(parts[0], int.Parse(parts[1]));
+                await client.ConnectAsync(joinParts[0], joinPort);
                 var stream = client.GetStream();
                 await stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes("direct\n"));
                 using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -1745,6 +1755,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         host.TestPeers = null;
         stopServer.Cancel();
         server.Stop();
+        relayNode.Dispose(); // before counting easytier-core processes (Dispose is safe to repeat)
         await Task.Delay(3000);
         var left = System.Diagnostics.Process.GetProcessesByName("easytier-core")
             .Count(p => { try { return p.MainModule?.FileName?.StartsWith(AppSettingsDataDir(), StringComparison.OrdinalIgnoreCase) == true; } catch { return false; } });

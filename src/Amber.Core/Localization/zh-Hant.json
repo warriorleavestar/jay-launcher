@@ -1449,7 +1449,7 @@
   "core.mp.knock.banned": "這個人在本房間已被踢出",
   "core.mp.knock.bound": "這張邀請是發給別人的",
   "core.mp.knock.wronghost": "這個房間的房主不是給你發邀請的人，已停止加入",
-  "core.mp.public.directory_changed": "這個網路的目錄公鑰和 Jay 記住的不一樣，Jay 不會再向它傳送任何東西。如果是網路管理員有意更換的，請刪掉這個網路再重新加入。",
+  "core.mp.public.directory_changed": "這個網路的目錄公鑰和 Jay 記住的不一樣，Jay 不會再向它傳送任何東西。如果是網路管理員有意更換的，請刪掉這個網路再重新加入（Jay 公共網路：在連線設定裡重新儲存一次種子位址）。",
   "multiplayer.kick.button": "踢出",
   "multiplayer.kick.hint": "踢出後這個人會馬上斷開，本房間裡不能再敲門進來；房間會換一套新金鑰，其他在線的人會自動重新連線。",
   "multiplayer.kick.confirm_body": "{0} 會馬上斷開，之後不能再敲門進本房間（可以在「已踢出」裡解除）。房間會換一套新金鑰，其他在線的人會自動重連。",

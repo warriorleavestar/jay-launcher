@@ -42,7 +42,10 @@ internal static class EasyTierProcessGuard
         // 要和系统报告的进程路径完全一致：/bin 本身也可能是指向 /usr/bin 的链接，所以用 realpath 解析整条路径。
         try
         {
-            var resolved = realpath("/bin/sh", IntPtr.Zero);
+            // macOS /bin/sh starts the shell selected by /private/var/select/sh.
+            // Process.MainModule reports that selected executable after startup.
+            var shell = OperatingSystem.IsMacOS() ? "/private/var/select/sh" : "/bin/sh";
+            var resolved = realpath(shell, IntPtr.Zero);
             if (resolved == IntPtr.Zero) return "/bin/sh";
             try { return System.Runtime.InteropServices.Marshal.PtrToStringUTF8(resolved) ?? "/bin/sh"; }
             finally { free(resolved); }
