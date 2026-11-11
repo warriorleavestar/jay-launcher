@@ -232,13 +232,13 @@ public static class ServerList
         try
         {
             // 所有 Core 调用者共享连接/帧预算，排队不会提前消耗正常服务器的响应时间。
-            await PingSlots.WaitAsync(ct);
+            await PingSlots.WaitAsync(ct).ConfigureAwait(false);
             acquired = true;
             linked.CancelAfter(timeout ?? TimeSpan.FromSeconds(5));
             var (host, port) = ParseAddress(address);
             using var tcp = new TcpClient();
-            await tcp.ConnectAsync(host, port, linked.Token);
-            await using var stream = tcp.GetStream();
+            await tcp.ConnectAsync(host, port, linked.Token).ConfigureAwait(false);
+            using var stream = tcp.GetStream();
 
             var handshake = new MemoryStream();
             WriteVarInt(handshake, 0x00);
@@ -249,19 +249,19 @@ public static class ServerList
             handshake.WriteByte((byte)(port >> 8));
             handshake.WriteByte((byte)port);
             WriteVarInt(handshake, 1);
-            await WritePacketAsync(stream, handshake.ToArray(), linked.Token);
-            await WritePacketAsync(stream, [0x00], linked.Token);
+            await WritePacketAsync(stream, handshake.ToArray(), linked.Token).ConfigureAwait(false);
+            await WritePacketAsync(stream, [0x00], linked.Token).ConfigureAwait(false);
 
-            var json = await ReadStatusPacketAsync(stream, linked.Token);
+            var json = await ReadStatusPacketAsync(stream, linked.Token).ConfigureAwait(false);
 
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var ping = new byte[9];
             ping[0] = 0x01;
-            await WritePacketAsync(stream, ping, linked.Token);
+            await WritePacketAsync(stream, ping, linked.Token).ConfigureAwait(false);
             long? ms = null;
             try
             {
-                var pong = await ReadPacketAsync(stream, 9, linked.Token);
+                var pong = await ReadPacketAsync(stream, 9, linked.Token).ConfigureAwait(false);
                 if (!pong.AsSpan().SequenceEqual(ping)) throw InvalidStatus();
                 ms = watch.ElapsedMilliseconds;
             }
@@ -284,20 +284,20 @@ public static class ServerList
     // 状态包很小；先限制完整帧，再在帧内验证 ID 和字符串长度，绝不按内层声明另行分配。
     internal static async Task<JsonObject> ReadStatusPacketAsync(Stream stream, CancellationToken ct = default)
     {
-        var frame = await ReadPacketAsync(stream, MaxStatusPacketBytes, ct);
+        var frame = await ReadPacketAsync(stream, MaxStatusPacketBytes, ct).ConfigureAwait(false);
         using var packet = new MemoryStream(frame, writable: false);
-        if (await ReadVarIntAsync(packet, ct) != 0) throw InvalidStatus();
-        var length = await ReadVarIntAsync(packet, ct);
+        if (await ReadVarIntAsync(packet, ct).ConfigureAwait(false) != 0) throw InvalidStatus();
+        var length = await ReadVarIntAsync(packet, ct).ConfigureAwait(false);
         if (length <= 0 || length != packet.Length - packet.Position) throw InvalidStatus();
         return JsonNode.Parse(frame.AsSpan((int)packet.Position, length)) as JsonObject ?? throw InvalidStatus();
     }
 
     private static async Task<byte[]> ReadPacketAsync(Stream stream, int maxBytes, CancellationToken ct)
     {
-        var length = await ReadVarIntAsync(stream, ct);
+        var length = await ReadVarIntAsync(stream, ct).ConfigureAwait(false);
         if (length <= 0 || length > maxBytes) throw InvalidStatus();
         var frame = new byte[length];
-        await stream.ReadExactlyAsync(frame, ct);
+        await stream.ReadExactlyAsync(frame, ct).ConfigureAwait(false);
         return frame;
     }
 
@@ -324,7 +324,7 @@ public static class ServerList
         var packet = new MemoryStream();
         WriteVarInt(packet, body.Length);
         packet.Write(body);
-        await stream.WriteAsync(packet.ToArray(), ct);
+        await stream.WriteAsync(packet.ToArray(), ct).ConfigureAwait(false);
     }
 
     private static void WriteVarInt(Stream s, int value)
@@ -344,7 +344,7 @@ public static class ServerList
         var buffer = new byte[1];
         for (var shift = 0; shift < 35; shift += 7)
         {
-            await stream.ReadExactlyAsync(buffer, ct);
+            await stream.ReadExactlyAsync(buffer, ct).ConfigureAwait(false);
             if (shift == 28 && (buffer[0] & 0xf0) != 0) throw InvalidStatus();
             result |= (buffer[0] & 0x7f) << shift;
             if ((buffer[0] & 0x80) == 0) return result;

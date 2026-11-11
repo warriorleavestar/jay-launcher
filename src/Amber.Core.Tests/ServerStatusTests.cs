@@ -215,6 +215,47 @@ public sealed class ServerStatusTests
         }
     }
 
+    [Fact]
+    public async Task APingStartedOnAThreadWhoseQueueNeverRunsStillReleasesItsSlot()
+    {
+        // A ping started on a UI thread that stops pumping (a test's UI thread, a window closing) must not keep its
+        // query slot: the shared four would shrink for every later caller until that thread ran its queue again.
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var address = $"127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}";
+        var accepted = new List<TcpClient>();
+        var previous = SynchronizationContext.Current;
+        Task<ServerStatus>[] stranded;
+        SynchronizationContext.SetSynchronizationContext(new NeverRunsContext());
+        try
+        {
+            stranded = Enumerable.Range(0, 4).Select(_ => ServerList.PingAsync(address, TimeSpan.FromMilliseconds(300), stop.Token)).ToArray();
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(previous); }
+        try
+        {
+            for (var i = 0; i < 4; i++) accepted.Add(await listener.AcceptTcpClientAsync(stop.Token));
+            // The servers stay silent, so each ping ends on its own timeout, with nobody pumping the context.
+            Assert.All(await Task.WhenAll(stranded).WaitAsync(stop.Token), status => Assert.False(status.Online));
+            var next = Enumerable.Range(0, 4).Select(_ => ServerList.PingAsync(address, TimeSpan.FromSeconds(5), stop.Token)).ToArray();
+            for (var i = 0; i < 4; i++) accepted.Add(await listener.AcceptTcpClientAsync(stop.Token));
+            await Task.WhenAll(accepted.Skip(4).Select(client => Reply(client, StatusPacket("{}"), stop.Token)));
+            Assert.All(await Task.WhenAll(next), status => Assert.True(status.Online, status.Error));
+        }
+        finally
+        {
+            stop.Cancel();
+            foreach (var client in accepted) client.Dispose();
+        }
+    }
+
+    private sealed class NeverRunsContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) { }
+        public override void Send(SendOrPostCallback d, object? state) { }
+    }
+
     private static byte[] VarInt(int value)
     {
         using var output = new MemoryStream();
