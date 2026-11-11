@@ -385,10 +385,25 @@ public sealed class GameLauncher(GameDirectory dir)
     private WindowsSandboxLevel? Sandbox(ProcessStartInfo psi, SandboxOptions sandbox, string workDir, string? legacyHome, Action<string>? onOutput)
     {
         List<string> extraReadOnly = [];
+        var natives = GameSandbox.NativeExtractArguments(workDir);
+        for (var i = 0; i < natives.Count; i++) psi.ArgumentList.Insert(i, natives[i]);
         WindowsSandboxLevel? windowsLevel = null;
         if (OperatingSystem.IsWindows())
         {
             windowsLevel = sandbox.WindowsLevel;
+            // Inside the container Java must be able to list every parent of what it uses. A parent the admin step
+            // has not opened (a new game folder, another Java): standard this time instead of a game that cannot start.
+            // Checked before any strong-only argument goes on the command line.
+            if (windowsLevel == WindowsSandboxLevel.Strong)
+            {
+                var planned = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox,
+                    extraReadWrite: legacyHome is null ? null : [legacyHome]);
+                if (WindowsSandboxSetup.FoldersToOpen(planned.ReadWrite.Concat(planned.ReadOnly)) is { Count: > 0 } closed)
+                {
+                    windowsLevel = WindowsSandboxLevel.Standard;
+                    onOutput?.Invoke(L.F("core.launch.sandbox.win.parents_closed", closed[0]));
+                }
+            }
             if (windowsLevel == WindowsSandboxLevel.Strong)
             {
                 // Name lookups inside the container go to the system's DNS servers directly (see DnsArguments).

@@ -448,21 +448,36 @@ public sealed class LauncherService : IDisposable
 
     /// <summary>
     /// The game sandbox for every launch: on unless the player switched it off. Jay's data folders stay hidden; the
-    /// universal loader's runtime folder is granted (install and bake data read-only, the cache writable: a launch may
-    /// rebake). No key or identity file lives in the runtime folder.
+    /// universal loader's runtime folder is granted (install and bake data read-only, the cache writable while the
+    /// loader still rebakes into it at launch). No key or identity file lives in the runtime folder.
     /// </summary>
-    public SandboxOptions GameSandboxOptions => new()
+    public SandboxOptions GameSandboxOptions => SandboxOptionsWith(BakeSandboxGrants) with { Enabled = !Settings.LaunchWithoutSandbox };
+
+    private static SandboxOptions SandboxOptionsWith(IReadOnlyList<Amber.Core.Bake.BakeRuntime.Grant> bake) => new()
     {
-        Enabled = !Settings.LaunchWithoutSandbox,
+        Enabled = true,
         Hidden = [AppSettings.DataDir, Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber")],
-        ExtraReadOnly = [.. BakeRuntime.SandboxGrants.Where(g => !g.Writable).Select(g => g.Path)],
-        ExtraReadWrite = [.. BakeRuntime.SandboxGrants.Where(g => g.Writable).Select(g => g.Path)],
+        ExtraReadOnly = [.. bake.Where(g => !g.Writable).Select(g => g.Path)],
+        ExtraReadWrite = [.. bake.Where(g => g.Writable).Select(g => g.Path)],
     };
+
+    /// <summary>The universal loader's runtime grants for the installed loader (its cache read-only once the loader writes only inside the instance at launch).</summary>
+    private IReadOnlyList<Amber.Core.Bake.BakeRuntime.Grant> BakeSandboxGrants
+    {
+        get
+        {
+            string? version = null;
+            try { version = Amber.Core.Bake.BakeToolkit.Find(Settings.BakeLoaderPath)?.Package?.LoaderVersion; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or Amber.Core.Bake.BakeException) { }
+            return BakeRuntime.SandboxGrantsFor(version);
+        }
+    }
 
     /// <summary>
     /// The sandbox for one launch with this Java. On Windows this picks the level (<see cref="WindowsSandboxPolicy"/>):
-    /// strong mode the first time explains itself (<paramref name="ask"/>) and asks Windows for the loopback exemption
-    /// (one admin prompt); declined, no admin or failed: the standard level, remembered so Jay does not ask again.
+    /// strong mode the first time explains itself (<paramref name="ask"/>) and runs Jay's admin step (loopback exemption,
+    /// parent folders: <see cref="WindowsSandboxSetup"/>)
+    /// in one admin prompt; declined, no admin or failed: the standard level, remembered so Jay does not ask again.
     /// <paramref name="note"/> gets a line for the launch status when this launch uses less than the player chose.
     /// </summary>
     public async Task<SandboxOptions> SandboxForLaunchAsync(string javaPath, Func<Task<bool>> ask, Action<string> note, CancellationToken ct = default)
@@ -478,9 +493,9 @@ public sealed class LauncherService : IDisposable
             }
             else
             {
-                var error = await AddLoopbackExemptionAsync(ct);
-                if (error is null && WindowsSandbox.LoopbackExempt()) return options with { WindowsLevel = WindowsSandboxLevel.Strong };
-                if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, "CheckNetIsolation");
+                var error = await RunSandboxSetupAsync(undo: false, !WindowsSandbox.LoopbackExempt(), WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)), ct);
+                if (error is null && StrongSandboxReady(javaPath)) return options with { WindowsLevel = WindowsSandboxLevel.Strong };
+                if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).FirstOrDefault() ?? "CheckNetIsolation");
             }
             decision = DecideWindowsSandbox(javaPath);
         }
@@ -493,28 +508,78 @@ public sealed class LauncherService : IDisposable
     private WindowsSandboxDecision DecideWindowsSandbox(string javaPath) => WindowsSandboxPolicy.Decide(
         Settings.StrongSandbox, Settings.StrongSandboxFallback, Settings.StrongSandboxFallbackDetail,
         WindowsSandboxPolicy.JavaCanUseStrong(WindowsSandbox.JavaMajor(javaPath), GameSandbox.JavaHome(javaPath), WindowsSandbox.HasResolver),
-        WindowsSandbox.JavaMajor(javaPath), WindowsSandbox.LoopbackExempt(), WindowsSandbox.Elevation());
+        WindowsSandbox.JavaMajor(javaPath), StrongSandboxReady(javaPath), WindowsSandbox.Elevation());
 
-    /// <summary>Runs CheckNetIsolation elevated (Windows shows its admin prompt). Returns null when it ran, else why not (and remembers it).</summary>
+    /// <summary>Strong mode needs no admin step for this Java: the loopback exemption is there and every parent folder is open.</summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private async Task<string?> AddLoopbackExemptionAsync(CancellationToken ct)
+    private bool StrongSandboxReady(string javaPath) =>
+        WindowsSandbox.LoopbackExempt() && WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).Count == 0;
+
+    /// <summary>
+    /// The folders a launch grants whose parents the container must be able to list: inside the game folder (so the game
+    /// folder itself is one of the parents: a launch grants its subfolders, not the folder), Java and the universal loader's runtime.
+    /// </summary>
+    private IEnumerable<string?> SandboxSetupPaths(string javaPath) =>
+        [Path.Combine(Context.Directory.Root, "versions"), GameSandbox.JavaHome(javaPath), .. BakeRuntime.SandboxGrants.Select(g => g.Path)];
+
+    /// <summary>
+    /// Runs Jay's admin step (Windows shows its admin prompt): the loopback exemption when asked and the parent folders,
+    /// or with <paramref name="undo"/> takes them away again. Returns null when it ran, else why not (and remembers it).
+    /// Opened folders are recorded so "remove sandbox permissions" knows exactly what to undo.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task<string?> RunSandboxSetupAsync(bool undo, bool loopback, IReadOnlyList<string> folders, CancellationToken ct)
     {
+        if (!loopback && folders.Count == 0) return null;
+        if (Environment.ProcessPath is not { } jay) return Failed("no path");
         try
         {
-            using var process = System.Diagnostics.Process.Start(WindowsSandbox.LoopbackExemptCommand());
-            if (process is not null) await process.WaitForExitAsync(ct);
-            return null;
+            using var process = System.Diagnostics.Process.Start(WindowsSandboxSetup.Command(jay, undo, loopback, folders));
+            if (process is null) return Failed("no process");
+            await process.WaitForExitAsync(ct);
+            if (!undo)
+            {
+                Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
+                Settings.Save();
+            }
+            return process.ExitCode == 0 ? null : Failed($"exit {process.ExitCode}");
         }
         catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223)
         {
-            RememberSandboxFallback(WindowsSandboxPolicy.Refused, null);
+            if (!undo) RememberSandboxFallback(WindowsSandboxPolicy.Refused, null);
             return e.Message;
         }
-        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or SandboxUnavailableException)
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            RememberSandboxFallback(WindowsSandboxPolicy.Failed, e.Message);
-            return e.Message;
+            return Failed(e.Message);
         }
+
+        string Failed(string detail)
+        {
+            if (!undo) RememberSandboxFallback(WindowsSandboxPolicy.Failed, detail);
+            return detail;
+        }
+    }
+
+    /// <summary>Whether Jay's admin step left anything to take away (the loopback exemption or opened parent folders).</summary>
+    public bool HasSandboxPermissions => OperatingSystem.IsWindows() && (Settings.StrongSandboxFolders.Count > 0 || WindowsSandbox.LoopbackExempt());
+
+    /// <summary>
+    /// "Remove sandbox permissions": one admin prompt takes the loopback exemption and Jay's entries on the recorded
+    /// parent folders away again, and strong mode is switched off so the next launch does not ask straight away.
+    /// Returns null when done, else why not.
+    /// </summary>
+    public async Task<string?> RemoveSandboxPermissionsAsync(CancellationToken ct = default)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        var folders = Settings.StrongSandboxFolders.Where(System.IO.Directory.Exists).ToList();
+        var error = await RunSandboxSetupAsync(undo: true, WindowsSandbox.LoopbackExempt(), folders, ct);
+        if (error is not null) return error;
+        Settings.StrongSandboxFolders = [];
+        Settings.StrongSandbox = false;
+        Settings.Save();
+        SandboxStateChanged?.Invoke();
+        return null;
     }
 
     private void RememberSandboxFallback(string reason, string? detail)

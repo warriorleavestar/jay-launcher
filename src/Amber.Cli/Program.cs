@@ -39,7 +39,7 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 //   lan-direct-join <邀请码> [--sim] [--debug] [--node url]... [--seconds N]   直连房间，不用联机节点
 //   lan-host <本机游戏端口> [--peer url]... [--listen url]... [--seconds N]   开房间，打印房间码
 //   lan-join <房间码> [--peer url]... [--listen url]... [--seconds N]         加入房间，打印本机转发地址
-//   （--peer 不写时用 EasyTier 社区公共节点；联机组件放在 %APPDATA%\Amber\easytier）
+//   （--peer 不写时用 EasyTier 社区公共节点；联机组件放在数据目录的 easytier 下：AMBER_DATA_DIR，默认 %APPDATA%\Amber）
 var argList = args.ToList();
 var root = TakeOption(argList, "--dir") ?? GameDirectory.DefaultRoot();
 var sources = TakeOption(argList, "--source") switch
@@ -241,7 +241,7 @@ try
         {
             // 检查选中的微软账号能不能正常进服务器，只打印不涉密的结果。--force-refresh：在内存里强制走一次刷新令牌（不写回文件）。
             var force = argList.Remove("--force-refresh");
-            var dataDir = Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
+            var dataDir = AmberDataDir();
             var store = new AccountStore(Path.Combine(dataDir, "accounts.json"));
             store.Load();
             var account = store.Selected;
@@ -597,6 +597,7 @@ try
             // one level; on Windows strong mode needs the loopback exemption for multiplayer (Jay asks for it, the CLI does not).
             var sandboxMode = TakeOption(argList, "--sandbox") ?? "off";
             string? bakeDataDir = null;
+            var bakeCacheReadOnly = false;
 
             await installer.CompleteAsync(id, null, cts.Token);
             var version = dir.ResolveVersion(id);
@@ -628,6 +629,8 @@ try
                 var toolkit = Amber.Core.Bake.BakeToolkit.Find(bakeLoader) ?? throw new DirectoryNotFoundException(bakeLoader);
                 var bakeData = Environment.GetEnvironmentVariable("AMBER_BAKE_DATA") is { Length: > 0 } bd ? bd : Path.Combine(dir.Root, ".amber-bake-data");
                 bakeDataDir = bakeData;
+                // A loader that writes only inside the instance at launch (after 0.3.1) gets the shared cache read-only.
+                bakeCacheReadOnly = Amber.Core.Bake.BakeRuntime.LaunchWritesOnlyInstance(toolkit.Package?.LoaderVersion);
                 var bake = new Amber.Core.Bake.BakeService(toolkit, Path.Combine(bakeData, "cache"), bakeData,
                     (items, ct) => downloader.DownloadAllAsync(items, null, ct));
                 var instance = Instance(id, isolate);
@@ -649,7 +652,7 @@ try
             if (sandboxMode != "off")
             {
                 // The data folder (AMBER_DATA_DIR in tests) stays hidden; a bake's loader and data are granted.
-                var dataDir = Environment.GetEnvironmentVariable("AMBER_DATA_DIR") is { Length: > 0 } dd ? dd : AmberDataDir();
+                var dataDir = AmberDataDir();
                 options = options with
                 {
                     Sandbox = new SandboxOptions
@@ -657,8 +660,8 @@ try
                         Enabled = true,
                         WindowsLevel = sandboxMode == "strong" ? WindowsSandboxLevel.Strong : WindowsSandboxLevel.Standard,
                         Hidden = [Path.GetFullPath(dataDir)],
-                        ExtraReadOnly = bakeLoader is null ? [] : [Path.GetFullPath(bakeLoader)],
-                        ExtraReadWrite = bakeDataDir is null ? [] : [Path.GetFullPath(bakeDataDir)],
+                        ExtraReadOnly = [.. new[] { bakeLoader, bakeCacheReadOnly ? bakeDataDir : null }.OfType<string>().Select(Path.GetFullPath)],
+                        ExtraReadWrite = bakeDataDir is null || bakeCacheReadOnly ? [] : [Path.GetFullPath(bakeDataDir)],
                     },
                 };
                 Console.WriteLine($"SANDBOX {sandboxMode}");
@@ -738,7 +741,10 @@ catch (Exception e)
     return 1;
 }
 
-static string AmberDataDir() => Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
+// The same data folder as the app: AMBER_DATA_DIR when set (tests), else %APPDATA%\Amber.
+static string AmberDataDir() => Environment.GetEnvironmentVariable("AMBER_DATA_DIR") is { Length: > 0 } configured
+    ? configured
+    : Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
 
 static List<string> TakeAll(List<string> list, string name)
 {

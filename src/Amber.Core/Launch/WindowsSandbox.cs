@@ -331,18 +331,6 @@ public static unsafe class WindowsSandbox
         return false;
     }
 
-    /// <summary>
-    /// The command that adds the loopback exemption: CheckNetIsolation, run elevated. Jay starts it only after the player
-    /// agreed; Windows then shows its admin prompt. Jay itself never asks for admin otherwise.
-    /// </summary>
-    public static ProcessStartInfo LoopbackExemptCommand() => new(Path.Combine(Environment.SystemDirectory, "CheckNetIsolation.exe"),
-        $"LoopbackExempt -a -p={ContainerSid().Value}")
-    {
-        UseShellExecute = true,
-        Verb = "runas",
-        WindowStyle = ProcessWindowStyle.Hidden,
-    };
-
     /// <summary>What the admin prompt for the loopback exemption would be like for this Windows user.</summary>
     public static AdminPrompt Elevation()
     {
@@ -832,6 +820,8 @@ public static unsafe class WindowsSandbox
 /// <summary>Windows command-line quoting (the rules CommandLineToArgvW and the C runtime use to split it again).</summary>
 internal static class CommandLine
 {
+    public static string Join(IEnumerable<string> args) => string.Join(' ', args.Select(Quote));
+
     public static string Quote(string arg)
     {
         if (arg.Length > 0 && arg.IndexOfAny([' ', '\t', '\n', '\v', '"']) < 0) return arg;

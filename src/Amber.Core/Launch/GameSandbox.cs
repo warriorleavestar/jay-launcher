@@ -88,6 +88,23 @@ public static class GameSandbox
     public static bool IsSupported => OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
 
     /// <summary>
+    /// LWJGL and JNA unpack native libraries into <c>java.io.tmpdir</c> unless told otherwise, and the sandboxed game
+    /// can write only its instance folder: they unpack into <c>&lt;instance&gt;/.jay-natives/</c> instead. Empty for a
+    /// folder Java could not read from its command line (not ASCII: Java reads it in the ANSI code page on Windows);
+    /// the game then keeps its old behaviour. Added first, so an instance's own JVM arguments still win.
+    /// </summary>
+    public static IReadOnlyList<string> NativeExtractArguments(string workDir)
+    {
+        var root = Path.Combine(Path.GetFullPath(workDir), ".jay-natives");
+        if (!root.All(char.IsAscii)) return [];
+        var lwjgl = Path.Combine(root, "lwjgl");
+        var jna = Path.Combine(root, "jna");
+        Directory.CreateDirectory(lwjgl);
+        Directory.CreateDirectory(jna);
+        return ["-Dorg.lwjgl.system.SharedLibraryExtractPath=" + lwjgl, "-Djna.tmpdir=" + jna];
+    }
+
+    /// <summary>
     /// The grants for one launch: the instance folder writable; Java, versions, libraries, assets, natives and the
     /// files named in the JVM arguments read-only; plus what the caller adds.
     /// </summary>

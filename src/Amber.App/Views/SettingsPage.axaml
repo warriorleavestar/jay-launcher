@@ -332,6 +332,9 @@
                   <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.java_note}" TextWrapping="Wrap" />
                   <Button x:Name="RetryStrongSandboxButton" Classes="ghost" Content="{l:T settings.sandbox.retry}" Command="{Binding RetryStrongSandboxCommand}"
                           IsVisible="{Binding CanRetryStrongSandbox}" HorizontalAlignment="Left" Padding="0,2" />
+                  <Button x:Name="RemoveSandboxPermissionsButton" Classes="ghost" Content="{l:T settings.sandbox.remove}" Command="{Binding RemoveSandboxPermissionsCommand}"
+                          IsVisible="{Binding CanRemoveSandboxPermissions}" HorizontalAlignment="Left" Padding="0,2" ToolTip.Tip="{l:T settings.sandbox.remove.hint}" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{Binding SandboxPermissionsError}" IsVisible="{Binding SandboxPermissionsError, Converter={x:Static ObjectConverters.IsNotNull}}" TextWrapping="Wrap" />
                 </StackPanel>
                 <CheckBox x:Name="LaunchWithoutSandboxBox" IsChecked="{Binding LaunchWithoutSandbox}" Content="{l:T settings.sandbox.without}" />
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.without.hint}" TextWrapping="Wrap" />

@@ -95,9 +95,25 @@ public sealed partial class SettingsViewModel
         SandboxChanged();
     }
 
+    /// <summary>"Remove sandbox permissions" shows while Jay's admin step left something behind.</summary>
+    public bool CanRemoveSandboxPermissions => _service.HasSandboxPermissions;
+
+    /// <summary>Why removing the sandbox permissions did not work (null when it did or was not tried).</summary>
+    [ObservableProperty]
+    private string? _sandboxPermissionsError;
+
+    [RelayCommand]
+    private async Task RemoveSandboxPermissions()
+    {
+        SandboxPermissionsError = await _service.RemoveSandboxPermissionsAsync() is { } error
+            ? L.F("settings.sandbox.remove_failed", error)
+            : null;
+        SandboxChanged();
+    }
+
     private void SandboxChanged()
     {
-        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(CanRetryStrongSandbox)])
+        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(CanRetryStrongSandbox), nameof(CanRemoveSandboxPermissions)])
             OnPropertyChanged(name);
         _service.NotifySandboxChanged();
     }
@@ -107,7 +123,7 @@ public sealed partial class SettingsViewModel
     {
         NetworkList.Refresh();
         OnPropertyChanged(nameof(ChildModeStatusText));
-        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(CanRetryStrongSandbox)])
+        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(CanRetryStrongSandbox), nameof(CanRemoveSandboxPermissions)])
             OnPropertyChanged(name);
     }
 }

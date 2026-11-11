@@ -72,6 +72,40 @@ public sealed class GameSandboxTests : IDisposable
         Assert.NotNull(new SandboxGrants { ReadWrite = [_root], Hidden = [data] }.Problem(canHideInside: false));
     }
 
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("0.3.0", false)]
+    [InlineData("0.3.1", false)]
+    [InlineData("0.3.2", true)]
+    [InlineData("0.3.2-dev", true)]
+    [InlineData("0.4", true)]
+    [InlineData("1.0.0+abc", true)]
+    [InlineData("dev", false)]
+    public void Bake_SharedCacheIsReadOnly_OnlyForLoadersThatWriteOnlyTheInstance(string? version, bool readOnly)
+    {
+        Assert.Equal(readOnly, Amber.Core.Bake.BakeRuntime.LaunchWritesOnlyInstance(version));
+        var runtime = new Amber.Core.Bake.BakeRuntime(Path.Combine(_root, "rt"));
+        var grants = runtime.SandboxGrantsFor(version);
+        Assert.Equal(!readOnly, grants.Single(g => g.Path == runtime.CacheRoot).Writable);
+        Assert.DoesNotContain(grants, g => g.Writable && g.Path != runtime.CacheRoot);
+        // Without a version (0.3.1, the pin) nothing changes.
+        Assert.Equal(runtime.SandboxGrants, runtime.SandboxGrantsFor("0.3.1"));
+    }
+
+    [Fact]
+    public void NativeExtract_GoesIntoTheInstance_AndOnlyForAsciiFolders()
+    {
+        var instance = Dir("versions", "1.21.1");
+        var args = GameSandbox.NativeExtractArguments(instance);
+        Assert.Equal(
+            ["-Dorg.lwjgl.system.SharedLibraryExtractPath=" + Path.Combine(instance, ".jay-natives", "lwjgl"), "-Djna.tmpdir=" + Path.Combine(instance, ".jay-natives", "jna")],
+            args);
+        Assert.True(Directory.Exists(Path.Combine(instance, ".jay-natives", "jna")));
+        Assert.All(args, a => Assert.True(GameSandbox.IsInside(a[(a.IndexOf('=') + 1)..], instance)));
+        Assert.Empty(GameSandbox.NativeExtractArguments(Dir("实例")));
+    }
+
     [Fact]
     public void JavaHome_IsTheFolderAboveBin()
     {
@@ -335,6 +369,133 @@ public sealed class GameSandboxTests : IDisposable
         WindowsSandbox.Ungrant(folder, sid);
         Assert.False(Named(Path.Combine(folder, "f.txt")));
         WindowsSandbox.Ungrant(folder, sid); // nothing left to take off
+    }
+
+    // ---------------------------------------------------------------- the strong sandbox's admin step
+
+    private static System.Security.AccessControl.DirectorySecurity Acl(string folder) => new DirectoryInfo(folder).GetAccessControl();
+
+    private static string Sddl(string folder) => Acl(folder).GetSecurityDescriptorSddlForm(System.Security.AccessControl.AccessControlSections.Access);
+
+    private static List<System.Security.AccessControl.FileSystemAccessRule> PackageRules(string folder) =>
+    [
+        .. Acl(folder).GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier))
+            .OfType<System.Security.AccessControl.FileSystemAccessRule>().Where(r => r.IdentityReference == WindowsSandboxSetup.AllPackages),
+    ];
+
+    [Fact]
+    public void Windows_SetupStep_OpensOnlyThatFolder_KeepsTheAclCanonical_AndUndoesExactly()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var parent = Dir("parent");
+        var child = Dir("parent", "child");
+        File.WriteAllText(Path.Combine(parent, "name.txt"), "x");
+        var before = Sddl(parent);
+        var childBefore = Sddl(child);
+
+        // Run as the elevated helper would (the folder is ours, so no admin is needed here); loopback left alone.
+        Assert.Equal(0, WindowsSandboxSetup.Run([WindowsSandboxSetup.SetupArgument, "--no-loopback", parent]));
+        Assert.True(Acl(parent).AreAccessRulesCanonical);
+        var ours = Assert.Single(PackageRules(parent));
+        // Names only (list, traverse, attributes), this folder only: nothing inherited below, no contents.
+        Assert.Equal(System.Security.AccessControl.InheritanceFlags.None, ours.InheritanceFlags);
+        Assert.Equal(WindowsSandboxSetup.ListMask, (int)ours.FileSystemRights);
+        Assert.True(WindowsSandboxSetup.ContainersCanList(parent));
+        Assert.Equal(childBefore, Sddl(child));
+        // Still inheriting from above (the auto-inherit mark survived the rewrite).
+        Assert.False(Acl(parent).AreAccessRulesProtected);
+        Assert.Contains("AI", Sddl(parent));
+
+        // Twice is still one entry.
+        WindowsSandboxSetup.AddListing(parent);
+        Assert.Single(PackageRules(parent));
+
+        // A low-integrity process (the standard level) can still list it: an entry naming one specific container would stop that.
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"))
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        foreach (var arg in (string[])["/c", "dir", "/b", parent]) psi.ArgumentList.Add(arg);
+        using (var process = WindowsSandbox.Start(psi, WindowsSandboxLevel.Standard))
+        {
+            var output = process.StandardOutput.ReadToEnd();
+            Assert.True(process.WaitForExit(30_000));
+            Assert.Contains("name.txt", output);
+        }
+
+        Assert.Equal(0, WindowsSandboxSetup.Run([WindowsSandboxSetup.UndoArgument, "--no-loopback", parent]));
+        Assert.Equal(before, Sddl(parent));
+        Assert.True(Acl(parent).AreAccessRulesCanonical);
+        WindowsSandboxSetup.RemoveListing(parent); // nothing left to take off
+        Assert.Equal(before, Sddl(parent));
+    }
+
+    [Fact]
+    public void Windows_SetupStep_UndoLeavesOtherEntriesForTheSameGroup()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var folder = Dir("shared");
+        // Someone else's entry for the same group (read and execute, inherited below): undo must not take it.
+        var acl = Acl(folder);
+        acl.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(WindowsSandboxSetup.AllPackages,
+            System.Security.AccessControl.FileSystemRights.ReadAndExecute,
+            System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+            System.Security.AccessControl.PropagationFlags.None, System.Security.AccessControl.AccessControlType.Allow));
+        new DirectoryInfo(folder).SetAccessControl(acl);
+        var before = Sddl(folder);
+        WindowsSandboxSetup.AddListing(folder);
+        Assert.Equal(2, PackageRules(folder).Count);
+        WindowsSandboxSetup.RemoveListing(folder);
+        Assert.Equal(before, Sddl(folder));
+    }
+
+    [Fact]
+    public void Windows_SetupStep_RefusesCommandLinesJayWouldNotWrite()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var folder = Dir("ok");
+        Assert.False(WindowsSandboxSetup.IsInvocation([]));
+        Assert.False(WindowsSandboxSetup.IsInvocation(["--theme-dev", folder]));
+        Assert.True(WindowsSandboxSetup.IsInvocation([WindowsSandboxSetup.UndoArgument]));
+        Assert.Equal(2, WindowsSandboxSetup.Run([WindowsSandboxSetup.SetupArgument]));
+        Assert.Equal(2, WindowsSandboxSetup.Run([WindowsSandboxSetup.SetupArgument, folder]));
+        Assert.Equal(2, WindowsSandboxSetup.Run([WindowsSandboxSetup.SetupArgument, "--no-loopback", "relative\\folder"]));
+        Assert.Equal(2, WindowsSandboxSetup.Run([WindowsSandboxSetup.SetupArgument, "--no-loopback", Path.Combine(_root, "missing")]));
+        Assert.Empty(PackageRules(folder));
+    }
+
+    [Fact]
+    public void Windows_SetupStep_CommandRunsJayElevatedWithTheFoldersQuoted()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var psi = WindowsSandboxSetup.Command(@"C:\Jay\Jay.exe", undo: false, loopback: true, [@"D:\", @"D:\My Games\"]);
+        Assert.Equal("runas", psi.Verb);
+        Assert.True(psi.UseShellExecute);
+        Assert.Equal(@"C:\Jay\Jay.exe", psi.FileName);
+        Assert.Equal(@"--jay-sandbox-setup --loopback D:\ ""D:\My Games\\""", psi.Arguments);
+        Assert.Equal(["--jay-sandbox-undo", "--no-loopback"], WindowsSandboxSetup.Arguments(undo: true, loopback: false, []));
+    }
+
+    [Fact]
+    public void Windows_FoldersToOpen_AreTheClosedParentsOutsideTheGrants()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var game = Dir("games", "mc");
+        var java = Dir("java", "jdk");
+        var games = Path.Combine(_root, "games");
+        var lists = WindowsSandboxSetup.FoldersToOpen([game, Path.Combine(game, "versions"), java, null, "relative"]);
+        // Inside a grant: never (the launch grants it to the container itself).
+        Assert.DoesNotContain(lists, f => GameSandbox.IsInside(f, game));
+        Assert.Contains(games, lists);
+        Assert.Contains(Path.Combine(_root, "java"), lists);
+        Assert.Contains(_root, lists);
+        Assert.Equal(lists.Count, lists.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+
+        WindowsSandboxSetup.AddListing(games);
+        Assert.DoesNotContain(games, WindowsSandboxSetup.FoldersToOpen([game]));
+        WindowsSandboxSetup.RemoveListing(games);
+        Assert.Contains(games, WindowsSandboxSetup.FoldersToOpen([game]));
+        Assert.Equal(Path.GetPathRoot(game), WindowsSandboxSetup.Parents(game).Last());
     }
 
     /// <summary>A JDK for the real-Java tests: JAVA_HOME, else an Adoptium install; null skips them.</summary>

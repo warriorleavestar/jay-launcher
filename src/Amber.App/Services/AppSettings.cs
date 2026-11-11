@@ -49,6 +49,13 @@ public sealed class AppSettings
 
     /// <summary>Detail for <see cref="StrongSandboxFallback"/> (the error of a failed exemption).</summary>
     public string? StrongSandboxFallbackDetail { get; set; }
+
+    /// <summary>
+    /// Parent folders Jay's admin step let app containers list (names only, that folder only), so "remove sandbox
+    /// permissions" takes exactly these entries away again.
+    /// </summary>
+    public List<string> StrongSandboxFolders { get; set; } = [];
+
     public string PlayerName { get; set; } = "Player";
     public string? LastVersion { get; set; }
     public int? WindowWidth { get; set; }

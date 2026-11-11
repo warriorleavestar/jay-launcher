@@ -14,6 +14,9 @@ internal static class Program
             LinuxStartup.EnsureIcu(args);
             Environment.Exit(Amber.Core.Multiplayer.UnixElevatedGuardHost.Run(args));
         }
+        // Windows strong sandbox: the one admin step (loopback exemption, parent folders), started by Jay itself with runas.
+        if (OperatingSystem.IsWindows() && Amber.Core.Launch.WindowsSandboxSetup.IsInvocation(args))
+            Environment.Exit(Amber.Core.Launch.WindowsSandboxSetup.Run(args));
         // Linux：先确认 ICU 和图形界面要用的库都在（缺了给出看得懂的提示）。必须排在任何区域、格式化代码之前。
         LinuxStartup.BeforeAnything(args);
         StartupTrace.Mark("main");
