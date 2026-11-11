@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Gate;
 using Amber.Core.Multiplayer.Transport;
@@ -46,27 +47,101 @@ public sealed class GateTests : IAsyncLifetime
 
     private GateInvite Invite(string name, int uses = 1) => _store.CreateInvite(name, TimeSpan.FromHours(1), uses, _serverKey.PublicKey);
 
+    /// <summary>A server with a domain: the plain code carries the domain, and never the player's name.</summary>
     [Fact]
     public void InviteRoundTripsAndToleratesCopyPaste()
     {
-        var invite = Invite("Steve");
+        var invite = Invite("Steve") with { Host = "mc.example.com" };
         var code = invite.Encode();
         Assert.StartsWith(GateInvite.Prefix, code);
+        Assert.Equal((code, (string?)null), invite.ToCode());
         var parsed = GateInvite.TryParse($"来玩吧：\n{code.ToLowerInvariant()}  （24 小时内有效）", out var error);
         Assert.Null(error);
         Assert.NotNull(parsed);
-        Assert.Equal("127.0.0.1", parsed.Host);
+        Assert.Equal("mc.example.com", parsed.Host);
         Assert.Equal(invite.Port, parsed.Port);
         Assert.Equal(invite.Token, parsed.Token);
         Assert.Equal(invite.ServerKeyHash, parsed.ServerKeyHash);
-        Assert.Equal("Steve", parsed.Username);
+        var raw = GateInvite.Base32Decode(code[GateInvite.Prefix.Length..])!;
+        Assert.DoesNotContain("Steve", System.Text.Encoding.ASCII.GetString(raw), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(Convert.ToHexString(invite.Token), invite.ToString());
+        Assert.DoesNotContain("mc.example.com", invite.ToString());
     }
+
+    /// <summary>A server with only an IP: no plain code at all; the sealed code shows no address and opens with the passphrase.</summary>
+    [Fact]
+    public void IpOnlyServerGetsASealedInvite()
+    {
+        var invite = Invite("Steve");
+        Assert.True(invite.NeedsSeal);
+        Assert.Throws<InvalidOperationException>(() => invite.Encode());
+        var (code, passphrase) = invite.ToCode();
+        Assert.NotNull(passphrase);
+        Assert.StartsWith(GateInvite.SealedPrefix, code);
+        Assert.True(GateInvite.IsSealed(code));
+        Assert.DoesNotMatch(@"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", code);
+        Assert.Equal(PastedCodeKind.JayServer, PastedCode.Detect(code));
+
+        // Without the passphrase it only says it needs one.
+        Assert.Null(GateInvite.TryParse(code, out var error));
+        Assert.Equal(L.T("core.gate.invite.sealed"), error);
+        Assert.Null(GateInvite.TryOpen(code, "0000 0000 0000 0000", out error));
+        Assert.Equal(L.T("core.mp.sealed.wrong_passphrase"), error);
+        Assert.Null(GateInvite.TryOpen(code, "123", out error));
+        Assert.Equal(L.T("core.mp.sealed.passphrase_format"), error);
+
+        var opened = GateInvite.TryOpen("加入：" + code + " 口令另说", passphrase.Replace(" ", ""), out error);
+        Assert.Null(error);
+        Assert.NotNull(opened);
+        Assert.Equal("127.0.0.1", opened.Host);
+        Assert.Equal(invite.Port, opened.Port);
+        Assert.Equal(invite.Token, opened.Token);
+        Assert.Equal(invite.ServerKeyHash, opened.ServerKeyHash);
+        // A plain code is opened by TryOpen too, passphrase or not.
+        var domain = invite with { Host = "mc.example.com" };
+        Assert.Equal("mc.example.com", GateInvite.TryOpen(domain.Encode(), null, out _)!.Host);
+    }
+
+    /// <summary>A hand-made plain code with an IP in it, and an old JAYS1 code, are refused with a reason.</summary>
+    [Fact]
+    public void PlainCodeWithAnIpAndOldCodesAreRefused()
+    {
+        var invite = Invite("Steve");
+        var body = new List<byte> { 1, (byte)invite.Host.Length };
+        body.AddRange(System.Text.Encoding.ASCII.GetBytes(invite.Host));
+        body.AddRange(new byte[] { (byte)(invite.Port >> 8), (byte)invite.Port });
+        body.AddRange(invite.ServerKeyHash);
+        body.AddRange(invite.Token);
+        var bytes = body.ToArray();
+        var checksum = System.Security.Cryptography.SHA256.HashData([.. "jay-invite-v2"u8, .. bytes])[..4];
+        Assert.Null(GateInvite.TryParse(GateInvite.Prefix + GateInvite.Base32Encode([.. bytes, .. checksum]), out var error));
+        Assert.Equal(L.T("core.gate.invite.ip_needs_seal"), error);
+
+        Assert.Null(GateInvite.TryParse("请进：JAYS1-04632E9J5RRKCE1E64Q34C", out error));
+        Assert.Equal(L.T("core.gate.invite.old"), error);
+        Assert.Equal(PastedCodeKind.JayServer, PastedCode.Detect("JAYS1-04632E9J5RRKCE1E64Q34C"));
+    }
+
+    [Fact]
+    public void DiagnosticsRedactServerInvites()
+    {
+        var text = NetDiagnostics.Redact("a JAYS2-04632E9J5RRKCE1E64Q34C b jayss1-QUJDREVGR0hJSktMTU5PUA c JAYS1-04632E9J5RRKCE1E64Q34D", [], includePublicIps: true);
+        Assert.DoesNotContain("04632E9J5RRKCE1E64Q34", text);
+        Assert.DoesNotContain("QUJDREVGR0hJSktMTU5PUA", text);
+    }
+
+    [Theory]
+    [InlineData("mc.example.com", false)]
+    [InlineData("localhost", false)]
+    [InlineData("203.0.113.5", true)]
+    [InlineData("2408:8000::1", true)]
+    [InlineData("[2408:8000::1]", true)]
+    public void IpHostsNeedASeal(string host, bool ip) => Assert.Equal(ip, GateInvite.IsIpLiteral(host));
 
     [Fact]
     public void TamperedInviteIsRejected()
     {
-        var code = Invite("Steve").Encode();
+        var code = (Invite("Steve") with { Host = "mc.example.com" }).Encode();
         for (var i = GateInvite.Prefix.Length; i < code.Length; i += 7)
         {
             var c = code[i] == 'Z' ? 'Y' : 'Z';
@@ -276,11 +351,13 @@ public sealed class GateTests : IAsyncLifetime
     private static byte[] Packet(byte[] body) => [(byte)body.Length, .. body];
 }
 
-/// <summary>JAYS1- 贴错输入框时能认出来，不和 JAY2 系列的前缀混淆。</summary>
+/// <summary>JAYS1- / JAYS2- / JAYSS1- 贴错输入框时能认出来，不和 JAY2 系列的前缀混淆。</summary>
 public sealed class GatePastedCodeTests
 {
     [Theory]
     [InlineData("JAYS1-04632E9J5RRKCE1E64Q34C", PastedCodeKind.JayServer)]
+    [InlineData("JAYS2-04632E9J5RRKCE1E64Q34C", PastedCodeKind.JayServer)]
+    [InlineData("JAYSS1-QUJDREVGR0hJSktMTU5PUA", PastedCodeKind.JayServer)]
     [InlineData("来玩：jays1-04632e9j5rrkce", PastedCodeKind.JayServer)]
     [InlineData("JAY2-ABCDEF", PastedCodeKind.Invite)]
     [InlineData("JAY2D-ABCDEF", PastedCodeKind.OldDirect)]

@@ -930,6 +930,8 @@
                   <TextBox Text="{Binding InviteText}" PlaceholderText="{l:T multiplayer.jayserver.invite_placeholder}" />
                   <Button Grid.Column="1" Classes="primary" Margin="6,0,0,0" Content="{l:T multiplayer.jayserver.join}" Command="{Binding JoinCommand}" IsEnabled="{Binding !IsBusy}" />
                 </Grid>
+                <TextBox x:Name="JayServerPassphraseBox" Text="{Binding InvitePassphrase}" IsVisible="{Binding InviteIsSealed}"
+                         PlaceholderText="{l:T multiplayer.jayserver.passphrase_placeholder}" />
                 <TextBlock x:Name="NoJayServersText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.jayserver.empty}" IsVisible="{Binding !Servers.Count}" />
                 <ItemsControl ItemsSource="{Binding Servers}">
                   <ItemsControl.ItemTemplate>
@@ -1018,6 +1020,13 @@
                     <TextBox IsReadOnly="True" FontSize="12" TextWrapping="Wrap" Text="{Binding InviteCode}" />
                     <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.copy}" Command="{Binding CopyInviteCommand}" />
                   </Grid>
+                  <StackPanel x:Name="HostInvitePassphrasePanel" Spacing="4" IsVisible="{Binding HasInvitePassphrase}">
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.invite_sealed}" />
+                    <Grid ColumnDefinitions="*,Auto">
+                      <SelectableTextBlock FontFamily="Consolas,monospace" FontSize="16" VerticalAlignment="Center" Text="{Binding InvitePassphrase}" />
+                      <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.sealed.copy_passphrase}" Command="{Binding CopyInvitePassphraseCommand}" />
+                    </Grid>
+                  </StackPanel>
                   <ItemsControl ItemsSource="{Binding Members}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate DataType="vm:HostMemberItem">
@@ -1281,6 +1290,10 @@
                 <Button Grid.Column="1" Content="{l:T common.import}" Command="{Binding ImportNodesCommand}" Margin="6,0,0,0" />
                 <Button Grid.Column="2" Content="{l:T multiplayer.nodes.export}" Command="{Binding ExportNodesCommand}" Margin="6,0,0,0" />
               </Grid>
+              <StackPanel x:Name="NodeSharePassphrasePanel" Spacing="4" IsVisible="{Binding ShareCodeIsSealed}">
+                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.nodes.sealed_hint}" />
+                <TextBox x:Name="NodeSharePassphraseBox" Text="{Binding SharePassphrase}" FontFamily="Consolas,monospace" PlaceholderText="{l:T multiplayer.nodes.passphrase_placeholder}" />
+              </StackPanel>
             </StackPanel>
             </StackPanel>
           </Border>

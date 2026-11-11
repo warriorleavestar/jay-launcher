@@ -124,7 +124,7 @@ public sealed class EntryRotationTests : IAsyncLifetime
     public void InviteCarriesRotationAndOldInvitesStillParse()
     {
         var rotation = new GateEntryRotation(Rule, RandomNumberGenerator.GetBytes(32));
-        var invite = new GateInvite("mc.example.com", 47670, RandomNumberGenerator.GetBytes(16), RandomNumberGenerator.GetBytes(16), "Steve", rotation);
+        var invite = new GateInvite("mc.example.com", 47670, RandomNumberGenerator.GetBytes(16), RandomNumberGenerator.GetBytes(16), rotation);
         var parsed = GateInvite.TryParse(invite.Encode(), out var error)!;
         Assert.Null(error);
         Assert.Equal(Rule, parsed.Rotation!.Rotation);

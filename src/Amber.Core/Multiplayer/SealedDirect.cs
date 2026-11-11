@@ -138,6 +138,58 @@ public static class SealedDirect
         return DirectAddresses.TryParse(payload["a"] as JsonObject, out var guest) ? guest : throw new InvalidDataException(L.T("core.mp.sealed.damaged"));
     }
 
+    /// <summary>
+    /// Seals any small payload with a passphrase, for other codes that must not show an address (a Jay server invite
+    /// for a server with no domain). Same construction as an offer: Argon2id over the digits with a fresh salt, then
+    /// HKDF-SHA256 with <paramref name="info"/>, then ChaCha20-Poly1305 with associated data = prefix + salt.
+    /// Code = prefix + base64url(salt | nonce | ciphertext).
+    /// </summary>
+    internal static string SealBlob(string prefix, string info, ReadOnlySpan<byte> plain, string passphrase)
+    {
+        var digits = NormalizePassphrase(passphrase) ?? throw new ArgumentException(null, nameof(passphrase));
+        var salt = RandomNumberGenerator.GetBytes(SaltSize);
+        var key = BlobKey(digits, salt, info);
+        try
+        {
+            var nonce = RandomNumberGenerator.GetBytes(NonceSize);
+            var body = Aead(true, key, nonce, plain.ToArray(), Ad(prefix, salt));
+            return prefix + Base64Url([.. salt, .. nonce, .. body]);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    /// <summary>Opens a <see cref="SealBlob"/> code. Throws <see cref="InvalidDataException"/> with a message for the person.</summary>
+    internal static byte[] OpenBlob(string? text, string prefix, string info, string? passphrase)
+    {
+        var blob = Body(text, prefix) ?? throw new InvalidDataException(L.T("core.mp.sealed.damaged"));
+        if (blob.Length < SaltSize + NonceSize + TagSize) throw new InvalidDataException(L.T("core.mp.sealed.damaged"));
+        var digits = NormalizePassphrase(passphrase) ?? throw new InvalidDataException(L.T("core.mp.sealed.passphrase_format"));
+        var salt = blob[..SaltSize];
+        var key = BlobKey(digits, salt, info);
+        try
+        {
+            return Aead(false, key, blob[SaltSize..(SaltSize + NonceSize)], blob[(SaltSize + NonceSize)..], Ad(prefix, salt));
+        }
+        catch (InvalidDataException)
+        {
+            throw new InvalidDataException(L.T("core.mp.sealed.wrong_passphrase"));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    private static byte[] BlobKey(string digits, byte[] salt, string info)
+    {
+        var master = Keys.Master(digits, salt);
+        try { return HKDF.Expand(HashAlgorithmName.SHA256, master, 32, Encoding.ASCII.GetBytes(info)); }
+        finally { CryptographicOperations.ZeroMemory(master); }
+    }
+
     private static DateTimeOffset Expiry(JsonObject payload, DateTimeOffset now)
     {
         if ((payload["e"] as JsonValue)?.TryGetValue<long>(out var seconds) != true) throw new InvalidDataException(L.T("core.mp.sealed.damaged"));
@@ -199,6 +251,23 @@ public static class SealedDirect
 
         internal static Keys Derive(string digits, byte[] salt)
         {
+            var master = Master(digits, salt);
+            try
+            {
+                return new Keys(
+                    HKDF.Expand(HashAlgorithmName.SHA256, master, 32, "jay-sealed-direct-v1 offer"u8.ToArray()),
+                    HKDF.Expand(HashAlgorithmName.SHA256, master, 32, "jay-sealed-direct-v1 reply"u8.ToArray()),
+                    HKDF.Expand(HashAlgorithmName.SHA256, master, KeyIdSize, "jay-sealed-direct-v1 id"u8.ToArray()));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(master);
+            }
+        }
+
+        /// <summary>Argon2id(digits, salt): the 32-byte master the subkeys come from. The caller zeroes it.</summary>
+        internal static byte[] Master(string digits, byte[] salt)
+        {
             var generator = new Org.BouncyCastle.Crypto.Generators.Argon2BytesGenerator();
             generator.Init(new Org.BouncyCastle.Crypto.Parameters.Argon2Parameters.Builder(Org.BouncyCastle.Crypto.Parameters.Argon2Parameters.Argon2id)
                 .WithVersion(Org.BouncyCastle.Crypto.Parameters.Argon2Parameters.Version13)
@@ -208,15 +277,11 @@ public static class SealedDirect
             try
             {
                 generator.GenerateBytes(password, master);
-                return new Keys(
-                    HKDF.Expand(HashAlgorithmName.SHA256, master, 32, "jay-sealed-direct-v1 offer"u8.ToArray()),
-                    HKDF.Expand(HashAlgorithmName.SHA256, master, 32, "jay-sealed-direct-v1 reply"u8.ToArray()),
-                    HKDF.Expand(HashAlgorithmName.SHA256, master, KeyIdSize, "jay-sealed-direct-v1 id"u8.ToArray()));
+                return master;
             }
             finally
             {
                 CryptographicOperations.ZeroMemory(password);
-                CryptographicOperations.ZeroMemory(master);
             }
         }
 

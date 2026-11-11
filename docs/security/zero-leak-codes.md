@@ -153,15 +153,30 @@ For two people with no relay, no public network and no shared LAN. `Multiplayer/
   together. A stolen code is an offline guessing target for the passphrase; 53 bits behind 64 MiB of Argon2id per guess
   makes that impractical (centuries at a million guesses a second).
 
+## Jay server invites: a domain or a sealed code
+
+`Multiplayer/Gate/GateInvite.cs`. Rule: a code may name a server by its domain, never by a raw IP, and never names the player.
+
+- `JAYS2-` (plain, Crockford Base32) carries the gate's domain and port, the gate key hash, the one-use token and the
+  optional port rotation. The player's name is gone: the gate keeps which name an invite is for and returns it at
+  enrollment. A plain code with an IP in it is refused when made and when pasted.
+- A server with only an IP (a home server, a LAN test, a privacy-plus relay with no name) gets `JAYSS1-` instead: the same
+  bytes sealed with a new 16-digit passphrase, the same construction as the sealed direct codes (Argon2id, HKDF info
+  `jay-sealed-server-invite-v1`, ChaCha20-Poly1305, prefix + salt as associated data). The admin tells the passphrase
+  another way. No expiry inside: the gate still expires and counts the token.
+- Old `JAYS1-` codes (IP and player name in plain sight) are recognised and refused with "ask the admin for a new one".
+- Diagnostics redact `JAYS1`, `JAYS2` and `JAYSS1` codes (they hold a token).
+
 ## Still to do
 
-- **Server and network codes without an address**: `JAYS1-` (Jay server), `JAYNET` (public network) and `AMBNODE`
-  (relay share) still name a host or IP. Plan: a short token or ID resolved through a signed directory entry or the
-  directory rendezvous, so the code itself names nothing.
+- **IP-only servers without a passphrase**: an id + token in the code, the address resolved through the directory's
+  signed-record store (`rec.put` / `rec.get`); the sealed code stays the fallback when no directory is reachable.
+- **Network and relay codes without an address**: `JAYNET` (public network) and `AMBNODE` (relay share) still name a
+  host or IP. Domain names stay allowed; IP-only nodes go the same way as servers.
 
 - **Relay enrollment the other way around**: a relay generates its own key and the admin approves its fingerprint, so
   JAYR1 codes carry no secret.
-- **Jay server invites (JAYS1) bound to the player's identity key**, the same way room invites are.
+- **Jay server invites (JAYS2) bound to the player's identity key**, the same way room invites are.
 - **Flood limits**: per-sender limits once directories can see a stable sender (for example, a cheap proof of work per
   post).
 

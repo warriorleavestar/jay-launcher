@@ -156,10 +156,25 @@ internal sealed partial class SelfTest
         var importBox = await FindAsync<TextBox>(t => t.PlaceholderText == L.T("multiplayer.nodes.share_placeholder"));
         Check("中转分享码转到联机设置，不静默导入", vm.IsSettingsTab && vm.Nodes.Count == 0 && roomCode!.Text == "" && importBox?.Text == nodeCode && vm.IsIdle);
         Check("用户点导入才添加", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.ImportNodesCommand)))
-            && vm.Nodes.Count == 1 && vm.Nodes[0].Url == "tcp://example.invalid:11010");
+            && await WaitAsync(() => Dispatcher.UIThread.Invoke(() => vm.Nodes.Count == 1), 5) && vm.Nodes[0].Url == "tcp://example.invalid:11010");
         Check("中转服务器数量同步到标题和大厅状态行", relayHeader?.Text == L.F("multiplayer.nodes.header_count", 1)
             && vm.LobbyStatusText.Contains(L.F("multiplayer.lobby.status_relays", 1)));
         vm.RemoveNodeCommand.Execute(vm.Nodes.Single());
+
+        // A relay that goes by an IP: the share code is sealed, the passphrase box shows, and import needs the passphrase.
+        var (sealedNodes, nodePassphrase) = RelayNodes.Share(null, ["tcp://203.0.113.5:11010"]);
+        Dispatcher.UIThread.Invoke(() => vm.ShareCodeText = sealedNodes);
+        await Task.Delay(200);
+        var nodePassphraseBox = await FindAsync<TextBox>(t => t.Name == "NodeSharePassphraseBox");
+        Check("加密中转分享码：不含 IP，显示口令框", !sealedNodes.Contains("203.0.113.5") && nodePassphraseBox?.IsEffectivelyVisible == true);
+        Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.ImportNodesCommand)));
+        await Task.Delay(300);
+        Check("加密中转分享码：没口令不导入", vm.Nodes.Count == 0 && vm.Status == L.T("multiplayer.sealed.enter_passphrase"), vm.Status);
+        Dispatcher.UIThread.Invoke(() => vm.SharePassphrase = nodePassphrase!);
+        Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.ImportNodesCommand)));
+        Check("加密中转分享码：输入口令后导入", await WaitAsync(() => Dispatcher.UIThread.Invoke(() => vm.Nodes.Count == 1), 10)
+            && vm.Nodes[0].Url == "tcp://203.0.113.5:11010" && vm.SharePassphrase == "");
+        if (vm.Nodes.Count > 0) vm.RemoveNodeCommand.Execute(vm.Nodes.Single());
         vm.UseBuiltInNodes = true;
 
         // Open a room: game status follows the port typed under "more ways".

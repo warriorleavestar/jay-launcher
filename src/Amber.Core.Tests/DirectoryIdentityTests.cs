@@ -187,7 +187,7 @@ public class DirectoryIdentityTests
     {
         using var key = X25519KeyPair.Generate();
         var signer = TrustSigner.Generate(out _);
-        var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://203.0.113.5:11010"], DirectoryKeys: [key.PublicKey]);
+        var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://node.example.net:11010"], DirectoryKeys: [key.PublicKey]);
         var text = NetworkString.Create(info, signer);
         var parsed = NetworkString.Parse(text, []);
         Assert.Equal(key.PublicKey, Assert.Single(parsed.Info.DirectoryKeys!));
@@ -203,7 +203,7 @@ public class DirectoryIdentityTests
     [Fact]
     public void DirKeysAreValidated()
     {
-        var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://203.0.113.5:11010"]);
+        var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://node.example.net:11010"]);
         Assert.NotNull(NetworkString.Validate(info with { DirectoryKeys = [new byte[31]] }));
         Assert.NotNull(NetworkString.Validate(info with { DirectoryKeys = [] }));
         // Eight: four nodes, each with a spare slot for rotation.
@@ -232,7 +232,7 @@ public class DirectoryIdentityTests
     {
         var dir = Directory.CreateTempSubdirectory("jay-dirkey-");
         var path = Path.Combine(dir.FullName, "mynet.json");
-        var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://203.0.113.5:11010"], Seq: 3);
+        var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://node.example.net:11010"], Seq: 3);
         File.WriteAllText(path, info.ToJson().ToJsonString());
         using var key = X25519KeyPair.Generate();
         var (first, added) = NetworkScaffold.AttachDirectoryKey(path, key.PublicKey);

@@ -28,7 +28,8 @@ jay-server directory --listen 11010
 
 ```bash
 # 1. 生成签名钥匙、网络信息、网络配置模板
-jay-server network init nz-friends --name 新西兰朋友服 --host 203.0.113.5
+# --host 写节点的域名：网络连接串会广泛传播，不能写公网 IP（Jay 会拒绝）
+jay-server network init nz-friends --name 新西兰朋友服 --host node.example.org
 
 # 2.（可选）改 nz-friends/config.json：公告、链接、允许的房间方式、传文件、最低版本、登录……
 #    传到一个 https 地址（比如 GitHub Pages），然后算哈希并写进网络信息（版本号自动加一）：

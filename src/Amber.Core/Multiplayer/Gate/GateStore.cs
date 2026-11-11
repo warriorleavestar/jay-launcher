@@ -259,8 +259,8 @@ public sealed class GateStore
         var state = Read();
         if (state.Privacy.IsSplit() && state.Relays.Count > 0
             && GateEndpoint.TryParse(state.Relays[RandomNumberGenerator.GetInt32(state.Relays.Count)].Address) is { } relay)
-            return new GateInvite(relay.Host, relay.Port, keyHash, token, name, EntryRotation(relay.ToString(), state));
-        return new GateInvite(config.PublicHost, config.PublicPort, keyHash, token, name, EntryRotation(GateRotation.DirectEntry, state));
+            return new GateInvite(relay.Host, relay.Port, keyHash, token, EntryRotation(relay.ToString(), state));
+        return new GateInvite(config.PublicHost, config.PublicPort, keyHash, token, EntryRotation(GateRotation.DirectEntry, state));
     }
 
     /// <summary>用邀请登记设备。设备已经在这个名下：照样算成功（重装后重新申请也走这条）。</summary>

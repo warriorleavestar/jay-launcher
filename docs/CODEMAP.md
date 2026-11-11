@@ -70,7 +70,8 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `JAYDS1-`, `JAYDR1-` | Sealed direct offer / reply (no server; addresses encrypted with a passphrase told another way) | `Multiplayer/SealedDirect.cs` |
 | `JAY2D-`, `JAY2R-` | Removed direct-link codes (carried public IPs); refused as `OldDirect` | `Multiplayer/DirectLink.cs` (`OldDirectCodes`) |
 | `AMB-` | Legacy room code | `Multiplayer/RoomCode.cs` |
-| `JAYS1-` | Jay server invite | `Multiplayer/Gate/GateInvite.cs` |
+| `JAYS2-` | Jay server invite (domain only, no player name) | `Multiplayer/Gate/GateInvite.cs` |
+| `JAYSS1-` | Jay server invite sealed with a passphrase (server with no domain) | `Multiplayer/Gate/GateInvite.cs` |
 | `JAYC1-` | Contact code (identity public key) | `Multiplayer/Contacts/ContactCode.cs` |
 | `JAYR1-` | Relay node code | `Multiplayer/Gate/GateRelayCode.cs` |
 | `JAYNET2-` | Public network connection string | `Multiplayer/Public/NetworkString.cs` |

@@ -17,8 +17,9 @@
 
 ```bash
 # 1. 初始化：--host 写玩家连的地址
-#    VPS：公网 IP 或域名；局域网：这台电脑的局域网 IP（比如 192.168.1.20）
-jay-server init --host 203.0.113.10
+#    VPS：最好用域名（邀请码里只写域名）；只有 IP 时也行，邀请码会用口令加密，不显示 IP
+#    局域网：这台电脑的局域网 IP（比如 192.168.1.20）
+jay-server init --host mc.example.org
 
 # 2. 下载服务端和 Java（需要同意 Minecraft EULA：https://aka.ms/MinecraftEULA）
 jay-server setup --version latest --memory 2048 --accept-eula
@@ -30,7 +31,9 @@ jay-server run
 jay-server invite Steve
 ```
 
-把 `JAYS1-…` 这段邀请码私下发给 Steve。Steve 在 Jay 的「联机 → Jay 服务器」里粘贴、点「加入」。之后每次点「进服」就行。
+把 `JAYS2-…` 这段邀请码私下发给 Steve。Steve 在 Jay 的「联机 → Jay 服务器」里粘贴、点「加入」。之后每次点「进服」就行。
+
+邀请码里只写服务器的域名，不写 IP，也不写用户名。服务器只有 IP、没有域名时，发出来的是加密的 `JAYSS1-…` 码和一个 16 位数字口令：口令换个方式告诉 Steve（打电话、当面），别和邀请码发在一起。
 
 - 邀请码默认 **24 小时、只能用 1 次**（`--ttl 7d`、`--uses 3` 可以改），绑定一个用户名。
 - 每个用户名最多绑定 **2 台设备**。换电脑时，给他发一个新邀请。名额满了就先 `revoke` 一台旧的。

@@ -118,13 +118,23 @@ if (-not $PublicHost) {
     $PublicHost = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -ne "WellKnown" -and $_.IPAddress -notlike "169.254.*" } | Select-Object -First 1).IPAddress
     Write-Host "注意：猜到的地址是 $PublicHost；在家里的电脑上一般要用路由器的公网 IP，并在路由器上做端口转发。可以用 -PublicHost 指定。"
 }
-$json = '{"v":1'
-if ($NodeName) { $json += ',"name":' + (ConvertTo-Json $NodeName) }
-$json += ',"peers":["tcp://' + $PublicHost + ':' + $Port + '","udp://' + $PublicHost + ':' + $Port + '"]}'
-$code = "AMBNODE-" + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json)).TrimEnd("=").Replace("+", "-").Replace("/", "_"))
+# A share code names a node by domain only, never by IP (Jay refuses plain codes with an IP in them).
+$parsedIp = $null
+$code = $null
+if (-not [System.Net.IPAddress]::TryParse($PublicHost.Trim('[', ']'), [ref]$parsedIp)) {
+    $json = '{"v":1'
+    if ($NodeName) { $json += ',"name":' + (ConvertTo-Json $NodeName) }
+    $json += ',"peers":["tcp://' + $PublicHost + ':' + $Port + '","udp://' + $PublicHost + ':' + $Port + '"]}'
+    $code = "AMBNODE-" + ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json)).TrimEnd("=").Replace("+", "-").Replace("/", "_"))
+}
 
 Write-Host ""
 Write-Host "节点已运行 / node is running（计划任务 / scheduled task: $Task）"
 Write-Host "节点地址 / node address:  tcp://${PublicHost}:$Port   udp://${PublicHost}:$Port"
-Write-Host "Amber 节点分享码 / share code:"
-Write-Host $code
+if ($code) {
+    Write-Host "Jay 节点分享码 / share code:"
+    Write-Host $code
+} else {
+    Write-Host "这个节点用的是 IP 地址，分享码不能直接写 IP。在 Jay 联机设置的“中转服务器”里添加上面的地址，再点【导出】，Jay 会生成加密的分享码和口令。有域名时用 -PublicHost <域名> 重新运行。"
+    Write-Host "This node goes by an IP address, and share codes never carry one. Add the address above in Jay (Multiplayer settings, relay servers) and press Export: Jay makes a sealed code and a passphrase. With a domain, re-run with -PublicHost <domain>."
+}

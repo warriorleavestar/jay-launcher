@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Public;
 using Amber.Core.Multiplayer.Transport;
@@ -393,12 +394,29 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Equal("seed", server.Health()["role"]!.GetValue<string>());
     }
 
+    /// <summary>Public IPs are refused in a network string; LAN and loopback ones (test networks) say nothing about anyone.</summary>
+    [Theory]
+    [InlineData("tcp://node.example.net:11010", false)]
+    [InlineData("tcp://203.0.113.5:11010", true)]
+    [InlineData("udp://[2408:8000::1]:11010", true)]
+    [InlineData("tcp://127.0.0.1:11010", false)]
+    [InlineData("tcp://192.168.1.5:11010", false)]
+    public void NetworkNodesGoByDomain(string node, bool refused)
+    {
+        Assert.Equal(refused, RelayNodes.HasPublicIpHost(node));
+        var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", [node]);
+        Assert.Equal(refused ? L.T("core.mp.network.ip_node") : null, NetworkString.Validate(info));
+    }
+
     [Fact]
     public void ScaffoldCreatesASignableNetworkAndAttachesTheConfig()
     {
-        var r = NetworkScaffold.Init(_dir, "nz-friends", "新西兰朋友服", ["tcp://203.0.113.5:11010"]);
-        Assert.Throws<IOException>(() => NetworkScaffold.Init(_dir, "nz-friends", "x", ["tcp://203.0.113.5:11010"]));
-        Assert.Throws<ArgumentException>(() => NetworkScaffold.Init(Path.Combine(_dir, "b"), "jay", "x", ["tcp://203.0.113.5:11010"]));
+        // A network string never names a public IP: its nodes go by domain.
+        var ip = Assert.Throws<ArgumentException>(() => NetworkScaffold.Init(Path.Combine(_dir, "ip"), "nz-friends", "x", ["tcp://203.0.113.5:11010"]));
+        Assert.Equal(L.T("core.mp.network.ip_node"), ip.Message);
+        var r = NetworkScaffold.Init(_dir, "nz-friends", "新西兰朋友服", ["tcp://node.example.net:11010"]);
+        Assert.Throws<IOException>(() => NetworkScaffold.Init(_dir, "nz-friends", "x", ["tcp://node.example.net:11010"]));
+        Assert.Throws<ArgumentException>(() => NetworkScaffold.Init(Path.Combine(_dir, "b"), "jay", "x", ["tcp://node.example.net:11010"]));
         if (!OperatingSystem.IsWindows()) Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(r.KeyPath));
 
         var (config, sha) = NetworkScaffold.Hash(r.ConfigPath, "nz-friends");
@@ -422,7 +440,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     {
         var output = new StringWriter();
         var net = Path.Combine(_dir, "net");
-        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "init", "nz-friends", "--name", "朋友服", "--host", "203.0.113.5", "--out", net]), output));
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "init", "nz-friends", "--name", "朋友服", "--host", "node.example.net", "--out", net]), output));
         Assert.Contains("签名钥匙编号", output.ToString());
         var config = Path.Combine(net, "config.json");
         var network = Path.Combine(net, "nz-friends.json");
