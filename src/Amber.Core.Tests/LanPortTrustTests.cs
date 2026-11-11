@@ -16,11 +16,14 @@ public sealed class LanPortTrustTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        // Start accepting before the check runs: a check that fails fast must not stop the listener before
+        // AcceptTcpClientAsync has even been called.
+        var accept = listener.AcceptTcpClientAsync();
         var serve = Task.Run(async () =>
         {
             try
             {
-                using var client = await listener.AcceptTcpClientAsync();
+                using var client = await accept;
                 var stream = client.GetStream();
                 await stream.WriteAsync(reply);
                 await Task.Delay(200);
