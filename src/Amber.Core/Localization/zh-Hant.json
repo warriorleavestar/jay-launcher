@@ -3105,5 +3105,7 @@
   "tip.theme_import": "主題讓 Jay 打不開了？啟動時按住 Shift。",
   "tip.narrow_window": "側欄收起來了，視窗拉寬一些就會展開。",
   "tip.reset": "重新看所有提示",
-  "tip.reset_done": "所有提示會重新出現。"
+  "tip.reset_done": "所有提示會重新出現。",
+  "shortcut.look.restored": "已恢復預設外觀。",
+  "shortcut.look.already": "現在就是預設外觀。"
 }

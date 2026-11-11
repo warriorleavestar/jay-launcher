@@ -33,6 +33,7 @@ internal sealed partial class SelfTest
 
             await MatrixAsync();
             await KeyboardAndHistoryAsync(shell);
+            await KeyboardScopeAsync(shell);
             await ReachEveryOldPageAsync(shell);
             await FieldAndReturnAsync(shell);
             await SidebarSettingAsync();

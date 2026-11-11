@@ -2971,5 +2971,7 @@
   "tip.theme_import": "若主題致 Jay 不能啟，啟時按 Shift。",
   "tip.narrow_window": "側欄已斂，廣其窗則復展。",
   "tip.reset": "諸示皆復觀之",
-  "tip.reset_done": "諸示將復見。"
+  "tip.reset_done": "諸示將復見。",
+  "shortcut.look.restored": "已復常貌。",
+  "shortcut.look.already": "今即常貌。"
 }
