@@ -465,7 +465,7 @@ public sealed partial class MultiplayerViewModel
         lobby.Book.Game = await HostGameAsync();
         if (_lobby != lobby) return;
         // One invite per device, each bound to that device's key: whichever computer they're at, they can come in.
-        var pendings = item.Devices.Select(d => (Device: d, Invite: lobby.Book.Create(1, ContactInviteLifetime, Child.MayAutoAdmit(true), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
+        var pendings = item.Devices.Select(d => (Device: d, Invite: lobby.Book.Create(1, ContactInviteLifetime, Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
         RefreshInvites();
         try
         {
