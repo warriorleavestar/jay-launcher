@@ -42,6 +42,10 @@ jobs:
       - name: Build
         run: dotnet build Amber.slnx -c Release --no-restore
 
+      # build/pins.json is the one list of pinned binaries; fail early when code or scripts disagree with it (docs/pins.md).
+      - name: Check pins
+        run: dotnet test Amber.Core.Tests -c Release --no-build --filter "FullyQualifiedName~Amber.Core.Tests.PinsTests"
+
       - name: Unit tests
         run: dotnet test Amber.Core.Tests -c Release --no-build
 
