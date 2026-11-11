@@ -88,50 +88,44 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 `Public/DirectoryTrust.cs`, `Public/DirectoryChannel.cs`. Jay picks one of these before sending a directory anything:
 
 1. **Pinned**: keys in the signed connection string (`dirKeys`, #145).
-2. **Root-certified**: the connection string lists Ed25519 root keys (`dirRoots`, at most 4). The built-in network uses
-   `PublicNetworkProfile.JayDirectoryRoots`.
-   - A directory sends `{"c","r","s"}` as the payload of its handshake message. Older Jay versions ignore it.
-   - `c` is `{"key","net","exp"}` and `s` is the root's signature over `"jay-directory-cert-v1\n" ‖ c`.
-   - Jay accepts the key if the root is listed, `net` is this network's EasyTier name, it hasn't expired, and `key` is
-     the key the directory just proved.
+2. **Root-certified**: the connection string lists root key ids (`dirRoots`, at most 4; each the SHA-256 id of a hybrid
+   Ed25519 + ML-DSA-65 key, see `TrustSigner`) and how many of them must
+   sign (`dirRootsNeed`, default 1). The built-in network uses the Jay trustees (`JayTrust`): 2 of 3.
+   - A directory sends `{"c","sigs"}` as the payload of its handshake message.
+   - `c` is `{"key","net","exp"}`; `sigs` is a list of base64 `TrustSignature` entries (both public keys, an Ed25519
+     and an ML-DSA-65 signature over `"jay-directory-cert-v2\n" ‖ c`, about 5.3 KB each). Both algorithms must verify;
+     one bad signature rejects the certificate.
+   - Jay accepts the key if enough distinct listed roots signed, `net` is this network's EasyTier name, it hasn't
+     expired, and `key` is the key the directory just proved.
 3. **First use** (networks with neither): the first key seen at each directory address is remembered in
    `directory-keys.json`. After that, only that key is accepted, with no legacy fallback for that address.
    `DirectoryKeyChangedException` tells the user to remove and re-add the network if the change was intended. Until a key
    is remembered, a directory that only speaks the old protocol still works.
 
-### Making the root key for the built-in network (project owner, offline)
+### Trustee keys for the built-in network (offline, one per person)
+
+The built-in network's directory certificates, and reviewed network strings, need 2 of the 3 Jay trustees
+(`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
 
 ```bash
-jay-server network root-key --out <usb>/jay-directory-root.key
-# prints the root public key → paste it into PublicNetworkProfile.JayDirectoryRoots and release
+jay-server network root-key --out <usb>/jay-trustee.key --paper
+# asks for a passphrase (the file is sealed with Argon2id + ChaCha20-Poly1305), shows the two paper lines once,
+# prints the full public key → it goes into JayTrust.Keys, then a release
+jay-server network paper-check --key <usb>/jay-trustee.key   # check the hand-copied lines
 
 # on each directory node: print its directory public key (makes directory.key on first use)
 jay-server network dir-key --dir <node data dir>
 
-# on the offline machine, with only that public key:
-jay-server network dir-cert --root <usb>/jay-directory-root.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# trustee 1, offline, with only that public key:
+jay-server network dir-cert --root <usb>/jay-trustee.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# trustee 2, on their own offline machine, adds their signature to the same file:
+jay-server network dir-cert --cosign directory.cert --root <usb>/jay-trustee.key
 # copy directory.cert into the node's data dir; the node logs "directory certificate" at start
 ```
 
-Keep the root private key off servers, CI, cloud drives and the repository. Certificates are not secret. A new or
-re-keyed node needs only a new certificate, not a Jay release. Rotating the root itself needs a release with both roots
-listed for a while (up to 4).
-
-## In the app
-
-- **Contacts card** (Multiplayer settings): my contact code (shown as "contact code", unlike the JAYF1 "friend code"),
-  a box for theirs, exchanges in progress and the contact list. A JAYC1 pasted anywhere (Ctrl+V, the join box) lands
-  in this box; nothing is mailed until [Add].
-- **Emoji card**: four large emoji, each with its localized name under it and as its accessible name
-  (`multiplayer.contacts.emoji_names`, 64 names per language). [They match] saves the contact; [They don't match]
-  drops the exchange and suggests sending the code another way.
-- **Mail pick-up**: `ContactPost.CheckAsync` every 30 s while the public network is connected, and right after
-  connecting. Add requests and ready-to-compare exchanges are mirrored as activity-centre requests.
-- **Invite a contact** (room header, host only): a one-use, 30-minute invite bound to the contact's key and let in
-  without asking, mailed with the host's key. Joining from the request knocks with `expectedHost`; a different host
-  stops the knock before the guest says anything (`WrongHostException`, also for public-network and lobby knocks).
-- **Held back**: no receipt after 3 minutes shows a banner in the room naming the other ways in: the invite dialog
-  (direct link) or the game's LAN list when both are on the same network.
+No trustee key goes on a server, CI, a cloud drive, a chat or the repository. Certificates are not secret. A new or
+re-keyed node needs only a new certificate, not a Jay release. If one trustee loses their key, the other two can still
+sign; replacing a trustee needs a release with the new public key.
 
 ## Direct links without an IP in any code (done)
 
@@ -153,3 +147,19 @@ encrypted) carry only the session id. `JAY2D-` / `JAY2R-` are refused.
 - **Jay server invites (JAYS1) bound to the player's identity key**, the same way room invites are.
 - **Flood limits**: per-sender limits once directories can see a stable sender (for example, a cheap proof of work per
   post).
+
+## One-shot rendezvous records
+
+`Public/Rendezvous.cs`, directory ops `rv.put` / `rv.take` in `Public/RoomDirectory.cs`. These let a code carry a random token
+instead of an address: the publisher puts a sealed record on the directories, the code's holder takes it once.
+
+- **Derivation**: from a token of at least 16 random bytes, id = `HKDF-SHA256(token, info "jay-rv-id-v1")` (32 bytes) and
+  seal key = `HKDF-SHA256(token, info "jay-rv-seal-v1")`. The record is ChaCha20-Poly1305 with a random nonce and the id as
+  associated data. The directory sees only the id and the opaque record, never the token.
+- **Single use**: `rv.take` removes the record in the same step that returns it. The client asks every directory at once,
+  so taking the record also clears the other copies.
+- **No overwrite**: `rv.put` on an id that is still waiting is refused with `exists`, so nobody can replace a record they
+  didn't publish.
+- **Authenticated channel only**: both ops are answered only over `DirectoryChannel`; a legacy JSON request gets `secure`.
+- **Limits**: 2 KB per record, at most 10 minutes, 4096 records per directory, 30 puts per source address per 10 minutes.
+  Nothing is written to disk. The node's `/metrics` shows only the number of waiting records (`jay_rendezvous_records`).

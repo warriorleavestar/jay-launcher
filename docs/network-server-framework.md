@@ -5,7 +5,7 @@
 1. **用框架写**（.NET）：引用 `src/Amber.NetworkServer`（程序集 `Jay.NetworkServer`），几十行就是一个完整节点。官方的 `jay-server directory` 就是用它跑的。
 2. **自己实现协议**（任何语言）：按下面的[协议](#协议)写一个目录服务，前面放一个 EasyTier。
 
-不管哪条路，玩家都用同一个 Jay，粘贴你的 `JAYNET1-...` 连接串就能进你的网络（怎么生成连接串见 [network-server.md](network-server.md#二自己的公共网络四步)）。
+不管哪条路，玩家都用同一个 Jay，粘贴你的 `JAYNET2-...` 连接串就能进你的网络（怎么生成连接串见 [network-server.md](network-server.md#二自己的公共网络四步)）。
 
 ## 最小的节点
 
@@ -68,7 +68,7 @@ await server.RunAsync(CancellationToken.None);
 |---|---|
 | `GET /health` | `{ok, network, role: directory\|seed, easytier: running\|stopped\|external, rooms, listed, login, uptime}` |
 | `GET /stats` | `{ok, health, stats: {published, renewed, withdrawn, expired, removed, rejected: {code: n}, loginOk, loginFail}}` |
-| `GET /metrics` | Prometheus 文本（`text/plain; version=0.0.4`）：`jay_node_up`、`jay_node_info{network,role,easytier,login}`、`jay_node_uptime_seconds`、`jay_directory_rooms`、`jay_directory_rooms_listed`、`jay_volunteer_relays`、`jay_bans`、`jay_directory_rooms_published_total`、`jay_directory_rooms_renewed_total`、`jay_directory_rooms_ended_total{reason}`、`jay_directory_rooms_rejected_total{reason}`、`jay_logins_total{result}`。只有总数，要口令 |
+| `GET /metrics` | Prometheus 文本（`text/plain; version=0.0.4`）：`jay_node_up`、`jay_node_info{network,role,easytier,login}`、`jay_node_uptime_seconds`、`jay_directory_rooms`、`jay_directory_rooms_listed`、`jay_volunteer_relays`、`jay_bans`、`jay_rendezvous_records`、`jay_directory_rooms_published_total`、`jay_directory_rooms_renewed_total`、`jay_directory_rooms_ended_total{reason}`、`jay_directory_rooms_rejected_total{reason}`、`jay_logins_total{result}`。只有总数，要口令 |
 | `GET /rooms` | `{ok, total, hidden, rooms: [{id, name, host, hostFingerprint, mode, players, game, account, updated}]}`（只有公开房间） |
 | `GET /nodes` | `{ok, enabled, nodes: ["tcp://...", ...]}`：列出的志愿中转 |
 | `GET /bans` | `{ok, bans: [{kind, value, reason, at, until}]}`（`until` 为 null 是永久） |

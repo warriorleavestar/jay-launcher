@@ -78,9 +78,9 @@ public sealed class LauncherService : IDisposable
 
     private Amber.Core.Multiplayer.Public.PublicNetworkList? _networks;
 
-    /// <summary>认哪些注册表钥匙（自检里换成测试钥匙；null = 程序里内置的）。</summary>
-    internal IReadOnlyList<byte[]>? TrustedNetworkKeys { get; set; } = TestRegistryKeys.Count > 0
-        ? [.. Amber.Core.Multiplayer.Public.NetworkString.RegistryKeys.Select(Convert.FromBase64String), .. TestRegistryKeys]
+    /// <summary>Quorums that make a network reviewed (the self-check swaps in test keys; null = the Jay trustees).</summary>
+    internal IReadOnlyList<Amber.Core.Multiplayer.Public.TrustQuorum>? TrustedNetworkKeys { get; set; } = TestRegistryKeys.Count > 0
+        ? [Amber.Core.Multiplayer.Public.JayTrust.Quorum, new(TestRegistryKeys, 1)]
         : null;
 
     /// <summary>
@@ -104,8 +104,9 @@ public sealed class LauncherService : IDisposable
         return keys;
     }
 
-    /// <summary>Signed by a key that only AMBER_TEST_REGISTRY_KEY trusts.</summary>
-    internal static bool IsTestReviewed(byte[] signer) => TestRegistryKeys.Any(k => k.AsSpan().SequenceEqual(signer));
+    /// <summary>Reviewed only because of a key that AMBER_TEST_REGISTRY_KEY trusts, not by the Jay trustees.</summary>
+    internal static bool IsTestReviewed(IReadOnlyList<byte[]> signers) =>
+        !Amber.Core.Multiplayer.Public.JayTrust.Quorum.IsMet(signers) && new Amber.Core.Multiplayer.Public.TrustQuorum(TestRegistryKeys, 1).IsMet(signers);
 
     /// <summary>保存的公共网络（设置里的连接串验签后的结果，改了设置要 <see cref="ReloadNetworks"/>）。</summary>
     public Amber.Core.Multiplayer.Public.PublicNetworkList Networks => _networks ??= new(Settings.PublicNetworks, TrustedNetworkKeys);

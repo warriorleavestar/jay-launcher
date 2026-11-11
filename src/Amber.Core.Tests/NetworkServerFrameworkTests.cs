@@ -411,8 +411,8 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Equal(2, info.Seq);
         Assert.Throws<ArgumentException>(() => NetworkScaffold.AttachConfig(r.NetworkPath, "http://example.org/config.json", sha));
 
-        var signed = NetworkString.Parse(NetworkString.Create(info, NetworkSigner.FromSeed(File.ReadAllText(r.KeyPath))));
-        Assert.Equal(r.PublicKey, signed.SignerKey);
+        var signed = NetworkString.Parse(NetworkString.Create(info, TrustSigner.FromSeed(File.ReadAllText(r.KeyPath))));
+        Assert.Equal(r.KeyId, signed.SignerKey);
         Assert.Equal(sha, signed.Info.Config!.Sha256);
         Assert.StartsWith("jay-net-", signed.ToProfile().NetworkName);
     }
@@ -423,7 +423,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var output = new StringWriter();
         var net = Path.Combine(_dir, "net");
         Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "init", "nz-friends", "--name", "朋友服", "--host", "203.0.113.5", "--out", net]), output));
-        Assert.Contains("签名公钥", output.ToString());
+        Assert.Contains("签名钥匙编号", output.ToString());
         var config = Path.Combine(net, "config.json");
         var network = Path.Combine(net, "nz-friends.json");
         // 只允许公开房间。

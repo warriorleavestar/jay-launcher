@@ -13,7 +13,7 @@ public static class NetworkScaffold
 {
     private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    public sealed record Result(string KeyPath, string NetworkPath, string ConfigPath, byte[] PublicKey);
+    public sealed record Result(string KeyPath, string NetworkPath, string ConfigPath, byte[] KeyId);
 
     /// <summary>
     /// 在 <paramref name="dir"/> 里生成 network.key（签名私钥）、&lt;编号&gt;.json（网络信息）、config.json（网络配置模板）。
@@ -33,11 +33,12 @@ public static class NetworkScaffold
         var info = new NetworkInfo(id, name, "jay-net-" + id, id + "-public-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4)), nodes);
         if (NetworkString.Validate(info) is { } problem) throw new ArgumentException(problem);
 
-        var signer = NetworkSigner.Generate(out var seed);
-        Amber.Core.PrivateFile.WriteAllText(keyPath, Convert.ToBase64String(seed) + "\n");
+        // Unsealed so automated setups can use it; `jay-server network keygen` makes passphrase-sealed keys.
+        var signer = TrustSigner.Generate(out var seed);
+        Amber.Core.PrivateFile.WriteAllText(keyPath, TrustKeyFile.Format(seed, null));
         File.WriteAllText(networkPath, info.ToJson().ToJsonString(Pretty) + "\n");
         File.WriteAllText(configPath, ConfigTemplate(id, name).ToJsonString(Pretty) + "\n");
-        return new Result(keyPath, networkPath, configPath, signer.PublicKey);
+        return new Result(keyPath, networkPath, configPath, signer.Id);
     }
 
     /// <summary>网络配置模板：公告、链接、默认的安全策略（和 Jay 默认一样，按需收紧）。</summary>
