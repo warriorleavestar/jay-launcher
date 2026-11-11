@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     {
         _settings = settings;
         InitializeComponent();
+        InitLazyOverlays();
         Amber.App.Services.ThemeService.AttachMainWindow(this);
         Amber.App.Services.DensityService.Attach(this);
         AttachShell();
