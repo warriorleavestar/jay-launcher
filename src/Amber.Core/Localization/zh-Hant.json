@@ -3001,6 +3001,7 @@
   "multiplayer.volunteer.status_checking": "已登記 {0}，網路正在確認能不能連到你",
   "multiplayer.volunteer.status_listed": "正在當志願中轉：{0}。謝謝！",
   "multiplayer.volunteer.status_retry": "連不上目錄，稍後再試",
+  "multiplayer.volunteer.test_rate_limited": "連接埠測試幾秒只能測一次，稍等一下再測",
   "multiplayer.volunteer.added_peers": "另外經 {0} 個志願中轉連線",
   "multiplayer.contacts.title": "聯絡人",
   "multiplayer.contacts.hint": "加一次朋友、和 TA 對一下四個表情。以後開了房間就能直接邀請 TA：邀請封好了只寄給 TA，不經過任何聊天軟體。",

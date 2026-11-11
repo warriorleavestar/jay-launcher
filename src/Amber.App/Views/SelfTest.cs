@@ -1395,8 +1395,12 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await guest.SendChatCommand.ExecuteAsync(null);
         host.ChatInput = "欢迎";
         await host.SendChatCommand.ExecuteAsync(null);
-        var chatOk = await WaitAsync(() => host.ChatLines.Any(l => l.Text == "你好，房主" && !l.Mine) && guest.ChatLines.Any(l => l.Text == "欢迎" && !l.Mine), 15);
-        Check("联机：聊天消息双向送达", chatOk, string.Join(" | ", host.ChatLines.Select(l => l.Name + ":" + l.Text)));
+        // 30 s: on a slow VM (round-3 Linux normal user) 15 s was not always enough. The detail lists both sides so a
+        // failure says which direction was missing.
+        var chatOk = await WaitAsync(() => host.ChatLines.Any(l => l.Text == "你好，房主" && !l.Mine) && guest.ChatLines.Any(l => l.Text == "欢迎" && !l.Mine), 30);
+        Check("联机：聊天消息双向送达", chatOk,
+            $"房主[{host.ChatStatus}]：{string.Join(" | ", host.ChatLines.Select(l => l.Name + ":" + l.Text))} / " +
+            $"加入方[{guest.ChatStatus}]：{string.Join(" | ", guest.ChatLines.Select(l => l.Name + ":" + l.Text))}");
         // 每个成员到房主是自己的 Noise 通道；房主按成员表给消息盖上发送者的指纹（成员自己写的发送者不算数）。
         var stamped = host.ChatLines.FirstOrDefault(l => l.Text == "你好，房主" && !l.Mine);
         Check("联机：房主给聊天消息盖上发送者指纹", stamped?.Message.Fingerprint == guest.Identity.Fingerprint, stamped?.Message.Fingerprint ?? "没有消息");
@@ -1424,6 +1428,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await guest.JoinCommand.ExecuteAsync(null);
         Check("联机：信任的人重新加入不用批准", guest.IsJoined && host.ApprovalCards.Count == 0, guest.Status);
         Check("联机：一张邀请用完后不再列为待用", await WaitAsync(() => host.PendingInvites.Count == 0, 10), host.PendingInvites.Count.ToString());
+        if (!chatOk) Log("注意：上面的聊天没有双向送达，下面“重新加入看到之前的消息”会跟着失败（它找的是房主发的“欢迎”）。");
         var restored = guest.ChatLines.Any(l => l.Text == "欢迎") && guest.ChatLines.Any(l => l.IsSeparator);
         Check("联机：重新加入同一房间看到之前的消息", restored, string.Join(" | ", guest.ChatLines.Select(l => l.Text)));
         Check("联机：重新加入后聊天重连", await WaitAsync(() => guest.ChatReady, 40), guest.ChatStatus);
