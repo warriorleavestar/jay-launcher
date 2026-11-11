@@ -51,14 +51,16 @@ jobs:
       - name: Verify and stage runtime
         shell: bash
         run: |
-          archive="$(find runtime-source -maxdepth 1 -type f -name 'jre21-*.tar.xz' -print -quit)"
-          test -n "$archive"
+          source_archive="$(find runtime-source -maxdepth 1 -type f -name 'jre21-*.tar.xz' -print -quit)"
+          test -n "$source_archive"
+          normalized="$(mktemp -d)"
+          tar -xf "$source_archive" -C "$normalized"
+          mkdir -p runtime-artifact
+          archive="runtime-artifact/jay-jre21-${{ matrix.architecture }}.tar.xz"
+          tar -C "$normalized" -cJhf "$archive" .
           readelf_path="runtime-source/android-ndk-r21/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           bash scripts/check-android-runtime.sh "$archive" "${{ matrix.architecture }}" "$readelf_path"
-          mkdir -p runtime-artifact
-          cp "$archive" "runtime-artifact/jay-jre21-${{ matrix.architecture }}.tar.xz"
-          sha256sum "runtime-artifact/jay-jre21-${{ matrix.architecture }}.tar.xz" > \
-            "runtime-artifact/jay-jre21-${{ matrix.architecture }}.tar.xz.sha256"
+          sha256sum "$archive" > "$archive.sha256"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

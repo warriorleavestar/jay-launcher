@@ -6,6 +6,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using System.Security.Cryptography;
+using System.Formats.Tar;
+using System.IO.Compression;
 
 namespace Amber.Core.Tests;
 
@@ -214,12 +216,108 @@ public sealed class MobilePortTests
         }
     }
 
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallerExtractsAndActivatesVerifiedJre()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        try
+        {
+            var archive = Convert.FromBase64String(RuntimeXzFixture);
+            var descriptor = RuntimeArchive(archive);
+            var manifest = await RuntimeArchiveInstaller.InstallAsync(
+                target,
+                descriptor,
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)));
+
+            Assert.Contains(manifest.Files, file => file.Path == "lib/server/libjvm.so");
+            Assert.True(await RuntimeBundleVerifier.VerifyAsync(target, manifest, "arm64-v8a"));
+            Assert.False(File.Exists(Path.Combine(parent, "escape")));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallerRejectsTraversalWithoutReplacingRuntime()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "keep.txt"), "old runtime");
+        try
+        {
+            var archive = CreateRuntimeArchive(("../escape", "bad"u8.ToArray()));
+            await Assert.ThrowsAsync<InvalidDataException>(() => RuntimeArchiveInstaller.InstallAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false))));
+
+            Assert.Equal("old runtime", await File.ReadAllTextAsync(Path.Combine(target, "keep.txt")));
+            Assert.False(File.Exists(Path.Combine(parent, "escape")));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
     private static RuntimeBundleFile RuntimeFile(string path, byte[] bytes) => new(
         path,
         bytes.Length,
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
         "GPL-2.0-with-classpath-exception",
         "https://example.invalid/openjdk-source");
+
+    private static RuntimeArchiveDescriptor RuntimeArchive(byte[] archive) => new(
+        1,
+        "jay-jre21-test",
+        "arm64-v8a",
+        archive.Length,
+        Convert.ToHexString(SHA256.HashData(archive)),
+        1024 * 1024,
+        "GPL-2.0-with-classpath-exception",
+        "https://example.invalid/openjdk-source",
+        "https://example.invalid/jre.tar.xz");
+
+    private static byte[] CreateRuntimeArchive(params (string Path, byte[] Data)[] extra)
+    {
+        var entries = new (string Path, byte[] Data)[]
+        {
+            ("lib/server/libjvm.so", "jvm"u8.ToArray()),
+            ("lib/modules", "modules"u8.ToArray()),
+            ("release", "JAVA_VERSION=21"u8.ToArray()),
+            ("legal/java.base/LICENSE", "GPL-2.0"u8.ToArray()),
+            ("legal/java.base/ASSEMBLY_EXCEPTION", "Classpath Exception"u8.ToArray())
+        }.Concat(extra);
+        using var archive = new MemoryStream();
+        using (var gzip = new GZipStream(archive, CompressionLevel.SmallestSize, leaveOpen: true))
+        using (var writer = new TarWriter(gzip, leaveOpen: false))
+            foreach (var (path, data) in entries)
+                writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, path)
+                {
+                    DataStream = new MemoryStream(data, writable: false)
+                });
+        return archive.ToArray();
+    }
+
+    private const string RuntimeXzFixture = """
+        /Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4HH/A1VdABcXwcAN4XBkd8ji0xzZjqGzadoY40D8VACY44SciLdE0kUWxrzJNdZQh6Re
+        RJw7pSaEXmof08wj5TrCFFRSiAe4d1/7GMwhiAHCmm5yuDd6kczORFYTx744AGRGQ8kuOfLCoTYRgNybThb1uEujoKUgyv3ilZXB
+        YmKuCRWFh47pFQfY1096CTnovrMxPsGaYNFTngP0h2byTEHmYllYSyUBOrrxwNY1LpzCaXV8JtCyeUQlcLu/o/jL7siUmxm8T+8r
+        kcsPfp4R29iHPTipLm/uVjZf99c8JaEWUCFkXoiqyg55qqW26rBaoPC3eCZ7BkbmEAD5kKk6TZOaAoyhymHMs/+uWYeTZ/qYAyty
+        Nt0osVbsGcAYGsuYxIZILrkYxQpjNUxRTInp5VMihwH4meta4SBBrXW1BnhEIaItgJuxUZcVKjlYmhSgc/urFZ+kmi2E+BcxBkpz
+        WB6mqi5+PT+8+thHG+LUNkqMZVrofjBgsk9Z9JiM8Lse9aKXO9rE8ax/9WwpGhVRVWxt93mIgTRjw4ufeUhYH84pn69cl60k7k6G
+        LMSNEaPM9qp0mvPegoH02JtNgH7XT4IexIHUEabBull09w7AqTkRUqi9yj6GFeWmpzU7E5kMtDtR2HYyl8iCkmH6AabA4YsXv9HY
+        38LjVEniBB0UmRCtPRwseA/1lWjuMYDFMewIsZ7nBiKNDM4bpirXZlzHf4DMLlHohaKH6AgZ2JUopRHoR+znADrN60ot2ebw5N2t
+        F13aCaMculBKKuxG9F2JkH7xZu3t3wnswnvr8LN9TVI6S7lIM7D1r6UVQg8arxWsezBj2SpE/+RxtXsgVi01et7meEOQYE8qI+ma
+        Q3MgChfTN08adqUdHRrEgm9BC5RvNZh6x3qhxHP7AKxNjS13yrdAaxH63C9wktVusqnE9puxmoRK4Ux7hNc1PPyy2lSIKv8hkg7W
+        WuHyp9URPhgavb6eJvCxZX3NBOXXKOYOXL/AwTljExBcf0vZ8/Br5/ZkyxIKSF2HxaNQEzbQn7RcW2xFBeB9CKH90/WEmDHJwn4D
+        uOSkvqrb56xEuy4315U0RexbEnxSs1NeGvEtAHrr4MdiD+fnhi1ZfdCIMM9cNZzJAKFIrqxwOpQl9QAAAAAAqDkUZuAiHJcAAfEG
+        gOQBAMcUcsixxGf7AgAAAAAEWVo=
+        """;
 
     private sealed class FakeMobilePlatformServices : IMobilePlatformServices
     {

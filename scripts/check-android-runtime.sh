@@ -19,6 +19,11 @@ case "$architecture" in
 esac
 
 listing="$(tar -tf "$archive")"
+verbose_listing="$(tar -tvf "$archive")"
+if awk 'substr($1, 1, 1) == "l" || substr($1, 1, 1) == "h" { found=1 } END { exit !found }' <<<"$verbose_listing"; then
+  echo "runtime archive must not contain symbolic or hard links" >&2
+  exit 1
+fi
 while IFS= read -r entry; do
   entry="${entry#./}"
   [[ -z "$entry" ]] && continue

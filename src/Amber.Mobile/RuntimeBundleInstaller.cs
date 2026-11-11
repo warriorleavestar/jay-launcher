@@ -51,23 +51,28 @@ public static class RuntimeBundleInstaller
             if (!await RuntimeBundleVerifier.VerifyAsync(staging, manifest, architecture, ct))
                 throw new InvalidDataException("The staged Android runtime did not pass final verification.");
 
-            if (Directory.Exists(target)) Directory.Move(target, backup);
-            try
-            {
-                Directory.Move(staging, target);
-            }
-            catch
-            {
-                if (!Directory.Exists(target) && Directory.Exists(backup)) Directory.Move(backup, target);
-                throw;
-            }
-
-            if (Directory.Exists(backup)) Directory.Delete(backup, true);
+            ActivateStaged(target, staging, backup);
         }
         finally
         {
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
         }
+    }
+
+    internal static void ActivateStaged(string target, string staging, string backup)
+    {
+        if (Directory.Exists(target)) Directory.Move(target, backup);
+        try
+        {
+            Directory.Move(staging, target);
+        }
+        catch
+        {
+            if (!Directory.Exists(target) && Directory.Exists(backup)) Directory.Move(backup, target);
+            throw;
+        }
+
+        if (Directory.Exists(backup)) Directory.Delete(backup, true);
     }
 
     private static async Task WriteVerifiedAsync(
