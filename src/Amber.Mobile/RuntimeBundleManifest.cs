@@ -65,6 +65,22 @@ internal sealed partial class MobileRuntimeJsonContext : JsonSerializerContext;
 
 public static class RuntimeBundleVerifier
 {
+    public static bool VerifyLayout(
+        string root,
+        RuntimeBundleManifest manifest,
+        string architecture)
+    {
+        if (manifest.Validate().Count != 0 || !manifest.MatchesArchitecture(architecture)) return false;
+        var fullRoot = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+        foreach (var file in manifest.Files)
+        {
+            var path = Path.GetFullPath(Path.Combine(root, file.Path));
+            if (!path.StartsWith(fullRoot, StringComparison.Ordinal) || !File.Exists(path)) return false;
+            if (new FileInfo(path).Length != file.Size) return false;
+        }
+        return true;
+    }
+
     public static async Task<bool> VerifyFileAsync(string root, RuntimeBundleFile file, CancellationToken ct = default)
     {
         if (!RuntimeBundleManifest.IsSafeRelativePath(file.Path)) return false;

@@ -147,9 +147,12 @@ public sealed class MobilePortTests
 
             Assert.Empty(manifest.Validate());
             Assert.True(await RuntimeBundleVerifier.VerifyAsync(root, manifest, "arm64-v8a"));
+            Assert.True(RuntimeBundleVerifier.VerifyLayout(root, manifest, "arm64-v8a"));
             Assert.False(await RuntimeBundleVerifier.VerifyAsync(root, manifest, "x86_64"));
+            Assert.False(RuntimeBundleVerifier.VerifyLayout(root, manifest, "x86_64"));
 
             await File.AppendAllTextAsync(path, "tampered");
+            Assert.False(RuntimeBundleVerifier.VerifyLayout(root, manifest, "arm64-v8a"));
             Assert.False(await RuntimeBundleVerifier.VerifyAsync(root, manifest, "arm64-v8a"));
             Assert.NotEmpty((manifest with { Files = [file with { Path = "../libjvm.so" }] }).Validate());
             Assert.NotEmpty((manifest with { Files = [file with { License = "" }] }).Validate());
