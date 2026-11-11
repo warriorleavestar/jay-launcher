@@ -101,3 +101,7 @@ Many docs under `docs/`, `server/`, `node/` and `networks/` currently exist only
 ## Pull requests
 
 Keep changes focused, describe what you tested, and include before/after screenshots for UI changes.
+
+## License of contributions
+
+Jay is under the [PolyForm Noncommercial License 1.0.0](LICENSE) with a [Commercial Use Exception](COMMERCIAL-EXCEPTION.md). By sending a pull request, you agree that your contribution is licensed under those terms, and that the Jay development team may also license it to others for commercial use, including under the Commercial Use Exception.
