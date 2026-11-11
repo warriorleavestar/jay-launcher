@@ -7,7 +7,7 @@ using Amber.Core.Multiplayer.Transport;
 namespace Amber.Core.Multiplayer.Public;
 
 /// <summary>
-/// A directory node's certificate: root keys (Ed25519, kept offline by the network's owners) say "this X25519 key is a
+/// A directory node's certificate: root keys (hybrid Ed25519 + ML-DSA-65 <see cref="TrustSigner"/> keys, kept offline by the network's owners) say "this X25519 key is a
 /// directory of network N until T". Jay ships only the roots' public keys, so directory nodes can be added or re-keyed
 /// without a new Jay release, and no root private key ever has to be on a server.
 /// <para>
@@ -17,20 +17,20 @@ namespace Amber.Core.Multiplayer.Public;
 /// </para>
 /// <para>
 /// Signed bytes: <c>"jay-directory-cert-v2\n"</c> + the JSON {"key","net","exp"} exactly as sent.
-/// On the wire: {"c": base64(that JSON), "sigs": [{"r": base64(root public key), "s": base64(signature)}, …]}, as the
-/// payload of the directory's handshake message.
+/// On the wire: {"c": base64(that JSON), "sigs": [base64(encoded <see cref="TrustSignature"/>), …]}, as the payload of
+/// the directory's handshake message. Two signatures make about 15 KB.
 /// </para>
 /// </summary>
 public sealed record DirectoryCertificate(byte[] DirectoryKey, string Network, DateTimeOffset Expires, IReadOnlyList<TrustSignature> Signatures, byte[] Content)
 {
     private static readonly byte[] Domain = "jay-directory-cert-v2\n"u8.ToArray();
-    public const int MaxSize = 2048;
-    public const int MaxSignatures = 8;
+    public const int MaxSize = 32768;
+    public const int MaxSignatures = 4;
 
     /// <summary>The roots that signed (all verified).</summary>
     public IEnumerable<byte[]> Signers => Signatures.Select(s => s.Key);
 
-    public static byte[] Issue(NetworkSigner root, ReadOnlySpan<byte> directoryKey, string network, DateTimeOffset expires)
+    public static byte[] Issue(TrustSigner root, ReadOnlySpan<byte> directoryKey, string network, DateTimeOffset expires)
     {
         if (directoryKey.Length != DirectoryChannel.KeyLength) throw new ArgumentException(null, nameof(directoryKey));
         var content = Encoding.UTF8.GetBytes(new JsonObject
@@ -39,26 +39,22 @@ public sealed record DirectoryCertificate(byte[] DirectoryKey, string Network, D
             ["net"] = network,
             ["exp"] = expires.ToUnixTimeSeconds(),
         }.ToJsonString());
-        return Write(content, [new TrustSignature(root.PublicKey, root.Sign([.. Domain, .. content]))]);
+        return Write(content, [root.Sign([.. Domain, .. content])]);
     }
 
     /// <summary>Adds another root's signature. Refuses a certificate that doesn't verify, or a root that already signed.</summary>
-    public static byte[] Cosign(ReadOnlySpan<byte> certificate, NetworkSigner root)
+    public static byte[] Cosign(ReadOnlySpan<byte> certificate, TrustSigner root)
     {
         var cert = Parse(certificate) ?? throw new InvalidDataException("not a valid directory certificate");
-        if (cert.Signers.Any(k => k.AsSpan().SequenceEqual(root.PublicKey))) throw new InvalidDataException("this root already signed");
+        if (cert.Signers.Any(k => k.AsSpan().SequenceEqual(root.Id))) throw new InvalidDataException("this root already signed");
         if (cert.Signatures.Count >= MaxSignatures) throw new InvalidDataException("too many signatures");
-        return Write(cert.Content, [.. cert.Signatures, new TrustSignature(root.PublicKey, root.Sign([.. Domain, .. cert.Content]))]);
+        return Write(cert.Content, [.. cert.Signatures, root.Sign([.. Domain, .. cert.Content])]);
     }
 
     private static byte[] Write(byte[] content, IEnumerable<TrustSignature> signatures) => Encoding.UTF8.GetBytes(new JsonObject
     {
         ["c"] = Convert.ToBase64String(content),
-        ["sigs"] = new JsonArray([.. signatures.Select(s => (JsonNode)new JsonObject
-        {
-            ["r"] = Convert.ToBase64String(s.Key),
-            ["s"] = Convert.ToBase64String(s.Signature),
-        })]),
+        ["sigs"] = new JsonArray([.. signatures.Select(s => (JsonNode)JsonValue.Create(Convert.ToBase64String(s.Encode())))]),
     }.ToJsonString());
 
     /// <summary>
@@ -75,8 +71,9 @@ public sealed record DirectoryCertificate(byte[] DirectoryKey, string Network, D
             var signatures = new List<TrustSignature>();
             foreach (var entry in sigs)
             {
-                if (entry is not JsonObject e) return null;
-                var signature = new TrustSignature(Convert.FromBase64String(e["r"]?.GetValue<string>() ?? ""), Convert.FromBase64String(e["s"]?.GetValue<string>() ?? ""));
+                var encoded = Convert.FromBase64String(entry?.GetValue<string>() ?? "");
+                if (encoded.Length != TrustSignature.Size) return null;
+                var signature = TrustSignature.Decode(encoded);
                 if (signatures.Any(x => x.Key.AsSpan().SequenceEqual(signature.Key)) || !signature.Verify([.. Domain, .. content])) return null;
                 signatures.Add(signature);
             }

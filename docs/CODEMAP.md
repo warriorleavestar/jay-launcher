@@ -16,7 +16,7 @@ Namespaces are still `Amber.*`; the product name is Jay. Many `///` summaries ar
 | `src/Amber.Core/` | Everything that isn't UI: launch, install, content, accounts, multiplayer, themes. No Avalonia references. | library |
 | `src/Amber.App/` | Avalonia 12 desktop app (MVVM, CommunityToolkit.Mvvm). | `Program.cs` → `App.axaml.cs` |
 | `src/Amber.NetworkServer/` | Network server framework (assembly `Jay.NetworkServer`) for public network nodes. | `JayNetworkServer.cs` (`JayNetworkServerBuilder`) |
-| `src/Amber.Server/` | `jay-server` CLI: Jay-only MC server with gate and relays, and the public network node. | `Program.cs` |
+| `src/Amber.Server/` | `jay-server` CLI: Jay-only MC server with gate and relays, and the public network node. Offline signing review for trust keys. | `Program.cs`, `TrustCommands.cs` |
 | `src/Amber.Cli/` | Developer CLI over Core for measurements and scripted tests. | `Program.cs` |
 | `src/Amber.Core.Tests/` | xUnit tests, one file per Core area (flat folder). | `dotnet test Amber.Core.Tests` |
 | `src/Amber.Mobile/` | Shared Avalonia view for the mobile shells (early). | `App.axaml.cs` |
@@ -50,7 +50,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `src/Amber.Core/Multiplayer/` | EasyTier-based rooms: invites, knock, lobby, members, chat, private messages and files, direct link and hole punching, exit (VPN-like) mode helpers. | `Invite.cs`, `Knock.cs`, `Lobby.cs`, `EasyTier.cs`, `DirectLink.cs` |
 | `src/Amber.Core/Multiplayer/Contacts/` | Contacts and sealed mail: contact codes (JAYC1), the four-emoji check, mail through the room directories, mailed invites and receipts. | `ContactCode.cs`, `ContactBook.cs`, `SealedMail.cs`, `ContactPost.cs` |
 | `src/Amber.Core/Multiplayer/Gate/` | Jay server: gate daemon, invites, relays, MC login sniffing, the MC server host. | `GateServer.cs`, `JayServerRunner.cs`, `JayServers.cs` |
-| `src/Amber.Core/Multiplayer/Public/` | Public networks: connection strings, room directory protocol, announcer, accounts and login factors, device fingerprints. | `PublicNetwork.cs`, `RoomDirectory.cs`, `NetworkString.cs` |
+| `src/Amber.Core/Multiplayer/Public/` | Public networks: connection strings, room directory protocol, announcer, accounts and login factors, device fingerprints, trust keys (2-of-3 trustees, Ed25519 + ML-DSA-65, sealed key files, paper backup). | `PublicNetwork.cs`, `RoomDirectory.cs`, `NetworkString.cs`, `TrustQuorum.cs`, `TrustKeyFile.cs` |
 | `src/Amber.Core/Multiplayer/Transport/` | Crypto and tunnels: Noise, ML-KEM-768, secure record stream, device attestation, security policy, SOCKS5 and game-only exit rules. | `Noise.cs`, `SecureStream.cs`, `SecurityPolicy.cs`, `Tunnel.cs` |
 | `src/Amber.Core/Navigation/` | Routes, router history, legacy page routes, command palette index, settings catalog (`settings#field`). | `Route.cs`, `Router.cs`, `SettingsCatalog.cs` |
 | `src/Amber.Core/Net/` | Downloader with mirrors and checksums, network-use categories, safe web links. | `Downloader.cs`, `DownloadSource.cs`, `NetworkPolicy.cs` |

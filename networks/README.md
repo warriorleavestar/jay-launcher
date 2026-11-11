@@ -56,17 +56,24 @@ jay-server directory --network <上面打印的连接串>    # 在有公网 IP �
 
 ## Jay 信任人（维护者）
 
-“已审核”不由一把钥匙决定：Jay 有 3 个信任人，每人在自己的离线电脑上用 `jay-server network root-key --out <文件>`
-生成一把钥匙，私钥只留在本人手里（U 盘 + 手抄），不放进仓库、CI、服务器、网盘或聊天软件。三个公钥写进
-`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs` 的 `JayTrust.Keys`，`JayTrust.Need` 是要几个人签（2）。
+“已审核”不由一把钥匙决定：Jay 有 3 个信任人，每人在自己的离线电脑上用 `jay-server network root-key --out <文件> --paper`
+生成一把钥匙，私钥只留在本人手里（U 盘 + 手抄），不放进仓库、CI、服务器、网盘或聊天软件。
 
-审核一个网络：
+- 每把钥匙是一个 32 字节种子，推出一把 Ed25519 和一把 ML-DSA-65（抗量子，FIPS 204）。签名两种都要对才算这个人签了。
+- 钥匙文件用口令加密（Argon2id + ChaCha20-Poly1305）；`--paper` 在屏幕上显示手抄的两行，`network paper-check` 核对抄得对不对，
+  `network paper-restore` 从纸上恢复。
+- 三把完整公钥写进 `src/Amber.Core/Multiplayer/Public/TrustQuorum.cs` 的 `JayTrust.Keys`，`JayTrust.Need` 是要几个人签（2）。
+
+审核一个网络（每个信任人各自从仓库里的 `networks/<编号>.json` 核对内容，不只看别人转来的文件）：
 
 ```bash
-jay-server network cosign <网络主人签好的连接串或文件> --key <自己的信任钥匙> > 加签后.jaynet
+jay-server network cosign <网络主人签好的连接串或文件> --key <自己的信任钥匙> [--prev <上一版>] --out 加签后.jaynet
+# 先逐项显示内容和被签内容的 SHA-256（两位信任人对一下这一行），手打网络编号最后 6 位才签；不在终端里运行就不签
 # 把输出交给下一个信任人，他在自己的离线电脑上再跑一次 cosign
 jay-server network show 加签后.jaynet   # 显示 “Jay 信任人签了 2/2，Jay 审核过”
 ```
 
+一个签名约 5.3 KB，主人加两个信任人的连接串约 23 KB，所以审核过的网络用 `.jaynet` 文件或网络列表传，不适合手打。
+
 同样的 2/3 规则也用在内置 Jay 公共网络的目录证书上（`network dir-cert`，第二个人用 `--cosign`）。一个人的钥匙丢了或泄露时，
-另外两个人照样能签，换钥匙要发一个新版 Jay，把新公钥换进 `JayTrust.Keys`。
+另外两个人照样能签，换钥匙要发一个新版 Jay，把新公钥换进 `JayTrust.Keys`（换人的声明由旧名单里的两人签，见隐私方案第 3 项）。

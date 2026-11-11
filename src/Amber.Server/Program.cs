@@ -80,13 +80,18 @@ public static class Program
               一步生成签名钥匙、网络 JSON 和网络配置模板，并打印后面几步
           jay-server network config-hash <配置.json> --network <网络.json> [--url https://...]
               检查配置文件、算 SHA-256；给了 --url 就写进网络 JSON（版本号加一），然后重新 sign
-          jay-server network keygen --out <钥匙文件>          生成签名钥匙（私钥存在文件里，只自己留着），打印公钥
-          jay-server network sign <网络.json> [--key <钥匙文件>]  网络主人签名并打印连接串（也可以用环境变量 JAY_NETWORK_KEY 给钥匙）
-          jay-server network cosign <连接串或文件> --key <信任钥匙文件>  再加一个签名（Jay 信任人离线审核用，够数才算“已审核”）
+          jay-server network keygen --out <钥匙文件> [--no-passphrase]  生成签名钥匙（Ed25519 + ML-DSA-65，默认用口令加密），打印公钥
+          jay-server network sign <网络.json> --key <钥匙文件>  网络主人签名并打印连接串
+          jay-server network cosign <连接串或文件> --key <信任钥匙文件> [--prev <上一版>] [--out <文件>]
+              再加一个签名（Jay 信任人离线审核用，够数才算“已审核”）：先逐项显示内容，手打网络编号最后 6 位才签
           jay-server network check <网络.json> ...             只检查格式（注册表的 PR 检查用）
           jay-server network show <连接串或文件>              显示连接串里的内容和签名
           jay-server network dir-key [<网络.json>] --dir <节点数据目录>  打印目录公钥（没有就生成 directory.key），给了网络 JSON 就写进 dirKeys
-          jay-server network root-key --out <钥匙文件>       生成一把信任 / 根钥匙（每个信任人在自己的离线电脑上各生成一把），打印公钥
+          jay-server network root-key --out <钥匙文件> [--paper]  生成一把信任 / 根钥匙（每个信任人在自己的离线电脑上各生成一把），
+              用口令加密；--paper 在屏幕上显示手抄的两行
+          jay-server network key-public --key <钥匙文件>     打印钥匙的公钥、编号和指纹
+          jay-server network paper-check --key <钥匙文件>    照着纸输入两行，核对抄得对不对
+          jay-server network paper-restore --out <钥匙文件>  从纸上的两行恢复钥匙文件
           jay-server network dir-cert --root <根钥匙文件> --network <EasyTier 网络名> --dir-key <目录公钥> --out <证书文件> [--days 365]
               在离线电脑上用根钥匙给节点的目录公钥（dir-key 打印的）签证书，再把证书拷到节点数据目录，命名为 directory.cert
           jay-server network dir-cert --cosign <证书文件> --root <根钥匙文件>
@@ -347,7 +352,7 @@ public static class Program
 
     internal static int NetworkCommand(Options options, TextWriter output, string? root = null)
     {
-        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show|dir-key");
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
         var rest = options.Positional.Skip(1).ToList();
         switch (sub)
         {
@@ -355,28 +360,33 @@ public static class Program
             {
                 var path = options.Get("out") ?? throw new ArgumentException("要用 --out 指定钥匙文件");
                 if (File.Exists(path)) throw new IOException($"{path} 已经存在，不覆盖（换钥匙请换个文件名）");
-                var signer = NetworkSigner.Generate(out var seed);
-                File.WriteAllText(path, Convert.ToBase64String(seed) + "\n");
-                if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                output.WriteLine($"私钥已存到 {path}（不要提交、不要发给别人）");
-                output.WriteLine($"公钥：{Convert.ToBase64String(signer.PublicKey)}");
+                var passphrase = TrustCommands.NewPassphrase(options);
+                var signer = TrustSigner.Generate(out var seed);
+                TrustCommands.WriteKey(path, seed, passphrase);
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(seed);
+                output.WriteLine($"私钥已存到 {path}（{(passphrase is null ? "没有口令" : "已用口令加密")}；不要提交、不要发给别人）");
+                foreach (var line in TrustCommands.PublicLines(signer)) output.WriteLine(line);
                 return 0;
             }
             case "sign":
             {
                 var file = rest.FirstOrDefault() ?? throw new ArgumentException("要给网络 JSON 文件");
-                var keyText = options.Get("key") is { } keyFile ? File.ReadAllText(keyFile)
-                    : Environment.GetEnvironmentVariable("JAY_NETWORK_KEY") ?? throw new ArgumentException("要用 --key 或环境变量 JAY_NETWORK_KEY 给签名钥匙");
+                var keyFile = options.Get("key") ?? throw new ArgumentException("要用 --key 指定网络主人的钥匙文件");
                 var info = ReadNetwork(file);
-                output.WriteLine(NetworkString.Create(info, NetworkSigner.FromSeed(keyText)));
+                output.WriteLine(NetworkString.Create(info, TrustCommands.LoadKey(keyFile)));
                 return 0;
             }
             case "cosign":
             {
                 var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
                 var keyFile = options.Get("key") ?? throw new ArgumentException("要用 --key 指定自己的信任钥匙文件");
-                var signed = NetworkString.Cosign(File.Exists(text) ? File.ReadAllText(text) : text, NetworkSigner.FromSeed(File.ReadAllText(keyFile)));
-                output.WriteLine(signed);
+                var current = File.Exists(text) ? File.ReadAllText(text) : text;
+                var previous = options.Get("prev") is { } prev ? File.Exists(prev) ? File.ReadAllText(prev) : prev : null;
+                var info = NetworkString.Parse(current, now: DateTimeOffset.UtcNow).Info;
+                if (!TrustCommands.ConfirmOnConsole(TrustCommands.DescribeNetwork(current, previous), "网络编号", TrustCommands.CodeOf(info.Id))) return 3;
+                var signed = NetworkString.Cosign(current, TrustCommands.LoadKey(keyFile));
+                if (options.Get("out") is { } outPath) { File.WriteAllText(outPath, signed + "\n"); Console.Error.WriteLine($"已写 {outPath}"); }
+                else output.WriteLine(signed);
                 var parsed = NetworkString.Parse(signed);
                 Console.Error.WriteLine($"签名数 {parsed.Signers.Count}，Jay 信任人 {JayTrust.Quorum.Count(parsed.Signers)}/{JayTrust.Need}{(parsed.Reviewed ? "，已审核" : "")}");
                 return 0;
@@ -417,7 +427,7 @@ public static class Program
                 output.WriteLine($"  {Path.GetFileName(r.KeyPath)}：签名私钥，只自己留着，不要提交、不要发给别人");
                 output.WriteLine($"  {Path.GetFileName(r.NetworkPath)}：网络信息（名字、EasyTier 网络名和密钥、节点）");
                 output.WriteLine($"  {Path.GetFileName(r.ConfigPath)}：网络配置（公告、链接、安全策略），按需修改");
-                output.WriteLine($"签名公钥：{Convert.ToBase64String(r.PublicKey)}");
+                output.WriteLine($"签名钥匙编号：{Convert.ToBase64String(r.KeyId)}");
                 output.WriteLine("下一步：");
                 output.WriteLine($"  1. 改好 config.json，传到一个 https 地址（比如 GitHub Pages），然后：");
                 output.WriteLine($"     jay-server network config-hash {r.ConfigPath} --network {r.NetworkPath} --url https://<地址>/config.json");
@@ -450,23 +460,68 @@ public static class Program
             }
             case "root-key":
             {
-                var path = options.Get("out") ?? throw new ArgumentException("要用 --out 指定根钥匙文件");
+                // A trustee's or directory root's key: Ed25519 + ML-DSA-65 from one seed, sealed with a passphrase.
+                var path = options.Get("out") ?? throw new ArgumentException("要用 --out 指定钥匙文件");
                 if (File.Exists(path)) throw new IOException($"{path} 已经存在，不覆盖（换钥匙请换个文件名）");
-                var signer = NetworkSigner.Generate(out var seed);
-                var write = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
-                if (!OperatingSystem.IsWindows()) write.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-                using (var file = new StreamWriter(path, System.Text.Encoding.ASCII, write)) file.Write(Convert.ToBase64String(seed) + "\n");
+                var passphrase = TrustCommands.NewPassphrase(options);
+                var signer = TrustSigner.Generate(out var seed);
+                TrustCommands.WriteKey(path, seed, passphrase);
+                if (options.Has("paper"))
+                {
+                    // Shown once, on this offline screen only, for copying by hand. Never written to a file.
+                    Console.Error.WriteLine("手抄备份（这是私钥，只抄在纸上，不要拍照）：");
+                    foreach (var line in PaperKey.ToLines(seed)) Console.Error.WriteLine("    " + line);
+                }
                 System.Security.Cryptography.CryptographicOperations.ZeroMemory(seed);
-                output.WriteLine($"根私钥已存到 {path}：离线保管（U 盘、纸），不要放在服务器、CI、网盘或仓库里");
-                output.WriteLine($"根公钥（写进网络 JSON 的 dirRoots）：{Convert.ToBase64String(signer.PublicKey)}");
+                output.WriteLine($"私钥已存到 {path}（{(passphrase is null ? "没有口令" : "已用口令加密")}）：离线保管（U 盘、纸），不要放在服务器、CI、网盘或仓库里");
+                foreach (var line in TrustCommands.PublicLines(signer)) output.WriteLine(line);
                 return 0;
+            }
+            case "key-public":
+            {
+                var path = options.Get("key") ?? throw new ArgumentException("要用 --key 指定钥匙文件");
+                foreach (var line in TrustCommands.PublicLines(TrustCommands.LoadKey(path))) output.WriteLine(line);
+                return 0;
+            }
+            case "paper-check":
+            case "paper-restore":
+            {
+                // Check a hand-copied backup against the key file, or rebuild the key file from paper.
+                Console.Error.WriteLine("照着纸输入两行（空格、横杠、大小写都不要紧）：");
+                byte[] fromPaper;
+                try { fromPaper = PaperKey.FromLines(TrustCommands.AskSecret("第 1 行："), TrustCommands.AskSecret("第 2 行：")); }
+                catch (InvalidDataException e) { output.WriteLine($"✗ {e.Message}"); return 2; }
+                try
+                {
+                    var signer = TrustSigner.FromSeed(Convert.ToBase64String(fromPaper));
+                    if (sub == "paper-check")
+                    {
+                        var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定要核对的钥匙文件");
+                        var stored = TrustKeyFile.ReadSeed(File.ReadAllText(keyPath), () => TrustCommands.AskSecret($"{Path.GetFileName(keyPath)} 的口令："));
+                        var same = System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(stored, fromPaper);
+                        System.Security.Cryptography.CryptographicOperations.ZeroMemory(stored);
+                        output.WriteLine(same ? $"✓ 抄对了（指纹 {TrustCommands.Fingerprint(signer.Id)}）" : "✗ 两行校验都对，但和钥匙文件不是同一把：可能抄成了另一把钥匙");
+                        return same ? 0 : 2;
+                    }
+                    var outPath = options.Get("out") ?? throw new ArgumentException("要用 --out 指定恢复出的钥匙文件");
+                    if (File.Exists(outPath)) throw new IOException($"{outPath} 已经存在，不覆盖");
+                    TrustCommands.WriteKey(outPath, fromPaper, TrustCommands.NewPassphrase(options));
+                    output.WriteLine($"✓ 已恢复到 {outPath}");
+                    foreach (var line in TrustCommands.PublicLines(signer)) output.WriteLine(line);
+                    return 0;
+                }
+                finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(fromPaper); }
             }
             case "dir-cert":
             {
                 var rootFile = options.Get("root") ?? throw new ArgumentException("要用 --root 指定根钥匙文件");
                 if (options.Get("cosign") is { } existing)
                 {
-                    var cosigned = DirectoryCertificate.Cosign(File.ReadAllBytes(existing), NetworkSigner.FromSeed(File.ReadAllText(rootFile)));
+                    var bytes = File.ReadAllBytes(existing);
+                    var before = DirectoryCertificate.Parse(bytes) ?? throw new InvalidDataException("不是有效的目录证书（格式或签名不对）");
+                    if (!TrustCommands.ConfirmOnConsole(TrustCommands.DescribeCertificate(bytes), "目录节点公钥",
+                        TrustCommands.CodeOf(Convert.ToBase64String(before.DirectoryKey).TrimEnd('=')))) return 3;
+                    var cosigned = DirectoryCertificate.Cosign(bytes, TrustCommands.LoadKey(rootFile));
                     File.WriteAllBytes(existing, cosigned);
                     var c = DirectoryCertificate.Parse(cosigned)!;
                     output.WriteLine($"已在 {existing} 上加签名（现在 {c.Signatures.Count} 个，Jay 信任人 {JayTrust.Quorum.Count(c.Signers)}/{JayTrust.Need}）。");
@@ -492,7 +547,10 @@ public static class Program
                     target = Path.Combine(dataDir, "directory.cert");
                 }
                 var expires = DateTimeOffset.UtcNow.AddDays(days);
-                var cert = DirectoryCertificate.Issue(NetworkSigner.FromSeed(File.ReadAllText(rootFile)), directoryKey, networkName, expires);
+                var review = TrustCommands.DescribeCertificateContent(directoryKey, networkName, expires);
+                review.Add("已经签过的：还没有人（你是第一个）");
+                if (!TrustCommands.ConfirmOnConsole(review, "目录节点公钥", TrustCommands.CodeOf(Convert.ToBase64String(directoryKey).TrimEnd('=')))) return 3;
+                var cert = DirectoryCertificate.Issue(TrustCommands.LoadKey(rootFile), directoryKey, networkName, expires);
                 File.WriteAllBytes(target, cert);
                 output.WriteLine($"已写 {target}（到 {expires:yyyy-MM-dd} 有效）。证书不是秘密，可以随节点数据目录一起备份。");
                 return 0;
@@ -518,13 +576,13 @@ public static class Program
                 var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
                 var signed = NetworkString.Parse(File.Exists(text) ? File.ReadAllText(text) : text);
                 output.WriteLine(signed.Info.ToJson().ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                output.WriteLine($"网络主人的钥匙：{Convert.ToBase64String(signed.SignerKey)}（{signed.SignerFingerprint}）");
-                foreach (var k in signed.Signers.Skip(1)) output.WriteLine($"加签：{Convert.ToBase64String(k)}");
+                output.WriteLine($"网络主人的钥匙编号：{Convert.ToBase64String(signed.SignerKey)}（指纹 {TrustCommands.Fingerprint(signed.SignerKey)}）");
+                foreach (var k in signed.Signers.Skip(1)) output.WriteLine($"加签：{TrustCommands.Fingerprint(k)}{(JayTrust.Quorum.Count([k]) == 1 ? "（Jay 信任人）" : "")}");
                 output.WriteLine($"Jay 信任人签了 {JayTrust.Quorum.Count(signed.Signers)}/{JayTrust.Need}{(signed.Reviewed ? "，Jay 审核过" : "，未经 Jay 审核")}");
                 return 0;
             }
             default:
-                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|dir-key|dir-cert");
+                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
         }
     }
 
@@ -1030,7 +1088,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "no-passphrase", "paper"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];
