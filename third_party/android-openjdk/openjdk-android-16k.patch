@@ -2,12 +2,6 @@ diff --git a/set_devkit_path.sh b/set_devkit_path.sh
 index d48aebf..1dfccae 100644
 --- a/set_devkit_path.sh
 +++ b/set_devkit_path.sh
-@@ -30,7 +30,7 @@ export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
- export ANDROID_INCLUDE=$TOOLCHAIN/sysroot/usr/include
- 
- export CPPFLAGS="-I$ANDROID_INCLUDE -I$ANDROID_INCLUDE/$TARGET"
+@@ -39 +39 @@
 -export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib"
 +export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib -Wl,-z,max-page-size=16384"
- 
- export thecc=$TOOLCHAIN/bin/${TARGET}${API}-clang
- export thecxx=$TOOLCHAIN/bin/${TARGET}${API}-clang++
