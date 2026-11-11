@@ -222,6 +222,13 @@ public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, 
 
     /// <summary>The host's Jay account, when the host sent a certificate for the key it proved in the handshake (only after approving).</summary>
     public string? HostJayAccount { get; init; }
+
+    /// <summary>
+    /// The host's direct-link addresses, sent only after approval inside the encrypted reply (direct rooms only).
+    /// Never shown and never put into any code.
+    /// </summary>
+    public DirectAddresses? HostAddresses { get; init; }
+
     public string HostFingerprint => MemberIdentity.FingerprintOf(HostPublicKey);
 }
 
@@ -229,6 +236,12 @@ public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, 
 public static class KnockClient
 {
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// How long a guest may take to gather its own direct-link addresses (STUN, router port mapping) before it acks a
+    /// grant that offered a direct link. The host waits this long plus <see cref="HandshakeTimeout"/> for the ack.
+    /// </summary>
+    public static readonly TimeSpan DirectAnswerTimeout = TimeSpan.FromSeconds(30);
     /// <summary>
     /// How long a guest waits for the host's answer. The host chooses 2 minutes, 10 minutes or "keep waiting"
     /// (<see cref="KnockWaits"/>); the guest cannot know which, so it waits up to an hour and can cancel at any time.
@@ -241,9 +254,15 @@ public static class KnockClient
     /// This device's Jay account certificate (when the player bound a Jay account). Sent only inside the encrypted handshake,
     /// after the host proved its key, and only to hosts that ask for it, so the host can recognize the person on any of their devices.
     /// </param>
+    /// <param name="direct">
+    /// Direct rooms: called after the host approved and sent its addresses (inside the encrypted reply). It gathers this
+    /// side's addresses and returns them; they go back in the encrypted ack. Null, or a null result, sends none (the guest
+    /// then stays on the relay). No address ever travels in a code or before approval.
+    /// </param>
     public static async Task<KnockOutcome> KnockAsync(Stream stream, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct = default, TimeSpan? handshakeTimeout = null, TimeSpan? decisionTimeout = null, Public.DeviceFingerprint? device = null,
-        string? account = null, byte[]? expectedHost = null, Identity.DeviceCertificate? jay = null)
+        string? account = null, byte[]? expectedHost = null, Identity.DeviceCertificate? jay = null,
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
         var psk = LobbyKeys.KnockPsk(invite.Token);
@@ -297,10 +316,35 @@ public static class KnockClient
             if (!CryptographicOperations.FixedTimeEquals(credentials.HostPublicKey, hostPub)) throw new CryptographicException(L.T("core.mp.knock.hostmismatch"));
             // 房主发了验证方案：之后每条成员通道都用本机设备密钥和这把（握手里证明过的）房主公钥互相证明。
             if (credentials.Scheme is { } scheme) credentials.Member!.Attestor = new DeviceAttestor(me, hostPub, scheme);
+            var ackMessage = new JsonObject { ["ack"] = true };
+            DirectAddresses? hostAddresses = null;
+            if (reply["direct"] is JsonObject offer && DirectAddresses.TryParse(offer, out var parsed))
+            {
+                hostAddresses = parsed;
+                if (direct is not null)
+                {
+                    using var gather = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    gather.CancelAfter(DirectAnswerTimeout);
+                    DirectAddresses? mine = null;
+                    try
+                    {
+                        mine = await direct(parsed, gather.Token);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        // Gathering took too long: ack without addresses and stay on the relay.
+                    }
+                    if (mine is not null) ackMessage["direct"] = (mine with { Session = parsed.Session }).ToJson();
+                }
+            }
             using var ack = CancellationTokenSource.CreateLinkedTokenSource(ct);
             ack.CancelAfter(handshakeTimeout ?? HandshakeTimeout);
-            await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(new JsonObject { ["ack"] = true })), ack.Token);
-            return new KnockOutcome(credentials, null, hostPub) { HostJayAccount = Identity.DeviceCertificate.VerifiedAccount(reply["jay"], hostPub) };
+            await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(ackMessage)), ack.Token);
+            return new KnockOutcome(credentials, null, hostPub)
+            {
+                HostJayAccount = Identity.DeviceCertificate.VerifiedAccount(reply["jay"], hostPub),
+                HostAddresses = hostAddresses,
+            };
         }
     }
 }
@@ -645,6 +689,15 @@ public sealed class KnockServer : IAsyncDisposable
     /// </summary>
     public Func<bool>? AlwaysAsk { get; init; }
 
+    /// <summary>
+    /// Direct rooms: this host's direct-link addresses, added to the encrypted reply of every approved knock (never to a
+    /// refusal, never before approval). Null or a null result: no direct link is offered.
+    /// </summary>
+    public Func<DirectAddresses?>? DirectOffer { get; init; }
+
+    /// <summary>An approved guest sent its direct-link addresses in the encrypted ack (only after a <see cref="DirectOffer"/>).</summary>
+    public event Action<KnockRequest, MemberEntry, DirectAddresses>? DirectAnswered;
+
     /// <summary>Whether the host trusts a Jay account (any device the account certified). Null: trust goes by device key only.</summary>
     public Func<string, bool>? IsTrustedJayAccount { get; init; }
 
@@ -869,6 +922,7 @@ public sealed class KnockServer : IAsyncDisposable
                     member.Attests = attestation is not null;
                     reply = (_credentials() with { Member = member.Key, Scheme = attestation?.Scheme }).ToJson();
                     if (JayCertificate?.Invoke() is { } hostCert && hostCert.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["jay"] = hostCert.ToJson();
+                    if (DirectOffer?.Invoke() is { } offered) reply["direct"] = offered.ToJson();
                 }
                 else reply = Reject("denied");
                 _log?.Invoke(L.F(member is not null ? "core.mp.knock.approved" : "core.mp.knock.rejected", request.Name, request.Fingerprint));
@@ -887,12 +941,18 @@ public sealed class KnockServer : IAsyncDisposable
                     throw;
                 }
                 if (member is null) return;
-                var sealedAck = await KnockProtocol.ReadFrameAsync(stream, answer.Token);
+                // A direct offer gives the guest time to gather its own addresses before it acks.
+                using var ackWait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                ackWait.CancelAfter(_limits.HandshakeTimeout + (reply.ContainsKey("direct") ? KnockClient.DirectAnswerTimeout : TimeSpan.Zero));
+                var sealedAck = await KnockProtocol.ReadFrameAsync(stream, ackWait.Token);
                 var ack = KnockProtocol.ParseJson(receive.DecryptWithAd([], sealedAck));
                 if (ack["ack"]?.GetValue<bool>() == true)
                 {
                     _members.Confirm(member);
                     Admitted?.Invoke(request);
+                    if (reply["direct"] is JsonObject sent && ack["direct"] is JsonObject answered && DirectAddresses.TryParse(answered, out var guestAddresses)
+                        && sent["s"]?.GetValue<string>() == guestAddresses.Session)
+                        DirectAnswered?.Invoke(request, member, guestAddresses);
                 }
             }
         }

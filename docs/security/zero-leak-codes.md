@@ -14,7 +14,9 @@ Codes that must travel are either public by design (a public key) or never leave
 | Contact code `JAYC1-…` | Anywhere (public) | Sending that person mail they still have to accept. Not reading their mail, not posing as them. |
 | Emoji check (4 emoji) | Voice, in person, video | Nothing; it is only compared. |
 | Room invite sent by mail | Sealed mail through the directories | Nothing: sealed to one recipient, bound to that recipient's key, names the host's key. |
-| Old `JAY2-` / `JAY2D-` codes | Still accepted (LAN, offline, older Jay) | As before. Mailing an invite is the new default path; the old codes are the fallback. |
+| Plain `JAY2-` invite | Still accepted (LAN, offline) | Knocking with a one-use token the host still has to approve. No IP, port or room secret in it. |
+| Sealed direct code `JAYDS1-` / reply `JAYDR1-` | Anywhere; the 16-digit passphrase by another way (call, in person) | Nothing without the passphrase: the addresses and the invite inside are encrypted. With both, the host's IP and a one-use, 10-minute invite the host still approves. |
+| `JAY2D-` / `JAY2R-` direct codes | Removed: refused with a hint to send a `JAY2-` invite | They carried both sides' public IPs. Direct rooms now hand out plain `JAY2-` invites. |
 
 ## Contact codes
 
@@ -126,10 +128,37 @@ No trustee key goes on a server, CI, a cloud drive, a chat or the repository. Ce
 re-keyed node needs only a new certificate, not a Jay release. If one trustee loses their key, the other two can still
 sign; replacing a trustee needs a release with the new public key.
 
+## Direct links without an IP in any code (done)
+
+A direct room hands out a plain `JAY2-` invite. The guest knocks over the lobby (relay, LAN or public network) as for any
+room. Only when the host approves does the encrypted knock reply carry the host's addresses (`"direct"`, built from
+`DirectAddresses`); the guest answers with its own inside the encrypted ack, tagged with the host's session id. Then both
+sides punch at once, and the room falls back to the relays if that fails. Someone who copies the invite learns no address
+of either side, and a rejected or expired knock gets none either. The bridge's control messages (authenticated, not
+encrypted) carry only the session id. `JAY2D-` / `JAY2R-` are refused.
+
+## Direct links with no server at all: sealed codes
+
+For two people with no relay, no public network and no shared LAN. `Multiplayer/SealedDirect.cs`:
+
+- The host's `JAYDS1-` code holds its `DirectAddresses` and a one-use JAY2 invite, encrypted. Jay makes up a
+  16-digit passphrase (about 53 bits); the host tells it by another way. The key is Argon2id(passphrase, 16-byte salt
+  in the code; 64 MiB, 3 passes), and HKDF-SHA256 splits it into an offer key, a reply key and a 4-byte key id. Both codes
+  use ChaCha20-Poly1305 with the prefix (and salt or key id) as associated data.
+- The friend opens it, gets a `JAYDR1-` reply sealed under the same passphrase (no second passphrase), and sends it
+  back. Both sides punch; the friend knocks over the bridge, which reaches only the host's lobby, and the host approves
+  as usual.
+- Each code expires after 10 minutes (the time is inside the ciphertext); a code dated far ahead is refused.
+- Limits, said in the UI: whoever holds both the code and the passphrase can read the IP, so they must not be pasted
+  together. A stolen code is an offline guessing target for the passphrase; 53 bits behind 64 MiB of Argon2id per guess
+  makes that impractical (centuries at a million guesses a second).
+
 ## Still to do
 
-- **Direct links without an IP in the code**: rendezvous through mail (each side mails its candidates, sealed), so
-  JAY2D/JAY2R no longer carry public IPs.
+- **Server and network codes without an address**: `JAYS1-` (Jay server), `JAYNET` (public network) and `AMBNODE`
+  (relay share) still name a host or IP. Plan: a short token or ID resolved through a signed directory entry or the
+  directory rendezvous, so the code itself names nothing.
+
 - **Relay enrollment the other way around**: a relay generates its own key and the admin approves its fingerprint, so
   JAYR1 codes carry no secret.
 - **Jay server invites (JAYS1) bound to the player's identity key**, the same way room invites are.

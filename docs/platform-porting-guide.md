@@ -220,7 +220,7 @@ EasyTier（组网，P2P 或经节点中继）
 
 #### 直连房间 🟡
 
-`DirectLink.cs`、`DirectSession.cs`：`JAY2D-`（邀请）/ `JAY2R-`（回复）码，依次试 IPv6 直连、路由器端口映射（`PortMapping.cs`，UPnP IGD 和 NAT-PMP）、同局域网、IPv4 打洞（`Stun.cs` 判断 NAT 类型，严格 NAT 时做端口预测和“生日”喷洒），多人时由能连上的成员中转，都不行再用节点。
+`DirectLink.cs`、`DirectSession.cs`：直连房间发的是普通 `JAY2-` 邀请，码里没有地址；房主批准后双方的地址（`DirectAddresses`）只在加密的敲门回复和确认里交换（`KnockServer.DirectOffer` / `KnockClient.KnockAsync` 的 `direct`），然后依次试 IPv6 直连、路由器端口映射（`PortMapping.cs`，UPnP IGD 和 NAT-PMP）、同局域网、IPv4 打洞（`Stun.cs` 判断 NAT 类型，严格 NAT 时做端口预测和“生日”喷洒），多人时由能连上的成员中转，都不行再用节点。
 
 平台注意点：
 - Windows 上对 UDP 套接字设了 `SIO_UDP_CONNRESET = 0`，避免收到 ICMP 端口不可达时整个套接字报错。其他平台不需要。
@@ -265,7 +265,7 @@ EasyTier（组网，P2P 或经节点中继）
 
 #### 敏感文字和剪贴板 ✅
 
-邀请码、直连码在界面上默认打码；复制后 60 秒，如果剪贴板里还是这段文字就清掉（`App/Services/SensitiveClipboard.cs`，只用 Avalonia 的剪贴板接口，三平台一样）。日志和诊断里不写任何密钥或码。
+邀请码在界面上默认打码；复制后 60 秒，如果剪贴板里还是这段文字就清掉（`App/Services/SensitiveClipboard.cs`，只用 Avalonia 的剪贴板接口，三平台一样）。日志和诊断里不写任何密钥或码。
 
 可以改进的平台细节：
 - Windows 的剪贴板历史（Win+V）和云同步会留一份，可以在设置剪贴板时加 `ExcludeClipboardContentFromMonitorProcessing` 格式（要绕过 Avalonia 直接调 Win32）。

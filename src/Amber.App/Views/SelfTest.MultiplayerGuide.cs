@@ -172,27 +172,23 @@ internal sealed partial class SelfTest
         Check("开房间：填端口后卡片上写出来", vm.HasHostGame
             && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == L.F("multiplayer.guide.port_ready", 25565)));
 
-        // A direct invite in the join box moves to the direct box under "more ways".
-        vm.MoreWaysOpen = false;
-        const string directInvite = "JAY2D-eyJ2IjoxfQ";
-        Dispatcher.UIThread.Invoke(() => roomCode!.Text = directInvite);
-        Check("加入框里的直连邀请：点加入", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
-        await Task.Delay(300);
-        var directCode = await FindAsync<TextBox>(t => t.PlaceholderText == L.T("multiplayer.direct.invite_placeholder"));
-        Check("直连邀请转到“更多方式”的直连框", vm.MoreWaysOpen && roomCode!.Text == "" && directCode?.Text == directInvite && vm.IsIdle);
-        Dispatcher.UIThread.Invoke(() => directCode!.Text = relayInvite);
-        Check("直连框的邀请码转到加入框", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinDirectCommand)))
-            && directCode!.Text == "" && roomCode!.Text == relayInvite);
+        // Old direct codes (JAY2D / JAY2R) carried public IPs: the join box refuses them and asks for a plain invite.
+        foreach (var oldDirect in new[] { "JAY2D-eyJ2IjoxfQ", "JAY2R-eyJ2IjoxfQ" })
+        {
+            Dispatcher.UIThread.Invoke(() => roomCode!.Text = oldDirect);
+            Check($"加入框里的旧直连码（{oldDirect[..5]}）：点加入", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
+            await Task.Delay(300);
+            Check($"旧直连码（{oldDirect[..5]}）提示改发普通邀请", vm.Status == L.T("multiplayer.direct.old_code") && vm.IsIdle && !vm.IsKnocking, vm.Status);
+        }
+        // A sealed direct code (no server, no readable IP): the passphrase box shows, and Join without it does nothing.
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = "JAYDS1-QUJDREVGR0hJSktMTU5PUA");
         await Task.Delay(200);
-        vm.CancelKnockCommand.Execute(null);
-        Dispatcher.UIThread.Invoke(() => { roomCode!.Text = ""; directCode!.Text = "AMB-K7Q2M9XD-4HZP8RW2N6TC-25565"; });
-        Check("直连框的旧房间码提示对方更新", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinDirectCommand)))
-            && vm.Status == L.T("multiplayer.invite.old_code") && vm.IsIdle, vm.Status);
-        Dispatcher.UIThread.Invoke(() => directCode!.Text = "JAY2R-eyJ2IjoxfQ");
-        Check("直连框：点击加入识别回复码", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinDirectCommand))));
+        var passphraseBox = await FindAsync<TextBox>(t => t.Name == "JoinPassphraseBox");
+        Check("加密直连码：出现口令框", passphraseBox is { IsEffectivelyVisible: true });
+        Check("加密直连码：没填口令点加入只提示", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
         await Task.Delay(200);
-        Check("回复码误贴时提示交给房主", vm.Status == L.T("multiplayer.code.reply_misplaced") && vm.IsIdle);
-        Dispatcher.UIThread.Invoke(() => { directCode!.Text = ""; port!.Text = ""; });
+        Check("加密直连码：提示输入口令、不敲门", vm.Status == L.T("multiplayer.sealed.enter_passphrase") && vm.IsIdle && !vm.IsKnocking, vm.Status);
+        Dispatcher.UIThread.Invoke(() => { roomCode!.Text = ""; port!.Text = ""; });
         vm.MoreWaysOpen = false;
         vm.SetStatus(null);
 

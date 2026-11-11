@@ -283,6 +283,6 @@ public sealed class GatePastedCodeTests
     [InlineData("JAYS1-04632E9J5RRKCE1E64Q34C", PastedCodeKind.JayServer)]
     [InlineData("来玩：jays1-04632e9j5rrkce", PastedCodeKind.JayServer)]
     [InlineData("JAY2-ABCDEF", PastedCodeKind.Invite)]
-    [InlineData("JAY2D-ABCDEF", PastedCodeKind.DirectInvite)]
+    [InlineData("JAY2D-ABCDEF", PastedCodeKind.OldDirect)]
     public void Detects(string text, PastedCodeKind kind) => Assert.Equal(kind, PastedCode.Detect(text));
 }

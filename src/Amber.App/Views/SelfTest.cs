@@ -1651,37 +1651,42 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
             }
         });
 
+        // 直连房间也只发普通邀请（JAY2-）：加入方经中继敲门，批准后两边在加密的敲门里交换地址，再打洞。
+        var relayPort = Amber.Core.Multiplayer.EasyTierArgs.FreeTcpPort();
+        host.TestListeners = [$"tcp://127.0.0.1:{relayPort}"];
+        host.TestPeers = [];
         host.DirectSimulate = true;
         host.DirectUseNodes = false;
         host.DebugMode = true;
         host.ManualPort = gamePort.ToString();
         await host.CreateDirectRoomCommand.ExecuteAsync(null);
-        Check("直连：创建房间并生成直连邀请码（JAY2D-）", host.IsDirect && host.MyDirectCode.StartsWith("JAY2D-", StringComparison.Ordinal), host.Status);
-        Check("直连：邀请码默认打码", host.MyDirectCodeDisplay.Contains('•') && !host.MyDirectCodeDisplay.Contains(host.MyDirectCode[6..^4]), host.MyDirectCodeDisplay);
+        var directInvite = host.TestInviteText ?? "";
+        Check("直连：创建房间，发的是普通邀请（JAY2-）", host.IsDirect && directInvite.StartsWith(Amber.Core.Multiplayer.JayInvite.Prefix, StringComparison.Ordinal), host.Status);
+        Check("直连：邀请默认打码", host.InviteDisplay.Contains('•') && !host.InviteDisplay.Contains(directInvite[5..^4]), host.InviteDisplay);
+        Check("直连：邀请里没有任何地址（不含 IP、不含端口）", !ContainsAddress(directInvite) && !directInvite.Contains("127.0.0.1"), directInvite.Length.ToString());
         var hostSecrets = host.RoomSecretsForTest;
-        Check("直连：邀请码里没有房间的网络名和密钥", hostSecrets.Count > 0 && hostSecrets.All(s => !DecodedDirect(host.MyDirectCode).Contains(s, StringComparison.OrdinalIgnoreCase)));
+        Check("直连：邀请里没有房间的网络名和密钥", hostSecrets.Count > 0 && hostSecrets.All(s => !directInvite.Contains(s, StringComparison.OrdinalIgnoreCase)));
         await ShotAsync("直连房主");
 
         var guest = host.CreateTestPeer();
         guest.Activate();
         guest.DirectSimulate = true;
         guest.DirectUseNodes = false;
-        guest.DirectInviteInput = "AMBDIRECT1-eyJhIjoxfQ";
-        await guest.JoinDirectCommand.ExecuteAsync(null);
-        Check("直连：旧版直连码不认，提示更新", guest.IsIdle && guest.Status.Contains("旧版本"), guest.Status);
-        guest.DirectInviteInput = host.MyDirectCode;
-        var joining = guest.JoinDirectCommand.ExecuteAsync(null);
-        // 打通后先经直连桥进大厅敲门：房主批准前，这条桥只到大厅。
+        guest.TestPeers = [$"tcp://127.0.0.1:{relayPort}"];
+        guest.JoinCode = "JAY2D-eyJhIjoxfQ";
+        await guest.JoinCommand.ExecuteAsync(null);
+        Check("直连：旧的直连码（JAY2D-，带公网 IP）不认，提示更新", guest.IsIdle && guest.Status == L.T("multiplayer.direct.old_code"), guest.Status);
+        guest.JoinCode = directInvite;
+        var joining = guest.JoinCommand.ExecuteAsync(null);
+        // 经中继敲门：房主批准前，两边都还没拿到对方的地址，也没有直连桥。
         var knocked = await WaitAsync(() => host.ApprovalCards.Count == 1, 90);
-        Check("直连：经直连桥敲门，房主看到批准卡片", knocked, guest.Status);
-        Check("直连：批准前加入方还没进房间、直连桥只到大厅", guest.DirectForTest?.HasRoom == false
-            && host.DirectForTest?.Bridge?.Peers is { Count: 1 } before && !before.First().Admitted, guest.Status);
-        Check("直连：加入方生成回复码（JAY2R-，默认打码）", guest.MyDirectCode.StartsWith("JAY2R-", StringComparison.Ordinal) && guest.MyDirectCodeDisplay.Contains('•'));
+        Check("直连：经中继敲门，房主看到批准卡片", knocked, guest.Status);
+        Check("直连：批准前加入方没有直连会话、房主的直连桥上没有人", guest.DirectForTest is null && host.DirectForTest?.Bridge?.Peers is { Count: 0 }, guest.Status);
         if (knocked) host.ApproveKnockCommand.Execute(host.ApprovalCards[0]);
         await joining;
         Check("直连：批准后加入房间", guest.IsDirect && guest.IsJoined, guest.Status);
         Check("直连：证明了成员身份，直连桥接到房间", host.DirectForTest?.Bridge?.Peers is { Count: 1 } after && after.First().Admitted);
-        Check("直连：邀请用完后不再接新的直连", host.DirectForTest?.Bridge?.AcceptingNewPeers?.Invoke() == false && host.PendingInvites.Count == 0, host.PendingInvites.Count.ToString());
+        Check("直连：邀请用完了（直连桥只在批准后的几分钟里接这个人）", host.PendingInvites.Count == 0, host.PendingInvites.Count.ToString());
         Check("直连：房主的成员列表里有这个人", await WaitAsync(() => host.Members.Count == 1, 10), string.Join(" | ", host.Members.Select(m => m.Label)));
 
         string? reply = null;
@@ -1724,8 +1729,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var report = Path.Combine(reportDir, "direct-report.txt");
         host.ExportDiagnostics(report);
         var text = File.ReadAllText(report);
-        Check("直连：诊断报告去掉了房间密钥和直连码", File.Exists(report) && host.RoomSecretsForTest.All(s => !text.Contains(s, StringComparison.OrdinalIgnoreCase))
-            && !text.Contains(host.MyDirectCode[6..]) && !text.Contains(guest.MyDirectCode[6..]) && text.Contains("全条件测试结果"), $"{text.Length} 字");
+        Check("直连：诊断报告去掉了房间密钥和邀请", File.Exists(report) && host.RoomSecretsForTest.All(s => !text.Contains(s, StringComparison.OrdinalIgnoreCase))
+            && !text.Contains(directInvite[5..]) && text.Contains("全条件测试结果"), $"{text.Length} 字");
 
         // 踢出直连成员：他的直连桥马上断开，他那边看到“你已被移出房间”并停止联机。
         var member = host.Members.First();
@@ -1738,6 +1743,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         host.StopCommand.Execute(null);
         host.DebugMode = false;
         host.DirectSimulate = false;
+        host.TestListeners = null;
+        host.TestPeers = null;
         stopServer.Cancel();
         server.Stop();
         await Task.Delay(3000);
@@ -1748,13 +1755,9 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
 
     private static string AppSettingsDataDir() => Amber.App.Services.AppSettings.DataDir;
 
-    /// <summary>直连码的正文（base64url 解开后的 JSON）。</summary>
-    private static string DecodedDirect(string code)
-    {
-        var b64 = code[6..].Replace('-', '+').Replace('_', '/');
-        b64 += new string('=', (4 - b64.Length % 4) % 4);
-        return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(b64));
-    }
+    /// <summary>Whether the text holds anything that parses as an IP address (dotted IPv4 or an IPv6 with colons).</summary>
+    private static bool ContainsAddress(string text) =>
+        System.Text.RegularExpressions.Regex.IsMatch(text, @"\b\d{1,3}(\.\d{1,3}){3}\b|[0-9A-Fa-f]{0,4}:[0-9A-Fa-f]{0,4}:[0-9A-Fa-f:]+");
 
     /// <summary>房主开“邀请朋友”对话框、生成一张邀请；界面上默认打码，返回完整的码。</summary>
     private async Task<string> CreateInviteAsync(MultiplayerViewModel host, int uses, bool auto)

@@ -9,8 +9,9 @@ using Amber.Core.Multiplayer.Transport;
 namespace Amber.Core.Tests;
 
 /// <summary>
-/// 直连码不带密钥（JAY2D- / JAY2R-），桥钥匙来自邀请里的大厅密钥，批准前直连桥只能到大厅，
-/// 批准后证明成员身份才接到房间；踢出断开桥；换网络时桥不动；旧版直连码不认。
+/// Direct links: the room hands out a plain JAY2 invite (no address in any code); the two sides' addresses travel only
+/// inside the encrypted knock, and only after approval. 桥钥匙来自邀请里的大厅密钥，批准前直连桥只能到大厅，
+/// 批准后证明成员身份才接到房间；踢出断开桥；换网络时桥不动；旧的 JAY2D / JAY2R 码不认。
 /// </summary>
 public sealed class DirectInviteTests
 {
@@ -33,45 +34,46 @@ public sealed class DirectInviteTests
         new(PathKind.Lan, IPEndPoint.Parse("192.168.1.5:40000")),
     ];
 
-    private static string BodyOf(string code)
-    {
-        var b64 = code[6..].Replace('-', '+').Replace('_', '/');
-        b64 += new string('=', (4 - b64.Length % 4) % 4);
-        return Encoding.UTF8.GetString(Convert.FromBase64String(b64));
-    }
-
-    private static string Encode(string prefix, JsonObject json) =>
-        prefix + Convert.ToBase64String(Encoding.UTF8.GetBytes(json.ToJsonString())).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-
-    // ---- 码 ----
+    // ---- Addresses: only inside the encrypted knock, never in a code ----
 
     [Fact]
-    public void InviteAndReplyRoundTrip()
+    public void AddressesRoundTripThroughTheKnockJson()
     {
-        var invite = new DirectCode(false, "abcdef0123456789", NatKind.Cone, SomeAddresses, DirectTestKeys.Invite);
-        var text = invite.Encode();
-        Assert.StartsWith("JAY2D-", text);
-        Assert.True(DirectCode.TryParse("朋友发来：" + text + " 快来", out var parsed, out _));
-        Assert.False(parsed.IsReply);
-        Assert.Equal(invite.Candidates, parsed.Candidates);
-        Assert.Equal(DirectTestKeys.Invite.ToString(), parsed.Invite!.ToString());
+        var addresses = new DirectAddresses("abcdef0123456789", NatKind.Cone, SomeAddresses);
+        var json = addresses.ToJson();
+        Assert.Equal(["c", "n", "s"], json.Select(p => p.Key).Order(StringComparer.Ordinal));
+        Assert.True(DirectAddresses.TryParse(JsonNode.Parse(json.ToJsonString())!.AsObject(), out var parsed));
+        Assert.Equal("abcdef0123456789", parsed.Session);
+        Assert.Equal(NatKind.Cone, parsed.Nat);
+        Assert.Equal(SomeAddresses, parsed.Candidates);
         Assert.True(parsed.DirectlyReachable);
-
-        var reply = new DirectCode(true, "abcdef0123456789", NatKind.Symmetric, [new Candidate(PathKind.Punch, IPEndPoint.Parse("198.51.100.7:40001"))]);
-        var replyText = reply.Encode();
-        Assert.StartsWith("JAY2R-", replyText);
-        Assert.True(DirectCode.TryParse(replyText, out var r, out _));
-        Assert.True(r.IsReply);
-        Assert.Null(r.Invite);
-        Assert.False(r.DirectlyReachable);
-        // 打码显示只露出前缀和最后 4 位。
-        Assert.Equal("JAY2D-", invite.Masked[..6]);
-        Assert.DoesNotContain(text[6..^4], invite.Masked);
+        Assert.False(new DirectAddresses("abcdef0123456789", NatKind.Symmetric, [SomeAddresses[1]]).DirectlyReachable);
+        // ToString ends up in logs and exceptions: no address in it.
+        Assert.DoesNotContain("203.0.113.5", addresses.ToString());
+        Assert.DoesNotContain("2408:8000", addresses.ToString());
     }
 
-    /// <summary>直连码里没有房间的网络名、密钥和成员钥匙；回复码里只有会话、NAT 和地址。</summary>
     [Fact]
-    public void CodesCarryNoRoomSecretsOrMemberKeys()
+    public void BadAddressesAreRefusedOrSkipped()
+    {
+        Assert.False(DirectAddresses.TryParse(null, out _));
+        Assert.False(DirectAddresses.TryParse(new JsonObject { ["s"] = "short", ["n"] = "Cone", ["c"] = new JsonArray() }, out _));
+        Assert.False(DirectAddresses.TryParse(new JsonObject { ["s"] = "abc/def0123456789", ["c"] = new JsonArray() }, out _));
+        Assert.False(DirectAddresses.TryParse(new JsonObject { ["s"] = 5 }, out _));
+        // Unknown kinds, broken endpoints, port 0 and wrong shapes are skipped; the count is capped.
+        var items = new JsonArray(
+            new JsonArray("Nope", "1.2.3.4:5"), new JsonArray("Punch", "not-an-address"), new JsonArray("Punch", "1.2.3.4:0"),
+            new JsonArray(1, 2), JsonValue.Create("x"), new JsonArray("Punch", "198.51.100.7:40001"));
+        for (var i = 0; i < 40; i++) items.Add(new JsonArray("Lan", $"192.168.1.{i + 1}:40000"));
+        Assert.True(DirectAddresses.TryParse(new JsonObject { ["s"] = "abcdef0123456789", ["n"] = "Weird", ["c"] = items }, out var parsed));
+        Assert.Equal(NatKind.Unknown, parsed.Nat);
+        Assert.Equal(DirectAddresses.MaxCandidates, parsed.Candidates.Count);
+        Assert.Equal(new Candidate(PathKind.Punch, IPEndPoint.Parse("198.51.100.7:40001")), parsed.Candidates[0]);
+    }
+
+    /// <summary>A direct room hands out a plain JAY2 invite: no IP, no port, no room secret, no member key.</summary>
+    [Fact]
+    public void DirectRoomInviteCarriesNoAddressOrSecret()
     {
         using var host = X25519KeyPair.Generate();
         var credentials = RoomCredentials.Create(host.PublicKey, 25565, TunnelSettings.Default);
@@ -79,77 +81,42 @@ public sealed class DirectInviteTests
         var room = credentials.ToHostRoom(members, "Host");
         var guest = members.Issue(RandomNumberGenerator.GetBytes(32), "Steve");
         var book = new InviteBook { KeepLobbyKey = true };
-        var pending = book.Create(1, TimeSpan.FromMinutes(10), false, credentials.Tunnel);
-        var inviteText = new DirectCode(false, "abcdef0123456789", NatKind.Cone, SomeAddresses, pending.Invite).Encode();
-        var replyText = new DirectCode(true, "abcdef0123456789", NatKind.Cone, SomeAddresses).Encode();
-        foreach (var body in new[] { BodyOf(inviteText), BodyOf(replyText), inviteText, replyText })
+        var text = book.Create(1, TimeSpan.FromMinutes(10), false, credentials.Tunnel).Invite.ToString();
+        Assert.StartsWith(JayInvite.Prefix, text);
+        Assert.False(OldDirectCodes.Contains(text));
+        Assert.DoesNotMatch(@"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", text);
+        Assert.DoesNotContain("25565", text);
+        foreach (var secret in room.Secrets) Assert.DoesNotContain(secret, text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(credentials.Secret, text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(credentials.Network, text, StringComparison.OrdinalIgnoreCase);
+        foreach (var key in new[] { room.Member!, guest.Key })
         {
-            foreach (var secret in room.Secrets) Assert.DoesNotContain(secret, body, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(credentials.Secret, body, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain(credentials.Network, body, StringComparison.OrdinalIgnoreCase);
-            foreach (var key in new[] { room.Member!, guest.Key })
-            {
-                Assert.DoesNotContain(key.PskBase64, body);
-                Assert.DoesNotContain(Convert.ToHexString(key.CopyPsk()), body, StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain(key.IdHex, body, StringComparison.OrdinalIgnoreCase);
-            }
+            Assert.DoesNotContain(key.PskBase64, text);
+            Assert.DoesNotContain(key.IdHex, text, StringComparison.OrdinalIgnoreCase);
         }
-        Assert.Equal(["c", "n", "s", "v"], JsonNode.Parse(BodyOf(replyText))!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal));
-        Assert.Equal(["c", "i", "n", "s", "v"], JsonNode.Parse(BodyOf(inviteText))!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal));
     }
 
+    /// <summary>The removed direct codes (JAY2D / JAY2R carried both sides' public IPs; AMBDIRECT / AMBREPLY older still) are refused.</summary>
     [Theory]
+    [InlineData("JAY2D-eyJ2IjoxfQ")]
+    [InlineData("来直连：jay2d-eyJ2IjoxfQ 快来")]
+    [InlineData("JAY2R-eyJ2IjoxfQ")]
     [InlineData("AMBDIRECT1-eyJhIjoxfQ")]
     [InlineData("来直连：ambdirect1-eyJyIjoiQU1CLUs3UTJNOVhELTRIWlA4UlcyTjZUQy0yNTU2NSJ9")]
     [InlineData("AMBREPLY1-eyJhIjoxfQ")]
-    public void OldDirectCodesAreRejectedWithTheUpdateHint(string text)
+    public void OldDirectCodesAreRefused(string text)
     {
-        Assert.False(DirectCode.TryParse(text, out _, out var error));
-        Assert.Contains("旧版本", error);
-        Assert.True(DirectCode.LooksLikeOldCode(text));
+        Assert.True(OldDirectCodes.Contains(text));
         Assert.Equal(PastedCodeKind.OldDirect, PastedCode.Detect(text));
+        Assert.False(JayInvite.TryParse(text, out _));
     }
 
     [Fact]
-    public void BadCodesAreRejected()
+    public void DiagnosticsStillRedactOldDirectCodes()
     {
-        var good = JsonNode.Parse(BodyOf(new DirectCode(false, "abcdef0123456789", NatKind.Cone, SomeAddresses, DirectTestKeys.Invite).Encode()))!.AsObject();
-        var newer = good.DeepClone().AsObject();
-        newer["v"] = 2;
-        Assert.False(DirectCode.TryParse(Encode("JAY2D-", newer), out _, out var error));
-        Assert.Contains("第 2 版", error);
-        Assert.False(DirectCode.TryParse("JAY2D-!!!!", out _, out error));
-        Assert.Contains("损坏", error);
-        Assert.False(DirectCode.TryParse("hello", out _, out error));
-        Assert.Contains("没认出", error);
-        // 邀请码少了邀请、回复码带了邀请、多了别的字段（比如塞进来的密钥）：都不认。
-        var noInvite = good.DeepClone().AsObject();
-        noInvite.Remove("i");
-        Assert.False(DirectCode.TryParse(Encode("JAY2D-", noInvite), out _, out _));
-        Assert.False(DirectCode.TryParse(Encode("JAY2R-", good.DeepClone().AsObject()), out _, out _));
-        var extra = good.DeepClone().AsObject();
-        extra["r"] = "AMB-K7Q2M9XD-4HZP8RW2N6TC-25565";
-        Assert.False(DirectCode.TryParse(Encode("JAY2D-", extra), out _, out _));
-        var badSession = good.DeepClone().AsObject();
-        badSession["s"] = "short";
-        Assert.False(DirectCode.TryParse(Encode("JAY2D-", badSession), out _, out _));
-    }
-
-    [Theory]
-    [InlineData("JAY2D-eyJ2IjoxfQ", PastedCodeKind.DirectInvite)]
-    [InlineData("来直连：jay2d-eyJ2IjoxfQ 快来", PastedCodeKind.DirectInvite)]
-    [InlineData("JAY2R-eyJ2IjoxfQ", PastedCodeKind.DirectReply)]
-    public void PastedCodeRecognizesDirectCodes(string text, PastedCodeKind kind) => Assert.Equal(kind, PastedCode.Detect(text));
-
-    [Fact]
-    public void DiagnosticsRedactDirectCodes()
-    {
-        var invite = new DirectCode(false, "abcdef0123456789", NatKind.Cone, SomeAddresses, DirectTestKeys.Invite).Encode();
-        var reply = new DirectCode(true, "abcdef0123456789", NatKind.Cone, SomeAddresses).Encode();
-        var text = NetDiagnostics.Redact($"invite {invite} reply {reply.ToLowerInvariant()}", [], includePublicIps: true);
-        Assert.DoesNotContain(invite[6..], text);
-        Assert.DoesNotContain(reply[6..].ToLowerInvariant(), text);
-        Assert.Contains("JAY2D-<直连码已隐藏>", text);
+        var text = NetDiagnostics.Redact("invite JAY2D-eyJjIjpbWyJQdW5jaCIsIjIwMy4wLjExMy41OjUxMjM0Il1dfQ reply jay2r-eyJ2IjoxfQ", [], includePublicIps: true);
+        Assert.DoesNotContain("eyJjIjpbWyJQdW5jaCIsIjIwMy4wLjExMy41OjUxMjM0Il1dfQ", text);
+        Assert.DoesNotContain("eyJ2IjoxfQ", text);
     }
 
     // ---- 桥钥匙 ----
@@ -193,7 +160,7 @@ public sealed class DirectInviteTests
             Lobby = new UdpClient(new IPEndPoint(IPAddress.Loopback, Host.LobbyUdpPort!.Value));
         }
 
-        public Task<DirectCode> PrepareAsync() => Host.PrepareAsync();
+        public Task<DirectAddresses> PrepareAsync() => Host.PrepareAsync();
 
         public RoomCode Admit(byte[] guestPub, string name) =>
             (Credentials with { Member = Members.Issue(guestPub, name).Key }).ToRoom();
@@ -231,25 +198,39 @@ public sealed class DirectInviteTests
         return null;
     }
 
+    /// <summary>
+    /// The knock exchange, without the knock: the guest answers the host's offer, the host punches towards the guest's
+    /// addresses, then the guest completes the join with the room the host approved it into.
+    /// </summary>
+    private static async Task<bool> JoinAsync(DirectRoom host, DirectSession guest, RoomCode room, Func<Task>? beforeJoin = null)
+    {
+        var mine = await guest.AnswerAsync(host.Host.Offer()!);
+        Assert.NotNull(mine);
+        Assert.Equal(host.Host.LocalAddresses!.Session, mine!.Session);
+        var hostPunch = host.Host.AddGuestAsync(mine);
+        if (beforeJoin is not null) await beforeJoin();
+        var joined = await guest.CompleteJoinAsync(room);
+        Assert.True(await hostPunch.WaitAsync(Deadline));
+        return joined;
+    }
+
     /// <summary>批准之前，加入方经直连桥的数据只到大厅；证明了成员身份之后才到房间。</summary>
     [Fact]
     public async Task BridgeReachesOnlyTheLobbyUntilTheGuestProvesMembership()
     {
         await using var host = new DirectRoom();
-        var invite = (await host.PrepareAsync()) with { IsReply = false, Invite = DirectTestKeys.Invite };
+        var offer = await host.PrepareAsync();
         using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
         await using var guest = Guest();
-        await guest.PrepareAsync();
-        string? beforeApproval = null;
-        var joined = await guest.JoinAsync(invite, async (peers, _) =>
+        string? beforeAdmit = null;
+        var joined = await JoinAsync(host, guest, host.Admit(RandomNumberGenerator.GetBytes(32), "Steve"), async () =>
         {
-            Assert.Equal([$"udp://127.0.0.1:{guest.Bridge!.LocalPort}"], peers);
-            beforeApproval = await ArrivesAtAsync(guest, host.Lobby, room, "knock");
+            Assert.NotNull(await guest.Bridge!.PunchAsync(offer.Candidates, offer.Nat, Deadline));
+            beforeAdmit = await ArrivesAtAsync(guest, host.Lobby, room, "knock");
             Assert.False(host.Host.Bridge.Peers.Single().Admitted);
-            return host.Admit(RandomNumberGenerator.GetBytes(32), "Steve");
         });
         Assert.True(joined);
-        Assert.Equal("lobby", beforeApproval);
+        Assert.Equal("lobby", beforeAdmit);
         var peer = host.Host.Bridge.Peers.Single();
         Assert.True(peer.Admitted);
         Assert.Same(host.Members.FindGuest(peer.Member!.PublicKey), peer.Member);
@@ -257,17 +238,63 @@ public sealed class DirectInviteTests
         Assert.True(guest.HasRoom && guest.Room.FromInvite);
     }
 
+    /// <summary>
+    /// Sealed direct code (no server): the guest opens the offer, the host opens the sealed reply and punches, the guest
+    /// knocks over the bridge (which reaches only the lobby) and, once approved, the bridge reaches the room.
+    /// </summary>
+    [Fact]
+    public async Task SealedCodeJoinsWithoutAnyServer()
+    {
+        await using var host = new DirectRoom(() => true);
+        var offerAddresses = await host.PrepareAsync();
+        using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
+        using var offer = SealedDirect.Seal(offerAddresses, DirectTestKeys.Invite, DateTimeOffset.UtcNow);
+        using var opened = SealedDirect.Open(offer.Code, offer.Passphrase, DateTimeOffset.UtcNow);
+        await using var guest = Guest();
+        var mine = await guest.AnswerAsync(opened.Host);
+        var reply = SealedDirect.SealReply(opened, mine!, DateTimeOffset.UtcNow);
+        var hostPunch = host.Host.AddGuestAsync(offer.OpenReply(reply, DateTimeOffset.UtcNow));
+        string? beforeApproval = null;
+        var joined = await guest.JoinThroughBridgeAsync(async (peers, _) =>
+        {
+            Assert.Equal([$"udp://127.0.0.1:{guest.Bridge!.LocalPort}"], peers);
+            beforeApproval = await ArrivesAtAsync(guest, host.Lobby, room, "knock");
+            return host.Admit(RandomNumberGenerator.GetBytes(32), "Steve");
+        });
+        Assert.True(joined);
+        Assert.True(await hostPunch.WaitAsync(Deadline));
+        Assert.Equal("lobby", beforeApproval);
+        Assert.True(host.Host.Bridge.Peers.Single().Admitted);
+        Assert.Equal("room", await ArrivesAtAsync(guest, host.Lobby, room, "play"));
+        Assert.False(guest.UsingFallbackNode);
+    }
+
+    /// <summary>Sealed code, host turns the knock down: no room, nothing admitted.</summary>
+    [Fact]
+    public async Task SealedCodeTurnedDownLeavesWithoutARoom()
+    {
+        await using var host = new DirectRoom(() => true);
+        var offerAddresses = await host.PrepareAsync();
+        using var offer = SealedDirect.Seal(offerAddresses, DirectTestKeys.Invite, DateTimeOffset.UtcNow);
+        using var opened = SealedDirect.Open(offer.Code, offer.Passphrase, DateTimeOffset.UtcNow);
+        await using var guest = Guest();
+        var mine = await guest.AnswerAsync(opened.Host);
+        _ = host.Host.AddGuestAsync(offer.OpenReply(SealedDirect.SealReply(opened, mine!, DateTimeOffset.UtcNow), DateTimeOffset.UtcNow));
+        Assert.False(await guest.JoinThroughBridgeAsync((_, _) => Task.FromResult<RoomCode?>(null)));
+        Assert.False(guest.HasRoom);
+        Assert.False(host.Host.Bridge!.Peers.Single().Admitted);
+    }
+
     /// <summary>成员钥匙不在房主的成员表里（没批准、伪造的）：房主不认，桥还是只能到大厅。</summary>
     [Fact]
     public async Task UnknownMemberKeyIsRefusedAndTheBridgeStaysOnTheLobby()
     {
         await using var host = new DirectRoom();
-        var invite = (await host.PrepareAsync()) with { IsReply = false, Invite = DirectTestKeys.Invite };
+        await host.PrepareAsync();
         using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
         await using var guest = Guest();
-        await guest.PrepareAsync();
         var forged = (host.Credentials with { Member = MemberKey.Create() }).ToRoom();
-        await Assert.ThrowsAsync<DirectFailedException>(() => guest.JoinAsync(invite, (_, _) => Task.FromResult<RoomCode?>(forged)));
+        await Assert.ThrowsAsync<DirectFailedException>(() => JoinAsync(host, guest, forged));
         Assert.False(host.Host.Bridge.Peers.Single().Admitted);
         Assert.Equal("lobby", await ArrivesAtAsync(guest, host.Lobby, room, "sneak"));
     }
@@ -284,17 +311,14 @@ public sealed class DirectInviteTests
         Assert.NotEqual(a, DirectKeys.AdmitProof(MemberKey.Create(), "abcdef0123456789", new byte[16]));
     }
 
-    /// <summary>被拒（敲门没通过）：不进房间，也不去证明成员身份。</summary>
+    /// <summary>The host only takes addresses for its own session: an answer for another room is refused.</summary>
     [Fact]
-    public async Task DeniedKnockLeavesWithoutARoom()
+    public async Task HostRefusesAnAnswerForAnotherSession()
     {
         await using var host = new DirectRoom();
-        var invite = (await host.PrepareAsync()) with { IsReply = false, Invite = DirectTestKeys.Invite };
-        await using var guest = Guest();
-        await guest.PrepareAsync();
-        Assert.False(await guest.JoinAsync(invite, (_, _) => Task.FromResult<RoomCode?>(null)));
-        Assert.False(guest.HasRoom);
-        Assert.False(host.Host.Bridge!.Peers.Single().Admitted);
+        var offer = await host.PrepareAsync();
+        var other = new DirectAddresses(new string('a', 16) == offer.Session ? new string('b', 16) : new string('a', 16), NatKind.Cone, SomeAddresses);
+        await Assert.ThrowsAsync<DirectFailedException>(() => host.Host.AddGuestAsync(other));
     }
 
     /// <summary>踢出：这个成员的直连桥马上断开，之后他的探测不再接。</summary>
@@ -302,11 +326,10 @@ public sealed class DirectInviteTests
     public async Task KickDropsTheMembersBridgePeer()
     {
         await using var host = new DirectRoom();
-        var invite = (await host.PrepareAsync()) with { IsReply = false, Invite = DirectTestKeys.Invite };
+        await host.PrepareAsync();
         using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
         await using var guest = Guest();
-        await guest.PrepareAsync();
-        Assert.True(await guest.JoinAsync(invite, (_, _) => Task.FromResult<RoomCode?>(host.Admit(RandomNumberGenerator.GetBytes(32), "Steve"))));
+        Assert.True(await JoinAsync(host, guest, host.Admit(RandomNumberGenerator.GetBytes(32), "Steve")));
         var peer = host.Host.Bridge.Peers.Single();
         host.Members.Kick(peer.Member!, null);
         Assert.Empty(host.Host.Bridge.Peers);
@@ -317,21 +340,21 @@ public sealed class DirectInviteTests
     }
 
     /// <summary>
-    /// 没有待用邀请时房主的直连桥不接新人：桥钥匙（由 L 派生）整个房间都不换，拿着旧码的人连大厅都到不了。
-    /// 有了新邀请又能接。
+    /// 没有待用邀请时房主的直连桥不接新人：桥钥匙（由 L 派生）整个房间都不换，拿着旧邀请的人连大厅都到不了。
+    /// 一个刚批准的加入方经加密敲门交了地址之后，短时间内能接（他的一次性邀请那时已经用掉了）。
     /// </summary>
     [Fact]
-    public async Task ClosedRoomRefusesNewBridgePeers()
+    public async Task ClosedRoomTakesOnlyTheGuestItJustApproved()
     {
-        var open = false;
-        await using var host = new DirectRoom(() => Volatile.Read(ref open));
-        var code = await host.PrepareAsync();
+        await using var host = new DirectRoom(() => false);
+        var offer = await host.PrepareAsync();
         await using var guest = Guest();
-        await guest.PrepareAsync();
-        Assert.Null(await guest.Bridge!.PunchAsync(code.Candidates, code.Nat, TimeSpan.FromSeconds(3)));
+        var mine = await guest.AnswerAsync(offer);
+        Assert.Null(await guest.Bridge!.PunchAsync(offer.Candidates, offer.Nat, TimeSpan.FromSeconds(3)));
         Assert.Empty(host.Host.Bridge!.Peers);
-        Volatile.Write(ref open, true);
-        Assert.NotNull(await guest.Bridge.PunchAsync(code.Candidates, code.Nat, TimeSpan.FromSeconds(5)));
+        var hostPunch = host.Host.AddGuestAsync(mine!);
+        Assert.NotNull(await guest.Bridge.PunchAsync(offer.Candidates, offer.Nat, TimeSpan.FromSeconds(5)));
+        Assert.True(await hostPunch.WaitAsync(Deadline));
         Assert.Single(host.Host.Bridge.Peers);
     }
 
@@ -341,11 +364,10 @@ public sealed class DirectInviteTests
     {
         var open = true;
         await using var host = new DirectRoom(() => Volatile.Read(ref open));
-        var invite = (await host.PrepareAsync()) with { IsReply = false, Invite = DirectTestKeys.Invite };
+        await host.PrepareAsync();
         using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
         await using var guest = Guest();
-        await guest.PrepareAsync();
-        Assert.True(await guest.JoinAsync(invite, (_, _) => Task.FromResult<RoomCode?>(host.Admit(RandomNumberGenerator.GetBytes(32), "Steve"))));
+        Assert.True(await JoinAsync(host, guest, host.Admit(RandomNumberGenerator.GetBytes(32), "Steve")));
         Volatile.Write(ref open, false);
         Assert.True(host.Host.Bridge.Peers.Single().Admitted);
         Assert.Equal("room", await ArrivesAtAsync(guest, host.Lobby, room, "still-here"));
@@ -356,10 +378,9 @@ public sealed class DirectInviteTests
     public async Task RekeyKeepsTheBridgeAndSwitchesTheRoom()
     {
         await using var host = new DirectRoom();
-        var invite = (await host.PrepareAsync()) with { IsReply = false, Invite = DirectTestKeys.Invite };
+        await host.PrepareAsync();
         await using var guest = Guest();
-        await guest.PrepareAsync();
-        Assert.True(await guest.JoinAsync(invite, (_, _) => Task.FromResult<RoomCode?>(host.Admit(RandomNumberGenerator.GetBytes(32), "Steve"))));
+        Assert.True(await JoinAsync(host, guest, host.Admit(RandomNumberGenerator.GetBytes(32), "Steve")));
         var next = guest.Room.Rekeyed(host.Credentials.Rotate().ToRekey());
         await guest.SwitchRoomAsync(next);
         Assert.Equal(next.Secret, guest.EasyTier!.Options.Room.Secret);
@@ -371,7 +392,9 @@ public sealed class DirectInviteTests
         Assert.Single(guest.Bridge!.Peers);
     }
 
-    // ---- 直连邀请里的 JAY2 邀请照样按普通邀请的规矩：令牌、一次、过期、批准 ----
+    // ---- 直连房间的邀请就是普通 JAY2 邀请：令牌、一次、过期、批准；地址只在批准后的加密回复里 ----
+
+    private static readonly DirectAddresses HostOffer = new("0123456789abcdef", NatKind.Cone, SomeAddresses);
 
     private sealed class Knocking : IAsyncDisposable
     {
@@ -381,22 +404,32 @@ public sealed class DirectInviteTests
         public readonly MemberTable Members = new();
         public readonly KnockServer Server;
         public readonly RoomCredentials Credentials;
+        public readonly TaskCompletionSource<DirectAddresses> Answered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Knocking(Func<KnockRequest, CancellationToken, Task<bool>>? approve = null)
         {
             Book = new InviteBook(() => Now) { KeepLobbyKey = true };
             Credentials = RoomCredentials.Create(Host.PublicKey, 25565, TunnelSettings.Default);
             Server = new KnockServer(Book, Host, () => Credentials, _ => false, approve ?? ((_, _) => Task.FromResult(true)), IPAddress.Loopback, 0,
-                limits: new KnockLimits { HandshakeTimeout = TimeSpan.FromSeconds(3), DecisionTimeout = TimeSpan.FromMilliseconds(400) }, members: Members);
+                limits: new KnockLimits { HandshakeTimeout = TimeSpan.FromSeconds(3), DecisionTimeout = TimeSpan.FromMilliseconds(400) }, members: Members)
+            {
+                DirectOffer = () => HostOffer,
+            };
+            Server.DirectAnswered += (_, _, addresses) => Answered.TrySetResult(addresses);
         }
 
-        /// <summary>按直连邀请码里带着的邀请敲门（码先编码再解析，和真的一样）。</summary>
-        public async Task<KnockOutcome> KnockAsync(DirectCode code, X25519KeyPair who)
+        /// <summary>按邀请敲门（邀请先编码再解析，和真的一样）。<paramref name="seen"/> 记下加入方从回复里拿到的房主地址。</summary>
+        public async Task<KnockOutcome> KnockAsync(JayInvite invite, X25519KeyPair who, List<DirectAddresses>? seen = null)
         {
-            Assert.True(DirectCode.TryParse(code.Encode(), out var parsed, out _));
+            Assert.True(JayInvite.TryParse(invite.ToString(), out var parsed));
             using var client = new TcpClient();
             await client.ConnectAsync(IPAddress.Loopback, Server.Port);
-            return await KnockClient.KnockAsync(client.GetStream(), parsed.Invite!, who, "Steve", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5));
+            return await KnockClient.KnockAsync(client.GetStream(), parsed, who, "Steve", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5),
+                direct: (host, _) =>
+                {
+                    seen?.Add(host);
+                    return Task.FromResult<DirectAddresses?>(new DirectAddresses("ffffffffffffffff", NatKind.Symmetric, [new Candidate(PathKind.Punch, IPEndPoint.Parse("198.51.100.7:40001"))]));
+                });
         }
 
         public async ValueTask DisposeAsync()
@@ -406,23 +439,61 @@ public sealed class DirectInviteTests
         }
     }
 
-    private static DirectCode CodeFor(PendingInvite invite) => new(false, "abcdef0123456789", NatKind.Cone, SomeAddresses, invite.Invite);
-
     private static async Task<bool> RejectedAsync(Func<Task<KnockOutcome>> knock)
     {
         try { return !(await knock()).Approved; }
         catch (IOException) { return true; }
     }
 
+    /// <summary>批准后：房主的地址在加密回复里给加入方，加入方的地址（带房主的会话）在加密确认里回给房主。</summary>
+    [Fact]
+    public async Task ApprovedKnockExchangesAddressesInsideTheEncryptedChannel()
+    {
+        await using var k = new Knocking();
+        var invite = k.Book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default).Invite;
+        using var a = X25519KeyPair.Generate();
+        var seen = new List<DirectAddresses>();
+        var outcome = await k.KnockAsync(invite, a, seen);
+        Assert.True(outcome.Approved);
+        var host = Assert.Single(seen);
+        Assert.Equal(HostOffer.Session, host.Session);
+        Assert.Equal(HostOffer.Candidates, host.Candidates);
+        Assert.Equal(HostOffer.Candidates, outcome.HostAddresses!.Candidates);
+        var guest = await k.Answered.Task.WaitAsync(Deadline);
+        Assert.Equal(HostOffer.Session, guest.Session);
+        Assert.Equal(NatKind.Symmetric, guest.Nat);
+        Assert.Equal(IPEndPoint.Parse("198.51.100.7:40001"), Assert.Single(guest.Candidates).EndPoint);
+    }
+
+    /// <summary>没批准的人拿不到房主的任何地址，房主也收不到他的。</summary>
+    [Fact]
+    public async Task RejectedKnockLearnsNoAddress()
+    {
+        await using var k = new Knocking((_, _) => Task.FromResult(false));
+        var invite = k.Book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default).Invite;
+        using var a = X25519KeyPair.Generate();
+        var seen = new List<DirectAddresses>();
+        var outcome = await k.KnockAsync(invite, a, seen);
+        Assert.False(outcome.Approved);
+        Assert.Null(outcome.Credentials);
+        Assert.Null(outcome.HostAddresses);
+        Assert.Empty(seen);
+        Assert.Empty(k.Members.All);
+        await Task.Delay(200);
+        Assert.False(k.Answered.Task.IsCompleted);
+    }
+
     [Fact]
     public async Task DirectInviteIsSingleUse()
     {
         await using var k = new Knocking();
-        var code = CodeFor(k.Book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default));
+        var invite = k.Book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default).Invite;
         using var a = X25519KeyPair.Generate();
         using var b = X25519KeyPair.Generate();
-        Assert.True((await k.KnockAsync(code, a)).Approved);
-        Assert.True(await RejectedAsync(() => k.KnockAsync(code, b)));
+        Assert.True((await k.KnockAsync(invite, a)).Approved);
+        var seen = new List<DirectAddresses>();
+        Assert.True(await RejectedAsync(() => k.KnockAsync(invite, b, seen)));
+        Assert.Empty(seen);
         Assert.Null(k.Members.FindGuest(b.PublicKey));
     }
 
@@ -430,10 +501,10 @@ public sealed class DirectInviteTests
     public async Task ExpiredDirectInviteFails()
     {
         await using var k = new Knocking();
-        var code = CodeFor(k.Book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default));
+        var invite = k.Book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default).Invite;
         k.Now += TimeSpan.FromMinutes(11);
         using var a = X25519KeyPair.Generate();
-        Assert.True(await RejectedAsync(() => k.KnockAsync(code, a)));
+        Assert.True(await RejectedAsync(() => k.KnockAsync(invite, a)));
         Assert.Empty(k.Members.All);
     }
 
@@ -444,23 +515,12 @@ public sealed class DirectInviteTests
         var pending = k.Book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default);
         var token = (byte[])pending.Invite.Token.Clone();
         token[0] ^= 1;
-        var forged = CodeFor(pending) with { Invite = pending.Invite with { Token = token } };
         using var a = X25519KeyPair.Generate();
-        Assert.True(await RejectedAsync(() => k.KnockAsync(forged, a)));
+        var seen = new List<DirectAddresses>();
+        Assert.True(await RejectedAsync(() => k.KnockAsync(pending.Invite with { Token = token }, a, seen)));
+        Assert.Empty(seen);
         Assert.Empty(k.Members.All);
         Assert.Equal(1, pending.UsesLeft);
-    }
-
-    [Fact]
-    public async Task DirectInviteNeedsTheHostsApproval()
-    {
-        await using var k = new Knocking((_, _) => Task.FromResult(false));
-        var code = CodeFor(k.Book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default));
-        using var a = X25519KeyPair.Generate();
-        var outcome = await k.KnockAsync(code, a);
-        Assert.False(outcome.Approved);
-        Assert.Null(outcome.Credentials);
-        Assert.Empty(k.Members.All);
     }
 
     [Fact]
@@ -469,8 +529,10 @@ public sealed class DirectInviteTests
         await using var k = new Knocking();
         using var a = X25519KeyPair.Generate();
         k.Members.Ban(a.PublicKey, "Steve");
-        var code = CodeFor(k.Book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default));
-        Assert.True(await RejectedAsync(() => k.KnockAsync(code, a)));
+        var invite = k.Book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default).Invite;
+        var seen = new List<DirectAddresses>();
+        Assert.True(await RejectedAsync(() => k.KnockAsync(invite, a, seen)));
+        Assert.Empty(seen);
         Assert.Empty(k.Members.All);
     }
 
