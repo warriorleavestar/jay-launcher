@@ -554,6 +554,28 @@ public sealed class BakeTests : IDisposable
     }
 
     [Fact]
+    public void EmbeddedLaunchSeparatesVmMainAndGameArgumentsWithoutLeakingItsMarker()
+    {
+        Version("1.21.1");
+        var invocation = new GameLauncher(new GameDirectory(Game)).BuildEmbeddedInvocation(new LaunchOptions
+        {
+            VersionId = "1.21.1",
+            JavaPath = "unused-when-embedded",
+            Session = new GameSession("Tester", Guid.NewGuid(), "0", "legacy"),
+            ExtraJvmArgs = ["-Djay.test=true"],
+            ExtraGameArgs = ["--demo"],
+        });
+
+        Assert.Equal("net.minecraft.client.main.Main", invocation.MainClass);
+        Assert.Contains("-Djay.test=true", invocation.VmOptions);
+        Assert.Contains(invocation.VmOptions, value => value.StartsWith("-Djava.class.path=", StringComparison.Ordinal));
+        Assert.DoesNotContain("-cp", invocation.VmOptions);
+        Assert.DoesNotContain(invocation.VmOptions, value => value.StartsWith("-Djay.embedded.marker=", StringComparison.Ordinal));
+        Assert.Equal("--demo", invocation.Arguments[^1]);
+        Assert.Null(invocation.TransientDirectory);
+    }
+
+    [Fact]
     public void ResultParsingReadsLaunchAndRejectsIncompleteResults()
     {
         var result = BakeService.ParseLine("""{"type":"result","stateKey":"abc","launch":{"mainClass":"amber.ul.Launcher","classpath":["a","b"],"jvmArgs":["-Dx=1"],"gameArgsPrefix":["--state","s","--"],"stateFile":"s"}}""")!;

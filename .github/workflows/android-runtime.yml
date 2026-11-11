@@ -1,0 +1,76 @@
+name: android-runtime
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/android-runtime.yml'
+      - 'scripts/check-android-runtime.sh'
+      - 'scripts/prepare-android-openjdk.sh'
+      - 'third_party/android-openjdk/**'
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: Android runtime architecture
+        type: choice
+        options: [all, arm64-v8a, x86_64]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: ${{ fromJSON(github.event_name == 'pull_request' && '["arm64-v8a","x86_64"]' || (inputs.architecture == 'all' && '["arm64-v8a","x86_64"]' || format('["{0}"]', inputs.architecture))) }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch pinned Android OpenJDK build source
+        shell: bash
+        run: |
+          git clone https://github.com/FCL-Team/Android-OpenJDK-Build.git runtime-source
+          git -C runtime-source checkout b79a530da187dbb33d40c4ed51ddeeeb9d379360
+          bash scripts/prepare-android-openjdk.sh runtime-source
+
+      - name: Build OpenJDK 21.0.12.1
+        shell: bash
+        run: |
+          case "${{ matrix.architecture }}" in
+            arm64-v8a) script=ci_build_arch_aarch64.sh ;;
+            x86_64) script=ci_build_arch_x86_64.sh ;;
+          esac
+          cd runtime-source
+          JOBS=4 bash "$script"
+
+      - name: Verify and stage runtime
+        shell: bash
+        run: |
+          source_archive="$(find runtime-source -maxdepth 1 -type f -name 'jre21-*.tar.xz' -print -quit)"
+          test -n "$source_archive"
+          normalized="$(mktemp -d)"
+          tar -xf "$source_archive" -C "$normalized"
+          mkdir -p runtime-artifact
+          archive="runtime-artifact/jay-jre21-${{ matrix.architecture }}.tar.xz"
+          # The installer intentionally rejects both symbolic and hard links. Dereference
+          # both kinds so every activated runtime path is an independently verified file.
+          tar --hard-dereference -C "$normalized" -cJhf "$archive" .
+          readelf_path="runtime-source/android-ndk-r21/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          bash scripts/check-android-runtime.sh "$archive" "${{ matrix.architecture }}" "$readelf_path"
+          sha256sum "$archive" > "$archive.sha256"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jay-jre21-${{ matrix.architecture }}
+          path: runtime-artifact/*
+          if-no-files-found: error
+          retention-days: 14

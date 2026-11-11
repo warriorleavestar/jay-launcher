@@ -6,4 +6,5 @@
     <item name="android:windowNoTitle">true</item>
     <item name="android:windowBackground">@android:color/transparent</item>
   </style>
+  <style name="JayProgressBarHorizontal" parent="@android:style/Widget.ProgressBar.Horizontal" />
 </resources>

@@ -1,0 +1,38 @@
+diff --git a/MobileGlues-cpp/egl/loader.cpp b/MobileGlues-cpp/egl/loader.cpp
+index 7f957f3..44f84b5 100644
+--- a/MobileGlues-cpp/egl/loader.cpp
++++ b/MobileGlues-cpp/egl/loader.cpp
+@@ -139,7 +139,9 @@ cleanup:
+     // down EGL_DEFAULT_DISPLAY underneath the host process, taking contexts and
+     // surfaces it had created before this library was ever loaded.
+     if (mg_display_release(eglDisplay, true)) {
++#if !defined(__ANDROID__)
+         egl_eglTerminate(eglDisplay);
++#endif
+     }
+     // Cleared so destroy_temp_egl_ctx, which runs at the end of proc_init whether
+     // or not the probe came up, does not destroy the same handles a second time
+@@ -151,6 +153,12 @@ cleanup:
+ 
+ void destroy_temp_egl_ctx() {
+     ETRACE("destroy_temp_egl_ctx: dpy=%p, ctx=%p, surface=%p", eglDisplay, eglContext, eglSurface)
++#if defined(__ANDROID__)
++    // Android's process-wide EGL implementation is also used by the activity's
++    // hardware renderer. Some drivers share bookkeeping with this bootstrap
++    // context, so retain the small pbuffer for the process lifetime.
++    return;
++#endif
+     if (eglDisplay == EGL_NO_DISPLAY) return;
+ 
+     LOAD_EGL(eglDestroySurface);
+@@ -169,8 +178,10 @@ void destroy_temp_egl_ctx() {
+     // contexts and surfaces the host process created before this library was
+     // loaded.
+     if (mg_display_release(eglDisplay, true)) {
++#if !defined(__ANDROID__)
+         LOAD_EGL(eglTerminate);
+         if (egl_eglTerminate) egl_eglTerminate(eglDisplay);
++#endif
+     }
+     eglDisplay = EGL_NO_DISPLAY;
+ }
