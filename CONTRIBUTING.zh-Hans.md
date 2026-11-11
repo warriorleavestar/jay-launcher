@@ -101,3 +101,7 @@ AMBER_LAYOUTCHECK=<dir> src/Amber.App/bin/Release/net10.0/Jay.exe
 ## Pull request
 
 改动保持专注，写清楚测试了什么；界面改动附上改前改后的截图。
+
+## 贡献的许可
+
+Jay 使用 [PolyForm Noncommercial 1.0.0 许可证](LICENSE)，另有[商用例外条款](COMMERCIAL-EXCEPTION.md)。提交 pull request 即表示你同意：你的贡献按这些条款授权，Jay 开发团队也可以把它授权给别人商用，包括按商用例外条款授权。

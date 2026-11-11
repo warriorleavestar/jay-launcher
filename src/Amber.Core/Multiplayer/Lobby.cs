@@ -59,7 +59,7 @@ public sealed class HostLobby : IAsyncDisposable
         Func<RoomCredentials> credentials, Func<byte[], bool> isTrusted, Func<KnockRequest, CancellationToken, Task<bool>> approve, MemberTable members, Action<string>? log = null,
         InviteBook? book = null, int? listenUdpPort = null, Func<Public.DevicePolicy>? devicePolicy = null,
         Func<Public.AccountPolicy?>? accountPolicy = null, Func<TimeSpan>? decisionWait = null, Action<KnockRequest>? timedOut = null,
-        Func<string, bool>? isTrustedJayAccount = null, Func<Identity.DeviceCertificate?>? jayCertificate = null)
+        Func<string, bool>? isTrustedJayAccount = null, Func<Identity.DeviceCertificate?>? jayCertificate = null, Func<bool>? alwaysAsk = null)
     {
         HostLobby? lobby = null;
         lobby = new HostLobby(
@@ -69,7 +69,7 @@ public sealed class HostLobby : IAsyncDisposable
             book =>
             {
                 var server = new KnockServer(book, identity, credentials, isTrusted, approve, IPAddress.Loopback, KnockProtocol.Port, log, members: members)
-                    { DevicePolicy = devicePolicy, AccountPolicy = accountPolicy, DecisionWait = decisionWait, IsTrustedJayAccount = isTrustedJayAccount, JayCertificate = jayCertificate };
+                    { DevicePolicy = devicePolicy, AccountPolicy = accountPolicy, DecisionWait = decisionWait, IsTrustedJayAccount = isTrustedJayAccount, JayCertificate = jayCertificate, AlwaysAsk = alwaysAsk };
                 if (timedOut is not null) server.TimedOut += timedOut;
                 return server;
             },

@@ -303,7 +303,7 @@ public static class Program
 
     /// <summary>
     /// Release signing for trustees (privacy plan items 2 and 3). Every trustee signs on their own offline machine with
-    /// their own trust key; a release needs 2 of the 3. There is no release key of its own and nothing here can run in CI.
+    /// their own release key (separate from the key that reviews networks); a release needs 2 of the 3. Nothing here can run in CI.
     /// </summary>
     internal static int ReleaseCommand(Options options, TextWriter output, Func<IReadOnlyList<string>, string, string, bool>? confirm = null)
     {
