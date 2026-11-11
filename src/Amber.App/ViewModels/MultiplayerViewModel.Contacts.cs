@@ -44,7 +44,8 @@ public sealed class ContactDeviceItem(Contact device, ContactItem person)
 {
     public Contact Device { get; } = device;
     public ContactItem Person { get; } = person;
-    public string Fingerprint => Device.Fingerprint;
+    public string Fingerprint => (Device.DeviceName.Length > 0 ? Device.DeviceName + " · " : "") + Device.Fingerprint
+        + (Device.NewDevice ? " · " + L.T("multiplayer.contacts.new_device_tag") : "");
 }
 
 /// <summary>An add-contact exchange under way: waiting, asking me, or the emoji to compare.</summary>
@@ -115,8 +116,6 @@ public sealed partial class MultiplayerViewModel
     {
         var book = new ContactBook(Path.Combine(ContactsDir, ContactBook.FileName)) { Me = Identity.PublicKey };
         book.Changed += () => Dispatcher.UIThread.Post(RefreshContacts);
-        // Privacy plan item 7: a friend's new device is accepted on their account's signature, but never silently.
-        book.DeviceAdded += device => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.contacts.new_device", device.Name)));
         return book;
     }
 
@@ -178,7 +177,7 @@ public sealed partial class MultiplayerViewModel
         ContactRequests.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasContactRequests));
         _service.Requests.Resolved += handle =>
         {
-            if (handle.ResolvedBy == RequestSource.Program || handle.Spec.Kind is not ("contact" or "contact-compare" or "contact-invite")) return;
+            if (handle.ResolvedBy == RequestSource.Program || handle.Spec.Kind is not ("contact" or "contact-compare" or "contact-invite" or "contact-new-device")) return;
             Dispatcher.UIThread.Post(() => AnswerContactRequest(handle));
         };
         PropertyChanged += (_, e) =>
@@ -227,8 +226,21 @@ public sealed partial class MultiplayerViewModel
                     DedupeKey: "contact-compare:" + hex));
             }
         }
+        // Privacy plan item 7: a friend's new device comes in on their account's signature, but never silently. The notice
+        // stays (in the request bar, and in the contact file across restarts) until I say it's fine or remove the device.
+        foreach (var d in book.All.Where(c => c.Verified && c.NewDevice))
+        {
+            var dedupe = "contact-new-device:" + Convert.ToHexStringLower(d.PublicKey);
+            wanted.Add(dedupe);
+            var who = new ContactItem(d).Name;
+            var device = d.DeviceName.Length > 0 ? d.DeviceName : L.T("multiplayer.contacts.new_device_unnamed");
+            _service.Requests.Post(new RequestSpec("contact-new-device", L.F("multiplayer.contacts.new_device", who),
+                L.F("multiplayer.contacts.new_device_body", device, d.Fingerprint),
+                [new("ok", L.T("multiplayer.contacts.new_device_ok"), IsDefault: true), new("remove", L.T("multiplayer.contacts.new_device_remove"), IsDanger: true)],
+                IsSafety: true, DedupeKey: dedupe));
+        }
         foreach (var r in _service.Requests.Pending)
-            if (r.Spec.Kind is "contact" or "contact-compare" && r.Spec.DedupeKey is { } key && !wanted.Contains(key))
+            if (r.Spec.Kind is "contact" or "contact-compare" or "contact-new-device" && r.Spec.DedupeKey is { } key && !wanted.Contains(key))
                 _service.Requests.Withdraw(key);
     }
 
@@ -409,6 +421,17 @@ public sealed partial class MultiplayerViewModel
             case "contact-invite":
                 if (_mailedInvites.Remove(key, out var invite) && handle.Choice == "join") _ = JoinMailedInviteAsync(invite);
                 break;
+            case "contact-new-device" when key.StartsWith("contact-new-device:", StringComparison.Ordinal):
+            {
+                var device = Convert.FromHexString(key["contact-new-device:".Length..]);
+                if (handle.Choice == "remove")
+                {
+                    Contacts.Remove(device);
+                    SetStatus(StatusMessage.Info("multiplayer.contacts.new_device_removed"));
+                }
+                else if (handle.Choice == "ok") Contacts.AcknowledgeDevice(device);
+                break;
+            }
         }
     }
 

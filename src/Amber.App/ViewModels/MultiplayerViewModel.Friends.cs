@@ -44,7 +44,11 @@ public sealed partial class MultiplayerViewModel
         using var account = OpenSelectedJayAccount();
         if (account is null || PickFriendBackupSave is not { } pick) return;
         var count = ContactList.Count;
-        var data = FriendBackup.Export(account, Contacts.All, DateTimeOffset.UtcNow);
+        if (FriendBackup.Export(account, Contacts.All, DateTimeOffset.UtcNow, Contacts.RemovedDevices) is not { } data)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.friends.too_big"));
+            return;
+        }
         if (await pick() is not { Length: > 0 } path) return;
         try
         {
@@ -79,12 +83,27 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.friends.not_backup"));
             return;
         }
-        if (FriendBackup.Import(account, data) is not { } contacts)
+        if (FriendBackup.Import(account, data) is not { } backup)
         {
             SetStatus(StatusMessage.Warning("multiplayer.friends.wrong_account"));
             return;
         }
-        var added = Contacts.Import(contacts);
+        // Say how old the backup is and who comes back before doing anything: an old backup brings back people removed since.
+        var contacts = backup.Contacts;
+        var people = contacts.Where(c => !Contacts.IsVerified(c.PublicKey))
+            .GroupBy(c => c.JayAccount ?? Convert.ToHexStringLower(c.PublicKey))
+            .Select(g => g.First().Name is { Length: > 0 } n ? n : L.T("multiplayer.contacts.no_name"))
+            .ToList();
+        if (people.Count > 0)
+        {
+            const int Shown = 8;
+            var names = string.Join(L.T("multiplayer.friends.name_separator"), people.Take(Shown)) + (people.Count > Shown ? " \u2026" : "");
+            if (!await Confirm(L.T("multiplayer.friends.restore_title"),
+                    L.F("multiplayer.friends.restore_body", backup.Created.ToLocalTime().ToString("d"), people.Count, names),
+                    L.T("multiplayer.friends.restore_confirm")))
+                return;
+        }
+        var added = Contacts.Import(contacts, backup.Removed);
         if (added == 0)
         {
             SetStatus(StatusMessage.Info("multiplayer.friends.restored_none"));

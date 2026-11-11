@@ -67,13 +67,17 @@ public sealed class JayAccount : IDisposable
         return (byte[])_seed.Clone();
     }
 
-    /// <summary>The 32-byte symmetric key that encrypts this account's friend list backups (m/3'/0'). Zero it after use.</summary>
+    /// <summary>
+    /// The 32-byte symmetric key that encrypts this account's friend list backups: HKDF-SHA256 over the m/3'/0' node with
+    /// info "jay-friend-backup-v1", so the key is tied to this one format and a later use of m/3' can't share it. Zero it after use.
+    /// </summary>
     internal byte[] DeriveFriendBackupKey()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var (key, chain) = Slip10.Derive(_seed, Slip10.JayRootKey, 3, 0);
+        var (node, chain) = Slip10.Derive(_seed, Slip10.JayRootKey, 3, 0);
         CryptographicOperations.ZeroMemory(chain);
-        return key;
+        try { return HKDF.DeriveKey(HashAlgorithmName.SHA256, node, 32, [], "jay-friend-backup-v1"u8.ToArray()); }
+        finally { CryptographicOperations.ZeroMemory(node); }
     }
 
     /// <summary>Signs <paramref name="domain"/> ‖ <paramref name="message"/>. Every use has its own domain string so a signature can't be replayed elsewhere.</summary>

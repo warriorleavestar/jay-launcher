@@ -1,3 +1,4 @@
+using Amber.Core.Activity;
 using Amber.App.ViewModels;
 using Amber.Core.Identity;
 using Amber.Core.Localization;
@@ -208,7 +209,17 @@ internal sealed partial class SelfTest
             foreach (var c in vm.ContactList.ToList()) vm.RemoveContactCommand.Execute(c);
         });
         await WaitAsync(() => !vm.HasContacts, 3);
+        string? asked = null;
+        var confirm = vm.Confirm;
+        vm.Confirm = (_, body, _) =>
+        {
+            asked = body;
+            return Task.FromResult(true);
+        };
         await Dispatcher.UIThread.InvokeAsync(() => vm.RestoreFriendsCommand.ExecuteAsync(null));
+        vm.Confirm = confirm;
+        Check("好友：【恢复联系人】先写明备份日期和会回来的人", asked is not null && asked.Contains("Bob") && asked.Contains("Sam")
+            && asked.Contains(DateTimeOffset.Now.ToString("d")), asked ?? "");
         Check("好友：【恢复联系人】把人带回来，并记下要从这台设备打招呼",
             await WaitAsync(() => vm.ContactList.Count == 2, 3) && File.Exists(Path.Combine(dir, MultiplayerViewModel.RelinkFileName)), vm.Status);
 
@@ -221,8 +232,21 @@ internal sealed partial class SelfTest
             var reply = vm.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me");
             if (reply is not null && bobBook.Receive(me, reply, "Bob") is { } nonce) vm.Contacts.Receive(bobNew.PublicKey, nonce, "Me");
             var notice = L.F("multiplayer.contacts.new_device", "Bob");
-            Check("好友：认识的人换了新设备，不对表情就加上，并且告诉我",
-                await WaitAsync(() => vm.Status == notice && vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: true }, 3), vm.Status);
+            RequestHandle? Notice() => main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-new-device");
+            Check("好友：认识的人换了新设备，不对表情就加上，并在请求条里留一条安全提示",
+                await WaitAsync(() => Notice() is { Spec.IsSafety: true, Spec.Timeout: null } n && n.Spec.Title == notice
+                    && n.Spec.Body?.Contains("Linux") == true && vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: true }, 3),
+                string.Join(", ", main.Service.Requests.Pending.Select(r => r.Spec.Kind + ":" + r.Spec.Title)));
+            Check("好友：新设备在设备列表里标着“待你确认”",
+                Dispatcher.UIThread.Invoke(() => vm.ContactList.First(c => c.Name == "Bob").DeviceItems.Any(d => d.Fingerprint.Contains(L.T("multiplayer.contacts.new_device_tag")))));
+            await ShotAsync("Jay账户-好友新设备");
+            Dispatcher.UIThread.Invoke(() => main.Service.Requests.Resolve(Notice()!, "remove", RequestSource.Bar));
+            Check("好友：点“不是 TA？移除这台设备”，设备没了，它再敲门也要重新对表情",
+                await WaitAsync(() => vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: false }, 3)
+                && vm.Contacts.RemovedDevices.Any(r => r.PublicKey.AsSpan().SequenceEqual(bobNew.PublicKey))
+                && vm.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me") is null
+                && vm.Contacts.Pending.Any(p => p.PublicKey.AsSpan().SequenceEqual(bobNew.PublicKey) && !p.KnownFriend), vm.Status);
+            vm.Contacts.Dismiss(bobNew.PublicKey);
         }
 
         var tampered = File.ReadAllBytes(backup);
