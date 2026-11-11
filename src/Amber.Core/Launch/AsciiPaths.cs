@@ -40,13 +40,14 @@ public static class AsciiPaths
     {
         var full = FullDirectoryPath(directory);
         if (!OperatingSystem.IsWindows() || Representable(full)) return full;
+        // The 8.3 short name needs no link at all, when the volume keeps them.
+        if (PrivateFolder.ShortPath(full) is { } shortPath && Representable(shortPath)) return FullDirectoryPath(shortPath);
         var name = "a" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(full.ToLowerInvariant())))[..10];
         foreach (var parent in LinkParents(full))
         {
             var link = Path.Combine(parent, name);
             try
             {
-                Directory.CreateDirectory(parent);
                 var info = new DirectoryInfo(link);
                 if (info.Exists)
                 {
@@ -80,7 +81,16 @@ public static class AsciiPaths
                 : Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber");
         var parent = Path.Combine(dataRoot, "legacyhome", name);
         if (!OperatingSystem.IsWindows()) return UnixLegacyHome(parent, full, log);
-        if (!Representable(parent)) parent = Path.Combine(Environment.GetEnvironmentVariable("PUBLIC") ?? @"C:\Users\Public", "AmberLegacyHome", name);
+        if (!Representable(parent))
+        {
+            // Old Forge loads mods from this home, so it must stay somewhere only this user can change (see PrivateFolder).
+            if (PrivateHome(Path.Combine(dataRoot, "legacyhome")) is not { } home)
+            {
+                log?.Invoke(L.T("core.launch.paths.junctionunavailable"));
+                return null;
+            }
+            parent = Path.Combine(home, name);
+        }
         var link = Path.Combine(parent, ".minecraft");
         try
         {
@@ -143,17 +153,44 @@ public static class AsciiPaths
             char.IsAsciiLetter(full[4]) && full[5] == ':' && full[6] == '\\' ? full[4..] : full;
     }
 
-    /// <summary>放联接的地方：先 Amber 的本地数据目录，再公共目录，最后目标所在盘的根目录。要求本身是纯英文。</summary>
+    /// <summary>
+    /// Where the junctions go, all folders only this user can change, with English names: Jay's local data folder (by its
+    /// short name if the long one isn't English), then a per-user locked folder in <c>%PUBLIC%</c>, then one at the root of
+    /// the target's drive. Folders that are missing are created; ones that fail the checks are skipped.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static IEnumerable<string> LinkParents(string target)
     {
-        var candidates = new[]
-        {
-            Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber", "links"),
-            Path.Combine(Environment.GetEnvironmentVariable("PUBLIC") ?? @"C:\Users\Public", "AmberLinks"),
-            Path.Combine(Path.GetPathRoot(target) ?? @"C:\", "AmberLinks"),
-        };
-        return candidates.Where(c => c.All(ch => ch < 128));
+        if (OwnFolder(Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber", "links")) is { } own) yield return own;
+        foreach (var shared in SharedParents(target))
+            if (PrivateFolder.Ensure(Path.Combine(shared, PrivateFolder.NameFor("AmberLinks"))) is { } locked && Representable(locked))
+                yield return locked;
     }
+
+    /// <summary>The legacy home's parent when the data folder's path isn't English: its short name, or a locked shared folder.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string? PrivateHome(string ownFolder)
+    {
+        if (OwnFolder(ownFolder) is { } own) return own;
+        foreach (var shared in SharedParents(null))
+            if (PrivateFolder.Ensure(Path.Combine(shared, PrivateFolder.NameFor("AmberLegacyHome"))) is { } locked && Representable(locked))
+                return locked;
+        return null;
+    }
+
+    /// <summary>A folder in this user's own profile (others can't write there), by an English name: its own or its short name.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string? OwnFolder(string path)
+    {
+        try { Directory.CreateDirectory(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        if (Representable(path)) return path;
+        return PrivateFolder.ShortPath(path) is { } shortPath && Representable(shortPath) ? FullDirectoryPath(shortPath) : null;
+    }
+
+    private static IEnumerable<string> SharedParents(string? target) =>
+        new[] { Environment.GetEnvironmentVariable("PUBLIC") ?? @"C:\Users\Public", Path.GetPathRoot(target ?? "") is { Length: > 0 } root ? root : @"C:\" }
+            .Where(p => p.All(ch => ch < 128)).Distinct(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 参数里带的路径（整个参数是路径、-javaagent:路径[=选项]、-D名字=路径）表示不了时，把它所在的目录换成英文联接。
