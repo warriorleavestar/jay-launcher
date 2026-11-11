@@ -16,6 +16,15 @@ internal static class AndroidGameInputBridge
         if (ReferenceEquals(_session, session)) _session = null;
     }
 
-    public static void SetAction(TouchControlAction action, bool pressed) => _session?.SetAction(action, pressed);
-    public static void SetMovement(double x, double y) => _session?.SetMovement(x, y);
+    public static void SetAction(TouchControlAction action, bool pressed)
+    {
+        NativeJvmHost.SetAction(action, pressed);
+        _session?.SetAction(action, pressed);
+    }
+
+    public static void SetMovement(double x, double y)
+    {
+        NativeJvmHost.SetMovement(x, y);
+        _session?.SetMovement(x, y);
+    }
 }

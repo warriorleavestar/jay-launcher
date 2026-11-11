@@ -15,7 +15,7 @@ namespace Amber.Android;
     Theme = "@style/MyTheme.NoActionBar",
     ScreenOrientation = ScreenOrientation.SensorLandscape,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
-public sealed class GameActivity : Activity
+public sealed class GameActivity : Activity, ISurfaceHolderCallback
 {
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
 
@@ -27,6 +27,7 @@ public sealed class GameActivity : Activity
         var root = new FrameLayout(this);
         var surface = new SurfaceView(this);
         surface.SetBackgroundColor(Color.Black);
+        surface.Holder!.AddCallback(this);
         root.AddView(surface, MatchParent());
         root.AddView(new TouchControlOverlay(this), MatchParent());
 
@@ -53,6 +54,13 @@ public sealed class GameActivity : Activity
 
         SetContentView(root);
     }
+
+    public void SurfaceCreated(ISurfaceHolder holder) => NativeJvmHost.SetSurface(holder.Surface);
+
+    public void SurfaceChanged(ISurfaceHolder holder, Format format, int width, int height) =>
+        NativeJvmHost.SetSurface(holder.Surface);
+
+    public void SurfaceDestroyed(ISurfaceHolder holder) => NativeJvmHost.SetSurface(null);
 
     private static FrameLayout.LayoutParams MatchParent() => new(
         ViewGroup.LayoutParams.MatchParent,

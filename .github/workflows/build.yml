@@ -150,6 +150,19 @@ jobs:
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:AcceptAndroidSdkLicenses=true
 
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          yes | "${{ runner.temp }}/android-sdk/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="${{ runner.temp }}/android-sdk" "ndk;28.2.13676358"
+
+      - name: Build Jay native JVM host
+        shell: bash
+        run: |
+          bash ../scripts/build-android-native.sh \
+            "${{ runner.temp }}/android-sdk" \
+            Amber.Android/obj/jay-native
+
       - name: Prepare stable preview signing key
         if: github.event_name == 'workflow_dispatch' && inputs.publish_android_preview
         shell: bash
