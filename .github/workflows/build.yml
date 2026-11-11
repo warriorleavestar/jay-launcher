@@ -123,18 +123,16 @@ jobs:
           Copy-Item -Recurse ../out/win-x64/easytier ../out/win-x64-aot/easytier
           Compress-Archive -Path ../out/win-x64-aot/* -DestinationPath ../packages/Jay-win-x64-aot.zip
 
-      # Mac/Linux Native AOT 仍是附加的实验包。Linux 的 ILC 偶尔会超出托管 runner 内存；
-      # 不让它遮住已经构建成功的标准单文件包。
-      - name: Try macOS/Linux Native AOT
-        if: matrix.archive == 'tar'
-        continue-on-error: true
+      # Linux ILC 会耗尽托管 runner 内存并使整台 runner 被强制终止，连已构建的
+      # 标准包也来不及上传。Linux 只发可靠的 ReadyToRun 包，macOS 继续附带 AOT 包。
+      - name: Publish macOS Native AOT
+        if: startsWith(matrix.rid, 'osx-')
         shell: bash
         run: |
           dotnet publish Amber.App -c Release -r ${{ matrix.rid }} -p:PublishAot=true -p:DebugType=none -o ../out/${{ matrix.rid }}-aot
           find ../out/${{ matrix.rid }}-aot \( -name '*.pdb' -o -name '*.dbg' -o -name '*.dSYM' \) -prune -exec rm -rf {} +
           cp -R ../out/${{ matrix.rid }}/easytier ../out/${{ matrix.rid }}-aot/easytier
           chmod +x ../out/${{ matrix.rid }}-aot/Jay
-          if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}-aot/NotoSansSC-OFL.txt; fi
           tar -C ../out/${{ matrix.rid }}-aot -czf ../packages/Jay-${{ matrix.rid }}-aot.tar.gz .
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
