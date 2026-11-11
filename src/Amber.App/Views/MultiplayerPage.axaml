@@ -1305,7 +1305,10 @@
                   <CheckBox IsChecked="{Binding VolunteerEnabled}" Content="{l:T multiplayer.volunteer.enable}" />
                   <StackPanel Spacing="6" IsEnabled="{Binding VolunteerEnabled}">
                     <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.address}" />
-                    <TextBox Text="{Binding VolunteerAddress}" FontFamily="Consolas,monospace" MaxLength="253" PlaceholderText="203.0.113.5 / jay.example.org" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                      <TextBox Text="{Binding VolunteerAddress}" FontFamily="Consolas,monospace" MaxLength="253" PlaceholderText="203.0.113.5 / jay.example.org" />
+                      <Button Grid.Column="1" Content="{l:T multiplayer.volunteer.detect}" Command="{Binding DetectVolunteerAddressCommand}" IsEnabled="{Binding !IsCheckingVolunteer}" />
+                    </Grid>
                     <WrapPanel ItemSpacing="12" LineSpacing="6">
                       <StackPanel Spacing="4">
                         <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.port}" />
@@ -1318,7 +1321,10 @@
                     </WrapPanel>
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.port_hint}" />
                   </StackPanel>
-                  <Button Content="{l:T multiplayer.volunteer.save}" Command="{Binding SaveVolunteerCommand}" HorizontalAlignment="Left" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Content="{l:T multiplayer.volunteer.save}" Command="{Binding SaveVolunteerCommand}" />
+                    <Button Content="{l:T multiplayer.volunteer.test}" Command="{Binding TestVolunteerPortCommand}" IsEnabled="{Binding !IsCheckingVolunteer}" />
+                  </WrapPanel>
                   <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding VolunteerStatus}" IsVisible="{Binding VolunteerStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 </StackPanel>
               </Expander>

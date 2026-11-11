@@ -81,6 +81,31 @@ public static class VolunteerNodes
     }
 
     /// <summary>
+    /// This computer's public IPv4 address as EasyTier's STUN check saw it, from <c>easytier-cli node -o json</c>
+    /// (<c>stun_info.public_ip</c>, else <c>ip_list.public_ipv4</c>). Null when there is none (STUN blocked, or not
+    /// checked yet). Behind carrier-grade NAT this is the carrier's address, which port forwarding can't reach.
+    /// </summary>
+    public static string? PublicAddressFromNodeInfo(string json)
+    {
+        try
+        {
+            if (JsonNode.Parse(json) is not JsonObject node) return null;
+            var candidates = new List<string>();
+            foreach (var ip in node["stun_info"]?["public_ip"] as JsonArray ?? [])
+                if (ip?.GetValueKind() == JsonValueKind.String) candidates.Add(ip.GetValue<string>());
+            if (node["ip_list"]?["public_ipv4"] is JsonObject v4 && v4["addr"]?.GetValueKind() == JsonValueKind.Number)
+            {
+                var n = v4["addr"]!.GetValue<uint>();
+                candidates.Add(new IPAddress([(byte)(n >> 24), (byte)(n >> 16), (byte)(n >> 8), (byte)n]).ToString());
+            }
+            else if (node["ip_list"]?["public_ipv4"]?.GetValueKind() == JsonValueKind.String) candidates.Add(node["ip_list"]!["public_ipv4"]!.GetValue<string>());
+            return candidates.Select(c => IPAddress.TryParse(c.Trim(), out var ip) ? ip : null)
+                .FirstOrDefault(ip => ip is { AddressFamily: AddressFamily.InterNetwork } && IsPublic(ip))?.ToString();
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or OverflowException) { return null; }
+    }
+
+    /// <summary>
     /// Default reachability check the directory runs before listing a volunteer: resolve the host, refuse it if any
     /// address is not public, then open (and close) a TCP connection within 5 seconds.
     /// </summary>
@@ -132,6 +157,37 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     /// <summary>The last probe started by <see cref="Register"/> (tests wait on it).</summary>
     public Task LastProbe { get; private set; } = Task.CompletedTask;
+
+    /// <summary>Most reachability checks ("probe" op) per minute for the whole directory, and per address.</summary>
+    public const int ChecksPerMinute = 30;
+    public static readonly TimeSpan CheckSameAddressEvery = TimeSpan.FromSeconds(10);
+
+    private readonly Queue<DateTimeOffset> _checks = new();
+    private readonly Dictionary<string, DateTimeOffset> _lastCheck = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Handles a "probe" request: can the directory reach this address right now? Lets a would-be volunteer test its
+    /// port forwarding before volunteering. Same rules as listing (public addresses only) and rate limited, so it can't
+    /// be used as a port scanner. Returns <c>{ok, reachable}</c>, or error "bad" / "banned" / "rate".
+    /// </summary>
+    public async Task<JsonObject> CheckAsync(string? url, CancellationToken ct = default)
+    {
+        if (VolunteerNodes.Normalize(url) is not { } address) return Error("bad");
+        if (Blocked?.Invoke(address) == true) return Error("banned");
+        var now = _now();
+        lock (_gate)
+        {
+            while (_checks.Count > 0 && now - _checks.Peek() > TimeSpan.FromMinutes(1)) _checks.Dequeue();
+            foreach (var key in _lastCheck.Where(p => now - p.Value > CheckSameAddressEvery).Select(p => p.Key).ToList()) _lastCheck.Remove(key);
+            if (_checks.Count >= ChecksPerMinute || _lastCheck.ContainsKey(address)) return Error("rate");
+            _checks.Enqueue(now);
+            _lastCheck[address] = now;
+        }
+        bool reachable;
+        try { reachable = await _probe(address, ct); }
+        catch (Exception e) when (e is not OutOfMemoryException) { reachable = false; }
+        return new JsonObject { ["ok"] = true, ["reachable"] = reachable };
+    }
 
     /// <summary>Handles a "volunteer" request. Returns the reply: <c>{ok, listed}</c> or an error code.</summary>
     public JsonObject Register(string? url)
