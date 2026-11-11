@@ -160,8 +160,12 @@ public sealed class FriendBackupTests : IDisposable
             Assert.False(b.Find(laptop.PublicKey)!.NewDevice);
             var path = Path.Combine(_dir, "bob.json");
             Assert.True(new ContactBook(path).Find(phone.PublicKey)!.NewDevice);
+            // Until I confirm it, a room invite to that device doesn't let it straight in.
+            Assert.False(b.Find(phone.PublicKey)!.MayBeAutoAdmitted);
+            Assert.True(b.Find(laptop.PublicKey)!.MayBeAutoAdmitted);
             b.AcknowledgeDevice(phone.PublicKey);
             Assert.False(new ContactBook(path).Find(phone.PublicKey)!.NewDevice);
+            Assert.True(b.Find(phone.PublicKey)!.MayBeAutoAdmitted);
         }
     }
 

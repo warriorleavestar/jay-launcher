@@ -26,6 +26,12 @@ public sealed record Contact(byte[] PublicKey, string Name, bool Verified, DateT
     /// fine yet. Kept in the file so the notice survives a restart until I answer it.
     /// </summary>
     public bool NewDevice { get; init; }
+
+    /// <summary>
+    /// A room invite mailed to this device may let it straight in. Not while it's a new device I haven't confirmed:
+    /// until then the host is asked when it knocks, like for anyone else.
+    /// </summary>
+    public bool MayBeAutoAdmitted => Verified && !NewDevice;
 }
 
 /// <summary>A device I removed from someone's devices. It has to go through the emoji again to come back.</summary>
