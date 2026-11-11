@@ -66,6 +66,44 @@
     </ItemGroup>
   </Target>
 
+  <!--
+    Jay's file system provider for the Windows sandbox (tools/jay-fs, Java 8 bytecode): fixes Java's write check inside
+    the sandbox. The JDK class it extends is package-private, so it compiles against a stand-in (tools/jay-fs/stub) that
+    is not packaged. Same JDK lookup and RequireJayDns switch as jay-dns.
+  -->
+  <PropertyGroup>
+    <JayFsSource>$(MSBuildThisFileDirectory)..\..\tools\jay-fs</JayFsSource>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <JayFsJava Include="$(JayFsSource)\src\**\*.java" />
+    <JayFsStub Include="$(JayFsSource)\stub\**\*.java" />
+  </ItemGroup>
+
+  <Target Name="BuildJayFs" BeforeTargets="BeforeBuild" Inputs="@(JayFsJava);@(JayFsStub)" Outputs="$(IntermediateOutputPath)jay-fs.jar">
+    <PropertyGroup>
+      <JayFsClasses>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)jay-fs</JayFsClasses>
+      <JayFsStubClasses>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)jay-fs-stub</JayFsStubClasses>
+    </PropertyGroup>
+    <RemoveDir Directories="$(JayFsClasses);$(JayFsStubClasses)" />
+    <MakeDir Directories="$(JayFsClasses);$(JayFsStubClasses)" />
+    <Exec Command="&quot;$(JayJavac)&quot; --release 8 -Xlint:-options -encoding UTF-8 -d &quot;$(JayFsStubClasses)&quot; @(JayFsStub->'&quot;%(FullPath)&quot;', ' ')" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="JayFsStubExit" />
+    </Exec>
+    <Exec Condition="'$(JayFsStubExit)' == '0'" Command="&quot;$(JayJavac)&quot; --release 8 -Xlint:-options -encoding UTF-8 -cp &quot;$(JayFsStubClasses)&quot; -d &quot;$(JayFsClasses)&quot; @(JayFsJava->'&quot;%(FullPath)&quot;', ' ')" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="JayFsExit" />
+    </Exec>
+    <ZipDirectory Condition="'$(JayFsExit)' == '0'" SourceDirectory="$(JayFsClasses)" DestinationFile="$(IntermediateOutputPath)jay-fs.jar" Overwrite="true" />
+    <Warning Condition="'$(JayFsExit)' != '0' and '$(RequireJayDns)' != 'true'" Text="jay-fs was not built (no JDK found as '$(JayJavac)'): sandboxed games may not write through zip file systems (Fabric's remapped jar)." />
+    <Error Condition="'$(JayFsExit)' != '0' and '$(RequireJayDns)' == 'true'" Text="jay-fs could not be built with '$(JayJavac)' (RequireJayDns=true)." />
+  </Target>
+
+  <Target Name="EmbedJayFs" AfterTargets="BuildJayFs" BeforeTargets="BeforeBuild" Condition="Exists('$(IntermediateOutputPath)jay-fs.jar')">
+    <ItemGroup>
+      <EmbeddedResource Include="$(IntermediateOutputPath)jay-fs.jar" LogicalName="Amber.Core.jay-fs.jar" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Amber.Core.Tests" />
   </ItemGroup>

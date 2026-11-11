@@ -77,6 +77,10 @@ public static unsafe class WindowsSandbox
     {
         grants = grants.Normalized();
         var container = level == WindowsSandboxLevel.Strong ? ContainerSid() : null;
+        // A strong launch left the container's rights on these folders. Low-integrity processes were seen to be refused
+        // reading anything whose ACL names a specific container SID, so the standard level takes them off again.
+        if (container is null && DerivedContainerSid() is { } previous)
+            foreach (var path in grants.ReadWrite.Concat(grants.ReadOnly).Where(Exists)) Ungrant(path, previous);
         // Grants first, hidden folders after: a hidden folder inside a granted one keeps its own label.
         foreach (var path in grants.ReadWrite)
         {
@@ -219,17 +223,45 @@ public static unsafe class WindowsSandbox
         }
     }
 
+    /// <summary>Takes the container's own (not inherited) rights off <paramref name="path"/> and what inherited them.</summary>
+    internal static void Ungrant(string path, SecurityIdentifier sid)
+    {
+        try
+        {
+            FileSystemSecurity acl = Directory.Exists(path) ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Access) : new FileInfo(path).GetAccessControl(AccessControlSections.Access);
+            if (!acl.GetAccessRules(true, false, typeof(SecurityIdentifier)).OfType<FileSystemAccessRule>().Any(r => r.IdentityReference == sid)) return;
+            acl.PurgeAccessRules(sid);
+            if (acl is DirectorySecurity d) new DirectoryInfo(path).SetAccessControl(d);
+            else new FileInfo(path).SetAccessControl((FileSecurity)acl);
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or PrivilegeNotHeldException or InvalidOperationException)
+        {
+            throw new SandboxUnavailableException(L.F("core.launch.sandbox.win.grant_failed", path, e.Message), e);
+        }
+    }
+
     /// <summary>"ALL APPLICATION PACKAGES": system folders and Program Files already let every container read them.</summary>
     private static readonly SecurityIdentifier AllApplicationPackages = new("S-1-15-2-1");
 
     private static bool Has(AuthorizationRuleCollection rules, SecurityIdentifier sid, FileSystemRights rights) =>
-        rules.OfType<FileSystemAccessRule>().Any(r => r.AccessControlType == AccessControlType.Allow
+        Has(rules.OfType<FileSystemAccessRule>(), sid, rights);
+
+    private static bool Has(IEnumerable<FileSystemAccessRule> rules, SecurityIdentifier sid, FileSystemRights rights) =>
+        rules.Any(r => r.AccessControlType == AccessControlType.Allow
             && (r.IdentityReference == sid || r.IdentityReference == AllApplicationPackages) && (r.FileSystemRights & rights) == rights);
 
     // ---------------------------------------------------------------- the container
 
     /// <summary>Jay's game container SID, creating the container on first use (no admin needed).</summary>
     public static SecurityIdentifier ContainerSid() => ContainerSid(ContainerName);
+
+    /// <summary>Jay's container SID without creating the container, or null.</summary>
+    internal static SecurityIdentifier? DerivedContainerSid()
+    {
+        if (DeriveAppContainerSidFromAppContainerName(ContainerName, out var sid) != 0) return null;
+        try { return new SecurityIdentifier(sid); }
+        finally { FreeSid(sid); }
+    }
 
     internal static SecurityIdentifier ContainerSid(string name)
     {
@@ -322,6 +354,29 @@ public static unsafe class WindowsSandbox
         return AdminPrompt.NoAdmin;
     }
 
+    // ---------------------------------------------------------------- Java's AF_UNIX wakeup pipe
+
+    /// <summary>Longest socket folder path in characters: AF_UNIX paths are limited to 108 bytes, and Java appends a
+    /// separator and a file name of about 30 characters.</summary>
+    public const int MaxSocketFolderLength = 70;
+
+    /// <summary>
+    /// Java 16+ builds the selector's wakeup pipe from an AF_UNIX socket in its temp folder. At low integrity that
+    /// connect was seen to fail ("Invalid argument") under the user's AppData folders while it worked elsewhere, and the
+    /// game then dies at start (Netty's selector). The socket folder can be moved with <c>jdk.net.unixdomain.tmpdir</c>:
+    /// this returns a folder inside the game's own writable folder for that, or null when the path is too long for a
+    /// socket, not plain ASCII (Java reads its command line in the ANSI code page) or the folder cannot be made.
+    /// Older Javas ignore the property.
+    /// </summary>
+    public static string? SocketFolder(string writableFolder)
+    {
+        var folder = Path.Combine(Path.GetFullPath(writableFolder), ".jay-sock");
+        if (folder.Length > MaxSocketFolderLength || folder.Any(c => c > 127)) return null;
+        try { Directory.CreateDirectory(folder); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        return folder;
+    }
+
     // ---------------------------------------------------------------- DNS inside the container
 
     /// <summary>
@@ -392,15 +447,43 @@ public static unsafe class WindowsSandbox
     public static bool HasResolver => typeof(WindowsSandbox).Assembly.GetManifestResourceInfo(ResolverResource) is not null;
 
     /// <summary>Writes the resolver jar into <paramref name="folder"/> (once per content) and returns its path, or null when this build has none.</summary>
-    public static string? ResolverJar(string folder)
+    public static string? ResolverJar(string folder) => EmbeddedJar(ResolverResource, "jay-dns", folder);
+
+    // ---------------------------------------------------------------- "may I write?" inside the sandbox
+
+    /// <summary>The file system jar's resource (tools/jay-fs); missing when the build had no JDK.</summary>
+    internal const string FileSystemResource = "Amber.Core.jay-fs.jar";
+
+    /// <summary>The class in that jar that becomes the game's default file system provider.</summary>
+    public const string FileSystemProvider = "sun.nio.fs.JaySandboxFileSystemProvider";
+
+    public static bool HasFileSystemJar => typeof(WindowsSandbox).Assembly.GetManifestResourceInfo(FileSystemResource) is not null;
+
+    /// <summary>Writes the file system jar into <paramref name="folder"/> (once per content) and returns its path, or null when this build has none.</summary>
+    public static string? FileSystemJar(string folder) => EmbeddedJar(FileSystemResource, "jay-fs", folder);
+
+    /// <summary>
+    /// Java's "may I write this?" (<c>Files.isWritable</c>, used by zip file systems among others) checks a file's
+    /// permissions without its integrity label, so at either sandbox level every file looks read-only to the game, even
+    /// the ones it may write: Fabric then cannot write its remapped game jar. These JVM arguments make Jay's provider
+    /// (a subclass of the JDK's own Windows provider that confirms a refused write check by opening the file) the default
+    /// file system. Java 9+ add the class to java.base; Java 8 has no modules and takes it from the boot class path.
+    /// </summary>
+    public static IReadOnlyList<string> FileSystemArguments(int javaMajor, string jar) =>
+    [
+        javaMajor is > 0 and <= 8 ? "-Xbootclasspath/a:" + jar : "--patch-module=java.base=" + jar,
+        "-Djava.nio.file.spi.DefaultFileSystemProvider=" + FileSystemProvider,
+    ];
+
+    private static string? EmbeddedJar(string resource, string name, string folder)
     {
-        using var stream = typeof(WindowsSandbox).Assembly.GetManifestResourceStream(ResolverResource);
+        using var stream = typeof(WindowsSandbox).Assembly.GetManifestResourceStream(resource);
         if (stream is null) return null;
         using var memory = new MemoryStream();
         stream.CopyTo(memory);
         var bytes = memory.ToArray();
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes))[..12];
-        var path = Path.Combine(folder, $"jay-dns-{hash}.jar");
+        var path = Path.Combine(folder, $"{name}-{hash}.jar");
         if (!File.Exists(path))
         {
             Directory.CreateDirectory(folder);
@@ -651,6 +734,7 @@ public static unsafe class WindowsSandbox
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int SetNamedSecurityInfoW(string name, int type, uint info, nint owner, nint group, nint dacl, nint sacl);
+
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
     private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl, uint revision, out nint sd, out uint size);

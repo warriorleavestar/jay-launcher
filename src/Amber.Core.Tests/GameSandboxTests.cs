@@ -203,6 +203,21 @@ public sealed class GameSandboxTests : IDisposable
 
     // ---------------------------------------------------------------- Windows
 
+    [Fact]
+    public void Windows_SocketFolder_InsideTheWritableFolder_OnlyWhenShortAndAscii()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var game = Dir("g");
+        var folder = WindowsSandbox.SocketFolder(game);
+        if (Path.Combine(game, ".jay-sock").Length <= WindowsSandbox.MaxSocketFolderLength)
+        {
+            Assert.Equal(Path.Combine(game, ".jay-sock"), folder);
+            Assert.True(Directory.Exists(folder));
+        }
+        Assert.Null(WindowsSandbox.SocketFolder(Dir(new string('x', 80))));
+        Assert.Null(WindowsSandbox.SocketFolder(Path.Combine(Path.GetPathRoot(game)!, "游戏")));
+    }
+
     [Theory]
     [InlineData("plain")]
     [InlineData("with space")]
@@ -286,6 +301,85 @@ public sealed class GameSandboxTests : IDisposable
         using var zip = System.IO.Compression.ZipFile.OpenRead(first);
         Assert.Contains(zip.Entries, e => e.FullName == "META-INF/services/java.net.spi.InetAddressResolverProvider");
         Assert.Contains(zip.Entries, e => e.FullName == "jay/dns/JayResolverProvider.class");
+    }
+
+    [Fact]
+    public void Windows_FileSystemJar_HoldsOnlyTheProvider_AndArgumentsFitTheJava()
+    {
+        if (!OperatingSystem.IsWindows() || !WindowsSandbox.HasFileSystemJar) return;
+        var folder = Path.Combine(_root, "libraries", "jay", "jay-fs");
+        var jar = WindowsSandbox.FileSystemJar(folder);
+        Assert.NotNull(jar);
+        Assert.Equal(jar, WindowsSandbox.FileSystemJar(folder));
+        using (var zip = System.IO.Compression.ZipFile.OpenRead(jar))
+            // The compile-time stand-in for the JDK class must never ship: it would replace the real one.
+            Assert.Equal(["sun/nio/fs/JaySandboxFileSystemProvider.class"], zip.Entries.Select(e => e.FullName).Where(n => !n.EndsWith('/')));
+        Assert.Equal(["-Xbootclasspath/a:" + jar, "-Djava.nio.file.spi.DefaultFileSystemProvider=" + WindowsSandbox.FileSystemProvider],
+            WindowsSandbox.FileSystemArguments(8, jar));
+        Assert.Equal(["--patch-module=java.base=" + jar, "-Djava.nio.file.spi.DefaultFileSystemProvider=" + WindowsSandbox.FileSystemProvider],
+            WindowsSandbox.FileSystemArguments(21, jar));
+    }
+
+    [Fact]
+    public void Windows_StandardLevel_TakesTheContainersRightsOffAgain()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var folder = Dir("granted");
+        File.WriteAllText(Path.Combine(folder, "f.txt"), "x");
+        // Any app container SID will do; this one is never created.
+        var sid = new System.Security.Principal.SecurityIdentifier("S-1-15-2-1-2-3-4-5-6-7");
+        bool Named(string path) => new FileInfo(path).GetAccessControl().GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+            .OfType<System.Security.AccessControl.FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
+        WindowsSandbox.Grant(folder, sid, write: true);
+        Assert.True(Named(Path.Combine(folder, "f.txt")));
+        WindowsSandbox.Ungrant(folder, sid);
+        Assert.False(Named(Path.Combine(folder, "f.txt")));
+        WindowsSandbox.Ungrant(folder, sid); // nothing left to take off
+    }
+
+    /// <summary>A JDK for the real-Java tests: JAVA_HOME, else an Adoptium install; null skips them.</summary>
+    private static string? TestJava()
+    {
+        var homes = new List<string?> { Environment.GetEnvironmentVariable("JAVA_HOME"), Environment.GetEnvironmentVariable("JAVA_HOME_21_X64") };
+        var adoptium = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Eclipse Adoptium");
+        if (Directory.Exists(adoptium)) homes.AddRange(Directory.GetDirectories(adoptium, "jdk-*").OrderDescending());
+        return homes.Where(h => !string.IsNullOrEmpty(h)).Select(h => Path.Combine(h!, "bin", "java.exe"))
+            .FirstOrDefault(j => File.Exists(j) && WindowsSandbox.JavaMajor(j) >= 11);
+    }
+
+    [Fact]
+    public void Windows_StandardLevel_JavaSeesItsWritableFilesAsWritable_WithJaysProvider()
+    {
+        // Java's Files.isWritable ignores the integrity label, so inside the sandbox it called every file read-only and
+        // Fabric could not write its remapped game jar (zip file systems open read-only then).
+        if (!OperatingSystem.IsWindows() || !WindowsSandbox.HasFileSystemJar || TestJava() is not { } java) return;
+        var instance = Dir("instance");
+        var jar = WindowsSandbox.FileSystemJar(Dir("libraries"))!;
+        File.WriteAllText(Path.Combine(instance, "Probe.java"), """
+            import java.nio.file.*;
+            import java.util.Map;
+            public class Probe {
+                public static void main(String[] a) throws Exception {
+                    Path jar = Path.of("probe.jar");
+                    try (FileSystem zip = FileSystems.newFileSystem(jar, Map.of("create", "true"))) {
+                        Files.writeString(zip.getPath("x.txt"), "x");
+                    }
+                    System.out.println("writable=" + Files.isWritable(jar) + " dir=" + Files.isWritable(Path.of(".")));
+                }
+            }
+            """);
+        WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], ReadOnly = [Path.GetDirectoryName(jar)!] }, WindowsSandboxLevel.Standard);
+        var psi = new ProcessStartInfo(java)
+        {
+            WorkingDirectory = instance, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        foreach (var arg in WindowsSandbox.FileSystemArguments(WindowsSandbox.JavaMajor(java), jar)) psi.ArgumentList.Add(arg);
+        psi.ArgumentList.Add("Probe.java");
+        using var process = WindowsSandbox.Start(psi, WindowsSandboxLevel.Standard);
+        var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+        Assert.True(process.WaitForExit(60_000));
+        Assert.Contains("writable=true dir=true", output);
     }
 
     [Fact]

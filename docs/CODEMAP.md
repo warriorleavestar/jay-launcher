@@ -111,6 +111,8 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `scripts/` | Release helpers: bundle EasyTier, publish and package macOS, attach the universal loader zip to its release (`attach-loader.ps1`, see `docs/universal-loader-release.md`). |
 | `tools/` | GUI self-check runner, multiplayer test, NAT bench, brand icon export, this code index builder. |
 | `tools/FullLanCheck/` | Headless end-to-end check of full-LAN mode on macOS/Linux (needs root), used by the fulllan-e2e workflow. |
+| `tools/jay-dns/` | Java 18+ name resolver for the Windows strong sandbox; built by Amber.Core.csproj and embedded (`WindowsSandbox.ResolverJar`). |
+| `tools/jay-fs/` | Java file system provider for the Windows sandbox (fixes `Files.isWritable` under low integrity / AppContainer); `stub/` is compile-only. Embedded (`WindowsSandbox.FileSystemJar`). |
 | `.github/` | CI (`build.yml`), security regression tests, network registry checks, issue templates. |
 
 ## Where to start for common tasks

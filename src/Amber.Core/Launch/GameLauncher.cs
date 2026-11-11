@@ -411,6 +411,16 @@ public sealed class GameLauncher(GameDirectory dir)
                     if (jar is not null) extraReadOnly.Add(jar);
                 }
             }
+            if (windowsLevel == WindowsSandboxLevel.Standard && WindowsSandbox.SocketFolder(workDir) is { } sockets)
+                psi.ArgumentList.Insert(0, "-Djdk.net.unixdomain.tmpdir=" + sockets);
+            // Java's write check cannot see the sandbox's labels (see FileSystemArguments): without this, Fabric's
+            // remapped game jar and anything else written through a zip file system fails as "read-only".
+            if (WindowsSandbox.FileSystemJar(Path.Combine(dir.Root, "libraries", "jay", "jay-fs")) is { } fs)
+            {
+                var fsArgs = WindowsSandbox.FileSystemArguments(WindowsSandbox.JavaMajor(psi.FileName), fs);
+                for (var i = 0; i < fsArgs.Count; i++) psi.ArgumentList.Insert(i, fsArgs[i]);
+                extraReadOnly.Add(fs);
+            }
         }
         var grants = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox, extraReadOnly,
             extraReadWrite: legacyHome is null ? null : [legacyHome]);
