@@ -94,7 +94,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     {
         var server = await StartAsync(b => b.UseBlockedWords(["坏 词"]));
         var net = new LoopbackNetwork(server.Directory!.Port);
-        var client = new RoomDirectoryClient(net);
+        var client = new RoomDirectoryClient(net) { NetworkSecret = server.Directory.NetworkSecret };
         var host = X25519KeyPair.Generate();
         var signer = new RoomSigner();
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
@@ -507,10 +507,10 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var net = new LoopbackNetwork(server.Directory!.Port);
         var host = X25519KeyPair.Generate();
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
-            new RoomDirectoryClient(net) { Version = "0.7.3" }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default));
+            new RoomDirectoryClient(net) { Version = "0.7.3", NetworkSecret = server.Directory.NetworkSecret }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default));
         Assert.Equal("version", e.Code);
         Assert.Contains("0.8.0", e.Message);
-        await new RoomDirectoryClient(net) { Version = "0.8.0" }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default);
+        await new RoomDirectoryClient(net) { Version = "0.8.0", NetworkSecret = server.Directory.NetworkSecret }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default);
         Assert.Equal(1, server.Directory.Count);
 
         // No minVersion in the config: any client is fine.
@@ -683,7 +683,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var main = await ReplicaAsync("main");
         var backup = await ReplicaAsync("backup", b => b.UseDirectoryIndex(2));
         var net = new ReplicaNetwork { Map = { ["10.235.0.1"] = main.Port, ["10.235.255.254"] = backup.Port } };
-        var client = new RoomDirectoryClient(net);
+        var client = new RoomDirectoryClient(net) { NetworkSecret = main.NetworkSecret };
         var host = X25519KeyPair.Generate();
         var signer = new RoomSigner();
         var lobby = new byte[32];
@@ -721,19 +721,12 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         // 登录请求带的是真实时间，这个节点也用真实时钟。
         var backup = await ReplicaAsync("backup", b => b.UseDirectoryIndex(2).UseBlockedWords(["广告"]).UseAccounts(new ForumAccounts()).UseClock(() => DateTimeOffset.UtcNow));
         var net = new ReplicaNetwork { Map = { ["10.235.0.1"] = main.Port, ["10.235.255.254"] = backup.Port } };
-        var client = new RoomDirectoryClient(net);
+        var client = new RoomDirectoryClient(net) { NetworkSecret = main.NetworkSecret };
         var host = X25519KeyPair.Generate();
 
         // 两个目录都拒绝：报拒绝和原因，不是“连不上”。
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(host, name: "广告"), _now), true, [], default));
         Assert.Equal("name", e.Code);
-
-        // 直连房间的回复码：只捎给一个目录，房主续期时只收到一份。
-        var signer = new RoomSigner();
-        await client.AnnounceAsync(signer.Sign(Listing(host, RoomVisibility.Direct), _now), true, [], default);
-        await client.MailAsync(signer.RoomId, "JAY2R-REPLY", default);
-        _now += TimeSpan.FromSeconds(30);
-        Assert.Equal(["JAY2R-REPLY"], await client.AnnounceAsync(signer.Sign(Listing(host, RoomVisibility.Direct), _now), true, [], default));
 
         // 只有备用目录开了登录：主目录回 op，客户端接着问备用的。
         var authority = new JayNetworkServerBuilder().UseDataDir(Path.Combine(_dir, "backup")).UseAccounts(new ForumAccounts()).WithoutAdmin()

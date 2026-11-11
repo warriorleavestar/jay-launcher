@@ -174,21 +174,6 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         Assert.Equal("lookup", squat.Code);
     }
 
-    [Fact]
-    public async Task MailReachesDirectRoomHostOnNextRenewal()
-    {
-        var client = new RoomDirectoryClient(_net);
-        var signer = new RoomSigner();
-        await client.AnnounceAsync(signer.Sign(Listing(RoomVisibility.Direct), _now), true, [], default);
-        await client.MailAsync(signer.RoomId, "JAY2R-REPLY", default);
-        var mail = await client.AnnounceAsync(signer.Sign(Listing(RoomVisibility.Direct), _now), true, [], default);
-        Assert.Equal(["JAY2R-REPLY"], mail);
-        Assert.Empty(await client.AnnounceAsync(signer.Sign(Listing(RoomVisibility.Direct), _now), true, [], default));
-        // 只有直连房间收信。
-        var other = new RoomSigner();
-        await client.AnnounceAsync(other.Sign(Listing(), _now), true, [], default);
-        await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.MailAsync(other.RoomId, "x", default));
-    }
 
     [Fact]
     public async Task BadRequestsGetErrorsNotCrashes()

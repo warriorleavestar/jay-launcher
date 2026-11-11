@@ -10,9 +10,10 @@ using Amber.Core.Multiplayer.Transport;
 namespace Amber.Core.Multiplayer.Public;
 
 /// <summary>
-/// 目录服务的协议：一条连接一个请求，各是一行 JSON（UTF-8，最长 16 KB）。
+/// 目录服务的协议：一条连接一个请求，请求和回复各是一段 JSON（UTF-8，最长 16 KB），只经 <see cref="DirectoryChannel"/>
+/// 加密传输（不再有明文请求）。
 /// announce 发布 / 续期房间（房主用房间的签名钥匙签过，房间编号由签名公钥派生，序号只能变大）；
-/// withdraw 撤下；list 看公开列表；lookup 按大厅名找房主（拿着邀请码的人用它找到隐藏房间）；mail 给房主捎一句话（直连房间的回复码）；
+/// withdraw 撤下；list 看公开列表；lookup 按大厅名找房主（拿着邀请码的人用它找到隐藏房间）；
 /// find 按设备指纹码找房间（房主打开了“可以用指纹码找到这个房间”时，发布时带上指纹密钥，目录拿它认码）。
 /// 目录服务只存这些，不经手任何钥匙；房主 90 秒没续期就从列表里消失。
 /// <para>
@@ -25,8 +26,6 @@ public static class RoomDirectoryProtocol
 {
     public const int MaxLine = 16 * 1024;
     public const int MaxLookupKeys = 4;
-    public const int MaxMailLength = 4096;
-    public const int MaxMailPerRoom = 16;
     /// <summary>Sealed mail kept per mailbox; more is refused with "full" until the recipient picks some up or it expires.</summary>
     public const int MaxMailPerBox = 32;
     /// <summary>Mailboxes asked for in one fetch (yesterday's, today's and tomorrow's).</summary>
@@ -35,37 +34,6 @@ public static class RoomDirectoryProtocol
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan RenewEvery = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
-
-    internal static async Task WriteLineAsync(Stream stream, JsonNode node, CancellationToken ct)
-    {
-        var bytes = Encoding.UTF8.GetBytes(node.ToJsonString() + "\n");
-        if (bytes.Length > MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
-        await stream.WriteAsync(bytes, ct);
-        await stream.FlushAsync(ct);
-    }
-
-    internal static async Task<JsonObject> ReadLineAsync(Stream stream, CancellationToken ct, byte? firstByte = null)
-    {
-        var buffer = new byte[MaxLine];
-        var length = 0;
-        if (firstByte is { } b) buffer[length++] = b;
-        while (true)
-        {
-            if (length == buffer.Length) throw new InvalidDataException(L.T("core.mp.public.too_large"));
-            var read = await stream.ReadAsync(buffer.AsMemory(length), ct);
-            if (read == 0) throw new EndOfStreamException();
-            var newline = Array.IndexOf(buffer, (byte)'\n', length, read);
-            length += read;
-            if (newline >= 0)
-            {
-                try
-                {
-                    return JsonNode.Parse(buffer.AsSpan(0, newline)) as JsonObject ?? throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
-                }
-                catch (JsonException) { throw new InvalidDataException(L.T("core.mp.public.bad_reply")); }
-            }
-        }
-    }
 
     /// <summary>邀请码的大厅名 → 目录里的查找键（不直接存大厅名，免得目录拿它去进大厅）。</summary>
     public static string LookupKey(ReadOnlySpan<byte> lobbyKey) =>
@@ -87,7 +55,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         /// <summary>房主的指纹密钥（没打开指纹查找时为 null）。</summary>
         public byte[]? Search;
         public DateTimeOffset Expires;
-        public readonly List<string> Mail = [];
         /// <summary>The host's verified network account (null when the host did not log in).</summary>
         public string? Account;
     }
@@ -153,10 +120,13 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     public bool RequireAccountToPublish { get; set; }
 
     /// <summary>
-    /// This directory's X25519 identity. With one, clients of a network that pins it ("dirKeys") reach the directory
-    /// through <see cref="DirectoryChannel"/>. Without one, only the legacy protocol is spoken.
+    /// This directory's X25519 identity for <see cref="DirectoryChannel"/>. Clients of a network that pins it ("dirKeys")
+    /// or certifies it insist on it. Null: a throwaway key for this process (the channel is still encrypted, but clients
+    /// can only trust it on first use).
     /// </summary>
     public X25519KeyPair? Identity { get; set; }
+
+    private readonly Lazy<X25519KeyPair> _ephemeralIdentity = new(X25519KeyPair.Generate);
 
     /// <summary>The network's EasyTier secret, for <see cref="DirectoryChannel"/>'s psk.</summary>
     public string NetworkSecret { get; set; } = "";
@@ -166,12 +136,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// handshake so Jay can accept a key that isn't pinned in the connection string. Null: none.
     /// </summary>
     public byte[]? Certificate { get; set; }
-
-    /// <summary>
-    /// Whether unauthenticated (legacy JSON line) requests are still answered. True by default so Jay versions without
-    /// directory pinning keep working; a network that requires a new enough Jay can turn it off.
-    /// </summary>
-    public bool AcceptLegacyClients { get; set; } = true;
 
     /// <summary>Volunteer nodes ("volunteer" / "nodes" ops). Null = this network doesn't take volunteers (error "off").</summary>
     public VolunteerRegistry? Volunteers { get; set; }
@@ -252,30 +216,22 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             var stream = client.GetStream();
             var first = new byte[1];
             if (!await SecureStream.ReadExactAsync(stream, first, deadline.Token)) return;
-            if (first[0] == DirectoryChannel.LegacyFirstByte)
-            {
-                if (!AcceptLegacyClients) return;
-                var request = await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token, first[0]);
-                await RoomDirectoryProtocol.WriteLineAsync(stream, Handle(request, secure: false, Source(client)), deadline.Token);
-                return;
-            }
-            if (Identity is null) return;
-            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
-            await secure.Reply(Handle(secure.Request, secure: true, Source(client)), deadline.Token);
+            // Only the authenticated channel is spoken. An old plaintext JSON request is dropped at once; anything else
+            // fails the handshake's first-message check and is dropped without a reply too.
+            if (first[0] == DirectoryChannel.LegacyFirstByte) return;
+            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
+            await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
     }
 
     private static string? Source(TcpClient client) => (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString();
 
-    /// <summary>处理一个请求（测试和框架的宿主直接调）。Treated as arriving over the legacy, unauthenticated protocol.</summary>
-    public JsonObject Handle(JsonObject request) => Handle(request, secure: false, source: null);
+    /// <summary>处理一个请求（测试和框架的宿主直接调）。</summary>
+    public JsonObject Handle(JsonObject request) => Handle(request, source: null);
 
-    /// <summary>
-    /// Handles one request. <paramref name="secure"/>: it came through <see cref="DirectoryChannel"/> (rendezvous ops
-    /// need that). <paramref name="source"/>: the caller's address, for per-source limits.
-    /// </summary>
-    internal JsonObject Handle(JsonObject request, bool secure, string? source)
+    /// <summary>Handles one request. <paramref name="source"/>: the caller's address, for per-source limits.</summary>
+    internal JsonObject Handle(JsonObject request, string? source)
     {
         try
         {
@@ -288,15 +244,14 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "withdraw" => Withdraw(request),
                 "list" => List(),
                 "lookup" => Lookup(request),
-                "mail" => Mail(request),
                 "find" => Find(request),
                 "post" => Post(request),
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
-                "rv.put" => secure ? RendezvousPut(request, source) : Error("secure"),
-                "rv.take" => secure ? RendezvousTake(request) : Error("secure"),
-                "rec.put" => secure ? RecordPut(request, source) : Error("secure"),
-                "rec.get" => secure ? RecordGet(request) : Error("secure"),
+                "rv.put" => RendezvousPut(request, source),
+                "rv.take" => RendezvousTake(request),
+                "rec.put" => RecordPut(request, source),
+                "rec.get" => RecordGet(request),
                 "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
                 // Blocks this connection's task for at most a few seconds while the directory dials the address.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
@@ -497,9 +452,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             _rooms[listing.Id] = entry;
             var published = entry.Listing;
             _events.Add(o => o.OnAnnounced(published, listed, isNew));
-            var mail = new JsonArray(entry.Mail.Select(m => (JsonNode?)m).ToArray());
-            entry.Mail.Clear();
-            return new JsonObject { ["ok"] = true, ["mail"] = mail };
+            return new JsonObject { ["ok"] = true };
         }
     }
 
@@ -555,21 +508,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             foreach (var entry in _rooms.Values)
                 if (entry.Search is { } key && FingerprintCode.Matches(key, code))
                     return new JsonObject { ["ok"] = true, ["room"] = entry.Listing.ToJson() };
-            return new JsonObject { ["ok"] = true };
-        }
-    }
-
-    private JsonObject Mail(JsonObject request)
-    {
-        var id = request["id"]?.GetValue<string>();
-        var text = request["text"]?.GetValue<string>();
-        if (id is null || text is not { Length: > 0 and <= RoomDirectoryProtocol.MaxMailLength }) return Error("bad");
-        lock (_gate)
-        {
-            Prune();
-            if (!_rooms.TryGetValue(id, out var entry) || entry.Listing.Mode != RoomVisibility.Direct) return Error("gone");
-            if (entry.Mail.Count >= RoomDirectoryProtocol.MaxMailPerRoom) return Error("full");
-            entry.Mail.Add(text);
             return new JsonObject { ["ok"] = true };
         }
     }
@@ -829,39 +767,17 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         Memory = KeyMemory,
     };
 
-    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct, bool secureOnly = false)
+    /// <summary>Every request goes through <see cref="DirectoryChannel"/>; there is no plaintext protocol any more.</summary>
+    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct)
     {
-        var trust = Trust;
         request["jay"] = Version;
-        // Ops that must never travel in the clear: authenticated channel only, even for a network that pins nothing
-        // (then the channel is at least encrypted, and the key is remembered when Jay keeps a key memory).
-        if (secureOnly) return await CallOnceAsync(ip, request, trust, ct);
-        // Pinned keys, roots, or a key already remembered for this address: authenticated only.
-        if (trust.IsStrict || trust.Remembers(ip)) return await CallOnceAsync(ip, request, trust, ct);
-        if (trust.Memory is not null)
-        {
-            // First contact with a network that pins nothing: try the authenticated channel and remember the key; a
-            // directory too old for it closes the connection (on Windows often as a reset), and only then does Jay fall
-            // back to the legacy protocol.
-            try { return await CallOnceAsync(ip, request, trust, ct); }
-            catch (Exception e) when (ClosedByOldDirectory(e) && !trust.Remembers(ip)) { }
-        }
-        return await CallOnceAsync(ip, request, null, ct);
-    }
-
-    private static bool ClosedByOldDirectory(Exception e) =>
-        e is EndOfStreamException or InvalidDataException || e is IOException { InnerException: SocketException } and not DirectoryImpostorException and not DirectoryKeyChangedException;
-
-    private async Task<JsonObject> CallOnceAsync(string ip, JsonObject request, DirectoryTrust? trust, CancellationToken ct)
-    {
+        var trust = Trust;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
         try
         {
             await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
-            if (trust is not null) return await DirectoryChannel.CallAsync(stream, trust, ip, NetworkSecret, request, deadline.Token);
-            await RoomDirectoryProtocol.WriteLineAsync(stream, request, deadline.Token);
-            return await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token);
+            return await DirectoryChannel.CallAsync(stream, trust, ip, NetworkSecret, request, deadline.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -874,12 +790,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     }
 
     /// <summary>发给每个目录，返回每个的回复（连不上的是异常）。</summary>
-    private async Task<List<(JsonObject? Reply, Exception? Error)>> FanOutAsync(JsonObject request, CancellationToken ct, bool secureOnly = false)
+    private async Task<List<(JsonObject? Reply, Exception? Error)>> FanOutAsync(JsonObject request, CancellationToken ct)
     {
         var targets = await TargetsAsync(ct);
         var tasks = targets.Select(async ip =>
         {
-            try { return ((JsonObject?)await CallAsync(ip, (JsonObject)request.DeepClone(), ct, secureOnly), (Exception?)null); }
+            try { return ((JsonObject?)await CallAsync(ip, (JsonObject)request.DeepClone(), ct), (Exception?)null); }
             catch (Exception e) when (e is IOException or InvalidDataException or EndOfStreamException) { return (null, e); }
         }).ToList();
         var results = (await Task.WhenAll(tasks)).ToList();
@@ -948,7 +864,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         if (sealedRecord.Length is 0 or > Rendezvous.MaxSealed) throw new ArgumentException("Rendezvous record size", nameof(sealedRecord));
         var seconds = (int)Math.Clamp(ttl.TotalSeconds, 1, Rendezvous.MaxTtl.TotalSeconds);
         var request = new JsonObject { ["op"] = "rv.put", ["id"] = Convert.ToHexStringLower(id), ["blob"] = Convert.ToBase64String(sealedRecord), ["ttl"] = seconds };
-        var results = await FanOutAsync(request, ct, secureOnly: true);
+        var results = await FanOutAsync(request, ct);
         if (results.Any(r => r.Reply is { } reply && IsOk(reply))) return true;
         if (results.Any(r => r.Reply?["error"]?.GetValue<string>() == "exists")) return false;
         NeedOne(results);
@@ -964,7 +880,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         if (id.Length != Rendezvous.IdLength) throw new ArgumentException("Rendezvous id length", nameof(id));
         var request = new JsonObject { ["op"] = "rv.take", ["id"] = Convert.ToHexStringLower(id) };
         // Ask all of them at once: each copy is single-use, so taking every copy both finds the record and clears the rest.
-        var results = await FanOutAsync(request, ct, secureOnly: true);
+        var results = await FanOutAsync(request, ct);
         foreach (var (reply, _) in results)
         {
             if (reply is null || !IsOk(reply) || reply["blob"]?.GetValue<string>() is not { } blob) continue;
@@ -985,7 +901,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// connection error.
     /// </summary>
     public async Task PutRecordAsync(SignedRecord record, CancellationToken ct) =>
-        NeedOne(await FanOutAsync(new JsonObject { ["op"] = "rec.put", ["record"] = record.ToJson() }, ct, secureOnly: true));
+        NeedOne(await FanOutAsync(new JsonObject { ["op"] = "rec.put", ["record"] = record.ToJson() }, ct));
 
     /// <summary>
     /// Asks every directory for the record under <paramref name="lookup"/> and returns the newest one that is signed,
@@ -995,7 +911,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     public async Task<SignedRecord?> GetRecordAsync(byte[] lookup, Func<byte[], bool> acceptSigner, CancellationToken ct, DateTimeOffset? now = null)
     {
         if (lookup.Length != SignedRecord.LookupLength) throw new ArgumentException("Lookup length", nameof(lookup));
-        var results = await FanOutAsync(new JsonObject { ["op"] = "rec.get", ["lookup"] = Convert.ToHexStringLower(lookup) }, ct, secureOnly: true);
+        var results = await FanOutAsync(new JsonObject { ["op"] = "rec.get", ["lookup"] = Convert.ToHexStringLower(lookup) }, ct);
         var at = now ?? DateTimeOffset.UtcNow;
         var best = results
             .Select(r => r.Reply is { } reply && IsOk(reply) ? SignedRecord.FromJson(reply["record"]) : null)
@@ -1021,7 +937,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <param name="listing">已经用 <see cref="RoomSigner.Sign"/> 签好的房间信息。</param>
     /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
     /// <param name="account">This network's login token, if logged in: lets networks that require login accept the room and tie it to the account.</param>
-    public async Task<IReadOnlyList<string>> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<string> lookupKeys, CancellationToken ct,
+    public async Task AnnounceAsync(RoomListing listing, bool listed, IEnumerable<string> lookupKeys, CancellationToken ct,
         byte[]? searchKey = null, string? account = null)
     {
         var request = new JsonObject
@@ -1033,8 +949,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         };
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         if (account is not null) request["account"] = account;
-        var replies = NeedOne(await FanOutAsync(request, ct));
-        return [.. replies.SelectMany(r => (r["mail"] as JsonArray ?? []).Select(m => m?.GetValue<string>()).OfType<string>()).Distinct()];
+        NeedOne(await FanOutAsync(request, ct));
     }
 
     /// <summary>
@@ -1175,9 +1090,6 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     public async Task DropMailAsync(string box, byte[] token, CancellationToken ct) =>
         await FanOutAsync(new JsonObject { ["op"] = "drop", ["box"] = box, ["token"] = Convert.ToHexStringLower(token) }, ct);
 
-    /// <summary>给直连房间的房主捎话：交给第一个肯收的目录（房主续期时会从每个目录取一遍）。</summary>
-    public async Task MailAsync(string id, string text, CancellationToken ct) =>
-        Check(await FirstAsync(new JsonObject { ["op"] = "mail", ["id"] = id, ["text"] = text }, IsOk, ct));
 }
 
 /// <summary>目录服务拒绝了请求（口令不对、满了、房间不在了）。</summary>

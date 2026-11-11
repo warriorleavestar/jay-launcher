@@ -295,8 +295,9 @@ public sealed partial class MultiplayerViewModel
     private void StartAnnouncerIfHosting()
     {
         if (_public is not { } network || _announcer is not null || !IsHosting || _lobby is null) return;
-        var announcer = new RoomAnnouncer(network, BuildListing, LookupKeys, null,
-            line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), searchKey: SearchKeyForAnnounce, account: () => AccountToken);
+        var announcer = new RoomAnnouncer(network, BuildListing, LookupKeys,
+            line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), client: DirectoryClient(network), searchKey: SearchKeyForAnnounce,
+            account: () => AccountToken);
         announcer.StateChanged += () => Dispatcher.UIThread.Post(() =>
         {
             if (_announcer != announcer) return;

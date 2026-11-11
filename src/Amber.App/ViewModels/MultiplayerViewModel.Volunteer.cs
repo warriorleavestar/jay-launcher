@@ -144,7 +144,7 @@ public partial class MultiplayerViewModel
                 listener.Start();
                 _ = AcceptAndDropAsync(listener);
             }
-            var reachable = await new RoomDirectoryClient(network).ProbeAsync(url, default);
+            var reachable = await DirectoryClient(network).ProbeAsync(url, default);
             VolunteerStatus = reachable ? L.F("multiplayer.volunteer.reachable", url) : L.F("multiplayer.volunteer.unreachable", port);
             SetStatus(reachable ? StatusMessage.Success("multiplayer.volunteer.reachable", url) : StatusMessage.Warning("multiplayer.volunteer.unreachable", port));
         }

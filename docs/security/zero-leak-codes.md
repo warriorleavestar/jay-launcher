@@ -99,9 +99,9 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
    - Jay accepts the key if enough distinct listed roots signed, `net` is this network's EasyTier name, it hasn't
      expired, and `key` is the key the directory just proved.
 3. **First use** (networks with neither): the first key seen at each directory address is remembered in
-   `directory-keys.json`. After that, only that key is accepted, with no legacy fallback for that address.
-   `DirectoryKeyChangedException` tells the user to remove and re-add the network if the change was intended. Until a key
-   is remembered, a directory that only speaks the old protocol still works.
+   `directory-keys.json`. After that, only that key is accepted for that address.
+   `DirectoryKeyChangedException` tells the user to remove and re-add the network if the change was intended. There is no
+   plaintext protocol to fall back to.
 
 ### Trustee keys for the built-in network (offline, one per person)
 
@@ -192,7 +192,7 @@ instead of an address: the publisher puts a sealed record on the directories, th
   so taking the record also clears the other copies.
 - **No overwrite**: `rv.put` on an id that is still waiting is refused with `exists`, so nobody can replace a record they
   didn't publish.
-- **Authenticated channel only**: both ops are answered only over `DirectoryChannel`; a legacy JSON request gets `secure`.
+- **Encrypted channel**: like every directory op, only over `DirectoryChannel`.
 - **Limits**: 2 KB per record, at most 10 minutes, 4096 records per directory, 30 puts per source address per 10 minutes.
   Nothing is written to disk. The node's `/metrics` shows only the number of waiting records (`jay_rendezvous_records`).
 
@@ -210,6 +210,6 @@ domain name publishes where it is as a signed record, and its code carries an id
 - **Ownership**: the first signer owns a lookup until its record expires. A different signer gets `owner`; the same
   signer replaces it only with a higher seq (`stale` otherwise).
 - **Lifetime**: at most 7 days per put, renewed by putting it again.
-- **Authenticated channel only**: a legacy JSON request gets `secure`.
+- **Encrypted channel**: like every directory op, only over `DirectoryChannel`.
 - **Limits**: 4 KB per blob, 20000 records per directory, 60 puts per source address per hour, memory only. `/metrics`
   shows the total (`jay_signed_records`).

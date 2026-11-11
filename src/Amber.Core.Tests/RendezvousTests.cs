@@ -73,16 +73,6 @@ public class RendezvousTests
         Assert.Equal((0, 0), (s1.RendezvousCount, s2.RendezvousCount));
     }
 
-    [Fact]
-    public async Task LegacyRequestsAreRefused()
-    {
-        using var key = X25519KeyPair.Generate();
-        await using var server = Server(key);
-        var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
-        Assert.Equal("secure", server.Handle(Put(id, "AAAA"))["error"]?.GetValue<string>());
-        Assert.Equal("secure", server.Handle(new JsonObject { ["op"] = "rv.take", ["id"] = id })["error"]?.GetValue<string>());
-        Assert.Equal(0, server.RendezvousCount);
-    }
 
     [Fact]
     public async Task RecordsExpire()
@@ -91,10 +81,10 @@ public class RendezvousTests
         using var key = X25519KeyPair.Generate();
         await using var server = Server(key, () => now);
         var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
-        Assert.True(server.Handle(Put(id, "AAAA", ttl: 60), secure: true, source: "10.235.0.9")["ok"]?.GetValue<bool>());
+        Assert.True(server.Handle(Put(id, "AAAA", ttl: 60), source: "10.235.0.9")["ok"]?.GetValue<bool>());
         now += TimeSpan.FromSeconds(61);
         Assert.Equal(0, server.RendezvousCount);
-        Assert.Equal("not_found", server.Handle(new JsonObject { ["op"] = "rv.take", ["id"] = id }, secure: true, source: null)["error"]?.GetValue<string>());
+        Assert.Equal("not_found", server.Handle(new JsonObject { ["op"] = "rv.take", ["id"] = id }, source: null)["error"]?.GetValue<string>());
     }
 
     [Theory]
@@ -108,10 +98,10 @@ public class RendezvousTests
         using var key = X25519KeyPair.Generate();
         await using var server = Server(key);
         id ??= Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
-        Assert.Equal("bad", server.Handle(Put(id, blob, ttl), secure: true, source: null)["error"]?.GetValue<string>());
+        Assert.Equal("bad", server.Handle(Put(id, blob, ttl), source: null)["error"]?.GetValue<string>());
         // Over the size limit.
         var big = Convert.ToBase64String(new byte[Rendezvous.MaxSealed + 1]);
-        Assert.Equal("bad", server.Handle(Put(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)), big), secure: true, source: null)["error"]?.GetValue<string>());
+        Assert.Equal("bad", server.Handle(Put(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)), big), source: null)["error"]?.GetValue<string>());
     }
 
     [Fact]
@@ -120,7 +110,7 @@ public class RendezvousTests
         var now = DateTimeOffset.UtcNow;
         using var key = X25519KeyPair.Generate();
         await using var server = Server(key, () => now);
-        JsonObject PutFrom(string source) => server.Handle(Put(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)), "AAAA"), secure: true, source);
+        JsonObject PutFrom(string source) => server.Handle(Put(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)), "AAAA"), source);
         for (var i = 0; i < RoomDirectoryServer.MaxRendezvousPutsPerSource; i++) Assert.True(PutFrom("10.235.0.9")["ok"]?.GetValue<bool>());
         Assert.Equal("rate", PutFrom("10.235.0.9")["error"]?.GetValue<string>());
         Assert.True(PutFrom("10.235.0.10")["ok"]?.GetValue<bool>());
