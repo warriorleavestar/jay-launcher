@@ -132,6 +132,34 @@ public sealed partial class AboutViewModel : PageViewModel
 
     [RelayCommand]
     private void OpenHelp() => Navigate?.Invoke("help");
+
+    /// <summary>The result of "Verify a Jay download"; null before the first check.</summary>
+    [ObservableProperty] public partial string? VerifyText { get; set; }
+
+    /// <summary>Whether the last checked file is a release signed by enough Jay trustees.</summary>
+    [ObservableProperty] public partial bool VerifyPassed { get; set; }
+
+    /// <summary>
+    /// Verify a Jay download (privacy plan item 2): SHA256SUMS.txt, SHA256SUMS.txt.sigs and, when present,
+    /// trust-chain.json must sit next to the file. Reads local files only; nothing is fetched.
+    /// </summary>
+    public async Task VerifyDownloadAsync(string path, Amber.Core.Launch.TrustList? trust = null)
+    {
+        VerifyPassed = false;
+        VerifyText = L.T("about.verify.checking");
+        var name = Path.GetFileName(path);
+        try
+        {
+            var check = await Amber.Core.Launch.ReleaseSignature.VerifyPackageAsync(path, own: trust);
+            VerifyPassed = check.IsValid;
+            VerifyText = check.IsValid ? L.F("about.verify.ok", name, check.Tag ?? "", check.Seq)
+                : L.F("about.verify.bad", name, Amber.Core.Launch.UpdateCheck.Explain(check.Verdict));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            VerifyText = L.F("about.verify.bad", name, e.Message);
+        }
+    }
 }
 
 /// <summary>The one-line child-mode status (§9.6).</summary>
