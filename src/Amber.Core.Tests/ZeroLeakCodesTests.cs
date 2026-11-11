@@ -461,6 +461,30 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ForgettingTheNetworkAcceptsADirectoryThatWasReKeyed()
+    {
+        // A directory that lost its key file (or was re-keyed by its owner) comes back with another key. Jay refuses it
+        // until the user accepts the change (removing and re-adding the network, or saving the built-in network's nodes
+        // again), which forgets the remembered key; the next key seen is remembered instead.
+        using var before = X25519KeyPair.Generate();
+        using var after = X25519KeyPair.Generate();
+        var memory = new DirectoryKeyMemory(Path.Combine(_dir, DirectoryKeyMemory.FileName));
+        var net = new Loopback(StartDirectory(before).Port, Profile());
+        var client = new RoomDirectoryClient(net) { KeyMemory = memory };
+        Assert.Empty(await client.ListAsync(default));
+        net.Port = StartDirectory(after).Port;
+        await Assert.ThrowsAsync<DirectoryKeyChangedException>(() => client.ListAsync(default));
+        // Forgetting another network changes nothing.
+        memory.Forget("some-other-net");
+        await Assert.ThrowsAsync<DirectoryKeyChangedException>(() => client.ListAsync(default));
+        memory.Forget("jay-net-test");
+        Assert.Empty(await client.ListAsync(default));
+        Assert.Equal(after.PublicKey, memory.Get("jay-net-test", PublicNetworkProfile.DirectoryIp));
+        // The forgetting is saved: a fresh memory over the same file (Jay restarted) holds the new key.
+        Assert.Equal(after.PublicKey, new DirectoryKeyMemory(Path.Combine(_dir, DirectoryKeyMemory.FileName)).Get("jay-net-test", PublicNetworkProfile.DirectoryIp));
+    }
+
+    [Fact]
     public async Task DirectoryWithoutAConfiguredKeyIsStillEncrypted()
     {
         var memory = new DirectoryKeyMemory(Path.Combine(_dir, DirectoryKeyMemory.FileName));

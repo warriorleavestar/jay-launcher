@@ -65,7 +65,13 @@ internal sealed partial class SelfTest
         // 本机的种子节点 + 目录（和 jay-server directory 一样）。
         var nodePort = EasyTierArgs.FreeTcpPort();
         var node = $"tcp://127.0.0.1:{nodePort}";
-        await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort);
+        // Like jay-server directory: the network's secret for the channel's psk (a mismatch drops every request), and a
+        // directory key kept across runs, since Jay remembers the first key it sees for this network (trust on first use).
+        await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort)
+        {
+            Identity = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(Amber.App.Services.AppSettings.DataDir, "selftest-directory.key")),
+            NetworkSecret = PublicNetworkProfile.JaySecret,
+        };
         using var seed = PublicNetworkSession.Start(service.EasyTier, new PublicNetworkOptions(PublicNetworkProfile.Jay() with { Nodes = [] },
             EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true, Listeners: [node]), Path.Combine(reportDir, "public-seed"));
 
@@ -106,6 +112,7 @@ internal sealed partial class SelfTest
         await ShotAsync("公共网络隐私说明");
         await host.AcceptPublicNoticeCommand.ExecuteAsync(null);
         Check("公共网络：同意后连上", await WaitAsync(() => host.IsPublicConnected, 60), host.Status);
+        await PortTestLimitAsync(host, directory);
 
         // 房主开房间（房间自己的网络经本机节点互连），默认“隐藏”登记，然后公开发布。
         var server = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -237,7 +244,8 @@ internal sealed partial class SelfTest
         Check("换公共网络：审核过的连接串直接加上并选中", host.SelectedNetworkChoice is { Id: "selftest-net", Reviewed: true }
             && service.Settings.PublicNetworkId == "selftest-net" && host.PublicStateText.Contains("自检公共网络"), host.Status + " / " + host.PublicStateText);
 
-        // 这个网络的种子节点（和 jay-server directory --network 一样；目录服务沿用前面开的那个）。
+        // 这个网络的种子节点（和 jay-server directory --network 一样；目录服务沿用前面开的那个，换成这个网络的密钥）。
+        directory.NetworkSecret = info.Secret;
         using (var seed = PublicNetworkSession.Start(service.EasyTier, new PublicNetworkOptions(service.Networks.Find("selftest-net")!.ToProfile() with { Nodes = [] },
             EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true, Listeners: [node]), Path.Combine(reportDir, "public-seed-2")))
         {
@@ -261,6 +269,7 @@ internal sealed partial class SelfTest
             Check("网络主题：断开后换回自己的主题", Amber.App.Services.ThemeService.NetworkPack is null && host.NetworkThemePack is null && !host.NetworkThemeAskGlobal);
             Check("网络账号：断开后登录框和凭证清掉", !host.HasNetworkLogin && !host.IsAccountLoggedIn && host.AccountToken is null && host.HostAccountPolicy is null);
             directory.Login = null;
+            await DirectoryKeyChangeAsync(host, directory, info, registry);
             // 缓存被改过、地址又连不上：不连。
             await File.WriteAllTextAsync(Path.Combine(host.NetworkConfigDir, configSha + ".json"), "{}");
             await host.ConnectPublicCommand.ExecuteAsync(null);
@@ -268,7 +277,7 @@ internal sealed partial class SelfTest
         }
 
         // 别人签的：先提醒（显示签名钥匙），确认后才加。
-        var other = new NetworkInfo("selftest-other", "没审核的网络", "jay-selftest-other", "other-secret", ["tcp://203.0.113.5:11010"]);
+        var other = new NetworkInfo("selftest-other", "没审核的网络", "jay-selftest-other", "other-secret", ["tcp://other-node.example.invalid:11010"]);
         Dispatcher.UIThread.Invoke(() =>
         {
             host.NetworkInput = NetworkString.Create(other, someone);
@@ -304,6 +313,53 @@ internal sealed partial class SelfTest
         });
         Check("换公共网络：删掉后回到 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && service.Settings.PublicNetworkId is null
             && (service.Settings.PublicNetworks ?? []).Count == 0, host.Status);
+    }
+
+    /// <summary>
+    /// Test port, connected: the directory answers the first test, and a second test of the same address within
+    /// <see cref="VolunteerRegistry.CheckSameAddressEvery"/> is refused with the port test's own rate-limit line (not the
+    /// generic one about publishing rooms). The directory's probe is stubbed: nothing outside this computer is dialled.
+    /// </summary>
+    private async Task PortTestLimitAsync(MultiplayerViewModel host, RoomDirectoryServer directory)
+    {
+        directory.Volunteers = new VolunteerRegistry((_, _) => Task.FromResult(false));
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.VolunteerAddress = "jay.example.org";
+            host.VolunteerPort = EasyTierArgs.FreeTcpPort().ToString(System.Globalization.CultureInfo.InvariantCulture);
+        });
+        await host.TestVolunteerPortCommand.ExecuteAsync(null);
+        Check("Volunteer relay: Test port gets the directory's answer", host.Status == L.F("multiplayer.volunteer.unreachable", host.VolunteerPort), host.Status);
+        await host.TestVolunteerPortCommand.ExecuteAsync(null);
+        Check("Volunteer relay: a second test right away gets the port test's rate-limit line",
+            host.Status == L.T("multiplayer.volunteer.test_rate_limited") && !host.IsCheckingVolunteer, host.Status);
+        directory.Volunteers = null;
+    }
+
+    /// <summary>
+    /// The directory comes back with a different key (its key file was lost, or its owner re-keyed it): Jay remembered the
+    /// first key, so it refuses and says how to accept the new one. Removing the network and adding it again does that.
+    /// </summary>
+    private async Task DirectoryKeyChangeAsync(MultiplayerViewModel host, RoomDirectoryServer directory, NetworkInfo info, TrustSigner registry)
+    {
+        host.DisconnectPublicCommand.Execute(null);
+        // The old key stays dropped: the rest of this run uses the new one (as a re-keyed directory would).
+        directory.Identity = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        await host.ConnectPublicCommand.ExecuteAsync(null);
+        await WaitAsync(() => !host.IsPublicConnecting, 60);
+        // EasyTier still joins the network; it's the directory Jay refuses to talk to, and the status says how to fix it.
+        Check("目录换了钥匙：不和目录说话，提示怎么接受新钥匙", await WaitAsync(() => host.Status.Contains(L.T("core.mp.public.directory_changed")), 30), host.Status);
+        host.DisconnectPublicCommand.Execute(null);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            host.SelectedNetworkChoice = host.NetworkChoices.First(c => c.Id == info.Id);
+            host.RemoveNetworkCommand.Execute(null);
+            host.NetworkInput = NetworkString.Create(info, registry);
+            host.AddNetworkCommand.Execute(null);
+        });
+        await host.ConnectPublicCommand.ExecuteAsync(null);
+        Check("目录换了钥匙：删掉网络再加回来后连得上", await WaitAsync(() => host.IsPublicConnected, 60), host.Status);
+        host.DisconnectPublicCommand.Execute(null);
     }
 
     /// <summary>设备指纹：默认关着；打开后生成的码每次不同；房主隐藏房间 + 指纹查找 + 要求设备指纹；加入方按码找到房间，没开指纹进不去，开了、在名单里、房主批准后能进；换新后旧码找不到。</summary>
