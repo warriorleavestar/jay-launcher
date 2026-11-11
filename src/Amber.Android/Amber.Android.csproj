@@ -20,7 +20,18 @@
     </AndroidResource>
     <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so" Abi="arm64-v8a" />
     <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so" Abi="x86_64" />
+    <AndroidAsset Include="$(IntermediateOutputPath)jay-runtime-probe.jar" LogicalName="jay-runtime-probe.jar" />
   </ItemGroup>
+
+  <Target Name="BuildJayRuntimeProbe" AfterTargets="_ResolveAndroidTooling" BeforeTargets="_BuildApkEmbed">
+    <PropertyGroup>
+      <_JayProbeClasses>$(IntermediateOutputPath)jay-runtime-probe-classes</_JayProbeClasses>
+      <_JayProbeSource>$(MSBuildProjectDirectory)/Java/nz/work/minecraft/jay/RuntimeProbe.java</_JayProbeSource>
+    </PropertyGroup>
+    <MakeDir Directories="$(_JayProbeClasses)" />
+    <Exec Command="&quot;$(_JavaSdkDirectory)/bin/javac&quot; --release 8 -encoding UTF-8 -d &quot;$(_JayProbeClasses)&quot; &quot;$(_JayProbeSource)&quot;" />
+    <Exec Command="&quot;$(_JavaSdkDirectory)/bin/jar&quot; --create --file &quot;$(IntermediateOutputPath)jay-runtime-probe.jar&quot; -C &quot;$(_JayProbeClasses)&quot; ." />
+  </Target>
 
   <Target Name="RequireJayJvmHost" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
