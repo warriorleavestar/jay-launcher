@@ -163,6 +163,7 @@ internal sealed partial class SelfTest
             await guest.JoinPublicRoomCommand.ExecuteAsync(locked);
             Check("公共网络：密码对了能进", guest.IsJoined, guest.Status);
             guest.StopCommand.Execute(null);
+            await PasswordGuessLimitAsync(host, guest, locked);
         }
 
         await DeviceFingerprintAsync(host, guest);
@@ -333,6 +334,32 @@ internal sealed partial class SelfTest
         await ShotAsync("网络账号已登录");
         host.LogoutAccountCommand.Execute(null);
         Check("网络账号：退出登录后凭证作废", !host.IsAccountLoggedIn && host.AccountToken is null && host.ShowAccountLogin);
+    }
+
+    /// <summary>
+    /// Password guessing (KnockLimits.MaxUnknownPerMinute, 20 a minute): enough wrong passwords make the password invite go
+    /// quiet for a minute, so even the right password is refused the same way as a wrong one, and the host's diagnostics say
+    /// someone may be guessing. Random-token invites are not affected (the next step publishes a hidden room).
+    /// </summary>
+    private async Task PasswordGuessLimitAsync(MultiplayerViewModel host, MultiplayerViewModel guest, PublicRoomItem locked)
+    {
+        var limit = new Amber.Core.Multiplayer.KnockLimits().MaxUnknownPerMinute;
+        var refused = 0;
+        for (var i = 0; i < limit; i++)
+        {
+            guest.PublicRoomPassword = $"guess-{i:D2}";
+            await guest.JoinPublicRoomCommand.ExecuteAsync(locked);
+            if (guest.IsIdle && !guest.IsJoined) refused++;
+            if (guest.IsJoined) guest.StopCommand.Execute(null);
+        }
+        Check($"公共网络：连猜 {limit} 次错密码都进不去", refused == limit, $"{refused}/{limit}，{guest.Status}");
+        var warned = await WaitAsync(() => host.DebugLines.Any(l => l.Contains(L.T("core.mp.knock.guessing"))), 10);
+        Check("公共网络：房主诊断里写“可能有人在猜房间密码”", warned, host.DebugLines.LastOrDefault() ?? "没有诊断");
+        guest.PublicRoomPassword = "creeper-123";
+        await guest.JoinPublicRoomCommand.ExecuteAsync(locked);
+        Check("公共网络：猜密码被限后，对的密码也暂时进不去（和错密码一样的提示）",
+            !guest.IsJoined && guest.Status == L.T("multiplayer.public.reason.password"), guest.Status);
+        if (guest.IsJoined) guest.StopCommand.Execute(null);
     }
 
     private async Task DeviceFingerprintAsync(MultiplayerViewModel host, MultiplayerViewModel guest)
