@@ -140,6 +140,9 @@ public sealed partial class MultiplayerViewModel
     {
         if (SelectedNetworkChoice is not { IsBuiltIn: false } choice) return;
         if (_service.PublicNetwork.Id == choice.Id && (IsPublicConnected || IsPublicConnecting)) DisconnectPublic();
+        // "Remove the network and add it again" is how a user accepts a directory key its owner changed on purpose
+        // (core.mp.public.directory_changed): forget the keys remembered for it, or the re-added network stays locked out.
+        if (_service.Networks.Find(choice.Id) is { } removed) DirectoryKeys.Forget(removed.Info.NetworkName);
         _service.Networks.Remove(choice.Id);
         _service.Settings.PublicNetworks = _service.Networks.ToSaved();
         if (_service.Settings.PublicNetworkId == choice.Id) _service.Settings.PublicNetworkId = null;
