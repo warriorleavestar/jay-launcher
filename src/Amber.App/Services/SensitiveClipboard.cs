@@ -46,7 +46,8 @@ public sealed class SensitiveClipboard
     public async Task<bool> CopyAsync(string text)
     {
         if (string.IsNullOrEmpty(text) || _clipboard() is not { } clipboard) return false;
-        await clipboard.SetTextAsync(text);
+        try { await clipboard.SetTextAsync(text); }
+        catch (Exception e) when (ClipboardErrors.IsBusy(e)) { return false; }
         var task = ClearLaterAsync(clipboard, text, _cts.Token);
         lock (_gate)
         {
@@ -70,11 +71,18 @@ public sealed class SensitiveClipboard
         {
             if (string.Equals(await clipboard.GetTextAsync(), text, StringComparison.Ordinal)) await clipboard.ClearAsync();
         }
-        catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException or TimeoutException)
+        catch (Exception e) when (ClipboardErrors.IsBusy(e))
         {
             // 剪贴板被别的程序占着：这次清不了，不影响别的。
         }
     }
+}
+
+/// <summary>The clipboard is held by another program (Windows: CLIPBRD_E_CANT_OPEN) or not usable right now.</summary>
+internal static class ClipboardErrors
+{
+    public static bool IsBusy(Exception e) =>
+        e is InvalidOperationException or System.Runtime.InteropServices.COMException or TimeoutException or UnauthorizedAccessException;
 }
 
 /// <summary>Avalonia 的剪贴板（都在界面线程上调用）。</summary>
@@ -84,6 +92,21 @@ internal sealed class AvaloniaClipboard(Avalonia.Input.Platform.IClipboard clipb
         Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard }
             ? new AvaloniaClipboard(clipboard)
             : null;
+
+    /// <summary>Copies plain text to the main window's clipboard; false when there is none or another program holds it (a busy clipboard must not close Jay).</summary>
+    public static async Task<bool> TrySetTextAsync(string text)
+    {
+        if (FromMainWindow() is not { } clipboard) return false;
+        try
+        {
+            await clipboard.SetTextAsync(text);
+            return true;
+        }
+        catch (Exception e) when (ClipboardErrors.IsBusy(e))
+        {
+            return false;
+        }
+    }
 
     public Task SetTextAsync(string text) => OnUi(() => Avalonia.Input.Platform.ClipboardExtensions.SetTextAsync(clipboard, text));
 

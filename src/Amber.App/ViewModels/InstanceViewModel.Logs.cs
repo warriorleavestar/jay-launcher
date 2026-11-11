@@ -304,7 +304,8 @@ public sealed partial class InstanceViewModel
         if (Current is { } c)
         {
             var dir = RunLogStore.Dir(c.WorkDir);
-            System.IO.Directory.CreateDirectory(dir);
+            try { System.IO.Directory.CreateDirectory(dir); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; }
             OpenPath(dir);
         }
     }

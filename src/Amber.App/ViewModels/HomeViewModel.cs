@@ -1220,18 +1220,15 @@ public sealed partial class HomeViewModel : PageViewModel
     private void DismissFailure() => Failure = null;
 
     /// <summary>导出启动失败的错误报告（这一局的日志和异常）。</summary>
-    public void ExportFailureReport(string zipPath)
-    {
-        CrashAnalyzer.ExportBundle(zipPath, [], _failureOutput);
-        SetStatus(StatusMessage.Success("home.status.report_exported", zipPath));
-    }
+    public void ExportFailureReport(string zipPath) =>
+        SaveFile(zipPath, () => CrashAnalyzer.ExportBundle(zipPath, [], _failureOutput), "home.status.report_exported");
 
     /// <summary>导出崩溃卡对应的那一局：无痕过滤已在保存快照时完成，多开和后续启动不会串日志。</summary>
     public void ExportCrashBundle(string zipPath)
     {
         // 先写内存中的输出，再附上崩溃当时的磁盘快照；导出时绝不重新打开原日志路径。
-        CrashAnalyzer.ExportBundle(zipPath, [], _lastRunOutput, _lastRunAttachments.Select(a => (a.Name, a.ExportText)));
-        SetStatus(StatusMessage.Success("home.status.report_exported", zipPath));
+        SaveFile(zipPath, () => CrashAnalyzer.ExportBundle(zipPath, [], _lastRunOutput, _lastRunAttachments.Select(a => (a.Name, a.ExportText))),
+            "home.status.report_exported");
     }
 
     [RelayCommand]

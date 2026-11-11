@@ -192,7 +192,9 @@ public sealed class LauncherService : IDisposable
     /// <summary>保存设置并按新设置重建下载器、安装器（新手卡用）。</summary>
     public void SaveAndReload()
     {
-        Settings.Save();
+        // Same policy as SetDownloadSource: if the settings file can't be written, the change still applies for this run.
+        try { Settings.Save(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { SettingsSaveFailed?.Invoke(e); }
         Reload();
         SettingsChangedElsewhere?.Invoke();
     }

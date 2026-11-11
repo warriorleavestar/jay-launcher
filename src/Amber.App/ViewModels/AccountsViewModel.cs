@@ -136,12 +136,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
     public bool HasLoginSuccess => LoginSuccess is not null;
 
     /// <summary>复制文字、打开网页（测试里换掉，不碰真剪贴板和浏览器）。</summary>
-    internal Func<string, Task<bool>> CopyText { get; set; } = async text =>
-    {
-        if (AvaloniaClipboard.FromMainWindow() is not { } clipboard) return false;
-        await clipboard.SetTextAsync(text);
-        return true;
-    };
+    internal Func<string, Task<bool>> CopyText { get; set; } = AvaloniaClipboard.TrySetTextAsync;
 
     internal Action<string> OpenUrl { get; set; } = url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 

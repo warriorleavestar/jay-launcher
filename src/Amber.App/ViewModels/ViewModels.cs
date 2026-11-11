@@ -103,6 +103,23 @@ public abstract class PageViewModel : ObservableObject
     /// <summary>没有消息时显示的内容（比如首页的“准备就绪”）。</summary>
     protected virtual StatusMessage? DefaultStatus => null;
 
+    /// <summary>
+    /// Writes a file the user picked a place for: a failure (the file is open elsewhere, no permission, disk full) becomes
+    /// an error status instead of an exception escaping into the UI thread, which would close Jay.
+    /// </summary>
+    protected void SaveFile(string path, Action write, string successKey)
+    {
+        try
+        {
+            write();
+            SetStatus(StatusMessage.Success(successKey, path));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            SetStatus(StatusMessage.Failure("common.save_file_failed", e, path, ErrorText.Of(e)));
+        }
+    }
+
     public void SetStatus(StatusMessage? message)
     {
         _statusInfo = message;
@@ -812,12 +829,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     public bool HasThemeReport => ThemeReportText.Length > 0;
 
     /// <summary>Copy text to the clipboard (tests swap this so the real clipboard is never touched).</summary>
-    internal Func<string, Task<bool>> CopyText { get; set; } = async text =>
-    {
-        if (Amber.App.Services.AvaloniaClipboard.FromMainWindow() is not { } clipboard) return false;
-        await clipboard.SetTextAsync(text);
-        return true;
-    };
+    internal Func<string, Task<bool>> CopyText { get; set; } = Amber.App.Services.AvaloniaClipboard.TrySetTextAsync;
 
     /// <summary>【复制给作者看】: the upgrade notes and fixes as plain text, for the theme's author.</summary>
     [RelayCommand]

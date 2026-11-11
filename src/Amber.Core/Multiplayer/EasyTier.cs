@@ -578,6 +578,9 @@ public sealed class EasyTierSession : IEasyTierSession
         return text is null ? [] : ParsePeers(text);
     }
 
+    internal static Task<string?> NodeInfoAsync(string cliPath, int rpcPort, CancellationToken ct) =>
+        RunCliAsync(cliPath, ["-p", $"127.0.0.1:{rpcPort}", "-o", "json", "node"], ct);
+
     internal static async Task<bool> AddConnectorAsync(string cliPath, int rpcPort, string url, CancellationToken ct) =>
         await RunCliAsync(cliPath, ["-p", $"127.0.0.1:{rpcPort}", "connector", "add", url], ct) is not null;
 

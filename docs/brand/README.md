@@ -14,3 +14,7 @@ Edit this exact single-feather Jay launcher logo. Preserve the original outer si
 ```
 
 在 Windows 上运行 `powershell -NoProfile -File tools/export-brand-icons.ps1` 可重新导出应用素材。脚本保留透明通道和完整画布，只缩放、不重绘。ICO 包含 16、20、24、32、40、48、64、128、256 像素；16–24 像素时细纹会融合，32 像素起更清晰。
+
+## GitHub social preview
+
+`social-preview.png` (1280×640) is the image GitHub shows when the repository link is shared. Upload it under the repository's Settings → General → Social preview.
