@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define JAY_JVM_ABI_VERSION 1
+#define JAY_JVM_ABI_VERSION 2
 #define JAY_ACTION_COUNT 7
 
 typedef jint (*jay_create_jvm_fn)(JavaVM **, void **, void *);
@@ -16,6 +16,8 @@ typedef jint (*jay_create_jvm_fn)(JavaVM **, void **, void *);
 typedef struct {
     float move_x;
     float move_y;
+    float look_x;
+    float look_y;
     uint32_t actions;
     uint64_t generation;
 } jay_input_snapshot;
@@ -27,6 +29,8 @@ static pthread_mutex_t g_surface_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ANativeWindow *g_surface;
 static _Atomic float g_move_x;
 static _Atomic float g_move_y;
+static _Atomic float g_look_x;
+static _Atomic float g_look_y;
 static _Atomic uint32_t g_actions;
 static _Atomic uint64_t g_generation;
 
@@ -158,11 +162,25 @@ void jay_input_set_movement(float x, float y) {
     atomic_fetch_add(&g_generation, 1);
 }
 
+static void jay_atomic_add_float(_Atomic float *target, float value) {
+    float expected = atomic_load(target);
+    while (!atomic_compare_exchange_weak(target, &expected, expected + value)) {}
+}
+
+__attribute__((visibility("default")))
+void jay_input_add_look(float x, float y) {
+    jay_atomic_add_float(&g_look_x, x);
+    jay_atomic_add_float(&g_look_y, y);
+    atomic_fetch_add(&g_generation, 1);
+}
+
 __attribute__((visibility("default")))
 void jay_input_read(jay_input_snapshot *snapshot) {
     if (snapshot == NULL) return;
     snapshot->move_x = atomic_load(&g_move_x);
     snapshot->move_y = atomic_load(&g_move_y);
+    snapshot->look_x = atomic_exchange(&g_look_x, 0.f);
+    snapshot->look_y = atomic_exchange(&g_look_y, 0.f);
     snapshot->actions = atomic_load(&g_actions);
     snapshot->generation = atomic_load(&g_generation);
 }

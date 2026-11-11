@@ -128,6 +128,20 @@ public sealed class MobilePortTests
     }
 
     [Fact]
+    public void TouchInputRouterTurnsUnoccupiedScreenDragsIntoCameraLook()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(20, 0.52, 0.45));
+        Assert.True(router.Move(20, 0.60, 0.39));
+        Assert.Equal(0.08, sink.LastLook.X, 6);
+        Assert.Equal(-0.06, sink.LastLook.Y, 6);
+        Assert.True(router.Release(20));
+        Assert.Empty(sink.Actions);
+    }
+
+    [Fact]
     public async Task AndroidRuntimeManifestRequiresSafeLicensedVerifiedFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-runtime-" + Guid.NewGuid().ToString("N"));
@@ -341,9 +355,11 @@ public sealed class MobilePortTests
     {
         public List<(TouchControlAction Action, bool Pressed)> Actions { get; } = [];
         public (double X, double Y) LastMovement { get; private set; }
+        public (double X, double Y) LastLook { get; private set; }
 
         public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
         public void SetMovement(double x, double y) => LastMovement = (x, y);
+        public void AddLook(double x, double y) => LastLook = (x, y);
     }
 
 }

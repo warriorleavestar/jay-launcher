@@ -27,4 +27,10 @@ internal static class AndroidGameInputBridge
         NativeJvmHost.SetMovement(x, y);
         _session?.SetMovement(x, y);
     }
+
+    public static void AddLook(double x, double y)
+    {
+        NativeJvmHost.AddLook(x, y);
+        _session?.AddLook(x, y);
+    }
 }

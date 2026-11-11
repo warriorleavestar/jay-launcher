@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 1;
+    private const int ExpectedAbiVersion = 2;
 
     public static bool IsAvailable
     {
@@ -72,6 +72,11 @@ internal static partial class NativeJvmHost
         if (IsAvailable) SetNativeMovement((float)x, (float)y);
     }
 
+    public static void AddLook(double x, double y)
+    {
+        if (IsAvailable) AddNativeLook((float)x, (float)y);
+    }
+
     public static void SetSurface(Surface? surface)
     {
         if (IsAvailable) SetNativeSurface(JNIEnv.Handle, surface?.Handle ?? 0);
@@ -94,6 +99,9 @@ internal static partial class NativeJvmHost
 
     [LibraryImport("jayjvm", EntryPoint = "jay_input_set_movement")]
     private static partial void SetNativeMovement(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_input_add_look")]
+    private static partial void AddNativeLook(float x, float y);
 
     [LibraryImport("jayjvm", EntryPoint = "jay_surface_set")]
     private static partial void SetNativeSurface(nint environment, nint surface);

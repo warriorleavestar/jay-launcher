@@ -121,4 +121,6 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         AndroidGameInputBridge.SetAction(action, pressed);
 
     public void SetMovement(double x, double y) => AndroidGameInputBridge.SetMovement(x, y);
+
+    public void AddLook(double x, double y) => AndroidGameInputBridge.AddLook(x, y);
 }
