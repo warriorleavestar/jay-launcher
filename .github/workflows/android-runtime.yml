@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/android-runtime.yml'
       - 'scripts/check-android-runtime.sh'
+      - 'scripts/prepare-android-openjdk.sh'
       - 'third_party/android-openjdk/**'
   workflow_dispatch:
     inputs:
@@ -35,7 +36,7 @@ jobs:
         run: |
           git clone https://github.com/FCL-Team/Android-OpenJDK-Build.git runtime-source
           git -C runtime-source checkout b79a530da187dbb33d40c4ed51ddeeeb9d379360
-          git -C runtime-source apply "$GITHUB_WORKSPACE/third_party/android-openjdk/openjdk-android-16k.patch"
+          bash scripts/prepare-android-openjdk.sh runtime-source
 
       - name: Build OpenJDK 21.0.12.1
         shell: bash

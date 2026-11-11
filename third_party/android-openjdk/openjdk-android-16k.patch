@@ -1,7 +1,0 @@
-diff --git a/set_devkit_path.sh b/set_devkit_path.sh
-index d48aebf..1dfccae 100644
---- a/set_devkit_path.sh
-+++ b/set_devkit_path.sh
-@@ -39 +39 @@
--export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib"
-+export LDFLAGS="-L$NDK/platforms/android-$API/arch-$TARGET_SHORT/usr/lib -Wl,-z,max-page-size=16384"
