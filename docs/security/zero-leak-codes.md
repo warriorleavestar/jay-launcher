@@ -180,3 +180,21 @@ instead of an address: the publisher puts a sealed record on the directories, th
 - **Authenticated channel only**: both ops are answered only over `DirectoryChannel`; a legacy JSON request gets `secure`.
 - **Limits**: 2 KB per record, at most 10 minutes, 4096 records per directory, 30 puts per source address per 10 minutes.
   Nothing is written to disk. The node's `/metrics` shows only the number of waiting records (`jay_rendezvous_records`).
+
+## Long-lived signed records
+
+`Public/SignedRecord.cs`, directory ops `rec.put` / `rec.get` in `Public/RoomDirectory.cs`. A server or network that has no
+domain name publishes where it is as a signed record, and its code carries an id instead of the address.
+
+- **Derivation**: from an id of at least 16 bytes held by the code, lookup = `HKDF-SHA256(id, info "jay-rec-lookup-v1")`
+  (32 bytes) and seal key = `HKDF-SHA256(id, info "jay-rec-seal-v1")`. The blob is ChaCha20-Poly1305 with a random nonce
+  and the lookup as associated data, so the directory sees neither the id nor the contents.
+- **Signature**: Ed25519 over `"jay-rec-v1" ‖ lookup ‖ signer ‖ seq ‖ expires ‖ len(blob) ‖ blob` (`RecordSigner`). The
+  directory checks it, and the reader also checks the signer against what its code expects, so a directory can withhold a
+  record but never substitute one.
+- **Ownership**: the first signer owns a lookup until its record expires. A different signer gets `owner`; the same
+  signer replaces it only with a higher seq (`stale` otherwise).
+- **Lifetime**: at most 7 days per put, renewed by putting it again.
+- **Authenticated channel only**: a legacy JSON request gets `secure`.
+- **Limits**: 4 KB per blob, 20000 records per directory, 60 puts per source address per hour, memory only. `/metrics`
+  shows the total (`jay_signed_records`).

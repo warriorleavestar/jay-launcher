@@ -120,6 +120,20 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>Rendezvous puts one source address may make per <see cref="Rendezvous.MaxTtl"/>.</summary>
     public const int MaxRendezvousPutsPerSource = 30;
+
+    /// <summary>Lookup (hex) → signed record (<see cref="SignedRecord"/>), replaced only by its signer with a higher seq.</summary>
+    private readonly Dictionary<string, SignedRecord> _records = new(StringComparer.Ordinal);
+    /// <summary>Record puts per source address in the current hour.</summary>
+    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _recordPuts = new(StringComparer.Ordinal);
+
+    /// <summary>Signed records at most (about 110 MB of base64 blobs at the largest size; real records are far smaller).</summary>
+    public const int MaxRecords = 20000;
+
+    /// <summary>Record puts (new or renewed) one source address may make per hour.</summary>
+    public const int MaxRecordPutsPerSource = 60;
+
+    /// <summary>How far ahead of this directory's clock a record's expiry may be beyond <see cref="SignedRecord.MaxLifetime"/>.</summary>
+    private static readonly TimeSpan RecordClockSkew = TimeSpan.FromMinutes(10);
     private readonly SemaphoreSlim _slots = new(MaxConcurrent, MaxConcurrent);
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _accept;
@@ -188,6 +202,12 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     public int RendezvousCount
     {
         get { lock (_gate) { PruneRendezvous(); return _rendezvous.Count; } }
+    }
+
+    /// <summary>Signed records held (a total, for metrics).</summary>
+    public int RecordCount
+    {
+        get { lock (_gate) { PruneRecords(); return _records.Count; } }
     }
 
     public int Count
@@ -275,6 +295,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "drop" => Drop(request),
                 "rv.put" => secure ? RendezvousPut(request, source) : Error("secure"),
                 "rv.take" => secure ? RendezvousTake(request) : Error("secure"),
+                "rec.put" => secure ? RecordPut(request, source) : Error("secure"),
+                "rec.get" => secure ? RecordGet(request) : Error("secure"),
                 "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
                 // Blocks this connection's task for at most a few seconds while the directory dials the address.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
@@ -663,6 +685,52 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
+    private JsonObject RecordPut(JsonObject request, string? source)
+    {
+        if (SignedRecord.FromJson(request["record"]) is not { } record) return Error("bad");
+        var now = _now();
+        if (record.Expires <= now || record.Expires > now + SignedRecord.MaxLifetime + RecordClockSkew) return Error("bad");
+        var lookup = Convert.ToHexStringLower(record.LookupKey);
+        lock (_gate)
+        {
+            PruneRecords();
+            if (_records.TryGetValue(lookup, out var have))
+            {
+                // First signer owns the lookup until its record expires; nobody else can replace or shadow it.
+                if (!CryptographicOperations.FixedTimeEquals(have.Signer, record.Signer)) return Error("owner");
+                if (record.Seq == have.Seq && record.Signature.AsSpan().SequenceEqual(have.Signature)) return new JsonObject { ["ok"] = true };
+                if (record.Seq <= have.Seq) return Error("stale");
+            }
+            else if (_records.Count >= MaxRecords) return Error("full");
+            if (source is not null)
+            {
+                var (count, until) = _recordPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + TimeSpan.FromHours(1));
+                if (count >= MaxRecordPutsPerSource) return Error("rate");
+                _recordPuts[source] = (count + 1, until);
+            }
+            _records[lookup] = record;
+            return new JsonObject { ["ok"] = true };
+        }
+    }
+
+    private JsonObject RecordGet(JsonObject request)
+    {
+        var lookup = request["lookup"]?.GetValue<string>()?.ToLowerInvariant();
+        if (!IsHex(lookup, SignedRecord.LookupLength * 2)) return Error("bad");
+        lock (_gate)
+        {
+            PruneRecords();
+            return _records.TryGetValue(lookup!, out var record) ? new JsonObject { ["ok"] = true, ["record"] = record.ToJson() } : Error("not_found");
+        }
+    }
+
+    private void PruneRecords()
+    {
+        var now = _now();
+        foreach (var (lookup, record) in _records.Where(p => p.Value.Expires <= now).ToList()) _records.Remove(lookup);
+        foreach (var (source, used) in _recordPuts.Where(p => p.Value.Until <= now).ToList()) _recordPuts.Remove(source);
+    }
+
     private void PruneRendezvous()
     {
         var now = _now();
@@ -908,6 +976,33 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             catch (FormatException) { }
         }
         if (results.Any(r => r.Reply is not null)) return null;
+        throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
+    }
+
+    /// <summary>
+    /// Puts a signed record (<see cref="SignedRecord"/>) on every directory, over the authenticated channel only.
+    /// Succeeds when at least one directory keeps it; otherwise throws the rejection (owner, stale, full, rate) or the
+    /// connection error.
+    /// </summary>
+    public async Task PutRecordAsync(SignedRecord record, CancellationToken ct) =>
+        NeedOne(await FanOutAsync(new JsonObject { ["op"] = "rec.put", ["record"] = record.ToJson() }, ct, secureOnly: true));
+
+    /// <summary>
+    /// Asks every directory for the record under <paramref name="lookup"/> and returns the newest one that is signed,
+    /// unexpired, under that lookup and whose signer <paramref name="acceptSigner"/> accepts (check it against what the
+    /// code expects, so a directory can't hand over someone else's record). Null when none qualifies.
+    /// </summary>
+    public async Task<SignedRecord?> GetRecordAsync(byte[] lookup, Func<byte[], bool> acceptSigner, CancellationToken ct, DateTimeOffset? now = null)
+    {
+        if (lookup.Length != SignedRecord.LookupLength) throw new ArgumentException("Lookup length", nameof(lookup));
+        var results = await FanOutAsync(new JsonObject { ["op"] = "rec.get", ["lookup"] = Convert.ToHexStringLower(lookup) }, ct, secureOnly: true);
+        var at = now ?? DateTimeOffset.UtcNow;
+        var best = results
+            .Select(r => r.Reply is { } reply && IsOk(reply) ? SignedRecord.FromJson(reply["record"]) : null)
+            .OfType<SignedRecord>()
+            .Where(r => r.LookupKey.AsSpan().SequenceEqual(lookup) && r.Expires > at && acceptSigner(r.Signer))
+            .MaxBy(r => r.Seq);
+        if (best is not null || results.Any(r => r.Reply is not null)) return best;
         throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
     }
 
