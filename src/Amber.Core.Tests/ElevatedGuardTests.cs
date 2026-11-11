@@ -10,7 +10,7 @@ using Amber.Core.Multiplayer;
 namespace Amber.Core.Tests;
 
 /// <summary>
-/// 完整局域网模式的守护脚本：不提权运行，用一个 PowerShell 小程序代替 easytier-core。
+/// 完整局域网模式的守护（测试目录里的 Jay.exe --jay-lan-guard）：不提权运行，用一个 PowerShell 小程序代替 easytier-core。
 /// 检查参数（含假的房间密钥）只经管道传、不出现在命令行里，输出经管道回来，重启、停止、Amber 崩溃三种情况，
 /// 以及别的程序抢先连上管道时什么都不发。
 /// </summary>
@@ -118,20 +118,13 @@ public class ElevatedGuardTests
         await impostor.ConnectAsync(5000);
 
         using var identity = WindowsIdentity.GetCurrent();
-        var script = ElevatedGuard.GuardScript
-            .Replace("__ID__", id)
-            .Replace("__AMBERPID__", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture))
-            .Replace("__SID__", identity.User!.Value)
-            .Replace("__TIMEOUT__", ElevatedGuard.GuardConnectSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture))
-            .Replace("__SETUPHASH__", Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ElevatedGuard.SetupScript))))
-            .Replace("__CORE64__", Convert.ToBase64String(Encoding.Unicode.GetBytes(Core)));
-        var commandLine = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "
-            + Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        var commandLine = WindowsCommandLine.Join(WindowsElevatedGuardHost.Arguments(id, Environment.ProcessId, identity.User!.Value, Core));
+        var jay = Path.Combine(AppContext.BaseDirectory, "Jay.exe");
         Process? process = null;
         ElevatedGuard? guard = null;
         try
         {
-            process = Process.Start(new ProcessStartInfo(Core, commandLine)
+            process = Process.Start(new ProcessStartInfo(jay, commandLine)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -189,8 +182,8 @@ public class ElevatedGuardTests
         {
             Assert.True(await WaitAsync(() => guard.ConnectFailed, 5));
             Assert.False(guard.StartPending); // 没真正发出去的重启不算“正在重启”
-            // 守护脚本自己的期限是 20 秒；被关掉管道的话远早于这个时间退出。
-            Assert.True(await WaitAsync(() => guard.HasExited, 12), "守护脚本没有被关在外面");
+            // 守护自己的期限是 20 秒；被关掉管道的话早于这个时间退出（满负荷跑全部测试时 Jay.exe 冷启动可能要好几秒）。
+            Assert.True(await WaitAsync(() => guard.HasExited, 18), "守护没有被关在外面");
             await Task.Delay(1000);
             Assert.False(File.Exists(marker), "超时后 easytier-core 还是被启动了");
         }
