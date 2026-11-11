@@ -5,13 +5,13 @@
     {
       "id": "jay-loader",
       "name": "Jay universal loader package",
-      "version": "0.3.0",
-      "tag": "v0.3.0",
-      "file": "amber-ul-0.3.0.zip",
-      "urls": ["https://github.com/warriorleavestar/jay-loader/releases/download/v0.3.0/amber-ul-0.3.0.zip"],
+      "version": "0.3.1",
+      "tag": "v0.3.1",
+      "file": "amber-ul-0.3.1.zip",
+      "urls": ["https://github.com/warriorleavestar/jay-loader/releases/download/v0.3.1/amber-ul-0.3.1.zip"],
       "source": "https://github.com/warriorleavestar/jay-loader",
-      "sha256": "3f6e8a40040bad1e362d71f8ebde3236105d776325b5f420acb1e44a14f97c8a",
-      "size": 4878654,
+      "sha256": "e848b2c479b5b267be66c7aec6e11462f90d257b923ab70bc66ed517e4a87753",
+      "size": 4888811,
       "usedBy": ["src/Amber.Core/Bake/BakeLoaderRelease.cs", "scripts/attach-loader.ps1"]
     },
     {
