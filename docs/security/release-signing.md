@@ -43,9 +43,11 @@ the command line.
   release; ML-DSA-65 keeps that true against a future quantum computer that breaks Ed25519.
 - **Doesn't protect:** two trustees acting together, or the very first download (that copy of Jay has
   no reason to trust anything yet). It also doesn't remove Windows SmartScreen / Smart App Control or
-  macOS Gatekeeper warnings; those need real code signing (see `docs/code-signing-policy.md`).
+  macOS Gatekeeper warnings; those need real code signing, which Jay doesn't have yet.
 - Losing two of the three keys can't be repaired by a trust-chain step; old installs then have to
   reinstall from a fresh download.
+- A self-signed Authenticode certificate is not a substitute. Windows doesn't trust it, and asking
+  users to install it as a trusted root would weaken their whole system.
 
 ## Signed bytes
 

@@ -75,11 +75,8 @@ public sealed partial class MultiplayerViewModel
     private async Task CopyVirtualIpAsync()
     {
         if (!HasVirtualIp) return;
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard })
-        {
-            await Avalonia.Input.Platform.ClipboardExtensions.SetTextAsync(clipboard, MyVirtualIp);
+        if (await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(MyVirtualIp))
             SetStatus(StatusMessage.Success("multiplayer.room.address_copied"));
-        }
     }
 
     private void NotifyRoomHeader()
@@ -397,10 +394,7 @@ public sealed partial class MultiplayerViewModel
     {
         var text = string.Join(Environment.NewLine, new[] { RoomHeaderText, HasVirtualIp ? VirtualIpLabel : null, TransportText }
             .Where(s => !string.IsNullOrWhiteSpace(s)));
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard })
-        {
-            await Avalonia.Input.Platform.ClipboardExtensions.SetTextAsync(clipboard, text);
+        if (await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(text))
             SetStatus(StatusMessage.Success("multiplayer.room.info_copied"));
-        }
     }
 }

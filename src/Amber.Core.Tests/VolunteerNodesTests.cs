@@ -135,6 +135,49 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public void PublicAddressComesFromEasyTiersStunResult()
+    {
+        Assert.Equal("8.8.4.4", VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":["8.8.4.4"]},"ip_list":{"public_ipv4":null}}"""));
+        // ip_list.public_ipv4 as EasyTier's numeric form (1.1.1.1 = 16843009).
+        Assert.Equal("1.1.1.1", VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":[]},"ip_list":{"public_ipv4":{"addr":16843009}}}"""));
+        // Private / CGNAT results and garbage give nothing.
+        Assert.Null(VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":["100.64.3.4","192.168.1.2"]}}"""));
+        Assert.Null(VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":[]},"ip_list":{"public_ipv4":null}}"""));
+        Assert.Null(VolunteerNodes.PublicAddressFromNodeInfo("not json"));
+        Assert.Null(VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":[42]}}"""));
+    }
+
+    [Fact]
+    public async Task ProbeTellsAWouldBeVolunteerWhetherItsPortIsOpenAndIsRateLimited()
+    {
+        var open = new HashSet<string> { "tcp://8.8.8.8:11010" };
+        await using var directory = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => _now)
+        {
+            Volunteers = new VolunteerRegistry((url, _) => Task.FromResult(open.Contains(url)), () => _now),
+        };
+        var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port));
+        Assert.True(await client.ProbeAsync("tcp://8.8.8.8:11010", default));
+        Assert.False(await client.ProbeAsync("tcp://1.1.1.1:11010", default));
+        // Same address again right away: refused.
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.ProbeAsync("tcp://8.8.8.8:11010", default));
+        Assert.Equal("rate", e.Code);
+        _now += VolunteerRegistry.CheckSameAddressEvery + TimeSpan.FromSeconds(1);
+        Assert.True(await client.ProbeAsync("tcp://8.8.8.8:11010", default));
+        // Probing never lists anything.
+        Assert.Empty(directory.Volunteers.Listed());
+        // Whole-directory cap per minute.
+        for (var i = 0; i < VolunteerRegistry.ChecksPerMinute - 3; i++) Assert.True(Ok(await directory.Volunteers.CheckAsync($"tcp://n{i}.example.org:11010")));
+        Assert.Equal("rate", (await directory.Volunteers.CheckAsync("tcp://last.example.org:11010"))["error"]!.GetValue<string>());
+        _now += TimeSpan.FromMinutes(1.1);
+        Assert.True(Ok(await directory.Volunteers.CheckAsync("tcp://last.example.org:11010")));
+        Assert.Equal("bad", (await directory.Volunteers.CheckAsync("tcp://10.1.2.3:11010"))["error"]!.GetValue<string>());
+        await Assert.ThrowsAsync<ArgumentException>(() => client.ProbeAsync("tcp://192.168.0.9:11010", default));
+
+        directory.Volunteers = null;
+        Assert.Equal("off", (await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.ProbeAsync("tcp://8.8.4.4:11010", default))).Code);
+    }
+
+    [Fact]
     public void VolunteerArgsListenPubliclyRelayOnlyThisNetworkAndCapBandwidth()
     {
         var profile = PublicNetworkProfile.Jay(["tcp://8.8.4.4:11010"]);

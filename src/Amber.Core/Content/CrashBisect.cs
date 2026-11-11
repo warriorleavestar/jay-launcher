@@ -55,13 +55,25 @@ public sealed class CrashBisect
         try
         {
             var state = JsonSerializer.Deserialize(File.ReadAllText(path), CrashBisectJson.Default.State);
-            return state is null ? null : new CrashBisect(workDir, state);
+            // The file sits in the instance folder, so a modpack or another program could have written it. Every name must be a
+            // plain jar file name in mods; otherwise the session is not ours and nothing in it is renamed.
+            return state is null || !IsSane(state) ? null : new CrashBisect(workDir, state);
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
             return null;
         }
     }
+
+    private static bool IsSane(State state) =>
+        state.Candidates.All(IsModFileName) && state.Disabled.All(IsModFileName)
+        && state.History.All(step => step.TurnedOff is { } off && off.All(IsModFileName));
+
+    /// <summary>A jar file name with no folder part, as <see cref="Start"/> records it.</summary>
+    internal static bool IsModFileName(string? name) =>
+        !string.IsNullOrEmpty(name) && name.Length <= 255 && name.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)
+        && name.IndexOfAny(['/', '\\', ':', '\0']) < 0 && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
+        && name.Trim('.', ' ').Length > 0 && Path.GetFileName(name) == name;
 
     /// <summary>Starts a session over the mods that are on now (jar files in <c>mods</c>). Nothing is switched off yet.</summary>
     public static CrashBisect Start(string workDir, DateTimeOffset? now = null)
@@ -128,6 +140,7 @@ public sealed class CrashBisect
 
     private void SetEnabled(string name, bool enabled)
     {
+        if (!IsModFileName(name)) return;
         var on = Path.Combine(ModsDir(_workDir), name);
         var off = on + Off;
         if (enabled && File.Exists(off) && !File.Exists(on)) File.Move(off, on);

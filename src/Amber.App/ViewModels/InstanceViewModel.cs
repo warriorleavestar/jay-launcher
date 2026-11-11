@@ -325,10 +325,9 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         }
     }
 
-    private static void OpenPath(string path)
+    private void OpenPath(string path)
     {
-        System.IO.Directory.CreateDirectory(path);
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        if (ShellOpen.TryOpen(path) is { } e) SetStatus(StatusMessage.Failure("common.open_failed", e, path, ErrorText.Of(e)));
     }
 
     /// <summary>
@@ -928,14 +927,28 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
 
     public void AddFiles(IEnumerable<string> paths, string targetDir)
     {
-        System.IO.Directory.CreateDirectory(targetDir);
         var count = 0;
+        StatusMessage? failure = null;
         foreach (var path in paths)
         {
-            File.Copy(path, Path.Combine(targetDir, Path.GetFileName(path)), true);
-            count++;
+            var target = Path.Combine(targetDir, Path.GetFileName(path));
+            // Picked from the target folder itself: it is already there (copying a file onto itself throws).
+            if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(target), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                continue;
+            try
+            {
+                System.IO.Directory.CreateDirectory(targetDir);
+                File.Copy(path, target, true);
+                count++;
+            }
+            // A running game keeps its mods open on Windows; one locked or unreadable file must not stop the rest.
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                failure ??= StatusMessage.Failure("instance.files.add_failed", e, Path.GetFileName(path), ErrorText.Of(e));
+            }
         }
-        Status = L.P("instance.files.added", count, count);
+        if (failure is not null) SetStatus(failure);
+        else Status = L.P("instance.files.added", count, count);
         _loadedTabs.Clear();
         LoadTab(TabIndex);
     }
@@ -1123,7 +1136,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [RelayCommand]
     private void OpenScreenshot(ScreenshotItem? item)
     {
-        if (item is not null) Process.Start(new ProcessStartInfo(item.Path) { UseShellExecute = true });
+        if (item is not null) OpenPath(item.Path);
     }
 
     [RelayCommand]

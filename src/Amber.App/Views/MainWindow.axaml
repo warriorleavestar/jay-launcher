@@ -358,219 +358,243 @@
       </Border>
 
       <!-- Help drawer (§6.24): 400 on the right, full width when compact. Esc or a click outside closes it -->
-      <Panel x:Name="HelpLayer" Grid.RowSpan="7" IsVisible="{Binding Help.IsOpen}">
-        <Border x:Name="HelpScrim" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="HelpScrim_Pressed" />
-        <Border x:Name="HelpDrawer" Width="400" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
-                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}">
-          <DockPanel Margin="16,12,16,16">
-            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
-              <TextBlock x:Name="HelpHeader" Text="{Binding Help.Header}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-              <Button x:Name="HelpClose" Grid.Column="1" Classes="ghost icon-only" Command="{Binding Help.CloseCommand}"
-                      ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}">
-                <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
-              </Button>
-            </Grid>
-            <TextBox x:Name="HelpDrawerSearch" DockPanel.Dock="Top" Text="{Binding Help.Query}" PlaceholderText="{l:T help.search}" Margin="0,0,0,10" />
-            <Button x:Name="HelpCenterLink" DockPanel.Dock="Bottom" Classes="ghost" Content="{l:T help.open_center}" Command="{Binding Help.OpenCenterCommand}"
-                    HorizontalAlignment="Left" Padding="0,4" Margin="0,8,0,0" />
-            <ScrollViewer x:Name="HelpScroll" HorizontalScrollBarVisibility="Disabled">
-              <Panel Margin="0,0,14,0">
-                <views:HelpArticleBody x:Name="HelpArticle" DataContext="{Binding Help.Article}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.ShowArticle}"
-                                       LinkCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.FollowLinkCommand}"
-                                       ArticleCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.OpenArticleCommand}" />
-                <StackPanel Spacing="4" IsVisible="{Binding Help.HasQuery}">
-                  <TextBlock x:Name="HelpNoResults" Classes="hint" Text="{l:T help.search.empty}" IsVisible="{Binding Help.NoResults}" TextWrapping="Wrap" />
-                  <ItemsControl x:Name="HelpResults" ItemsSource="{Binding Help.Results}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate DataType="vm:HelpArticleItem">
-                        <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,6"
-                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.OpenArticleCommand}" CommandParameter="{Binding}">
-                          <StackPanel Spacing="2">
-                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding Summary}" Classes="hint" FontSize="12" TextWrapping="Wrap" MaxLines="2" />
-                          </StackPanel>
-                        </Button>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </StackPanel>
-              </Panel>
-            </ScrollViewer>
-          </DockPanel>
-        </Border>
-      </Panel>
+      <c:LazyHost x:Name="HelpHost" Grid.RowSpan="7" IsOpen="{Binding Help.IsOpen}" IsVisible="{Binding Help.IsOpen}">
+        <Template x:DataType="vm:MainViewModel">
+            <Panel x:Name="HelpLayerPart">
+              <Border x:Name="HelpScrimPart" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="HelpScrim_Pressed" />
+              <Border x:Name="HelpDrawerPart" Width="400" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
+                      BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}">
+                <DockPanel Margin="16,12,16,16">
+                  <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                    <TextBlock x:Name="HelpHeaderPart" Text="{Binding Help.Header}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Button x:Name="HelpClosePart" Grid.Column="1" Classes="ghost icon-only" Command="{Binding Help.CloseCommand}"
+                            ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}">
+                      <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
+                    </Button>
+                  </Grid>
+                  <TextBox x:Name="HelpDrawerSearchPart" DockPanel.Dock="Top" Text="{Binding Help.Query}" PlaceholderText="{l:T help.search}" Margin="0,0,0,10" />
+                  <Button x:Name="HelpCenterLinkPart" DockPanel.Dock="Bottom" Classes="ghost" Content="{l:T help.open_center}" Command="{Binding Help.OpenCenterCommand}"
+                          HorizontalAlignment="Left" Padding="0,4" Margin="0,8,0,0" />
+                  <ScrollViewer x:Name="HelpScrollPart" HorizontalScrollBarVisibility="Disabled">
+                    <Panel Margin="0,0,14,0">
+                      <views:HelpArticleBody x:Name="HelpArticlePart" DataContext="{Binding Help.Article}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.ShowArticle}"
+                                             LinkCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.FollowLinkCommand}"
+                                             ArticleCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.OpenArticleCommand}" />
+                      <StackPanel Spacing="4" IsVisible="{Binding Help.HasQuery}">
+                        <TextBlock x:Name="HelpNoResultsPart" Classes="hint" Text="{l:T help.search.empty}" IsVisible="{Binding Help.NoResults}" TextWrapping="Wrap" />
+                        <ItemsControl x:Name="HelpResultsPart" ItemsSource="{Binding Help.Results}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:HelpArticleItem">
+                              <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,6"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Help.OpenArticleCommand}" CommandParameter="{Binding}">
+                                <StackPanel Spacing="2">
+                                  <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                  <TextBlock Text="{Binding Summary}" Classes="hint" FontSize="12" TextWrapping="Wrap" MaxLines="2" />
+                                </StackPanel>
+                              </Button>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Panel>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+            </Panel>
+        </Template>
+      </c:LazyHost>
 
       <!-- 活动中心（§6.22）：盖在内容区右侧的抽屉 400，紧凑档全宽。Esc 或点外面关 -->
-      <Panel x:Name="ActivityLayer" Grid.RowSpan="7" IsVisible="{Binding Activity.IsOpen}">
-        <Border x:Name="ActivityScrim" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="ActivityScrim_Pressed" />
-        <Border x:Name="ActivityDrawer" Width="400" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
-                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}">
-          <DockPanel Margin="16,12,16,16">
-            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
-              <TextBlock Text="{l:T activity.title}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold" VerticalAlignment="Center" />
-              <Button x:Name="ActivityClose" Grid.Column="1" Classes="ghost icon-only" Command="{Binding Activity.CloseCommand}"
-                      ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}">
-                <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
-              </Button>
-            </Grid>
-            <ListBox x:Name="ActivityTabs" DockPanel.Dock="Top" Classes="subtabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
-                     Background="Transparent" Margin="-4,0,0,8" ScrollViewer.HorizontalScrollBarVisibility="Auto">
-              <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
-              <ListBox.ItemTemplate>
-                <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-              <Button Classes="secondary small" Content="{l:T activity.clear_finished}" Command="{Binding Activity.ClearFinishedCommand}"
-                      IsVisible="{Binding Activity.IsTasksTab}" IsEnabled="{Binding Activity.HasFinishedTasks}" />
-              <Button Classes="secondary small" Content="{l:T activity.clear_notices}" Command="{Binding Activity.ClearNoticesCommand}"
-                      IsVisible="{Binding Activity.IsNoticesTab}" IsEnabled="{Binding Activity.HasNotices}" />
-            </StackPanel>
-            <Panel>
-              <!-- 进行中 -->
-              <Panel IsVisible="{Binding Activity.IsTasksTab}">
-                <TextBlock Classes="hint" Text="{l:T activity.empty.tasks}" IsVisible="{Binding !Activity.HasTasks}" Margin="0,8" TextWrapping="Wrap" />
-                <ScrollViewer>
-                  <ItemsControl x:Name="ActivityTaskList" ItemsSource="{Binding Activity.Tasks}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate DataType="vm:TaskItem">
-                        <Border Classes="card" Padding="12" Margin="0,0,0,8">
-                          <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8">
-                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
-                            <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Value="{Binding Percent}" Maximum="100" IsIndeterminate="{Binding Indeterminate}"
-                                         IsVisible="{Binding IsRunning}" Margin="0,6,0,0" />
-                            <TextBlock Grid.Row="2" Text="{Binding Detail}" Classes="hint" Classes.error="{Binding IsFailed}" TextWrapping="Wrap" Margin="0,4,0,0" />
-                            <Button Grid.Column="1" Classes="ghost small" Content="{l:T common.cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding CanCancel}" />
-                          </Grid>
-                        </Border>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </ScrollViewer>
-              </Panel>
-              <!-- 通知 -->
-              <Panel IsVisible="{Binding Activity.IsNoticesTab}">
-                <TextBlock Classes="hint" Text="{l:T activity.empty.notices}" IsVisible="{Binding !Activity.HasNotices}" Margin="0,8" TextWrapping="Wrap" />
-                <ScrollViewer>
-                  <ItemsControl ItemsSource="{Binding Activity.Notices}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate DataType="vm:NoticeItem">
-                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="0,4">
-                          <TextBlock Text="{Binding TimeText}" Classes="hint" FontSize="12" VerticalAlignment="Top" />
-                          <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" Classes.error="{Binding IsError}" />
-                        </Grid>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </ScrollViewer>
-              </Panel>
-              <!-- 运行记录 -->
-              <Panel IsVisible="{Binding Activity.IsRunsTab}">
-                <TextBlock Classes="hint" Text="{l:T activity.empty.runs}" IsVisible="{Binding !Activity.HasRuns}" Margin="0,8" TextWrapping="Wrap" />
-                <ScrollViewer>
-                  <ItemsControl ItemsSource="{Binding Activity.Runs}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate DataType="vm:RunItem">
-                        <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,0,0,4"
-                                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Activity.OpenCommand}" CommandParameter="{Binding}">
-                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <StackPanel>
-                              <TextBlock Text="{Binding Instance}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                              <TextBlock Text="{Binding StateText}" Classes="hint" Classes.error="{Binding IsCrash}" />
-                            </StackPanel>
-                            <TextBlock Grid.Column="1" Text="{Binding StartedText}" Classes="hint" FontSize="12" VerticalAlignment="Top" />
-                          </Grid>
-                        </Button>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </ScrollViewer>
-              </Panel>
+      <c:LazyHost x:Name="ActivityHost" Grid.RowSpan="7" IsOpen="{Binding Activity.IsOpen}" IsVisible="{Binding Activity.IsOpen}">
+        <Template x:DataType="vm:MainViewModel">
+            <Panel x:Name="ActivityLayerPart">
+              <Border x:Name="ActivityScrimPart" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="ActivityScrim_Pressed" />
+              <Border x:Name="ActivityDrawerPart" Width="400" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
+                      BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}">
+                <DockPanel Margin="16,12,16,16">
+                  <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                    <TextBlock Text="{l:T activity.title}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Button x:Name="ActivityClosePart" Grid.Column="1" Classes="ghost icon-only" Command="{Binding Activity.CloseCommand}"
+                            ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}">
+                      <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
+                    </Button>
+                  </Grid>
+                  <ListBox x:Name="ActivityTabsPart" DockPanel.Dock="Top" Classes="subtabs" ItemsSource="{Binding Activity.TabOptions}" SelectedIndex="{Binding Activity.Tab}"
+                           Background="Transparent" Margin="-4,0,0,8" ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                    <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                    <Button Classes="secondary small" Content="{l:T activity.clear_finished}" Command="{Binding Activity.ClearFinishedCommand}"
+                            IsVisible="{Binding Activity.IsTasksTab}" IsEnabled="{Binding Activity.HasFinishedTasks}" />
+                    <Button Classes="secondary small" Content="{l:T activity.clear_notices}" Command="{Binding Activity.ClearNoticesCommand}"
+                            IsVisible="{Binding Activity.IsNoticesTab}" IsEnabled="{Binding Activity.HasNotices}" />
+                  </StackPanel>
+                  <Panel>
+                    <!-- 进行中 -->
+                    <Panel IsVisible="{Binding Activity.IsTasksTab}">
+                      <TextBlock Classes="hint" Text="{l:T activity.empty.tasks}" IsVisible="{Binding !Activity.HasTasks}" Margin="0,8" TextWrapping="Wrap" />
+                      <ScrollViewer>
+                        <ItemsControl x:Name="ActivityTaskListPart" ItemsSource="{Binding Activity.Tasks}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:TaskItem">
+                              <Border Classes="card" Padding="12" Margin="0,0,0,8">
+                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8">
+                                  <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
+                                  <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Value="{Binding Percent}" Maximum="100" IsIndeterminate="{Binding Indeterminate}"
+                                               IsVisible="{Binding IsRunning}" Margin="0,6,0,0" />
+                                  <TextBlock Grid.Row="2" Text="{Binding Detail}" Classes="hint" Classes.error="{Binding IsFailed}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                  <Button Grid.Column="1" Classes="ghost small" Content="{l:T common.cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding CanCancel}" />
+                                </Grid>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Panel>
+                    <!-- 通知 -->
+                    <Panel IsVisible="{Binding Activity.IsNoticesTab}">
+                      <TextBlock Classes="hint" Text="{l:T activity.empty.notices}" IsVisible="{Binding !Activity.HasNotices}" Margin="0,8" TextWrapping="Wrap" />
+                      <ScrollViewer>
+                        <ItemsControl ItemsSource="{Binding Activity.Notices}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:NoticeItem">
+                              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="0,4">
+                                <TextBlock Text="{Binding TimeText}" Classes="hint" FontSize="12" VerticalAlignment="Top" />
+                                <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" Classes.error="{Binding IsError}" />
+                              </Grid>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Panel>
+                    <!-- 运行记录 -->
+                    <Panel IsVisible="{Binding Activity.IsRunsTab}">
+                      <TextBlock Classes="hint" Text="{l:T activity.empty.runs}" IsVisible="{Binding !Activity.HasRuns}" Margin="0,8" TextWrapping="Wrap" />
+                      <ScrollViewer>
+                        <ItemsControl ItemsSource="{Binding Activity.Runs}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:RunItem">
+                              <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,0,0,4"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Activity.OpenCommand}" CommandParameter="{Binding}">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                  <StackPanel>
+                                    <TextBlock Text="{Binding Instance}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding StateText}" Classes="hint" Classes.error="{Binding IsCrash}" />
+                                  </StackPanel>
+                                  <TextBlock Grid.Column="1" Text="{Binding StartedText}" Classes="hint" FontSize="12" VerticalAlignment="Top" />
+                                </Grid>
+                              </Button>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Panel>
+                  </Panel>
+                </DockPanel>
+              </Border>
             </Panel>
-          </DockPanel>
-        </Border>
-      </Panel>
+        </Template>
+      </c:LazyHost>
     </Grid>
 
     <!-- First-run wizard (§6.1): covers the whole shell, under the breaker countdown. -->
-    <views:FirstRunWizard x:Name="FirstRunLayer" Grid.ColumnSpan="2" DataContext="{Binding FirstRun}" />
+    <c:LazyHost x:Name="FirstRunHost" Grid.ColumnSpan="2" IsOpen="{Binding FirstRun.IsOpen}" IsVisible="{Binding FirstRun.IsOpen}">
+      <Template x:DataType="vm:MainViewModel">
+          <views:FirstRunWizard x:Name="FirstRunLayerPart" DataContext="{Binding FirstRun}" />
+      </Template>
+    </c:LazyHost>
 
     <!-- Drag-and-drop import (§6.25): one to three big zones for what is being dragged. Zones sit in a row on wide
          windows and stack when compact. Dropping outside a zone does nothing. -->
-    <Border x:Name="DropLayer" Grid.ColumnSpan="2" IsVisible="{Binding Drop.IsActive}" Background="{DynamicResource Scrim}">
-      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" Margin="16">
-        <ItemsControl x:Name="DropTargets" ItemsSource="{Binding Drop.Targets}" HorizontalAlignment="Center">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><WrapPanel x:Name="DropTargetsPanel" ItemSpacing="14" LineSpacing="14" HorizontalAlignment="Center" /></ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate DataType="vm:DropTarget">
-              <Border Classes="card drop-target" Classes.hovered="{Binding IsHovered}" MinHeight="130" Padding="18">
-                <StackPanel Spacing="6" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="{DynamicResource FontSubtitle}" TextWrapping="Wrap" TextAlignment="Center" />
-                  <TextBlock Classes="hint" Text="{Binding Hint}" TextWrapping="Wrap" TextAlignment="Center" />
-                </StackPanel>
+    <c:LazyHost x:Name="DropHost" Grid.ColumnSpan="2" IsOpen="{Binding Drop.IsActive}" IsVisible="{Binding Drop.IsActive}">
+      <Template x:DataType="vm:MainViewModel">
+          <Border x:Name="DropLayerPart" Background="{DynamicResource Scrim}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" Margin="16">
+              <ItemsControl x:Name="DropTargetsPart" ItemsSource="{Binding Drop.Targets}" HorizontalAlignment="Center">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate><WrapPanel x:Name="DropTargetsPanelPart" ItemSpacing="14" LineSpacing="14" HorizontalAlignment="Center" /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:DropTarget">
+                    <Border Classes="card drop-target" Classes.hovered="{Binding IsHovered}" MinHeight="130" Padding="18">
+                      <StackPanel Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="{DynamicResource FontSubtitle}" TextWrapping="Wrap" TextAlignment="Center" />
+                        <TextBlock Classes="hint" Text="{Binding Hint}" TextWrapping="Wrap" TextAlignment="Center" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Border Classes="card" IsVisible="{Binding Drop.HasNote}" MaxWidth="520" HorizontalAlignment="Center">
+                <TextBlock x:Name="DropNotePart" Text="{Binding Drop.Note}" TextWrapping="Wrap" TextAlignment="Center" />
               </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-        <Border Classes="card" IsVisible="{Binding Drop.HasNote}" MaxWidth="520" HorizontalAlignment="Center">
-          <TextBlock x:Name="DropNote" Text="{Binding Drop.Note}" TextWrapping="Wrap" TextAlignment="Center" />
-        </Border>
-      </StackPanel>
-    </Border>
+            </StackPanel>
+          </Border>
+      </Template>
+    </c:LazyHost>
 
     <!-- Command palette (§6.23): Ctrl+K. 640 wide, top centre, at most 480 high; full width when compact. -->
-    <Panel x:Name="PaletteLayer" Grid.ColumnSpan="2" IsVisible="{Binding Palette.IsOpen}">
-      <Border x:Name="PaletteScrim" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="PaletteScrim_Pressed" />
-      <Border x:Name="PalettePanel" Width="640" MaxHeight="480" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="16,64,16,16"
-              Background="{DynamicResource Overlay}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="10"
-              BoxShadow="{DynamicResource Elevation3}" Padding="0,0,0,8">
-        <DockPanel>
-          <TextBox x:Name="PaletteBox" DockPanel.Dock="Top" Text="{Binding Palette.Query}" PlaceholderText="{Binding Palette.Placeholder}"
-                   Margin="12,12,12,6" FontSize="{DynamicResource FontSubtitle}" />
-          <TextBlock x:Name="PalettePicking" DockPanel.Dock="Top" Text="{Binding Palette.PickingText}" IsVisible="{Binding Palette.IsPicking}"
-                     Classes="hint" Margin="16,0,16,6" TextWrapping="Wrap" />
-          <TextBlock x:Name="PaletteRecent" DockPanel.Dock="Top" Text="{l:T palette.recent}" IsVisible="{Binding Palette.ShowsRecent}"
-                     Classes="hint" FontSize="12" Margin="16,0,16,4" />
-          <TextBlock x:Name="PaletteHint" DockPanel.Dock="Bottom" Text="{l:T palette.hint}" Classes="hint" FontSize="12" Margin="16,6,16,0" TextWrapping="Wrap" />
-          <TextBlock x:Name="PaletteEmpty" DockPanel.Dock="Top" Text="{l:T palette.empty}" IsVisible="{Binding Palette.IsEmpty}"
-                     Classes="hint" Margin="16,8" TextWrapping="Wrap" />
-          <ListBox x:Name="PaletteList" ItemsSource="{Binding Palette.Results}" SelectedIndex="{Binding Palette.SelectedIndex}"
-                   Background="Transparent" Margin="6,0" Focusable="False" Tapped="PaletteList_Tapped">
-            <ListBox.Styles>
-              <Style Selector="ListBoxItem">
-                <Setter Property="Padding" Value="10,4" />
-                <Setter Property="CornerRadius" Value="6" />
-              </Style>
-            </ListBox.Styles>
-            <ListBox.ItemTemplate>
-              <DataTemplate DataType="vm:PaletteEntry">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" MinHeight="32">
-                  <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="{Binding Subtitle}" IsVisible="{Binding HasSubtitle}" Classes="hint" FontSize="12" TextTrimming="CharacterEllipsis" />
-                  </StackPanel>
-                  <TextBlock Grid.Column="1" Text="{Binding KindText}" Classes="hint" FontSize="12" VerticalAlignment="Center" />
-                </Grid>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </DockPanel>
-      </Border>
-    </Panel>
+    <c:LazyHost x:Name="PaletteHost" Grid.ColumnSpan="2" IsOpen="{Binding Palette.IsOpen}" IsVisible="{Binding Palette.IsOpen}">
+      <Template x:DataType="vm:MainViewModel">
+          <Panel x:Name="PaletteLayerPart">
+            <Border x:Name="PaletteScrimPart" Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="PaletteScrim_Pressed" />
+            <Border x:Name="PalettePanelPart" Width="640" MaxHeight="480" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="16,64,16,16"
+                    Background="{DynamicResource Overlay}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" CornerRadius="10"
+                    BoxShadow="{DynamicResource Elevation3}" Padding="0,0,0,8">
+              <DockPanel>
+                <TextBox x:Name="PaletteBoxPart" DockPanel.Dock="Top" Text="{Binding Palette.Query}" PlaceholderText="{Binding Palette.Placeholder}"
+                         Margin="12,12,12,6" FontSize="{DynamicResource FontSubtitle}" />
+                <TextBlock x:Name="PalettePickingPart" DockPanel.Dock="Top" Text="{Binding Palette.PickingText}" IsVisible="{Binding Palette.IsPicking}"
+                           Classes="hint" Margin="16,0,16,6" TextWrapping="Wrap" />
+                <TextBlock x:Name="PaletteRecentPart" DockPanel.Dock="Top" Text="{l:T palette.recent}" IsVisible="{Binding Palette.ShowsRecent}"
+                           Classes="hint" FontSize="12" Margin="16,0,16,4" />
+                <TextBlock x:Name="PaletteHintPart" DockPanel.Dock="Bottom" Text="{l:T palette.hint}" Classes="hint" FontSize="12" Margin="16,6,16,0" TextWrapping="Wrap" />
+                <TextBlock x:Name="PaletteEmptyPart" DockPanel.Dock="Top" Text="{l:T palette.empty}" IsVisible="{Binding Palette.IsEmpty}"
+                           Classes="hint" Margin="16,8" TextWrapping="Wrap" />
+                <ListBox x:Name="PaletteListPart" ItemsSource="{Binding Palette.Results}" SelectedIndex="{Binding Palette.SelectedIndex}"
+                         Background="Transparent" Margin="6,0" Focusable="False" Tapped="PaletteList_Tapped">
+                  <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                      <Setter Property="Padding" Value="10,4" />
+                      <Setter Property="CornerRadius" Value="6" />
+                    </Style>
+                  </ListBox.Styles>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:PaletteEntry">
+                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" MinHeight="32">
+                        <StackPanel VerticalAlignment="Center">
+                          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Text="{Binding Subtitle}" IsVisible="{Binding HasSubtitle}" Classes="hint" FontSize="12" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding KindText}" Classes="hint" FontSize="12" VerticalAlignment="Center" />
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </DockPanel>
+            </Border>
+          </Panel>
+      </Template>
+    </c:LazyHost>
 
     <!-- 熔断倒计时：盖住整个窗口，按空格或点按钮取消重启 -->
-    <Border x:Name="BreakerOverlay" Grid.ColumnSpan="2" IsVisible="{Binding Multiplayer.IsBreakerCounting}" Background="{DynamicResource Scrim}">
-      <Border Classes="card" MaxWidth="440" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
-        <StackPanel Spacing="10">
-          <TextBlock Classes="h2" Text="{l:T multiplayer.breaker.title}" Margin="0" />
-          <TextBlock Text="{Binding Multiplayer.BreakerReason}" TextWrapping="Wrap" />
-          <TextBlock Text="{Binding Multiplayer.BreakerCountdownText}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" />
-          <TextBlock Classes="hint" FontSize="12" Text="{l:T multiplayer.breaker.hint}" TextWrapping="Wrap" />
-          <Button x:Name="BreakerCancel" Content="{l:T multiplayer.breaker.cancel}" Command="{Binding Multiplayer.CancelBreakerRestartCommand}" HorizontalAlignment="Right" />
-        </StackPanel>
-      </Border>
-    </Border>
+    <c:LazyHost x:Name="BreakerHost" Grid.ColumnSpan="2" IsOpen="{Binding Multiplayer.IsBreakerCounting}" IsVisible="{Binding Multiplayer.IsBreakerCounting}">
+      <Template x:DataType="vm:MainViewModel">
+          <Border x:Name="BreakerOverlayPart" Background="{DynamicResource Scrim}">
+            <Border Classes="card" MaxWidth="440" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="h2" Text="{l:T multiplayer.breaker.title}" Margin="0" />
+                <TextBlock Text="{Binding Multiplayer.BreakerReason}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Multiplayer.BreakerCountdownText}" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource Accent}" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T multiplayer.breaker.hint}" TextWrapping="Wrap" />
+                <Button x:Name="BreakerCancelPart" Content="{l:T multiplayer.breaker.cancel}" Command="{Binding Multiplayer.CancelBreakerRestartCommand}" HorizontalAlignment="Right" />
+              </StackPanel>
+            </Border>
+          </Border>
+      </Template>
+    </c:LazyHost>
   </Grid>
 </Window>

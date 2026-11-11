@@ -102,7 +102,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 
 | Path | What it is |
 | --- | --- |
-| `docs/` | Design and operator docs: `public-network.md`, `network-server.md`, `network-server-framework.md`, `themes.md`, `platform-porting-guide.md`, `code-signing-policy.md`, `i18n-glossary.md`, `releases/`. |
+| `docs/` | Design and operator docs: `public-network.md`, `network-server.md`, `network-server-framework.md`, `themes.md`, `platform-porting-guide.md`, `privacy.md`, `i18n-glossary.md`. |
 | `docs/help/` | In-app help articles per language (`zh-Hans`, `zh-Hant`, `en`, `ja`), embedded into Core. |
 | `themes/examples/` | Example theme packs (`pixel-night`, `sakura`, `topbar`). |
 | `networks/` | Registry of third-party public networks; CI (`networks.yml`) signs them into `JAYNET2-` strings after merge. |

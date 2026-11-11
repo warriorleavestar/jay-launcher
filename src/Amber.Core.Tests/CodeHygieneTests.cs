@@ -103,6 +103,22 @@ public sealed class CodeHygieneTests
         Assert.False(await new SensitiveClipboard(() => new FakeClipboard()).CopyAsync(""));
     }
 
+    private sealed class BusyClipboard : IClipboardText
+    {
+        public Task SetTextAsync(string text) => throw new System.Runtime.InteropServices.COMException("OpenClipboard failed", unchecked((int)0x800401D0));
+        public Task<string?> GetTextAsync() => Task.FromResult<string?>(null);
+        public Task ClearAsync() => Task.CompletedTask;
+    }
+
+    /// <summary>Another program holds the clipboard (CLIPBRD_E_CANT_OPEN): copying reports false instead of throwing into the UI thread and closing Jay.</summary>
+    [Fact]
+    public async Task BusyClipboardMeansNothingCopied()
+    {
+        var clipboard = new SensitiveClipboard(() => new BusyClipboard(), new ManualDelay().Delay);
+        Assert.False(await clipboard.CopyAsync("JAY2D-secret"));
+        await clipboard.PendingClears;
+    }
+
     private static (Amber.App.Services.LauncherService Service, MultiplayerViewModel Vm) Create()
     {
         var service = new Amber.App.Services.LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });

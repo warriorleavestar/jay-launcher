@@ -88,7 +88,7 @@ public sealed partial class DownloadViewModel
         p.Loader is { } loader ? $"{loader} {p.LoaderVersion}".TrimEnd() : L.T("home.version.vanilla"),
         L.P("newinstance.pack.files", p.FileCount, p.FileCount),
         p.Format,
-    });
+    }.Concat(p.IsMixed ? [L.F("newinstance.pack.mixed", string.Join(" + ", p.ExtraLoaders))] : []));
 
     /// <summary>The file picker or a drop handed us a pack: read its manifest without importing anything.</summary>
     public async Task PreviewPackAsync(string path)

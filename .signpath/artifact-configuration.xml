@@ -3,7 +3,7 @@
   SignPath 制品配置（artifact configuration）。这个文件只是存档：真正生效的是贴到
   SignPath 网页里（项目 → Artifact Configurations）的那份，两边改动要保持一致。
 
-  build.yml 上传的 jay-win-x64 制品是一个 zip，里面有三个发布包；这里只签我们自己编译的
+  build.yml 上传的 jay-win-x64 制品是一个 zip，里面有两个发布包；这里只签我们自己编译的
   Jay.exe 和 jay-server.exe。包里自带的 EasyTier 是上游程序，按 SignPath Foundation 的规则
   不能用我们的证书签，保持原样。
 
@@ -16,11 +16,6 @@
   </parameters>
   <zip-file>
     <zip-file path="Jay-win-x64.zip">
-      <pe-file path="Jay.exe" product-name="Jay" product-version="${version}">
-        <authenticode-sign />
-      </pe-file>
-    </zip-file>
-    <zip-file path="Jay-win-x64-aot.zip">
       <pe-file path="Jay.exe" product-name="Jay" product-version="${version}">
         <authenticode-sign />
       </pe-file>

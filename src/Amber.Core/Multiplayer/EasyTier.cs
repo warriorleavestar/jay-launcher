@@ -12,33 +12,50 @@ namespace Amber.Core.Multiplayer;
 
 /// <summary>
 /// 联机用的 EasyTier（开源组网工具，LGPL-3.0，https://github.com/EasyTier/EasyTier）。
-/// 发布包里自带固定版本的官方安装包；单独拿到主程序时，第一次用联机再从 GitHub 或下载镜像下载。
+/// Jay uses its own hardened build of a pinned upstream tag (https://github.com/Yumao-Feather/jay-easytier, see JAY.md there):
+/// ciphers fail closed, the management API is loopback-only, remote config, the VPN portal and http(s) peer lists are refused.
+/// 发布包里自带固定版本的安装包；单独拿到主程序时，第一次用联机再从 GitHub 或下载镜像下载。
 /// 无论哪种来源，都校验固定的大小和 SHA-256 后才解压到数据目录。
 /// </summary>
 public static class EasyTierRelease
 {
+    /// <summary>The upstream EasyTier version the hardened build is based on.</summary>
     public const string Version = "2.6.4";
-    private const string BaseUrl = "https://github.com/EasyTier/EasyTier/releases/download/v2.6.4/";
+    /// <summary>Release tag of Jay's hardened build.</summary>
+    public const string ReleaseTag = "jay-v2.6.4-1";
+    /// <summary>First 12 hex digits of the hardened build's commit; part of every package name.</summary>
+    public const string Commit = "89e36e45d7e2";
+    /// <summary>Install folder name: a new hardened build never reuses files from an older or an upstream install.</summary>
+    public const string InstallTag = Version + "-jay-" + Commit;
+    public const string SourceUrl = "https://github.com/Yumao-Feather/jay-easytier";
+    private const string BaseUrl = SourceUrl + "/releases/download/" + ReleaseTag + "/";
     public const string License = "LGPL-3.0";
     public const string ProjectUrl = "https://github.com/EasyTier/EasyTier";
 
     public sealed record Asset(string Platform, string Name, string Sha256, long Size, string CoreName, string CliName)
     {
         public string Url => BaseUrl + Name;
+
+        /// <summary>
+        /// The WinDivert driver the Windows package ships (full-LAN broadcast relay): WinDivert32.sys in the
+        /// 32-bit package, WinDivert64.sys in the x64 and arm64 ones (arm64's is upstream's placeholder). Null elsewhere.
+        /// </summary>
+        public string? DriverName => Platform == "windows-i686" ? "WinDivert32.sys"
+            : Platform.StartsWith("windows-", StringComparison.Ordinal) ? "WinDivert64.sys" : null;
     }
 
-    /// <summary>当前系统对应的官方命令行包。哈希和大小来自 EasyTier 的 GitHub Release。</summary>
+    /// <summary>The package for this system. Hashes and sizes come from SHA256SUMS.txt and SIZES.txt of the ReleaseTag release.</summary>
     public static Asset Current => ForCurrentPlatform();
 
     internal static Asset For(string os, Architecture arch) => (os, arch) switch
     {
-        ("windows", Architecture.X64) => A("windows-x86_64", "27af91e270e554709b048bd32327fefd2dfce5062ae1e8701af7550c6f525f84", 32_657_720, true),
-        ("windows", Architecture.Arm64) => A("windows-arm64", "37023f8a3451c9234b17ee2089a03dc344ce90d803b5b359cb6c46682b0549b4", 30_136_892, true),
-        ("windows", Architecture.X86) => A("windows-i686", "bf557daeccc5525d95b8a230c339d75554fb52d82d1e050e9a5202c92c02e09e", 30_881_261, true),
-        ("macos", Architecture.X64) => A("macos-x86_64", "89fc28a6e6995259d76ce3f11775220e8a21c760e94df91a6a9db30a69b6982e", 33_733_545),
-        ("macos", Architecture.Arm64) => A("macos-aarch64", "4be1882d1aa36d31c1d6ba0596f2cf8a097e371f8da124212324b2e0f8df7e4b", 30_174_017),
-        ("linux", Architecture.X64) => A("linux-x86_64", "61b659eaedba658fa66fe47d17e1426cdd77e5d02fa15fed447bb4357c09dfd6", 25_506_523),
-        ("linux", Architecture.Arm64) => A("linux-aarch64", "f533ec25a7ea714e09f645615012200278058525795cc3bb690ff011aec1a70f", 20_487_230),
+        ("windows", Architecture.X64) => A("windows-x86_64", "780be28da60a2c6c0cdb305998cceb57c79b8474f53812ef1212432709182f83", 12_049_938, true),
+        ("windows", Architecture.Arm64) => A("windows-arm64", "8d90565d4d27e30eca5c6749b5e8562ba8227be5dd4c6e2d8a2afd661a37380f", 11_047_777, true),
+        ("windows", Architecture.X86) => A("windows-i686", "3a03cf82399216112703eda40f0157b6f08f7f2e50b8df41a81ef55255bb7d18", 11_600_648, true),
+        ("macos", Architecture.X64) => A("macos-x86_64", "fd04ff0dd835a5ee573bb1abbdbc110821e04cb28030168ad12836312df89907", 12_547_528),
+        ("macos", Architecture.Arm64) => A("macos-aarch64", "70a2ddc3259a3f8791a4695557091fef7492f4a928780b7eb0289e27e9748501", 11_136_375),
+        ("linux", Architecture.X64) => A("linux-x86_64", "4d2c3e962259fd9c72cee59f23cb707c91aa2702af26413438683446a989fa9a", 13_992_778),
+        ("linux", Architecture.Arm64) => A("linux-aarch64", "15a21e30b1a50cb8cb72e9be297a2dd88856639c5efe7f0fd860154b0034fc49", 12_525_937),
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
@@ -70,7 +87,7 @@ public static class EasyTierRelease
     private static Asset A(string platform, string sha256, long size, bool exe = false)
     {
         var suffix = exe ? ".exe" : "";
-        return new Asset(platform, $"easytier-{platform}-v{Version}.zip", sha256, size, "easytier-core" + suffix, "easytier-cli" + suffix);
+        return new Asset(platform, $"easytier-{platform}-v{Version}-jay-{Commit}.zip", sha256, size, "easytier-core" + suffix, "easytier-cli" + suffix);
     }
 
     /// <summary>
@@ -127,15 +144,16 @@ public sealed class EasyTierInstaller
     }
 
     private EasyTierRelease.Asset Asset => _asset ?? EasyTierRelease.Current;
-    public string InstallDir => Path.Combine(_dataDir, "easytier", EasyTierRelease.Version, Asset.Platform);
+    public string InstallDir => Path.Combine(_dataDir, "easytier", EasyTierRelease.InstallTag, Asset.Platform);
     public string CorePath => Path.Combine(InstallDir, Asset.CoreName);
     public string CliPath => Path.Combine(InstallDir, Asset.CliName);
     /// <summary>发布包里随程序附带的安装包（和 Jay 主程序同目录下的 easytier 文件夹）。</summary>
     public string BundledPath => Path.Combine(_bundledDir, Asset.Name);
     /// <summary>手动导入时需要的文件名。</summary>
     public string ExpectedFileName => Asset.Name;
-    /// <summary>WinDivert64.sys 是完整局域网模式转发游戏局域网广播要用的驱动文件，缺了也重新解压。</summary>
-    public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath) && (!OperatingSystem.IsWindows() || File.Exists(Path.Combine(InstallDir, "WinDivert64.sys")));
+    /// <summary>The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again.</summary>
+    public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath)
+        && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)));
 
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
@@ -240,7 +258,7 @@ public sealed class EasyTierInstaller
                 var name = Path.GetFileName(entry.FullName);
                 if (name.Length == 0 || name.Contains("..")) continue;
                 // 只要命令行程序、它们用的库和 WinDivert 驱动文件（完整局域网模式转发广播用）；网页控制台用不到。
-                if (name != asset.CoreName && name != asset.CliName && name != "WinDivert64.sys"
+                if (name != asset.CoreName && name != asset.CliName && name != asset.DriverName
                     && !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
                     && !name.EndsWith(".so", StringComparison.Ordinal)
                     && !name.EndsWith(".dylib", StringComparison.Ordinal)) continue;
@@ -577,6 +595,9 @@ public sealed class EasyTierSession : IEasyTierSession
         var text = await RunCliAsync(cliPath, ["-p", $"127.0.0.1:{rpcPort}", "-o", "json", "peer"], ct);
         return text is null ? [] : ParsePeers(text);
     }
+
+    internal static Task<string?> NodeInfoAsync(string cliPath, int rpcPort, CancellationToken ct) =>
+        RunCliAsync(cliPath, ["-p", $"127.0.0.1:{rpcPort}", "-o", "json", "node"], ct);
 
     internal static async Task<bool> AddConnectorAsync(string cliPath, int rpcPort, string url, CancellationToken ct) =>
         await RunCliAsync(cliPath, ["-p", $"127.0.0.1:{rpcPort}", "connector", "add", url], ct) is not null;

@@ -179,12 +179,20 @@ public sealed class JayAccountMultiplayerTests : IAsyncDisposable, IDisposable
         using var aliceNew = X25519KeyPair.Generate();
         var bookA2 = new ContactBook(Path.Combine(_dir, "a2.json"), () => Now)
             { Me = aliceNew.PublicKey, MyCertificate = _alice.CertifyDevice(aliceNew.PublicKey, "macOS", 0, Now) };
+        var added = new List<Contact>();
+        bookB.DeviceAdded += added.Add;
         var reply = bookB.Receive(aliceNew.PublicKey, bookA2.StartAdd(aliceNew.PublicKey, bobPc.PublicKey, "Alice")!, "Bob");
         Assert.NotNull(reply);
         var known = bookB.Pending.Single(p => p.PublicKey.AsSpan().SequenceEqual(aliceNew.PublicKey));
         Assert.True(known.KnownFriend);
         Assert.Equal(ContactStep.WaitingForNonce, known.Step);
         Assert.Equal("Alice", bookB.FindVerifiedByJayAccount(_alice.Address)!.Name);
+        // Bob's side finishes on Alice's nonce without the emoji, and says so once: the new device never slips in silently.
+        Assert.Empty(added);
+        var bobReply = bookA2.Receive(bobPc.PublicKey, reply!, "Alice")!;
+        bookB.Receive(aliceNew.PublicKey, bobReply, "Bob");
+        Assert.True(Assert.Single(added).PublicKey.AsSpan().SequenceEqual(aliceNew.PublicKey));
+        Assert.Contains(bookB.All, c => c.Verified && c.PublicKey.AsSpan().SequenceEqual(aliceNew.PublicKey));
 
         // A stranger can't borrow Alice's certificate: it names her device key, not theirs.
         using var stranger = X25519KeyPair.Generate();

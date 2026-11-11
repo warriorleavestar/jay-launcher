@@ -165,6 +165,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         .. NoiseHandshake.HybridSupported ? [new TransportChoice(TransportMode.Extreme)] : Array.Empty<TransportChoice>(),
     ];
 
+    /// <summary>
+    /// The transport a new room uses unless the host picks another. "MC 专用" gives every member their own
+    /// encrypted channel on top of EasyTier, so room traffic stays private even if EasyTier's own encryption
+    /// (one shared key per room) is weak or broken.
+    /// </summary>
+    public const TransportMode DefaultTransport = TransportMode.Minecraft;
+
     /// <summary>开房间时用的封装方式；加入时跟着房间码走。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanDisguise))]
@@ -245,12 +252,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         : L.F("multiplayer.component.required", EasyTierRelease.Version, EasyTierRelease.Current.Size / 1024 / 1024);
 
     public string LicenseText =>
-        L.F("multiplayer.component.license", EasyTierRelease.License, EasyTierRelease.ProjectUrl);
+        L.F("multiplayer.component.license", EasyTierRelease.License, EasyTierRelease.SourceUrl);
 
     public MultiplayerViewModel(LauncherService service)
     {
         _service = service;
-        SelectedTransport = TransportChoices[0];
+        SelectedTransport = TransportChoices.First(c => c.Mode == DefaultTransport);
         service.GameOutput += OnGameOutput;
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshInstances);
         service.CurrentInstanceChanged += () => Dispatcher.UIThread.Post(() =>
@@ -309,8 +316,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (LanGames_PortFromLog(line) is not { } port) return;
         Dispatcher.UIThread.Post(() =>
         {
-            var item = new LanGameItem(new LanGame(versionId, port), L.T("multiplayer.lan.amber_source"));
+            // The same port again moves to the top instead of adding a row; rows from the log are capped.
+            var source = L.T("multiplayer.lan.amber_source");
+            if (LanGames.FirstOrDefault(g => g.Game.Port == port && g.Source == source) is { } old) LanGames.Remove(old);
+            var item = new LanGameItem(new LanGame(versionId, port), source);
             LanGames.Insert(0, item);
+            while (LanGames.Count(g => g.Source == source) > MaxLogLanGames) LanGames.Remove(LanGames.Last(g => g.Source == source));
             SelectedLanGame = item;
             if (IsIdle) SetStatus(StatusMessage.Success("multiplayer.lan.opened", versionId, port));
             OnLanOpenedWhileWaiting();
@@ -499,8 +510,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private async Task ExportNodesAsync()
     {
         ShareCodeText = RelayNodes.Encode(null, Nodes.Select(n => n.Url));
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard })
-            await clipboard.SetTextAsync(ShareCodeText);
+        await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);
         SetStatus(StatusMessage.Success("multiplayer.nodes.exported"));
     }
 
@@ -548,7 +558,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Warning("multiplayer.lan.port_required"));
             return;
         }
-        if (!await CanConnectAsync(port.Value))
+        if (!await GamePortReadyAsync(port.Value, manual: port == manual))
         {
             SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
             return;
@@ -870,8 +880,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             var time = l.Message.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
             return l.IsNotice ? L.F("multiplayer.chat.export_notice", time, l.Text) : L.F("multiplayer.chat.export_line", time, l.Name, l.Text);
         });
-        File.WriteAllLines(path, lines);
-        SetStatus(StatusMessage.Success("multiplayer.chat.exported", path));
+        SaveFile(path, () => File.WriteAllLines(path, lines), "multiplayer.chat.exported");
     }
 
     /// <summary>每次刷新时看看聊天要不要连：房主在完整局域网模式下等虚拟网卡就绪后再监听虚拟 IP；加入方看到房主后连。</summary>
@@ -1044,6 +1053,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
     }
 
+    private const int MaxLogLanGames = 8;
+
+    /// <summary>
+    /// A port the user typed only has to be listening. One taken from the game's output or a LAN announcement has to answer
+    /// like a Minecraft world (status ping): otherwise text that reached the log (a server message, say) could point the
+    /// room at another local service, which room members could then reach.
+    /// </summary>
+    internal static async Task<bool> GamePortReadyAsync(int port, bool manual) =>
+        manual ? await CanConnectAsync(port) : (await ServerList.PingAsync("127.0.0.1:" + port, TimeSpan.FromSeconds(3))).Online;
+
     private static async Task<bool> CanConnectAsync(int port)
     {
         using var client = new TcpClient();
@@ -1075,8 +1094,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     {
         if (TargetInstance is not { } id || JoinAddress.Length == 0) return;
         var workDir = _service.WorkDirFor(id);
-        Directory.CreateDirectory(workDir);
-        ServerList.Add(workDir, new ServerEntry(L.T("multiplayer.room.server_name"), JoinAddress));
+        try
+        {
+            Directory.CreateDirectory(workDir);
+            ServerList.Add(workDir, new ServerEntry(L.T("multiplayer.room.server_name"), JoinAddress));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            SetStatus(StatusMessage.Failure("common.save_file_failed", e, Path.Combine(workDir, "servers.dat"), ErrorText.Of(e)));
+            return;
+        }
         SetStatus(StatusMessage.Success("multiplayer.room.added_to_servers", id, JoinAddress));
     }
 

@@ -46,12 +46,18 @@ public sealed class CurseForgeProvider(HttpClient http, Func<string?> apiKey, st
         var path = $"/mods/search?gameId={MinecraftGameId}&classId={ClassId(q.Type)}&sortField=2&sortOrder=desc" +
                    $"&searchFilter={Uri.EscapeDataString(q.Text)}&index={q.Offset}&pageSize={Math.Min(q.Limit, 50)}";
         if (!string.IsNullOrEmpty(q.GameVersion)) path += "&gameVersion=" + Uri.EscapeDataString(q.GameVersion);
-        if (q.Type == ContentType.Mod && LoaderCode(q.Loader) is { } loader) path += $"&modLoaderType={loader}";
+        if (q.Type == ContentType.Mod && LoaderCode(q.Loader) is { } loader)
+        {
+            var extra = q.ExtraLoaders.Select(LoaderCode).OfType<int>().Where(c => c != loader).Distinct().ToList();
+            path += extra.Count == 0
+                ? $"&modLoaderType={loader}"
+                : "&modLoaderTypes=" + Uri.EscapeDataString("[" + string.Join(",", new[] { loader }.Concat(extra)) + "]");
+        }
 
         using var doc = await GetAsync(path, ct);
         var root = doc.RootElement;
         var total = root.TryGetProperty("pagination", out var page) && page.TryGetProperty("totalCount", out var t) ? t.GetInt32() : 0;
-        return new SearchResult(root.GetProperty("data").EnumerateArray().Select(ParseProject).ToList(), total);
+        return new SearchResult(root.GetProperty("data").EnumerateArray().Select(m => ParseProject(m) with { Loaders = IndexedLoaders(m, q.GameVersion) }).ToList(), total);
     }
 
     public async Task<ContentProject> GetProjectAsync(string projectId, CancellationToken ct = default)
@@ -226,6 +232,29 @@ public sealed class CurseForgeProvider(HttpClient http, Func<string?> apiKey, st
         ContentType.Modpack => 4471,
         ContentType.Datapack => 6945,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
+
+    /// <summary>The loaders of a project's latest files (for one game version when given), from the search hit.</summary>
+    private static List<string> IndexedLoaders(JsonElement m, string? gameVersion)
+    {
+        var loaders = new List<string>();
+        if (!m.TryGetProperty("latestFilesIndexes", out var indexes) || indexes.ValueKind != JsonValueKind.Array) return loaders;
+        foreach (var index in indexes.EnumerateArray())
+        {
+            if (gameVersion is { Length: > 0 } && (!index.TryGetProperty("gameVersion", out var gv) || gv.GetString() != gameVersion)) continue;
+            if (index.TryGetProperty("modLoader", out var ml) && ml.ValueKind == JsonValueKind.Number && LoaderName(ml.GetInt32()) is { } name && !loaders.Contains(name))
+                loaders.Add(name);
+        }
+        return loaders;
+    }
+
+    private static string? LoaderName(int code) => code switch
+    {
+        1 => "forge",
+        4 => "fabric",
+        5 => "quilt",
+        6 => "neoforge",
+        _ => null,
     };
 
     private static int? LoaderCode(string? loader) => loader switch

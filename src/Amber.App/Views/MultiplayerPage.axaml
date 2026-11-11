@@ -398,7 +398,10 @@
                   </ListBox>
                   <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.people.pick}" IsVisible="{Binding !HasSelectedPerson}" />
                   <StackPanel x:Name="PersonDetails" Spacing="6" IsVisible="{Binding HasSelectedPerson}">
-                    <TextBlock Classes="caption" Text="{l:T multiplayer.knock.safety_code}" />
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                      <TextBlock Classes="caption" Text="{l:T multiplayer.knock.safety_code}" VerticalAlignment="Center" />
+                      <c:TermHint x:Name="SafetyCodeTermHint" Term="safety_code" />
+                    </StackPanel>
                     <SelectableTextBlock x:Name="PersonSafetyCode" Text="{Binding SelectedPerson.Fingerprint}" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" />
                     <TextBlock Classes="caption" Text="{l:T multiplayer.people.jay}" IsVisible="{Binding SelectedPerson.HasJayAccount}" />
                     <SelectableTextBlock x:Name="PersonJayAccount" Text="{Binding SelectedPerson.JayAccount}" FontFamily="Consolas,Menlo,monospace" FontSize="12"
@@ -865,7 +868,10 @@
                 <TextBox Text="{Binding PublicRoomPassword}" PasswordChar="•" PlaceholderText="{l:T multiplayer.public.password_placeholder}" IsVisible="{Binding IsPublicConnected}" />
                 <!-- 用指纹码找房间 -->
                 <StackPanel Spacing="6" IsVisible="{Binding IsPublicConnected}">
-                  <TextBlock Text="{l:T multiplayer.device.find_title}" FontWeight="SemiBold" />
+                  <WrapPanel ItemSpacing="2">
+                    <TextBlock Text="{l:T multiplayer.device.find_title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <c:TermHint x:Name="FriendCodeTermHint" Term="friend_code" />
+                  </WrapPanel>
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBox Text="{Binding FindCodeInput}" PlaceholderText="{l:T multiplayer.device.find_placeholder}" FontFamily="Consolas,monospace" />
                     <Button Grid.Column="1" Content="{l:T multiplayer.device.find}" Command="{Binding FindByFingerprintCommand}" IsEnabled="{Binding !IsFindingRoom}" Margin="6,0,0,0" />
@@ -1146,9 +1152,25 @@
                       <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource AccentTint}" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Initial}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentText}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                       </Border>
-                      <StackPanel Grid.Column="1" Margin="8,0" VerticalAlignment="Center">
+                      <StackPanel Grid.Column="1" Margin="8,0" VerticalAlignment="Center" Spacing="1">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ContactJay" Text="{Binding JayText}" Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasJay}" />
+                        <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" IsVisible="{Binding HasOneDevice}" />
+                        <!-- Person + devices: each device's safety code, and a lost one can be removed alone. -->
+                        <StackPanel x:Name="ContactDevices" Spacing="2" IsVisible="{Binding HasSeveralDevices}">
+                          <TextBlock Text="{Binding DevicesText}" Classes="hint" FontSize="12" />
+                          <ItemsControl ItemsSource="{Binding DeviceItems}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate DataType="vm:ContactDeviceItem">
+                                <Grid ColumnDefinitions="*,Auto" Margin="0,1">
+                                  <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                  <Button Grid.Column="1" Classes="small" Margin="6,0,0,0" Content="{l:T multiplayer.contacts.remove_device}"
+                                          Command="{Binding $parent[ItemsControl;1].((vm:MultiplayerViewModel)DataContext).RemoveContactDeviceCommand}" CommandParameter="{Binding}" />
+                                </Grid>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
                       </StackPanel>
                       <Button Grid.Column="2" Classes="small" Content="{l:T multiplayer.contacts.remove}" VerticalAlignment="Center"
                               Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RemoveContactCommand}" CommandParameter="{Binding}" />
@@ -1156,6 +1178,12 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+              <!-- Friend list backup, locked with the Jay account: restore it on a new computer and friends reconnect. -->
+              <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,6,0,0">
+                <Button x:Name="BackupFriendsButton" Classes="small" Content="{l:T multiplayer.friends.backup}" Command="{Binding BackupFriendsCommand}" />
+                <Button x:Name="RestoreFriendsButton" Classes="small" Content="{l:T multiplayer.friends.restore}" Command="{Binding RestoreFriendsCommand}" />
+              </WrapPanel>
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.friends.backup_hint}" />
             </StackPanel>
           </Border>
 
@@ -1209,7 +1237,10 @@
           <!-- Relay servers -->
           <Border x:Name="RelayGroup" Classes="card" Margin="0">
             <StackPanel Spacing="8">
-              <TextBlock x:Name="RelayHeader" Classes="h2" Text="{Binding NodesHeaderText}" Margin="0" TextWrapping="Wrap" />
+              <WrapPanel ItemSpacing="2">
+                <TextBlock x:Name="RelayHeader" Classes="h2" Text="{Binding NodesHeaderText}" Margin="0" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <c:TermHint x:Name="RelayTermHint" Term="relay" />
+              </WrapPanel>
             <StackPanel Spacing="6">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"
@@ -1305,7 +1336,10 @@
                   <CheckBox IsChecked="{Binding VolunteerEnabled}" Content="{l:T multiplayer.volunteer.enable}" />
                   <StackPanel Spacing="6" IsEnabled="{Binding VolunteerEnabled}">
                     <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.address}" />
-                    <TextBox Text="{Binding VolunteerAddress}" FontFamily="Consolas,monospace" MaxLength="253" PlaceholderText="203.0.113.5 / jay.example.org" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                      <TextBox Text="{Binding VolunteerAddress}" FontFamily="Consolas,monospace" MaxLength="253" PlaceholderText="203.0.113.5 / jay.example.org" />
+                      <Button Grid.Column="1" Content="{l:T multiplayer.volunteer.detect}" Command="{Binding DetectVolunteerAddressCommand}" IsEnabled="{Binding !IsCheckingVolunteer}" />
+                    </Grid>
                     <WrapPanel ItemSpacing="12" LineSpacing="6">
                       <StackPanel Spacing="4">
                         <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.port}" />
@@ -1318,7 +1352,10 @@
                     </WrapPanel>
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.port_hint}" />
                   </StackPanel>
-                  <Button Content="{l:T multiplayer.volunteer.save}" Command="{Binding SaveVolunteerCommand}" HorizontalAlignment="Left" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Content="{l:T multiplayer.volunteer.save}" Command="{Binding SaveVolunteerCommand}" />
+                    <Button Content="{l:T multiplayer.volunteer.test}" Command="{Binding TestVolunteerPortCommand}" IsEnabled="{Binding !IsCheckingVolunteer}" />
+                  </WrapPanel>
                   <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding VolunteerStatus}" IsVisible="{Binding VolunteerStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 </StackPanel>
               </Expander>

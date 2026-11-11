@@ -37,8 +37,9 @@ public sealed partial class MultiplayerViewModel
     /// <summary>远程控制用的窗口。测试可以换掉。</summary>
     internal IRemoteUi RemoteUi { get; set; } = new Views.RemoteWindows();
 
-    /// <summary>远程控制的同意策略：每次都问（可以换，比如以后加“信任此人”）。</summary>
-    internal IRemoteConsentPolicy RemoteConsentPolicy => new AskEveryTimePolicy((request, ct) => RemoteUi.AskConsentAsync(request, ct));
+    /// <summary>远程控制的同意策略：每次都问（可以换，比如以后加“信任此人”）。Child mode declines every request without asking, host or member.</summary>
+    internal IRemoteConsentPolicy RemoteConsentPolicy =>
+        new RefuseWhilePolicy(() => Child.HideRemoteControl, new AskEveryTimePolicy((request, ct) => RemoteUi.AskConsentAsync(request, ct)));
 
     /// <summary>当前房间能用远程控制（邀请房间）。看 / 控制别人在哪个系统上都行；这台电脑能不能被看由对方请求时再判断。</summary>
     public bool CanRemoteControl => _room is { FromInvite: true } && !Child.HideRemoteControl;
@@ -62,6 +63,9 @@ public sealed partial class MultiplayerViewModel
     {
         if (Child.HideNetworkExit) AllowExitNode = false;
         if (Child.AlwaysAskKnock) InviteAutoApprove = false;
+        // A child hosting must not keep a remote-control service open, nor stay on a public network or in its room list.
+        if (Child.HideRemoteControl && _remoteHub is not null) StopRemote();
+        if (Child.InviteOnly) LeavePublicForChildMode();
         OnPropertyChanged(nameof(ShowPublicNetworks));
         OnPropertyChanged(nameof(ShowNetworkExit));
         OnPropertyChanged(nameof(ShowInviteAutoApprove));
@@ -102,7 +106,7 @@ public sealed partial class MultiplayerViewModel
     private void StartRemoteHub(RoomCode room)
     {
         NotifyRemoteAvailability();
-        if (_remoteHub is not null || !room.FromInvite) return;
+        if (_remoteHub is not null || !room.FromInvite || Child.HideRemoteControl) return;
         try
         {
             var hub = new RemoteHub(room, new RemoteHostOptions(RemoteConsentPolicy, RemotePlatform.CreateScreen, RemotePlatform.CreateInput, RemoteCodec));

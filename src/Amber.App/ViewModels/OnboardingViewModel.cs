@@ -269,9 +269,10 @@ public sealed partial class OnboardingViewModel : ObservableObject
             var manifest = await _service.Installer.GetManifestAsync();
             if (manifest.Latest.TryGetValue("release", out var release)) LatestRelease = release;
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        catch (Exception e)
         {
             // 拿不到版本列表时按钮写“正在获取”，点热门版本或去下载页照样能装。
+            // Nothing cancels this request, so an OperationCanceledException is HttpClient's timeout: report it as offline too.
             Trace.WriteLine("Jay: onboarding manifest failed: " + e.Message);
             LatestFailed = true;
         }

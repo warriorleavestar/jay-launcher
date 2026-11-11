@@ -2,6 +2,7 @@ using System.IO.Compression;
 using Amber.App.ViewModels;
 using Amber.Core.Content;
 using Amber.Core.Localization;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -81,9 +82,13 @@ internal sealed partial class SelfTest
             Dispatcher.UIThread.Invoke(() =>
             {
                 list.SelectedItem = instance.EnabledPacks[0];
-                list.Focus();
+                // The ListBox itself can't take focus; the row can, and list keys only act with focus inside the list.
+                list.ContainerFromItem(instance.EnabledPacks[0])?.Focus();
             });
             PressKey(list, Key.Down, KeyModifiers.Alt);
+            await Task.Delay(300);
+            Check("Alt+↓：焦点留在列表里，接着按键还管用", Dispatcher.UIThread.Invoke(() =>
+                TopLevel.GetTopLevel(list)?.FocusManager?.GetFocusedElement() is Visual v && (v == list || list.IsVisualAncestorOf(v))));
             Check("Alt+↓：在列表里调顺序", ResourcePackOptions.Enabled(work).SequenceEqual(["Old Classic.zip", "Faithful.zip", "Fonts.zip"]),
                 string.Join(",", ResourcePackOptions.Enabled(work)));
             Dispatcher.UIThread.Invoke(() => list.SelectedItem = instance.EnabledPacks.Single(p => p.Name == "Fonts.zip"));
