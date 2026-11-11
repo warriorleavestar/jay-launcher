@@ -199,7 +199,7 @@ EasyTier（组网，P2P 或经节点中继）
 纯托管代码，理论上三平台一样，只是没在 Mac/Linux 上实测过。
 
 - `Invite.cs`：`JAY2-` 邀请码，里面是大厅密钥 L 和一次性令牌 K，没有房间密钥。默认 10 分钟、用一次。
-- `Lobby.cs`、`Knock.cs`：房主有可用邀请时开一个“大厅”（第二个 EasyTier 实例 + 敲门服务）。加入方用 Noise XXpsk0 敲门，房主在卡片上批准后，经加密通道发下房间凭据和这个成员自己的 memberId + psk。
+- `Lobby.cs`、`Knock.cs`：房主有可用邀请时开一个“大厅”（第二个 EasyTier 实例 + 敲门服务）。加入方用 Noise XXhfspsk0（X25519 + ML-KEM-768）敲门，房主在卡片上批准后，经加密通道发下房间凭据和这个成员自己的 memberId + psk。
 - `Members.cs`、`Transport/MemberChannel.cs`：每个成员一把钥匙，游戏通道、聊天、远程控制都用它握手；聊天发送者由房主核对。
 - 踢人：作废这个人的钥匙和他用过的邀请，房间换新网络名和密钥（epoch + 1），留下的人自动跟过去（`RoomChat.cs` 里的控制帧）。
 - `MemberIdentity.cs`：每台设备一把 X25519 长期身份密钥。Windows 用 DPAPI 加密（文件头 `AMBID1`）；其他平台用 AES-GCM，密钥在 `identity.wrap`（0600，文件头 `AMBID2`）。和账号令牌一样，建议改成钥匙串 / libsecret 存 wrap 密钥。

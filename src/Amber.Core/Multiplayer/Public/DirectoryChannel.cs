@@ -17,8 +17,8 @@ namespace Amber.Core.Multiplayer.Public;
 /// other end holds one of those keys.
 /// </para>
 /// <para>
-/// One request per connection, Noise_XXpsk0_25519_ChaChaPoly_SHA256 (the same implementation the knock and the gate use):
-/// <c>-> psk, e</c>, <c>&lt;- e, ee, s, es</c>, then Jay compares the directory's static key with the pinned keys and only then
+/// One request per connection, Noise_XXhfspsk0_25519+MLKEM768_ChaChaPoly_SHA256 (the same implementation the knock and the gate use):
+/// <c>-> psk, e, e1</c>, <c>&lt;- e, ee, ekem1, s, es</c>, then Jay compares the directory's static key with the pinned keys and only then
 /// sends <c>-> s, se</c> with the JSON request as payload. The reply is one ChaCha20-Poly1305 record under the split keys.
 /// Jay's static key in the handshake is a fresh throwaway per connection, so the directory learns nothing new about who asks.
 /// The psk comes from the network's EasyTier secret, which is public for public networks: it only keeps handshakes of
@@ -26,15 +26,18 @@ namespace Amber.Core.Multiplayer.Public;
 /// </para>
 /// <para>
 /// On the wire every message is a 2-byte big-endian length and the bytes. A legacy request is a JSON line starting with
-/// '{' (0x7B); a Noise first message is 48 bytes, so its first byte is 0x00. The directory tells them apart by that byte.
+/// '{' (0x7B); a Noise first message is 1248 bytes, so its first length byte is 0x04. The directory tells them apart by that byte.
 /// </para>
 /// </summary>
 public static class DirectoryChannel
 {
-    private static readonly byte[] Prologue = "jay-directory-v1"u8.ToArray();
+    private static readonly byte[] Prologue = "jay-directory-v2"u8.ToArray();
     private const int MaxMessage = RoomDirectoryProtocol.MaxLine + 256;
-    /// <summary>The first handshake message with an empty payload: ephemeral key (32) + tag (16).</summary>
-    private const int FirstMessageLength = 48;
+    /// <summary>
+    /// The first handshake message with an empty payload: ephemeral key (32) + encrypted ML-KEM-768 encapsulation key
+    /// (1184 + 16) + payload tag (16).
+    /// </summary>
+    private const int FirstMessageLength = X25519KeyPair.Length + MlKem768.EncapsulationKeySize + 2 * CipherState.TagLength;
 
     /// <summary>Directory keys are X25519 public keys, 32 bytes.</summary>
     public const int KeyLength = X25519KeyPair.Length;
@@ -69,7 +72,7 @@ public static class DirectoryChannel
         if (payload.Length > RoomDirectoryProtocol.MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
         var psk = Psk(networkSecret);
         using var throwaway = X25519KeyPair.Generate();
-        using var hs = new NoiseHandshake(NoisePattern.XXpsk0, initiator: true, Prologue, psk, throwaway);
+        using var hs = new NoiseHandshake(NoisePattern.XXhfspsk0, initiator: true, Prologue, psk, throwaway);
         try
         {
             await WriteFrameAsync(stream, hs.WriteMessage([]), ct);
@@ -110,7 +113,7 @@ public static class DirectoryChannel
         Stream stream, byte firstByte, X25519KeyPair identity, string networkSecret, CancellationToken ct, byte[]? certificate = null)
     {
         var psk = Psk(networkSecret);
-        var hs = new NoiseHandshake(NoisePattern.XXpsk0, initiator: false, Prologue, psk, identity);
+        var hs = new NoiseHandshake(NoisePattern.XXhfspsk0, initiator: false, Prologue, psk, identity);
         try
         {
             var first = await ReadFrameAsync(stream, ct, firstByte);

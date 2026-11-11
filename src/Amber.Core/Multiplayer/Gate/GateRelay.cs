@@ -10,7 +10,7 @@ namespace Amber.Core.Multiplayer.Gate;
 /// <summary>
 /// 节点（中继）：把收到的 TCP 原样转给固定的源站网关。不持有任何密钥，看到的只有端到端加密的字节，
 /// 也不能当开放代理用（目标写死）。VPS 和局域网电脑上都能跑。
-/// 隐私++：带上节点码时，节点还会和网关保持一条心跳通道（Noise XXpsk0，用节点自己的长期密钥认证），每隔几秒发一条带序号和时间的心跳。
+/// 隐私++：带上节点码时，节点还会和网关保持一条心跳通道（Noise XXhfspsk0，用节点自己的长期密钥认证），每隔几秒发一条带序号和时间的心跳。
 /// </summary>
 public sealed class GateRelay : IAsyncDisposable
 {
