@@ -90,6 +90,10 @@ public sealed class MobilePortTests
         Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Move);
         Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Jump);
         Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.PrimaryAction);
+        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Sneak);
+        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Sprint);
+        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.PreviousSlot);
+        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.NextSlot);
 
         foreach (var control in TouchControlLayout.Default)
         {
@@ -139,6 +143,25 @@ public sealed class MobilePortTests
         Assert.Equal(-0.06, sink.LastLook.Y, 6);
         Assert.True(router.Release(20));
         Assert.Empty(sink.Actions);
+        Assert.Equal((0.60, 0.39, true), sink.LastPointer);
+    }
+
+    [Fact]
+    public void TouchInputRouterBypassesControlsWhenGameplayOverlayIsDisabled()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+        var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
+
+        Assert.True(router.Press(21, jump.CenterX, jump.CenterY, controlsEnabled: false));
+        Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.Jump);
+        Assert.Equal((jump.CenterX, jump.CenterY, false), sink.LastPointer);
+        Assert.True(router.Release(21));
+        Assert.Equal((jump.CenterX, jump.CenterY, true), sink.LastPointer);
+
+        var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
+        Assert.True(router.Press(22, menu.CenterX, menu.CenterY, controlsEnabled: false));
+        Assert.Contains((TouchControlAction.Menu, true), sink.Actions);
     }
 
     [Fact]
@@ -356,10 +379,12 @@ public sealed class MobilePortTests
         public List<(TouchControlAction Action, bool Pressed)> Actions { get; } = [];
         public (double X, double Y) LastMovement { get; private set; }
         public (double X, double Y) LastLook { get; private set; }
+        public (double X, double Y, bool Click) LastPointer { get; private set; }
 
         public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
         public void SetMovement(double x, double y) => LastMovement = (x, y);
         public void AddLook(double x, double y) => LastLook = (x, y);
+        public void SetPointer(double x, double y, bool click) => LastPointer = (x, y, click);
     }
 
 }

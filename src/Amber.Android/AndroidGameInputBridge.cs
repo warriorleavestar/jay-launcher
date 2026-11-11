@@ -33,4 +33,10 @@ internal static class AndroidGameInputBridge
         NativeJvmHost.AddLook(x, y);
         _session?.AddLook(x, y);
     }
+
+    public static void SetPointer(double x, double y, bool click)
+    {
+        NativeJvmHost.SetPointer(x, y, click);
+        _session?.SetPointer(x, y, click);
+    }
 }

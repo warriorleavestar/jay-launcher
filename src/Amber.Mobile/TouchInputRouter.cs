@@ -5,6 +5,7 @@ public interface ITouchInputSink
     void SetAction(TouchControlAction action, bool pressed);
     void SetMovement(double x, double y);
     void AddLook(double x, double y);
+    void SetPointer(double x, double y, bool click);
 }
 
 /// <summary>Maps independent Android pointer IDs to Jay controls without coupling input to a View.</summary>
@@ -12,12 +13,15 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
 {
     private readonly Dictionary<int, PointerState> _pointers = [];
 
-    public bool Press(int pointerId, double x, double y)
+    public bool Press(int pointerId, double x, double y, bool controlsEnabled = true)
     {
         Release(pointerId);
-        if (TouchControlLayout.HitTest(x, y) is not { } control)
+        var control = TouchControlLayout.HitTest(x, y);
+        if (!controlsEnabled && control?.Action != TouchControlAction.Menu) control = null;
+        if (control is null)
         {
             _pointers[pointerId] = new(null, x, y);
+            sink.SetPointer(x, y, false);
             return true;
         }
         _pointers[pointerId] = new(control.Action, x, y);
@@ -39,6 +43,7 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         else if (pointer.Action is null)
         {
             sink.AddLook(x - pointer.X, y - pointer.Y);
+            sink.SetPointer(x, y, false);
             _pointers[pointerId] = pointer with { X = x, Y = y };
         }
         return true;
@@ -49,6 +54,8 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         if (!_pointers.Remove(pointerId, out var pointer)) return false;
         if (pointer.Action == TouchControlAction.Move)
             sink.SetMovement(0, 0);
+        else if (pointer.Action is null)
+            sink.SetPointer(pointer.X, pointer.Y, true);
         else if (pointer.Action is { } action)
             sink.SetAction(action, false);
         return true;

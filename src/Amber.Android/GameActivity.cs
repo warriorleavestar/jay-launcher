@@ -43,6 +43,40 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             AddGameSetup(root);
 
         SetContentView(root);
+        EnterImmersiveMode();
+    }
+
+    public override void OnWindowFocusChanged(bool hasFocus)
+    {
+        base.OnWindowFocusChanged(hasFocus);
+        if (hasFocus) EnterImmersiveMode();
+    }
+
+    private void EnterImmersiveMode()
+    {
+        if (Window is not { } window) return;
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
+        {
+#pragma warning disable CA1416, CA1422
+            window.SetDecorFitsSystemWindows(false);
+            if (window.InsetsController is { } controller)
+            {
+                controller.Hide(WindowInsets.Type.SystemBars());
+                controller.SystemBarsBehavior = (int)WindowInsetsControllerBehavior.ShowTransientBarsBySwipe;
+            }
+#pragma warning restore CA1416, CA1422
+            return;
+        }
+
+#pragma warning disable CS0618
+        window.DecorView.SystemUiVisibility = (StatusBarVisibility)(
+            SystemUiFlags.Fullscreen |
+            SystemUiFlags.HideNavigation |
+            SystemUiFlags.ImmersiveSticky |
+            SystemUiFlags.LayoutFullscreen |
+            SystemUiFlags.LayoutHideNavigation |
+            SystemUiFlags.LayoutStable);
+#pragma warning restore CS0618
     }
 
     protected override void OnDestroy()
@@ -282,9 +316,11 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     protected override void OnDraw(Canvas canvas)
     {
         base.OnDraw(canvas);
+        var gameplayControlsActive = NativeJvmHost.GameplayControlsActive;
         _stroke.SetStyle(Paint.Style.Stroke);
         foreach (var control in TouchControlLayout.Default)
         {
+            if (!gameplayControlsActive && control.Action != TouchControlAction.Menu) continue;
             var x = (float)(control.CenterX * Width);
             var y = (float)(control.CenterY * Height);
             var radius = (float)(control.Radius * Math.Min(Width, Height));
@@ -293,6 +329,16 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
             if (control.Label.Length > 0)
                 canvas.DrawText(control.Label, x, y - (_text.Ascent() + _text.Descent()) / 2, _text);
         }
+        PostInvalidateDelayed(100);
+    }
+
+    protected override void OnSizeChanged(int width, int height, int oldWidth, int oldHeight)
+    {
+        base.OnSizeChanged(width, height, oldWidth, oldHeight);
+        if (Build.VERSION.SdkInt < BuildVersionCodes.Q) return;
+#pragma warning disable CA1416
+        SystemGestureExclusionRects = [new Rect(0, Math.Max(0, height - 200), width, height)];
+#pragma warning restore CA1416
     }
 
     public override bool OnTouchEvent(MotionEvent? e)
@@ -303,7 +349,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         {
             case MotionEventActions.Down:
             case MotionEventActions.PointerDown:
-                return _router.Press(e.GetPointerId(actionIndex), e.GetX(actionIndex) / Width, e.GetY(actionIndex) / Height);
+                return _router.Press(e.GetPointerId(actionIndex), e.GetX(actionIndex) / Width,
+                    e.GetY(actionIndex) / Height, NativeJvmHost.GameplayControlsActive);
             case MotionEventActions.Move:
                 var handled = false;
                 for (var i = 0; i < e.PointerCount; i++)
@@ -330,6 +377,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     public void SetMovement(double x, double y) => AndroidGameInputBridge.SetMovement(x, y);
 
     public void AddLook(double x, double y) => AndroidGameInputBridge.AddLook(x, y);
+
+    public void SetPointer(double x, double y, bool click) => AndroidGameInputBridge.SetPointer(x, y, click);
 
     private void ShowKeyboard()
     {

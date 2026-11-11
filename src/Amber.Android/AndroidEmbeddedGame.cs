@@ -42,6 +42,7 @@ internal static class AndroidEmbeddedGame
         var forwardedProgress = new Progress<InstallProgress>(value =>
             progress?.Report(new(value.Stage, value.Files.CompletedFiles, value.Files.TotalFiles, value.Files.BytesDownloaded)));
         await installer.InstallAsync(FirstPlayableVersion, forwardedProgress, ct);
+        await CreateMobileOptionsIfMissingAsync(gameRoot, ct);
 
         var runtimeRoot = AndroidRuntimeStore.Root(context);
         var nativeRoot = Path.Combine(runtimeRoot, "native");
@@ -154,5 +155,34 @@ internal static class AndroidEmbeddedGame
         await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 32 * 1024, true);
         await input.CopyToAsync(output, ct);
         await output.FlushAsync(ct);
+    }
+
+    private static async Task CreateMobileOptionsIfMissingAsync(string gameRoot, CancellationToken ct)
+    {
+        var path = Path.Combine(gameRoot, "options.txt");
+        if (File.Exists(path)) return;
+
+        const string defaults = """
+            version:4671
+            ao:true
+            autoJump:true
+            biomeBlendRadius:0
+            enableVsync:true
+            entityDistanceScaling:0.75
+            entityShadows:false
+            graphicsPreset:"fast"
+            guiScale:3
+            maxFps:60
+            mipmapLevels:2
+            onboardAccessibility:false
+            particles:1
+            pauseOnLostFocus:false
+            rawMouseInput:false
+            renderClouds:"false"
+            renderDistance:8
+            simulationDistance:6
+            touchscreen:false
+            """;
+        await File.WriteAllTextAsync(path, defaults + Environment.NewLine, ct);
     }
 }

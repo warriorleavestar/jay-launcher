@@ -7,7 +7,9 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 6;
+    private const int ExpectedAbiVersion = 10;
+
+    public static bool GameplayControlsActive => IsAvailable && GetNativeGameplayMode() != 0;
 
     public static bool IsAvailable
     {
@@ -102,6 +104,11 @@ internal static partial class NativeJvmHost
         if (IsAvailable) AddNativeLook((float)x, (float)y);
     }
 
+    public static void SetPointer(double x, double y, bool click)
+    {
+        if (IsAvailable) SetNativePointer((float)x, (float)y, click ? 1 : 0);
+    }
+
     public static void AddCodePoint(int codePoint)
     {
         if (IsAvailable) AddNativeCodePoint((uint)codePoint);
@@ -119,6 +126,9 @@ internal static partial class NativeJvmHost
 
     [LibraryImport("jayjvm", EntryPoint = "jay_jvm_abi_version")]
     private static partial int AbiVersion();
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_gameplay_mode_get")]
+    private static partial int GetNativeGameplayMode();
 
     [LibraryImport("jayjvm", EntryPoint = "jay_jvm_load", StringMarshalling = StringMarshalling.Utf8)]
     private static partial nint LoadJvm(string path);
@@ -149,6 +159,9 @@ internal static partial class NativeJvmHost
 
     [LibraryImport("jayjvm", EntryPoint = "jay_input_add_look")]
     private static partial void AddNativeLook(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_input_set_pointer")]
+    private static partial void SetNativePointer(float x, float y, int click);
 
     [LibraryImport("jayjvm", EntryPoint = "jay_input_add_codepoint")]
     private static partial void AddNativeCodePoint(uint codePoint);

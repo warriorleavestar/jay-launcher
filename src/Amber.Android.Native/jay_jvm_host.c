@@ -10,8 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 6
-#define JAY_ACTION_COUNT 7
+#define JAY_JVM_ABI_VERSION 10
+#define JAY_ACTION_COUNT 12
 #define JAY_TEXT_CAPACITY 64
 #define JAY_KEY_CAPACITY 16
 
@@ -22,11 +22,16 @@ typedef struct {
     float move_y;
     float look_x;
     float look_y;
+    float pointer_x;
+    float pointer_y;
+    uint32_t pointer_clicks;
     uint32_t actions;
+    uint32_t action_taps;
     uint32_t text_count;
     uint32_t key_count;
     uint32_t text[JAY_TEXT_CAPACITY];
     int32_t keys[JAY_KEY_CAPACITY];
+    uint64_t pointer_generation;
     uint64_t generation;
 } jay_input_snapshot;
 
@@ -40,7 +45,13 @@ static _Atomic float g_move_x;
 static _Atomic float g_move_y;
 static _Atomic float g_look_x;
 static _Atomic float g_look_y;
+static _Atomic float g_pointer_x;
+static _Atomic float g_pointer_y;
+static _Atomic uint32_t g_pointer_clicks;
+static _Atomic uint64_t g_pointer_generation;
 static _Atomic uint32_t g_actions;
+static _Atomic uint32_t g_action_taps;
+static _Atomic int g_gameplay_mode;
 static _Atomic uint64_t g_generation;
 static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_text[JAY_TEXT_CAPACITY];
@@ -51,6 +62,16 @@ static uint32_t g_key_count;
 __attribute__((visibility("default")))
 int jay_jvm_abi_version(void) {
     return JAY_JVM_ABI_VERSION;
+}
+
+__attribute__((visibility("default")))
+void jay_gameplay_mode_set(int active) {
+    atomic_store(&g_gameplay_mode, active ? 1 : 0);
+}
+
+__attribute__((visibility("default")))
+int jay_gameplay_mode_get(void) {
+    return atomic_load(&g_gameplay_mode);
 }
 
 __attribute__((visibility("default")))
@@ -224,7 +245,10 @@ void jay_input_set_action(int action, int pressed) {
     if (action < 0 || action >= JAY_ACTION_COUNT) return;
     uint32_t bit = 1u << (uint32_t)action;
     if (pressed) atomic_fetch_or(&g_actions, bit);
-    else atomic_fetch_and(&g_actions, ~bit);
+    else {
+        atomic_fetch_and(&g_actions, ~bit);
+        atomic_fetch_or(&g_action_taps, bit);
+    }
     atomic_fetch_add(&g_generation, 1);
 }
 
@@ -244,6 +268,19 @@ __attribute__((visibility("default")))
 void jay_input_add_look(float x, float y) {
     jay_atomic_add_float(&g_look_x, x);
     jay_atomic_add_float(&g_look_y, y);
+    atomic_fetch_add(&g_generation, 1);
+}
+
+__attribute__((visibility("default")))
+void jay_input_set_pointer(float x, float y, int click) {
+    if (x < 0.f) x = 0.f;
+    if (x > 1.f) x = 1.f;
+    if (y < 0.f) y = 0.f;
+    if (y > 1.f) y = 1.f;
+    atomic_store(&g_pointer_x, x);
+    atomic_store(&g_pointer_y, y);
+    if (click) atomic_fetch_add(&g_pointer_clicks, 1);
+    atomic_fetch_add(&g_pointer_generation, 1);
     atomic_fetch_add(&g_generation, 1);
 }
 
@@ -271,7 +308,11 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     snapshot->move_y = atomic_load(&g_move_y);
     snapshot->look_x = atomic_exchange(&g_look_x, 0.f);
     snapshot->look_y = atomic_exchange(&g_look_y, 0.f);
+    snapshot->pointer_x = atomic_load(&g_pointer_x);
+    snapshot->pointer_y = atomic_load(&g_pointer_y);
+    snapshot->pointer_clicks = atomic_exchange(&g_pointer_clicks, 0);
     snapshot->actions = atomic_load(&g_actions);
+    snapshot->action_taps = atomic_exchange(&g_action_taps, 0);
     pthread_mutex_lock(&g_event_mutex);
     snapshot->text_count = g_text_count;
     snapshot->key_count = g_key_count;
@@ -279,6 +320,7 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     for (uint32_t i = 0; i < g_key_count; i++) snapshot->keys[i] = g_keys[i];
     g_text_count = 0;
     g_key_count = 0;
+    snapshot->pointer_generation = atomic_load(&g_pointer_generation);
     snapshot->generation = atomic_load(&g_generation);
     pthread_mutex_unlock(&g_event_mutex);
 }
