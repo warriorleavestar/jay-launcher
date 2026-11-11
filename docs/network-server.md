@@ -77,6 +77,18 @@ jay-server node remove <房间编号>       # 只删这一次，房主续期时�
 
 - `node` 命令经本机管理接口操作运行中的节点，口令在数据目录的 `admin.token`（只有运行节点的用户能读）。要和 `directory` 用同一个 `--dir`（或 `JAY_SERVER_DIR`）。
 - 健康检查：`curl http://127.0.0.1:47669/health`，不用口令，给监控和 Docker 用。
+- Prometheus 监控：`GET /metrics` 给出 Prometheus 文本格式的计数（房间数、公开数、新房间 / 续期 / 离开 / 被拒的累计数、登录成功失败、封禁条数、志愿中转数、运行时长）。只有总数，没有房间名、房主、地址、指纹或账号。要口令；在节点那台机器上的 Prometheus 这样配：
+
+  ```yaml
+  scrape_configs:
+    - job_name: jay-node
+      static_configs:
+        - targets: ["127.0.0.1:47669"]
+      authorization:
+        credentials_file: /etc/prometheus/jay-admin.token   # 数据目录里 admin.token 的副本，只给 Prometheus 的用户读
+  ```
+
+  `admin.token` 本身只有运行节点的用户能读，所以复制一份（`sudo install -m 600 -o prometheus /var/lib/jay-network/admin.token /etc/prometheus/jay-admin.token`），别放宽原文件的权限。target 必须写 `127.0.0.1` 或 `localhost`（管理接口只认本机的 Host）。Prometheus 在别的机器上时，用 SSH 隧道把 47669 转过去，target 仍写 `127.0.0.1:<本地端口>`。节点自己从不往外发数据，是你的 Prometheus 来取。
 - 封禁名单存在数据目录的 `bans.json`。`--for 30m` / `24h` / `7d` 是临时封禁，到点自动解除；不加就是永久。房主被拒时能看到原因和解封时间。
 - 节点每 5 秒检查一次 `bans.json` 有没有被改过，改了就重新读。几台目录节点想共用一份封禁名单，可以用 rsync、共享盘之类把这个文件同步过去，不用在每台上各执行一次。
 - 封账号只在开了账号登录的节点上有用：Jay 发布房间时会带上登录凭证，节点核对过签名才记下账号。
