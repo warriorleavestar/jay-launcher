@@ -12,6 +12,8 @@ No telemetry, no remote switches. Download, unzip, run.
 [![License](https://img.shields.io/github/license/warriorleavestar/jay-launcher)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 
+**[Download Android APK (experimental)](https://github.com/warriorleavestar/jay-launcher/releases/download/android-preview/Jay-android-experimental.apk)**
+
 English | [简体中文](README.zh-Hans.md) | [Code signing policy](docs/code-signing-policy.md) | [Contributing](CONTRIBUTING.md)
 
 ![Jay home page](docs/images/jay-home.png)
