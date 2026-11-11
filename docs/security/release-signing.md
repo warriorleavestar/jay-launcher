@@ -19,7 +19,7 @@ hold:
   signature, because the private key never leaves the maintainer's offline machine.
 - **Doesn't protect:** the very first download, because that copy of Jay has no reason to trust
   anything yet. It also doesn't remove Windows SmartScreen / Smart App Control or macOS Gatekeeper
-  warnings. Those need real code signing (see `docs/code-signing-policy.md`).
+  warnings. Those need real code signing, which Jay doesn't have yet.
 - A self-signed Authenticode certificate is not a substitute. Windows doesn't trust it, and asking
   users to install it as a trusted root would weaken their whole system.
 
