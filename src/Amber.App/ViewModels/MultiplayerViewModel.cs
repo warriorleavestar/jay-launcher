@@ -499,8 +499,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private async Task ExportNodesAsync()
     {
         ShareCodeText = RelayNodes.Encode(null, Nodes.Select(n => n.Url));
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard })
-            await clipboard.SetTextAsync(ShareCodeText);
+        await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);
         SetStatus(StatusMessage.Success("multiplayer.nodes.exported"));
     }
 
@@ -870,8 +869,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             var time = l.Message.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
             return l.IsNotice ? L.F("multiplayer.chat.export_notice", time, l.Text) : L.F("multiplayer.chat.export_line", time, l.Name, l.Text);
         });
-        File.WriteAllLines(path, lines);
-        SetStatus(StatusMessage.Success("multiplayer.chat.exported", path));
+        SaveFile(path, () => File.WriteAllLines(path, lines), "multiplayer.chat.exported");
     }
 
     /// <summary>每次刷新时看看聊天要不要连：房主在完整局域网模式下等虚拟网卡就绪后再监听虚拟 IP；加入方看到房主后连。</summary>
@@ -1075,8 +1073,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     {
         if (TargetInstance is not { } id || JoinAddress.Length == 0) return;
         var workDir = _service.WorkDirFor(id);
-        Directory.CreateDirectory(workDir);
-        ServerList.Add(workDir, new ServerEntry(L.T("multiplayer.room.server_name"), JoinAddress));
+        try
+        {
+            Directory.CreateDirectory(workDir);
+            ServerList.Add(workDir, new ServerEntry(L.T("multiplayer.room.server_name"), JoinAddress));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            SetStatus(StatusMessage.Failure("common.save_file_failed", e, Path.Combine(workDir, "servers.dat"), ErrorText.Of(e)));
+            return;
+        }
         SetStatus(StatusMessage.Success("multiplayer.room.added_to_servers", id, JoinAddress));
     }
 
