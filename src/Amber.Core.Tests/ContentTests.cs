@@ -152,6 +152,20 @@ public class ContentTests : IDisposable
         Assert.Throws<InvalidDataException>(() => ModpackService.Inspect(MakeZip("c.zip", ("x", "y"))));
     }
 
+    /// <summary>A mixed mrpack (Fabric mods on NeoForge / Forge through the universal loader) installs the Forge-family base, not Fabric.</summary>
+    [Theory]
+    [InlineData("\"fabric-loader\":\"0.16.9\",\"neoforge\":\"21.1.77\"", LoaderKind.NeoForge, "21.1.77")]
+    [InlineData("\"neoforge\":\"21.1.77\",\"fabric-loader\":\"0.16.9\"", LoaderKind.NeoForge, "21.1.77")]
+    [InlineData("\"quilt-loader\":\"0.26.0\",\"forge\":\"47.3.0\"", LoaderKind.Forge, "47.3.0")]
+    [InlineData("\"fabric-loader\":\"0.16.9\"", LoaderKind.Fabric, "0.16.9")]
+    [InlineData("\"quilt-loader\":\"0.26.0\"", LoaderKind.Quilt, "0.26.0")]
+    public void Inspect_MixedMrpackUsesTheForgeFamilyBase(string loaders, LoaderKind kind, string version)
+    {
+        var index = "{\"formatVersion\":1,\"game\":\"minecraft\",\"name\":\"M\",\"versionId\":\"1\",\"files\":[],\"dependencies\":{\"minecraft\":\"1.21.1\"," + loaders + "}}";
+        var info = ModpackService.Inspect(MakeZip("mixed-" + kind + ".mrpack", ("modrinth.index.json", index)));
+        Assert.Equal((kind, version), (info.Loader, info.LoaderVersion));
+    }
+
     private sealed class FakeProvider(params ContentFile[] files) : IContentProvider
     {
         public Action? BeforeGetFile { get; set; }

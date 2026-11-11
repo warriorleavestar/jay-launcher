@@ -363,12 +363,16 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         return Convert.ToHexStringLower(await System.Security.Cryptography.SHA512.HashDataAsync(stream, ct));
     }
 
+    /// <summary>
+    /// The base loader of an mrpack. A mixed pack lists a Forge-family and a Fabric-family loader: the base is the
+    /// Forge-family one, because the universal loader runs Fabric mods on NeoForge / Forge and not the other way round.
+    /// </summary>
     private static (LoaderKind?, string?) MrpackLoader(JsonObject deps)
     {
-        if (deps["fabric-loader"] is { } fabric) return (LoaderKind.Fabric, fabric.GetValue<string>());
-        if (deps["quilt-loader"] is { } quilt) return (LoaderKind.Quilt, quilt.GetValue<string>());
         if (deps["neoforge"] is { } neo) return (LoaderKind.NeoForge, neo.GetValue<string>());
         if (deps["forge"] is { } forge) return (LoaderKind.Forge, forge.GetValue<string>());
+        if (deps["fabric-loader"] is { } fabric) return (LoaderKind.Fabric, fabric.GetValue<string>());
+        if (deps["quilt-loader"] is { } quilt) return (LoaderKind.Quilt, quilt.GetValue<string>());
         return (null, null);
     }
 
