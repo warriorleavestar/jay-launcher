@@ -38,6 +38,10 @@ public sealed record RuntimeArchiveDescriptor(
         Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
 }
 
+public enum RuntimeInstallPhase { Downloading, Extracting, Verifying, Activating }
+
+public readonly record struct RuntimeInstallProgress(RuntimeInstallPhase Phase, long Completed, long Total);
+
 /// <summary>Downloads, bounds, extracts and atomically activates a self-contained Android JRE archive.</summary>
 public static class RuntimeArchiveInstaller
 {
@@ -45,6 +49,7 @@ public static class RuntimeArchiveInstaller
         string destination,
         RuntimeArchiveDescriptor descriptor,
         Func<RuntimeArchiveDescriptor, CancellationToken, Task<Stream>> openArchive,
+        IProgress<RuntimeInstallProgress>? progress = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
@@ -68,9 +73,9 @@ public static class RuntimeArchiveInstaller
         try
         {
             await using (var input = await openArchive(descriptor, ct))
-                await WriteArchiveAsync(input, archivePath, descriptor, ct);
+                await WriteArchiveAsync(input, archivePath, descriptor, progress, ct);
 
-            var files = ExtractVerifiedFiles(archivePath, staging, descriptor, ct);
+            var files = ExtractVerifiedFiles(archivePath, staging, descriptor, progress, ct);
             RequireRuntimeFiles(files);
             var manifest = new RuntimeBundleManifest(
                 RuntimeBundleManifest.CurrentFormat,
@@ -78,9 +83,11 @@ public static class RuntimeArchiveInstaller
                 descriptor.Architecture,
                 files);
             manifest.Write(Path.Combine(staging, "runtime-manifest.json"));
+            progress?.Report(new(RuntimeInstallPhase.Verifying, 0, files.Count));
             if (!await RuntimeBundleVerifier.VerifyAsync(staging, manifest, descriptor.Architecture, ct))
                 throw new InvalidDataException("The extracted Android runtime did not pass final verification.");
 
+            progress?.Report(new(RuntimeInstallPhase.Activating, files.Count, files.Count));
             RuntimeBundleInstaller.ActivateStaged(target, staging, backup);
             return manifest;
         }
@@ -95,6 +102,7 @@ public static class RuntimeArchiveInstaller
         Stream input,
         string outputPath,
         RuntimeArchiveDescriptor descriptor,
+        IProgress<RuntimeInstallProgress>? progress,
         CancellationToken ct)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(128 * 1024);
@@ -111,6 +119,7 @@ public static class RuntimeArchiveInstaller
                 if (written > descriptor.ArchiveSize) throw new InvalidDataException("The runtime archive is larger than declared.");
                 hash.AppendData(buffer, 0, read);
                 await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                progress?.Report(new(RuntimeInstallPhase.Downloading, written, descriptor.ArchiveSize));
             }
             await output.FlushAsync(ct);
             var digest = Convert.ToHexString(hash.GetHashAndReset());
@@ -127,6 +136,7 @@ public static class RuntimeArchiveInstaller
         string archivePath,
         string staging,
         RuntimeArchiveDescriptor descriptor,
+        IProgress<RuntimeInstallProgress>? progress,
         CancellationToken ct)
     {
         var files = new List<RuntimeBundleFile>();
@@ -167,6 +177,7 @@ public static class RuntimeArchiveInstaller
                     if (written > entry.Size) throw new InvalidDataException($"Runtime entry is larger than declared: {relative}");
                     hash.AppendData(buffer, 0, read);
                     output.Write(buffer, 0, read);
+                    progress?.Report(new(RuntimeInstallPhase.Extracting, extracted - entry.Size + written, descriptor.MaximumExtractedSize));
                 }
                 if (written != entry.Size) throw new InvalidDataException($"Runtime entry is truncated: {relative}");
                 files.Add(new RuntimeBundleFile(
