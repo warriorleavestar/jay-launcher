@@ -490,15 +490,6 @@ public sealed class GuestTestLifecycleTests : IDisposable
         Assert.True(late!.HasExited);
     }
 
-    /// <summary>认得出 0.5.9 以前的 hello（带完整码、没有会话 id）；新版本的不算。</summary>
-    [Fact]
-    public void LegacyHelloIsRecognized()
-    {
-        Assert.True(DirectSession.IsLegacyHello(new JsonObject { ["op"] = "hello", ["code"] = "AMBER-D1-xxxx" }));
-        var code = new DirectCode(true, "abcdef0123456789", NatKind.Cone, [new Candidate(PathKind.Lan, IPEndPoint.Parse("192.168.1.9:40001"))]);
-        Assert.False(DirectSession.IsLegacyHello(DirectSession.Hello(code)));
-    }
-
     /// <summary>对方不再回心跳：桥会补发探测包（任何版本都会回探测）。</summary>
     [Fact]
     public async Task SilentPeerIsReprobed()

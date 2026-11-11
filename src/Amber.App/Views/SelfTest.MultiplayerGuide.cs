@@ -156,10 +156,25 @@ internal sealed partial class SelfTest
         var importBox = await FindAsync<TextBox>(t => t.PlaceholderText == L.T("multiplayer.nodes.share_placeholder"));
         Check("中转分享码转到联机设置，不静默导入", vm.IsSettingsTab && vm.Nodes.Count == 0 && roomCode!.Text == "" && importBox?.Text == nodeCode && vm.IsIdle);
         Check("用户点导入才添加", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.ImportNodesCommand)))
-            && vm.Nodes.Count == 1 && vm.Nodes[0].Url == "tcp://example.invalid:11010");
+            && await WaitAsync(() => Dispatcher.UIThread.Invoke(() => vm.Nodes.Count == 1), 5) && vm.Nodes[0].Url == "tcp://example.invalid:11010");
         Check("中转服务器数量同步到标题和大厅状态行", relayHeader?.Text == L.F("multiplayer.nodes.header_count", 1)
             && vm.LobbyStatusText.Contains(L.F("multiplayer.lobby.status_relays", 1)));
         vm.RemoveNodeCommand.Execute(vm.Nodes.Single());
+
+        // A relay that goes by an IP: the share code is sealed, the passphrase box shows, and import needs the passphrase.
+        var (sealedNodes, nodePassphrase) = RelayNodes.Share(null, ["tcp://203.0.113.5:11010"]);
+        Dispatcher.UIThread.Invoke(() => vm.ShareCodeText = sealedNodes);
+        await Task.Delay(200);
+        var nodePassphraseBox = await FindAsync<TextBox>(t => t.Name == "NodeSharePassphraseBox");
+        Check("加密中转分享码：不含 IP，显示口令框", !sealedNodes.Contains("203.0.113.5") && nodePassphraseBox?.IsEffectivelyVisible == true);
+        Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.ImportNodesCommand)));
+        await Task.Delay(300);
+        Check("加密中转分享码：没口令不导入", vm.Nodes.Count == 0 && vm.Status == L.T("multiplayer.sealed.enter_passphrase"), vm.Status);
+        Dispatcher.UIThread.Invoke(() => vm.SharePassphrase = nodePassphrase!);
+        Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.ImportNodesCommand)));
+        Check("加密中转分享码：输入口令后导入", await WaitAsync(() => Dispatcher.UIThread.Invoke(() => vm.Nodes.Count == 1), 10)
+            && vm.Nodes[0].Url == "tcp://203.0.113.5:11010" && vm.SharePassphrase == "");
+        if (vm.Nodes.Count > 0) vm.RemoveNodeCommand.Execute(vm.Nodes.Single());
         vm.UseBuiltInNodes = true;
 
         // Open a room: game status follows the port typed under "more ways".
@@ -172,27 +187,23 @@ internal sealed partial class SelfTest
         Check("开房间：填端口后卡片上写出来", vm.HasHostGame
             && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == L.F("multiplayer.guide.port_ready", 25565)));
 
-        // A direct invite in the join box moves to the direct box under "more ways".
-        vm.MoreWaysOpen = false;
-        const string directInvite = "JAY2D-eyJ2IjoxfQ";
-        Dispatcher.UIThread.Invoke(() => roomCode!.Text = directInvite);
-        Check("加入框里的直连邀请：点加入", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
-        await Task.Delay(300);
-        var directCode = await FindAsync<TextBox>(t => t.PlaceholderText == L.T("multiplayer.direct.invite_placeholder"));
-        Check("直连邀请转到“更多方式”的直连框", vm.MoreWaysOpen && roomCode!.Text == "" && directCode?.Text == directInvite && vm.IsIdle);
-        Dispatcher.UIThread.Invoke(() => directCode!.Text = relayInvite);
-        Check("直连框的邀请码转到加入框", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinDirectCommand)))
-            && directCode!.Text == "" && roomCode!.Text == relayInvite);
+        // Old direct codes (JAY2D / JAY2R) carried public IPs: the join box refuses them and asks for a plain invite.
+        foreach (var oldDirect in new[] { "JAY2D-eyJ2IjoxfQ", "JAY2R-eyJ2IjoxfQ" })
+        {
+            Dispatcher.UIThread.Invoke(() => roomCode!.Text = oldDirect);
+            Check($"加入框里的旧直连码（{oldDirect[..5]}）：点加入", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
+            await Task.Delay(300);
+            Check($"旧直连码（{oldDirect[..5]}）提示改发普通邀请", vm.Status == L.T("multiplayer.direct.old_code") && vm.IsIdle && !vm.IsKnocking, vm.Status);
+        }
+        // A sealed direct code (no server, no readable IP): the passphrase box shows, and Join without it does nothing.
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = "JAYDS1-QUJDREVGR0hJSktMTU5PUA");
         await Task.Delay(200);
-        vm.CancelKnockCommand.Execute(null);
-        Dispatcher.UIThread.Invoke(() => { roomCode!.Text = ""; directCode!.Text = "AMB-K7Q2M9XD-4HZP8RW2N6TC-25565"; });
-        Check("直连框的旧房间码提示对方更新", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinDirectCommand)))
-            && vm.Status == L.T("multiplayer.invite.old_code") && vm.IsIdle, vm.Status);
-        Dispatcher.UIThread.Invoke(() => directCode!.Text = "JAY2R-eyJ2IjoxfQ");
-        Check("直连框：点击加入识别回复码", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinDirectCommand))));
+        var passphraseBox = await FindAsync<TextBox>(t => t.Name == "JoinPassphraseBox");
+        Check("加密直连码：出现口令框", passphraseBox is { IsEffectivelyVisible: true });
+        Check("加密直连码：没填口令点加入只提示", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
         await Task.Delay(200);
-        Check("回复码误贴时提示交给房主", vm.Status == L.T("multiplayer.code.reply_misplaced") && vm.IsIdle);
-        Dispatcher.UIThread.Invoke(() => { directCode!.Text = ""; port!.Text = ""; });
+        Check("加密直连码：提示输入口令、不敲门", vm.Status == L.T("multiplayer.sealed.enter_passphrase") && vm.IsIdle && !vm.IsKnocking, vm.Status);
+        Dispatcher.UIThread.Invoke(() => { roomCode!.Text = ""; port!.Text = ""; });
         vm.MoreWaysOpen = false;
         vm.SetStatus(null);
 

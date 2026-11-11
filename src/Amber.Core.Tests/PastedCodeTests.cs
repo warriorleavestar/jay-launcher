@@ -7,9 +7,9 @@ public class PastedCodeTests
     [Theory]
     [InlineData("AMB-K7Q2M9XD-4HZP8RW2N6TC-25565", PastedCodeKind.Room)]
     [InlineData("房间码：amb-t2d-K7Q2M9XD-4HZP8RW2N6TC-25565，快来", PastedCodeKind.Room)]
-    [InlineData("JAY2D-eyJ2IjoxfQ", PastedCodeKind.DirectInvite)]
-    [InlineData("来直连：jay2d-eyJ2IjoxfQ", PastedCodeKind.DirectInvite)]
-    [InlineData("JAY2R-eyJ2IjoxfQ", PastedCodeKind.DirectReply)]
+    [InlineData("JAY2D-eyJ2IjoxfQ", PastedCodeKind.OldDirect)]
+    [InlineData("来直连：jay2d-eyJ2IjoxfQ", PastedCodeKind.OldDirect)]
+    [InlineData("JAY2R-eyJ2IjoxfQ", PastedCodeKind.OldDirect)]
     [InlineData("AMBDIRECT1-eyJhIjoxfQ", PastedCodeKind.OldDirect)]
     [InlineData("来直连：ambdirect1-eyJhIjoxfQ", PastedCodeKind.OldDirect)]
     [InlineData("AMBREPLY1-eyJhIjoxfQ", PastedCodeKind.OldDirect)]
@@ -32,7 +32,7 @@ public class PastedCodeTests
     public void BodyThatHappensToContainRoomPrefixIsStillDirect()
     {
         // base64url 正文里可能出现 “AMB-…-…-端口” 这样的片段，前缀优先。
-        Assert.Equal(PastedCodeKind.DirectInvite, PastedCode.Detect("JAY2D-xxAMB-K7Q2M9XD-4HZP8RW2N6TC-25565"));
+        Assert.Equal(PastedCodeKind.OldDirect, PastedCode.Detect("JAY2D-xxAMB-K7Q2M9XD-4HZP8RW2N6TC-25565"));
         Assert.Equal(PastedCodeKind.OldDirect, PastedCode.Detect("AMBDIRECT1-xxAMB-K7Q2M9XD-4HZP8RW2N6TC-25565"));
     }
 

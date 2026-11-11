@@ -144,7 +144,7 @@ public partial class MultiplayerViewModel
                 listener.Start();
                 _ = AcceptAndDropAsync(listener);
             }
-            var reachable = await new RoomDirectoryClient(network).ProbeAsync(url, default);
+            var reachable = await DirectoryClient(network).ProbeAsync(url, default);
             VolunteerStatus = reachable ? L.F("multiplayer.volunteer.reachable", url) : L.F("multiplayer.volunteer.unreachable", port);
             SetStatus(reachable ? StatusMessage.Success("multiplayer.volunteer.reachable", url) : StatusMessage.Warning("multiplayer.volunteer.unreachable", port));
         }
@@ -154,7 +154,7 @@ public partial class MultiplayerViewModel
         }
         catch (DirectoryRejectedException e)
         {
-            SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
+            SetStatus(PortTestRejected(e));
         }
         catch (Exception e) when (e is IOException or InvalidDataException)
         {
@@ -166,6 +166,14 @@ public partial class MultiplayerViewModel
             IsCheckingVolunteer = false;
         }
     }
+
+    /// <summary>
+    /// What "Test port" says when the directory refuses the test. Its generic "rate" text talks about publishing rooms,
+    /// so a rate-limited port test gets its own line; other refusals keep the directory's text.
+    /// </summary>
+    internal static StatusMessage PortTestRejected(DirectoryRejectedException e) => e.Code == "rate"
+        ? StatusMessage.Warning("multiplayer.volunteer.test_rate_limited")
+        : new StatusMessage("common.raw", [e.Message], StatusKind.Warning);
 
     private static async Task AcceptAndDropAsync(System.Net.Sockets.TcpListener listener)
     {

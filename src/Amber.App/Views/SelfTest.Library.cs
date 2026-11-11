@@ -2,6 +2,7 @@ using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Localization;
 using Amber.Core.Navigation;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.VisualTree;
 
@@ -70,6 +71,7 @@ internal sealed partial class SelfTest
             Check("游戏库：没装完的实例标成有问题", library.Cards.First(c => c.Id == "forge-1.20.1").HasProblem);
             Check("游戏库：中档是封面视图", page?.CardGrid.IsEffectivelyVisible == true && page.CardRows.IsVisible == false);
             await ShotAsync("library-1024-zh");
+            await LibraryScrollbarGutterAsync(page);
 
             library.Search = "forge";
             await Task.Delay(200);
@@ -156,6 +158,33 @@ internal sealed partial class SelfTest
             service.Settings.GameDirectory = originalDir;
             service.SaveAndReload();
         }
+    }
+
+    /// <summary>
+    /// The page's vertical scrollbar overlays the content. In a short window (so the page scrolls) at three widths,
+    /// the right-aligned 【+ New instance】 button must end left of the scrollbar.
+    /// </summary>
+    private async Task LibraryScrollbarGutterAsync(LibraryPage? page)
+    {
+        if (page is null) return;
+        foreach (var w in new[] { 760.0, 1024, 1280 })
+        {
+            window.Width = w;
+            window.Height = 480;
+            page.LibraryScroll.Offset = default;
+            await Task.Delay(500);
+            var bar = page.LibraryScroll.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ScrollBar>()
+                .FirstOrDefault(b => b.Orientation == Avalonia.Layout.Orientation.Vertical && b.TemplatedParent == page.LibraryScroll);
+            var barLeft = bar?.TranslatePoint(new Avalonia.Point(0, 0), window)?.X ?? double.NaN;
+            var button = page.NewInstanceButton;
+            var buttonRight = (button.TranslatePoint(new Avalonia.Point(0, 0), window)?.X ?? double.NaN) + button.Bounds.Width;
+            Check($"游戏库（{w}×480）：【新建实例】右边在滚动条左边", bar is { IsEffectivelyVisible: true } && buttonRight <= barLeft,
+                $"button right {buttonRight:0.#}, scrollbar left {barLeft:0.#}, visible {bar?.IsEffectivelyVisible}");
+            if (w == 1280) await ShotAsync("library-scrollbar-gutter");
+        }
+        window.Width = 1024;
+        window.Height = 700;
+        await Task.Delay(400);
     }
 
     private static void WriteLibraryVersion(string root, string id, string libraries)

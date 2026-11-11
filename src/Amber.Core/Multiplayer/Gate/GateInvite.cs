@@ -6,26 +6,77 @@ using Amber.Core.Localization;
 namespace Amber.Core.Multiplayer.Gate;
 
 /// <summary>
-/// Jay 服务器的邀请码：<c>JAYS1-</c> + Crockford Base32。管理员在 VPS 上用 <c>jay-gate invite</c> 生成，发给一个具体的玩家。
-/// 内容：网关地址和端口、网关公钥的哈希（钉住，防冒充服务器）、一次性令牌（128 位）、这份邀请绑定的用户名、4 字节校验。
-/// 任何一位被改都会校验失败，直接报错，不会被当成别的码。邀请里没有长期密钥：令牌只用来做第一次握手，用掉或过期就作废。
-/// <para>版本 2：入口开了端口轮换时，后面再接轮换规则和这个入口的种子（Port 只是固定端口，可能已经关了）。</para>
+/// A Jay server invite. The admin makes one for one player (<c>jay-server invite</c>, or the host server page).
+/// <para>
+/// Plain form <c>JAYS2-</c> + Crockford Base32: the gate's <b>domain name</b> and port, a hash of the gate's public key
+/// (pins the server), a one-use 128-bit token, and a 4-byte checksum. It names no player: the server keeps which name an
+/// invite is for, and tells the player after enrollment. No long-term key: the token only opens the first handshake.
+/// Version 2 adds the entry's port rotation rule and seed.
+/// </para>
+/// <para>
+/// A raw IP address never goes into a plain code. A server with no domain gets a sealed code <c>JAYSS1-</c> instead:
+/// the same bytes encrypted with a 16-digit passphrase that the admin tells the player another way
+/// (<see cref="SealedDirect.SealBlob"/>). Old <c>JAYS1-</c> codes (which carried an IP and the player's name) are refused.
+/// </para>
+/// <para>
+/// Version 3: a server with no domain that publishes a signed record on a public network's directories. The code
+/// carries a <see cref="GateLocator"/> (network id, a random id, the record key's hash) instead of a host; Jay looks
+/// the address up at enrollment (<see cref="GateRecord.ResolveAsync"/>). No address and no passphrase in the code.
+/// </para>
 /// </summary>
-public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byte[] Token, string Username, GateEntryRotation? Rotation = null)
+public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byte[] Token, GateEntryRotation? Rotation = null, GateLocator? Locator = null)
 {
-    public const string Prefix = "JAYS1-";
+    public const string Prefix = "JAYS2-";
+    public const string SealedPrefix = "JAYSS1-";
+    /// <summary>The old format: refused, the admin makes a new invite.</summary>
+    public const string OldPrefix = "JAYS1-";
     public const int KeyHashLength = 16;
     public const int TokenLength = 16;
     private const byte Version = 1;
     private const byte VersionRotating = 2;
+    private const byte VersionLocator = 3;
     private const int ChecksumLength = 4;
     private const string Crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    private const string SealInfo = "jay-sealed-server-invite-v1";
 
+    /// <summary>The host is an IP address: only a sealed code may carry it (<see cref="Seal"/>).</summary>
+    public bool NeedsSeal => Locator is null && IsIpLiteral(Host);
+
+    /// <summary>For a server with a record (<see cref="Locator"/>): the address and rotation filled in from the record.</summary>
+    public static GateInvite Located(GateLocator locator, byte[] serverKeyHash, byte[] token) => new("", 0, serverKeyHash, token, null, locator);
+
+    /// <summary>The plain code. Throws <see cref="InvalidOperationException"/> when the host is an IP address.</summary>
     public string Encode()
     {
-        Validate(Host, Port, ServerKeyHash, Token, Username);
+        if (NeedsSeal) throw new InvalidOperationException(L.T("core.gate.invite.ip_needs_seal"));
+        var bytes = Body();
+        return Prefix + Base32Encode([.. bytes, .. Checksum(bytes)]);
+    }
+
+    /// <summary>The sealed code and the passphrase that opens it (a new one unless given). Works for any host.</summary>
+    public (string Code, string Passphrase) Seal(string? passphrase = null)
+    {
+        passphrase ??= SealedDirect.NewPassphrase();
+        var bytes = Body();
+        try { return (SealedDirect.SealBlob(SealedPrefix, SealInfo, bytes, passphrase), passphrase); }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
+    }
+
+    /// <summary>The code to hand out: plain for a domain, sealed (with a passphrase) for an IP address.</summary>
+    public (string Code, string? Passphrase) ToCode() => NeedsSeal ? Seal() : (Encode(), null);
+
+    private byte[] Body()
+    {
+        if (Locator is { } locator)
+        {
+            if (!IsValidNetworkId(locator.NetworkId) || locator.Id.Length != GateLocator.IdLength || locator.SignerHash.Length != GateLocator.SignerHashLength
+                || ServerKeyHash.Length != KeyHashLength || Token.Length != TokenLength)
+                throw new FormatException(L.T("core.gate.invite.corrupt"));
+            var network = Encoding.ASCII.GetBytes(locator.NetworkId);
+            return [VersionLocator, (byte)network.Length, .. network, .. locator.Id, .. locator.SignerHash, .. ServerKeyHash, .. Token];
+        }
+        Validate(Host, Port, ServerKeyHash, Token);
         var host = Encoding.ASCII.GetBytes(Host);
-        var name = Encoding.ASCII.GetBytes(Username);
         var body = new List<byte> { Rotation is null ? Version : VersionRotating, (byte)host.Length };
         body.AddRange(host);
         Span<byte> port = stackalloc byte[2];
@@ -33,24 +84,33 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
         body.AddRange(port.ToArray());
         body.AddRange(ServerKeyHash);
         body.AddRange(Token);
-        body.Add((byte)name.Length);
-        body.AddRange(name);
         if (Rotation is not null)
         {
             Rotation.Rotation.Write(body);
             body.AddRange(Rotation.Seed);
         }
-        var bytes = body.ToArray();
-        return Prefix + Base32Encode([.. bytes, .. Checksum(bytes)]);
+        return body.ToArray();
     }
 
-    /// <summary>从一段文字里找出邀请码并解析（前后有别的字、中间有空格或换行都行）。没有或者不对返回 null，error 说明原因。</summary>
+    /// <summary>The text holds a sealed invite: ask for the passphrase and use <see cref="TryOpen"/>.</summary>
+    public static bool IsSealed(string? text) => text?.Contains(SealedPrefix, StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>
+    /// Finds a plain invite in some text (words around it, spaces or line breaks inside are fine). Null with a reason when
+    /// there is none, it is damaged, it is sealed (needs the passphrase), or it is an old JAYS1 code.
+    /// </summary>
     public static GateInvite? TryParse(string? text, out string? error)
     {
         error = null;
         if (string.IsNullOrWhiteSpace(text)) { error = L.T("core.gate.invite.missing"); return null; }
         var start = text.IndexOf(Prefix, StringComparison.OrdinalIgnoreCase);
-        if (start < 0) { error = L.T("core.gate.invite.missing"); return null; }
+        if (start < 0)
+        {
+            error = IsSealed(text) ? L.T("core.gate.invite.sealed")
+                : text.Contains(OldPrefix, StringComparison.OrdinalIgnoreCase) ? L.T("core.gate.invite.old")
+                : L.T("core.gate.invite.missing");
+            return null;
+        }
         var chars = new StringBuilder();
         foreach (var c in text.AsSpan(start + Prefix.Length))
         {
@@ -59,7 +119,7 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
             chars.Append(c);
         }
         var raw = Base32Decode(chars.ToString());
-        if (raw is null || raw.Length < 1 + 1 + 2 + KeyHashLength + TokenLength + 1 + ChecksumLength)
+        if (raw is null || raw.Length < 1 + 1 + KeyHashLength + TokenLength + ChecksumLength)
         {
             error = L.T("core.gate.invite.corrupt");
             return null;
@@ -70,7 +130,39 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
             error = L.T("core.gate.invite.corrupt");
             return null;
         }
-        if (bytes[0] is not (Version or VersionRotating))
+        var invite = Read(bytes, out error);
+        if (invite is { NeedsSeal: true })
+        {
+            // Jay never makes this; a hand-made plain code with an IP in it is refused like any other bad code.
+            error = L.T("core.gate.invite.ip_needs_seal");
+            return null;
+        }
+        return invite;
+    }
+
+    /// <summary>Opens a sealed invite with its passphrase. Null with a reason for the person (wrong passphrase, damaged).</summary>
+    public static GateInvite? TryOpen(string? text, string? passphrase, out string? error)
+    {
+        error = null;
+        if (!IsSealed(text)) return TryParse(text, out error);
+        byte[] bytes;
+        try
+        {
+            bytes = SealedDirect.OpenBlob(text, SealedPrefix, SealInfo, passphrase);
+        }
+        catch (InvalidDataException e)
+        {
+            error = e.Message;
+            return null;
+        }
+        try { return Read(bytes, out error); }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
+    }
+
+    private static GateInvite? Read(ReadOnlySpan<byte> bytes, out string? error)
+    {
+        error = null;
+        if (bytes.Length == 0 || bytes[0] is not (Version or VersionRotating or VersionLocator))
         {
             error = L.T("core.gate.invite.version");
             return null;
@@ -78,13 +170,22 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
         try
         {
             var p = 1;
+            if (bytes[0] == VersionLocator)
+            {
+                int networkLength = bytes[p++];
+                var network = Encoding.ASCII.GetString(bytes.Slice(p, networkLength)); p += networkLength;
+                var id = bytes.Slice(p, GateLocator.IdLength).ToArray(); p += GateLocator.IdLength;
+                var signer = bytes.Slice(p, GateLocator.SignerHashLength).ToArray(); p += GateLocator.SignerHashLength;
+                var serverKey = bytes.Slice(p, KeyHashLength).ToArray(); p += KeyHashLength;
+                var secret = bytes.Slice(p, TokenLength).ToArray(); p += TokenLength;
+                if (p != bytes.Length || !IsValidNetworkId(network)) throw new FormatException();
+                return Located(new GateLocator(network, id, signer), serverKey, secret);
+            }
             int hostLength = bytes[p++];
             var host = Encoding.ASCII.GetString(bytes.Slice(p, hostLength)); p += hostLength;
             int port = BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(p, 2)); p += 2;
             var keyHash = bytes.Slice(p, KeyHashLength).ToArray(); p += KeyHashLength;
             var token = bytes.Slice(p, TokenLength).ToArray(); p += TokenLength;
-            int nameLength = bytes[p++];
-            var name = Encoding.ASCII.GetString(bytes.Slice(p, nameLength)); p += nameLength;
             GateEntryRotation? rotation = null;
             if (bytes[0] == VersionRotating)
             {
@@ -94,16 +195,22 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
                 p += GateRotation.SeedLength;
             }
             if (p != bytes.Length) throw new FormatException();
-            Validate(host, port, keyHash, token, name);
-            return new GateInvite(host, port, keyHash, token, name, rotation);
+            Validate(host, port, keyHash, token);
+            return new GateInvite(host, port, keyHash, token, rotation);
         }
         // A length byte that points past the end makes bytes[p++] throw IndexOutOfRangeException: a crafted code is just corrupt.
-        catch (Exception e) when (e is FormatException or ArgumentException or IndexOutOfRangeException)
+        catch (Exception e) when (e is FormatException or ArgumentException or IndexOutOfRangeException or ArgumentOutOfRangeException)
         {
             error = L.T("core.gate.invite.corrupt");
             return null;
         }
     }
+
+    /// <summary>A public network id as <see cref="Public.NetworkString.IsValidId"/> allows (or "jay").</summary>
+    private static bool IsValidNetworkId(string id) => Public.NetworkString.IsValidId(id);
+
+    /// <summary>An IPv4 or IPv6 address rather than a name.</summary>
+    public static bool IsIpLiteral(string? host) => host is not null && System.Net.IPAddress.TryParse(host.Trim('[', ']'), out _);
 
     /// <summary>Minecraft 用户名：3–16 个字母、数字或下划线。离线账号也按这个规则。</summary>
     public static bool IsValidUsername(string? name) =>
@@ -114,18 +221,17 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
         host is { Length: >= 1 and <= 253 } && host.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or ':')
         && !host.StartsWith('-') && !host.StartsWith('.');
 
-    private static void Validate(string host, int port, byte[] keyHash, byte[] token, string username)
+    private static void Validate(string host, int port, byte[] keyHash, byte[] token)
     {
         if (!IsValidHost(host)) throw new FormatException(L.T("core.gate.invite.badhost"));
         if (port is < 1 or > 65535) throw new FormatException(L.T("core.gate.invite.badport"));
         if (keyHash.Length != KeyHashLength || token.Length != TokenLength) throw new FormatException(L.T("core.gate.invite.corrupt"));
-        if (!IsValidUsername(username)) throw new FormatException(L.T("core.gate.invite.badname"));
     }
 
     private static byte[] Checksum(ReadOnlySpan<byte> bytes)
     {
         Span<byte> digest = stackalloc byte[32];
-        SHA256.HashData([.. "jay-invite-v1"u8, .. bytes], digest);
+        SHA256.HashData([.. "jay-invite-v2"u8, .. bytes], digest);
         return digest[..ChecksumLength].ToArray();
     }
 
@@ -171,6 +277,6 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
         return [.. output];
     }
 
-    /// <summary>日志和界面上显示：不带令牌。</summary>
-    public override string ToString() => $"{Prefix}... ({Username}@{Host}:{Port})";
+    /// <summary>For logs: no token, no address.</summary>
+    public override string ToString() => Locator is { } l ? $"{Prefix}... (record on {l.NetworkId})" : $"{(NeedsSeal ? SealedPrefix : Prefix)}...";
 }

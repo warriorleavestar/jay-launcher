@@ -112,7 +112,12 @@ internal sealed partial class SelfTest
         Check("开服：剪贴板里是邀请码", clip == code, Dispatcher.UIThread.Invoke(() => host.Status));
         ScrollTo(page, "multiplayer.hostserver.title");
         await ShotAsync("开服-邀请码");
-        File.WriteAllText(invitePath, code);
+        // No domain (a LAN or test address): the invite is sealed, the passphrase is shown beside it, and no IP is in the code.
+        var passphrase = Dispatcher.UIThread.Invoke(() => host.InvitePassphrase);
+        Check("开服：邀请码里没有 IP 和用户名", !System.Text.RegularExpressions.Regex.IsMatch(code, @"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}") && !code.Contains("Steve", StringComparison.OrdinalIgnoreCase));
+        Check("开服：没有域名时邀请码加密并给出口令", Amber.Core.Multiplayer.Gate.GateInvite.IsSealed(code) == (passphrase.Length > 0)
+            && (passphrase.Length == 0 || Dispatcher.UIThread.Invoke(() => page.GetVisualDescendants().OfType<StackPanel>().FirstOrDefault(c => c.Name == "HostInvitePassphrasePanel")?.IsEffectivelyVisible == true)), code[..Math.Min(7, code.Length)]);
+        File.WriteAllText(invitePath, passphrase.Length > 0 ? code + "\n" + passphrase : code);
 
         // 5. 等客户端进服
         var joined = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => host.Summary.Contains(L.F("multiplayer.hostserver.online", 1)) && host.LogText.Contains("Steve joined the game")), 900);
@@ -224,8 +229,13 @@ internal sealed partial class SelfTest
         var got = await WaitAsync(() => File.Exists(invitePath) && File.ReadAllText(invitePath).Trim().Length > 0, 1800);
         Check("客户端：拿到邀请码", got);
         if (!got) return;
-        var invite = File.ReadAllText(invitePath).Trim();
-        Dispatcher.UIThread.Invoke(() => servers.InviteText = invite);
+        var lines = File.ReadAllText(invitePath).Trim().Split('\n', StringSplitOptions.TrimEntries);
+        Dispatcher.UIThread.Invoke(() => servers.InviteText = lines[0]);
+        if (lines.Length > 1)
+        {
+            Check("客户端：加密邀请码要口令（显示口令框）", Dispatcher.UIThread.Invoke(() => servers.InviteIsSealed && page.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(c => c.Name == "JayServerPassphraseBox")?.IsVisible == true));
+            Dispatcher.UIThread.Invoke(() => servers.InvitePassphrase = lines[1]);
+        }
         ScrollTo(page, "multiplayer.jayserver.title");
         await ShotAsync("客户端-粘贴邀请码");
         Check("客户端：点“加入”", Press(await ButtonFor(servers.JoinCommand)));

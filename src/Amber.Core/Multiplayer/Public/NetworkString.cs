@@ -138,6 +138,8 @@ public static partial class NetworkString
             return L.T("core.mp.network.bad_easytier");
         if (info.NetworkName == PublicNetworkProfile.JayNetworkName && info.Id != "jay") return L.T("core.mp.network.bad_easytier");
         if (info.Nodes.Count is 0 or > MaxNodes || info.Nodes.Any(n => !RelayNodes.IsValid(n))) return L.T("core.mp.network.bad_nodes");
+        // A network string is shared widely: its nodes go by domain name, never by a public IP address.
+        if (info.Nodes.Any(RelayNodes.HasPublicIpHost)) return L.T("core.mp.network.ip_node");
         if (info.Home is { } home && !IsHttps(home)) return L.T("core.mp.network.bad_link");
         if (info.Config is { } config && (!IsHttps(config.Url) || config.Sha256.Length != 64 || !config.Sha256.All(Uri.IsHexDigit)))
             return L.T("core.mp.network.bad_config");

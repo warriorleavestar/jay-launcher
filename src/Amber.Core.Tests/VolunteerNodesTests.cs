@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
@@ -161,6 +162,11 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         // Same address again right away: refused.
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.ProbeAsync("tcp://8.8.8.8:11010", default));
         Assert.Equal("rate", e.Code);
+        // "Test port" says it was the port test that was too soon, not the directory's "Publishing too often".
+        Assert.Equal("multiplayer.volunteer.test_rate_limited", Amber.App.ViewModels.MultiplayerViewModel.PortTestRejected(e).Key);
+        Assert.Equal(StatusKind.Warning, Amber.App.ViewModels.MultiplayerViewModel.PortTestRejected(e).Kind);
+        var other = new DirectoryRejectedException("banned", "nope");
+        Assert.Equal(["nope"], Amber.App.ViewModels.MultiplayerViewModel.PortTestRejected(other).Args);
         _now += VolunteerRegistry.CheckSameAddressEvery + TimeSpan.FromSeconds(1);
         Assert.True(await client.ProbeAsync("tcp://8.8.8.8:11010", default));
         // Probing never lists anything.

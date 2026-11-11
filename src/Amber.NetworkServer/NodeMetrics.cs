@@ -28,6 +28,8 @@ public static class NodeMetrics
         w.Gauge("jay_directory_rooms_listed", "Rooms shown in the public room list.", Long(health["listed"]));
         w.Gauge("jay_volunteer_relays", "Volunteer relays currently handed out (absent when volunteers are off).", server.Volunteers?.Listed().Count);
         w.Gauge("jay_bans", "Entries in the ban list (absent when the node has none).", server.Bans?.List().Count);
+        w.Gauge("jay_rendezvous_records", "One-shot rendezvous records waiting to be taken (absent when the directory is off).", server.Directory?.RendezvousCount);
+        w.Gauge("jay_signed_records", "Signed long-lived records held (absent when the directory is off).", server.Directory?.RecordCount);
 
         var stats = server.Stats.ToJson();
         w.Counter("jay_directory_rooms_published_total", "New rooms accepted.", Long(stats["published"]));

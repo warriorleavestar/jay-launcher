@@ -98,8 +98,8 @@ public sealed record DirectoryCertificate(byte[] DirectoryKey, string Network, D
 /// <item>Keys certified by enough of the network's root keys ("dirRoots" and "dirRootsNeed", or for the built-in network
 /// the Jay trustees, <see cref="JayTrust"/>).</item>
 /// <item>A network with neither: trust on first use. The first key seen at each directory address is remembered
-/// (<see cref="DirectoryKeyMemory"/>) and from then on only that key is accepted, with no fallback to the unauthenticated
-/// protocol for that address.</item>
+/// (<see cref="DirectoryKeyMemory"/>) and from then on only that key is accepted. Without a key memory any key is accepted
+/// for that one connection: still encrypted, but not authenticated.</item>
 /// </list>
 /// </summary>
 public sealed class DirectoryTrust
@@ -124,7 +124,7 @@ public sealed class DirectoryTrust
             return Roots.Count > 0 && DirectoryCertificate.Parse(certificate) is { } cert && new TrustQuorum(Roots, RootsNeed).IsMet(cert.Signers)
                 && cert.Network == Network && cert.Expires > Clock() && CryptographicOperations.FixedTimeEquals(cert.DirectoryKey, key);
         }
-        if (Memory is null) return false;
+        if (Memory is null) return true;
         if (Memory.Get(Network, address) is { } known) return CryptographicOperations.FixedTimeEquals(known, key);
         Memory.Remember(Network, address, key);
         return true;

@@ -11,6 +11,4 @@ internal static class DirectTestKeys
     public static readonly byte[] Bridge = DirectKeys.Bridge(LobbyKey);
     public static readonly byte[] OtherBridge = DirectKeys.Bridge([.. Enumerable.Range(201, 16).Select(i => (byte)i)]);
 
-    /// <summary>测试里的“敲门”：直接给出房间（不经大厅）。</summary>
-    public static Func<IReadOnlyList<string>, CancellationToken, Task<RoomCode?>> Knock(RoomCode room) => (_, _) => Task.FromResult<RoomCode?>(room);
 }

@@ -70,7 +70,7 @@ public sealed class JayServerCliTests
             Assert.Equal(2, state.Relays.Count);
             output.GetStringBuilder().Clear();
             Run("invite", "Steve");
-            var invite = GateInvite.TryParse(output.ToString(), out _)!;
+            var invite = ReadInvite(output.ToString());
             Assert.Contains($"{invite.Host}:{invite.Port}", new[] { "198.51.100.7:47671", "203.0.113.10:47672" });
         }
         finally
@@ -108,6 +108,39 @@ public sealed class JayServerCliTests
         }
     }
 
+    /// <summary>records on: an IP-only server's invite carries a record locator, no IP and no passphrase.</summary>
+    [Fact]
+    public void RecordsCommands()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-cli-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            GateStore.Initialize(Path.Combine(root, "gate"), "203.0.113.10", 47670, 47670);
+            var output = new StringWriter();
+            int Run(params string[] args) => Program.Admin(root, Options.Parse(args), output);
+            Assert.Throws<ArgumentException>(() => Run("records", "on", "--network", "not a network"));
+            Assert.Equal(0, Run("records", "on"));
+            output.GetStringBuilder().Clear();
+            Run("invite", "Steve");
+            var text = output.ToString();
+            Assert.False(GateInvite.IsSealed(text));
+            Assert.DoesNotContain("203.0.113.10", text);
+            var invite = GateInvite.TryParse(text, out var error)!;
+            Assert.Null(error);
+            Assert.Equal("jay", invite.Locator!.NetworkId);
+            Run("records", "status");
+            Assert.Contains("203.0.113.10:47670", output.ToString());
+            Run("records", "off");
+            output.GetStringBuilder().Clear();
+            Run("invite", "Alex");
+            Assert.True(GateInvite.IsSealed(output.ToString()));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
     [Fact]
     public void RotateCommands()
     {
@@ -124,7 +157,7 @@ public sealed class JayServerCliTests
             Run("rotate", "status");
             Assert.Contains("网关直连", output.ToString());
             Run("invite", "Steve");
-            Assert.NotNull(GateInvite.TryParse(output.ToString(), out _)!.Rotation);
+            Assert.NotNull(ReadInvite(output.ToString()).Rotation);
             Assert.Throws<ArgumentException>(() => Run("rotate", "on", "--range", "30000-30010"));
             Run("rotate", "off");
             Assert.Null(store.Rotation());
@@ -167,5 +200,14 @@ public sealed class JayServerCliTests
         {
             try { Directory.Delete(root, true); } catch (IOException) { }
         }
+    }
+
+    /// <summary>The invite the CLI printed: an IP-only test server prints a sealed code and its passphrase.</summary>
+    private static GateInvite ReadInvite(string output)
+    {
+        var passphrase = System.Text.RegularExpressions.Regex.Match(output, @"\d{4} \d{4} \d{4} \d{4}").Value;
+        Assert.True(GateInvite.IsSealed(output));
+        Assert.DoesNotMatch(@"JAYSS1-\S*\d{1,3}\.\d{1,3}\.", output);
+        return GateInvite.TryOpen(output, passphrase, out var error) ?? throw new Xunit.Sdk.XunitException(error);
     }
 }
