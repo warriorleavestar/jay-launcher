@@ -42,7 +42,7 @@ internal static class AndroidRuntimeStore
         HttpResponseMessage? response = null;
         try
         {
-            return await RuntimeArchiveInstaller.InstallAsync(
+            var manifest = await RuntimeArchiveInstaller.InstallAsync(
                 Root(context),
                 descriptor,
                 async (archive, token) =>
@@ -57,6 +57,8 @@ internal static class AndroidRuntimeStore
                 },
                 progress,
                 ct);
+            MakeRuntimeCodeReadOnly(context, manifest);
+            return manifest;
         }
         finally
         {
@@ -76,5 +78,17 @@ internal static class AndroidRuntimeStore
         var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Jay-Android/1.0");
         return client;
+    }
+
+    private static void MakeRuntimeCodeReadOnly(Context context, RuntimeBundleManifest manifest)
+    {
+        var root = Root(context);
+        foreach (var file in manifest.Files)
+        {
+            var mode = UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+            if (file.Path.StartsWith("bin/", StringComparison.Ordinal) || file.Path == "lib/jspawnhelper")
+                mode |= UnixFileMode.UserExecute;
+            File.SetUnixFileMode(Path.Combine(root, file.Path), mode);
+        }
     }
 }
