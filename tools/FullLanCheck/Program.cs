@@ -400,7 +400,10 @@ static class FullLanCheck
         if (OperatingSystem.IsLinux())
         {
             var conf = File.Exists("/etc/resolv.conf") ? File.ReadAllText("/etc/resolv.conf") : "";
-            var resolved = Run("resolvectl", "dns").Output;
+            // Links with no DNS servers are left out: a cloud runner can hot-plug a NIC (for example
+            // Azure's accelerated-networking VF) mid-test, which adds an empty "Link N (x):" line.
+            var resolved = string.Join('\n', Run("resolvectl", "dns").Output.Split('\n')
+                .Where(l => !(l.StartsWith("Link ", StringComparison.Ordinal) && l.TrimEnd().EndsWith(':'))));
             return (conf + "\n" + resolved).Trim();
         }
         return string.Join('\n', Run("scutil", "--dns").Output.Split('\n').Select(l => l.Trim())
