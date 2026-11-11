@@ -14,6 +14,9 @@ internal static class Program
             LinuxStartup.EnsureIcu(args);
             Environment.Exit(Amber.Core.Multiplayer.UnixElevatedGuardHost.Run(args));
         }
+        // Windows strong sandbox: the one admin step (loopback exemption, parent folders), started by Jay itself with runas.
+        if (OperatingSystem.IsWindows() && Amber.Core.Launch.WindowsSandboxSetup.IsInvocation(args))
+            Environment.Exit(Amber.Core.Launch.WindowsSandboxSetup.Run(args));
         // Windows full LAN guard: Jay itself, started elevated through the admin prompt. No window.
         if (OperatingSystem.IsWindows() && Amber.Core.Multiplayer.WindowsElevatedGuardHost.IsGuardInvocation(args))
             Environment.Exit(Amber.Core.Multiplayer.WindowsElevatedGuardHost.Run(args));

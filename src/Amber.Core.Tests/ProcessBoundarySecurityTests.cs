@@ -295,6 +295,111 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         return process.ExitCode;
     }
 
+    // ---- Game sandbox on Windows (privacy plan item 15): a real process at each level ----
+
+    [Theory]
+    [InlineData(WindowsSandboxLevel.Standard)]
+    [InlineData(WindowsSandboxLevel.Strong)]
+    public async Task WindowsSandbox_HidesJayData_LetsTheGameWriteItsInstance(WindowsSandboxLevel level) => await HidesJayData(level);
+
+    [Theory]
+    [InlineData(WindowsSandboxLevel.Standard)]
+    [InlineData(WindowsSandboxLevel.Strong)]
+    public async Task WindowsSandbox_GameCannotOpenJaysProcess(WindowsSandboxLevel level)
+    {
+        // Privacy plan item 15: the sandboxed game must not open Jay's process to read its memory (keys, sessions).
+        if (!OperatingSystem.IsWindows()) return;
+        var instance = Directory.CreateDirectory(Path.Combine(_root, "instance-" + level)).FullName;
+        WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance] }, level);
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = instance,
+        };
+        // Process.Handle asks for full access, which includes reading memory.
+        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command",
+                     $"try {{ $null = [System.Diagnostics.Process]::GetProcessById({Environment.ProcessId}).Handle; 'JAY-OPENED' }} catch {{ 'JAY-DENIED' }}" })
+            psi.ArgumentList.Add(a);
+        using var process = WindowsSandbox.Start(psi, level);
+        var read = Task.WhenAll(process.StandardOutput.ReadToEndAsync(), process.StandardError.ReadToEndAsync());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await process.WaitForExitAsync(timeout.Token);
+        var output = string.Join('\n', await read);
+        Assert.DoesNotContain("JAY-OPENED", output);
+        // At the standard level PowerShell runs and is refused; in the container it may not even start, which is also a refusal.
+        if (level == WindowsSandboxLevel.Standard) Assert.Contains("JAY-DENIED", output);
+    }
+
+    private async Task HidesJayData(WindowsSandboxLevel level)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var data = Directory.CreateDirectory(Path.Combine(_root, "data")).FullName;
+        var key = Path.Combine(data, "identity.key");
+        File.WriteAllText(key, "secret-key-material");
+        var instance = Directory.CreateDirectory(Path.Combine(_root, "instance")).FullName;
+        var other = Directory.CreateDirectory(Path.Combine(_root, "other")).FullName;
+        File.WriteAllText(Path.Combine(other, "profile.txt"), "browser-profile-material");
+        WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance], Hidden = [data] }, level);
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"))
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = instance,
+        };
+        // One command line (cmd will not run a batch file inside an AppContainer). Temp paths have no spaces.
+        var whoami = Path.Combine(Environment.SystemDirectory, "whoami.exe");
+        foreach (var a in new[] { "/d", "/c", "type", key, "&", "dir", "/b", data, "&", "type", Path.Combine(other, "profile.txt"), "&",
+                     "echo", "written>" + Path.Combine(instance, "out.txt"), "&", whoami, "/groups", "&", "exit", "/b", "0" })
+            psi.ArgumentList.Add(a);
+        var lines = new List<string>();
+        using var process = WindowsSandbox.Start(psi, level);
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (lines) lines.Add(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (lines) lines.Add(e.Data); };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await process.WaitForExitAsync(timeout.Token);
+        var output = string.Join('\n', lines);
+
+        Assert.True(process.ExitCode == 0, output);
+        Assert.DoesNotContain("secret-key-material", output);
+        Assert.DoesNotContain("identity.key", output);
+        Assert.True(File.Exists(Path.Combine(instance, "out.txt")), output);
+        if (level == WindowsSandboxLevel.Standard)
+        {
+            // Low integrity; files outside the data folder stay readable at this level.
+            Assert.Contains("S-1-16-4096", output);
+            Assert.Contains("browser-profile-material", output);
+        }
+        else
+        {
+            // The container sees nothing it was not granted.
+            Assert.DoesNotContain("browser-profile-material", output);
+        }
+        // Jay's data folder keeps its label for later launches; Jay itself still reads it.
+        Assert.Equal("secret-key-material", File.ReadAllText(key));
+    }
+
+    [Fact]
+    public void WindowsSandbox_LabelsStayPut_AndArePreparedOnlyOnce()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var data = Directory.CreateDirectory(Path.Combine(_root, "data2")).FullName;
+        var inside = Path.Combine(data, "notrace", "log4j2.xml");
+        Directory.CreateDirectory(Path.GetDirectoryName(inside)!);
+        File.WriteAllText(inside, "<xml/>");
+        var instance = Directory.CreateDirectory(Path.Combine(_root, "instance2")).FullName;
+        var grants = new SandboxGrants { ReadWrite = [instance], ReadOnly = [inside], Hidden = [data] };
+        WindowsSandbox.Prepare(grants, WindowsSandboxLevel.Standard);
+        Assert.True(WindowsSandbox.Same(WindowsSandbox.CurrentLabel(data)!, WindowsSandbox.Label(true, false, true)));
+        Assert.True(WindowsSandbox.Same(WindowsSandbox.CurrentLabel(instance)!, WindowsSandbox.Label(true, true, false)));
+        // A file Jay hands over from inside the data folder carries its own readable label.
+        Assert.True(WindowsSandbox.Same(WindowsSandbox.CurrentLabel(inside)!, WindowsSandbox.Label(false, false, false)));
+        WindowsSandbox.Prepare(grants, WindowsSandboxLevel.Standard);
+        Assert.True(WindowsSandbox.Same(WindowsSandbox.CurrentLabel(data)!, WindowsSandbox.Label(true, false, true)));
+    }
+
     private static void AssertRecordedArguments(string path, string work, IReadOnlyList<string> expected)
     {
         using var reader = new BinaryReader(File.OpenRead(path), Encoding.UTF8);

@@ -92,4 +92,76 @@ public sealed class SandboxFindingsTests : IDisposable
             Assert.NotEqual("home.status.no_versions", home.StatusInfo?.Key);
         });
     }
+
+    // ---- Privacy plan item 15: the game process sandbox ----
+
+    [Fact]
+    public void GameSandbox_IsOnByDefault_HidesJayData_GrantsTheLoaderRuntime()
+    {
+        using var service = Service();
+        Assert.False(service.Settings.LaunchWithoutSandbox);
+        Assert.True(service.Settings.StrongSandbox);
+        var options = service.GameSandboxOptions;
+        Assert.True(options.Enabled);
+        Assert.Contains(AppSettings.DataDir, options.Hidden);
+        // The universal loader's runtime folder sits beside the data folder: install and data read-only, cache writable.
+        Assert.Contains(options.ExtraReadWrite, p => p.EndsWith("bake-cache", StringComparison.Ordinal));
+        Assert.Contains(options.ExtraReadOnly, p => p.EndsWith("universal-loader", StringComparison.Ordinal));
+        Assert.DoesNotContain(options.ExtraReadOnly.Concat(options.ExtraReadWrite), p => Amber.Core.Launch.GameSandbox.IsInside(p, AppSettings.DataDir));
+
+        service.Settings.LaunchWithoutSandbox = true;
+        Assert.False(service.GameSandboxOptions.Enabled);
+        Assert.Equal(L.T("settings.sandbox.status.off"), service.SandboxStatusText);
+    }
+
+    [Fact]
+    public async Task StrongSandbox_DeclinedOnce_UsesStandard_AndDoesNotAskAgainUntilRetry()
+    {
+        if (!OperatingSystem.IsWindows() || Amber.Core.Launch.WindowsSandbox.LoopbackExempt()) return;
+        var java = Path.Combine(_game, "jdk21", "bin", "java.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(java)!);
+        File.WriteAllText(java, "");
+        File.WriteAllText(Path.Combine(_game, "jdk21", "release"), "JAVA_VERSION=\"21.0.5\"\n");
+        using var service = Service();
+        var asked = 0;
+        var notes = new List<string>();
+        // Never says yes: the test must not bring up Windows' admin prompt.
+        Task<bool> Ask() { asked++; return Task.FromResult(false); }
+
+        var first = await service.SandboxForLaunchAsync(java, Ask, notes.Add);
+        Assert.Equal(Amber.Core.Launch.WindowsSandboxLevel.Standard, first.WindowsLevel);
+        var noAdmin = Amber.Core.Launch.WindowsSandbox.Elevation() == Amber.Core.Launch.AdminPrompt.NoAdmin;
+        if (!Amber.Core.Launch.WindowsSandbox.HasResolver)
+        {
+            // A build without the resolver: Java 21 cannot use strong mode, so nothing is asked or remembered.
+            Assert.Equal(0, asked);
+            Assert.Null(service.Settings.StrongSandboxFallback);
+            return;
+        }
+        Assert.Equal(noAdmin ? 0 : 1, asked);
+        Assert.Equal(noAdmin ? Amber.Core.Launch.WindowsSandboxPolicy.NoAdmin : Amber.Core.Launch.WindowsSandboxPolicy.Refused, service.Settings.StrongSandboxFallback);
+        Assert.Single(notes);
+        Assert.Contains(L.F("settings.sandbox.status.standard_because", ""), service.SandboxStatusText);
+
+        var second = await service.SandboxForLaunchAsync(java, Ask, notes.Add);
+        Assert.Equal(Amber.Core.Launch.WindowsSandboxLevel.Standard, second.WindowsLevel);
+        Assert.Equal(noAdmin ? 0 : 1, asked);
+
+        service.RetryStrongSandbox();
+        Assert.Null(service.Settings.StrongSandboxFallback);
+        Assert.Equal(L.T("settings.sandbox.status.strong_pending"), service.SandboxStatusText);
+    }
+
+    [Fact]
+    public async Task StrongSandbox_Off_UsesStandardWithoutAsking()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var service = Service();
+        service.Settings.StrongSandbox = false;
+        var asked = false;
+        var options = await service.SandboxForLaunchAsync(Path.Combine(_game, "java.exe"), () => { asked = true; return Task.FromResult(true); }, _ => { });
+        Assert.False(asked);
+        Assert.Equal(Amber.Core.Launch.WindowsSandboxLevel.Standard, options.WindowsLevel);
+        Assert.Equal(L.T("settings.sandbox.status.standard"), service.SandboxStatusText);
+    }
 }

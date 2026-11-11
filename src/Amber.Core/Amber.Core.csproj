@@ -28,6 +28,86 @@
     <EmbeddedResource Include="Multiplayer\EasyTierSigned\*" LogicalName="easytier-signed/%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!--
+    Jay's DNS fallback for the Windows strong sandbox (tools/jay-dns, Java 18+): compiled from source with a local JDK
+    and embedded as Amber.Core.jay-dns.jar. Without a JDK the build goes on without it (a warning) and Java 18+ games
+    use the standard sandbox; release builds pass -p:RequireJayDns=true so a missing JDK fails the build instead.
+    The JDK is looked up in JAY_JAVAC, the CI images' JAVA_HOME_25_X64 / JAVA_HOME_21_X64, JAVA_HOME, then PATH.
+  -->
+  <PropertyGroup>
+    <JayDnsSource>$(MSBuildThisFileDirectory)..\..\tools\jay-dns\src</JayDnsSource>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAY_JAVAC)' != ''">$(JAY_JAVAC)</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAVA_HOME_25_X64)' != '' and Exists('$(JAVA_HOME_25_X64)\bin\javac.exe')">$(JAVA_HOME_25_X64)\bin\javac.exe</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAVA_HOME_21_X64)' != '' and Exists('$(JAVA_HOME_21_X64)\bin\javac.exe')">$(JAVA_HOME_21_X64)\bin\javac.exe</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAVA_HOME)' != '' and Exists('$(JAVA_HOME)\bin\javac.exe')">$(JAVA_HOME)\bin\javac.exe</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAVA_HOME)' != '' and Exists('$(JAVA_HOME)/bin/javac')">$(JAVA_HOME)/bin/javac</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == ''">javac</JayJavac>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <JayDnsJava Include="$(JayDnsSource)\**\*.java" />
+    <JayDnsServices Include="$(JayDnsSource)\META-INF\**\*" />
+  </ItemGroup>
+
+  <Target Name="BuildJayDns" BeforeTargets="BeforeBuild" Inputs="@(JayDnsJava);@(JayDnsServices)" Outputs="$(IntermediateOutputPath)jay-dns.jar">
+    <PropertyGroup>
+      <JayDnsClasses>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)jay-dns</JayDnsClasses>
+    </PropertyGroup>
+    <RemoveDir Directories="$(JayDnsClasses)" />
+    <MakeDir Directories="$(JayDnsClasses)" />
+    <Exec Command="&quot;$(JayJavac)&quot; --release 18 -encoding UTF-8 -d &quot;$(JayDnsClasses)&quot; @(JayDnsJava->'&quot;%(FullPath)&quot;', ' ')" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="JayDnsExit" />
+    </Exec>
+    <Copy Condition="'$(JayDnsExit)' == '0'" SourceFiles="@(JayDnsServices)" DestinationFiles="@(JayDnsServices->'$(JayDnsClasses)/META-INF/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <ZipDirectory Condition="'$(JayDnsExit)' == '0'" SourceDirectory="$(JayDnsClasses)" DestinationFile="$(IntermediateOutputPath)jay-dns.jar" Overwrite="true" />
+    <Warning Condition="'$(JayDnsExit)' != '0' and '$(RequireJayDns)' != 'true'" Text="jay-dns was not built (no JDK 18+ found as '$(JayJavac)'): Java 18+ games will use the standard Windows sandbox." />
+    <Error Condition="'$(JayDnsExit)' != '0' and '$(RequireJayDns)' == 'true'" Text="jay-dns could not be built with '$(JayJavac)' (RequireJayDns=true)." />
+  </Target>
+
+  <Target Name="EmbedJayDns" AfterTargets="BuildJayDns" BeforeTargets="BeforeBuild" Condition="Exists('$(IntermediateOutputPath)jay-dns.jar')">
+    <ItemGroup>
+      <EmbeddedResource Include="$(IntermediateOutputPath)jay-dns.jar" LogicalName="Amber.Core.jay-dns.jar" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Jay's file system provider for the Windows sandbox (tools/jay-fs, Java 8 bytecode): fixes Java's write check inside
+    the sandbox. The JDK class it extends is package-private, so it compiles against a stand-in (tools/jay-fs/stub) that
+    is not packaged. Same JDK lookup and RequireJayDns switch as jay-dns.
+  -->
+  <PropertyGroup>
+    <JayFsSource>$(MSBuildThisFileDirectory)..\..\tools\jay-fs</JayFsSource>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <JayFsJava Include="$(JayFsSource)\src\**\*.java" />
+    <JayFsStub Include="$(JayFsSource)\stub\**\*.java" />
+  </ItemGroup>
+
+  <Target Name="BuildJayFs" BeforeTargets="BeforeBuild" Inputs="@(JayFsJava);@(JayFsStub)" Outputs="$(IntermediateOutputPath)jay-fs.jar">
+    <PropertyGroup>
+      <JayFsClasses>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)jay-fs</JayFsClasses>
+      <JayFsStubClasses>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)jay-fs-stub</JayFsStubClasses>
+    </PropertyGroup>
+    <RemoveDir Directories="$(JayFsClasses);$(JayFsStubClasses)" />
+    <MakeDir Directories="$(JayFsClasses);$(JayFsStubClasses)" />
+    <Exec Command="&quot;$(JayJavac)&quot; --release 8 -Xlint:-options -encoding UTF-8 -d &quot;$(JayFsStubClasses)&quot; @(JayFsStub->'&quot;%(FullPath)&quot;', ' ')" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="JayFsStubExit" />
+    </Exec>
+    <Exec Condition="'$(JayFsStubExit)' == '0'" Command="&quot;$(JayJavac)&quot; --release 8 -Xlint:-options -encoding UTF-8 -cp &quot;$(JayFsStubClasses)&quot; -d &quot;$(JayFsClasses)&quot; @(JayFsJava->'&quot;%(FullPath)&quot;', ' ')" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="JayFsExit" />
+    </Exec>
+    <ZipDirectory Condition="'$(JayFsExit)' == '0'" SourceDirectory="$(JayFsClasses)" DestinationFile="$(IntermediateOutputPath)jay-fs.jar" Overwrite="true" />
+    <Warning Condition="'$(JayFsExit)' != '0' and '$(RequireJayDns)' != 'true'" Text="jay-fs was not built (no JDK found as '$(JayJavac)'): sandboxed games may not write through zip file systems (Fabric's remapped jar)." />
+    <Error Condition="'$(JayFsExit)' != '0' and '$(RequireJayDns)' == 'true'" Text="jay-fs could not be built with '$(JayJavac)' (RequireJayDns=true)." />
+  </Target>
+
+  <Target Name="EmbedJayFs" AfterTargets="BuildJayFs" BeforeTargets="BeforeBuild" Condition="Exists('$(IntermediateOutputPath)jay-fs.jar')">
+    <ItemGroup>
+      <EmbeddedResource Include="$(IntermediateOutputPath)jay-fs.jar" LogicalName="Amber.Core.jay-fs.jar" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Amber.Core.Tests" />
   </ItemGroup>

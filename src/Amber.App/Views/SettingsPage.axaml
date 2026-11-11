@@ -321,6 +321,25 @@
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.notrace.hint}" TextWrapping="Wrap" />
               </StackPanel>
             </Border>
+            <!-- Game sandbox (privacy plan item 15): which level the next launch uses, strong mode (Windows), the escape hatch -->
+            <Border Classes="card">
+              <StackPanel Spacing="8">
+                <TextBlock Text="{l:T settings.sandbox.label}" FontWeight="SemiBold" />
+                <TextBlock x:Name="SandboxStatusLine" Text="{Binding SandboxStatusText}" FontSize="12" TextWrapping="Wrap" />
+                <StackPanel Spacing="4" IsVisible="{Binding IsWindowsSandbox}">
+                  <CheckBox x:Name="StrongSandboxBox" IsChecked="{Binding StrongSandbox}" IsEnabled="{Binding !LaunchWithoutSandbox}" Content="{l:T settings.sandbox.strong}" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.strong.hint}" TextWrapping="Wrap" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.java_note}" TextWrapping="Wrap" />
+                  <Button x:Name="RetryStrongSandboxButton" Classes="ghost" Content="{l:T settings.sandbox.retry}" Command="{Binding RetryStrongSandboxCommand}"
+                          IsVisible="{Binding CanRetryStrongSandbox}" HorizontalAlignment="Left" Padding="0,2" />
+                  <Button x:Name="RemoveSandboxPermissionsButton" Classes="ghost" Content="{l:T settings.sandbox.remove}" Command="{Binding RemoveSandboxPermissionsCommand}"
+                          IsVisible="{Binding CanRemoveSandboxPermissions}" HorizontalAlignment="Left" Padding="0,2" ToolTip.Tip="{l:T settings.sandbox.remove.hint}" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{Binding SandboxPermissionsError}" IsVisible="{Binding SandboxPermissionsError, Converter={x:Static ObjectConverters.IsNotNull}}" TextWrapping="Wrap" />
+                </StackPanel>
+                <CheckBox x:Name="LaunchWithoutSandboxBox" IsChecked="{Binding LaunchWithoutSandbox}" Content="{l:T settings.sandbox.without}" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.without.hint}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
             <!-- Multiplayer security: device check, circuit breaker and the countdown before a restart -->
             <Border Classes="card">
               <StackPanel Spacing="8">

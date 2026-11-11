@@ -116,6 +116,8 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `build/` | `pins.json`: every binary Jay bundles or downloads with a fixed hash (source, SHA-256, size), embedded in Amber.Core; see `docs/pins.md`. |
 | `tools/` | GUI self-check runner, multiplayer test, NAT bench, brand icon export, this code index builder. |
 | `tools/FullLanCheck/` | Headless end-to-end check of full-LAN mode on macOS/Linux (needs root), used by the fulllan-e2e workflow. |
+| `tools/jay-dns/` | Java 18+ name resolver for the Windows strong sandbox; built by Amber.Core.csproj and embedded (`WindowsSandbox.ResolverJar`). |
+| `tools/jay-fs/` | Java file system provider for the Windows sandbox (fixes `Files.isWritable` under low integrity / AppContainer); `stub/` is compile-only. Embedded (`WindowsSandbox.FileSystemJar`). |
 | `.github/` | CI (`build.yml`), security regression tests, network registry checks, issue templates. |
 
 ## Where to start for common tasks

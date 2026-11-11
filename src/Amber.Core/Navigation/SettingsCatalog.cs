@@ -71,6 +71,8 @@ public static class SettingsCatalog
         new("RecycleKeep", Storage, "recycle.keep.label", "recycle.title"),
 
         new("NoTrace", Privacy, "settings.notrace.label", "settings.notrace.hint"),
+        new("StrongSandbox", Privacy, "settings.sandbox.strong", "settings.sandbox.strong.hint"),
+        new("LaunchWithoutSandbox", Privacy, "settings.sandbox.without", "settings.sandbox.without.hint"),
         new("Attestation", Privacy, "settings.security.attest.label", "settings.security.hint"),
         new("Breaker", Privacy, "settings.security.breaker.label", "settings.security.breaker.toggle"),
         new("BreakerDelay", Privacy, "settings.security.delay.label"),

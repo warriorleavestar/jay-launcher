@@ -519,6 +519,17 @@ public sealed partial class HomeViewModel : PageViewModel
     [RelayCommand]
     private void DismissPendingLaunch() => PendingLaunch = null;
 
+    /// <summary>
+    /// Before the first strong-sandbox launch: explain and ask whether to show Windows' admin prompt for the loopback
+    /// exemption. Replaced in the self-check and tests.
+    /// </summary>
+    internal Func<Task<bool>> AskSandboxConsent { get; set; } = DefaultSandboxConsentAsync;
+
+    private static Task<bool> DefaultSandboxConsentAsync() =>
+        Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner }
+            ? Views.ConfirmDialog.AskAsync(owner, L.T("home.sandbox.consent.title"), L.T("home.sandbox.consent.body"), L.T("home.sandbox.consent.confirm"))
+            : Task.FromResult(false);
+
     private async Task RunAsync(LaunchRequest request, bool allowSecond = false)
     {
         Toasts.DismissBakeFailures();
@@ -661,6 +672,16 @@ public sealed partial class HomeViewModel : PageViewModel
                 SetStatus(StatusMessage.Info("home.status.pre_launch_command"));
                 await RunUserCommandAsync(settings.PreLaunchCommand, id, workDir, run.Log, ct);
             }
+
+            // The game sandbox (privacy plan item 15): on Windows this picks standard or strong, and the first strong
+            // launch explains the one admin prompt. A fallback is said once as a toast and on every launch in the log.
+            var fallbackBefore = _service.Settings.StrongSandboxFallback;
+            options = options with
+            {
+                Sandbox = await _service.SandboxForLaunchAsync(javaPath, AskSandboxConsent, note => _log.AddRaw(run.Log, "[Sandbox] " + note), ct),
+            };
+            if (_service.Settings.StrongSandboxFallback is { } fallback && fallback != fallbackBefore)
+                Toasts.Show(L.F("home.sandbox.standard_because", WindowsSandboxPolicy.Describe(fallback, _service.Settings.StrongSandboxFallbackDetail)));
 
             SetOwnedStatus(StatusMessage.Info("home.status.launching"));
             run.Output.Begin(options);

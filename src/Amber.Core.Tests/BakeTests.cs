@@ -734,6 +734,9 @@ public sealed class BakeTests : IDisposable
         Assert.Equal(0, loader.Count("warm"));
         var request = loader.Last("bake-instance");
         Assert.Null(request["platform"]);
+        // A sandboxed launch writes only inside the instance: the game directory is the instance the loader keeps .amber-ul in.
+        Assert.Equal(instance.WorkDir, request["instanceDir"]!.GetValue<string>());
+        Assert.Equal(instance.WorkDir, request["gameDir"]!.GetValue<string>());
         Assert.Equal(bake.MappingsDir("1.21.1"), request["mappingsDir"]!.GetValue<string>());
         Assert.Equal(bake.MappingCache, request["mappingCache"]!.GetValue<string>());
         Assert.Single(request["mods"]!.AsArray());

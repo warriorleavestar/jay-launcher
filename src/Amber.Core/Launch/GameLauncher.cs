@@ -37,6 +37,9 @@ public sealed record LaunchOptions
     /// <summary>实验功能“烘焙”的结果：设了就用通用加载器的主类和 classpath 启动，原版的其余参数不变。</summary>
     public Amber.Core.Bake.BakedLaunch? Baked { get; init; }
     public string LauncherVersion { get; init; } = "0.1";
+
+    /// <summary>Run the game in the OS sandbox (privacy plan item 15; see <see cref="GameSandbox"/>). Off by default here; Jay turns it on.</summary>
+    public SandboxOptions Sandbox { get; init; } = SandboxOptions.Off;
 }
 
 /// <summary>A process-free Java invocation for hosts that embed a JVM, such as Jay on Android.</summary>
@@ -369,16 +372,32 @@ public sealed class GameLauncher(GameDirectory dir)
         else if (legacyHome is not null)
             onOutput?.Invoke(L.F("core.launch.game.legacyhome", legacyHome));
 
+        var sandboxed = false;
+        WindowsSandboxLevel? windowsLevel = null;
         Process process;
         try
         {
-            process = Process.Start(psi) ?? throw new InvalidOperationException(L.T("core.launch.game.javastartfailed"));
+            if (options.Sandbox.Enabled && GameSandbox.IsSupported)
+            {
+                windowsLevel = Sandbox(psi, options.Sandbox, workDir, legacyHome, onOutput);
+                sandboxed = true;
+                onOutput?.Invoke(windowsLevel switch
+                {
+                    WindowsSandboxLevel.Strong => L.T("core.launch.sandbox.on_strong"),
+                    WindowsSandboxLevel.Standard => L.T("core.launch.sandbox.on_standard"),
+                    _ => L.T("core.launch.sandbox.on"),
+                });
+            }
+            process = windowsLevel is { } level && OperatingSystem.IsWindows()
+                ? WindowsSandbox.Start(psi, level)
+                : Process.Start(psi) ?? throw new InvalidOperationException(L.T("core.launch.game.javastartfailed"));
         }
         catch
         {
             DeleteNoTraceDir(noTraceDir);
             throw;
         }
+        if (sandboxed && OperatingSystem.IsLinux()) LinuxSandbox.Track(process);
         if (noTraceDir is not null)
         {
             // 记下是哪个游戏进程在用：Amber 先退出、崩溃或被结束时，下次启动按这个判断能不能清掉（SweepNoTrace）。
@@ -396,6 +415,95 @@ public sealed class GameLauncher(GameDirectory dir)
             process.BeginErrorReadLine();
         }
         return process;
+    }
+
+    /// <summary>
+    /// Wraps the Java command in the OS sandbox: the grants come from this launch (instance folder, Java, game files,
+    /// files named on the command line, the legacy home) plus the caller's. Throws <see cref="SandboxUnavailableException"/>
+    /// when the sandbox cannot start; the game is then not launched. On Windows the process is started by
+    /// <see cref="WindowsSandbox.Start"/> afterwards, at the level returned here.
+    /// </summary>
+    private WindowsSandboxLevel? Sandbox(ProcessStartInfo psi, SandboxOptions sandbox, string workDir, string? legacyHome, Action<string>? onOutput)
+    {
+        List<string> extraReadOnly = [];
+        var natives = GameSandbox.NativeExtractArguments(workDir);
+        for (var i = 0; i < natives.Count; i++) psi.ArgumentList.Insert(i, natives[i]);
+        WindowsSandboxLevel? windowsLevel = null;
+        if (OperatingSystem.IsWindows())
+        {
+            windowsLevel = sandbox.WindowsLevel;
+            // Inside the container Java must be able to list every parent of what it uses. A parent the admin step
+            // has not opened (a new game folder, another Java): standard this time instead of a game that cannot start.
+            // Checked before any strong-only argument goes on the command line.
+            if (windowsLevel == WindowsSandboxLevel.Strong)
+            {
+                var planned = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox,
+                    extraReadWrite: legacyHome is null ? null : [legacyHome]);
+                if (WindowsSandboxSetup.FoldersToOpen(planned.ReadWrite.Concat(planned.ReadOnly)) is { Count: > 0 } closed)
+                {
+                    windowsLevel = WindowsSandboxLevel.Standard;
+                    onOutput?.Invoke(L.F("core.launch.sandbox.win.parents_closed", closed[0]));
+                }
+            }
+            if (windowsLevel == WindowsSandboxLevel.Strong)
+            {
+                // Name lookups inside the container go to the system's DNS servers directly (see DnsArguments).
+                // Without DNS servers (offline) there is nothing to look up and the container needs no help.
+                var javaHome = GameSandbox.JavaHome(psi.FileName);
+                var major = WindowsSandbox.JavaMajor(psi.FileName);
+                var servers = WindowsSandbox.SystemDnsServers();
+                if (!WindowsSandboxPolicy.JavaCanUseStrong(major, javaHome, WindowsSandbox.HasResolver))
+                {
+                    windowsLevel = WindowsSandboxLevel.Standard;
+                    onOutput?.Invoke(L.F("core.launch.sandbox.win.no_dns", major));
+                }
+                else if (servers.Count > 0)
+                {
+                    // The jar goes into the game's libraries folder: granted read-only already, and reachable by an
+                    // ASCII path when the game folder is (Java reads its command line in the ANSI code page).
+                    var jar = major >= 18 ? WindowsSandbox.ResolverJar(Path.Combine(dir.Root, "libraries", "jay", "jay-dns")) : null;
+                    if (WindowsSandbox.DnsArguments(major, javaHome, servers, jar) is { } dns)
+                        for (var i = 0; i < dns.Count; i++) psi.ArgumentList.Insert(i, dns[i]);
+                    if (jar is not null) extraReadOnly.Add(jar);
+                }
+            }
+            if (windowsLevel == WindowsSandboxLevel.Standard && WindowsSandbox.SocketFolder(workDir) is { } sockets)
+                psi.ArgumentList.Insert(0, "-Djdk.net.unixdomain.tmpdir=" + sockets);
+            // Java's write check cannot see the sandbox's labels (see FileSystemArguments): without this, Fabric's
+            // remapped game jar and anything else written through a zip file system fails as "read-only".
+            if (WindowsSandbox.FileSystemJar(Path.Combine(dir.Root, "libraries", "jay", "jay-fs")) is { } fs)
+            {
+                var fsArgs = WindowsSandbox.FileSystemArguments(WindowsSandbox.JavaMajor(psi.FileName), fs);
+                for (var i = 0; i < fsArgs.Count; i++) psi.ArgumentList.Insert(i, fsArgs[i]);
+                extraReadOnly.Add(fs);
+            }
+        }
+        var grants = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox, extraReadOnly,
+            extraReadWrite: legacyHome is null ? null : [legacyHome]);
+        if (grants.Problem() is { } problem) throw new SandboxUnavailableException(problem);
+        GameSandbox.FilterEnvironment(psi.Environment);
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsSandbox.Prepare(grants, windowsLevel!.Value);
+            return windowsLevel;
+        }
+        List<string> command = [psi.FileName, .. psi.ArgumentList];
+        List<string> wrapped;
+        if (OperatingSystem.IsLinux())
+        {
+            if (LinuxSandbox.Problem() is { } linux) throw new SandboxUnavailableException(linux);
+            psi.FileName = LinuxSandbox.Bubblewrap!;
+            wrapped = LinuxSandbox.Arguments(grants, LinuxSandbox.Host.Current(), workDir, command);
+        }
+        else
+        {
+            if (MacSandbox.Problem() is { } mac) throw new SandboxUnavailableException(mac);
+            psi.FileName = MacSandbox.Executable;
+            wrapped = MacSandbox.Arguments(MacSandbox.Profile(grants, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)), command);
+        }
+        psi.ArgumentList.Clear();
+        foreach (var arg in wrapped) psi.ArgumentList.Add(arg);
+        return null;
     }
 
     private string NewNoTraceDir() => Path.Combine(NoTraceRoot, Guid.NewGuid().ToString("N")[..12]);
