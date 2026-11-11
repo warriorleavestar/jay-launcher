@@ -80,7 +80,7 @@ public static unsafe class WindowsSandbox
         // A strong launch left the container's rights on these folders. Low-integrity processes were seen to be refused
         // reading anything whose ACL names a specific container SID, so the standard level takes them off again.
         if (container is null && DerivedContainerSid() is { } previous)
-            foreach (var path in grants.ReadWrite.Concat(grants.ReadOnly).Where(Exists)) Ungrant(path, previous);
+            foreach (var path in UngrantTargets(grants.ReadWrite.Concat(grants.ReadOnly))) Ungrant(path, previous);
         // Grants first, hidden folders after: a hidden folder inside a granted one keeps its own label.
         foreach (var path in grants.ReadWrite)
         {
@@ -224,12 +224,46 @@ public static unsafe class WindowsSandbox
     }
 
     /// <summary>Takes the container's own (not inherited) rights off <paramref name="path"/> and what inherited them.</summary>
+    /// <summary>
+    /// Where a strong launch may have left the container's own entries that this standard launch reads through: its
+    /// grants, the folder of every granted file, and the folders right inside every granted folder. The last two catch
+    /// another instance's folder: a strong launch of instance A grants <c>versions\A</c> itself, and a standard launch
+    /// of B that runs on A's game jar (a modded instance on the vanilla version) grants only <c>versions</c> and the jar.
+    /// </summary>
+    internal static IEnumerable<string> UngrantTargets(IEnumerable<string> grants)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in grants)
+        {
+            if (Directory.Exists(path))
+            {
+                if (seen.Add(path)) yield return path;
+                string[] inside;
+                try { inside = Directory.GetDirectories(path); }
+                catch (Exception e) when (e is UnauthorizedAccessException or IOException) { continue; }
+                foreach (var folder in inside)
+                    if (seen.Add(folder)) yield return folder;
+            }
+            else if (File.Exists(path))
+            {
+                if (seen.Add(path)) yield return path;
+                if (Path.GetDirectoryName(path) is { } folder && seen.Add(folder)) yield return folder;
+            }
+        }
+    }
+
     internal static void Ungrant(string path, SecurityIdentifier sid)
     {
+        FileSystemSecurity acl;
         try
         {
-            FileSystemSecurity acl = Directory.Exists(path) ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Access) : new FileInfo(path).GetAccessControl(AccessControlSections.Access);
+            acl = Directory.Exists(path) ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Access) : new FileInfo(path).GetAccessControl(AccessControlSections.Access);
             if (!acl.GetAccessRules(true, false, typeof(SecurityIdentifier)).OfType<FileSystemAccessRule>().Any(r => r.IdentityReference == sid)) return;
+        }
+        // A folder Jay cannot even read the permissions of was never granted by Jay.
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException or PrivilegeNotHeldException or InvalidOperationException) { return; }
+        try
+        {
             acl.PurgeAccessRules(sid);
             if (acl is DirectorySecurity d) new DirectoryInfo(path).SetAccessControl(d);
             else new FileInfo(path).SetAccessControl((FileSecurity)acl);

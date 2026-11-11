@@ -498,6 +498,34 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Equal(Path.GetPathRoot(game), WindowsSandboxSetup.Parents(game).Last());
     }
 
+    [Fact]
+    public void Windows_StandardLevel_TakesTheContainerOffAnotherInstancesFolder_ItReadsThrough()
+    {
+        // Seen in a real run: a strong launch of the vanilla instance granted versions\1.21.1 to the container; the
+        // next standard launch of a modded instance on that version granted only versions and the game jar, so the
+        // low-integrity game could not read 1.21.1.jar ("game jar missing").
+        if (!OperatingSystem.IsWindows()) return;
+        var vanilla = Dir("versions", "1.21.1");
+        var jar = Path.Combine(vanilla, "1.21.1.jar");
+        File.WriteAllText(jar, "jar");
+        var other = Dir("versions", "UL-VFab");
+        var sid = new System.Security.Principal.SecurityIdentifier("S-1-15-2-1-2-3-4-5-6-8");
+        bool Named(string path) => (Directory.Exists(path) ? (System.Security.AccessControl.FileSystemSecurity)new DirectoryInfo(path).GetAccessControl() : new FileInfo(path).GetAccessControl())
+            .GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+            .OfType<System.Security.AccessControl.FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
+        WindowsSandbox.Grant(vanilla, sid, write: true);
+        Assert.True(Named(jar));
+
+        var targets = WindowsSandbox.UngrantTargets([other, Path.Combine(_root, "versions"), jar]).ToList();
+        Assert.Contains(vanilla, targets);
+        Assert.Equal(targets.Count, targets.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        foreach (var path in targets) WindowsSandbox.Ungrant(path, sid);
+        Assert.False(Named(jar));
+        Assert.False(Named(vanilla));
+        // Nothing to take off, and folders Jay never touched: no error.
+        WindowsSandbox.Ungrant(Environment.SystemDirectory, sid);
+    }
+
     /// <summary>A JDK for the real-Java tests: JAVA_HOME, else an Adoptium install; null skips them.</summary>
     private static string? TestJava()
     {
