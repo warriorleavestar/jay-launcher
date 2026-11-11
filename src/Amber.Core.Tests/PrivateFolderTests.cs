@@ -113,12 +113,13 @@ public sealed class PrivateFolderTests
             new DirectoryInfo(shared).Create(sharedAcl);
             Assert.Null(Ensure(Path.Combine(shared, "locked"), out refused));
             Assert.StartsWith("parent:", refused);
-            // A link is refused even when it points at a private folder.
+            // A link is refused even when it points at a private folder. A junction needs no special privilege, unlike a
+            // symbolic link (which fails without Developer Mode or admin rights).
             var link = Path.Combine(root, "link");
-            Directory.CreateSymbolicLink(link, made);
-            Assert.Null(Ensure(link));
+            WindowsJunction.Create(link, made);
+            Assert.Null(Ensure(link, out refused));
+            Assert.Equal("is a link", refused);
         }
-        catch (UnauthorizedAccessException) { /* no symlink right on this machine: the link case can't be set up */ }
         finally { Directory.Delete(root, true); }
     }
 }
