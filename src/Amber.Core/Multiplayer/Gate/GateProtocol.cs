@@ -268,6 +268,12 @@ public static class GateProtocol
             // 网关对认不出的 psk 一声不吭就断开：邀请用过了、过期了，或者访问密钥不对。
             throw new IOException(L.T("core.gate.protocol.silent"), e);
         }
+        catch (IOException e) when (e.InnerException is System.Net.Sockets.SocketException
+            { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionReset })
+        {
+            // macOS can report the same silent close as a connection reset.
+            throw new IOException(L.T("core.gate.protocol.silent"), e);
+        }
         hs.ReadMessage(second);
         var serverKey = hs.RemoteStaticPublicKey ?? throw new CryptographicException(L.T("core.gate.protocol.malformed"));
         // 先核对服务器身份，对上了才发第三条消息（里面才有本机的设备公钥）。
