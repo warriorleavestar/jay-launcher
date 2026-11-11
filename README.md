@@ -312,7 +312,7 @@ Run Forge mods on Fabric or Quilt: there is no reliable compatibility layer, and
 
 Jay is source available under the [PolyForm Noncommercial License 1.0.0](LICENSE). Personal and other noncommercial use is free. Individuals and small teams can apply for free commercial use under the [Commercial Use Exception](COMMERCIAL-EXCEPTION.md); any other commercial use needs a written license from the Jay development team.
 
-Versions released before this change (up to and including v0.7.0) stay under the MIT License.
+This license now covers every version of Jay, including v0.7.0 and earlier, which were first released under the MIT License. The Jay development team no longer offers any version under MIT. Anyone who already received a copy of an earlier version under MIT keeps the MIT rights to that copy.
 
 Any place that still calls Jay "open source" or "MIT", including older docs, release notes and copies elsewhere, is outdated: [LICENSE](LICENSE) and [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) take precedence. If you find such a description, please [open an issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose).
 
