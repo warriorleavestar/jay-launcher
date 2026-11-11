@@ -91,6 +91,35 @@ public sealed partial class JayServersViewModel : ObservableObject
             Status = error ?? "";
             return;
         }
+        if (invite.Locator is { } locator)
+        {
+            // A server with no domain: its address is in a signed record on a public network's directories.
+            var profile = locator.NetworkId == Amber.Core.Multiplayer.Public.PublicNetworkProfile.Jay().Id
+                ? _service.Networks.Current(locator.NetworkId, _service.Settings.PublicNetworkNodes)
+                : _service.Networks.Find(locator.NetworkId)?.ToProfile();
+            if (profile is null)
+            {
+                Status = L.F("core.gate.record.needs_network", locator.NetworkId);
+                return;
+            }
+            IsBusy = true;
+            Status = L.F("core.gate.record.looking_up", profile.Name);
+            try
+            {
+                invite = await Amber.Core.Multiplayer.Gate.GateRecord.ResolveOnNetworkAsync(invite, profile, _service.EasyTier,
+                    Path.Combine(AppSettings.DataDir, "easytier", "gate-lookup"), default);
+            }
+            catch (Exception e) when (e is IOException or TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception
+                or System.Net.Sockets.SocketException or System.Net.Http.HttpRequestException)
+            {
+                Status = L.F("multiplayer.jayserver.enroll_failed", e.Message);
+                return;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
         IsBusy = true;
         Status = L.F("multiplayer.jayserver.enrolling", invite.Host);
         try
