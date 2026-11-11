@@ -7,9 +7,9 @@ using Amber.Core.Multiplayer.Public;
 namespace Amber.Core.Launch;
 
 /// <summary>
-/// Jay's release signatures (privacy plan, items 2 and 3). A release counts only when enough of the Jay trustees
-/// (<see cref="JayTrust"/>, 2 of 3) signed it, each with both Ed25519 and ML-DSA-65; there is no separate release key
-/// that could outrank them.
+/// Jay's release signatures (privacy plan, items 2 and 3). A release counts only when enough of the Jay trustees signed it
+/// (2 of 3), each with both Ed25519 and ML-DSA-65, using their release keys (<see cref="JayTrust.ReleaseKeys"/>), which are
+/// separate from the keys that review networks.
 /// <para>
 /// Next to the packages a release carries <c>SHA256SUMS.txt</c>, <c>SHA256SUMS.txt.sigs</c> (JSON, see
 /// <see cref="ReleaseManifest"/>) and, once the trustee list has ever changed, <c>trust-chain.json</c>
@@ -234,8 +234,8 @@ public sealed class TrustList
         Hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.ASCII.GetBytes(lines.ToString())));
     }
 
-    /// <summary>The list built into this Jay (<see cref="JayTrust.Keys"/>, <see cref="JayTrust.Need"/>).</summary>
-    public static TrustList Jay => new([.. JayTrust.Keys.Select(Convert.FromBase64String)], JayTrust.Need);
+    /// <summary>The release list built into this Jay (<see cref="JayTrust.ReleaseKeys"/>, <see cref="JayTrust.ReleaseNeed"/>).</summary>
+    public static TrustList Jay => new([.. JayTrust.ReleaseKeys.Select(Convert.FromBase64String)], JayTrust.ReleaseNeed);
 
     public IReadOnlyList<byte[]> Keys { get; }
     public IReadOnlyList<byte[]> Ids { get; }

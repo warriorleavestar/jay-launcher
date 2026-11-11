@@ -1,9 +1,11 @@
 # Release signatures
 
 A Jay release counts only when **2 of the 3 Jay trustees** have signed it, each with both **Ed25519 and
-ML-DSA-65** (privacy plan, items 2 and 3). There is no separate release key: the trustee keys in
-`JayTrust.Keys` (`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`) are the only keys that count, and
-nobody can outrank two of them.
+ML-DSA-65** (privacy plan, items 2 and 3). Every trustee holds **two separate keys**: a trust key for
+networks, directory certificates and hardware certificates (`JayTrust.Keys`), and a **release key** used only
+for releases and trustee list changes (`JayTrust.ReleaseKeys`, both in
+`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). `jay-server` refuses a release key for network signing and
+a trust key for release signing, so losing or misusing one doesn't touch the other job.
 
 Each release carries, next to its packages:
 
@@ -75,7 +77,7 @@ gh release download v0.9.0 --pattern 'SHA256SUMS.txt' --dir rel
 jay-server release prepare --tag v0.9.0 --seq 12 --commit <full commit id> --sums rel/SHA256SUMS.txt
 
 # Each of two trustees, on their own offline machine:
-jay-server release cosign --key my-trust.key --sums rel/SHA256SUMS.txt
+jay-server release cosign --key jay-release.key --sums rel/SHA256SUMS.txt
 ```
 
 `cosign` prints the version, seq, commit, every file and hash, the trustee list and who already signed
@@ -95,14 +97,14 @@ gh release edit v0.9.0 --draft=false
 
 ## Changing a trustee
 
-A new list (one full public key per line, from `jay-server key-public`) must be signed by enough of the
+A new list of release keys (one full public key per line, from `jay-server network key-public`) must be signed by enough of the
 **old** list:
 
 ```bash
-jay-server release trust-change --key my-trust.key --to new-trustees.txt --need 2 --seq 13
+jay-server release trust-change --key jay-release.key --to new-trustees.txt --need 2 --seq 13
 ```
 
 The review shows who stays, who leaves, who joins, and the new list hash; the trustee types its last 6
-characters. Once enough old trustees have signed, put the new keys in `JayTrust.Keys`, and ship
+characters. Once enough old trustees have signed, put the new keys in `JayTrust.ReleaseKeys`, and ship
 `trust-chain.json` with every later release so old installs can follow. A change's seq must not be
 lower than the last release's seq.

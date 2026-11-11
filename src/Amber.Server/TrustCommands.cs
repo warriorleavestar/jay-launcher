@@ -62,9 +62,22 @@ internal static class TrustCommands
     /// <summary>The public key lines everyone may see: full key (for JayTrust.Keys), id (for dirRoots) and a short fingerprint.</summary>
     internal static IEnumerable<string> PublicLines(TrustSigner signer)
     {
-        yield return $"公钥（写进 JayTrust.Keys，不是秘密）：{Convert.ToBase64String(signer.PublicKey)}";
+        yield return $"公钥（写进 JayTrust.Keys 或 JayTrust.ReleaseKeys，不是秘密）：{Convert.ToBase64String(signer.PublicKey)}";
         yield return $"钥匙编号（写进 dirRoots）：{Convert.ToBase64String(signer.Id)}";
         yield return $"指纹（核对用）：{Fingerprint(signer.Id)}";
+    }
+
+    /// <summary>Refuses a release key for network, directory or hardware signing, and a network key for releases.</summary>
+    internal static TrustSigner ForUse(TrustSigner signer, bool release) =>
+        ForUse(signer, release, JayTrust.IsNetworkKey, JayTrust.IsReleaseKey);
+
+    internal static TrustSigner ForUse(TrustSigner signer, bool release, Func<byte[], bool> isNetworkKey, Func<byte[], bool> isReleaseKey)
+    {
+        if (release && isNetworkKey(signer.Id))
+            throw new InvalidOperationException("这是审核网络用的钥匙，发版要用另一把发版钥匙（jay-release.key）");
+        if (!release && isReleaseKey(signer.Id))
+            throw new InvalidOperationException("这是发版钥匙，审核网络、目录证书要用另一把信任钥匙（jay-trustee.key）");
+        return signer;
     }
 
     internal static string Fingerprint(byte[] id) => Group(Convert.ToHexString(id.AsSpan(0, 8)));

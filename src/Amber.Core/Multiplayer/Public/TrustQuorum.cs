@@ -148,7 +148,8 @@ public sealed class TrustSigner
 }
 
 /// <summary>
-/// The Jay project's trust keys: one hybrid Ed25519 + ML-DSA-65 key per trustee (<see cref="TrustSigner"/>), each generated offline on that person's own machine. Any
+/// The Jay project's trust keys: per trustee, one hybrid Ed25519 + ML-DSA-65 key for networks, directories and hardware
+/// (<see cref="Keys"/>) and a separate one for releases (<see cref="ReleaseKeys"/>) (<see cref="TrustSigner"/>), each generated offline on that person's own machine. Any
 /// <see cref="Need"/> of them together can review a network, certify a directory node or bind a node to its hardware.
 /// The private keys never go into the repository, CI, a server or a chat. Empty until the trustees have made their keys:
 /// until then nothing counts as reviewed and the built-in network's directory is trusted on first use.
@@ -163,6 +164,22 @@ public static class JayTrust
 
     /// <summary>How many trustees must sign.</summary>
     public const int Need = 2;
+
+    /// <summary>
+    /// The trustees' separate release-signing keys (full public keys, base64), used only for Jay releases and trust-chain
+    /// changes (<c>Amber.Core.Launch.TrustList.Jay</c>). Each trustee holds one of these and one of <see cref="Keys"/>;
+    /// the two are never the same key, so a key used to review networks can't sign a release and the other way round.
+    /// </summary>
+    public static readonly string[] ReleaseKeys = [];
+
+    /// <summary>How many release keys must sign a release.</summary>
+    public const int ReleaseNeed = 2;
+
+    /// <summary>Whether <paramref name="id"/> is one of the release keys (refused for network, directory and hardware signing).</summary>
+    public static bool IsReleaseKey(byte[] id) => ReleaseKeys.Any(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)).AsSpan().SequenceEqual(id));
+
+    /// <summary>Whether <paramref name="id"/> is one of <see cref="Keys"/> (refused for release signing).</summary>
+    public static bool IsNetworkKey(byte[] id) => Keys.Any(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)).AsSpan().SequenceEqual(id));
 
     /// <summary>The quorum over the trustees' ids.</summary>
     public static TrustQuorum Quorum => Keys.Length == 0 ? TrustQuorum.None
