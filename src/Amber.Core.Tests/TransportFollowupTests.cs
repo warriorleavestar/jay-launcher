@@ -35,7 +35,7 @@ public class TransportFollowupTests
     // 确认过公网 IP 之后、判断地址之前网络变了：所有地址都被拒绝时回“出口没准备好”，不说成“目标是局域网”。
     [Theory]
     [InlineData(false, "没准备好")]
-    [InlineData(true, "出口拒绝连接")]
+    [InlineData(true, "转发的那台电脑拒绝连接")]
     public async Task RejectedTargetsRecheckReadiness(bool stillReady, string expected)
     {
         var (client, server, a, b) = await PairAsync();

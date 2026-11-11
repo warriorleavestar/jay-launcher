@@ -38,7 +38,7 @@ public class SecondReviewFixTests
         var serve = Socks5.ServeAsync(server, default, allow: policy.Allows, ensureReady: c => policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), c));
         await Task.Delay(300);   // 连接开着，公网 IP 变旧了
         var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, newIp.ToString(), 25565, default));
-        Assert.StartsWith("出口拒绝连接", e.Message);
+        Assert.StartsWith("转发的那台电脑拒绝连接", e.Message);
         Assert.Equal(1, calls);
         await serve.WaitAsync(TimeSpan.FromSeconds(5));
         a.Dispose();

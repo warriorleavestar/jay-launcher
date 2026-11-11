@@ -1550,7 +1550,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         Check("封装：邀请码带模式段", invite.StartsWith("JAY2-T2D-", StringComparison.Ordinal), invite[..9]);
         guest.JoinCode = invite;
         await guest.JoinCommand.ExecuteAsync(null);
-        Check("封装：自动批准，加入方按房主发来的设置用同样的封装", guest.IsJoined && host.ApprovalCards.Count == 0 && guest.TransportText.Contains("高加密") && guest.TransportText.Contains("伪装"), guest.TransportText + " / " + guest.Status);
+        Check("封装：自动批准，加入方按房主发来的设置用同样的封装", guest.IsJoined && host.ApprovalCards.Count == 0 && guest.TransportText.Contains("高加密") && guest.TransportText.Contains(L.T("multiplayer.transport.disguised_suffix")), guest.TransportText + " / " + guest.Status);
         await WaitAsync(() => guest.Peers.Any(p => p.Peer.Ip == Amber.Core.Multiplayer.EasyTierArgs.HostIp), 60);
         string? reply = null;
         for (var attempt = 0; attempt < 15 && reply is null; attempt++)

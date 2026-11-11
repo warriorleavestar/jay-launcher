@@ -19,4 +19,4 @@ When someone joins your room with an invite, they knock first. You decide who co
 
 ## If something goes wrong
 - One character is different: deny and ask your friend to knock again. Someone may be in between.
-- Practise it: the lobby's **Practice once ›** walks through a knock with a wrong code.
+- Practise it: **Practice once ›** at the bottom of the Multiplayer page walks through a knock with a wrong code.

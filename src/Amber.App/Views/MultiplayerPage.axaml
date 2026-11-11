@@ -875,7 +875,7 @@
                 <StackPanel Spacing="6" IsVisible="{Binding IsPublicConnected}">
                   <WrapPanel ItemSpacing="2">
                     <TextBlock Text="{l:T multiplayer.device.find_title}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    <c:TermHint x:Name="FriendCodeTermHint" Term="friend_code" />
+                    <c:TermHint x:Name="DeviceCodeTermHint" Term="device_code" />
                   </WrapPanel>
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBox Text="{Binding FindCodeInput}" PlaceholderText="{l:T multiplayer.device.find_placeholder}" FontFamily="Consolas,monospace" />

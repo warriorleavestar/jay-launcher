@@ -16,16 +16,42 @@ Use these terms when writing or translating UI text. The tables live in `src/Amb
 | 资源包 / 光影包 / 数据包 | 资源包 / 光影 / 数据包 | 資源包 / 光影 / 資料包 | resource pack / shader pack / data pack | リソースパック / シェーダーパック / データパック | |
 | 存档 | 世界 | 世界 | world | ワールド | |
 
-## 联机
+## Multiplayer
 
-| 概念 | 简体中文 | 繁體中文 | English | 日本語 | 说明 |
+One thing has one name, on every page and in every language. The table is the whole vocabulary; `LocalizationTests.RetiredNamesDoNotComeBack` fails the build when a retired name returns.
+
+| Concept | 简体中文 | 繁體中文 | English | 日本語 | Retired names (do not use) |
 |---|---|---|---|---|---|
-| 让双方找到彼此、必要时转发数据的服务器 | 联机节点 | 連線節點 | relay node | ノード | “中转 / 中繼 / 中継”只用来说经节点转发的那条路径 |
-| 发给朋友的整串码 | 房间码 | 房間碼 | room code | ルームコード | |
-| 房间码里用来加密的那段 | 房间密钥 | 房間金鑰 | room key | ルームキー | 不要写“密码 / password” |
-| 把流量交给房间里另一个人的网络发出去的那个人 | 出口 | 出口 | exit | 出口 | “exit node”只用于“全部流量”模式 |
-| 只让游戏经别人的网络进服务器 | 仅游戏转发 | 僅遊戲轉發 | game-only forwarding | ゲームのみ転送 | |
-| 联机和聊天外面再包一层加密 | 数据封装 | 資料封裝 | data tunneling | データのトンネル化 | 四种模式：通用 / MC 专用 / 高加密 / 极端加密 |
+| The code a host sends so someone can knock (`JAY2-`, `JAYS2-` for a server) | 邀请 / 服务器邀请 | 邀請 / 伺服器邀請 | invite / server invite | 招待 / サーバー招待 | 邀请码, invite code, 招待コード, 房间码 for new codes |
+| Asking to be let in | 敲门 | 敲門 | knock | ノック | |
+| The short code both sides compare | 安全码 | 安全碼 | safety code | 安全コード | 指纹, fingerprint |
+| Comparing four emoji when adding a friend | 对表情 | 對表情 | compare emoji | 絵文字の確認 | |
+| A person you added and checked | 朋友 | 朋友 | friend | フレンド | 联系人, contact, 連絡先 |
+| The code that lets someone ask to add you (`JAYC1-`) | 好友码 | 好友碼 | friend code | フレンドコード | 联系人码, contact code |
+| The code that points at one computer and finds its room (`JAYF1-`) | 设备码 | 裝置碼 | device code | デバイスコード | 好友码 / friend code for this code, 设备认证, device verification |
+| The host checking that a connection really comes from that computer | 核对设备 | 核對裝置 | device check | デバイス確認 | 设备验证 |
+| The key pair of this installation | 这台设备的身份 | 這台裝置的身分 | this device's identity | このデバイスの身元 | 联机身份, multiplayer identity |
+| A server that helps two sides meet and forwards when they cannot connect directly | 中转 | 中轉 | relay | 中継 | 中转服务器, 联机节点, 节点, relay server, node, ノード |
+| A room list and knock service run by a community (`JAYNET2-` adds one) | 公共网络，its code is a 网络地址 | 公共網路 / 網路位址 | public network / network address | 公開ネットワーク / ネットワークアドレス | 连接串, network string, 网络服务器 |
+| The address a public network is first reached at (advanced) | 种子地址 | 種子位址 | seed address | シードアドレス | |
+| Servers a friend runs with `jay-server`, and the one you host | 服务器（我加入的 / 我开的） | 伺服器 | servers (Joined / Hosted by me) | サーバー（参加済み / 自分のサーバー） | Jay 服务器, Jay server |
+| The extra encryption layer around room traffic | 保护 | 保護 | protection | 保護 | 数据封装, 封装, tunneling, 伪装, disguise (say "looks like an MC login") |
+| How much of the network a room joins | 范围：只联这个游戏 / 整个局域网 | 範圍 | scope: this game only / whole LAN | 範囲：このゲームだけ / LAN 全体 | 完整局域网模式, full LAN mode |
+| Sending all traffic out through a room member | 经 TA 上网 / 让房间里的人经我上网 | 經 TA 上網 | going online through a member | メンバー経由のインターネット接続 | 出口, exit, exit node |
+| Sending only the game's login and server traffic through a member | 转发游戏（只转游戏） | 轉發遊戲 | game forwarding (game only) | ゲームの転送 | |
+| Seeing and controlling someone's computer to help them | 远程协助 | 遠端協助 | remote help | リモートサポート | 远程控制, remote control |
+| Dropping everyone when an impostor is found | 紧急断开 | 緊急斷開 | emergency disconnect | 緊急切断 | 熔断, circuit breaker |
+| The room key inside an old room code | 房间密钥 | 房間金鑰 | room key | ルームキー | 密码 / password |
+
+Rules that go with the table:
+
+- There is no "lobby" (大厅) in the UI. Say what happens: "waiting for knocks", "looking for the host".
+- Explanations on a main screen are two lines at most. Longer text goes behind "Learn more" or into a help article.
+- State facts, not promises. Say who can see what ("a relay can see your IP address, not the content"); do not write "safe to share", "rest assured" or 放心.
+- Status is a mark (a tag, a dot, a chip), not a sentence.
+- The old `AMB-` room code, the sealed direct codes (`JAYDS1-` / `JAYDR1-`: 加密直连码, 回复码) and the word "seed" keep their names because they only appear in their own flows.
+
+Names in code are older than the UI words and stay as they are. `PastedCodeKind.FriendCode` and the `multiplayer.device.*` keys are the device code (`JAYF1-`); `PastedCodeKind.ContactCode` and `multiplayer.contacts.*` are the friend code (`JAYC1-`) and the friends list; `multiplayer.nodes.*` is relays; `multiplayer.exit.*` is going online through a member; `multiplayer.breaker.*` is the emergency disconnect.
 
 ## 账号
 

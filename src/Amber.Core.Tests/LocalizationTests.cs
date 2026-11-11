@@ -141,7 +141,7 @@ public partial class LocalizationTests
     }
 
     /// <summary>
-    /// Multiplayer glossary (official §6.14): the UI says relay server, safety code, friend code and "connected directly",
+    /// Multiplayer glossary (official §6.14): the UI says relay, safety code, device code and "connected directly",
     /// never the internal words. Internal names may appear only in the component's licence line.
     /// </summary>
     [Theory]
@@ -158,6 +158,48 @@ public partial class LocalizationTests
                 && banned.Any(b => p.Value.Contains(b, StringComparison.Ordinal)))
             .Select(p => $"{p.Key}: {p.Value}").ToList();
         Assert.True(bad.Count == 0, string.Join("\n", bad.Take(10)));
+    }
+
+    /// <summary>
+    /// One thing, one name (docs/i18n-glossary.md). These are the names the wording pass retired: "invite code" is now
+    /// an invite, "contact" a friend, the JAYF1- code a device code, "relay server" a relay, "tunneling" protection,
+    /// "full LAN mode" a scope, "exit" going online through someone, "remote control" remote help, "circuit breaker"
+    /// an emergency disconnect, and there is no "lobby". They must not come back anywhere in the UI, and the UI states
+    /// facts instead of telling people to feel safe. Matching ignores case.
+    /// </summary>
+    [Theory]
+    [InlineData("zh-Hans", new[] { "邀请码", "联系人", "设备认证", "连接串", "中转服务器", "网络服务器", "Jay 服务器", "数据封装", "封装通道", "伪装",
+        "完整局域网", "出口", "远程控制", "大厅", "熔断", "联机身份", "联机节点", "放心" })]
+    [InlineData("zh-Hant", new[] { "邀請碼", "聯絡人", "裝置認證", "連線字串", "中轉伺服器", "網路伺服器", "Jay 伺服器", "資料封裝", "封裝通道", "偽裝",
+        "完整區域網路", "出口", "遠端控制", "大廳", "熔斷", "連線身分", "放心" })]
+    [InlineData("en", new[] { "invite code", "contact code", "contacts", "network string", "relay server", "network server", "tunnel", "disguise",
+        "full LAN", "full-LAN", "exit node", "lobby", "remote control", "circuit breaker", "multiplayer identity", "rest assured" })]
+    [InlineData("ja", new[] { "招待コード", "連絡先", "デバイス認証", "接続文字列", "中継サーバー", "ネットワークサーバー", "Jay サーバー", "トンネル", "偽装",
+        "フルLAN", "完全 LAN", "出口", "リモート操作", "ロビー", "ブレーカー", "安心して" })]
+    public void RetiredNamesDoNotComeBack(string code, string[] retired)
+    {
+        var bad = L.Load(code)
+            .Where(p => retired.Any(w => p.Value.Contains(w, StringComparison.OrdinalIgnoreCase)))
+            .Select(p => $"{p.Key}: {p.Value}").ToList();
+        Assert.True(bad.Count == 0, string.Join("\n", bad.Take(10)));
+    }
+
+    /// <summary>
+    /// The text about public networks has to match what ships: while the built-in network has no servers,
+    /// the "add a network" hint must not present it as the default people are already using.
+    /// </summary>
+    [Theory]
+    [InlineData("zh-Hans")]
+    [InlineData("zh-Hant")]
+    [InlineData("en")]
+    [InlineData("ja")]
+    public void NetworkHintDoesNotPromiseABuiltInNetworkThatHasNoServers(string code)
+    {
+        if (Amber.Core.Multiplayer.Public.PublicNetworkProfile.JayNodes.Length > 0) return;
+        var table = L.Load(code);
+        var name = table["core.mp.public.jay_name"];
+        Assert.DoesNotContain(name, table["multiplayer.network.hint"], StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(name, table["multiplayer.public.setup_body"], StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>占位符的完整写法（包括 :F1 这类格式），译文要和原文一模一样。</summary>
