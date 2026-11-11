@@ -179,7 +179,7 @@
                       </Border>
                       <StackPanel Margin="12,8,12,12" Spacing="2">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                          <Ellipse Classes="status-dot playing" IsVisible="{Binding IsRunning}" />
+                          <Border Classes="led playing" IsVisible="{Binding IsRunning}" />
                           <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="14" Height="14" Stroke="{DynamicResource WarningText}" IsVisible="{Binding HasProblem}" />
                           <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="150" ToolTip.Tip="{Binding Name}" />
                         </StackPanel>
@@ -216,7 +216,7 @@
                     </Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                       <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Ellipse Classes="status-dot playing" IsVisible="{Binding IsRunning}" />
+                        <Border Classes="led playing" IsVisible="{Binding IsRunning}" />
                         <Path Classes="icon" Data="{StaticResource Icon.Warning}" Width="14" Height="14" Stroke="{DynamicResource WarningText}" IsVisible="{Binding HasProblem}" />
                         <Path Classes="icon" Data="{StaticResource Icon.Pin}" Width="14" Height="14" IsVisible="{Binding IsPinned}" />
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />

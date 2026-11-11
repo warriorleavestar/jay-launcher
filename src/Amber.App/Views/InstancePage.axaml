@@ -34,7 +34,7 @@
     </Style>
     <Style Selector="Border.fact-tag">
       <Setter Property="Background" Value="#40000000" />
-      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusXs}" />
       <Setter Property="Padding" Value="8,2" />
     </Style>
     <!-- 正在玩：PlayTint 底 PlayText 字，不是实心琥珀 -->
@@ -109,7 +109,7 @@
           <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Bottom">
             <TextBlock x:Name="HeroName" Classes="on-cover headline" Text="{Binding HeroName}" TextTrimming="CharacterEllipsis" MaxLines="1" ToolTip.Tip="{Binding HeroName}" />
             <WrapPanel x:Name="HeroFacts" ItemSpacing="6" LineSpacing="4">
-              <Border Classes="fact-tag"><TextBlock Classes="on-cover" Text="{Binding HeroVersion}" FontSize="12" /></Border>
+              <Border Classes="fact-tag"><TextBlock Classes="on-cover px" Text="{Binding HeroVersion}" /></Border>
               <Border Classes="fact-tag" IsVisible="{Binding !!HeroLoader.Length}"><TextBlock Classes="on-cover" Text="{Binding HeroLoader}" FontSize="12" /></Border>
               <TextBlock Classes="on-cover-dim" Text="{Binding HeroFacts}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </WrapPanel>
@@ -121,7 +121,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Path Data="{StaticResource Icon.Play}" Width="14" Height="14" Stretch="Uniform" Fill="{Binding $parent[Button].Foreground}"
                         IsVisible="{Binding ShowPlayIcon}" />
-                  <Ellipse Width="8" Height="8" Fill="{DynamicResource Play}" VerticalAlignment="Center" IsVisible="{Binding StartPlaying}" />
+                  <Border Classes="led playing" IsVisible="{Binding StartPlaying}" />
                   <ProgressBar IsIndeterminate="True" Width="22" MinWidth="22" Height="4" VerticalAlignment="Center" IsVisible="{Binding StartBusy}" />
                   <TextBlock Text="{Binding StartLabel}" VerticalAlignment="Center" />
                 </StackPanel>
@@ -284,7 +284,7 @@
                       <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                       <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="vm:ScreenshotItem">
-                          <Button Padding="0" Background="Transparent" ToolTip.Tip="{Binding Name}" AutomationProperties.Name="{Binding Name}"
+                          <Button Classes="bare" ToolTip.Tip="{Binding Name}" AutomationProperties.Name="{Binding Name}"
                                   Command="{Binding $parent[ItemsControl].((vm:InstanceViewModel)DataContext).OpenScreenshotCommand}" CommandParameter="{Binding}">
                             <Image Source="{Binding Thumbnail}" Width="120" Height="68" Stretch="UniformToFill" />
                           </Button>
@@ -809,7 +809,7 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate DataType="vm:ScreenshotItem">
                     <StackPanel Width="180" Margin="0,0,10,10">
-                      <Button Padding="0" Background="Transparent" Command="{Binding $parent[ItemsControl].((vm:InstanceViewModel)DataContext).OpenScreenshotCommand}" CommandParameter="{Binding}">
+                      <Button Classes="bare" Command="{Binding $parent[ItemsControl].((vm:InstanceViewModel)DataContext).OpenScreenshotCommand}" CommandParameter="{Binding}">
                         <Image Source="{Binding Thumbnail}" Height="102" Stretch="UniformToFill" />
                       </Button>
                       <Grid ColumnDefinitions="*,Auto" Margin="0,2,0,0">

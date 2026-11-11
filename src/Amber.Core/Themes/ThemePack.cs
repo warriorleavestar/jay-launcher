@@ -114,7 +114,7 @@ public static partial class ThemePackReader
         "PlayHover", "PlayPressed", "OnPlay", "PlayBorder", "PlayText", "PlayGlow", "PlayTint", "Badge",
         "OnBadge", "BadgeMuted", "OnBadgeMuted", "IlloLine", "IlloFill", "LoaderVanilla", "LoaderFabric", "LoaderForge",
         "LoaderNeoForge", "LoaderQuilt", "LoaderOptiFine", "LogDebug", "LogInfo", "LogWarn", "LogError", "LogFatal",
-        "LogJay",
+        "LogJay", "WingLight", "WingDark",
     ];
 
     /// <summary>数字 token 和允许的范围（字号最小 11，太小的看不清）。</summary>

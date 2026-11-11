@@ -5,7 +5,7 @@
   <ScrollViewer>
     <StackPanel Margin="{DynamicResource PagePadding}" Spacing="16" MaxWidth="1100">
       <TextBlock Classes="display" Text="Jay 控件库" />
-      <TextBlock Classes="hint" Text="第 0 批：设计令牌和基础控件。琥珀只给开始游戏，松鸦蓝是普通主按钮。" />
+      <TextBlock Classes="hint" Text="设计令牌和基础控件。琥珀只给开始游戏，松鸦蓝是面板里的确认；按钮只有一种形状；翅膀条纹只在选中、进度和码的边上。" />
 
       <Border Classes="card">
         <StackPanel Spacing="12">
@@ -42,31 +42,93 @@
 
       <Border Classes="card">
         <StackPanel Spacing="12">
-          <TextBlock Classes="h2" Text="标签、角标、状态" />
-          <WrapPanel ItemSpacing="8" LineSpacing="8">
-            <Border Classes="chip"><TextBlock Text="全部" /></Border>
+          <TextBlock Classes="h2" Text="状态（芯片 + 方灯）、属性（标签）、数字（角标）" />
+          <WrapPanel x:Name="GalleryChips" ItemSpacing="8" LineSpacing="8">
+            <Border Classes="chip ok"><StackPanel><Border Classes="led online" /><TextBlock Text="已连接" /></StackPanel></Border>
+            <Border Classes="chip info"><StackPanel><Border Classes="led busy" /><TextBlock Text="端到端加密" /></StackPanel></Border>
+            <Border Classes="chip playing"><StackPanel><Border Classes="led playing" /><TextBlock Text="正在玩" /></StackPanel></Border>
+            <Border Classes="chip warn"><StackPanel><Border Classes="led warning" /><TextBlock Text="走中转" /></StackPanel></Border>
+            <Border Classes="chip bad"><StackPanel><Border Classes="led error" /><TextBlock Text="连不上" /></StackPanel></Border>
+            <Border Classes="chip"><StackPanel><Border Classes="led off" /><TextBlock Text="离线" /></StackPanel></Border>
             <Border Classes="chip selected"><TextBlock Text="已选中" /></Border>
-            <Border Classes="badge"><TextBlock Text="3" /></Border>
-            <Border Classes="badge muted"><TextBlock Text="12" /></Border>
-            <Border Classes="pill success"><TextBlock Text="正式版" /></Border>
-            <Border Classes="pill accent"><TextBlock Text="快照" /></Border>
           </WrapPanel>
-          <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <WrapPanel x:Name="GalleryTags" ItemSpacing="8" LineSpacing="8">
+            <Border Classes="tag"><TextBlock Classes="px" Text="1.21.1" /></Border>
+            <Border Classes="tag"><TextBlock Classes="px" Text="1.20.1" /></Border>
+            <Border Classes="tag success"><TextBlock Text="正式版" /></Border>
+            <Border Classes="tag accent"><TextBlock Text="快照" /></Border>
             <Border Classes="loader vanilla"><TextBlock Text="原版" /></Border>
             <Border Classes="loader fabric"><TextBlock Text="Fabric" /></Border>
             <Border Classes="loader forge"><TextBlock Text="Forge" /></Border>
             <Border Classes="loader neoforge"><TextBlock Text="NeoForge" /></Border>
             <Border Classes="loader quilt"><TextBlock Text="Quilt" /></Border>
             <Border Classes="loader optifine"><TextBlock Text="OptiFine" /></Border>
+            <Border Classes="badge"><TextBlock Text="3" /></Border>
+            <Border Classes="badge muted"><TextBlock Text="12" /></Border>
           </WrapPanel>
           <WrapPanel ItemSpacing="16" LineSpacing="8">
-            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot online" /><TextBlock Text="在线" /></StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot busy" /><TextBlock Text="正在安装" /></StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot playing" /><TextBlock Text="正在玩" /></StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot warning" /><TextBlock Text="需要注意" /></StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot error" /><TextBlock Text="出错" /></StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6"><Ellipse Classes="status-dot" /><TextBlock Text="离线" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Border Classes="led online" /><TextBlock Text="在线" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Border Classes="led busy" /><TextBlock Text="正在安装" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Border Classes="led playing" /><TextBlock Text="正在玩" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Border Classes="led warning" /><TextBlock Text="需要注意" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Border Classes="led error" /><TextBlock Text="出错" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6"><Border Classes="led off" /><TextBlock Text="离线" /></StackPanel>
           </WrapPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="h2" Text="翅膀条纹：选中的页签、选中的导航、进度、码的边" />
+          <ListBox x:Name="GalleryTabs" Classes="subtabs" SelectedIndex="0" Background="Transparent" HorizontalAlignment="Left">
+            <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+            <ListBoxItem Content="一起玩" />
+            <ListBoxItem Content="公开房间" />
+            <ListBoxItem Content="服务器" />
+          </ListBox>
+          <StackPanel Orientation="Horizontal" Spacing="24">
+            <Border Background="{DynamicResource NavSelected}" CornerRadius="{DynamicResource RadiusMd}" Width="200" Height="40">
+              <Panel>
+                <Border x:Name="GalleryNavIndicator" Classes="nav-indicator" Width="4" Height="26" CornerRadius="1"
+                        HorizontalAlignment="Left" VerticalAlignment="Center" Margin="2,0,0,0" />
+                <StackPanel Orientation="Horizontal" Spacing="12" Margin="16,0,0,0">
+                  <Path Classes="icon" Data="{StaticResource Icon.Library}" Stroke="{DynamicResource Accent}" />
+                  <TextBlock Text="游戏库" FontWeight="Bold" VerticalAlignment="Center" />
+                </StackPanel>
+              </Panel>
+            </Border>
+            <ProgressBar x:Name="GalleryProgress" Value="62" Width="300" VerticalAlignment="Center" />
+          </StackPanel>
+          <Border x:Name="GalleryCodeCard" Classes="code-card" HorizontalAlignment="Left">
+            <Panel>
+              <Border Classes="wing-edge" />
+              <StackPanel Margin="18,10,14,10" Spacing="2">
+                <TextBlock Classes="caption" Text="邀请码（30 分钟内有效）" />
+                <SelectableTextBlock Classes="mono" FontSize="{DynamicResource FontSubtitle}" Text="JAY3-7F3K-Q9MX-2WPD" />
+              </StackPanel>
+            </Panel>
+          </Border>
+          <StackPanel x:Name="GallerySegments" Orientation="Horizontal" Classes="segmented" Spacing="4">
+            <RadioButton GroupName="GallerySegment" IsChecked="True"><TextBlock Text="跟随系统" /></RadioButton>
+            <RadioButton GroupName="GallerySegment"><TextBlock Text="夜" /></RadioButton>
+            <RadioButton GroupName="GallerySegment"><TextBlock Text="晨" /></RadioButton>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Border Width="28" Height="28" CornerRadius="{DynamicResource RadiusSm}" Background="{DynamicResource Accent}">
+              <TextBlock Classes="px step" Text="1" Foreground="{DynamicResource OnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <TextBlock Text="步骤编号和游戏版本用像素数字，别处不用" VerticalAlignment="Center" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="Pixel faces" />
+          <TextBlock Classes="hint" Text="按名字生成，同一个名字到哪儿都是同一张脸；嘴永远在鼻子正下方。" />
+          <ItemsControl x:Name="FaceGrid">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="14" LineSpacing="12" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          </ItemsControl>
         </StackPanel>
       </Border>
 
@@ -98,14 +160,17 @@
       <Border Classes="card">
         <StackPanel Spacing="8">
           <TextBlock Classes="h2" Text="输入、选择、进度" />
-          <TextBox PlaceholderText="搜索模组" MaxWidth="360" HorizontalAlignment="Left" />
-          <TextBox Classes="mono" Text="JAY2-7F3K-Q9MX-2WPD" MaxWidth="360" HorizontalAlignment="Left" />
+          <TextBox PlaceholderText="搜索模组" Width="360" HorizontalAlignment="Left" />
+          <TextBox Classes="mono" Text="JAY3-7F3K-Q9MX-2WPD" Width="360" HorizontalAlignment="Left" />
+          <ComboBox SelectedIndex="0" Width="360">
+            <ComboBoxItem Content="Fabric" />
+            <ComboBoxItem Content="NeoForge" />
+          </ComboBox>
           <StackPanel Orientation="Horizontal" Spacing="16">
             <CheckBox Content="已勾选" IsChecked="True" />
             <CheckBox Content="没勾选" />
             <ToggleSwitch IsChecked="True" OnContent="开" OffContent="关" />
           </StackPanel>
-          <ProgressBar Value="62" MaxWidth="360" HorizontalAlignment="Left" />
           <StackPanel Spacing="6">
             <Border Classes="skeleton" Width="240" />
             <Border Classes="skeleton" Width="180" />
