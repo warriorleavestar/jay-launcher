@@ -32,6 +32,25 @@
           </StackPanel>
           <StackPanel x:Name="RoomHeaderActions" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" HorizontalAlignment="Right">
             <Button x:Name="HeaderInviteButton" Classes="primary" Content="{l:T multiplayer.invite.button}" Command="{Binding InviteFriendsCommand}" IsVisible="{Binding IsHosting}" ToolTip.Tip="Ctrl+Shift+I" />
+            <Button x:Name="InviteContactButton" Content="{l:T multiplayer.contacts.invite_button}" IsVisible="{Binding CanInviteContacts}" ToolTip.Tip="{l:T multiplayer.contacts.invite_hint}">
+              <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedRight">
+                  <StackPanel x:Name="InviteContactPanel" Spacing="6" MaxWidth="320">
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.invite_hint}" />
+                    <ItemsControl x:Name="InviteContactList" ItemsSource="{Binding ContactList}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:ContactItem">
+                          <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Margin="0,1"
+                                  Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).InviteContactCommand}" CommandParameter="{Binding}">
+                            <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                          </Button>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
             <Button x:Name="RoomMenuButton" Content="⋯" ToolTip.Tip="{l:T multiplayer.room.menu}" AutomationProperties.Name="{l:T multiplayer.room.menu}">
               <Button.Flyout>
                 <MenuFlyout Placement="BottomEdgeAlignedRight">
@@ -45,6 +64,17 @@
             <Button x:Name="EndRoomButton" Content="{Binding EndRoomLabel}" Command="{Binding AskStopCommand}" />
           </StackPanel>
         </Grid>
+      </Border>
+
+      <!-- A mailed invite got no receipt: it may have been held back; offer the other ways in. -->
+      <Border x:Name="HeldBackBanner" Classes="banner warning" Margin="0" Padding="12,8" IsVisible="{Binding HasHeldBack}">
+        <StackPanel Spacing="6">
+          <TextBlock Text="{Binding HeldBackText}" TextWrapping="Wrap" />
+          <WrapPanel ItemSpacing="6" LineSpacing="6">
+            <Button x:Name="HeldBackOtherWayButton" Content="{l:T multiplayer.contacts.held_back.other_way}" Command="{Binding HeldBackOtherWayCommand}" />
+            <Button Classes="ghost" Content="{l:T multiplayer.contacts.held_back.dismiss}" Command="{Binding DismissHeldBackCommand}" />
+          </WrapPanel>
+        </StackPanel>
       </Border>
 
       <!-- Someone knocks: a locked panel (theme packs cannot restyle it). "No" has the focus; Alt+Y / Alt+N / Esc. -->
@@ -1042,6 +1072,86 @@
                     <Grid ColumnDefinitions="*,Auto" Margin="0,2">
                       <TextBlock Text="{Binding Label}" FontFamily="Consolas,monospace" VerticalAlignment="Center" TextWrapping="Wrap" />
                       <Button Grid.Column="1" Content="{l:T multiplayer.trusted.remove}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RemoveTrustedCommand}" CommandParameter="{Binding}" Margin="6,0,0,0" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+
+          <!-- Contacts (zero-leak codes): add once, compare four emoji, then invite them with sealed mail. -->
+          <Border x:Name="ContactsCard" Classes="card" Margin="0" IsVisible="{Binding ShowPublicNetworks}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="h2" Text="{l:T multiplayer.contacts.title}" Margin="0" />
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.hint}" />
+              <TextBlock Text="{l:T multiplayer.contacts.my_code}" FontWeight="SemiBold" />
+              <Grid ColumnDefinitions="*,Auto">
+                <SelectableTextBlock x:Name="MyContactCodeText" Text="{Binding MyContactCode}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button x:Name="CopyContactCodeButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="{l:T common.copy}" Command="{Binding CopyContactCodeCommand}" VerticalAlignment="Center" />
+              </Grid>
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.my_code_hint}" />
+              <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                <TextBox x:Name="ContactCodeBox" Text="{Binding ContactCodeInput}" PlaceholderText="{l:T multiplayer.contacts.add_placeholder}"
+                         c:EnterSubmit.Command="{Binding AddContactCommand}" />
+                <Button x:Name="AddContactButton" Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.contacts.add}" Command="{Binding AddContactCommand}" />
+              </Grid>
+              <TextBlock x:Name="ContactsPublicHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.public_hint}" IsVisible="{Binding !IsPublicConnected}" />
+
+              <TextBlock Text="{l:T multiplayer.contacts.requests}" FontWeight="SemiBold" Margin="0,6,0,0" IsVisible="{Binding HasContactRequests}" />
+              <ItemsControl x:Name="ContactRequestList" ItemsSource="{Binding ContactRequests}" IsVisible="{Binding HasContactRequests}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:ContactRequestItem">
+                    <Border Classes="callout" Padding="10,8" Margin="0,3">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                        <!-- The emoji check: big, each with its name under it (and read out for screen readers). -->
+                        <StackPanel Spacing="6" IsVisible="{Binding IsComparing}">
+                          <ItemsControl x:Name="ContactEmoji" ItemsSource="{Binding Emoji}" AutomationProperties.Name="{Binding EmojiSpoken}">
+                            <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate><WrapPanel ItemSpacing="14" LineSpacing="6" /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate DataType="vm:EmojiItem">
+                                <StackPanel Spacing="2" MinWidth="56" AutomationProperties.Name="{Binding Name}">
+                                  <TextBlock Text="{Binding Emoji}" FontSize="34" HorizontalAlignment="Center" />
+                                  <TextBlock Text="{Binding Name}" FontSize="12" HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="80" TextAlignment="Center" />
+                                </StackPanel>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.compare.hint}" />
+                          <WrapPanel ItemSpacing="6" LineSpacing="6">
+                            <Button x:Name="ConfirmContactButton" Content="{l:T multiplayer.contacts.compare.match}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).ConfirmContactCommand}" CommandParameter="{Binding}" />
+                            <Button x:Name="RejectContactButton" Content="{l:T multiplayer.contacts.compare.no_match}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RejectContactCommand}" CommandParameter="{Binding}" />
+                          </WrapPanel>
+                        </StackPanel>
+                        <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding IsAskingMe}">
+                          <Button Content="{l:T multiplayer.contacts.accept}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).AcceptContactCommand}" CommandParameter="{Binding}" />
+                          <Button Content="{l:T multiplayer.contacts.ignore}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DismissContactCommand}" CommandParameter="{Binding}" />
+                        </WrapPanel>
+                        <Button Classes="small" HorizontalAlignment="Left" Content="{l:T multiplayer.contacts.cancel}" IsVisible="{Binding CanCancel}"
+                                Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).DismissContactCommand}" CommandParameter="{Binding}" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <TextBlock Text="{l:T multiplayer.contacts.list}" FontWeight="SemiBold" Margin="0,6,0,0" />
+              <TextBlock x:Name="ContactsEmpty" Classes="hint" Text="{l:T multiplayer.contacts.empty}" IsVisible="{Binding !HasContacts}" />
+              <ItemsControl x:Name="ContactListView" ItemsSource="{Binding ContactList}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:ContactItem">
+                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
+                      <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource AccentTint}" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Initial}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentText}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Border>
+                      <StackPanel Grid.Column="1" Margin="8,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <Button Grid.Column="2" Classes="small" Content="{l:T multiplayer.contacts.remove}" VerticalAlignment="Center"
+                              Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RemoveContactCommand}" CommandParameter="{Binding}" />
                     </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>

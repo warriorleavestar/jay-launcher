@@ -201,7 +201,7 @@ public partial class MultiplayerViewModel
         if (!VolunteersAllowed) return;
         try
         {
-            var nodes = await new RoomDirectoryClient(network).NodesAsync(ct);
+            var nodes = await DirectoryClient(network).NodesAsync(ct);
             if (nodes.Count == 0) return;
             VolunteerCache.Remember(profile.Id, nodes);
             var have = new HashSet<string>(profile.Nodes.Concat(network.Options.ExtraPeers ?? []), StringComparer.OrdinalIgnoreCase);
@@ -219,7 +219,7 @@ public partial class MultiplayerViewModel
 
     private async Task VolunteerLoopAsync(PublicNetworkSession network, string url, CancellationToken ct)
     {
-        var client = new RoomDirectoryClient(network);
+        var client = DirectoryClient(network);
         while (!ct.IsCancellationRequested)
         {
             try

@@ -10,6 +10,12 @@ public sealed class Application : AvaloniaAndroidApplication<Mobile.App>
 {
     public Application(nint javaReference, JniHandleOwnership transfer) : base(javaReference, transfer) { }
 
+    public override void OnCreate()
+    {
+        Mobile.App.PlatformServices = new AndroidMobilePlatformServices(this);
+        base.OnCreate();
+    }
+
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder) =>
         base.CustomizeAppBuilder(builder).WithInterFont();
 }

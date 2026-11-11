@@ -5,6 +5,12 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_android_preview:
+        description: Publish the Android APK as the android-preview pre-release
+        type: boolean
+        default: false
 
 # 同一个 PR 推了新提交时，取消旧提交还在排队或在跑的检查；main 和标签上的不取消
 concurrency:
@@ -42,6 +48,7 @@ jobs:
       # 界面自检（AMBER_SELFTEST）要真实窗口、联网下载游戏和启动 Java，CI 上不跑，发布前在本机跑 tools/run-selftest.ps1。
 
   publish:
+    if: github.event_name != 'workflow_dispatch' || !inputs.publish_android_preview
     needs: validate
     timeout-minutes: 60
     strategy:
@@ -107,26 +114,8 @@ jobs:
           chmod +x ../out/server-${{ matrix.rid }}/install-network-node.sh
           tar -C ../out/server-${{ matrix.rid }} -czf ../packages/JayServer-${{ matrix.rid }}.tar.gz .
 
-      - name: Publish Windows Native AOT
-        if: matrix.rid == 'win-x64'
-        shell: pwsh
-        run: |
-          dotnet publish Amber.App -c Release -r win-x64 -p:PublishAot=true -p:DebugType=none -o ../out/win-x64-aot
-          Get-ChildItem ../out/win-x64-aot -Recurse -Filter *.pdb | Remove-Item
-          Copy-Item -Recurse ../out/win-x64/easytier ../out/win-x64-aot/easytier
-          Compress-Archive -Path ../out/win-x64-aot/* -DestinationPath ../packages/Jay-win-x64-aot.zip
-
-      # Mac/Linux 也出 Native AOT 包（启动更快，不用解压运行时）：在各自的原生机器上编译，带上同一份 EasyTier。
-      - name: Publish macOS/Linux Native AOT
-        if: matrix.archive == 'tar'
-        shell: bash
-        run: |
-          dotnet publish Amber.App -c Release -r ${{ matrix.rid }} -p:PublishAot=true -p:DebugType=none -o ../out/${{ matrix.rid }}-aot
-          find ../out/${{ matrix.rid }}-aot \( -name '*.pdb' -o -name '*.dbg' -o -name '*.dSYM' \) -prune -exec rm -rf {} +
-          cp -R ../out/${{ matrix.rid }}/easytier ../out/${{ matrix.rid }}-aot/easytier
-          chmod +x ../out/${{ matrix.rid }}-aot/Jay
-          if [[ "${{ matrix.rid }}" == linux-* ]]; then cp Amber.App/Assets/Fonts/OFL.txt ../out/${{ matrix.rid }}-aot/NotoSansSC-OFL.txt; fi
-          tar -C ../out/${{ matrix.rid }}-aot -czf ../packages/Jay-${{ matrix.rid }}-aot.tar.gz .
+      # Native AOT 会在 Windows/macOS/Linux 托管 runner 上超时或耗尽内存，
+      # 并让前面已打好的标准包来不及上传。发布链只生成可靠的 ReadyToRun 自包含包。
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -161,12 +150,39 @@ jobs:
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:AcceptAndroidSdkLicenses=true
 
-      - name: Publish experimental APK
+      - name: Prepare stable preview signing key
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_android_preview
+        shell: bash
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "${{ runner.temp }}/jay-android-preview.p12"
+
+      - name: Publish CI APK
+        if: github.event_name != 'workflow_dispatch' || !inputs.publish_android_preview
         run: >-
           dotnet publish Amber.Android/Amber.Android.csproj -c Release
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
           -p:JavaSdkDirectory=${{ runner.temp }}/jdk
           -p:AndroidPackageFormats=apk
+
+      - name: Publish release-signed preview APK
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_android_preview
+        env:
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: >-
+          dotnet publish Amber.Android/Amber.Android.csproj -c Release
+          -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
+          -p:JavaSdkDirectory=${{ runner.temp }}/jdk
+          -p:AndroidPackageFormats=apk
+          -p:AndroidKeyStore=true
+          -p:AndroidSigningKeyStore=${{ runner.temp }}/jay-android-preview.p12
+          -p:AndroidSigningKeyAlias="$ANDROID_RELEASE_KEY_ALIAS"
+          -p:AndroidSigningStorePass="$ANDROID_RELEASE_STORE_PASSWORD"
+          -p:AndroidSigningKeyPass="$ANDROID_RELEASE_KEY_PASSWORD"
 
       - name: Stage APK
         shell: bash
@@ -175,10 +191,18 @@ jobs:
           DISPLAY_VERSION="$(dotnet msbuild Amber.Android/Amber.Android.csproj -getProperty:ApplicationDisplayVersion)"
           BUILD_VERSION="$(dotnet msbuild Amber.Android/Amber.Android.csproj -getProperty:ApplicationVersion)"
           AAPT_PATH="$(find "${{ runner.temp }}/android-sdk/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
+          APKSIGNER_PATH="$(find "${{ runner.temp }}/android-sdk/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
           test -n "$AAPT_PATH"
+          test -n "$APKSIGNER_PATH"
           BADGING="$("$AAPT_PATH" dump badging "$APK_PATH" | head -n 1)"
           [[ "$BADGING" == *"versionName='$DISPLAY_VERSION'"* ]]
           [[ "$BADGING" == *"versionCode='$BUILD_VERSION'"* ]]
+          "$APKSIGNER_PATH" verify "$APK_PATH"
+          if [[ "${{ github.event_name }}" == workflow_dispatch && "${{ inputs.publish_android_preview }}" == true ]]; then
+            CERT_SHA256="$("$APKSIGNER_PATH" verify --print-certs "$APK_PATH" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+            test "$CERT_SHA256" = "595779309affcfebd61f591c3127a75c5471fbcd0f192539fbe5f52b951808e0"
+          fi
+          bash ../scripts/check-android-16k.sh "$APK_PATH" "${{ runner.temp }}/android-sdk"
           mkdir -p ../packages
           cp "$APK_PATH" ../packages/Jay-android-experimental.apk
 
@@ -188,7 +212,95 @@ jobs:
           path: packages/Jay-android-experimental.apk
           if-no-files-found: error
 
+  android-smoke:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: jay-android
+          path: android-assets
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install, launch and exercise phone/tablet touch layouts
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          script: |
+            adb install android-assets/Jay-android-experimental.apk
+            adb shell wm size 1080x2400
+            adb shell wm density 420
+            adb shell monkey -p nz.work.minecraft.jay -c android.intent.category.LAUNCHER 1
+            sleep 8
+            test -n "$(adb shell pidof nz.work.minecraft.jay)"
+            adb shell input swipe 540 1900 540 700 500
+            adb exec-out screencap -p > android-phone.png
+            adb shell am force-stop nz.work.minecraft.jay
+            adb shell wm size 2560x1600
+            adb shell wm density 320
+            adb shell monkey -p nz.work.minecraft.jay -c android.intent.category.LAUNCHER 1
+            sleep 5
+            test -n "$(adb shell pidof nz.work.minecraft.jay)"
+            adb shell input tap 1280 800
+            adb shell input swipe 2100 1300 2100 500 500
+            sleep 2
+            test -n "$(adb shell pidof nz.work.minecraft.jay)"
+            adb exec-out screencap -p > android-tablet.png
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jay-android-smoke-screenshots
+          path: android-*.png
+          if-no-files-found: error
+
+  publish-android-preview:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview
+    needs: [android, android-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: jay-android
+          path: android-assets
+
+      - name: Publish Android preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          cd android-assets
+          test -s Jay-android-experimental.apk
+          sha256sum Jay-android-experimental.apk > SHA256SUMS.txt
+          cat > release-notes.md <<'NOTES'
+          直接下载 Jay-android-experimental.apk。支持 Android 6.0 及以上的 ARM64 和 x86_64 设备。
+
+          手机和窄分屏采用单栏，宽屏平板采用双栏，旋转或调整窗口时自动重排。按钮和邀请码输入框已针对触控调整。
+
+          这是 Jay 服务器伴侣应用。通过邀请码登记并开启网关后，点【打开 FCL】会复制本机地址、保持后台网关并打开 FCL。Minecraft Java 运行环境、微软登录和游戏触控由需要另行安装的 FCL 提供；Jay 不内置或复制 FCL。
+
+          此发布从本版起使用固定的预览版签名，以后可覆盖升级并保留语言、设备身份和已保存的服务器。若此前安装过其他签名的测试包，Android 仍会拒绝首次覆盖安装。
+          NOTES
+          gh release create android-preview Jay-android-experimental.apk SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Jay Android 预览版" \
+            --notes-file release-notes.md \
+            --prerelease
+
   ios:
+    if: github.event_name != 'workflow_dispatch' || !inputs.publish_android_preview
     # Keep the platform compile independent so a desktop-only/flaky test cannot hide iOS compiler failures.
     # .NET 10.0.403 installs the iOS 27.1 workload; this image has matching Xcode 27.1 as its default.
     runs-on: xcode-27
@@ -206,7 +318,8 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Install iOS workload
-        run: dotnet workload install ios
+        # setup-dotnet 只锁 SDK 还不够；workload 默认会更新到最新 feature band。
+        run: dotnet workload install ios --version 10.0.403
 
       - name: Build experimental iOS Simulator app
         run: >-
@@ -302,7 +415,7 @@ jobs:
       - name: Use signed Windows packages
         if: needs.sign-windows.result == 'success'
         run: |
-          for f in Jay-win-x64.zip Jay-win-x64-aot.zip JayServer-win-x64.zip; do
+          for f in Jay-win-x64.zip JayServer-win-x64.zip; do
             test -f "signed-assets/$f"
             cp -f "signed-assets/$f" "release-assets/$f"
           done

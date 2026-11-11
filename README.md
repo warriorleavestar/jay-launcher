@@ -12,6 +12,8 @@ No telemetry, no remote switches. Download, unzip, run.
 [![License](https://img.shields.io/github/license/warriorleavestar/jay-launcher)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 
+**[Download the Android companion APK (experimental)](https://github.com/warriorleavestar/jay-launcher/releases/download/android-preview/Jay-android-experimental.apk)**
+
 English | [简体中文](README.zh-Hans.md) | [Code signing policy](docs/code-signing-policy.md) | [Contributing](CONTRIBUTING.md)
 
 ![Jay home page](docs/images/jay-home.png)
@@ -30,15 +32,14 @@ Get the package for your computer from [Releases](https://github.com/warriorleav
 
 | System | File | Run |
 |---|---|---|
-| Windows 10+ x64 | `Jay-win-x64-aot.zip` (recommended) | Unzip and run `Jay.exe` |
+| Windows 10+ x64 | `Jay-win-x64.zip` | Unzip and run `Jay.exe` |
 | Apple silicon Mac | `Jay-osx-arm64.tar.gz` | Extract and run `./Jay` in Terminal |
 | Intel Mac (experimental) | `Jay-osx-x64.tar.gz` | Extract and run `./Jay` in Terminal |
 | Linux x64 (experimental) | `Jay-linux-x64.tar.gz` | Extract and run `./Jay` |
 | Linux ARM64 (experimental) | `Jay-linux-arm64.tar.gz` | Extract and run `./Jay`; install Java through your distribution |
 | Jay Server (experimental) | `JayServer-<platform>.zip` / `.tar.gz` | See [server/README.md](server/README.md) |
 
-The recommended zip is compiled ahead of time to native code (Native AOT): the window opens in about 0.3 seconds and it uses less memory. It unzips to 4 files that must stay in the same folder.
-Each release also has `Jay-win-x64.zip`, which holds a single `Jay.exe` that runs straight after unzipping if you prefer one file; it starts a little slower. Both builds have the same features and share the same data, so you can switch at any time.
+`Jay-win-x64.zip` contains a self-contained, single-file ReadyToRun build. Native AOT packages are currently disabled because they exhaust memory or exceed the time limit on GitHub-hosted runners and can prevent the reliable packages from being uploaded.
 
 Free code signing for the Windows builds from SignPath Foundation is being set up; see the [code signing policy](docs/code-signing-policy.md).
 
@@ -172,7 +173,7 @@ There is also a command-line version, for example `dotnet run --project Amber.Cl
 
 Jay is built with C#, .NET 10 and [Avalonia](https://avaloniaui.net/).
 
-The experimental Android and iOS projects currently provide Jay Server enrollment and a localhost gateway; they cannot launch Minecraft themselves yet. See the [Android](docs/android.md) and [iOS](docs/ios.md) experiment notes for build steps and current limitations.
+The experimental Android and iOS projects provide Jay Server enrollment and a localhost gateway. Android can keep that gateway alive, copy its address and open the separately installed FCL app for the Minecraft Java runtime and touch controls; Jay does not bundle FCL. iOS still requires a separate compatible client. See the [Android](docs/android.md) and [iOS](docs/ios.md) experiment notes for build steps and current limitations.
 
 ## FAQ
 

@@ -3,17 +3,17 @@
              xmlns:vm="using:Amber.Mobile.ViewModels"
              x:Class="Amber.Mobile.Views.MainView"
              x:DataType="vm:MobileMainViewModel">
-  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-    <StackPanel Margin="20,28,20,36" Spacing="16">
-      <Grid ColumnDefinitions="*,Auto">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <StackPanel x:Name="PageContent" MaxWidth="1080" Margin="16,16,16,24" Spacing="16">
+      <StackPanel Spacing="8">
         <StackPanel>
           <TextBlock Text="{Binding Title}" FontSize="28" FontWeight="Bold" />
           <TextBlock Text="{Binding VersionText}" Foreground="{DynamicResource SecondaryText}" FontSize="13" />
         </StackPanel>
-        <Border Grid.Column="1" Background="{DynamicResource AccentBrush}" CornerRadius="999" Padding="10,5" VerticalAlignment="Top">
+        <Border HorizontalAlignment="Left" Background="{DynamicResource AccentBrush}" CornerRadius="999" Padding="10,5" VerticalAlignment="Top">
           <TextBlock Text="{Binding ExperimentalText}" Foreground="{DynamicResource AccentText}" FontSize="12" FontWeight="SemiBold" />
         </Border>
-      </Grid>
+      </StackPanel>
 
       <Border Classes="card" Background="{DynamicResource WarningBackground}" BorderBrush="{DynamicResource WarningBorder}">
         <StackPanel Spacing="8">
@@ -22,55 +22,79 @@
         </StackPanel>
       </Border>
 
-      <Border Classes="card">
-        <StackPanel Spacing="10">
-          <TextBlock Text="{Binding DeviceTitle}" FontSize="17" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding DeviceFingerprint}" FontFamily="monospace" FontSize="16" TextWrapping="Wrap" />
-          <TextBlock Text="{Binding DeviceHint}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
+      <Grid x:Name="ContentColumns" ColumnDefinitions="*" RowDefinitions="Auto,Auto" RowSpacing="16" ColumnSpacing="20">
+        <StackPanel Spacing="16" VerticalAlignment="Top">
+          <Border Classes="card">
+            <StackPanel Spacing="10">
+              <TextBlock Text="{Binding DeviceTitle}" FontSize="17" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding DeviceFingerprint}" FontFamily="monospace" FontSize="16" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding DeviceHint}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <TextBlock Text="{Binding EnrollTitle}" FontSize="17" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding EnrollHint}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
+              <TextBox Text="{Binding InviteText}" AcceptsReturn="True" MinHeight="96" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" PlaceholderText="JAYS1-..." />
+              <Button Classes="primary" Command="{Binding EnrollCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Stretch">
+                <TextBlock Text="{Binding EnrollButtonText}" TextWrapping="Wrap" />
+              </Button>
+              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+            </StackPanel>
+          </Border>
+
         </StackPanel>
-      </Border>
+        <StackPanel x:Name="ServerColumn" Grid.Row="1" Spacing="16" VerticalAlignment="Top">
+          <Border Classes="card" IsVisible="{Binding ShowGameLauncher}" Background="{DynamicResource WarningBackground}" BorderBrush="{DynamicResource WarningBorder}">
+            <StackPanel Spacing="10">
+              <TextBlock Text="{Binding GameLauncherTitle}" FontSize="17" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding GameLauncherHint}" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryText}" LineHeight="21" />
+              <Button Classes="primary" Command="{Binding OpenGameLauncherCommand}" HorizontalAlignment="Stretch">
+                <TextBlock Text="{Binding OpenGameLauncherText}" TextWrapping="Wrap" />
+              </Button>
+            </StackPanel>
+          </Border>
 
-      <Border Classes="card">
-        <StackPanel Spacing="12">
-          <TextBlock Text="{Binding EnrollTitle}" FontSize="17" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding EnrollHint}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
-          <TextBox Text="{Binding InviteText}" AcceptsReturn="True" MinHeight="96" TextWrapping="Wrap" PlaceholderText="JAYS1-..." />
-          <Button Classes="primary" Content="{Binding EnrollButtonText}" Command="{Binding EnrollCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Stretch" />
-          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+          <Border Classes="card" IsVisible="{Binding HasStatus}">
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" LineHeight="21" />
+          </Border>
+
+          <Border Classes="card" IsVisible="{Binding IsConnected}">
+            <StackPanel Spacing="10">
+              <TextBlock Text="{Binding TunnelTitle}" FontSize="17" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding LocalAddress}" FontFamily="monospace" FontSize="20" FontWeight="Bold" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding TunnelHint}" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryText}" />
+              <Button Classes="secondary" Command="{Binding DisconnectCommand}">
+                <TextBlock Text="{Binding DisconnectButtonText}" TextWrapping="Wrap" />
+              </Button>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="{Binding SavedServersTitle}" FontSize="20" FontWeight="SemiBold" Margin="0,4,0,0" />
+          <TextBlock Text="{Binding NoServersText}" IsVisible="{Binding HasNoServers}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Servers}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MobileServerItem">
+                <Border Classes="card" Margin="0,0,0,12">
+                  <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
+                    <StackPanel Spacing="8">
+                      <Button Classes="primary" Command="{Binding ConnectCommand}">
+                        <TextBlock Text="{Binding ConnectText}" TextWrapping="Wrap" />
+                      </Button>
+                      <Button Classes="secondary" Command="{Binding RemoveCommand}">
+                        <TextBlock Text="{Binding RemoveText}" TextWrapping="Wrap" />
+                      </Button>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
         </StackPanel>
-      </Border>
-
-      <Border Classes="card" IsVisible="{Binding HasStatus}">
-        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" LineHeight="21" />
-      </Border>
-
-      <Border Classes="card" IsVisible="{Binding IsConnected}">
-        <StackPanel Spacing="10">
-          <TextBlock Text="{Binding TunnelTitle}" FontSize="17" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding LocalAddress}" FontFamily="monospace" FontSize="20" FontWeight="Bold" />
-          <TextBlock Text="{Binding TunnelHint}" TextWrapping="Wrap" Foreground="{DynamicResource SecondaryText}" />
-          <Button Classes="secondary" Content="{Binding DisconnectButtonText}" Command="{Binding DisconnectCommand}" />
-        </StackPanel>
-      </Border>
-
-      <TextBlock Text="{Binding SavedServersTitle}" FontSize="20" FontWeight="SemiBold" Margin="0,4,0,0" />
-      <TextBlock Text="{Binding NoServersText}" IsVisible="{Binding HasNoServers}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
-      <ItemsControl ItemsSource="{Binding Servers}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="vm:MobileServerItem">
-            <Border Classes="card" Margin="0,0,0,12">
-              <StackPanel Spacing="10">
-                <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                  <Button Classes="primary" Content="{Binding ConnectText}" Command="{Binding ConnectCommand}" />
-                  <Button Grid.Column="1" Classes="secondary" Content="{Binding RemoveText}" Command="{Binding RemoveCommand}" />
-                </Grid>
-              </StackPanel>
-            </Border>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+      </Grid>
     </StackPanel>
   </ScrollViewer>
 </UserControl>
