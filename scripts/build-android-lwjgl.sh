@@ -21,8 +21,8 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 case "$abi" in
-  arm64-v8a) triple="aarch64-linux-android"; host_triple="aarch64-linux-android"; arch_define="LWJGL_arm64" ;;
-  x86_64) triple="x86_64-linux-android"; host_triple="x86_64-linux-android"; arch_define="LWJGL_x64" ;;
+  arm64-v8a) triple="aarch64-linux-android"; host_triple="aarch64-linux-android"; arch_define="LWJGL_arm64"; ffi_arch="aarch64" ;;
+  x86_64) triple="x86_64-linux-android"; host_triple="x86_64-linux-android"; arch_define="LWJGL_x64"; ffi_arch="x86" ;;
   *) echo "unsupported Android ABI: $abi" >&2; exit 2 ;;
 esac
 case "$(uname -s)" in
@@ -75,6 +75,8 @@ common_flags=(
   -I"$toolchain/sysroot/usr/include"
   -I"$lwjgl/modules/lwjgl/core/src/main/c"
   -I"$lwjgl/modules/lwjgl/core/src/main/c/linux"
+  -I"$lwjgl/modules/lwjgl/core/src/main/c/libffi"
+  -I"$lwjgl/modules/lwjgl/core/src/main/c/libffi/$ffi_arch"
 )
 link_flags=(
   -shared -Wl,--no-undefined -Wl,--gc-sections -Wl,-z,noexecstack
