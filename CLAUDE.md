@@ -43,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Repo
 只验证联机（邀请、敲门、房间、直连）时设置 `AMBER_SELFTEST_SCOPE=multiplayer`。
 只验证混合整合包（通用加载器跑别的生态的模组）时设置 `AMBER_SELFTEST_SCOPE=mixed-content`：在报告目录里建临时游戏目录和手写的 NeoForge 1.21.1 实例，再放一个只描述自己的替身加载器包，检查烘焙关时搜索不变、装只有 Forge 版的模组后提示【下载加载器】/【开启烘焙】、点【开启烘焙】、烘焙就绪后按实例搜得到并带“经通用加载器”标记、有原生版的模组不带标记、混合整合包预览，截图；联网搜 Modrinth 并下载一个小模组到测试目录。`AMBER_SELFTEST_SCOPE=mixed-e2e` 是端到端的浏览器半程：`AMBER_SELFTEST_MIXED_GAME` 和 `AMBER_SELFTEST_MIXED_INSTANCE` 指向测试游戏目录里的 NeoForge 1.21.1 实例（设置里开烘焙、选真实加载器包），经发现页装一个 Fabric 模组（连 Fabric 依赖）和一个 NeoForge 模组；之后用 CLI `launch … --bake <包> --smoke` 启动到标题画面。
 只验证光影检查时设置 `AMBER_SELFTEST_SCOPE=shader`：在报告目录里建一个临时游戏目录（Fabric 和原版两个手写版本），检查实例光影页和资源页在缺 Iris、已装 Iris、原版三种情况下的提示和【安装 Iris】，不联网。
-只看控件库和新配色时设置 `AMBER_SELFTEST_SCOPE=gallery`：控件库每一格和现有每一页在深浅两色下截图，检查琥珀按钮每屏最多一个、图标都解析得到；不碰游戏目录、不联网。
+只看控件库和新配色时设置 `AMBER_SELFTEST_SCOPE=gallery`：控件库每一格和现有每一页在深浅两色下截图，检查琥珀按钮每屏最多一个、图标都解析得到，以及美术风格的几条（按钮只有一种形状、状态灯是小方块、翅膀条纹只在选中的页签 / 导航指示条 / 进度条上、选中的分段是浅色调不是实心强调色、版本标签用像素数字、像素头像和像素封面都排出来）；不碰游戏目录、不联网。
 只验证新外壳时设置 `AMBER_SELFTEST_SCOPE=shell`：600×420 到 1440×900 四种窗口 × 四种语言截图，检查隐私行、三个入口、设置和账号都看得见，侧栏只在宽窗口展开；再走快捷键、返回前进、旧的九页都能走到、`settings#字段` 定位和带上下文返回；快捷键范围（§8.5）：任何地方 Ctrl+N 进新建实例、输入框里和输入法组字时不触发、没在玩时 Ctrl+Shift+Q 不做事、F6 / Shift+F6 在侧栏 / 顶栏 / 请求条 / 内容区之间轮换、Ctrl+Alt+Shift+T 回默认外观且能撤销。不碰游戏目录、不联网。
 只验证游戏库主页时设置 `AMBER_SELFTEST_SCOPE=library`：在报告目录里建一个临时游戏目录（五个手写版本），检查继续玩、需要你处理、固定排前、搜索、筛选、排序、封面和列表视图、打开、固定、空状态，三种宽度两种语言截图，不联网。
 只验证模组页签时设置 `AMBER_SELFTEST_SCOPE=mods`：在报告目录里建临时游戏目录和手写的模组 jar，检查搜索、筛选、检查器（宽档一栏、其余盖在右边）、勾选和批量栏、批量禁用 / 启用 / 删除和撤销、表格快捷键、检查出更新后才有【全部更新】、原版空状态，三种宽度两种语言截图；不联网。

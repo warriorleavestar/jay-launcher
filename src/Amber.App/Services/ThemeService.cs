@@ -66,7 +66,7 @@ public static class ThemeService
     }
 
     /// <summary>默认界面字体链（和 Tokens.axaml 的 UiFont 一致），锁定的窗口直接用它，主题换字体也不受影响。</summary>
-    public const string DefaultUiFont = "Segoe UI Variable Text, Segoe UI, $Default, Inter, Microsoft YaHei UI, PingFang SC, Noto Sans SC, Noto Sans CJK SC, Source Han Sans SC";
+    public const string DefaultUiFont = "avares://Jay/Assets/Fonts#Manrope, Segoe UI Variable Text, Segoe UI, $Default, Inter, Microsoft YaHei UI, PingFang SC, Noto Sans SC, Noto Sans CJK SC, Source Han Sans SC";
 
     private static readonly List<WeakReference<Window>> LockedWindows = [];
 
@@ -249,8 +249,8 @@ public static class ThemeService
         Current = pack;
         if (pack is not null)
         {
-            resources.ThemeDictionaries[ThemeVariant.Dark] = Brushes(pack.DarkColors);
-            resources.ThemeDictionaries[ThemeVariant.Light] = Brushes(pack.LightColors);
+            resources.ThemeDictionaries[ThemeVariant.Dark] = Brushes(pack.DarkColors, dark: true);
+            resources.ThemeDictionaries[ThemeVariant.Light] = Brushes(pack.LightColors, dark: false);
             foreach (var (key, value) in pack.Numbers) Set(resources, key, value);
             foreach (var (key, value) in pack.Radii) Set(resources, key, new CornerRadius(value));
             if (pack.DarkColors.TryGetValue("Accent", out var accent) || pack.LightColors.TryGetValue("Accent", out accent))
@@ -278,11 +278,31 @@ public static class ThemeService
         App.ApplyTheme(forced ?? _variantSetting);
     }
 
-    private static ResourceDictionary Brushes(Dictionary<string, uint> colors)
+    private static ResourceDictionary Brushes(Dictionary<string, uint> colors, bool dark)
     {
         var dict = new ResourceDictionary();
         foreach (var (key, argb) in colors) dict[key] = new SolidColorBrush(Color.FromUInt32(argb));
+        // The wing bars follow the pack's accent. A pack that touches neither keeps the brushes from Tokens.axaml.
+        if (colors.ContainsKey("Accent") || colors.ContainsKey("WingLight") || colors.ContainsKey("WingDark"))
+        {
+            var (accent, light, deep) = WingBars.Colors(colors, dark);
+            dict["WingBrush"] = WingBrush(accent, light, deep, vertical: false);
+            dict["WingBrushVertical"] = WingBrush(accent, light, deep, vertical: true);
+        }
         return dict;
+    }
+
+    /// <summary>One period of the wing bars as a repeating hard-edged gradient (same shape as WingBrush in Tokens.axaml).</summary>
+    internal static LinearGradientBrush WingBrush(uint accent, uint light, uint dark, bool vertical)
+    {
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Absolute),
+            EndPoint = vertical ? new RelativePoint(0, WingBars.Period, RelativeUnit.Absolute) : new RelativePoint(WingBars.Period, 0, RelativeUnit.Absolute),
+            SpreadMethod = GradientSpreadMethod.Repeat,
+        };
+        foreach (var (offset, color) in WingBars.Stops(accent, light, dark)) brush.GradientStops.Add(new GradientStop(Color.FromUInt32(color), offset));
+        return brush;
     }
 
     private static void Set(IResourceDictionary resources, string key, object value)

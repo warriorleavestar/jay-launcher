@@ -64,6 +64,7 @@ internal static class ThemeStyleBuilder
                 break;
             case "badge": Labeled(styles, x => x.OfType<Border>().Class("badge"), pack, p); break;
             case "tag":
+                Labeled(styles, x => x.OfType<Border>().Class("tag"), pack, p);
                 Labeled(styles, x => x.OfType<Border>().Class("loader"), pack, p);
                 Labeled(styles, x => x.OfType<Border>().Class("fact-tag"), pack, p);
                 break;

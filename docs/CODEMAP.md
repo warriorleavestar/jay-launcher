@@ -58,7 +58,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `src/Amber.Core/RemoteControl/Unix/` | macOS (CoreGraphics), X11 (XTest) and Wayland (portal) capture and input, stop hotkey. | `X11Remote.cs`, `WaylandRemote.cs`, `MacRemote.cs` |
 | `src/Amber.Core/RemoteControl/Windows/` | Windows GDI capture, SendInput, global hotkey. | `WindowsRemote.cs` |
 | `src/Amber.Core/Safety/` | "For a child" mode settings. | `ChildMode.cs` |
-| `src/Amber.Core/Themes/` | Theme packs (`.jaytheme`, data only): tokens, styles, layout, store, reserved safety words, network themes. | `ThemePack.cs`, `ThemeStore.cs` |
+| `src/Amber.Core/Themes/` | Theme packs (`.jaytheme`, data only): tokens, styles, layout, store, reserved safety words, network themes. Also Jay's own artwork as data: the wing bars, pixel covers and pixel faces. | `ThemePack.cs`, `ThemeStore.cs`, `PixelArt.cs`, `WingBars.cs` |
 
 ### Codes users paste
 
