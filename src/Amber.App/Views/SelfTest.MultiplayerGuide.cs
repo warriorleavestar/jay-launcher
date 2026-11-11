@@ -180,6 +180,14 @@ internal sealed partial class SelfTest
             await Task.Delay(300);
             Check($"旧直连码（{oldDirect[..5]}）提示改发普通邀请", vm.Status == L.T("multiplayer.direct.old_code") && vm.IsIdle && !vm.IsKnocking, vm.Status);
         }
+        // A sealed direct code (no server, no readable IP): the passphrase box shows, and Join without it does nothing.
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = "JAYDS1-QUJDREVGR0hJSktMTU5PUA");
+        await Task.Delay(200);
+        var passphraseBox = await FindAsync<TextBox>(t => t.Name == "JoinPassphraseBox");
+        Check("加密直连码：出现口令框", passphraseBox is { IsEffectivelyVisible: true });
+        Check("加密直连码：没填口令点加入只提示", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
+        await Task.Delay(200);
+        Check("加密直连码：提示输入口令、不敲门", vm.Status == L.T("multiplayer.sealed.enter_passphrase") && vm.IsIdle && !vm.IsKnocking, vm.Status);
         Dispatcher.UIThread.Invoke(() => { roomCode!.Text = ""; port!.Text = ""; });
         vm.MoreWaysOpen = false;
         vm.SetStatus(null);

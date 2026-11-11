@@ -595,6 +595,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private async Task JoinAsync()
     {
         if (!IsIdle || IsKnocking) return;
+        if (JoinCodeIsSealed)
+        {
+            await JoinSealedAsync();
+            return;
+        }
         if (RouteMisplacedCode(JoinCode, PastedCodeKind.Invite, () => JoinCode = "")) return;
         if (!IsComponentReady)
         {

@@ -450,6 +450,40 @@ public sealed class DirectSession : IAsyncDisposable
     }
 
     /// <summary>
+    /// Guest of a sealed direct code (no server): after <see cref="AnswerAsync"/>, punches towards the host while the friend
+    /// carries the sealed reply back, then knocks over the bridge (it reaches only the host's lobby), proves membership
+    /// and runs the room over the bridge. When punching fails and relays are set, the knock and the room use the relays.
+    /// </summary>
+    /// <returns>False when the host turned the knock down (the reason is already shown by <paramref name="knock"/>).</returns>
+    public async Task<bool> JoinThroughBridgeAsync(Func<IReadOnlyList<string>, CancellationToken, Task<RoomCode?>> knock, CancellationToken ct = default)
+    {
+        if (IsHost) throw new InvalidOperationException("host");
+        if (_remote is not { } host || Bridge is not { } bridge) throw new InvalidOperationException("no offer");
+        // The host can punch only once the friend has carried the reply back by hand: wait longer than in the knock flow.
+        var peer = await bridge.PunchAsync(host.Candidates, host.Nat, TimeSpan.FromSeconds(host.DirectlyReachable ? 60 : 120), ct);
+        IReadOnlyList<string> lobbyPeers;
+        if (peer is not null) lobbyPeers = [$"udp://127.0.0.1:{bridge.LocalPort}"];
+        else
+        {
+            var reason = FailureReason(host.Nat, LocalNat, host.Candidates, _gathered?.Candidates ?? []);
+            Log(L.T("core.mp.session.failed") + reason);
+            if (Options.FallbackNodes.Count == 0)
+            {
+                Log(L.T("core.mp.session.nofallback"));
+                throw new DirectFailedException(reason);
+            }
+            Log(L.T("core.mp.session.fallback") + string.Join(L.T("core.mp.format.listseparator"), Options.FallbackNodes));
+            UsingFallbackNode = true;
+            lobbyPeers = Options.FallbackNodes;
+        }
+        if (await knock(lobbyPeers, ct) is not { } room) return false;
+        _room = room;
+        if (peer is not null && room.FromInvite) await AdmitAsync(room.Member ?? throw new InvalidOperationException("no member key"), ct);
+        await StartEasyTierAsync(GuestOptions(peer is not null, Options.FullLan, null), ct);
+        return true;
+    }
+
+    /// <summary>
     /// 加入方：向房主证明自己是批准过的成员（要一个挑战，再用成员钥匙对它做 HMAC）。UDP 会丢包，每秒重发，最多 <see cref="AdmitTimeout"/>。
     /// 控制消息里只有成员编号和 HMAC，没有密钥。
     /// </summary>

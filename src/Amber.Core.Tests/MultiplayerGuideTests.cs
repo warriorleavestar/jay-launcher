@@ -124,6 +124,35 @@ public sealed class MultiplayerGuideTests
         Assert.False(vm.IsKnocking);
     });
 
+    /// <summary>A sealed direct code in the join box asks for the passphrase; nothing is opened or sent without it.</summary>
+    [Fact]
+    public void SealedCodeAsksForThePassphrase() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var __ = service;
+        vm.JoinCode = "JAYDS1-QUJDREVGR0hJSktMTU5PUA";
+        Assert.True(vm.JoinCodeIsSealed);
+        Assert.Equal(L.T("multiplayer.lobby.code.sealed_offer"), vm.JoinCodeRecognition);
+        vm.JoinCommand.Execute(null);
+        Assert.Equal(L.T("multiplayer.sealed.enter_passphrase"), vm.Status);
+        Assert.True(vm.IsIdle);
+        Assert.False(vm.IsKnocking);
+        vm.JoinCode = "JAY2-00041061050R3GG28A1C60T3GF-0G2491650N2RBHG68T3CE1T7GZ-2";
+        Assert.False(vm.JoinCodeIsSealed);
+    });
+
+    /// <summary>A sealed reply pasted by a guest (or a host without a sealed code out) says where it belongs.</summary>
+    [Fact]
+    public void SealedReplyInJoinBoxSaysItGoesToTheHost() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var __ = service;
+        vm.JoinCode = "JAYDR1-QUJDREVGR0hJSktMTU5PUA";
+        vm.JoinCommand.Execute(null);
+        Assert.Equal(L.T("multiplayer.sealed.reply_misplaced"), vm.Status);
+        Assert.True(vm.IsIdle);
+    });
+
     [Fact]
     public void RoomCodeInRoomBoxIsNotRerouted() => UiTestThread.Run(() =>
     {

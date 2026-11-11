@@ -313,6 +313,9 @@
                 </Grid>
                 <TextBlock x:Name="JoinCodeRecognitionText" FontSize="12" TextWrapping="Wrap" Text="{Binding JoinCodeRecognition}" IsVisible="{Binding HasJoinCodeText}"
                            Classes.warn="{Binding JoinCodeRecognitionWarns}" />
+                <!-- A sealed direct code: the passphrase the host told by another way (a call, in person). -->
+                <TextBox x:Name="JoinPassphraseBox" Text="{Binding JoinPassphrase}" PlaceholderText="{l:T multiplayer.sealed.passphrase_placeholder}"
+                         IsVisible="{Binding JoinCodeIsSealed}" c:EnterSubmit.Command="{Binding JoinCommand}" />
                 <!-- Invite v3: the host's game, the instance Jay picked, or "install one and join". -->
                 <StackPanel x:Name="JoinGamePanel" Spacing="4" IsVisible="{Binding HasJoinGame}">
                   <TextBlock x:Name="JoinGameText" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding JoinGameText}" />
@@ -618,6 +621,35 @@
                     <TextBlock Classes="h2" Text="{l:T multiplayer.direct.title}" Margin="0" />
                     <TextBlock Text="{Binding CurrentPathText}" FontWeight="SemiBold" TextWrapping="Wrap" />
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding DirectHint}" />
+                    <!-- No server at all: a sealed code and a passphrase told by another way. No IP is readable in the code. -->
+                    <StackPanel x:Name="SealedHostPanel" Spacing="6" IsVisible="{Binding IsDirectHost}">
+                      <TextBlock Text="{l:T multiplayer.sealed.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
+                      <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.sealed.hint}" />
+                      <Button x:Name="CreateSealedButton" Content="{l:T multiplayer.sealed.create}" Command="{Binding CreateSealedOfferCommand}" IsEnabled="{Binding !IsSealing}" />
+                      <StackPanel Spacing="6" IsVisible="{Binding HasSealedOffer}">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBox x:Name="SealedCodeBox" Text="{Binding SealedOfferCode}" IsReadOnly="True" TextWrapping="Wrap" FontSize="12" />
+                          <Button Grid.Column="1" Content="{l:T multiplayer.sealed.copy_code}" Command="{Binding CopySealedCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                          <TextBlock VerticalAlignment="Center" Margin="0,0,6,0" Text="{l:T multiplayer.sealed.passphrase_label}" />
+                          <TextBlock x:Name="SealedPassphraseText" Grid.Column="1" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" FontFamily="monospace" Text="{Binding SealedPassphrase}" />
+                          <Button Grid.Column="2" Content="{l:T multiplayer.sealed.copy_passphrase}" Command="{Binding CopySealedPassphraseCommand}" Margin="6,0,0,0" />
+                        </Grid>
+                        <TextBlock Classes="warn" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.sealed.separate_warning}" />
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBox x:Name="SealedReplyBox" Text="{Binding SealedReplyInput}" PlaceholderText="{l:T multiplayer.sealed.reply_placeholder}" c:EnterSubmit.Command="{Binding AddSealedReplyCommand}" />
+                          <Button Grid.Column="1" Content="{l:T multiplayer.sealed.connect}" Command="{Binding AddSealedReplyCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                        </Grid>
+                      </StackPanel>
+                    </StackPanel>
+                    <StackPanel x:Name="SealedGuestPanel" Spacing="6" IsVisible="{Binding HasMySealedReply}">
+                      <TextBlock Text="{l:T multiplayer.sealed.reply_title}" FontWeight="SemiBold" />
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBox x:Name="MySealedReplyBox" Text="{Binding MySealedReply}" IsReadOnly="True" TextWrapping="Wrap" FontSize="12" />
+                        <Button Grid.Column="1" Content="{l:T multiplayer.sealed.copy_reply}" Command="{Binding CopyMySealedReplyCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                      </Grid>
+                    </StackPanel>
                     <StackPanel Spacing="6" IsVisible="{Binding IsDirectHost}">
                       <TextBlock Text="{l:T multiplayer.matrix.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
                       <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.matrix.hint}" />

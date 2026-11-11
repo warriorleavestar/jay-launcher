@@ -23,6 +23,10 @@ public enum PastedCodeKind
     PublicNetwork,
     /// <summary>A contact code JAYC1-… (someone's identity public key): add them as a contact and compare emoji.</summary>
     ContactCode,
+    /// <summary>A sealed direct offer JAYDS1-… (host's addresses encrypted with a passphrase told by another way).</summary>
+    SealedOffer,
+    /// <summary>A sealed direct reply JAYDR1-… (the friend's addresses, sealed with the same passphrase): goes to the host.</summary>
+    SealedReply,
 }
 
 /// <summary>
@@ -53,6 +57,8 @@ public static class PastedCode
 
     private static readonly (string Prefix, PastedCodeKind Kind)[] Prefixes =
     [
+        (SealedDirect.OfferPrefix, PastedCodeKind.SealedOffer),
+        (SealedDirect.ReplyPrefix, PastedCodeKind.SealedReply),
         ("JAY2D-", PastedCodeKind.OldDirect),
         ("JAY2R-", PastedCodeKind.OldDirect),
         ("AMBDIRECT", PastedCodeKind.OldDirect),

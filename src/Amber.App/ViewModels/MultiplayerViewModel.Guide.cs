@@ -139,6 +139,23 @@ public sealed partial class MultiplayerViewModel
             case PastedCodeKind.OldDirect:
                 SetStatus(StatusMessage.Warning("multiplayer.direct.old_code"));
                 return true;
+            case PastedCodeKind.SealedOffer:
+                // A sealed direct code: into the join box, which then asks for the passphrase.
+                clearSource();
+                Tab = MultiplayerTab.Play;
+                JoinCode = text.Trim();
+                SetStatus(StatusMessage.Info("multiplayer.sealed.enter_passphrase"));
+                return true;
+            case PastedCodeKind.SealedReply:
+                // A friend's sealed reply belongs to the host's direct room card.
+                clearSource();
+                if (IsDirectHost && HasSealedOffer)
+                {
+                    SealedReplyInput = text.Trim();
+                    AddSealedReplyCommand.Execute(null);
+                }
+                else SetStatus(StatusMessage.Warning("multiplayer.sealed.reply_misplaced"));
+                return true;
             case PastedCodeKind.JayServer:
                 // Jay 服务器邀请：交给“Jay 服务器”卡片加入（只能用一次，所以直接用掉，不留在原来的框里）。
                 clearSource();

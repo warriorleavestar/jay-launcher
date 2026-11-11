@@ -93,6 +93,8 @@ public sealed partial class MultiplayerViewModel
         PastedCodeKind.NodeShare => L.T("multiplayer.lobby.code.relay_share"),
         PastedCodeKind.PublicNetwork => L.T("multiplayer.lobby.code.public_network"),
         PastedCodeKind.ContactCode => L.T("multiplayer.lobby.code.contact"),
+        PastedCodeKind.SealedOffer => L.T("multiplayer.lobby.code.sealed_offer"),
+        PastedCodeKind.SealedReply => L.T("multiplayer.lobby.code.sealed_reply"),
         PastedCodeKind.Room or PastedCodeKind.OldDirect => L.T("multiplayer.lobby.code.old"),
         _ => HasJoinCodeText ? L.T("multiplayer.lobby.code.unknown") : "",
     };
@@ -111,6 +113,7 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(JoinCodeRecognition));
         OnPropertyChanged(nameof(JoinCodeRecognitionWarns));
         OnPropertyChanged(nameof(HostButtonIsAmber));
+        OnPropertyChanged(nameof(JoinCodeIsSealed));
         RepickJoinInstance();
     }
 

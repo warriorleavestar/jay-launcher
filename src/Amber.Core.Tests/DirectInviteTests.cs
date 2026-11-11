@@ -238,6 +238,53 @@ public sealed class DirectInviteTests
         Assert.True(guest.HasRoom && guest.Room.FromInvite);
     }
 
+    /// <summary>
+    /// Sealed direct code (no server): the guest opens the offer, the host opens the sealed reply and punches, the guest
+    /// knocks over the bridge (which reaches only the lobby) and, once approved, the bridge reaches the room.
+    /// </summary>
+    [Fact]
+    public async Task SealedCodeJoinsWithoutAnyServer()
+    {
+        await using var host = new DirectRoom(() => true);
+        var offerAddresses = await host.PrepareAsync();
+        using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
+        using var offer = SealedDirect.Seal(offerAddresses, DirectTestKeys.Invite, DateTimeOffset.UtcNow);
+        using var opened = SealedDirect.Open(offer.Code, offer.Passphrase, DateTimeOffset.UtcNow);
+        await using var guest = Guest();
+        var mine = await guest.AnswerAsync(opened.Host);
+        var reply = SealedDirect.SealReply(opened, mine!, DateTimeOffset.UtcNow);
+        var hostPunch = host.Host.AddGuestAsync(offer.OpenReply(reply, DateTimeOffset.UtcNow));
+        string? beforeApproval = null;
+        var joined = await guest.JoinThroughBridgeAsync(async (peers, _) =>
+        {
+            Assert.Equal([$"udp://127.0.0.1:{guest.Bridge!.LocalPort}"], peers);
+            beforeApproval = await ArrivesAtAsync(guest, host.Lobby, room, "knock");
+            return host.Admit(RandomNumberGenerator.GetBytes(32), "Steve");
+        });
+        Assert.True(joined);
+        Assert.True(await hostPunch.WaitAsync(Deadline));
+        Assert.Equal("lobby", beforeApproval);
+        Assert.True(host.Host.Bridge.Peers.Single().Admitted);
+        Assert.Equal("room", await ArrivesAtAsync(guest, host.Lobby, room, "play"));
+        Assert.False(guest.UsingFallbackNode);
+    }
+
+    /// <summary>Sealed code, host turns the knock down: no room, nothing admitted.</summary>
+    [Fact]
+    public async Task SealedCodeTurnedDownLeavesWithoutARoom()
+    {
+        await using var host = new DirectRoom(() => true);
+        var offerAddresses = await host.PrepareAsync();
+        using var offer = SealedDirect.Seal(offerAddresses, DirectTestKeys.Invite, DateTimeOffset.UtcNow);
+        using var opened = SealedDirect.Open(offer.Code, offer.Passphrase, DateTimeOffset.UtcNow);
+        await using var guest = Guest();
+        var mine = await guest.AnswerAsync(opened.Host);
+        _ = host.Host.AddGuestAsync(offer.OpenReply(SealedDirect.SealReply(opened, mine!, DateTimeOffset.UtcNow), DateTimeOffset.UtcNow));
+        Assert.False(await guest.JoinThroughBridgeAsync((_, _) => Task.FromResult<RoomCode?>(null)));
+        Assert.False(guest.HasRoom);
+        Assert.False(host.Host.Bridge!.Peers.Single().Admitted);
+    }
+
     /// <summary>成员钥匙不在房主的成员表里（没批准、伪造的）：房主不认，桥还是只能到大厅。</summary>
     [Fact]
     public async Task UnknownMemberKeyIsRefusedAndTheBridgeStaysOnTheLobby()

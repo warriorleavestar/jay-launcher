@@ -217,7 +217,36 @@ public sealed partial class MultiplayerViewModel
     /// </summary>
     private async Task CompleteDirectJoinAsync(DirectSession direct, RoomCode room, KnockOutcome outcome)
     {
-        // 先订阅再打洞：打通后房主可能马上发来测试请求。只认当前这个会话的事件（结束或换了会话就不管）。
+        SubscribeGuestDirect(direct);
+        try
+        {
+            Mode = "join";
+            IsDirect = true;
+            _direct = direct;
+            RoomCodeText = "";
+            HostFingerprint = outcome.HostFingerprint;
+            HostJayAccount = outcome.HostJayAccount;
+            DirectHint = L.T("multiplayer.direct.guest_hint");
+            SetStatus(StatusMessage.Info("multiplayer.direct.punching"));
+            await direct.CompleteJoinAsync(room);
+            FinishDirectJoin(direct, room);
+        }
+        catch (TimeoutException e)
+        {
+            await LeaveFailedDirectAsync(direct);
+            SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
+        }
+        catch (Exception e) when (e is DirectFailedException or OperationCanceledException or IOException or System.Net.Sockets.SocketException or InvalidOperationException
+            or System.ComponentModel.Win32Exception or PlatformNotSupportedException or System.Security.Cryptography.CryptographicException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            await LeaveFailedDirectAsync(direct);
+            SetStatus(StatusMessage.Failure("multiplayer.direct.connect_failed", e, ErrorText.Of(e)));
+        }
+    }
+
+    /// <summary>Guest: subscribe before punching, since the host may send a test request right after. Only this session's events count.</summary>
+    private void SubscribeGuestDirect(DirectSession direct)
+    {
         direct.TestRequested += request => Dispatcher.UIThread.Post(() =>
         {
             // 事件排到界面线程时请求可能已经作废或撤回：只显示还在等确认的那个。
@@ -234,39 +263,21 @@ public sealed partial class MultiplayerViewModel
             if (_direct != direct || _guestTestRun != run) return;
             ResetGuestTest();
         });
-        try
-        {
-            Mode = "join";
-            IsDirect = true;
-            _direct = direct;
-            RoomCodeText = "";
-            HostFingerprint = outcome.HostFingerprint;
-            HostJayAccount = outcome.HostJayAccount;
-            DirectHint = L.T("multiplayer.direct.guest_hint");
-            SetStatus(StatusMessage.Info("multiplayer.direct.punching"));
-            await direct.CompleteJoinAsync(room);
-            AttachDirect(direct, room);
-            JoinAddress = FullLanMode ? $"{EasyTierArgs.HostIp}:{room.Port}" : $"127.0.0.1:{direct.LocalGamePort}";
-            _localChatPort = FullLanMode ? null : direct.LocalChatPort;
-            _localRemotePort = FullLanMode ? null : direct.LocalRemotePort;
-            RestoreChatHistory(room);
-            ChatStatus = L.T("multiplayer.chat.awaiting_host");
-            Status = direct.UsingFallbackNode ? L.T("multiplayer.direct.fallback") : L.T("multiplayer.direct.connected");
-            direct.GuestChatProbe = ChatProbeAsync;
-            // 万一请求在界面订阅前就到了（或者事件被错过）：按会话里记着的待确认请求补上。
-            if (direct.TestConsent.Pending is { } pending && !TestRequestPending) ShowTestRequest(pending);
-        }
-        catch (TimeoutException e)
-        {
-            await LeaveFailedDirectAsync(direct);
-            SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
-        }
-        catch (Exception e) when (e is DirectFailedException or OperationCanceledException or IOException or System.Net.Sockets.SocketException or InvalidOperationException
-            or System.ComponentModel.Win32Exception or PlatformNotSupportedException or System.Security.Cryptography.CryptographicException or InvalidDataException or System.Text.Json.JsonException)
-        {
-            await LeaveFailedDirectAsync(direct);
-            SetStatus(StatusMessage.Failure("multiplayer.direct.connect_failed", e, ErrorText.Of(e)));
-        }
+    }
+
+    /// <summary>Guest: the room runs (over the bridge, or the relays after a failed punch).</summary>
+    private void FinishDirectJoin(DirectSession direct, RoomCode room)
+    {
+        AttachDirect(direct, room);
+        JoinAddress = FullLanMode ? $"{EasyTierArgs.HostIp}:{room.Port}" : $"127.0.0.1:{direct.LocalGamePort}";
+        _localChatPort = FullLanMode ? null : direct.LocalChatPort;
+        _localRemotePort = FullLanMode ? null : direct.LocalRemotePort;
+        RestoreChatHistory(room);
+        ChatStatus = L.T("multiplayer.chat.awaiting_host");
+        Status = direct.UsingFallbackNode ? L.T("multiplayer.direct.fallback") : L.T("multiplayer.direct.connected");
+        direct.GuestChatProbe = ChatProbeAsync;
+        // 万一请求在界面订阅前就到了（或者事件被错过）：按会话里记着的待确认请求补上。
+        if (direct.TestConsent.Pending is { } pending && !TestRequestPending) ShowTestRequest(pending);
     }
 
     private async Task LeaveFailedDirectAsync(DirectSession direct)
@@ -276,6 +287,7 @@ public sealed partial class MultiplayerViewModel
         _direct = null;
         IsDirect = false;
         Mode = "";
+        ClearSealed();
         // 打洞期间可能已经收到测试请求：一起收起。
         ResetGuestTest();
     }
@@ -493,5 +505,6 @@ public sealed partial class MultiplayerViewModel
         IsDirect = false;
         DirectHint = "";
         PathText = "";
+        ClearSealed();
     }
 }
