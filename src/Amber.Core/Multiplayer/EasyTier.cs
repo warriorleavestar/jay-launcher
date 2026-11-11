@@ -86,9 +86,10 @@ public static class EasyTierRelease
             Embedded(ReleaseSignature.SumsFileName) ?? [], TrustList.Jay, All));
 
     /// <summary>
-    /// Whether a package may be installed: always when this Jay has no trustee keys built in yet (only the pinned
-    /// hashes protect it then), otherwise only with a valid <see cref="Signature"/>. Tests make sure no build with
-    /// trustee keys ships without one.
+    /// Whether a package may be installed: always when this Jay has no release keys built in yet
+    /// (<see cref="Amber.Core.Multiplayer.Public.JayTrust.ReleaseKeys"/>; only the pinned hashes protect it then),
+    /// otherwise only with a valid <see cref="Signature"/>. Tests make sure no build with
+    /// release keys ships without one.
     /// </summary>
     public static bool SignatureAllowsInstall => TrustList.Jay.Keys.Count == 0 || Signature.IsValid;
 
@@ -282,7 +283,7 @@ public sealed class EasyTierInstaller
             if (hash != Asset.Sha256)
                 throw new InvalidDataException(L.F("core.mp.component.hashfailed", hash));
         }
-        // Once trustee keys are built in, the pinned build must also carry 2 of 3 trustee signatures.
+        // Once release keys are built in, the pinned build must also carry 2 of 3 trustee release signatures.
         if (!EasyTierRelease.SignatureAllowsInstall)
             throw new InvalidDataException(L.F("core.mp.component.unsigned", UpdateCheck.Explain(EasyTierRelease.Signature.Verdict)));
         Extract(zip, InstallDir, Asset);

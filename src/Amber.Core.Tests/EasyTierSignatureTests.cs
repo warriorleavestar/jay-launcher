@@ -40,7 +40,7 @@ public sealed class EasyTierSignatureTests
         Assert.Equal(40, EasyTierRelease.FullCommit.Length);
     }
 
-    /// <summary>The release gate: a Jay build with trustee keys must carry a valid EasyTier signature, or EasyTier won't install.</summary>
+    /// <summary>The release gate: a Jay build with release keys must carry a valid EasyTier signature, or EasyTier won't install.</summary>
     [Fact]
     public void ABuildWithTrusteeKeysCarriesAValidSignature()
     {
