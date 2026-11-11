@@ -418,10 +418,10 @@ public static unsafe class WindowsSandbox
     /// The temp folder is moved to one the sandboxed game may write: LocalLow\Jay\temp (standard) or the container's
     /// Temp folder (strong). Every handle but the output pipes stays in Jay.
     /// </summary>
-    public static Process Start(ProcessStartInfo psi, WindowsSandboxLevel level)
+    public static Process Start(ProcessStartInfo psi, WindowsSandboxLevel level, string? tempFolder = null)
     {
         SecurityIdentifier? container = level == WindowsSandboxLevel.Strong ? ContainerSid() : null;
-        var temp = container is not null ? Path.Combine(ContainerFolder(container), "Temp") : LowTempFolder();
+        var temp = tempFolder ?? (container is not null ? Path.Combine(ContainerFolder(container), "Temp") : LowTempFolder());
         Directory.CreateDirectory(temp);
         psi.Environment["TEMP"] = temp;
         psi.Environment["TMP"] = temp;

@@ -593,6 +593,10 @@ try
             var extraJvm = TakeOption(argList, "--jvm");
             // --bake <加载器目录>：实验功能，先用通用加载器烘焙模组和实例，再用烘焙结果启动。
             var bakeLoader = TakeOption(argList, "--bake");
+            // --sandbox off|standard|strong: run the game in the OS sandbox (privacy plan item 15). Linux and macOS have
+            // one level; on Windows strong mode needs the loopback exemption for multiplayer (Jay asks for it, the CLI does not).
+            var sandboxMode = TakeOption(argList, "--sandbox") ?? "off";
+            string? bakeDataDir = null;
 
             await installer.CompleteAsync(id, null, cts.Token);
             var version = dir.ResolveVersion(id);
@@ -623,6 +627,7 @@ try
             {
                 var toolkit = Amber.Core.Bake.BakeToolkit.Find(bakeLoader) ?? throw new DirectoryNotFoundException(bakeLoader);
                 var bakeData = Environment.GetEnvironmentVariable("AMBER_BAKE_DATA") is { Length: > 0 } bd ? bd : Path.Combine(dir.Root, ".amber-bake-data");
+                bakeDataDir = bakeData;
                 var bake = new Amber.Core.Bake.BakeService(toolkit, Path.Combine(bakeData, "cache"), bakeData,
                     (items, ct) => downloader.DownloadAllAsync(items, null, ct));
                 var instance = Instance(id, isolate);
@@ -640,6 +645,23 @@ try
                 var baked = prepared.Launch ?? throw new InvalidOperationException(prepared.Reason);
                 Console.WriteLine($"BAKE READY {bakeWatch.Elapsed.TotalSeconds:F1}s reused={prepared.Reused} cache={prepared.Cache?.State ?? "-"} warm={(prepared.Warm is null ? "no" : "yes")} {prepared.Reason} {baked.StateFile}");
                 options = options with { Baked = baked };
+            }
+            if (sandboxMode != "off")
+            {
+                // The data folder (AMBER_DATA_DIR in tests) stays hidden; a bake's loader and data are granted.
+                var dataDir = Environment.GetEnvironmentVariable("AMBER_DATA_DIR") is { Length: > 0 } dd ? dd : AmberDataDir();
+                options = options with
+                {
+                    Sandbox = new SandboxOptions
+                    {
+                        Enabled = true,
+                        WindowsLevel = sandboxMode == "strong" ? WindowsSandboxLevel.Strong : WindowsSandboxLevel.Standard,
+                        Hidden = [Path.GetFullPath(dataDir)],
+                        ExtraReadOnly = bakeLoader is null ? [] : [Path.GetFullPath(bakeLoader)],
+                        ExtraReadWrite = bakeDataDir is null ? [] : [Path.GetFullPath(bakeDataDir)],
+                    },
+                };
+                Console.WriteLine($"SANDBOX {sandboxMode}");
             }
             var launcher = new GameLauncher(dir);
             if (dryRun)
@@ -664,8 +686,18 @@ try
                         if (parsed is null) return;
                         tail.Enqueue(parsed.Message);
                         if (tail.Count > 25) tail.Dequeue();
+                        // With --world or --server the smoke test waits until the player is in the world.
+                        var wantsWorld = options.JoinWorld is not null || options.JoinServer is not null;
                         if (parsed.Message.Contains("Sound engine started") || parsed.Message.Contains("OpenAL initialized") || parsed.Message.Contains("SoundSystem Author"))
+                        {
+                            Console.WriteLine("SMOKE SOUND " + parsed.Message);
+                            if (!wantsWorld) reached.TrySetResult(parsed.Message);
+                        }
+                        if (wantsWorld && parsed.Message.Contains("logged in with entity id", StringComparison.Ordinal))
+                        {
+                            Console.WriteLine("SMOKE WORLD " + parsed.Message);
                             reached.TrySetResult(parsed.Message);
+                        }
                     }
                 });
                 var finished = await Task.WhenAny(reached.Task, game.WaitForExitAsync(cts.Token), Task.Delay(TimeSpan.FromSeconds(smoke.Value), cts.Token));
