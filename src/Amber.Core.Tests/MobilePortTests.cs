@@ -58,7 +58,7 @@ public sealed class MobilePortTests
     }
 
     [Fact]
-    public async Task AndroidGameLauncherBridgeReceivesTheRunningGatewayAddress()
+    public async Task AndroidGameRuntimeReceivesTheRunningGatewayAddress()
     {
         var root = Path.Combine(Path.GetTempPath(), "jay-mobile-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -73,7 +73,7 @@ public sealed class MobilePortTests
             await viewModel.OpenGameLauncherCommand.ExecuteAsync(null);
 
             Assert.Equal("127.0.0.1:25565", platform.OpenedWithAddress);
-            Assert.Contains("FCL", viewModel.Status);
+            Assert.Contains("Jay", viewModel.Status);
         }
         finally
         {
@@ -81,10 +81,53 @@ public sealed class MobilePortTests
         }
     }
 
+    [Fact]
+    public void DefaultTouchControlsStayOnScreenAndHitTheirCenters()
+    {
+        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Move);
+        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.Jump);
+        Assert.Contains(TouchControlLayout.Default, control => control.Action == TouchControlAction.PrimaryAction);
+
+        foreach (var control in TouchControlLayout.Default)
+        {
+            Assert.InRange(control.CenterX - control.Radius, 0, 1);
+            Assert.InRange(control.CenterX + control.Radius, 0, 1);
+            Assert.InRange(control.CenterY - control.Radius, 0, 1);
+            Assert.InRange(control.CenterY + control.Radius, 0, 1);
+            Assert.Equal(control.Action, TouchControlLayout.HitTest(control.CenterX, control.CenterY)!.Action);
+        }
+
+        var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
+        var right = TouchControlLayout.JoystickVector(move.CenterX + move.Radius * 2, move.CenterY);
+        Assert.Equal(1, right.X, 6);
+        Assert.Equal(0, right.Y, 6);
+    }
+
+    [Fact]
+    public void TouchInputRouterKeepsSimultaneousMovementAndJumpIndependent()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+        var move = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Move);
+        var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
+
+        Assert.True(router.Press(10, move.CenterX, move.CenterY));
+        Assert.True(router.Move(10, move.CenterX + move.Radius, move.CenterY));
+        Assert.True(router.Press(11, jump.CenterX, jump.CenterY));
+        Assert.Contains((TouchControlAction.Jump, true), sink.Actions);
+        Assert.Equal(1, sink.LastMovement.X, 6);
+
+        Assert.True(router.Release(11));
+        Assert.Contains((TouchControlAction.Jump, false), sink.Actions);
+        Assert.Equal(1, sink.LastMovement.X, 6);
+        Assert.True(router.Release(10));
+        Assert.Equal((0d, 0d), sink.LastMovement);
+    }
+
     private sealed class FakeMobilePlatformServices : IMobilePlatformServices
     {
         public bool CanOpenGameLauncher => true;
-        public string GameLauncherName => "FCL";
+        public string GameLauncherName => "Jay";
         public string? OpenedWithAddress { get; private set; }
 
         public Task<MobileGameLauncherResult> OpenGameLauncherAsync(string? serverAddress)
@@ -94,6 +137,15 @@ public sealed class MobilePortTests
         }
 
         public void SetGatewayActive(bool active) { }
+    }
+
+    private sealed class RecordingTouchSink : ITouchInputSink
+    {
+        public List<(TouchControlAction Action, bool Pressed)> Actions { get; } = [];
+        public (double X, double Y) LastMovement { get; private set; }
+
+        public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
+        public void SetMovement(double x, double y) => LastMovement = (x, y);
     }
 
 }

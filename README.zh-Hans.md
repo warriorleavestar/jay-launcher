@@ -236,7 +236,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 
 还有一个命令行版本，例如 `dotnet run --project Amber.Cli -- list-remote`。
 
-[Android](docs/android.md) 和 [iOS](docs/ios.md) 实验版提供 Jay 服务器登记和本机网关。Android 版能让网关常驻，并打开另行安装的 FCL 来运行 Minecraft（Jay 不内置 FCL）；iOS 仍需要另外兼容的客户端。
+[Android](docs/android.md) 和 [iOS](docs/ios.md) 实验版提供 Jay 服务器登记和本机网关。Android 版现在有 Jay 自己的全屏游戏画面与触屏控制基础；独立 JVM 和图形运行环境仍在开发。iOS 仍需要另外兼容的客户端。
 
 第一次看代码？从 [docs/CODEMAP.md](docs/CODEMAP.md) 和 [参与贡献](CONTRIBUTING.zh-Hans.md) 开始。
 </details>

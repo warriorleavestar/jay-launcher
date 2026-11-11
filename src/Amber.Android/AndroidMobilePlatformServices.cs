@@ -6,13 +6,10 @@ namespace Amber.Android;
 
 public sealed class AndroidMobilePlatformServices(Context context) : IMobilePlatformServices
 {
-    private const string FclPackage = "com.tungsten.fcl";
-    private const string FclDebugPackage = "com.tungsten.fcl.debug";
-    private const string FclReleases = "https://github.com/FCL-Team/FoldCraftLauncher/releases/latest";
     private readonly Context _context = context.ApplicationContext!;
 
     public bool CanOpenGameLauncher => true;
-    public string GameLauncherName => "FCL";
+    public string GameLauncherName => "Jay";
 
     public Task<MobileGameLauncherResult> OpenGameLauncherAsync(string? serverAddress)
     {
@@ -23,19 +20,14 @@ public sealed class AndroidMobilePlatformServices(Context context) : IMobilePlat
                 clipboard.PrimaryClip = ClipData.NewPlainText("Jay Server", serverAddress);
         }
 
-        foreach (var packageName in new[] { FclPackage, FclDebugPackage })
-        {
-            var launchIntent = _context.PackageManager?.GetLaunchIntentForPackage(packageName);
-            if (launchIntent is null) continue;
-            launchIntent.AddFlags(ActivityFlags.NewTask);
-            _context.StartActivity(launchIntent);
-            return Task.FromResult(MobileGameLauncherResult.Launched);
-        }
-
-        var releaseIntent = new Intent(Intent.ActionView, global::Android.Net.Uri.Parse(FclReleases));
-        releaseIntent.AddFlags(ActivityFlags.NewTask);
-        _context.StartActivity(releaseIntent);
-        return Task.FromResult(MobileGameLauncherResult.InstallPageOpened);
+        var gameIntent = new Intent(_context, typeof(GameActivity));
+        gameIntent.AddFlags(ActivityFlags.NewTask);
+        if (!string.IsNullOrWhiteSpace(serverAddress))
+            gameIntent.PutExtra(GameActivity.ServerAddressExtra, serverAddress);
+        _context.StartActivity(gameIntent);
+        return Task.FromResult(AndroidRuntimeStore.IsInstalled(_context)
+            ? MobileGameLauncherResult.Launched
+            : MobileGameLauncherResult.RuntimeSetupOpened);
     }
 
     public void SetGatewayActive(bool active)

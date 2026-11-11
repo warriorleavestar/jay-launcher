@@ -5,8 +5,4 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <application android:label="Jay" android:icon="@drawable/jay" android:allowBackup="false" />
-  <queries>
-    <package android:name="com.tungsten.fcl" />
-    <package android:name="com.tungsten.fcl.debug" />
-  </queries>
 </manifest>
