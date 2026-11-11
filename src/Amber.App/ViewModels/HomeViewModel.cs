@@ -1234,8 +1234,8 @@ public sealed partial class HomeViewModel : PageViewModel
     [RelayCommand]
     private void OpenLatestCrashFile()
     {
-        if (_lastRunFiles.FirstOrDefault() is { } file)
-            Process.Start(new ProcessStartInfo(file) { UseShellExecute = true });
+        if (_lastRunFiles.FirstOrDefault() is { } file && ShellOpen.TryOpen(file, createFolder: false) is { } e)
+            SetStatus(StatusMessage.Failure("common.open_failed", e, file, ErrorText.Of(e)));
     }
 }
 

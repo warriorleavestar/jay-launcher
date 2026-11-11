@@ -136,7 +136,7 @@ public sealed partial class InstanceViewModel
     public event Action<LogRow>? LogJumpRequested;
 
     private List<LogEvent> _allEvents = [];
-    private int _liveCount = -1;
+    private long _liveRevision = -1;
     private DispatcherTimer? _liveTimer;
 
     partial void OnSelectedLogRunChanged(LogRunRow? value) => LoadLogRun();
@@ -180,13 +180,13 @@ public sealed partial class InstanceViewModel
     private void LoadLogRun()
     {
         _allEvents = [];
-        _liveCount = -1;
+        _liveRevision = -1;
         if (SelectedLogRun is { } run)
         {
             if (run.IsLive && Current is { } c && LiveLogFor?.Invoke(c.Id) is { } live)
             {
                 _allEvents = LogEvents.Group(LiveLines(live));
-                _liveCount = live.All.Count;
+                _liveRevision = live.Revision;
             }
             else if (!run.IsMissing)
             {
@@ -250,8 +250,8 @@ public sealed partial class InstanceViewModel
             UpdateLiveTimer();
             return;
         }
-        if (!IsLiveRun || Current is not { } c || LiveLogFor?.Invoke(c.Id) is not { } live || live.All.Count == _liveCount) return;
-        _liveCount = live.All.Count;
+        if (!IsLiveRun || Current is not { } c || LiveLogFor?.Invoke(c.Id) is not { } live || live.Revision == _liveRevision) return;
+        _liveRevision = live.Revision;
         _allEvents = LogEvents.Group(LiveLines(live));
         RebuildLogRows();
     }
@@ -303,10 +303,7 @@ public sealed partial class InstanceViewModel
     {
         if (Current is { } c)
         {
-            var dir = RunLogStore.Dir(c.WorkDir);
-            try { System.IO.Directory.CreateDirectory(dir); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return; }
-            OpenPath(dir);
+            OpenPath(RunLogStore.Dir(c.WorkDir));
         }
     }
 

@@ -1177,6 +1177,7 @@
   "trash.failure.parent_missing": "其原所在之實例已不存，不能歸之",
   "common.copy_failed": "錄而未成",
   "common.save_file_failed": "{0} 未能存：{1}",
+  "common.open_failed": "{0} 未能啟：{1}",
   "instance.delete.running": "{0} 方行，先終戲乃除實例",
   "onboarding.title": "始用 Jay",
   "onboarding.intro": "二步即可入戲：增籍，置一戲版。",

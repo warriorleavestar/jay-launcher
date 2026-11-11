@@ -1235,6 +1235,7 @@
   "trash.failure.parent_missing": "The instance it came from no longer exists, so it can't be put back",
   "common.copy_failed": "Copy failed",
   "common.save_file_failed": "Couldn't save {0}: {1}",
+  "common.open_failed": "Couldn't open {0}: {1}",
   "instance.delete.running": "{0} is running. Quit the game before deleting the instance",
   "onboarding.title": "Get started with Jay",
   "onboarding.intro": "Two steps to get in game: add an account, then install a game version.",

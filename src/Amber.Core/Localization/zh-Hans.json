@@ -1206,6 +1206,7 @@
   "trash.failure.parent_missing": "它原来所在的实例已经不在了，没法放回去",
   "common.copy_failed": "复制失败",
   "common.save_file_failed": "无法保存 {0}：{1}",
+  "common.open_failed": "无法打开 {0}：{1}",
   "instance.delete.running": "{0} 正在运行，先退出游戏再删除实例",
   "onboarding.title": "开始使用 Jay",
   "onboarding.intro": "两步就能进游戏：添加账号，装一个游戏版本。",

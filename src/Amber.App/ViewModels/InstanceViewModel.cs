@@ -325,10 +325,9 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         }
     }
 
-    private static void OpenPath(string path)
+    private void OpenPath(string path)
     {
-        System.IO.Directory.CreateDirectory(path);
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        if (ShellOpen.TryOpen(path) is { } e) SetStatus(StatusMessage.Failure("common.open_failed", e, path, ErrorText.Of(e)));
     }
 
     /// <summary>
@@ -1137,7 +1136,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [RelayCommand]
     private void OpenScreenshot(ScreenshotItem? item)
     {
-        if (item is not null) Process.Start(new ProcessStartInfo(item.Path) { UseShellExecute = true });
+        if (item is not null) OpenPath(item.Path);
     }
 
     [RelayCommand]
