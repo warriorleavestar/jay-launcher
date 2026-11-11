@@ -45,29 +45,59 @@ internal static class PrivateFolder
     /// isn't private (someone else made it, its ACL lets others change it, it is a link, or its parent lets others take it away).
     /// </summary>
     [SupportedOSPlatform("windows")]
-    internal static string? Ensure(string path)
+    internal static string? Ensure(string path) => Ensure(path, out _);
+
+    /// <summary>Same as <see cref="Ensure(string)"/>, and says why a folder was refused (for logs and tests).</summary>
+    [SupportedOSPlatform("windows")]
+    internal static string? Ensure(string path, out string? refused)
     {
         try
         {
             var me = WindowsIdentity.GetCurrent().User!;
             var info = new DirectoryInfo(Path.GetFullPath(path));
-            if (info.Parent is not { Exists: true } parent) return null;
+            if (info.Parent is not { Exists: true } parent)
+            {
+                refused = "parent missing";
+                return null;
+            }
             if (!info.Exists)
             {
                 // Created with the ACL in one step. If someone made it first this does nothing, and the checks below refuse it.
                 info.Create(Locked(me));
                 info.Refresh();
             }
-            if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) != 0) return null;
+            if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                refused = info.Exists ? "is a link" : "not created";
+                return null;
+            }
             var security = info.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
             var parentSecurity = parent.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
-            return IsPrivate(Owner(security), security.AreAccessRulesProtected, Rules(security), me.Value)
-                   && KeepsChildren(Owner(parentSecurity), Rules(parentSecurity), me.Value)
-                ? info.FullName
-                : null;
+            string? owner = Owner(security), parentOwner = Owner(parentSecurity);
+            var rules = Rules(security).ToList();
+            var parentRules = Rules(parentSecurity).ToList();
+            if (!IsPrivate(owner, security.AreAccessRulesProtected, rules, me.Value))
+            {
+                refused = $"folder: owner {owner}, protected {security.AreAccessRulesProtected}, rules {Describe(rules)}";
+                return null;
+            }
+            if (!KeepsChildren(parentOwner, parentRules, me.Value))
+            {
+                refused = $"parent: owner {parentOwner}, rules {Describe(parentRules)}";
+                return null;
+            }
+            refused = null;
+            return info.FullName;
         }
-        catch (SystemException) { return null; }
+        catch (SystemException e)
+        {
+            refused = e.GetType().Name + ": " + e.Message;
+            return null;
+        }
     }
+
+    private static string Describe(IEnumerable<Rule> rules) =>
+        string.Join("; ", rules.Select(r => $"{(r.Allow ? "allow" : "deny")} {r.Sid} {r.Rights}{(r.InheritOnly ? " (inherit only)" : "")}"));
 
     /// <summary>
     /// The folder belongs to me (or Administrators), doesn't inherit from its parent, and no one but me, SYSTEM and

@@ -79,19 +79,40 @@ public sealed class PrivateFolderTests
     public void EnsureLocksANewFolderAndRefusesAnOpenOne()
     {
         if (!OperatingSystem.IsWindows()) return;
+        // The parent gets a known ACL (only me, SYSTEM and Administrators) instead of whatever %TEMP% has on this
+        // machine: a temp folder that another account may change (some sandboxes) is rightly refused as a parent.
+        var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+        var parentAcl = new DirectorySecurity();
+        parentAcl.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var sid in new[] { me.Value, LocalSystem, Administrators })
+            parentAcl.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(sid), FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         var root = Path.Combine(Path.GetTempPath(), "jay-private-" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(root);
+        new DirectoryInfo(root).Create(parentAcl);
         try
         {
-            var made = Ensure(Path.Combine(root, "locked"));
-            Assert.NotNull(made);
+            var made = Ensure(Path.Combine(root, "locked"), out var refused);
+            Assert.True(made is not null, "refused: " + refused);
             var security = new DirectoryInfo(made).GetAccessControl();
             Assert.True(security.AreAccessRulesProtected);
-            Assert.Equal(made, Ensure(made));
+            Assert.Equal(made, Ensure(made, out refused));
 
-            // Created the ordinary way first (inherits the temp folder's ACL): not ours to trust.
+            // Created the ordinary way first (inherits the parent's ACL, not protected): not ours to trust.
             var open = Directory.CreateDirectory(Path.Combine(root, "open")).FullName;
-            Assert.Null(Ensure(open));
+            Assert.Null(Ensure(open, out refused));
+            Assert.StartsWith("folder:", refused);
+
+            // A parent that someone else may empty is refused, even for a folder with the locked ACL.
+            var shared = Path.Combine(root, "shared");
+            var sharedAcl = new DirectorySecurity();
+            sharedAcl.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            foreach (var rule in parentAcl.GetAccessRules(true, false, typeof(System.Security.Principal.SecurityIdentifier)).OfType<FileSystemAccessRule>())
+                sharedAcl.AddAccessRule(rule);
+            sharedAcl.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(AuthenticatedUsers),
+                FileSystemRights.Modify | FileSystemRights.DeleteSubdirectoriesAndFiles, AccessControlType.Allow));
+            new DirectoryInfo(shared).Create(sharedAcl);
+            Assert.Null(Ensure(Path.Combine(shared, "locked"), out refused));
+            Assert.StartsWith("parent:", refused);
             // A link is refused even when it points at a private folder.
             var link = Path.Combine(root, "link");
             Directory.CreateSymbolicLink(link, made);
