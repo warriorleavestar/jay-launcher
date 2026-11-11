@@ -24,6 +24,48 @@
     <EmbeddedResource Include="..\..\themes\builtin\**\*.json" LogicalName="themes/builtin/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!--
+    Jay's DNS fallback for the Windows strong sandbox (tools/jay-dns, Java 18+): compiled from source with a local JDK
+    and embedded as Amber.Core.jay-dns.jar. Without a JDK the build goes on without it (a warning) and Java 18+ games
+    use the standard sandbox; release builds pass -p:RequireJayDns=true so a missing JDK fails the build instead.
+    The JDK is looked up in JAY_JAVAC, the CI images' JAVA_HOME_25_X64 / JAVA_HOME_21_X64, JAVA_HOME, then PATH.
+  -->
+  <PropertyGroup>
+    <JayDnsSource>$(MSBuildThisFileDirectory)..\..\tools\jay-dns\src</JayDnsSource>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAY_JAVAC)' != ''">$(JAY_JAVAC)</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAVA_HOME_25_X64)' != '' and Exists('$(JAVA_HOME_25_X64)\bin\javac.exe')">$(JAVA_HOME_25_X64)\bin\javac.exe</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAVA_HOME_21_X64)' != '' and Exists('$(JAVA_HOME_21_X64)\bin\javac.exe')">$(JAVA_HOME_21_X64)\bin\javac.exe</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAVA_HOME)' != '' and Exists('$(JAVA_HOME)\bin\javac.exe')">$(JAVA_HOME)\bin\javac.exe</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == '' and '$(JAVA_HOME)' != '' and Exists('$(JAVA_HOME)/bin/javac')">$(JAVA_HOME)/bin/javac</JayJavac>
+    <JayJavac Condition="'$(JayJavac)' == ''">javac</JayJavac>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <JayDnsJava Include="$(JayDnsSource)\**\*.java" />
+    <JayDnsServices Include="$(JayDnsSource)\META-INF\**\*" />
+  </ItemGroup>
+
+  <Target Name="BuildJayDns" BeforeTargets="BeforeBuild" Inputs="@(JayDnsJava);@(JayDnsServices)" Outputs="$(IntermediateOutputPath)jay-dns.jar">
+    <PropertyGroup>
+      <JayDnsClasses>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)jay-dns</JayDnsClasses>
+    </PropertyGroup>
+    <RemoveDir Directories="$(JayDnsClasses)" />
+    <MakeDir Directories="$(JayDnsClasses)" />
+    <Exec Command="&quot;$(JayJavac)&quot; --release 18 -encoding UTF-8 -d &quot;$(JayDnsClasses)&quot; @(JayDnsJava->'&quot;%(FullPath)&quot;', ' ')" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="JayDnsExit" />
+    </Exec>
+    <Copy Condition="'$(JayDnsExit)' == '0'" SourceFiles="@(JayDnsServices)" DestinationFiles="@(JayDnsServices->'$(JayDnsClasses)/META-INF/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <ZipDirectory Condition="'$(JayDnsExit)' == '0'" SourceDirectory="$(JayDnsClasses)" DestinationFile="$(IntermediateOutputPath)jay-dns.jar" Overwrite="true" />
+    <Warning Condition="'$(JayDnsExit)' != '0' and '$(RequireJayDns)' != 'true'" Text="jay-dns was not built (no JDK 18+ found as '$(JayJavac)'): Java 18+ games will use the standard Windows sandbox." />
+    <Error Condition="'$(JayDnsExit)' != '0' and '$(RequireJayDns)' == 'true'" Text="jay-dns could not be built with '$(JayJavac)' (RequireJayDns=true)." />
+  </Target>
+
+  <Target Name="EmbedJayDns" AfterTargets="BuildJayDns" BeforeTargets="BeforeBuild" Condition="Exists('$(IntermediateOutputPath)jay-dns.jar')">
+    <ItemGroup>
+      <EmbeddedResource Include="$(IntermediateOutputPath)jay-dns.jar" LogicalName="Amber.Core.jay-dns.jar" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Amber.Core.Tests" />
   </ItemGroup>

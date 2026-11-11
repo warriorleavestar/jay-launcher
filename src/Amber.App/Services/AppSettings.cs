@@ -34,6 +34,21 @@ public sealed class AppSettings
     /// instance folder. When on, the multiplayer page says so on a line that stays.
     /// </summary>
     public bool LaunchWithoutSandbox { get; set; }
+
+    /// <summary>
+    /// Windows: strong sandbox mode (AppContainer). On by default; the first launch asks once for the loopback exemption.
+    /// Off: the standard sandbox (low integrity).
+    /// </summary>
+    public bool StrongSandbox { get; set; } = true;
+
+    /// <summary>
+    /// Why strong mode fell back to the standard sandbox (a localization key: declined, no admin, failed), so Jay does
+    /// not ask on every launch. Cleared by "Retry strong mode".
+    /// </summary>
+    public string? StrongSandboxFallback { get; set; }
+
+    /// <summary>Detail for <see cref="StrongSandboxFallback"/> (the error of a failed exemption).</summary>
+    public string? StrongSandboxFallbackDetail { get; set; }
     public string PlayerName { get; set; } = "Player";
     public string? LastVersion { get; set; }
     public int? WindowWidth { get; set; }

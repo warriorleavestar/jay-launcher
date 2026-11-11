@@ -5,6 +5,7 @@ using Amber.Core.Game;
 using Amber.Core.Install;
 using Amber.Core.Java;
 using Amber.Core.Launch;
+using Amber.Core.Localization;
 using Amber.Core.Net;
 
 namespace Amber.App.Services;
@@ -457,6 +458,104 @@ public sealed class LauncherService : IDisposable
         ExtraReadOnly = [.. BakeRuntime.SandboxGrants.Where(g => !g.Writable).Select(g => g.Path)],
         ExtraReadWrite = [.. BakeRuntime.SandboxGrants.Where(g => g.Writable).Select(g => g.Path)],
     };
+
+    /// <summary>
+    /// The sandbox for one launch with this Java. On Windows this picks the level (<see cref="WindowsSandboxPolicy"/>):
+    /// strong mode the first time explains itself (<paramref name="ask"/>) and asks Windows for the loopback exemption
+    /// (one admin prompt); declined, no admin or failed: the standard level, remembered so Jay does not ask again.
+    /// <paramref name="note"/> gets a line for the launch status when this launch uses less than the player chose.
+    /// </summary>
+    public async Task<SandboxOptions> SandboxForLaunchAsync(string javaPath, Func<Task<bool>> ask, Action<string> note, CancellationToken ct = default)
+    {
+        var options = GameSandboxOptions;
+        if (!options.Enabled || !OperatingSystem.IsWindows()) return options;
+        var decision = DecideWindowsSandbox(javaPath);
+        if (decision.AskFirst)
+        {
+            if (!await ask())
+            {
+                RememberSandboxFallback(WindowsSandboxPolicy.Refused, null);
+            }
+            else
+            {
+                var error = await AddLoopbackExemptionAsync(ct);
+                if (error is null && WindowsSandbox.LoopbackExempt()) return options with { WindowsLevel = WindowsSandboxLevel.Strong };
+                if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, "CheckNetIsolation");
+            }
+            decision = DecideWindowsSandbox(javaPath);
+        }
+        if (decision.Fallback is not null) RememberSandboxFallback(decision.Fallback, null);
+        if (decision.Reason is not null) note(L.F("home.sandbox.standard_because", decision.Reason));
+        return options with { WindowsLevel = decision.Level };
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private WindowsSandboxDecision DecideWindowsSandbox(string javaPath) => WindowsSandboxPolicy.Decide(
+        Settings.StrongSandbox, Settings.StrongSandboxFallback, Settings.StrongSandboxFallbackDetail,
+        WindowsSandboxPolicy.JavaCanUseStrong(WindowsSandbox.JavaMajor(javaPath), GameSandbox.JavaHome(javaPath), WindowsSandbox.HasResolver),
+        WindowsSandbox.JavaMajor(javaPath), WindowsSandbox.LoopbackExempt(), WindowsSandbox.Elevation());
+
+    /// <summary>Runs CheckNetIsolation elevated (Windows shows its admin prompt). Returns null when it ran, else why not (and remembers it).</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task<string?> AddLoopbackExemptionAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(WindowsSandbox.LoopbackExemptCommand());
+            if (process is not null) await process.WaitForExitAsync(ct);
+            return null;
+        }
+        catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223)
+        {
+            RememberSandboxFallback(WindowsSandboxPolicy.Refused, null);
+            return e.Message;
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or SandboxUnavailableException)
+        {
+            RememberSandboxFallback(WindowsSandboxPolicy.Failed, e.Message);
+            return e.Message;
+        }
+    }
+
+    private void RememberSandboxFallback(string reason, string? detail)
+    {
+        if (Settings.StrongSandboxFallback == reason && Settings.StrongSandboxFallbackDetail == detail) return;
+        Settings.StrongSandboxFallback = reason;
+        Settings.StrongSandboxFallbackDetail = detail;
+        Settings.Save();
+        SandboxStateChanged?.Invoke();
+    }
+
+    /// <summary>"Retry strong mode": forget the fallback; the next launch explains and asks again.</summary>
+    public void RetryStrongSandbox()
+    {
+        Settings.StrongSandboxFallback = null;
+        Settings.StrongSandboxFallbackDetail = null;
+        Settings.StrongSandbox = true;
+        Settings.Save();
+        SandboxStateChanged?.Invoke();
+    }
+
+    /// <summary>Raised when the sandbox state shown in settings and on the multiplayer page changed.</summary>
+    public event Action? SandboxStateChanged;
+
+    public void NotifySandboxChanged() => SandboxStateChanged?.Invoke();
+
+    /// <summary>The line in Settings › Privacy & security: which sandbox the next launch uses, and why not strong.</summary>
+    public string SandboxStatusText
+    {
+        get
+        {
+            if (Settings.LaunchWithoutSandbox) return L.T("settings.sandbox.status.off");
+            if (OperatingSystem.IsLinux()) return L.F("settings.sandbox.status.unix", "bubblewrap");
+            if (OperatingSystem.IsMacOS()) return L.F("settings.sandbox.status.unix", "sandbox-exec");
+            if (!OperatingSystem.IsWindows()) return L.T("settings.sandbox.status.off");
+            if (!Settings.StrongSandbox) return L.T("settings.sandbox.status.standard");
+            if (Settings.StrongSandboxFallback is { } fallback)
+                return L.F("settings.sandbox.status.standard_because", WindowsSandboxPolicy.Describe(fallback, Settings.StrongSandboxFallbackDetail));
+            return WindowsSandbox.LoopbackExempt() ? L.T("settings.sandbox.status.strong") : L.T("settings.sandbox.status.strong_pending");
+        }
+    }
 
     public GameInstance GetInstance(string id) => GetInstance(Context, id);
 

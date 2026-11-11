@@ -63,6 +63,9 @@ public sealed record SandboxOptions
 {
     public bool Enabled { get; init; }
 
+    /// <summary>Windows only: the level to use (the caller decides; see <see cref="WindowsSandboxLevel"/>).</summary>
+    public WindowsSandboxLevel WindowsLevel { get; init; } = WindowsSandboxLevel.Standard;
+
     /// <summary>Folders the caller adds (the universal loader install and bake data read-only, the bake cache writable).</summary>
     public IReadOnlyList<string> ExtraReadOnly { get; init; } = [];
     public IReadOnlyList<string> ExtraReadWrite { get; init; } = [];
@@ -78,8 +81,11 @@ public sealed class SandboxUnavailableException(string message, Exception? inner
 
 public static class GameSandbox
 {
-    /// <summary>True on the systems where Jay has a sandbox for the game (Linux: bubblewrap, macOS: sandbox-exec).</summary>
-    public static bool IsSupported => OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
+    /// <summary>
+    /// True on the systems where Jay has a sandbox for the game (Windows: low integrity or AppContainer, Linux: bubblewrap,
+    /// macOS: sandbox-exec). Android and iOS run the game their own way.
+    /// </summary>
+    public static bool IsSupported => OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
 
     /// <summary>
     /// The grants for one launch: the instance folder writable; Java, versions, libraries, assets, natives and the
@@ -167,4 +173,58 @@ public static class GameSandbox
         var cmp = OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         return string.Equals(p, f, cmp) || p.StartsWith(f + Path.DirectorySeparatorChar, cmp) || p.StartsWith(f + '/', cmp);
     }
+}
+
+/// <summary>What the admin prompt for the loopback exemption would be like for this Windows user.</summary>
+public enum AdminPrompt
+{
+    /// <summary>An administrator with UAC: one yes in the prompt.</summary>
+    Prompt,
+    /// <summary>Jay already runs elevated: no prompt.</summary>
+    Elevated,
+    /// <summary>A standard user: the prompt would need someone else's admin password, so Jay does not ask.</summary>
+    NoAdmin,
+}
+
+/// <summary>The level for one Windows launch, and whether the player must be asked first.</summary>
+/// <param name="AskFirst">Strong mode needs the loopback exemption: explain, then one admin prompt.</param>
+/// <param name="Reason">Why this launch uses the standard level although strong mode is on (localized), or null.</param>
+/// <param name="Fallback">A reason to remember (a localization key): strong mode is not tried again until the player retries.</param>
+public sealed record WindowsSandboxDecision(WindowsSandboxLevel Level, bool AskFirst = false, string? Reason = null, string? Fallback = null);
+
+/// <summary>
+/// Which Windows sandbox level a launch gets (privacy plan item 15). Strong mode is on by default; when it cannot be
+/// used Jay falls back to the standard level without asking again on every launch.
+/// </summary>
+public static class WindowsSandboxPolicy
+{
+    public const string Refused = "core.launch.sandbox.win.reason.refused";
+    public const string NoAdmin = "core.launch.sandbox.win.reason.no_admin";
+    public const string Failed = "core.launch.sandbox.win.reason.failed";
+
+    public static WindowsSandboxDecision Decide(bool strongWanted, string? fallback, string? fallbackDetail, bool javaCanUseStrong, int javaMajor,
+        bool exempt, AdminPrompt admin)
+    {
+        if (!strongWanted) return new(WindowsSandboxLevel.Standard);
+        if (fallback is not null) return new(WindowsSandboxLevel.Standard, Reason: Describe(fallback, fallbackDetail));
+        if (!javaCanUseStrong) return new(WindowsSandboxLevel.Standard, Reason: L.F("core.launch.sandbox.win.no_dns", javaMajor));
+        if (exempt) return new(WindowsSandboxLevel.Strong);
+        if (admin == AdminPrompt.NoAdmin) return new(WindowsSandboxLevel.Standard, Reason: Describe(NoAdmin, null), Fallback: NoAdmin);
+        return new(WindowsSandboxLevel.Strong, AskFirst: true);
+    }
+
+    /// <summary>
+    /// Whether a Java can look up names in the strong sandbox: Java 8 with its JNDI DNS provider, Java 18+ when this
+    /// build carries Jay's resolver. Java 9–17 have no hook (see <see cref="WindowsSandbox.DnsArguments"/>).
+    /// </summary>
+    public static bool JavaCanUseStrong(int javaMajor, string javaHome, bool hasResolver) => javaMajor switch
+    {
+        > 0 and <= 8 => File.Exists(Path.Combine(javaHome, "lib", "ext", "dnsns.jar")),
+        >= 18 => hasResolver,
+        _ => false,
+    };
+
+    /// <summary>The remembered reason as a sentence part ("you declined the admin confirmation.").</summary>
+    public static string Describe(string fallback, string? detail) =>
+        fallback == Failed ? L.F(Failed, detail ?? "?") : L.T(fallback);
 }

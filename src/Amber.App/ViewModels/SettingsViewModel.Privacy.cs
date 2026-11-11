@@ -1,6 +1,7 @@
 using Amber.Core.Localization;
 using Amber.Core.Safety;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace Amber.App.ViewModels;
 
@@ -50,10 +51,63 @@ public sealed partial class SettingsViewModel
         ChildModeChanged?.Invoke();
     }
 
+    // ---- Game sandbox (privacy plan item 15)
+
+    /// <summary>Strong sandbox mode (Windows only): AppContainer, on by default.</summary>
+    public bool StrongSandbox
+    {
+        get => _service.Settings.StrongSandbox;
+        set
+        {
+            if (_service.Settings.StrongSandbox == value) return;
+            _service.Settings.StrongSandbox = value;
+            _service.Settings.Save();
+            SandboxChanged();
+        }
+    }
+
+    /// <summary>"Launch without sandbox (not recommended)": off by default; the multiplayer page says so while it is on.</summary>
+    public bool LaunchWithoutSandbox
+    {
+        get => _service.Settings.LaunchWithoutSandbox;
+        set
+        {
+            if (_service.Settings.LaunchWithoutSandbox == value) return;
+            _service.Settings.LaunchWithoutSandbox = value;
+            _service.Settings.Save();
+            SandboxChanged();
+        }
+    }
+
+    /// <summary>Strong mode and its Java note exist only on Windows.</summary>
+    public bool IsWindowsSandbox => OperatingSystem.IsWindows();
+
+    /// <summary>Which sandbox the next launch uses and, after a fallback, why.</summary>
+    public string SandboxStatusText => _service.SandboxStatusText;
+
+    /// <summary>"Retry strong mode" shows after strong mode fell back (declined, no admin, failed).</summary>
+    public bool CanRetryStrongSandbox => OperatingSystem.IsWindows() && !LaunchWithoutSandbox && _service.Settings.StrongSandboxFallback is not null;
+
+    [RelayCommand]
+    private void RetryStrongSandbox()
+    {
+        _service.RetryStrongSandbox();
+        SandboxChanged();
+    }
+
+    private void SandboxChanged()
+    {
+        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(CanRetryStrongSandbox)])
+            OnPropertyChanged(name);
+        _service.NotifySandboxChanged();
+    }
+
     /// <summary>Refresh the statuses whenever settings is shown.</summary>
     internal void RefreshPrivacy()
     {
         NetworkList.Refresh();
         OnPropertyChanged(nameof(ChildModeStatusText));
+        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(CanRetryStrongSandbox)])
+            OnPropertyChanged(name);
     }
 }
