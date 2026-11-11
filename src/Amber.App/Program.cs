@@ -14,6 +14,9 @@ internal static class Program
             LinuxStartup.EnsureIcu(args);
             Environment.Exit(Amber.Core.Multiplayer.UnixElevatedGuardHost.Run(args));
         }
+        // Windows full LAN guard: Jay itself, started elevated through the admin prompt. No window.
+        if (OperatingSystem.IsWindows() && Amber.Core.Multiplayer.WindowsElevatedGuardHost.IsGuardInvocation(args))
+            Environment.Exit(Amber.Core.Multiplayer.WindowsElevatedGuardHost.Run(args));
         // Linux：先确认 ICU 和图形界面要用的库都在（缺了给出看得懂的提示）。必须排在任何区域、格式化代码之前。
         LinuxStartup.BeforeAnything(args);
         StartupTrace.Mark("main");

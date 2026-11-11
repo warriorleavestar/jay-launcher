@@ -236,7 +236,7 @@ EasyTier（组网，P2P 或经节点中继）
 
 `EasyTierElevated.cs`：EasyTier 建虚拟网卡，每人一个虚拟 IP，局域网广播也转发。建网卡要管理员 / root，所以只在用户打开这个模式时请求一次权限，由一个守护进程运行 easytier-core；参数和密钥都不落盘；Jay 退出或崩溃时守护结束 easytier-core 后退出。
 
-- Windows：wintun。经 UAC（`powershell.exe` + `Verb = "runas"`）启动守护脚本，参数经命名管道传。广播由 EasyTier 的 `--enable-udp-broadcast-relay` 转发（这个功能 EasyTier 只在 Windows 上有）。
+- Windows：wintun。经 UAC（`Jay.exe --jay-lan-guard` + `Verb = "runas"`）以管理员身份启动 Jay 自己的守护模式，参数经命名管道传；只有用远程出口或热点共享时，守护才经标准输入起一个 PowerShell 子进程跑固定的路由 / DNS / 防漏脚本。广播由 EasyTier 的 `--enable-udp-broadcast-relay` 转发（这个功能 EasyTier 只在 Windows 上有）。
 - Linux：tun，网卡名 `amberlan`（Linux 网卡名不能有空格）。经 `pkexec` 以 root 运行 **Jay 自己的守护模式**（`Jay --amber-et-guard …`，入口在 `Program.Main` 最前面，不开窗口），实现在 `UnixElevated.cs`（Jay 这边）和 `UnixElevatedHost.cs`（root 这边）。已经是 root 时不弹密码框。没有 pkexec 时勾选框禁用并说明原因。
 - macOS：utun（系统编号，不传 `--dev-name`）。经 `osascript … with administrator privileges` 弹系统管理员密码框，守护放后台运行。
 - Mac/Linux 的通信：Jay 在 `mkdtemp` 建的 0700 临时目录里开一个 Unix 域套接字，守护连上来。Jay 只接受 root（`SO_PEERCRED` / `LOCAL_PEERCRED` 核对 uid），守护核对对端就是命令行里那个 Jay 的进程号和用户（`SO_PEERCRED` / `LOCAL_PEERPID`）。连上后套接字文件马上删掉。命令是一行一个 JSON（参数按数组传，不经过 shell），easytier-core 只拿到固定 PATH 和房间密钥两个环境变量。easytier-core 必须是普通文件（不是符号链接）、组和其他人不可写，否则拒绝运行。
