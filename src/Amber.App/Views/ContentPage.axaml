@@ -107,6 +107,10 @@
                   </Border>
                   <StackPanel Grid.Column="1" Margin="10,0,0,0">
                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
+                    <!-- Runs on this instance only through the universal loader (experimental baking). -->
+                    <Border x:Name="UniversalLoaderBadge" Classes="badge muted" HorizontalAlignment="Left" Margin="0,2" IsVisible="{Binding ViaUniversalLoader}">
+                      <TextBlock Text="{l:T content.loader.ul_badge}" />
+                    </Border>
                     <TextBlock x:Name="ProjectSummary" Text="{Binding Summary}" Classes="hint" MaxWidth="640" HorizontalAlignment="Left" MaxLines="2" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Summary}" />
                     <TextBlock Text="{Binding Meta}" Classes="caption" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Meta}" />
                   </StackPanel>
@@ -164,8 +168,15 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </StackPanel>
-            <Border Classes="callout warning" IsVisible="{Binding HasLoaderNote}">
-              <TextBlock Text="{Binding LoaderNote}" TextWrapping="Wrap" />
+            <Border x:Name="LoaderNoteBox" Classes="callout warning" IsVisible="{Binding HasLoaderNote}">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{Binding LoaderNote}" TextWrapping="Wrap" />
+                <!-- A mod from another ecosystem while baking is off or the loader is missing. -->
+                <Button x:Name="TurnOnBakeButton" Classes="secondary small" HorizontalAlignment="Left" Content="{l:T content.loader.ul_turn_on}"
+                        Command="{Binding TurnOnBakeCommand}" IsVisible="{Binding ShowTurnOnBake}" />
+                <Button x:Name="DownloadLoaderButton" Classes="secondary small" HorizontalAlignment="Left" Content="{l:T content.loader.ul_download}"
+                        Command="{Binding DownloadUniversalLoaderCommand}" IsVisible="{Binding ShowDownloadLoader}" />
+              </StackPanel>
             </Border>
             <!-- 光影要 Iris / Oculus / OptiFine 才生效（旧规格 N3）：原版实例拦下；缺 Iris 时默认一并安装 -->
             <Border x:Name="ShaderNoteBox" Classes="callout warning" IsVisible="{Binding HasShaderNote}">

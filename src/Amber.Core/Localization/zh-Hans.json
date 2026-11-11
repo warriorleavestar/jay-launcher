@@ -3121,5 +3121,16 @@
   "term.friend_code": "好友码",
   "term.friend_code.hint": "在公开房间里找到朋友的房间。光有它进不了门，还是要敲门。",
   "shortcut.look.restored": "已恢复默认外观。",
-  "shortcut.look.already": "现在就是默认外观。"
+  "shortcut.look.already": "现在就是默认外观。",
+  "content.loader.ul_badge": "经通用加载器",
+  "content.loader.ul_note": "没有 {0} 版。{1} 版会经通用加载器在这个实例上运行（实验性烘焙）。",
+  "content.loader.ul_needs_bake": "没有 {0} 版。{1} 版可以经通用加载器在这里运行，但实验性烘焙没开。开启后才能用这个模组。",
+  "content.loader.ul_needs_loader": "没有 {0} 版。{1} 版可以经通用加载器在这里运行，但还没装通用加载器。下载后才能用这个模组。",
+  "content.loader.ul_turn_on": "开启烘焙",
+  "content.loader.ul_download": "下载加载器",
+  "content.install.ul_not_ready": " 注意：它只能经通用加载器运行。玩之前请开启实验性烘焙并装好加载器。",
+  "core.content.modpack.mixed_unsupported": "这个整合包混用了 {0}。通用加载器跑不了这种组合，所以不能导入。",
+  "core.content.modpack.mixed_needs_bake": "这个整合包混用了 {0}，只能经通用加载器运行：先在设置里开启实验性烘焙并装好加载器，再导入一次。",
+  "newinstance.pack.mixed": "混合整合包：{0} 模组经通用加载器运行",
+  "content.loader.ul_missing_bridges": "没有 {0} 版。装的通用加载器在 {0} 上跑不了别的模组：包里缺 {1}。请在设置里下载完整的加载器包。"
 }

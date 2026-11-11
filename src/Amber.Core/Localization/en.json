@@ -3196,5 +3196,16 @@
   "term.friend_code": "Friend code",
   "term.friend_code.hint": "Finds a friend's room in public rooms. It doesn't let anyone in by itself: they still knock.",
   "shortcut.look.restored": "Back to the default look.",
-  "shortcut.look.already": "Jay already has the default look."
+  "shortcut.look.already": "Jay already has the default look.",
+  "content.loader.ul_badge": "Universal loader",
+  "content.loader.ul_note": "No {0} build. The {1} build runs on this instance through the universal loader (experimental baking).",
+  "content.loader.ul_needs_bake": "No {0} build. The {1} build can run here through the universal loader, but experimental baking is off. Turn it on to use this mod.",
+  "content.loader.ul_needs_loader": "No {0} build. The {1} build can run here through the universal loader, which is not installed yet. Download it to use this mod.",
+  "content.loader.ul_turn_on": "Turn on baking",
+  "content.loader.ul_download": "Download loader",
+  "content.install.ul_not_ready": " Note: it runs only through the universal loader. Turn on experimental baking and install the loader before you play.",
+  "core.content.modpack.mixed_unsupported": "This pack mixes {0}. The universal loader cannot run this combination, so it cannot be imported.",
+  "core.content.modpack.mixed_needs_bake": "This pack mixes {0}. It runs only through the universal loader: turn on experimental baking and install the loader in Settings, then import it again.",
+  "newinstance.pack.mixed": "Mixed pack: {0} mods run through the universal loader",
+  "content.loader.ul_missing_bridges": "No {0} build. The installed universal loader cannot run other mods on {0}: its package lacks {1}. Download the full loader package in Settings."
 }

@@ -3121,5 +3121,16 @@
   "term.friend_code": "フレンドコード",
   "term.friend_code.hint": "公開ルームで友だちの部屋を探すコードです。これだけでは入れず、ノックが必要です。",
   "shortcut.look.restored": "標準の見た目に戻しました。",
-  "shortcut.look.already": "すでに標準の見た目です。"
+  "shortcut.look.already": "すでに標準の見た目です。",
+  "content.loader.ul_badge": "汎用ローダー経由",
+  "content.loader.ul_note": "{0} 版はありません。{1} 版は汎用ローダー経由でこのインスタンスで動きます（実験的なベイク）。",
+  "content.loader.ul_needs_bake": "{0} 版はありません。{1} 版は汎用ローダー経由でここで動きますが、実験的なベイクがオフです。オンにするとこの MOD を使えます。",
+  "content.loader.ul_needs_loader": "{0} 版はありません。{1} 版は汎用ローダー経由でここで動きますが、汎用ローダーがまだ入っていません。ダウンロードするとこの MOD を使えます。",
+  "content.loader.ul_turn_on": "ベイクをオンにする",
+  "content.loader.ul_download": "ローダーをダウンロード",
+  "content.install.ul_not_ready": " 注意：汎用ローダー経由でしか動きません。遊ぶ前に実験的なベイクをオンにしてローダーを入れてください。",
+  "core.content.modpack.mixed_unsupported": "このパックは {0} を混ぜています。汎用ローダーはこの組み合わせを動かせないため、インポートできません。",
+  "core.content.modpack.mixed_needs_bake": "このパックは {0} を混ぜていて、汎用ローダー経由でしか動きません。設定で実験的なベイクをオンにしてローダーを入れてから、もう一度インポートしてください。",
+  "newinstance.pack.mixed": "混合パック：{0} の MOD は汎用ローダー経由で動きます",
+  "content.loader.ul_missing_bridges": "{0} 版はありません。入っている汎用ローダーは {0} で他の MOD を動かせません：パッケージに {1} がありません。設定で完全なローダーパッケージをダウンロードしてください。"
 }

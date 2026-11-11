@@ -365,7 +365,7 @@ main 上 v0.7.0 之后新增【未发布】：
 
 ### 3.12 模组烘焙【实验，默认关闭】🟡
 
-`Bake/BakeService.cs`：启动前调用本机的通用加载器原型（Java 程序，`amber.ul.Bake`）预处理模组并缓存到 `<数据目录>/bake-cache`，只支持 1.21.1 的 Fabric、Quilt 和原版。要另外准备加载器目录（`build/loader`、`build/loader-cp.txt`、`mc/mappings-amber`），普通用户不用开。代码本身跨平台；Windows 上原型遇到过“系统代码页是 1252 时 Java 打不开中文路径”的问题，Mac/Linux 是 UTF-8，应该没有。
+`Bake/BakeService.cs`：启动前调用本机的通用加载器原型（Java 程序，`amber.ul.Bake`）预处理模组并缓存到 `<数据目录>-runtime/bake-cache`（数据目录旁边的运行时目录，不放设置、账号和密钥），只支持 1.21.1 的 Fabric、Quilt 和原版。要另外准备加载器目录（`build/loader`、`build/loader-cp.txt`、`mc/mappings-amber`），普通用户不用开。代码本身跨平台；Windows 上原型遇到过“系统代码页是 1252 时 Java 打不开中文路径”的问题，Mac/Linux 是 UTF-8，应该没有。
 
 ### 3.13 联机节点部署脚本
 
