@@ -92,6 +92,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>熔断：马上断开所有联机；策略允许时倒计时重启。</summary>
     internal void TripBreaker(string reason)
     {
+        Amber.Core.Diagnostics.ExitTrail.Note("breaker", $"tripped, breaker {(Security.Breaker ? "on" : "off")}");
         StopSession();
         BreakerReason = reason;
         var policy = Security;
@@ -134,6 +135,12 @@ public sealed partial class MultiplayerViewModel
         {
             IsBreakerCounting = false;
         }
+    }
+
+    /// <summary>Exit trail: the multiplayer steps by status key only (the arguments can hold codes, names and addresses).</summary>
+    protected override void OnStatusChanged()
+    {
+        if (StatusInfo is { } status) Amber.Core.Diagnostics.ExitTrail.Note("mp", $"{status.Kind}: {status.Key}");
     }
 
     /// <summary>倒计时里按空格（或点按钮）：不重启，联机已经断开了。</summary>

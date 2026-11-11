@@ -37,6 +37,7 @@ public partial class MainWindow : Window
         {
             // 关窗保护（§5.9）：还有远程控制、服务器、房间里的人、进行中的任务或准备中的游戏时先确认。
             if (GuardClose(e)) return;
+            Amber.Core.Diagnostics.ExitTrail.Note("exit", "main window closing");
             RememberPlacement();
             // 关主窗口就是退出 Jay：先结束远程控制（通知对方、收起红框），不能让被控状态在后台继续。
             if (DataContext is MainViewModel main)

@@ -31,6 +31,9 @@ public sealed class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         DevCrashGuard.HookDispatcher();
+        // Observe only (not Handled): the exit trail keeps the stack even when nothing reaches stderr.
+        Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (_, e) =>
+            Amber.Core.Diagnostics.ExitTrail.Exception("Dispatcher.UnhandledException", e.Exception);
         // Linux 系统没有中文字体时，系统画的标题栏会把中文显示成方框，标题改用「Jay」。
         LinuxFonts.GuardWindowTitles();
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -52,8 +55,9 @@ public sealed class App : Application
             // 关主窗口就退出：远程控制的小条、查看窗口这些不能让进程留在后台（被控时关 Jay 以为断了，其实还在被控制）。
             desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnMainWindowClose;
             StartupTrace.Mark("window");
-            desktop.Exit += (_, _) =>
+            desktop.Exit += (_, e) =>
             {
+                Amber.Core.Diagnostics.ExitTrail.CleanExit($"app exit, code {e.ApplicationExitCode}");
                 // 开着的服务器先存盘停下，再清理别的。
                 ViewModels.HostServerViewModel.StopRunningServer();
                 service.Dispose();
