@@ -125,7 +125,11 @@ public class DirectoryIdentityTests
         await stream.WriteAsync("{\"op\":\"list\"}\n"u8.ToArray());
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var buffer = new byte[64];
-        Assert.Equal(0, await stream.ReadAsync(buffer, timeout.Token));
+        // The server drops the connection without answering. Closing with our request still unread can arrive as a reset, not a clean end of stream.
+        int read;
+        try { read = await stream.ReadAsync(buffer, timeout.Token); }
+        catch (IOException) { read = 0; }
+        Assert.Equal(0, read);
         // A client that pins nothing still gets through, over the encrypted channel.
         Assert.Empty(await new RoomDirectoryClient(new Loopback(server.Port)).ListAsync(default));
     }
