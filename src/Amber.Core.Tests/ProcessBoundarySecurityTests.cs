@@ -300,7 +300,36 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
     [Theory]
     [InlineData(WindowsSandboxLevel.Standard)]
     [InlineData(WindowsSandboxLevel.Strong)]
-    public async Task WindowsSandbox_HidesJayData_LetsTheGameWriteItsInstance(WindowsSandboxLevel level)
+    public async Task WindowsSandbox_HidesJayData_LetsTheGameWriteItsInstance(WindowsSandboxLevel level) => await HidesJayData(level);
+
+    [Theory]
+    [InlineData(WindowsSandboxLevel.Standard)]
+    [InlineData(WindowsSandboxLevel.Strong)]
+    public async Task WindowsSandbox_GameCannotOpenJaysProcess(WindowsSandboxLevel level)
+    {
+        // Privacy plan item 15: the sandboxed game must not open Jay's process to read its memory (keys, sessions).
+        if (!OperatingSystem.IsWindows()) return;
+        var instance = Directory.CreateDirectory(Path.Combine(_root, "instance-" + level)).FullName;
+        WindowsSandbox.Prepare(new SandboxGrants { ReadWrite = [instance] }, level);
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = instance,
+        };
+        // Process.Handle asks for full access, which includes reading memory.
+        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command",
+                     $"try {{ $null = [System.Diagnostics.Process]::GetProcessById({Environment.ProcessId}).Handle; 'JAY-OPENED' }} catch {{ 'JAY-DENIED' }}" })
+            psi.ArgumentList.Add(a);
+        using var process = WindowsSandbox.Start(psi, level);
+        var read = Task.WhenAll(process.StandardOutput.ReadToEndAsync(), process.StandardError.ReadToEndAsync());
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await process.WaitForExitAsync(timeout.Token);
+        var output = string.Join('\n', await read);
+        Assert.DoesNotContain("JAY-OPENED", output);
+        // At the standard level PowerShell runs and is refused; in the container it may not even start, which is also a refusal.
+        if (level == WindowsSandboxLevel.Standard) Assert.Contains("JAY-DENIED", output);
+    }
+
+    private async Task HidesJayData(WindowsSandboxLevel level)
     {
         if (!OperatingSystem.IsWindows()) return;
         var data = Directory.CreateDirectory(Path.Combine(_root, "data")).FullName;
