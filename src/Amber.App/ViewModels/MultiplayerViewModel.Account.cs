@@ -81,7 +81,7 @@ public sealed partial class MultiplayerViewModel
         try
         {
             var factors = AccountFactors.Where(f => f.Value.Trim().Length > 0).ToDictionary(f => f.Name, f => f.Value.Trim());
-            var (token, parsed) = await new RoomDirectoryClient(network).LoginAsync(Identity.KeyPair, login, config.Network, AccountUser.Trim(), AccountPassword,
+            var (token, parsed) = await DirectoryClient(network).LoginAsync(Identity.KeyPair, login, config.Network, AccountUser.Trim(), AccountPassword,
                 CancellationToken.None, factors);
             if (_networkConfig?.Network != config.Network) return;
             _account = (config.Network, token, parsed.Expires);

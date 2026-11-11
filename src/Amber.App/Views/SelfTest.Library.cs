@@ -43,6 +43,9 @@ internal sealed partial class SelfTest
             service.Settings.RecentInstances = ["fabric-1.20.1", "neoforge-1.21.1"];
             service.Settings.GameDirectory = game;
             service.SaveAndReload();
+            // Pages rescan the new game directory in the background and may pick their own instance when the scan lands;
+            // let them settle before choosing the current one, as a player would.
+            await Task.Delay(1500);
             service.SetCurrentInstance("fabric-1.20.1");
             main.Shell.Navigate("library");
             await WaitAsync(() => library.IsLoaded && library.TotalCount == 5, 10);
@@ -54,7 +57,8 @@ internal sealed partial class SelfTest
             Check("游戏库：打开 Jay 落在游戏库主页", main.Shell.Router.Current == Route.Library && page is not null);
             Check("游戏库：5 个实例都在", library.TotalCount == 5 && library.Cards.Count == 5, $"{library.TotalCount}");
             Check("游戏库：继续玩是上次玩的那个，按钮是琥珀色开始键", library.Continue?.Id == "fabric-1.20.1" && page?.ContinuePlay.Classes.Contains("play") == true
-                && page.ContinuePlay.IsEffectivelyVisible, library.Continue?.Id ?? "");
+                && page.ContinuePlay.IsEffectivelyVisible,
+                $"{library.Continue?.Id} current={service.CurrentInstance} recent={string.Join(",", service.Settings.RecentInstances ?? [])}");
             var amber = window.GetVisualDescendants().OfType<Button>().Count(b => b.Classes.Contains("play") && b.IsEffectivelyVisible);
             Check("游戏库：这一屏只有一个琥珀色按钮", amber == 1, $"{amber}");
             Check("游戏库：继续玩卡写了版本、加载器和上次玩", library.Continue?.Facts.Contains("Fabric") == true && library.Continue.LastPlayedText.Contains("昨天"),

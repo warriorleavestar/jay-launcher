@@ -34,7 +34,7 @@ jay-server network init nz-friends --name 新西兰朋友服 --host 203.0.113.5
 #    传到一个 https 地址（比如 GitHub Pages），然后算哈希并写进网络信息（版本号自动加一）：
 jay-server network config-hash nz-friends/config.json --network nz-friends/nz-friends.json --url https://example.org/jay/config.json
 
-# 3. 签名，得到连接串 JAYNET1-...，发给玩家（联机 → 公共网络 → 粘贴 → 添加网络）
+# 3. 签名，得到连接串 JAYNET2-...，发给玩家（联机 → 公共网络 → 粘贴 → 添加网络）
 jay-server network sign nz-friends/nz-friends.json --key nz-friends/network.key > nz-friends.jaynet
 
 # 4. 跑节点

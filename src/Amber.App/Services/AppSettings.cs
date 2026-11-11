@@ -145,6 +145,9 @@ public sealed class AppSettings
     /// <summary>启动游戏后启动器怎么办：minimize（最小化，默认）/ keep（保持）/ tray（隐藏到托盘）。</summary>
     public string AfterLaunch { get; set; } = "minimize";
 
+    /// <summary>Contextual tips already seen and kinds muted (official design §9.3 rule 7).</summary>
+    public Amber.Core.Tutorial.TutorialState Tutorial { get; set; } = new();
+
     /// <summary>standard / compact (official design §6.20 Appearance).</summary>
     public string Density { get; set; } = Amber.Core.Layout.Density.Standard;
 
@@ -187,7 +190,7 @@ public sealed class AppSettings
     /// <summary>Amber 自己的数据目录。单元测试用 AMBER_DATA_DIR 指到临时目录，免得读写真实的设置和账号。</summary>
     public static string DataDir => Environment.GetEnvironmentVariable("AMBER_DATA_DIR") is { Length: > 0 } dir
         ? dir
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Amber");
+        : Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
     public static string FilePath => Path.Combine(DataDir, "settings.json");
 
     public InstanceSettings ToGlobalInstanceSettings() => new()

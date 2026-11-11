@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Amber.Core.Launch;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Gate;
 using Amber.Core.Multiplayer.Public;
@@ -79,19 +80,22 @@ public static class Program
               马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
-        自己的公共网络（连接串 JAYNET1-...）：
+        自己的公共网络（连接串 JAYNET2-...）：
           jay-server network init <编号> --name <名字> --host <公网地址> [--listen 11010] [--out <文件夹>]
               一步生成签名钥匙、网络 JSON 和网络配置模板，并打印后面几步
           jay-server network config-hash <配置.json> --network <网络.json> [--url https://...]
               检查配置文件、算 SHA-256；给了 --url 就写进网络 JSON（版本号加一），然后重新 sign
           jay-server network keygen --out <钥匙文件>          生成签名钥匙（私钥存在文件里，只自己留着），打印公钥
-          jay-server network sign <网络.json> [--key <钥匙文件>]  签名并打印连接串（也可以用环境变量 JAY_NETWORK_KEY 给钥匙）
+          jay-server network sign <网络.json> [--key <钥匙文件>]  网络主人签名并打印连接串（也可以用环境变量 JAY_NETWORK_KEY 给钥匙）
+          jay-server network cosign <连接串或文件> --key <信任钥匙文件>  再加一个签名（Jay 信任人离线审核用，够数才算“已审核”）
           jay-server network check <网络.json> ...             只检查格式（注册表的 PR 检查用）
           jay-server network show <连接串或文件>              显示连接串里的内容和签名
           jay-server network dir-key [<网络.json>] --dir <节点数据目录>  打印目录公钥（没有就生成 directory.key），给了网络 JSON 就写进 dirKeys
-          jay-server network root-key --out <根钥匙文件>     生成目录根钥匙（离线保管，不放服务器、不进仓库），打印公钥（写进 dirRoots）
+          jay-server network root-key --out <钥匙文件>       生成一把信任 / 根钥匙（每个信任人在自己的离线电脑上各生成一把），打印公钥
           jay-server network dir-cert --root <根钥匙文件> --network <EasyTier 网络名> --dir-key <目录公钥> --out <证书文件> [--days 365]
               在离线电脑上用根钥匙给节点的目录公钥（dir-key 打印的）签证书，再把证书拷到节点数据目录，命名为 directory.cert
+          jay-server network dir-cert --cosign <证书文件> --root <根钥匙文件>
+              另一个信任人在自己的离线电脑上给同一张证书加签名（网络要求几个就签几个）
               （根钥匙和节点在同一台电脑时也可以用 --dir <节点数据目录> 直接写进去，但根钥匙不该放在服务器上）
           jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
               在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）
@@ -107,6 +111,12 @@ public static class Program
           jay-server account remove|disable|enable <账号> / account list
           jay-server account 2fa on <账号> [--issuer <网络名>]   开两步验证：打印密钥和 otpauth 地址，用验证器 App 添加
           jay-server account 2fa off <账号>提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
+
+        发版签名（维护者在离线电脑上用，见 docs/security/release-signing.md）：
+          jay-server release key --out <发布钥匙文件>            生成发布钥匙（离线保管），打印公钥（写进 ReleaseSignature.TrustedKeys）
+          jay-server release sums <文件...> [--out SHA256SUMS.txt]  算发布包的 SHA-256 清单
+          jay-server release sign --key <发布钥匙文件> --tag <v0.9.0> [--sums SHA256SUMS.txt] [--out SHA256SUMS.txt.sig]
+          jay-server release verify <安装包> [--tag <v0.9.0>] [--pub <公钥>]  核对安装包、清单和签名（清单和签名放在安装包旁边）
 
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
@@ -128,6 +138,7 @@ public static class Program
                 "relay" => await RelayAsync(options),
                 "directory" => await DirectoryAsync(root, options),
                 "network" => NetworkCommand(options, Console.Out, root),
+                "release" => ReleaseCommand(options, Console.Out),
                 "account" => AccountCommand(root, options, Console.Out, ReadPassword),
                 "node" => await NodeCommand(root, options, Console.Out),
                 null => Help(),
@@ -270,6 +281,77 @@ public static class Program
     }
 
     /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
+    /// <summary>Release signing for maintainers: run on an offline machine; the private key never goes to CI or the repo.</summary>
+    internal static int ReleaseCommand(Options options, TextWriter output)
+    {
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server release key|sums|sign|verify");
+        var rest = options.Positional.Skip(1).ToList();
+        switch (sub)
+        {
+            case "key":
+            {
+                var path = options.Get("out") ?? throw new ArgumentException("要用 --out 指定发布钥匙文件");
+                if (File.Exists(path)) throw new IOException($"{path} 已经存在，不覆盖（换钥匙请换个文件名）");
+                var signer = NetworkSigner.Generate(out var seed);
+                var write = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+                if (!OperatingSystem.IsWindows()) write.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                using (var file = new StreamWriter(path, Encoding.ASCII, write)) file.Write(Convert.ToBase64String(seed) + "\n");
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(seed);
+                output.WriteLine($"发布私钥已存到 {path}：离线保管（U 盘、纸），不要放在 CI、服务器、网盘或仓库里，也不要和目录根钥匙混用");
+                output.WriteLine($"发布公钥（写进 src/Amber.Core/Launch/ReleaseSignature.cs 的 TrustedKeys）：{Convert.ToBase64String(signer.PublicKey)}");
+                return 0;
+            }
+            case "sums":
+            {
+                if (rest.Count == 0) throw new ArgumentException("要给出发布包文件");
+                foreach (var f in rest) if (!File.Exists(f)) throw new IOException($"找不到 {f}");
+                var text = ReleaseSignature.BuildSums(rest);
+                var outPath = options.Get("out");
+                if (outPath is null) output.Write(text);
+                else { File.WriteAllText(outPath, text); output.WriteLine($"已写入 {outPath}（{rest.Count} 个文件）"); }
+                return 0;
+            }
+            case "sign":
+            {
+                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定发布钥匙文件");
+                var tag = options.Get("tag") ?? throw new ArgumentException("要用 --tag 指定版本（例如 v0.9.0）");
+                var sumsPath = options.Get("sums") ?? ReleaseSignature.SumsFileName;
+                var outPath = options.Get("out") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(sumsPath)) ?? ".", ReleaseSignature.SignatureFileName);
+                var sums = File.ReadAllBytes(sumsPath);
+                var listed = ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums));
+                if (listed.Count == 0) throw new InvalidDataException($"{sumsPath} 里没有可用的 SHA-256 行");
+                var signer = NetworkSigner.FromSeed(File.ReadAllText(keyPath));
+                File.WriteAllText(outPath, ReleaseSignature.Sign(signer, tag, sums));
+                var trusted = ReleaseSignature.TrustedKeys.Contains(Convert.ToBase64String(signer.PublicKey));
+                output.WriteLine($"已签名 {listed.Count} 个文件（{ReleaseSignature.NormalizeTag(tag)}），写入 {outPath}。把它上传到同一个 Release。");
+                if (!trusted) output.WriteLine("注意：这把钥匙的公钥还不在 ReleaseSignature.TrustedKeys 里，现有的 Jay 认不出这个签名。");
+                return 0;
+            }
+            case "verify":
+            {
+                var package = rest.FirstOrDefault() ?? throw new ArgumentException("要给出安装包文件");
+                var keys = options.Get("pub") is { } pub ? new[] { pub } : null;
+                var check = ReleaseSignature.VerifyPackageAsync(package, options.Get("tag"), options.Get("sums"), options.Get("sig"), keys).GetAwaiter().GetResult();
+                output.WriteLine(check.Verdict switch
+                {
+                    ReleaseVerdict.Valid => $"通过：{Path.GetFileName(package)} 是 {check.Tag} 的正式发布包，签名来自 Jay 发布钥匙。",
+                    ReleaseVerdict.Unsigned => "没有签名：安装包旁边找不到 SHA256SUMS.txt 和 SHA256SUMS.txt.sig。",
+                    ReleaseVerdict.NoTrustedKey => "这个版本的程序里还没有发布公钥，没法核对（可以用 --pub 指定）。",
+                    ReleaseVerdict.Malformed => "签名文件格式不对。",
+                    ReleaseVerdict.UnknownKey => "签名不是 Jay 的发布钥匙签的。不要安装。",
+                    ReleaseVerdict.BadSignature => "签名和清单对不上（清单被改过）。不要安装。",
+                    ReleaseVerdict.WrongTag => $"签名属于 {check.Tag}，不是你要的版本。不要安装。",
+                    ReleaseVerdict.NotListed => "清单里没有这个文件名。",
+                    ReleaseVerdict.HashMismatch => "安装包的 SHA-256 和清单不一样（文件被改过或没下载完整）。不要安装。",
+                    _ => check.Verdict.ToString(),
+                });
+                return check.IsValid ? 0 : 2;
+            }
+            default:
+                throw new ArgumentException($"不认识的 release 子命令：{sub}");
+        }
+    }
+
     internal static int NetworkCommand(Options options, TextWriter output, string? root = null)
     {
         var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show|dir-key");
@@ -294,6 +376,16 @@ public static class Program
                     : Environment.GetEnvironmentVariable("JAY_NETWORK_KEY") ?? throw new ArgumentException("要用 --key 或环境变量 JAY_NETWORK_KEY 给签名钥匙");
                 var info = ReadNetwork(file);
                 output.WriteLine(NetworkString.Create(info, NetworkSigner.FromSeed(keyText)));
+                return 0;
+            }
+            case "cosign":
+            {
+                var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
+                var keyFile = options.Get("key") ?? throw new ArgumentException("要用 --key 指定自己的信任钥匙文件");
+                var signed = NetworkString.Cosign(File.Exists(text) ? File.ReadAllText(text) : text, NetworkSigner.FromSeed(File.ReadAllText(keyFile)));
+                output.WriteLine(signed);
+                var parsed = NetworkString.Parse(signed);
+                Console.Error.WriteLine($"签名数 {parsed.Signers.Count}，Jay 信任人 {JayTrust.Quorum.Count(parsed.Signers)}/{JayTrust.Need}{(parsed.Reviewed ? "，已审核" : "")}");
                 return 0;
             }
             case "check":
@@ -379,6 +471,14 @@ public static class Program
             case "dir-cert":
             {
                 var rootFile = options.Get("root") ?? throw new ArgumentException("要用 --root 指定根钥匙文件");
+                if (options.Get("cosign") is { } existing)
+                {
+                    var cosigned = DirectoryCertificate.Cosign(File.ReadAllBytes(existing), NetworkSigner.FromSeed(File.ReadAllText(rootFile)));
+                    File.WriteAllBytes(existing, cosigned);
+                    var c = DirectoryCertificate.Parse(cosigned)!;
+                    output.WriteLine($"已在 {existing} 上加签名（现在 {c.Signatures.Count} 个，Jay 信任人 {JayTrust.Quorum.Count(c.Signers)}/{JayTrust.Need}）。");
+                    return 0;
+                }
                 var networkName = options.Get("network") ?? throw new ArgumentException("要用 --network 指定 EasyTier 网络名（Jay 公共网络是 " + PublicNetworkProfile.JayNetworkName + "）");
                 var days = int.Parse(options.Get("days") ?? "365", System.Globalization.CultureInfo.InvariantCulture);
                 if (days is < 1 or > 3650) throw new ArgumentException("--days 要在 1 到 3650 之间");
@@ -444,11 +544,13 @@ public static class Program
                 var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
                 var signed = NetworkString.Parse(File.Exists(text) ? File.ReadAllText(text) : text);
                 output.WriteLine(signed.Info.ToJson().ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                output.WriteLine($"签名钥匙：{Convert.ToBase64String(signed.SignerKey)}（{signed.SignerFingerprint}）{(signed.Reviewed ? "，Jay 审核过" : "，未经 Jay 审核")}");
+                output.WriteLine($"网络主人的钥匙：{Convert.ToBase64String(signed.SignerKey)}（{signed.SignerFingerprint}）");
+                foreach (var k in signed.Signers.Skip(1)) output.WriteLine($"加签：{Convert.ToBase64String(k)}");
+                output.WriteLine($"Jay 信任人签了 {JayTrust.Quorum.Count(signed.Signers)}/{JayTrust.Need}{(signed.Reviewed ? "，Jay 审核过" : "，未经 Jay 审核")}");
                 return 0;
             }
             default:
-                throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show|dir-key");
+                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|dir-key|dir-cert");
         }
     }
 

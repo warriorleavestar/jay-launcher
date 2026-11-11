@@ -24,11 +24,11 @@ public enum NetworkAddResult
 public sealed class PublicNetworkList
 {
     private readonly List<SignedNetwork> _networks = [];
-    private readonly IReadOnlyList<byte[]>? _trusted;
+    private readonly IReadOnlyList<TrustQuorum>? _trusted;
 
     /// <param name="saved">设置里存的连接串。</param>
-    /// <param name="trusted">认哪些注册表钥匙（测试里换掉；不给就用 <see cref="NetworkString.RegistryKeys"/>）。</param>
-    public PublicNetworkList(IEnumerable<string>? saved, IReadOnlyList<byte[]>? trusted = null, DateTimeOffset? now = null)
+    /// <param name="trusted">Quorums that make a string reviewed (tests swap them; null = the Jay trustees, <see cref="JayTrust"/>).</param>
+    public PublicNetworkList(IEnumerable<string>? saved, IReadOnlyList<TrustQuorum>? trusted = null, DateTimeOffset? now = null)
     {
         _trusted = trusted;
         foreach (var text in saved ?? [])

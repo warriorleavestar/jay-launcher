@@ -118,21 +118,53 @@ public sealed class AccountStore : IAccountStore
     private readonly Dictionary<string, Account> _accounts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (int Fails, DateTimeOffset Until)> _fails = new(StringComparer.Ordinal);
 
+    /// <summary>Last-write time of the file as last read or written here, to notice edits from another process.</summary>
+    private DateTime _loadedStamp;
+
     public AccountStore(string path)
     {
         _path = path;
-        if (!File.Exists(path)) return;
-        var o = JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? throw new InvalidDataException(path);
+        if (File.Exists(path)) Load();
+    }
+
+    private void Load()
+    {
+        var stamp = File.GetLastWriteTimeUtc(_path);
+        var o = JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? throw new InvalidDataException(_path);
+        var accounts = new Dictionary<string, Account>(StringComparer.Ordinal);
         foreach (var (name, node) in o["users"] as JsonObject ?? [])
             if (node is JsonObject a)
-                _accounts[name] = new Account(Convert.FromBase64String(a["salt"]!.GetValue<string>()), Convert.FromBase64String(a["hash"]!.GetValue<string>()),
+                accounts[name] = new Account(Convert.FromBase64String(a["salt"]?.GetValue<string>() ?? throw new InvalidDataException(_path)),
+                    Convert.FromBase64String(a["hash"]?.GetValue<string>() ?? throw new InvalidDataException(_path)),
                     a["iter"]?.GetValue<int>() ?? Iterations, a["disabled"]?.GetValue<bool>() ?? false,
                     a["totp"]?.GetValue<string>() is { } totp ? Convert.FromBase64String(totp) : null);
+        _accounts.Clear();
+        foreach (var (name, account) in accounts) _accounts[name] = account;
+        _loadedStamp = stamp;
+    }
+
+    /// <summary>
+    /// Picks up changes made by <c>jay-server account</c> while the node runs (disable, remove, new password, 2FA), so they
+    /// take effect at the next login instead of at the next restart. Call under <see cref="_gate"/>. A file that can't be
+    /// read right now (being replaced, or broken) keeps the last good list.
+    /// </summary>
+    private void Refresh()
+    {
+        try
+        {
+            if (File.Exists(_path) && File.GetLastWriteTimeUtc(_path) != _loadedStamp) Load();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or JsonException
+            or FormatException or InvalidOperationException) { }
     }
 
     public IReadOnlyList<(string Name, bool Disabled)> List()
     {
-        lock (_gate) return [.. _accounts.OrderBy(a => a.Key, StringComparer.Ordinal).Select(a => (a.Key, a.Value.Disabled))];
+        lock (_gate)
+        {
+            Refresh();
+            return [.. _accounts.OrderBy(a => a.Key, StringComparer.Ordinal).Select(a => (a.Key, a.Value.Disabled))];
+        }
     }
 
     /// <summary>账号名：1~32 个字，去掉控制字符和首尾空格，大小写有区别。</summary>
@@ -150,6 +182,7 @@ public sealed class AccountStore : IAccountStore
         var salt = RandomNumberGenerator.GetBytes(16);
         lock (_gate)
         {
+            Refresh();
             _accounts.TryGetValue(clean, out var old);
             _accounts[clean] = new Account(salt, Hash(password, salt, Iterations), Iterations, old?.Disabled ?? false, old?.Totp);
             Save();
@@ -160,6 +193,7 @@ public sealed class AccountStore : IAccountStore
     {
         lock (_gate)
         {
+            Refresh();
             if (!_accounts.Remove(name)) return false;
             Save();
             return true;
@@ -170,6 +204,7 @@ public sealed class AccountStore : IAccountStore
     {
         lock (_gate)
         {
+            Refresh();
             if (!_accounts.TryGetValue(name, out var a)) return false;
             _accounts[name] = a with { Disabled = disabled };
             Save();
@@ -182,6 +217,7 @@ public sealed class AccountStore : IAccountStore
     {
         lock (_gate)
         {
+            Refresh();
             if (!_accounts.TryGetValue(name, out var a)) return false;
             _accounts[name] = a with { Totp = secret };
             Save();
@@ -192,7 +228,11 @@ public sealed class AccountStore : IAccountStore
     /// <summary>账号的 TOTP 密钥（没开两步验证是 null）。</summary>
     public byte[]? TotpSecret(string name)
     {
-        lock (_gate) return _accounts.TryGetValue(name, out var a) ? a.Totp : null;
+        lock (_gate)
+        {
+            Refresh();
+            return _accounts.TryGetValue(name, out var a) ? a.Totp : null;
+        }
     }
 
     /// <summary>记一次失败（比如两步验证码错了），和密码猜错一起算锁定次数。</summary>
@@ -219,6 +259,7 @@ public sealed class AccountStore : IAccountStore
         lock (_gate)
         {
             if (_fails.TryGetValue(clean, out var f) && f.Fails >= MaxFails && f.Until > now) return LoginResult.Locked;
+            Refresh();
             _accounts.TryGetValue(clean, out account);
         }
         var salt = account?.Salt ?? new byte[16];
@@ -246,11 +287,8 @@ public sealed class AccountStore : IAccountStore
                 ["salt"] = Convert.ToBase64String(a.Salt), ["hash"] = Convert.ToBase64String(a.Hash), ["iter"] = a.Iterations, ["disabled"] = a.Disabled,
                 ["totp"] = a.Totp is { } totp ? Convert.ToBase64String(totp) : null,
             };
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
-        var temp = _path + ".tmp";
-        File.WriteAllText(temp, new JsonObject { ["v"] = 1, ["users"] = users }.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        File.Move(temp, _path, true);
+        PrivateFile.WriteAllText(_path, new JsonObject { ["v"] = 1, ["users"] = users }.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        _loadedStamp = File.GetLastWriteTimeUtc(_path);
     }
 }
 
@@ -339,9 +377,7 @@ public sealed class LoginAuthority(IAccountStore accounts, X25519KeyPair key, Ne
         }
         var key = X25519KeyPair.Generate();
         var signer = NetworkSigner.Generate(out var seed);
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        File.WriteAllText(path, Convert.ToBase64String(key.ExportPrivateKey()) + "\n" + Convert.ToBase64String(seed) + "\n");
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        PrivateFile.WriteAllText(path, Convert.ToBase64String(key.ExportPrivateKey()) + "\n" + Convert.ToBase64String(seed) + "\n");
         return (key, signer);
     }
 }

@@ -14,9 +14,7 @@ public static class AdminToken
     {
         if (File.Exists(path) && File.ReadAllText(path).Trim() is { Length: 64 } existing && existing.All(char.IsAsciiHexDigit)) return existing;
         var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        File.WriteAllText(path, token + "\n");
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        Amber.Core.PrivateFile.WriteAllText(path, token + "\n");
         return token;
     }
 

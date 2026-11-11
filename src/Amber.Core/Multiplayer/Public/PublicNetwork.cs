@@ -51,7 +51,8 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
             if (RelayNodes.IsValid(n) && !nodes.Contains(n.Trim())) nodes.Add(n.Trim());
         return new PublicNetworkProfile("jay", L.T("core.mp.public.jay_name"), JayNetworkName, JaySecret, nodes)
         {
-            DirectoryRoots = [.. JayDirectoryRoots.Select(Convert.FromBase64String)],
+            DirectoryRoots = JayTrust.Quorum.Keys,
+            DirectoryRootsNeed = JayTrust.Need,
         };
     }
 
@@ -75,17 +76,13 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 
     /// <summary>
     /// Ed25519 root keys whose certificates (<see cref="DirectoryCertificate"/>) make a directory key acceptable, from
-    /// the connection string's "dirRoots", or <see cref="JayDirectoryRoots"/> for the built-in network. Lets a network
-    /// add or re-key directory nodes without re-issuing its string, while the root private key stays offline.
+    /// the connection string's "dirRoots", or the Jay trustees (<see cref="JayTrust"/>) for the built-in network. Lets a
+    /// network add or re-key directory nodes without re-issuing its string, while the root private keys stay offline.
     /// </summary>
     public IReadOnlyList<byte[]> DirectoryRoots { get; init; } = [];
 
-    /// <summary>
-    /// The built-in Jay network's directory root public keys (base64). Empty until the root key is made; until then the
-    /// built-in network's directory is trusted on first use. The root private key is kept offline by the project owner
-    /// and never goes into the repository, CI or a server.
-    /// </summary>
-    public static readonly string[] JayDirectoryRoots = [];
+    /// <summary>How many of <see cref="DirectoryRoots"/> must sign a directory certificate.</summary>
+    public int DirectoryRootsNeed { get; init; } = 1;
 
     public bool IsBuiltIn => Id == "jay";
 
@@ -265,7 +262,7 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
                 var peers = await PeersAsync(cts.Token);
                 if (peers.Any(p => PublicNetworkProfile.DirectoryIps.Contains(StripMask(p.Ip)) && p.Cost != "Local")
                     // 自动分配的地址要已经在公共网络的网段里：刚连上、还没看到别人的路由时 EasyTier 会先给一个 10.126.126.x，过几秒才改过来。
-                    && peers.FirstOrDefault(p => p.Cost == "Local") is { Ip.Length: > 0 } me && StripMask(me.Ip).StartsWith(PublicNetworkProfile.Subnet, StringComparison.Ordinal)) return;
+                    && peers.FirstOrDefault(p => p.Cost == "Local") is { Ip.Length: > 0 } me && IsMemberAddress(StripMask(me.Ip))) return;
                 await Task.Delay(500, cts.Token);
             }
         }
@@ -278,6 +275,15 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
     public Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct) => Socks5Client.ConnectAsync(IPAddress.Loopback, Options.SocksPort, ip, port, ct);
 
     internal static string StripMask(string ip) => ip.Split('/')[0];
+
+    /// <summary>
+    /// An address a member may use: inside the public subnet and not one of the directory addresses. EasyTier's DHCP hands
+    /// out the lowest free address, so while the main directory is offline a member can be given 10.235.0.1. Such a member
+    /// isn't treated as connected; EasyTier moves it once the directory is back and claims its fixed address.
+    /// Even while it holds the address it can't receive directory traffic: members only let the knock port in.
+    /// </summary>
+    internal static bool IsMemberAddress(string ip) =>
+        ip.StartsWith(PublicNetworkProfile.Subnet, StringComparison.Ordinal) && !PublicNetworkProfile.DirectoryIps.Contains(ip);
 
     public void Dispose()
     {

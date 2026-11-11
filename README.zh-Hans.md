@@ -12,6 +12,8 @@
 [![许可证](https://img.shields.io/github/license/warriorleavestar/jay-launcher?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
 ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 
+**[直接下载 Android APK（实验版）](https://github.com/warriorleavestar/jay-launcher/releases/download/android-preview/Jay-android-experimental.apk)**
+
 [English](README.md) | 简体中文 | [代码签名政策](docs/code-signing-policy.md) | [参与贡献](CONTRIBUTING.zh-Hans.md)
 
 ![Jay 启动页](docs/images/jay-home.png)

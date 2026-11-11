@@ -21,6 +21,10 @@ public sealed record PersonItem(string Name, string Fingerprint, bool IsMe, bool
         : Member is { Confirmed: false } ? L.T("multiplayer.invite.member_unconfirmed")
         : L.T("multiplayer.people.offline");
 
+    /// <summary>Their verified Jay account: from their knock (host), or the host's approval (guest looking at the host).</summary>
+    public string? JayAccount { get; init; }
+    public bool HasJayAccount => JayAccount is not null;
+
     public bool IsOnline => IsMe || Online is not null;
     public bool CanPrivate => !IsMe && Online is not null;
     public bool CanTrust => Member is { Trusted: false };
@@ -163,10 +167,13 @@ public sealed partial class MultiplayerViewModel
         foreach (var m in Members)
         {
             online.Remove(m.Fingerprint, out var peer);
-            People.Add(new PersonItem(m.Name, m.Fingerprint, false, false, m, peer));
+            People.Add(new PersonItem(m.Name, m.Fingerprint, false, false, m, peer) { JayAccount = m.JayAccount });
         }
         foreach (var peer in online.Values.Where(p => p.Entry.Fingerprint != me))
-            People.Add(new PersonItem(peer.Entry.Name, peer.Entry.Fingerprint, false, !IsHosting && peer.Entry.Fingerprint == HostFingerprint, null, peer));
+        {
+            var isHost = !IsHosting && peer.Entry.Fingerprint == HostFingerprint;
+            People.Add(new PersonItem(peer.Entry.Name, peer.Entry.Fingerprint, false, isHost, null, peer) { JayAccount = isHost ? HostJayAccount : null });
+        }
         SelectedPerson = People.FirstOrDefault(p => p.Fingerprint == selected);
         NotifyRoomHeader();
     }

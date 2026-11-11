@@ -17,15 +17,16 @@
     <Grid x:Name="Body" Grid.Row="1" ColumnDefinitions="220,*" ColumnSpacing="16">
       <!-- Wide: catalog by category -->
       <ScrollViewer x:Name="CatalogPane">
+        <StackPanel>
         <ItemsControl x:Name="CatalogList" ItemsSource="{Binding Groups}">
           <ItemsControl.ItemTemplate>
             <DataTemplate DataType="vm:HelpCategoryGroup">
               <StackPanel Spacing="2" Margin="0,0,0,10">
-                <TextBlock Text="{Binding Title}" Classes="hint" FontSize="12" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Title}" Classes="hint" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
                 <ItemsControl ItemsSource="{Binding Articles}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:HelpArticleItem">
-                      <!-- Long English titles wrap instead of running past the catalog column. -->
+                      <!-- Long titles (English, Japanese) wrap in the 220px catalog instead of running under the article. -->
                       <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,4"
                               Command="{Binding $parent[ItemsControl;1].((vm:HelpCenterViewModel)DataContext).OpenCommand}" CommandParameter="{Binding}">
                         <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
@@ -37,6 +38,11 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+        <Button x:Name="ResetTipsButton" Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,4" Margin="0,4,0,0"
+                Command="{Binding ResetTipsCommand}">
+          <TextBlock Text="{l:T tip.reset}" TextWrapping="Wrap" />
+        </Button>
+        </StackPanel>
       </ScrollViewer>
       <Grid Grid.Column="1" RowDefinitions="Auto,*">
         <!-- Medium: the catalog as a menu -->

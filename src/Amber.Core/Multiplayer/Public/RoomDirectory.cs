@@ -665,6 +665,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>Root keys that certify directory keys (<see cref="PublicNetworkProfile.DirectoryRoots"/>). Same rule as pinned keys.</summary>
     public IReadOnlyList<byte[]> RootKeys { get; init; } = network.Profile?.DirectoryRoots ?? [];
 
+    /// <summary>How many of <see cref="RootKeys"/> must have signed a directory's certificate.</summary>
+    public int RootsNeed { get; init; } = network.Profile?.DirectoryRootsNeed ?? 1;
+
     /// <summary>
     /// Where to remember directory keys of networks that pin nothing (trust on first use). Null: such networks use the
     /// legacy protocol as before.
@@ -679,6 +682,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         Network = network.Profile?.NetworkName ?? "",
         Pinned = PinnedKeys,
         Roots = RootKeys,
+        RootsNeed = RootsNeed,
         Memory = KeyMemory,
     };
 

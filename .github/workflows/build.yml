@@ -5,6 +5,12 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_android_preview:
+        description: Publish the Android APK as the android-preview pre-release
+        type: boolean
+        default: false
 
 # 同一个 PR 推了新提交时，取消旧提交还在排队或在跑的检查；main 和标签上的不取消
 concurrency:
@@ -42,6 +48,7 @@ jobs:
       # 界面自检（AMBER_SELFTEST）要真实窗口、联网下载游戏和启动 Java，CI 上不跑，发布前在本机跑 tools/run-selftest.ps1。
 
   publish:
+    if: github.event_name != 'workflow_dispatch' || !inputs.publish_android_preview
     needs: validate
     timeout-minutes: 60
     strategy:
@@ -188,7 +195,44 @@ jobs:
           path: packages/Jay-android-experimental.apk
           if-no-files-found: error
 
+  publish-android-preview:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview
+    needs: android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: jay-android
+          path: android-assets
+
+      - name: Publish Android preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          cd android-assets
+          test -s Jay-android-experimental.apk
+          sha256sum Jay-android-experimental.apk > SHA256SUMS.txt
+          cat > release-notes.md <<'NOTES'
+          直接下载 Jay-android-experimental.apk。支持 Android 6.0 及以上的 ARM64 和 x86_64 设备。
+
+          手机和窄分屏采用单栏，宽屏平板采用双栏，旋转或调整窗口时自动重排。按钮和邀请码输入框已针对触控调整。
+
+          这是 Jay 服务器伴侣应用。通过邀请码登记后，在独立的 Minecraft Java 启动器中使用 Jay 显示的本机地址。
+
+          此实验版使用 CI 测试签名。若此前安装了签名不同的构建，Android 会拒绝覆盖安装。卸载会清除设备身份和已保存的服务器，请先确认可以重新取得邀请码。
+          NOTES
+          gh release create android-preview Jay-android-experimental.apk SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Jay Android 预览版" \
+            --notes-file release-notes.md \
+            --prerelease
+
   ios:
+    if: github.event_name != 'workflow_dispatch' || !inputs.publish_android_preview
     # Keep the platform compile independent so a desktop-only/flaky test cannot hide iOS compiler failures.
     # .NET 10.0.403 installs the iOS 27.1 workload; this image has matching Xcode 27.1 as its default.
     runs-on: xcode-27
@@ -306,6 +350,15 @@ jobs:
             test -f "signed-assets/$f"
             cp -f "signed-assets/$f" "release-assets/$f"
           done
+
+      # Jay release signature: the maintainer signs this list offline (`jay-server release sign`) and
+      # uploads SHA256SUMS.txt.sig to the release; see docs/security/release-signing.md.
+      - name: SHA-256 list
+        run: |
+          cd release-assets
+          sha256sum -- * | LC_ALL=C sort -k2 > ../SHA256SUMS.txt
+          mv ../SHA256SUMS.txt .
+          cat SHA256SUMS.txt
 
       - name: Publish GitHub Release
         env:

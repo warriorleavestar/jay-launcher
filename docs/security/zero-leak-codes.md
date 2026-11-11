@@ -1,7 +1,7 @@
 # Codes that are useless when leaked
 
-Status: core pieces implemented (contact codes, emoji check, sealed mail, bound invites, directory roots, trust on first use).
-The UI and the remaining items below are follow-ups.
+Status: implemented, including the UI (Multiplayer settings › Contacts, room header [Invite a contact], mailed invites in
+the activity centre) and first-use directory keys in `directory-keys.json`. The remaining items below are follow-ups.
 
 People paste Jay's codes into QQ, WeChat, Discord, forums and screenshots. Those platforms keep and scan what they carry,
 and anyone else in the group can copy it. The goal: **nothing pasted on a third-party platform lets anyone else in**.
@@ -87,48 +87,43 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 `Public/DirectoryTrust.cs`, `Public/DirectoryChannel.cs`. Jay picks one of these before sending a directory anything:
 
 1. **Pinned**: keys in the signed connection string (`dirKeys`, #145).
-2. **Root-certified**: the connection string lists Ed25519 root keys (`dirRoots`, at most 4). The built-in network uses
-   `PublicNetworkProfile.JayDirectoryRoots`.
-   - A directory sends `{"c","r","s"}` as the payload of its handshake message. Older Jay versions ignore it.
-   - `c` is `{"key","net","exp"}` and `s` is the root's signature over `"jay-directory-cert-v1\n" ‖ c`.
-   - Jay accepts the key if the root is listed, `net` is this network's EasyTier name, it hasn't expired, and `key` is
-     the key the directory just proved.
+2. **Root-certified**: the connection string lists Ed25519 root keys (`dirRoots`, at most 4) and how many of them must
+   sign (`dirRootsNeed`, default 1). The built-in network uses the Jay trustees (`JayTrust`): 2 of 3.
+   - A directory sends `{"c","sigs"}` as the payload of its handshake message.
+   - `c` is `{"key","net","exp"}`; `sigs` is a list of `{"r","s"}`, each `s` being root `r`'s signature over
+     `"jay-directory-cert-v2\n" ‖ c`. One bad signature rejects the certificate.
+   - Jay accepts the key if enough distinct listed roots signed, `net` is this network's EasyTier name, it hasn't
+     expired, and `key` is the key the directory just proved.
 3. **First use** (networks with neither): the first key seen at each directory address is remembered in
    `directory-keys.json`. After that, only that key is accepted, with no legacy fallback for that address.
    `DirectoryKeyChangedException` tells the user to remove and re-add the network if the change was intended. Until a key
    is remembered, a directory that only speaks the old protocol still works.
 
-### Making the root key for the built-in network (project owner, offline)
+### Trustee keys for the built-in network (offline, one per person)
+
+The built-in network's directory certificates, and reviewed network strings, need 2 of the 3 Jay trustees
+(`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
 
 ```bash
-jay-server network root-key --out <usb>/jay-directory-root.key
-# prints the root public key → paste it into PublicNetworkProfile.JayDirectoryRoots and release
+jay-server network root-key --out <usb>/jay-trustee.key
+# prints the public key → it goes into JayTrust.Keys, then a release
 
 # on each directory node: print its directory public key (makes directory.key on first use)
 jay-server network dir-key --dir <node data dir>
 
-# on the offline machine, with only that public key:
-jay-server network dir-cert --root <usb>/jay-directory-root.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# trustee 1, offline, with only that public key:
+jay-server network dir-cert --root <usb>/jay-trustee.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# trustee 2, on their own offline machine, adds their signature to the same file:
+jay-server network dir-cert --cosign directory.cert --root <usb>/jay-trustee.key
 # copy directory.cert into the node's data dir; the node logs "directory certificate" at start
 ```
 
-Keep the root private key off servers, CI, cloud drives and the repository. Certificates are not secret. A new or
-re-keyed node needs only a new certificate, not a Jay release. Rotating the root itself needs a release with both roots
-listed for a while (up to 4).
+No trustee key goes on a server, CI, a cloud drive, a chat or the repository. Certificates are not secret. A new or
+re-keyed node needs only a new certificate, not a Jay release. If one trustee loses their key, the other two can still
+sign; replacing a trustee needs a release with the new public key.
 
 ## Still to do
 
-- **UI**:
-  - "add contact" from a pasted JAYC1;
-  - the emoji compare card (with emoji names for screen readers);
-  - contacts list;
-  - "invite a contact" on the room card, creating a bound, auto-approved invite;
-  - mailed invites in the activity centre;
-  - "may have been held back" with direct-link and LAN fallback;
-  - polling `CheckAsync` while the public network is on (every 30 s, like room renewals).
-
-  The UI redesign thread owns those pages.
-- **App wiring**: `RoomDirectoryClient.KeyMemory` in the data folder, so third-party networks get first-use pinning.
 - **Direct links without an IP in the code**: rendezvous through mail (each side mails its candidates, sealed), so
   JAY2D/JAY2R no longer carry public IPs.
 - **Relay enrollment the other way around**: a relay generates its own key and the admin approves its fingerprint, so
