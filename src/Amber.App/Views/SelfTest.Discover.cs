@@ -68,7 +68,13 @@ internal sealed partial class SelfTest
             await Task.Delay(400);
 
             // Space on the selected row takes it out again, and back in.
-            Dispatcher.UIThread.Invoke(() => { page.ResultsList.SelectedItem = first; PressKey(page.ResultsList, Key.Space); });
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                page.ResultsList.SelectedItem = first;
+                // List keys only act with focus inside the list; the ListBox itself can't take focus, its row can.
+                page.ResultsList.ContainerFromItem(first)?.Focus();
+                PressKey(page.ResultsList, Key.Space);
+            });
             Check("Space：从待装里拿掉", await WaitAsync(() => content.QueueCount == 0 && !first.Queued, 5));
             Dispatcher.UIThread.Invoke(() => PressKey(page.ResultsList, Key.Space));
             Check("Space：再放回去", await WaitAsync(() => content.QueueCount == 1, 20));

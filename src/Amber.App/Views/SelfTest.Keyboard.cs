@@ -26,18 +26,27 @@ internal sealed partial class SelfTest
             shell.Router.Current.ToString());
 
         // In a text box Ctrl+N belongs to the text box.
+        // An empty library has no search box, so fall back to Discover's.
         shell.Navigate("library");
         await Task.Delay(400);
-        var box = window.PageHost.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(t => t.IsEffectivelyVisible && t.IsEffectivelyEnabled);
+        TextBox? VisibleBox() => window.PageHost.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(t => t.IsEffectivelyVisible && t.IsEffectivelyEnabled);
+        var box = VisibleBox();
         if (box is null)
-            Check("Library has a visible text box to test with", false);
+        {
+            shell.Navigate("discover");
+            await Task.Delay(400);
+            box = VisibleBox();
+        }
+        if (box is null)
+            Check("Library or Discover has a visible text box to test with", false);
         else
         {
+            var before = main.CurrentPage;
             box.Focus();
             await Task.Delay(150);
             box.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.N, KeyModifiers = KeyModifiers.Control, Source = box });
             await Task.Delay(300);
-            Check("Ctrl+N inside a text box does not navigate", main.CurrentPage is LibraryViewModel, shell.Router.Current.ToString());
+            Check("Ctrl+N inside a text box does not navigate", main.CurrentPage == before, shell.Router.Current.ToString());
             window.Focus();
         }
 
