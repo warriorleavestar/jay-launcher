@@ -26,10 +26,11 @@ internal sealed partial class SelfTest
                 var name = variant == ThemeVariant.Dark ? "夜" : "晨";
                 Application.Current.RequestedThemeVariant = variant;
                 var gallery = new Gallery();
-                var host = new Window { Width = 1100, Height = 2200, Content = gallery, ShowInTaskbar = false };
+                var host = new Window { Width = 1100, Height = 2700, Content = gallery, ShowInTaskbar = false };
                 host.Show();
                 await Task.Delay(600);
                 Check($"控件库（{name}）：图标都解析得到", gallery.IconCount >= 60, $"{gallery.IconCount} 个");
+                Check($"Gallery ({variant}): every automatic cover is shown for review", gallery.CoverCount == Amber.Core.GameLibrary.CoverArt.Slots, $"{gallery.CoverCount}");
                 var plays = gallery.GetVisualDescendants().OfType<Button>().Count(b => b.Classes.Contains("play") && b.IsEffectivelyVisible);
                 Check($"控件库（{name}）：琥珀按钮只有一个", plays == 1, $"{plays} 个");
                 // 琥珀按钮用的是 Play 令牌，不是强调色。

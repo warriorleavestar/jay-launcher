@@ -898,6 +898,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             Persist();
             UpdateThemePackStatus();
             Toasts.Show(L.F("settings.themepack.imported", pack.Name));
+            TutorialService.Request(Amber.Core.Tutorial.Tips.ThemeImport);
         }
         catch (Amber.Core.Themes.ThemePackException e)
         {

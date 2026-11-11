@@ -39,11 +39,12 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `src/Amber.Core/Game/` | `.minecraft` layout, version JSON model, rules, libraries, NBT (`servers.dat`, `level.dat`), datapacks, world backups. | `GameDirectory.cs`, `VersionModels.cs` |
 | `src/Amber.Core/GameLibrary/` | Library home data: instance list, new-instance rules, copy instance, start button state. | `LibraryQuery.cs`, `StartButton.cs` |
 | `src/Amber.Core/Help/` | Help center articles (Markdown in `docs/help/`, embedded) and search. | `HelpLibrary.cs` |
+| `src/Amber.Core/Tutorial/` | Contextual tips (§9.3): the tip list and the don't-interrupt rules; the app shows them via `Services/TutorialService.cs` and `MainWindow.Tips.cs`. | `Tips.cs` |
 | `src/Amber.Core/Identity/` | Jay accounts: BIP39 recovery phrases (embedded wordlists), SLIP-0010 Ed25519 with Jay's own root key, `jay1` Bech32m addresses, device certificates, encrypted account store. | `JayAccount.cs`, `JayAccountStore.cs`, `Bip39.cs` |
 | `src/Amber.Core/Install/` | Vanilla, Fabric/Quilt, Forge/NeoForge (new and legacy), OptiFine installers. | `VanillaInstaller.cs`, `ForgeInstaller.cs` |
 | `src/Amber.Core/Interop/` | P/Invoke library names for macOS frameworks. | `MacFrameworks.cs` |
 | `src/Amber.Core/Java/` | Find local Java, or download the Mojang runtime / Temurin. | `JavaManager.cs`, `JavaFinder.cs` |
-| `src/Amber.Core/Launch/` | Build the command line and run the game; per-instance settings, logs, no-trace mode, error reports, graceful exit per OS. | `GameLauncher.cs`, `LaunchSession.cs`, `InstanceSettings.cs` |
+| `src/Amber.Core/Launch/` | Build the command line and run the game; per-instance settings, logs, no-trace mode, error reports, graceful exit per OS, the update check and release signature checks. | `GameLauncher.cs`, `LaunchSession.cs`, `InstanceSettings.cs`; release signatures in `ReleaseSignature.cs` |
 | `src/Amber.Core/Layout/` | UI-independent layout rules: width tiers, density, motion, window sizing. | `LayoutTiers.cs` |
 | `src/Amber.Core/Localization/` | UI strings (`en.json` is the source, then one JSON per language), error text, number formatting. | `L.cs`, `en.json` |
 | `src/Amber.Core/Multiplayer/` | EasyTier-based rooms: invites, knock, lobby, members, chat, private messages and files, direct link and hole punching, exit (VPN-like) mode helpers. | `Invite.cs`, `Knock.cs`, `Lobby.cs`, `EasyTier.cs`, `DirectLink.cs` |
@@ -109,6 +110,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `server/` | `jay-server` deployment: systemd units, Docker, public node installer. |
 | `scripts/` | Release helpers: bundle EasyTier, publish and package macOS, attach the universal loader zip to its release (`attach-loader.ps1`, see `docs/universal-loader-release.md`). |
 | `tools/` | GUI self-check runner, multiplayer test, NAT bench, brand icon export, this code index builder. |
+| `tools/FullLanCheck/` | Headless end-to-end check of full-LAN mode on macOS/Linux (needs root), used by the fulllan-e2e workflow. |
 | `.github/` | CI (`build.yml`), security regression tests, network registry checks, issue templates. |
 
 ## Where to start for common tasks

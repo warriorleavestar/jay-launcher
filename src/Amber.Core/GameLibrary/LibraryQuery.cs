@@ -102,7 +102,7 @@ public sealed class GameVersionComparer : IComparer<string>
 /// </summary>
 public static class CoverArt
 {
-    public const int Slots = 8;
+    public const int Slots = 9;
 
     /// <summary>FNV-1a over the UTF-16 id: stable across runs and platforms (string.GetHashCode is randomized).</summary>
     public static int SlotFor(string id)

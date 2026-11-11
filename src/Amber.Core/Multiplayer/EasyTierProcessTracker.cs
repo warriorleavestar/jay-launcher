@@ -26,10 +26,13 @@ internal static class EasyTierProcessTracker
                     File.Delete(record);
                     continue;
                 }
+                // A record whose Jay is still running (another Jay, or this one) belongs to a live session, not a leftover.
+                // This Jay counts too: on Mac/Linux a second EasyTier started in the same work dir (the self-check's
+                // guest, or any session that overlaps another) must not kill the room this Jay is still hosting.
                 if (lines.Length == 5 && int.TryParse(lines[3], out var ownerPid) && long.TryParse(lines[4], out var ownerTicks)
-                    && ownerPid != Environment.ProcessId && IsAlive(ownerPid, ownerTicks))
+                    && IsAlive(ownerPid, ownerTicks))
                 {
-                    continue; // 另一个仍在运行的 Jay 的联机，不是残留。
+                    continue;
                 }
                 var recordedPath = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(lines[2]));
                 using var process = Process.GetProcessById(pid);
