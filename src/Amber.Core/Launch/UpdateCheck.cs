@@ -128,6 +128,7 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         ReleaseVerdict.WrongTag => "tools.update.verdict.wrongtag",
         ReleaseVerdict.NotListed => "tools.update.verdict.notlisted",
         ReleaseVerdict.HashMismatch => "tools.update.verdict.hashmismatch",
+        ReleaseVerdict.WrongComponent => "tools.update.verdict.wrongcomponent",
         _ => "tools.update.verdict.malformed",
     });
 

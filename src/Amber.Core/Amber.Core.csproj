@@ -22,6 +22,8 @@
     <EmbeddedResource Include="..\..\docs\help\**\*.md" LogicalName="help/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\docs\help\shots\**\*.png" LogicalName="help/shots/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\themes\builtin\**\*.json" LogicalName="themes/builtin/%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- The hardened EasyTier release's SHA256SUMS.txt and the trustees' signatures over it (docs/security/release-signing.md) -->
+    <EmbeddedResource Include="Multiplayer\EasyTierSigned\*" LogicalName="easytier-signed/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

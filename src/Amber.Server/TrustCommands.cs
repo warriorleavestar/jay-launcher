@@ -147,6 +147,7 @@ internal static class TrustCommands
         var files = ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums));
         var lines = new List<string>
         {
+            s.Component is null ? "要签的是：Jay 发布" : $"要签的是：{s.Component} 加固版的发布（不是 Jay 本身）",
             $"版本号：{s.Tag}",
             $"发布序号：{s.Seq}",
             $"提交号：{s.Commit}（到仓库里对一下，是不是要发的那个提交）",
