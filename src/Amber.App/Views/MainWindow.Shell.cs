@@ -143,8 +143,8 @@ public partial class MainWindow
         }
         Grid.SetRowSpan(ThemeBackground, 2);
         Grid.SetColumnSpan(ThemeBackground, 2);
-        Grid.SetRowSpan(BreakerOverlay, 2);
-        Grid.SetColumnSpan(BreakerOverlay, 2);
+        Grid.SetRowSpan(BreakerHost, 2);
+        Grid.SetColumnSpan(BreakerHost, 2);
 
         // 侧栏里面：竖排是 品牌 / 入口 / 底部 三行；横排是 品牌 | 入口 | 底部 三列。
         SidebarGrid.RowDefinitions.Clear();
@@ -210,12 +210,7 @@ public partial class MainWindow
         TipBar.Margin = new Thickness(pad, 0, pad, 8);
         RequestBar.Margin = new Thickness(pad, 0, pad, 8);
         // 活动抽屉：紧凑档铺满内容区，其余 400 宽从右边滑出（§5.3）。
-        ActivityDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
-        ActivityDrawer.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
-        HelpDrawer.Width = ContentTier == WidthTier.Compact ? double.NaN : 400;
-        HelpDrawer.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
-        PalettePanel.Width = ContentTier == WidthTier.Compact ? double.NaN : 640;
-        PalettePanel.HorizontalAlignment = ContentTier == WidthTier.Compact ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
+        ApplyOverlayTier();
         ContentColumn.Classes.Set("compact", ContentTier == WidthTier.Compact);
         ContentColumn.Classes.Set("wide", ContentTier == WidthTier.Wide);
     }

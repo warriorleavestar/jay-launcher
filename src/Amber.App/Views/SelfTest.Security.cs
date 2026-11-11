@@ -47,7 +47,7 @@ internal sealed partial class SelfTest
 
         // 熔断：盖住窗口的倒计时，空格取消。
         Dispatcher.UIThread.Invoke(() => mp.TripBreaker("自检：模拟有人冒充"));
-        var overlay = await FindAsync<Border>(b => b.Name == "BreakerOverlay" && b.IsEffectivelyVisible);
+        var overlay = await FindAsync<Border>(b => b.Name == "BreakerOverlayPart" && b.IsEffectivelyVisible);
         Check("熔断：倒计时盖住窗口，写着原因和秒数",
             overlay is not null && mp.IsBreakerCounting && mp.BreakerReason.Contains("自检") && mp.BreakerCountdownText.Contains('3'), mp.BreakerCountdownText);
         await ShotAsync("security-breaker-countdown");
