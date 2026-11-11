@@ -57,6 +57,7 @@ meson setup "$work/build" "$source" --cross-file "$cross" \
   -Dplatforms=android -Dplatform-sdk-version=35 -Dandroid-stub=true \
   -Dandroid-libbacktrace=disabled -Dandroid-libperfetto=disabled \
   -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dvulkan-layers=[] \
+  -Dallow-fallback-for=libdrm \
   -Degl=enabled -Degl-native-platform=android -Dopengl=true \
   -Dgles1=disabled -Dgles2=enabled -Dglx=disabled -Dgbm=disabled \
   -Dllvm=disabled -Dlibunwind=disabled -Dvalgrind=disabled \
@@ -67,9 +68,16 @@ meson compile -C "$work/build"
 DESTDIR="$work/install" meson install -C "$work/build"
 
 mkdir -p "$output"
-find "$work/install/opt/jay-mesa" -type f \( -name '*.so' -o -name '*.so.*' \) -exec cp {} "$output/" \;
+while IFS= read -r -d '' library; do
+  # Flatten the runtime while retaining every loader-visible SONAME and DRI alias.
+  # Symlinks are deliberately dereferenced because Jay's installer rejects links.
+  cp -L "$library" "$output/$(basename "$library")"
+done < <(find "$work/install/opt/jay-mesa" \( -type f -o -type l \) \( -name '*.so' -o -name '*.so.*' \) -print0)
 cp "$source/docs/license.rst" "$output/MESA-LICENSE.rst"
 cp "$source/licenses/MIT" "$output/MESA-MIT.txt"
+
+test -f "$output/libEGL.so"
+test -f "$output/zink_dri.so"
 
 readelf="$toolchain/bin/llvm-readelf"
 found=0

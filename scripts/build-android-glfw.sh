@@ -20,8 +20,8 @@ test -x "$cmake"
 test -x "$ninja"
 git clone --filter=blob:none --no-checkout https://github.com/glfw/glfw.git "$work/glfw"
 git -C "$work/glfw" checkout --detach "$source_commit"
-git -C "$work/glfw" apply --check "$patch_file"
-git -C "$work/glfw" apply "$patch_file"
+git -C "$work/glfw" apply --recount --check "$patch_file"
+git -C "$work/glfw" apply --recount "$patch_file"
 
 for abi in arm64-v8a x86_64; do
   build="$work/build-$abi"

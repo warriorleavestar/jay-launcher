@@ -10,7 +10,7 @@ index 1057a6f..b0e5483 100644
 +    target_link_libraries(glfw PRIVATE android log)
 +    target_link_options(glfw PRIVATE "-Wl,-z,max-page-size=16384")
 +endif()
- 
+
  # Workaround for CMake not knowing about .m files before version 3.16
  if (CMAKE_VERSION VERSION_LESS "3.16" AND APPLE)
 diff --git a/src/null_platform.h b/src/null_platform.h
@@ -28,16 +28,16 @@ index 4843a76..baa02ca 100644
 +    uint64_t        jayInputGeneration;
 +#endif
  } _GLFWwindowNull;
- 
+
  // Null-specific per-monitor data
 diff --git a/src/null_window.c b/src/null_window.c
 index 1db0811..b84b668 100644
 --- a/src/null_window.c
 +++ b/src/null_window.c
 @@ -29,6 +29,39 @@
- 
+
  #include <stdlib.h>
- 
+
 +#if defined(__ANDROID__)
 +#include <android/native_window.h>
 +#include <dlfcn.h>
@@ -51,6 +51,10 @@ index 1db0811..b84b668 100644
 +    float lookX;
 +    float lookY;
 +    uint32_t actions;
++    uint32_t textCount;
++    uint32_t keyCount;
++    uint32_t text[64];
++    int32_t keys[16];
 +    uint64_t generation;
 +} JayInputSnapshot;
 +typedef void (*JayInputRead)(JayInputSnapshot*);
@@ -157,8 +161,8 @@ index 1db0811..b84b668 100644
 +    const uint32_t previous = window->null.jayActions;
 +    window->null.jayActions = input.actions;
 +    const int keys[] = { GLFW_KEY_UNKNOWN, GLFW_MOUSE_BUTTON_LEFT, GLFW_MOUSE_BUTTON_RIGHT,
-+                         GLFW_KEY_SPACE, GLFW_KEY_E, GLFW_KEY_ESCAPE, GLFW_KEY_UNKNOWN };
-+    for (int action = 1; action <= 5; action++)
++                         GLFW_KEY_SPACE, GLFW_KEY_E, GLFW_KEY_ESCAPE, GLFW_KEY_T };
++    for (int action = 1; action <= 6; action++)
 +    {
 +        const uint32_t bit = 1u << action;
 +        if ((previous & bit) == (input.actions & bit))
@@ -182,6 +186,13 @@ index 1db0811..b84b668 100644
 +                          (movement & bit) ? GLFW_PRESS : GLFW_RELEASE, 0);
 +    }
 +    window->null.jayMovementKeys = movement;
++    for (uint32_t index = 0; index < input.textCount && index < 64; index++)
++        _glfwInputChar(window, input.text[index], 0, GLFW_TRUE);
++    for (uint32_t index = 0; index < input.keyCount && index < 16; index++)
++    {
++        _glfwInputKey(window, input.keys[index], input.keys[index], GLFW_PRESS, 0);
++        _glfwInputKey(window, input.keys[index], input.keys[index], GLFW_RELEASE, 0);
++    }
 +    if (input.lookX != 0.f || input.lookY != 0.f)
 +    {
 +        _glfw.null.xcursor += (int) (input.lookX * window->null.width);
@@ -221,3 +232,54 @@ index af1b0f4..12f274f 100644
      }
  
  #if defined(_GLFW_WAYLAND) && defined(_GLFW_X11)
+diff --git a/src/egl_context.c b/src/egl_context.c
+index ef65dd3..e3b8d6d 100644
+--- a/src/egl_context.c
++++ b/src/egl_context.c
+@@ -383,8 +383,15 @@ GLFWbool _glfwInitEGL(void)
+     if (_glfw.egl.handle)
+         return GLFW_TRUE;
+ 
++#if defined(__ANDROID__)
++    const char* jayEGL = getenv("JAY_EGL_LIBRARY");
++    if (jayEGL && jayEGL[0])
++        _glfw.egl.handle = _glfwPlatformLoadModule(jayEGL);
++#endif
+     for (i = 0;  sonames[i];  i++)
+     {
++        if (_glfw.egl.handle)
++            break;
+         _glfw.egl.handle = _glfwPlatformLoadModule(sonames[i]);
+         if (_glfw.egl.handle)
+             break;
+@@ -396,7 +403,11 @@ GLFWbool _glfwInitEGL(void)
+         return GLFW_FALSE;
+     }
+ 
++#if defined(__ANDROID__)
++    _glfw.egl.prefix = GLFW_TRUE;
++#else
+     _glfw.egl.prefix = (strncmp(sonames[i], "lib", 3) == 0);
++#endif
+ 
+     _glfw.egl.GetConfigAttrib = (PFN_eglGetConfigAttrib)
+         _glfwPlatformGetModuleSymbol(_glfw.egl.handle, "eglGetConfigAttrib");
+@@ -799,8 +810,18 @@ GLFWbool _glfwCreateContextEGL(_GLFWwindow* window,
+         else
+             sonames = glsonames;
+ 
++#if defined(__ANDROID__)
++        if (ctxconfig->client == GLFW_OPENGL_API)
++        {
++            const char* jayGL = getenv("JAY_GL_LIBRARY");
++            if (jayGL && jayGL[0])
++                window->context.egl.client = _glfwPlatformLoadModule(jayGL);
++        }
++#endif
+         for (i = 0;  sonames[i];  i++)
+         {
++            if (window->context.egl.client)
++                break;
+             // HACK: Match presence of lib prefix to increase chance of finding
+             //       a matching pair in the jungle that is Win32 EGL/GLES
+             if (_glfw.egl.prefix != (strncmp(sonames[i], "lib", 3) == 0))

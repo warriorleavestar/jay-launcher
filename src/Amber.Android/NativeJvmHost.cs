@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 2;
+    private const int ExpectedAbiVersion = 3;
 
     public static bool IsAvailable
     {
@@ -45,7 +45,7 @@ internal static partial class NativeJvmHost
 
     public static void RunMain(nint environment, string className, IReadOnlyList<string> arguments)
     {
-        var main = Marshal.StringToCoTaskMemUTF8(className);
+        var main = Marshal.StringToCoTaskMemUTF8(className.Replace('.', '/'));
         var strings = arguments.Select(Marshal.StringToCoTaskMemUTF8).ToArray();
         var pointers = Marshal.AllocHGlobal(nint.Size * strings.Length);
         try
@@ -77,6 +77,16 @@ internal static partial class NativeJvmHost
         if (IsAvailable) AddNativeLook((float)x, (float)y);
     }
 
+    public static void AddCodePoint(int codePoint)
+    {
+        if (IsAvailable) AddNativeCodePoint((uint)codePoint);
+    }
+
+    public static void AddKey(int glfwKey)
+    {
+        if (IsAvailable) AddNativeKey(glfwKey);
+    }
+
     public static void SetSurface(Surface? surface)
     {
         if (IsAvailable) SetNativeSurface(JNIEnv.Handle, surface?.Handle ?? 0);
@@ -102,6 +112,12 @@ internal static partial class NativeJvmHost
 
     [LibraryImport("jayjvm", EntryPoint = "jay_input_add_look")]
     private static partial void AddNativeLook(float x, float y);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_input_add_codepoint")]
+    private static partial void AddNativeCodePoint(uint codePoint);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_input_add_key")]
+    private static partial void AddNativeKey(int glfwKey);
 
     [LibraryImport("jayjvm", EntryPoint = "jay_surface_set")]
     private static partial void SetNativeSurface(nint environment, nint surface);

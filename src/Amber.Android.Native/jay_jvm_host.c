@@ -8,8 +8,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define JAY_JVM_ABI_VERSION 2
+#define JAY_JVM_ABI_VERSION 3
 #define JAY_ACTION_COUNT 7
+#define JAY_TEXT_CAPACITY 64
+#define JAY_KEY_CAPACITY 16
 
 typedef jint (*jay_create_jvm_fn)(JavaVM **, void **, void *);
 
@@ -19,6 +21,10 @@ typedef struct {
     float look_x;
     float look_y;
     uint32_t actions;
+    uint32_t text_count;
+    uint32_t key_count;
+    uint32_t text[JAY_TEXT_CAPACITY];
+    int32_t keys[JAY_KEY_CAPACITY];
     uint64_t generation;
 } jay_input_snapshot;
 
@@ -33,6 +39,11 @@ static _Atomic float g_look_x;
 static _Atomic float g_look_y;
 static _Atomic uint32_t g_actions;
 static _Atomic uint64_t g_generation;
+static pthread_mutex_t g_event_mutex = PTHREAD_MUTEX_INITIALIZER;
+static uint32_t g_text[JAY_TEXT_CAPACITY];
+static uint32_t g_text_count;
+static int32_t g_keys[JAY_KEY_CAPACITY];
+static uint32_t g_key_count;
 
 __attribute__((visibility("default")))
 int jay_jvm_abi_version(void) {
@@ -175,6 +186,23 @@ void jay_input_add_look(float x, float y) {
 }
 
 __attribute__((visibility("default")))
+void jay_input_add_codepoint(uint32_t codepoint) {
+    if (codepoint == 0 || codepoint > 0x10ffffu || (codepoint >= 0xd800u && codepoint <= 0xdfffu)) return;
+    pthread_mutex_lock(&g_event_mutex);
+    if (g_text_count < JAY_TEXT_CAPACITY) g_text[g_text_count++] = codepoint;
+    atomic_fetch_add(&g_generation, 1);
+    pthread_mutex_unlock(&g_event_mutex);
+}
+
+__attribute__((visibility("default")))
+void jay_input_add_key(int32_t key) {
+    pthread_mutex_lock(&g_event_mutex);
+    if (g_key_count < JAY_KEY_CAPACITY) g_keys[g_key_count++] = key;
+    atomic_fetch_add(&g_generation, 1);
+    pthread_mutex_unlock(&g_event_mutex);
+}
+
+__attribute__((visibility("default")))
 void jay_input_read(jay_input_snapshot *snapshot) {
     if (snapshot == NULL) return;
     snapshot->move_x = atomic_load(&g_move_x);
@@ -182,5 +210,13 @@ void jay_input_read(jay_input_snapshot *snapshot) {
     snapshot->look_x = atomic_exchange(&g_look_x, 0.f);
     snapshot->look_y = atomic_exchange(&g_look_y, 0.f);
     snapshot->actions = atomic_load(&g_actions);
+    pthread_mutex_lock(&g_event_mutex);
+    snapshot->text_count = g_text_count;
+    snapshot->key_count = g_key_count;
+    for (uint32_t i = 0; i < g_text_count; i++) snapshot->text[i] = g_text[i];
+    for (uint32_t i = 0; i < g_key_count; i++) snapshot->keys[i] = g_keys[i];
+    g_text_count = 0;
+    g_key_count = 0;
     snapshot->generation = atomic_load(&g_generation);
+    pthread_mutex_unlock(&g_event_mutex);
 }

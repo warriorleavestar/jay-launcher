@@ -30,9 +30,10 @@
     <PropertyGroup>
       <_JayProbeClasses>$(IntermediateOutputPath)jay-runtime-probe-classes</_JayProbeClasses>
       <_JayProbeSource>$(MSBuildProjectDirectory)/Java/nz/work/minecraft/jay/RuntimeProbe.java</_JayProbeSource>
+      <_JayBootstrapSource>$(MSBuildProjectDirectory)/Java/nz/work/minecraft/jay/AndroidGameBootstrap.java</_JayBootstrapSource>
     </PropertyGroup>
     <MakeDir Directories="$(_JayProbeClasses)" />
-    <Exec Command="&quot;$(_JavaSdkDirectory)/bin/javac&quot; --release 8 -encoding UTF-8 -d &quot;$(_JayProbeClasses)&quot; &quot;$(_JayProbeSource)&quot;" />
+    <Exec Command="&quot;$(_JavaSdkDirectory)/bin/javac&quot; --release 8 -encoding UTF-8 -d &quot;$(_JayProbeClasses)&quot; &quot;$(_JayProbeSource)&quot; &quot;$(_JayBootstrapSource)&quot;" />
     <Exec Command="&quot;$(_JavaSdkDirectory)/bin/jar&quot; --create --file &quot;$(IntermediateOutputPath)jay-runtime-probe.jar&quot; -C &quot;$(_JayProbeClasses)&quot; ." />
   </Target>
 
