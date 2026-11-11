@@ -184,11 +184,22 @@ For two people with no relay, no public network and no shared LAN. `Multiplayer/
 - The phone app can't join a public network yet and asks for a sealed invite instead. With records off, IP-only
   servers fall back to `JAYSS1-` sealed invites.
 
-## Still to do
+### Relay share codes: domains, a record locator or a sealed code
 
-- **Relays with only an IP without a passphrase**: the same record mechanism for `JAYNS1-` relay share codes.
-- **Network and relay codes without an address**: `JAYNET` (public network) and `AMBNODE` (relay share) still name a
-  host or IP. Domain names stay allowed; IP-only nodes go the same way as servers.
+`Multiplayer/RelayNodes.cs`, `Multiplayer/Public/RelayRecord.cs`.
+
+- Relays that all go by a domain are shared as plain `AMBNODE-` codes.
+- Relays with an IP, while the sharer is on a public network: `JAYNR1-` carries the network id, a random 16-byte
+  locator id and a hash of the sharer's record key (`relay-record.key` in the data folder, created once). The relay list
+  is in a `SignedRecord` on that network's directories, put at share time and renewed on every connection (7-day
+  lifetime). The reader must be on the same public network, accepts only a record signed by the key in the code, and
+  adds the relays. Diagnostics redact `JAYNR1`.
+- Not on a public network: `JAYNS1-`, sealed with a 16-digit passphrase (same construction as the server invites, HKDF
+  info `jay-sealed-nodes-v1`).
+- If the sharer stays off the network for over 7 days the record expires and the code stops resolving; sharing again
+  renews it with the same code.
+
+## Still to do
 
 - **Relay enrollment the other way around**: a relay generates its own key and the admin approves its fingerprint, so
   JAYR1 codes carry no secret.

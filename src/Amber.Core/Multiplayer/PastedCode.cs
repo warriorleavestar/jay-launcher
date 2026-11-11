@@ -65,6 +65,7 @@ public static class PastedCode
         ("AMBREPLY", PastedCodeKind.OldDirect),
         ("AMBNODE-", PastedCodeKind.NodeShare),
         (RelayNodes.SealedPrefix, PastedCodeKind.NodeShare),
+        (Public.RelayRecord.Prefix, PastedCodeKind.NodeShare),
         ("JAY2-", PastedCodeKind.Invite),
         (Gate.GateInvite.SealedPrefix, PastedCodeKind.JayServer),
         (Gate.GateInvite.Prefix, PastedCodeKind.JayServer),

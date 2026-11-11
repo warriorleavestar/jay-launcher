@@ -167,6 +167,7 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Success("multiplayer.public.connected", profile.Name));
             StartAnnouncerIfHosting();
             StartVolunteerWork(_public, profile);
+            _ = RenewRelayRecordAsync(_public);
             await RefreshRoomsAsync();
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
