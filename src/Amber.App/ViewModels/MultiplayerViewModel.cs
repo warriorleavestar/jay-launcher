@@ -309,8 +309,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (LanGames_PortFromLog(line) is not { } port) return;
         Dispatcher.UIThread.Post(() =>
         {
-            var item = new LanGameItem(new LanGame(versionId, port), L.T("multiplayer.lan.amber_source"));
+            // The same port again moves to the top instead of adding a row; rows from the log are capped.
+            var source = L.T("multiplayer.lan.amber_source");
+            if (LanGames.FirstOrDefault(g => g.Game.Port == port && g.Source == source) is { } old) LanGames.Remove(old);
+            var item = new LanGameItem(new LanGame(versionId, port), source);
             LanGames.Insert(0, item);
+            while (LanGames.Count(g => g.Source == source) > MaxLogLanGames) LanGames.Remove(LanGames.Last(g => g.Source == source));
             SelectedLanGame = item;
             if (IsIdle) SetStatus(StatusMessage.Success("multiplayer.lan.opened", versionId, port));
             OnLanOpenedWhileWaiting();
@@ -547,7 +551,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Warning("multiplayer.lan.port_required"));
             return;
         }
-        if (!await CanConnectAsync(port.Value))
+        if (!await GamePortReadyAsync(port.Value, manual: port == manual))
         {
             SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
             return;
@@ -1041,6 +1045,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             _refreshing = false;
         }
     }
+
+    private const int MaxLogLanGames = 8;
+
+    /// <summary>
+    /// A port the user typed only has to be listening. One taken from the game's output or a LAN announcement has to answer
+    /// like a Minecraft world (status ping): otherwise text that reached the log (a server message, say) could point the
+    /// room at another local service, which room members could then reach.
+    /// </summary>
+    internal static async Task<bool> GamePortReadyAsync(int port, bool manual) =>
+        manual ? await CanConnectAsync(port) : (await ServerList.PingAsync("127.0.0.1:" + port, TimeSpan.FromSeconds(3))).Online;
 
     private static async Task<bool> CanConnectAsync(int port)
     {
