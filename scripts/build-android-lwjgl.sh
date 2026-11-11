@@ -32,8 +32,8 @@ case "$(uname -s)" in
 esac
 
 toolchain="$ndk/toolchains/llvm/prebuilt/$host"
-cc="$toolchain/bin/${triple}23-clang"
-cxx="$toolchain/bin/${triple}23-clang++"
+cc="$toolchain/bin/${triple}26-clang"
+cxx="$toolchain/bin/${triple}26-clang++"
 ar="$toolchain/bin/llvm-ar"
 ranlib="$toolchain/bin/llvm-ranlib"
 strip="$toolchain/bin/llvm-strip"
@@ -133,7 +133,7 @@ build_library lwjgl_tinyfd "$lwjgl/modules/lwjgl/tinyfd/src/main/c" "${tinyfd_so
 android_cmake=(
   -G Ninja
   -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake"
-  -DANDROID_ABI="$abi" -DANDROID_PLATFORM=23
+  -DANDROID_ABI="$abi" -DANDROID_PLATFORM=26
   -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
   -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384
 )

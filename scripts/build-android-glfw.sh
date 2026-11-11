@@ -28,7 +28,7 @@ for abi in arm64-v8a x86_64; do
   "$cmake" -S "$work/glfw" -B "$build" -G Ninja \
     -DCMAKE_MAKE_PROGRAM="$ninja" \
     -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
-    -DANDROID_ABI="$abi" -DANDROID_PLATFORM=23 \
+    -DANDROID_ABI="$abi" -DANDROID_PLATFORM=26 \
     -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
     -DGLFW_BUILD_X11=OFF -DGLFW_BUILD_WAYLAND=OFF \
     -DGLFW_BUILD_EXAMPLES=OFF -DGLFW_BUILD_TESTS=OFF \

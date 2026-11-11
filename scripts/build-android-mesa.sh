@@ -36,8 +36,8 @@ patch -d "$source" -p1 --forward --batch < "$patch_file"
 cross="$work/android-$abi.ini"
 cat >"$cross" <<EOF
 [binaries]
-c = '$toolchain/bin/${triple}23-clang'
-cpp = ['$toolchain/bin/${triple}23-clang++', '-fno-exceptions', '-fno-rtti', '-static-libstdc++']
+c = '$toolchain/bin/${triple}26-clang'
+cpp = ['$toolchain/bin/${triple}26-clang++', '-fno-exceptions', '-fno-rtti', '-static-libstdc++']
 ar = '$toolchain/bin/llvm-ar'
 strip = '$toolchain/bin/llvm-strip'
 pkg-config = 'pkg-config'

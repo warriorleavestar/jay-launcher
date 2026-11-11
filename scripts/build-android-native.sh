@@ -19,8 +19,8 @@ case "$(uname -s)" in
 esac
 
 toolchain="$ndk/toolchains/llvm/prebuilt/$host"
-test -x "$toolchain/bin/aarch64-linux-android23-clang"
-test -x "$toolchain/bin/x86_64-linux-android23-clang"
+test -x "$toolchain/bin/aarch64-linux-android26-clang"
+test -x "$toolchain/bin/x86_64-linux-android26-clang"
 
 build_one() {
   local abi="$1"
@@ -34,8 +34,8 @@ build_one() {
     -o "$output/$abi/libjayjvm.so"
 }
 
-build_one arm64-v8a aarch64-linux-android23-clang
-build_one x86_64 x86_64-linux-android23-clang
+build_one arm64-v8a aarch64-linux-android26-clang
+build_one x86_64 x86_64-linux-android26-clang
 
 for library in "$output"/*/libjayjvm.so; do
   program_headers="$("$toolchain/bin/llvm-readelf" -lW "$library")"
