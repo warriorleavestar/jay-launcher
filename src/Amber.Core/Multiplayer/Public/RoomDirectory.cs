@@ -110,6 +110,16 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Mailbox id → sealed mail waiting there.</summary>
     private readonly Dictionary<string, List<SealedItem>> _mailboxes = new(StringComparer.Ordinal);
     private int _sealedCount;
+    /// <summary>Rendezvous id (hex) → sealed record, taken at most once (<see cref="Rendezvous"/>).</summary>
+    private readonly Dictionary<string, (string Blob, DateTimeOffset Expires)> _rendezvous = new(StringComparer.Ordinal);
+    /// <summary>Rendezvous puts per source address in the current window.</summary>
+    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _rendezvousPuts = new(StringComparer.Ordinal);
+
+    /// <summary>Live rendezvous records at most (about 11 MB of base64 at the largest size).</summary>
+    public const int MaxRendezvous = 4096;
+
+    /// <summary>Rendezvous puts one source address may make per <see cref="Rendezvous.MaxTtl"/>.</summary>
+    public const int MaxRendezvousPutsPerSource = 30;
     private readonly SemaphoreSlim _slots = new(MaxConcurrent, MaxConcurrent);
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _accept;
@@ -174,6 +184,12 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         _accept = AcceptLoopAsync();
     }
 
+    /// <summary>Rendezvous records waiting to be taken (a total, for metrics).</summary>
+    public int RendezvousCount
+    {
+        get { lock (_gate) { PruneRendezvous(); return _rendezvous.Count; } }
+    }
+
     public int Count
     {
         get
@@ -220,18 +236,26 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             {
                 if (!AcceptLegacyClients) return;
                 var request = await RoomDirectoryProtocol.ReadLineAsync(stream, deadline.Token, first[0]);
-                await RoomDirectoryProtocol.WriteLineAsync(stream, Handle(request), deadline.Token);
+                await RoomDirectoryProtocol.WriteLineAsync(stream, Handle(request, secure: false, Source(client)), deadline.Token);
                 return;
             }
             if (Identity is null) return;
             if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
-            await secure.Reply(Handle(secure.Request), deadline.Token);
+            await secure.Reply(Handle(secure.Request, secure: true, Source(client)), deadline.Token);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
     }
 
-    /// <summary>处理一个请求（测试和框架的宿主直接调）。</summary>
-    public JsonObject Handle(JsonObject request)
+    private static string? Source(TcpClient client) => (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString();
+
+    /// <summary>处理一个请求（测试和框架的宿主直接调）。Treated as arriving over the legacy, unauthenticated protocol.</summary>
+    public JsonObject Handle(JsonObject request) => Handle(request, secure: false, source: null);
+
+    /// <summary>
+    /// Handles one request. <paramref name="secure"/>: it came through <see cref="DirectoryChannel"/> (rendezvous ops
+    /// need that). <paramref name="source"/>: the caller's address, for per-source limits.
+    /// </summary>
+    internal JsonObject Handle(JsonObject request, bool secure, string? source)
     {
         try
         {
@@ -249,6 +273,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "post" => Post(request),
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
+                "rv.put" => secure ? RendezvousPut(request, source) : Error("secure"),
+                "rv.take" => secure ? RendezvousTake(request) : Error("secure"),
                 "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
                 // Blocks this connection's task for at most a few seconds while the directory dials the address.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
@@ -597,6 +623,53 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
+    private JsonObject RendezvousPut(JsonObject request, string? source)
+    {
+        var id = request["id"]?.GetValue<string>()?.ToLowerInvariant();
+        var blob = request["blob"]?.GetValue<string>();
+        var ttl = request["ttl"]?.GetValue<int>() ?? (int)Rendezvous.MaxTtl.TotalSeconds;
+        if (!IsHex(id, Rendezvous.IdLength * 2) || blob is null || blob.Length > (Rendezvous.MaxSealed + 2) / 3 * 4) return Error("bad");
+        if (ttl <= 0 || ttl > Rendezvous.MaxTtl.TotalSeconds) return Error("bad");
+        try { if (Convert.FromBase64String(blob).Length is 0 or > Rendezvous.MaxSealed) return Error("bad"); }
+        catch (FormatException) { return Error("bad"); }
+        lock (_gate)
+        {
+            PruneRendezvous();
+            var now = _now();
+            if (source is not null)
+            {
+                var (count, until) = _rendezvousPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + Rendezvous.MaxTtl);
+                if (count >= MaxRendezvousPutsPerSource) return Error("rate");
+                _rendezvousPuts[source] = (count + 1, until);
+            }
+            // Never overwrite: whoever put first keeps the id until it is taken or expires.
+            if (_rendezvous.ContainsKey(id!)) return Error("exists");
+            if (_rendezvous.Count >= MaxRendezvous) return Error("full");
+            _rendezvous[id!] = (blob, now + TimeSpan.FromSeconds(ttl));
+            return new JsonObject { ["ok"] = true };
+        }
+    }
+
+    private JsonObject RendezvousTake(JsonObject request)
+    {
+        var id = request["id"]?.GetValue<string>()?.ToLowerInvariant();
+        if (!IsHex(id, Rendezvous.IdLength * 2)) return Error("bad");
+        lock (_gate)
+        {
+            PruneRendezvous();
+            // Single use: the record leaves the directory in the same step that hands it out.
+            if (!_rendezvous.Remove(id!, out var record)) return Error("not_found");
+            return new JsonObject { ["ok"] = true, ["blob"] = record.Blob };
+        }
+    }
+
+    private void PruneRendezvous()
+    {
+        var now = _now();
+        foreach (var (id, record) in _rendezvous.Where(p => p.Value.Expires <= now).ToList()) _rendezvous.Remove(id);
+        foreach (var (source, used) in _rendezvousPuts.Where(p => p.Value.Until <= now).ToList()) _rendezvousPuts.Remove(source);
+    }
+
     private void PruneMail()
     {
         var now = _now();
@@ -684,10 +757,13 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         Memory = KeyMemory,
     };
 
-    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct)
+    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct, bool secureOnly = false)
     {
         var trust = Trust;
         request["jay"] = Version;
+        // Ops that must never travel in the clear: authenticated channel only, even for a network that pins nothing
+        // (then the channel is at least encrypted, and the key is remembered when Jay keeps a key memory).
+        if (secureOnly) return await CallOnceAsync(ip, request, trust, ct);
         // Pinned keys, roots, or a key already remembered for this address: authenticated only.
         if (trust.IsStrict || trust.Remembers(ip)) return await CallOnceAsync(ip, request, trust, ct);
         if (trust.Memory is not null)
@@ -726,12 +802,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     }
 
     /// <summary>发给每个目录，返回每个的回复（连不上的是异常）。</summary>
-    private async Task<List<(JsonObject? Reply, Exception? Error)>> FanOutAsync(JsonObject request, CancellationToken ct)
+    private async Task<List<(JsonObject? Reply, Exception? Error)>> FanOutAsync(JsonObject request, CancellationToken ct, bool secureOnly = false)
     {
         var targets = await TargetsAsync(ct);
         var tasks = targets.Select(async ip =>
         {
-            try { return ((JsonObject?)await CallAsync(ip, (JsonObject)request.DeepClone(), ct), (Exception?)null); }
+            try { return ((JsonObject?)await CallAsync(ip, (JsonObject)request.DeepClone(), ct, secureOnly), (Exception?)null); }
             catch (Exception e) when (e is IOException or InvalidDataException or EndOfStreamException) { return (null, e); }
         }).ToList();
         var results = (await Task.WhenAll(tasks)).ToList();
@@ -787,6 +863,48 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             _ when !string.IsNullOrWhiteSpace(reason) => L.F("core.mp.public.err_policy", reason),
             _ => L.F("core.mp.public.err_other", code),
         });
+    }
+
+    /// <summary>
+    /// Puts a sealed rendezvous record (<see cref="Rendezvous"/>) on every directory. Always over the authenticated
+    /// channel, never the legacy protocol. True when at least one directory kept it; false when the id is already taken
+    /// everywhere that answered.
+    /// </summary>
+    public async Task<bool> PutRendezvousAsync(byte[] id, byte[] sealedRecord, TimeSpan ttl, CancellationToken ct)
+    {
+        if (id.Length != Rendezvous.IdLength) throw new ArgumentException("Rendezvous id length", nameof(id));
+        if (sealedRecord.Length is 0 or > Rendezvous.MaxSealed) throw new ArgumentException("Rendezvous record size", nameof(sealedRecord));
+        var seconds = (int)Math.Clamp(ttl.TotalSeconds, 1, Rendezvous.MaxTtl.TotalSeconds);
+        var request = new JsonObject { ["op"] = "rv.put", ["id"] = Convert.ToHexStringLower(id), ["blob"] = Convert.ToBase64String(sealedRecord), ["ttl"] = seconds };
+        var results = await FanOutAsync(request, ct, secureOnly: true);
+        if (results.Any(r => r.Reply is { } reply && IsOk(reply))) return true;
+        if (results.Any(r => r.Reply?["error"]?.GetValue<string>() == "exists")) return false;
+        NeedOne(results);
+        return false;
+    }
+
+    /// <summary>
+    /// Takes the rendezvous record under <paramref name="id"/>: the first directory that has it hands it over and drops
+    /// it, then the others are told to drop their copies too. Null when no directory has it (taken, expired, never put).
+    /// </summary>
+    public async Task<byte[]?> TakeRendezvousAsync(byte[] id, CancellationToken ct)
+    {
+        if (id.Length != Rendezvous.IdLength) throw new ArgumentException("Rendezvous id length", nameof(id));
+        var request = new JsonObject { ["op"] = "rv.take", ["id"] = Convert.ToHexStringLower(id) };
+        // Ask all of them at once: each copy is single-use, so taking every copy both finds the record and clears the rest.
+        var results = await FanOutAsync(request, ct, secureOnly: true);
+        foreach (var (reply, _) in results)
+        {
+            if (reply is null || !IsOk(reply) || reply["blob"]?.GetValue<string>() is not { } blob) continue;
+            try
+            {
+                var bytes = Convert.FromBase64String(blob);
+                if (bytes.Length is > 0 and <= Rendezvous.MaxSealed) return bytes;
+            }
+            catch (FormatException) { }
+        }
+        if (results.Any(r => r.Reply is not null)) return null;
+        throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
     }
 
     /// <summary>公开列表：合并所有在线目录的结果，同一个房间取序号最大的版本。</summary>
