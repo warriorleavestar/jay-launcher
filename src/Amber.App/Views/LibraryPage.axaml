@@ -54,7 +54,7 @@
     </Style>
   </UserControl.Styles>
 
-  <ScrollViewer x:Name="LibraryScroll" HorizontalScrollBarVisibility="Disabled">
+  <ScrollViewer x:Name="LibraryScroll" Classes="page-scroll" HorizontalScrollBarVisibility="Disabled">
     <StackPanel Spacing="16" Margin="0,0,0,16">
       <Grid ColumnDefinitions="*,Auto" svc:ThemeRegion.Name="library.title">
         <TextBlock Classes="h1" Text="{Binding Title}" Margin="0" VerticalAlignment="Center" />
