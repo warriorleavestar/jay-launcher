@@ -2611,7 +2611,7 @@
   "about.open_data_folder": "データフォルダーを開く",
   "about.version": "Jay {0}",
   "about.licenses": "オープンソースライセンス ›",
-  "about.licenses.body": "Jay は MIT ライセンスのオープンソースです。",
+  "about.licenses.body": "Jay のソースコードは PolyForm Noncommercial License 1.0.0 で公開されています。非商用は無料、商用には Jay 開発チームの許可が必要です。",
   "about.help": "ヘルプ ›",
   "settings.privacy.open_about": "Jay について・プライバシー ›",
   "settings.privacy.network_list": "ネット接続の一覧",

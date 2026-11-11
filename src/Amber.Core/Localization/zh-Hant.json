@@ -2611,7 +2611,7 @@
   "about.open_data_folder": "打開資料資料夾",
   "about.version": "Jay {0}",
   "about.licenses": "開源授權 ›",
-  "about.licenses.body": "Jay 以 MIT 授權開源。",
+  "about.licenses.body": "Jay 以 PolyForm Noncommercial 1.0.0 授權公開原始碼。非商業使用免費，商用需要 Jay 開發團隊授權。",
   "about.help": "說明 ›",
   "settings.privacy.open_about": "關於和隱私 ›",
   "settings.privacy.network_list": "連網清單",

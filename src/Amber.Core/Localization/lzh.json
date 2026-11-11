@@ -2505,7 +2505,7 @@
   "about.open_data_folder": "开数据之夹",
   "about.version": "Jay {0}",
   "about.licenses": "开源之许 ›",
-  "about.licenses.body": "Jay 依 MIT 之许开源。",
+  "about.licenses.body": "Jay 之源码依 PolyForm Noncommercial 1.0.0 之许公之。非商用者无偿；商用者，须得 Jay 开发之众许之。",
   "about.help": "助 ›",
   "settings.privacy.open_about": "述私 ›",
   "settings.privacy.network_list": "通网之单",

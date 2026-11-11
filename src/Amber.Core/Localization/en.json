@@ -2672,7 +2672,7 @@
   "about.open_data_folder": "Open data folder",
   "about.version": "Jay {0}",
   "about.licenses": "Open-source licences ›",
-  "about.licenses.body": "Jay is open source under the MIT licence.",
+  "about.licenses.body": "Jay's source code is public under the PolyForm Noncommercial License 1.0.0. Noncommercial use is free; commercial use needs permission from the Jay development team.",
   "about.help": "Help ›",
   "settings.privacy.open_about": "About and privacy ›",
   "settings.privacy.network_list": "Network list",
