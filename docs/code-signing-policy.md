@@ -10,8 +10,8 @@ The Windows builds of Jay (`Jay.exe` and `jay-server.exe`) are signed with a fre
 
 ## 签名什么 / What is signed
 
-- 只签本仓库源码在 GitHub Actions（GitHub 托管的运行器）上编译出来的程序：`Jay.exe`（单文件版和 AOT 版）和 `jay-server.exe`。
-  Only binaries built from this repository's source by GitHub Actions on GitHub-hosted runners: `Jay.exe` (single-file and AOT builds) and `jay-server.exe`.
+- 只签本仓库源码在 GitHub Actions（GitHub 托管的运行器）上编译出来的程序：`Jay.exe`（单文件 ReadyToRun 版）和 `jay-server.exe`。
+  Only binaries built from this repository's source by GitHub Actions on GitHub-hosted runners: `Jay.exe` (the single-file ReadyToRun build) and `jay-server.exe`.
 - 只签正式发布：推送 `v*` 标签触发构建，每次签名都由下面的批准人在 SignPath 上手动批准。日常构建和 PR 构建不签名。
   Only releases: pushing a `v*` tag starts the build, and every signing request is approved by hand by an approver listed below. Everyday and pull-request builds are not signed.
 - 发布包里自带的第三方程序（EasyTier 联机组件，LGPL-3.0，来自 [EasyTier 官方发布页](https://github.com/EasyTier/EasyTier/releases)）不用本项目的证书签名，保持上游原样，SHA-256 固定在 `scripts/bundle-easytier.sh` 里。

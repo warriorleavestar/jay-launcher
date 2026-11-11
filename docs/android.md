@@ -39,6 +39,8 @@ dotnet publish src/Amber.Android/Amber.Android.csproj -c Release \
 
 产物在 `src/Amber.Android/bin/Release/net10.0-android/publish/`。对外发布前要按 [Avalonia Android 发布文档](https://docs.avaloniaui.net/docs/deployment/android) 配置独立密钥库，密码只能放在 GitHub Secrets 中。
 
+CI 会用 Android Build Tools 的 `zipalign -P 16` 检查 APK，并逐个检查 ARM64 `.so` 的 ELF `LOAD` 段是否至少按 16 KiB 对齐。预览发布使用仓库 Secrets 中的固定签名，后续覆盖安装不会清除玩家的语言、设备身份和已保存服务器。
+
 ## 下一步
 
 1. 在 Android 真机上用 FCL 完成从 Jay 网关到进服的端到端验证。
