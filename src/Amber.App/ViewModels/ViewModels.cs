@@ -347,6 +347,7 @@ public sealed partial class MainViewModel : ObservableObject
             _ = settingsPage.DownloadBakeLoaderAsync();
         };
         Help.Navigate = r => shell.Navigate(r);
+        Views.Controls.TermHint.Navigate = r => shell.Navigate(r);
         var about = Pages.OfType<AboutViewModel>().Single();
         about.Navigate = r => shell.Navigate(r);
         about.List.Navigate = r => shell.Navigate(r);
