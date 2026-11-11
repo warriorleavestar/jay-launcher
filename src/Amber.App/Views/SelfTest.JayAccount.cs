@@ -213,7 +213,7 @@ internal sealed partial class SelfTest
             await WaitAsync(() => vm.ContactList.Count == 2, 3) && File.Exists(Path.Combine(dir, MultiplayerViewModel.RelinkFileName)), vm.Status);
 
         // Bob shows up from a computer I've never seen: his account signed it, so it's added without the emoji, and I'm told.
-        using (var bobNew = Amber.Core.Multiplayer.X25519KeyPair.Generate())
+        using (var bobNew = X25519KeyPair.Generate())
         {
             var me = Dispatcher.UIThread.Invoke(() => vm.Contacts.Me);
             var bobBook = new Amber.Core.Multiplayer.Contacts.ContactBook(Path.Combine(dir, "bob-new.json"))
