@@ -3023,6 +3023,7 @@
   "multiplayer.volunteer.status_checking": "已登记 {0}，网络正在确认能不能连到你",
   "multiplayer.volunteer.status_listed": "正在当志愿中转：{0}。谢谢！",
   "multiplayer.volunteer.status_retry": "连不上目录，稍后再试",
+  "multiplayer.volunteer.test_rate_limited": "端口测试几秒只能测一次，稍等一下再测",
   "multiplayer.volunteer.added_peers": "另外经 {0} 个志愿中转连接",
   "multiplayer.contacts.title": "联系人",
   "multiplayer.contacts.hint": "加一次朋友、和 TA 对一下四个表情。以后开了房间就能直接邀请 TA：邀请封好了只寄给 TA，不经过任何聊天软件。",

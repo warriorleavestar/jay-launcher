@@ -3098,6 +3098,7 @@
   "multiplayer.volunteer.status_checking": "Registered {0}; the network is checking that it can reach you",
   "multiplayer.volunteer.status_listed": "Volunteering at {0}. Thank you!",
   "multiplayer.volunteer.status_retry": "Couldn't reach the directory; trying again soon",
+  "multiplayer.volunteer.test_rate_limited": "Port tests are limited to one every few seconds. Wait a moment, then test again",
   "multiplayer.volunteer.added_peers": "Also connected through {0} volunteer relay(s)",
   "multiplayer.contacts.title": "Contacts",
   "multiplayer.contacts.hint": "Add a friend once and compare four emoji with them. After that you can invite them straight from your room: the invite goes to them sealed, and never passes through a chat app.",
