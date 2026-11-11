@@ -125,7 +125,7 @@ Jay's window needs a desktop session (X11, or Wayland with XWayland) and the lib
 - **Remote help.** Ask to see and control a friend's screen to fix something for them. They accept every time, see a red border while it runs, and Ctrl+Shift+F12 stops it at once.
 - **Public rooms** *(experimental)*. Browse a room list, request to join, or protect a room with a password. Rooms are signed by the host, so nobody can fake or replay them.
 - **Practice and diagnose.** A safe drill mode walks you through a knock without touching the network, and the "Connection trouble?" drawer runs a full test matrix and writes a report with secrets removed.
-- **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS1-` invite; unknown connections get not a single byte back.
+- **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS2-` invite; unknown connections get not a single byte back.
 
 Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), in Jay's hardened build ([jay-easytier](https://github.com/Yumao-Feather/jay-easytier)), which Jay downloads and verifies the first time you use multiplayer. The default mode needs no admin rights and installs no driver.
 
@@ -312,7 +312,7 @@ Run Forge mods on Fabric or Quilt: there is no reliable compatibility layer, and
 
 Jay is source available under the [PolyForm Noncommercial License 1.0.0](LICENSE). Personal and other noncommercial use is free. Individuals and small teams can apply for free commercial use under the [Commercial Use Exception](COMMERCIAL-EXCEPTION.md); any other commercial use needs a written license from the Jay development team.
 
-Versions released before this change (up to and including v0.7.0) stay under the MIT License.
+This license now covers every version of Jay, including v0.7.0 and earlier, which were first released under the MIT License. The Jay development team no longer offers any version under MIT. Anyone who already received a copy of an earlier version under MIT keeps the MIT rights to that copy.
 
 Any place that still calls Jay "open source" or "MIT", including older docs, release notes and copies elsewhere, is outdated: [LICENSE](LICENSE) and [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) take precedence. If you find such a description, please [open an issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose).
 

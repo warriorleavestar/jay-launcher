@@ -51,7 +51,7 @@
             <DataTemplate DataType="vm:HelpArticleItem"><TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" /></DataTemplate>
           </ComboBox.ItemTemplate>
         </ComboBox>
-        <ScrollViewer x:Name="ArticleScroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer x:Name="ArticleScroll" Classes="page-scroll" Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
           <Panel MaxWidth="640" HorizontalAlignment="Left" Margin="0,0,14,0">
             <views:HelpArticleBody x:Name="ArticleBody" DataContext="{Binding Article}" IsVisible="{Binding !$parent[UserControl;1].((vm:HelpCenterViewModel)DataContext).HasQuery}"
                                    LinkCommand="{Binding $parent[UserControl;1].((vm:HelpCenterViewModel)DataContext).FollowLinkCommand}"

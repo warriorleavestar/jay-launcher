@@ -35,7 +35,12 @@ public sealed partial class JayServersViewModel : ObservableObject
     private JayServerItem? _connected;
 
     public ObservableCollection<JayServerItem> Servers { get; } = [];
-    [ObservableProperty] public partial string InviteText { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(InviteIsSealed))]
+    public partial string InviteText { get; set; } = "";
+    /// <summary>The passphrase for a sealed invite (a server with no domain).</summary>
+    [ObservableProperty] public partial string InvitePassphrase { get; set; } = "";
+    public bool InviteIsSealed => GateInvite.IsSealed(InviteText);
     [ObservableProperty] public partial string Status { get; set; } = "";
     [ObservableProperty] public partial bool IsBusy { get; set; }
     [ObservableProperty] public partial string DeviceCode { get; set; } = "";
@@ -70,11 +75,50 @@ public sealed partial class JayServersViewModel : ObservableObject
     [RelayCommand]
     private async Task JoinAsync()
     {
-        var invite = GateInvite.TryParse(InviteText, out var error);
+        if (InviteIsSealed && SealedDirect.NormalizePassphrase(InvitePassphrase) is null)
+        {
+            Status = L.T("multiplayer.sealed.enter_passphrase");
+            return;
+        }
+        var text = InviteText;
+        var passphrase = InvitePassphrase;
+        IsBusy = true;
+        // Opening a sealed invite runs Argon2id: off the UI thread.
+        var (invite, error) = await Task.Run(() => (GateInvite.TryOpen(text, passphrase, out var e), e));
+        IsBusy = false;
         if (invite is null)
         {
             Status = error ?? "";
             return;
+        }
+        if (invite.Locator is { } locator)
+        {
+            // A server with no domain: its address is in a signed record on a public network's directories.
+            var profile = locator.NetworkId == Amber.Core.Multiplayer.Public.PublicNetworkProfile.Jay().Id
+                ? _service.Networks.Current(locator.NetworkId, _service.Settings.PublicNetworkNodes)
+                : _service.Networks.Find(locator.NetworkId)?.ToProfile();
+            if (profile is null)
+            {
+                Status = L.F("core.gate.record.needs_network", locator.NetworkId);
+                return;
+            }
+            IsBusy = true;
+            Status = L.F("core.gate.record.looking_up", profile.Name);
+            try
+            {
+                invite = await Amber.Core.Multiplayer.Gate.GateRecord.ResolveOnNetworkAsync(invite, profile, _service.EasyTier,
+                    Path.Combine(AppSettings.DataDir, "easytier", "gate-lookup"), default);
+            }
+            catch (Exception e) when (e is IOException or TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception
+                or System.Net.Sockets.SocketException or System.Net.Http.HttpRequestException)
+            {
+                Status = L.F("multiplayer.jayserver.enroll_failed", e.Message);
+                return;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
         }
         IsBusy = true;
         Status = L.F("multiplayer.jayserver.enrolling", invite.Host);
@@ -83,6 +127,7 @@ public sealed partial class JayServersViewModel : ObservableObject
             var membership = await GateClient.EnrollAsync(invite, Identity());
             var entry = _list.Add(membership);
             InviteText = "";
+            InvitePassphrase = "";
             Load();
             Status = L.F("multiplayer.jayserver.enrolled", entry.DisplayName, membership.Username);
         }

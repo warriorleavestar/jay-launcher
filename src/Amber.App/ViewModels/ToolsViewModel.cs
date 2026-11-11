@@ -153,15 +153,21 @@ public sealed partial class ToolsViewModel(LauncherService service) : PageViewMo
         }
         try
         {
-            var update = await new UpdateChecker(service.Http).CheckAsync(feed, UpdateChecker.CurrentVersion);
+            // Privacy plan item 2: a newer release is offered only when 2 of the 3 Jay trustees signed it.
+            var update = await new UpdateCheck(service.Http, AppSettings.DataDir).CheckAsync(feed, UpdateChecker.CurrentVersion);
             if (update is null)
             {
                 UpdateStatus = L.F("tools.update.latest", UpdateChecker.CurrentVersion);
             }
+            else if (update.IsVerified)
+            {
+                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion);
+                UpdateUrl = update.Info.Url;
+            }
             else
             {
-                UpdateStatus = L.F("tools.update.available", update.Version, UpdateChecker.CurrentVersion);
-                UpdateUrl = update.Url;
+                // No button: the release page of an unverified release is exactly what an attacker would want opened.
+                UpdateStatus = L.F("tools.update.unverified", update.Info.Version, UpdateCheck.Explain(update.Check.Verdict));
             }
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException)

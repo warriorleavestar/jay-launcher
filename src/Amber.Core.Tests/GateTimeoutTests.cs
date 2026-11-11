@@ -29,7 +29,7 @@ public sealed class GateTimeoutTests
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
     }
 
-    private static readonly GateInvite Invite = new("gate.example", 25565, new byte[GateInvite.KeyHashLength], new byte[16], "Steve");
+    private static readonly GateInvite Invite = new("gate.example", 25565, new byte[GateInvite.KeyHashLength], new byte[16]);
 
     [Fact]
     public async Task ASilentGateIsAConnectionError()

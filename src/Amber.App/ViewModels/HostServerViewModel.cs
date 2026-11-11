@@ -60,6 +60,11 @@ public sealed partial class HostServerViewModel : ObservableObject
     [ObservableProperty] public partial bool AcceptEula { get; set; }
     [ObservableProperty] public partial string InviteName { get; set; } = "";
     [ObservableProperty] public partial string InviteCode { get; set; } = "";
+    /// <summary>The passphrase of a sealed invite (a server with no domain); empty for a plain one.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasInvitePassphrase))]
+    public partial string InvitePassphrase { get; set; } = "";
+    public bool HasInvitePassphrase => InvitePassphrase.Length > 0;
     [ObservableProperty] public partial string Status { get; set; } = "";
     [ObservableProperty] public partial string Summary { get; set; } = "";
     [ObservableProperty] public partial string LogText { get; set; } = "";
@@ -302,7 +307,9 @@ public sealed partial class HostServerViewModel : ObservableObject
         {
             var store = Store();
             using var key = store.LoadServerKey();
-            InviteCode = store.CreateInvite(name, TimeSpan.FromHours(24), 1, key.PublicKey).Encode();
+            var (code, passphrase) = store.CreateInvite(name, TimeSpan.FromHours(24), 1, key.PublicKey).ToCode();
+            InviteCode = code;
+            InvitePassphrase = passphrase ?? "";
             _shownInviteFor = name;
             Status = L.F("multiplayer.hostserver.invite_created", name);
             InviteName = "";
@@ -318,6 +325,12 @@ public sealed partial class HostServerViewModel : ObservableObject
     private async Task CopyInviteAsync()
     {
         if (InviteCode.Length > 0 && await SensitiveClipboard.Shared.CopyAsync(InviteCode)) Status = L.T("multiplayer.hostserver.invite_copied");
+    }
+
+    [RelayCommand]
+    private async Task CopyInvitePassphraseAsync()
+    {
+        if (InvitePassphrase.Length > 0 && await SensitiveClipboard.Shared.CopyAsync(InvitePassphrase)) Status = L.T("multiplayer.sealed.passphrase_copied");
     }
 
     /// <summary>撤销这个人的所有设备（在线的立刻断开）；名字留在名单里，再发邀请就能重新加入。</summary>
@@ -372,6 +385,7 @@ public sealed partial class HostServerViewModel : ObservableObject
         if (_shownInviteFor is { } invitee && !state.Invites.Any(i => string.Equals(i.Name, invitee, StringComparison.OrdinalIgnoreCase) && i.UsesLeft > 0 && i.Expires > DateTimeOffset.UtcNow))
         {
             InviteCode = "";
+            InvitePassphrase = "";
             _shownInviteFor = null;
         }
         var names = state.Members.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).Select(m => new HostMemberItem(m)).ToList();

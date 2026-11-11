@@ -1,9 +1,11 @@
 using Amber.App.Controls.Safety;
 using Amber.App.Services;
 using Amber.App.ViewModels;
+using Amber.Core.Launch;
 using Amber.Core.Layout;
 using Amber.Core.Localization;
 using Amber.Core.Net;
+using Avalonia.Controls;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -43,6 +45,7 @@ internal sealed partial class SelfTest
             Check("宽窗口：状态在右边一栏", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide) && !about.List.IsCompact);
             Check("存在本机的写明凭据怎么加密", about.StoredText.Contains(NetworkList.CredentialMethod, StringComparison.Ordinal));
             await ShotAsync("about-1440");
+            await VerifyDownloadAsync(about);
 
             // Status follows the settings: an update address makes it "only when you click".
             var feed = AppSettingsFeed;
@@ -114,6 +117,47 @@ internal sealed partial class SelfTest
             window.Width = 1440;
             window.Height = 900;
         }
+    }
+
+    /// <summary>
+    /// "Verify a Jay download" (privacy plan item 2): a release signed by 2 of 3 test trustees passes; the same file
+    /// changed, one signature only, and a file without SHA256SUMS.txt are refused. Local files only.
+    /// </summary>
+    private async Task VerifyDownloadAsync(AboutViewModel about)
+    {
+        var trustees = Enumerable.Range(0, 3).Select(_ => Amber.Core.Multiplayer.Public.TrustSigner.Generate(out byte[] _)).ToArray();
+        var list = new TrustList([.. trustees.Select(t => t.PublicKey)], 2);
+        var dir = Path.Combine(reportDir, "verify-download");
+        Directory.CreateDirectory(dir);
+        var package = Path.Combine(dir, "Jay-test.zip");
+        File.WriteAllText(package, "self-check package");
+        var sums = ReleaseSignature.BuildSums([package]);
+        File.WriteAllText(Path.Combine(dir, ReleaseSignature.SumsFileName), sums);
+        var statement = new ReleaseStatement("v9.9.9", 1, new string('0', 40),
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sums))), list.Hash, ReleaseStatement.NoLog);
+        var sigs = Path.Combine(dir, ReleaseSignature.SignatureFileName);
+
+        File.WriteAllText(sigs, ReleaseSignature.Cosign(ReleaseSignature.Create(statement), trustees[0]));
+        await about.VerifyDownloadAsync(package, list);
+        Check("Verify download: one trustee signature is refused", !about.VerifyPassed && about.VerifyText!.Contains(UpdateCheck.Explain(ReleaseVerdict.NotEnoughSignatures), StringComparison.Ordinal), about.VerifyText);
+
+        File.WriteAllText(sigs, ReleaseSignature.Cosign(File.ReadAllText(sigs), trustees[2]));
+        await about.VerifyDownloadAsync(package, list);
+        await Task.Delay(200);
+        Check("Verify download: 2 of 3 trustees pass and the result is shown", about.VerifyPassed
+            && Dispatcher.UIThread.Invoke(() => window.PageHost.GetVisualDescendants().OfType<AboutPage>().First().VerifyResult.IsEffectivelyVisible), about.VerifyText);
+        Dispatcher.UIThread.Invoke(() => window.PageHost.GetVisualDescendants().OfType<AboutPage>().First().VerifyResult.BringIntoView());
+        await Task.Delay(300);
+        await ShotAsync("about-verify-ok");
+
+        File.AppendAllText(package, "!");
+        await about.VerifyDownloadAsync(package, list);
+        Check("Verify download: a changed file is refused", !about.VerifyPassed && about.VerifyText!.Contains(UpdateCheck.Explain(ReleaseVerdict.HashMismatch), StringComparison.Ordinal), about.VerifyText);
+
+        File.Delete(Path.Combine(dir, ReleaseSignature.SumsFileName));
+        await about.VerifyDownloadAsync(package, list);
+        Check("Verify download: no SHA256SUMS.txt next to it is refused", !about.VerifyPassed, about.VerifyText);
+        about.VerifyText = null;
     }
 
     private string? AppSettingsFeed

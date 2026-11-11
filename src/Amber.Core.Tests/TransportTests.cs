@@ -110,26 +110,21 @@ public class NoiseHandshakeTests
         return (iSend, iReceive, rSend, rReceive, m1, m2);
     }
 
-    [Theory]
-    [InlineData(NoisePattern.NNpsk0)]
-    [InlineData(NoisePattern.NNhfspsk0)]
-    public void HandshakeAndTransport(NoisePattern pattern)
+    [Fact]
+    public void HandshakeAndTransport()
     {
-        if (pattern == NoisePattern.NNhfspsk0 && !NoiseHandshake.HybridSupported) return;
+        const NoisePattern pattern = NoisePattern.NNhfspsk0;
         var (iSend, iReceive, rSend, rReceive, m1, m2) = Run(pattern, Psk, (byte[])Psk.Clone());
         Assert.Equal("a"u8.ToArray(), rReceive.DecryptWithAd([], iSend.EncryptWithAd([], "a"u8)));
         Assert.Equal("b"u8.ToArray(), iReceive.DecryptWithAd([], rSend.EncryptWithAd([], "b"u8)));
-        // 握手消息大小：NN 是 32 字节临时公钥 + 加密的 payload；混合模式再加 ML-KEM 公钥 / 密文。
-        if (pattern == NoisePattern.NNpsk0) Assert.Equal((32 + 3 + 16, 32 + 2 + 16), (m1.Length, m2.Length));
-        else Assert.Equal((32 + 1184 + 16 + 3 + 16, 32 + 1088 + 16 + 2 + 16), (m1.Length, m2.Length));
+        // Handshake sizes: 32-byte ephemeral key + the ML-KEM key / ciphertext + the encrypted payload.
+        Assert.Equal((32 + 1184 + 16 + 3 + 16, 32 + 1088 + 16 + 2 + 16), (m1.Length, m2.Length));
     }
 
-    [Theory]
-    [InlineData(NoisePattern.NNpsk0)]
-    [InlineData(NoisePattern.NNhfspsk0)]
-    public void WrongPskOrPrologueFails(NoisePattern pattern)
+    [Fact]
+    public void WrongPskOrPrologueFails()
     {
-        if (pattern == NoisePattern.NNhfspsk0 && !NoiseHandshake.HybridSupported) return;
+        const NoisePattern pattern = NoisePattern.NNhfspsk0;
         // 不知道房间码（psk 不同）的人在第一条消息就失败。
         Assert.ThrowsAny<CryptographicException>(() => Run(pattern, Psk, RandomNumberGenerator.GetBytes(32)));
         // 两边模式不一样（prologue 不同）也失败，不会悄悄用弱的那种。
@@ -139,8 +134,8 @@ public class NoiseHandshakeTests
     [Fact]
     public void TamperedHandshakeFails()
     {
-        using var i = new NoiseHandshake(NoisePattern.NNpsk0, true, [], Psk);
-        using var r = new NoiseHandshake(NoisePattern.NNpsk0, false, [], (byte[])Psk.Clone());
+        using var i = new NoiseHandshake(NoisePattern.NNhfspsk0, true, [], Psk);
+        using var r = new NoiseHandshake(NoisePattern.NNhfspsk0, false, [], (byte[])Psk.Clone());
         var m1 = i.WriteMessage("req"u8);
         m1[5] ^= 0x40;   // 改临时公钥
         Assert.ThrowsAny<CryptographicException>(() => r.ReadMessage(m1));
@@ -150,8 +145,8 @@ public class NoiseHandshakeTests
     public void EphemeralKeysGiveForwardSecrecy()
     {
         // 同一个 psk 两次握手得到不同的会话密钥。
-        var (a, _, _, _, _, _) = Run(NoisePattern.NNpsk0, Psk, (byte[])Psk.Clone());
-        var (b, _, _, _, _, _) = Run(NoisePattern.NNpsk0, Psk, (byte[])Psk.Clone());
+        var (a, _, _, _, _, _) = Run(NoisePattern.NNhfspsk0, Psk, (byte[])Psk.Clone());
+        var (b, _, _, _, _, _) = Run(NoisePattern.NNhfspsk0, Psk, (byte[])Psk.Clone());
         Assert.NotEqual(a.EncryptWithAd([], new byte[16]), b.EncryptWithAd([], new byte[16]));
     }
 }
@@ -253,8 +248,9 @@ public class TunnelTests
         var (mitmOut, s, a2, b2) = await PairAsync();
         using (a) using (b) using (a2) using (b2)
         {
-            // 握手消息 1 的帧 = 2 字节长度 + 32 字节临时公钥 + 加密的 1 字节 payload（17）= 51；再往后是记录头 2 字节 + 密文。
-            const int tamperAt = 51 + 2 + 5;
+            // Handshake message 1's frame = 2-byte length + 32-byte ephemeral key + encrypted ML-KEM key (1184 + 16)
+            // + encrypted 1-byte payload (17) = 1251; then a 2-byte record header and the ciphertext.
+            const int tamperAt = 1251 + 2 + 5;
             var up = Task.Run(async () =>
             {
                 var buf = new byte[1];
@@ -288,15 +284,15 @@ public class TunnelTests
         using (a)
         using (b)
         {
-            using var i = new NoiseHandshake(NoisePattern.NNpsk0, true, [], RandomNumberGenerator.GetBytes(32));
+            using var i = new NoiseHandshake(NoisePattern.NNhfspsk0, true, [], RandomNumberGenerator.GetBytes(32));
             var psk = (byte[])typeof(NoiseHandshake).GetField("_psk", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(i)!;
-            using var r = new NoiseHandshake(NoisePattern.NNpsk0, false, [], (byte[])psk.Clone());
+            using var r = new NoiseHandshake(NoisePattern.NNhfspsk0, false, [], (byte[])psk.Clone());
             r.ReadMessage(i.WriteMessage([]));
             i.ReadMessage(r.WriteMessage([]));
             var (iSend, iReceive) = i.Split();
             var (rSend, rReceive) = r.Split();
             // 每 3 条记录换钥、填充到档位、空闲 30 毫秒发掩护记录。
-            var profile = new TransportProfile(TransportMode.Extreme, NoisePattern.NNpsk0, 3, TimeSpan.FromHours(1), 1, [256, 1024, SecureStream.MaxPlaintext], TimeSpan.FromMilliseconds(30));
+            var profile = new TransportProfile(TransportMode.Extreme, NoisePattern.NNhfspsk0, 3, TimeSpan.FromHours(1), 1, [256, 1024, SecureStream.MaxPlaintext], TimeSpan.FromMilliseconds(30));
             await using var client = new SecureStream(c, iSend, iReceive, profile);
             await using var server = new SecureStream(s, rSend, rReceive, profile with { CoverTrafficIdle = null });
 

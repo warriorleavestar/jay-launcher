@@ -48,7 +48,7 @@
         </ListBox.ItemTemplate>
       </ListBox>
 
-      <ScrollViewer x:Name="FormScroll" Grid.Column="1">
+      <ScrollViewer x:Name="FormScroll" Classes="page-scroll" Grid.Column="1">
         <StackPanel x:Name="Form" MaxWidth="720" HorizontalAlignment="Stretch" Margin="0,0,14,0">
 
           <!-- General -->

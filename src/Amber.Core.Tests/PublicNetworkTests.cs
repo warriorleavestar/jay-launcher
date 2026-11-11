@@ -53,8 +53,7 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         Ip = "10.235.0.7",
         Game = "1.21.1",
         Players = 2,
-        Invite = invite ?? (mode == RoomVisibility.Public ? new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite.ToString() : null),
-        Direct = mode == RoomVisibility.Direct ? "JAY2D-TEST" : null,
+        Invite = invite ?? (mode is RoomVisibility.Public or RoomVisibility.Direct ? new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite.ToString() : null),
         Lobby = mode == RoomVisibility.Password ? new string('a', 32) : null,
         Salt = mode == RoomVisibility.Password ? new string('b', 32) : null,
     };
@@ -175,21 +174,6 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         Assert.Equal("lookup", squat.Code);
     }
 
-    [Fact]
-    public async Task MailReachesDirectRoomHostOnNextRenewal()
-    {
-        var client = new RoomDirectoryClient(_net);
-        var signer = new RoomSigner();
-        await client.AnnounceAsync(signer.Sign(Listing(RoomVisibility.Direct), _now), true, [], default);
-        await client.MailAsync(signer.RoomId, "JAY2R-REPLY", default);
-        var mail = await client.AnnounceAsync(signer.Sign(Listing(RoomVisibility.Direct), _now), true, [], default);
-        Assert.Equal(["JAY2R-REPLY"], mail);
-        Assert.Empty(await client.AnnounceAsync(signer.Sign(Listing(RoomVisibility.Direct), _now), true, [], default));
-        // 只有直连房间收信。
-        var other = new RoomSigner();
-        await client.AnnounceAsync(other.Sign(Listing(), _now), true, [], default);
-        await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.MailAsync(other.RoomId, "x", default));
-    }
 
     [Fact]
     public async Task BadRequestsGetErrorsNotCrashes()

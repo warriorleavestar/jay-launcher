@@ -24,7 +24,7 @@ public static class CrossLoader
         public static Capabilities Of(BakePackage package) => new(package.Platforms, package.Bridges, package.Accepts);
 
         /// <summary>
-        /// What the pinned release (jay-loader v0.3.0) runs, from its manifest. Used only to tell the player what turning
+        /// What the pinned release (jay-loader v0.3.1) runs, from its manifest (platforms, bridges and its <c>accepts</c> array). Used only to tell the player what turning
         /// on baking would allow before the loader is downloaded; an installed package always speaks for itself.
         /// </summary>
         public static Capabilities PinnedRelease { get; } = new(
@@ -34,7 +34,12 @@ public static class CrossLoader
                 [BakePlatform.NeoForge] = ["1.21.1"],
                 [BakePlatform.Forge] = ["1.20.1"],
             },
-            ["fmlbridge.jar", "fabricbridge.jar", "fmlbridge-forge.jar", "fabricbridge-forge.jar", "forgecompat.jar"]);
+            ["fmlbridge.jar", "fabricbridge.jar", "fmlbridge-forge.jar", "fabricbridge-forge.jar", "forgecompat.jar"],
+            AcceptTable.Parse(System.Text.Json.Nodes.JsonNode.Parse("""
+                [{"platform":"vanilla","mc":"1.21.1","available":true,"accepts":["fabric","quilt"],"missingBridges":[]},
+                 {"platform":"neoforge","mc":"1.21.1","available":true,"accepts":["neoforge","fabric","quilt","forge"],"missingBridges":[]},
+                 {"platform":"forge","mc":"1.20.1","available":true,"accepts":["forge","neoforge","fabric","quilt"],"missingBridges":[]}]
+                """)));
     }
 
     /// <summary>

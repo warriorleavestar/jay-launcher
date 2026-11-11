@@ -14,7 +14,9 @@ public enum RoomVisibility
     Public = 1,
     /// <summary>密码：列表里显示带锁的房间，输入密码才能敲门。</summary>
     Password = 2,
-    /// <summary>直连：列表里带着房主的直连邀请码，走打洞 / IPv6 直连，不经过公共网络的节点。</summary>
+    /// <summary>
+    /// 直连：列表里和公开房间一样带一张长期邀请（不带任何地址）。批准后两边在加密的敲门里交换地址，再打洞 / IPv6 直连。
+    /// </summary>
     Direct = 3,
 }
 
@@ -48,8 +50,6 @@ public sealed record RoomListing
     public string? Lobby { get; init; }
     public string? Salt { get; init; }
     public TunnelSettings Tunnel { get; init; } = TunnelSettings.Default;
-    /// <summary>直连房间：直连邀请码（JAY2D-）。</summary>
-    public string? Direct { get; init; }
     /// <summary>目录服务最后一次收到续期的时间（目录服务填，不在签名里）。</summary>
     public DateTimeOffset Updated { get; init; }
     /// <summary>
@@ -63,12 +63,13 @@ public sealed record RoomListing
 
     public string HostFingerprint => MemberIdentity.FingerprintOf(HostKey);
 
-    /// <summary>公开 / 密码房间：敲门用的邀请。密码房间要给密码；密码不对时能造出邀请，但敲门握手会失败。</summary>
+    /// <summary>公开 / 直连 / 密码房间：敲门用的邀请。密码房间要给密码；密码不对时能造出邀请，但敲门握手会失败。</summary>
     public JayInvite? ToInvite(string? password = null)
     {
         switch (Mode)
         {
             case RoomVisibility.Public:
+            case RoomVisibility.Direct:
             case RoomVisibility.Hidden:
                 return JayInvite.TryParse(Invite, out var invite) ? invite : null;
             case RoomVisibility.Password:
@@ -112,7 +113,6 @@ public sealed record RoomListing
         if (Invite is not null) o["invite"] = Invite;
         if (Lobby is not null) o["lobby"] = Lobby;
         if (Salt is not null) o["salt"] = Salt;
-        if (Direct is not null) o["direct"] = Direct;
         o["sk"] = Convert.ToHexStringLower(SignKey);
         o["seq"] = Seq;
         if (!includeSignature) return o;
@@ -152,7 +152,6 @@ public sealed record RoomListing
                 Invite = Str(o, "invite", 200),
                 Lobby = Str(o, "lobby", 32),
                 Salt = Str(o, "salt", 32),
-                Direct = Str(o, "direct", MaxTextLength),
                 Updated = o["updated"]?.GetValue<long>() is { } t ? DateTimeOffset.FromUnixTimeSeconds(t) : default,
                 SignKey = Hex(Str(o, "sk", 64), 32),
                 Seq = o["seq"]?.GetValue<long>() ?? 0,
@@ -162,9 +161,8 @@ public sealed record RoomListing
             if (!listing.Verify()) return null;
             return listing.Mode switch
             {
-                RoomVisibility.Public when listing.ToInvite() is null => null,
+                RoomVisibility.Public or RoomVisibility.Direct when listing.ToInvite() is null => null,
                 RoomVisibility.Password when listing.Lobby is not { Length: 32 } || !IsHex(listing.Lobby) || listing.Salt is not { Length: RoomPassword.SaltLength * 2 } || !IsHex(listing.Salt) => null,
-                RoomVisibility.Direct when string.IsNullOrWhiteSpace(listing.Direct) => null,
                 _ => listing,
             };
         }

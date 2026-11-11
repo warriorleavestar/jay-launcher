@@ -199,7 +199,7 @@
       </Border>
     </StackPanel>
 
-    <ScrollViewer x:Name="MpBody" svc:ThemeRegion.Name="multiplayer.body" Grid.Row="3">
+    <ScrollViewer x:Name="MpBody" Classes="page-scroll" svc:ThemeRegion.Name="multiplayer.body" Grid.Row="3">
       <StackPanel Spacing="14" Margin="0,0,14,14">
 
 <!-- 加入方：房主发起的测试正在进行 -->
@@ -294,26 +294,11 @@
                         <CheckBox Content="{l:T multiplayer.diagnostics.debug_mode}" IsChecked="{Binding DebugMode}" ToolTip.Tip="{l:T multiplayer.diagnostics.debug_tooltip}" />
                       </WrapPanel>
                       <SelectableTextBlock Text="{Binding NetworkCheckText}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding NetworkCheckText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                      <Grid x:Name="DirectGrid" ColumnDefinitions="*,14,*">
-                        <StackPanel Spacing="6">
-                          <TextBlock Text="{l:T multiplayer.direct.host_title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                          <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" />
-                          <Button Classes="primary" Content="{l:T multiplayer.direct.create}" Command="{Binding CreateDirectRoomCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2" Spacing="6">
-                          <TextBlock Text="{l:T multiplayer.direct.join_title}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                          <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Text="{Binding DirectInviteInput}" PlaceholderText="{l:T multiplayer.direct.invite_placeholder}" PasswordChar="•" RevealPassword="{Binding DirectInviteInputShown}" />
-                            <Button Grid.Column="1" Command="{Binding ToggleDirectInviteInputShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
-                            <Panel>
-                              <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !DirectInviteInputShown}" />
-                              <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding DirectInviteInputShown}" />
-                            </Panel>
-                          </Button>
-                          </Grid>
-                          <Button Classes="primary" Content="{l:T common.join}" Command="{Binding JoinDirectCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-                        </StackPanel>
-                      </Grid>
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="{l:T multiplayer.direct.host_title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding GameStatusText}" Classes.hint="{Binding HasHostGame}" />
+                        <Button Classes="primary" Content="{l:T multiplayer.direct.create}" Command="{Binding CreateDirectRoomCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                      </StackPanel>
                     </StackPanel>
                   </StackPanel>
                 </Expander>
@@ -337,6 +322,9 @@
                 </Grid>
                 <TextBlock x:Name="JoinCodeRecognitionText" FontSize="12" TextWrapping="Wrap" Text="{Binding JoinCodeRecognition}" IsVisible="{Binding HasJoinCodeText}"
                            Classes.warn="{Binding JoinCodeRecognitionWarns}" />
+                <!-- A sealed direct code: the passphrase the host told by another way (a call, in person). -->
+                <TextBox x:Name="JoinPassphraseBox" Text="{Binding JoinPassphrase}" PlaceholderText="{l:T multiplayer.sealed.passphrase_placeholder}"
+                         IsVisible="{Binding JoinCodeIsSealed}" c:EnterSubmit.Command="{Binding JoinCommand}" />
                 <!-- Invite v3: the host's game, the instance Jay picked, or "install one and join". -->
                 <StackPanel x:Name="JoinGamePanel" Spacing="4" IsVisible="{Binding HasJoinGame}">
                   <TextBlock x:Name="JoinGameText" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Text="{Binding JoinGameText}" />
@@ -547,6 +535,16 @@
                 <Border x:Name="InviteCard" Classes="card" Margin="0" IsVisible="{Binding IsHosting}">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="h2" Text="{l:T multiplayer.invite.button}" Margin="0" />
+                    <!-- Room opened before the game: what it is waiting for, a port box for other games, and [Find]. -->
+                    <Border x:Name="GameLinkPanel" Background="{DynamicResource AccentTint}" CornerRadius="6" Padding="10" IsVisible="{Binding HasGameRelay}">
+                      <StackPanel Spacing="6">
+                        <TextBlock x:Name="GameLinkText" Text="{Binding GameLinkText}" TextWrapping="Wrap" />
+                        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsWaitingForGame}">
+                          <TextBox x:Name="GameLinkPortBox" Text="{Binding ManualPort}" PlaceholderText="{l:T multiplayer.lan.port_placeholder}" />
+                          <Button x:Name="GameLinkFindButton" Grid.Column="1" Content="{l:T common.find}" Command="{Binding FindGameForRoomCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
+                        </Grid>
+                      </StackPanel>
+                    </Border>
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.hint}" IsVisible="{Binding !HasInvite}" />
                     <Button x:Name="CreateFirstInviteButton" Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" IsVisible="{Binding !HasInvite}" HorizontalAlignment="Left" />
                     <StackPanel Spacing="6" IsVisible="{Binding HasInvite}">
@@ -626,41 +624,41 @@
                   </StackPanel>
                 </Border>
 
-                <!-- 直连房间：码、路径、全条件测试 -->
+                <!-- 直连房间：路径、全条件测试（邀请就是普通的 JAY2 邀请，地址只在加密的敲门里交换） -->
                 <Border Classes="card" Margin="0" IsVisible="{Binding IsDirect}">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="h2" Text="{l:T multiplayer.direct.title}" Margin="0" />
                     <TextBlock Text="{Binding CurrentPathText}" FontWeight="SemiBold" TextWrapping="Wrap" />
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding DirectHint}" />
-                    <StackPanel IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                      <TextBlock Text="{l:T multiplayer.direct.invite_label}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding IsDirectHost}" />
-                      <TextBlock Text="{l:T multiplayer.direct.reply_label}" FontWeight="SemiBold" TextWrapping="Wrap" IsVisible="{Binding !IsDirectHost}" />
+                    <!-- No server at all: a sealed code and a passphrase told by another way. No IP is readable in the code. -->
+                    <StackPanel x:Name="SealedHostPanel" Spacing="6" IsVisible="{Binding IsDirectHost}">
+                      <TextBlock Text="{l:T multiplayer.sealed.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
+                      <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.sealed.hint}" />
+                      <Button x:Name="CreateSealedButton" Content="{l:T multiplayer.sealed.create}" Command="{Binding CreateSealedOfferCommand}" IsEnabled="{Binding !IsSealing}" />
+                      <StackPanel Spacing="6" IsVisible="{Binding HasSealedOffer}">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBox x:Name="SealedCodeBox" Text="{Binding SealedOfferCode}" IsReadOnly="True" TextWrapping="Wrap" FontSize="12" />
+                          <Button Grid.Column="1" Content="{l:T multiplayer.sealed.copy_code}" Command="{Binding CopySealedCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                          <TextBlock VerticalAlignment="Center" Margin="0,0,6,0" Text="{l:T multiplayer.sealed.passphrase_label}" />
+                          <TextBlock x:Name="SealedPassphraseText" Grid.Column="1" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" FontFamily="monospace" Text="{Binding SealedPassphrase}" />
+                          <Button Grid.Column="2" Content="{l:T multiplayer.sealed.copy_passphrase}" Command="{Binding CopySealedPassphraseCommand}" Margin="6,0,0,0" />
+                        </Grid>
+                        <TextBlock Classes="warn" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.sealed.separate_warning}" />
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBox x:Name="SealedReplyBox" Text="{Binding SealedReplyInput}" PlaceholderText="{l:T multiplayer.sealed.reply_placeholder}" c:EnterSubmit.Command="{Binding AddSealedReplyCommand}" />
+                          <Button Grid.Column="1" Content="{l:T multiplayer.sealed.connect}" Command="{Binding AddSealedReplyCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                        </Grid>
+                      </StackPanel>
                     </StackPanel>
-                    <!-- 直连码默认打码；两种码都带着本机的公网地址 -->
-                    <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                      <TextBox Text="{Binding MyDirectCodeDisplay}" IsReadOnly="True" FontFamily="Consolas,monospace" FontSize="{DynamicResource FontCaption}" TextWrapping="Wrap" MaxHeight="70" />
-                      <Button Grid.Column="1" Command="{Binding ToggleDirectCodeShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
-                        <Panel>
-                          <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !DirectCodeShown}" />
-                          <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding DirectCodeShown}" />
-                        </Panel>
-                      </Button>
-                      <Button Grid.Column="2" Content="{l:T common.copy}" Command="{Binding CopyDirectCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
-                    </Grid>
-                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.clipboard.autoclear_hint}"
-                               IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.direct.ip_warning}"
-                               IsVisible="{Binding MyDirectCode, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                    <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding IsDirectHost}">
-                      <TextBox Text="{Binding DirectReplyInput}" PlaceholderText="{l:T multiplayer.direct.reply_placeholder}" PasswordChar="•" RevealPassword="{Binding DirectReplyInputShown}" />
-                      <Button Grid.Column="1" Command="{Binding ToggleDirectReplyInputShownCommand}" Margin="6,0,0,0" VerticalAlignment="Top">
-                        <Panel>
-                          <TextBlock Text="{l:T multiplayer.invite.show}" IsVisible="{Binding !DirectReplyInputShown}" />
-                          <TextBlock Text="{l:T multiplayer.invite.hide}" IsVisible="{Binding DirectReplyInputShown}" />
-                        </Panel>
-                      </Button>
-                      <Button Grid.Column="2" Content="{l:T multiplayer.direct.connect}" Command="{Binding AddDirectReplyCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
-                    </Grid>
+                    <StackPanel x:Name="SealedGuestPanel" Spacing="6" IsVisible="{Binding HasMySealedReply}">
+                      <TextBlock Text="{l:T multiplayer.sealed.reply_title}" FontWeight="SemiBold" />
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBox x:Name="MySealedReplyBox" Text="{Binding MySealedReply}" IsReadOnly="True" TextWrapping="Wrap" FontSize="12" />
+                        <Button Grid.Column="1" Content="{l:T multiplayer.sealed.copy_reply}" Command="{Binding CopyMySealedReplyCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                      </Grid>
+                    </StackPanel>
                     <StackPanel Spacing="6" IsVisible="{Binding IsDirectHost}">
                       <TextBlock Text="{l:T multiplayer.matrix.title}" FontWeight="SemiBold" Margin="0,6,0,0" />
                       <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.matrix.hint}" />
@@ -941,6 +939,8 @@
                   <TextBox Text="{Binding InviteText}" PlaceholderText="{l:T multiplayer.jayserver.invite_placeholder}" />
                   <Button Grid.Column="1" Classes="primary" Margin="6,0,0,0" Content="{l:T multiplayer.jayserver.join}" Command="{Binding JoinCommand}" IsEnabled="{Binding !IsBusy}" />
                 </Grid>
+                <TextBox x:Name="JayServerPassphraseBox" Text="{Binding InvitePassphrase}" IsVisible="{Binding InviteIsSealed}"
+                         PlaceholderText="{l:T multiplayer.jayserver.passphrase_placeholder}" />
                 <TextBlock x:Name="NoJayServersText" Classes="hint" TextWrapping="Wrap" Text="{l:T multiplayer.jayserver.empty}" IsVisible="{Binding !Servers.Count}" />
                 <ItemsControl ItemsSource="{Binding Servers}">
                   <ItemsControl.ItemTemplate>
@@ -1029,6 +1029,13 @@
                     <TextBox IsReadOnly="True" FontSize="12" TextWrapping="Wrap" Text="{Binding InviteCode}" />
                     <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.hostserver.copy}" Command="{Binding CopyInviteCommand}" />
                   </Grid>
+                  <StackPanel x:Name="HostInvitePassphrasePanel" Spacing="4" IsVisible="{Binding HasInvitePassphrase}">
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.hostserver.invite_sealed}" />
+                    <Grid ColumnDefinitions="*,Auto">
+                      <SelectableTextBlock FontFamily="Consolas,monospace" FontSize="16" VerticalAlignment="Center" Text="{Binding InvitePassphrase}" />
+                      <Button Grid.Column="1" Margin="6,0,0,0" Content="{l:T multiplayer.sealed.copy_passphrase}" Command="{Binding CopyInvitePassphraseCommand}" />
+                    </Grid>
+                  </StackPanel>
                   <ItemsControl ItemsSource="{Binding Members}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate DataType="vm:HostMemberItem">
@@ -1292,6 +1299,10 @@
                 <Button Grid.Column="1" Content="{l:T common.import}" Command="{Binding ImportNodesCommand}" Margin="6,0,0,0" />
                 <Button Grid.Column="2" Content="{l:T multiplayer.nodes.export}" Command="{Binding ExportNodesCommand}" Margin="6,0,0,0" />
               </Grid>
+              <StackPanel x:Name="NodeSharePassphrasePanel" Spacing="4" IsVisible="{Binding ShareCodeIsSealed}">
+                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.nodes.sealed_hint}" />
+                <TextBox x:Name="NodeSharePassphraseBox" Text="{Binding SharePassphrase}" FontFamily="Consolas,monospace" PlaceholderText="{l:T multiplayer.nodes.passphrase_placeholder}" />
+              </StackPanel>
             </StackPanel>
             </StackPanel>
           </Border>
@@ -1317,7 +1328,7 @@
                     <Button Content="{l:T multiplayer.network.copy}" Command="{Binding CopyNetworkCommand}" />
                     <Button Content="{l:T multiplayer.network.remove}" Command="{Binding RemoveNetworkCommand}" />
                   </WrapPanel>
-                  <TextBox Text="{Binding NetworkInput}" FontFamily="Consolas,monospace" TextWrapping="Wrap" MaxLength="8192" MaxHeight="96"
+                  <TextBox Text="{Binding NetworkInput}" FontFamily="Consolas,monospace" TextWrapping="Wrap" MaxLength="40960" MaxHeight="96"
                            PlaceholderText="{l:T multiplayer.network.input_placeholder}" />
                   <Button Content="{l:T multiplayer.network.add}" Command="{Binding AddNetworkCommand}" HorizontalAlignment="Left" />
                   <Border Classes="card" Margin="0" IsVisible="{Binding NetworkConfirmOpen}">

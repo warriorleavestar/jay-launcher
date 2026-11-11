@@ -53,75 +53,51 @@ public static class DirectText
 }
 
 /// <summary>
-/// 直连邀请码 / 回复码：JAY2D-… / JAY2R-…（base64url 编码的 JSON）。
-/// 邀请码里是本次会话 id、NAT 类型、能连到房主的地址，和一张普通的 JAY2 邀请（大厅密钥 L + 一次性令牌 K）：
-/// 拿着它只能经直连桥进大厅敲门，房主批准后才在加密通道里拿到房间的凭据。里面没有房间的网络名、密钥和成员钥匙。
-/// 回复码只有会话 id、NAT 类型和地址，没有任何密钥。两种码都含公网 IP，只发给要一起玩的人。
+/// One side's addresses for a direct link: a session id, the NAT type and the candidate addresses (public IPv4 from STUN,
+/// IPv6, router-mapped ports, LAN addresses).
+/// <para>
+/// These are never written into any code a person copies or pastes. The host sends its addresses only to a guest it has
+/// approved, inside the encrypted knock reply; the guest answers with its own inside the encrypted knock ack
+/// (<see cref="KnockServer.DirectOffer"/>, <see cref="KnockClient.KnockAsync"/>). Someone who only holds an invite code
+/// learns no address of either side.
+/// </para>
 /// </summary>
-public sealed record DirectCode(bool IsReply, string Session, NatKind Nat, IReadOnlyList<Candidate> Candidates, JayInvite? Invite = null)
+public sealed record DirectAddresses(string Session, NatKind Nat, IReadOnlyList<Candidate> Candidates)
 {
-    public const int Version = 1;
-    public const string InvitePrefix = "JAY2D-";
-    public const string ReplyPrefix = "JAY2R-";
-    private const string OldInvitePrefix = "AMBDIRECT";
-    private const string OldReplyPrefix = "AMBREPLY";
+    /// <summary>At most this many candidates are read from the other side (a gatherer finds a handful).</summary>
+    public const int MaxCandidates = 16;
 
-    /// <summary>对方地址里有 IPv6、映射端口或者对方有公网地址：加入方直接连得上，不用再发回复码。</summary>
+    /// <summary>The other side has IPv6, a mapped port or an open NAT: it can be reached without punching from both ends.</summary>
     public bool DirectlyReachable => Nat == NatKind.Open || Candidates.Any(c => c.Kind is PathKind.IPv6 or PathKind.Mapped);
 
-    public string Encode()
-    {
-        if (!IsReply && Invite is null) throw new InvalidOperationException("direct invite needs a JAY2 invite");
-        if (IsReply && Invite is not null) throw new InvalidOperationException("reply codes carry no invite");
-        var json = Addresses();
-        json["v"] = Version;
-        if (Invite is { } invite) json["i"] = invite.ToString();
-        var body = Convert.ToBase64String(Encoding.UTF8.GetBytes(json.ToJsonString())).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        return (IsReply ? ReplyPrefix : InvitePrefix) + body;
-    }
-
-    /// <summary>打码后的样子（界面默认显示这个）：只露出前缀和最后 4 位。</summary>
-    public string Masked
-    {
-        get
-        {
-            var text = Encode();
-            return text[..InvitePrefix.Length] + new string('•', 8) + text[^4..];
-        }
-    }
-
-    public override string ToString() => IsReply ? "DirectCode(reply)" : "DirectCode(invite)";
-
-    /// <summary>
-    /// 只有会话 id、NAT 类型和地址：回复码和经直连通道发的 hello 用它。
-    /// 直连通道的控制消息只有 HMAC 认证、没有加密，路上的人看得到内容，所以绝不能带任何密钥。
-    /// </summary>
-    public JsonObject Addresses() => new()
+    /// <summary>The JSON sent inside the encrypted knock.</summary>
+    public JsonObject ToJson() => new()
     {
         ["s"] = Session,
         ["n"] = Nat.ToString(),
-        ["c"] = new JsonArray(Candidates.Select(c => (JsonNode?)new JsonArray(c.Kind.ToString(), c.EndPoint.ToString())).ToArray()),
+        ["c"] = new JsonArray(Candidates.Take(MaxCandidates).Select(c => (JsonNode?)new JsonArray(c.Kind.ToString(), c.EndPoint.ToString())).ToArray()),
     };
 
-    /// <summary>解析 <see cref="Addresses"/> 的内容（对方的 hello、码里的地址）。会话 id 长度不对时返回 false。</summary>
-    public static bool TryParseAddresses(JsonObject? json, out string session, out NatKind nat, out List<Candidate> candidates)
+    /// <summary>Reads <see cref="ToJson"/>. A session id of the wrong shape is refused; unknown or broken candidates are skipped.</summary>
+    public static bool TryParse(JsonObject? json, out DirectAddresses addresses)
     {
-        session = "";
-        nat = NatKind.Unknown;
-        candidates = [];
+        addresses = null!;
         if (json is null) return false;
         try
         {
-            session = (json["s"] as JsonValue)?.TryGetValue<string>(out var s) == true ? s : "";
-            if (session.Length is < 8 or > 64 || !session.All(char.IsAsciiLetterOrDigit)) return false;
-            nat = (json["n"] as JsonValue)?.TryGetValue<string>(out var n) == true && Enum.TryParse<NatKind>(n, out var kind) && Enum.IsDefined(kind) ? kind : NatKind.Unknown;
+            var session = (json["s"] as JsonValue)?.TryGetValue<string>(out var s) == true ? s : "";
+            if (!IsValidSession(session)) return false;
+            var nat = (json["n"] as JsonValue)?.TryGetValue<string>(out var n) == true && Enum.TryParse<NatKind>(n, out var kind) && Enum.IsDefined(kind) ? kind : NatKind.Unknown;
+            var candidates = new List<Candidate>();
             foreach (var item in json["c"] as JsonArray ?? [])
             {
+                if (candidates.Count >= MaxCandidates) break;
                 if (item is not JsonArray pair || pair.Count != 2) continue;
                 if ((pair[0] as JsonValue)?.TryGetValue<string>(out var k) == true && Enum.TryParse<PathKind>(k, out var path) && Enum.IsDefined(path)
                     && (pair[1] as JsonValue)?.TryGetValue<string>(out var e) == true && IPEndPoint.TryParse(e, out var ep) && ep.Port > 0)
                     candidates.Add(new Candidate(path, ep));
             }
+            addresses = new DirectAddresses(session, nat, candidates);
             return true;
         }
         catch (InvalidOperationException)
@@ -130,61 +106,23 @@ public sealed record DirectCode(bool IsReply, string Session, NatKind Nat, IRead
         }
     }
 
-    /// <summary>旧版本的直连码（AMBDIRECT1- / AMBREPLY1-，里面是完整的房间码）：不再接受，提示对方更新。</summary>
-    public static bool LooksLikeOldCode(string? text) =>
-        text is not null && (text.Contains(OldInvitePrefix, StringComparison.OrdinalIgnoreCase) || text.Contains(OldReplyPrefix, StringComparison.OrdinalIgnoreCase));
+    /// <summary>Session ids are 8–64 ASCII letters or digits (the host makes 16 hex digits).</summary>
+    public static bool IsValidSession(string? session) => session is { Length: >= 8 and <= 64 } && session.All(char.IsAsciiLetterOrDigit);
 
-    /// <summary>解析粘贴的文字（容忍前后多余的文字）。认不出、旧版本、内容坏了时 error 说明原因。</summary>
-    public static bool TryParse(string? text, out DirectCode code, out string? error)
-    {
-        code = null!;
-        error = null;
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        var upper = text.ToUpperInvariant();
-        var start = upper.IndexOf(InvitePrefix, StringComparison.Ordinal);
-        var isReply = false;
-        var reply = upper.IndexOf(ReplyPrefix, StringComparison.Ordinal);
-        if (reply >= 0 && (start < 0 || reply < start))
-        {
-            start = reply;
-            isReply = true;
-        }
-        if (start < 0)
-        {
-            error = L.T(LooksLikeOldCode(text) ? "core.mp.code.old_direct" : "core.mp.code.unrecognized");
-            return false;
-        }
-        var body = new string(text[(start + InvitePrefix.Length)..].TakeWhile(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_').ToArray());
-        try
-        {
-            var b64 = body.Replace('-', '+').Replace('_', '/');
-            b64 += new string('=', (4 - b64.Length % 4) % 4);
-            if (JsonNode.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(b64))) is not JsonObject json) throw new FormatException();
-            var version = (json["v"] as JsonValue)?.TryGetValue<int>(out var v) == true ? v : 0;
-            if (version != Version)
-            {
-                error = L.F("core.mp.code.version", version, Version);
-                return false;
-            }
-            if (!TryParseAddresses(json, out var session, out var nat, out var candidates)) throw new FormatException();
-            JayInvite? invite = null;
-            if (json["i"] is JsonValue iv && iv.TryGetValue<string>(out var inviteText))
-            {
-                if (isReply || !JayInvite.TryParse(inviteText, out var parsed)) throw new FormatException();
-                invite = parsed;
-            }
-            if (!isReply && invite is null) throw new FormatException();
-            // 只认这几个字段：码里多出来的东西（比如塞进去的密钥）不当成合法的码。
-            if (json.Any(p => p.Key is not ("v" or "s" or "n" or "c" or "i"))) throw new FormatException();
-            code = new DirectCode(isReply, session, nat, candidates, invite);
-            return true;
-        }
-        catch (Exception e) when (e is FormatException or JsonException or InvalidOperationException or ArgumentException)
-        {
-            error = L.T("core.mp.code.corrupted");
-            return false;
-        }
-    }
+    /// <summary>Never prints an address (this ends up in logs and exception messages).</summary>
+    public override string ToString() => $"DirectAddresses({Candidates.Count})";
+}
+
+/// <summary>
+/// Codes of the removed direct-link format: JAY2D- / JAY2R- (and the even older AMBDIRECT / AMBREPLY). They carried both
+/// sides' public IP addresses in plain text, so they are refused; the paste box tells the person to ask for a current invite.
+/// </summary>
+public static class OldDirectCodes
+{
+    private static readonly string[] Prefixes = ["JAY2D-", "JAY2R-", "AMBDIRECT", "AMBREPLY"];
+
+    public static bool Contains(string? text) =>
+        text is not null && Prefixes.Any(p => text.Contains(p, StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>

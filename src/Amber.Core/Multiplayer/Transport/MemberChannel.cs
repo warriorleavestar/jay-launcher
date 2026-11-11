@@ -7,7 +7,7 @@ namespace Amber.Core.Multiplayer.Transport;
 
 /// <summary>
 /// 经邀请加入的房间里，成员连房主的一条连接（游戏通道或聊天）：
-/// 先明文发 8 字节成员编号，再用这个成员自己的 psk 跑 NNpsk0（极端加密模式下 NNhfspsk0），得到 SecureStream。
+/// 先明文发 8 字节成员编号，再用这个成员自己的 psk 跑 NNhfspsk0（每一档都是混合握手），得到 SecureStream。
 /// 房主按编号在成员表里查 psk，查不到直接断开；psk 不对第一条握手消息就解不开。
 /// prologue 里带上用途、模式和编号，一条连接的握手不能挪到另一种用途上用。
 /// 格式：[8 字节编号][2 字节长度][握手消息 1（载荷加密）] → [2 字节长度][握手消息 2]。
@@ -18,11 +18,10 @@ public static class MemberChannel
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
 
     internal static byte[] Prologue(string purpose, TransportMode mode, bool disguise, ReadOnlySpan<byte> id) =>
-        [.. Encoding.ASCII.GetBytes($"jay-member-v1|{purpose}|{(int)mode}|{(disguise ? 1 : 0)}|"), .. id];
+        [.. Encoding.ASCII.GetBytes($"jay-member-v2|{purpose}|{(int)mode}|{(disguise ? 1 : 0)}|"), .. id];
 
-    /// <summary>聊天用的通道参数：模式是极端加密时用混合握手，其余 NNpsk0；聊天量小，不填充到档位、不发掩护流量。</summary>
-    public static TransportProfile ChatProfile(TransportMode mode) =>
-        TransportProfile.For(TransportMode.High) with { Pattern = mode == TransportMode.Extreme ? NoisePattern.NNhfspsk0 : NoisePattern.NNpsk0 };
+    /// <summary>Chat channel parameters: the hybrid handshake like every channel, no bucket padding or cover traffic (chat is small).</summary>
+    public static TransportProfile ChatProfile(TransportMode mode) => TransportProfile.For(TransportMode.High);
 
     /// <summary>成员这边：连上之后调用。</summary>
     public static async Task<SecureStream> ConnectAsync(Stream stream, MemberKey key, TransportProfile profile, string purpose, byte[] payload, CancellationToken ct = default)

@@ -10,7 +10,7 @@
              x:DataType="vm:HomeViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
     <TextBlock Classes="h1" Text="{l:T home.launch}" svc:ThemeRegion.Name="home.title" />
-    <ScrollViewer Grid.Row="1">
+    <ScrollViewer Classes="page-scroll" Grid.Row="1">
       <StackPanel>
         <!-- 启动失败（没进游戏就失败了）：一句话原因 + 按顺序排好的修复按钮（旧规格 N1） -->
         <Border x:Name="FailureCard" Classes="error-bar" Margin="0,0,0,12" IsVisible="{Binding HasFailure}">

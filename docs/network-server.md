@@ -28,13 +28,14 @@ jay-server directory --listen 11010
 
 ```bash
 # 1. 生成签名钥匙、网络信息、网络配置模板
-jay-server network init nz-friends --name 新西兰朋友服 --host 203.0.113.5
+# --host 写节点的域名：网络连接串会广泛传播，不能写公网 IP（Jay 会拒绝）
+jay-server network init nz-friends --name 新西兰朋友服 --host node.example.org
 
 # 2.（可选）改 nz-friends/config.json：公告、链接、允许的房间方式、传文件、最低版本、登录……
 #    传到一个 https 地址（比如 GitHub Pages），然后算哈希并写进网络信息（版本号自动加一）：
 jay-server network config-hash nz-friends/config.json --network nz-friends/nz-friends.json --url https://example.org/jay/config.json
 
-# 3. 签名，得到连接串 JAYNET1-...，发给玩家（联机 → 公共网络 → 粘贴 → 添加网络）
+# 3. 签名，得到连接串 JAYNET2-...，发给玩家（联机 → 公共网络 → 粘贴 → 添加网络）
 jay-server network sign nz-friends/nz-friends.json --key nz-friends/network.key > nz-friends.jaynet
 
 # 4. 跑节点
@@ -77,6 +78,18 @@ jay-server node remove <房间编号>       # 只删这一次，房主续期时�
 
 - `node` 命令经本机管理接口操作运行中的节点，口令在数据目录的 `admin.token`（只有运行节点的用户能读）。要和 `directory` 用同一个 `--dir`（或 `JAY_SERVER_DIR`）。
 - 健康检查：`curl http://127.0.0.1:47669/health`，不用口令，给监控和 Docker 用。
+- Prometheus 监控：`GET /metrics` 给出 Prometheus 文本格式的计数（房间数、公开数、新房间 / 续期 / 离开 / 被拒的累计数、登录成功失败、封禁条数、志愿中转数、运行时长）。只有总数，没有房间名、房主、地址、指纹或账号。要口令；在节点那台机器上的 Prometheus 这样配：
+
+  ```yaml
+  scrape_configs:
+    - job_name: jay-node
+      static_configs:
+        - targets: ["127.0.0.1:47669"]
+      authorization:
+        credentials_file: /etc/prometheus/jay-admin.token   # 数据目录里 admin.token 的副本，只给 Prometheus 的用户读
+  ```
+
+  `admin.token` 本身只有运行节点的用户能读，所以复制一份（`sudo install -m 600 -o prometheus /var/lib/jay-network/admin.token /etc/prometheus/jay-admin.token`），别放宽原文件的权限。target 必须写 `127.0.0.1` 或 `localhost`（管理接口只认本机的 Host）。Prometheus 在别的机器上时，用 SSH 隧道把 47669 转过去，target 仍写 `127.0.0.1:<本地端口>`。节点自己从不往外发数据，是你的 Prometheus 来取。
 - 封禁名单存在数据目录的 `bans.json`。`--for 30m` / `24h` / `7d` 是临时封禁，到点自动解除；不加就是永久。房主被拒时能看到原因和解封时间。
 - 节点每 5 秒检查一次 `bans.json` 有没有被改过，改了就重新读。几台目录节点想共用一份封禁名单，可以用 rsync、共享盘之类把这个文件同步过去，不用在每台上各执行一次。
 - 封账号只在开了账号登录的节点上有用：Jay 发布房间时会带上登录凭证，节点核对过签名才记下账号。
@@ -162,15 +175,29 @@ docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-ser
 
 **Windows**：解压后在文件夹里打开终端运行 `jay-server directory ...`；防火墙询问时允许。想开机自动运行，用“任务计划程序”建一个开机任务。
 
+## 把节点绑定到硬件（防止被整盘拷走冒充）
+
+在节点上 `jay-server node bind`（生成只含加盐哈希的 hardware.request.json）→ 拷到放根钥匙的离线电脑 `jay-server network hw-cert --root <根钥匙> --request hardware.request.json --out hardware.cert` → 第二位信任人在自己的离线电脑上 `jay-server network hw-cert --cosign hardware.cert --root <自己的钥匙>`（Jay 公共网络要三人中两人，自己的网络看 dirRootsNeed；每次签名前逐项显示内容和核对码，要手打目录公钥最后 6 个字符）→ 拷回节点 `jay-server node bind --install hardware.cert`。之后 directory.key、login.key 只以加密形式存在（有 TPM 就封存进 TPM，Linux 上还绑定安全启动状态）。硬件对不上时节点删除数据目录里的 Jay 文件；运行环境被动过（调试器、注入、文件可被别人改、TPM 不解封）时拒绝运行。不需要 root：Linux 上把服务账号加进 tss 组即可（安装脚本会自动加）。换硬件、迁移虚拟机前先 `jay-server node bind --check`。细节和限制见 [security/node-hardware-binding.md](security/node-hardware-binding.md)。
+
 ## 节点能看到什么
 
-- 公开房间的名字、房主名、人数、游戏版本、房主在公共网络里的地址（就是房间列表的内容）。
-- 隐藏房间的查找键（邀请码大厅名的哈希）和房主地址，看不到邀请码本身。
-- 打开了指纹查找的房主的指纹密钥（见 [public-network.md](public-network.md#设备指纹)）。
-- 开了账号登录时：账号名、密码哈希、登录成功和失败的次数。
-- 看不到：游戏流量、聊天、文件、房间钥匙、邀请码、密码房间的密码。
+运营一个节点，你（以及能进这台机器的人）看得到下面这些。这张表要和 Jay 的“关于和隐私”页对得上，新功能改了它就要改这里。
 
-管理接口和日志只给数字和公开房间，不记录谁看了列表、谁敲了谁的门。
+| 看得到 | 什么时候 | 以后 |
+| --- | --- | --- |
+| 连到这台节点的电脑的公网 IP 和端口（EasyTier 这一层） | 节点当种子或中转时 | 不变；终极方案的三跳转发才解决 |
+| 每个成员在公共网络里的地址（10.235.x.x）和它发目录请求的时刻 | 一直 | 不变 |
+| 公开房间的名字、房主名、人数、游戏版本、房主地址（就是房间列表） | 一直 | 不变 |
+| 隐藏房间的查找键（大厅名的哈希）、房主地址 | 一直 | 隐私方案第 12 项后改成加密条目 |
+| 谁在什么时候按哪个查找键或房间码找房间 | 一直 | 第 12 项后看不到：客户端整份下载，在本机查 |
+| 开了指纹查找的房主的指纹密钥（见 [public-network.md](public-network.md#设备指纹)） | 房主打开时 | 第 7、14 项后好友码只带账户哈希 |
+| 密封信件的箱号、大小、存取时刻（看不到内容和寄信人） | 一直 | 第 13 项后箱号由双方共享钥匙算出，读写次数固定 |
+| 志愿中转的公网地址和端口（也会发给网络里要中转的人） | 有人登记时 | 不变；界面写明了 |
+| 开了账号登录时：账号名、密码哈希、登录成败次数、哪个账号发布了哪个公开房间 | 开登录时 | 不变 |
+
+看不到：游戏流量、聊天、私聊、文件、房间钥匙、邀请码本身、密码房间的密码。这些在房间自己的加密子网里，节点只转发密文。
+
+管理接口、网页面板和 `/metrics` 只给数字和公开房间；日志不记连上来的 IP，也不记谁看了列表、谁敲了谁的门。节点不往外发任何数据，也没有远程开关。
 
 ## 七、志愿中转（玩家自愿帮忙转发）
 

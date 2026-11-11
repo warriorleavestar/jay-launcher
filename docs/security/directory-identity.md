@@ -1,6 +1,6 @@
 # Directory identity
 
-Status: implemented and waiting for security review. It is opt-in per network and nothing is pinned yet for the built-in Jay network. Code: `src/Amber.Core/Multiplayer/Public/DirectoryChannel.cs`. Tests: `src/Amber.Core.Tests/DirectoryIdentityTests.cs`.
+Status: implemented and waiting for security review. Every directory request goes through this channel; the old plaintext JSON protocol is gone. Pinning is per network and nothing is pinned yet for the built-in Jay network. Code: `src/Amber.Core/Multiplayer/Public/DirectoryChannel.cs`. Tests: `src/Amber.Core.Tests/DirectoryIdentityTests.cs`.
 
 ## The problem
 
@@ -9,7 +9,7 @@ A public network is an EasyTier network whose name and secret are public, so any
 - `list` and `find` to browse public rooms
 - `announce` and `withdraw` to publish your own room
 - `lookup` to turn an invite code's lobby into the host's knock address
-- `login`, `mail` and `x-*` extensions
+- `login`, sealed mail (`post` / `fetch` / `drop`), rendezvous and signed records, and `x-*` extensions
 
 The 2026-11-10 real-device test (finding 8) showed that EasyTier's DHCP handed the address `10.235.0.1` to an ordinary member while the directory was offline. Any member can also take the address on purpose with `--ipv4 10.235.0.1`. A machine holding the address can:
 
@@ -34,28 +34,28 @@ A network can pin its directory nodes' keys in its signed connection string. Whe
 
 ### Protocol
 
-Each connection carries one request, using `Noise_XXpsk0_25519_ChaChaPoly_SHA256`. This is the same Noise implementation (`Transport/Noise.cs`) that the knock and the room gate use.
+Each connection carries one request, using `Noise_XXhfspsk0_25519+MLKEM768_ChaChaPoly_SHA256` (X25519 plus ML-KEM-768, like every other Jay handshake since privacy-plan item 6). This is the same Noise implementation (`Transport/Noise.cs`) that the knock and the room gate use.
 
 | Step | Direction | Content |
 |---|---|---|
-| 1 | Jay → directory | `psk, e` with an empty payload (48 bytes) |
-| 2 | directory → Jay | `e, ee, s, es` with an empty payload. Jay decrypts the directory's static key `s` and checks the tag, which proves the directory holds the private half of `s` (the `es` DH). Jay compares `s` in constant time against every pinned key. If none matches, Jay throws `DirectoryImpostorException` and closes the connection. Message 3 is never written, so the request never leaves the machine. |
+| 1 | Jay → directory | `psk, e, e1` with an empty payload (32 + 1184 + 16 + 16 = 1248 bytes) |
+| 2 | directory → Jay | `e, ee, ekem1, s, es` with an empty payload. Jay decrypts the directory's static key `s` and checks the tag, which proves the directory holds the private half of `s` (the `es` DH). Jay compares `s` in constant time against every pinned key. If none matches, Jay throws `DirectoryImpostorException` and closes the connection. Message 3 is never written, so the request never leaves the machine. |
 | 3 | Jay → directory | `s, se`, with the JSON request as payload. Jay's static key is a throwaway generated for this connection, so the directory learns nothing that links two requests. |
-| 4 | directory → Jay | One ChaCha20-Poly1305 record: the JSON reply under the responder's split key, with nonce 0 and AD `"jay-directory-v1"`. |
+| 4 | directory → Jay | One ChaCha20-Poly1305 record: the JSON reply under the responder's split key, with nonce 0 and AD `"jay-directory-v2"`. |
 
 Details:
 
-- **Prologue.** `"jay-directory-v1"`.
+- **Prologue.** `"jay-directory-v2"` (v1 was the classic X25519-only handshake; a v1 client and a v2 directory never complete a handshake).
 - **Psk.** `HKDF-SHA256(ikm = network EasyTier secret, salt = prologue, info = "jay-directory-psk-v1")`. The secret is public for public networks, so the psk only keeps handshakes of different networks apart. It is not an authentication factor; the pinned static key is.
 - **Framing.** Every message is a 2-byte big-endian length followed by the bytes. The maximum is `RoomDirectoryProtocol.MaxLine + 256`, and the request and reply JSON are each capped at `MaxLine`.
-- **Telling the protocols apart.** A legacy request is a JSON line that starts with `{` (0x7B). A Noise frame starts with the high byte of its length, which is 0x00 for every allowed size. The server reads one byte and dispatches on it (`RoomDirectoryServer.HandleAsync`).
-- **Server failures.** A first frame that isn't exactly 48 bytes is dropped before any DH work. Any other handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to both protocols.
+- **Old clients.** There is no plaintext protocol any more. An old Jay's JSON request starts with `{` (0x7B) and is dropped at once; a Noise frame starts with the high byte of its length, 0x04 for the 1248-byte first message. A directory with no configured key uses a throwaway one, so the channel is still encrypted; clients can then only trust it on first use.
+- **Server failures.** A first frame that isn't exactly 1248 bytes is dropped before any DH or ML-KEM work. Any other handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to both protocols.
 
 ### Downgrade
 
-- **Pinned clients.** A client whose network pins keys never falls back to the legacy protocol. A directory that answers only JSON, or that closes the connection, counts as unreachable for that address. `DirectoryImpostorException` is an `IOException`, so fan-out operations try the other directories. If every directory fails, the user sees "couldn't prove it is this network's directory".
-- **Old clients.** Clients without pins, meaning Jay versions before this change or networks without `dirKeys`, keep the old unauthenticated behaviour.
-- **Strict servers.** A server started with `--secure-directory-only` (`JayNetworkServerBuilder.RequireDirectoryChannel()`) refuses legacy requests. An operator who wants every client protected sets it together with `policy.minVersion`, so older Jay versions are told to update instead of failing silently.
+- **Pinned clients.** A client whose network pins keys accepts no other key. A directory with another key, or that closes the connection, counts as unreachable for that address. `DirectoryImpostorException` is an `IOException`, so fan-out operations try the other directories. If every directory fails, the user sees "couldn't prove it is this network's directory".
+- **Unpinned networks.** Jay remembers the first key seen at each address (`directory-keys.json`) and refuses a different one later. Without a key memory, any key is accepted for that one connection: encrypted, not authenticated.
+- **No strict mode.** `--secure-directory-only` used to turn the plaintext protocol off; that is now always the case and the flag is ignored. Old Jay versions can't reach the directory at all, so the network's `policy.minVersion` should be raised in the same release so they are told to update.
 
 ### Rotation and loss
 
@@ -72,8 +72,8 @@ Details:
 
 ## Questions for the reviewer
 
-1. Is `XXpsk0` with a throwaway initiator static the right pattern, or should this be `NKpsk0` (the responder's static key known in advance)? XX was chosen to reuse the reviewed implementation and the knock code path. It costs one extra DH per side and an extra 48 bytes in message 3. NK would send the request one round trip earlier, but it would need a new pattern in `Noise.cs`.
+1. Is `XXhfspsk0` with a throwaway initiator static the right pattern, or should this be `NKpsk0` (the responder's static key known in advance)? XX was chosen to reuse the reviewed implementation and the knock code path. It costs one extra DH per side and an extra 48 bytes in message 3 (small next to the 1.2 KB ML-KEM key and 1.1 KB ciphertext). NK would send the request one round trip earlier, but it would need a new pattern in `Noise.cs`.
 2. Jay checks the pin after message 2 and before message 3. Is there any information in message 1 (an ephemeral key only) that matters to an impostor?
 3. The psk is derived from a public secret. Does mixing it in weaken anything compared with no psk?
 4. Should the reply AD include anything besides the prologue, such as the request's op?
-5. Is a 0x00 or 0x01 first byte safe as a discriminator against a legacy client that sends leading whitespace? Current clients never do.
+5. Dropping a `{` first byte without a reply: is any other early filter worth having before the 1248-byte read?

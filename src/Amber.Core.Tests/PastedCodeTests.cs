@@ -7,9 +7,9 @@ public class PastedCodeTests
     [Theory]
     [InlineData("AMB-K7Q2M9XD-4HZP8RW2N6TC-25565", PastedCodeKind.Room)]
     [InlineData("房间码：amb-t2d-K7Q2M9XD-4HZP8RW2N6TC-25565，快来", PastedCodeKind.Room)]
-    [InlineData("JAY2D-eyJ2IjoxfQ", PastedCodeKind.DirectInvite)]
-    [InlineData("来直连：jay2d-eyJ2IjoxfQ", PastedCodeKind.DirectInvite)]
-    [InlineData("JAY2R-eyJ2IjoxfQ", PastedCodeKind.DirectReply)]
+    [InlineData("JAY2D-eyJ2IjoxfQ", PastedCodeKind.OldDirect)]
+    [InlineData("来直连：jay2d-eyJ2IjoxfQ", PastedCodeKind.OldDirect)]
+    [InlineData("JAY2R-eyJ2IjoxfQ", PastedCodeKind.OldDirect)]
     [InlineData("AMBDIRECT1-eyJhIjoxfQ", PastedCodeKind.OldDirect)]
     [InlineData("来直连：ambdirect1-eyJhIjoxfQ", PastedCodeKind.OldDirect)]
     [InlineData("AMBREPLY1-eyJhIjoxfQ", PastedCodeKind.OldDirect)]
@@ -18,7 +18,7 @@ public class PastedCodeTests
     [InlineData("邀请你：jay2-t2d-00041061050r3gg28a1c60t3gf-0g2491650n2rbhg68t3ce1t7gz-8 快来", PastedCodeKind.Invite)]
     [InlineData("JAYF1-ABCD-EFGH-JKMN-PQRS-TVWX", PastedCodeKind.FriendCode)]
     [InlineData("我的好友码 jayf1-abcd-efgh-jkmn-pqrs-tvwx", PastedCodeKind.FriendCode)]
-    [InlineData("JAYNET1-eyJ2IjoxfQ", PastedCodeKind.PublicNetwork)]
+    [InlineData("JAYNET2-eyJ2IjoxfQ", PastedCodeKind.PublicNetwork)]
     [InlineData("JAYS1-eyJ2IjoxfQ", PastedCodeKind.JayServer)]
     [InlineData("", PastedCodeKind.Unknown)]
     [InlineData("   ", PastedCodeKind.Unknown)]
@@ -32,7 +32,7 @@ public class PastedCodeTests
     public void BodyThatHappensToContainRoomPrefixIsStillDirect()
     {
         // base64url 正文里可能出现 “AMB-…-…-端口” 这样的片段，前缀优先。
-        Assert.Equal(PastedCodeKind.DirectInvite, PastedCode.Detect("JAY2D-xxAMB-K7Q2M9XD-4HZP8RW2N6TC-25565"));
+        Assert.Equal(PastedCodeKind.OldDirect, PastedCode.Detect("JAY2D-xxAMB-K7Q2M9XD-4HZP8RW2N6TC-25565"));
         Assert.Equal(PastedCodeKind.OldDirect, PastedCode.Detect("AMBDIRECT1-xxAMB-K7Q2M9XD-4HZP8RW2N6TC-25565"));
     }
 

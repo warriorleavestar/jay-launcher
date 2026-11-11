@@ -125,7 +125,7 @@ Jay 的窗口需要桌面会话（X11，或带 XWayland 的 Wayland）和下面�
 - **远程帮忙。** 申请查看并控制朋友的屏幕帮 TA 解决问题。每次都要对方同意，控制期间屏幕有红框，按 Ctrl+Shift+F12 立刻停止。
 - **公开房间**（实验）。浏览房间列表、申请加入，也可以给房间设密码。房间由房主签名，别人伪造不了也重放不了。
 - **演练和排查。** 演练模式不联网，带你走一遍敲门流程；“连接有问题？”抽屉能跑完整测试矩阵，生成去掉了密钥的报告。
-- **Jay 服务器**（实验）。在 VPS 或局域网电脑上开一个只有 Jay 能进的 Minecraft 服务器。玩家用一次性的 `JAYS1-` 邀请加入；陌生连接一个字节都收不到。
+- **Jay 服务器**（实验）。在 VPS 或局域网电脑上开一个只有 Jay 能进的 Minecraft 服务器。玩家用一次性的 `JAYS2-` 邀请加入；陌生连接一个字节都收不到。
 
 联机基于开源项目 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0），用的是 Jay 维护的加固版本（[jay-easytier](https://github.com/Yumao-Feather/jay-easytier)），第一次使用联机时下载并校验。默认模式不需要管理员权限，也不安装驱动。
 
@@ -312,7 +312,7 @@ CurseForge 的接口需要 API Key，见上面的[配置](#配置)。Modrinth �
 
 Jay 以 [PolyForm Noncommercial 1.0.0 许可证](LICENSE)公开源码。个人使用和其他非商业用途免费。个人和小团队可以按[商用例外条款](COMMERCIAL-EXCEPTION.md)申请免费商用；其他商用都需要 Jay 开发团队的书面授权。（以英文条款为准。）
 
-这次改动之前发布的版本（到 v0.7.0 为止）仍然适用 MIT 许可证。
+这个许可证现在适用于 Jay 的所有版本，包括最初以 MIT 许可证发布的 v0.7.0 及更早版本。Jay 开发团队不再以 MIT 提供任何版本；已经按 MIT 拿到旧版本副本的人，对那份副本的 MIT 权利不受影响。
 
 任何地方（包括旧文档、发布说明和别处的副本）如果还说 Jay 是“开源”或“MIT”，都是过时的描述，以 [LICENSE](LICENSE) 和 [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) 为准。发现这样的描述，请[提 issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose)。
 

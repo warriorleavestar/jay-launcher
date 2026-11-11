@@ -34,6 +34,10 @@ if [[ -n "${BLOCKED_WORDS:-}" ]]; then copy "$BLOCKED_WORDS" blocked-words.txt; 
 # shellcheck disable=SC2206
 [[ -n "${EXTRA:-}" ]] && ARGS+=(${EXTRA})
 
+# The node user may use the TPM (hardware binding, docs/security/node-hardware-binding.md) when the tss group exists.
+TPM_GROUP=""
+if getent group tss >/dev/null; then TPM_GROUP="SupplementaryGroups=tss"; fi
+
 cat > "$UNIT" <<UNIT
 # 由 install-network-node.sh 生成。改参数：改这里的 ExecStart，然后 systemctl daemon-reload && systemctl restart jay-network
 [Unit]
@@ -49,6 +53,9 @@ Environment=JAY_SERVER_DIR=$DATA
 ExecStart=$BIN_DIR/jay-server ${ARGS[*]}
 Restart=on-failure
 RestartSec=10
+# 77 = hardware check failed and the node wiped its files; 78 = refused to run (tampered runtime). Don't restart into either.
+RestartPreventExitStatus=77 78
+${TPM_GROUP}
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

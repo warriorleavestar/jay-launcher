@@ -16,7 +16,6 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     private readonly Func<IReadOnlyList<string>> _lookupKeys;
     private readonly Func<byte[]?>? _searchKey;
     private readonly Func<string?>? _account;
-    private readonly Action<string>? _mail;
     private readonly Action<string>? _log;
     private readonly TimeSpan _every;
     private readonly CancellationTokenSource _cts = new();
@@ -33,8 +32,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
 
     /// <param name="listing">当前的房间信息（每次续期时取，地址由这里填）。</param>
     /// <param name="lookupKeys">现在还能用的邀请码对应的查找键（<see cref="RoomDirectoryProtocol.LookupKey"/>）。</param>
-    /// <param name="mail">目录捎来的话（直连房间的回复码）。</param>
-    public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<string>> lookupKeys, Action<string>? mail = null,
+    public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<string>> lookupKeys,
         Action<string>? log = null, TimeSpan? every = null, RoomDirectoryClient? client = null, Func<byte[]?>? searchKey = null, Func<string?>? account = null)
     {
         _account = account;
@@ -43,7 +41,6 @@ public sealed class RoomAnnouncer : IAsyncDisposable
         _client = client ?? new RoomDirectoryClient(network);
         _listing = listing;
         _lookupKeys = lookupKeys;
-        _mail = mail;
         _log = log;
         _every = every ?? RoomDirectoryProtocol.RenewEvery;
         _loop = Task.Run(LoopAsync);
@@ -98,8 +95,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                     }
                     return;
                 }
-                var mails = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
-                foreach (var m in mails) _mail?.Invoke(m);
+                await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
@@ -142,7 +138,8 @@ public static class PublicJoin
     /// 对不上就当没成功，免得有人在目录里冒用别人的房间。
     /// </summary>
     public static async Task<KnockOutcome> KnockAsync(IPublicNetwork network, string hostIp, JayInvite invite, X25519KeyPair me, string name, string version,
-        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null)
+        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -151,7 +148,7 @@ public static class PublicJoin
             {
                 await using var stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, ct);
                 connected = true;
-                var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHostKey, jay: jay);
+                var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHostKey, jay: jay, direct: direct);
                 if (expectedHostKey is not null && !outcome.HostPublicKey.AsSpan().SequenceEqual(expectedHostKey))
                     return new KnockOutcome(null, "mismatch", outcome.HostPublicKey);
                 return outcome;
@@ -185,11 +182,11 @@ public static class PublicJoin
     /// <param name="expectedHost">A mailed invite names its host: a directory entry with another key is ignored (null).</param>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
-        byte[]? expectedHost = null)
+        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         var hit = await (client ?? new RoomDirectoryClient(network)).LookupAsync(invite.LobbyKey, ct);
         if (hit is null) return null;
         if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) return null;
-        return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay);
+        return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);
     }
 }

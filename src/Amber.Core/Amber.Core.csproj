@@ -17,11 +17,15 @@
   <ItemGroup>
     <!-- 界面文字：每种语言一个 JSON，嵌进程序集（Native AOT 版本也能读） -->
     <EmbeddedResource Include="Localization\*.json" LogicalName="Amber.Core.Localization.%(Filename).json" />
+    <!-- build/pins.json: every pinned binary and download (docs/pins.md); Jay reads its pins from it. -->
+    <EmbeddedResource Include="..\..\build\pins.json" LogicalName="Amber.Core.pins.json" />
     <!-- BIP39 wordlists for Jay account recovery phrases (bitcoin/bips, bip-0039) -->
     <EmbeddedResource Include="Identity\Wordlists\*.txt" LogicalName="Amber.Core.Identity.%(Filename).txt" />
     <EmbeddedResource Include="..\..\docs\help\**\*.md" LogicalName="help/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\docs\help\shots\**\*.png" LogicalName="help/shots/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\themes\builtin\**\*.json" LogicalName="themes/builtin/%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- The hardened EasyTier release's SHA256SUMS.txt and the trustees' signatures over it (docs/security/release-signing.md) -->
+    <EmbeddedResource Include="Multiplayer\EasyTierSigned\*" LogicalName="easytier-signed/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!--

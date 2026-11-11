@@ -35,8 +35,10 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 //   launch <版本> <玩家名> [--mem 4096] [--isolate] [--dry-run]
 //   lan-setup                                下载并校验联机组件 EasyTier
 //   lan-nat [--stun host:port]... [--map]    查网络类型（STUN、IPv6、路由器端口映射）
-//   lan-direct-host <游戏端口> [--sim] [--debug] [--node url]... [--reply-file 文件] [--seconds N]
-//   lan-direct-join <邀请码> [--sim] [--debug] [--node url]... [--seconds N]   直连房间，不用联机节点
+//   lan-direct-host <游戏端口> [--sim] [--debug] [--node url]... [--seconds N]
+//   lan-direct-join <JAY2 邀请码> [--sim] [--debug] [--node url]... [--seconds N]   直连房间：经 --node 中继（或局域网）敲门，批准后在加密的敲门里交换地址再直连
+//   lan-direct-host <游戏端口> --sealed --reply-file <文件> ...   不经服务器：打印 SEALED 加密码和 PASSPHRASE 口令，等文件里出现对方的 JAYDR1 回复码
+//   lan-direct-join <JAYDS1 加密码> --passphrase <口令> ...        打印 REPLY 回复码（交给房主），打通后经直连桥敲门
 //   lan-host <本机游戏端口> [--peer url]... [--listen url]... [--seconds N]   开房间，打印房间码
 //   lan-join <房间码> [--peer url]... [--listen url]... [--seconds N]         加入房间，打印本机转发地址
 //   （--peer 不写时用 EasyTier 社区公共节点；联机组件放在数据目录的 easytier 下：AMBER_DATA_DIR，默认 %APPDATA%\Amber）
@@ -326,20 +328,25 @@ try
         case "lan-direct-host" or "lan-direct-join":
         {
             // 直连房间（不用联机节点）。--sim 本机模拟（只用 127.0.0.1），--debug 打印详细日志，
-            // --node 打不通时退回的节点，--reply-file 房主从这个文件读加入方的回复码。
+            // --node：敲门经过的中继，打不通时也退回到这里。
             var isHost = argList[0] == "lan-direct-host";
             var sim = argList.Remove("--sim");
             var debug = argList.Remove("--debug");
             var nodes = TakeAll(argList, "--node");
             var stunList = TakeAll(argList, "--stun");
-            var replyFile = TakeOption(argList, "--reply-file");
             var seconds = int.Parse(TakeOption(argList, "--seconds") ?? "0");
+            var sealedHost = argList.Remove("--sealed");
+            var replyFile = TakeOption(argList, "--reply-file");
+            var passphrase = TakeOption(argList, "--passphrase");
             var et = new EasyTierInstaller(downloader, AmberDataDir());
             if (!et.IsInstalled) throw new InvalidOperationException("先运行 lan-setup");
-            // 直连房间也是邀请房间：房主开大厅、发一张自动批准的邀请；加入方经直连桥敲门拿到房间凭据。
+            if (sealedHost && replyFile is null) throw new ArgumentException("--sealed 要配 --reply-file");
+            OpenedOffer? opened = null;
+            // 直连房间也是邀请房间：房主开大厅、发一张自动批准的普通邀请（不含地址）；加入方经 --node 中继（或局域网）敲门，
+            // 批准后两边在加密的敲门里交换地址再打洞。
             // 这里的联机身份每次新生成，不保存。
             using var me = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
-            DirectCode? invite = null;
+            JayInvite? invite = null;
             RoomCode? room = null;
             MemberTable? members = null;
             RoomCredentials? credentials = null;
@@ -355,51 +362,82 @@ try
                 bridgeKey = DirectKeys.Bridge(lobbyKey);
                 System.Security.Cryptography.CryptographicOperations.ZeroMemory(lobbyKey);
             }
+            else if (passphrase is not null)
+            {
+                // Sealed direct code: no server; the passphrase came by another way.
+                opened = SealedDirect.Open(argList[1], passphrase, DateTimeOffset.UtcNow);
+                invite = opened.Invite;
+                bridgeKey = DirectKeys.Bridge(invite.LobbyKey);
+            }
             else
             {
-                if (!DirectCode.TryParse(argList[1], out invite, out var error) || invite.Invite is null) throw new ArgumentException(error ?? "邀请码不对");
-                bridgeKey = DirectKeys.Bridge(invite.Invite.LobbyKey);
+                if (!JayInvite.TryParse(argList[1], out var parsed)) throw new ArgumentException("邀请码不对");
+                invite = parsed;
+                bridgeKey = DirectKeys.Bridge(invite.LobbyKey);
             }
             var log = new DiagnosticLog();
             log.Added += e => { if (debug || e.Category is not "EasyTier") Console.WriteLine("  log| " + NetDiagnostics.Redact(e.ToString(), room is { } r ? [.. r.Secrets] : [], true)); };
             var options = new DirectOptions(stunList.Count > 0 ? stunList : Stun.DefaultServers, !sim, nodes, false, false, debug, sim);
             await using var direct = new DirectSession(et, Path.Combine(AmberDataDir(), "easytier"), room, isHost, options, log) { BridgeKey = bridgeKey, AcceptNewPeers = book is null ? null : () => book.HasPending };
-            var code = await direct.PrepareAsync(cts.Token);
+            if (isHost) await direct.PrepareAsync(cts.Token);
             await using var lobby = isHost
                 ? HostLobby.Create(et, Path.Combine(AmberDataDir(), "easytier", "lobby"), () => nodes, me, () => credentials!, _ => false, (_, _) => Task.FromResult(true),
-                    members!, l => Console.WriteLine("  lobby| " + l), book, direct.LobbyUdpPort)
+                    members!, l => Console.WriteLine("  lobby| " + l), book, direct.LobbyUdpPort, directOffer: direct.Offer)
                 : null;
             if (lobby is not null)
             {
-                var pending = lobby.Book.Create(1, TimeSpan.FromMinutes(30), true, credentials!.Tunnel);
-                await lobby.UpdateAsync();
-                Console.WriteLine("INVITE " + direct.InviteCode(pending.Invite).Encode());
-            }
-            else
-            {
-                Console.WriteLine("REPLY " + (code with { Session = invite!.Session }).Encode());
-                var joined = await direct.JoinAsync(invite, async (lobbyPeers, ct) =>
+                lobby.DirectAnswered += (_, _, guest) => _ = direct.AddGuestAsync(guest, cts.Token);
+                if (sealedHost)
                 {
-                    var outcome = await LobbyJoin.KnockAsync(et, Path.Combine(AmberDataDir(), "easytier", "lobby-join"), lobbyPeers, invite.Invite!, me, "cli",
+                    var pending = lobby.Book.Create(1, SealedDirect.Lifetime, true, credentials!.Tunnel);
+                    await lobby.UpdateAsync();
+                    using var offer = SealedDirect.Seal(direct.LocalAddresses!, pending.Invite, DateTimeOffset.UtcNow);
+                    Console.WriteLine("SEALED " + offer.Code);
+                    Console.WriteLine("PASSPHRASE " + offer.Passphrase.Replace(" ", ""));
+                    string? reply = null;
+                    while (reply is null)
+                    {
+                        await Task.Delay(500, cts.Token);
+                        if (File.Exists(replyFile) && (await File.ReadAllTextAsync(replyFile!, cts.Token)).Trim() is { Length: > 0 } text) reply = text;
+                    }
+                    Console.WriteLine(await direct.AddGuestAsync(offer.OpenReply(reply, DateTimeOffset.UtcNow), cts.Token) ? "PUNCHED" : "PUNCH-FAILED");
+                }
+                else
+                {
+                    var pending = lobby.Book.Create(1, TimeSpan.FromMinutes(30), true, credentials!.Tunnel);
+                    await lobby.UpdateAsync();
+                    Console.WriteLine("INVITE " + pending.Invite);
+                }
+            }
+            else if (opened is not null)
+            {
+                var mine = await direct.AnswerAsync(opened.Host, cts.Token);
+                Console.WriteLine("REPLY " + SealedDirect.SealReply(opened, mine!, DateTimeOffset.UtcNow));
+                var joined = await direct.JoinThroughBridgeAsync(async (peers, ct) =>
+                {
+                    var outcome = await LobbyJoin.KnockAsync(et, Path.Combine(AmberDataDir(), "easytier", "lobby-join"), peers, invite!, me, "cli",
                         UpdateChecker.CurrentVersion, l => Console.WriteLine("  lobby| " + l), null, ct);
                     return outcome.Credentials?.ToRoom();
                 }, cts.Token);
                 if (!joined) throw new InvalidOperationException("房主没有批准");
+                Console.WriteLine(direct.UsingFallbackNode ? "RELAY" : "DIRECT");
+                Console.WriteLine($"LOCAL 127.0.0.1:{direct.LocalGamePort}");
+            }
+            else
+            {
+                var outcome = await LobbyJoin.KnockAsync(et, Path.Combine(AmberDataDir(), "easytier", "lobby-join"), nodes, invite!, me, "cli",
+                    UpdateChecker.CurrentVersion, l => Console.WriteLine("  lobby| " + l), null, cts.Token, direct: direct.AnswerAsync);
+                if (outcome.Credentials is not { } granted) throw new InvalidOperationException("房主没有批准");
+                Console.WriteLine(await direct.CompleteJoinAsync(granted.ToRoom(), cts.Token) ? "DIRECT" : "RELAY");
                 Console.WriteLine($"LOCAL 127.0.0.1:{direct.LocalGamePort}");
             }
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
             if (seconds > 0) stop.CancelAfter(TimeSpan.FromSeconds(seconds));
-            var replied = false;
             try
             {
                 while (true)
                 {
                     await Task.Delay(2000, stop.Token);
-                    if (isHost && !replied && replyFile is not null && File.Exists(replyFile) && DirectCode.TryParse(File.ReadAllText(replyFile), out var reply, out _))
-                    {
-                        replied = true;
-                        _ = direct.AddReplyAsync(reply, stop.Token);
-                    }
                     var peers = direct.EasyTier is { } s ? await s.PeersAsync(stop.Token) : [];
                     Console.WriteLine("PATH " + direct.DescribePath(peers));
                 }

@@ -128,7 +128,7 @@ public sealed class GateRejectedException(GateStatus status) : Exception(Describ
 }
 
 /// <summary>
-/// Jay 网关协议 v1。全部用现有原语：Noise_XXpsk0_25519_ChaChaPoly_SHA256 + <see cref="SecureStream"/>。
+/// Jay 网关协议 v2。全部用现有原语：Noise_XXhfspsk0_25519+MLKEM768_ChaChaPoly_SHA256 + <see cref="SecureStream"/>。
 /// <list type="bullet">
 /// <item>入服申请（enroll）：psk 从邀请令牌派生。客户端读到网关的长期公钥后先核对邀请里钉住的哈希，对上了才在第三条消息里亮出自己的设备公钥。
 /// 网关登记（用户名, 设备公钥），在加密通道里回传访问密钥。</item>
@@ -142,12 +142,12 @@ public sealed class GateRejectedException(GateStatus status) : Exception(Describ
 public static class GateProtocol
 {
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
-    private const int MaxHandshakeMessage = 1024;
+    private const int MaxHandshakeMessage = 4096;
     private const int MaxRecord = 8192;
     internal const byte Version2 = 2;
-    internal static readonly byte[] EnrollPrologue = "jay-gate-v1|enroll"u8.ToArray();
-    internal static readonly byte[] JoinPrologue = "jay-gate-v1|join"u8.ToArray();
-    internal static readonly byte[] RelayPrologue = "jay-gate-v1|relay"u8.ToArray();
+    internal static readonly byte[] EnrollPrologue = "jay-gate-v2|enroll"u8.ToArray();
+    internal static readonly byte[] JoinPrologue = "jay-gate-v2|join"u8.ToArray();
+    internal static readonly byte[] RelayPrologue = "jay-gate-v2|relay"u8.ToArray();
     /// <summary>节点心跳记录：[8 字节序号][8 字节 Unix 毫秒]。</summary>
     internal const int HeartbeatLength = 16;
 
@@ -190,7 +190,7 @@ public static class GateProtocol
         SecureStream secure;
         try
         {
-            using var hs = new NoiseHandshake(NoisePattern.XXpsk0, initiator: true, EnrollPrologue, psk, device);
+            using var hs = new NoiseHandshake(NoisePattern.XXhfspsk0, initiator: true, EnrollPrologue, psk, device);
             (secure, serverKey) = await InitiateAsync(stream, hs, key => CryptographicOperations.FixedTimeEquals(ServerKeyHash(key), invite.ServerKeyHash), [Version2], timeout.Token);
         }
         finally
@@ -230,7 +230,7 @@ public static class GateProtocol
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(HandshakeTimeout);
-        using var hs = new NoiseHandshake(NoisePattern.XXpsk0, initiator: true, JoinPrologue, membership.AccessKey, device);
+        using var hs = new NoiseHandshake(NoisePattern.XXhfspsk0, initiator: true, JoinPrologue, membership.AccessKey, device);
         var (secure, _) = await InitiateAsync(stream, hs, key => CryptographicOperations.FixedTimeEquals(key, membership.ServerPublicKey), EncodeJoinRequest(request), timeout.Token);
         try
         {
@@ -305,7 +305,7 @@ public static class GateProtocol
         if (relays is not null) candidates.AddRange(relays.Select(r => (RelayPrologue, r.Psk, (string?)r.Id)));
         foreach (var (prologue, psk, id) in candidates)
         {
-            var hs = new NoiseHandshake(NoisePattern.XXpsk0, initiator: false, prologue, psk, serverKey);
+            var hs = new NoiseHandshake(NoisePattern.XXhfspsk0, initiator: false, prologue, psk, serverKey);
             try
             {
                 hs.ReadMessage(first);
@@ -373,7 +373,7 @@ public static class GateProtocol
         SecureStream secure;
         try
         {
-            using var hs = new NoiseHandshake(NoisePattern.XXpsk0, initiator: true, RelayPrologue, psk, relayKey);
+            using var hs = new NoiseHandshake(NoisePattern.XXhfspsk0, initiator: true, RelayPrologue, psk, relayKey);
             (secure, _) = await InitiateAsync(stream, hs, key => CryptographicOperations.FixedTimeEquals(ServerKeyHash(key), code.ServerKeyHash), [Version2], timeout.Token);
         }
         finally
