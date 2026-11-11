@@ -443,7 +443,20 @@ public sealed class LauncherService : IDisposable
         BaseLaunchOptions(Context, id, javaPath, session, sessionJvmArgs);
 
     public LaunchOptions BaseLaunchOptions(GameContext ctx, string id, string javaPath, GameSession session, IReadOnlyList<string> sessionJvmArgs) =>
-        EffectiveSettings(ctx, id).ToLaunchOptions(ctx.Directory, id, javaPath, session, sessionJvmArgs) with { NoTrace = Settings.NoTrace };
+        EffectiveSettings(ctx, id).ToLaunchOptions(ctx.Directory, id, javaPath, session, sessionJvmArgs) with { NoTrace = Settings.NoTrace, Sandbox = GameSandboxOptions };
+
+    /// <summary>
+    /// The game sandbox for every launch: on unless the player switched it off. Jay's data folders stay hidden; the
+    /// universal loader's runtime folder is granted (install and bake data read-only, the cache writable: a launch may
+    /// rebake). No key or identity file lives in the runtime folder.
+    /// </summary>
+    public SandboxOptions GameSandboxOptions => new()
+    {
+        Enabled = !Settings.LaunchWithoutSandbox,
+        Hidden = [AppSettings.DataDir, Path.Combine(Amber.Core.SpecialFolders.LocalApplicationData(), "Amber")],
+        ExtraReadOnly = [.. BakeRuntime.SandboxGrants.Where(g => !g.Writable).Select(g => g.Path)],
+        ExtraReadWrite = [.. BakeRuntime.SandboxGrants.Where(g => g.Writable).Select(g => g.Path)],
+    };
 
     public GameInstance GetInstance(string id) => GetInstance(Context, id);
 

@@ -37,6 +37,9 @@ public sealed record LaunchOptions
     /// <summary>实验功能“烘焙”的结果：设了就用通用加载器的主类和 classpath 启动，原版的其余参数不变。</summary>
     public Amber.Core.Bake.BakedLaunch? Baked { get; init; }
     public string LauncherVersion { get; init; } = "0.1";
+
+    /// <summary>Run the game in the OS sandbox (privacy plan item 15; see <see cref="GameSandbox"/>). Off by default here; Jay turns it on.</summary>
+    public SandboxOptions Sandbox { get; init; } = SandboxOptions.Off;
 }
 
 /// <summary>拼装启动参数、准备 natives 与旧版资源，然后启动游戏进程。</summary>
@@ -328,9 +331,16 @@ public sealed class GameLauncher(GameDirectory dir)
         else if (legacyHome is not null)
             onOutput?.Invoke(L.F("core.launch.game.legacyhome", legacyHome));
 
+        var sandboxed = false;
         Process process;
         try
         {
+            if (options.Sandbox.Enabled && GameSandbox.IsSupported)
+            {
+                Sandbox(psi, options.Sandbox, workDir, legacyHome);
+                sandboxed = true;
+                onOutput?.Invoke(L.T("core.launch.sandbox.on"));
+            }
             process = Process.Start(psi) ?? throw new InvalidOperationException(L.T("core.launch.game.javastartfailed"));
         }
         catch
@@ -338,6 +348,7 @@ public sealed class GameLauncher(GameDirectory dir)
             DeleteNoTraceDir(noTraceDir);
             throw;
         }
+        if (sandboxed && OperatingSystem.IsLinux()) LinuxSandbox.Track(process);
         if (noTraceDir is not null)
         {
             // 记下是哪个游戏进程在用：Amber 先退出、崩溃或被结束时，下次启动按这个判断能不能清掉（SweepNoTrace）。
@@ -355,6 +366,35 @@ public sealed class GameLauncher(GameDirectory dir)
             process.BeginErrorReadLine();
         }
         return process;
+    }
+
+    /// <summary>
+    /// Wraps the Java command in the OS sandbox: the grants come from this launch (instance folder, Java, game files,
+    /// files named on the command line, the legacy home) plus the caller's. Throws <see cref="SandboxUnavailableException"/>
+    /// when the sandbox cannot start; the game is then not launched.
+    /// </summary>
+    private void Sandbox(ProcessStartInfo psi, SandboxOptions sandbox, string workDir, string? legacyHome)
+    {
+        var grants = GameSandbox.For(workDir, dir.Root, psi.FileName, psi.ArgumentList, sandbox,
+            extraReadWrite: legacyHome is null ? null : [legacyHome]);
+        if (grants.Problem() is { } problem) throw new SandboxUnavailableException(problem);
+        List<string> command = [psi.FileName, .. psi.ArgumentList];
+        List<string> wrapped;
+        if (OperatingSystem.IsLinux())
+        {
+            if (LinuxSandbox.Problem() is { } linux) throw new SandboxUnavailableException(linux);
+            psi.FileName = LinuxSandbox.Bubblewrap!;
+            wrapped = LinuxSandbox.Arguments(grants, LinuxSandbox.Host.Current(), workDir, command);
+        }
+        else
+        {
+            if (MacSandbox.Problem() is { } mac) throw new SandboxUnavailableException(mac);
+            psi.FileName = MacSandbox.Executable;
+            wrapped = MacSandbox.Arguments(MacSandbox.Profile(grants, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)), command);
+        }
+        GameSandbox.FilterEnvironment(psi.Environment);
+        psi.ArgumentList.Clear();
+        foreach (var arg in wrapped) psi.ArgumentList.Add(arg);
     }
 
     private string NewNoTraceDir() => Path.Combine(NoTraceRoot, Guid.NewGuid().ToString("N")[..12]);

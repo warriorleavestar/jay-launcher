@@ -28,6 +28,12 @@ public sealed class AppSettings
 
     /// <summary>无痕模式：游戏日志（logs/latest.log）里不写聊天行。默认关。</summary>
     public bool NoTrace { get; set; }
+
+    /// <summary>
+    /// Launch the game without the OS sandbox (privacy plan item 15). Off by default: the game only sees its own
+    /// instance folder. When on, the multiplayer page says so on a line that stays.
+    /// </summary>
+    public bool LaunchWithoutSandbox { get; set; }
     public string PlayerName { get; set; } = "Player";
     public string? LastVersion { get; set; }
     public int? WindowWidth { get; set; }
