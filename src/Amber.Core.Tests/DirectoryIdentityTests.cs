@@ -186,7 +186,7 @@ public class DirectoryIdentityTests
     public void DirKeysRoundTripThroughASignedNetworkString()
     {
         using var key = X25519KeyPair.Generate();
-        var signer = NetworkSigner.Generate(out _);
+        var signer = TrustSigner.Generate(out _);
         var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://203.0.113.5:11010"], DirectoryKeys: [key.PublicKey]);
         var text = NetworkString.Create(info, signer);
         var parsed = NetworkString.Parse(text, []);

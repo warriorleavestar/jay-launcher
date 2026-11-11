@@ -1318,7 +1318,7 @@
                     <Button Content="{l:T multiplayer.network.copy}" Command="{Binding CopyNetworkCommand}" />
                     <Button Content="{l:T multiplayer.network.remove}" Command="{Binding RemoveNetworkCommand}" />
                   </WrapPanel>
-                  <TextBox Text="{Binding NetworkInput}" FontFamily="Consolas,monospace" TextWrapping="Wrap" MaxLength="8192" MaxHeight="96"
+                  <TextBox Text="{Binding NetworkInput}" FontFamily="Consolas,monospace" TextWrapping="Wrap" MaxLength="40960" MaxHeight="96"
                            PlaceholderText="{l:T multiplayer.network.input_placeholder}" />
                   <Button Content="{l:T multiplayer.network.add}" Command="{Binding AddNetworkCommand}" HorizontalAlignment="Left" />
                   <Border Classes="card" Margin="0" IsVisible="{Binding NetworkConfirmOpen}">

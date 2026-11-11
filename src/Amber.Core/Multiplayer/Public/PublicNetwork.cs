@@ -51,7 +51,8 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
             if (RelayNodes.IsValid(n) && !nodes.Contains(n.Trim())) nodes.Add(n.Trim());
         return new PublicNetworkProfile("jay", L.T("core.mp.public.jay_name"), JayNetworkName, JaySecret, nodes)
         {
-            DirectoryRoots = [.. JayDirectoryRoots.Select(Convert.FromBase64String)],
+            DirectoryRoots = JayTrust.Quorum.Keys,
+            DirectoryRootsNeed = JayTrust.Need,
         };
     }
 
@@ -75,17 +76,13 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 
     /// <summary>
     /// Ed25519 root keys whose certificates (<see cref="DirectoryCertificate"/>) make a directory key acceptable, from
-    /// the connection string's "dirRoots", or <see cref="JayDirectoryRoots"/> for the built-in network. Lets a network
-    /// add or re-key directory nodes without re-issuing its string, while the root private key stays offline.
+    /// the connection string's "dirRoots", or the Jay trustees (<see cref="JayTrust"/>) for the built-in network. Lets a
+    /// network add or re-key directory nodes without re-issuing its string, while the root private keys stay offline.
     /// </summary>
     public IReadOnlyList<byte[]> DirectoryRoots { get; init; } = [];
 
-    /// <summary>
-    /// The built-in Jay network's directory root public keys (base64). Empty until the root key is made; until then the
-    /// built-in network's directory is trusted on first use. The root private key is kept offline by the project owner
-    /// and never goes into the repository, CI or a server.
-    /// </summary>
-    public static readonly string[] JayDirectoryRoots = [];
+    /// <summary>How many of <see cref="DirectoryRoots"/> must sign a directory certificate.</summary>
+    public int DirectoryRootsNeed { get; init; } = 1;
 
     public bool IsBuiltIn => Id == "jay";
 

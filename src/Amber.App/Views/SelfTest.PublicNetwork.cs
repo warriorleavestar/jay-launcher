@@ -190,16 +190,16 @@ internal sealed partial class SelfTest
     private async Task NetworkSwitchAsync(MultiplayerViewModel host, RoomDirectoryServer directory)
     {
         var service = host.TestService;
-        var registry = NetworkSigner.Generate(out _);
-        var someone = NetworkSigner.Generate(out _);
-        service.TrustedNetworkKeys = [registry.PublicKey];
+        var registry = TrustSigner.Generate(out _);
+        var someone = TrustSigner.Generate(out _);
+        service.TrustedNetworkKeys = [new Amber.Core.Multiplayer.Public.TrustQuorum([registry.Id], 1)];
         service.ReloadNetworks();
         Dispatcher.UIThread.Invoke(host.LoadNetworks);
         Check("换公共网络：默认是 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && host.NetworkChoices.Count == 1,
             string.Join(" | ", host.NetworkChoices.Select(c => c.Label)));
 
         // Test registry key switch (AMBER_TEST_REGISTRY_KEY): only valid 32-byte keys count, and such networks are labelled as test-reviewed.
-        var testKey = Convert.ToBase64String(NetworkSigner.Generate(out _).PublicKey);
+        var testKey = Convert.ToBase64String(TrustSigner.Generate(out _).Id);
         var parsedKeys = Amber.App.Services.LauncherService.ParseTestKeys($"{testKey}, not-base64, AAAA");
         var testChoice = new NetworkChoice("t", "测试网络", true, 1, null, TestReviewed: true);
         Check("测试注册表钥匙：只认合法公钥，网络标成测试审核", parsedKeys.Count == 1 && testChoice.Label.Contains("🧪")
@@ -292,7 +292,7 @@ internal sealed partial class SelfTest
             host.NetworkInput = NetworkString.Create(info with { Seq = 5 }, someone);
             host.AddNetworkCommand.Execute(null);
         });
-        Check("换公共网络：同编号换了钥匙的拒绝", service.Networks.Find("selftest-net")!.SignerKey.AsSpan().SequenceEqual(registry.PublicKey)
+        Check("换公共网络：同编号换了钥匙的拒绝", service.Networks.Find("selftest-net")!.SignerKey.AsSpan().SequenceEqual(registry.Id)
             && host.Status == L.F("multiplayer.network.conflict", "selftest-net"), host.Status);
 
         // 删掉：回到 Jay 公共网络。

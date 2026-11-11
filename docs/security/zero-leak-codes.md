@@ -87,50 +87,44 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 `Public/DirectoryTrust.cs`, `Public/DirectoryChannel.cs`. Jay picks one of these before sending a directory anything:
 
 1. **Pinned**: keys in the signed connection string (`dirKeys`, #145).
-2. **Root-certified**: the connection string lists Ed25519 root keys (`dirRoots`, at most 4). The built-in network uses
-   `PublicNetworkProfile.JayDirectoryRoots`.
-   - A directory sends `{"c","r","s"}` as the payload of its handshake message. Older Jay versions ignore it.
-   - `c` is `{"key","net","exp"}` and `s` is the root's signature over `"jay-directory-cert-v1\n" ‖ c`.
-   - Jay accepts the key if the root is listed, `net` is this network's EasyTier name, it hasn't expired, and `key` is
-     the key the directory just proved.
+2. **Root-certified**: the connection string lists root key ids (`dirRoots`, at most 4; each the SHA-256 id of a hybrid
+   Ed25519 + ML-DSA-65 key, see `TrustSigner`) and how many of them must
+   sign (`dirRootsNeed`, default 1). The built-in network uses the Jay trustees (`JayTrust`): 2 of 3.
+   - A directory sends `{"c","sigs"}` as the payload of its handshake message.
+   - `c` is `{"key","net","exp"}`; `sigs` is a list of base64 `TrustSignature` entries (both public keys, an Ed25519
+     and an ML-DSA-65 signature over `"jay-directory-cert-v2\n" ‖ c`, about 5.3 KB each). Both algorithms must verify;
+     one bad signature rejects the certificate.
+   - Jay accepts the key if enough distinct listed roots signed, `net` is this network's EasyTier name, it hasn't
+     expired, and `key` is the key the directory just proved.
 3. **First use** (networks with neither): the first key seen at each directory address is remembered in
    `directory-keys.json`. After that, only that key is accepted, with no legacy fallback for that address.
    `DirectoryKeyChangedException` tells the user to remove and re-add the network if the change was intended. Until a key
    is remembered, a directory that only speaks the old protocol still works.
 
-### Making the root key for the built-in network (project owner, offline)
+### Trustee keys for the built-in network (offline, one per person)
+
+The built-in network's directory certificates, and reviewed network strings, need 2 of the 3 Jay trustees
+(`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
 
 ```bash
-jay-server network root-key --out <usb>/jay-directory-root.key
-# prints the root public key → paste it into PublicNetworkProfile.JayDirectoryRoots and release
+jay-server network root-key --out <usb>/jay-trustee.key --paper
+# asks for a passphrase (the file is sealed with Argon2id + ChaCha20-Poly1305), shows the two paper lines once,
+# prints the full public key → it goes into JayTrust.Keys, then a release
+jay-server network paper-check --key <usb>/jay-trustee.key   # check the hand-copied lines
 
 # on each directory node: print its directory public key (makes directory.key on first use)
 jay-server network dir-key --dir <node data dir>
 
-# on the offline machine, with only that public key:
-jay-server network dir-cert --root <usb>/jay-directory-root.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# trustee 1, offline, with only that public key:
+jay-server network dir-cert --root <usb>/jay-trustee.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# trustee 2, on their own offline machine, adds their signature to the same file:
+jay-server network dir-cert --cosign directory.cert --root <usb>/jay-trustee.key
 # copy directory.cert into the node's data dir; the node logs "directory certificate" at start
 ```
 
-Keep the root private key off servers, CI, cloud drives and the repository. Certificates are not secret. A new or
-re-keyed node needs only a new certificate, not a Jay release. Rotating the root itself needs a release with both roots
-listed for a while (up to 4).
-
-## In the app
-
-- **Contacts card** (Multiplayer settings): my contact code (shown as "contact code", unlike the JAYF1 "friend code"),
-  a box for theirs, exchanges in progress and the contact list. A JAYC1 pasted anywhere (Ctrl+V, the join box) lands
-  in this box; nothing is mailed until [Add].
-- **Emoji card**: four large emoji, each with its localized name under it and as its accessible name
-  (`multiplayer.contacts.emoji_names`, 64 names per language). [They match] saves the contact; [They don't match]
-  drops the exchange and suggests sending the code another way.
-- **Mail pick-up**: `ContactPost.CheckAsync` every 30 s while the public network is connected, and right after
-  connecting. Add requests and ready-to-compare exchanges are mirrored as activity-centre requests.
-- **Invite a contact** (room header, host only): a one-use, 30-minute invite bound to the contact's key and let in
-  without asking, mailed with the host's key. Joining from the request knocks with `expectedHost`; a different host
-  stops the knock before the guest says anything (`WrongHostException`, also for public-network and lobby knocks).
-- **Held back**: no receipt after 3 minutes shows a banner in the room naming the other ways in: the invite dialog
-  (direct link) or the game's LAN list when both are on the same network.
+No trustee key goes on a server, CI, a cloud drive, a chat or the repository. Certificates are not secret. A new or
+re-keyed node needs only a new certificate, not a Jay release. If one trustee loses their key, the other two can still
+sign; replacing a trustee needs a release with the new public key.
 
 ## Still to do
 

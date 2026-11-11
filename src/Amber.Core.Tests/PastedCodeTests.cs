@@ -18,7 +18,7 @@ public class PastedCodeTests
     [InlineData("邀请你：jay2-t2d-00041061050r3gg28a1c60t3gf-0g2491650n2rbhg68t3ce1t7gz-8 快来", PastedCodeKind.Invite)]
     [InlineData("JAYF1-ABCD-EFGH-JKMN-PQRS-TVWX", PastedCodeKind.FriendCode)]
     [InlineData("我的好友码 jayf1-abcd-efgh-jkmn-pqrs-tvwx", PastedCodeKind.FriendCode)]
-    [InlineData("JAYNET1-eyJ2IjoxfQ", PastedCodeKind.PublicNetwork)]
+    [InlineData("JAYNET2-eyJ2IjoxfQ", PastedCodeKind.PublicNetwork)]
     [InlineData("JAYS1-eyJ2IjoxfQ", PastedCodeKind.JayServer)]
     [InlineData("", PastedCodeKind.Unknown)]
     [InlineData("   ", PastedCodeKind.Unknown)]

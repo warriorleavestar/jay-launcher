@@ -409,11 +409,11 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     [Fact]
     public async Task DirectoryCertifiedByTheRootIsAccepted()
     {
-        var root = NetworkSigner.Generate(out _);
+        var root = TrustSigner.Generate(out _);
         using var identity = X25519KeyPair.Generate();
         var cert = DirectoryCertificate.Issue(root, identity.PublicKey, "jay-net-test", DateTimeOffset.UtcNow.AddDays(30));
         var server = StartDirectory(identity, cert);
-        var client = new RoomDirectoryClient(new Loopback(server.Port, Profile(roots: [root.PublicKey])));
+        var client = new RoomDirectoryClient(new Loopback(server.Port, Profile(roots: [root.Id])));
         Assert.Empty(await client.ListAsync(default));
     }
 
@@ -425,8 +425,8 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     [InlineData("none")]
     public async Task DirectoryWithoutAGoodCertificateGetsNothing(string flaw)
     {
-        var root = NetworkSigner.Generate(out _);
-        var other = NetworkSigner.Generate(out _);
+        var root = TrustSigner.Generate(out _);
+        var other = TrustSigner.Generate(out _);
         using var identity = X25519KeyPair.Generate();
         using var otherKey = X25519KeyPair.Generate();
         byte[]? cert = flaw switch
@@ -438,7 +438,7 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
             _ => null,
         };
         var server = StartDirectory(identity, cert);
-        var client = new RoomDirectoryClient(new Loopback(server.Port, Profile(roots: [root.PublicKey])));
+        var client = new RoomDirectoryClient(new Loopback(server.Port, Profile(roots: [root.Id])));
         await Assert.ThrowsAsync<DirectoryImpostorException>(() => client.ListAsync(default));
     }
 
@@ -473,12 +473,12 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     [Fact]
     public void NetworkStringCarriesDirectoryRoots()
     {
-        var signer = NetworkSigner.Generate(out _);
-        var root = NetworkSigner.Generate(out _);
-        var info = new NetworkInfo("test-net", "Test", "jay-net-test", Secret, ["tcp://example.com:11010"], DirectoryRoots: [root.PublicKey]);
+        var signer = TrustSigner.Generate(out _);
+        var root = TrustSigner.Generate(out _);
+        var info = new NetworkInfo("test-net", "Test", "jay-net-test", Secret, ["tcp://example.com:11010"], DirectoryRoots: [root.Id]);
         var signed = NetworkString.Parse(NetworkString.Create(info, signer));
-        Assert.Equal(root.PublicKey, Assert.Single(signed.ToProfile().DirectoryRoots));
-        var tooMany = info with { DirectoryRoots = [.. Enumerable.Range(0, NetworkString.MaxDirectoryRoots + 1).Select(_ => root.PublicKey)] };
+        Assert.Equal(root.Id, Assert.Single(signed.ToProfile().DirectoryRoots));
+        var tooMany = info with { DirectoryRoots = [.. Enumerable.Range(0, NetworkString.MaxDirectoryRoots + 1).Select(_ => root.Id)] };
         Assert.Throws<InvalidDataException>(() => NetworkString.Create(tooMany, signer));
     }
 

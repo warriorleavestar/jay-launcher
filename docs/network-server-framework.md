@@ -5,7 +5,7 @@
 1. **用框架写**（.NET）：引用 `src/Amber.NetworkServer`（程序集 `Jay.NetworkServer`），几十行就是一个完整节点。官方的 `jay-server directory` 就是用它跑的。
 2. **自己实现协议**（任何语言）：按下面的[协议](#协议)写一个目录服务，前面放一个 EasyTier。
 
-不管哪条路，玩家都用同一个 Jay，粘贴你的 `JAYNET1-...` 连接串就能进你的网络（怎么生成连接串见 [network-server.md](network-server.md#二自己的公共网络四步)）。
+不管哪条路，玩家都用同一个 Jay，粘贴你的 `JAYNET2-...` 连接串就能进你的网络（怎么生成连接串见 [network-server.md](network-server.md#二自己的公共网络四步)）。
 
 ## 最小的节点
 

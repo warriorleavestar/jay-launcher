@@ -65,17 +65,16 @@
 
 ## 换别的公共网络
 
-别人搭的公共网络用一串 `JAYNET1-...` 的连接串分享：联机 → 公共网络 → 公共网络，粘贴后“添加网络”，下拉框里切换。
+别人搭的公共网络用一串 `JAYNET2-...` 的连接串分享：联机 → 公共网络 → 公共网络，粘贴后“添加网络”，下拉框里切换。
 
-- 连接串 = 网络信息（编号、名字、EasyTier 网络名和密钥、节点、版本号、可选的过期时间 / 主页 / 服务器配置文件的地址和 SHA-256）+ Ed25519 签名。内容改一个字节签名就不对。
+- 连接串 = 网络信息（编号、名字、EasyTier 网络名和密钥、节点、版本号、可选的过期时间 / 主页 / 服务器配置文件的地址和 SHA-256）+ 签名（Ed25519 + ML-DSA-65 双签名，两个都对才算）。内容改一个字节签名就不对。
 - 前缀里的数字是格式版本；以后换算法就换数字，看到更新的版本会提示先更新 Jay。
-- Jay 注册表钥匙签的显示“Jay 已审核”，直接加；别人签的显示签名钥匙的短指纹，提醒后用户确认才加，下拉框里带 ⚠。
+- Jay 信任人里够数的人（3 人里 2 人）加签过的显示“Jay 已审核”，直接加；别人签的显示签名钥匙的短指纹，提醒后用户确认才加，下拉框里带 ⚠。
 - 同一把钥匙签的更大版本号会替换旧的；同一个编号换了钥匙的拒绝，要用户先删掉旧的（防冒用）。编号 `jay` 只认注册表签的，用来给内置网络补节点。
 - 设置里只存连接串原文，每次启动都重新验签，过期或被改过的直接不用。
 - 换网络会先断开旧网络（公开的房间也会撤下）。
 
-审核流程见 [networks/README.md](../networks/README.md)：在 `networks/` 提交 JSON → PR 检查格式 → 维护者审核合并 → CI 用注册表钥匙签名，发到 `networks` Release。
-注册表钥匙还没生成：生成后私钥放进 `network-registry` environment 的 secret `JAY_NETWORK_KEY`，公钥写进 `NetworkString.RegistryKeys`。
+审核流程见 [networks/README.md](../networks/README.md)：在 `networks/` 提交 JSON → PR 检查格式 → 维护者审核合并 → 网络主人签名 → 两位信任人各自离线加签 → 发到 `networks` Release。CI 不签名，也拿不到任何私钥。
 
 自己搭网络：`jay-server network init` → `network config-hash` → `network sign` → `jay-server directory --network <连接串>`，完整步骤、管理和部署见 [network-server.md](network-server.md)。想接自己的账号库、审核规则、验证方式，用 [网络服务端框架](network-server-framework.md)。
 

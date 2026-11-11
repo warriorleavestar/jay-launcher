@@ -7,21 +7,30 @@ using Amber.Core.Multiplayer.Transport;
 namespace Amber.Core.Multiplayer.Public;
 
 /// <summary>
-/// A directory node's certificate: a root key (Ed25519, kept offline by the network's owner) says "this X25519 key is a
-/// directory of network N until T". Jay ships only the root's public key, so directory nodes can be added or re-keyed
-/// without a new Jay release, and the root private key never has to be on a server.
+/// A directory node's certificate: root keys (hybrid Ed25519 + ML-DSA-65 <see cref="TrustSigner"/> keys, kept offline by the network's owners) say "this X25519 key is a
+/// directory of network N until T". Jay ships only the roots' public keys, so directory nodes can be added or re-keyed
+/// without a new Jay release, and no root private key ever has to be on a server.
 /// <para>
-/// Signed bytes: <c>"jay-directory-cert-v1\n"</c> + the JSON {"key","net","exp"} exactly as sent.
-/// On the wire: {"c": base64(that JSON), "r": base64(root public key), "s": base64(signature)}, as the payload of the
-/// directory's handshake message (Jay versions that don't know certificates ignore that payload).
+/// A certificate can carry several root signatures; the network decides how many it needs (for the built-in network,
+/// <see cref="JayTrust.Need"/> of the trustees). Roots sign one after another, offline, with <c>jay-server network dir-cert</c>
+/// and then <c>--cosign</c>.
+/// </para>
+/// <para>
+/// Signed bytes: <c>"jay-directory-cert-v2\n"</c> + the JSON {"key","net","exp"} exactly as sent.
+/// On the wire: {"c": base64(that JSON), "sigs": [base64(encoded <see cref="TrustSignature"/>), …]}, as the payload of
+/// the directory's handshake message. Two signatures make about 15 KB.
 /// </para>
 /// </summary>
-public sealed record DirectoryCertificate(byte[] DirectoryKey, string Network, DateTimeOffset Expires, byte[] Root, byte[] Signature, byte[] Content)
+public sealed record DirectoryCertificate(byte[] DirectoryKey, string Network, DateTimeOffset Expires, IReadOnlyList<TrustSignature> Signatures, byte[] Content)
 {
-    private static readonly byte[] Domain = "jay-directory-cert-v1\n"u8.ToArray();
-    public const int MaxSize = 1024;
+    private static readonly byte[] Domain = "jay-directory-cert-v2\n"u8.ToArray();
+    public const int MaxSize = 32768;
+    public const int MaxSignatures = 4;
 
-    public static byte[] Issue(NetworkSigner root, ReadOnlySpan<byte> directoryKey, string network, DateTimeOffset expires)
+    /// <summary>The roots that signed (all verified).</summary>
+    public IEnumerable<byte[]> Signers => Signatures.Select(s => s.Key);
+
+    public static byte[] Issue(TrustSigner root, ReadOnlySpan<byte> directoryKey, string network, DateTimeOffset expires)
     {
         if (directoryKey.Length != DirectoryChannel.KeyLength) throw new ArgumentException(null, nameof(directoryKey));
         var content = Encoding.UTF8.GetBytes(new JsonObject
@@ -30,32 +39,50 @@ public sealed record DirectoryCertificate(byte[] DirectoryKey, string Network, D
             ["net"] = network,
             ["exp"] = expires.ToUnixTimeSeconds(),
         }.ToJsonString());
-        var signature = root.Sign([.. Domain, .. content]);
-        return Encoding.UTF8.GetBytes(new JsonObject
-        {
-            ["c"] = Convert.ToBase64String(content),
-            ["r"] = Convert.ToBase64String(root.PublicKey),
-            ["s"] = Convert.ToBase64String(signature),
-        }.ToJsonString());
+        return Write(content, [root.Sign([.. Domain, .. content])]);
     }
 
-    /// <summary>Reads and checks the signature. Doesn't check the root, network or time (<see cref="DirectoryTrust"/> does).</summary>
+    /// <summary>Adds another root's signature. Refuses a certificate that doesn't verify, or a root that already signed.</summary>
+    public static byte[] Cosign(ReadOnlySpan<byte> certificate, TrustSigner root)
+    {
+        var cert = Parse(certificate) ?? throw new InvalidDataException("not a valid directory certificate");
+        if (cert.Signers.Any(k => k.AsSpan().SequenceEqual(root.Id))) throw new InvalidDataException("this root already signed");
+        if (cert.Signatures.Count >= MaxSignatures) throw new InvalidDataException("too many signatures");
+        return Write(cert.Content, [.. cert.Signatures, root.Sign([.. Domain, .. cert.Content])]);
+    }
+
+    private static byte[] Write(byte[] content, IEnumerable<TrustSignature> signatures) => Encoding.UTF8.GetBytes(new JsonObject
+    {
+        ["c"] = Convert.ToBase64String(content),
+        ["sigs"] = new JsonArray([.. signatures.Select(s => (JsonNode)JsonValue.Create(Convert.ToBase64String(s.Encode())))]),
+    }.ToJsonString());
+
+    /// <summary>
+    /// Reads the certificate and checks every signature (one bad signature rejects it). Doesn't check which roots signed,
+    /// the network or the time (<see cref="DirectoryTrust"/> does).
+    /// </summary>
     public static DirectoryCertificate? Parse(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length is 0 or > MaxSize) return null;
         try
         {
-            if (JsonNode.Parse(bytes) is not JsonObject wire) return null;
+            if (JsonNode.Parse(bytes) is not JsonObject wire || wire["sigs"] is not JsonArray sigs || sigs.Count is 0 or > MaxSignatures) return null;
             var content = Convert.FromBase64String(wire["c"]?.GetValue<string>() ?? "");
-            var root = Convert.FromBase64String(wire["r"]?.GetValue<string>() ?? "");
-            var signature = Convert.FromBase64String(wire["s"]?.GetValue<string>() ?? "");
-            if (root.Length != 32 || signature.Length != 64 || !RoomSigner.Verify(root, [.. Domain, .. content], signature)) return null;
+            var signatures = new List<TrustSignature>();
+            foreach (var entry in sigs)
+            {
+                var encoded = Convert.FromBase64String(entry?.GetValue<string>() ?? "");
+                if (encoded.Length != TrustSignature.Size) return null;
+                var signature = TrustSignature.Decode(encoded);
+                if (signatures.Any(x => x.Key.AsSpan().SequenceEqual(signature.Key)) || !signature.Verify([.. Domain, .. content])) return null;
+                signatures.Add(signature);
+            }
             if (JsonNode.Parse(content) is not JsonObject o) return null;
             var key = Convert.FromBase64String(o["key"]?.GetValue<string>() ?? "");
             var network = o["net"]?.GetValue<string>();
             var exp = o["exp"]?.GetValue<long>();
-            if (key.Length != DirectoryChannel.KeyLength || string.IsNullOrEmpty(network) || exp is not { } e) return null;
-            return new DirectoryCertificate(key, network, DateTimeOffset.FromUnixTimeSeconds(e), root, signature, content);
+            if (key.Length != DirectoryChannel.KeyLength || string.IsNullOrEmpty(network) || exp is not { } t) return null;
+            return new DirectoryCertificate(key, network, DateTimeOffset.FromUnixTimeSeconds(t), signatures, content);
         }
         catch (Exception e) when (e is JsonException or FormatException or InvalidOperationException or ArgumentOutOfRangeException)
         {
@@ -68,8 +95,8 @@ public sealed record DirectoryCertificate(byte[] DirectoryKey, string Network, D
 /// Which directory keys Jay accepts for one network, decided before it sends a directory anything:
 /// <list type="number">
 /// <item>Keys pinned in the signed connection string ("dirKeys").</item>
-/// <item>Keys certified by one of the network's root keys ("dirRoots", or for the built-in network the roots compiled
-/// into Jay, <see cref="PublicNetworkProfile.JayDirectoryRoots"/>).</item>
+/// <item>Keys certified by enough of the network's root keys ("dirRoots" and "dirRootsNeed", or for the built-in network
+/// the Jay trustees, <see cref="JayTrust"/>).</item>
 /// <item>A network with neither: trust on first use. The first key seen at each directory address is remembered
 /// (<see cref="DirectoryKeyMemory"/>) and from then on only that key is accepted, with no fallback to the unauthenticated
 /// protocol for that address.</item>
@@ -80,6 +107,8 @@ public sealed class DirectoryTrust
     public required string Network { get; init; }
     public IReadOnlyList<byte[]> Pinned { get; init; } = [];
     public IReadOnlyList<byte[]> Roots { get; init; } = [];
+    /// <summary>How many of <see cref="Roots"/> must have signed a certificate.</summary>
+    public int RootsNeed { get; init; } = 1;
     public DirectoryKeyMemory? Memory { get; init; }
     public Func<DateTimeOffset> Clock { get; init; } = () => DateTimeOffset.UtcNow;
 
@@ -92,7 +121,7 @@ public sealed class DirectoryTrust
         if (IsStrict)
         {
             if (Contains(Pinned, key)) return true;
-            return Roots.Count > 0 && DirectoryCertificate.Parse(certificate) is { } cert && Contains(Roots, cert.Root)
+            return Roots.Count > 0 && DirectoryCertificate.Parse(certificate) is { } cert && new TrustQuorum(Roots, RootsNeed).IsMet(cert.Signers)
                 && cert.Network == Network && cert.Expires > Clock() && CryptographicOperations.FixedTimeEquals(cert.DirectoryKey, key);
         }
         if (Memory is null) return false;
