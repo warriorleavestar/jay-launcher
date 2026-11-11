@@ -89,16 +89,17 @@ public static class GameSandbox
 
     /// <summary>
     /// LWJGL and JNA unpack native libraries into <c>java.io.tmpdir</c> unless told otherwise, and the sandboxed game
-    /// can write only its instance folder: they unpack into <c>&lt;instance&gt;/.jay-natives/</c> instead. Empty for a
+    /// can write only its instance folder: they unpack into <c>&lt;instance&gt;/natives-extract</c> and
+    /// <c>&lt;instance&gt;/jna-tmp</c> instead (the layout the universal loader's sandbox docs name). Empty for a
     /// folder Java could not read from its command line (not ASCII: Java reads it in the ANSI code page on Windows);
     /// the game then keeps its old behaviour. Added first, so an instance's own JVM arguments still win.
     /// </summary>
     public static IReadOnlyList<string> NativeExtractArguments(string workDir)
     {
-        var root = Path.Combine(Path.GetFullPath(workDir), ".jay-natives");
-        if (!root.All(char.IsAscii)) return [];
-        var lwjgl = Path.Combine(root, "lwjgl");
-        var jna = Path.Combine(root, "jna");
+        var instance = Path.GetFullPath(workDir);
+        if (!instance.All(char.IsAscii)) return [];
+        var lwjgl = Path.Combine(instance, "natives-extract");
+        var jna = Path.Combine(instance, "jna-tmp");
         Directory.CreateDirectory(lwjgl);
         Directory.CreateDirectory(jna);
         return ["-Dorg.lwjgl.system.SharedLibraryExtractPath=" + lwjgl, "-Djna.tmpdir=" + jna];

@@ -99,9 +99,9 @@ public sealed class GameSandboxTests : IDisposable
         var instance = Dir("versions", "1.21.1");
         var args = GameSandbox.NativeExtractArguments(instance);
         Assert.Equal(
-            ["-Dorg.lwjgl.system.SharedLibraryExtractPath=" + Path.Combine(instance, ".jay-natives", "lwjgl"), "-Djna.tmpdir=" + Path.Combine(instance, ".jay-natives", "jna")],
+            ["-Dorg.lwjgl.system.SharedLibraryExtractPath=" + Path.Combine(instance, "natives-extract"), "-Djna.tmpdir=" + Path.Combine(instance, "jna-tmp")],
             args);
-        Assert.True(Directory.Exists(Path.Combine(instance, ".jay-natives", "jna")));
+        Assert.True(Directory.Exists(Path.Combine(instance, "jna-tmp")));
         Assert.All(args, a => Assert.True(GameSandbox.IsInside(a[(a.IndexOf('=') + 1)..], instance)));
         Assert.Empty(GameSandbox.NativeExtractArguments(Dir("实例")));
     }
