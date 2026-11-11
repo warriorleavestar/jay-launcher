@@ -811,12 +811,7 @@ public sealed partial class SettingsViewModel : PageViewModel
     public bool HasThemeReport => ThemeReportText.Length > 0;
 
     /// <summary>Copy text to the clipboard (tests swap this so the real clipboard is never touched).</summary>
-    internal Func<string, Task<bool>> CopyText { get; set; } = async text =>
-    {
-        if (Amber.App.Services.AvaloniaClipboard.FromMainWindow() is not { } clipboard) return false;
-        await clipboard.SetTextAsync(text);
-        return true;
-    };
+    internal Func<string, Task<bool>> CopyText { get; set; } = Amber.App.Services.AvaloniaClipboard.TrySetTextAsync;
 
     /// <summary>【复制给作者看】: the upgrade notes and fixes as plain text, for the theme's author.</summary>
     [RelayCommand]
