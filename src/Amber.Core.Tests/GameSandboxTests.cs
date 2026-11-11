@@ -402,9 +402,10 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Equal(WindowsSandboxSetup.ListMask, (int)ours.FileSystemRights);
         Assert.True(WindowsSandboxSetup.ContainersCanList(parent));
         Assert.Equal(childBefore, Sddl(child));
-        // Still inheriting from above (the auto-inherit mark survived the rewrite).
+        // Exactly the original ACL plus Jay's one entry: same control flags (auto-inherit kept when the folder had it;
+        // some machines' folders do not), same entries, same order.
         Assert.False(Acl(parent).AreAccessRulesProtected);
-        Assert.Contains("AI", Sddl(parent));
+        Assert.Equal(before, Sddl(parent).Replace("(A;;0x1000a1;;;AC)", "", StringComparison.Ordinal));
 
         // Twice is still one entry.
         WindowsSandboxSetup.AddListing(parent);
