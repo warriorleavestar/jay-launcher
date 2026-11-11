@@ -219,6 +219,23 @@ public sealed class RemoteControlTests
         Assert.False(result.Accepted);
     }
 
+    [Fact]
+    public async Task RefuseWhile_DeclinesWithoutAskingAndFollowsTheSwitch()
+    {
+        var refuse = true;
+        var asked = 0;
+        var policy = new RefuseWhilePolicy(() => refuse, new AskEveryTimePolicy((_, _) =>
+        {
+            asked++;
+            return Task.FromResult(new RemoteConsent(true, false));
+        }));
+        Assert.False((await policy.DecideAsync(new RemoteConsentRequest("x", "y"), default)).Accepted);
+        Assert.Equal(0, asked);
+        refuse = false;
+        Assert.True((await policy.DecideAsync(new RemoteConsentRequest("x", "y"), default)).Accepted);
+        Assert.Equal(1, asked);
+    }
+
     // ---- 完整会话（成员钥匙通道，回环 TCP） ----
 
     private static RemoteHostOptions HostOptions(IRemoteConsentPolicy policy, FakeScreen screen, FakeInput input) =>
