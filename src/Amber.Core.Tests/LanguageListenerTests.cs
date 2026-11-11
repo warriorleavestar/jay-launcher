@@ -6,6 +6,7 @@ using Amber.Core.Localization;
 namespace Amber.Core.Tests;
 
 /// <summary>换语言的通知：下拉框选项跟着换文字，绑定被丢掉后能被回收（不会因为静态事件一直留在内存里）。</summary>
+[Collection("GlobalLanguage")]
 public class LanguageListenerTests
 {
     private sealed class Recorder : IObserver<string>
@@ -16,7 +17,7 @@ public class LanguageListenerTests
         public void OnError(Exception error) { }
     }
 
-    // 不切换全局语言（别的测试在并行跑、按中文断言），直接触发“换语言”的通知。
+    // 不切换全局语言，直接触发“换语言”的通知；放在 GlobalLanguage 里，别的测试换语言时发的通知不会算进这里的次数。
     [Fact]
     public void OptionItemRaisesLabelChanged()
     {
