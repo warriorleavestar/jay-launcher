@@ -50,8 +50,17 @@ public sealed partial class MultiplayerViewModel
             ? L.F("multiplayer.guide.game_ready", game.Label)
             : L.T("multiplayer.guide.game_missing");
 
-    partial void OnSelectedLanGameChanged(LanGameItem? value) => NotifyGameStatus();
-    partial void OnManualPortChanged(string value) => NotifyGameStatus();
+    partial void OnSelectedLanGameChanged(LanGameItem? value)
+    {
+        NotifyGameStatus();
+        _ = RetargetGameRelayAsync(typed: false);
+    }
+
+    partial void OnManualPortChanged(string value)
+    {
+        NotifyGameStatus();
+        _ = RetargetGameRelayAsync(typed: true);
+    }
 
     private void NotifyGameStatus()
     {
@@ -119,12 +128,6 @@ public sealed partial class MultiplayerViewModel
                 // 旧版本的 AMB- 房间码不能再用来加入：请房主更新后发邀请码。
                 SetStatus(StatusMessage.Warning("multiplayer.invite.old_code"));
                 return true;
-            case PastedCodeKind.DirectInvite:
-                clearSource();
-                MoreWaysOpen = true;
-                DirectInviteInput = text;
-                JoinDirectCommand.Execute(null);
-                return true;
             case PastedCodeKind.NodeShare:
                 // 节点会被保存、以后每次联机都用：不在“加入”框里静默导入，放进节点导入框让用户确认。
                 clearSource();
@@ -133,11 +136,25 @@ public sealed partial class MultiplayerViewModel
                 Tab = MultiplayerTab.Settings;
                 SetStatus(StatusMessage.Warning("multiplayer.code.node_misplaced"));
                 return true;
-            case PastedCodeKind.DirectReply:
-                SetStatus(StatusMessage.Warning("multiplayer.code.reply_misplaced"));
-                return true;
             case PastedCodeKind.OldDirect:
                 SetStatus(StatusMessage.Warning("multiplayer.direct.old_code"));
+                return true;
+            case PastedCodeKind.SealedOffer:
+                // A sealed direct code: into the join box, which then asks for the passphrase.
+                clearSource();
+                Tab = MultiplayerTab.Play;
+                JoinCode = text.Trim();
+                SetStatus(StatusMessage.Info("multiplayer.sealed.enter_passphrase"));
+                return true;
+            case PastedCodeKind.SealedReply:
+                // A friend's sealed reply belongs to the host's direct room card.
+                clearSource();
+                if (IsDirectHost && HasSealedOffer)
+                {
+                    SealedReplyInput = text.Trim();
+                    AddSealedReplyCommand.Execute(null);
+                }
+                else SetStatus(StatusMessage.Warning("multiplayer.sealed.reply_misplaced"));
                 return true;
             case PastedCodeKind.JayServer:
                 // Jay 服务器邀请：交给“Jay 服务器”卡片加入（只能用一次，所以直接用掉，不留在原来的框里）。

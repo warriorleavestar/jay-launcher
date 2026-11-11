@@ -65,9 +65,7 @@ public sealed partial class MultiplayerViewModel
     private PendingInvite? _standing;
     private byte[]? _standingSalt;
     /// <summary>直连房间公开时列表里放的直连码（用长期邀请生成，和“邀请朋友”生成的单次直连码分开）。</summary>
-    private string? _standingDirect;
     /// <summary>加入方：从列表点了直连房间，生成回复码后经目录捎给房主。</summary>
-    private string? _directMailRoom;
 
     public ObservableCollection<PublicRoomItem> PublicRooms { get; } = [];
 
@@ -169,6 +167,7 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Success("multiplayer.public.connected", profile.Name));
             StartAnnouncerIfHosting();
             StartVolunteerWork(_public, profile);
+            _ = RenewRelayRecordAsync(_public);
             await RefreshRoomsAsync();
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
@@ -236,20 +235,15 @@ public sealed partial class MultiplayerViewModel
         }
     }
 
-    /// <summary>从列表加入：公开 / 密码房间直接经公共网络敲门；直连房间填好直连码走直连。</summary>
+    /// <summary>
+    /// 从列表加入：公开 / 直连 / 密码房间都经公共网络敲门。直连房间批准后在加密的敲门里交换地址再打洞（列表里没有地址）。
+    /// </summary>
     [RelayCommand]
     private async Task JoinPublicRoomAsync(PublicRoomItem? item)
     {
         item ??= SelectedPublicRoom;
         if (item is null || _public is not { } network || !IsIdle || IsKnocking) return;
         var listing = item.Listing;
-        if (listing.Mode == RoomVisibility.Direct)
-        {
-            DirectInviteInput = listing.Direct ?? "";
-            _directMailRoom = listing.Id;
-            await JoinDirectCommand.ExecuteAsync(null);
-            return;
-        }
         if (listing.Mode == RoomVisibility.Password && PublicRoomPassword.Length == 0)
         {
             SelectedPublicRoom = item;
@@ -267,21 +261,22 @@ public sealed partial class MultiplayerViewModel
         }
         var device = Device;
         var jay = JayCertificate;
-        await KnockAndJoinAsync(invite, async (me, name, ct) =>
+        await KnockAndJoinAsync(invite, async (me, name, direct, ct) =>
         {
-            var outcome = await PublicJoin.KnockAsync(network, listing.Ip, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, listing.HostKey, ct, device, AccountToken, jay);
+            var outcome = await PublicJoin.KnockAsync(network, listing.Ip, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, listing.HostKey, ct, device, AccountToken, jay, direct);
             // 密码房间握手失败多半是密码不对（长期邀请不会用完或过期）。
             return listing.Mode == RoomVisibility.Password && outcome.Reason == "invalid" ? outcome with { Reason = "password" } : outcome;
         });
     }
 
     /// <summary>加入方拿着邀请码、又连着公共网络：先在目录里找房主（隐藏房间也行），找不到再走邀请码自己的大厅。</summary>
-    private async Task<KnockOutcome?> TryPublicKnockAsync(JayInvite invite, X25519KeyPair me, string name, CancellationToken ct, byte[]? expectedHost = null)
+    private async Task<KnockOutcome?> TryPublicKnockAsync(JayInvite invite, X25519KeyPair me, string name, CancellationToken ct, byte[]? expectedHost = null,
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         if (_public is not { } network) return null;
         try
         {
-            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost);
+            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct);
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException && !ct.IsCancellationRequested)
         {
@@ -301,8 +296,9 @@ public sealed partial class MultiplayerViewModel
     private void StartAnnouncerIfHosting()
     {
         if (_public is not { } network || _announcer is not null || !IsHosting || _lobby is null) return;
-        var announcer = new RoomAnnouncer(network, BuildListing, LookupKeys, OnDirectoryMail,
-            line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), searchKey: SearchKeyForAnnounce, account: () => AccountToken);
+        var announcer = new RoomAnnouncer(network, BuildListing, LookupKeys,
+            line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), client: DirectoryClient(network), searchKey: SearchKeyForAnnounce,
+            account: () => AccountToken);
         announcer.StateChanged += () => Dispatcher.UIThread.Post(() =>
         {
             if (_announcer != announcer) return;
@@ -326,22 +322,21 @@ public sealed partial class MultiplayerViewModel
             Id = "",
             Name = PublishRoomName.Trim().Length > 0 ? PublishRoomName.Trim() : L.F("multiplayer.public.default_name", ChatName),
             Host = ChatName,
-            Mode = standing is null && mode != RoomVisibility.Hidden || mode == RoomVisibility.Direct && _standingDirect is null ? RoomVisibility.Hidden : mode,
+            Mode = standing is null && mode != RoomVisibility.Hidden ? RoomVisibility.Hidden : mode,
             // 隐藏房间开了指纹查找：带一张要房主批准的长期邀请，只有拿着指纹码的人能从目录里拿到。
             HostKey = Identity.PublicKey,
             Game = TargetInstance ?? "",
             Version = Amber.Core.Launch.UpdateChecker.CurrentVersion,
             Players = 1 + Members.Count,
             Approval = !(standing?.AutoApprove ?? false),
-            Invite = mode == RoomVisibility.Public || mode == RoomVisibility.Hidden && _searchPublished ? standing?.Invite.ToString() : null,
+            Invite = mode is RoomVisibility.Public or RoomVisibility.Direct || mode == RoomVisibility.Hidden && _searchPublished ? standing?.Invite.ToString() : null,
             Lobby = mode == RoomVisibility.Password && standing is not null ? Convert.ToHexStringLower(standing.Invite.LobbyKey) : null,
             Salt = mode == RoomVisibility.Password && _standingSalt is { } salt ? Convert.ToHexStringLower(salt) : null,
             Tunnel = _credentials?.Tunnel ?? TunnelSettings.Default,
-            Direct = mode == RoomVisibility.Direct ? _standingDirect : null,
         };
     }
 
-    /// <summary>按选的方式发布：公开、密码房间开一张长期邀请；直连房间发直连码；隐藏只登记邀请码的查找键。</summary>
+    /// <summary>按选的方式发布：公开、直连、密码房间开一张长期邀请（列表里都没有地址）；隐藏只登记邀请码的查找键。</summary>
     [RelayCommand]
     private async Task PublishRoomAsync()
     {
@@ -382,7 +377,6 @@ public sealed partial class MultiplayerViewModel
         if (_standing is { } old) lobby.Book.Revoke(old);
         _standing = null;
         _standingSalt = null;
-        _standingDirect = null;
         switch (mode)
         {
             case RoomVisibility.Hidden when _searchPublished:
@@ -402,7 +396,6 @@ public sealed partial class MultiplayerViewModel
                 break;
             case RoomVisibility.Direct:
                 _standing = lobby.Book.CreateStanding(Child.MayAutoAdmit(PublishAutoApprove), credentials.Tunnel);
-                if (_direct is { IsHost: true } direct) _standingDirect = direct.InviteCode(_standing.Invite).Encode();
                 break;
         }
         try { await lobby.UpdateAsync(); }
@@ -436,34 +429,10 @@ public sealed partial class MultiplayerViewModel
         if (_standing is { } standing) _lobby?.Book.Revoke(standing);
         _standing = null;
         _standingSalt = null;
-        _standingDirect = null;
         _searchPublished = false;
         CurrentVisibility = RoomVisibility.Hidden;
         _announcer?.Refresh();
         SetStatus(StatusMessage.Info("multiplayer.public.unpublished"));
-    }
-
-    /// <summary>直连房间的房主：目录捎来的回复码，自动往对方打洞（等同于手动贴回复码）。</summary>
-    private void OnDirectoryMail(string text) => Dispatcher.UIThread.Post(async () =>
-    {
-        if (!IsDirectHost || !DirectCode.TryParse(text, out var reply, out _) || !reply.IsReply) return;
-        DirectReplyInput = text;
-        await AddDirectReplyCommand.ExecuteAsync(null);
-    });
-
-    /// <summary>加入方：从列表点的直连房间，回复码生成后经目录捎给房主。</summary>
-    partial void OnMyDirectCodeChanged(string value)
-    {
-        if (_directMailRoom is not { } id || _public is not { } network || Mode != "join" || value.Length == 0) return;
-        _directMailRoom = null;
-        _ = Task.Run(async () =>
-        {
-            try { await DirectoryClient(network).MailAsync(id, value, default); }
-            catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException or OperationCanceledException)
-            {
-                Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Failure("multiplayer.public.mail_failed", e, ErrorText.Of(e))));
-            }
-        });
     }
 
     private void StopAnnouncer()
@@ -472,7 +441,6 @@ public sealed partial class MultiplayerViewModel
         _announcer = null;
         _standing = null;
         _standingSalt = null;
-        _standingDirect = null;
         _searchPublished = false;
         CurrentVisibility = RoomVisibility.Hidden;
         PublishStatus = "";

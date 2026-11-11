@@ -5,7 +5,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
+using Amber.Core.Launch;
 using Amber.Core.Net;
 
 namespace Amber.Core.Multiplayer;
@@ -25,6 +27,12 @@ public static class EasyTierRelease
     public const string ReleaseTag = "jay-v2.6.4-1";
     /// <summary>First 12 hex digits of the hardened build's commit; part of every package name.</summary>
     public const string Commit = "89e36e45d7e2";
+    /// <summary>The hardened build's full commit, as the trustees' signature names it.</summary>
+    public const string FullCommit = "89e36e45d7e2c45eb7144a10afd272c084ad6d82";
+    /// <summary>Signature seq of this build: one more for every hardened release.</summary>
+    public const long Seq = 1;
+    /// <summary>Component name in the trustees' signature (<see cref="ReleaseStatement.Components"/>).</summary>
+    public const string Component = "easytier";
     /// <summary>Install folder name: a new hardened build never reuses files from an older or an upstream install.</summary>
     public const string InstallTag = Version + "-jay-" + Commit;
     public const string SourceUrl = "https://github.com/Yumao-Feather/jay-easytier";
@@ -58,6 +66,58 @@ public static class EasyTierRelease
         ("linux", Architecture.Arm64) => A("linux-aarch64", "15a21e30b1a50cb8cb72e9be297a2dd88856639c5efe7f0fd860154b0034fc49", 12_525_937),
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
+
+    /// <summary>Every package of this build, one per supported system.</summary>
+    public static IReadOnlyList<Asset> All =>
+    [
+        For("windows", Architecture.X64), For("windows", Architecture.Arm64), For("windows", Architecture.X86),
+        For("macos", Architecture.X64), For("macos", Architecture.Arm64), For("linux", Architecture.X64), For("linux", Architecture.Arm64),
+    ];
+
+    /// <summary>
+    /// The trustees' signature over this build (embedded SHA256SUMS.txt and SHA256SUMS.txt.sigs from the release):
+    /// valid when 2 of the 3 Jay trustees signed exactly this tag, seq and commit as an EasyTier build, and every
+    /// pinned package hash above is in the signed list. Checked once per run.
+    /// </summary>
+    public static ReleaseCheck Signature => SignatureCheck.Value;
+
+    private static readonly Lazy<ReleaseCheck> SignatureCheck = new(() =>
+        CheckSignature(Embedded(ReleaseSignature.SignatureFileName) is { } m ? Encoding.UTF8.GetString(m) : null,
+            Embedded(ReleaseSignature.SumsFileName) ?? [], TrustList.Jay, All));
+
+    /// <summary>
+    /// Whether a package may be installed: always when this Jay has no release keys built in yet
+    /// (<see cref="Amber.Core.Multiplayer.Public.JayTrust.ReleaseKeys"/>; only the pinned hashes protect it then),
+    /// otherwise only with a valid <see cref="Signature"/>. Tests make sure no build with
+    /// release keys ships without one.
+    /// </summary>
+    public static bool SignatureAllowsInstall => TrustList.Jay.Keys.Count == 0 || Signature.IsValid;
+
+    internal static ReleaseCheck CheckSignature(string? manifestJson, byte[] sums, TrustList own, IEnumerable<Asset> assets)
+    {
+        if (own.Keys.Count == 0) return new(ReleaseVerdict.NoTrustedKey, null, 0);
+        if (manifestJson is null || sums.Length == 0) return new(ReleaseVerdict.Unsigned, null, 0);
+        var check = ReleaseSignature.Verify(manifestJson, sums, null, ReleaseTag, own, 0, Component);
+        if (!check.IsValid) return check;
+        var statement = ReleaseManifest.Parse(manifestJson)!.Statement;
+        if (statement.Commit != FullCommit || statement.Seq != Seq) return check with { Verdict = ReleaseVerdict.WrongTag };
+        var listed = ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums));
+        foreach (var asset in assets)
+        {
+            if (!listed.TryGetValue(asset.Name, out var hash)) return check with { Verdict = ReleaseVerdict.NotListed };
+            if (hash != asset.Sha256) return check with { Verdict = ReleaseVerdict.HashMismatch };
+        }
+        return check;
+    }
+
+    private static byte[]? Embedded(string name)
+    {
+        using var stream = typeof(EasyTierRelease).Assembly.GetManifestResourceStream("easytier-signed/" + name);
+        if (stream is null) return null;
+        using var memory = new MemoryStream();
+        stream.CopyTo(memory);
+        return memory.ToArray();
+    }
 
     /// <summary>
     /// GitHub 下载加速镜像：把完整的 GitHub 地址接在前缀后面。它们都是第三方公益服务，只用来搬运文件，
@@ -223,6 +283,9 @@ public sealed class EasyTierInstaller
             if (hash != Asset.Sha256)
                 throw new InvalidDataException(L.F("core.mp.component.hashfailed", hash));
         }
+        // Once release keys are built in, the pinned build must also carry 2 of 3 trustee release signatures.
+        if (!EasyTierRelease.SignatureAllowsInstall)
+            throw new InvalidDataException(L.F("core.mp.component.unsigned", UpdateCheck.Explain(EasyTierRelease.Signature.Verdict)));
         Extract(zip, InstallDir, Asset);
         MakeExecutable(CorePath);
         MakeExecutable(CliPath);

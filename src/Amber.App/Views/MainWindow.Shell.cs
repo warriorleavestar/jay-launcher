@@ -11,6 +11,7 @@ using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.LogicalTree;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -79,6 +80,17 @@ public partial class MainWindow
             };
             (DataContext as MainViewModel)?.Shell.AccountMenu.Refresh();
         };
+        // The icon rail hides the footer labels with a style. When that happens with no change in the row's
+        // constraint (e.g. a theme applied while already in the rail), the hidden label keeps its old DesiredSize:
+        // the row still counts it plus the spacing, fills the rail, and the gear and avatar sit flush left instead of
+        // centred. Whenever a label's visibility changes, invalidate the label and its row so both are measured again.
+        foreach (var title in SidebarFooter.GetLogicalDescendants().OfType<TextBlock>().Where(t => t.Classes.Contains("foot-title")))
+            title.PropertyChanged += (_, e) =>
+            {
+                if (e.Property != IsVisibleProperty) return;
+                title.InvalidateMeasure();
+                (title.Parent as Layoutable)?.InvalidateMeasure();
+            };
         AttachLogDock();
         AddHandler(KeyDownEvent, OnShellKeyDown, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, OnShellPointerPressed, RoutingStrategies.Tunnel);

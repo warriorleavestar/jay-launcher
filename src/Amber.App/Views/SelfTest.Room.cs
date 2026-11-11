@@ -85,6 +85,23 @@ internal sealed partial class SelfTest
         vm.InviteOptionsOpen = false;
         await ShotAsync("房间-1440");
 
+        // Room opened before the game: the invite card says what it waits for and takes a port; nothing is connected yet.
+        Check("先开房间：有游戏时不显示等游戏", Named<Border>("GameLinkPanel")?.IsEffectivelyVisible == false);
+        var savedPort = vm.ManualPort;
+        var savedGame = vm.SelectedLanGame;
+        vm.ManualPort = "";
+        vm.SelectedLanGame = null;
+        var relayReady = await vm.PrepareGameRelayForTest();
+        await Task.Delay(300);
+        Check("先开房间：邀请卡写在等游戏，给端口框和【查找】", relayReady && vm.IsWaitingForGame && Named<Border>("GameLinkPanel")?.IsEffectivelyVisible == true
+            && Named<TextBox>("GameLinkPortBox")?.IsEffectivelyVisible == true && Named<Button>("GameLinkFindButton")?.IsEffectivelyVisible == true
+            && HasText(L.T("multiplayer.relay.waiting")));
+        await ShotAsync("房间-先开房间等游戏");
+        vm.StopGameRelayForTest();
+        vm.ManualPort = savedPort;
+        vm.SelectedLanGame = savedGame;
+        await Task.Delay(200);
+
         // A knock: the locked panel at the top, "No" focused, the countdown; Alt+N says no.
         var book = new InviteBook();
         KnockRequest Knock(string name, byte[] key) => new(name, key, "Jay 0.8", false, book.Create(1, null, false, TunnelSettings.Default));

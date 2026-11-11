@@ -14,7 +14,9 @@ Codes that must travel are either public by design (a public key) or never leave
 | Contact code `JAYC1-…` | Anywhere (public) | Sending that person mail they still have to accept. Not reading their mail, not posing as them. |
 | Emoji check (4 emoji) | Voice, in person, video | Nothing; it is only compared. |
 | Room invite sent by mail | Sealed mail through the directories | Nothing: sealed to one recipient, bound to that recipient's key, names the host's key. |
-| Old `JAY2-` / `JAY2D-` codes | Still accepted (LAN, offline, older Jay) | As before. Mailing an invite is the new default path; the old codes are the fallback. |
+| Plain `JAY2-` invite | Still accepted (LAN, offline) | Knocking with a one-use token the host still has to approve. No IP, port or room secret in it. |
+| Sealed direct code `JAYDS1-` / reply `JAYDR1-` | Anywhere; the 16-digit passphrase by another way (call, in person) | Nothing without the passphrase: the addresses and the invite inside are encrypted. With both, the host's IP and a one-use, 10-minute invite the host still approves. |
+| `JAY2D-` / `JAY2R-` direct codes | Removed: refused with a hint to send a `JAY2-` invite | They carried both sides' public IPs. Direct rooms now hand out plain `JAY2-` invites. |
 
 ## Contact codes
 
@@ -87,57 +89,154 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 `Public/DirectoryTrust.cs`, `Public/DirectoryChannel.cs`. Jay picks one of these before sending a directory anything:
 
 1. **Pinned**: keys in the signed connection string (`dirKeys`, #145).
-2. **Root-certified**: the connection string lists Ed25519 root keys (`dirRoots`, at most 4). The built-in network uses
-   `PublicNetworkProfile.JayDirectoryRoots`.
-   - A directory sends `{"c","r","s"}` as the payload of its handshake message. Older Jay versions ignore it.
-   - `c` is `{"key","net","exp"}` and `s` is the root's signature over `"jay-directory-cert-v1\n" ‖ c`.
-   - Jay accepts the key if the root is listed, `net` is this network's EasyTier name, it hasn't expired, and `key` is
-     the key the directory just proved.
+2. **Root-certified**: the connection string lists root key ids (`dirRoots`, at most 4; each the SHA-256 id of a hybrid
+   Ed25519 + ML-DSA-65 key, see `TrustSigner`) and how many of them must
+   sign (`dirRootsNeed`, default 1). The built-in network uses the Jay trustees (`JayTrust`): 2 of 3.
+   - A directory sends `{"c","sigs"}` as the payload of its handshake message.
+   - `c` is `{"key","net","exp"}`; `sigs` is a list of base64 `TrustSignature` entries (both public keys, an Ed25519
+     and an ML-DSA-65 signature over `"jay-directory-cert-v2\n" ‖ c`, about 5.3 KB each). Both algorithms must verify;
+     one bad signature rejects the certificate.
+   - Jay accepts the key if enough distinct listed roots signed, `net` is this network's EasyTier name, it hasn't
+     expired, and `key` is the key the directory just proved.
 3. **First use** (networks with neither): the first key seen at each directory address is remembered in
-   `directory-keys.json`. After that, only that key is accepted, with no legacy fallback for that address.
-   `DirectoryKeyChangedException` tells the user to remove and re-add the network if the change was intended. Until a key
-   is remembered, a directory that only speaks the old protocol still works.
+   `directory-keys.json`. After that, only that key is accepted for that address.
+   `DirectoryKeyChangedException` tells the user to remove and re-add the network if the change was intended. There is no
+   plaintext protocol to fall back to.
 
-### Making the root key for the built-in network (project owner, offline)
+### Trustee keys for the built-in network (offline, one per person)
+
+The built-in network's directory certificates, and reviewed network strings, need 2 of the 3 Jay trustees
+(`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
 
 ```bash
-jay-server network root-key --out <usb>/jay-directory-root.key
-# prints the root public key → paste it into PublicNetworkProfile.JayDirectoryRoots and release
+jay-server network root-key --out <usb>/jay-trustee.key --paper
+# asks for a passphrase (the file is sealed with Argon2id + ChaCha20-Poly1305), shows the two paper lines once,
+# prints the full public key → it goes into JayTrust.Keys, then a release
+jay-server network paper-check --key <usb>/jay-trustee.key   # check the hand-copied lines
 
 # on each directory node: print its directory public key (makes directory.key on first use)
 jay-server network dir-key --dir <node data dir>
 
-# on the offline machine, with only that public key:
-jay-server network dir-cert --root <usb>/jay-directory-root.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# trustee 1, offline, with only that public key:
+jay-server network dir-cert --root <usb>/jay-trustee.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
+# trustee 2, on their own offline machine, adds their signature to the same file:
+jay-server network dir-cert --cosign directory.cert --root <usb>/jay-trustee.key
 # copy directory.cert into the node's data dir; the node logs "directory certificate" at start
 ```
 
-Keep the root private key off servers, CI, cloud drives and the repository. Certificates are not secret. A new or
-re-keyed node needs only a new certificate, not a Jay release. Rotating the root itself needs a release with both roots
-listed for a while (up to 4).
+No trustee key goes on a server, CI, a cloud drive, a chat or the repository. Certificates are not secret. A new or
+re-keyed node needs only a new certificate, not a Jay release. If one trustee loses their key, the other two can still
+sign; replacing a trustee needs a release with the new public key.
 
-## In the app
+## Direct links without an IP in any code (done)
 
-- **Contacts card** (Multiplayer settings): my contact code (shown as "contact code", unlike the JAYF1 "friend code"),
-  a box for theirs, exchanges in progress and the contact list. A JAYC1 pasted anywhere (Ctrl+V, the join box) lands
-  in this box; nothing is mailed until [Add].
-- **Emoji card**: four large emoji, each with its localized name under it and as its accessible name
-  (`multiplayer.contacts.emoji_names`, 64 names per language). [They match] saves the contact; [They don't match]
-  drops the exchange and suggests sending the code another way.
-- **Mail pick-up**: `ContactPost.CheckAsync` every 30 s while the public network is connected, and right after
-  connecting. Add requests and ready-to-compare exchanges are mirrored as activity-centre requests.
-- **Invite a contact** (room header, host only): a one-use, 30-minute invite bound to the contact's key and let in
-  without asking, mailed with the host's key. Joining from the request knocks with `expectedHost`; a different host
-  stops the knock before the guest says anything (`WrongHostException`, also for public-network and lobby knocks).
-- **Held back**: no receipt after 3 minutes shows a banner in the room naming the other ways in: the invite dialog
-  (direct link) or the game's LAN list when both are on the same network.
+A direct room hands out a plain `JAY2-` invite. The guest knocks over the lobby (relay, LAN or public network) as for any
+room. Only when the host approves does the encrypted knock reply carry the host's addresses (`"direct"`, built from
+`DirectAddresses`); the guest answers with its own inside the encrypted ack, tagged with the host's session id. Then both
+sides punch at once, and the room falls back to the relays if that fails. Someone who copies the invite learns no address
+of either side, and a rejected or expired knock gets none either. The bridge's control messages (authenticated, not
+encrypted) carry only the session id. `JAY2D-` / `JAY2R-` are refused.
+
+## Direct links with no server at all: sealed codes
+
+For two people with no relay, no public network and no shared LAN. `Multiplayer/SealedDirect.cs`:
+
+- The host's `JAYDS1-` code holds its `DirectAddresses` and a one-use JAY2 invite, encrypted. Jay makes up a
+  16-digit passphrase (about 53 bits); the host tells it by another way. The key is Argon2id(passphrase, 16-byte salt
+  in the code; 64 MiB, 3 passes), and HKDF-SHA256 splits it into an offer key, a reply key and a 4-byte key id. Both codes
+  use ChaCha20-Poly1305 with the prefix (and salt or key id) as associated data.
+- The friend opens it, gets a `JAYDR1-` reply sealed under the same passphrase (no second passphrase), and sends it
+  back. Both sides punch; the friend knocks over the bridge, which reaches only the host's lobby, and the host approves
+  as usual.
+- Each code expires after 10 minutes (the time is inside the ciphertext); a code dated far ahead is refused.
+- Limits, said in the UI: whoever holds both the code and the passphrase can read the IP, so they must not be pasted
+  together. A stolen code is an offline guessing target for the passphrase; 53 bits behind 64 MiB of Argon2id per guess
+  makes that impractical (centuries at a million guesses a second).
+
+## Jay server invites: a domain or a sealed code
+
+`Multiplayer/Gate/GateInvite.cs`. Rule: a code may name a server by its domain, never by a raw IP, and never names the player.
+
+- `JAYS2-` (plain, Crockford Base32) carries the gate's domain and port, the gate key hash, the one-use token and the
+  optional port rotation. The player's name is gone: the gate keeps which name an invite is for and returns it at
+  enrollment. A plain code with an IP in it is refused when made and when pasted.
+- A server with only an IP (a home server, a LAN test, a privacy-plus relay with no name) gets `JAYSS1-` instead: the same
+  bytes sealed with a new 16-digit passphrase, the same construction as the sealed direct codes (Argon2id, HKDF info
+  `jay-sealed-server-invite-v1`, ChaCha20-Poly1305, prefix + salt as associated data). The admin tells the passphrase
+  another way. No expiry inside: the gate still expires and counts the token.
+- Old `JAYS1-` codes (IP and player name in plain sight) are recognised and refused with "ask the admin for a new one".
+- Diagnostics redact `JAYS1`, `JAYS2` and `JAYSS1` codes (they hold a token).
+
+### IP-only servers without a passphrase: signed address records
+
+`Gate/GateRecord.cs`, `Gate/GateRecordPublisher.cs`, turned on with `jay-server records on [--network …]`.
+
+- The gate keeps an Ed25519 record key (`record.key`, 0600) and a random 16-byte locator id. Invites (`JAYS2-`
+  version 3) then carry the network id, the locator id, a hash of the record key, the gate key hash and the token: no
+  host, no port, no passphrase.
+- While `jay-server run` runs, it joins that public network with its own EasyTier and puts a `SignedRecord` (ops
+  `rec.put` / `rec.get`, #219) every 12 hours (3-day lifetime). Lookup and seal key come from the locator id, so a
+  directory sees neither the id nor the address. The record lists the gate's own entry, or its relays in privacy-plus
+  mode, with port rotation.
+- At enrollment Jay joins the network briefly, gets the record, accepts it only when the signer matches the hash in
+  the invite (someone who saw an invite can't redirect others), opens it and enrolls as usual; the gate key is still
+  pinned by the handshake.
+- The phone app can't join a public network yet and asks for a sealed invite instead. With records off, IP-only
+  servers fall back to `JAYSS1-` sealed invites.
+
+### Relay share codes: domains, a record locator or a sealed code
+
+`Multiplayer/RelayNodes.cs`, `Multiplayer/Public/RelayRecord.cs`.
+
+- Relays that all go by a domain are shared as plain `AMBNODE-` codes.
+- Relays with an IP, while the sharer is on a public network: `JAYNR1-` carries the network id, a random 16-byte
+  locator id and a hash of the sharer's record key (`relay-record.key` in the data folder, created once). The relay list
+  is in a `SignedRecord` on that network's directories, put at share time and renewed on every connection (7-day
+  lifetime). The reader must be on the same public network, accepts only a record signed by the key in the code, and
+  adds the relays. Diagnostics redact `JAYNR1`.
+- Not on a public network: `JAYNS1-`, sealed with a 16-digit passphrase (same construction as the server invites, HKDF
+  info `jay-sealed-nodes-v1`).
+- If the sharer stays off the network for over 7 days the record expires and the code stops resolving; sharing again
+  renews it with the same code.
 
 ## Still to do
 
-- **Direct links without an IP in the code**: rendezvous through mail (each side mails its candidates, sealed), so
-  JAY2D/JAY2R no longer carry public IPs.
 - **Relay enrollment the other way around**: a relay generates its own key and the admin approves its fingerprint, so
   JAYR1 codes carry no secret.
-- **Jay server invites (JAYS1) bound to the player's identity key**, the same way room invites are.
+- **Jay server invites (JAYS2) bound to the player's identity key**, the same way room invites are.
 - **Flood limits**: per-sender limits once directories can see a stable sender (for example, a cheap proof of work per
   post).
+
+## One-shot rendezvous records
+
+`Public/Rendezvous.cs`, directory ops `rv.put` / `rv.take` in `Public/RoomDirectory.cs`. These let a code carry a random token
+instead of an address: the publisher puts a sealed record on the directories, the code's holder takes it once.
+
+- **Derivation**: from a token of at least 16 random bytes, id = `HKDF-SHA256(token, info "jay-rv-id-v1")` (32 bytes) and
+  seal key = `HKDF-SHA256(token, info "jay-rv-seal-v1")`. The record is ChaCha20-Poly1305 with a random nonce and the id as
+  associated data. The directory sees only the id and the opaque record, never the token.
+- **Single use**: `rv.take` removes the record in the same step that returns it. The client asks every directory at once,
+  so taking the record also clears the other copies.
+- **No overwrite**: `rv.put` on an id that is still waiting is refused with `exists`, so nobody can replace a record they
+  didn't publish.
+- **Encrypted channel**: like every directory op, only over `DirectoryChannel`.
+- **Limits**: 2 KB per record, at most 10 minutes, 4096 records per directory, 30 puts per source address per 10 minutes.
+  Nothing is written to disk. The node's `/metrics` shows only the number of waiting records (`jay_rendezvous_records`).
+
+## Long-lived signed records
+
+`Public/SignedRecord.cs`, directory ops `rec.put` / `rec.get` in `Public/RoomDirectory.cs`. A server or network that has no
+domain name publishes where it is as a signed record, and its code carries an id instead of the address.
+
+- **Derivation**: from an id of at least 16 bytes held by the code, lookup = `HKDF-SHA256(id, info "jay-rec-lookup-v1")`
+  (32 bytes) and seal key = `HKDF-SHA256(id, info "jay-rec-seal-v1")`. The blob is ChaCha20-Poly1305 with a random nonce
+  and the lookup as associated data, so the directory sees neither the id nor the contents.
+- **Signature**: Ed25519 over `"jay-rec-v1" ‖ lookup ‖ signer ‖ seq ‖ expires ‖ len(blob) ‖ blob` (`RecordSigner`). The
+  directory checks it, and the reader also checks the signer against what its code expects, so a directory can withhold a
+  record but never substitute one.
+- **Ownership**: the first signer owns a lookup until its record expires. A different signer gets `owner`; the same
+  signer replaces it only with a higher seq (`stale` otherwise).
+- **Lifetime**: at most 7 days per put, renewed by putting it again.
+- **Encrypted channel**: like every directory op, only over `DirectoryChannel`.
+- **Limits**: 4 KB per blob, 20000 records per directory, 60 puts per source address per hour, memory only. `/metrics`
+  shows the total (`jay_signed_records`).

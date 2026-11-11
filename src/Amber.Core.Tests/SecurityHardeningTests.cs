@@ -54,11 +54,11 @@ public sealed class SecurityHardeningTests : IDisposable
     [Fact]
     public void CraftedServerInviteIsRejectedNotThrown()
     {
-        // A valid checksum around a body whose last length byte points past the end.
-        var body = new List<byte> { 1, 1, (byte)'a', 0x63, 0xDD };
+        // A valid checksum around a body whose host length byte points past the end.
+        var body = new List<byte> { 1, 200, (byte)'a', 0x63, 0xDD };
         body.AddRange(new byte[GateInvite.KeyHashLength + GateInvite.TokenLength]);
         var bytes = body.ToArray();
-        var checksum = SHA256.HashData([.. "jay-invite-v1"u8, .. bytes])[..4];
+        var checksum = SHA256.HashData([.. "jay-invite-v2"u8, .. bytes])[..4];
         var text = GateInvite.Prefix + GateInvite.Base32Encode([.. bytes, .. checksum]);
 
         var invite = GateInvite.TryParse(text, out var error);

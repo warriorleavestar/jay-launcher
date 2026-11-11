@@ -23,8 +23,8 @@ public class ReverificationFixTests
     private static (CipherState, CipherState, CipherState, CipherState) Keys()
     {
         var psk = RandomNumberGenerator.GetBytes(32);
-        using var i = new NoiseHandshake(NoisePattern.NNpsk0, true, [], psk);
-        using var r = new NoiseHandshake(NoisePattern.NNpsk0, false, [], psk);
+        using var i = new NoiseHandshake(NoisePattern.NNhfspsk0, true, [], psk);
+        using var r = new NoiseHandshake(NoisePattern.NNhfspsk0, false, [], psk);
         r.ReadMessage(i.WriteMessage([]));
         i.ReadMessage(r.WriteMessage([]));
         var (iSend, iReceive) = i.Split();

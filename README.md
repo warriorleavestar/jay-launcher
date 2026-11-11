@@ -125,7 +125,7 @@ Jay's window needs a desktop session (X11, or Wayland with XWayland) and the lib
 - **Remote help.** Ask to see and control a friend's screen to fix something for them. They accept every time, see a red border while it runs, and Ctrl+Shift+F12 stops it at once.
 - **Public rooms** *(experimental)*. Browse a room list, request to join, or protect a room with a password. Rooms are signed by the host, so nobody can fake or replay them.
 - **Practice and diagnose.** A safe drill mode walks you through a knock without touching the network, and the "Connection trouble?" drawer runs a full test matrix and writes a report with secrets removed.
-- **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS1-` invite; unknown connections get not a single byte back.
+- **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS2-` invite; unknown connections get not a single byte back.
 
 Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), in Jay's hardened build ([jay-easytier](https://github.com/Yumao-Feather/jay-easytier)), which Jay downloads and verifies the first time you use multiplayer. The default mode needs no admin rights and installs no driver.
 

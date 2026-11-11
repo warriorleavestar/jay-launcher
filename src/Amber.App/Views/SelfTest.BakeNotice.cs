@@ -34,6 +34,17 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
         if (!ok) throw new InvalidOperationException(name);
     }
 
+    /// <summary>The bake-related fields of the saved settings file (ExperimentalBake, BakeLoaderPath, …) as one string.</summary>
+    private static string BakeSettingsSnapshot()
+    {
+        if (!File.Exists(AppSettings.FilePath)) return "";
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(AppSettings.FilePath));
+        return string.Join(";", doc.RootElement.EnumerateObject()
+            .Where(p => p.Name.Contains("Bake", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.Name, StringComparer.Ordinal)
+            .Select(p => $"{p.Name}={p.Value.GetRawText()}"));
+    }
+
     private void Show(string id, Action? retry = null) => Toasts.BakeFailed(L.F("home.bake.crashed_toast", id), retry ?? (() => { }));
 
     private static Rect BoundsIn(Control control, Visual target) =>
@@ -108,7 +119,7 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             Check("自检使用显式独立数据/游戏目录", !string.IsNullOrWhiteSpace(dataDir)
                 && Path.GetFullPath(Home.Service.Directory.Root).StartsWith(Path.GetFullPath(dataDir) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
             main.CurrentPage = Home;
-            var settingsBefore = File.ReadAllText(AppSettings.FilePath);
+            var settingsBefore = BakeSettingsSnapshot();
             const string instance = "E2E-Bake-Sodium";
             var original = new LaunchRequest(instance, JoinServer: "localhost:25565", JoinWorld: null);
             var request = original with { SkipBake = true };
@@ -165,7 +176,10 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
             Check("实际按钮点击已触发一次回调并移除通知", calls.Count == 1 && State.Notices.Count == 0);
             pendingRetry.Execute(null);
             Check("按钮只回调一次且保留实例/加入目标/SkipBake", calls.Count == 1 && calls[0] == request && request.VersionId == original.VersionId);
-            Check("按钮移除通知，烘焙设置未改变", State.Notices.Count == 0 && File.ReadAllText(AppSettings.FilePath) == settingsBefore);
+            // Only the bake settings matter here: the language and theme switches above legitimately save other fields.
+            var settingsAfter = BakeSettingsSnapshot();
+            Check("按钮移除通知，烘焙设置未改变", State.Notices.Count == 0 && settingsAfter == settingsBefore,
+                $"before={settingsBefore}; after={settingsAfter}");
             window.UpdateLayout();
             Check("通知结束后原状态文字恢复", !Host.IsVisible && LaunchStatus.IsVisible);
             using (var simulatedGame = Process.GetCurrentProcess())
@@ -377,7 +391,8 @@ internal sealed class BakeNoticeSelfTest(MainWindow window, MainViewModel main, 
                     && ToolTip.GetTip(download)?.ToString() == L.T(published ? "settings.bake.download_hint" : "core.bake.download_unpublished"));
                 var unpublished = window.PageHost.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "BakeDownloadUnpublishedText");
                 Check($"下载加载器 {language}-{width}：未发布时按钮关着并写明原因", published
-                    ? download.IsEffectivelyEnabled && !unpublished.IsVisible
+                    // The whole install row follows the "Bake" switch, so with bake off the button is greyed by its parent.
+                    ? download.IsEnabled && download.IsEffectivelyEnabled == settings.ExperimentalBake && !unpublished.IsVisible
                     : !download.IsEffectivelyEnabled && unpublished.IsEffectivelyVisible && unpublished.Text == L.T("core.bake.download_unpublished"));
                 var cancel = window.PageHost.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "BakeDownloadCancelButton");
                 Check($"下载加载器 {language}-{width}：没在下载时不显示取消", !cancel.IsVisible);

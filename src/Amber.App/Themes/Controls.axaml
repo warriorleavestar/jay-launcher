@@ -403,6 +403,13 @@
   <Style Selector="Button.shell-foot Path.icon">
     <Setter Property="Stroke" Value="{DynamicResource SidebarText}" />
   </Style>
+  <!-- A page's main vertical scroller. Fluent draws the scrollbar over the content (16 wide when expanded), so
+       right-aligned controls ended up under it. Reserve that width as padding inside the scroller and pull the
+       scroller into the page gutter by the same amount: content keeps its right edge, the bar sits in the gutter. -->
+  <Style Selector="ScrollViewer.page-scroll">
+    <Setter Property="Margin" Value="0,0,-16,0" />
+    <Setter Property="Padding" Value="0,0,16,0" />
+  </Style>
   <!-- 图标栏：底部按钮只留图标，居中 -->
   <Style Selector="Border.sidebar.rail Button.shell-foot">
     <Setter Property="HorizontalContentAlignment" Value="Center" />

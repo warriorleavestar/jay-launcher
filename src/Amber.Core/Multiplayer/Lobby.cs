@@ -34,6 +34,8 @@ public sealed class HostLobby : IAsyncDisposable
     public event Action<KnockRequest, MemberEntry>? Withdrawn;
     /// <summary>失败的敲门太多，暂停 60 秒。</summary>
     public event Action? Paused;
+    /// <summary>Direct rooms: an approved guest sent its addresses in the encrypted knock ack.</summary>
+    public event Action<KnockRequest, MemberEntry, DirectAddresses>? DirectAnswered;
 
     public bool IsOpen => _lobby is not null;
 
@@ -59,7 +61,8 @@ public sealed class HostLobby : IAsyncDisposable
         Func<RoomCredentials> credentials, Func<byte[], bool> isTrusted, Func<KnockRequest, CancellationToken, Task<bool>> approve, MemberTable members, Action<string>? log = null,
         InviteBook? book = null, int? listenUdpPort = null, Func<Public.DevicePolicy>? devicePolicy = null,
         Func<Public.AccountPolicy?>? accountPolicy = null, Func<TimeSpan>? decisionWait = null, Action<KnockRequest>? timedOut = null,
-        Func<string, bool>? isTrustedJayAccount = null, Func<Identity.DeviceCertificate?>? jayCertificate = null, Func<bool>? alwaysAsk = null)
+        Func<string, bool>? isTrustedJayAccount = null, Func<Identity.DeviceCertificate?>? jayCertificate = null, Func<bool>? alwaysAsk = null,
+        Func<DirectAddresses?>? directOffer = null)
     {
         HostLobby? lobby = null;
         lobby = new HostLobby(
@@ -69,7 +72,8 @@ public sealed class HostLobby : IAsyncDisposable
             book =>
             {
                 var server = new KnockServer(book, identity, credentials, isTrusted, approve, IPAddress.Loopback, KnockProtocol.Port, log, members: members)
-                    { DevicePolicy = devicePolicy, AccountPolicy = accountPolicy, DecisionWait = decisionWait, IsTrustedJayAccount = isTrustedJayAccount, JayCertificate = jayCertificate, AlwaysAsk = alwaysAsk };
+                    { DevicePolicy = devicePolicy, AccountPolicy = accountPolicy, DecisionWait = decisionWait, IsTrustedJayAccount = isTrustedJayAccount, JayCertificate = jayCertificate, AlwaysAsk = alwaysAsk,
+                      DirectOffer = directOffer };
                 if (timedOut is not null) server.TimedOut += timedOut;
                 return server;
             },
@@ -102,6 +106,7 @@ public sealed class HostLobby : IAsyncDisposable
                     _knock.Issued += (r, m) => Issued?.Invoke(r, m);
                     _knock.Withdrawn += (r, m) => Withdrawn?.Invoke(r, m);
                     _knock.Admitted += r => Admitted?.Invoke(r);
+                    _knock.DirectAnswered += (r, m, a) => DirectAnswered?.Invoke(r, m, a);
                     _knock.Paused += () => Paused?.Invoke();
                     _knock.SessionEnded += () => _ = UpdateQuietlyAsync();
                     _lobby = _startLobby(new LobbyOptions(lobby.Name, lobby.Secret, true, _peers(), EasyTierArgs.FreeTcpPort(), ListenUdpPort: ListenUdpPort));
@@ -173,7 +178,8 @@ public static class LobbyJoin
     /// <param name="relayFound">连上了中继节点（大厅里看到了除自己以外的对端），在找房主。</param>
     public static async Task<KnockOutcome> KnockAsync(EasyTierInstaller installer, string workDir, IReadOnlyList<string> peers, JayInvite invite,
         X25519KeyPair me, string name, string version, Action<string>? log, Action? hostFound, CancellationToken ct, Action? relayFound = null,
-        Public.DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null, byte[]? expectedHost = null)
+        Public.DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null, byte[]? expectedHost = null,
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         var localPort = EasyTierArgs.FreeTcpPort();
         var options = new LobbyOptions(LobbyKeys.LobbyName(invite.LobbyKey), LobbyKeys.LobbySecret(invite.LobbyKey), false, peers, EasyTierArgs.FreeTcpPort(), localPort);
@@ -195,7 +201,7 @@ public static class LobbyJoin
             try
             {
                 await client.ConnectAsync(IPAddress.Loopback, localPort, ct);
-                return await KnockClient.KnockAsync(client.GetStream(), invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHost, jay: jay);
+                return await KnockClient.KnockAsync(client.GetStream(), invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHost, jay: jay, direct: direct);
             }
             catch (Exception e) when (attempt < 2 && e is IOException or SocketException && !ct.IsCancellationRequested)
             {

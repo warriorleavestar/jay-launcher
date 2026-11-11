@@ -81,6 +81,12 @@ public sealed class AppSettings
     /// <summary>Jay 公共网络的种子节点（程序里内置的之外，自己加的；比如朋友的 VPS 上跑的 jay-server directory）。</summary>
     public List<string>? PublicNetworkNodes { get; set; }
 
+    /// <summary>
+    /// The public network on which this Jay keeps a signed record of its relays (set when a relay share code went out as a
+    /// JAYNR1 record code; Jay puts the record again each time it connects there). Null: none.
+    /// </summary>
+    public string? RelayRecordNetwork { get; set; }
+
     /// <summary>Volunteer node: let other players reach the public network through this computer (off by default).</summary>
     public bool VolunteerNode { get; set; }
 

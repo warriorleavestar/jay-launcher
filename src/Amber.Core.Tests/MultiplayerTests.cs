@@ -1,4 +1,5 @@
 using Amber.Core.Multiplayer;
+using Amber.Core.Localization;
 
 namespace Amber.Core.Tests;
 
@@ -174,15 +175,51 @@ public class RelayNodeTests
         Assert.Equal(["tcp://a.example.com:11010", "udp://a.example.com:11010"], urls);
     }
 
-    /// <summary>node/install.sh 和 node/install-windows.ps1 打印的分享码（两边输出逐字节相同）。</summary>
+    /// <summary>node/install.sh 和 node/install-windows.ps1 打印的分享码（有域名时才打印，两边输出逐字节相同）。</summary>
     [Theory]
-    [InlineData("AMBNODE-eyJ2IjoxLCJuYW1lIjoi5bCP5piOIFwi5rWL6K-VXCIgXFwg6IqC54K5IiwicGVlcnMiOlsidGNwOi8vMjAzLjAuMTEzLjU6MTEwMTAiLCJ1ZHA6Ly8yMDMuMC4xMTMuNToxMTAxMCJdfQ", @"小明 ""测试"" \ 节点")]
-    [InlineData("AMBNODE-eyJ2IjoxLCJwZWVycyI6WyJ0Y3A6Ly8yMDMuMC4xMTMuNToxMTAxMCIsInVkcDovLzIwMy4wLjExMy41OjExMDEwIl19", null)]
+    [InlineData("AMBNODE-eyJ2IjoxLCJwZWVycyI6WyJ0Y3A6Ly9ub2RlLmV4YW1wbGUuY29tOjExMDEwIiwidWRwOi8vbm9kZS5leGFtcGxlLmNvbToxMTAxMCJdfQ", null)]
     public void ShareCode_FromNodeScripts(string code, string? expectedName)
     {
         Assert.True(RelayNodes.TryDecode(code, out var name, out var urls));
         Assert.Equal(expectedName, name);
-        Assert.Equal(["tcp://203.0.113.5:11010", "udp://203.0.113.5:11010"], urls);
+        Assert.Equal(["tcp://node.example.com:11010", "udp://node.example.com:11010"], urls);
+    }
+
+    /// <summary>Old scripts printed codes with the node's IP: those nodes are never imported from a plain code.</summary>
+    [Theory]
+    [InlineData("AMBNODE-eyJ2IjoxLCJuYW1lIjoi5bCP5piOIFwi5rWL6K-VXCIgXFwg6IqC54K5IiwicGVlcnMiOlsidGNwOi8vMjAzLjAuMTEzLjU6MTEwMTAiLCJ1ZHA6Ly8yMDMuMC4xMTMuNToxMTAxMCJdfQ")]
+    [InlineData("AMBNODE-eyJ2IjoxLCJwZWVycyI6WyJ0Y3A6Ly8yMDMuMC4xMTMuNToxMTAxMCIsInVkcDovLzIwMy4wLjExMy41OjExMDEwIl19")]
+    public void ShareCode_WithAnIpIsRefused(string code)
+    {
+        Assert.False(RelayNodes.TryDecode(code, out _, out _));
+        Assert.False(RelayNodes.TryOpen(code, null, out _, out _, out var error));
+        Assert.Equal(L.T("multiplayer.nodes.invalid_share_code"), error);
+    }
+
+    /// <summary>A node with only an IP (a home relay): the share code is sealed, shows no IP, and opens with the passphrase.</summary>
+    [Fact]
+    public void ShareCode_WithAnIpNodeIsSealed()
+    {
+        string[] nodes = ["tcp://203.0.113.5:11010", "udp://relay.example.com:11010"];
+        Assert.Throws<InvalidOperationException>(() => RelayNodes.Encode("家里", nodes));
+        var (code, passphrase) = RelayNodes.Share("家里", nodes);
+        Assert.NotNull(passphrase);
+        Assert.StartsWith(RelayNodes.SealedPrefix, code);
+        Assert.True(RelayNodes.IsSealed(code));
+        Assert.DoesNotContain("203.0.113.5", code);
+        Assert.DoesNotMatch(@"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", code);
+        Assert.Equal(PastedCodeKind.NodeShare, PastedCode.Detect(code));
+        Assert.False(RelayNodes.TryDecode(code, out _, out _));
+        Assert.False(RelayNodes.TryOpen(code, "0000 0000 0000 0000", out _, out _, out var error));
+        Assert.Equal(L.T("core.mp.sealed.wrong_passphrase"), error);
+        Assert.True(RelayNodes.TryOpen("拿去：" + code, passphrase, out var name, out var urls, out error));
+        Assert.Null(error);
+        Assert.Equal("家里", name);
+        Assert.Equal(nodes, urls);
+        // Domains only: still the plain code.
+        var (plain, none) = RelayNodes.Share(null, ["tcp://relay.example.com:11010"]);
+        Assert.Null(none);
+        Assert.StartsWith("AMBNODE-", plain);
     }
 
     [Fact]

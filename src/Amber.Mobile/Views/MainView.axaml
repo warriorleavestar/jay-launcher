@@ -36,7 +36,8 @@
             <StackPanel Spacing="12">
               <TextBlock Text="{Binding EnrollTitle}" FontSize="17" FontWeight="SemiBold" />
               <TextBlock Text="{Binding EnrollHint}" Foreground="{DynamicResource SecondaryText}" TextWrapping="Wrap" />
-              <TextBox Text="{Binding InviteText}" AcceptsReturn="True" MinHeight="96" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" PlaceholderText="JAYS1-..." />
+              <TextBox Text="{Binding InviteText}" AcceptsReturn="True" MinHeight="96" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" PlaceholderText="JAYS2-..." />
+              <TextBox Text="{Binding InvitePassphrase}" IsVisible="{Binding InviteIsSealed}" PlaceholderText="{Binding PassphrasePlaceholder}" />
               <Button Classes="primary" Command="{Binding EnrollCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Stretch">
                 <TextBlock Text="{Binding EnrollButtonText}" TextWrapping="Wrap" />
               </Button>

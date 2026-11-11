@@ -74,9 +74,9 @@ public sealed class SecretsStayOutOfLogsTests
         await chat.ConnectAsync("127.0.0.1", hub.Port);
         Assert.True(await WaitAsync(() => hub.MemberCount == 1));
 
-        // 直连码：同一张邀请包进 JAY2D-，回复码 JAY2R-。
-        var direct = new DirectCode(false, "0123456789abcdef", NatKind.Cone, [new Candidate(PathKind.Punch, new IPEndPoint(IPAddress.Parse("203.0.113.7"), 40000))], invite);
-        var reply = new DirectCode(true, "0123456789abcdef", NatKind.Cone, [new Candidate(PathKind.Punch, new IPEndPoint(IPAddress.Parse("198.51.100.9"), 40001))]);
+        // Direct-link addresses (sent only inside the encrypted knock): their ToString must not print an address either.
+        var direct = new DirectAddresses("0123456789abcdef", NatKind.Cone, [new Candidate(PathKind.Punch, new IPEndPoint(IPAddress.Parse("203.0.113.7"), 40000))]);
+        var reply = new DirectAddresses("0123456789abcdef", NatKind.Cone, [new Candidate(PathKind.Punch, new IPEndPoint(IPAddress.Parse("198.51.100.9"), 40001))]);
 
         // 踢人：通知、移出、作废邀请，再换网络。
         // 被踢的人回了确认才断开：他那边一定已经收到通知。
@@ -94,7 +94,7 @@ public sealed class SecretsStayOutOfLogsTests
         foreach (var o in new object[] { credentials, next, next.ToRekey(), hostRoom, entry, entry.Key, outcome.Credentials, direct, reply, pending })
             Capture(o.ToString() ?? "");
         // 有人把码原样写进了日志：诊断报告要遮掉（房间密钥按房间的 Secrets 遮）。
-        diag.Add("pasted", $"invite {invite} direct {direct.Encode()} reply {reply.Encode()}");
+        diag.Add("pasted", $"invite {invite}");
         var report = NetDiagnostics.BuildReport("test", diag.Snapshot(), null, [.. hostRoom.Secrets, .. next.ToRekey() is var r ? new[] { r.Network, r.Secret } : []], includePublicIps: false);
 
         string[] secrets =
@@ -103,7 +103,7 @@ public sealed class SecretsStayOutOfLogsTests
             Convert.ToBase64String(psk), Convert.ToHexString(psk),
             invite.ToString(), Convert.ToHexString(lobbyKey), Convert.ToHexString(invite.Token),
             LobbyKeys.LobbySecret(lobbyKey), LobbyKeys.LobbyName(lobbyKey),
-            direct.Encode(), direct.Encode()[6..], reply.Encode()[6..],
+            "203.0.113.7", "198.51.100.9",
         ];
         // 日志里本来就不该写出来的（除了故意写进去的那一行“pasted”）。
         var logged = string.Join("\n", captured.Where(l => !l.Contains("[pasted]", StringComparison.Ordinal)));

@@ -196,7 +196,7 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.Equal(1, real.UsesLeft);
     }
 
-    /// <summary>编号对、令牌不对（psk 不对）：XXpsk0 的第一条消息房主就读不过，什么都不回（拿不到房主的长期公钥），也不算用掉。</summary>
+    /// <summary>编号对、令牌不对（psk 不对）：XXhfspsk0 的第一条消息房主就读不过，什么都不回（拿不到房主的长期公钥），也不算用掉。</summary>
     [Fact]
     public async Task WrongTokenFailsAtFirstMessage()
     {
@@ -207,7 +207,7 @@ public sealed class KnockTests : IAsyncDisposable
         var stream = client.GetStream();
         var wrongPsk = LobbyKeys.KnockPsk(RandomNumberGenerator.GetBytes(16));
         var id = LobbyKeys.InviteId(real.Invite.Token);
-        using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(real.Invite.LobbyKey), id), wrongPsk, _guest);
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(real.Invite.LobbyKey), id), wrongPsk, _guest);
         await KnockProtocol.WriteFrameAsync(stream, LobbyKeys.InviteId(real.Invite.Token), default);
         await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -288,7 +288,7 @@ public sealed class KnockTests : IAsyncDisposable
             await client.ConnectAsync(IPAddress.Loopback, server.Port);
             var stream = client.GetStream();
             var id = LobbyKeys.InviteId(invite.Invite.Token);
-            using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), id),
+            using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), id),
                 LobbyKeys.KnockPsk(RandomNumberGenerator.GetBytes(16)), _guest);
             await KnockProtocol.WriteFrameAsync(stream, id, default);
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
@@ -464,7 +464,7 @@ public sealed class KnockTests : IAsyncDisposable
         var stream = client.GetStream();
         var id = LobbyKeys.InviteId(invite.Invite.Token);
         var psk = LobbyKeys.KnockPsk(invite.Invite.Token);
-        using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), id), psk, _guest);
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), id), psk, _guest);
         await KnockProtocol.WriteFrameAsync(stream, id, default);
         await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
         handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, default));
@@ -567,7 +567,7 @@ public sealed class KnockTests : IAsyncDisposable
         await client.ConnectAsync(IPAddress.Loopback, server.Port);
         var stream = client.GetStream();
         var psk = LobbyKeys.KnockPsk(invite.Invite.Token);
-        using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true,
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true,
             KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), RandomNumberGenerator.GetBytes(KnockProtocol.IdLength)), psk, _guest);
         await KnockProtocol.WriteFrameAsync(stream, LobbyKeys.InviteId(invite.Invite.Token), default);
         await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
@@ -576,7 +576,7 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.Empty(_asked);
         Assert.Equal(1, invite.UsesLeft);
         // 两边按同一个编号做的照常通过。
-        Assert.Equal((byte[])[.. "JAY-KNOCK-1x"u8, 1, 2], KnockProtocol.Prologue("x", [1, 2]));
+        Assert.Equal((byte[])[.. "JAY-KNOCK-2x"u8, 1, 2], KnockProtocol.Prologue("x", [1, 2]));
     }
 
     [Fact]
@@ -591,10 +591,10 @@ public sealed class KnockTests : IAsyncDisposable
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         Assert.Equal(0, await ReadToEndAsync(stream, timeout.Token));
 
-        // 读的一方也拒绝超过 4 KB 的帧，不会照着长度去分配。
-        using var big = new MemoryStream([0x10, 0x01, .. new byte[4097]]);
+        // The reader also refuses frames over 8 KB instead of allocating whatever length it was given.
+        using var big = new MemoryStream([0x20, 0x01, .. new byte[8193]]);
         await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.ReadFrameAsync(big, default));
-        await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.WriteFrameAsync(new MemoryStream(), new byte[4097], default));
+        await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.WriteFrameAsync(new MemoryStream(), new byte[8193], default));
     }
 
     [Fact]

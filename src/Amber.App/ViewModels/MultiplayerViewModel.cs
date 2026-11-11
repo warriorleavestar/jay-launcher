@@ -425,7 +425,14 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     public ObservableCollection<NodeItem> Nodes { get; } = [];
     [ObservableProperty] public partial string NewNodeUrl { get; set; } = "";
-    [ObservableProperty] public partial string ShareCodeText { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShareCodeIsSealed))]
+    public partial string ShareCodeText { get; set; } = "";
+    /// <summary>
+    /// The passphrase of a sealed node share code (a node that goes by an IP): shown after export, typed before import.
+    /// </summary>
+    [ObservableProperty] public partial string SharePassphrase { get; set; } = "";
+    public bool ShareCodeIsSealed => RelayNodes.IsSealed(ShareCodeText);
 
     /// <summary>内置节点（只读显示，可以测延迟）。</summary>
     public ObservableCollection<NodeItem> BuiltInNodes { get; } = [.. RelayNodes.BuiltIn.Select(u => new NodeItem(u))];
@@ -509,19 +516,111 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task ExportNodesAsync()
     {
-        ShareCodeText = RelayNodes.Encode(null, Nodes.Select(n => n.Url));
+        var urls = Nodes.Select(n => n.Url).ToList();
+        if (urls.Count == 0)
+        {
+            SetStatus(StatusMessage.Warning("core.mp.nodes.empty"));
+            return;
+        }
+        // A relay that goes by an IP: on a public network, a record code (relays in a signed record on its directories, no
+        // passphrase); otherwise a sealed code (Argon2id, off the UI thread) with the passphrase shown beside it.
+        if (urls.Any(RelayNodes.HasIpHost) && _public is { } network)
+        {
+            try
+            {
+                var identity = RelayRecordIdentity();
+                await new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network).PutRecordAsync(
+                    Amber.Core.Multiplayer.Public.RelayRecord.Make(identity, null, urls, DateTimeOffset.UtcNow), default);
+                _service.Settings.RelayRecordNetwork = network.Profile.Id;
+                _service.Settings.Save();
+                ShareCodeText = Amber.Core.Multiplayer.Public.RelayRecord.Encode(identity.Locator(network.Profile.Id));
+                SharePassphrase = "";
+                await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);
+                SetStatus(StatusMessage.Success("multiplayer.nodes.exported_record", network.Profile.Name));
+                return;
+            }
+            catch (IOException e)
+            {
+                // The directory turned it down or isn't reachable: the sealed code still works.
+                _diag.Add(L.T("multiplayer.public.diagnostics_category"), e.Message);
+            }
+        }
+        var (code, passphrase) = await Task.Run(() => RelayNodes.Share(null, urls));
+        ShareCodeText = code;
+        SharePassphrase = passphrase ?? "";
         await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);
-        SetStatus(StatusMessage.Success("multiplayer.nodes.exported"));
+        SetStatus(StatusMessage.Success(passphrase is null ? "multiplayer.nodes.exported" : "multiplayer.nodes.exported_sealed"));
+    }
+
+    private Amber.Core.Multiplayer.Public.RelayRecord.Identity RelayRecordIdentity() =>
+        Amber.Core.Multiplayer.Public.RelayRecord.LoadOrCreate(Path.Combine(AppSettings.DataDir, "relay-record.key"));
+
+    /// <summary>On connecting to a public network: puts this Jay's relay record there again (each put lasts 7 days).</summary>
+    private async Task RenewRelayRecordAsync(Amber.Core.Multiplayer.Public.PublicNetworkSession network)
+    {
+        var urls = Nodes.Select(n => n.Url).ToList();
+        if (_service.Settings.RelayRecordNetwork != network.Profile.Id || !urls.Any(RelayNodes.HasIpHost)) return;
+        try
+        {
+            await new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network).PutRecordAsync(
+                Amber.Core.Multiplayer.Public.RelayRecord.Make(RelayRecordIdentity(), null, urls, DateTimeOffset.UtcNow), default);
+        }
+        catch (IOException e)
+        {
+            _diag.Add(L.T("multiplayer.public.diagnostics_category"), e.Message);
+        }
+    }
+
+    /// <summary>A JAYNR1 record code: looks the relays up on the public network it names (must be the connected one).</summary>
+    private async Task<(string? Name, List<string> Urls)?> ResolveRelayRecordAsync(string text)
+    {
+        if (Amber.Core.Multiplayer.Public.RelayRecord.TryParse(text) is not { } locator)
+        {
+            SetStatus(StatusMessage.Error("multiplayer.nodes.invalid_share_code"));
+            return null;
+        }
+        if (_public is not { } network || network.Profile.Id != locator.NetworkId)
+        {
+            SetStatus(new StatusMessage("common.raw", [L.F("core.mp.nodes.record_needs_network", locator.NetworkId)], StatusKind.Warning));
+            return null;
+        }
+        try
+        {
+            return await Amber.Core.Multiplayer.Public.RelayRecord.ResolveAsync(new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network), locator, default);
+        }
+        catch (IOException e)
+        {
+            SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
+            return null;
+        }
     }
 
     [RelayCommand]
-    private void ImportNodes()
+    private async Task ImportNodesAsync()
     {
-        if (!RelayNodes.TryDecode(ShareCodeText, out var name, out var urls))
+        if (Amber.Core.Multiplayer.Public.RelayRecord.IsCode(ShareCodeText))
         {
-            SetStatus(StatusMessage.Error("multiplayer.nodes.invalid_share_code"));
+            if (await ResolveRelayRecordAsync(ShareCodeText) is { } found) AddImportedNodes(found.Name, found.Urls);
             return;
         }
+        if (ShareCodeIsSealed && SealedDirect.NormalizePassphrase(SharePassphrase) is null)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.sealed.enter_passphrase"));
+            return;
+        }
+        var text = ShareCodeText;
+        var passphrase = SharePassphrase;
+        var (ok, name, urls, error) = await Task.Run(() => (RelayNodes.TryOpen(text, passphrase, out var n, out var u, out var e), n, u, e));
+        if (!ok)
+        {
+            SetStatus(new StatusMessage("common.raw", [error ?? L.T("multiplayer.nodes.invalid_share_code")], StatusKind.Error));
+            return;
+        }
+        AddImportedNodes(name, urls);
+    }
+
+    private void AddImportedNodes(string? name, List<string> urls)
+    {
         var added = 0;
         foreach (var url in urls.Where(u => Nodes.All(n => n.Url != u)))
         {
@@ -530,6 +629,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         SaveNodes();
         ShareCodeText = "";
+        SharePassphrase = "";
         Status = name is null ? L.P("multiplayer.nodes.imported", added, added, "") : L.P("multiplayer.nodes.imported_named", added, added, name);
     }
 
@@ -552,31 +652,32 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
             return;
         }
-        var port = int.TryParse(ManualPort.Trim(), out var manual) && manual is > 0 and < 65536 ? manual : SelectedLanGame?.Game.Port;
-        if (port is null)
-        {
-            SetStatus(StatusMessage.Warning("multiplayer.lan.port_required"));
-            return;
-        }
-        if (!await GamePortReadyAsync(port.Value, manual: port == manual))
-        {
-            SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
-            return;
-        }
         if ((TestPeers ?? _service.MultiplayerPeers).Count == 0 && TestListeners is null)
         {
             SetStatus(StatusMessage.Warning("multiplayer.nodes.host_required"));
             return;
         }
+        // No LAN world yet: the room opens on a relay and picks the game up when it's opened to LAN.
+        if (await HostGamePortAsync(checkManual: true) is not (var gamePort, var relay)) return;
+        if (!IsIdle)
+        {
+            if (relay is not null) await relay.DisposeAsync();
+            return;
+        }
         // 房间的网络名和密钥随机生成，只在批准加入时经加密的敲门通道发给对方；没有可以直接分享的房间码，靠“邀请”。
-        var credentials = NewCredentials(port.Value, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft));
+        var credentials = NewCredentials(gamePort, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft));
         // 成员表：批准一个人时发给他自己的钥匙（游戏通道和聊天按它认人）；房主自己的聊天客户端也有一把。
         var members = new MemberTable();
         var room = credentials.ToHostRoom(members, ChatName);
         if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
                 AllowProxy = AllowGameProxy,
-            })) return;
+            }))
+        {
+            if (relay is not null) await relay.DisposeAsync();
+            return;
+        }
+        AdoptGameRelay(relay);
         Mode = "host";
         RoomCodeText = "";
         _room = room;
@@ -587,13 +688,18 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
-            : L.T("multiplayer.room.created");
+            : relay is not null ? L.T("multiplayer.relay.created") : L.T("multiplayer.room.created");
     }
 
     [RelayCommand]
     private async Task JoinAsync()
     {
         if (!IsIdle || IsKnocking) return;
+        if (JoinCodeIsSealed)
+        {
+            await JoinSealedAsync();
+            return;
+        }
         if (RouteMisplacedCode(JoinCode, PastedCodeKind.Invite, () => JoinCode = "")) return;
         if (!IsComponentReady)
         {
@@ -1165,6 +1271,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // 直连房间的 EasyTier 归直连会话管，由它一起关掉。
         if (_direct is not null) _ = StopDirectAsync();
         else _session?.Dispose();
+        StopGameRelay();
         _session = null;
         _service.ActiveMultiplayer = null;
         SyncHotspotSharing();

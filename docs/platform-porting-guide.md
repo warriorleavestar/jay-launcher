@@ -199,7 +199,7 @@ EasyTier（组网，P2P 或经节点中继）
 纯托管代码，理论上三平台一样，只是没在 Mac/Linux 上实测过。
 
 - `Invite.cs`：`JAY2-` 邀请码，里面是大厅密钥 L 和一次性令牌 K，没有房间密钥。默认 10 分钟、用一次。
-- `Lobby.cs`、`Knock.cs`：房主有可用邀请时开一个“大厅”（第二个 EasyTier 实例 + 敲门服务）。加入方用 Noise XXpsk0 敲门，房主在卡片上批准后，经加密通道发下房间凭据和这个成员自己的 memberId + psk。
+- `Lobby.cs`、`Knock.cs`：房主有可用邀请时开一个“大厅”（第二个 EasyTier 实例 + 敲门服务）。加入方用 Noise XXhfspsk0（X25519 + ML-KEM-768）敲门，房主在卡片上批准后，经加密通道发下房间凭据和这个成员自己的 memberId + psk。
 - `Members.cs`、`Transport/MemberChannel.cs`：每个成员一把钥匙，游戏通道、聊天、远程控制都用它握手；聊天发送者由房主核对。
 - 踢人：作废这个人的钥匙和他用过的邀请，房间换新网络名和密钥（epoch + 1），留下的人自动跟过去（`RoomChat.cs` 里的控制帧）。
 - `MemberIdentity.cs`：每台设备一把 X25519 长期身份密钥。Windows 用 DPAPI 加密（文件头 `AMBID1`）；其他平台用 AES-GCM，密钥在 `identity.wrap`（0600，文件头 `AMBID2`）。和账号令牌一样，建议改成钥匙串 / libsecret 存 wrap 密钥。
@@ -220,7 +220,7 @@ EasyTier（组网，P2P 或经节点中继）
 
 #### 直连房间 🟡
 
-`DirectLink.cs`、`DirectSession.cs`：`JAY2D-`（邀请）/ `JAY2R-`（回复）码，依次试 IPv6 直连、路由器端口映射（`PortMapping.cs`，UPnP IGD 和 NAT-PMP）、同局域网、IPv4 打洞（`Stun.cs` 判断 NAT 类型，严格 NAT 时做端口预测和“生日”喷洒），多人时由能连上的成员中转，都不行再用节点。
+`DirectLink.cs`、`DirectSession.cs`：直连房间发的是普通 `JAY2-` 邀请，码里没有地址；房主批准后双方的地址（`DirectAddresses`）只在加密的敲门回复和确认里交换（`KnockServer.DirectOffer` / `KnockClient.KnockAsync` 的 `direct`），然后依次试 IPv6 直连、路由器端口映射（`PortMapping.cs`，UPnP IGD 和 NAT-PMP）、同局域网、IPv4 打洞（`Stun.cs` 判断 NAT 类型，严格 NAT 时做端口预测和“生日”喷洒），多人时由能连上的成员中转，都不行再用节点。
 
 平台注意点：
 - Windows 上对 UDP 套接字设了 `SIO_UDP_CONNRESET = 0`，避免收到 ICMP 端口不可达时整个套接字报错。其他平台不需要。
@@ -265,7 +265,7 @@ EasyTier（组网，P2P 或经节点中继）
 
 #### 敏感文字和剪贴板 ✅
 
-邀请码、直连码在界面上默认打码；复制后 60 秒，如果剪贴板里还是这段文字就清掉（`App/Services/SensitiveClipboard.cs`，只用 Avalonia 的剪贴板接口，三平台一样）。日志和诊断里不写任何密钥或码。
+邀请码在界面上默认打码；复制后 60 秒，如果剪贴板里还是这段文字就清掉（`App/Services/SensitiveClipboard.cs`，只用 Avalonia 的剪贴板接口，三平台一样）。日志和诊断里不写任何密钥或码。
 
 可以改进的平台细节：
 - Windows 的剪贴板历史（Win+V）和云同步会留一份，可以在设置剪贴板时加 `ExcludeClipboardContentFromMonitorProcessing` 格式（要绕过 Avalonia 直接调 Win32）。
@@ -353,7 +353,7 @@ public interface IInputSink : IDisposable
 一个只能用 Jay 进的 MC 服务器。三部分：
 
 - **服务端 `jay-server`**（`src/Amber.Server/Program.cs`）：`init`、`setup`（下载官方服务端 jar 并核对 SHA-1、准备 Java）、`run`、`invite`、`revoke`、节点管理等命令。MC 服务端固定只听 127.0.0.1（`Gate/McServerHost.cs`）。网关（`Gate/GateServer.cs`）在公网端口（默认 47670）上做 Noise 握手、核对设备名单和用户名（`Gate/McLogin.cs` 读 Handshake 和 Login Start），认不出的连接一个字节都不回。数据在 `Gate/GateStore.cs`，只存设备公钥和用户名，Unix 上文件权限 0600。Windows 上用 Ctrl+C，Unix 上另外处理 SIGTERM（systemd 停服务时正常关闭 MC）。三平台都能跑。
-- **客户端**（`Gate/JayServers.cs`，联机页的“Jay 服务器”卡片）：粘贴 `JAYS1-` 邀请码（`Gate/GateInvite.cs`）入服，拿到这台设备的访问密钥，之后一键进服。访问密钥在 Windows 上 DPAPI 加密（`dpapi:` 前缀），在 Mac/Linux 上和 `Accounts.cs` 一样用 AES-GCM + 本机密钥（`jay-servers.json.key`，0600）；旧版的 `plain:` 明文读到后立即迁移。
+- **客户端**（`Gate/JayServers.cs`，联机页的“Jay 服务器”卡片）：粘贴 `JAYS2-` 邀请码（`Gate/GateInvite.cs`）入服，拿到这台设备的访问密钥，之后一键进服。访问密钥在 Windows 上 DPAPI 加密（`dpapi:` 前缀），在 Mac/Linux 上和 `Accounts.cs` 一样用 AES-GCM + 本机密钥（`jay-servers.json.key`，0600）；旧版的 `plain:` 明文读到后立即迁移。
 - **节点**（`Gate/GateRelay.cs`）：把 TCP 原样转给网关，不持有密钥。
 
 main 上 v0.7.0 之后新增【未发布】：

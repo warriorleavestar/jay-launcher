@@ -8,15 +8,14 @@ public enum PastedCodeKind
     Room,
     /// <summary>邀请码 JAY2-…：经联机节点的房间（先敲门、房主批准）。</summary>
     Invite,
-    /// <summary>直连邀请码 JAY2D-…：房主发给朋友。</summary>
-    DirectInvite,
-    /// <summary>直连回复码 JAY2R-…：朋友发回房主。</summary>
-    DirectReply,
-    /// <summary>旧版本的直连码 AMBDIRECT1- / AMBREPLY1-（里面是完整的房间码）：不再接受，提示对方更新。</summary>
+    /// <summary>
+    /// Removed direct-link codes: JAY2D- / JAY2R- (both sides' public IP addresses in plain text) and the older
+    /// AMBDIRECT1- / AMBREPLY1-. Refused; the person is told to ask for a current invite (JAY2-).
+    /// </summary>
     OldDirect,
     /// <summary>节点分享码 AMBNODE-…。</summary>
     NodeShare,
-    /// <summary>Jay 服务器邀请码 JAYS1-…：贴到“Jay 服务器”卡片。</summary>
+    /// <summary>Jay 服务器邀请码 JAYS2- / JAYSS1-（加密）…：贴到“Jay 服务器”卡片。</summary>
     JayServer,
     /// <summary>好友码 JAYF1-…（设备指纹码）：到“公开房间”里找朋友的隐藏房间。</summary>
     FriendCode,
@@ -24,6 +23,10 @@ public enum PastedCodeKind
     PublicNetwork,
     /// <summary>A contact code JAYC1-… (someone's identity public key): add them as a contact and compare emoji.</summary>
     ContactCode,
+    /// <summary>A sealed direct offer JAYDS1-… (host's addresses encrypted with a passphrase told by another way).</summary>
+    SealedOffer,
+    /// <summary>A sealed direct reply JAYDR1-… (the friend's addresses, sealed with the same passphrase): goes to the host.</summary>
+    SealedReply,
 }
 
 /// <summary>
@@ -54,13 +57,20 @@ public static class PastedCode
 
     private static readonly (string Prefix, PastedCodeKind Kind)[] Prefixes =
     [
-        ("JAY2D-", PastedCodeKind.DirectInvite),
-        ("JAY2R-", PastedCodeKind.DirectReply),
+        (SealedDirect.OfferPrefix, PastedCodeKind.SealedOffer),
+        (SealedDirect.ReplyPrefix, PastedCodeKind.SealedReply),
+        ("JAY2D-", PastedCodeKind.OldDirect),
+        ("JAY2R-", PastedCodeKind.OldDirect),
         ("AMBDIRECT", PastedCodeKind.OldDirect),
         ("AMBREPLY", PastedCodeKind.OldDirect),
         ("AMBNODE-", PastedCodeKind.NodeShare),
+        (RelayNodes.SealedPrefix, PastedCodeKind.NodeShare),
+        (Public.RelayRecord.Prefix, PastedCodeKind.NodeShare),
         ("JAY2-", PastedCodeKind.Invite),
-        ("JAYS1-", PastedCodeKind.JayServer),
+        (Gate.GateInvite.SealedPrefix, PastedCodeKind.JayServer),
+        (Gate.GateInvite.Prefix, PastedCodeKind.JayServer),
+        // Old server invites go to the server card too, which explains they must be remade.
+        (Gate.GateInvite.OldPrefix, PastedCodeKind.JayServer),
         ("JAYF1-", PastedCodeKind.FriendCode),
         ("JAYC1-", PastedCodeKind.ContactCode),
         ("JAYNET", PastedCodeKind.PublicNetwork),

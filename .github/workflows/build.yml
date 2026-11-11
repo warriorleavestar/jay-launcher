@@ -460,8 +460,10 @@ jobs:
             cp -f "signed-assets/$f" "release-assets/$f"
           done
 
-      # Jay release signature: the maintainer signs this list offline (`jay-server release sign`) and
-      # uploads SHA256SUMS.txt.sig to the release; see docs/security/release-signing.md.
+      # Jay release signature (privacy plan item 2): 2 of the 3 trustees sign this list offline
+      # (`jay-server release prepare` / `cosign`), then SHA256SUMS.txt.sigs (and trust-chain.json, once the
+      # trustee list has changed) is uploaded and the draft published. Jay only offers an update once that
+      # file verifies; see docs/security/release-signing.md. CI never holds a trustee key.
       - name: SHA-256 list
         run: |
           cd release-assets
@@ -473,9 +475,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A draft until the trustees have signed it: drafts don't show up as "latest" for the update check.
           gh release create "${GITHUB_REF_NAME}" release-assets/* \
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
+            --draft \
             --notes "代码签名政策 / Code signing policy: https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/code-signing-policy.md" \
             --generate-notes \
             --title "Jay ${GITHUB_REF_NAME}"

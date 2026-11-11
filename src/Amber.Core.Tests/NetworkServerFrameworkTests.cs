@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Public;
 using Amber.Core.Multiplayer.Transport;
@@ -35,8 +36,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Ip = "10.235.0.7",
         Game = "1.21.1",
         Players = 2,
-        Invite = mode is RoomVisibility.Public ? new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite.ToString() : null,
-        Direct = mode == RoomVisibility.Direct ? "JAY2D-TEST" : null,
+        Invite = mode is RoomVisibility.Public or RoomVisibility.Direct ? new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite.ToString() : null,
         Lobby = mode == RoomVisibility.Password ? new string('a', 32) : null,
         Salt = mode == RoomVisibility.Password ? new string('b', 32) : null,
     };
@@ -94,7 +94,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     {
         var server = await StartAsync(b => b.UseBlockedWords(["坏 词"]));
         var net = new LoopbackNetwork(server.Directory!.Port);
-        var client = new RoomDirectoryClient(net);
+        var client = new RoomDirectoryClient(net) { NetworkSecret = server.Directory.NetworkSecret };
         var host = X25519KeyPair.Generate();
         var signer = new RoomSigner();
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
@@ -322,6 +322,53 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task MetricsArePrometheusTextBehindTheTokenWithOnlyTotals()
+    {
+        var server = await StartAsync(b => b.UseBlockedWords(["nope"]), admin: true);
+        var host = X25519KeyPair.Generate();
+        Assert.True(Ok(server.Directory!.Handle(Announce(new RoomSigner(), Listing(host, name: "公开房", hostName: "Steve")))));
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host, RoomVisibility.Hidden, name: "秘密房"), listed: false))));
+        server.Directory.Handle(Announce(new RoomSigner(), Listing(host, name: "nope")));
+        server.Ban("account", "someone@example", "test");
+
+        using var http = new HttpClient();
+        var port = server.AdminPort!.Value;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync($"http://127.0.0.1:{port}/metrics")).StatusCode);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/metrics");
+        request.Headers.Authorization = new("Bearer", File.ReadAllText(server.AdminTokenPath).Trim());
+        using var reply = await http.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, reply.StatusCode);
+        Assert.Equal("text/plain", reply.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("0.0.4", reply.Content.Headers.ContentType.Parameters.Single(p => p.Name == "version").Value);
+        var text = await reply.Content.ReadAsStringAsync();
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.Contains("jay_node_up 1", lines);
+        Assert.Contains("jay_directory_rooms 2", lines);
+        Assert.Contains("jay_directory_rooms_listed 1", lines);
+        Assert.Contains("jay_directory_rooms_published_total 2", lines);
+        Assert.Contains("jay_directory_rooms_rejected_total{reason=\"name\"} 1", lines);
+        Assert.Contains("jay_bans 1", lines);
+        Assert.Contains("jay_logins_total{result=\"ok\"} 0", lines);
+        Assert.Contains(lines, l => l.StartsWith("jay_node_info{network=\"", StringComparison.Ordinal) && l.EndsWith("} 1", StringComparison.Ordinal));
+        // Every sample has a TYPE line before it, and every TYPE is a gauge or a counter.
+        var typed = new HashSet<string>();
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("# TYPE ", StringComparison.Ordinal))
+            {
+                var parts = line.Split(' ');
+                Assert.Contains(parts[3], new[] { "gauge", "counter" });
+                Assert.True(typed.Add(parts[2]), "duplicate TYPE " + parts[2]);
+            }
+            else if (!line.StartsWith('#')) Assert.Contains(line.Split('{', ' ')[0], typed);
+        }
+        // Totals only: nothing about who hosts what.
+        foreach (var secret in new[] { "公开房", "秘密房", "Steve", "10.235.0.7", "someone@example", MemberIdentity.FingerprintOf(host.PublicKey) })
+            Assert.DoesNotContain(secret, text);
+    }
+
+    [Fact]
     public async Task AdminApiRejectsOversizedAndMalformedRequests()
     {
         var server = await StartAsync(admin: true);
@@ -347,12 +394,29 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Equal("seed", server.Health()["role"]!.GetValue<string>());
     }
 
+    /// <summary>Public IPs are refused in a network string; LAN and loopback ones (test networks) say nothing about anyone.</summary>
+    [Theory]
+    [InlineData("tcp://node.example.net:11010", false)]
+    [InlineData("tcp://203.0.113.5:11010", true)]
+    [InlineData("udp://[2408:8000::1]:11010", true)]
+    [InlineData("tcp://127.0.0.1:11010", false)]
+    [InlineData("tcp://192.168.1.5:11010", false)]
+    public void NetworkNodesGoByDomain(string node, bool refused)
+    {
+        Assert.Equal(refused, RelayNodes.HasPublicIpHost(node));
+        var info = new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", [node]);
+        Assert.Equal(refused ? L.T("core.mp.network.ip_node") : null, NetworkString.Validate(info));
+    }
+
     [Fact]
     public void ScaffoldCreatesASignableNetworkAndAttachesTheConfig()
     {
-        var r = NetworkScaffold.Init(_dir, "nz-friends", "新西兰朋友服", ["tcp://203.0.113.5:11010"]);
-        Assert.Throws<IOException>(() => NetworkScaffold.Init(_dir, "nz-friends", "x", ["tcp://203.0.113.5:11010"]));
-        Assert.Throws<ArgumentException>(() => NetworkScaffold.Init(Path.Combine(_dir, "b"), "jay", "x", ["tcp://203.0.113.5:11010"]));
+        // A network string never names a public IP: its nodes go by domain.
+        var ip = Assert.Throws<ArgumentException>(() => NetworkScaffold.Init(Path.Combine(_dir, "ip"), "nz-friends", "x", ["tcp://203.0.113.5:11010"]));
+        Assert.Equal(L.T("core.mp.network.ip_node"), ip.Message);
+        var r = NetworkScaffold.Init(_dir, "nz-friends", "新西兰朋友服", ["tcp://node.example.net:11010"]);
+        Assert.Throws<IOException>(() => NetworkScaffold.Init(_dir, "nz-friends", "x", ["tcp://node.example.net:11010"]));
+        Assert.Throws<ArgumentException>(() => NetworkScaffold.Init(Path.Combine(_dir, "b"), "jay", "x", ["tcp://node.example.net:11010"]));
         if (!OperatingSystem.IsWindows()) Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(r.KeyPath));
 
         var (config, sha) = NetworkScaffold.Hash(r.ConfigPath, "nz-friends");
@@ -365,8 +429,8 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Equal(2, info.Seq);
         Assert.Throws<ArgumentException>(() => NetworkScaffold.AttachConfig(r.NetworkPath, "http://example.org/config.json", sha));
 
-        var signed = NetworkString.Parse(NetworkString.Create(info, NetworkSigner.FromSeed(File.ReadAllText(r.KeyPath))));
-        Assert.Equal(r.PublicKey, signed.SignerKey);
+        var signed = NetworkString.Parse(NetworkString.Create(info, TrustSigner.FromSeed(File.ReadAllText(r.KeyPath))));
+        Assert.Equal(r.KeyId, signed.SignerKey);
         Assert.Equal(sha, signed.Info.Config!.Sha256);
         Assert.StartsWith("jay-net-", signed.ToProfile().NetworkName);
     }
@@ -376,8 +440,8 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     {
         var output = new StringWriter();
         var net = Path.Combine(_dir, "net");
-        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "init", "nz-friends", "--name", "朋友服", "--host", "203.0.113.5", "--out", net]), output));
-        Assert.Contains("签名公钥", output.ToString());
+        Assert.Equal(0, Program.NetworkCommand(Options.Parse(["network", "init", "nz-friends", "--name", "朋友服", "--host", "node.example.net", "--out", net]), output));
+        Assert.Contains("签名钥匙编号", output.ToString());
         var config = Path.Combine(net, "config.json");
         var network = Path.Combine(net, "nz-friends.json");
         // 只允许公开房间。
@@ -443,10 +507,10 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var net = new LoopbackNetwork(server.Directory!.Port);
         var host = X25519KeyPair.Generate();
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
-            new RoomDirectoryClient(net) { Version = "0.7.3" }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default));
+            new RoomDirectoryClient(net) { Version = "0.7.3", NetworkSecret = server.Directory.NetworkSecret }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default));
         Assert.Equal("version", e.Code);
         Assert.Contains("0.8.0", e.Message);
-        await new RoomDirectoryClient(net) { Version = "0.8.0" }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default);
+        await new RoomDirectoryClient(net) { Version = "0.8.0", NetworkSecret = server.Directory.NetworkSecret }.AnnounceAsync(new RoomSigner().Sign(Listing(host), _now), true, [], default);
         Assert.Equal(1, server.Directory.Count);
 
         // No minVersion in the config: any client is fine.
@@ -619,7 +683,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var main = await ReplicaAsync("main");
         var backup = await ReplicaAsync("backup", b => b.UseDirectoryIndex(2));
         var net = new ReplicaNetwork { Map = { ["10.235.0.1"] = main.Port, ["10.235.255.254"] = backup.Port } };
-        var client = new RoomDirectoryClient(net);
+        var client = new RoomDirectoryClient(net) { NetworkSecret = main.NetworkSecret };
         var host = X25519KeyPair.Generate();
         var signer = new RoomSigner();
         var lobby = new byte[32];
@@ -657,19 +721,12 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         // 登录请求带的是真实时间，这个节点也用真实时钟。
         var backup = await ReplicaAsync("backup", b => b.UseDirectoryIndex(2).UseBlockedWords(["广告"]).UseAccounts(new ForumAccounts()).UseClock(() => DateTimeOffset.UtcNow));
         var net = new ReplicaNetwork { Map = { ["10.235.0.1"] = main.Port, ["10.235.255.254"] = backup.Port } };
-        var client = new RoomDirectoryClient(net);
+        var client = new RoomDirectoryClient(net) { NetworkSecret = main.NetworkSecret };
         var host = X25519KeyPair.Generate();
 
         // 两个目录都拒绝：报拒绝和原因，不是“连不上”。
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(host, name: "广告"), _now), true, [], default));
         Assert.Equal("name", e.Code);
-
-        // 直连房间的回复码：只捎给一个目录，房主续期时只收到一份。
-        var signer = new RoomSigner();
-        await client.AnnounceAsync(signer.Sign(Listing(host, RoomVisibility.Direct), _now), true, [], default);
-        await client.MailAsync(signer.RoomId, "JAY2R-REPLY", default);
-        _now += TimeSpan.FromSeconds(30);
-        Assert.Equal(["JAY2R-REPLY"], await client.AnnounceAsync(signer.Sign(Listing(host, RoomVisibility.Direct), _now), true, [], default));
 
         // 只有备用目录开了登录：主目录回 op，客户端接着问备用的。
         var authority = new JayNetworkServerBuilder().UseDataDir(Path.Combine(_dir, "backup")).UseAccounts(new ForumAccounts()).WithoutAdmin()

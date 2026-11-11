@@ -131,23 +131,14 @@ public sealed class CodeHygieneTests
         var (service, vm) = Create();
         using var _ = service;
         Assert.False(vm.JoinCodeShown);
-        Assert.False(vm.DirectInviteInputShown);
-        Assert.False(vm.DirectReplyInputShown);
         Assert.False(vm.InviteShown);
-        Assert.False(vm.DirectCodeShown);
         vm.IsCurrent = true;
         vm.ToggleJoinCodeShownCommand.Execute(null);
-        vm.ToggleDirectInviteInputShownCommand.Execute(null);
-        vm.ToggleDirectReplyInputShownCommand.Execute(null);
         vm.ToggleInviteShownCommand.Execute(null);
-        vm.ToggleDirectCodeShownCommand.Execute(null);
-        Assert.True(vm.JoinCodeShown && vm.DirectInviteInputShown && vm.DirectReplyInputShown && vm.InviteShown && vm.DirectCodeShown);
+        Assert.True(vm.JoinCodeShown && vm.InviteShown);
         vm.IsCurrent = false;
         Assert.False(vm.JoinCodeShown);
-        Assert.False(vm.DirectInviteInputShown);
-        Assert.False(vm.DirectReplyInputShown);
         Assert.False(vm.InviteShown);
-        Assert.False(vm.DirectCodeShown);
     });
 
     [Fact]

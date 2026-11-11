@@ -21,7 +21,7 @@ public sealed record NetworkChoice(string Id, string Name, bool Reviewed, int No
 }
 
 /// <summary>
-/// 换公共网络：粘贴别人给的连接串（JAYNET1-...）加进来，在下拉框里切换。
+/// 换公共网络：粘贴别人给的连接串（JAYNET2-...）加进来，在下拉框里切换。
 /// Jay 注册表签的（GitHub 审核过）直接加；没审核的先提醒，确认后才加。
 /// </summary>
 public sealed partial class MultiplayerViewModel
@@ -47,7 +47,7 @@ public sealed partial class MultiplayerViewModel
             NetworkChoices.Add(new NetworkChoice("jay", jay.Name, true, _service.PublicNetwork.IsBuiltIn ? _service.PublicNetwork.Nodes.Count : jay.Nodes.Count, null));
             foreach (var n in _service.Networks.Networks.Where(n => n.Info.Id != "jay"))
                 NetworkChoices.Add(new NetworkChoice(n.Info.Id, n.Info.Name, n.Reviewed, n.Info.Nodes.Count, n.SignerFingerprint,
-                    n.Reviewed && LauncherService.IsTestReviewed(n.SignerKey)));
+                    n.Reviewed && LauncherService.IsTestReviewed(n.Signers)));
             var current = _service.PublicNetwork.Id;
             SelectedNetworkChoice = NetworkChoices.FirstOrDefault(c => c.Id == current) ?? NetworkChoices[0];
         }

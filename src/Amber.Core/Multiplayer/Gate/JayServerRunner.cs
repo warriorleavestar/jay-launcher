@@ -12,6 +12,7 @@ public sealed class JayServerRunner : IAsyncDisposable
     private readonly X25519KeyPair _key;
     private readonly TaskCompletionSource _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _stopped;
+    private GateRecordPublisher? _records;
 
     public GateStore Store { get; }
     public GateConfig Config { get; }
@@ -72,6 +73,8 @@ public sealed class JayServerRunner : IAsyncDisposable
                 log(L.F("core.gate.run.mc_started", mc.Process.Id));
             }
             var runner = new JayServerRunner(store, config, key, gate, mc);
+            // A server with no domain and records on: keep its signed address record on the public network's directories.
+            runner._records = GateRecordPublisher.Start(store, config, Path.Combine(root, "records"), log);
             // 熔断时先存盘（不停服），万一之后有人去停服务端也不会坏档。
             gate.BreakerChanged += (open, _) =>
             {
@@ -116,6 +119,7 @@ public sealed class JayServerRunner : IAsyncDisposable
     public async Task StopAsync(TimeSpan? timeout = null)
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
+        if (_records is not null) await _records.DisposeAsync();
         await Gate.DisposeAsync();
         if (Mc is not null)
         {
