@@ -152,6 +152,13 @@ public sealed partial class MultiplayerViewModel
                 Tab = MultiplayerTab.Public;
                 SetStatus(StatusMessage.Info("multiplayer.code.friend_misplaced"));
                 return true;
+            case PastedCodeKind.ContactCode when ShowPublicNetworks:
+                // A contact code: into the contacts card, added only when the player clicks [Add].
+                clearSource();
+                ContactCodeInput = text.Trim();
+                Tab = MultiplayerTab.Settings;
+                SetStatus(StatusMessage.Info("multiplayer.code.contact_misplaced"));
+                return true;
             case PastedCodeKind.PublicNetwork:
                 // 公共网络地址：放进联机设置的输入框，用户看过内容再确认添加，不静默添加。
                 clearSource();

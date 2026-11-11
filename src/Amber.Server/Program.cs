@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Amber.Core.Launch;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Gate;
 using Amber.Core.Multiplayer.Public;
@@ -101,6 +102,12 @@ public static class Program
           jay-server account 2fa on <账号> [--issuer <网络名>]   开两步验证：打印密钥和 otpauth 地址，用验证器 App 添加
           jay-server account 2fa off <账号>提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
 
+        发版签名（维护者在离线电脑上用，见 docs/security/release-signing.md）：
+          jay-server release key --out <发布钥匙文件>            生成发布钥匙（离线保管），打印公钥（写进 ReleaseSignature.TrustedKeys）
+          jay-server release sums <文件...> [--out SHA256SUMS.txt]  算发布包的 SHA-256 清单
+          jay-server release sign --key <发布钥匙文件> --tag <v0.9.0> [--sums SHA256SUMS.txt] [--out SHA256SUMS.txt.sig]
+          jay-server release verify <安装包> [--tag <v0.9.0>] [--pub <公钥>]  核对安装包、清单和签名（清单和签名放在安装包旁边）
+
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
 
@@ -121,6 +128,7 @@ public static class Program
                 "relay" => await RelayAsync(options),
                 "directory" => await DirectoryAsync(root, options),
                 "network" => NetworkCommand(options, Console.Out, root),
+                "release" => ReleaseCommand(options, Console.Out),
                 "account" => AccountCommand(root, options, Console.Out, ReadPassword),
                 "node" => await NodeCommand(root, options, Console.Out),
                 null => Help(),
@@ -262,7 +270,6 @@ public static class Program
         return 0;
     }
 
-    /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
     /// <summary>
     /// A self-supplied easytier-core is not covered by Jay's pinned package hashes. Always log its SHA-256 so the
     /// operator can compare it with the build they meant to use; with --easytier-sha256, refuse anything else.
@@ -281,6 +288,78 @@ public static class Program
         log($"EasyTier 校验通过（SHA-256 {actual}）");
     }
 
+    /// <summary>Release signing for maintainers: run on an offline machine; the private key never goes to CI or the repo.</summary>
+    internal static int ReleaseCommand(Options options, TextWriter output)
+    {
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server release key|sums|sign|verify");
+        var rest = options.Positional.Skip(1).ToList();
+        switch (sub)
+        {
+            case "key":
+            {
+                var path = options.Get("out") ?? throw new ArgumentException("要用 --out 指定发布钥匙文件");
+                if (File.Exists(path)) throw new IOException($"{path} 已经存在，不覆盖（换钥匙请换个文件名）");
+                var signer = NetworkSigner.Generate(out var seed);
+                var write = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+                if (!OperatingSystem.IsWindows()) write.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                using (var file = new StreamWriter(path, Encoding.ASCII, write)) file.Write(Convert.ToBase64String(seed) + "\n");
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(seed);
+                output.WriteLine($"发布私钥已存到 {path}：离线保管（U 盘、纸），不要放在 CI、服务器、网盘或仓库里，也不要和目录根钥匙混用");
+                output.WriteLine($"发布公钥（写进 src/Amber.Core/Launch/ReleaseSignature.cs 的 TrustedKeys）：{Convert.ToBase64String(signer.PublicKey)}");
+                return 0;
+            }
+            case "sums":
+            {
+                if (rest.Count == 0) throw new ArgumentException("要给出发布包文件");
+                foreach (var f in rest) if (!File.Exists(f)) throw new IOException($"找不到 {f}");
+                var text = ReleaseSignature.BuildSums(rest);
+                var outPath = options.Get("out");
+                if (outPath is null) output.Write(text);
+                else { File.WriteAllText(outPath, text); output.WriteLine($"已写入 {outPath}（{rest.Count} 个文件）"); }
+                return 0;
+            }
+            case "sign":
+            {
+                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定发布钥匙文件");
+                var tag = options.Get("tag") ?? throw new ArgumentException("要用 --tag 指定版本（例如 v0.9.0）");
+                var sumsPath = options.Get("sums") ?? ReleaseSignature.SumsFileName;
+                var outPath = options.Get("out") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(sumsPath)) ?? ".", ReleaseSignature.SignatureFileName);
+                var sums = File.ReadAllBytes(sumsPath);
+                var listed = ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums));
+                if (listed.Count == 0) throw new InvalidDataException($"{sumsPath} 里没有可用的 SHA-256 行");
+                var signer = NetworkSigner.FromSeed(File.ReadAllText(keyPath));
+                File.WriteAllText(outPath, ReleaseSignature.Sign(signer, tag, sums));
+                var trusted = ReleaseSignature.TrustedKeys.Contains(Convert.ToBase64String(signer.PublicKey));
+                output.WriteLine($"已签名 {listed.Count} 个文件（{ReleaseSignature.NormalizeTag(tag)}），写入 {outPath}。把它上传到同一个 Release。");
+                if (!trusted) output.WriteLine("注意：这把钥匙的公钥还不在 ReleaseSignature.TrustedKeys 里，现有的 Jay 认不出这个签名。");
+                return 0;
+            }
+            case "verify":
+            {
+                var package = rest.FirstOrDefault() ?? throw new ArgumentException("要给出安装包文件");
+                var keys = options.Get("pub") is { } pub ? new[] { pub } : null;
+                var check = ReleaseSignature.VerifyPackageAsync(package, options.Get("tag"), options.Get("sums"), options.Get("sig"), keys).GetAwaiter().GetResult();
+                output.WriteLine(check.Verdict switch
+                {
+                    ReleaseVerdict.Valid => $"通过：{Path.GetFileName(package)} 是 {check.Tag} 的正式发布包，签名来自 Jay 发布钥匙。",
+                    ReleaseVerdict.Unsigned => "没有签名：安装包旁边找不到 SHA256SUMS.txt 和 SHA256SUMS.txt.sig。",
+                    ReleaseVerdict.NoTrustedKey => "这个版本的程序里还没有发布公钥，没法核对（可以用 --pub 指定）。",
+                    ReleaseVerdict.Malformed => "签名文件格式不对。",
+                    ReleaseVerdict.UnknownKey => "签名不是 Jay 的发布钥匙签的。不要安装。",
+                    ReleaseVerdict.BadSignature => "签名和清单对不上（清单被改过）。不要安装。",
+                    ReleaseVerdict.WrongTag => $"签名属于 {check.Tag}，不是你要的版本。不要安装。",
+                    ReleaseVerdict.NotListed => "清单里没有这个文件名。",
+                    ReleaseVerdict.HashMismatch => "安装包的 SHA-256 和清单不一样（文件被改过或没下载完整）。不要安装。",
+                    _ => check.Verdict.ToString(),
+                });
+                return check.IsValid ? 0 : 2;
+            }
+            default:
+                throw new ArgumentException($"不认识的 release 子命令：{sub}");
+        }
+    }
+
+    /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
     internal static int NetworkCommand(Options options, TextWriter output, string? root = null)
     {
         var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show|dir-key");

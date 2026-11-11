@@ -244,10 +244,7 @@ public sealed partial class AccountsViewModel
         }
     }
 
-    /// <summary>What other people see as this device's name in phase 2: only the operating system, never the computer or user name.</summary>
-    internal static string DeviceName() =>
-        OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : OperatingSystem.IsLinux() ? "Linux"
-        : OperatingSystem.IsAndroid() ? "Android" : OperatingSystem.IsIOS() ? "iOS" : "Jay";
+    internal static string DeviceName() => JayAccountStore.ThisDeviceName();
 
     [RelayCommand]
     private void BindJay(JayAccountItem? item)
