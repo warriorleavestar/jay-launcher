@@ -447,6 +447,8 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
             var workDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(WorkDir));
             var inWorkDir = Path.GetRelativePath(workDir, full).Split(Path.DirectorySeparatorChar);
             if (inWorkDir.Any(s => s.Equals(Launch.InstanceSettings.FileName, StringComparison.OrdinalIgnoreCase))) return true;
+            // [Help me fix…]'s saved session names the mod files it renames; only Jay writes it.
+            if (inWorkDir.Any(s => s.Equals(CrashBisect.FileName, StringComparison.OrdinalIgnoreCase))) return true;
             // 烘焙记录（实验）决定启动用的主类、classpath 和 JVM 参数，只能由本机烘焙生成。
             if (inWorkDir[0].Equals(Bake.BakeService.StateFolder, StringComparison.OrdinalIgnoreCase)) return true;
             var versionDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(VersionDir));

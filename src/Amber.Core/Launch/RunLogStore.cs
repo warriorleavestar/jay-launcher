@@ -114,11 +114,25 @@ public sealed class RunLogStore : IDisposable
                 var record = JsonSerializer.Deserialize(File.ReadAllText(meta), RunLogJson.Default.RunRecord);
                 if (record is null) continue;
                 // The folder may have moved with the instance: point at the log next to the meta file.
-                result.Add(record with { LogPath = Path.ChangeExtension(meta, ".log") });
+                result.Add(record with { LogPath = Path.ChangeExtension(meta, ".log"), CrashReport = CrashReportIn(workDir, record.CrashReport) });
             }
             catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
         }
         return [.. result.OrderByDescending(r => r.StartedAt)];
+    }
+
+    /// <summary>
+    /// The meta file sits in the instance folder, so a modpack or another program could have written it: the crash report it
+    /// names is only trusted as a file name, looked up in this instance's <c>crash-reports</c> folder. Anything else (another
+    /// folder, a network path that would leak the Windows login hash, a name with a path in it) is dropped.
+    /// </summary>
+    internal static string? CrashReportIn(string workDir, string? saved)
+    {
+        if (string.IsNullOrWhiteSpace(saved)) return null;
+        var name = Path.GetFileName(saved.Replace('\\', '/').TrimEnd('/'));
+        if (name.Length is 0 or > 255 || name.Trim('.', ' ').Length == 0 || name.IndexOfAny([':', '\\', '\0']) >= 0
+            || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) return null;
+        return Path.Combine(workDir, "crash-reports", name);
     }
 
     /// <summary>Reads a saved log; an unreadable line becomes a plain Info line.</summary>
