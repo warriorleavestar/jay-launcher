@@ -3107,5 +3107,16 @@
   "tip.reset": "重新看所有提示",
   "tip.reset_done": "所有提示會重新出現。",
   "shortcut.look.restored": "已恢復預設外觀。",
-  "shortcut.look.already": "現在就是預設外觀。"
+  "shortcut.look.already": "現在就是預設外觀。",
+  "content.loader.ul_badge": "經通用載入器",
+  "content.loader.ul_note": "沒有 {0} 版。{1} 版會經通用載入器在這個實例上執行（實驗性烘焙）。",
+  "content.loader.ul_needs_bake": "沒有 {0} 版。{1} 版可以經通用載入器在這裡執行，但實驗性烘焙沒開。開啟後才能用這個模組。",
+  "content.loader.ul_needs_loader": "沒有 {0} 版。{1} 版可以經通用載入器在這裡執行，但還沒裝通用載入器。下載後才能用這個模組。",
+  "content.loader.ul_turn_on": "開啟烘焙",
+  "content.loader.ul_download": "下載載入器",
+  "content.install.ul_not_ready": " 注意：它只能經通用載入器執行。玩之前請開啟實驗性烘焙並裝好載入器。",
+  "core.content.modpack.mixed_unsupported": "這個整合包混用了 {0}。通用載入器跑不了這種組合，所以不能匯入。",
+  "core.content.modpack.mixed_needs_bake": "這個整合包混用了 {0}，只能經通用載入器執行：先在設定裡開啟實驗性烘焙並裝好載入器，再匯入一次。",
+  "newinstance.pack.mixed": "混合整合包：{0} 模組經通用載入器執行",
+  "content.loader.ul_missing_bridges": "沒有 {0} 版。裝的通用載入器在 {0} 上跑不了別的模組：包裡缺 {1}。請在設定裡下載完整的載入器包。"
 }

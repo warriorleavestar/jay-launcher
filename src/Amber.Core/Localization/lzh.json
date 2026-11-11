@@ -2973,5 +2973,16 @@
   "tip.reset": "諸示皆復觀之",
   "tip.reset_done": "諸示將復見。",
   "shortcut.look.restored": "已復常貌。",
-  "shortcut.look.already": "今即常貌。"
+  "shortcut.look.already": "今即常貌。",
+  "content.loader.ul_badge": "借通用載器",
+  "content.loader.ul_note": "無 {0} 之版。{1} 之版借通用載器行於此實例（試行之烘焙）。",
+  "content.loader.ul_needs_bake": "無 {0} 之版。{1} 之版可借通用載器行於此，然試行之烘焙未啟。啟之乃可用此模組。",
+  "content.loader.ul_needs_loader": "無 {0} 之版。{1} 之版可借通用載器行於此，然通用載器未裝。下載之乃可用此模組。",
+  "content.loader.ul_turn_on": "啟烘焙",
+  "content.loader.ul_download": "下載載器",
+  "content.install.ul_not_ready": " 注：此唯借通用載器可行。戲前請啟試行之烘焙並裝載器。",
+  "core.content.modpack.mixed_unsupported": "此合包雜用 {0}。通用載器不能行此組，故不可入。",
+  "core.content.modpack.mixed_needs_bake": "此合包雜用 {0}，唯借通用載器可行：先於設置啟試行之烘焙並裝載器，復入之。",
+  "newinstance.pack.mixed": "雜合之包：{0} 之模組借通用載器而行",
+  "content.loader.ul_missing_bridges": "無 {0} 之版。所裝通用載器不能於 {0} 行他模組：包中闕 {1}。請於設置下載全備之載器包。"
 }

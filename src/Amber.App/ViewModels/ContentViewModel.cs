@@ -17,6 +17,10 @@ namespace Amber.App.ViewModels;
 public sealed partial class ProjectItem(ContentProject project) : LocalizedObservable
 {
     public ContentProject Project { get; } = project;
+
+    /// <summary>Runs on the target instance only through the universal loader (badge on the result row).</summary>
+    [ObservableProperty]
+    public partial bool ViaUniversalLoader { get; set; }
     public string Title => Project.Title;
     public string Summary => Project.Summary;
     public string Meta => L.P("content.project.downloads", Project.Downloads, (Project.Author is null ? "" : Project.Author + " · "), FormatCount(Project.Downloads));
@@ -49,7 +53,10 @@ public sealed partial class ProjectItem(ContentProject project) : LocalizedObser
 
 public sealed record FileItem(ContentFile File) : LocalizedRecord
 {
-    public string Name => File.DisplayName;
+    /// <summary>This version runs on the instance only through the universal loader.</summary>
+    public bool ViaUniversalLoader { get; init; }
+
+    public string Name => ViaUniversalLoader ? File.DisplayName + " · " + L.T("content.loader.ul_badge") : File.DisplayName;
     public string Meta => $"{ChannelText} · {File.Date.LocalDateTime:yyyy-MM-dd} · {string.Join(", ", File.Loaders)} · {string.Join(", ", File.GameVersions.Take(3))}{(File.GameVersions.Count > 3 ? "…" : "")}";
     private string ChannelText => File.Channel switch { "release" => L.T("download.filter.release"), "beta" => L.T("content.channel.beta"), "alpha" => L.T("content.channel.alpha"), var c => c };
 }
@@ -521,12 +528,16 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         try
         {
             var instance = FilterByInstance && !IsModpack ? CurrentInstance() : null;
-            var result = await Provider.SearchAsync(new SearchQuery(CurrentType, Query.Trim(), instance?.McVersion, instance?.Loader, Page * PageSize, PageSize), cts.Token);
+            // With experimental baking on, mods the universal loader runs on this instance are searched too (and get a
+            // badge); picking one before the loader is installed shows the download prompt. With baking off, nothing changes.
+            var cross = CurrentType == ContentType.Mod ? _service.CrossLoaderFor(instance) : ([], false, false);
+            var extras = cross.Ready || _service.Settings.ExperimentalBake ? cross.Extras : [];
+            var result = await Provider.SearchAsync(new SearchQuery(CurrentType, Query.Trim(), instance?.McVersion, instance?.Loader, Page * PageSize, PageSize) { ExtraLoaders = extras }, cts.Token);
             if (cts.IsCancellationRequested) return;
             _total = result.Total;
             foreach (var p in result.Items)
             {
-                var item = new ProjectItem(p);
+                var item = new ProjectItem(p) { ViaUniversalLoader = extras.Count > 0 && Amber.Core.Bake.CrossLoader.IsCross(instance?.Loader, p.Loaders, extras) };
                 item.Queued = Queue.Contains(item.Project.Source, item.Project.Id);
                 Results.Add(item);
                 _ = LoadIconAsync(item);
@@ -601,9 +612,27 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             var files = await Provider.GetFilesAsync(selected.Project.Id, instance?.McVersion, loader, cts.Token);
             if (cts.IsCancellationRequested) return;
             _viaConnector = false;
+            _crossExtras = [];
             string? loaderNote = null;
             LoaderNote = null;
-            if (files.Count == 0 && CurrentType == ContentType.Mod && instance is { Loader: "forge" or "neoforge" } && SourceIndex == 0)
+            CrossPrompt = CrossLoaderPrompt.None;
+            var cross = CurrentType == ContentType.Mod && instance is not null ? _service.CrossLoaderFor(instance) : ([], false, false);
+            var crossFiles = new List<ContentFile>();
+            if (files.Count == 0 && cross.Extras.Count > 0)
+            {
+                // No build for this loader: a build for another ecosystem may run here through the universal loader.
+                crossFiles = Amber.Core.Bake.CrossLoader.Usable(await Provider.GetFilesAsync(selected.Project.Id, instance!.McVersion, null, cts.Token), instance.Loader, cross.Extras).ToList();
+                if (cts.IsCancellationRequested) return;
+            }
+            var connectorWouldWork = instance is { Loader: "forge" or "neoforge" } && SourceIndex == 0 && crossFiles.Count > 0 && crossFiles.All(f => f.Loaders.Contains("fabric"));
+            if (crossFiles.Count > 0 && (cross.Ready || !connectorWouldWork))
+            {
+                files = crossFiles;
+                _crossExtras = cross.Extras;
+                ShowCrossPrompt(instance!, files[0]);
+                loaderNote = LoaderNote;
+            }
+            else if (files.Count == 0 && CurrentType == ContentType.Mod && instance is { Loader: "forge" or "neoforge" } && SourceIndex == 0)
             {
                 // 只有 Fabric 版：可以经 Sinytra Connector 用。
                 var fabric = await Provider.GetFilesAsync(selected.Project.Id, instance.McVersion, "fabric", cts.Token);
@@ -621,7 +650,14 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
                 if (forge.Count > 0 && forge.All(f => f.Loaders.All(l => l is "forge" or "neoforge")))
                     loaderNote = L.T("content.loader.forge_only");
             }
-            foreach (var f in files.Where(f => f.IsRelease || ShowUnstable)) Files.Add(new FileItem(f));
+            if (files.Count == 0 && loaderNote is null && CurrentType == ContentType.Mod && cross.Extras.Count == 0
+                && Amber.Core.Bake.CrossLoader.MissingBridges(_service.InstalledBakeCapabilities, instance?.Loader, instance?.McVersion) is { Count: > 0 } missingBridges)
+            {
+                // The installed loader package could run other ecosystems here but lacks the bridges (a core-only package).
+                loaderNote = L.F("content.loader.ul_missing_bridges", LoaderLabel(instance!.Loader), string.Join(L.T("common.list_separator"), missingBridges));
+            }
+            foreach (var f in files.Where(f => f.IsRelease || ShowUnstable))
+                Files.Add(new FileItem(f) { ViaUniversalLoader = _crossExtras.Count > 0 && Amber.Core.Bake.CrossLoader.IsCross(instance?.Loader, f.Loaders, _crossExtras) });
             SelectedFile = Files.FirstOrDefault();
             if (IsModpack) NewInstanceName = SafeName(selected.Title);
             if (Files.Count == 0 && files.Count > 0) SetStatus(StatusMessage.Warning("content.files.only_unstable"));
@@ -636,6 +672,64 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Failure("content.files.fetch_failed", e, ErrorText.Of(e)));
         }
     }
+
+    /// <summary>The extra ecosystems the shown files were picked from (empty when they are this instance's own).</summary>
+    private IReadOnlyList<string> _crossExtras = [];
+
+    /// <summary>The loader's display name ("NeoForge") for notes.</summary>
+    internal static string LoaderLabel(string? loader) => loader switch
+    {
+        "neoforge" => "NeoForge",
+        "forge" => "Forge",
+        "fabric" => "Fabric",
+        "quilt" => "Quilt",
+        null or "" => "",
+        var other => other,
+    };
+
+    /// <summary>What the note next to a mod from another ecosystem asks for: nothing, turning baking on, or the loader download.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowTurnOnBake), nameof(ShowDownloadLoader))]
+    public partial CrossLoaderPrompt CrossPrompt { get; set; }
+
+    public bool ShowTurnOnBake => CrossPrompt == CrossLoaderPrompt.TurnOn;
+    public bool ShowDownloadLoader => CrossPrompt == CrossLoaderPrompt.Download;
+
+    /// <summary>"Download loader" (Settings › Experimental shows the progress), set by the shell.</summary>
+    public Action? DownloadBakeLoader { get; set; }
+
+    /// <summary>The note and its button for a mod that runs here only through the universal loader.</summary>
+    private void ShowCrossPrompt(GameInstance instance, ContentFile file)
+    {
+        var cross = _service.CrossLoaderFor(instance);
+        var ecosystem = Amber.Core.Bake.CrossLoader.EcosystemOf(instance.Loader, file.Loaders, cross.Extras) ?? "";
+        CrossPrompt = cross.Ready ? CrossLoaderPrompt.None : cross.LoaderInstalled ? CrossLoaderPrompt.TurnOn : CrossLoaderPrompt.Download;
+        LoaderNote = L.F(CrossPrompt switch
+        {
+            CrossLoaderPrompt.TurnOn => "content.loader.ul_needs_bake",
+            CrossLoaderPrompt.Download => "content.loader.ul_needs_loader",
+            _ => "content.loader.ul_note",
+        }, LoaderLabel(instance.Loader), LoaderLabel(ecosystem));
+    }
+
+    [RelayCommand]
+    private async Task TurnOnBakeAsync()
+    {
+        _service.EnableBake();
+        await LoadFilesAsync();
+    }
+
+    [RelayCommand]
+    private void DownloadUniversalLoader() => DownloadBakeLoader?.Invoke();
+
+    /// <summary>
+    /// For a mod that runs here only through the universal loader: the loaders to look its dependencies up with
+    /// (its own ecosystem first). Null for an ordinary mod.
+    /// </summary>
+    internal static IReadOnlyList<string?>? CrossDependencyOrder(ContentFile file, GameInstance instance, IReadOnlyList<string> extras) =>
+        extras.Count > 0 && Amber.Core.Bake.CrossLoader.IsCross(instance.Loader, file.Loaders, extras)
+            ? Amber.Core.Bake.CrossLoader.DependencyOrder(instance.Loader, Amber.Core.Bake.CrossLoader.EcosystemOf(instance.Loader, file.Loaders, extras)!, extras)
+            : null;
 
     /// <summary>详情面板安装按钮上方的提示：需要 Connector、只有 Forge 版这类（null 表示没有）。</summary>
     [ObservableProperty]
@@ -741,6 +835,11 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             return;
         }
 
+        // A mod from another ecosystem (also when the list was not filtered by this instance): its dependencies come
+        // from its own ecosystem, and when baking is not ready the note says what to turn on.
+        var crossOrder = CurrentType == ContentType.Mod && !_viaConnector ? CrossDependencyOrder(file, instance, _service.CrossLoaderFor(instance).Extras) : null;
+        if (crossOrder is not null) ShowCrossPrompt(instance, file);
+
         IsBusy = true;
         _workCts = new CancellationTokenSource();
         try
@@ -759,7 +858,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
                 {
                     var optional = OptionalDependencies.Where(d => d.Include && d.ProjectId is not null).Select(d => d.ProjectId!).ToHashSet(StringComparer.Ordinal);
                     var optionalFiles = OptionalDependencies.Where(d => d.Include && d.ProjectId is null && d.FileId is not null).Select(d => d.FileId!).ToHashSet(StringComparer.Ordinal);
-                    plan = await _service.ContentInstaller.ResolveAsync(file, instance, null, _workCts.Token, optionalProjects: optional, optionalFiles: optionalFiles);
+                    plan = await _service.ContentInstaller.ResolveAsync(file, instance, null, _workCts.Token, loaderPreference: crossOrder,
+                        optionalProjects: optional, optionalFiles: optionalFiles);
                 }
                 // 目标文件夹里已经有同名文件的依赖不用再下，下载器会校验并跳过。
             }
@@ -772,7 +872,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             await Ui.FlushAsync();
             var extra = plan.Files.Count > 1 ? L.P("content.install.dependencies", plan.Files.Count - 1, plan.Files.Count - 1) : "";
             var problems = plan.Problems.Count > 0 ? L.F("content.install.problems", string.Join(L.T("common.list_separator"), plan.Problems)) : "";
-            var noLoader = CurrentType == ContentType.Mod && instance.Loader is null ? L.T("content.install.no_loader") : "";
+            var noLoader = CurrentType == ContentType.Mod && instance.Loader is null ? L.T("content.install.no_loader")
+                : crossOrder is not null && CrossPrompt != CrossLoaderPrompt.None ? L.T("content.install.ul_not_ready") : "";
             var where = IsDatapack ? L.F("content.install.world_target", instance.Id, world!.Label) : instance.Id;
             // 带“注意：”的（依赖有问题、实例没装加载器）用警告色，不当成单纯的成功。
             var kind = problems.Length > 0 || noLoader.Length > 0 ? StatusKind.Warning : StatusKind.Success;
@@ -942,7 +1043,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             Status = p.Stage;
             if (p.Percent is { } percent) Progress = percent;
             _importTask?.Report(p.Percent / 100.0, p.Stage);
-        }), ct, onSkip: file => { lock (skipped) skipped.Add(file); });
+        }), ct, onSkip: file => { lock (skipped) skipped.Add(file); }, mixedRefusal: MixedRefusal);
         await Ui.FlushAsync();
         _service.ForceIsolated(id);
         // 跳过的文件在进度里一闪而过，完成时用可随语言切换的状态再汇总一次。
@@ -954,6 +1055,15 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         // 新装的整合包直接成为当前实例（改版规格 2.3）。
         _service.SetCurrentInstance(id);
         return id;
+    }
+
+    /// <summary>A mixed pack imports only when the universal loader runs its mix on the base loader and baking is ready.</summary>
+    private string? MixedRefusal(ModpackInfo info)
+    {
+        var loader = NewInstanceMods.LoaderId(info.Loader);
+        var installed = _service.InstalledBakeCapabilities;
+        var caps = installed ?? (Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished ? Amber.Core.Bake.CrossLoader.Capabilities.PinnedRelease : null);
+        return ModpackService.MixedRefusal(info, Amber.Core.Bake.CrossLoader.Extras(caps, loader, info.McVersion), _service.Settings.ExperimentalBake && installed is not null);
     }
 
     [RelayCommand]
@@ -969,6 +1079,9 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         await Task.Delay(1500);
     }
 }
+
+/// <summary>What the note next to a mod from another ecosystem asks the player to do.</summary>
+public enum CrossLoaderPrompt { None, TurnOn, Download }
 
 /// <summary>来源下拉的一项：Enabled 为 false 时置灰（CurseForge 没配密钥）。</summary>
 public sealed partial class SourceOption(string label, bool enabled) : ObservableObject

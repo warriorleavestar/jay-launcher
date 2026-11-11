@@ -15,6 +15,9 @@ public sealed record QueuedContent(
     bool ViaConnector = false)
 {
     public string Key => InstallQueue.KeyOf(File.Source, File.ProjectId);
+
+    /// <summary>A mod from another ecosystem (runs through the universal loader): the loaders its dependencies are looked up with.</summary>
+    public IReadOnlyList<string?>? LoaderPreference { get; init; }
 }
 
 /// <summary>

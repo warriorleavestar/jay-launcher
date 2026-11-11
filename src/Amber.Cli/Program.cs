@@ -573,7 +573,7 @@ try
         {
             // bake-install <loader zip> [install root]: the same check and unpacking as the app's "Install loader from zip".
             if (argList.Count < 2) { Console.WriteLine("用法：bake-install <zip> [安装目录]"); return 1; }
-            var installRoot = argList.Count > 2 ? argList[2] : Path.Combine(AmberDataDir(), "universal-loader");
+            var installRoot = argList.Count > 2 ? argList[2] : Amber.Core.Bake.BakeRuntime.For(AmberDataDir()).LoaderRoot;
             var package = Amber.Core.Bake.BakePackage.InstallFromZip(argList[1], installRoot);
             Console.WriteLine($"BAKE INSTALLED {package.LoaderVersion} interface {package.Interface} -> {package.Root}");
             break;

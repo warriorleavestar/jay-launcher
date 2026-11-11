@@ -126,10 +126,31 @@ public sealed class LauncherService : IDisposable
         Accounts = new AccountService(_http, store, AppSettings.DataDir, () => Settings.MicrosoftClientId);
         JayAccounts = new Amber.Core.Identity.JayAccountStore(AppSettings.DataDir);
         JayAccounts.Load();
+        MigrateBakeRuntime(settings);
         if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
             Accounts.AddOffline(settings.PlayerName);
         Reload();
+    }
+
+    /// <summary>
+    /// Older versions kept the loader package and bake caches in the data folder: move them to the runtime folder
+    /// once and point the configured loader path at the new place.
+    /// </summary>
+    private static void MigrateBakeRuntime(AppSettings settings)
+    {
+        try
+        {
+            var runtime = BakeRuntime;
+            if (runtime.MigrateFrom(AppSettings.DataDir).Count == 0) return;
+            var rebased = runtime.RebaseLoaderPath(settings.BakeLoaderPath, AppSettings.DataDir);
+            if (rebased != settings.BakeLoaderPath)
+            {
+                settings.BakeLoaderPath = rebased;
+                settings.Save();
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { System.Diagnostics.Debug.WriteLine("bake runtime migration: " + e.Message); }
     }
 
     /// <summary>
@@ -433,9 +454,46 @@ public sealed class LauncherService : IDisposable
 
     public Amber.Core.Bake.BakeService? BakeFor(GameContext ctx) =>
         Settings.ExperimentalBake && Amber.Core.Bake.BakeToolkit.Find(Settings.BakeLoaderPath) is { } toolkit
-            ? new Amber.Core.Bake.BakeService(toolkit, Path.Combine(AppSettings.DataDir, "bake-cache"), Path.Combine(AppSettings.DataDir, "bake-data"),
+            ? new Amber.Core.Bake.BakeService(toolkit, BakeRuntime.CacheRoot, BakeRuntime.DataRoot,
                 (items, ct) => ctx.Downloader.DownloadAllAsync(items, null, ct))
             : null;
+
+    /// <summary>What the installed universal loader runs (null when none is installed or the package is unreadable). Read whether or not baking is on.</summary>
+    public Amber.Core.Bake.CrossLoader.Capabilities? InstalledBakeCapabilities
+    {
+        get
+        {
+            try
+            {
+                return Amber.Core.Bake.BakeToolkit.Find(Settings.BakeLoaderPath)?.Package is { } package ? Amber.Core.Bake.CrossLoader.Capabilities.Of(package) : null;
+            }
+            catch (Exception e) when (e is Amber.Core.Bake.BakeException or IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Mods from other ecosystems for an instance: the extra loaders, and whether a launch would bake today (baking on
+    /// and a loader installed). When it would not, the extras say what turning it on would allow: from the installed
+    /// package, else from the pinned release (empty when that is not published).
+    /// </summary>
+    public (IReadOnlyList<string> Extras, bool Ready, bool LoaderInstalled) CrossLoaderFor(GameInstance? instance)
+    {
+        if (instance is null) return ([], false, false);
+        var installed = InstalledBakeCapabilities;
+        var caps = installed ?? (Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished ? Amber.Core.Bake.CrossLoader.Capabilities.PinnedRelease : null);
+        return (Amber.Core.Bake.CrossLoader.Extras(caps, instance.Loader, instance.McVersion), Settings.ExperimentalBake && installed is not null, installed is not null);
+    }
+
+    /// <summary>Turns experimental baking on (the prompt next to a mod from another ecosystem) and tells the other pages.</summary>
+    public void EnableBake()
+    {
+        if (Settings.ExperimentalBake) return;
+        Settings.ExperimentalBake = true;
+        SaveAndReload();
+    }
 
     /// <summary>One bake, warm or cleanup at a time: gc must never run while an instance using the cache is baking.</summary>
     private readonly SemaphoreSlim _bakeLock = new(1, 1);
@@ -532,8 +590,11 @@ public sealed class LauncherService : IDisposable
         });
     }
 
-    /// <summary>Where loader packages installed from a zip live: <c>&lt;data&gt;/universal-loader/&lt;version&gt;</c>.</summary>
-    public static string BakeLoaderInstallRoot => Path.Combine(AppSettings.DataDir, "universal-loader");
+    /// <summary>Loader package and bake caches: a runtime folder beside the data folder, so a sandboxed game never needs the data folder.</summary>
+    public static Amber.Core.Bake.BakeRuntime BakeRuntime => Amber.Core.Bake.BakeRuntime.For(AppSettings.DataDir);
+
+    /// <summary>Where loader packages installed from a zip live: <c>&lt;runtime&gt;/universal-loader/&lt;version&gt;</c>.</summary>
+    public static string BakeLoaderInstallRoot => BakeRuntime.LoaderRoot;
 
     /// <summary>
     /// Installs a universal loader package from its zip (checked file by file against its manifest) and selects it.

@@ -22,6 +22,8 @@ public sealed record BakeLoaderRelease(string ReleasesBase, string LoaderVersion
     /// <summary>The loader's own repository, where its packages are released.</summary>
     public const string LoaderReleases = "https://github.com/warriorleavestar/jay-loader/releases/download/";
 
+    // TODO(privacy plan item 4): list this pin in build/pins.json (source + SHA-256, checked at build time) once that
+    // file exists on main, and generate or check this constant against it.
     /// <summary>The pin: the loader project's release (tag, asset, SHA-256 and size of that exact zip).</summary>
     public static BakeLoaderRelease Pinned { get; } = new(
         LoaderReleases,
