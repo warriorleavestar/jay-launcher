@@ -36,8 +36,8 @@ patch -d "$source" -p1 --forward --batch < "$patch_file"
 cross="$work/android-$abi.ini"
 cat >"$cross" <<EOF
 [binaries]
-c = '$toolchain/bin/${triple}26-clang'
-cpp = ['$toolchain/bin/${triple}26-clang++', '-fno-exceptions', '-fno-rtti', '-static-libstdc++']
+c = ['$toolchain/bin/${triple}26-clang', '-femulated-tls']
+cpp = ['$toolchain/bin/${triple}26-clang++', '-femulated-tls', '-fno-exceptions', '-fno-rtti', '-static-libstdc++']
 ar = '$toolchain/bin/llvm-ar'
 strip = '$toolchain/bin/llvm-strip'
 pkg-config = 'pkg-config'
@@ -60,6 +60,8 @@ meson setup "$work/build" "$source" --cross-file "$cross" \
   -Dandroid-libbacktrace=disabled -Dandroid-libperfetto=disabled \
   -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dvulkan-layers=[] \
   -Dallow-fallback-for=libdrm \
+  -Dlibdrm:tests=false -Dlibdrm:cairo-tests=disabled \
+  -Dlibdrm:man-pages=disabled -Dlibdrm:valgrind=disabled \
   -Degl=enabled -Degl-native-platform=android -Dopengl=true \
   -Dgles1=disabled -Dgles2=enabled -Dglx=disabled -Dgbm=disabled \
   -Dllvm=disabled -Dlibunwind=disabled -Dvalgrind=disabled \
