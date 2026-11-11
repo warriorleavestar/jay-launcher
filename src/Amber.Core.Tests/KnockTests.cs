@@ -34,14 +34,14 @@ public sealed class KnockTests : IAsyncDisposable
         _credentials = RoomCredentials.Create(_host.PublicKey, 25565, new TunnelSettings(TransportMode.High, true));
     }
 
-    private KnockServer Server(KnockLimits? limits = null)
+    private KnockServer Server(KnockLimits? limits = null, Func<bool>? alwaysAsk = null)
     {
         if (_server is not null) return _server;
         _server = new KnockServer(_book, _host, () => _credentials, pub => _trusted(pub), (request, ct) =>
         {
             lock (_asked) _asked.Add(request);
             return _decide(request, ct);
-        }, IPAddress.Loopback, 0, limits: limits ?? Fast);
+        }, IPAddress.Loopback, 0, limits: limits ?? Fast) { AlwaysAsk = alwaysAsk };
         _server.Admitted += r =>
         {
             lock (_admitted) _admitted.Add(r);
@@ -509,6 +509,52 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.False(paused);
         Assert.False(server.IsPaused);
         Assert.True((await KnockAsync(invite.Invite)).Approved);
+    }
+
+    /// <summary>
+    /// In a password room every wrong guess is an unknown invite id. Too many of them and the password invite answers like an
+    /// unknown one for a while, even to the right password, so guessing gets no answer; ordinary invites keep working.
+    /// </summary>
+    [Fact]
+    public async Task UnknownInviteIdsQuietOnlyThePasswordInvite()
+    {
+        var invite = Invite(uses: 2);
+        var salt = Amber.Core.Multiplayer.Public.RoomPassword.NewSalt();
+        var room = _book.CreateStanding(true, TunnelSettings.Default, Amber.Core.Multiplayer.Public.RoomPassword.Token("hunter2", salt));
+        var server = Server();
+        for (var i = 0; i < Fast.MaxUnknownPerMinute; i++)
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, server.Port);
+            var stream = client.GetStream();
+            await KnockProtocol.WriteFrameAsync(stream, RandomNumberGenerator.GetBytes(KnockProtocol.IdLength), default);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, await ReadToEndAsync(stream, timeout.Token));
+        }
+        Assert.True(server.IsPasswordPaused);
+        Assert.False(server.IsPaused);
+        await Assert.ThrowsAnyAsync<IOException>(() => KnockAsync(room.Invite));
+        Assert.True((await KnockAsync(invite.Invite)).Approved);
+
+        _now += Fast.PauseAfterFailures + TimeSpan.FromSeconds(1);
+        Assert.False(server.IsPasswordPaused);
+        Assert.True((await KnockAsync(room.Invite)).Approved);
+    }
+
+    /// <summary>Child mode's "always ask" overrides both a trusted guest and an auto-approve invite, checked at each knock.</summary>
+    [Fact]
+    public async Task AlwaysAskOverridesTrustAndAutoApprove()
+    {
+        var always = true;
+        Server(alwaysAsk: () => always);
+        _decide = (_, _) => Task.FromResult(false);
+        _trusted = pub => pub.AsSpan().SequenceEqual(_guest.PublicKey);
+        var standing = _book.CreateStanding(true, TunnelSettings.Default);
+        Assert.False((await KnockAsync(standing.Invite)).Approved);
+        Assert.Single(_asked);
+        always = false;
+        Assert.True((await KnockAsync(standing.Invite)).Approved);
+        Assert.Single(_asked);
     }
 
     /// <summary>prologue 里带着邀请编号：报的是这张邀请的编号、握手却按另一个编号做，第一条消息就失败。</summary>

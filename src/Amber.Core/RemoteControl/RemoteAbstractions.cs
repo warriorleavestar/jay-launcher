@@ -84,6 +84,16 @@ public sealed class AskEveryTimePolicy(Func<RemoteConsentRequest, CancellationTo
 }
 
 /// <summary>
+/// Declines without asking while <paramref name="refuse"/> says so (child mode's "no remote control", checked at the moment of
+/// each request so turning it on applies to a hub that is already running); otherwise <paramref name="inner"/> decides.
+/// </summary>
+public sealed class RefuseWhilePolicy(Func<bool> refuse, IRemoteConsentPolicy inner) : IRemoteConsentPolicy
+{
+    public Task<RemoteConsent> DecideAsync(RemoteConsentRequest request, CancellationToken ct) =>
+        refuse() ? Task.FromResult(RemoteConsent.Denied) : inner.DecideAsync(request, ct);
+}
+
+/// <summary>
 /// 按当前系统选截屏和注入的实现：Windows 用 GDI + SendInput，Linux 的 X11 会话用 XGetImage + XTest、Wayland 会话用系统门户（ScreenCast/RemoteDesktop + PipeWire），macOS 用 CoreGraphics + CGEvent。
 /// 这里只管“这台电脑能不能被别人看 / 控制”；看别人、控制别人在哪个系统上都行（只要解码和显示）。
 /// </summary>
