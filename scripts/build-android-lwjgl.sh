@@ -72,6 +72,7 @@ common_flags=(
   -std=gnu11 -O3 -fPIC -ffunction-sections -fdata-sections
   -fvisibility=hidden -pthread -DNDEBUG -DLWJGL_LINUX "-D$arch_define"
   -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64
+  -include string.h
   -I"$toolchain/sysroot/usr/include"
   -I"$lwjgl/modules/lwjgl/core/src/main/c"
   -I"$lwjgl/modules/lwjgl/core/src/main/c/linux"
