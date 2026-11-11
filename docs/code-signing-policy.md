@@ -14,8 +14,8 @@ The Windows builds of Jay (`Jay.exe` and `jay-server.exe`) are signed with a fre
   Only binaries built from this repository's source by GitHub Actions on GitHub-hosted runners: `Jay.exe` (the single-file ReadyToRun build) and `jay-server.exe`.
 - 只签正式发布：推送 `v*` 标签触发构建，每次签名都由下面的批准人在 SignPath 上手动批准。日常构建和 PR 构建不签名。
   Only releases: pushing a `v*` tag starts the build, and every signing request is approved by hand by an approver listed below. Everyday and pull-request builds are not signed.
-- 发布包里自带的第三方程序（EasyTier 联机组件，LGPL-3.0，来自 [EasyTier 官方发布页](https://github.com/EasyTier/EasyTier/releases)）不用本项目的证书签名，保持上游原样，SHA-256 固定在 `scripts/bundle-easytier.sh` 里。
-  Bundled third-party programs (the EasyTier multiplayer component, LGPL-3.0, from the [official EasyTier releases](https://github.com/EasyTier/EasyTier/releases)) are not signed with this project's certificate. They ship exactly as upstream publishes them, pinned by SHA-256 in `scripts/bundle-easytier.sh`.
+- 发布包里自带的第三方程序（EasyTier 联机组件，LGPL-3.0）用的是 Jay 维护的加固版本（[jay-easytier](https://github.com/Yumao-Feather/jay-easytier)，改动见其中的 JAY.md），不用本项目的证书签名，SHA-256 和大小固定在 `src/Amber.Core/Multiplayer/EasyTier.cs` 里，`scripts/bundle-easytier.sh` 读同一份。
+  Bundled third-party programs (the EasyTier multiplayer component, LGPL-3.0) come from Jay's hardened build ([jay-easytier](https://github.com/Yumao-Feather/jay-easytier); JAY.md there lists the changes). They are not signed with this project's certificate. Their SHA-256 and size are pinned in `src/Amber.Core/Multiplayer/EasyTier.cs`, which `scripts/bundle-easytier.sh` reads.
 - 签名配置存档在 [`.signpath/artifact-configuration.xml`](../.signpath/artifact-configuration.xml)，构建流程在 [`.github/workflows/build.yml`](../.github/workflows/build.yml)。
   The signing configuration is archived in [`.signpath/artifact-configuration.xml`](../.signpath/artifact-configuration.xml); the build is defined in [`.github/workflows/build.yml`](../.github/workflows/build.yml).
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 把固定版本的 EasyTier 官方安装包放进发布目录，用户不用再联网下载联机组件。
+# 把固定版本的 EasyTier 安装包（Jay 的加固版本）放进发布目录，用户不用再联网下载联机组件。
 # 版本、大小和 SHA-256 都从 src/Amber.Core/Multiplayer/EasyTier.cs 读取，和程序里的校验值是同一份，对不上就失败。
 # 用法：scripts/bundle-easytier.sh <rid> <目标目录>，例如 scripts/bundle-easytier.sh win-x64 out/win-x64/easytier
 set -euo pipefail
@@ -21,17 +21,20 @@ case "$rid" in
 esac
 
 version="$(sed -n 's/.*public const string Version = "\([0-9.]*\)";.*/\1/p' "$source_file" | head -n 1)"
+tag="$(sed -n 's/.*public const string ReleaseTag = "\([a-z0-9.-]*\)";.*/\1/p' "$source_file" | head -n 1)"
+commit="$(sed -n 's/.*public const string Commit = "\([0-9a-f]\{12\}\)";.*/\1/p' "$source_file" | head -n 1)"
+source_url="$(sed -n 's/.*public const string SourceUrl = "\(https:[^"]*\)";.*/\1/p' "$source_file" | head -n 1)"
 line="$(grep -F "$key =>" "$source_file" | head -n 1)"
 platform="$(sed -n 's/.*A("\([a-z0-9_-]*\)".*/\1/p' <<<"$line")"
 sha="$(sed -n 's/.*A("[^"]*", "\([0-9a-f]\{64\}\)".*/\1/p' <<<"$line")"
 size="$(sed -n 's/.*A("[^"]*", "[0-9a-f]*", \([0-9_]*\).*/\1/p' <<<"$line" | tr -d _)"
-if [[ -z "$version" || -z "$platform" || -z "$sha" || -z "$size" ]]; then
+if [[ -z "$version" || -z "$tag" || -z "$commit" || -z "$source_url" || -z "$platform" || -z "$sha" || -z "$size" ]]; then
     echo "could not read EasyTier pin for $rid from $source_file" >&2
     exit 1
 fi
 
-name="easytier-$platform-v$version.zip"
-url="https://github.com/EasyTier/EasyTier/releases/download/v$version/$name"
+name="easytier-$platform-v$version-jay-$commit.zip"
+url="$source_url/releases/download/$tag/$name"
 mkdir -p "$dest"
 curl -fL --retry 5 --retry-all-errors --connect-timeout 20 -o "$dest/$name.tmp" "$url"
 
@@ -46,13 +49,14 @@ fi
 mv "$dest/$name.tmp" "$dest/$name"
 
 cat > "$dest/README.txt" <<TXT
-EasyTier $version ($platform)
+EasyTier $version, Jay build $tag ($platform)
 
-这是开源组网工具 EasyTier 的官方发布包，未经修改，Jay 的联机功能用它。
-This is the unmodified official release of EasyTier, used by Jay for multiplayer.
+这是开源组网工具 EasyTier 的 Jay 加固版本，Jay 的联机功能用它。改动和构建方法见源码仓库里的 JAY.md。
+This is Jay's hardened build of EasyTier, used by Jay for multiplayer. JAY.md in the source repository lists the changes and how it is built.
 
 License: LGPL-3.0
-Source:  https://github.com/EasyTier/EasyTier
+Source:  $source_url/tree/$tag
+Upstream: https://github.com/EasyTier/EasyTier
 Package: $url
 SHA-256: $sha
 TXT
