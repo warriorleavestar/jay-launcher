@@ -140,8 +140,23 @@ public sealed class ReleaseSignatureTests : IDisposable
     [Fact]
     public void NoTrusteeKeysAreBuiltInYet()
     {
-        // The three trustees add their public keys (jay-server key-public) before the first release with this check.
-        foreach (var key in JayTrust.Keys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
+        // The three trustees add their release public keys (jay-server key-public) before the first release with this check.
+        foreach (var key in JayTrust.ReleaseKeys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
+    }
+
+    [Fact]
+    public void ReleaseAndNetworkKeysAreSeparate()
+    {
+        // The release list is JayTrust.ReleaseKeys, not the keys that review networks.
+        Assert.Equal(new TrustList([.. JayTrust.ReleaseKeys.Select(Convert.FromBase64String)], JayTrust.ReleaseNeed).Hash, TrustList.Jay.Hash);
+        Assert.Empty(JayTrust.ReleaseKeys.Intersect(JayTrust.Keys));
+
+        bool IsNetwork(byte[] id) => id.AsSpan().SequenceEqual(T[0].Id);
+        bool IsRelease(byte[] id) => id.AsSpan().SequenceEqual(T[1].Id);
+        Assert.Throws<InvalidOperationException>(() => TrustCommands.ForUse(T[0], release: true, IsNetwork, IsRelease));
+        Assert.Throws<InvalidOperationException>(() => TrustCommands.ForUse(T[1], release: false, IsNetwork, IsRelease));
+        Assert.Same(T[0], TrustCommands.ForUse(T[0], release: false, IsNetwork, IsRelease));
+        Assert.Same(T[1], TrustCommands.ForUse(T[1], release: true, IsNetwork, IsRelease));
     }
 
     // ---- item 3: changing the trustee list ----

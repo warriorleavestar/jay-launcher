@@ -114,9 +114,9 @@ public static class Program
           jay-server release sums <文件...> [--out SHA256SUMS.txt]  算发布包的 SHA-256 清单
           jay-server release prepare --tag <v0.9.0> --seq <序号> --commit <40 位提交号> [--sums SHA256SUMS.txt] [--out SHA256SUMS.txt.sigs]
               写出还没人签的发布签名文件（序号每次发布加 1）
-          jay-server release cosign --key <信任钥匙文件> [--sums SHA256SUMS.txt] [--sigs SHA256SUMS.txt.sigs]
+          jay-server release cosign --key <发版钥匙文件> [--sums SHA256SUMS.txt] [--sigs SHA256SUMS.txt.sigs]
               信任人在离线电脑上看清要签的版本、提交号和文件清单，手打版本号后签；3 人里要 2 人
-          jay-server release trust-change --key <信任钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
+          jay-server release trust-change --key <发版钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
               换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）
           jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
           EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 2/3 信任人签：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
@@ -347,7 +347,7 @@ public static class Program
             }
             case "cosign":
             {
-                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定你的信任钥匙文件");
+                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定你的发版钥匙文件（jay-release.key）");
                 var sumsPath = options.Get("sums") ?? ReleaseSignature.SumsFileName;
                 var sigsPath = options.Get("sigs") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(sumsPath)) ?? ".", ReleaseSignature.SignatureFileName);
                 var manifest = File.ReadAllText(sigsPath);
@@ -355,7 +355,7 @@ public static class Program
                 var lines = TrustCommands.DescribeRelease(manifest, sums, options.Get("trust") is { } t ? ReadTrustList(t, options.Get("need")) : TrustList.Jay);
                 var tag = ReleaseManifest.Parse(manifest)!.Statement.Tag;
                 if (!confirm(lines, "版本号", tag)) return 3;
-                var signed = ReleaseSignature.Cosign(manifest, TrustCommands.LoadKey(keyPath));
+                var signed = ReleaseSignature.Cosign(manifest, TrustCommands.ForUse(TrustCommands.LoadKey(keyPath), release: true));
                 var outPath = options.Get("out") ?? sigsPath;
                 File.WriteAllText(outPath, signed);
                 output.WriteLine($"已签 {tag}，写入 {outPath}。签够 2 位后，把它和 SHA256SUMS.txt 一起上传到同一个 Release。");
@@ -364,14 +364,14 @@ public static class Program
             case "trust-change":
             {
                 // From the list this Jay was built with (or --from), to the list in --to: one public key per line.
-                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定你的信任钥匙文件");
+                var keyPath = options.Get("key") ?? throw new ArgumentException("要用 --key 指定你的发版钥匙文件（jay-release.key）");
                 var from = options.Get("from") is { } f ? ReadTrustList(f, options.Get("from-need")) : TrustList.Jay;
                 var to = ReadTrustList(options.Get("to") ?? throw new ArgumentException("要用 --to 指定新名单（每行一把完整公钥）"), options.Get("need"));
                 var seq = long.Parse(options.Get("seq") ?? throw new ArgumentException("要用 --seq 指定这次换名单的序号（不小于上一版发布序号）"), System.Globalization.CultureInfo.InvariantCulture);
                 var chainPath = options.Get("chain") ?? ReleaseSignature.ChainFileName;
                 var chain = File.Exists(chainPath) ? File.ReadAllText(chainPath) : null;
                 if (!confirm(TrustCommands.DescribeTrustChange(from, to, seq), "新名单编号", TrustCommands.CodeOf(to.Hash))) return 3;
-                File.WriteAllText(options.Get("out") ?? chainPath, TrustChain.Cosign(chain, from, to.Keys, to.Need, seq, TrustCommands.LoadKey(keyPath)));
+                File.WriteAllText(options.Get("out") ?? chainPath, TrustChain.Cosign(chain, from, to.Keys, to.Need, seq, TrustCommands.ForUse(TrustCommands.LoadKey(keyPath), release: true)));
                 output.WriteLine($"已签换名单，写入 {options.Get("out") ?? chainPath}。旧名单里签够 {from.Need} 位后，把它放进之后每个 Release。");
                 return 0;
             }
@@ -452,7 +452,7 @@ public static class Program
                 var previous = options.Get("prev") is { } prev ? File.Exists(prev) ? File.ReadAllText(prev) : prev : null;
                 var info = NetworkString.Parse(current, now: DateTimeOffset.UtcNow).Info;
                 if (!TrustCommands.ConfirmOnConsole(TrustCommands.DescribeNetwork(current, previous), "网络编号", TrustCommands.CodeOf(info.Id))) return 3;
-                var signed = NetworkString.Cosign(current, TrustCommands.LoadKey(keyFile));
+                var signed = NetworkString.Cosign(current, TrustCommands.ForUse(TrustCommands.LoadKey(keyFile), release: false));
                 if (options.Get("out") is { } outPath) { File.WriteAllText(outPath, signed + "\n"); Console.Error.WriteLine($"已写 {outPath}"); }
                 else output.WriteLine(signed);
                 var parsed = NetworkString.Parse(signed);
@@ -589,7 +589,7 @@ public static class Program
                     var before = DirectoryCertificate.Parse(bytes) ?? throw new InvalidDataException("不是有效的目录证书（格式或签名不对）");
                     if (!TrustCommands.ConfirmOnConsole(TrustCommands.DescribeCertificate(bytes), "目录节点公钥",
                         TrustCommands.CodeOf(Convert.ToBase64String(before.DirectoryKey).TrimEnd('=')))) return 3;
-                    var cosigned = DirectoryCertificate.Cosign(bytes, TrustCommands.LoadKey(rootFile));
+                    var cosigned = DirectoryCertificate.Cosign(bytes, TrustCommands.ForUse(TrustCommands.LoadKey(rootFile), release: false));
                     File.WriteAllBytes(existing, cosigned);
                     var c = DirectoryCertificate.Parse(cosigned)!;
                     output.WriteLine($"已在 {existing} 上加签名（现在 {c.Signatures.Count} 个，Jay 信任人 {JayTrust.Quorum.Count(c.Signers)}/{JayTrust.Need}）。");
@@ -618,7 +618,7 @@ public static class Program
                 var review = TrustCommands.DescribeCertificateContent(directoryKey, networkName, expires);
                 review.Add("已经签过的：还没有人（你是第一个）");
                 if (!TrustCommands.ConfirmOnConsole(review, "目录节点公钥", TrustCommands.CodeOf(Convert.ToBase64String(directoryKey).TrimEnd('=')))) return 3;
-                var cert = DirectoryCertificate.Issue(TrustCommands.LoadKey(rootFile), directoryKey, networkName, expires);
+                var cert = DirectoryCertificate.Issue(TrustCommands.ForUse(TrustCommands.LoadKey(rootFile), release: false), directoryKey, networkName, expires);
                 File.WriteAllBytes(target, cert);
                 output.WriteLine($"已写 {target}（到 {expires:yyyy-MM-dd} 有效）。证书不是秘密，可以随节点数据目录一起备份。");
                 return 0;
