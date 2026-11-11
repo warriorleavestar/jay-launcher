@@ -129,6 +129,8 @@ public sealed class RunLogStore : IDisposable
     internal static string? CrashReportIn(string workDir, string? saved)
     {
         if (string.IsNullOrWhiteSpace(saved)) return null;
+        // "C:x.txt" is relative to drive C's current folder, not a crash report Jay wrote: refuse it on every system.
+        if (saved.Length >= 2 && char.IsAsciiLetter(saved[0]) && saved[1] == ':' && (saved.Length == 2 || saved[2] is not ('\\' or '/'))) return null;
         var name = Path.GetFileName(saved.Replace('\\', '/').TrimEnd('/'));
         if (name.Length is 0 or > 255 || name.Trim('.', ' ').Length == 0 || name.IndexOfAny([':', '\\', '\0']) >= 0
             || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) return null;
