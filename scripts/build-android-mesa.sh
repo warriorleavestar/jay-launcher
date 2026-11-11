@@ -33,6 +33,13 @@ tar -xf "$archive" -C "$work"
 source="$work/mesa-$version"
 patch_file="$(cd "$(dirname "$0")/../third_party/android-mesa" && pwd)/jay-android.patch"
 patch -d "$source" -p1 --forward --batch < "$patch_file"
+# Clang's pre-API-29 emulated TLS exposes descriptors instead of the original
+# ELF TLS symbols, so the DRI version script must not try to export them.
+sed -i.bak \
+  -e '/_mesa_glapi_tls_Context;/d' \
+  -e '/_mesa_glapi_tls_Dispatch;/d' \
+  "$source/src/gallium/targets/dri/dri.sym.in"
+rm "$source/src/gallium/targets/dri/dri.sym.in.bak"
 cross="$work/android-$abi.ini"
 cat >"$cross" <<EOF
 [binaries]
