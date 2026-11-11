@@ -522,7 +522,29 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Warning("core.mp.nodes.empty"));
             return;
         }
-        // A node that goes by an IP: the code is sealed (Argon2id, off the UI thread) and the passphrase shown beside it.
+        // A relay that goes by an IP: on a public network, a record code (relays in a signed record on its directories, no
+        // passphrase); otherwise a sealed code (Argon2id, off the UI thread) with the passphrase shown beside it.
+        if (urls.Any(RelayNodes.HasIpHost) && _public is { } network)
+        {
+            try
+            {
+                var identity = RelayRecordIdentity();
+                await new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network).PutRecordAsync(
+                    Amber.Core.Multiplayer.Public.RelayRecord.Make(identity, null, urls, DateTimeOffset.UtcNow), default);
+                _service.Settings.RelayRecordNetwork = network.Profile.Id;
+                _service.Settings.Save();
+                ShareCodeText = Amber.Core.Multiplayer.Public.RelayRecord.Encode(identity.Locator(network.Profile.Id));
+                SharePassphrase = "";
+                await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);
+                SetStatus(StatusMessage.Success("multiplayer.nodes.exported_record", network.Profile.Name));
+                return;
+            }
+            catch (IOException e)
+            {
+                // The directory turned it down or isn't reachable: the sealed code still works.
+                _diag.Add(L.T("multiplayer.public.diagnostics_category"), e.Message);
+            }
+        }
         var (code, passphrase) = await Task.Run(() => RelayNodes.Share(null, urls));
         ShareCodeText = code;
         SharePassphrase = passphrase ?? "";
@@ -530,9 +552,57 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         SetStatus(StatusMessage.Success(passphrase is null ? "multiplayer.nodes.exported" : "multiplayer.nodes.exported_sealed"));
     }
 
+    private Amber.Core.Multiplayer.Public.RelayRecord.Identity RelayRecordIdentity() =>
+        Amber.Core.Multiplayer.Public.RelayRecord.LoadOrCreate(Path.Combine(AppSettings.DataDir, "relay-record.key"));
+
+    /// <summary>On connecting to a public network: puts this Jay's relay record there again (each put lasts 7 days).</summary>
+    private async Task RenewRelayRecordAsync(Amber.Core.Multiplayer.Public.PublicNetworkSession network)
+    {
+        var urls = Nodes.Select(n => n.Url).ToList();
+        if (_service.Settings.RelayRecordNetwork != network.Profile.Id || !urls.Any(RelayNodes.HasIpHost)) return;
+        try
+        {
+            await new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network).PutRecordAsync(
+                Amber.Core.Multiplayer.Public.RelayRecord.Make(RelayRecordIdentity(), null, urls, DateTimeOffset.UtcNow), default);
+        }
+        catch (IOException e)
+        {
+            _diag.Add(L.T("multiplayer.public.diagnostics_category"), e.Message);
+        }
+    }
+
+    /// <summary>A JAYNR1 record code: looks the relays up on the public network it names (must be the connected one).</summary>
+    private async Task<(string? Name, List<string> Urls)?> ResolveRelayRecordAsync(string text)
+    {
+        if (Amber.Core.Multiplayer.Public.RelayRecord.TryParse(text) is not { } locator)
+        {
+            SetStatus(StatusMessage.Error("multiplayer.nodes.invalid_share_code"));
+            return null;
+        }
+        if (_public is not { } network || network.Profile.Id != locator.NetworkId)
+        {
+            SetStatus(new StatusMessage("common.raw", [L.F("core.mp.nodes.record_needs_network", locator.NetworkId)], StatusKind.Warning));
+            return null;
+        }
+        try
+        {
+            return await Amber.Core.Multiplayer.Public.RelayRecord.ResolveAsync(new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network), locator, default);
+        }
+        catch (IOException e)
+        {
+            SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
+            return null;
+        }
+    }
+
     [RelayCommand]
     private async Task ImportNodesAsync()
     {
+        if (Amber.Core.Multiplayer.Public.RelayRecord.IsCode(ShareCodeText))
+        {
+            if (await ResolveRelayRecordAsync(ShareCodeText) is { } found) AddImportedNodes(found.Name, found.Urls);
+            return;
+        }
         if (ShareCodeIsSealed && SealedDirect.NormalizePassphrase(SharePassphrase) is null)
         {
             SetStatus(StatusMessage.Warning("multiplayer.sealed.enter_passphrase"));
@@ -546,6 +616,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(new StatusMessage("common.raw", [error ?? L.T("multiplayer.nodes.invalid_share_code")], StatusKind.Error));
             return;
         }
+        AddImportedNodes(name, urls);
+    }
+
+    private void AddImportedNodes(string? name, List<string> urls)
+    {
         var added = 0;
         foreach (var url in urls.Where(u => Nodes.All(n => n.Url != u)))
         {

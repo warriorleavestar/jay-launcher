@@ -74,6 +74,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `JAYSS1-` | Jay server invite sealed with a passphrase (server with no domain) | `Multiplayer/Gate/GateInvite.cs` |
 | `JAYC1-` | Contact code (identity public key) | `Multiplayer/Contacts/ContactCode.cs` |
 | `JAYR1-` | Relay node code | `Multiplayer/Gate/GateRelayCode.cs` |
+| `AMBNODE-`, `JAYNS1-`, `JAYNR1-` | Relay share: domains only / sealed with a passphrase / signed-record locator (relays that go by an IP) | `Multiplayer/RelayNodes.cs`, `Multiplayer/Public/RelayRecord.cs` |
 | `JAYNET2-` | Public network connection string | `Multiplayer/Public/NetworkString.cs` |
 | `JAYF1-` | Device fingerprint | `Multiplayer/Public/DeviceFingerprint.cs` |
 
