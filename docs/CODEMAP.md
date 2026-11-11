@@ -92,7 +92,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 
 ## src/Amber.NetworkServer/
 
-`JayNetworkServer.cs` (builder and host: EasyTier seed, room directory, login, room gates), `Gates.cs` (policy and region gates), `AdminApi.cs` (local admin API and token), `NetworkScaffold.cs` (signing key, network JSON, config files for a new network). `Hardware/` binds a node to its machine (hardware ids, offline certificate, TPM sealing, runtime checks, self-wipe; `docs/security/node-hardware-binding.md`). See `docs/network-server-framework.md`.
+`JayNetworkServer.cs` (builder and host: EasyTier seed, room directory, login, room gates), `Gates.cs` (policy and region gates), `AdminApi.cs` (local admin API and token), `NetworkScaffold.cs` (signing key, network JSON, config files for a new network). `src/Amber.NetworkServer/Hardware/` binds a node to its machine (hardware ids, offline certificate, TPM sealing, runtime checks, self-wipe; `docs/security/node-hardware-binding.md`). See `docs/network-server-framework.md`.
 
 ## Mobile
 
