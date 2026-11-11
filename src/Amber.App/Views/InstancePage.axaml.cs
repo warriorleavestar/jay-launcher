@@ -43,7 +43,7 @@ public partial class InstancePage : UserControl
     private void OnWorldsKeyDown(object? sender, KeyEventArgs e)
     {
         if (Vm is not { } vm || WorldsList.SelectedItem is not ViewModels.WorldItem world || e.KeyModifiers != KeyModifiers.None
-            || !KeyboardScope.Allows(KeyScope.List, WorldsList, e)) return;
+            || !KeyboardScope.Allows(KeyScope.List, e)) return;
         switch (e.Key)
         {
             case Key.Enter:
@@ -62,7 +62,7 @@ public partial class InstancePage : UserControl
     private void OnPacksKeyDown(object? sender, KeyEventArgs e)
     {
         if (Vm is not { } vm || sender is not ListBox list || list.SelectedItem is not ViewModels.PackFileItem item
-            || !KeyboardScope.Allows(KeyScope.List, list, e)) return;
+            || !KeyboardScope.Allows(KeyScope.List, e)) return;
         switch (e.Key)
         {
             case Key.Space when e.KeyModifiers == KeyModifiers.None:
@@ -184,7 +184,7 @@ public partial class InstancePage : UserControl
         base.OnDetachedFromVisualTree(e);
     }
 
-    /// <summary>§6.3 keys: Ctrl+Tab / Ctrl+Shift+Tab switch tabs, Alt+1…8 go straight to a tab, Ctrl+Shift+Q quits the running game.</summary>
+    /// <summary>§6.3 keys: Ctrl+Tab / Ctrl+Shift+Tab switch tabs, Alt+1…8 go straight to a tab (Ctrl+Shift+Q is global, in MainWindow).</summary>
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (!IsEffectivelyVisible || Vm is not { HasInstance: true } vm) return;
@@ -286,7 +286,7 @@ public partial class InstancePage : UserControl
     /// </summary>
     private void OnModsKeyDown(object? sender, KeyEventArgs e)
     {
-        if (Vm is not { } vm || !KeyboardScope.Allows(KeyScope.List, ModsList, e)) return;
+        if (Vm is not { } vm || !KeyboardScope.Allows(KeyScope.List, e)) return;
         var rows = vm.ModsView.ToList();
         var current = ModsList.SelectedItem as ModItem;
         var index = current is null ? -1 : rows.IndexOf(current);

@@ -63,12 +63,12 @@ public partial class MainWindow : Window
             // Ctrl+Enter 启动当前实例；焦点在输入框里（JVM 参数这类）时不触发，免得边填参数边把游戏启动了。
             else if (e.Key == Avalonia.Input.Key.Enter && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control)
             {
-                if (!KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.OutsideText, this, e)) return;
+                if (!KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.OutsideText, e)) return;
                 if (DataContext is MainViewModel { Pages: var pages } && pages.OfType<HomeViewModel>().FirstOrDefault() is { } home)
                     e.Handled = home.LaunchShortcut();
             }
             else if (e.Key == Avalonia.Input.Key.Z && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control
-                     && KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.OutsideText, this, e))
+                     && KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.OutsideText, e))
                 e.Handled = Toasts.UndoLatest();
         }, RoutingStrategies.Tunnel);
         // 开发用：设置 AMBER_SNAPSHOT_DIR 后，依次把每个页面渲染成 PNG 然后退出。

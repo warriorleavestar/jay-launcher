@@ -938,13 +938,14 @@ public sealed partial class SettingsViewModel : PageViewModel
     public void RestoreDefaultLook()
     {
         var before = SelectedThemePack;
-        if (before is null || before.IsDefault)
+        if (before is { IsDefault: true })
         {
             Toasts.Show(L.T("shortcut.look.already"));
             return;
         }
         ResetThemePack();
-        Toasts.WithAction(L.T("shortcut.look.restored"), L.T("common.undo"),
+        if (before is null or { IsDefault: true }) Toasts.Show(L.T("shortcut.look.restored"));
+        else Toasts.WithAction(L.T("shortcut.look.restored"), L.T("common.undo"),
             () => SelectedThemePack = ThemePacks.FirstOrDefault(p => p.Id == before.Id) ?? SelectedThemePack);
     }
 
