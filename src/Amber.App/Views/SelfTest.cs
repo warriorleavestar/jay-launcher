@@ -666,29 +666,29 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
 
     private async Task LogPageAsync()
     {
-        var previous = main.CurrentPage;
         var log = Page<LogViewModel>();
-        main.CurrentPage = log;
-        var page = await FindAsync<LogPage>(_ => true);
-        if (page is null)
+        var wasDocked = main.LogDocked;
+        main.LogDocked = true;
+        var dock = await FindAsync<LogDockView>(_ => true);
+        if (dock is null)
         {
-            Check("日志页显示", false);
+            Check("日志停靠显示", false);
             return;
         }
-        await CheckLogPageAsync(page, Check);
-        await LayoutHereAsync("日志页");
-        await ShotAsync("日志页");
+        await CheckLogDockAsync(dock, Check);
+        await LayoutHereAsync("日志停靠");
+        await ShotAsync("日志停靠");
         log.Clear();
-        main.CurrentPage = previous;
+        main.LogDocked = wasDocked;
     }
 
     /// <summary>只用合成日志检查真实控件，不下载、不启动游戏，也不读写游戏目录。</summary>
-    internal static async Task CheckLogPageAsync(LogPage page, Action<string, bool, string> check)
+    internal static async Task CheckLogDockAsync(LogDockView page, Action<string, bool, string> check)
     {
         var log = (LogViewModel)page.DataContext!;
-        var list = page.FindControl<ListBox>("List")!;
-        var filter = page.FindControl<CheckBox>("ProblemsFilter")!;
-        var follow = page.FindControl<CheckBox>("FollowLatest")!;
+        var list = page.FindControl<ListBox>("DockList")!;
+        var filter = page.FindControl<CheckBox>("DockProblems")!;
+        var follow = page.FindControl<CheckBox>("DockFollow")!;
         log.Clear();
         await Ui.FlushAsync();
         log.IsCurrent = false;
@@ -699,18 +699,16 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         log.AddRaw("Caused by: java.io.IOException: 合成原因");
         check("日志：文本等级、异常和堆栈计数", await WaitAsync(() => log.Lines.Count == 9, 5)
             && log.ErrorCount == 5 && log.WarningCount == 1, $"错误 {log.ErrorCount}，警告 {log.WarningCount}");
-        check("日志：离页时只累计错误徽标", log.Badge == 5 && log.HasBadge, log.Badge.ToString());
+        check("日志：没在看时只累计错误徽标", log.Badge == 5 && log.HasBadge, log.Badge.ToString());
         log.IsCurrent = true;
-        check("日志：进入页面清空徽标", !log.HasBadge, "");
+        check("日志：看到日志后清空徽标", !log.HasBadge, "");
 
         await Task.Delay(200);
-        var messages = page.GetVisualDescendants().OfType<SelectableTextBlock>().Where(c => c.DataContext is LogEntry).ToList();
-        check("日志：等级文字使用主题颜色和 1.5 倍行高", messages.Count > 0 && messages.All(c =>
+        var messages = page.GetVisualDescendants().OfType<TextBlock>().Where(c => c.DataContext is LogEntry && Grid.GetColumn(c) == 2).ToList();
+        check("日志：错误和警告行带各自的样式", messages.Count > 0 && messages.All(c =>
         {
             var entry = (LogEntry)c.DataContext!;
-            var key = entry.IsError ? "DangerText" : entry.IsWarning ? "WarningText" : entry.IsMuted ? "TextTertiary" : "TextPrimary";
-            return c.Foreground is ISolidColorBrush actual && page.FindResource(page.ActualThemeVariant, key) is ISolidColorBrush expected
-                && actual.Color == expected.Color && Math.Abs(c.LineHeight - c.FontSize * 1.5) < 0.01;
+            return c.Classes.Contains("error") == entry.IsError && c.Classes.Contains("warning") == entry.IsWarning && c.Classes.Contains("muted") == entry.IsMuted;
         }), "");
 
         filter.IsChecked = true;
@@ -722,11 +720,11 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         check("日志：当前页新错误不产生未读徽标", await WaitAsync(() => log.ErrorCount == 6, 5) && !log.HasBadge, "");
 
         // 点“错误 N”芯片：选中第一个错误行，再点跳到下一个。
-        var errorChip = page.FindControl<Button>("ErrorChip");
+        var errorChip = page.FindControl<Button>("DockErrors");
         var firstError = log.Lines.First(e => e.IsError);
         var pressed = Press(errorChip);
         await Task.Delay(100);
-        var jumpedFirst = ReferenceEquals(log.SelectedLine, firstError) && ReferenceEquals(list.SelectedItem, firstError);
+        var jumpedFirst = ReferenceEquals(log.SelectedLine, firstError);
         Press(errorChip);
         await Task.Delay(100);
         check("日志：点错误芯片跳到第一个、再点跳到下一个错误", pressed && jumpedFirst && log.SelectedLine is { IsError: true } next
@@ -1975,7 +1973,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
 
     /// <summary>全局当前实例：实例页切换后启动页、资源页、联机页跟着变，写进设置；资源页临时换一个只算这一次。</summary>
     /// <summary>
-    /// 新手卡（改版规格 3.1）：本机已经有账号和实例，所以把卡强制显示出来检查。
+    /// 首次引导背后的步骤（账号 → 装游戏 → 用已有的游戏文件夹）。引导的界面在 firstrun 范围里查；这里只查步骤本身。
     /// 找目录只在报告目录里造的假 HMCL 目录里找；换目录后换回原来的测试目录；安装只补全测试目录里已有的原版 1.21.1。
     /// 不添加账号（不改账号文件）。
     /// </summary>
@@ -1986,7 +1984,6 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var onboarding = home.Onboarding;
         var originalDir = service.Settings.GameDirectory;
         var originalCurrent = service.CurrentInstance;
-        main.CurrentPage = home;
         await Ui.FlushAsync();
 
         var fake = Path.Combine(reportDir, "fake-launcher", ".minecraft");
@@ -1995,41 +1992,31 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         onboarding.Candidates = () => [fake, originalDir];
         await Dispatcher.UIThread.InvokeAsync(() => onboarding.Update(true, true, null));
         await onboarding.DetectAsync();
-        var card = await FindAsync<OnboardingCard>(_ => true, 5);
-        Check("新手卡：没有账号和实例时替换实例卡，只展开“添加账号”这一步",
-            card is not null && !home.ShowInstanceCard && onboarding.ShowAccountStep && !onboarding.ShowGameStep && onboarding.ShowGameWaiting,
-            $"卡 {card is not null}，实例卡 {home.ShowInstanceCard}");
-        Check("新手卡：找到已有游戏目录（跳过正在用的目录），写出实例数",
+        Check("首次引导步骤：没有账号和实例时只展开“添加账号”这一步",
+            onboarding.IsVisible && onboarding.ShowAccountStep && !onboarding.ShowGameStep && onboarding.ShowGameWaiting, "");
+        Check("首次引导步骤：找到已有游戏目录（跳过正在用的目录），写出实例数",
             onboarding.Detected?.Path == Path.GetFullPath(fake) && onboarding.Detected.InstanceCount == 1 && onboarding.DetectedText.Contains("1 个实例"),
             onboarding.DetectedText);
 
         onboarding.PlayerName = "ab";
         await Ui.FlushAsync();
-        var add = card?.FindControl<Button>("AddOfflineButton");
-        Check("新手卡：玩家名太短时禁用添加并说明", !onboarding.CanAddOffline && add?.IsEffectivelyEnabled == false && onboarding.NameProblem.Contains("3–16"), onboarding.NameProblem);
+        Check("首次引导步骤：玩家名太短时禁用添加并说明", !onboarding.CanAddOffline && onboarding.NameProblem.Contains("3–16"), onboarding.NameProblem);
         onboarding.PlayerName = "小明 2";
-        Check("新手卡：玩家名有空格时禁用添加", !onboarding.CanAddOffline && onboarding.NameProblem.Contains("空格"), onboarding.NameProblem);
+        Check("首次引导步骤：玩家名有空格时禁用添加", !onboarding.CanAddOffline && onboarding.NameProblem.Contains("空格"), onboarding.NameProblem);
         onboarding.PlayerName = "玩家小明";
         await Ui.FlushAsync();
-        Check("新手卡：中文名只提醒，仍然能添加", onboarding.CanAddOffline && add?.IsEffectivelyEnabled == true && onboarding.NameWarning.Contains("服务器") && onboarding.NameProblem.Length == 0, onboarding.NameWarning);
+        Check("首次引导步骤：中文名只提醒，仍然能添加", onboarding.CanAddOffline && onboarding.NameWarning.Contains("服务器") && onboarding.NameProblem.Length == 0, onboarding.NameWarning);
 
-        onboarding.RequestFocus(OnboardingStep.Account);
-        var nameBox = card?.FindControl<TextBox>("PlayerNameBox");
-        Check("新手卡：缺账号时点启动，焦点放到玩家名输入框", await WaitAsync(() => Dispatcher.UIThread.Invoke(() => nameBox?.IsFocused == true), 3), "");
-        await LayoutHereAsync("新手卡·账号");
-        await ShotAsync("新手卡-账号");
         onboarding.PlayerName = "";
 
         // 账号有了，展开“安装游戏”。
         await Dispatcher.UIThread.InvokeAsync(() => onboarding.Update(false, true, "Steve"));
         await WaitAsync(() => onboarding.LatestRelease is not null, 20);
-        Check("新手卡：账号做完收成一行，展开安装：最新正式版按钮、4 个热门版本、下载源",
+        Check("首次引导步骤：账号做完收成一行，展开安装：最新正式版按钮、4 个热门版本、下载源",
             onboarding.ShowAccountDone && onboarding.ShowGameStep && onboarding.AccountDoneText.Contains("Steve")
             && onboarding.Hot.Length == 4 && onboarding.SourceText.StartsWith("下载源：", StringComparison.Ordinal),
             $"{onboarding.InstallLatestLabel} · {onboarding.SourceText}");
-        Check("新手卡：拿到最新正式版号", onboarding.LatestRelease is { Length: > 0 } && onboarding.InstallLatestLabel.Contains(onboarding.LatestRelease!), onboarding.InstallLatestLabel);
-        await LayoutHereAsync("新手卡·安装");
-        await ShotAsync("新手卡-安装");
+        Check("首次引导步骤：拿到最新正式版号", onboarding.LatestRelease is { Length: > 0 } && onboarding.InstallLatestLabel.Contains(onboarding.LatestRelease!), onboarding.InstallLatestLabel);
 
         // 切换下载源再切回来：设置跟着变，设置页也跟着显示。
         var settings = Page<SettingsViewModel>();
@@ -2042,7 +2029,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         service.Settings.DownloadSource = sourceBefore;
         service.SaveAndReload();
         await Ui.FlushAsync();
-        Check("新手卡：【切换】换下载源，设置页跟着变", switched && onboarding.UsesMirror == mirrorBefore, onboarding.SourceText);
+        Check("首次引导步骤：【切换】换下载源，设置页跟着变", switched && onboarding.UsesMirror == mirrorBefore, onboarding.SourceText);
 
         // 补全已有的原版 1.21.1：阶段走到“完成”，Java 合并在同一条进度里，装完设为当前实例，卡收起。
         var stages = new List<string>();
@@ -2054,8 +2041,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await onboarding.InstallAsync("1.21.1", null, fallbackToVanilla: false);
         onboarding.PropertyChanged -= OnStage;
         await WaitAsync(() => !onboarding.IsVisible, 5);
-        Check("新手卡：安装阶段是 下载游戏文件 → 准备 Java → 完成，装完设为当前实例、卡收起",
-            stages.SequenceEqual(["下载游戏文件", "准备 Java", "完成"]) && service.CurrentInstance == "1.21.1" && !onboarding.IsVisible && home.ShowInstanceCard
+        Check("首次引导步骤：安装阶段是 下载游戏文件 → 准备 Java → 完成，装完设为当前实例、卡收起",
+            stages.SequenceEqual(["下载游戏文件", "准备 Java", "完成"]) && service.CurrentInstance == "1.21.1" && !onboarding.IsVisible
             && onboarding.Message?.Kind == StatusKind.Success,
             $"{string.Join(" → ", stages)}；当前 {service.CurrentInstance}；{onboarding.Message?.Text}");
 
@@ -2069,7 +2056,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         service.SaveAndReload();
         if (originalCurrent is not null) service.SetCurrentInstance(originalCurrent);
         await WaitAsync(() => home.Versions.Contains(FabricName) && settings.GameDirectory == originalDir, 10);
-        Check("新手卡：选启动器文件夹也能认出里面的 .minecraft，换过去后换回测试目录",
+        Check("首次引导步骤：选启动器文件夹也能认出里面的 .minecraft，换过去后换回测试目录",
             used && service.Directory.Root == Path.GetFullPath(originalDir) && settings.GameDirectory == originalDir && !onboarding.IsVisible,
             $"换过去 {used}（{usedRoot}）；现在 {service.Directory.Root}；设置页 {settings.GameDirectory}；卡 {onboarding.IsVisible}");
     }

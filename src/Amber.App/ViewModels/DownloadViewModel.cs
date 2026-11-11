@@ -347,6 +347,13 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     [ObservableProperty]
     public partial double Progress { get; set; }
 
+    /// <summary>The progress line of the work in hand: percent, speed, time left.</summary>
+    public WorkProgress Work { get; } = new();
+
+    partial void OnProgressChanged(double value) => Work.Report(value);
+
+    partial void OnIsBusyChanged(bool value) => Work.Reset();
+
     public DownloadViewModel(LauncherService service)
     {
         _service = service;
@@ -566,10 +573,11 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
                 {
                     if (!AcceptProgress()) return;
                     if (p.Stage != InstallStage.Files || p.Files.TotalFiles == 0) return;
+                    Work.Bytes(p.Files.BytesDownloaded);
                     Progress = 100.0 * p.Files.CompletedFiles / p.Files.TotalFiles;
-                    var mb = p.Files.BytesDownloaded / 1024.0 / 1024;
-                    task.Report(Progress / 100, L.F("activity.task.files", p.Files.CompletedFiles, p.Files.TotalFiles, mb / Math.Max(watch.Elapsed.TotalSeconds, 0.1)));
-                    SetStatus(StatusMessage.Info("download.status.progress", id, p.Files.CompletedFiles, p.Files.TotalFiles, mb, mb / Math.Max(watch.Elapsed.TotalSeconds, 0.1)));
+                    // The speed and the time left are the progress line's; the step only says how far.
+                    task.Report(Progress / 100, L.F("activity.task.files", p.Files.CompletedFiles, p.Files.TotalFiles), p.Files.BytesDownloaded);
+                    SetStatus(StatusMessage.Info("download.status.progress", id, p.Files.CompletedFiles, p.Files.TotalFiles));
                 }), ct);
                 item.Installed = true;
             }

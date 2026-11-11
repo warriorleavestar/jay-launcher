@@ -1,7 +1,7 @@
 ---
 id: library
 category: start
-routes: library, library/start
+routes: library
 related: instance, new-instance
 ---
 

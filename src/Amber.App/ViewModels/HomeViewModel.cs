@@ -160,6 +160,20 @@ public sealed partial class HomeViewModel : PageViewModel
     private readonly List<GameRun> _runs = [];
     private GameRun? Latest => _runs.Count > 0 ? _runs[^1] : null;
 
+    /// <summary>The instance of the most recent run still going (the one the progress is about).</summary>
+    public string? LatestInstance => Latest?.Id;
+
+    /// <summary>The instance of the most recent start, running or over: the status text is about it.</summary>
+    public string? LastRunInstance { get; private set; }
+
+    private readonly Amber.Core.Activity.ProgressMeter _launchMeter = new();
+
+    /// <summary>Download speed while game files are being fetched; null otherwise.</summary>
+    public double? LaunchBytesPerSecond => IsPreparing ? _launchMeter.BytesPerSecond : null;
+
+    /// <summary>Time left for the current preparation step, when it can be told.</summary>
+    public TimeSpan? LaunchRemaining => IsPreparing ? _launchMeter.Remaining : null;
+
     /// <summary>进行中的启动有几个（自检用）。</summary>
     internal int RunCount => _runs.Count;
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -194,11 +208,6 @@ public sealed partial class HomeViewModel : PageViewModel
         ? L.F(a.Kind switch { AccountKind.Microsoft => "home.account.online", AccountKind.External => "home.account.external", _ => "home.account.offline" }, a.Name)
         : "";
 
-    [ObservableProperty]
-    public partial bool AutoMemory { get; set; }
-
-    [ObservableProperty]
-    public partial int MaxMemoryMb { get; set; }
 
     [ObservableProperty]
     public partial string VersionInfo { get; set; } = "";
@@ -249,7 +258,15 @@ public sealed partial class HomeViewModel : PageViewModel
     public Action? NavigateToAccounts { get; set; }
     public Action? NavigateToNewInstance { get; set; }
     public Action? NavigateToLog { get; set; }
-    public Action? NavigateHere { get; set; }
+
+    /// <summary>Opens an instance's page: the crash toast's "show", and the multi-launch question when nobody else asks it.</summary>
+    public Action<string>? NavigateToInstance { get; set; }
+
+    /// <summary>True while that instance's page is on screen (its last-session panel already says what a toast would).</summary>
+    public Func<string, bool>? IsShowingInstance { get; set; }
+
+    /// <summary>The engine has no page of its own: the instance page shows its state.</summary>
+    public override bool HasView => false;
 
     /// <summary>新的一局开始了（启动协调器记进运行记录、更新正在玩胶囊）。</summary>
     public event Action<LaunchSession>? SessionStarted;
@@ -284,12 +301,7 @@ public sealed partial class HomeViewModel : PageViewModel
 
     public bool HasCrash => Crash is not null;
 
-    /// <summary>新手卡不在时才显示实例卡。</summary>
-    public bool ShowInstanceCard => !Onboarding.IsVisible;
-
-    public int TotalMemoryMb { get; } = (int)MemoryPlanner.TotalPhysicalMb();
-
-    /// <summary>没有账号或没有实例时替换实例卡的新手卡（改版规格 3.1）。</summary>
+    /// <summary>The first-run steps (account, then a game); the first-run wizard shows them.</summary>
     public OnboardingViewModel Onboarding { get; }
 
     /// <summary>Opens Settings at the loader and starts "Download loader" (set by the main view model).</summary>
@@ -300,12 +312,6 @@ public sealed partial class HomeViewModel : PageViewModel
         _service = service;
         _log = log;
         Onboarding = new OnboardingViewModel(service);
-        Onboarding.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(OnboardingViewModel.IsVisible)) OnPropertyChanged(nameof(ShowInstanceCard));
-        };
-        AutoMemory = service.Settings.AutoMemory;
-        MaxMemoryMb = service.Settings.MaxMemoryMb;
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshVersions);
         service.AccountsChanged += RefreshAccounts;
         service.LaunchRequested += request => Dispatcher.UIThread.Post(() => _ = RunAsync(request));
@@ -377,18 +383,6 @@ public sealed partial class HomeViewModel : PageViewModel
         {
             VersionInfo = L.F("home.version.read_failed", e.Message);
         }
-    }
-
-    partial void OnMaxMemoryMbChanged(int value)
-    {
-        _service.Settings.MaxMemoryMb = value;
-        _service.Settings.Save();
-    }
-
-    partial void OnAutoMemoryChanged(bool value)
-    {
-        _service.Settings.AutoMemory = value;
-        _service.Settings.Save();
     }
 
     /// <summary>按最近一次启动的阶段和当前选择，重算主按钮文字和进度条。</summary>
@@ -475,21 +469,15 @@ public sealed partial class HomeViewModel : PageViewModel
             else if (!run.Exiting) ExitGame(run);
             return;
         }
-        // 新手卡在的时候不换页：焦点放到卡里对应的那一步。
         if (SelectedAccount is null)
         {
-            if (Onboarding.NeedsAccount) Onboarding.RequestFocus(OnboardingStep.Account);
-            else
-            {
-                SetStatus(StatusMessage.Warning("home.status.account_required"));
-                NavigateToAccounts?.Invoke();
-            }
+            Toasts.Show(L.T("home.status.account_required"), Avalonia.Controls.Notifications.NotificationType.Warning);
+            NavigateToAccounts?.Invoke();
             return;
         }
         if (SelectedVersion is not { } id)
         {
-            if (Onboarding.NeedsGame) Onboarding.RequestFocus(OnboardingStep.Game);
-            else NavigateToNewInstance?.Invoke();
+            NavigateToNewInstance?.Invoke();
             return;
         }
         await RunAsync(new LaunchRequest(id));
@@ -543,24 +531,28 @@ public sealed partial class HomeViewModel : PageViewModel
         if (!allowSecond && !_gate.TryPass(DateTimeOffset.Now)) return;
         if (_runs.Any(r => r.Game is null))
         {
-            SetStatus(StatusMessage.Warning("home.status.preparing_other"));
+            // Said in a toast: the start may have come from a library card or the command palette, where no status line is near.
+            Toasts.Show(L.T("home.status.preparing_other"), Avalonia.Controls.Notifications.NotificationType.Warning);
             return;
         }
         if (!allowSecond && _runs.FirstOrDefault(r => r.Game is not null) is { } other)
         {
             _pendingRunningId = other.Id;
             PendingLaunch = request;
-            // 不换页（§2.5 第 5 条）：问题发到请求条，启动页的卡片也在，哪边点都行。
+            // No page change (§2.5 rule 5): the question goes to the request bar.
             if (MultiLaunchRequested is { } ask) ask(other.Id);
-            else NavigateHere?.Invoke();
+            else NavigateToInstance?.Invoke(request.VersionId);
             return;
         }
         if (SelectedAccount is not { } account)
         {
-            SetStatus(StatusMessage.Warning("home.status.account_required"));
+            Toasts.WithAction(L.T("home.status.account_required"), L.T("home.button.need_account"), () => NavigateToAccounts?.Invoke(),
+                Avalonia.Controls.Notifications.NotificationType.Warning);
             return;
         }
         var id = request.VersionId;
+        LastRunInstance = id;
+        _launchMeter.Reset();
         SelectedVersion = id;
         _service.SetCurrentInstance(id);
 
@@ -594,6 +586,7 @@ public sealed partial class HomeViewModel : PageViewModel
             {
                 if (p.Stage == InstallStage.Files && p.Files.TotalFiles > 0)
                 {
+                    _launchMeter.Add(DateTimeOffset.Now, (double)p.Files.CompletedFiles / p.Files.TotalFiles, p.Files.BytesDownloaded);
                     Progress = 100.0 * p.Files.CompletedFiles / p.Files.TotalFiles;
                     Status = p.Files.BytesDownloaded > 0
                         ? L.F("home.status.completing_files", p.Files.CompletedFiles, p.Files.TotalFiles)
@@ -761,7 +754,7 @@ public sealed partial class HomeViewModel : PageViewModel
                     });
                 }
                 // 玩家在别的页面：弹个出错级的 Toast（不自动消失），带“查看”。
-                if (!IsCurrent) Toasts.WithAction(L.F("home.crash.toast", id), L.T("home.crash.show"), () => NavigateHere?.Invoke(), Avalonia.Controls.Notifications.NotificationType.Error);
+                if (IsShowingInstance?.Invoke(id) != true) Toasts.WithAction(L.F("home.crash.toast", id), L.T("home.crash.show"), () => NavigateToInstance?.Invoke(id), Avalonia.Controls.Notifications.NotificationType.Error);
                 GameCrashed?.Invoke(id);
             }
 
@@ -1008,6 +1001,7 @@ public sealed partial class HomeViewModel : PageViewModel
         var run = new GameRun(id) { Game = game, WorkDir = workDir, Started = DateTime.UtcNow };
         _runs.Add(run);
         _sessions[id] = run.Session;
+        LastRunInstance = id;
         SessionStarted?.Invoke(run.Session);
         UpdateRunState();
         return run;
@@ -1037,6 +1031,25 @@ public sealed partial class HomeViewModel : PageViewModel
     {
         ShowCrashForTest(id, analysis);
         GameCrashed?.Invoke(id);
+    }
+
+    /// <summary>Self-check: a start that is still fetching game files, without starting anything.</summary>
+    internal object AddPreparingRunForTest(string id)
+    {
+        var run = new GameRun(id);
+        _runs.Add(run);
+        LastRunInstance = id;
+        _launchMeter.Reset();
+        UpdateRunState();
+        return run;
+    }
+
+    /// <summary>Self-check: the game-file download of the preparing start is this far at this moment.</summary>
+    internal void ReportFilesForTest(int done, int total, long bytes, DateTimeOffset at)
+    {
+        _launchMeter.Add(at, (double)done / total, bytes);
+        Progress = 100.0 * done / total;
+        Status = L.F("home.status.completing_files", done, total);
     }
 
     internal void RemoveRunForTest(object run)
@@ -1197,11 +1210,11 @@ public sealed partial class HomeViewModel : PageViewModel
     }
 
     /// <summary>Self-check only: shows the failure card for an exception without launching.</summary>
-    internal void ShowFailureForSelfTest(Exception e)
+    internal void ShowFailureForSelfTest(Exception e, string instance = "self-check")
     {
         var info = LaunchFailure.Classify(e, _service.Settings.DownloadSource);
         _failureOutput = ["self-check", e.ToString()];
-        Failure = new LaunchFailureCard(info, ErrorText.Describe(e), new LaunchRequest("self-check"), null);
+        Failure = new LaunchFailureCard(info, ErrorText.Describe(e), new LaunchRequest(instance), null);
     }
 
     /// <summary>启动失败卡上的修复按钮。</summary>

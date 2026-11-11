@@ -35,6 +35,21 @@ public static class Fmt
         return L.F("format.duration.hours_minutes", minutes / 60, minutes % 60);
     }
 
+    /// <summary>Transfer speed: the size written the usual way, per second ("4.2 MB/s").</summary>
+    public static string Speed(double bytesPerSecond) => L.F("format.speed", Size((long)Math.Max(0, Math.Round(bytesPerSecond))));
+
+    /// <summary>
+    /// Time left, rounded so it does not flicker: to 5 seconds under a minute, to whole minutes under an hour, to whole
+    /// hours after that ("about 40 s", "about 3 min", "about 2 h").
+    /// </summary>
+    public static string Remaining(TimeSpan time)
+    {
+        if (time < TimeSpan.Zero) time = TimeSpan.Zero;
+        if (time.TotalSeconds < 57.5) return L.F("format.remaining.seconds", Math.Max(5, (long)Math.Round(time.TotalSeconds / 5) * 5));
+        if (time.TotalMinutes < 59.5) return L.F("format.remaining.minutes", Math.Max(1, (long)Math.Round(time.TotalMinutes)));
+        return L.F("format.remaining.hours", Math.Max(1, (long)Math.Round(time.TotalHours)));
+    }
+
     /// <summary>Total play time: minutes under an hour, whole hours after that ("36 hours").</summary>
     public static string PlayTime(TimeSpan time)
     {

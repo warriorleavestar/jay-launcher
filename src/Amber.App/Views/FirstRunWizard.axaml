@@ -126,8 +126,9 @@
                   <TextBlock Grid.Row="2" Text="{Binding StartStage}" />
                   <TextBlock Grid.Row="2" Grid.Column="1" Text="{l:T firstrun.stage.start}" />
                 </Grid>
-                <ProgressBar Value="{Binding Onboarding.Progress}" Maximum="100" IsIndeterminate="{Binding Onboarding.ProgressIndeterminate}" />
-                <TextBlock Classes="hint" Text="{Binding Onboarding.DetailText}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Onboarding.DetailText}" />
+                <c:ProgressLine x:Name="InstallLine" Step="{Binding Onboarding.DetailText}" Percent="{Binding Onboarding.Progress}"
+                                IsIndeterminate="{Binding Onboarding.ProgressIndeterminate}" BytesPerSecond="{Binding Onboarding.Work.BytesPerSecond}"
+                                Remaining="{Binding Onboarding.Work.Remaining}" />
                 <Border Classes="callout warning" IsVisible="{Binding Onboarding.ShowSlowHint}">
                   <DockPanel>
                     <Button DockPanel.Dock="Right" Content="{l:T onboarding.source.switch}" Command="{Binding Onboarding.SwitchSourceCommand}" Margin="12,0,0,0" VerticalAlignment="Center" />

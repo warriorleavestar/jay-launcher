@@ -197,6 +197,15 @@ public sealed class HelpLibrary
             var prefix = pattern[..^2];
             if (path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase)) return 500 + prefix.Length;
         }
+        // "library/*/logs": the same number of segments, each one equal or a star. Ranks above the trailing-star
+        // prefix ("library/*") and below an exact route.
+        if (pattern.Contains("/*/", StringComparison.Ordinal))
+        {
+            var parts = pattern.Split('/');
+            if (parts.Length == segments.Count
+                && parts.Select((part, i) => part == "*" || string.Equals(part, segments[i], StringComparison.OrdinalIgnoreCase)).All(ok => ok))
+                return 700 + pattern.Length;
+        }
         if (segments.Count > 0 && string.Equals(pattern, segments[0], StringComparison.OrdinalIgnoreCase)) return 100;
         return -1;
     }

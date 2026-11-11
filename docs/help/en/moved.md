@@ -15,5 +15,5 @@ Jay's new layout has three places: the library, Discover and Multiplayer. Here i
 - **Resources** → Discover.
 - **Instances** → the library; click an instance to open it.
 - **Logs** → each instance's Logs tab.
-- **Toolbox** → Settings › Tools.
+- **Toolbox** → clean-up is in Settings › Storage, the Java download in Settings › Game defaults, the update check in Settings › About.
 - Ctrl+K finds anything, including the old page names.

@@ -250,13 +250,24 @@ public sealed partial class LibraryViewModel : PageViewModel
 
     // ---- needs you ----
 
+    /// <summary>The page of this instance, or of the one in focus when it is not installed (any more).</summary>
+    private string InstanceRoute(string? id) =>
+        id is not null && _service.InstalledVersions().Contains(id) ? "library/" + id : Amber.Core.Navigation.LegacyRoutes.CurrentInstance;
+
     private void RefreshNeeds()
     {
         Needs.Clear();
+        // Both lead to the instance itself: its page shows the failure card or the last-session panel.
         if (_home.Failure is { } failure)
-            Needs.Add(new NeedItem(L.F("library.need.failed", failure.Title), L.T("library.need.view"), true, () => Navigate?.Invoke("library/start")));
+        {
+            var failed = failure.Request.VersionId;
+            Needs.Add(new NeedItem(L.F("library.need.failed", failure.Title), L.T("library.need.view"), true, () => Navigate?.Invoke(InstanceRoute(failed))));
+        }
         if (_home.HasCrash)
-            Needs.Add(new NeedItem(L.T("library.need.crashed"), L.T("library.need.view"), true, () => Navigate?.Invoke("library/start")));
+        {
+            var crashed = _home.CrashInstance;
+            Needs.Add(new NeedItem(L.T("library.need.crashed"), L.T("library.need.view"), true, () => Navigate?.Invoke(InstanceRoute(crashed))));
+        }
         foreach (var card in _all)
         {
             var state = _service.MetaOf(card.Id)?.State;

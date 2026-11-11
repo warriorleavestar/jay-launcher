@@ -181,28 +181,38 @@ internal sealed partial class SelfTest
         await Task.Delay(300);
         Check("Ctrl+1 回游戏库", main.CurrentPage is LibraryViewModel && shell.SelectedSection?.Id == "library");
 
-        // 游戏库里点子页签：新建实例 → 运行记录；返回、前进在游戏库自己的历史里走。
-        shell.SelectedSubPage = main.Pages.OfType<DownloadViewModel>().Single();
+        // Inside the library there are no sub-page tabs: new instance, then the focused instance; back and forward walk
+        // the library's own history, and the top bar's breadcrumb leads home.
+        shell.Navigate(Amber.Core.Navigation.LegacyRoutes.NewInstance);
         await Task.Delay(300);
-        shell.SelectedSubPage = main.Pages.OfType<LogViewModel>().Single();
+        Check("新建实例：顶栏是面包屑“游戏库 › 新建实例”", main.CurrentPage is DownloadViewModel && shell.HasCrumb && shell.Heading == L.T("shell.crumb.new_instance")
+            && window.CrumbHome.IsEffectivelyVisible && (window.CrumbHome.Content as string) == L.T("shell.nav.library"), shell.Heading);
+        Check("游戏库没有子页签了", window.FocusRegions.All(r => r.Name != "SubPageTabs") && window.FindControl<Control>("SubPageTabs") is null);
+        shell.Navigate(Amber.Core.Navigation.LegacyRoutes.CurrentInstance);
         await Task.Delay(300);
-        Check("子页签切到运行记录", main.CurrentPage is LogViewModel && shell.Router.Current.ToString() == "library/logs");
+        Check("去实例详情", main.CurrentPage is InstanceViewModel && shell.Router.Current.ToString() == "library/current");
         Press(Key.Left, KeyModifiers.Alt);
         await Task.Delay(300);
         Check("Alt+← 返回到新建实例", main.CurrentPage is DownloadViewModel && shell.CanGoForward);
         Press(Key.Right, KeyModifiers.Alt);
         await Task.Delay(300);
-        Check("Alt+→ 前进到运行记录", main.CurrentPage is LogViewModel && !shell.CanGoForward);
+        Check("Alt+→ 前进到实例详情", main.CurrentPage is InstanceViewModel && !shell.CanGoForward);
         // 切到发现再切回：回到离开时的位置。
         shell.GoSectionCommand.Execute("discover");
         await Task.Delay(300);
         Check("切到发现时返回按钮不能点（发现还没有历史）", !window.BackButton.IsEnabled);
         shell.GoSectionCommand.Execute("library");
         await Task.Delay(300);
-        Check("切回游戏库，回到离开时的运行记录", main.CurrentPage is LogViewModel);
+        Check("切回游戏库，回到离开时的实例详情", main.CurrentPage is InstanceViewModel);
         window.BackButton.Command?.Execute(null);
         await Task.Delay(300);
         Check("顶栏 ← 按钮返回", main.CurrentPage is DownloadViewModel);
+        window.CrumbHome.Command?.Execute(null);
+        await Task.Delay(300);
+        Check("点面包屑里的“游戏库”回游戏库主页，面包屑收起", main.CurrentPage is LibraryViewModel && !shell.HasCrumb && !window.CrumbHome.IsVisible
+            && shell.Heading == L.T("shell.nav.library"));
+        shell.Navigate(Amber.Core.Navigation.LegacyRoutes.NewInstance);
+        await Task.Delay(300);
         // 已经在游戏库时再点游戏库：回游戏库首页。
         shell.GoSectionCommand.Execute("library");
         await Task.Delay(300);
@@ -210,7 +220,10 @@ internal sealed partial class SelfTest
         await ShotAsync("shell-history");
     }
 
-    /// <summary>旧版九页每一页都能从新外壳的按钮走到（§11.9：功能一个不少）。</summary>
+    /// <summary>
+    /// Everything the nine old pages held is still reachable (§11.9). The launch page, the standalone log page and the
+    /// toolbox have no page of their own any more: their ids and their saved routes lead to where each thing lives now.
+    /// </summary>
     private async Task ReachEveryOldPageAsync(ShellViewModel shell)
     {
         var reached = new HashSet<Type>();
@@ -220,18 +233,39 @@ internal sealed partial class SelfTest
             await Task.Delay(250);
             reached.Add(main.CurrentPage.GetType());
         }
-        shell.GoSectionCommand.Execute("library");
-        await Task.Delay(200);
-        foreach (var sub in shell.SubPages.ToList()) await Visit(() => shell.SelectedSubPage = sub);
-        await Visit(() => shell.GoSectionCommand.Execute("discover"));
-        await Visit(() => shell.GoSectionCommand.Execute("multiplayer"));
-        await Visit(() => window.SettingsButton.Command!.Execute(null));
-        foreach (var sub in shell.SubPages.ToList()) await Visit(() => shell.SelectedSubPage = sub);
+        var expected = new Dictionary<string, Type>
+        {
+            ["home"] = typeof(LibraryViewModel), ["instances"] = typeof(InstanceViewModel), ["downloads"] = typeof(DownloadViewModel),
+            ["log"] = typeof(InstanceViewModel), ["content"] = typeof(ContentViewModel), ["multiplayer"] = typeof(MultiplayerViewModel),
+            ["tools"] = typeof(SettingsViewModel), ["settings"] = typeof(SettingsViewModel), ["accounts"] = typeof(AccountsViewModel),
+        };
+        var wrong = new List<string>();
+        foreach (var id in Amber.Core.Themes.ThemeLayout.PageIds)
+        {
+            var route = Amber.Core.Navigation.LegacyRoutes.For(id);
+            await Visit(() => shell.Navigate(route?.ToString() ?? "library"));
+            if (route is null || !expected.TryGetValue(id, out var type) || main.CurrentPage.GetType() != type) wrong.Add($"{id}→{main.CurrentPage.GetType().Name}");
+        }
+        Check("旧版九页的东西都还走得到（启动页、日志页、工具箱并到了新位置）", wrong.Count == 0 && expected.Count == Amber.Core.Themes.ThemeLayout.PageIds.Length, string.Join("、", wrong));
+
+        // Routes saved by the previous shell (help links, tips, history).
+        shell.Navigate("library/start");
+        await Task.Delay(250);
+        Check("旧路由 library/start 落在游戏库主页", main.CurrentPage is LibraryViewModel && shell.Router.Current.ToString() == "library", shell.Router.Current.ToString());
+        shell.Navigate("library/logs");
+        await Task.Delay(250);
+        Check("旧路由 library/logs 落在实例的日志页签", main.CurrentPage is InstanceViewModel && shell.Router.Current.ToString() == Amber.Core.Navigation.LegacyRoutes.Logs,
+            shell.Router.Current.ToString());
+        shell.Navigate("settings/tools");
+        var junk = await WaitAsync(() => window.RevealedField?.Name == "JunkBox", 3);
+        Check("旧路由 settings/tools 落在设置 › 存储的清理", junk && main.CurrentPage is SettingsViewModel { SelectedGroupId: Amber.Core.Navigation.SettingsCatalog.Storage },
+            $"{shell.Router.Current} {window.RevealedField?.Name}");
+
         await Visit(() => main.Shell.AccountMenu.ManageCommand.Execute(null));
         await Visit(() => Page<SettingsViewModel>().GoAboutCommand.Execute(null));
         await Visit(() => main.Shell.Navigate("help"));
-        var missing = main.Pages.Select(p => p.GetType()).Where(t => !reached.Contains(t)).Select(t => t.Name).ToList();
-        Check("旧版九页、游戏库主页、关于页和帮助中心都能从新外壳走到", missing.Count == 0 && reached.Count == 12, missing.Count == 0 ? $"{reached.Count} 页" : "走不到：" + string.Join("、", missing));
+        var missing = main.Pages.Where(p => p.HasView).Select(p => p.GetType()).Where(t => !reached.Contains(t)).Select(t => t.Name).ToList();
+        Check("有界面的每一页都能从新外壳走到", missing.Count == 0 && reached.Count == 9, missing.Count == 0 ? $"{reached.Count} 页" : "走不到：" + string.Join("、", missing));
         await ShotAsync("shell-accounts");
         await AccountMenuAsync();
     }

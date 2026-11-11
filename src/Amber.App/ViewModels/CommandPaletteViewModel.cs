@@ -265,7 +265,7 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
         list.Add(Page("play/servers", "multiplayer.tab.servers", "jay server"));
         list.Add(Page("play/settings", "multiplayer.tab.settings", "relay", "nodes"));
         list.Add(Page("settings", "shell.settings"));
-        list.Add(Page(LegacyRoutes.Tools, "tools.title", "tools", "toolbox"));
+        list.Add(Page(LegacyRoutes.Tools, "tools.junk.title", [.. NamesOf("palette.old.toolbox"), "tools", "toolbox"]));
         list.Add(Page(LegacyRoutes.Logs, "log.title", "log"));
         list.Add(Page("accounts", "accounts.title"));
         list.Add(Page("settings#RecycleKeep", "recycle.title", "trash", "recycle"));

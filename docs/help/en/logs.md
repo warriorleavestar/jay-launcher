@@ -1,7 +1,7 @@
 ---
 id: logs
 category: trouble
-routes: library/logs
+routes: library/*/logs
 related: instance, error-report, crash
 ---
 

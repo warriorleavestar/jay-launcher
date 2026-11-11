@@ -15,14 +15,11 @@
 
   <Window.DataTemplates>
     <DataTemplate DataType="vm:LibraryViewModel"><views:LibraryPage /></DataTemplate>
-    <DataTemplate DataType="vm:HomeViewModel"><views:HomePage /></DataTemplate>
     <DataTemplate DataType="vm:AccountsViewModel"><views:AccountsPage /></DataTemplate>
     <DataTemplate DataType="vm:InstanceViewModel"><views:InstancePage /></DataTemplate>
     <DataTemplate DataType="vm:DownloadViewModel"><views:DownloadPage /></DataTemplate>
     <DataTemplate DataType="vm:ContentViewModel"><views:ContentPage /></DataTemplate>
     <DataTemplate DataType="vm:MultiplayerViewModel"><views:MultiplayerPage /></DataTemplate>
-    <DataTemplate DataType="vm:ToolsViewModel"><views:ToolsPage /></DataTemplate>
-    <DataTemplate DataType="vm:LogViewModel"><views:LogPage /></DataTemplate>
 
     <DataTemplate DataType="vm:SettingsViewModel"><views:SettingsPage /></DataTemplate>
     <DataTemplate DataType="vm:AboutViewModel"><views:AboutPage /></DataTemplate>
@@ -232,7 +229,7 @@
       </Grid>
     </Border>
 
-    <!-- 内容列：顶栏、子页页签、“东西搬到哪了”、页面 -->
+    <!-- Content column: top bar, request bar, "where things moved", page -->
     <Grid x:Name="ContentColumn" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
       <!-- 顶栏（§3.1）：← 返回 + 标题或面包屑；带上下文跳过来时有【完成，返回】 -->
       <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" Margin="8,0,16,0">
@@ -245,7 +242,12 @@
           <Path Classes="icon" Data="{StaticResource Icon.ChevronRight}" Width="20" Height="20" />
         </Button>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" Margin="8,0,0,0" VerticalAlignment="Center">
-          <TextBlock x:Name="ShellTitle" Text="{Binding Shell.Title}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold"
+          <!-- Breadcrumb: on library/{instance} and library/new the section name is a way back and the page's name follows it -->
+          <Button x:Name="CrumbHome" Classes="ghost small" Content="{Binding Shell.Title}" Command="{Binding Shell.GoSectionHomeCommand}"
+                  IsVisible="{Binding Shell.HasCrumb}" VerticalAlignment="Center" Margin="-8,0,-6,0" />
+          <Path x:Name="CrumbSeparator" Classes="icon sm" Data="{StaticResource Icon.ChevronRight}" Width="14" Height="14" Opacity="0.6"
+                IsVisible="{Binding Shell.HasCrumb}" VerticalAlignment="Center" />
+          <TextBlock x:Name="ShellTitle" Text="{Binding Shell.Heading}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold"
                      VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
           <TextBlock Text="{Binding Shell.ReturnLabel}" IsVisible="{Binding Shell.HasReturn}" Classes="hint" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
         </StackPanel>
@@ -289,23 +291,6 @@
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         </ItemsControl>
       </StackPanel>
-      <!-- 入口里的子页：游戏库 = 游戏库 / 实例 / 新建实例 / 运行记录；设置 = 设置 / 工具 -->
-      <ListBox x:Name="SubPageTabs" Grid.Row="2" Classes="subtabs" ItemsSource="{Binding Shell.SubPages}" SelectedItem="{Binding Shell.SelectedSubPage}"
-               IsVisible="{Binding Shell.HasSubPages}" Background="Transparent" Margin="16,0,16,4"
-               ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-               AutomationProperties.Name="{Binding Shell.Title}">
-        <ListBox.ItemsPanel>
-          <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate>
-        </ListBox.ItemsPanel>
-        <ListBox.ItemTemplate>
-          <DataTemplate DataType="vm:PageViewModel">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
-              <Border Classes="led error small" IsVisible="{Binding HasBadge}" />
-            </StackPanel>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
       <!-- 第一次打开新版：东西搬到哪了（可关闭） -->
       <StackPanel Grid.Row="3">
       <Border x:Name="MovedNotice" Classes="banner" Margin="16,0,16,8" IsVisible="False">
@@ -441,13 +426,16 @@
                           <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:TaskItem">
                               <Border Classes="card" Padding="12" Margin="0,0,0,8">
-                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8">
-                                  <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
-                                  <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Value="{Binding Percent}" Maximum="100" IsIndeterminate="{Binding Indeterminate}"
-                                               IsVisible="{Binding IsRunning}" Margin="0,6,0,0" />
-                                  <TextBlock Grid.Row="2" Text="{Binding Detail}" Classes="hint" Classes.error="{Binding IsFailed}" TextWrapping="Wrap" Margin="0,4,0,0" />
-                                  <Button Grid.Column="1" Classes="ghost small" Content="{l:T common.cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding CanCancel}" />
-                                </Grid>
+                                <Panel>
+                                  <!-- Running: the one progress line. Finished: the name and how it ended. -->
+                                  <c:ProgressLine Title="{Binding Title}" Step="{Binding Step}" Percent="{Binding Percent}" IsIndeterminate="{Binding Indeterminate}"
+                                                  BytesPerSecond="{Binding Speed}" Remaining="{Binding Remaining}"
+                                                  CancelCommand="{Binding CancelCommand}" CanCancel="{Binding CanCancel}" IsVisible="{Binding IsRunning}" />
+                                  <StackPanel Spacing="4" IsVisible="{Binding !IsRunning}">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
+                                    <TextBlock Text="{Binding Detail}" Classes="hint" Classes.error="{Binding IsFailed}" TextWrapping="Wrap" />
+                                  </StackPanel>
+                                </Panel>
                               </Border>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>

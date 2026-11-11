@@ -162,13 +162,18 @@ public sealed partial class ContentViewModel
             }
             var total = groups.Sum(g => g.Plan.Files.Count);
             var done = 0;
+            // Bytes add up across the groups, so the speed does not start over at each one.
+            long bytesNow = 0;
             foreach (var (target, plan, _) in groups)
             {
                 var before = done;
+                var bytesBefore = bytesNow;
                 await _service.ContentInstaller.InstallAsync(plan, target, new Progress<Amber.Core.Net.DownloadProgress>(p =>
                 {
+                    Work.Bytes(bytesBefore + p.BytesDownloaded);
                     Progress = 100.0 * (before + p.CompletedFiles) / Math.Max(1, total);
-                    task.Report(Progress / 100, p.CurrentFile);
+                    task.Report(Progress / 100, p.CurrentFile, bytesBefore + p.BytesDownloaded);
+                    bytesNow = bytesBefore + p.BytesDownloaded;
                     SetStatus(StatusMessage.Info("content.install.progress", before + p.CompletedFiles, total, p.CurrentFile));
                 }), cts.Token);
                 done += plan.Files.Count;

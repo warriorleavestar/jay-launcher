@@ -304,6 +304,13 @@ public partial class MultiplayerPage : UserControl
         if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await vm.ImportComponentAsync(path);
     }
 
+    private async void BrowseDownloadFolder_Click(object? sender, RoutedEventArgs e)
+    {
+        if ((DataContext as MultiplayerViewModel)?.Tools is not { } tools || TopLevel.GetTopLevel(this) is not { } top) return;
+        var folders = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = L.T("tools.download.folder_picker") });
+        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } path) tools.DownloadFolder = path;
+    }
+
     private async void ExportDiagnostics_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MultiplayerViewModel vm || TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return;

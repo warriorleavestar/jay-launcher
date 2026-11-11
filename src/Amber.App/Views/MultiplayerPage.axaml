@@ -230,10 +230,12 @@
                   <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
                     <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
                     <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
-                    <Button Content="{l:T common.cancel}" Command="{Binding CancelDownloadCommand}" IsVisible="{Binding IsDownloading}" />
                   </WrapPanel>
                 </Grid>
-                <ProgressBar Value="{Binding DownloadPercent}" Maximum="100" IsVisible="{Binding IsDownloading}" />
+                <c:ProgressLine x:Name="ComponentLine" IsVisible="{Binding IsDownloading}" Step="{Binding Status}"
+                                Percent="{Binding ComponentWork.Percent}" IsIndeterminate="{Binding ComponentWork.IsIndeterminate}"
+                                BytesPerSecond="{Binding ComponentWork.BytesPerSecond}" Remaining="{Binding ComponentWork.Remaining}"
+                                CancelCommand="{Binding CancelDownloadCommand}" />
                 <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
                 <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding LicenseText}" />
               </StackPanel>
@@ -1420,10 +1422,12 @@
                 <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
                   <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
                   <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
-                  <Button Content="{l:T common.cancel}" Command="{Binding CancelDownloadCommand}" IsVisible="{Binding IsDownloading}" />
                 </WrapPanel>
               </Grid>
-              <ProgressBar Value="{Binding DownloadPercent}" Maximum="100" IsVisible="{Binding IsDownloading}" />
+              <c:ProgressLine x:Name="ComponentLineSettings" IsVisible="{Binding IsDownloading}" Step="{Binding Status}"
+                              Percent="{Binding ComponentWork.Percent}" IsIndeterminate="{Binding ComponentWork.IsIndeterminate}"
+                              BytesPerSecond="{Binding ComponentWork.BytesPerSecond}" Remaining="{Binding ComponentWork.Remaining}"
+                              CancelCommand="{Binding CancelDownloadCommand}" />
               <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
               <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding LicenseText}" />
             </StackPanel>
@@ -1568,6 +1572,21 @@
                     <DataTemplate><SelectableTextBlock Text="{Binding}" FontFamily="Consolas,Menlo,monospace" FontSize="11" TextWrapping="Wrap" /></DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+              </StackPanel>
+            </Expander>
+            <!-- Try a download (it used to be in the toolbox): fetch one file, optionally checking its SHA-1 -->
+            <Expander x:Name="DownloadTest" Header="{l:T tools.download.title}" HorizontalAlignment="Stretch" DataContext="{Binding Tools}">
+              <StackPanel Spacing="8" x:DataType="vm:ToolsViewModel">
+                <TextBox x:Name="DownloadUrlBox" Text="{Binding DownloadUrl}" PlaceholderText="{l:T tools.download.url_hint}" AutomationProperties.Name="{l:T tools.download.url_hint}" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBox Text="{Binding DownloadFolder}" PlaceholderText="{l:T tools.download.folder_hint}" AutomationProperties.Name="{l:T tools.download.folder_hint}" />
+                  <Button Grid.Column="1" Content="{l:T common.browse}" Margin="8,0,0,0" Click="BrowseDownloadFolder_Click" />
+                </Grid>
+                <TextBox Text="{Binding DownloadSha1}" PlaceholderText="{l:T tools.download.sha1_hint}" AutomationProperties.Name="{l:T tools.download.sha1_hint}" />
+                <Button x:Name="DownloadTestButton" Classes="secondary" Content="{l:T tools.download.start}" Command="{Binding DownloadFileCommand}" IsEnabled="{Binding !IsBusy}" HorizontalAlignment="Left" />
+                <c:ProgressLine x:Name="DownloadTestLine" Title="{Binding BusyTitle}" Step="{Binding Status}" IsIndeterminate="True" BytesPerSecond="{Binding BytesPerSecond}"
+                                CancelCommand="{Binding CancelCommand}" IsVisible="{Binding IsDownloadingFile}" />
+                <c:StatusBar Message="{Binding DownloadMessage}" />
               </StackPanel>
             </Expander>
           </StackPanel>

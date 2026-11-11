@@ -222,6 +222,11 @@ public sealed partial class OnboardingViewModel : ObservableObject
     [ObservableProperty]
     public partial bool ProgressIndeterminate { get; set; }
 
+    /// <summary>Speed and time left for the progress line.</summary>
+    public WorkProgress Work { get; } = new();
+
+    partial void OnProgressChanged(double value) => Work.Report(value);
+
     [ObservableProperty]
     public partial string WaitedText { get; set; } = "";
 
@@ -370,6 +375,7 @@ public sealed partial class OnboardingViewModel : ObservableObject
                     await _service.Installer.InstallAsync(id, new Progress<InstallProgress>(p =>
                     {
                         if (p.Stage != InstallStage.Files || p.Files.TotalFiles == 0) return;
+                        Work.Bytes(p.Files.BytesDownloaded);
                         DetailText = L.F("onboarding.stage.files", p.Files.CompletedFiles, p.Files.TotalFiles, p.Files.BytesDownloaded / 1024.0 / 1024);
                         GameProgress(100.0 * p.Files.CompletedFiles / p.Files.TotalFiles);
                     }), ct);

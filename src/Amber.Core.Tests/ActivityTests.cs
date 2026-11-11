@@ -14,6 +14,33 @@ public class ActivityTests
     // ---- TaskCenter ----
 
     [Fact]
+    public void ReportedBytesBecomeSpeedAndTimeLeftWhileRunning()
+    {
+        var center = new TaskCenter(Now);
+        var task = center.Track("install", "1.21.4");
+        Assert.Null(task.BytesPerSecond);
+        Assert.Null(task.Remaining);
+        for (var s = 0; s <= 4; s++)
+        {
+            task.Report(s * 0.1, $"{s * 48} / 480", s * 4_000_000L);
+            _now = _now.AddSeconds(1);
+        }
+        Assert.Equal(4_000_000, task.BytesPerSecond!.Value, 3);
+        Assert.Equal(6, task.Remaining!.Value.TotalSeconds, 3);
+        // A task that reports no bytes has a time left but no speed.
+        var plain = center.Track("install", "1.20.1");
+        plain.Report(0.0);
+        _now = _now.AddSeconds(2);
+        plain.Report(0.5);
+        Assert.Null(plain.BytesPerSecond);
+        Assert.Equal(2, plain.Remaining!.Value.TotalSeconds, 3);
+        // Finished tasks say nothing: there is no speed to show next to "Done".
+        task.Succeed();
+        Assert.Null(task.BytesPerSecond);
+        Assert.Null(task.Remaining);
+    }
+
+    [Fact]
     public async Task SameDedupeKeyRunsOnce()
     {
         var center = new TaskCenter(Now);

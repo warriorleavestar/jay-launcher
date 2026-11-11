@@ -22,6 +22,11 @@ public sealed partial class TaskItem(TaskHandle handle) : ObservableObject
     public bool IsFailed => Handle.State == TaskState.Failed;
     public bool IsDone => Handle.State is TaskState.Succeeded or TaskState.PartlySucceeded;
 
+    /// <summary>The step under the bar while running ("12/30 files"); "Working…" when the task says nothing.</summary>
+    public string Step => Handle.Detail ?? (Handle.Progress is null ? L.T("activity.task.working") : "");
+    public double? Speed => Handle.BytesPerSecond;
+    public TimeSpan? Remaining => Handle.Remaining;
+
     public string Detail => Handle.State switch
     {
         TaskState.Running => Handle.Detail ?? (Handle.Progress is { } p ? $"{p:P0}" : L.T("activity.task.working")),

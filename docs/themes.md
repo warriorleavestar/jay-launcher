@@ -15,7 +15,7 @@ theme.json        必需：清单
 tokens.json       可选：配色、字体、字号、间距、圆角、背景图
 styles.json       可选：组件样式（按钮、卡片、导航、输入框……的美术风格）
 layout/shell.json 可选：窗口外壳（导航放哪、多宽、只显示图标、页面顺序）
-layout/pages/     可选：各页面的布局，如 layout/pages/home.json
+layout/pages/     可选：各页面的布局，如 layout/pages/downloads.json
 fonts/            可选：.ttf / .otf
 assets/           可选：.png / .jpg（每边不超过 4096 像素）
 README.txt / *.md 可选：说明
@@ -213,18 +213,7 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 
 页面被分成几个**区块**，每个区块是 Jay 自带的一整块功能（按钮、绑定、提示都在里面）。主题不能改区块里面，但可以决定区块放在哪、套什么容器、怎么分栏，还能加装饰性的文字和图片。
 
-启动页（`home.json`）的区块：
-
-| 区块 | 内容 | 必需 |
-|---|---|---|
-| `home.title` | 页面标题 | 否 |
-| `home.pending` | “游戏已在运行，还要再开一个吗”提示 | 是 |
-| `home.onboarding` | 新手卡（没有账号或实例时） | 是 |
-| `home.instance` | 版本、账号、内存 | 是 |
-| `home.crash` | 崩溃原因分析 | 是 |
-| `home.launch` | 启动按钮和状态 | 是 |
-
-其他页面的区块（标题以外都必需）：
+Pages and their regions (every region except a title is required):
 
 | 页面文件 | 区块 |
 |---|---|
@@ -233,8 +222,11 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 | `downloads.json` | `downloads.title` `downloads.search` `downloads.filters` `downloads.body` `downloads.status` |
 | `content.json` | `content.header` `content.filters` `content.body` `content.status` |
 | `multiplayer.json` | `multiplayer.title` `multiplayer.tabs` `multiplayer.room` (the room header and knock panel) `multiplayer.body` `multiplayer.status` |
-| `tools.json` | `tools.title` `tools.body` `tools.status` |
-| `log.json` | `log.header` `log.jump` `log.filters` `log.list` |
+
+`home.json`, `tools.json` and `log.json` laid out the launch page, the toolbox and the standalone log page. Those pages are
+gone (starting a game happens on each instance, the toolbox moved into Settings, the live log is a dock: Ctrl+`). A pack
+that still carries these files installs as before and their regions (`home.*`, `tools.*`, `log.*`) still validate; Jay
+just has no page to apply them to.
 
 设置页的排版固定，不能改（“恢复默认主题”在那里）。
 
@@ -247,16 +239,18 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
   "wide": {
     "type": "grid", "columns": ["*", "360"], "rows": ["auto", "*"], "spacing": 16,
     "children": [
-      { "type": "region", "name": "home.title", "columnSpan": 2 },
-      { "type": "scroll", "row": 1, "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] },
-      { "type": "region", "name": "home.launch", "row": 1, "column": 1, "valign": "start" }
+      { "type": "region", "name": "downloads.title", "columnSpan": 2 },
+      { "type": "region", "name": "downloads.body", "row": 1 },
+      { "type": "stack", "row": 1, "column": 1, "children": ["downloads.search", "downloads.filters", "downloads.status"] }
     ]
   },
   "default": {
     "type": "dock",
     "children": [
-      { "type": "region", "name": "home.launch", "dock": "top" },
-      { "type": "scroll", "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] }
+      { "type": "region", "name": "downloads.search", "dock": "top" },
+      { "type": "region", "name": "downloads.filters", "dock": "top" },
+      { "type": "region", "name": "downloads.status", "dock": "bottom" },
+      "downloads.body"
     ]
   }
 }
@@ -265,7 +259,7 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 节点类型：
 
 - 容器：`stack`（`"orientation": "horizontal"` 横排）、`grid`（`columns` / `rows`，如 `["auto", "*", "2*", "240"]`）、`dock`、`wrap`、`panel`（叠在一起）、`scroll`、`card`（套上卡片样式）。
-- 叶子：`region`（`"name"` 写区块名；直接写字符串 `"home.launch"` 是简写）、`spacer`、`text`（`"text"` 不超过 200 字，`"style"`：h1 / h2 / hint / caption / body）、`image`（`"source": "assets/xx.png"`）。
+- 叶子：`region`（`"name"` 写区块名；直接写字符串 `"downloads.body"` 是简写）、`spacer`、`text`（`"text"` 不超过 200 字，`"style"`：h1 / h2 / hint / caption / body）、`image`（`"source": "assets/xx.png"`）。
 - 通用属性：`width` `height` `minWidth` `maxWidth` `minHeight` `maxHeight` `margin` `padding`（一个数，或 `[左右, 上下]`，或 `[左, 上, 右, 下]`）、`align` / `valign`（start / center / end / stretch）、`spacing`。
 - 放在父容器里的位置：`row` `column` `rowSpan` `columnSpan`（grid）、`dock`（left / right / top / bottom）。
 - `hideBelow`：页面窄于这个宽度时不显示（只能用在装饰和容器上，区块不能这样藏起来）。
@@ -328,4 +322,4 @@ Jay 自带三套外观，在设置 › 外观的主题包列表最前面：
 - 从网上加载图片或字体（会被用来追踪谁打开了 Jay）。
 - 把字号调到 11 以下，或把关键文字调到看不清。
 - 改确认框、远程控制同意框和共享提示条的样式（这些窗口锁定用 Jay 自带样式）。
-- 改区块里面的文字和按钮，或把必需的区块藏起来；隐藏启动页、设置页和“恢复默认主题”。
+- 改区块里面的文字和按钮，或把必需的区块藏起来；隐藏游戏库、设置页和“恢复默认主题”。

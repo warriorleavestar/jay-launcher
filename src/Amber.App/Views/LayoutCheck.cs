@@ -75,7 +75,7 @@ internal sealed class LayoutCheck(MainWindow window, MainViewModel main, string 
                 Amber.Core.Localization.L.Pseudo = pseudo;
                 Amber.Core.Localization.L.SetLanguage(code);
                 await Task.Delay(300);
-                foreach (var page in main.Pages)
+                foreach (var page in main.Pages.Where(p => p.HasView))
                 {
                     main.CurrentPage = page;
                     await Task.Delay(500);

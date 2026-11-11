@@ -21,13 +21,58 @@ public sealed partial class JunkItem(JunkGroup group) : ObservableObject
     public partial bool Selected { get; set; } = group.Bytes > 0;
 }
 
-/// <summary>工具箱：清理垃圾、下载任意文件、下载 Java、检查更新。</summary>
-public sealed partial class ToolsViewModel(LauncherService service) : PageViewModel
+/// <summary>
+/// What used to be the toolbox page. It has no page of its own any more: Settings › Storage shows the clean-up,
+/// Settings › Game the Java download, Settings › About the update check, and the "Connection problems?" drawer the
+/// file download. One job (Java or file download) runs at a time.
+/// </summary>
+public sealed partial class ToolsViewModel : PageViewModel
 {
+    private readonly LauncherService service;
     private CancellationTokenSource? _cts;
 
-    public override string Title => L.T("tools.title");
-    public override string Icon => "M21.500 7a5.500 5.500 0 0 1-7.600 5.100L7.200 18.800a2 2 0 0 1-2.800-2.800l6.700-6.700A5.500 5.500 0 0 1 17 2.500l-3.300 3.300 1 3.500 3.500 1 3.300-3.300c.3.600.5 1.300.5 2z";
+    public ToolsViewModel(LauncherService service)
+    {
+        this.service = service;
+        Junk.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasJunk));
+    }
+
+    public override string Title => L.T("tools.junk.title");
+    public override string Icon => "M4 6h16v2H4z";
+    public override bool HasView => false;
+
+    /// <summary>The job that is running, or ran last: <see cref="JavaJob"/> or <see cref="DownloadJob"/>.</summary>
+    public string? Job { get; private set; }
+    internal const string JavaJob = "java";
+    internal const string DownloadJob = "download";
+
+    public bool IsInstallingJava => IsBusy && Job == JavaJob;
+    public bool IsDownloadingFile => IsBusy && Job == DownloadJob;
+
+    /// <summary>How the last Java download ended; shown under its card. Null while it runs (the progress line speaks then).</summary>
+    public StatusMessage? JavaMessage => Job == JavaJob && !IsBusy ? StatusInfo : null;
+
+    /// <summary>How the last file download ended.</summary>
+    public StatusMessage? DownloadMessage => Job == DownloadJob && !IsBusy ? StatusInfo : null;
+
+    /// <summary>The running job's name on its progress line.</summary>
+    [ObservableProperty] public partial string BusyTitle { get; set; } = "";
+    [ObservableProperty] public partial double? BytesPerSecond { get; set; }
+    [ObservableProperty] public partial TimeSpan? Remaining { get; set; }
+
+    public bool HasJunk => Junk.Count > 0;
+
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.PropertyName is nameof(StatusInfo) or nameof(IsBusy))
+        {
+            base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(JavaMessage)));
+            base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(DownloadMessage)));
+            base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(IsInstallingJava)));
+            base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(IsDownloadingFile)));
+        }
+    }
 
     public ObservableCollection<JunkItem> Junk { get; } = [];
     public int[] JavaMajors { get; } = [8, 17, 21, 25];
@@ -72,12 +117,17 @@ public sealed partial class ToolsViewModel(LauncherService service) : PageViewMo
     /// <summary>活动中心里的当前任务（下载文件、下载 Java）：进度跟着报过去。</summary>
     private Amber.Core.Activity.TaskHandle? _task;
 
-    private async Task RunAsync(Func<CancellationToken, Task> work, string? title = null)
+    private async Task RunAsync(string job, Func<CancellationToken, Task> work, string title)
     {
         if (IsBusy) return;
+        Job = job;
+        BusyTitle = title;
+        BytesPerSecond = null;
+        Remaining = null;
+        SetStatus(null);
         IsBusy = true;
         var cts = _cts = new CancellationTokenSource();
-        var task = _task = title is null ? null : service.Tasks.Track("tools", title, () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
+        var task = _task = service.Tasks.Track("tools", title, () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
         try
         {
             await work(cts.Token);
@@ -106,8 +156,17 @@ public sealed partial class ToolsViewModel(LauncherService service) : PageViewMo
     [RelayCommand]
     private void Cancel() => _cts?.Cancel();
 
+    /// <summary>Progress goes to the activity center's task, and its speed and time left come back for the line on the page.</summary>
+    private void Report(double? fraction, long bytes)
+    {
+        if (_task is not { } task) return;
+        task.Report(fraction, Status, bytes);
+        BytesPerSecond = task.BytesPerSecond;
+        Remaining = task.Remaining;
+    }
+
     [RelayCommand]
-    private Task DownloadFileAsync() => RunAsync(async ct =>
+    private Task DownloadFileAsync() => RunAsync(DownloadJob, async ct =>
     {
         if (!Uri.TryCreate(DownloadUrl.Trim(), UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             throw new ArgumentException(L.T("tools.download.invalid_url"));
@@ -119,14 +178,14 @@ public sealed partial class ToolsViewModel(LauncherService service) : PageViewMo
         await service.Downloader.DownloadOneAsync(item, new Progress<long>(bytes =>
         {
             SetStatus(StatusMessage.Info("tools.download.progress", name, bytes / 1024.0 / 1024));
-            _task?.Report(null, Status);
+            Report(null, bytes);
         }), ct);
         await Ui.FlushAsync();
         SetStatus(StatusMessage.Success("tools.download.completed", target));
     }, L.F("activity.kind.download", DownloadUrl.Trim()));
 
     [RelayCommand]
-    private Task InstallJavaAsync() => RunAsync(async ct =>
+    private Task InstallJavaAsync() => RunAsync(JavaJob, async ct =>
     {
         var major = SelectedJavaMajor;
         SetStatus(StatusMessage.Info("tools.java.downloading", major));
@@ -134,7 +193,7 @@ public sealed partial class ToolsViewModel(LauncherService service) : PageViewMo
         {
             Progress = 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
             SetStatus(StatusMessage.Info("tools.java.progress", major, p.CompletedFiles, p.TotalFiles));
-            _task?.Report(Progress / 100, Status);
+            Report(Progress / 100, p.BytesDownloaded);
         }), ct);
         await service.Java.ScanAsync(true);
         await Ui.FlushAsync();

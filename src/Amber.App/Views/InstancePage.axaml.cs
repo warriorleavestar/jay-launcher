@@ -348,6 +348,18 @@ public partial class InstancePage : UserControl
         if (file?.TryGetLocalPath() is { } path) vm.ExportLastRun(path);
     }
 
+    private async void ExportFailure_Click(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm || Storage is not { } storage) return;
+        var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = L.T("home.crash.export_title"),
+            SuggestedFileName = $"jay-error-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
+            DefaultExtension = "zip",
+        });
+        if (file?.TryGetLocalPath() is { } path) vm.ExportLaunchFailure(path);
+    }
+
     private InstanceViewModel? Vm => DataContext as InstanceViewModel;
     private IStorageProvider? Storage => TopLevel.GetTopLevel(this)?.StorageProvider;
 

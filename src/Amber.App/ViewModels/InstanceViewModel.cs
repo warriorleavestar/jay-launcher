@@ -202,6 +202,13 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [ObservableProperty]
     public partial double Progress { get; set; }
 
+    /// <summary>The progress line of the work in hand: percent, speed, time left.</summary>
+    public WorkProgress Work { get; } = new();
+
+    partial void OnProgressChanged(double value) => Work.Report(value);
+
+    partial void OnIsBusyChanged(bool value) => Work.Reset();
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasManualDownload))]
     public partial string? ManualDownloadUrl { get; set; }
@@ -376,6 +383,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             {
                 if (p.Stage == InstallStage.Files && p.Files.TotalFiles > 0)
                 {
+                    Work.Bytes(p.Files.BytesDownloaded);
                     Progress = 100.0 * p.Files.CompletedFiles / p.Files.TotalFiles;
                     SetStatus(StatusMessage.Info("instance.files.progress", p.Files.CompletedFiles, p.Files.TotalFiles));
                 }

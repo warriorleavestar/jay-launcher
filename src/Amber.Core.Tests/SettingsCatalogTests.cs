@@ -7,9 +7,16 @@ namespace Amber.Core.Tests;
 public sealed class SettingsCatalogTests
 {
     [Fact]
-    public void TenGroupsEachWithAtLeastOneSetting()
+    public void NineGroupsEachWithAtLeastOneSetting()
     {
-        Assert.Equal(10, SettingsCatalog.Groups.Count);
+        // The Tools group is gone: its things live in Storage, Game and About.
+        Assert.Equal(9, SettingsCatalog.Groups.Count);
+        Assert.Null(SettingsCatalog.Group("tools"));
+        Assert.Equal(SettingsCatalog.Storage, SettingsCatalog.Find("Junk")?.Group);
+        Assert.Equal(SettingsCatalog.Game, SettingsCatalog.Find("JavaDownload")?.Group);
+        Assert.Equal(SettingsCatalog.Game, SettingsCatalog.Find("Memory")?.Group);
+        Assert.Equal(SettingsCatalog.About, SettingsCatalog.Find("CheckUpdate")?.Group);
+        Assert.Null(SettingsCatalog.Find("OpenTools"));
         Assert.Equal(SettingsCatalog.Groups.Count, SettingsCatalog.Groups.Select(g => g.Id).Distinct().Count());
         foreach (var group in SettingsCatalog.Groups)
             Assert.Contains(SettingsCatalog.Fields, f => f.Group == group.Id);

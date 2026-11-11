@@ -66,6 +66,9 @@ public sealed record WorldChoice(WorldInfo World) : LocalizedRecord
     public string Label => World.Name == World.FolderName ? World.Name : L.F("content.world.label", World.Name, World.FolderName);
 }
 
+/// <summary>One choice of Discover's "Install to" marker: the instance's id and the name the library shows for it.</summary>
+public sealed record InstanceChoice(string Id, string Name);
+
 /// <summary>资源页：在 Modrinth / CurseForge 搜索并安装模组、资源包、光影、整合包、数据包。</summary>
 public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
 {
@@ -82,7 +85,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     /// <summary>当前选中的项目是经 Sinytra Connector 装的 Fabric 模组。</summary>
     private bool _viaConnector;
 
-    public override string Title => L.T("content.title");
+    public override string Title => L.T("shell.nav.discover");
     public override string Icon => "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z";
 
     public OptionItem[] TypeNames { get; } = OptionItem.Keys("instance.mods.title", "instance.resourcepacks.title", "instance.shaderpacks.title", "content.type.modpack", "instance.datapacks.title");
@@ -96,6 +99,17 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     private readonly Func<bool>? _hasCurseForge;
 
     public ObservableCollection<string> Instances { get; } = [];
+
+    /// <summary>The "Install to" marker's choices: the same instances as <see cref="Instances"/>, under the names the library shows.</summary>
+    public ObservableCollection<InstanceChoice> TargetChoices { get; } = [];
+
+    /// <summary>The marker's selection; it reads and writes <see cref="TargetInstance"/>.</summary>
+    public InstanceChoice? TargetChoice
+    {
+        get => TargetChoices.FirstOrDefault(c => c.Id == TargetInstance);
+        // The list is rebuilt under the control (selection goes null for a moment): only a real pick moves the target.
+        set { if (value is not null && value.Id != TargetInstance) TargetInstance = value.Id; }
+    }
     public ObservableCollection<ProjectItem> Results { get; } = [];
     public ObservableCollection<FileItem> Files { get; } = [];
     public ObservableCollection<WorldChoice> Worlds { get; } = [];
@@ -186,6 +200,11 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     [ObservableProperty]
     public partial double Progress { get; set; }
 
+    /// <summary>The progress line of the work in hand: percent, speed, time left.</summary>
+    public WorkProgress Work { get; } = new();
+
+    partial void OnProgressChanged(double value) => Work.Report(value);
+
     protected override StatusMessage? DefaultStatus => StatusMessage.Info("content.search.hint");
 
     public bool IsModpack => CurrentType == ContentType.Modpack;
@@ -212,6 +231,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         _slowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _slowTimer.Tick += (_, _) => UpdateSlow();
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshInstances);
+        service.LibraryChanged += () => Dispatcher.UIThread.Post(RefreshTargetNames);
         service.CurrentInstanceChanged += () => Dispatcher.UIThread.Post(() =>
         {
             if (_service.CurrentInstance is { } id && Instances.Contains(id)) TargetInstance = id;
@@ -242,7 +262,20 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         var keep = IsTemporaryTarget ? TargetInstance : null;
         Instances.Clear();
         foreach (var v in _service.InstalledVersions()) Instances.Add(v);
+        TargetChoices.Clear();
+        foreach (var v in Instances) TargetChoices.Add(new InstanceChoice(v, NameOf(v)));
         TargetInstance = keep is not null && Instances.Contains(keep) ? keep : _service.CurrentOr(Instances, Instances.FirstOrDefault());
+        OnPropertyChanged(nameof(TargetChoice));
+    }
+
+    private string NameOf(string id) => _service.MetaOf(id)?.DisplayName is { Length: > 0 } name ? name : id;
+
+    /// <summary>An instance was renamed: the marker shows the new name.</summary>
+    private void RefreshTargetNames()
+    {
+        if (TargetChoices.All(c => c.Name == NameOf(c.Id))) return;
+        for (var i = 0; i < TargetChoices.Count; i++) TargetChoices[i] = TargetChoices[i] with { Name = NameOf(TargetChoices[i].Id) };
+        OnPropertyChanged(nameof(TargetChoice));
     }
 
     private bool _starting;
@@ -285,6 +318,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     }
     partial void OnIsBusyChanged(bool value)
     {
+        Work.Reset();
         InstallCommand.NotifyCanExecuteChanged();
         InstallQueueCommand.NotifyCanExecuteChanged();
         InstallModpackAndPlayCommand.NotifyCanExecuteChanged();
@@ -300,6 +334,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
 
     partial void OnTargetInstanceChanged(string? value)
     {
+        OnPropertyChanged(nameof(TargetChoice));
         OnPropertyChanged(nameof(IsTemporaryTarget));
         UpdateShaderState();
         OnPropertyChanged(nameof(IsSharedTarget));
@@ -868,6 +903,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             }
             await _service.ContentInstaller.InstallAsync(plan, target, new Progress<DownloadProgress>(p =>
             {
+                Work.Bytes(p.BytesDownloaded);
                 Progress = 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
                 SetStatus(StatusMessage.Info("content.install.progress", p.CompletedFiles, p.TotalFiles, p.CurrentFile));
             }), _workCts.Token);

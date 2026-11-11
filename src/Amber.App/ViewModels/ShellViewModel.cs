@@ -61,10 +61,9 @@ public sealed partial class NavSection : ObservableObject
 }
 
 /// <summary>
-/// 外壳（官方设计 §3、§11.5）：路由和历史栈、侧栏一级入口、入口里的子页、返回 / 前进、带上下文的返回。
-/// 过渡期旧页面挂在 3 个入口下面（§11.9）：游戏库 = 启动页 + 实例 + 新建实例（旧下载页）+ 运行记录（旧日志页）；
-/// 发现 = 旧资源页；联机 = 旧联机页；设置 = 设置 + 工具（旧工具箱）；账号在侧栏底部。
-/// 页面状态在各自的 ViewModel 里，切走再切回还在原处。
+/// The shell (official design §3, §11.5): routes and history, the sidebar sections, back / forward and "done, go back".
+/// The library has one path and no sub-pages: library → library/{instance} → its tabs, with library/new for a new
+/// instance. Settings is one page with groups. Page state lives in each view model, so leaving and coming back keeps it.
 /// </summary>
 public sealed partial class ShellViewModel : ObservableObject
 {
@@ -84,15 +83,28 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>侧栏上显示的入口（主题包可以排顺序、藏掉发现或联机；藏掉的还能从别处跳过去）。</summary>
     public ObservableCollection<NavSection> Sections { get; } = [];
 
-    /// <summary>当前入口里的子页（多于一个时顶栏下面显示页签）。</summary>
-    public ObservableCollection<PageViewModel> SubPages { get; } = [];
-
     public ShellViewModel(MainViewModel main, LauncherService service)
     {
         _main = main;
         _service = service;
+        // Routes of removed pages (library/start, library/logs, settings/tools) go to what replaced them, unless an
+        // instance really has that name.
+        Router.Rewrite = route => route.Section == Section.Library && route[1] is { } id && _service.InstalledVersions().Contains(id)
+            ? route
+            : LegacyRoutes.Resolve(route);
         Router.Navigated += OnNavigated;
-        L.Changed += () => Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(Title)));
+        L.Changed += () => Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(Title));
+            OnPropertyChanged(nameof(Crumb));
+            OnPropertyChanged(nameof(Heading));
+        });
+        _service.LibraryChanged += () => Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(Crumb));
+            OnPropertyChanged(nameof(HasCrumb));
+            OnPropertyChanged(nameof(Heading));
+        });
         ApplyOrder(null);
     }
 
@@ -108,14 +120,12 @@ public sealed partial class ShellViewModel : ObservableObject
             Section.Library => route[1] switch
             {
                 null => Find<LibraryViewModel>(),
-                "start" => Find<HomeViewModel>(),
                 "new" => Find<DownloadViewModel>(),
-                "logs" => Find<LogViewModel>(),
                 _ => Find<InstanceViewModel>(),
             },
             Section.Discover => Find<ContentViewModel>(),
             Section.Play => Find<MultiplayerViewModel>(),
-            Section.Settings => route[1] == "tools" ? Find<ToolsViewModel>() : Find<SettingsViewModel>(),
+            Section.Settings => Find<SettingsViewModel>(),
             Section.Accounts => Find<AccountsViewModel>(),
             Section.About => Find<AboutViewModel>(),
             Section.Help => Find<HelpCenterViewModel>(),
@@ -126,13 +136,10 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>页面的路由（从别处直接换了当前页时，按它补一条历史）。</summary>
     public Route RouteOf(PageViewModel page) => page switch
     {
-        HomeViewModel => Route.Parse("library/start"),
         InstanceViewModel => Route.Of(Section.Library, _service.CurrentInstance ?? "current"),
         DownloadViewModel => Route.Parse(LegacyRoutes.NewInstance),
-        LogViewModel => Route.Parse(LegacyRoutes.Logs),
         ContentViewModel => Route.Parse("discover"),
         MultiplayerViewModel => Route.Parse("play"),
-        ToolsViewModel => Route.Parse(LegacyRoutes.Tools),
         SettingsViewModel => Route.Parse("settings"),
         AboutViewModel => Route.Parse("about"),
         HelpCenterViewModel help => Route.Parse(help.Selected is { } a ? "help/" + a.Id : "help"),
@@ -166,7 +173,7 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 // library/{实例}：把它设成焦点实例，实例页显示它。
                 string? instanceId = null;
-                if (route.Section == Section.Library && route[1] is { } id && id is not ("new" or "logs" or "current")
+                if (route.Section == Section.Library && route[1] is { } id && id is not ("new" or "current")
                     && _service.InstalledVersions().Contains(id))
                 {
                     _service.SetCurrentInstance(id);
@@ -214,7 +221,34 @@ public sealed partial class ShellViewModel : ObservableObject
     public string? ReturnLabel => Router.CurrentReturn?.Label;
     public bool HasReturn => Router.CurrentReturn is not null;
 
-    public bool HasSubPages => SubPages.Count > 1;
+    /// <summary>
+    /// What comes after the section name in the top bar: the instance's name on library/{instance}, "New instance" on
+    /// library/new. Empty on a section's home.
+    /// </summary>
+    public string Crumb
+    {
+        get
+        {
+            var route = Router.Current;
+            if (route.Section != Section.Library || route[1] is not { } part) return "";
+            if (part == "new") return L.T("shell.crumb.new_instance");
+            var id = part == "current" ? _service.CurrentInstance : part;
+            if (id is null) return "";
+            return _service.MetaOf(id)?.DisplayName is { Length: > 0 } name ? name : id;
+        }
+    }
+
+    public bool HasCrumb => Crumb.Length > 0;
+
+    /// <summary>The top bar's heading: the crumb when there is one, the section's name otherwise.</summary>
+    public string Heading => HasCrumb ? Crumb : Title;
+
+    /// <summary>The section name in the top bar goes back to the section's home when a crumb follows it.</summary>
+    [RelayCommand]
+    private void GoSectionHome()
+    {
+        if (HasCrumb) Router.Navigate(Route.Parse(Route.RootOf(Router.CurrentSection)));
+    }
 
     public bool IsSettingsActive => Router.CurrentSection is Section.Settings or Section.About or Section.Help;
     public bool IsAccountsActive => Router.CurrentSection == Section.Accounts;
@@ -227,14 +261,6 @@ public sealed partial class ShellViewModel : ObservableObject
         Router.SwitchTo(value.Section);
     }
 
-    [ObservableProperty] public partial PageViewModel? SelectedSubPage { get; set; }
-
-    partial void OnSelectedSubPageChanged(PageViewModel? value)
-    {
-        if (value is null || _updating || ReferenceEquals(value, _main.CurrentPage)) return;
-        Router.Navigate(RouteOf(value));
-    }
-
     private bool _updating;
 
     private void UpdateState()
@@ -245,13 +271,6 @@ public sealed partial class ShellViewModel : ObservableObject
             var section = Router.CurrentSection;
             foreach (var s in AllSections) s.IsActive = s.Section == section;
             SelectedSection = Sections.FirstOrDefault(s => s.Section == section);
-            var subs = SubPagesOf(section);
-            if (!subs.SequenceEqual(SubPages))
-            {
-                SubPages.Clear();
-                foreach (var p in subs) SubPages.Add(p);
-            }
-            SelectedSubPage = SubPages.Contains(_main.CurrentPage) ? _main.CurrentPage : null;
         }
         finally { _updating = false; }
         OnPropertyChanged(nameof(CurrentSection));
@@ -260,20 +279,11 @@ public sealed partial class ShellViewModel : ObservableObject
         OnPropertyChanged(nameof(CanGoForward));
         OnPropertyChanged(nameof(ReturnLabel));
         OnPropertyChanged(nameof(HasReturn));
-        OnPropertyChanged(nameof(HasSubPages));
+        OnPropertyChanged(nameof(Crumb));
+        OnPropertyChanged(nameof(HasCrumb));
+        OnPropertyChanged(nameof(Heading));
         OnPropertyChanged(nameof(IsSettingsActive));
         OnPropertyChanged(nameof(IsAccountsActive));
-    }
-
-    private List<PageViewModel> SubPagesOf(Section section)
-    {
-        var pages = _main.Pages;
-        return section switch
-        {
-            Section.Library => [.. pages.OfType<LibraryViewModel>(), .. pages.OfType<HomeViewModel>(), .. pages.OfType<InstanceViewModel>(), .. pages.OfType<DownloadViewModel>(), .. pages.OfType<LogViewModel>()],
-            Section.Settings => [.. pages.OfType<SettingsViewModel>(), .. pages.OfType<ToolsViewModel>()],
-            _ => [],
-        };
     }
 
     /// <summary>按主题包的 shell 布局排入口；传空恢复 Jay 自带的顺序。</summary>
@@ -331,7 +341,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public string AccountInitial => AccountName.Length > 0 ? AccountName[..1].ToUpperInvariant() : "?";
 
     /// <summary>设置按钮上的角标（有更新这类提示时）。</summary>
-    public int SettingsBadge => _main.Pages.OfType<SettingsViewModel>().Sum(p => p.Badge) + _main.Pages.OfType<ToolsViewModel>().Sum(p => p.Badge);
+    public int SettingsBadge => _main.Pages.OfType<SettingsViewModel>().Sum(p => p.Badge);
     public bool HasSettingsBadge => SettingsBadge > 0;
 
     /// <summary>页面的角标汇总到所在入口；账号名跟着启动页选中的账号。</summary>
@@ -363,7 +373,7 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         ContentViewModel => Section.Discover,
         MultiplayerViewModel => Section.Play,
-        SettingsViewModel or ToolsViewModel or AboutViewModel or HelpCenterViewModel => Section.Settings,
+        SettingsViewModel or AboutViewModel or HelpCenterViewModel => Section.Settings,
         AccountsViewModel => Section.Accounts,
         _ => Section.Library,
     };

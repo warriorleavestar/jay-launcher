@@ -1,17 +1,19 @@
 ---
 id: tools
 category: storage
-routes: settings/tools
+routes: 
 related: settings
 ---
 
-# Toolbox
+# Clean-up, Java and updates
 
-The toolbox holds things you rarely need but are useful when you do: checking for a new Jay, repairing game files, clearing caches.
+The old toolbox is gone; each of its tools now sits where you would look for it.
 
 ## How to
-- Open it from [Settings › Tools](jay:settings#OpenTools), or the "Toolbox" tab at the top of Settings.
-- Each tool says what it will do; anything that deletes asks you first.
+- Clean up game junk: [Settings › Storage](jay:settings#Junk). **Scan** lists what can go and how big it is; tick what you want and clean.
+- Download a Java runtime by hand: [Settings › Game defaults](jay:settings#JavaDownload). Jay normally fetches the right Java by itself.
+- Check for a new Jay: [Settings › About](jay:settings#CheckUpdate).
+- Try a download: open "Connection problems?" in Multiplayer and unfold **Download file**.
 
 ## If something goes wrong
 - Check for updates does nothing: set an update address in [Settings › Downloads and services](jay:settings#UpdateFeed) first; without one, Jay never goes online for this.

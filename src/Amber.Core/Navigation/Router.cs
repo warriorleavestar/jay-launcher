@@ -59,9 +59,13 @@ public sealed class Router
     public Route LastIn(Section section) =>
         _histories.TryGetValue(section, out var h) && h.Index >= 0 ? h.Entries[h.Index].Route : Route.Parse(Route.RootOf(section));
 
+    /// <summary>Applied to every route before navigating: the shell sends routes of removed pages to their new place.</summary>
+    public Func<Route, Route>? Rewrite { get; set; }
+
     /// <summary>去一处。和当前一样（不算 #字段）时只更新字段，不加历史。</summary>
     public void Navigate(Route route, ReturnContext? returnTo = null)
     {
+        if (Rewrite is { } rewrite) route = rewrite(route);
         var kind = route.Section == CurrentSection ? NavigationKind.Navigate : NavigationKind.Section;
         var h = HistoryOf(route.Section);
         if (h.Index >= 0 && h.Entries[h.Index].Route.WithoutFragment.Equals(route.WithoutFragment))

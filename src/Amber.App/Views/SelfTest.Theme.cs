@@ -108,12 +108,12 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             await Task.Delay(400);
             Check("恢复默认主题后强调色回到默认", Brush("Accent", ThemeVariant.Dark) == defaultAccent && ThemeService.Current is null);
             Check("恢复默认后设置文件不再指定主题包", !File.ReadAllText(AppSettings.FilePath).Contains("selftest-", StringComparison.Ordinal));
-            main.CurrentPage = main.Pages[0];
+            main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.NewInstance);
             await Task.Delay(500);
-            var home = window.GetVisualDescendants().OfType<HomePage>().First();
-            Check("恢复默认后导航回到左边、三个入口都在、启动页用回自带布局",
-                window.ShellNav == "left" && main.Shell.Sections.Count == 3 && !home.ThemeLayout.UsingThemeLayout
-                && home.ThemeLayout.Regions["home.title"].Parent is not null);
+            var newInstance = window.GetVisualDescendants().OfType<DownloadPage>().First();
+            Check("恢复默认后导航回到左边、三个入口都在、新建实例页用回自带布局",
+                window.ShellNav == "left" && main.Shell.Sections.Count == 3 && !newInstance.ThemeLayout.UsingThemeLayout
+                && newInstance.ThemeLayout.Regions["downloads.title"].Parent is not null);
             main.CurrentPage = settings;
             await Task.Delay(300);
 
@@ -142,18 +142,23 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         var path = Path.Combine(reportDir, "topbar.jaytheme");
         WritePack(path, """{ "id": "selftest-topbar", "name": "自检顶栏" }""", """{ "seed": { "accent": "#0F9D8A" } }""",
             ("layout/shell.json", """{ "nav": "top", "navStyle": "icons", "pages": ["home", "multiplayer", "settings"], "hidden": ["tools", "log", "downloads", "content"] }"""),
-            ("layout/pages/home.json", """
+            // Layouts for pages that are gone (the launch page, the toolbox) stay valid in a pack and are simply not used.
+            ("layout/pages/home.json", """{ "type": "dock", "children": [ { "type": "region", "name": "home.launch", "dock": "top" }, "home.instance" ] }"""),
+            ("layout/pages/tools.json", """{ "type": "dock", "children": [ { "type": "region", "name": "tools.status", "dock": "top" }, "tools.body" ] }"""),
+            ("layout/pages/downloads.json", """
             {
               "wide": { "type": "grid", "columns": ["*", "360"], "rows": ["auto", "*"], "spacing": 16, "children": [
-                  { "type": "region", "name": "home.title", "columnSpan": 2 },
-                  { "type": "scroll", "row": 1, "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] },
-                  { "type": "region", "name": "home.launch", "row": 1, "column": 1, "valign": "start" } ] },
+                  { "type": "region", "name": "downloads.title", "columnSpan": 2 },
+                  { "type": "region", "name": "downloads.body", "row": 1 },
+                  { "type": "stack", "row": 1, "column": 1, "children": ["downloads.search", "downloads.filters", "downloads.status"] } ] },
               "default": { "type": "dock", "children": [
-                  { "type": "region", "name": "home.launch", "dock": "top", "margin": [0, 0, 0, 12] },
-                  { "type": "scroll", "children": ["home.pending", "home.onboarding", "home.instance", "home.crash"] } ] }
+                  { "type": "region", "name": "downloads.search", "dock": "top", "margin": [0, 0, 0, 12] },
+                  { "type": "region", "name": "downloads.filters", "dock": "top" },
+                  { "type": "region", "name": "downloads.status", "dock": "bottom" },
+                  "downloads.body" ] }
             }
             """),
-            ("layout/pages/tools.json", """{ "type": "dock", "children": [ { "type": "region", "name": "tools.status", "dock": "top" }, "tools.body" ] }"""));
+            ("layout/pages/content.json", """{ "type": "dock", "children": [ { "type": "region", "name": "content.status", "dock": "top" }, { "type": "region", "name": "content.header", "dock": "top" }, { "type": "region", "name": "content.filters", "dock": "top" }, "content.body" ] }"""));
         settings.ImportThemePack(path);
         await Task.Delay(500);
         Check("导入带排版的主题包：导航挪到顶上", window.ShellNav == "top" && window.SidebarHost.Bounds.Width > window.Bounds.Width - 4
@@ -167,33 +172,34 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         await Task.Delay(300);
         Check("藏起来的入口还能跳过去", main.CurrentPage is ContentViewModel && main.Shell.SelectedSection is null);
 
-        main.CurrentPage = main.Pages[0];
+        Check("带着已经没有的页面（启动页、工具箱）排版的主题包照样装得上", settings.SelectedThemePack?.Id == "selftest-topbar");
+        main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.NewInstance);
         window.Width = 1600;
         window.Height = 900;
         await Task.Delay(600);
-        var home = window.GetVisualDescendants().OfType<HomePage>().First();
-        var launch = home.ThemeLayout.Regions["home.launch"];
-        Check("宽窗口：启动页用主题的布局，启动卡片在右边一栏",
-            home.ThemeLayout.UsingThemeLayout && launch.TranslatePoint(default, home) is { X: > 600 },
-            $"启动卡片位置 {launch.TranslatePoint(default, home)}");
-        await ShotAsync("layout-home-1600x900");
+        var page = window.GetVisualDescendants().OfType<DownloadPage>().First();
+        var search = page.ThemeLayout.Regions["downloads.search"];
+        Check("宽窗口：新建实例页用主题的布局，搜索在右边一栏",
+            page.ThemeLayout.UsingThemeLayout && search.TranslatePoint(default, page) is { X: > 600 },
+            $"搜索位置 {search.TranslatePoint(default, page)}");
+        await ShotAsync("layout-new-instance-1600x900");
 
         window.Width = 1024;
         window.Height = 640;
         await Task.Delay(600);
-        Check("中等窗口：换成另一棵树，启动卡片在最上面",
-            home.ThemeLayout.UsingThemeLayout && launch.TranslatePoint(default, home) is { Y: < 20 } && home.ThemeLayout.Regions["home.title"].Parent is null,
-            $"启动卡片位置 {launch.TranslatePoint(default, home)}");
-        await ShotAsync("layout-home-1024x640");
+        Check("中等窗口：换成另一棵树，搜索在最上面",
+            page.ThemeLayout.UsingThemeLayout && search.TranslatePoint(default, page) is { Y: < 20 } && page.ThemeLayout.Regions["downloads.title"].Parent is null,
+            $"搜索位置 {search.TranslatePoint(default, page)}");
+        await ShotAsync("layout-new-instance-1024x640");
         window.Width = 760;
         window.Height = 440;
-        await ShotAsync("layout-home-760x440");
-        main.CurrentPage = main.Pages.OfType<ToolsViewModel>().Single();
+        await ShotAsync("layout-new-instance-760x440");
+        main.Shell.Navigate("discover");
         await Task.Delay(500);
-        var tools = window.GetVisualDescendants().OfType<ToolsPage>().First();
-        Check("工具页也能重排：状态卡片挪到最上面、标题去掉",
-            tools.ThemeLayout.UsingThemeLayout && tools.ThemeLayout.Regions["tools.status"].TranslatePoint(default, tools) is { Y: < 5 }
-            && tools.ThemeLayout.Regions["tools.title"].Parent is null);
+        var discover = window.GetVisualDescendants().OfType<ContentPage>().First();
+        Check("发现页也能重排：状态卡片挪到最上面",
+            discover.ThemeLayout.UsingThemeLayout && discover.ThemeLayout.Regions["content.status"].TranslatePoint(default, discover) is { Y: < 20 },
+            $"{discover.ThemeLayout.Regions["content.status"].TranslatePoint(default, discover)}");
         main.CurrentPage = main.Pages.OfType<MultiplayerViewModel>().Single();
         window.Width = 1280;
         window.Height = 800;

@@ -17,7 +17,7 @@ namespace Amber.App.Views;
 /// <summary>
 /// AMBER_SELFTEST_SCOPE=activity (UI batch 3): task center in the activity drawer, the request bar, notifications,
 /// the playing pill, the launch-failure card with its fix buttons, and the close guard. Screenshots in three width tiers.
-/// No game directory, no network: tasks, requests and game runs are simulated.
+/// No network, and only a hand-written instance in the report directory: tasks, requests and game runs are simulated.
 /// </summary>
 internal sealed partial class SelfTest
 {
@@ -25,8 +25,16 @@ internal sealed partial class SelfTest
     {
         var activity = main.Activity;
         var service = main.Service;
+        var originalDir = service.Settings.GameDirectory;
+        const string failing = "activity-1.21.4";
         try
         {
+            // The launch-failure card shows on its instance's page, so there has to be one: a bare version in the report directory.
+            var game = Path.Combine(reportDir, "activity-game");
+            WriteLibraryVersion(game, failing, "[]");
+            service.Settings.GameDirectory = game;
+            service.SaveAndReload();
+            service.SetCurrentInstance(failing);
             window.Width = 1024;
             window.Height = 700;
             main.Shell.Navigate("library");
@@ -35,7 +43,9 @@ internal sealed partial class SelfTest
             // ---- tasks ----
             var cancelled = false;
             var task = service.Tasks.Track("install", "自检安装 1.20.1", () => cancelled = true);
-            task.Report(0.4, "12/30 个文件");
+            task.Report(0.2, "6/30 个文件", 1_000_000);
+            await Task.Delay(1200);
+            task.Report(0.4, "12/30 个文件", 6_000_000);
             await Task.Delay(300);
             Check("任务：活动按钮外圈显示进度", activity.HasRunningTasks && Math.Abs(activity.RingSweep - 144) < 1, $"{activity.RingSweep}");
             Press(Key.J, KeyModifiers.Control);
@@ -43,6 +53,9 @@ internal sealed partial class SelfTest
             Check("任务：Ctrl+J 打开活动抽屉", activity.IsOpen && window.ActivityDrawer.IsEffectivelyVisible);
             var rows = window.ActivityTaskList.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
             Check("任务：抽屉“进行中”里有这个任务和进度说明", rows.Contains("自检安装 1.20.1") && rows.Contains("12/30 个文件"), string.Join(" | ", rows));
+            var line = window.ActivityTaskList.GetVisualDescendants().OfType<Controls.ProgressLine>().FirstOrDefault(l => l.IsEffectivelyVisible);
+            Check("任务：用的是统一的进度行，写百分比和速度", line is not null && line.Facts.StartsWith("40%", StringComparison.Ordinal) && line.Facts.Contains("/s", StringComparison.Ordinal),
+                line?.Facts ?? "没有进度行");
             Check("任务：抽屉宽 400（中档）", Math.Abs(window.ActivityDrawer.Bounds.Width - 400) < 1, $"{window.ActivityDrawer.Bounds.Width}");
             await ShotAsync("activity-tasks-1024");
             var cancel = window.ActivityTaskList.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.IsEffectivelyVisible);
@@ -131,13 +144,15 @@ internal sealed partial class SelfTest
             Check("胶囊：点开去游戏库，看过后收起", main.Shell.Router.Current.Section == Amber.Core.Navigation.Section.Library && !activity.HasPill);
 
             // ---- launch failure card (N1) ----
+            // The failure card shows on the page of the instance whose start failed (the launch page is gone).
             var home = main.Pages.OfType<HomeViewModel>().First();
-            main.Shell.Navigate("library/start");
+            main.Shell.Navigate("library/" + failing);
+            await WaitAsync(() => main.Pages.OfType<InstanceViewModel>().First().Current?.Id == failing, 5);
             await Task.Delay(300);
-            var page = window.PageHost.GetVisualDescendants().OfType<HomePage>().FirstOrDefault();
+            var page = window.PageHost.GetVisualDescendants().OfType<InstancePage>().FirstOrDefault();
             async Task<List<string>> FailureButtonsAsync(Exception e)
             {
-                home.ShowFailureForSelfTest(e);
+                home.ShowFailureForSelfTest(e, failing);
                 await Task.Delay(300);
                 return page?.FailureFixes.GetVisualDescendants().OfType<Button>().Select(b => b.Content as string ?? "").ToList() ?? [];
             }
@@ -201,6 +216,11 @@ internal sealed partial class SelfTest
         catch (Exception e)
         {
             Check("自检没有异常", false, e.ToString());
+        }
+        finally
+        {
+            service.Settings.GameDirectory = originalDir;
+            service.SaveAndReload();
         }
     }
 
