@@ -86,6 +86,14 @@ internal sealed partial class SelfTest
         Dispatcher.UIThread.Invoke(() => host.VolunteerEnabled = false);
         host.SaveVolunteerCommand.Execute(null);
         Check("Volunteer relay: turned off again", !service.Settings.VolunteerNode, host.Status);
+        // Detect and Test port need the public network; before connecting they say so and do nothing else.
+        Check("Volunteer relay: Detect and Test port buttons shown",
+            await FindAsync<Button>(b => ReferenceEquals(b.Command, host.DetectVolunteerAddressCommand)) is not null
+            && await FindAsync<Button>(b => ReferenceEquals(b.Command, host.TestVolunteerPortCommand)) is not null);
+        await host.DetectVolunteerAddressCommand.ExecuteAsync(null);
+        Check("Volunteer relay: Detect asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && host.VolunteerAddress == "jay.example.org", host.Status);
+        await host.TestVolunteerPortCommand.ExecuteAsync(null);
+        Check("Volunteer relay: Test port asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && !host.IsCheckingVolunteer, host.Status);
         service.Settings.PublicNetworkNoticeAccepted = false;
         Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
         await Task.Delay(300);
