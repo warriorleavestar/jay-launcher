@@ -165,8 +165,12 @@ cp "$lwjgl/modules/lwjgl/freetype/freetype_license.txt" "$output/FREETYPE-LICENS
 cp "$lwjgl/modules/lwjgl/openal/openal_soft_license.txt" "$output/OPENAL-SOFT-LICENSE.md"
 
 for library in "$output"/*.so; do
-  "$readelf" -lW "$library" | grep -q 'LOAD.*0x4000'
+  headers="$("$readelf" -lW "$library")"
+  grep -q 'LOAD.*0x4000' <<<"$headers"
 done
-"$readelf" -Ws "$output/liblwjgl.so" | grep -q 'JNI_OnLoad'
-"$readelf" -Ws "$output/liblwjgl_opengl.so" | grep -q 'org_lwjgl_opengl'
-"$readelf" -Ws "$output/liblwjgl_stb.so" | grep -q 'org_lwjgl_stb'
+core_symbols="$("$readelf" -Ws "$output/liblwjgl.so")"
+opengl_symbols="$("$readelf" -Ws "$output/liblwjgl_opengl.so")"
+stb_symbols="$("$readelf" -Ws "$output/liblwjgl_stb.so")"
+grep -q 'JNI_OnLoad' <<<"$core_symbols"
+grep -q 'org_lwjgl_opengl' <<<"$opengl_symbols"
+grep -q 'org_lwjgl_stb' <<<"$stb_symbols"
