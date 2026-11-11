@@ -89,6 +89,7 @@ public sealed class PrivateFolderTests
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         var root = Path.Combine(Path.GetTempPath(), "jay-private-" + Guid.NewGuid().ToString("N")[..8]);
         new DirectoryInfo(root).Create(parentAcl);
+        var link = Path.Combine(root, "link");
         try
         {
             var made = Ensure(Path.Combine(root, "locked"), out var refused);
@@ -115,11 +116,16 @@ public sealed class PrivateFolderTests
             Assert.StartsWith("parent:", refused);
             // A link is refused even when it points at a private folder. A junction needs no special privilege, unlike a
             // symbolic link (which fails without Developer Mode or admin rights).
-            var link = Path.Combine(root, "link");
             WindowsJunction.Create(link, made);
             Assert.Null(Ensure(link, out refused));
             Assert.Equal("is a link", refused);
         }
-        finally { Directory.Delete(root, true); }
+        finally
+        {
+            // Remove the junction on its own first (non-recursive deletes only the link); a recursive delete of the
+            // root trips over it on Windows.
+            if (Directory.Exists(link)) Directory.Delete(link);
+            Directory.Delete(root, true);
+        }
     }
 }
