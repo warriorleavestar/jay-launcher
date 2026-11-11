@@ -33,7 +33,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
         var root = new FrameLayout(this);
         var surface = new SurfaceView(this);
-        surface.SetBackgroundColor(Color.Black);
         surface.Holder!.AddCallback(this);
         root.AddView(surface, MatchParent());
         root.AddView(new TouchControlOverlay(this), MatchParent());
@@ -105,8 +104,10 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             progress.Visibility = ViewStates.Visible;
             progress.Progress = 0;
 
+            var acceptingProgress = true;
             var report = new Progress<RuntimeInstallProgress>(value =>
             {
+                if (!acceptingProgress) return;
                 var percent = value.Total <= 0 ? 0 : (int)Math.Clamp(value.Completed * 100 / value.Total, 0, 100);
                 progress.Progress = percent;
                 status.Text = value.Phase switch
@@ -121,6 +122,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             try
             {
                 await AndroidRuntimeStore.InstallAsync(this, descriptor, report, _runtimeSetup.Token);
+                acceptingProgress = false;
                 progress.Progress = 100;
                 status.Text = L.T("mobile.runtime.ready");
                 install.Visibility = ViewStates.Gone;
@@ -129,11 +131,14 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             }
             catch (System.OperationCanceledException)
             {
+                acceptingProgress = false;
                 status.Text = L.T("mobile.runtime.missing");
                 progress.Visibility = ViewStates.Gone;
             }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or HttpRequestException or UnauthorizedAccessException)
+            catch (Exception exception)
             {
+                acceptingProgress = false;
+                global::Android.Util.Log.Error("JayRuntime", exception.ToString());
                 status.Text = L.F("mobile.runtime.failed", exception.Message);
             }
             finally

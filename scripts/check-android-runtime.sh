@@ -31,6 +31,10 @@ while IFS= read -r entry; do
     echo "unsafe runtime archive path: $entry" >&2
     exit 1
   fi
+  if [[ "$entry" == ._* || "$entry" == */._* ]]; then
+    echo "AppleDouble metadata is not allowed in the runtime archive: $entry" >&2
+    exit 1
+  fi
 done <<<"$listing"
 
 work="$(mktemp -d)"

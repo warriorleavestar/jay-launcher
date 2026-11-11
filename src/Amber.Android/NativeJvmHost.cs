@@ -7,7 +7,7 @@ namespace Amber.Android;
 
 internal static partial class NativeJvmHost
 {
-    private const int ExpectedAbiVersion = 3;
+    private const int ExpectedAbiVersion = 6;
 
     public static bool IsAvailable
     {
@@ -23,6 +23,25 @@ internal static partial class NativeJvmHost
     {
         var error = LoadJvm(libJvmPath);
         return error == 0 ? null : Marshal.PtrToStringUTF8(error);
+    }
+
+    public static string? Preload(string libraryPath)
+    {
+        var error = PreloadLibrary(libraryPath);
+        return error == 0 ? null : Marshal.PtrToStringUTF8(error);
+    }
+
+    public static string? PreloadLocal(string libraryPath)
+    {
+        var error = PreloadLocalLibrary(libraryPath);
+        return error == 0 ? null : Marshal.PtrToStringUTF8(error);
+    }
+
+    public static void SetEnvironmentVariable(string name, string value)
+    {
+        var error = SetNativeEnvironmentVariable(name, value);
+        if (error != 0)
+            throw new InvalidOperationException(Marshal.PtrToStringUTF8(error) ?? $"Could not set {name}.");
     }
 
     public static (nint Vm, nint Environment) Create(IReadOnlyList<string> options)
@@ -52,7 +71,13 @@ internal static partial class NativeJvmHost
         {
             for (var i = 0; i < strings.Length; i++) Marshal.WriteIntPtr(pointers, i * nint.Size, strings[i]);
             var result = RunJavaMain(environment, main, strings.Length, pointers);
-            if (result != 0) throw new InvalidOperationException($"Java main() failed with {result}.");
+            if (result != 0)
+            {
+                var detail = Marshal.PtrToStringUTF8(LastError());
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
+                    ? $"Java main() failed with {result}."
+                    : $"Java main() failed with {result}: {detail}");
+            }
         }
         finally
         {
@@ -98,11 +123,23 @@ internal static partial class NativeJvmHost
     [LibraryImport("jayjvm", EntryPoint = "jay_jvm_load", StringMarshalling = StringMarshalling.Utf8)]
     private static partial nint LoadJvm(string path);
 
+    [LibraryImport("jayjvm", EntryPoint = "jay_jvm_preload", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial nint PreloadLibrary(string path);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_jvm_preload_local", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial nint PreloadLocalLibrary(string path);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_setenv", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial nint SetNativeEnvironmentVariable(string name, string value);
+
     [LibraryImport("jayjvm", EntryPoint = "jay_jvm_create")]
     private static partial int CreateJvm(nint options, int optionCount, out nint vm, out nint environment);
 
     [LibraryImport("jayjvm", EntryPoint = "jay_jvm_run_main")]
     private static partial int RunJavaMain(nint environment, nint className, int argumentCount, nint arguments);
+
+    [LibraryImport("jayjvm", EntryPoint = "jay_jvm_last_error")]
+    private static partial nint LastError();
 
     [LibraryImport("jayjvm", EntryPoint = "jay_input_set_action")]
     private static partial void SetNativeAction(int action, int pressed);

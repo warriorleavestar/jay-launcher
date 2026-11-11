@@ -17,23 +17,23 @@ internal static class AndroidRuntimeCatalog
     // license and 16 KiB ELF LOAD-alignment validation before publication.
     private static RuntimeArchiveDescriptor Arm64 => new(
         RuntimeArchiveDescriptor.CurrentFormat,
-        "jay-android-runtime21-v1-arm64-v8a",
+        "jay-android-runtime21-v2-arm64-v8a",
         "arm64-v8a",
-        35_343_912,
-        "b7c6451afb752d2e48fab05c3ff4ac78fd205bc76bb06c7d65725abb0db1a807",
-        193_179_476,
-        "OpenJDK GPL-2.0 with Classpath Exception; Mesa MIT; LWJGL BSD; bundled component licenses included",
-        "https://github.com/warriorleavestar/jay-launcher/tree/0c124f9/scripts",
+        29_411_052,
+        "7c87d6de0374190988aaf89fa5e2542517f77988146330090a3aae9c6d80bb95",
+        150_733_830,
+        "OpenJDK GPL-2.0 with Classpath Exception; MobileGlues LGPL-2.1-only; LWJGL BSD; bundled component licenses included",
+        "https://github.com/warriorleavestar/jay-launcher/pull/203",
         "https://github.com/warriorleavestar/jay-launcher/releases/download/android-runtime-v1/jay-android-runtime21-arm64-v8a.tar.xz");
 
     private static RuntimeArchiveDescriptor X64 => new(
         RuntimeArchiveDescriptor.CurrentFormat,
-        "jay-android-runtime21-v1-x86_64",
+        "jay-android-runtime21-v2-x86_64",
         "x86_64",
-        37_637_924,
-        "ff250ae9890e595ed89c3c78fa9cacb952aa264566471b01325b4cc85132f58c",
-        197_101_802,
-        "OpenJDK GPL-2.0 with Classpath Exception; Mesa MIT; LWJGL BSD; bundled component licenses included",
-        "https://github.com/warriorleavestar/jay-launcher/tree/0c124f9/scripts",
+        31_308_180,
+        "1cec903c2c8ba4ac177b71c0984dac9239e2dcffda243c69f11c8c50a68949fe",
+        155_409_052,
+        "OpenJDK GPL-2.0 with Classpath Exception; MobileGlues LGPL-2.1-only; LWJGL BSD; bundled component licenses included",
+        "https://github.com/warriorleavestar/jay-launcher/pull/203",
         "https://github.com/warriorleavestar/jay-launcher/releases/download/android-runtime-v1/jay-android-runtime21-x86_64.tar.xz");
 }

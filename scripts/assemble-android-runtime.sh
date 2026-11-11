@@ -2,19 +2,19 @@
 set -euo pipefail
 
 if [[ $# -ne 6 ]]; then
-  echo "usage: $0 <jre.tar.xz> <mesa-directory> <lwjgl-directory> <arm64-v8a|x86_64> <readelf> <output.tar.xz>" >&2
+  echo "usage: $0 <jre.tar.xz> <renderer-directory> <lwjgl-directory> <arm64-v8a|x86_64> <readelf> <output.tar.xz>" >&2
   exit 2
 fi
 
 jre_archive="$1"
-mesa_directory="$2"
+renderer_directory="$2"
 lwjgl_directory="$3"
 architecture="$4"
 elf_reader="$5"
 output_archive="$6"
 
 test -f "$jre_archive"
-test -d "$mesa_directory"
+test -d "$renderer_directory"
 test -d "$lwjgl_directory"
 test -x "$elf_reader"
 
@@ -31,12 +31,11 @@ copy_runtime_files() {
   done < <(find "$source_directory" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' -o -iname '*license*' \) -print0)
 }
 
-copy_runtime_files "$mesa_directory"
+copy_runtime_files "$renderer_directory"
 copy_runtime_files "$lwjgl_directory"
 
 test -f "$runtime/lib/server/libjvm.so"
-test -f "$runtime/native/libEGL.so"
-test -f "$runtime/native/zink_dri.so"
+test -f "$runtime/native/libmobileglues.so"
 test -f "$runtime/native/liblwjgl.so"
 test -f "$runtime/native/liblwjgl_opengl.so"
 test -f "$runtime/native/liblwjgl_stb.so"
@@ -44,7 +43,9 @@ test -f "$runtime/native/libfreetype.so"
 test -f "$runtime/native/libopenal.so"
 
 mkdir -p "$(dirname "$output_archive")"
-tar -C "$runtime" -cJf "$output_archive" .
+# BSD tar otherwise serializes macOS extended attributes as `._*` AppleDouble
+# files, which Android would treat as untrusted extra runtime entries.
+COPYFILE_DISABLE=1 tar -C "$runtime" -cJf "$output_archive" .
 "$(cd "$(dirname "$0")" && pwd)/check-android-runtime.sh" \
   "$output_archive" "$architecture" "$elf_reader"
 

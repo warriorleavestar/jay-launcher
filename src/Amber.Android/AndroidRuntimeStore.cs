@@ -25,10 +25,13 @@ internal static class AndroidRuntimeStore
         try
         {
             var manifest = RuntimeBundleManifest.Read(manifestPath);
+            var descriptor = AndroidRuntimeCatalog.ForCurrentProcess();
             // Installation already verifies every SHA-256 before activation. Startup only checks
             // the immutable app-private layout so opening the game never hashes the full JRE on
             // Android's UI thread.
-            return RuntimeBundleVerifier.VerifyLayout(root, manifest, CurrentArchitecture());
+            return descriptor is not null &&
+                   string.Equals(manifest.Id, descriptor.Id, StringComparison.Ordinal) &&
+                   RuntimeBundleVerifier.VerifyLayout(root, manifest, CurrentArchitecture());
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
         {

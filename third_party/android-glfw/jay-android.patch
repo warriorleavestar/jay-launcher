@@ -62,15 +62,20 @@ index 1db0811..b84b668 100644
 +static JaySurfaceAcquire jaySurfaceAcquire;
 +static JaySurfaceRelease jaySurfaceRelease;
 +static JayInputRead jayInputRead;
++static void* jayBridge;
 +
 +static GLFWbool connectJayBridge(void)
 +{
++    if (!jayBridge)
++        jayBridge = dlopen("libjayjvm.so", RTLD_NOW);
++    if (!jayBridge)
++        return GLFW_FALSE;
 +    if (!jaySurfaceAcquire)
-+        jaySurfaceAcquire = (JaySurfaceAcquire) dlsym(RTLD_DEFAULT, "jay_surface_acquire");
++        jaySurfaceAcquire = (JaySurfaceAcquire) dlsym(jayBridge, "jay_surface_acquire");
 +    if (!jaySurfaceRelease)
-+        jaySurfaceRelease = (JaySurfaceRelease) dlsym(RTLD_DEFAULT, "jay_surface_release");
++        jaySurfaceRelease = (JaySurfaceRelease) dlsym(jayBridge, "jay_surface_release");
 +    if (!jayInputRead)
-+        jayInputRead = (JayInputRead) dlsym(RTLD_DEFAULT, "jay_input_read");
++        jayInputRead = (JayInputRead) dlsym(jayBridge, "jay_input_read");
 +    return jaySurfaceAcquire && jaySurfaceRelease && jayInputRead;
 +}
 +#endif
@@ -78,6 +83,24 @@ index 1db0811..b84b668 100644
  static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
  {
      if (window->numer != GLFW_DONT_CARE && window->denom != GLFW_DONT_CARE)
+@@ -46,9 +79,15 @@ static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
+     else if (window->maxwidth != GLFW_DONT_CARE)
+         *width = _glfw_min(*width, window->maxwidth);
+ 
++#if defined(__ANDROID__)
++    if (window->minheight != GLFW_DONT_CARE)
++        *height = _glfw_max(*height, window->minheight);
++    if (window->maxheight != GLFW_DONT_CARE)
++        *height = _glfw_min(*height, window->maxheight);
++#else
+     if (window->minheight != GLFW_DONT_CARE)
+         *height = _glfw_min(*height, window->minheight);
+     else if (window->maxheight != GLFW_DONT_CARE)
+         *height = _glfw_max(*height, window->maxheight);
++#endif
+ }
+ 
+ static void fitToMonitor(_GLFWwindow* window)
 @@ -76,6 +109,21 @@ static int createNativeWindow(_GLFWwindow* window,
                                const _GLFWwndconfig* wndconfig,
                                const _GLFWfbconfig* fbconfig)
@@ -244,6 +267,8 @@ index ef65dd3..e3b8d6d 100644
 +    const char* jayEGL = getenv("JAY_EGL_LIBRARY");
 +    if (jayEGL && jayEGL[0])
 +        _glfw.egl.handle = _glfwPlatformLoadModule(jayEGL);
++    if (!_glfw.egl.handle)
++        _glfw.egl.handle = _glfwPlatformLoadModule("libEGL.so");
 +#endif
      for (i = 0;  sonames[i];  i++)
      {
@@ -274,6 +299,8 @@ index ef65dd3..e3b8d6d 100644
 +            const char* jayGL = getenv("JAY_GL_LIBRARY");
 +            if (jayGL && jayGL[0])
 +                window->context.egl.client = _glfwPlatformLoadModule(jayGL);
++            if (!window->context.egl.client)
++                window->context.egl.client = _glfwPlatformLoadModule("libGLESv2.so");
 +        }
 +#endif
          for (i = 0;  sonames[i];  i++)

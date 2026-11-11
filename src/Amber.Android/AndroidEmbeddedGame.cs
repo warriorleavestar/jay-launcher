@@ -45,7 +45,7 @@ internal static class AndroidEmbeddedGame
 
         var runtimeRoot = AndroidRuntimeStore.Root(context);
         var nativeRoot = Path.Combine(runtimeRoot, "native");
-        RequireNativeFiles(nativeRoot, ["liblwjgl.so", "liblwjgl_opengl.so", "liblwjgl_stb.so", "libfreetype.so", "libopenal.so", "libEGL.so"]);
+        RequireNativeFiles(nativeRoot, ["liblwjgl.so", "liblwjgl_opengl.so", "liblwjgl_stb.so", "libfreetype.so", "libopenal.so", "libmobileglues.so"]);
         var glfw = Path.Combine(nativeRoot, "libglfw.so");
         if (!File.Exists(glfw)) glfw = Path.Combine(context.ApplicationInfo!.NativeLibraryDir!, "libglfw.so");
         if (!File.Exists(glfw)) throw new FileNotFoundException("The Android GLFW bridge is missing.", glfw);
@@ -99,17 +99,36 @@ internal static class AndroidEmbeddedGame
     public static void Run(AndroidPreparedGame game)
     {
         var nativeRoot = Path.Combine(game.RuntimeRoot, "native");
-        Environment.SetEnvironmentVariable("MESA_LOADER_DRIVER_OVERRIDE", "zink");
-        Environment.SetEnvironmentVariable("GALLIUM_DRIVER", "zink");
-        Environment.SetEnvironmentVariable("LIBGL_DRIVERS_PATH", nativeRoot);
-        Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "4.6COMPAT");
-        Environment.SetEnvironmentVariable("MESA_GLSL_VERSION_OVERRIDE", "460");
-        Environment.SetEnvironmentVariable("JAY_EGL_LIBRARY", Path.Combine(nativeRoot, "libEGL.so"));
-        Environment.SetEnvironmentVariable("JAY_GL_LIBRARY", Path.Combine(nativeRoot, "libEGL.so"));
+        var mobileGluesRoot = Path.Combine(game.WorkingDirectory, "mobileglues");
+        Directory.CreateDirectory(mobileGluesRoot);
+        var mobileGlues = Path.Combine(nativeRoot, "libmobileglues.so");
+        foreach (var (name, value) in new (string Name, string Value)[]
+        {
+            ("MG_DIR_PATH", mobileGluesRoot),
+            ("MG_ANGLE_DIR", ""),
+            ("JAY_EGL_LIBRARY", mobileGlues),
+            ("JAY_GL_LIBRARY", mobileGlues),
+        })
+        {
+            Environment.SetEnvironmentVariable(name, value);
+            NativeJvmHost.SetEnvironmentVariable(name, value);
+        }
         Directory.SetCurrentDirectory(game.WorkingDirectory);
 
         var error = NativeJvmHost.LoadRuntime(Path.Combine(game.RuntimeRoot, "lib", "server", "libjvm.so"));
         if (error is not null) throw new InvalidOperationException(error);
+        foreach (var library in new[] { "libjava.so", "libnet.so", "libnio.so" })
+        {
+            var path = Path.Combine(game.RuntimeRoot, "lib", library);
+            error = NativeJvmHost.Preload(path);
+            if (error is not null) throw new InvalidOperationException($"Could not load {library}: {error}");
+        }
+        foreach (var library in new[] { "libmobileglues.so" })
+        {
+            var path = Path.Combine(nativeRoot, library);
+            error = NativeJvmHost.PreloadLocal(path);
+            if (error is not null) throw new InvalidOperationException($"Could not load {library}: {error}");
+        }
         var (_, environment) = NativeJvmHost.Create(game.Invocation.VmOptions);
         NativeJvmHost.RunMain(environment, game.Invocation.MainClass, game.Invocation.Arguments);
     }

@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <dlfcn.h>
@@ -7,8 +8,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
-#define JAY_JVM_ABI_VERSION 3
+#define JAY_JVM_ABI_VERSION 6
 #define JAY_ACTION_COUNT 7
 #define JAY_TEXT_CAPACITY 64
 #define JAY_KEY_CAPACITY 16
@@ -31,6 +33,7 @@ typedef struct {
 static void *g_jvm_library;
 static jay_create_jvm_fn g_create_jvm;
 static char g_load_error[256];
+static char g_runtime_error[2048];
 static pthread_mutex_t g_surface_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ANativeWindow *g_surface;
 static _Atomic float g_move_x;
@@ -70,6 +73,37 @@ const char *jay_jvm_load(const char *libjvm_path) {
 }
 
 __attribute__((visibility("default")))
+const char *jay_jvm_preload(const char *library_path) {
+    if (library_path == NULL || library_path[0] == '\0') return "library path is empty";
+    dlerror();
+    if (dlopen(library_path, RTLD_NOW | RTLD_GLOBAL) != NULL) return NULL;
+    const char *error = dlerror();
+    snprintf(g_load_error, sizeof(g_load_error), "%s",
+             error == NULL ? "dlopen failed without an error" : error);
+    return g_load_error;
+}
+
+__attribute__((visibility("default")))
+const char *jay_jvm_preload_local(const char *library_path) {
+    if (library_path == NULL || library_path[0] == '\0') return "library path is empty";
+    dlerror();
+    if (dlopen(library_path, RTLD_NOW | RTLD_LOCAL) != NULL) return NULL;
+    const char *error = dlerror();
+    snprintf(g_load_error, sizeof(g_load_error), "%s",
+             error == NULL ? "local dlopen failed without an error" : error);
+    return g_load_error;
+}
+
+__attribute__((visibility("default")))
+const char *jay_setenv(const char *name, const char *value) {
+    if (name == NULL || name[0] == '\0') return "environment variable name is empty";
+    if (value == NULL) return "environment variable value is null";
+    if (setenv(name, value, 1) == 0) return NULL;
+    snprintf(g_load_error, sizeof(g_load_error), "setenv(%s) failed", name);
+    return g_load_error;
+}
+
+__attribute__((visibility("default")))
 int jay_jvm_create(
     const char *const *options,
     int option_count,
@@ -95,42 +129,70 @@ int jay_jvm_create(
     return result;
 }
 
-static int jay_clear_exception(JNIEnv *env) {
+static int jay_capture_exception(JNIEnv *env, const char *stage) {
     if (!(*env)->ExceptionCheck(env)) return 0;
+    jthrowable exception = (*env)->ExceptionOccurred(env);
     (*env)->ExceptionDescribe(env);
     (*env)->ExceptionClear(env);
+    snprintf(g_runtime_error, sizeof(g_runtime_error), "%s failed with a Java exception", stage);
+    if (exception != NULL) {
+        jclass exception_class = (*env)->GetObjectClass(env, exception);
+        jmethodID to_string = exception_class == NULL ? NULL
+            : (*env)->GetMethodID(env, exception_class, "toString", "()Ljava/lang/String;");
+        if (!(*env)->ExceptionCheck(env) && to_string != NULL) {
+            jstring message = (jstring)(*env)->CallObjectMethod(env, exception, to_string);
+            if (!(*env)->ExceptionCheck(env) && message != NULL) {
+                const char *text = (*env)->GetStringUTFChars(env, message, NULL);
+                if (text != NULL) {
+                    snprintf(g_runtime_error, sizeof(g_runtime_error), "%s: %s", stage, text);
+                    (*env)->ReleaseStringUTFChars(env, message, text);
+                }
+                (*env)->DeleteLocalRef(env, message);
+            }
+        }
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        if (exception_class != NULL) (*env)->DeleteLocalRef(env, exception_class);
+        (*env)->DeleteLocalRef(env, exception);
+    }
+    __android_log_print(ANDROID_LOG_ERROR, "JayJvm", "%s", g_runtime_error);
     return -1;
+}
+
+__attribute__((visibility("default")))
+const char *jay_jvm_last_error(void) {
+    return g_runtime_error[0] == '\0' ? NULL : g_runtime_error;
 }
 
 __attribute__((visibility("default")))
 int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *const *argv) {
     if (env == NULL || class_name == NULL || argc < 0 || (argc > 0 && argv == NULL)) return JNI_ERR;
+    g_runtime_error[0] = '\0';
     jclass main_class = (*env)->FindClass(env, class_name);
     if (main_class == NULL) {
-        jay_clear_exception(env);
+        jay_capture_exception(env, "FindClass(main)");
         return JNI_ERR;
     }
     jmethodID main_method = (*env)->GetStaticMethodID(env, main_class, "main", "([Ljava/lang/String;)V");
     if (main_method == NULL) {
-        jay_clear_exception(env);
+        jay_capture_exception(env, "GetStaticMethodID(main)");
         return JNI_ERR;
     }
     jclass string_class = (*env)->FindClass(env, "java/lang/String");
     if (string_class == NULL) {
-        jay_clear_exception(env);
+        jay_capture_exception(env, "FindClass(String)");
         return JNI_ERR;
     }
     jobjectArray arguments = (*env)->NewObjectArray(env, argc, string_class, NULL);
-    if (arguments == NULL || jay_clear_exception(env) != 0) return JNI_ENOMEM;
+    if (arguments == NULL || jay_capture_exception(env, "NewObjectArray(arguments)") != 0) return JNI_ENOMEM;
     for (int i = 0; i < argc; i++) {
         jstring value = (*env)->NewStringUTF(env, argv[i] == NULL ? "" : argv[i]);
-        if (value == NULL || jay_clear_exception(env) != 0) return JNI_ENOMEM;
+        if (value == NULL || jay_capture_exception(env, "NewStringUTF(argument)") != 0) return JNI_ENOMEM;
         (*env)->SetObjectArrayElement(env, arguments, i, value);
         (*env)->DeleteLocalRef(env, value);
-        if (jay_clear_exception(env) != 0) return JNI_ERR;
+        if (jay_capture_exception(env, "SetObjectArrayElement(argument)") != 0) return JNI_ERR;
     }
     (*env)->CallStaticVoidMethod(env, main_class, main_method, arguments);
-    return jay_clear_exception(env) == 0 ? JNI_OK : JNI_ERR;
+    return jay_capture_exception(env, "CallStaticVoidMethod(main)") == 0 ? JNI_OK : JNI_ERR;
 }
 
 __attribute__((visibility("default")))
