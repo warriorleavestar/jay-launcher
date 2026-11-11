@@ -195,7 +195,7 @@ try
             var problems = results.Count(r => r?.IsProblem == true);
             if (!quiet)
                 foreach (var (m, result) in list.Zip(results))
-                    Console.WriteLine($"{(m.Enabled ? "  " : "× ")}{m.Name} | {m.Version} | {m.ModId} | {m.Authors} | {(m.Icon is null ? "无图标" : "有图标")}{(result is null ? "" : " | " + result.Text)}");
+                    Console.WriteLine($"{(m.Enabled ? "  " : "× ")}{TerminalText.Clean(m.Name)} | {TerminalText.Clean(m.Version)} | {TerminalText.Clean(m.ModId)} | {TerminalText.Clean(m.Authors)} | {(m.Icon is null ? "无图标" : "有图标")}{(result is null ? "" : " | " + result.Text)}");
             Console.WriteLine($"SCAN {list.Count} 个模组：读元数据 {listMs} ms，兼容检查 {compatMs} ms，问题 {problems} 个");
             break;
         }
@@ -486,7 +486,7 @@ try
                 {
                     await Task.Delay(3000, stop.Token);
                     var list = await session.PeersAsync(stop.Token);
-                    Console.WriteLine($"PEERS {list.Count}: " + string.Join("; ", list.Select(p => $"{p.Hostname} {p.Ip} {p.Cost} {p.LatencyMs}ms {p.Tunnel}")));
+                    Console.WriteLine($"PEERS {list.Count}: " + string.Join("; ", list.Select(p => $"{TerminalText.Clean(p.Hostname)} {p.Ip} {p.Cost} {p.LatencyMs}ms {p.Tunnel}")));
                     if (probe > 0 && local is { } probePort && list.Count > 0)
                     {
                         try
@@ -515,13 +515,14 @@ try
         case "worlds":
         {
             foreach (var w in WorldManager.List(Path.Combine(argList[1], "saves")))
-                Console.WriteLine($"{w.Name} | {w.FolderName} | {w.GameMode} | {w.Version} | {w.LastPlayed}");
+                Console.WriteLine($"{TerminalText.Clean(w.Name)} | {TerminalText.Clean(w.FolderName)} | {w.GameMode} | {w.Version} | {w.LastPlayed}");
             break;
         }
         case "ping":
         {
             var status = await ServerList.PingAsync(argList[1], null, cts.Token);
-            Console.WriteLine(status);
+            // The status (MOTD, version name) comes from the server: no escape sequences reach the terminal.
+            Console.WriteLine(TerminalText.Clean(status?.ToString()));
             break;
         }
         case "junk":

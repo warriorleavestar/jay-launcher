@@ -161,6 +161,11 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.lan.port_required"));
             return;
         }
+        if (port != manual && !await GamePortReadyAsync(port.Value, manual: false))
+        {
+            SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
+            return;
+        }
         var credentials = NewCredentials(port.Value, TunnelSettings.Default);
         var members = new MemberTable();
         var room = credentials.ToHostRoom(members, ChatName);

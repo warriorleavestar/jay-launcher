@@ -165,7 +165,23 @@ public static class GateProtocol
     // ---------------- 客户端 ----------------
 
     /// <summary>用邀请码入服：成功返回要保存的入服信息；网关拒绝时抛 <see cref="GateRejectedException"/>；邀请无效、用过或过期时网关不回话，抛 IOException。</summary>
-    public static async Task<GateMembership> EnrollAsync(Stream stream, GateInvite invite, X25519KeyPair device, CancellationToken ct = default)
+    public static Task<GateMembership> EnrollAsync(Stream stream, GateInvite invite, X25519KeyPair device, CancellationToken ct = default) =>
+        TimeoutAsIo(() => EnrollCoreAsync(stream, invite, device, ct), ct);
+
+    /// <summary>
+    /// The handshake's own timeout (a gate that takes the connection and then says nothing, which an invite can point at)
+    /// surfaces as an IOException like any other connection failure; only the caller's own cancellation stays a cancellation.
+    /// </summary>
+    private static async Task<T> TimeoutAsIo<T>(Func<Task<T>> body, CancellationToken ct)
+    {
+        try { return await body(); }
+        catch (OperationCanceledException e) when (!ct.IsCancellationRequested)
+        {
+            throw new IOException(L.T("core.gate.connect.timeout"), e);
+        }
+    }
+
+    private static async Task<GateMembership> EnrollCoreAsync(Stream stream, GateInvite invite, X25519KeyPair device, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(HandshakeTimeout);
@@ -207,7 +223,10 @@ public static class GateProtocol
 
     /// <param name="request">null 表示按 v1 进服（第三条消息负载为空，只收 1 字节结果）：只给兼容测试用。</param>
     /// <param name="onNetwork">网关回了最新的连法（隐私等级、节点列表）时调用，拒绝时（比如要求拆分）也会先调用。</param>
-    public static async Task<SecureStream> JoinAsync(Stream stream, GateMembership membership, X25519KeyPair device, JoinRequest? request, Action<GateNetwork>? onNetwork, CancellationToken ct)
+    public static Task<SecureStream> JoinAsync(Stream stream, GateMembership membership, X25519KeyPair device, JoinRequest? request, Action<GateNetwork>? onNetwork, CancellationToken ct) =>
+        TimeoutAsIo(() => JoinCoreAsync(stream, membership, device, request, onNetwork, ct), ct);
+
+    private static async Task<SecureStream> JoinCoreAsync(Stream stream, GateMembership membership, X25519KeyPair device, JoinRequest? request, Action<GateNetwork>? onNetwork, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(HandshakeTimeout);
@@ -343,7 +362,10 @@ public static class GateProtocol
         HKDF.DeriveKey(HashAlgorithmName.SHA256, secret.ToArray(), 32, serverKeyHash.ToArray(), "jay-gate-relay-psk-v1"u8.ToArray());
 
     /// <summary>节点：连上网关的心跳通道。先核对网关公钥（节点码里钉住的哈希），网关认了这个节点才回 Ok。</summary>
-    public static async Task<SecureStream> RelayConnectAsync(Stream stream, GateRelayCode code, X25519KeyPair relayKey, CancellationToken ct)
+    public static Task<SecureStream> RelayConnectAsync(Stream stream, GateRelayCode code, X25519KeyPair relayKey, CancellationToken ct) =>
+        TimeoutAsIo(() => RelayConnectCoreAsync(stream, code, relayKey, ct), ct);
+
+    private static async Task<SecureStream> RelayConnectCoreAsync(Stream stream, GateRelayCode code, X25519KeyPair relayKey, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(HandshakeTimeout);
