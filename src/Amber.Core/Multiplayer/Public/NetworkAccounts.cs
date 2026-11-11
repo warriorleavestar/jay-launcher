@@ -356,6 +356,15 @@ public sealed class LoginAuthority(IAccountStore accounts, X25519KeyPair key, Ne
 
     private static JsonObject Error(string code) => new() { ["ok"] = false, ["error"] = code };
 
+    /// <summary>Reads the contents of a login.key file (also used for hardware-sealed copies). Null when malformed.</summary>
+    public static (X25519KeyPair Key, NetworkSigner Signer)? ParseKeys(string text)
+    {
+        var lines = text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length != 2) return null;
+        try { return (X25519KeyPair.FromPrivateKey(Convert.FromBase64String(lines[0])), NetworkSigner.FromSeed(lines[1])); }
+        catch (Exception e) when (e is FormatException or InvalidDataException or ArgumentException) { return null; }
+    }
+
     /// <summary>
     /// 节点的登录钥匙：一个文件里存 X25519 私钥和 Ed25519 种子（各 32 字节，base64 两行），没有就生成。
     /// 公钥要写进网络配置的 login.key / login.signKey。
@@ -364,9 +373,7 @@ public sealed class LoginAuthority(IAccountStore accounts, X25519KeyPair key, Ne
     {
         if (File.Exists(path))
         {
-            var lines = File.ReadAllLines(path).Where(l => l.Length > 0).ToArray();
-            if (lines.Length != 2) throw new InvalidDataException(path);
-            return (X25519KeyPair.FromPrivateKey(Convert.FromBase64String(lines[0])), NetworkSigner.FromSeed(lines[1]));
+            return ParseKeys(File.ReadAllText(path)) ?? throw new InvalidDataException(path);
         }
         var key = X25519KeyPair.Generate();
         var signer = NetworkSigner.Generate(out var seed);
