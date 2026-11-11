@@ -1,40 +1,39 @@
 #!/bin/bash
 # 把固定版本的 EasyTier 安装包（Jay 的加固版本）放进发布目录，用户不用再联网下载联机组件。
-# 版本、大小和 SHA-256 都从 src/Amber.Core/Multiplayer/EasyTier.cs 读取，和程序里的校验值是同一份，对不上就失败。
+# Version, size and SHA-256 come from build/pins.json, the same pins Jay checks (PinsTests keeps EasyTier.cs in step); a mismatch fails.
 # 用法：scripts/bundle-easytier.sh <rid> <目标目录>，例如 scripts/bundle-easytier.sh win-x64 out/win-x64/easytier
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-source_file="$root/src/Amber.Core/Multiplayer/EasyTier.cs"
+pins="$root/build/pins.json"
 rid="${1:?usage: $0 <rid> <dir>}"
 dest="${2:?usage: $0 <rid> <dir>}"
 
 case "$rid" in
-    win-x64) key='("windows", Architecture.X64)' ;;
-    win-arm64) key='("windows", Architecture.Arm64)' ;;
-    win-x86) key='("windows", Architecture.X86)' ;;
-    osx-x64) key='("macos", Architecture.X64)' ;;
-    osx-arm64) key='("macos", Architecture.Arm64)' ;;
-    linux-x64) key='("linux", Architecture.X64)' ;;
-    linux-arm64) key='("linux", Architecture.Arm64)' ;;
+    win-x64) platform=windows-x86_64 ;;
+    win-arm64) platform=windows-arm64 ;;
+    win-x86) platform=windows-i686 ;;
+    osx-x64) platform=macos-x86_64 ;;
+    osx-arm64) platform=macos-aarch64 ;;
+    linux-x64) platform=linux-x86_64 ;;
+    linux-arm64) platform=linux-aarch64 ;;
     *) echo "unsupported rid: $rid" >&2; exit 2 ;;
 esac
 
-version="$(sed -n 's/.*public const string Version = "\([0-9.]*\)";.*/\1/p' "$source_file" | head -n 1)"
-tag="$(sed -n 's/.*public const string ReleaseTag = "\([a-z0-9.-]*\)";.*/\1/p' "$source_file" | head -n 1)"
-commit="$(sed -n 's/.*public const string Commit = "\([0-9a-f]\{12\}\)";.*/\1/p' "$source_file" | head -n 1)"
-source_url="$(sed -n 's/.*public const string SourceUrl = "\(https:[^"]*\)";.*/\1/p' "$source_file" | head -n 1)"
-line="$(grep -F "$key =>" "$source_file" | head -n 1)"
-platform="$(sed -n 's/.*A("\([a-z0-9_-]*\)".*/\1/p' <<<"$line")"
-sha="$(sed -n 's/.*A("[^"]*", "\([0-9a-f]\{64\}\)".*/\1/p' <<<"$line")"
-size="$(sed -n 's/.*A("[^"]*", "[0-9a-f]*", \([0-9_]*\).*/\1/p' <<<"$line" | tr -d _)"
-if [[ -z "$version" || -z "$tag" || -z "$commit" || -z "$source_url" || -z "$platform" || -z "$sha" || -z "$size" ]]; then
-    echo "could not read EasyTier pin for $rid from $source_file" >&2
+command -v jq >/dev/null || { echo "jq is needed to read $pins" >&2; exit 1; }
+pin() { jq -r --arg id "easytier-$platform" ".pins[] | select(.id == \$id) | .$1 // empty" "$pins"; }
+version="$(pin version)"
+tag="$(pin tag)"
+name="$(pin file)"
+url="$(jq -r --arg id "easytier-$platform" '.pins[] | select(.id == $id) | .urls[0] // empty' "$pins")"
+source_url="$(pin source)"
+sha="$(pin sha256)"
+size="$(pin size)"
+if [[ -z "$version" || -z "$tag" || -z "$name" || -z "$url" || -z "$source_url" || -z "$sha" || -z "$size" ]]; then
+    echo "could not read the easytier-$platform pin from $pins" >&2
     exit 1
 fi
 
-name="easytier-$platform-v$version-jay-$commit.zip"
-url="$source_url/releases/download/$tag/$name"
 mkdir -p "$dest"
 curl -fL --retry 5 --retry-all-errors --connect-timeout 20 -o "$dest/$name.tmp" "$url"
 
