@@ -2966,5 +2966,14 @@
   "accounts.status.jay_bound": "已綁 Jay 之籍 {0} 於 {1}",
   "accounts.status.jay_unbound": "已解 {0} 之 Jay 籍",
   "accounts.status.jay_address_copied": "址已錄",
-  "accounts.status.jay_removed": "已去此機之 Jay 籍 {0}，記字猶可復之"
+  "accounts.status.jay_removed": "已去此機之 Jay 籍 {0}，記字猶可復之",
+  "tip.ok": "知矣",
+  "tip.mute": "此類之示勿復見",
+  "tip.mods_toggle": "點其關，可暫閉一模組，毋須刪之。",
+  "tip.first_crash": "Jay 已度其崩之由，修之之鈕在側，誤則可復。",
+  "tip.first_knock": "先與彼核安碼，同乃納之。",
+  "tip.theme_import": "若主題致 Jay 不能啟，啟時按 Shift。",
+  "tip.narrow_window": "側欄已斂，廣其窗則復展。",
+  "tip.reset": "諸示皆復觀之",
+  "tip.reset_done": "諸示將復見。"
 }

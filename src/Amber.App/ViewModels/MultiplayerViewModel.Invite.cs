@@ -454,6 +454,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (card.Decision.Task.IsCompleted) return;
             ApprovalCards.Add(card);
+            Services.TutorialService.Request(Amber.Core.Tutorial.Tips.FirstKnock);
             if (!IsCurrent) Badge++;
             _ = card.Decision.Task.ContinueWith(_ => Dispatcher.UIThread.Post(() => ApprovalCards.Remove(card)), TaskScheduler.Default);
         });

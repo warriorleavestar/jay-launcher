@@ -3092,5 +3092,14 @@
   "accounts.status.jay_bound": "已把 Jay 帳戶 {0} 綁定到 {1}",
   "accounts.status.jay_unbound": "已解除 {0} 的 Jay 帳戶綁定",
   "accounts.status.jay_address_copied": "位址已複製",
-  "accounts.status.jay_removed": "已從這台電腦移除 Jay 帳戶 {0}，用助記詞仍能復原"
+  "accounts.status.jay_removed": "已從這台電腦移除 Jay 帳戶 {0}，用助記詞仍能復原",
+  "tip.ok": "知道了",
+  "tip.mute": "這類提示都別出了",
+  "tip.mods_toggle": "點開關能暫時關掉一個模組，不用刪。",
+  "tip.first_crash": "Jay 猜了當機的原因，修復按鈕就在旁邊，做錯了能復原。",
+  "tip.first_knock": "先和 TA 核對安全碼，一樣再讓進。",
+  "tip.theme_import": "主題讓 Jay 打不開了？啟動時按住 Shift。",
+  "tip.narrow_window": "側欄收起來了，視窗拉寬一些就會展開。",
+  "tip.reset": "重新看所有提示",
+  "tip.reset_done": "所有提示會重新出現。"
 }
