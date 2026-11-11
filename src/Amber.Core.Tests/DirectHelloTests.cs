@@ -15,25 +15,22 @@ public sealed class DirectHelloTests
 {
     private static readonly RoomCode Room = new("K7Q2M9XD", "4HZP8RW2N6TC", 25565);
 
-    private static DirectCode GuestCode() => new(true, "abcdef0123456789", NatKind.Cone,
-        [new Candidate(PathKind.Punch, IPEndPoint.Parse("198.51.100.7:40001")), new Candidate(PathKind.Lan, IPEndPoint.Parse("192.168.1.9:40001"))]);
+    private const string Session = "abcdef0123456789";
 
+    /// <summary>The hello goes over the authenticated-only bridge: it carries the session id and nothing else (no address, no key).</summary>
     [Fact]
-    public void HelloCarriesOnlyAddresses()
+    public void HelloCarriesOnlyTheSession()
     {
-        var hello = DirectSession.Hello(GuestCode());
-        Assert.Equal(["c", "n", "op", "s"], hello.Select(p => p.Key).Order(StringComparer.Ordinal));
+        var hello = DirectSession.Hello(Session);
+        Assert.Equal(["op", "s"], hello.Select(p => p.Key).Order(StringComparer.Ordinal));
         Assert.DoesNotContain(Room.Secret, hello.ToJsonString());
 
-        Assert.True(DirectSession.TryParseHello(hello, "abcdef0123456789", out var nat, out var candidates));
-        Assert.Equal(NatKind.Cone, nat);
-        Assert.Equal(GuestCode().Candidates, candidates);
+        Assert.True(DirectSession.TryParseHello(hello, Session));
         // 会话 id 不对（旧会话、别的房间）不认。
-        Assert.False(DirectSession.TryParseHello(hello, "0123456789abcdef", out _, out _));
+        Assert.False(DirectSession.TryParseHello(hello, "0123456789abcdef"));
         // 类型不对的字段不抛异常。
-        Assert.False(DirectSession.TryParseHello(new JsonObject { ["op"] = "hello", ["s"] = 5 }, "abcdef0123456789", out _, out _));
-        Assert.True(DirectSession.TryParseHello(new JsonObject { ["s"] = "abcdef0123456789", ["n"] = 3, ["c"] = new JsonArray(1, new JsonArray(2, 3)) }, "abcdef0123456789", out _, out var none));
-        Assert.Empty(none);
+        Assert.False(DirectSession.TryParseHello(new JsonObject { ["op"] = "hello", ["s"] = 5 }, Session));
+        Assert.False(DirectSession.TryParseHello(new JsonObject { ["op"] = "hello" }, Session));
     }
 
     [Fact]
@@ -69,9 +66,9 @@ public sealed class DirectHelloTests
         var peer = await guest.PunchAsync([new Candidate(PathKind.Lan, proxyEnd)], NatKind.Cone, TimeSpan.FromSeconds(10));
         Assert.NotNull(peer);
         await hostWait;
-        await guest.SendControlAsync(peer!, DirectSession.Hello(GuestCode()));
+        await guest.SendControlAsync(peer!, DirectSession.Hello(Session));
         var hello = await got.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.True(DirectSession.TryParseHello(hello, "abcdef0123456789", out _, out _));
+        Assert.True(DirectSession.TryParseHello(hello, Session));
         stop.Cancel();
         await forward;
 

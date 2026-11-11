@@ -128,12 +128,6 @@ public sealed partial class MultiplayerViewModel
                 // 旧版本的 AMB- 房间码不能再用来加入：请房主更新后发邀请码。
                 SetStatus(StatusMessage.Warning("multiplayer.invite.old_code"));
                 return true;
-            case PastedCodeKind.DirectInvite:
-                clearSource();
-                MoreWaysOpen = true;
-                DirectInviteInput = text;
-                JoinDirectCommand.Execute(null);
-                return true;
             case PastedCodeKind.NodeShare:
                 // 节点会被保存、以后每次联机都用：不在“加入”框里静默导入，放进节点导入框让用户确认。
                 clearSource();
@@ -141,9 +135,6 @@ public sealed partial class MultiplayerViewModel
                 NodesExpanded = true;
                 Tab = MultiplayerTab.Settings;
                 SetStatus(StatusMessage.Warning("multiplayer.code.node_misplaced"));
-                return true;
-            case PastedCodeKind.DirectReply:
-                SetStatus(StatusMessage.Warning("multiplayer.code.reply_misplaced"));
                 return true;
             case PastedCodeKind.OldDirect:
                 SetStatus(StatusMessage.Warning("multiplayer.direct.old_code"));

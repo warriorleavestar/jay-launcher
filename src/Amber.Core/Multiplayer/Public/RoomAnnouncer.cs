@@ -142,7 +142,8 @@ public static class PublicJoin
     /// 对不上就当没成功，免得有人在目录里冒用别人的房间。
     /// </summary>
     public static async Task<KnockOutcome> KnockAsync(IPublicNetwork network, string hostIp, JayInvite invite, X25519KeyPair me, string name, string version,
-        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null)
+        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -151,7 +152,7 @@ public static class PublicJoin
             {
                 await using var stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, ct);
                 connected = true;
-                var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHostKey, jay: jay);
+                var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHostKey, jay: jay, direct: direct);
                 if (expectedHostKey is not null && !outcome.HostPublicKey.AsSpan().SequenceEqual(expectedHostKey))
                     return new KnockOutcome(null, "mismatch", outcome.HostPublicKey);
                 return outcome;
@@ -185,11 +186,11 @@ public static class PublicJoin
     /// <param name="expectedHost">A mailed invite names its host: a directory entry with another key is ignored (null).</param>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
-        byte[]? expectedHost = null)
+        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         var hit = await (client ?? new RoomDirectoryClient(network)).LookupAsync(invite.LobbyKey, ct);
         if (hit is null) return null;
         if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) return null;
-        return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay);
+        return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);
     }
 }

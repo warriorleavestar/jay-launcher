@@ -97,12 +97,12 @@ await server.RunAsync(CancellationToken.None);
 
 | op | 请求 | 回复 |
 |---|---|---|
-| `announce` | `{room: <房间>, listed: bool, lookup: ["<64 位十六进制>", ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok, mail: ["..."]}`：直连房间收到的留言，交出去后清空 |
+| `announce` | `{room: <房间>, listed: bool, lookup: ["<64 位十六进制>", ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok, mail: ["..."]}`：房间收到的留言，交出去后清空（Jay 现在不再用它传直连回复码） |
 | `withdraw` | `{id, seq, sig}`：`sig` 是房间签名钥匙对 `"jay-withdraw-v1\n<id>\n<seq>"` 的 Ed25519 签名（十六进制） | `{ok}` |
 | `list` | `{}` | `{ok, rooms: [<房间>, ...]}`：`listed` 为真且不是隐藏房间的，最多 300 个 |
 | `lookup` | `{key}`：邀请码大厅名的查找键 | `{ok, ip?, key?, id?}` |
 | `find` | `{code: "JAYF1-..."}` | `{ok, room?}`：用登记的指纹密钥算标签，见 `FingerprintCode.Matches` |
-| `mail` | `{id, text}`（最多 4 KB）：给直连房间的房主捎回复码 | `{ok}`；房间不在或不是直连回 `gone` |
+| `mail` | `{id, text}`（最多 4 KB）：给直连房间的房主捎留言。Jay 不再用它：直连地址改在加密的敲门里交换，不经目录 | `{ok}`；房间不在或不是直连回 `gone` |
 | `login` | 见 `NetworkLoginClient.Request` / `LoginAuthority.Handle` | 加密的凭证或 `factor` 提示 |
 | `volunteer` | `{url: "tcp://<公网地址>:<端口>"}`：登记或续期志愿中转（每 3 分钟） | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad` |
 | `nodes` | `{}` | `{ok, nodes: ["tcp://...", ...最多 8 个，随机]}`：探测过、还在续期的志愿中转 |
@@ -116,7 +116,7 @@ Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别
 ```json
 { "id": "<签名公钥 SHA-256 的前 16 字节，十六进制>", "name": "...", "host": "...", "mode": 0,
   "key": "<房主联机公钥，十六进制>", "ip": "10.235.x.y", "game": "1.21.1", "ver": "", "players": 2,
-  "approval": true, "tm": 0, "td": false, "invite": "JAY2-...", "lobby": "...", "salt": "...", "direct": "JAY2D-...",
+  "approval": true, "tm": 0, "td": false, "invite": "JAY2-...", "lobby": "...", "salt": "...",
   "sk": "<房间签名公钥（Ed25519），十六进制>", "seq": 1762646400000, "sig": "<签名，十六进制>" }
 ```
 

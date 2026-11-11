@@ -346,8 +346,7 @@ public sealed partial class MultiplayerViewModel
     private async Task CopyInviteMessageAsync()
     {
         if (_lastInvite is not { } invite) return;
-        var code = IsDirect && MyDirectCode.Length > 0 ? MyDirectCode : invite.ToString();
-        if (await SecretClipboard.CopyAsync(L.F("multiplayer.invite.message", code)))
+        if (await SecretClipboard.CopyAsync(L.F("multiplayer.invite.message", invite.ToString())))
             SetStatus(StatusMessage.Success("multiplayer.invite.message_copied"));
     }
 

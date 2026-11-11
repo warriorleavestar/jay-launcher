@@ -5,13 +5,15 @@
 #                                                                                       公网 203.0.113.0/24（两台 STUN）
 #   加入方局域网 192.168.20.0/24 ── 加入方路由器（NAT，保留端口，端口受限）────────────────┘
 #
-# 流程：房主建房间 → 等 HOST_IDLE 秒（默认 120，要比映射回收时间 NAT_TIMEOUT 长）→ 加入方拿邀请码加入 → 回复码马上交给房主。
+# 流程：房主建房间 → 等 HOST_IDLE 秒（默认 120，要比映射回收时间 NAT_TIMEOUT 长）→ 加入方拿邀请码经中转敲门 → 批准后双方在加密的敲门里交换地址再打洞。
+# 邀请码里没有地址，第一次联系要经中转：NODE 填一个两边都连得到的中转（在“公网”段上，比如 tcp://203.0.113.20:11010）。
 # 用法：run.sh <Amber.Cli 路径> <工作目录> [HOST_IDLE]
-# 环境变量：NAT_TIMEOUT 房主路由器空闲 UDP 映射回收秒数（默认 30）；JOIN_SECONDS 加入方最多跑多久（默认 120）。
+# 环境变量：NODE 中转地址（必填）；NAT_TIMEOUT 房主路由器空闲 UDP 映射回收秒数（默认 30）；JOIN_SECONDS 加入方最多跑多久（默认 120）。
 # 需要 Linux（用户命名空间 + nft），不需要 root。2026-11-09 在这里复现了两地实测的失败：没有保活时打不通，有保活时 100 ms 内打通。
 # 工作目录里要有 Amber/easytier/<版本>/linux-x86_64/（先在别处跑一次 lan-setup 拷过来）。
 # 只在工作目录里读写，不碰真实的 .minecraft。
 set -u
+: "${NODE:?NODE 要填一个两边都连得到的中转地址}"
 CLI=$(realpath "$1"); WORK=$(realpath "$2"); IDLE=${3:-120}
 HERE=$(dirname "$(realpath "$0")")
 if [ "${INSIDE_NS:-}" != 1 ]; then
@@ -66,18 +68,13 @@ python3 "$HERE/stun.py" 203.0.113.10:3478 203.0.113.11:3478 & STUN=$!
 STUNARGS="--stun 203.0.113.10:3478 --stun 203.0.113.11:3478"
 mkdir -p "$WORK/host" "$WORK/join"
 for d in host join; do mkdir -p "$WORK/$d/.config"; cp -r "$WORK/Amber" "$WORK/$d/.config/" 2>/dev/null; cp -r "$WORK/Amber" "$WORK/$d/" 2>/dev/null; done
-rm -f "$WORK/reply.txt"
-cd "$WORK/host" && HOME="$WORK/host" XDG_CONFIG_HOME="$WORK/host/.config" X hostlan "$CLI" lan-direct-host 25565 $STUNARGS --reply-file "$WORK/reply.txt" --seconds $((IDLE+150)) > "$WORK/host.log" 2>&1 & HOST=$!
+cd "$WORK/host" && HOME="$WORK/host" XDG_CONFIG_HOME="$WORK/host/.config" X hostlan "$CLI" lan-direct-host 25565 $STUNARGS --node "$NODE" --seconds $((IDLE+150)) > "$WORK/host.log" 2>&1 & HOST=$!
 for i in $(seq 60); do grep -q '^INVITE ' "$WORK/host.log" && break; sleep 1; done
 INVITE=$(grep -m1 '^INVITE ' "$WORK/host.log" | cut -d' ' -f2)
 [ -z "$INVITE" ] && { echo "房主没生成邀请码"; cat "$WORK/host.log"; kill $STUN $HOST; exit 2; }
 echo "[$(date +%T)] 房间建好，等 $IDLE 秒再让加入方加入"
 sleep "$IDLE"
-cd "$WORK/join" && HOME="$WORK/join" XDG_CONFIG_HOME="$WORK/join/.config" X joinlan "$CLI" lan-direct-join "$INVITE" $STUNARGS --seconds ${JOIN_SECONDS:-120} > "$WORK/join.log" 2>&1 & JOIN=$!
-for i in $(seq 60); do grep -q '^REPLY ' "$WORK/join.log" && break; sleep 1; done
-sleep 5  # 模拟手动复制回复码的时间
-grep -m1 '^REPLY ' "$WORK/join.log" | cut -d' ' -f2 > "$WORK/reply.txt"
-echo "[$(date +%T)] 回复码已交给房主"
+cd "$WORK/join" && HOME="$WORK/join" XDG_CONFIG_HOME="$WORK/join/.config" X joinlan "$CLI" lan-direct-join "$INVITE" $STUNARGS --node "$NODE" --seconds ${JOIN_SECONDS:-120} > "$WORK/join.log" 2>&1 & JOIN=$!
 wait $JOIN
 kill $HOST $STUN 2>/dev/null; wait 2>/dev/null
 if grep -qE "打通：|Connected: " "$WORK/join.log" && ! grep -qE "直连失败|Direct connection failed" "$WORK/join.log"; then RESULT=打通; else RESULT=没打通; fi

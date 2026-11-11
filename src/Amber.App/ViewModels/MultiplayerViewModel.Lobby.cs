@@ -88,8 +88,6 @@ public sealed partial class MultiplayerViewModel
     public string JoinCodeRecognition => JoinCodeKind switch
     {
         PastedCodeKind.Invite => L.T("multiplayer.lobby.code.invite"),
-        PastedCodeKind.DirectInvite => L.T("multiplayer.lobby.code.direct_invite"),
-        PastedCodeKind.DirectReply => L.T("multiplayer.lobby.code.direct_reply"),
         PastedCodeKind.JayServer => L.T("multiplayer.lobby.code.server"),
         PastedCodeKind.FriendCode => L.T("multiplayer.lobby.code.friend"),
         PastedCodeKind.NodeShare => L.T("multiplayer.lobby.code.relay_share"),

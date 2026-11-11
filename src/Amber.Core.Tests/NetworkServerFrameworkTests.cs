@@ -35,8 +35,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Ip = "10.235.0.7",
         Game = "1.21.1",
         Players = 2,
-        Invite = mode is RoomVisibility.Public ? new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite.ToString() : null,
-        Direct = mode == RoomVisibility.Direct ? "JAY2D-TEST" : null,
+        Invite = mode is RoomVisibility.Public or RoomVisibility.Direct ? new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite.ToString() : null,
         Lobby = mode == RoomVisibility.Password ? new string('a', 32) : null,
         Salt = mode == RoomVisibility.Password ? new string('b', 32) : null,
     };

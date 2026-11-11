@@ -67,7 +67,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | Prefix | Meaning | Parser |
 | --- | --- | --- |
 | `JAY2-` | Room invite | `Multiplayer/Invite.cs` |
-| `JAY2D-`, `JAY2R-` | Direct link offer / reply | `Multiplayer/DirectLink.cs` |
+| `JAY2D-`, `JAY2R-` | Removed direct-link codes (carried public IPs); refused as `OldDirect` | `Multiplayer/DirectLink.cs` (`OldDirectCodes`) |
 | `AMB-` | Legacy room code | `Multiplayer/RoomCode.cs` |
 | `JAYS1-` | Jay server invite | `Multiplayer/Gate/GateInvite.cs` |
 | `JAYC1-` | Contact code (identity public key) | `Multiplayer/Contacts/ContactCode.cs` |

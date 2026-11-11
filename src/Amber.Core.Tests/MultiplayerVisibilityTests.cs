@@ -50,18 +50,18 @@ public sealed class MultiplayerVisibilityTests
             bool Shown(string key) => page.GetLogicalDescendants().OfType<Button>()
                 .Any(b => Equals(b.Content, L.T(key)) && b.IsEffectivelyVisible);
             Layout();
-            Assert.False(Shown("multiplayer.direct.connect"));
+            Assert.False(Shown("multiplayer.matrix.start"));
 
             vm.IsDirect = true;
             Layout();
             vm.Mode = "host";
             Layout();
-            Assert.True(Shown("multiplayer.direct.connect"));
+            Assert.True(Shown("multiplayer.matrix.start"));
 
             vm.Mode = "join";
             vm.TestRequestPending = true;
             Layout();
-            Assert.False(Shown("multiplayer.direct.connect"));
+            Assert.False(Shown("multiplayer.matrix.start"));
             Assert.True(Shown("multiplayer.matrix.accept"));
         }
         finally { window.Close(); }

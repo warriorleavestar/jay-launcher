@@ -14,7 +14,8 @@ Codes that must travel are either public by design (a public key) or never leave
 | Contact code `JAYC1-…` | Anywhere (public) | Sending that person mail they still have to accept. Not reading their mail, not posing as them. |
 | Emoji check (4 emoji) | Voice, in person, video | Nothing; it is only compared. |
 | Room invite sent by mail | Sealed mail through the directories | Nothing: sealed to one recipient, bound to that recipient's key, names the host's key. |
-| Old `JAY2-` / `JAY2D-` codes | Still accepted (LAN, offline, older Jay) | As before. Mailing an invite is the new default path; the old codes are the fallback. |
+| Plain `JAY2-` invite | Still accepted (LAN, offline) | Knocking with a one-use token the host still has to approve. No IP, port or room secret in it. |
+| `JAY2D-` / `JAY2R-` direct codes | Removed: refused with a hint to send a `JAY2-` invite | They carried both sides' public IPs. Direct rooms now hand out plain `JAY2-` invites. |
 
 ## Contact codes
 
@@ -132,10 +133,21 @@ listed for a while (up to 4).
 - **Held back**: no receipt after 3 minutes shows a banner in the room naming the other ways in: the invite dialog
   (direct link) or the game's LAN list when both are on the same network.
 
+## Direct links without an IP in any code (done)
+
+A direct room hands out a plain `JAY2-` invite. The guest knocks over the lobby (relay, LAN or public network) as for any
+room. Only when the host approves does the encrypted knock reply carry the host's addresses (`"direct"`, built from
+`DirectAddresses`); the guest answers with its own inside the encrypted ack, tagged with the host's session id. Then both
+sides punch at once, and the room falls back to the relays if that fails. Someone who copies the invite learns no address
+of either side, and a rejected or expired knock gets none either. The bridge's control messages (authenticated, not
+encrypted) carry only the session id. `JAY2D-` / `JAY2R-` are refused.
+
 ## Still to do
 
-- **Direct links without an IP in the code**: rendezvous through mail (each side mails its candidates, sealed), so
-  JAY2D/JAY2R no longer carry public IPs.
+- **Server and network codes without an address**: `JAYS1-` (Jay server), `JAYNET` (public network) and `AMBNODE`
+  (relay share) still name a host or IP. Plan: a short token or ID resolved through a signed directory entry or the
+  directory rendezvous, so the code itself names nothing.
+
 - **Relay enrollment the other way around**: a relay generates its own key and the admin approves its fingerprint, so
   JAYR1 codes carry no secret.
 - **Jay server invites (JAYS1) bound to the player's identity key**, the same way room invites are.
