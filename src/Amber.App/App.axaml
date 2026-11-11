@@ -53,60 +53,39 @@
       <Setter Property="Padding" Value="6,2" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
     </Style>
-    <!-- 三段式选择器：一排等宽的单选段，选中的用强调色底（改版规格 3.5） -->
+    <!-- Segmented choice: a row of radio keys. The chosen one is tonal azure with an azure edge (not a filled accent block). -->
     <Style Selector="UniformGrid.segmented > RadioButton, StackPanel.segmented > RadioButton">
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
       <Setter Property="MinWidth" Value="0" />
-      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="MinHeight" Value="{DynamicResource MinHitSize}" />
+      <Setter Property="Padding" Value="12,5" />
       <Setter Property="Margin" Value="0" />
       <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
       <Setter Property="Template">
         <ControlTemplate>
-          <Border Name="SegmentBorder" Background="{DynamicResource PageBg}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"
-                  Padding="{TemplateBinding Padding}" CornerRadius="{DynamicResource RadiusSm}">
+          <Border Name="SegmentBorder" Background="{DynamicResource Sunken}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"
+                  Padding="{TemplateBinding Padding}" CornerRadius="{DynamicResource RadiusMd}">
             <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Border>
         </ControlTemplate>
       </Setter>
     </Style>
     <Style Selector="UniformGrid.segmented > RadioButton:checked /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:checked /template/ Border#SegmentBorder">
-      <Setter Property="Background" Value="{DynamicResource Accent}" />
+      <Setter Property="Background" Value="{DynamicResource ControlSelected}" />
       <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
     </Style>
-    <Style Selector="UniformGrid.segmented > RadioButton:checked TextBlock, StackPanel.segmented > RadioButton:checked TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
-      <Setter Property="FontWeight" Value="SemiBold" />
+    <Style Selector="UniformGrid.segmented > RadioButton:checked, StackPanel.segmented > RadioButton:checked">
+      <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
+      <Setter Property="FontWeight" Value="Bold" />
     </Style>
     <Style Selector="UniformGrid.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:pointerover:not(:checked) /template/ Border#SegmentBorder">
-      <Setter Property="Background" Value="{DynamicResource NavHover}" />
+      <Setter Property="Background" Value="{DynamicResource ControlHover}" />
     </Style>
     <Style Selector="UniformGrid.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder, StackPanel.segmented > RadioButton:focus-visible /template/ Border#SegmentBorder">
-      <Setter Property="BorderBrush" Value="{DynamicResource AccentText}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Focus}" />
       <Setter Property="BorderThickness" Value="2" />
-    </Style>
-    <!-- 胶囊：类型和状态标签（改版规格 4.4：正式版 Success、快照 Accent、其余中性色） -->
-    <Style Selector="Border.pill">
-      <Setter Property="CornerRadius" Value="{DynamicResource RadiusPill}" />
-      <Setter Property="Padding" Value="8,1" />
-      <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Background" Value="{DynamicResource PageBg}" />
-    </Style>
-    <Style Selector="Border.pill > TextBlock">
-      <Setter Property="FontSize" Value="{DynamicResource FontCaption}" />
-      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
-    </Style>
-    <Style Selector="Border.pill.success">
-      <Setter Property="Background" Value="{DynamicResource SuccessTint}" />
-    </Style>
-    <Style Selector="Border.pill.success > TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource SuccessText}" />
-    </Style>
-    <Style Selector="Border.pill.accent">
-      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
-    </Style>
-    <Style Selector="Border.pill.accent > TextBlock">
-      <Setter Property="Foreground" Value="{DynamicResource AccentText}" />
     </Style>
     <!-- 侧边栏底色写成样式（不写在元素上），主题包的组件样式才盖得住。窗口底色同理，在上面的 :is(Window) 里。 -->
     <Style Selector="Border.sidebar">
@@ -168,47 +147,77 @@
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
-    <!-- 按钮四种：primary（每块区域最多一个）、secondary、ghost、danger。 -->
+    <!--
+      Buttons ("美术风格": one shape, each look has one job). Every Button is a tonal key unless a class says otherwise:
+        play     amber, the one main action on a screen (Themes/Controls.axaml)
+        primary  jay azure, the confirmation inside a panel or card
+        (none) / secondary  tonal key, any other action
+        ghost    quiet: no key until hovered; minor entries, icon buttons, whole rows. There are no underlined text links.
+        danger   red label; danger.solid and danger.armed are filled red
+    -->
+    <Style Selector="Button">
+      <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="Padding" Value="13,5" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BoxShadow" Value="{DynamicResource KeycapShadow}" />
+    </Style>
+    <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ControlHover}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    </Style>
+    <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ControlPressed}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+      <Setter Property="BoxShadow" Value="none" />
+    </Style>
     <Style Selector="Button.primary">
       <Setter Property="Background" Value="{DynamicResource Accent}" />
       <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="FontWeight" Value="Bold" />
     </Style>
     <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
     </Style>
     <Style Selector="Button.primary:pressed /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource AccentPressed}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="Foreground" Value="{DynamicResource OnAccent}" />
-    </Style>
-    <Style Selector="Button.secondary">
-      <Setter Property="Background" Value="{DynamicResource Surface}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
-    </Style>
-    <Style Selector="Button.secondary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
     </Style>
     <Style Selector="Button.ghost">
       <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.ghost /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BoxShadow" Value="none" />
     </Style>
     <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource SurfaceRaised}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    </Style>
+    <Style Selector="Button.ghost:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ControlPressed}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
     </Style>
     <Style Selector="Button.danger">
-      <Setter Property="Background" Value="Transparent" />
       <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
     </Style>
     <Style Selector="Button.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource DangerTint}" />
+      <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
+    </Style>
+    <Style Selector="Button.danger:pressed /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource DangerTint}" />
       <Setter Property="Foreground" Value="{DynamicResource DangerText}" />
     </Style>
@@ -229,17 +238,19 @@
     <Style Selector="Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource DisabledFill}" />
       <Setter Property="Foreground" Value="{DynamicResource DisabledText}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BoxShadow" Value="none" />
+    </Style>
+    <Style Selector="Button.ghost:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- 导航：选中项左边一条松鸦蓝指示条（在 MainWindow 的模板里），背景稍亮 -->
+    <!-- Navigation: the selected item carries the wing bars on its left edge (in MainWindow's item template) over a slightly lighter fill. -->
     <Style Selector="ListBox.nav ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource NavSelected}" />
     </Style>
     <Style Selector="ListBox.nav ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource NavHover}" />
-    </Style>
-    <Style Selector="ProgressBar">
-      <Setter Property="Foreground" Value="{DynamicResource Accent}" />
     </Style>
     <Style Selector="CheckBox:checked /template/ Border#NormalRectangle">
       <Setter Property="Background" Value="{DynamicResource Accent}" />

@@ -5,6 +5,7 @@
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:pub="using:Amber.Core.Multiplayer.Public"
              xmlns:c="using:Amber.App.Views.Controls"
+             xmlns:v="using:Amber.App.Views"
              xmlns:safety="using:Amber.App.Controls.Safety"
              x:Class="Amber.App.Views.MultiplayerPage"
              x:DataType="vm:MultiplayerViewModel">
@@ -382,10 +383,11 @@
                   <ListBox x:Name="PeopleList" ItemsSource="{Binding People}" SelectedItem="{Binding SelectedPerson}" Background="Transparent">
                     <ListBox.ItemTemplate>
                       <DataTemplate DataType="vm:PersonItem">
-                        <Grid ColumnDefinitions="Auto,*">
-                          <Ellipse Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center" Fill="{DynamicResource Success}" IsVisible="{Binding IsOnline}" />
-                          <Ellipse Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center" Stroke="{DynamicResource TextSecondary}" StrokeThickness="1" IsVisible="{Binding !IsOnline}" />
-                          <StackPanel Grid.Column="1">
+                        <Grid ColumnDefinitions="Auto,Auto,*">
+                          <Border Classes="led online" Margin="0,0,8,0" IsVisible="{Binding IsOnline}" />
+                          <Border Classes="led off" Margin="0,0,8,0" IsVisible="{Binding !IsOnline}" />
+                          <Border Grid.Column="1" Classes="face" Background="{Binding Name, Converter={x:Static v:FaceBrush.Instance}}" Margin="0,0,8,0" />
+                          <StackPanel Grid.Column="2">
                             <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                             <TextBlock Text="{Binding Status}" Classes="caption" TextTrimming="CharacterEllipsis" />
                           </StackPanel>
@@ -548,7 +550,12 @@
                     <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.hint}" IsVisible="{Binding !HasInvite}" />
                     <Button x:Name="CreateFirstInviteButton" Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" IsVisible="{Binding !HasInvite}" HorizontalAlignment="Left" />
                     <StackPanel Spacing="6" IsVisible="{Binding HasInvite}">
-                      <TextBox x:Name="InviteCodeBox" Text="{Binding InviteDisplay}" IsReadOnly="True" FontFamily="Consolas,monospace" TextWrapping="Wrap" />
+                      <Border Classes="code-card">
+                        <Panel>
+                          <Border Classes="wing-edge" />
+                          <TextBox x:Name="InviteCodeBox" Classes="mono code" Text="{Binding InviteDisplay}" IsReadOnly="True" TextWrapping="Wrap" />
+                        </Panel>
+                      </Border>
                       <WrapPanel ItemSpacing="6" LineSpacing="6">
                         <Button x:Name="CopyInviteButton" Classes="primary" Content="{l:T multiplayer.invite.copy}" Command="{Binding CopyInviteCommand}" />
                         <Button x:Name="CopyInviteMessageButton" Content="{l:T multiplayer.invite.copy_message}" Command="{Binding CopyInviteMessageCommand}" />
@@ -1165,9 +1172,7 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate DataType="vm:ContactItem">
                     <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
-                      <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource AccentTint}" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Initial}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentText}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                      </Border>
+                      <Border Classes="face large" Background="{Binding Name, Converter={x:Static v:FaceBrush.Instance}}" />
                       <StackPanel Grid.Column="1" Margin="8,0" VerticalAlignment="Center" Spacing="1">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                         <TextBlock x:Name="ContactJay" Text="{Binding JayText}" Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasJay}" />

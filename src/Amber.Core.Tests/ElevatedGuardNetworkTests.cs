@@ -43,16 +43,36 @@ public class ElevatedGuardNetworkTests
         Assert.True(guard.WaitForExit(TimeSpan.FromSeconds(10)));
     }
 
+    /// <summary>
+    /// The guard is Jay itself with a short, fixed command line: no PowerShell, no encoded script, no room key.
+    /// (Defender flagged the old hidden "powershell -EncodedCommand" guard as Trojan:Win32/Commando.B!ml.)
+    /// </summary>
     [Fact]
-    public void BootCommandStaysBelowWindowsLimitAndOnlyLoadsPinnedSetup()
+    public void GuardCommandLineIsJayWithoutScriptOrSecret()
     {
-        var bootstrap = ElevatedGuard.GuardScript
-            .Replace("__ID__", new string('a', 32)).Replace("__AMBERPID__", "999999")
-            .Replace("__SID__", "S-1-5-21-1234567890-1234567890-1234567890-1234")
-            .Replace("__TIMEOUT__", "20").Replace("__SETUPHASH__", new string('b', 64))
-            .Replace("__CORE64__", Convert.ToBase64String(Encoding.Unicode.GetBytes("C:\\" + new string('x', 250) + "\\core.exe")));
-        Assert.True(Convert.ToBase64String(Encoding.Unicode.GetBytes(bootstrap)).Length + 100 < 32767);
-        Assert.True(ElevatedGuard.SetupScript.Length > 10000);
-        Assert.True(ElevatedGuard.GuardScript.IndexOf("$hash -cne '__SETUPHASH__'", StringComparison.Ordinal) < ElevatedGuard.GuardScript.IndexOf("ScriptBlock]::Create", StringComparison.Ordinal));
+        if (!OperatingSystem.IsWindows()) return;
+        using var guard = ElevatedGuard.Start(PowerShell, ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep 60"],
+            new Dictionary<string, string> { [EasyTierArgs.SecretVariable] = "SECRET-cmdline" }, elevate: false);
+        Assert.StartsWith(WindowsElevatedGuardHost.GuardFlag + " ", guard.CommandLine);
+        Assert.DoesNotContain("SECRET", guard.CommandLine);
+        Assert.DoesNotContain("EncodedCommand", guard.CommandLine, StringComparison.OrdinalIgnoreCase);
+        Assert.True(guard.CommandLine.Length < 512);
+        using var process = Process.GetProcessById(guard.ProcessId);
+        Assert.Equal("Jay", process.ProcessName);
+    }
+
+    /// <summary>Command lines Jay would never write are refused before any pipe is opened.</summary>
+    [Theory]
+    [InlineData("--jay-lan-guard")]
+    [InlineData("--jay-lan-guard 0123456789abcdef0123456789abcdef 12 S-1-5-21-1-2-3-1001")]
+    [InlineData("--jay-lan-guard 0123456789ABCDEF0123456789ABCDEF 12 S-1-5-21-1-2-3-1001 C:\\core.exe")]
+    [InlineData("--jay-lan-guard 0123456789abcdef0123456789abcdef -12 S-1-5-21-1-2-3-1001 C:\\core.exe")]
+    [InlineData("--jay-lan-guard 0123456789abcdef0123456789abcdef 12 not-a-sid C:\\core.exe")]
+    [InlineData("--jay-lan-guard 0123456789abcdef0123456789abcdef 12 S-1-5-21-1-2-3-1001 core.exe")]
+    [InlineData("--other 0123456789abcdef0123456789abcdef 12 S-1-5-21-1-2-3-1001 C:\\core.exe")]
+    public void GuardRefusesMalformedCommandLines(string commandLine)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Assert.Equal(2, WindowsElevatedGuardHost.Run(commandLine.Split(' ')));
     }
 }

@@ -44,55 +44,70 @@ public sealed class HotspotGuardTests
         Assert.True(guard.WaitForExit(TimeSpan.FromSeconds(10)));
     }
 
+    /// <summary>Records the guard's exit network steps; can fail the hotspot restore.</summary>
+    private sealed class FakeExitHelper(List<string> events, bool failSharingCleanup) : IExitNetworkHelper
+    {
+        public void PreStop(Action<string, string> forward)
+        {
+            events.Add("hotspot");
+            if (failSharingCleanup)
+            {
+                events.Add("hotspot");
+                forward("e", "mock sharing restore failed");
+            }
+            events.Add("dns");
+            if (failSharingCleanup) throw new IOException("mock sharing restore failed");
+        }
+
+        public void ReleaseRoutes(Action<string, string> forward) { events.Add("routes-ready"); events.Add("routes"); }
+        public void ExitPolicy(Action<string, string> forward) => events.Add("policy");
+        public void EnterRoutes(ExitNetworkPlan plan, Action<string, string> forward) => events.Add("enter");
+        public void Ready(ExitNetworkPlan plan, int corePid, Action<string, string> forward) => events.Add("ready");
+        public bool SetHotspot(bool on, Action<string, string> forward) => on;
+        public void Tick(Action<string, string> forward) { }
+        public void Dispose() { }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task TeardownRestoresSharingBeforeDestroyingTunAndAlwaysReleasesTheCore(bool failSharingCleanup)
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void TeardownRestoresSharingBeforeDestroyingTunAndAlwaysReleasesTheCore(bool failSharingCleanup)
     {
         if (!OperatingSystem.IsWindows()) return;
-        var begin = ElevatedGuard.GuardScript.IndexOf("function Stop-Session {", StringComparison.Ordinal);
-        var end = ElevatedGuard.GuardScript.IndexOf("function Start-Core", begin, StringComparison.Ordinal);
-        var production = ElevatedGuard.GuardScript[begin..end];
-        var body = """
-            $ErrorActionPreference = 'Stop'
-            $PSModuleAutoLoadingPreference = 'None'
-            $script:events = New-Object 'Collections.Generic.List[string]'
-            $setupLoaded = $true
-            $script:activeExitPlan = 'active'
-            $ack = New-Object IO.StringWriter
-            function Exit-HotspotSharing { $script:events.Add('hotspot'); if ($failCleanup) { throw 'mock sharing restore failed' } }
-            function Start-Sleep { }
-            function Write-GuardError($message) { $script:events.Add('error') }
-            function Forward-Warning($message) { }
-            function Exit-ExitDns { $script:events.Add('dns') }
-            function Stop-Core { $script:events.Add('core') }
-            function Wait-ExitReleased { $script:events.Add('routes-ready') }
-            function Exit-ExitRoutes { $script:events.Add('routes') }
-            function Exit-ExitTrafficPolicy { $script:events.Add('policy') }
-            """ + $"\n$failCleanup = ${(failSharingCleanup ? "true" : "false")}\n" + production + """
+        var events = new List<string>();
+        var ack = new MemoryStream();
+        using var session = new WindowsElevatedGuardHost.GuardSession(Stream.Null, Stream.Null, Stream.Null, ack, PowerShell,
+            () => new FakeExitHelper(events, failSharingCleanup)) { Trace = events.Add };
+        // Load the helper the way a start with a remote exit does, then tear down.
+        typeof(WindowsElevatedGuardHost.GuardSession).GetField("_helper", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(session, new FakeExitHelper(events, failSharingCleanup));
+        var failed = false;
+        try { session.StopSession(); }
+        catch (IOException) { failed = true; }
+        Assert.Equal(failSharingCleanup, failed);
+        var expected = failSharingCleanup ? "hotspot,hotspot,dns,core,routes-ready,routes,policy" : "hotspot,dns,core,routes-ready,routes,policy";
+        Assert.Equal(expected, string.Join(',', events));
+        Assert.Contains("hotspot off", Encoding.UTF8.GetString(ack.ToArray()));
+    }
 
-            $failed = $false
-            try { Stop-Session } catch { $failed = $true }
-            if ($failed -ne $failCleanup) { throw 'Cleanup failure was hidden or fabricated' }
-            $actual = @($script:events | Where-Object { $_ -ne 'error' }) -join ','
-            $expected = if ($failCleanup) { 'hotspot,hotspot,dns,core,routes-ready,routes,policy' } else { 'hotspot,dns,core,routes-ready,routes,policy' }
-            if ($actual -ne $expected) { throw ('Bad teardown order: ' + $actual) }
-            if ($script:activeExitPlan) { throw 'Exit plan survived teardown' }
-            if (-not $ack.ToString().Contains('hotspot off')) { throw 'Missing inactive acknowledgement' }
-            """;
-        var info = new ProcessStartInfo(PowerShell) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        info.ArgumentList.Add("-NoProfile");
-        info.ArgumentList.Add("-NonInteractive");
-        info.ArgumentList.Add("-EncodedCommand");
-        const string bootstrap = "Import-Module Microsoft.PowerShell.Utility,Microsoft.PowerShell.Management -ErrorAction Stop; try { & ([ScriptBlock]::Create([Console]::In.ReadToEnd())) } catch { [Console]::Error.WriteLine($_); exit 1 }";
-        info.ArgumentList.Add(Convert.ToBase64String(Encoding.Unicode.GetBytes(bootstrap)));
-        using var process = Process.Start(info)!;
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.WriteAsync(body);
-        process.StandardInput.Close();
-        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20)); }
-        catch { process.Kill(entireProcessTree: true); throw; }
-        Assert.True(process.ExitCode == 0, await stdout + "\n" + await stderr);
+    /// <summary>
+    /// The real exit helper: one Windows PowerShell child fed the fixed setup through standard input (no encoded command).
+    /// Only steps that touch nothing are used: the lease renewal right after load, and requests it must refuse.
+    /// </summary>
+    [Fact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void ExitHelperLoadsTheSetupFromStandardInputAndAnswers()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Assert.DoesNotContain("Encoded", ExitNetworkHelper.CommandLine, StringComparison.OrdinalIgnoreCase);
+        using var helper = new ExitNetworkHelper();
+        var forwarded = new List<string>();
+        helper.Tick((kind, text) => forwarded.Add(kind + ":" + text));
+        var refused = Assert.Throws<IOException>(() => helper.SetHotspot(true, (kind, text) => forwarded.Add(kind + ":" + text)));
+        Assert.Contains("remote exit", refused.Message);
+        // Still answering after a failed request.
+        helper.Tick((kind, text) => forwarded.Add(kind + ":" + text));
+        Assert.Empty(forwarded);
     }
 }

@@ -8,7 +8,7 @@
   <ResourceDictionary.ThemeDictionaries>
     <ResourceDictionary x:Key="Dark">
       <SolidColorBrush x:Key="SafetyFrame" Color="#78A0FF" />
-      <SolidColorBrush x:Key="SafetyPanelBg" Color="#2D394E" />
+      <SolidColorBrush x:Key="SafetyPanelBg" Color="#233149" />
       <SolidColorBrush x:Key="SafetyDangerBorder" Color="#FF8C87" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="Light">
@@ -21,7 +21,7 @@
   <SolidColorBrush x:Key="SafetyDangerHover" Color="#C62E25" />
   <SolidColorBrush x:Key="SafetyOnDanger" Color="#FFFFFF" />
   <SolidColorBrush x:Key="RemoteBarBg" Color="#B3261E" />
-  <FontFamily x:Key="SafetyFont">Segoe UI Variable Text, Segoe UI, $Default, Inter, Microsoft YaHei UI, PingFang SC, Noto Sans SC, Noto Sans CJK SC, Source Han Sans SC</FontFamily>
+  <FontFamily x:Key="SafetyFont">avares://Jay/Assets/Fonts#Manrope, Segoe UI Variable Text, Segoe UI, $Default, Inter, Microsoft YaHei UI, PingFang SC, Noto Sans SC, Noto Sans CJK SC, Source Han Sans SC</FontFamily>
 
   <ControlTheme x:Key="{x:Type s:SafetySurface}" TargetType="s:SafetySurface">
     <Setter Property="Background" Value="{DynamicResource SafetyPanelBg}" />

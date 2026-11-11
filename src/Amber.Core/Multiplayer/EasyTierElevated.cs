@@ -14,11 +14,11 @@ namespace Amber.Core.Multiplayer;
 
 /// <summary>
 /// 完整局域网模式：EasyTier 建虚拟网卡（wintun），每个人有一个虚拟 IP，任何局域网游戏和程序都能互通。
-/// 建网卡要管理员权限，所以只在用户打开这个模式时，通过 Windows 的权限确认（UAC）启动一个小的守护脚本，
+/// 建网卡要管理员权限，所以只在用户打开这个模式时，通过 Windows 的权限确认（UAC）以管理员身份启动 Jay 自己的守护模式，
 /// 由它运行 easytier-core。非管理员的 Amber 结束不了管理员进程，所以要这样绕一层。
 ///
 /// 不落盘：参数（含房间密钥）、停止和重启命令都经命名管道传给守护脚本，easytier-core 的输出也经管道回来，只留在内存里。
-/// 守护脚本本身用 -EncodedCommand 传（里面没有密钥），不写任何文件。管道只允许当前用户和管理员组连接，
+/// 守护就是 Jay 自己（带隐藏参数提权运行，命令行里没有密钥），不写任何文件。管道只允许当前用户和管理员组连接，
 /// 连上后先核对对方的进程号就是刚启动的守护脚本，才发参数。Amber 退出或崩溃时命令管道断开，守护脚本结束 easytier-core 后自己退出。
 /// </summary>
 // 只能经 Start 创建，Start 先检查是不是 Windows：调用方不用再各自判断。
@@ -196,11 +196,11 @@ public sealed class EasyTierElevatedSession : IEasyTierSession, IHotspotSharingS
 #pragma warning restore CA1416
 
 /// <summary>
-/// 守护脚本和它的四根命名管道（命令、标准输出、标准错误、“已启动”回执）。
+/// 守护（Jay 自己带 --jay-lan-guard 提权运行，见 <see cref="WindowsElevatedGuardHost"/>）和它的四根命名管道（命令、标准输出、标准错误、“已启动”回执）。
 /// Start 在 UAC 确认后就返回（和以前一样不卡界面），管道在后台连接；连上并核对进程号之前不发任何命令。
 /// 两边互相核对：Amber 核对连上来的是刚启动的守护脚本（不是就断开它接着等），守护脚本核对管道是 Amber 建的（进程号和所有者），
 /// 不是就退出。管道在守护脚本退出之前一直留着，别的账号没法趁机建同名管道。
-/// elevate 为 false 时不弹 UAC，直接以当前权限运行（测试用）。
+/// elevate 为 false 时不弹 UAC，以当前权限运行测试目录里的 Jay.exe（测试用）。
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class ElevatedGuard : IElevatedGuard
@@ -322,8 +322,20 @@ internal sealed class ElevatedGuard : IElevatedGuard
     /// <summary>守护脚本连四根管道的总期限（秒）。</summary>
     internal const int GuardConnectSeconds = 20;
 
+    /// <summary>The guard executable in tests (elevate false). Defaults to the Jay.exe next to the test assembly.</summary>
+    internal static string? ExecutableForTest { get; set; }
+
+    /// <summary>This Jay's own executable. Run through "dotnet Jay.dll" there is no Jay.exe to elevate, so full LAN is unavailable.</summary>
+    private static string JayExecutable()
+    {
+        var path = Environment.ProcessPath;
+        if (path is null || Path.GetFileNameWithoutExtension(path).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(L.T("core.mp.component.startfailed"));
+        return path;
+    }
+
     /// <summary>
-    /// 启动守护脚本（elevate 时弹 UAC，这一步会等用户确认）。用户拒绝时抛 <see cref="OperationCanceledException"/>。
+    /// 启动守护（elevate 时弹 UAC，这一步会等用户确认）。用户拒绝时抛 <see cref="OperationCanceledException"/>。
     /// env 是给 easytier-core 的环境变量（房间密钥），和参数一样只经管道传。serverPidForTest：测试用，让守护脚本以为管道该由别的进程建。
     /// </summary>
     public static ElevatedGuard Start(string corePath, IReadOnlyList<string> args, IReadOnlyDictionary<string, string> env, bool elevate, int? serverPidForTest = null,
@@ -340,17 +352,10 @@ internal sealed class ElevatedGuard : IElevatedGuard
         };
         try
         {
-            // 先换掉 __ID__ 再放路径；路径用 UTF-16 的 Base64 传（PowerShell 的单引号字符串还会被 ‘ ’ ‚ ‛ 结束）。
-            var script = GuardScript
-                .Replace("__ID__", id)
-                .Replace("__AMBERPID__", (serverPidForTest ?? Environment.ProcessId).ToString(System.Globalization.CultureInfo.InvariantCulture))
-                .Replace("__SID__", WindowsIdentity.GetCurrent().User!.Value)
-                .Replace("__TIMEOUT__", GuardConnectSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                .Replace("__SETUPHASH__", Convert.ToHexStringLower(SHA256.HashData(Utf8.GetBytes(SetupScript))))
-                .Replace("__CORE64__", Convert.ToBase64String(Encoding.Unicode.GetBytes(corePath)));
-            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-            var commandLine = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand " + encoded;
-            var info = new ProcessStartInfo("powershell.exe", commandLine)
+            // Jay itself is the guard (Jay.exe --jay-lan-guard ...). The command line holds no secret: arguments and the room key go through the pipe.
+            var guardArgs = WindowsElevatedGuardHost.Arguments(id, serverPidForTest ?? Environment.ProcessId, WindowsIdentity.GetCurrent().User!.Value, corePath);
+            var commandLine = WindowsCommandLine.Join(guardArgs);
+            var info = new ProcessStartInfo(elevate ? JayExecutable() : ExecutableForTest ?? Path.Combine(AppContext.BaseDirectory, "Jay.exe"), commandLine)
             {
                 UseShellExecute = elevate,
                 CreateNoWindow = !elevate,
@@ -464,7 +469,7 @@ internal sealed class ElevatedGuard : IElevatedGuard
             _ready = completion.Task;
             // 即使旧同步调用者没有等待，也观察异常；异步调用者仍会得到原始错误。
             _ = _ready.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-            var message = JsonSerializer.Serialize(new GuardCommand("start", n, WindowsCommandLine.Join(args), new Dictionary<string, string>(env), network, SetupScript), AmberJsonContext.Default.GuardCommand);
+            var message = JsonSerializer.Serialize(new GuardCommand("start", n, WindowsCommandLine.Join(args), new Dictionary<string, string>(env), network), AmberJsonContext.Default.GuardCommand);
             Enqueue(w => w.WriteLine(message), isStart: true);
             if (ConnectFailed || HasExited) completion.TrySetException(new IOException(L.T("core.mp.guard.unavailable")));
             return _ready;
@@ -549,185 +554,9 @@ internal sealed class ElevatedGuard : IElevatedGuard
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetNamedPipeClientProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint clientProcessId);
-
-    // 可增长的逻辑不放在 Windows 命令行：命令行只带固定摘要，内容经已认证管道加载。
-    internal const string SetupScript = ExitRoutingScript.Script + "\n" + ExitDnsScript.Script + "\n" + ExitTrafficPolicyScript.Script
-        + "\n" + HotspotTrafficPolicyScript.Script + "\n" + HotspotSharingScript.Script;
-
-    /// <summary>
-    /// 守护脚本（Windows PowerShell 5.1，以管理员身份运行）：连上四根管道，按命令启动、重启、结束 easytier-core，
-    /// 输出原样经管道送回。命令管道断开（Amber 退出或崩溃）或 easytier-core 自己退出时结束。不写任何文件。
-    /// </summary>
-    internal const string GuardScript = """
-        $ErrorActionPreference = 'Stop'
-        $Core = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('__CORE64__'))
-        $AmberPid = [uint32]__AMBERPID__
-        $UserSid = '__SID__'
-        $clock = [System.Diagnostics.Stopwatch]::StartNew()
-        $limitMs = __TIMEOUT__ * 1000
-        $enc = New-Object System.Text.UTF8Encoding($false)
-        # GetNamedPipeServerProcessId via an in-memory P/Invoke (Add-Type would write temp files).
-        $asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object System.Reflection.AssemblyName('AmberGuardNative')), [System.Reflection.Emit.AssemblyBuilderAccess]::Run)
-        $type = $asm.DefineDynamicModule('AmberGuardNative').DefineType('AmberGuardNative', 'Public, Class')
-        $method = $type.DefinePInvokeMethod('GetNamedPipeServerProcessId', 'kernel32.dll', [System.Reflection.MethodAttributes]'Public, Static, PinvokeImpl', [System.Reflection.CallingConventions]::Standard, [bool], [Type[]]@([IntPtr], [uint32].MakeByRefType()), [System.Runtime.InteropServices.CallingConvention]::Winapi, [System.Runtime.InteropServices.CharSet]::Unicode)
-        $method.SetImplementationFlags([System.Reflection.MethodImplAttributes]::PreserveSig)
-        $native = $type.CreateType()
-        # Check the pipe was created by Amber (server PID, owner is the user or Administrators) before reading anything; exit otherwise.
-        function Connect-Pipe([string]$kind, $direction) {
-            $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', "amber-et-__ID__-$kind", $direction, [System.IO.Pipes.PipeOptions]::None, [System.Security.Principal.TokenImpersonationLevel]::Identification)
-            $left = [int]($limitMs - $clock.ElapsedMilliseconds)
-            if ($left -le 0) { throw 'connect timeout' }
-            $pipe.Connect($left)
-            $server = [uint32]0
-            if (-not $native::GetNamedPipeServerProcessId($pipe.SafePipeHandle.DangerousGetHandle(), [ref]$server) -or $server -ne $AmberPid) { $pipe.Dispose(); throw 'pipe server mismatch' }
-            $owner = $pipe.GetAccessControl().GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-            if ($owner -ne $UserSid -and $owner -ne 'S-1-5-32-544') { $pipe.Dispose(); throw 'pipe owner mismatch' }
-            return $pipe
-        }
-        $cmdPipe = Connect-Pipe 'cmd' ([System.IO.Pipes.PipeDirection]::In)
-        $outPipe = Connect-Pipe 'out' ([System.IO.Pipes.PipeDirection]::Out)
-        $errPipe = Connect-Pipe 'err' ([System.IO.Pipes.PipeDirection]::Out)
-        $ackPipe = Connect-Pipe 'ack' ([System.IO.Pipes.PipeDirection]::Out)
-        $reader = New-Object System.IO.StreamReader($cmdPipe, $enc)
-        $ack = New-Object System.IO.StreamWriter($ackPipe, $enc)
-        $ack.AutoFlush = $true
-        $script:p = $null
-        $script:copies = @()
-        $script:activeExitPlan = $null
-        $hotspotChecked = [DateTime]::MinValue
-        $setupLoaded = $false
-        function Write-GuardError([string]$message) {
-            $ack.WriteLine('error ' + [Convert]::ToBase64String($enc.GetBytes($message)))
-        }
-        function Forward-Warning($item) {
-            if ($item -is [System.Management.Automation.WarningRecord]) { Write-GuardError ([string]$item) }
-        }
-        function Stop-Core {
-            if ($script:p -and -not $script:p.HasExited) {
-                $script:p.Kill()
-                if (-not $script:p.WaitForExit(5000)) { throw 'Core did not stop; bypass leases retained' }
-            }
-            foreach ($c in $script:copies) { try { $c.Wait(3000) | Out-Null } catch {} }
-            $script:copies = @()
-            $script:p = $null
-        }
-        function Stop-Session {
-            $dnsFailure = $null
-            try {
-                if ($setupLoaded) {
-                    try { Exit-HotspotSharing }
-                    catch {
-                        # Retry once while the public Wintun connection still exists; COM may be finishing a sharing transition.
-                        Start-Sleep -Milliseconds 100
-                        try { Exit-HotspotSharing }
-                        catch { $dnsFailure = $_.Exception.Message; Write-GuardError $dnsFailure }
-                    }
-                    $ack.WriteLine('hotspot off')
-                    $script:activeExitPlan = $null
-                    try { Exit-ExitDns 3>&1 | ForEach-Object { Forward-Warning $_ } }
-                    catch { $dnsFailure = $_.Exception.Message; Write-GuardError $dnsFailure }
-                }
-                # Restore DNS while the adapter still exists; release underlay bypasses only after the core and capture routes are gone.
-                Stop-Core
-                if ($setupLoaded) { Wait-ExitReleased; Exit-ExitRoutes }
-                if ($dnsFailure) { throw $dnsFailure }
-            } finally {
-                # Release the dynamic WFP session last; even a partial cleanup failure must still try to restore normal networking.
-                if ($setupLoaded) { Exit-ExitTrafficPolicy }
-            }
-        }
-        function Start-Core([string]$arguments, $env) {
-            $psi = New-Object System.Diagnostics.ProcessStartInfo($Core)
-            $psi.Arguments = $arguments
-            # Only the allow-listed key reaches easytier-core.
-            if ($env) { foreach ($prop in $env.PSObject.Properties) { if ($prop.Name -ceq 'ET_NETWORK_SECRET') { $psi.EnvironmentVariables[$prop.Name] = [string]$prop.Value } } }
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow = $true
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $script:p = [System.Diagnostics.Process]::Start($psi)
-            $script:copies = @($script:p.StandardOutput.BaseStream.CopyToAsync($outPipe), $script:p.StandardError.BaseStream.CopyToAsync($errPipe))
-        }
-        try {
-            $pending = $reader.ReadLineAsync()
-            while ($true) {
-                if ($pending.Wait(500)) {
-                    $line = $pending.Result
-                    if ($null -eq $line) { break }
-                    $msg = $line | ConvertFrom-Json
-                    if ($msg.cmd -eq 'stop') { break }
-                    if ($msg.cmd -eq 'start') {
-                        try {
-                            if (-not $setupLoaded) {
-                                $sha = [Security.Cryptography.SHA256]::Create()
-                                try { $hash = [BitConverter]::ToString($sha.ComputeHash($enc.GetBytes([string]$msg.setup))).Replace('-', '').ToLowerInvariant() }
-                                finally { $sha.Dispose() }
-                                if ($hash -cne '__SETUPHASH__') { throw 'Guard setup digest mismatch' }
-                                . ([ScriptBlock]::Create([string]$msg.setup))
-                                Initialize-GuardJob
-                                $setupLoaded = $true
-                            }
-                            Stop-Session
-                            if ($msg.network) { Enter-ExitRoutes $msg.network }
-                            Start-Core $msg.args $msg.env
-                            if ($msg.network) {
-                                $adapter = Wait-ExitReady $msg.network $script:p
-                                Enter-ExitDns $adapter 3>&1 | ForEach-Object { Forward-Warning $_ }
-                                Enter-ExitTrafficPolicy $adapter $msg.network
-                                $script:activeExitPlan = $msg.network
-                            }
-                            if ($script:p.HasExited) { throw 'Core exited during startup' }
-                            $ack.WriteLine('started ' + $msg.n)
-                        } catch {
-                            $failure = $_.Exception.Message
-                            try { Stop-Session } catch { Write-GuardError $_.Exception.Message }
-                            $ack.WriteLine('failed ' + $msg.n + ' ' + [Convert]::ToBase64String($enc.GetBytes($failure)))
-                            throw
-                        }
-                    } elseif ($msg.cmd -eq 'hotspot') {
-                        try {
-                            if (-not $setupLoaded -or -not $script:p -or $script:p.HasExited) { throw 'The multiplayer session has ended' }
-                            if ($msg.hotspot -eq $true) {
-                                if (-not $script:activeExitPlan -or -not $script:exitAdapter) { throw 'Select a remote exit in full LAN mode before sharing a hotspot' }
-                                Enter-HotspotSharing $script:exitAdapter
-                            } else { Exit-HotspotSharing }
-                            $ack.WriteLine($(if ($script:HotspotSharingActive) { 'hotspot on' } else { 'hotspot off' }))
-                            $ack.WriteLine('started ' + $msg.n)
-                        } catch {
-                            $failure = $_.Exception.Message
-                            try { if ($setupLoaded) { Exit-HotspotSharing } }
-                            catch { Write-GuardError $_.Exception.Message; throw }
-                            $ack.WriteLine('hotspot off')
-                            $ack.WriteLine('failed ' + $msg.n + ' ' + [Convert]::ToBase64String($enc.GetBytes($failure)))
-                        }
-                    }
-                    $pending = $reader.ReadLineAsync()
-                } elseif ($script:p -and $script:p.HasExited) {
-                    break
-                }
-                if ($setupLoaded) {
-                    Renew-ExitRoutes
-                    if ($script:HotspotSharingActive -and ([DateTime]::UtcNow - $hotspotChecked).TotalSeconds -ge 2) {
-                        $hotspotChecked = [DateTime]::UtcNow
-                        try { Assert-HotspotSharing }
-                        catch {
-                            Write-GuardError $_.Exception.Message
-                            Exit-HotspotSharing
-                            $ack.WriteLine('hotspot off')
-                        }
-                    }
-                }
-            }
-        } catch {
-            try { Write-GuardError $_.Exception.Message } catch {}
-        } finally {
-            try { Stop-Session } catch { try { Write-GuardError $_.Exception.Message } catch {} }
-            foreach ($s in @($ack, $outPipe, $errPipe, $ackPipe, $cmdPipe)) { try { $s.Dispose() } catch {} }
-        }
-        """;
 }
 
-/// <summary>以管理员 / root 身份运行 easytier-core 的守护：Windows 是 PowerShell 守护脚本，Mac/Linux 是 Jay 自己的守护模式。</summary>
+/// <summary>以管理员 / root 身份运行 easytier-core 的守护：各平台都是 Jay 自己的守护模式。</summary>
 internal interface IElevatedGuard : IDisposable
 {
     bool HasExited { get; }
@@ -751,7 +580,6 @@ public sealed record GuardCommand(
     [property: System.Text.Json.Serialization.JsonPropertyName("args")] string Args,
     [property: System.Text.Json.Serialization.JsonPropertyName("env")] Dictionary<string, string>? Env,
     [property: System.Text.Json.Serialization.JsonPropertyName("network")] ExitNetworkPlan? Network = null,
-    [property: System.Text.Json.Serialization.JsonPropertyName("setup")] string? Setup = null,
     [property: System.Text.Json.Serialization.JsonPropertyName("hotspot")] bool? Hotspot = null);
 
 /// <summary>按 Windows 程序解析命令行的规则（CommandLineToArgvW / MSVC）把参数拼成一个字符串。</summary>

@@ -130,13 +130,13 @@
           <ListBox.ItemTemplate>
             <DataTemplate DataType="vm:NavSection">
               <Panel>
-                <!-- 选中项左边的指示条：不占位置，图标不动 -->
-                <Border Classes="nav-indicator" Width="3" Height="16" CornerRadius="2" Background="{DynamicResource Accent}" Margin="-10,0,0,0"
+                <!-- Selected item: the wing bars on its left edge (two periods tall). Takes no room, so the icon stays put. -->
+                <Border Classes="nav-indicator" Width="4" Height="26" CornerRadius="1" Margin="-10,0,0,0"
                         HorizontalAlignment="Left" VerticalAlignment="Center" IsVisible="{Binding IsActive}" />
                 <StackPanel Classes="nav-row">
                   <Panel HorizontalAlignment="Center">
                     <Path Classes="icon" Data="{Binding Icon}" Stroke="{DynamicResource SidebarText}" Width="20" Height="20" />
-                    <Ellipse Width="8" Height="8" Fill="{DynamicResource Danger}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-4,0"
+                    <Border Classes="led error" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-4,0"
                              IsVisible="{Binding HasBadge}" />
                   </Panel>
                   <TextBlock Classes="nav-title" Text="{Binding Title}" Foreground="{DynamicResource SidebarText}" FontSize="14" VerticalAlignment="Center"
@@ -156,7 +156,7 @@
             <StackPanel Classes="foot-row" Orientation="Horizontal" Spacing="12">
               <Panel>
                 <Path Classes="icon" Data="{StaticResource Icon.Settings}" Stroke="{DynamicResource SidebarText}" Width="20" Height="20" />
-                <Ellipse Width="8" Height="8" Fill="{DynamicResource Danger}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-4,0"
+                <Border Classes="led error" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-4,0"
                          IsVisible="{Binding Shell.HasSettingsBadge}" />
               </Panel>
               <TextBlock Classes="foot-title" Text="{l:T shell.settings}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
@@ -256,7 +256,7 @@
                 IsVisible="{Binding Activity.HasPill}" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip.Tip="{Binding Activity.PillText}"
                 AutomationProperties.Name="{Binding Activity.PillText}">
           <StackPanel Orientation="Horizontal" Spacing="6">
-            <Ellipse Classes="pill-dot" Width="8" Height="8" VerticalAlignment="Center" />
+            <Border Classes="led playing" />
             <TextBlock Text="{Binding Activity.PillText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
           </StackPanel>
         </Button>
@@ -267,7 +267,7 @@
             <Arc Stroke="{DynamicResource Accent}" StrokeThickness="2" StartAngle="-90" SweepAngle="{Binding Activity.RingSweep}" Width="28" Height="28"
                  IsVisible="{Binding Activity.HasRunningTasks}" />
             <Path Classes="icon" Data="{StaticResource Icon.Bell}" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
-            <Ellipse Width="8" Height="8" Fill="{DynamicResource Danger}" HorizontalAlignment="Right" VerticalAlignment="Top" IsVisible="{Binding Activity.HasAttention}" />
+            <Border Classes="led error" HorizontalAlignment="Right" VerticalAlignment="Top" IsVisible="{Binding Activity.HasAttention}" />
           </Panel>
         </Button>
         <!-- Help: this page's article in a drawer. F1; Shift+F1 opens the help center -->
@@ -301,7 +301,7 @@
           <DataTemplate DataType="vm:PageViewModel">
             <StackPanel Orientation="Horizontal" Spacing="6">
               <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
-              <Ellipse Width="6" Height="6" Fill="{DynamicResource Danger}" VerticalAlignment="Center" IsVisible="{Binding HasBadge}" />
+              <Border Classes="led error small" IsVisible="{Binding HasBadge}" />
             </StackPanel>
           </DataTemplate>
         </ListBox.ItemTemplate>

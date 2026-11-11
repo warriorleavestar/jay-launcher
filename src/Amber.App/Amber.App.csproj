@@ -30,6 +30,11 @@
     <!-- 等宽字体 JetBrains Mono（SIL OFL 1.1，见 Assets/Fonts/OFL-JetBrainsMono.txt）随所有平台打包：邀请码、安全码、日志都用它。 -->
     <AvaloniaResource Include="Assets\Fonts\JetBrainsMono-Regular.ttf" />
     <AvaloniaResource Include="Assets\Fonts\JetBrainsMono-Bold.ttf" />
+    <!-- Manrope for Latin letters and digits, VT323 for pixel digits on version tags (both SIL OFL 1.1, see Assets/Fonts/OFL-Manrope.txt and OFL-VT323.txt). -->
+    <AvaloniaResource Include="Assets\Fonts\Manrope-Regular.ttf" />
+    <AvaloniaResource Include="Assets\Fonts\Manrope-SemiBold.ttf" />
+    <AvaloniaResource Include="Assets\Fonts\Manrope-Bold.ttf" />
+    <AvaloniaResource Include="Assets\Fonts\VT323-Regular.ttf" />
   </ItemGroup>
 
   <!-- Linux 发行版不一定有中文字体：只给 Linux 版打包思源黑体（Noto Sans SC，SIL OFL 1.1，见 Assets/Fonts/OFL.txt）做回退。 -->

@@ -5,14 +5,18 @@
     深色叫“夜”，浅色叫“晨”。颜色和 Amber.Core/Themes/ThemeColor.cs 的 ThemeDefaults 一致，单元测试会核对，并重算 §4.2 的对比度表。
     颜色名沿用主题包 format 1 的名字（PageBg = 设计稿 Base、SidebarBg = Frame、BorderSubtle = Divider…），旧主题包照常生效；
     format 2 的改名在第 11 批做，那时旧名走迁移表。
+
+    Art direction (2026-11 redesign, "美术风格"): night-sky ink surfaces in five steps (SidebarBg, PageBg, Surface,
+    SurfaceRaised, Sunken), jay azure for selection and confirmation, amber for the one main action on a screen, and
+    the wing bars (WingBrush) as Jay's signature mark. Light is the same scale by day.
   -->
-  <Color x:Key="SystemAccentColor">#2C59CC</Color>
-  <Color x:Key="SystemAccentColorLight1">#3A67DA</Color>
-  <Color x:Key="SystemAccentColorLight2">#5B82E4</Color>
-  <Color x:Key="SystemAccentColorLight3">#78A0FF</Color>
-  <Color x:Key="SystemAccentColorDark1">#2149B0</Color>
-  <Color x:Key="SystemAccentColorDark2">#1A3A8E</Color>
-  <Color x:Key="SystemAccentColorDark3">#132B6B</Color>
+  <Color x:Key="SystemAccentColor">#1A6FE3</Color>
+  <Color x:Key="SystemAccentColorLight1">#2F82EC</Color>
+  <Color x:Key="SystemAccentColorLight2">#4DA3FF</Color>
+  <Color x:Key="SystemAccentColorLight3">#7DBBFF</Color>
+  <Color x:Key="SystemAccentColorDark1">#1565D6</Color>
+  <Color x:Key="SystemAccentColorDark2">#0F56BD</Color>
+  <Color x:Key="SystemAccentColorDark3">#0B4296</Color>
 
   <!-- 间距：4 的倍数为主 -->
   <x:Double x:Key="Space0">2</x:Double>
@@ -68,9 +72,15 @@
   <x:Double x:Key="LineHeadline">32</x:Double>
   <x:Double x:Key="LineDisplay">40</x:Double>
   <!-- 字体：先拉丁后中日文；按语言替换在 i18n 那边（繁体、日文） -->
-  <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI, $Default, Inter, Microsoft YaHei UI, PingFang SC, Noto Sans SC, Noto Sans CJK SC, Source Han Sans SC</FontFamily>
+  <!-- Manrope (SIL OFL 1.1, Assets/Fonts/OFL-Manrope.txt) ships on every platform for Latin letters and digits; Chinese and
+       Japanese come from the system fonts after it. -->
+  <FontFamily x:Key="UiFont">avares://Jay/Assets/Fonts#Manrope, Segoe UI Variable Text, Segoe UI, $Default, Inter, Microsoft YaHei UI, PingFang SC, Noto Sans SC, Noto Sans CJK SC, Source Han Sans SC</FontFamily>
   <!-- 等宽：JetBrains Mono 随所有平台打包（邀请码、安全码、日志、启动参数） -->
   <FontFamily x:Key="MonoFont">avares://Jay/Assets/Fonts#JetBrains Mono, Cascadia Mono, SF Mono, Consolas, Noto Sans Mono CJK SC, monospace</FontFamily>
+  <!-- Pixel digits: VT323 (SIL OFL 1.1, Assets/Fonts/OFL-VT323.txt). Only for game version tags and step numbers, never for running text. -->
+  <FontFamily x:Key="PixelFont">avares://Jay/Assets/Fonts#VT323, avares://Jay/Assets/Fonts#JetBrains Mono, Consolas, monospace</FontFamily>
+  <x:Double x:Key="FontPixelTag">17</x:Double>
+  <x:Double x:Key="FontPixelStep">19</x:Double>
   <!-- 主题包的窗口背景图透明度（背景图本身只在主题包里有） -->
   <x:Double x:Key="ThemeBackgroundOpacity">1</x:Double>
 
@@ -78,7 +88,9 @@
   <BoxShadows x:Key="Elevation1">0 1 2 0 #330B1220</BoxShadows>
   <BoxShadows x:Key="Elevation2">0 4 12 0 #400B1220</BoxShadows>
   <BoxShadows x:Key="Elevation3">0 12 32 0 #590B1220</BoxShadows>
-  <BoxShadows x:Key="PlayGlowShadow">0 4 16 0 #40F6A93B</BoxShadows>
+  <BoxShadows x:Key="PlayGlowShadow">0 6 18 -4 #73FFA528, inset 0 -2 0 0 #2E000000</BoxShadows>
+  <!-- Every button is a key: a 2 px darker lip along the bottom edge, gone while pressed. -->
+  <BoxShadows x:Key="KeycapShadow">inset 0 -2 0 0 #24000000</BoxShadows>
 
   <!-- 动效（§4.7）：减少动画打开时 Jay 把这些换成 0 或 100 毫秒（MotionSettings） -->
   <x:TimeSpan x:Key="MotionFast">0:0:0.1</x:TimeSpan>
@@ -91,85 +103,85 @@
   <ResourceDictionary.ThemeDictionaries>
     <ResourceDictionary x:Key="Dark">
       <!-- 内容区底色（设计稿 Base） -->
-      <SolidColorBrush x:Key="PageBg" Color="#0E1219" />
+      <SolidColorBrush x:Key="PageBg" Color="#0E1623" />
       <!-- 卡片、列表容器、面板 -->
-      <SolidColorBrush x:Key="Surface" Color="#202A3A" />
+      <SolidColorBrush x:Key="Surface" Color="#141D2E" />
       <!-- 卡片里再凸起的块（设计稿 Raised） -->
-      <SolidColorBrush x:Key="SurfaceRaised" Color="#29344A" />
+      <SolidColorBrush x:Key="SurfaceRaised" Color="#1C283D" />
       <!-- 分隔线、卡片 1px 边（设计稿 Divider） -->
-      <SolidColorBrush x:Key="BorderSubtle" Color="#394660" />
+      <SolidColorBrush x:Key="BorderSubtle" Color="#2D3C57" />
       <!-- 侧栏、顶栏（设计稿 Frame） -->
-      <SolidColorBrush x:Key="SidebarBg" Color="#080B10" />
+      <SolidColorBrush x:Key="SidebarBg" Color="#0A111C" />
       <!-- 正文、标题（设计稿 Text） -->
-      <SolidColorBrush x:Key="TextPrimary" Color="#E8EDF5" />
-      <SolidColorBrush x:Key="TextSecondary" Color="#B3BDCD" />
-      <SolidColorBrush x:Key="TextTertiary" Color="#A0ABBE" />
+      <SolidColorBrush x:Key="TextPrimary" Color="#E9EEF8" />
+      <SolidColorBrush x:Key="TextSecondary" Color="#AAB6CC" />
+      <SolidColorBrush x:Key="TextTertiary" Color="#94A2BC" />
       <!-- 松鸦蓝：普通主按钮、开关、进度、选中 -->
-      <SolidColorBrush x:Key="Accent" Color="#78A0FF" />
-      <SolidColorBrush x:Key="AccentHover" Color="#93B4FF" />
-      <SolidColorBrush x:Key="AccentPressed" Color="#6188EA" />
-      <SolidColorBrush x:Key="OnAccent" Color="#08132E" />
+      <SolidColorBrush x:Key="Accent" Color="#4DA3FF" />
+      <SolidColorBrush x:Key="AccentHover" Color="#6CB4FF" />
+      <SolidColorBrush x:Key="AccentPressed" Color="#3B90EC" />
+      <SolidColorBrush x:Key="OnAccent" Color="#04203F" />
       <!-- 链接、蓝色文字 -->
-      <SolidColorBrush x:Key="AccentText" Color="#8FB1FF" />
-      <SolidColorBrush x:Key="Success" Color="#3DD68C" />
-      <SolidColorBrush x:Key="SuccessText" Color="#5BE0A0" />
+      <SolidColorBrush x:Key="AccentText" Color="#7DBBFF" />
+      <SolidColorBrush x:Key="Success" Color="#52C796" />
+      <SolidColorBrush x:Key="SuccessText" Color="#6FD6A9" />
       <!-- 柠檬黄，和琥珀拉开色相 -->
       <SolidColorBrush x:Key="Warning" Color="#E9C84A" />
       <SolidColorBrush x:Key="WarningText" Color="#F0D46A" />
-      <SolidColorBrush x:Key="Danger" Color="#FF6B6B" />
-      <SolidColorBrush x:Key="DangerText" Color="#FF8C87" />
+      <SolidColorBrush x:Key="Danger" Color="#F36F6D" />
+      <SolidColorBrush x:Key="DangerText" Color="#FF8F8A" />
       <SolidColorBrush x:Key="OnDanger" Color="#1F0606" />
-      <SolidColorBrush x:Key="DisabledFill" Color="#293342" />
+      <SolidColorBrush x:Key="DisabledFill" Color="#1A2435" />
       <!-- 设计稿 TextDisabled -->
-      <SolidColorBrush x:Key="DisabledText" Color="#808B9E" />
+      <SolidColorBrush x:Key="DisabledText" Color="#6E7D99" />
       <!-- 设计稿 NavText -->
-      <SolidColorBrush x:Key="SidebarText" Color="#E8EDF5" />
+      <SolidColorBrush x:Key="SidebarText" Color="#E9EEF8" />
       <!-- 设计稿 NavTextMuted -->
-      <SolidColorBrush x:Key="SidebarTextMuted" Color="#A3AEC0" />
+      <SolidColorBrush x:Key="SidebarTextMuted" Color="#93A2BC" />
       <!-- 设计稿 NavItemSelected，只在侧栏用 -->
-      <SolidColorBrush x:Key="NavSelected" Color="#1A2336" />
+      <SolidColorBrush x:Key="NavSelected" Color="#14233A" />
       <!-- 设计稿 NavItemHover -->
-      <SolidColorBrush x:Key="NavHover" Color="#17191E" />
+      <SolidColorBrush x:Key="NavHover" Color="#101A2A" />
       <!-- 色调底：已按叠在 Surface 上算好 -->
-      <SolidColorBrush x:Key="AccentTint" Color="#2E3D5A" />
-      <SolidColorBrush x:Key="SuccessTint" Color="#244246" />
-      <SolidColorBrush x:Key="WarningTint" Color="#3C403C" />
-      <SolidColorBrush x:Key="DangerTint" Color="#3F3341" />
+      <SolidColorBrush x:Key="AccentTint" Color="#1C304B" />
+      <SolidColorBrush x:Key="SuccessTint" Color="#1D353D" />
+      <SolidColorBrush x:Key="WarningTint" Color="#323532" />
+      <SolidColorBrush x:Key="DangerTint" Color="#332837" />
       <!-- 菜单、抽屉、对话框、Toast -->
-      <SolidColorBrush x:Key="Overlay" Color="#2D394E" />
+      <SolidColorBrush x:Key="Overlay" Color="#1F2C43" />
       <!-- 日志、代码的凹陷底 -->
-      <SolidColorBrush x:Key="Sunken" Color="#070A0E" />
+      <SolidColorBrush x:Key="Sunken" Color="#080D16" />
       <!-- 输入框底 -->
-      <SolidColorBrush x:Key="InputBg" Color="#0B0F16" />
+      <SolidColorBrush x:Key="InputBg" Color="#0A101A" />
       <!-- 对话框后面的遮罩 -->
-      <SolidColorBrush x:Key="Scrim" Color="#8C000000" />
+      <SolidColorBrush x:Key="Scrim" Color="#99040810" />
       <!-- 输入框、复选框、次按钮的边（≥ 3:1） -->
-      <SolidColorBrush x:Key="ControlBorder" Color="#7783A0" />
-      <SolidColorBrush x:Key="ControlHover" Color="#2D3746" />
-      <SolidColorBrush x:Key="ControlPressed" Color="#37404E" />
-      <SolidColorBrush x:Key="ControlSelected" Color="#2E3D5A" />
+      <SolidColorBrush x:Key="ControlBorder" Color="#6B7C9C" />
+      <SolidColorBrush x:Key="ControlHover" Color="#223049" />
+      <SolidColorBrush x:Key="ControlPressed" Color="#283853" />
+      <SolidColorBrush x:Key="ControlSelected" Color="#1C304B" />
       <!-- 焦点环 -->
-      <SolidColorBrush x:Key="Focus" Color="#A9C4FF" />
+      <SolidColorBrush x:Key="Focus" Color="#A9D2FF" />
       <!-- 琥珀：只给“开始游戏”这一类按钮 -->
-      <SolidColorBrush x:Key="Play" Color="#F6A93B" />
-      <SolidColorBrush x:Key="PlayHover" Color="#FFB955" />
-      <SolidColorBrush x:Key="PlayPressed" Color="#E0952A" />
-      <SolidColorBrush x:Key="OnPlay" Color="#1E1404" />
+      <SolidColorBrush x:Key="Play" Color="#FFB53F" />
+      <SolidColorBrush x:Key="PlayHover" Color="#FFC460" />
+      <SolidColorBrush x:Key="PlayPressed" Color="#F29C1F" />
+      <SolidColorBrush x:Key="OnPlay" Color="#2B1800" />
       <!-- 浅色下给琥珀按钮描边 -->
       <SolidColorBrush x:Key="PlayBorder" Color="#00000000" />
-      <SolidColorBrush x:Key="PlayText" Color="#F8B85C" />
+      <SolidColorBrush x:Key="PlayText" Color="#FFC062" />
       <!-- 琥珀按钮的光晕 -->
-      <SolidColorBrush x:Key="PlayGlow" Color="#40F6A93B" />
-      <SolidColorBrush x:Key="PlayTint" Color="#3E3C3A" />
+      <SolidColorBrush x:Key="PlayGlow" Color="#66FFA528" />
+      <SolidColorBrush x:Key="PlayTint" Color="#353230" />
       <!-- 红点角标 -->
-      <SolidColorBrush x:Key="Badge" Color="#FF6B6B" />
+      <SolidColorBrush x:Key="Badge" Color="#F36F6D" />
       <SolidColorBrush x:Key="OnBadge" Color="#1F0606" />
       <!-- 灰色数字角标 -->
-      <SolidColorBrush x:Key="BadgeMuted" Color="#455068" />
-      <SolidColorBrush x:Key="OnBadgeMuted" Color="#E8EDF5" />
+      <SolidColorBrush x:Key="BadgeMuted" Color="#33456A" />
+      <SolidColorBrush x:Key="OnBadgeMuted" Color="#E9EEF8" />
       <!-- 线描插画 -->
-      <SolidColorBrush x:Key="IlloLine" Color="#93B4FF" />
-      <SolidColorBrush x:Key="IlloFill" Color="#202A3A" />
+      <SolidColorBrush x:Key="IlloLine" Color="#6CB4FF" />
+      <SolidColorBrush x:Key="IlloFill" Color="#141D2E" />
       <!-- 加载器标签文字 -->
       <SolidColorBrush x:Key="LoaderVanilla" Color="#7DD08A" />
       <SolidColorBrush x:Key="LoaderFabric" Color="#E2C49A" />
@@ -178,94 +190,101 @@
       <SolidColorBrush x:Key="LoaderQuilt" Color="#C3A6FA" />
       <SolidColorBrush x:Key="LoaderOptiFine" Color="#F08C8C" />
       <!-- 日志级别（在 Sunken 上） -->
-      <SolidColorBrush x:Key="LogDebug" Color="#8D98AA" />
-      <SolidColorBrush x:Key="LogInfo" Color="#E8EDF5" />
+      <SolidColorBrush x:Key="LogDebug" Color="#8D9AB3" />
+      <SolidColorBrush x:Key="LogInfo" Color="#E9EEF8" />
       <SolidColorBrush x:Key="LogWarn" Color="#F0D46A" />
-      <SolidColorBrush x:Key="LogError" Color="#FF8C87" />
+      <SolidColorBrush x:Key="LogError" Color="#FF8F8A" />
       <SolidColorBrush x:Key="LogFatal" Color="#FF7AA8" />
-      <SolidColorBrush x:Key="LogJay" Color="#F8B85C" />
+      <SolidColorBrush x:Key="LogJay" Color="#FFC062" />
+      <!-- Wing bars: the jay's barred wing feathers (accent, dark, light, dark; 13 px period). Jay's signature mark, used only
+           on the selected nav item, the selected tab, progress fills and the edge of code cards. The stops follow
+           Amber.Core/Themes/WingBars.cs; a unit test compares them. -->
+      <SolidColorBrush x:Key="WingLight" Color="#CFE6FF" />
+      <SolidColorBrush x:Key="WingDark" Color="#061427" />
+      <LinearGradientBrush x:Key="WingBrush" StartPoint="0,0" EndPoint="13,0" SpreadMethod="Repeat"><GradientStop Offset="0" Color="#4DA3FF" /><GradientStop Offset="0.4615" Color="#4DA3FF" /><GradientStop Offset="0.4615" Color="#061427" /><GradientStop Offset="0.6154" Color="#061427" /><GradientStop Offset="0.6154" Color="#CFE6FF" /><GradientStop Offset="0.8462" Color="#CFE6FF" /><GradientStop Offset="0.8462" Color="#061427" /><GradientStop Offset="1" Color="#061427" /></LinearGradientBrush>
+      <LinearGradientBrush x:Key="WingBrushVertical" StartPoint="0,0" EndPoint="0,13" SpreadMethod="Repeat"><GradientStop Offset="0" Color="#4DA3FF" /><GradientStop Offset="0.4615" Color="#4DA3FF" /><GradientStop Offset="0.4615" Color="#061427" /><GradientStop Offset="0.6154" Color="#061427" /><GradientStop Offset="0.6154" Color="#CFE6FF" /><GradientStop Offset="0.8462" Color="#CFE6FF" /><GradientStop Offset="0.8462" Color="#061427" /><GradientStop Offset="1" Color="#061427" /></LinearGradientBrush>
     </ResourceDictionary>
     <ResourceDictionary x:Key="Light">
       <!-- 内容区底色（设计稿 Base） -->
-      <SolidColorBrush x:Key="PageBg" Color="#F3F5F9" />
+      <SolidColorBrush x:Key="PageBg" Color="#F1F4F9" />
       <!-- 卡片、列表容器、面板 -->
       <SolidColorBrush x:Key="Surface" Color="#FFFFFF" />
       <!-- 卡片里再凸起的块（设计稿 Raised） -->
-      <SolidColorBrush x:Key="SurfaceRaised" Color="#EEF1F6" />
+      <SolidColorBrush x:Key="SurfaceRaised" Color="#EDF1F8" />
       <!-- 分隔线、卡片 1px 边（设计稿 Divider） -->
-      <SolidColorBrush x:Key="BorderSubtle" Color="#D3D9E2" />
+      <SolidColorBrush x:Key="BorderSubtle" Color="#C9D2E0" />
       <!-- 侧栏、顶栏（设计稿 Frame） -->
-      <SolidColorBrush x:Key="SidebarBg" Color="#E4E9F0" />
+      <SolidColorBrush x:Key="SidebarBg" Color="#E7ECF4" />
       <!-- 正文、标题（设计稿 Text） -->
-      <SolidColorBrush x:Key="TextPrimary" Color="#111722" />
-      <SolidColorBrush x:Key="TextSecondary" Color="#455164" />
-      <SolidColorBrush x:Key="TextTertiary" Color="#566275" />
+      <SolidColorBrush x:Key="TextPrimary" Color="#131E31" />
+      <SolidColorBrush x:Key="TextSecondary" Color="#47566F" />
+      <SolidColorBrush x:Key="TextTertiary" Color="#55647D" />
       <!-- 松鸦蓝：普通主按钮、开关、进度、选中 -->
-      <SolidColorBrush x:Key="Accent" Color="#2C59CC" />
-      <SolidColorBrush x:Key="AccentHover" Color="#3A67DA" />
-      <SolidColorBrush x:Key="AccentPressed" Color="#2149B0" />
+      <SolidColorBrush x:Key="Accent" Color="#1A6FE3" />
+      <SolidColorBrush x:Key="AccentHover" Color="#1565D6" />
+      <SolidColorBrush x:Key="AccentPressed" Color="#0F56BD" />
       <SolidColorBrush x:Key="OnAccent" Color="#FFFFFF" />
       <!-- 链接、蓝色文字 -->
-      <SolidColorBrush x:Key="AccentText" Color="#2550BF" />
-      <SolidColorBrush x:Key="Success" Color="#16804F" />
-      <SolidColorBrush x:Key="SuccessText" Color="#11683F" />
+      <SolidColorBrush x:Key="AccentText" Color="#1560CC" />
+      <SolidColorBrush x:Key="Success" Color="#15895A" />
+      <SolidColorBrush x:Key="SuccessText" Color="#0F6B45" />
       <!-- 柠檬黄，和琥珀拉开色相 -->
       <SolidColorBrush x:Key="Warning" Color="#9A7400" />
       <SolidColorBrush x:Key="WarningText" Color="#7A5C00" />
-      <SolidColorBrush x:Key="Danger" Color="#C93030" />
+      <SolidColorBrush x:Key="Danger" Color="#CB3B3B" />
       <SolidColorBrush x:Key="DangerText" Color="#B02828" />
       <SolidColorBrush x:Key="OnDanger" Color="#FFFFFF" />
-      <SolidColorBrush x:Key="DisabledFill" Color="#F3F4F5" />
+      <SolidColorBrush x:Key="DisabledFill" Color="#EEF1F5" />
       <!-- 设计稿 TextDisabled -->
-      <SolidColorBrush x:Key="DisabledText" Color="#7C8698" />
+      <SolidColorBrush x:Key="DisabledText" Color="#76829A" />
       <!-- 设计稿 NavText -->
-      <SolidColorBrush x:Key="SidebarText" Color="#111722" />
+      <SolidColorBrush x:Key="SidebarText" Color="#131E31" />
       <!-- 设计稿 NavTextMuted -->
-      <SolidColorBrush x:Key="SidebarTextMuted" Color="#455164" />
+      <SolidColorBrush x:Key="SidebarTextMuted" Color="#47566F" />
       <!-- 设计稿 NavItemSelected，只在侧栏用 -->
-      <SolidColorBrush x:Key="NavSelected" Color="#CED7EC" />
+      <SolidColorBrush x:Key="NavSelected" Color="#D3E1F7" />
       <!-- 设计稿 NavItemHover -->
-      <SolidColorBrush x:Key="NavHover" Color="#D9DEE6" />
+      <SolidColorBrush x:Key="NavHover" Color="#DCE3EE" />
       <!-- 色调底：已按叠在 Surface 上算好 -->
-      <SolidColorBrush x:Key="AccentTint" Color="#E5EBF9" />
-      <SolidColorBrush x:Key="SuccessTint" Color="#E7F2ED" />
+      <SolidColorBrush x:Key="AccentTint" Color="#E4EEFC" />
+      <SolidColorBrush x:Key="SuccessTint" Color="#E6F3EC" />
       <SolidColorBrush x:Key="WarningTint" Color="#F5F1E5" />
-      <SolidColorBrush x:Key="DangerTint" Color="#F9EAEA" />
+      <SolidColorBrush x:Key="DangerTint" Color="#FAEAEA" />
       <!-- 菜单、抽屉、对话框、Toast -->
       <SolidColorBrush x:Key="Overlay" Color="#FFFFFF" />
       <!-- 日志、代码的凹陷底 -->
-      <SolidColorBrush x:Key="Sunken" Color="#EBEEF3" />
+      <SolidColorBrush x:Key="Sunken" Color="#E9EDF4" />
       <!-- 输入框底 -->
       <SolidColorBrush x:Key="InputBg" Color="#FFFFFF" />
       <!-- 对话框后面的遮罩 -->
       <SolidColorBrush x:Key="Scrim" Color="#590B1220" />
       <!-- 输入框、复选框、次按钮的边（≥ 3:1） -->
-      <SolidColorBrush x:Key="ControlBorder" Color="#6E7B8F" />
-      <SolidColorBrush x:Key="ControlHover" Color="#F3F3F5" />
-      <SolidColorBrush x:Key="ControlPressed" Color="#E9EAED" />
-      <SolidColorBrush x:Key="ControlSelected" Color="#E5EBF9" />
+      <SolidColorBrush x:Key="ControlBorder" Color="#6C7A92" />
+      <SolidColorBrush x:Key="ControlHover" Color="#F1F4F9" />
+      <SolidColorBrush x:Key="ControlPressed" Color="#E6EBF3" />
+      <SolidColorBrush x:Key="ControlSelected" Color="#E4EEFC" />
       <!-- 焦点环 -->
-      <SolidColorBrush x:Key="Focus" Color="#2C59CC" />
+      <SolidColorBrush x:Key="Focus" Color="#1A6FE3" />
       <!-- 琥珀：只给“开始游戏”这一类按钮 -->
-      <SolidColorBrush x:Key="Play" Color="#F6A93B" />
-      <SolidColorBrush x:Key="PlayHover" Color="#FFB955" />
-      <SolidColorBrush x:Key="PlayPressed" Color="#E0952A" />
-      <SolidColorBrush x:Key="OnPlay" Color="#1E1404" />
+      <SolidColorBrush x:Key="Play" Color="#FFB031" />
+      <SolidColorBrush x:Key="PlayHover" Color="#FFBE52" />
+      <SolidColorBrush x:Key="PlayPressed" Color="#F09A14" />
+      <SolidColorBrush x:Key="OnPlay" Color="#2B1800" />
       <!-- 浅色下给琥珀按钮描边 -->
       <SolidColorBrush x:Key="PlayBorder" Color="#A3620C" />
       <SolidColorBrush x:Key="PlayText" Color="#8F520A" />
       <!-- 琥珀按钮的光晕 -->
-      <SolidColorBrush x:Key="PlayGlow" Color="#4DF6A93B" />
-      <SolidColorBrush x:Key="PlayTint" Color="#FEF5E7" />
+      <SolidColorBrush x:Key="PlayGlow" Color="#73F59614" />
+      <SolidColorBrush x:Key="PlayTint" Color="#FFF5E4" />
       <!-- 红点角标 -->
-      <SolidColorBrush x:Key="Badge" Color="#C9302C" />
+      <SolidColorBrush x:Key="Badge" Color="#CB3B3B" />
       <SolidColorBrush x:Key="OnBadge" Color="#FFFFFF" />
       <!-- 灰色数字角标 -->
-      <SolidColorBrush x:Key="BadgeMuted" Color="#5A6578" />
+      <SolidColorBrush x:Key="BadgeMuted" Color="#56637A" />
       <SolidColorBrush x:Key="OnBadgeMuted" Color="#FFFFFF" />
       <!-- 线描插画 -->
-      <SolidColorBrush x:Key="IlloLine" Color="#3A67DA" />
-      <SolidColorBrush x:Key="IlloFill" Color="#E5EBF9" />
+      <SolidColorBrush x:Key="IlloLine" Color="#2B7CEB" />
+      <SolidColorBrush x:Key="IlloFill" Color="#E4EEFC" />
       <!-- 加载器标签文字 -->
       <SolidColorBrush x:Key="LoaderVanilla" Color="#236B30" />
       <SolidColorBrush x:Key="LoaderFabric" Color="#7D5E30" />
@@ -274,12 +293,19 @@
       <SolidColorBrush x:Key="LoaderQuilt" Color="#6A3FC2" />
       <SolidColorBrush x:Key="LoaderOptiFine" Color="#A3303A" />
       <!-- 日志级别（在 Sunken 上） -->
-      <SolidColorBrush x:Key="LogDebug" Color="#566275" />
-      <SolidColorBrush x:Key="LogInfo" Color="#111722" />
+      <SolidColorBrush x:Key="LogDebug" Color="#55647D" />
+      <SolidColorBrush x:Key="LogInfo" Color="#131E31" />
       <SolidColorBrush x:Key="LogWarn" Color="#7A5C00" />
       <SolidColorBrush x:Key="LogError" Color="#B02828" />
       <SolidColorBrush x:Key="LogFatal" Color="#A3245A" />
       <SolidColorBrush x:Key="LogJay" Color="#8F520A" />
+      <!-- Wing bars: the jay's barred wing feathers (accent, dark, light, dark; 13 px period). Jay's signature mark, used only
+           on the selected nav item, the selected tab, progress fills and the edge of code cards. The stops follow
+           Amber.Core/Themes/WingBars.cs; a unit test compares them. -->
+      <SolidColorBrush x:Key="WingLight" Color="#A9D1FF" />
+      <SolidColorBrush x:Key="WingDark" Color="#0A2550" />
+      <LinearGradientBrush x:Key="WingBrush" StartPoint="0,0" EndPoint="13,0" SpreadMethod="Repeat"><GradientStop Offset="0" Color="#1A6FE3" /><GradientStop Offset="0.4615" Color="#1A6FE3" /><GradientStop Offset="0.4615" Color="#0A2550" /><GradientStop Offset="0.6154" Color="#0A2550" /><GradientStop Offset="0.6154" Color="#A9D1FF" /><GradientStop Offset="0.8462" Color="#A9D1FF" /><GradientStop Offset="0.8462" Color="#0A2550" /><GradientStop Offset="1" Color="#0A2550" /></LinearGradientBrush>
+      <LinearGradientBrush x:Key="WingBrushVertical" StartPoint="0,0" EndPoint="0,13" SpreadMethod="Repeat"><GradientStop Offset="0" Color="#1A6FE3" /><GradientStop Offset="0.4615" Color="#1A6FE3" /><GradientStop Offset="0.4615" Color="#0A2550" /><GradientStop Offset="0.6154" Color="#0A2550" /><GradientStop Offset="0.6154" Color="#A9D1FF" /><GradientStop Offset="0.8462" Color="#A9D1FF" /><GradientStop Offset="0.8462" Color="#0A2550" /><GradientStop Offset="1" Color="#0A2550" /></LinearGradientBrush>
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>
