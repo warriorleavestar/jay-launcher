@@ -1,10 +1,19 @@
 name: android-graphics-runtime
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/android-graphics-runtime.yml'
+      - 'scripts/build-android-mesa.sh'
+      - 'third_party/android-mesa/**'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
