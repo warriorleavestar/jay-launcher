@@ -155,10 +155,19 @@ if [ -z "$PUBLIC_HOST" ]; then
     esac
 fi
 
-json="{\"v\":1"
-[ -n "$NODE_NAME" ] && json="${json},\"name\":\"$(printf '%s' "$NODE_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')\""
-json="${json},\"peers\":[\"tcp://${PUBLIC_HOST}:${PORT}\",\"udp://${PUBLIC_HOST}:${PORT}\"]}"
-CODE="AMBNODE-$(printf '%s' "$json" | base64 | tr -d '\n=' | tr '+/' '-_')"
+# A share code names a node by domain only, never by IP (Jay refuses plain codes with an IP in them).
+CODE=""
+case "$PUBLIC_HOST" in
+    *:*) is_ip=1 ;;          # IPv6
+    *[!0-9.]*) is_ip=0 ;;    # a name
+    *) is_ip=1 ;;            # IPv4 (or empty)
+esac
+if [ "$is_ip" = 0 ]; then
+    json="{\"v\":1"
+    [ -n "$NODE_NAME" ] && json="${json},\"name\":\"$(printf '%s' "$NODE_NAME" | sed 's/\\/\\\\/g; s/"/\\"/g')\""
+    json="${json},\"peers\":[\"tcp://${PUBLIC_HOST}:${PORT}\",\"udp://${PUBLIC_HOST}:${PORT}\"]}"
+    CODE="AMBNODE-$(printf '%s' "$json" | base64 | tr -d '\n=' | tr '+/' '-_')"
+fi
 
 say ""
 say "=========================================================="
@@ -166,8 +175,15 @@ say "节点已运行 / node is running（${SERVICE}.service）"
 say "节点地址 / node address:  tcp://${PUBLIC_HOST}:${PORT}   udp://${PUBLIC_HOST}:${PORT}"
 say "转发范围 / relays:        $([ "$RELAY" = amber ] && echo 'Amber 联机房间 only' || echo '所有 EasyTier 网络 / all networks')"
 say ""
-say "Amber 节点分享码（在联机页“联机节点”里导入）/ Amber node share code:"
-say "$CODE"
+if [ -n "$CODE" ]; then
+    say "Jay 节点分享码（在联机设置“中转服务器”里导入）/ Jay node share code:"
+    say "$CODE"
+else
+    say "这个节点用的是 IP 地址，分享码不能直接写 IP。在 Jay 联机设置的“中转服务器”里添加上面的地址，再点【导出】，"
+    say "Jay 会生成加密的分享码和口令。有域名时用 PUBLIC_HOST=<域名> 重新运行，就能直接打印分享码。"
+    say "This node goes by an IP address, and share codes never carry one. Add the address above in Jay (Multiplayer settings,"
+    say "relay servers) and press Export: Jay makes a sealed code and a passphrase. With a domain, re-run with PUBLIC_HOST=<domain>."
+fi
 say ""
 say "记得在云服务器安全组放行 TCP 和 UDP ${PORT} / open TCP and UDP ${PORT} in your cloud security group"
 say "查看状态 / status:  systemctl status ${SERVICE}"

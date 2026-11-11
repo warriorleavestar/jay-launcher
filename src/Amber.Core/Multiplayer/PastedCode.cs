@@ -15,7 +15,7 @@ public enum PastedCodeKind
     OldDirect,
     /// <summary>节点分享码 AMBNODE-…。</summary>
     NodeShare,
-    /// <summary>Jay 服务器邀请码 JAYS1-…：贴到“Jay 服务器”卡片。</summary>
+    /// <summary>Jay 服务器邀请码 JAYS2- / JAYSS1-（加密）…：贴到“Jay 服务器”卡片。</summary>
     JayServer,
     /// <summary>好友码 JAYF1-…（设备指纹码）：到“公开房间”里找朋友的隐藏房间。</summary>
     FriendCode,
@@ -64,8 +64,12 @@ public static class PastedCode
         ("AMBDIRECT", PastedCodeKind.OldDirect),
         ("AMBREPLY", PastedCodeKind.OldDirect),
         ("AMBNODE-", PastedCodeKind.NodeShare),
+        (RelayNodes.SealedPrefix, PastedCodeKind.NodeShare),
         ("JAY2-", PastedCodeKind.Invite),
-        ("JAYS1-", PastedCodeKind.JayServer),
+        (Gate.GateInvite.SealedPrefix, PastedCodeKind.JayServer),
+        (Gate.GateInvite.Prefix, PastedCodeKind.JayServer),
+        // Old server invites go to the server card too, which explains they must be remade.
+        (Gate.GateInvite.OldPrefix, PastedCodeKind.JayServer),
         ("JAYF1-", PastedCodeKind.FriendCode),
         ("JAYC1-", PastedCodeKind.ContactCode),
         ("JAYNET", PastedCodeKind.PublicNetwork),

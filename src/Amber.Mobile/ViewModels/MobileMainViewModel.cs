@@ -95,7 +95,13 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
     public bool HasStatus => !string.IsNullOrWhiteSpace(Status);
 
     [ObservableProperty] public partial string DeviceFingerprint { get; set; } = "";
-    [ObservableProperty] public partial string InviteText { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(InviteIsSealed))]
+    public partial string InviteText { get; set; } = "";
+    /// <summary>The passphrase of a sealed invite (a server with no domain).</summary>
+    [ObservableProperty] public partial string InvitePassphrase { get; set; } = "";
+    public bool InviteIsSealed => GateInvite.IsSealed(InviteText);
+    public string PassphrasePlaceholder => L.T("multiplayer.jayserver.passphrase_placeholder");
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasStatus))]
     public partial string Status { get; set; } = "";
@@ -110,7 +116,12 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
     [RelayCommand]
     private async Task EnrollAsync()
     {
-        var invite = GateInvite.TryParse(InviteText, out var error);
+        var text = InviteText;
+        var passphrase = InvitePassphrase;
+        IsBusy = true;
+        // A sealed invite (a server with no domain) needs its passphrase; opening it runs Argon2id, off the UI thread.
+        var (invite, error) = await Task.Run(() => (GateInvite.TryOpen(text, passphrase, out var e), e));
+        IsBusy = false;
         if (invite is null)
         {
             Status = error ?? L.T("mobile.enroll.invalid");
@@ -124,6 +135,7 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
             var membership = await GateClient.EnrollAsync(invite, _identity);
             var entry = _serverList.Add(membership);
             InviteText = "";
+            InvitePassphrase = "";
             ReloadServers();
             Status = L.F("multiplayer.jayserver.enrolled", entry.DisplayName, membership.Username);
         }

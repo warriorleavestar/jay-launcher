@@ -35,7 +35,12 @@ public sealed partial class JayServersViewModel : ObservableObject
     private JayServerItem? _connected;
 
     public ObservableCollection<JayServerItem> Servers { get; } = [];
-    [ObservableProperty] public partial string InviteText { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(InviteIsSealed))]
+    public partial string InviteText { get; set; } = "";
+    /// <summary>The passphrase for a sealed invite (a server with no domain).</summary>
+    [ObservableProperty] public partial string InvitePassphrase { get; set; } = "";
+    public bool InviteIsSealed => GateInvite.IsSealed(InviteText);
     [ObservableProperty] public partial string Status { get; set; } = "";
     [ObservableProperty] public partial bool IsBusy { get; set; }
     [ObservableProperty] public partial string DeviceCode { get; set; } = "";
@@ -70,7 +75,17 @@ public sealed partial class JayServersViewModel : ObservableObject
     [RelayCommand]
     private async Task JoinAsync()
     {
-        var invite = GateInvite.TryParse(InviteText, out var error);
+        if (InviteIsSealed && SealedDirect.NormalizePassphrase(InvitePassphrase) is null)
+        {
+            Status = L.T("multiplayer.sealed.enter_passphrase");
+            return;
+        }
+        var text = InviteText;
+        var passphrase = InvitePassphrase;
+        IsBusy = true;
+        // Opening a sealed invite runs Argon2id: off the UI thread.
+        var (invite, error) = await Task.Run(() => (GateInvite.TryOpen(text, passphrase, out var e), e));
+        IsBusy = false;
         if (invite is null)
         {
             Status = error ?? "";
@@ -83,6 +98,7 @@ public sealed partial class JayServersViewModel : ObservableObject
             var membership = await GateClient.EnrollAsync(invite, Identity());
             var entry = _list.Add(membership);
             InviteText = "";
+            InvitePassphrase = "";
             Load();
             Status = L.F("multiplayer.jayserver.enrolled", entry.DisplayName, membership.Username);
         }

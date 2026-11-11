@@ -446,7 +446,7 @@ public static class Program
                 // 一步准备好自己的公共网络：签名钥匙 + 网络 JSON + 网络配置模板。
                 var id = rest.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init <编号> --name <名字> --host <公网地址> [--listen 11010] [--out <文件夹>]");
                 var name = options.Get("name") ?? throw new ArgumentException("要用 --name 给网络起个名字");
-                var host = options.Get("host") ?? throw new ArgumentException("要用 --host 给节点的公网地址（IP 或域名）");
+                var host = options.Get("host") ?? throw new ArgumentException("要用 --host 给节点的域名（网络连接串里不能写公网 IP）");
                 var port = options.GetInt("listen", 11010);
                 var dir = Path.GetFullPath(options.Get("out") ?? id);
                 var nodes = new List<string> { $"tcp://{host}:{port}", $"udp://{host}:{port}" };
@@ -1030,8 +1030,18 @@ public static class Program
                 var invite = store.CreateInvite(name, ttl, options.GetInt("uses", 1), key.PublicKey);
                 output.WriteLine($"给 {name} 的邀请码（{FormatDuration(ttl)}内有效，可用 {options.GetInt("uses", 1)} 次）：");
                 output.WriteLine();
-                output.WriteLine(invite.Encode());
+                var (code, passphrase) = invite.ToCode();
+                output.WriteLine(code);
                 output.WriteLine();
+                if (passphrase is not null)
+                {
+                    // An IP-only server: the code is sealed so it shows no address; the passphrase opens it.
+                    output.WriteLine("这台服务器没有域名，邀请码已加密，不含 IP。打开它的口令：");
+                    output.WriteLine();
+                    output.WriteLine("  " + passphrase);
+                    output.WriteLine();
+                    output.WriteLine("口令要换个方式告诉对方（打电话、当面），别和邀请码发在一起。");
+                }
                 output.WriteLine("让对方在 Jay 启动器里选“加入 Jay 服务器”，粘贴这段码。别发到公开的地方。");
                 return 0;
             }

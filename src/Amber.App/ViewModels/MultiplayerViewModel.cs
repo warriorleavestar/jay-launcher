@@ -425,7 +425,14 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     public ObservableCollection<NodeItem> Nodes { get; } = [];
     [ObservableProperty] public partial string NewNodeUrl { get; set; } = "";
-    [ObservableProperty] public partial string ShareCodeText { get; set; } = "";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShareCodeIsSealed))]
+    public partial string ShareCodeText { get; set; } = "";
+    /// <summary>
+    /// The passphrase of a sealed node share code (a node that goes by an IP): shown after export, typed before import.
+    /// </summary>
+    [ObservableProperty] public partial string SharePassphrase { get; set; } = "";
+    public bool ShareCodeIsSealed => RelayNodes.IsSealed(ShareCodeText);
 
     /// <summary>内置节点（只读显示，可以测延迟）。</summary>
     public ObservableCollection<NodeItem> BuiltInNodes { get; } = [.. RelayNodes.BuiltIn.Select(u => new NodeItem(u))];
@@ -509,17 +516,34 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task ExportNodesAsync()
     {
-        ShareCodeText = RelayNodes.Encode(null, Nodes.Select(n => n.Url));
+        var urls = Nodes.Select(n => n.Url).ToList();
+        if (urls.Count == 0)
+        {
+            SetStatus(StatusMessage.Warning("core.mp.nodes.empty"));
+            return;
+        }
+        // A node that goes by an IP: the code is sealed (Argon2id, off the UI thread) and the passphrase shown beside it.
+        var (code, passphrase) = await Task.Run(() => RelayNodes.Share(null, urls));
+        ShareCodeText = code;
+        SharePassphrase = passphrase ?? "";
         await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);
-        SetStatus(StatusMessage.Success("multiplayer.nodes.exported"));
+        SetStatus(StatusMessage.Success(passphrase is null ? "multiplayer.nodes.exported" : "multiplayer.nodes.exported_sealed"));
     }
 
     [RelayCommand]
-    private void ImportNodes()
+    private async Task ImportNodesAsync()
     {
-        if (!RelayNodes.TryDecode(ShareCodeText, out var name, out var urls))
+        if (ShareCodeIsSealed && SealedDirect.NormalizePassphrase(SharePassphrase) is null)
         {
-            SetStatus(StatusMessage.Error("multiplayer.nodes.invalid_share_code"));
+            SetStatus(StatusMessage.Warning("multiplayer.sealed.enter_passphrase"));
+            return;
+        }
+        var text = ShareCodeText;
+        var passphrase = SharePassphrase;
+        var (ok, name, urls, error) = await Task.Run(() => (RelayNodes.TryOpen(text, passphrase, out var n, out var u, out var e), n, u, e));
+        if (!ok)
+        {
+            SetStatus(new StatusMessage("common.raw", [error ?? L.T("multiplayer.nodes.invalid_share_code")], StatusKind.Error));
             return;
         }
         var added = 0;
@@ -530,6 +554,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         SaveNodes();
         ShareCodeText = "";
+        SharePassphrase = "";
         Status = name is null ? L.P("multiplayer.nodes.imported", added, added, "") : L.P("multiplayer.nodes.imported_named", added, added, name);
     }
 

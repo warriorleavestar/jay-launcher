@@ -19,7 +19,7 @@ public static class NetworkScaffold
     /// 在 <paramref name="dir"/> 里生成 network.key（签名私钥）、&lt;编号&gt;.json（网络信息）、config.json（网络配置模板）。
     /// 已经有的文件不覆盖。
     /// </summary>
-    /// <param name="nodes">玩家连的节点地址（tcp://公网地址:11010），至少一个。</param>
+    /// <param name="nodes">玩家连的节点地址（tcp://域名:11010，不能写公网 IP），至少一个。</param>
     public static Result Init(string dir, string id, string name, IReadOnlyList<string> nodes)
     {
         if (!NetworkString.IsValidId(id) || id == "jay") throw new ArgumentException("编号要是 2~32 个小写字母、数字、减号，不能是 jay");

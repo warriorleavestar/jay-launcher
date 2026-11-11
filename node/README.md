@@ -31,7 +31,7 @@ sudo bash install.sh
 | `PORT` | `11010` | 监听端口，TCP 和 UDP 都用这个 |
 | `RELAY` | `amber` | `amber` 只转发 Amber 联机房间；`all` 转发所有 EasyTier 网络 |
 | `NODE_NAME` | 空 | 分享码里显示的名字 |
-| `PUBLIC_HOST` | 自动猜 | 公网 IP 或域名。云服务器网卡上常是内网地址，这时要手动填 |
+| `PUBLIC_HOST` | 自动猜 | 公网 IP 或域名。云服务器网卡上常是内网地址，这时要手动填。填域名时脚本会打印节点分享码；只有 IP 时分享码不能写 IP，在 Jay 里添加地址后点【导出】，生成加密分享码和口令 |
 | `BANDWIDTH_LIMIT` | `0` | 转发别人流量的限速（字节/秒），0 不限 |
 
 例如：`sudo PUBLIC_HOST=203.0.113.5 NODE_NAME=小明的节点 bash install.sh`
@@ -89,7 +89,7 @@ curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main
 sudo bash install.sh
 ```
 
-The script downloads the pinned EasyTier release (2.6.4) from GitHub and verifies its SHA-256, creates a dedicated `amber-node` system user and an `amber-node` systemd service, opens TCP and UDP 11010 in ufw or firewalld if active, and prints the node address plus an **Amber node share code** you can import on Amber's Multiplayer page.
+The script downloads the pinned EasyTier release (2.6.4) from GitHub and verifies its SHA-256, creates a dedicated `amber-node` system user and an `amber-node` systemd service, opens TCP and UDP 11010 in ufw or firewalld if active, and prints the node address. With a domain (`PUBLIC_HOST=<domain>`) it also prints a **node share code** to import in Jay's multiplayer settings. Share codes never carry an IP address: for a node with only an IP, add the address in Jay and press Export, and Jay makes a sealed code plus a passphrase to tell your friends another way.
 
 Options (set them after `sudo`): `PORT` (default 11010), `RELAY` (`amber` = Amber rooms only, `all` = every EasyTier network), `NODE_NAME`, `PUBLIC_HOST` (public IP or domain; set it when the interface only has a private address), `BANDWIDTH_LIMIT` (bytes/s for relayed traffic, 0 = unlimited).
 
