@@ -1,4 +1,5 @@
 using Amber.Mobile.ViewModels;
+using Amber.Mobile;
 using System.Reflection;
 using Amber.Mobile.Views;
 using Avalonia;
@@ -54,6 +55,45 @@ public sealed class MobilePortTests
                 Assert.Equal(wide ? 2 : 1, columns.ColumnDefinitions.Count);
             }
         });
+    }
+
+    [Fact]
+    public async Task AndroidGameLauncherBridgeReceivesTheRunningGatewayAddress()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-mobile-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var platform = new FakeMobilePlatformServices();
+            await using var viewModel = new MobileMainViewModel(root, platform);
+            Assert.True(viewModel.ShowGameLauncher);
+
+            viewModel.IsConnected = true;
+            viewModel.LocalAddress = "127.0.0.1:25565";
+            await viewModel.OpenGameLauncherCommand.ExecuteAsync(null);
+
+            Assert.Equal("127.0.0.1:25565", platform.OpenedWithAddress);
+            Assert.Contains("FCL", viewModel.Status);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    private sealed class FakeMobilePlatformServices : IMobilePlatformServices
+    {
+        public bool CanOpenGameLauncher => true;
+        public string GameLauncherName => "FCL";
+        public string? OpenedWithAddress { get; private set; }
+
+        public Task<MobileGameLauncherResult> OpenGameLauncherAsync(string? serverAddress)
+        {
+            OpenedWithAddress = serverAddress;
+            return Task.FromResult(MobileGameLauncherResult.Launched);
+        }
+
+        public void SetGatewayActive(bool active) { }
     }
 
 }

@@ -174,7 +174,7 @@ There is also a command-line version, for example `dotnet run --project Amber.Cl
 
 Jay is built with C#, .NET 10 and [Avalonia](https://avaloniaui.net/).
 
-The experimental Android and iOS projects currently provide Jay Server enrollment and a localhost gateway; they cannot launch Minecraft themselves yet. See the [Android](docs/android.md) and [iOS](docs/ios.md) experiment notes for build steps and current limitations.
+The experimental Android and iOS projects provide Jay Server enrollment and a localhost gateway. Android can keep that gateway alive, copy its address and open the separately installed FCL app for the Minecraft Java runtime and touch controls; Jay does not bundle FCL. iOS still requires a separate compatible client. See the [Android](docs/android.md) and [iOS](docs/ios.md) experiment notes for build steps and current limitations.
 
 ## FAQ
 
