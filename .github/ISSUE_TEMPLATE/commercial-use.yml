@@ -1,0 +1,41 @@
+name: Commercial use application
+description: Ask the Jay development team for permission to use Jay commercially (see COMMERCIAL-EXCEPTION.md).
+title: "[Commercial use] "
+labels: ["commercial-use"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read [COMMERCIAL-EXCEPTION.md](https://github.com/warriorleavestar/jay-launcher/blob/main/COMMERCIAL-EXCEPTION.md) first. **This issue is public**: don't post anything you want to keep private.
+        Permission starts only when the Jay development team agrees in writing in this issue.
+  - type: input
+    id: who
+    attributes:
+      label: Who you are
+      description: Your name, or your team's name, and how many people are in the team.
+    validations:
+      required: true
+  - type: textarea
+    id: use
+    attributes:
+      label: How you will use Jay
+      description: What you will do with Jay and how it makes money.
+    validations:
+      required: true
+  - type: input
+    id: profit
+    attributes:
+      label: Expected real profit from Jay per 12 months (USD)
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirm
+      options:
+        - label: I am both the end user of Jay and the final beneficiary of this use, and I will not use Jay for or on behalf of anyone else.
+          required: true
+        - label: I will tell the Jay development team within 30 days if real profit from Jay reaches the limit.
+          required: true
+        - label: I will not transfer this permission without the team's written consent.
+          required: true

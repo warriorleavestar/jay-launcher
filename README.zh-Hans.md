@@ -7,11 +7,11 @@
 ### 你和朋友的私密空间：一起玩、聊天、传东西，还自带 Minecraft 启动器。
 
 隔着国境也能一起玩 Minecraft 和任何局域网游戏，聊天和传文件端到端加密，<br>
-远程帮朋友修电脑，或者借朋友的网络上网。开源，没有任何遥测。
+远程帮朋友修电脑，或者借朋友的网络上网。源码公开，没有任何遥测。
 
 [![最新版本](https://img.shields.io/github/v/release/warriorleavestar/jay-launcher?color=d98a1f&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/warriorleavestar/jay-launcher/releases/latest)
 [![构建](https://img.shields.io/github/actions/workflow/status/warriorleavestar/jay-launcher/build.yml?branch=main&label=%E6%9E%84%E5%BB%BA)](https://github.com/warriorleavestar/jay-launcher/actions/workflows/build.yml)
-[![许可证: MIT](https://img.shields.io/github/license/warriorleavestar/jay-launcher?color=4b6584&label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
+[![许可证: PolyForm Noncommercial](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-PolyForm%20Noncommercial-4b6584)](LICENSE)
 
 [![下载 Windows 版](https://img.shields.io/badge/Windows-%E4%B8%8B%E8%BD%BD-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip)
 [![下载 macOS 版](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz)
@@ -201,7 +201,7 @@ Jay 只有一个承诺：**只为你要做的事联网。**
 - 直连房间会向你设置的 STUN 服务器（默认 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`，可改可清空）询问你的外部地址，它们不经过游戏数据；也可能请你的路由器临时映射一个端口，结束联机时删掉。
 </details>
 
-代码完全开源，欢迎自己查。完整的隐私政策和 Jay 对系统的改动见[隐私政策](docs/privacy.md)。
+代码完全公开，欢迎自己查。完整的隐私政策和 Jay 对系统的改动见[隐私政策](docs/privacy.md)。
 
 ## Jay 家族
 
@@ -310,7 +310,11 @@ CurseForge 的接口需要 API Key，见上面的[配置](#配置)。Modrinth �
 
 ## 许可证
 
-Jay 以 [MIT 许可证](LICENSE)发布。
+Jay 以 [PolyForm Noncommercial 1.0.0 许可证](LICENSE)公开源码。个人使用和其他非商业用途免费。个人和小团队可以按[商用例外条款](COMMERCIAL-EXCEPTION.md)申请免费商用；其他商用都需要 Jay 开发团队的书面授权。（以英文条款为准。）
+
+这个许可证现在适用于 Jay 的所有版本，包括最初以 MIT 许可证发布的 v0.7.0 及更早版本。Jay 开发团队不再以 MIT 提供任何版本；已经按 MIT 拿到旧版本副本的人，对那份副本的 MIT 权利不受影响。
+
+任何地方（包括旧文档、发布说明和别处的副本）如果还说 Jay 是“开源”或“MIT”，都是过时的描述，以 [LICENSE](LICENSE) 和 [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) 为准。发现这样的描述，请[提 issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose)。
 
 联机使用的 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0）加固版（源码在 [jay-easytier](https://github.com/Yumao-Feather/jay-easytier)）是独立项目，Jay 不内置它，第一次使用联机时才下载。Linux 版内置的思源黑体（Noto Sans SC）使用 SIL Open Font License 1.1（[OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)）。
 

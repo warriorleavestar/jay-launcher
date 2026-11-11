@@ -704,6 +704,8 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         "forge_api_missing" => "core.bake.problem.forge_api_missing",
         "quilt_api_missing" => "core.bake.problem.quilt_api_missing",
         "mixin_incompatible" => "core.bake.problem.mixin_incompatible",
+        "mixin_lambda_unresolved" => "core.bake.problem.mixin_lambda_unresolved",
+        "mixin_target_changed" => "core.bake.problem.mixin_target_changed",
         _ => null,
     };
 

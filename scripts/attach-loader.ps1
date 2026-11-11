@@ -1,6 +1,6 @@
 <#
 Attach the universal loader package zip to Jay's GitHub release that Jay downloads it from.
-Jay only accepts the zip pinned in src/Amber.Core/Bake/BakeLoaderRelease.cs (asset name, size, SHA-256), so this script
+Jay only accepts the zip pinned in build/pins.json (id jay-loader: asset name, size, SHA-256), so this script
 first checks the zip against that pin and refuses anything else. See docs/universal-loader-release.md.
 
 Usage:
@@ -19,29 +19,22 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$pinFile = Join-Path $root "src\Amber.Core\Bake\BakeLoaderRelease.cs"
-$source = Get-Content -Raw -Encoding UTF8 $pinFile
-$m = [regex]::Match($source, 'Pinned \{ get; \} = new\(\s*(?<base>\w+|"[^"]*"),\s*"(?<ver>[^"]*)",\s*"(?<tag>[^"]*)",\s*"(?<asset>[^"]*)",\s*"(?<sha>[^"]*)",\s*(?<size>[0-9_]+)\)')
-if (-not $m.Success) { throw "Could not read the pinned loader release from $pinFile" }
-$base = $m.Groups["base"].Value
-if ($base -notmatch '^"') {
-    $c = [regex]::Match($source, "const string $base = ""(?<url>[^""]+)""")
-    if (-not $c.Success) { throw "Could not read $base from $pinFile" }
-    $base = $c.Groups["url"].Value
-} else { $base = $base.Trim('"') }
-$r = [regex]::Match($base, '^https://github\.com/(?<repo>[^/]+/[^/]+)/releases/download/?$')
-if (-not $r.Success) { throw "The pinned release base $base is not a GitHub releases download root" }
+$pinFile = Join-Path $root "build\pins.json"
+$entry = (Get-Content -Raw -Encoding UTF8 $pinFile | ConvertFrom-Json).pins | Where-Object { $_.id -eq "jay-loader" } | Select-Object -First 1
+if (-not $entry) { throw "No jay-loader pin in $pinFile" }
+$r = [regex]::Match([string]$entry.urls[0], '^https://github\.com/(?<repo>[^/]+/[^/]+)/releases/download/(?<tag>[^/]+)/(?<asset>[^/]+)$')
+if (-not $r.Success) { throw "The jay-loader URL in $pinFile is not a GitHub release asset" }
 $Repo = $r.Groups["repo"].Value
-if ($m.Groups["sha"].Value -notmatch '^[0-9a-fA-F]{64}$' -or $m.Groups["tag"].Value -eq "") {
-    Write-Host "The pin in $pinFile is not filled in yet (no tag / SHA-256). Fill in the loader version, tag, asset name, SHA-256 and size of the zip first." -ForegroundColor Red
+if ([string]$entry.sha256 -notmatch '^[0-9a-f]{64}$' -or -not $entry.tag -or $r.Groups["tag"].Value -ne $entry.tag -or $r.Groups["asset"].Value -ne $entry.file) {
+    Write-Host "The jay-loader pin in $pinFile is incomplete or its URL does not match its tag and file. Fill in the loader version, tag, file, URL, SHA-256 and size first." -ForegroundColor Red
     exit 1
 }
 $pin = [pscustomobject]@{
-    Version = $m.Groups["ver"].Value
-    Tag     = $m.Groups["tag"].Value
-    Asset   = $m.Groups["asset"].Value
-    Sha256  = $m.Groups["sha"].Value.ToLowerInvariant()
-    Size    = [long]($m.Groups["size"].Value -replace "_", "")
+    Version = [string]$entry.version
+    Tag     = [string]$entry.tag
+    Asset   = [string]$entry.file
+    Sha256  = [string]$entry.sha256
+    Size    = [long]$entry.size
 }
 Write-Host "Pinned: $Repo, loader $($pin.Version), release tag $($pin.Tag), asset $($pin.Asset), $($pin.Size) bytes, sha256 $($pin.Sha256)"
 
@@ -55,7 +48,7 @@ if ($sha -ne $pin.Sha256) { $problems += "sha256 is $sha, the pin expects $($pin
 if ($problems.Count -gt 0) {
     Write-Host "This zip is not the one Jay is pinned to:" -ForegroundColor Red
     $problems | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
-    Write-Host "Either attach the pinned zip, or update the pin in src/Amber.Core/Bake/BakeLoaderRelease.cs (and ship a Jay with it) first."
+    Write-Host "Either attach the pinned zip, or update the jay-loader pin in build/pins.json (and ship a Jay with it) first."
     exit 1
 }
 

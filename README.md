@@ -7,11 +7,11 @@
 ### A private place for you and your friends: play, chat, share. Minecraft launcher built in.
 
 Play Minecraft or any LAN game together across borders, chat and send files end to end encrypted,<br>
-help a friend with remote control, or borrow a friend's connection. Open source, no telemetry at all.
+help a friend with remote control, or borrow a friend's connection. Source available, no telemetry at all.
 
 [![Latest release](https://img.shields.io/github/v/release/warriorleavestar/jay-launcher?color=d98a1f&label=release)](https://github.com/warriorleavestar/jay-launcher/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/warriorleavestar/jay-launcher/build.yml?branch=main&label=build)](https://github.com/warriorleavestar/jay-launcher/actions/workflows/build.yml)
-[![License: MIT](https://img.shields.io/github/license/warriorleavestar/jay-launcher?color=4b6584)](LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-4b6584)](LICENSE)
 
 [![Download for Windows](https://img.shields.io/badge/Windows-Download-d98a1f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-win-x64.zip)
 [![Download for macOS](https://img.shields.io/badge/macOS-Download-4b6584?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/warriorleavestar/jay-launcher/releases/latest/download/Jay-osx-arm64.tar.gz)
@@ -201,7 +201,7 @@ Jay is built on a simple promise: **it only goes online to do what you asked.**
 - Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address. They carry no game data. Jay may also ask your router for a temporary port mapping, removed when the session ends.
 </details>
 
-The code is open, so you can check all of this yourself. The full privacy policy and the system changes Jay makes are in the [privacy policy](docs/privacy.md).
+The code is public, so you can check all of this yourself. The full privacy policy and the system changes Jay makes are in the [privacy policy](docs/privacy.md).
 
 ## The Jay family
 
@@ -310,7 +310,11 @@ Run Forge mods on Fabric or Quilt: there is no reliable compatibility layer, and
 
 ## License
 
-Jay is released under the [MIT License](LICENSE).
+Jay is source available under the [PolyForm Noncommercial License 1.0.0](LICENSE). Personal and other noncommercial use is free. Individuals and small teams can apply for free commercial use under the [Commercial Use Exception](COMMERCIAL-EXCEPTION.md); any other commercial use needs a written license from the Jay development team.
+
+This license now covers every version of Jay, including v0.7.0 and earlier, which were first released under the MIT License. The Jay development team no longer offers any version under MIT. Anyone who already received a copy of an earlier version under MIT keeps the MIT rights to that copy.
+
+Any place that still calls Jay "open source" or "MIT", including older docs, release notes and copies elsewhere, is outdated: [LICENSE](LICENSE) and [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) take precedence. If you find such a description, please [open an issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose).
 
 Multiplayer uses [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0) in a hardened build whose source is at [jay-easytier](https://github.com/Yumao-Feather/jay-easytier), a separate project that Jay downloads on first use and does not bundle. The Linux build bundles Noto Sans SC under the SIL Open Font License 1.1 ([OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)).
 

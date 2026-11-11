@@ -623,6 +623,31 @@ public sealed class BakeTests : IDisposable
     }
 
     [Fact]
+    public void UnresolvedLambdaMixinNamesTheModAndSaysToRemoveIt()
+    {
+        Assert.True(BakeService.IsKnownProblem("mixin_lambda_unresolved"));
+        var problem = BakeService.ParseLine("""{"type":"problem","severity":"error","code":"mixin_lambda_unresolved","modId":"visuality","file":"visuality.jar","message":"lambda$tick$32 not found"}""")!;
+        var text = BakeService.DescribeProblem(problem);
+        Assert.Equal("visuality: " + L.T("core.bake.problem.mixin_lambda_unresolved"), text);
+        Assert.NotEqual(L.T("core.bake.problem.unsupported_feature"), L.T("core.bake.problem.mixin_lambda_unresolved"));
+        Assert.True(BakeRuntimeProblem.Parse(BakeRuntimeProblem.Prefix + problem.ToJsonString())!.IsError);
+    }
+
+    [Fact]
+    public void ChangedMixinTargetIsAWarningWithItsOwnText()
+    {
+        Assert.True(BakeService.IsKnownProblem("mixin_target_changed"));
+        var problem = BakeService.ParseLine("""{"type":"problem","severity":"warning","code":"mixin_target_changed","modId":"somemod","file":"s.jar","message":"@At target gone"}""")!;
+        var text = BakeService.DescribeProblem(problem);
+        Assert.Equal("somemod: " + L.T("core.bake.problem.mixin_target_changed"), text);
+        Assert.NotEqual(L.T("core.bake.problem.mixin_lambda_unresolved"), L.T("core.bake.problem.mixin_target_changed"));
+        // A known warning keeps Jay's text while the game runs too, not the loader's English message.
+        var runtime = BakeRuntimeProblem.Parse(BakeRuntimeProblem.Prefix + problem.ToJsonString())!;
+        Assert.False(runtime.IsError);
+        Assert.Equal(text, runtime.Describe());
+    }
+
+    [Fact]
     public void UnknownRuntimeCodesReadLikeUnsupportedFeatureOnlyWhenTheyAreErrors()
     {
         var error = BakeRuntimeProblem.Parse(BakeRuntimeProblem.Prefix + """{"type":"problem","schema":"amber-ul/runtime-problem@1","code":"brand_new","severity":"error","modId":"m","message":"x"}""")!;
