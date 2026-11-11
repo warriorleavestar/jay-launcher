@@ -499,8 +499,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private async Task ExportNodesAsync()
     {
         ShareCodeText = RelayNodes.Encode(null, Nodes.Select(n => n.Url));
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard })
-            await clipboard.SetTextAsync(ShareCodeText);
+        await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);
         SetStatus(StatusMessage.Success("multiplayer.nodes.exported"));
     }
 
