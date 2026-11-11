@@ -23,6 +23,9 @@ public sealed record RuntimeBundleManifest(
         JsonSerializer.Deserialize(File.ReadAllText(path), MobileRuntimeJsonContext.Default.RuntimeBundleManifest)
         ?? throw new InvalidDataException("The Android runtime manifest is empty.");
 
+    public void Write(string path) =>
+        File.WriteAllText(path, JsonSerializer.Serialize(this, MobileRuntimeJsonContext.Default.RuntimeBundleManifest));
+
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();

@@ -159,6 +159,68 @@ public sealed class MobilePortTests
         }
     }
 
+    [Fact]
+    public async Task AndroidRuntimeInstallerActivatesOnlyACompleteVerifiedBundle()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-install-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        try
+        {
+            var bytes = "independent android jvm"u8.ToArray();
+            var file = RuntimeFile("lib/server/libjvm.so", bytes);
+            var manifest = new RuntimeBundleManifest(1, "test-runtime", "arm64-v8a", [file]);
+
+            await RuntimeBundleInstaller.InstallAsync(
+                target,
+                manifest,
+                "arm64-v8a",
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(bytes, writable: false)));
+
+            Assert.True(File.Exists(Path.Combine(target, "runtime-manifest.json")));
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(target, "lib", "server", "libjvm.so")));
+            Assert.True(await RuntimeBundleVerifier.VerifyAsync(target, RuntimeBundleManifest.Read(Path.Combine(target, "runtime-manifest.json")), "arm64-v8a"));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public async Task AndroidRuntimeInstallerKeepsActiveRuntimeWhenDownloadIsInvalid()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-install-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "keep.txt"), "old runtime");
+        try
+        {
+            var expected = "expected"u8.ToArray();
+            var tampered = "tampered"u8.ToArray();
+            var manifest = new RuntimeBundleManifest(1, "test-runtime", "arm64-v8a", [RuntimeFile("lib/libjvm.so", expected)]);
+
+            await Assert.ThrowsAsync<InvalidDataException>(() => RuntimeBundleInstaller.InstallAsync(
+                target,
+                manifest,
+                "arm64-v8a",
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(tampered, writable: false))));
+
+            Assert.Equal("old runtime", await File.ReadAllTextAsync(Path.Combine(target, "keep.txt")));
+            Assert.Equal([target], Directory.GetDirectories(parent));
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    private static RuntimeBundleFile RuntimeFile(string path, byte[] bytes) => new(
+        path,
+        bytes.Length,
+        Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+        "GPL-2.0-with-classpath-exception",
+        "https://example.invalid/openjdk-source");
+
     private sealed class FakeMobilePlatformServices : IMobilePlatformServices
     {
         public bool CanOpenGameLauncher => true;
