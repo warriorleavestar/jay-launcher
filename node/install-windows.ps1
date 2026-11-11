@@ -30,6 +30,42 @@ $Rule = "Amber relay node"
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { throw "请用管理员身份运行 PowerShell / run as administrator" }
 
+# The scheduled task runs this folder's exe at every boot. ProgramData lets ordinary users create folders and write files,
+# so the folder is locked to SYSTEM and Administrators (LOCAL SERVICE may only read and run it), whatever was in it is
+# removed, and a folder that someone else created (or a link to somewhere else) stops the install.
+function Initialize-NodeDir {
+    $inherit = [Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
+    $none = [Security.AccessControl.PropagationFlags]::None
+    $acl = New-Object Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($rule in @(@("S-1-5-18", "FullControl"), @("S-1-5-32-544", "FullControl"), @("S-1-5-19", "ReadAndExecute"))) {
+        $sid = New-Object Security.Principal.SecurityIdentifier $rule[0]
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, $rule[1], $inherit, $none, "Allow")))
+    }
+    if (Test-Path -LiteralPath $Dir) {
+        # Reinstalling: the running node holds its exe open.
+        Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
+        Get-Process easytier-core -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -PassThru | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+    }
+    else {
+        # Created with the locked ACL in one step, so there is no moment when users can write into it.
+        if ($PSVersionTable.PSEdition -eq "Core") { [IO.FileSystemAclExtensions]::Create((New-Object IO.DirectoryInfo $Dir), $acl) }
+        else { [IO.Directory]::CreateDirectory($Dir, $acl) | Out-Null }
+    }
+    # Checked even when it was just created: someone may have made it first.
+    $item = Get-Item -LiteralPath $Dir -Force
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "$Dir 不是普通文件夹，已停止；请检查后删掉它再装 / $Dir is not a plain folder; check it, remove it and run again"
+    }
+    $trusted = @("S-1-5-18", "S-1-5-32-544", [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+    $owner = (Get-Acl -LiteralPath $Dir).GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($trusted -notcontains $owner) {
+        throw "$Dir 不是管理员建的（所有者 $owner），已停止；请检查后删掉它再装 / $Dir was not created by an administrator (owner $owner); check it, remove it and run again"
+    }
+    Set-Acl -LiteralPath $Dir -AclObject $acl
+    Get-ChildItem -LiteralPath $Dir -Force | Remove-Item -Recurse -Force
+}
+
 if ($Uninstall) {
     Unregister-ScheduledTask -TaskName $Task -Confirm:$false -ErrorAction SilentlyContinue
     Get-Process easytier-core -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force
@@ -51,7 +87,7 @@ try {
     $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $tmp $asset)).Hash.ToLowerInvariant()
     if ($hash -ne $Sha256) { throw "SHA-256 不对，已停止 / checksum mismatch: $hash" }
     Expand-Archive -Force (Join-Path $tmp $asset) (Join-Path $tmp "x")
-    New-Item -ItemType Directory -Force $Dir | Out-Null
+    Initialize-NodeDir
     Get-ChildItem -Recurse (Join-Path $tmp "x") -Include "easytier-core.exe", "easytier-cli.exe", "*.dll" | Copy-Item -Destination $Dir -Force
 }
 finally {

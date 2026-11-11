@@ -37,6 +37,27 @@ public sealed class RunLogsTests : IDisposable
         Assert.Equal(T0.AddSeconds(5), lines[1].Time);
     }
 
+    /// <summary>
+    /// The run's meta file lives in the instance folder, so it can't point the crash report at any other file: only the name is
+    /// kept, under this instance's crash-reports folder; network paths and names with folders in them are dropped.
+    /// </summary>
+    [Theory]
+    [InlineData("crash-reports/crash.txt", "crash.txt")]
+    [InlineData("/old/place/crash-reports/crash-2026-11-09_20.14.05-client.txt", "crash-2026-11-09_20.14.05-client.txt")]
+    [InlineData("C:\\Games\\x\\crash-reports\\c.txt", "c.txt")]
+    [InlineData("\\\\attacker\\share\\x.txt", "x.txt")]
+    [InlineData("/home/someone/.ssh/id_ed25519", null)]
+    [InlineData("../../options.txt/..", null)]
+    [InlineData("C:x.txt", null)]
+    [InlineData("", null)]
+    public void SavedCrashReportPathStaysInTheInstance(string saved, string? expected)
+    {
+        using (var store = RunLogStore.Begin(_work, T0, noTrace: false))
+            store.Finish(T0.AddMinutes(1), RunOutcome.Crashed, -1, null, saved);
+        var run = Assert.Single(RunLogStore.List(_work));
+        Assert.Equal(expected is null ? null : Path.Combine(_work, "crash-reports", expected), run.CrashReport);
+    }
+
     [Fact]
     public void NoTraceKeepsChatOutOfTheSavedLog()
     {
