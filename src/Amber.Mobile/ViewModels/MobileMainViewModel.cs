@@ -127,6 +127,12 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
             Status = error ?? L.T("mobile.enroll.invalid");
             return;
         }
+        if (invite.Locator is not null)
+        {
+            // Looking the address up means joining a public network, which the phone app doesn't do yet.
+            Status = L.T("core.gate.record.mobile");
+            return;
+        }
 
         IsBusy = true;
         Status = L.F("multiplayer.jayserver.enrolling", invite.Host);

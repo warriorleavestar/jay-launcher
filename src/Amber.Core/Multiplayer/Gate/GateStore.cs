@@ -28,6 +28,13 @@ public sealed class GateState
     public int Epoch { get; set; }
     /// <summary>入口端口轮换（TOTP）。null 表示没开过。</summary>
     public GateRotationState? Rotation { get; set; }
+    /// <summary>
+    /// Signed address record: the public network (connection string, or "jay") whose directories keep it. Null: off.
+    /// With it on, invites for a server with no domain carry a locator instead of a sealed code.
+    /// </summary>
+    public string? RecordNetwork { get; set; }
+    /// <summary>The locator id (Base64, 16 bytes). Kept when records are turned off, so old invites work again after turning them on.</summary>
+    public string? RecordId { get; set; }
 
     public GateMember? Member(string name) => Members.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
 }
@@ -134,6 +141,8 @@ public sealed class GateStore
     public const string KeyFile = "server.key";
     public const string StateFile = "state.json";
     public const string ConfigFile = "gate.json";
+    /// <summary>The Ed25519 key that signs the address record (0600).</summary>
+    public const string RecordKeyFile = "record.key";
     private const string LockFile = "state.lock";
     private static readonly TimeSpan LastSeenResolution = TimeSpan.FromHours(1);
 
@@ -255,8 +264,11 @@ public sealed class GateStore
             return 0;
         });
         CryptographicOperations.ZeroMemory(psk);
-        // 隐私+：邀请码里写随机一个节点，不写源站地址。
         var state = Read();
+        // No domain, and records on: the invite names a locator, the address is looked up in the signed record.
+        if (Locator(state) is { } locator && RecordEntries(config, state).Any(e => GateInvite.IsIpLiteral(e.Host)))
+            return GateInvite.Located(locator, keyHash, token);
+        // 隐私+：邀请码里写随机一个节点，不写源站地址。
         if (state.Privacy.IsSplit() && state.Relays.Count > 0
             && GateEndpoint.TryParse(state.Relays[RandomNumberGenerator.GetInt32(state.Relays.Count)].Address) is { } relay)
             return new GateInvite(relay.Host, relay.Port, keyHash, token, EntryRotation(relay.ToString(), state));
@@ -366,6 +378,64 @@ public sealed class GateStore
         if (s.Rotation is not null) s.Rotation.Enabled = false;
         return 0;
     });
+
+    /// <summary>Turns the signed address record on, on the given public network (its connection string, or "jay").</summary>
+    public GateLocator EnableRecords(string network)
+    {
+        var keyPath = Path.Combine(_dir, RecordKeyFile);
+        if (!File.Exists(keyPath))
+        {
+            var seed = RandomNumberGenerator.GetBytes(32);
+            try { WritePrivate(keyPath, seed, FileMode.CreateNew); }
+            finally { CryptographicOperations.ZeroMemory(seed); }
+        }
+        Mutate(s =>
+        {
+            s.RecordNetwork = network;
+            s.RecordId ??= Convert.ToBase64String(RandomNumberGenerator.GetBytes(GateLocator.IdLength));
+            return 0;
+        });
+        return Locator()!;
+    }
+
+    public void DisableRecords() => Mutate(s =>
+    {
+        s.RecordNetwork = null;
+        return 0;
+    });
+
+    public Public.RecordSigner LoadRecordSigner()
+    {
+        var seed = File.ReadAllBytes(Path.Combine(_dir, RecordKeyFile));
+        try { return new Public.RecordSigner(seed); }
+        finally { CryptographicOperations.ZeroMemory(seed); }
+    }
+
+    /// <summary>The locator invites carry while records are on; null when they are off.</summary>
+    public GateLocator? Locator(GateState? state = null)
+    {
+        state ??= Read();
+        if (state.RecordNetwork is not { } network || state.RecordId is not { } id || !File.Exists(Path.Combine(_dir, RecordKeyFile))) return null;
+        var networkId = RecordNetworkId(network);
+        if (networkId is null) return null;
+        var signer = LoadRecordSigner();
+        return new GateLocator(networkId, Convert.FromBase64String(id), GateRecord.SignerHash(signer.PublicKey));
+    }
+
+    /// <summary>The id of the record's network: "jay", or the id inside a connection string (null when it doesn't parse).</summary>
+    public static string? RecordNetworkId(string network) =>
+        network == Public.PublicNetworkProfile.Jay().Id ? network
+        : Public.NetworkString.TryParse(network, trusted: [], now: DateTimeOffset.UtcNow)?.Info.Id;
+
+    /// <summary>What the record lists: the relays in privacy-plus mode, otherwise the gate's own public address.</summary>
+    public IReadOnlyList<GateRecordEntry> RecordEntries(GateConfig config, GateState? state = null)
+    {
+        state ??= Read();
+        if (state.Privacy.IsSplit())
+            return [.. state.Relays.Select(r => GateEndpoint.TryParse(r.Address)).OfType<GateEndpoint>()
+                .Select(e => new GateRecordEntry(e.Host, e.Port, EntryRotation(e.ToString(), state))).Take(GateRecord.MaxEntries)];
+        return [new GateRecordEntry(config.PublicHost, config.PublicPort, EntryRotation(GateRotation.DirectEntry, state))];
+    }
 
     /// <summary>某个入口（"direct" 或节点地址）现在的轮换信息。</summary>
     public GateEntryRotation? EntryRotation(string entry, GateState? state = null) =>

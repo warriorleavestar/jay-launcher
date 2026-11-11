@@ -12,8 +12,10 @@ namespace Amber.Core.Multiplayer.Gate;
 public static class GateClient
 {
     /// <summary>用邀请码入服（连网关、握手、拿到访问密钥）。</summary>
+    /// <remarks>An invite with a <see cref="GateInvite.Locator"/> must be resolved first (<see cref="GateRecord.ResolveAsync"/>).</remarks>
     public static async Task<GateMembership> EnrollAsync(GateInvite invite, MemberIdentity identity, CancellationToken ct = default)
     {
+        if (invite.Locator is not null) throw new InvalidOperationException(L.T("core.gate.record.unresolved"));
         using var tcp = await ConnectEntryAsync(new GateEndpoint(invite.Host, invite.Port), invite.Rotation, ct);
         await using var stream = tcp.GetStream();
         return await GateProtocol.EnrollAsync(stream, invite, identity.KeyPair, ct);

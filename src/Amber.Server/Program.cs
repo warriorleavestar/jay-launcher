@@ -56,6 +56,11 @@ public static class Program
               grace 期间固定端口照开，老玩家进一次服就会拿到轮换信息；之后固定端口关闭
           jay-server rotate off / rotate status
 
+        没有域名的服务器（邀请码里不写 IP）：
+          jay-server records on [--network <连接串或 .jaynet 文件>]   在公共网络的目录里放一份签名的地址记录（默认 Jay 公共网络），
+              之后的邀请码只写记录编号，玩家入服时到目录里查地址；不用口令。服务运行时每 12 小时续一次
+          jay-server records off / records status                    关掉后，没有域名的服务器回到口令加密的邀请码
+
         公共网络节点（Jay 公共网络 / 自己的公共网络的种子节点 + 房间目录）：
           jay-server directory [--listen 11010] [--seeds tcp://别的种子:11010,...] [--easytier <放 easytier-core 的文件夹> [--easytier-sha256 <easytier-core 的 SHA-256>]]
               在有公网 IP 的机器上运行，要放行 TCP 和 UDP 的 11010 端口。房间目录只在公共网络里可达（10.235.0.1:47668），不对公网开放。
@@ -1149,6 +1154,37 @@ public static class Program
                         throw new ArgumentException("只能是 add、code、remove、revoke 或 list");
                 }
                 return 0;
+            }
+            case "records":
+            {
+                switch (Arg(0, "on、off 或 status"))
+                {
+                    case "on":
+                    {
+                        var network = options.Get("network") ?? Amber.Core.Multiplayer.Public.PublicNetworkProfile.Jay().Id;
+                        if (File.Exists(network)) network = File.ReadAllText(network).Trim();
+                        if (GateStore.RecordNetworkId(network) is not { } networkId) throw new ArgumentException("--network 要写 jay、一个 JAYNET2- 连接串或 .jaynet 文件");
+                        store.EnableRecords(network);
+                        output.WriteLine($"已开启地址记录：公共网络 {networkId}。之后给没有域名的服务器发的邀请码只写记录编号，不写 IP，也不用口令。");
+                        output.WriteLine("记录在服务运行时发布并每 12 小时续一次（jay-server run 会连上这个公共网络）。服务没开时，玩家查不到地址。");
+                        return 0;
+                    }
+                    case "off":
+                        store.DisableRecords();
+                        output.WriteLine("已关闭地址记录。没有域名的服务器之后发口令加密的邀请码。");
+                        return 0;
+                    case "status":
+                    {
+                        var state = store.Read();
+                        output.WriteLine(state.RecordNetwork is { } n ? $"地址记录：开，公共网络 {GateStore.RecordNetworkId(n)}" : "地址记录：关");
+                        if (store.Locator(state) is not null)
+                            foreach (var e in store.RecordEntries(store.LoadConfig(), state))
+                                output.WriteLine($"  记录里的入口：{e.Host}:{e.Port}{(e.Rotation is null ? "" : "（轮换）")}");
+                        return 0;
+                    }
+                    default:
+                        throw new ArgumentException("只能是 on、off 或 status");
+                }
             }
             case "rotate":
             {

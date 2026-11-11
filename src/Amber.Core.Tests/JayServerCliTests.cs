@@ -108,6 +108,39 @@ public sealed class JayServerCliTests
         }
     }
 
+    /// <summary>records on: an IP-only server's invite carries a record locator, no IP and no passphrase.</summary>
+    [Fact]
+    public void RecordsCommands()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-cli-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            GateStore.Initialize(Path.Combine(root, "gate"), "203.0.113.10", 47670, 47670);
+            var output = new StringWriter();
+            int Run(params string[] args) => Program.Admin(root, Options.Parse(args), output);
+            Assert.Throws<ArgumentException>(() => Run("records", "on", "--network", "not a network"));
+            Assert.Equal(0, Run("records", "on"));
+            output.GetStringBuilder().Clear();
+            Run("invite", "Steve");
+            var text = output.ToString();
+            Assert.False(GateInvite.IsSealed(text));
+            Assert.DoesNotContain("203.0.113.10", text);
+            var invite = GateInvite.TryParse(text, out var error)!;
+            Assert.Null(error);
+            Assert.Equal("jay", invite.Locator!.NetworkId);
+            Run("records", "status");
+            Assert.Contains("203.0.113.10:47670", output.ToString());
+            Run("records", "off");
+            output.GetStringBuilder().Clear();
+            Run("invite", "Alex");
+            Assert.True(GateInvite.IsSealed(output.ToString()));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    }
+
     [Fact]
     public void RotateCommands()
     {

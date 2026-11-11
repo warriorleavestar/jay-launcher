@@ -167,10 +167,26 @@ For two people with no relay, no public network and no shared LAN. `Multiplayer/
 - Old `JAYS1-` codes (IP and player name in plain sight) are recognised and refused with "ask the admin for a new one".
 - Diagnostics redact `JAYS1`, `JAYS2` and `JAYSS1` codes (they hold a token).
 
+### IP-only servers without a passphrase: signed address records
+
+`Gate/GateRecord.cs`, `Gate/GateRecordPublisher.cs`, turned on with `jay-server records on [--network …]`.
+
+- The gate keeps an Ed25519 record key (`record.key`, 0600) and a random 16-byte locator id. Invites (`JAYS2-`
+  version 3) then carry the network id, the locator id, a hash of the record key, the gate key hash and the token: no
+  host, no port, no passphrase.
+- While `jay-server run` runs, it joins that public network with its own EasyTier and puts a `SignedRecord` (ops
+  `rec.put` / `rec.get`, #219) every 12 hours (3-day lifetime). Lookup and seal key come from the locator id, so a
+  directory sees neither the id nor the address. The record lists the gate's own entry, or its relays in privacy-plus
+  mode, with port rotation.
+- At enrollment Jay joins the network briefly, gets the record, accepts it only when the signer matches the hash in
+  the invite (someone who saw an invite can't redirect others), opens it and enrolls as usual; the gate key is still
+  pinned by the handshake.
+- The phone app can't join a public network yet and asks for a sealed invite instead. With records off, IP-only
+  servers fall back to `JAYSS1-` sealed invites.
+
 ## Still to do
 
-- **IP-only servers without a passphrase**: an id + token in the code, the address resolved through the directory's
-  signed-record store (`rec.put` / `rec.get`); the sealed code stays the fallback when no directory is reachable.
+- **Relays with only an IP without a passphrase**: the same record mechanism for `JAYNS1-` relay share codes.
 - **Network and relay codes without an address**: `JAYNET` (public network) and `AMBNODE` (relay share) still name a
   host or IP. Domain names stay allowed; IP-only nodes go the same way as servers.
 

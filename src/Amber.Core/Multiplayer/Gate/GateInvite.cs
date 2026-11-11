@@ -18,8 +18,13 @@ namespace Amber.Core.Multiplayer.Gate;
 /// the same bytes encrypted with a 16-digit passphrase that the admin tells the player another way
 /// (<see cref="SealedDirect.SealBlob"/>). Old <c>JAYS1-</c> codes (which carried an IP and the player's name) are refused.
 /// </para>
+/// <para>
+/// Version 3: a server with no domain that publishes a signed record on a public network's directories. The code
+/// carries a <see cref="GateLocator"/> (network id, a random id, the record key's hash) instead of a host; Jay looks
+/// the address up at enrollment (<see cref="GateRecord.ResolveAsync"/>). No address and no passphrase in the code.
+/// </para>
 /// </summary>
-public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byte[] Token, GateEntryRotation? Rotation = null)
+public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byte[] Token, GateEntryRotation? Rotation = null, GateLocator? Locator = null)
 {
     public const string Prefix = "JAYS2-";
     public const string SealedPrefix = "JAYSS1-";
@@ -29,12 +34,16 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
     public const int TokenLength = 16;
     private const byte Version = 1;
     private const byte VersionRotating = 2;
+    private const byte VersionLocator = 3;
     private const int ChecksumLength = 4;
     private const string Crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     private const string SealInfo = "jay-sealed-server-invite-v1";
 
     /// <summary>The host is an IP address: only a sealed code may carry it (<see cref="Seal"/>).</summary>
-    public bool NeedsSeal => IsIpLiteral(Host);
+    public bool NeedsSeal => Locator is null && IsIpLiteral(Host);
+
+    /// <summary>For a server with a record (<see cref="Locator"/>): the address and rotation filled in from the record.</summary>
+    public static GateInvite Located(GateLocator locator, byte[] serverKeyHash, byte[] token) => new("", 0, serverKeyHash, token, null, locator);
 
     /// <summary>The plain code. Throws <see cref="InvalidOperationException"/> when the host is an IP address.</summary>
     public string Encode()
@@ -58,6 +67,14 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
 
     private byte[] Body()
     {
+        if (Locator is { } locator)
+        {
+            if (!IsValidNetworkId(locator.NetworkId) || locator.Id.Length != GateLocator.IdLength || locator.SignerHash.Length != GateLocator.SignerHashLength
+                || ServerKeyHash.Length != KeyHashLength || Token.Length != TokenLength)
+                throw new FormatException(L.T("core.gate.invite.corrupt"));
+            var network = Encoding.ASCII.GetBytes(locator.NetworkId);
+            return [VersionLocator, (byte)network.Length, .. network, .. locator.Id, .. locator.SignerHash, .. ServerKeyHash, .. Token];
+        }
         Validate(Host, Port, ServerKeyHash, Token);
         var host = Encoding.ASCII.GetBytes(Host);
         var body = new List<byte> { Rotation is null ? Version : VersionRotating, (byte)host.Length };
@@ -102,7 +119,7 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
             chars.Append(c);
         }
         var raw = Base32Decode(chars.ToString());
-        if (raw is null || raw.Length < 1 + 1 + 2 + KeyHashLength + TokenLength + ChecksumLength)
+        if (raw is null || raw.Length < 1 + 1 + KeyHashLength + TokenLength + ChecksumLength)
         {
             error = L.T("core.gate.invite.corrupt");
             return null;
@@ -145,7 +162,7 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
     private static GateInvite? Read(ReadOnlySpan<byte> bytes, out string? error)
     {
         error = null;
-        if (bytes.Length == 0 || bytes[0] is not (Version or VersionRotating))
+        if (bytes.Length == 0 || bytes[0] is not (Version or VersionRotating or VersionLocator))
         {
             error = L.T("core.gate.invite.version");
             return null;
@@ -153,6 +170,17 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
         try
         {
             var p = 1;
+            if (bytes[0] == VersionLocator)
+            {
+                int networkLength = bytes[p++];
+                var network = Encoding.ASCII.GetString(bytes.Slice(p, networkLength)); p += networkLength;
+                var id = bytes.Slice(p, GateLocator.IdLength).ToArray(); p += GateLocator.IdLength;
+                var signer = bytes.Slice(p, GateLocator.SignerHashLength).ToArray(); p += GateLocator.SignerHashLength;
+                var serverKey = bytes.Slice(p, KeyHashLength).ToArray(); p += KeyHashLength;
+                var secret = bytes.Slice(p, TokenLength).ToArray(); p += TokenLength;
+                if (p != bytes.Length || !IsValidNetworkId(network)) throw new FormatException();
+                return Located(new GateLocator(network, id, signer), serverKey, secret);
+            }
             int hostLength = bytes[p++];
             var host = Encoding.ASCII.GetString(bytes.Slice(p, hostLength)); p += hostLength;
             int port = BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(p, 2)); p += 2;
@@ -177,6 +205,9 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
             return null;
         }
     }
+
+    /// <summary>A public network id as <see cref="Public.NetworkString.IsValidId"/> allows (or "jay").</summary>
+    private static bool IsValidNetworkId(string id) => Public.NetworkString.IsValidId(id);
 
     /// <summary>An IPv4 or IPv6 address rather than a name.</summary>
     public static bool IsIpLiteral(string? host) => host is not null && System.Net.IPAddress.TryParse(host.Trim('[', ']'), out _);
@@ -247,5 +278,5 @@ public sealed record GateInvite(string Host, int Port, byte[] ServerKeyHash, byt
     }
 
     /// <summary>For logs: no token, no address.</summary>
-    public override string ToString() => $"{(NeedsSeal ? SealedPrefix : Prefix)}...";
+    public override string ToString() => Locator is { } l ? $"{Prefix}... (record on {l.NetworkId})" : $"{(NeedsSeal ? SealedPrefix : Prefix)}...";
 }
