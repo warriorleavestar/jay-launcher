@@ -98,7 +98,10 @@ public static class Program
               另一个信任人在自己的离线电脑上给同一张证书加签名（网络要求几个就签几个）
               （根钥匙和节点在同一台电脑时也可以用 --dir <节点数据目录> 直接写进去，但根钥匙不该放在服务器上）
           jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
-              在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）
+              在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）。先逐项显示内容和核对码，手打目录公钥最后 6 个字符才签
+          jay-server network hw-cert --cosign <hardware.cert> --root <根钥匙文件>
+              另一位信任人在自己的离线电脑上加签（Jay 公共网络要三人中两人；自己的网络看 dirRootsNeed），同样先显示再手打确认
+          jay-server node bind --install <证书> [--network <连接串或文件>]  只认签名够数的证书（不加 --network 就是 Jay 信任人）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
 
@@ -521,22 +524,39 @@ public static class Program
             }
             case "hw-cert":
             {
-                // Offline: sign a node's hardware.request.json with the directory root key (docs/security/node-hardware-binding.md).
-                var rootFile = options.Get("root") ?? throw new ArgumentException("要用 --root 指定根钥匙文件");
-                var requestFile = options.Get("request") ?? rest.FirstOrDefault() ?? throw new ArgumentException("要用 --request 指定节点生成的 hardware.request.json");
-                var target = options.Get("out") ?? throw new ArgumentException("要用 --out 指定证书文件（拷回节点后用 node bind --install 装上）");
-                var request = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(requestFile)) as System.Text.Json.Nodes.JsonObject
-                    ?? throw new InvalidDataException(requestFile + " 不是硬件绑定请求");
-                int? need = options.Get("need") is { } n ? int.Parse(n, System.Globalization.CultureInfo.InvariantCulture) : null;
-                bool? tpm = options.Has("no-tpm") ? false : null;
-                var cert = HardwareCertificate.Issue(NetworkSigner.FromSeed(File.ReadAllText(rootFile)), request, options.Get("network"), need, tpm, options.Has("secure-boot"));
-                var parsed = HardwareCertificate.Parse(cert)!;
+                // Offline: the network's roots sign a node's hardware.request.json one after another
+                // (docs/security/node-hardware-binding.md). Each signer sees every field and confirms by hand first.
+                var rootFile = options.Get("root") ?? throw new ArgumentException("要用 --root 指定自己的根钥匙文件");
+                var signer = NetworkSigner.FromSeed(File.ReadAllText(rootFile));
+                string target;
+                HardwareCertificate shown;
+                Func<byte[]> sign;
+                if (options.Get("cosign") is { } existing)
+                {
+                    target = existing;
+                    var bytes = File.ReadAllBytes(existing);
+                    shown = HardwareCertificate.Parse(bytes) ?? throw new InvalidDataException(existing + " 不是有效的硬件证书（有签名对不上，或格式不认识）");
+                    sign = () => HardwareCertificate.Cosign(bytes, signer);
+                }
+                else
+                {
+                    var requestFile = options.Get("request") ?? rest.FirstOrDefault() ?? throw new ArgumentException("要用 --request 指定节点生成的 hardware.request.json");
+                    target = options.Get("out") ?? throw new ArgumentException("要用 --out 指定证书文件（交给下一位信任人 --cosign，够数后拷回节点 node bind --install）");
+                    if (File.Exists(target)) throw new IOException($"{target} 已经存在，不覆盖");
+                    var request = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(requestFile)) as System.Text.Json.Nodes.JsonObject
+                        ?? throw new InvalidDataException(requestFile + " 不是硬件绑定请求");
+                    int? need = options.Get("need") is { } n ? int.Parse(n, System.Globalization.CultureInfo.InvariantCulture) : null;
+                    bool? tpm = options.Has("no-tpm") ? false : null;
+                    shown = HardwareCertificate.Preview(request, options.Get("network"), need, tpm, options.Has("secure-boot"));
+                    sign = () => HardwareCertificate.Issue(signer, request, options.Get("network"), need, tpm, options.Has("secure-boot"));
+                }
+                if (shown.Signers.Any(k => k.AsSpan().SequenceEqual(signer.PublicKey))) throw new InvalidDataException("你的根钥匙已经签过这张证书");
+                if (!ConfirmHardwareCertificate(shown, output)) return 1;
+                var cert = sign();
                 File.WriteAllBytes(target, cert);
-                output.WriteLine($"已写 {target}：硬件标识 {parsed.Factors.Count} 项（{string.Join("、", parsed.Factors.Keys)}），至少 {parsed.Need} 项要对上"
-                    + (parsed.Must.Count > 0 ? $"，必须对上：{string.Join("、", parsed.Must)}" : "")
-                    + (parsed.RequireTpm ? "，钥匙封存进 TPM" : "，没有 TPM（钥匙只靠硬件标识加密，强度较弱）")
-                    + (parsed.RequireSecureBoot ? "，要求开着安全启动" : ""));
-                output.WriteLine("硬件对不上时节点会删除自己数据目录里的 Jay 文件。把证书拷回节点，运行 jay-server node bind --install <证书>。");
+                var parsed = HardwareCertificate.Parse(cert)!;
+                output.WriteLine($"已写 {target}，现在有 {parsed.Signatures.Count} 个签名，Jay 信任人 {JayTrust.Quorum.Count(parsed.Signers)}/{JayTrust.Need}（自己的网络看 dirRootsNeed）。");
+                output.WriteLine("签名够数后把证书拷回节点：jay-server node bind --install <证书>。硬件对不上时节点会删除自己数据目录里的 Jay 文件。");
                 return 0;
             }
             case "show":
@@ -677,6 +697,44 @@ public static class Program
     }
 
     /// <summary>jay-server node：经本机管理接口看运行中的网络节点、封禁、删房间。</summary>
+    /// <summary>Where signing confirmations are read from; tests replace it. Signing needs a terminal, never piped input.</summary>
+    internal static TextReader ConfirmInput = Console.In;
+    internal static Func<bool> ConfirmIsTerminal = () => !Console.IsInputRedirected;
+
+    /// <summary>
+    /// Shows every field of a hardware certificate, the signed bytes' digest to compare with the other signers, and asks
+    /// the signer to type the last 6 characters of the node's directory key (in hex). No flag skips this.
+    /// </summary>
+    internal static bool ConfirmHardwareCertificate(HardwareCertificate cert, TextWriter output)
+    {
+        if (!ConfirmIsTerminal()) throw new InvalidOperationException("签名要在终端里手动确认，不能从管道或脚本输入");
+        var keyHex = Convert.ToHexString(cert.DirectoryKey);
+        output.WriteLine("要签的硬件证书 / hardware certificate to sign:");
+        output.WriteLine($"  目录公钥 directory key : {keyHex}");
+        output.WriteLine($"  网络 network           : {cert.Network ?? "（没写）"}");
+        output.WriteLine($"  硬件标识 identifiers   : {string.Join(", ", cert.Factors.Keys.Order(StringComparer.Ordinal))}");
+        output.WriteLine($"  至少对上 need          : {cert.Need} / {cert.Factors.Count}");
+        output.WriteLine($"  必须对上 must          : {(cert.Must.Count == 0 ? "-" : string.Join(", ", cert.Must))}");
+        output.WriteLine($"  TPM 封存 tpm           : {(cert.RequireTpm ? "是 yes" : "否 no")}");
+        output.WriteLine($"  要求安全启动 secureBoot: {(cert.RequireSecureBoot ? "是 yes" : "否 no")}");
+        foreach (var k in cert.Signers) output.WriteLine($"  已签 signed by         : {Convert.ToBase64String(k)}");
+        var digest = Convert.ToHexString(cert.Digest.AsSpan(0, 8));
+        output.WriteLine($"  核对码 digest          : {string.Join(' ', Enumerable.Range(0, 4).Select(i => digest.Substring(i * 4, 4)))}（和其他信任人各自机器上的这一行对一遍）");
+        output.WriteLine("硬件对不上时节点会删除自己的文件。确认无误就手打目录公钥最后 6 个字符：");
+        var typed = ConfirmInput.ReadLine()?.Trim();
+        if (string.Equals(typed, keyHex[^6..], StringComparison.OrdinalIgnoreCase)) return true;
+        output.WriteLine("没有签名：输入和目录公钥最后 6 个字符不一样。");
+        return false;
+    }
+
+    /// <summary>The root quorum a node's hardware certificate must meet: the given network's dirRoots, or the Jay trustees.</summary>
+    private static TrustQuorum NodeTrust(Options options)
+    {
+        if (options.Get("network") is not { } text) return JayTrust.Quorum;
+        var profile = NetworkString.Parse(File.Exists(text) ? File.ReadAllText(text) : text).ToProfile();
+        return new TrustQuorum(profile.DirectoryRoots, profile.DirectoryRootsNeed);
+    }
+
     /// <summary>The node's directory public key: from hardware.cert once the node is bound (the key itself is sealed), else directory.key.</summary>
     private static byte[] DirectoryPublicKey(string dataDir)
     {
@@ -711,7 +769,7 @@ public static class Program
         }
         if (options.Get("install") is { } certFile)
         {
-            var sealedFiles = HardwareBinding.Install(root, File.ReadAllBytes(certFile), hardware, tpm, []);
+            var sealedFiles = HardwareBinding.Install(root, File.ReadAllBytes(certFile), hardware, tpm, NodeTrust(options));
             output.WriteLine($"已绑定硬件。{string.Join("、", sealedFiles)} 现在只以加密形式存在（{string.Join("、", sealedFiles.Select(f => f + HardwareBinding.SealedSuffix))}），只有这台机器能打开。");
             output.WriteLine("硬件对不上时节点会删除数据目录里的 Jay 文件；换硬件或迁移虚拟机之前先跑 jay-server node bind --check。");
             return 0;

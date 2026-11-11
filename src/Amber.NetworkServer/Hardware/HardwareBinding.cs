@@ -76,12 +76,12 @@ public static class HardwareBinding
     /// Step 3, on the node: checks the certificate against this hardware and this node's key, then encrypts the key files.
     /// Returns the files now kept only in sealed form.
     /// </summary>
-    public static IReadOnlyList<string> Install(string dataDir, byte[] certificate, IHardwareSource hardware, ITpmSealer tpm, IReadOnlyList<byte[]> trustedRoots)
+    public static IReadOnlyList<string> Install(string dataDir, byte[] certificate, IHardwareSource hardware, ITpmSealer tpm, TrustQuorum trust)
     {
         if (File.Exists(Path.Combine(dataDir, WrapFile))) throw new InvalidOperationException("This node is already bound to its hardware.");
         var cert = HardwareCertificate.Parse(certificate) ?? throw new InvalidDataException("hardware.cert isn't a valid hardware certificate.");
-        if (trustedRoots.Count > 0 && !trustedRoots.Any(r => CryptographicOperations.FixedTimeEquals(r, cert.Root)))
-            throw new InvalidDataException("hardware.cert is signed by a root key this network doesn't use.");
+        if (!trust.IsMet(cert.Signers))
+            throw new InvalidDataException($"hardware.cert has {trust.Count(cert.Signers)} of the {trust.Need} root signatures this network needs ({trust.Keys.Count} roots listed).");
         var directoryKeyPath = Path.Combine(dataDir, "directory.key");
         using (var key = DirectoryChannel.LoadOrCreateIdentity(directoryKeyPath))
             if (!CryptographicOperations.FixedTimeEquals(key.PublicKey, cert.DirectoryKey)) throw new InvalidDataException("hardware.cert was issued for another directory key.");
@@ -241,20 +241,63 @@ public sealed record HardwareMatch(bool Ok, int Matched, int Need, string Reason
 /// The offline signature over a node's hardware: "directory key K belongs on the machine with these identifier ids;
 /// at least <see cref="Need"/> of them (always including <see cref="Must"/>) must match". No expiry: a node must not
 /// wipe itself because a date passed.
-/// <para>Signed bytes: <c>"jay-hardware-cert-v1\n"</c> + the JSON content. Wire format like <see cref="DirectoryCertificate"/>.</para>
+/// <para>
+/// Signed bytes: <c>"jay-hardware-cert-v1\n"</c> + the JSON content. On disk, like <see cref="DirectoryCertificate"/>:
+/// {"c": base64(content), "sigs": [{"r": root public key, "s": signature}, …]}. The network's roots sign one after another,
+/// offline (<c>network hw-cert</c>, then <c>hw-cert --cosign</c>); a node accepts it only when the network's root quorum
+/// (<see cref="JayTrust"/> for the built-in network, "dirRoots" + "dirRootsNeed" otherwise) is met. One bad signature
+/// rejects the whole certificate.
+/// </para>
 /// </summary>
 public sealed record HardwareCertificate(
     byte[] DirectoryKey, string? Network, byte[] Salt, IReadOnlyDictionary<string, byte[]> Factors, int Need, IReadOnlyList<string> Must,
-    bool RequireTpm, bool RequireSecureBoot, byte[] Root)
+    bool RequireTpm, bool RequireSecureBoot, IReadOnlyList<TrustSignature> Signatures, byte[] Content)
 {
     private static readonly byte[] Domain = "jay-hardware-cert-v1\n"u8.ToArray();
     public const int MaxSize = 4096;
+    public const int MaxSignatures = 8;
+
+    /// <summary>The roots that signed (all verified).</summary>
+    public IEnumerable<byte[]> Signers => Signatures.Select(sig => sig.Key);
+
+    /// <summary>SHA-256 of the signed bytes: what two signers compare out loud before signing.</summary>
+    public byte[] Digest => SHA256.HashData([.. Domain, .. Content]);
+
+    /// <summary>Adds another root's signature. Refuses a certificate that doesn't verify, or a root that already signed.</summary>
+    public static byte[] Cosign(ReadOnlySpan<byte> certificate, NetworkSigner root)
+    {
+        var cert = Parse(certificate) ?? throw new InvalidDataException("not a valid hardware certificate");
+        if (cert.Signers.Any(k => k.AsSpan().SequenceEqual(root.PublicKey))) throw new InvalidDataException("this root already signed");
+        if (cert.Signatures.Count >= MaxSignatures) throw new InvalidDataException("too many signatures");
+        return Write(cert.Content, [.. cert.Signatures, new TrustSignature(root.PublicKey, root.Sign([.. Domain, .. cert.Content]))]);
+    }
+
+    private static byte[] Write(byte[] content, IEnumerable<TrustSignature> signatures) => Encoding.UTF8.GetBytes(new JsonObject
+    {
+        ["c"] = Convert.ToBase64String(content),
+        ["sigs"] = new JsonArray([.. signatures.Select(sig => (JsonNode)new JsonObject
+        {
+            ["r"] = Convert.ToBase64String(sig.Key),
+            ["s"] = Convert.ToBase64String(sig.Signature),
+        })]),
+    }.ToJsonString());
+
+    /// <summary>The unsigned content a first signer would sign for this request (to show it before signing).</summary>
+    public static HardwareCertificate Preview(JsonObject request, string? network, int? need = null, bool? requireTpm = null, bool requireSecureBoot = false) =>
+        FromContent(BuildContent(request, network, need, requireTpm, requireSecureBoot), [])
+        ?? throw new InvalidDataException("Not a hardware request from jay-server node bind.");
 
     /// <summary>
     /// Signs a node's hardware.request.json (run offline). <paramref name="need"/> defaults to all identifiers but one
     /// (at least two); a TPM identifier, when present, is always mandatory.
     /// </summary>
     public static byte[] Issue(NetworkSigner root, JsonObject request, string? network, int? need = null, bool? requireTpm = null, bool requireSecureBoot = false)
+    {
+        var bytes = BuildContent(request, network, need, requireTpm, requireSecureBoot);
+        return Write(bytes, [new TrustSignature(root.PublicKey, root.Sign([.. Domain, .. bytes]))]);
+    }
+
+    private static byte[] BuildContent(JsonObject request, string? network, int? need, bool? requireTpm, bool requireSecureBoot)
     {
         var key = Convert.FromBase64String(request["key"]?.GetValue<string>() ?? "");
         var salt = Convert.FromBase64String(request["salt"]?.GetValue<string>() ?? "");
@@ -277,36 +320,49 @@ public sealed record HardwareCertificate(
             ["secureBoot"] = requireSecureBoot,
         };
         if (network is not null) content["net"] = network;
-        var bytes = Encoding.UTF8.GetBytes(content.ToJsonString());
-        return Encoding.UTF8.GetBytes(new JsonObject
-        {
-            ["c"] = Convert.ToBase64String(bytes),
-            ["r"] = Convert.ToBase64String(root.PublicKey),
-            ["s"] = Convert.ToBase64String(root.Sign([.. Domain, .. bytes])),
-        }.ToJsonString());
+        return Encoding.UTF8.GetBytes(content.ToJsonString());
     }
 
-    /// <summary>Reads and checks the signature (not whether the root is trusted). Null when invalid.</summary>
+    /// <summary>
+    /// Reads the certificate and checks every signature: one bad or repeated signature rejects it. Doesn't check whether
+    /// the signers meet a quorum (the caller does, with the network's roots). Null when invalid.
+    /// </summary>
     public static HardwareCertificate? Parse(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length is 0 or > MaxSize) return null;
         try
         {
-            if (JsonNode.Parse(bytes) is not JsonObject wire) return null;
+            if (JsonNode.Parse(bytes) is not JsonObject wire || wire["sigs"] is not JsonArray sigs || sigs.Count is 0 or > MaxSignatures) return null;
             var content = Convert.FromBase64String(wire["c"]?.GetValue<string>() ?? "");
-            var root = Convert.FromBase64String(wire["r"]?.GetValue<string>() ?? "");
-            var signature = Convert.FromBase64String(wire["s"]?.GetValue<string>() ?? "");
-            if (root.Length != 32 || signature.Length != 64 || !RoomSigner.Verify(root, [.. Domain, .. content], signature)) return null;
+            var signatures = new List<TrustSignature>();
+            foreach (var entry in sigs)
+            {
+                if (entry is not JsonObject e) return null;
+                var sig = new TrustSignature(Convert.FromBase64String(e["r"]?.GetValue<string>() ?? ""), Convert.FromBase64String(e["s"]?.GetValue<string>() ?? ""));
+                if (signatures.Any(x => x.Key.AsSpan().SequenceEqual(sig.Key)) || !sig.Verify([.. Domain, .. content])) return null;
+                signatures.Add(sig);
+            }
+            return FromContent(content, signatures);
+        }
+        catch (Exception e) when (e is System.Text.Json.JsonException or FormatException or InvalidOperationException) { return null; }
+    }
+
+    private static HardwareCertificate? FromContent(byte[] content, IReadOnlyList<TrustSignature> signatures)
+    {
+        try
+        {
             if (JsonNode.Parse(content) is not JsonObject o || o["v"]?.GetValue<int>() != 1) return null;
             var key = Convert.FromBase64String(o["key"]?.GetValue<string>() ?? "");
             var salt = Convert.FromBase64String(o["salt"]?.GetValue<string>() ?? "");
             if (key.Length != DirectoryChannel.KeyLength || salt.Length != 32 || o["f"] is not JsonObject ids) return null;
+            // Only the fields this version knows: a signer must never vouch for something Jay would silently ignore.
+            if (o.Select(p => p.Key).Any(k => k is not ("v" or "key" or "salt" or "f" or "need" or "must" or "tpm" or "secureBoot" or "net"))) return null;
             var factors = ids.ToDictionary(p => p.Key, p => Convert.FromBase64String(p.Value!.GetValue<string>()));
             var need = o["need"]?.GetValue<int>() ?? 0;
             var must = (o["must"] as JsonArray ?? []).Select(m => m!.GetValue<string>()).ToArray();
             if (need < 1 || need > factors.Count || must.Any(m => !factors.ContainsKey(m))) return null;
             return new HardwareCertificate(key, o["net"]?.GetValue<string>(), salt, factors, need, must,
-                o["tpm"]?.GetValue<bool>() == true, o["secureBoot"]?.GetValue<bool>() == true, root);
+                o["tpm"]?.GetValue<bool>() == true, o["secureBoot"]?.GetValue<bool>() == true, signatures, content);
         }
         catch (Exception e) when (e is System.Text.Json.JsonException or FormatException or InvalidOperationException or ArgumentException or KeyNotFoundException)
         {
@@ -354,8 +410,12 @@ public sealed class NodeHardwareGuard(string dataDir)
     public IHardwareSource Hardware { get; init; } = SystemHardwareSource.Instance;
     public ITpmSealer Tpm { get; init; } = TpmSealers.ForThisMachine();
     public IRuntimeIntegrity Integrity { get; init; } = RuntimeIntegrity.Instance;
-    /// <summary>Root keys allowed to sign hardware.cert. Empty: any root (the directory.cert root is still checked by clients).</summary>
-    public IReadOnlyList<byte[]> TrustedRoots { get; init; } = [];
+    /// <summary>
+    /// Who must have signed hardware.cert: the network's root quorum (<see cref="JayTrust"/> for the built-in network,
+    /// "dirRoots" + "dirRootsNeed" otherwise). A certificate that verifies but falls short only makes the node refuse to
+    /// run (a wrong --network flag must not wipe a node); a missing or badly signed one is treated as tampering.
+    /// </summary>
+    public TrustQuorum Trust { get; init; } = TrustQuorum.None;
     /// <summary>Only list what a failed check would wipe; delete nothing.</summary>
     public bool DryRun { get; init; }
     public Action<string> Log { get; init; } = _ => { };
@@ -382,7 +442,8 @@ public sealed class NodeHardwareGuard(string dataDir)
         if (problems.Count > 0) throw new NodeIntegrityException(problems);
 
         if (cert is null) Fail("hardware.cert is missing or its signature is invalid");
-        if (TrustedRoots.Count > 0 && !TrustedRoots.Any(r => CryptographicOperations.FixedTimeEquals(r, cert!.Root))) Fail("hardware.cert is signed by an unknown root key");
+        if (!Trust.IsMet(cert!.Signers))
+            throw new NodeIntegrityException([$"hardware.cert has {Trust.Count(cert.Signers)} of the {Trust.Need} root signatures this network needs; check --network"]);
         var match = cert!.Match(Hardware.Read());
         if (!match.Ok) Fail(match.Reason);
         if (cert.RequireTpm && !Tpm.Available) Fail("the certificate requires a TPM and this machine has none");

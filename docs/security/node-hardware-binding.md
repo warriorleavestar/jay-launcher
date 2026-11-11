@@ -8,7 +8,7 @@ Status: implemented, opt-in per node, waiting for security review and a real-TPM
 
 ## What binding adds
 
-A node operator can bind a node to the machine it runs on. All of it happens offline, and the network's root key never touches the server.
+A node operator can bind a node to the machine it runs on. All of it happens offline, and no root key ever touches the server.
 
 1. **On the node**: `jay-server node bind` reads the machine's hardware identifiers:
    - the TPM endorsement key (Linux, through tpm2-tools)
@@ -17,8 +17,13 @@ A node operator can bind a node to the machine it runs on. All of it happens off
    - the OS machine id
 
    It writes `hardware.request.json` with the node's directory public key, a random 32-byte salt, and `HMAC-SHA256(salt, "jay-hw-id-v1" ‖ kind ‖ value)` for each identifier. Raw identifiers never leave the machine.
-2. **Offline**: `jay-server network hw-cert --root <root key> --request hardware.request.json --out hardware.cert` signs it with the network's directory root key (Ed25519, domain `jay-hardware-cert-v1\n`). The certificate says which directory key belongs on which identifiers, how many of them must match (`need`, default: all but one, at least two), and which ones are mandatory (`must`: the TPM when present). It can also require Secure Boot (`--secure-boot`). It has no expiry, because a node must not wipe itself just because a date passed.
-3. **Back on the node**: `jay-server node bind --install hardware.cert` checks that the certificate is for this node's key and that *every* identifier matches. It then encrypts `directory.key` and `login.key` into `*.key.hw` (AES-256-GCM) and overwrites and deletes the plaintext files.
+2. **Offline, by two of three trustees**: `jay-server network hw-cert --root <root key> --request hardware.request.json --out hardware.cert` makes the certificate with the first signature (Ed25519 over `"jay-hardware-cert-v1\n"` ‖ content). A second trustee adds theirs on their own offline machine with `jay-server network hw-cert --cosign hardware.cert --root <their key>`. The file holds `{"c": content, "sigs": [{"r", "s"}, …]}`, the same shape as directory certificates (PR #176).
+   - The built-in network needs `JayTrust.Need` (2) of the `JayTrust.Keys` trustees. A network of your own needs `dirRootsNeed` of its `dirRoots`.
+   - One bad or repeated signature rejects the whole certificate. Content fields this version doesn't know are rejected too, so nobody can vouch for something Jay would silently ignore.
+   - Before signing, each command prints every field: directory key (hex), network, identifiers, `need`, `must`, TPM, Secure Boot and the existing signers. It also prints the first 8 bytes of the signed bytes' SHA-256 in 4-character groups, for the trustees to compare by phone. It then asks the signer to type the last 6 characters of the directory key. There is no flag to skip this, and piped input is refused.
+
+    The certificate says which directory key belongs on which identifiers, how many of them must match (`need`, default: all but one, at least two), and which ones are mandatory (`must`: the TPM when present). It can also require Secure Boot (`--secure-boot`). It has no expiry, because a node must not wipe itself just because a date passed.
+3. **Back on the node**: `jay-server node bind --install hardware.cert [--network <string>]` refuses a certificate that doesn't meet the network's root quorum. It also checks that the certificate is for this node's key and that *every* identifier matches. It then encrypts `directory.key` and `login.key` into `*.key.hw` (AES-256-GCM) and overwrites and deletes the plaintext files.
 
 ### How the keys are encrypted
 
@@ -37,7 +42,8 @@ A node operator can bind a node to the machine it runs on. All of it happens off
 |---|---|
 | Runtime integrity: debugger/tracer attached (`TracerPid`, `IsDebuggerPresent`), code-injection variables (`LD_PRELOAD`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`, `DOTNET_STARTUP_HOOKS`, profiler variables), program, its folder or the data dir writable by group/others, Secure Boot off when the certificate requires it | **Refuse to run**, exit 78. Nothing is deleted. |
 | TPM refuses to unseal while its endorsement key still matches (boot state changed) | **Refuse to run**, exit 78. Nothing is deleted. |
-| Certificate missing, badly signed or from an untrusted root (the network's `dirRoots`, when it has any) | **Wipe**, exit 77 |
+| Certificate validly signed but short of the network's root quorum (e.g. the node was started with the wrong `--network`) | **Refuse to run**, exit 78. Nothing is deleted. |
+| Certificate missing, or any signature on it invalid | **Wipe**, exit 77 |
 | Fewer than `need` identifiers match, or a mandatory one (TPM) doesn't | **Wipe**, exit 77 |
 | `hardware.wrap` or a `*.key.hw` file doesn't open, or the sealed directory key isn't the certified one | **Wipe**, exit 77 |
 

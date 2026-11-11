@@ -204,7 +204,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
         Profile = b.Network is { } n ? n.ToProfile() with { Nodes = b.Seeds } : PublicNetworkProfile.Jay(b.Seeds);
         // A node bound to its hardware checks the machine before it reads any key or opens any port.
         // Wrong hardware: its files are wiped and this throws HardwareMismatchException. Tampered runtime: NodeIntegrityException.
-        Guard = b.HardwareGuard ?? new NodeHardwareGuard(b.DataDir) { TrustedRoots = Profile.DirectoryRoots, DryRun = b.HardwareDryRun, Log = b.Log };
+        Guard = b.HardwareGuard ?? new NodeHardwareGuard(b.DataDir) { Trust = new TrustQuorum(Profile.DirectoryRoots, Profile.DirectoryRootsNeed), DryRun = b.HardwareDryRun, Log = b.Log };
         _sealedKeys = Guard.Enforce();
         if (_sealedKeys is null) Guard = null;
         Bans = b.BanListOn ? new BanList(Path.Combine(b.DataDir, "bans.json"), b.Clock) : null;
