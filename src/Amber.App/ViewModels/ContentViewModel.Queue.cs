@@ -69,7 +69,10 @@ public sealed partial class ContentViewModel
         }
         var optional = OptionalDependencies.Where(d => d.Include && d.ProjectId is not null).Select(d => d.ProjectId!).ToHashSet(StringComparer.Ordinal);
         var optionalFiles = OptionalDependencies.Where(d => d.Include && d.ProjectId is null && d.FileId is not null).Select(d => d.FileId!).ToHashSet(StringComparer.Ordinal);
-        return new QueuedContent(CurrentType, instance.Id, file.File, title, IsDatapack ? TargetWorld!.World.Path : null, optional, optionalFiles, _viaConnector);
+        return new QueuedContent(CurrentType, instance.Id, file.File, title, IsDatapack ? TargetWorld!.World.Path : null, optional, optionalFiles, _viaConnector)
+        {
+            LoaderPreference = CurrentType == ContentType.Mod && !_viaConnector ? CrossDependencyOrder(file.File, instance, _service.CrossLoaderFor(instance).Extras) : null,
+        };
     }
 
     private bool CanQueueSelected() => SelectedFile is not null && !IsModpack && !SelectedRequiresManualDownload;
@@ -151,7 +154,7 @@ public sealed partial class ContentViewModel
                     }
                     else
                     {
-                        plans.Add(await _service.ContentInstaller.ResolveAsync(item.File, instance, null, cts.Token,
+                        plans.Add(await _service.ContentInstaller.ResolveAsync(item.File, instance, null, cts.Token, loaderPreference: item.LoaderPreference,
                             optionalProjects: item.OptionalProjects?.ToHashSet(StringComparer.Ordinal) ?? [], optionalFiles: item.OptionalFiles?.ToHashSet(StringComparer.Ordinal) ?? []));
                     }
                 }

@@ -17,6 +17,9 @@ public sealed record ContentProject(
     long Downloads,
     string? PageUrl)
 {
+    /// <summary>The loaders the search hit lists (Modrinth categories, CurseForge latest files); empty when unknown.</summary>
+    public IReadOnlyList<string> Loaders { get; init; } = [];
+
     /// <summary>CurseForge 作者的第三方分发设置；未设置时保持 API 的默认行为。</summary>
     public bool? AllowDistribution { get; init; }
 }
@@ -55,7 +58,11 @@ public static class ContentFileExtensions
 
 public sealed record SearchResult(IReadOnlyList<ContentProject> Items, int Total);
 
-public sealed record SearchQuery(ContentType Type, string Text, string? GameVersion, string? Loader, int Offset = 0, int Limit = 20);
+public sealed record SearchQuery(ContentType Type, string Text, string? GameVersion, string? Loader, int Offset = 0, int Limit = 20)
+{
+    /// <summary>Mods for these loaders are also searched (mods the universal loader runs on this instance).</summary>
+    public IReadOnlyList<string> ExtraLoaders { get; init; } = [];
+}
 
 public interface IContentProvider
 {

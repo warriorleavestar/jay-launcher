@@ -161,6 +161,11 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.lan.port_required"));
             return;
         }
+        if (port != manual && !await GamePortReadyAsync(port.Value, manual: false))
+        {
+            SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
+            return;
+        }
         var credentials = NewCredentials(port.Value, TunnelSettings.Default);
         var members = new MemberTable();
         var room = credentials.ToHostRoom(members, ChatName);
@@ -577,8 +582,7 @@ public sealed partial class MultiplayerViewModel
         var extra = new List<DiagnosticEntry>();
         if (_session is { } s) extra.AddRange(s.RecentOutput.Select(l => new DiagnosticEntry(DateTime.Now, L.T("multiplayer.diagnostics.recent_output"), l)));
         var report = NetDiagnostics.BuildReport(Amber.Core.Launch.UpdateChecker.CurrentVersion, _diag.Snapshot().Concat(extra), table, secrets, IncludePublicIps);
-        File.WriteAllText(path, report);
-        SetStatus(StatusMessage.Success("multiplayer.diagnostics.exported", path));
+        SaveFile(path, () => File.WriteAllText(path, report), "multiplayer.diagnostics.exported");
     }
 
     private async Task StopDirectAsync()

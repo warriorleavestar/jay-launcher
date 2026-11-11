@@ -242,6 +242,11 @@ public sealed partial class HostServerViewModel : ObservableObject
         {
             await runner.StopAsync(TimeSpan.FromSeconds(60));
         }
+        catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // The server process is already gone (dead stdin, disposed handle): nothing left to stop.
+            Log("[Jay] " + e.Message);
+        }
         finally
         {
             s_running = null;
@@ -319,16 +324,30 @@ public sealed partial class HostServerViewModel : ObservableObject
     [RelayCommand]
     private void Revoke(HostMemberItem item)
     {
-        var n = Store().RevokeDevices(item.Name, null);
-        Status = L.F("multiplayer.hostserver.revoked", item.Name, n);
+        try
+        {
+            var n = Store().RevokeDevices(item.Name, null);
+            Status = L.F("multiplayer.hostserver.revoked", item.Name, n);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Status = L.F("common.save_file_failed", JayServerRunner.GateDirectory(DataDirectory), ErrorText.Of(e));
+        }
         Refresh();
     }
 
     [RelayCommand]
     private void RemoveMember(HostMemberItem item)
     {
-        Store().RemoveMember(item.Name);
-        Status = L.F("multiplayer.hostserver.removed", item.Name);
+        try
+        {
+            Store().RemoveMember(item.Name);
+            Status = L.F("multiplayer.hostserver.removed", item.Name);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Status = L.F("common.save_file_failed", JayServerRunner.GateDirectory(DataDirectory), ErrorText.Of(e));
+        }
         Refresh();
     }
 

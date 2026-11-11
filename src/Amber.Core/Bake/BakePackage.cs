@@ -25,6 +25,15 @@ public sealed record BakePackage(
     public const string ManifestName = "manifest.json";
     public const string Schema = "amber-ul/package@1";
 
+    /// <summary>The bridge jars the manifest lists (file names such as <c>fabricbridge.jar</c>).</summary>
+    public IReadOnlyCollection<string> Bridges { get; init; } = [];
+
+    /// <summary>
+    /// Interface 1.3.1 <c>accepts</c>: per platform and game version, the mod ecosystems the loader runs there
+    /// (Modrinth loader names). Null from older packages: <see cref="CrossLoader"/> then infers it from the bridges.
+    /// </summary>
+    public CrossLoader.AcceptTable? Accepts { get; init; }
+
     /// <summary>One file the manifest vouches for (relative path inside the package).</summary>
     public sealed record FileEntry(string Path, string Sha256, long Size);
 
@@ -73,7 +82,14 @@ public sealed record BakePackage(
 
         var protocol = manifest["protocol"] is JsonValue p && p.TryGetValue<int>(out var pr) ? pr : 0;
         var face = Version.TryParse(Str(manifest, "interface"), out var parsed) ? parsed : new Version(1, 0);
-        return new BakePackage(root, Str(manifest, "loaderVersion") ?? "", protocol, face, platforms, javaMin, classpath, files);
+        var bridges = new List<string>();
+        foreach (var (name, node) in manifest["bridges"] as JsonObject ?? [])
+            if (node is JsonValue v && v.TryGetValue<string>(out var bridgePath) && files.ContainsKey(Normalize(bridgePath))) bridges.Add(System.IO.Path.GetFileName(name));
+        return new BakePackage(root, Str(manifest, "loaderVersion") ?? "", protocol, face, platforms, javaMin, classpath, files)
+        {
+            Bridges = bridges,
+            Accepts = CrossLoader.AcceptTable.Parse(manifest["accepts"]),
+        };
     }
 
     /// <summary>

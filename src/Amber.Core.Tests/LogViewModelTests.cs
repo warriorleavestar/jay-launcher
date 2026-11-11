@@ -50,6 +50,33 @@ public class LogViewModelTests
         Assert.Equal(1, vm.WarningCount);
     }
 
+    /// <summary>
+    /// The Logs tab polls a live run by its revision: once the log is full its line count stays at the cap while lines
+    /// keep rolling, so the count alone froze the live view after 5000 lines.
+    /// </summary>
+    [Fact]
+    public void RevisionMovesWhenAFullLogKeepsRolling() => UiTestThread.Run(() =>
+    {
+        var vm = new LogViewModel();
+        var shown = vm.BeginRun("shown", DateTimeOffset.Now);
+        var other = vm.BeginRun("other", DateTimeOffset.Now);
+        vm.SelectedRun = shown;
+        foreach (var run in new[] { shown, other })
+        {
+            for (var i = 0; i < 5100; i++) vm.Add(run, new GameLogLine(DateTimeOffset.Now, GameLogLevel.Info, "main", "line " + i));
+            vm.Flush();
+            var count = run.All.Count;
+            var revision = run.Revision;
+
+            vm.Add(run, new GameLogLine(DateTimeOffset.Now, GameLogLevel.Info, "main", "one more"));
+            vm.Flush();
+
+            Assert.Equal(count, run.All.Count);
+            Assert.NotEqual(revision, run.Revision);
+            Assert.Equal("one more", run.All[^1].Message);
+        }
+    });
+
     [Fact]
     public void FilteringKeepsCountsAndRestoresAllRetainedRows() => UiTestThread.Run(FilteringKeepsCountsAndRestoresAllRetainedRowsOnUiThread);
 

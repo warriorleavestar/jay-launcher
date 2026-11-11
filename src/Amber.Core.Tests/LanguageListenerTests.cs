@@ -6,6 +6,7 @@ using Amber.Core.Localization;
 namespace Amber.Core.Tests;
 
 /// <summary>换语言的通知：下拉框选项跟着换文字，绑定被丢掉后能被回收（不会因为静态事件一直留在内存里）。</summary>
+[Collection("GlobalLanguage")]
 public class LanguageListenerTests
 {
     private sealed class Recorder : IObserver<string>
@@ -16,7 +17,7 @@ public class LanguageListenerTests
         public void OnError(Exception error) { }
     }
 
-    // 不切换全局语言（别的测试在并行跑、按中文断言），直接触发“换语言”的通知。
+    // 不切换全局语言，直接触发“换语言”的通知；放在 GlobalLanguage 里，别的测试换语言时发的通知不会算进这里的次数。
     [Fact]
     public void OptionItemRaisesLabelChanged()
     {
@@ -24,7 +25,7 @@ public class LanguageListenerTests
         var changed = 0;
         ((INotifyPropertyChanged)item).PropertyChanged += (_, e) => { if (e.PropertyName == nameof(OptionItem.Label)) changed++; };
         Assert.Equal(L.T("common.all"), item.Label);
-        LanguageListeners.Notify();
+        LanguageListeners.NotifyOnly(item);
         Assert.Equal(1, changed);
         Assert.Equal("日本語", OptionItem.Fixed("日本語").Label);
         GC.KeepAlive(item);
@@ -36,10 +37,10 @@ public class LanguageListenerTests
         var recorder = new Recorder();
         var subscription = new LocalizedText("common.all").Subscribe(recorder);
         Assert.Single(recorder.Values);
-        LanguageListeners.Notify();
+        LanguageListeners.NotifyOnly(recorder);
         Assert.Equal(2, recorder.Values.Count);
         subscription.Dispose();
-        LanguageListeners.Notify();
+        LanguageListeners.NotifyOnly(recorder);
         Assert.Equal(2, recorder.Values.Count);
     }
 

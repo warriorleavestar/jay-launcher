@@ -10,6 +10,7 @@ namespace Amber.Mobile;
 public sealed class App : Application
 {
     private MobileMainViewModel? _viewModel;
+    public static IMobilePlatformServices PlatformServices { get; set; } = NoMobilePlatformServices.Instance;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -25,7 +26,7 @@ public sealed class App : Application
 
     private MainView CreateMainView()
     {
-        _viewModel ??= new MobileMainViewModel();
+        _viewModel ??= new MobileMainViewModel(platformServices: PlatformServices);
         return new MainView { DataContext = _viewModel };
     }
 }

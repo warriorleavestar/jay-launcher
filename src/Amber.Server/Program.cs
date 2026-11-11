@@ -56,7 +56,7 @@ public static class Program
           jay-server rotate off / rotate status
 
         公共网络节点（Jay 公共网络 / 自己的公共网络的种子节点 + 房间目录）：
-          jay-server directory [--listen 11010] [--seeds tcp://别的种子:11010,...] [--easytier <放 easytier-core 的文件夹>]
+          jay-server directory [--listen 11010] [--seeds tcp://别的种子:11010,...] [--easytier <放 easytier-core 的文件夹> [--easytier-sha256 <easytier-core 的 SHA-256>]]
               在有公网 IP 的机器上运行，要放行 TCP 和 UDP 的 11010 端口。房间目录只在公共网络里可达（10.235.0.1:47668），不对公网开放。
               目录只存房主签过名的房间信息（名字、人数、敲门地址），不经手任何密钥；90 秒没续期的房间自动消失。
               --config <网络配置.json>        节点也按配置里允许的房间方式挡一道（防改过的客户端）
@@ -282,7 +282,24 @@ public static class Program
         return 0;
     }
 
-    /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
+    /// <summary>
+    /// A self-supplied easytier-core is not covered by Jay's pinned package hashes. Always log its SHA-256 so the
+    /// operator can compare it with the build they meant to use; with --easytier-sha256, refuse anything else.
+    /// </summary>
+    internal static void CheckEasyTierBinary(string corePath, string? expectedSha256, Action<string> log)
+    {
+        string actual;
+        using (var stream = File.OpenRead(corePath)) actual = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream));
+        if (expectedSha256 is null)
+        {
+            log($"用的是自己指定的 EasyTier（{corePath}），没有校验。SHA-256：{actual}。确认无误后可以加 --easytier-sha256 {actual} 固定它。");
+            return;
+        }
+        if (!string.Equals(actual, expectedSha256.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"{corePath} 的 SHA-256 是 {actual}，和 --easytier-sha256 给的不一样，不启动。");
+        log($"EasyTier 校验通过（SHA-256 {actual}）");
+    }
+
     /// <summary>
     /// Release signing for trustees (privacy plan items 2 and 3). Every trustee signs on their own offline machine with
     /// their own trust key; a release needs 2 of the 3. There is no release key of its own and nothing here can run in CI.
@@ -392,6 +409,7 @@ public static class Program
         return new TrustList(keys, n);
     }
 
+    /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
     internal static int NetworkCommand(Options options, TextWriter output, string? root = null)
     {
         var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
@@ -680,6 +698,7 @@ public static class Program
             var core = Path.Combine(Path.GetFullPath(dir), "easytier-core" + exe);
             var cli = Path.Combine(Path.GetFullPath(dir), "easytier-cli" + exe);
             if (!File.Exists(core) || !File.Exists(cli)) throw new IOException($"{dir} 里没有 easytier-core 和 easytier-cli");
+            CheckEasyTierBinary(core, options.Get("easytier-sha256"), log);
             builder.UseEasyTier(core, cli);
         }
 

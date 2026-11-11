@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     {
         _settings = settings;
         InitializeComponent();
+        InitLazyOverlays();
         Amber.App.Services.ThemeService.AttachMainWindow(this);
         Amber.App.Services.DensityService.Attach(this);
         AttachShell();
@@ -63,12 +64,12 @@ public partial class MainWindow : Window
             // Ctrl+Enter 启动当前实例；焦点在输入框里（JVM 参数这类）时不触发，免得边填参数边把游戏启动了。
             else if (e.Key == Avalonia.Input.Key.Enter && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control)
             {
-                if (FocusManager?.GetFocusedElement() is TextBox) return;
+                if (!KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.OutsideText, e)) return;
                 if (DataContext is MainViewModel { Pages: var pages } && pages.OfType<HomeViewModel>().FirstOrDefault() is { } home)
                     e.Handled = home.LaunchShortcut();
             }
             else if (e.Key == Avalonia.Input.Key.Z && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control
-                     && FocusManager?.GetFocusedElement() is not TextBox)
+                     && KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.OutsideText, e))
                 e.Handled = Toasts.UndoLatest();
         }, RoutingStrategies.Tunnel);
         // 开发用：设置 AMBER_SNAPSHOT_DIR 后，依次把每个页面渲染成 PNG 然后退出。
@@ -254,17 +255,26 @@ public partial class MainWindow : Window
         if (_settings is null || Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 }) return;
         var maximized = WindowState == WindowState.Maximized;
         var old = _settings.LauncherWindow;
-        _settings.LauncherWindow = new WindowPlacement
+        var placement = new WindowPlacement
         {
             // 最大化时记最大化之前的位置和大小（Avalonia 没直接给，就沿用上次记下的）。
             X = maximized && old is not null ? old.X : Position.X,
             Y = maximized && old is not null ? old.Y : Position.Y,
-            Width = maximized && old is not null ? old.Width : Width,
-            Height = maximized && old is not null ? old.Height : Height,
+            Width = maximized && old is not null ? old.Width : SizeOrClient(Width, ClientSize.Width),
+            Height = maximized && old is not null ? old.Height : SizeOrClient(Height, ClientSize.Height),
             Maximized = maximized,
         };
-        try { _settings.Save(); } catch (IOException) { }
+        // Width and Height stay NaN when FitToScreen found no screen (some Linux setups). NaN can't be written as JSON:
+        // saving threw on close, and kept throwing on every later save of the settings.
+        if (!IsUsable(placement)) return;
+        _settings.LauncherWindow = placement;
+        try { _settings.Save(); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
+
+    private static double SizeOrClient(double size, double client) => double.IsFinite(size) && size > 0 ? size : client;
+
+    internal static bool IsUsable(WindowPlacement p) =>
+        double.IsFinite(p.Width) && double.IsFinite(p.Height) && p.Width > 0 && p.Height > 0;
 
     private async Task SnapshotPagesAsync(string dir)
     {

@@ -21,7 +21,7 @@ public partial class MainWindow
         AddHandler(DragDrop.DragLeaveEvent, OnDragLeave);
         AddHandler(DragDrop.DropEvent, OnDrop);
         // Compact windows stack the zones (each takes the width).
-        SizeChanged += (_, e) => DropLayer.Classes.Set("compact", e.NewSize.Width < 640);
+        SizeChanged += (_, e) => { if (DropHost.IsBuilt) DropLayer.Classes.Set("compact", e.NewSize.Width < 640); };
     }
 
     private DropViewModel? DropModel => (DataContext as MainViewModel)?.Drop;

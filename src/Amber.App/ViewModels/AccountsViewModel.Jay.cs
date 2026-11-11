@@ -230,8 +230,17 @@ public sealed partial class AccountsViewModel
 
     private void SaveAndBind(JayAccount account, string statusKey)
     {
-        using var device = MemberIdentity.LoadOrCreate(Amber.App.Services.AppSettings.DataDir);
-        _service.JayAccounts.Add(account, "", backedUp: true, device.PublicKey, DeviceName(), DateTimeOffset.UtcNow);
+        try
+        {
+            using var device = MemberIdentity.LoadOrCreate(Amber.App.Services.AppSettings.DataDir);
+            _service.JayAccounts.Add(account, "", backedUp: true, device.PublicKey, DeviceName(), DateTimeOffset.UtcNow);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Keep the words and the step on screen so the user can try again once the folder is free.
+            SetStatus(StatusMessage.Failure("common.save_file_failed", e, Amber.App.Services.AppSettings.DataDir, ErrorText.Of(e)));
+            return;
+        }
         var target = JaySuggestionFor ?? _service.Accounts.Store.Selected;
         ClearJayInputs();
         JayStep = JayStep.None;
@@ -256,7 +265,12 @@ public sealed partial class AccountsViewModel
     private void Bind(Account account, string address, string statusKey = "accounts.status.jay_bound")
     {
         account.JayAddress = address;
-        _service.Accounts.Store.Save();
+        try { _service.Accounts.Store.Save(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            SetStatus(StatusMessage.Failure("common.save_file_failed", e, Amber.App.Services.AppSettings.DataDir, ErrorText.Of(e)));
+            return;
+        }
         JaySuggestionFor = null;
         SetStatus(StatusMessage.Success(statusKey == "accounts.status.jay_bound" ? statusKey : statusKey + "_bound", JayAddress.Short(address), account.Name));
         Changed();

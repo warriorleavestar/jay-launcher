@@ -2,7 +2,7 @@
 # Amber 联机节点一键部署（Linux，x86_64 / arm64，systemd）
 # Amber relay node installer (Linux, x86_64 / arm64, systemd)
 #
-# 下载 EasyTier 官方发布的 easytier-core（固定版本，校验 SHA-256），以普通用户身份作为 systemd 服务运行，
+# 下载 Jay 加固版 EasyTier 的 easytier-core（固定版本，校验 SHA-256；源码 https://github.com/Yumao-Feather/jay-easytier），以普通用户身份作为 systemd 服务运行，
 # 只做中继（--no-tun，不建虚拟网卡，不需要 root 权限运行）。
 #
 # 用法 / usage（以 root 运行 / run as root）:
@@ -16,9 +16,12 @@
 
 set -euo pipefail
 
+# Same pins as src/Amber.Core/Multiplayer/EasyTier.cs.
 VERSION="2.6.4"
-SHA_X86_64="61b659eaedba658fa66fe47d17e1426cdd77e5d02fa15fed447bb4357c09dfd6"
-SHA_AARCH64="f533ec25a7ea714e09f645615012200278058525795cc3bb690ff011aec1a70f"
+TAG="jay-v2.6.4-1"
+COMMIT="89e36e45d7e2"
+SHA_X86_64="4d2c3e962259fd9c72cee59f23cb707c91aa2702af26413438683446a989fa9a"
+SHA_AARCH64="15a21e30b1a50cb8cb72e9be297a2dd88856639c5efe7f0fd860154b0034fc49"
 
 PORT="${PORT:-11010}"
 RELAY="${RELAY:-amber}"
@@ -60,8 +63,8 @@ need curl
 need unzip
 command -v sha256sum >/dev/null 2>&1 || die "需要 sha256sum（coreutils）"
 
-ASSET="easytier-linux-${ARCH}-v${VERSION}.zip"
-URL="https://github.com/EasyTier/EasyTier/releases/download/v${VERSION}/${ASSET}"
+ASSET="easytier-linux-${ARCH}-v${VERSION}-jay-${COMMIT}.zip"
+URL="https://github.com/Yumao-Feather/jay-easytier/releases/download/${TAG}/${ASSET}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

@@ -218,11 +218,12 @@ public static class TrashService
         return c.StartsWith(p, StringComparison.OrdinalIgnoreCase);
     }
 
+    // Only the folder that holds the trash matters: the game reads mods, saves and so on inside its own directory, and
+    // folders above the game directory can have any name (a game directory under D:\Backups\mods\ is fine).
     private static void EnsureNotInScanned(string root)
     {
-        for (var dir = Path.GetDirectoryName(root); dir is not null; dir = Path.GetDirectoryName(dir))
-            if (ScannedFolders.Contains(Path.GetFileName(dir)))
-                throw new TrashException(TrashFailure.TrashInScannedFolder, root);
+        if (Path.GetDirectoryName(root) is { } owner && ScannedFolders.Contains(Path.GetFileName(owner)))
+            throw new TrashException(TrashFailure.TrashInScannedFolder, root);
     }
 
     private static string FreeName(string path)
