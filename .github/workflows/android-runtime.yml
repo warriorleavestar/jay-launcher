@@ -61,7 +61,9 @@ jobs:
           tar -xf "$source_archive" -C "$normalized"
           mkdir -p runtime-artifact
           archive="runtime-artifact/jay-jre21-${{ matrix.architecture }}.tar.xz"
-          tar -C "$normalized" -cJhf "$archive" .
+          # The installer intentionally rejects both symbolic and hard links. Dereference
+          # both kinds so every activated runtime path is an independently verified file.
+          tar --hard-dereference -C "$normalized" -cJhf "$archive" .
           readelf_path="runtime-source/android-ndk-r21/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           bash scripts/check-android-runtime.sh "$archive" "${{ matrix.architecture }}" "$readelf_path"
           sha256sum "$archive" > "$archive.sha256"
