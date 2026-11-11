@@ -1,3 +1,4 @@
+using Amber.Core.Activity;
 using Amber.App.ViewModels;
 using Amber.Core.Identity;
 using Amber.Core.Localization;
@@ -129,6 +130,8 @@ internal sealed partial class SelfTest
             card!.TrustAfter = true;
             vm.ApproveKnockCommand.Execute(card);
         });
+        var knockLeft = await WaitAsync(() => !main.Service.Requests.Pending.Any(r => r.Spec.Kind == "knock"), 3);
+        Check("Jay 账户联机：批准后请求条里的敲门也收起", knockLeft, string.Join(", ", main.Service.Requests.Pending.Select(r => r.Spec.Kind + ":" + r.Spec.Title)));
         Check("Jay 账户联机：批准并信任后，信任列表记下的是账户",
             await decision && Dispatcher.UIThread.Invoke(() => vm.TrustedPeople.Any(t => t.Member.JayAccount == address && t.Label.Contains(JayAddress.Short(address)))));
 
@@ -148,8 +151,115 @@ internal sealed partial class SelfTest
             vm.Members.Clear();
             vm.Mode = "";
         });
+        await JayFriendsAsync(vm, page);
         Check("Jay 账户联机：取消信任时这个账户的设备一起移除", Dispatcher.UIThread.Invoke(() => vm.TrustedPeople.All(t => t.Member.JayAccount != address)));
         main.CurrentPage = Page<AccountsViewModel>();
         await Task.Delay(300);
+    }
+
+    /// <summary>
+    /// Contacts as people with devices (Jay accounts group devices), removing one device, and the friend list backup:
+    /// saved locked with the bound Jay account, restored into an empty list, with a hello from this device queued for later.
+    /// </summary>
+    private async Task JayFriendsAsync(MultiplayerViewModel vm, MultiplayerPage page)
+    {
+        Control? Shown(string name) => page.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible);
+        var dir = Path.Combine(reportDir, "jay-friends");
+        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        Directory.CreateDirectory(dir);
+        using var bob = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        byte[] Key(byte n)
+        {
+            var k = new byte[32];
+            k[0] = n;
+            return k;
+        }
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.ContactsDir = dir;
+            vm.Tab = MultiplayerTab.Settings;
+            vm.Contacts.Import([
+                new Amber.Core.Multiplayer.Contacts.Contact(Key(1), "Bob", true, DateTimeOffset.UtcNow.AddDays(-3)) { JayAccount = bob.Address },
+                new Amber.Core.Multiplayer.Contacts.Contact(Key(2), "Bob", true, DateTimeOffset.UtcNow) { JayAccount = bob.Address },
+                new Amber.Core.Multiplayer.Contacts.Contact(Key(3), "Sam", true, DateTimeOffset.UtcNow),
+            ]);
+        });
+        await Task.Delay(400);
+        var bobItem = Dispatcher.UIThread.Invoke(() => vm.ContactList.FirstOrDefault(c => c.Name == "Bob"));
+        Check("好友：同一个 Jay 账户的两台设备算一个人", Dispatcher.UIThread.Invoke(() => vm.ContactList.Count) == 2 && bobItem is { HasSeveralDevices: true }
+            && bobItem.Devices.Count == 2 && bobItem.JayText.Contains(JayAddress.Short(bob.Address)), string.Join(", ", vm.ContactList.Select(c => c.Name)));
+        Dispatcher.UIThread.Invoke(() => Shown("ContactListView")?.BringIntoView());
+        Check("好友：这个人下面列出每台设备，名下写 Jay 账户", await WaitAsync(() => Shown("ContactDevices") is not null && Shown("ContactJay") is not null, 3));
+        await ShotAsync("Jay账户-好友人和设备");
+
+        Dispatcher.UIThread.Invoke(() => vm.RemoveContactDeviceCommand.Execute(bobItem!.DeviceItems.First(d => d.Device.PublicKey[0] == 1)));
+        Check("好友：移除一台设备，人还在", await WaitAsync(() => vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: false }, 3)
+            && vm.ContactList.Count == 2);
+
+        var backup = Path.Combine(dir, "friends" + Amber.Core.Multiplayer.Contacts.FriendBackup.FileExtension);
+        vm.PickFriendBackupSave = () => Task.FromResult<string?>(backup);
+        vm.PickFriendBackupOpen = () => Task.FromResult<string?>(backup);
+        await Dispatcher.UIThread.InvokeAsync(() => vm.BackupFriendsCommand.ExecuteAsync(null));
+        Check("好友：【备份联系人】存下一份用 Jay 账户锁住的文件", File.Exists(backup)
+            && Amber.Core.Multiplayer.Contacts.FriendBackup.LooksLikeBackup(File.ReadAllBytes(backup))
+            && !File.ReadAllText(backup).Contains("Sam"), vm.Status);
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            foreach (var c in vm.ContactList.ToList()) vm.RemoveContactCommand.Execute(c);
+        });
+        await WaitAsync(() => !vm.HasContacts, 3);
+        string? asked = null;
+        var confirm = vm.Confirm;
+        vm.Confirm = (_, body, _) =>
+        {
+            asked = body;
+            return Task.FromResult(true);
+        };
+        await Dispatcher.UIThread.InvokeAsync(() => vm.RestoreFriendsCommand.ExecuteAsync(null));
+        vm.Confirm = confirm;
+        Check("好友：【恢复联系人】先写明备份日期和会回来的人", asked is not null && asked.Contains("Bob") && asked.Contains("Sam")
+            && asked.Contains(DateTimeOffset.Now.ToString("d")), asked ?? "");
+        Check("好友：【恢复联系人】把人带回来，并记下要从这台设备打招呼",
+            await WaitAsync(() => vm.ContactList.Count == 2, 3) && File.Exists(Path.Combine(dir, MultiplayerViewModel.RelinkFileName)), vm.Status);
+
+        // Bob shows up from a computer I've never seen: his account signed it, so it's added without the emoji, and I'm told.
+        using (var bobNew = X25519KeyPair.Generate())
+        {
+            var me = Dispatcher.UIThread.Invoke(() => vm.Contacts.Me);
+            var bobBook = new Amber.Core.Multiplayer.Contacts.ContactBook(Path.Combine(dir, "bob-new.json"))
+                { Me = bobNew.PublicKey, MyCertificate = bob.CertifyDevice(bobNew.PublicKey, "Linux", 0, DateTimeOffset.UtcNow) };
+            var reply = vm.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me");
+            if (reply is not null && bobBook.Receive(me, reply, "Bob") is { } nonce) vm.Contacts.Receive(bobNew.PublicKey, nonce, "Me");
+            var notice = L.F("multiplayer.contacts.new_device", "Bob");
+            RequestHandle? Notice() => main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-new-device");
+            Check("好友：认识的人换了新设备，不对表情就加上，并在请求条里留一条安全提示",
+                await WaitAsync(() => Notice() is { Spec.IsSafety: true, Spec.Timeout: null } n && n.Spec.Title == notice
+                    && n.Spec.Body?.Contains("Linux") == true && vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: true }, 3),
+                string.Join(", ", main.Service.Requests.Pending.Select(r => r.Spec.Kind + ":" + r.Spec.Title)));
+            Check("好友：新设备在设备列表里标着“待你确认”",
+                Dispatcher.UIThread.Invoke(() => vm.ContactList.First(c => c.Name == "Bob").DeviceItems.Any(d => d.Fingerprint.Contains(L.T("multiplayer.contacts.new_device_tag")))));
+            await ShotAsync("Jay账户-好友新设备");
+            Dispatcher.UIThread.Invoke(() => main.Service.Requests.Resolve(Notice()!, "remove", RequestSource.Bar));
+            Check("好友：点“不是 TA？移除这台设备”，设备没了，它再敲门也要重新对表情",
+                await WaitAsync(() => vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: false }, 3)
+                && vm.Contacts.RemovedDevices.Any(r => r.PublicKey.AsSpan().SequenceEqual(bobNew.PublicKey))
+                && vm.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me") is null
+                && vm.Contacts.Pending.Any(p => p.PublicKey.AsSpan().SequenceEqual(bobNew.PublicKey) && !p.KnownFriend), vm.Status);
+            vm.Contacts.Dismiss(bobNew.PublicKey);
+        }
+
+        var tampered = File.ReadAllBytes(backup);
+        tampered[^5] ^= 1;
+        File.WriteAllBytes(backup, tampered);
+        await Dispatcher.UIThread.InvokeAsync(() => vm.RestoreFriendsCommand.ExecuteAsync(null));
+        Check("好友：被改过的备份不认", vm.Status == L.T("multiplayer.friends.wrong_account"), vm.Status);
+        await ShotAsync("Jay账户-好友备份");
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            foreach (var c in vm.ContactList.ToList()) vm.RemoveContactCommand.Execute(c);
+            vm.Tab = MultiplayerTab.Play;
+        });
     }
 }

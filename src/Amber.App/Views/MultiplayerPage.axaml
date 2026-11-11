@@ -1152,9 +1152,25 @@
                       <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource AccentTint}" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Initial}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentText}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                       </Border>
-                      <StackPanel Grid.Column="1" Margin="8,0" VerticalAlignment="Center">
+                      <StackPanel Grid.Column="1" Margin="8,0" VerticalAlignment="Center" Spacing="1">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ContactJay" Text="{Binding JayText}" Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasJay}" />
+                        <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" IsVisible="{Binding HasOneDevice}" />
+                        <!-- Person + devices: each device's safety code, and a lost one can be removed alone. -->
+                        <StackPanel x:Name="ContactDevices" Spacing="2" IsVisible="{Binding HasSeveralDevices}">
+                          <TextBlock Text="{Binding DevicesText}" Classes="hint" FontSize="12" />
+                          <ItemsControl ItemsSource="{Binding DeviceItems}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate DataType="vm:ContactDeviceItem">
+                                <Grid ColumnDefinitions="*,Auto" Margin="0,1">
+                                  <TextBlock Text="{Binding Fingerprint}" Classes="hint" FontSize="12" FontFamily="Consolas,Menlo,monospace" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                  <Button Grid.Column="1" Classes="small" Margin="6,0,0,0" Content="{l:T multiplayer.contacts.remove_device}"
+                                          Command="{Binding $parent[ItemsControl;1].((vm:MultiplayerViewModel)DataContext).RemoveContactDeviceCommand}" CommandParameter="{Binding}" />
+                                </Grid>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
                       </StackPanel>
                       <Button Grid.Column="2" Classes="small" Content="{l:T multiplayer.contacts.remove}" VerticalAlignment="Center"
                               Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RemoveContactCommand}" CommandParameter="{Binding}" />
@@ -1162,6 +1178,12 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+              <!-- Friend list backup, locked with the Jay account: restore it on a new computer and friends reconnect. -->
+              <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,6,0,0">
+                <Button x:Name="BackupFriendsButton" Classes="small" Content="{l:T multiplayer.friends.backup}" Command="{Binding BackupFriendsCommand}" />
+                <Button x:Name="RestoreFriendsButton" Classes="small" Content="{l:T multiplayer.friends.restore}" Command="{Binding RestoreFriendsCommand}" />
+              </WrapPanel>
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.friends.backup_hint}" />
             </StackPanel>
           </Border>
 
