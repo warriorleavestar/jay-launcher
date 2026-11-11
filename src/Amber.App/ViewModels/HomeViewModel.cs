@@ -403,6 +403,14 @@ public sealed partial class HomeViewModel : PageViewModel
     /// <summary>Any run started, changed phase or ended. On the UI thread.</summary>
     public event Action? RunStateChanged;
 
+    /// <summary>Ctrl+Shift+Q (§8.5): ask the newest game that is actually playing to save and quit. False when none is.</summary>
+    public bool QuitRunningGame()
+    {
+        if (_runs.LastOrDefault(r => r.Game is { HasExited: false } && !r.Exiting) is not { } run) return false;
+        ExitGame(run);
+        return true;
+    }
+
     /// <summary>The instance page's side button: cancel while preparing, otherwise ask the game to save and quit.</summary>
     public void StopRun(string id)
     {

@@ -223,6 +223,8 @@ public partial class MainWindow
     private void OnShellKeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not MainViewModel { Shell: var shell } main) return;
+        // §8.5: while an input method composes, no shortcut fires; the keys belong to the composition.
+        if (KeyboardScope.Of(e).Composing) return;
         if (main.Palette.IsOpen)
         {
             HandlePaletteKey(main.Palette, e);
@@ -253,30 +255,26 @@ public partial class MainWindow
         if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.OemTilde) { main.ToggleLogDock(); e.Handled = true; return; }
         if (e.Key == Key.Escape && main.LogDocked && LogDockIsDrawer) { main.LogDocked = false; e.Handled = true; return; }
         // Ctrl+V outside a text box: a pasted invite (or any other Jay code) opens multiplayer with it filled in.
-        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.V && KeyboardScope.Allows(KeyScope.OutsideText, this, e))
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.V && KeyboardScope.Allows(KeyScope.OutsideText, e))
         {
             _ = PasteCodeAsync(main);
             return;
         }
         // Ctrl+N: new instance from anywhere (§8.5); in a text box Ctrl+N stays with the text box.
-        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.N && !main.FirstRun.IsOpen && KeyboardScope.Allows(KeyScope.OutsideText, this, e))
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.N && !OverlayOpen(main) && KeyboardScope.Allows(KeyScope.OutsideText, e))
         {
-            shell.Navigate("library/new");
+            shell.Navigate(LegacyRoutes.NewInstance);
             e.Handled = true;
             return;
         }
         // Ctrl+Shift+Q: quit the running game, from any page (§8.5 "global, while playing").
         if (e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.Q)
         {
-            if (main.Pages.OfType<InstanceViewModel>().FirstOrDefault() is { Start.Side: Amber.Core.GameLibrary.StartSide.QuitGame } running)
-            {
-                running.SideActionCommand.Execute(null);
-                e.Handled = true;
-            }
+            if (main.Pages.OfType<HomeViewModel>().FirstOrDefault()?.QuitRunningGame() == true) e.Handled = true;
             return;
         }
         // F6 / Shift+F6: jump between the sidebar, the top bar, the request bar and the page (§8.5, §8.6).
-        if (e.Key == Key.F6 && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift && !main.FirstRun.IsOpen)
+        if (e.Key == Key.F6 && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift && !OverlayOpen(main))
         {
             e.Handled = CycleRegion(back: e.KeyModifiers == KeyModifiers.Shift);
             return;
@@ -303,7 +301,11 @@ public partial class MainWindow
     }
 
     /// <summary>The keyboard regions in F6 order; ones that are hidden right now are skipped.</summary>
-    internal IReadOnlyList<Control> FocusRegions => [SidebarHost, TopBar, RequestBar, PageHost];
+    internal IReadOnlyList<Control> FocusRegions => [SidebarHost, TopBar, RequestBar, SubPageTabs, PageHost, LogDock];
+
+    /// <summary>A drawer, the palette, the first-run wizard or a full-window overlay is up: F6 and Ctrl+N leave focus where it is.</summary>
+    private static bool OverlayOpen(MainViewModel main) =>
+        main.Palette.IsOpen || main.Help.IsOpen || main.Activity.IsOpen || main.FirstRun.IsOpen || main.Drop.IsActive || main.Multiplayer.IsBreakerCounting;
 
     /// <summary>The region that has focus now (for F6 and the self-check), or null.</summary>
     internal Control? FocusedRegion
@@ -315,16 +317,26 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>The regions F6 stops at right now: visible and with something to focus.</summary>
-    internal IReadOnlyList<Control> ActiveFocusRegions => FocusRegions.Where(r => r.IsEffectivelyVisible && FirstFocusable(r) is not null).ToList();
+    /// <summary>The regions F6 stops at right now, each with the control it focuses: visible and with something to focus.</summary>
+    private List<(Control Region, InputElement Target)> ActiveRegions()
+    {
+        var list = new List<(Control, InputElement)>();
+        foreach (var r in FocusRegions)
+            if (r.IsEffectivelyVisible && FirstFocusable(r) is { } target) list.Add((r, target));
+        return list;
+    }
+
+    /// <summary>How many regions F6 cycles through right now (self-check).</summary>
+    internal int ActiveFocusRegionCount => ActiveRegions().Count;
 
     private bool CycleRegion(bool back)
     {
-        var regions = ActiveFocusRegions;
+        var regions = ActiveRegions();
         if (regions.Count == 0) return false;
-        var at = FocusedRegion is { } now ? regions.ToList().IndexOf(now) : -1;
+        var now = FocusedRegion;
+        var at = now is null ? -1 : regions.FindIndex(r => r.Region == now);
         var next = at < 0 ? (back ? regions.Count - 1 : 0) : (at + (back ? -1 : 1) + regions.Count) % regions.Count;
-        return FirstFocusable(regions[next])?.Focus(NavigationMethod.Tab) == true;
+        return regions[next].Target.Focus(NavigationMethod.Tab);
     }
 
     private static InputElement? FirstFocusable(Control region) =>

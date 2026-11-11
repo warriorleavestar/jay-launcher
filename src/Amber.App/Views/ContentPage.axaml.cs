@@ -39,7 +39,7 @@ public partial class ContentPage : UserControl
         ResultsList.AddHandler(KeyDownEvent, (_, e) =>
         {
             if (e.Key == Key.Space && DataContext is ContentViewModel vm && ResultsList.SelectedItem is ProjectItem item && !vm.IsModpack
-                && KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.List, ResultsList, e))
+                && KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.List, e))
             {
                 vm.ToggleQueueCommand.Execute(item);
                 e.Handled = true;

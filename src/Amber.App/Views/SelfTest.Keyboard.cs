@@ -35,7 +35,7 @@ internal sealed partial class SelfTest
         {
             box.Focus();
             await Task.Delay(150);
-            Press(Key.N, KeyModifiers.Control);
+            box.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.N, KeyModifiers = KeyModifiers.Control, Source = box });
             await Task.Delay(300);
             Check("Ctrl+N inside a text box does not navigate", main.CurrentPage is LibraryViewModel, shell.Router.Current.ToString());
             window.Focus();
@@ -45,11 +45,17 @@ internal sealed partial class SelfTest
         shell.Navigate("discover");
         await Task.Delay(300);
         window.Focus();
-        Press(Key.ImeProcessed, KeyModifiers.Control);
+        // Raise F6 / Ctrl+N as the composition reports them (no key at all): neither may act.
+        var focusedBefore = window.FocusedRegion;
+        Press(Key.None, KeyModifiers.Control);
+        Press(Key.ImeProcessed, KeyModifiers.None);
         await Task.Delay(200);
-        Check("A key the input method is composing does nothing", main.CurrentPage is ContentViewModel);
+        var composing = new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.ImeProcessed, Source = window };
+        Check("Keys the input method is composing count as composing and do nothing",
+            KeyboardScope.Of(composing).Composing && !KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.Global, composing)
+            && main.CurrentPage is ContentViewModel && window.FocusedRegion == focusedBefore);
 
-        // Ctrl+Shift+Q only acts while a game runs; with none running it changes nothing.
+        // Ctrl+Shift+Q only acts while a game runs (HomeViewModel.QuitRunningGame); with none running it changes nothing.
         Press(Key.Q, KeyModifiers.Control | KeyModifiers.Shift);
         await Task.Delay(200);
         Check("Ctrl+Shift+Q with no game running does nothing", main.CurrentPage is ContentViewModel && window.IsVisible);
@@ -59,7 +65,7 @@ internal sealed partial class SelfTest
         await Task.Delay(400);
         window.Focus();
         var visited = new List<Control?>();
-        var expected = window.ActiveFocusRegions.Count;
+        var expected = window.ActiveFocusRegionCount;
         for (var i = 0; i < expected + 1; i++)
         {
             Press(Key.F6, KeyModifiers.None);
@@ -74,6 +80,16 @@ internal sealed partial class SelfTest
         await Task.Delay(150);
         Check("Shift+F6 goes back one region", expected >= 2 && window.FocusedRegion == visited[expected - 1],
             window.FocusedRegion?.Name ?? "-");
+
+        // With a drawer open F6 leaves focus in the drawer instead of jumping behind the scrim.
+        main.Activity.Toggle();
+        await Task.Delay(300);
+        var inDrawer = window.FocusedRegion;
+        Press(Key.F6, KeyModifiers.None);
+        await Task.Delay(150);
+        Check("F6 does nothing while the activity drawer is open", main.Activity.IsOpen && window.FocusedRegion == inDrawer);
+        main.Activity.Close();
+        await Task.Delay(200);
         await ShotAsync("shell-f6");
 
         // Ctrl+Alt+Shift+T: back to the default look, with Undo; on the default look it only says so.
