@@ -310,6 +310,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     private void LoadTab(int tab)
     {
         if (Current is null || !_loadedTabs.Add(tab)) return;
+        if (tab == (int)InstanceTab.Mods && !IsVanilla) Services.TutorialService.Request(Amber.Core.Tutorial.Tips.ModsToggle);
         switch ((InstanceTab)tab)
         {
             case InstanceTab.Overview: LoadOverview(); break;

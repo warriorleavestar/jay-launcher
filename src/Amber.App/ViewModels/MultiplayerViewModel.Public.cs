@@ -221,7 +221,7 @@ public sealed partial class MultiplayerViewModel
         IsRefreshingRooms = true;
         try
         {
-            var rooms = await new RoomDirectoryClient(network).ListAsync(default);
+            var rooms = await DirectoryClient(network).ListAsync(default);
             PublicRooms.Clear();
             foreach (var room in rooms) PublicRooms.Add(new PublicRoomItem(room));
             if (rooms.Count == 0) SetStatus(StatusMessage.Info("multiplayer.public.no_rooms"));
@@ -276,12 +276,12 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>加入方拿着邀请码、又连着公共网络：先在目录里找房主（隐藏房间也行），找不到再走邀请码自己的大厅。</summary>
-    private async Task<KnockOutcome?> TryPublicKnockAsync(JayInvite invite, X25519KeyPair me, string name, CancellationToken ct)
+    private async Task<KnockOutcome?> TryPublicKnockAsync(JayInvite invite, X25519KeyPair me, string name, CancellationToken ct, byte[]? expectedHost = null)
     {
         if (_public is not { } network) return null;
         try
         {
-            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, device: Device, account: AccountToken, jay: JayCertificate);
+            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost);
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException && !ct.IsCancellationRequested)
         {
@@ -444,7 +444,7 @@ public sealed partial class MultiplayerViewModel
         _directMailRoom = null;
         _ = Task.Run(async () =>
         {
-            try { await new RoomDirectoryClient(network).MailAsync(id, value, default); }
+            try { await DirectoryClient(network).MailAsync(id, value, default); }
             catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException or OperationCanceledException)
             {
                 Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Failure("multiplayer.public.mail_failed", e, ErrorText.Of(e))));

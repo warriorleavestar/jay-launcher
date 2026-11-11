@@ -249,6 +249,14 @@ public sealed partial class HelpCenterViewModel : PageViewModel
     [RelayCommand]
     private void BackToCatalog() => ArticleEntered = false;
 
+    /// <summary>§9.3 rule 7: forget which contextual tips were seen or muted.</summary>
+    [RelayCommand]
+    private void ResetTips()
+    {
+        Services.TutorialService.ResetAll();
+        Services.Toasts.Show(L.T("tip.reset_done"));
+    }
+
     private void Rebuild()
     {
         var id = Selected?.Id;

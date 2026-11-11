@@ -244,6 +244,7 @@ public sealed partial class InstanceViewModel
         ShowLastRun = show;
         LastRunCauses.Clear();
         if (!show || crash is null) return;
+        Services.TutorialService.Request(Amber.Core.Tutorial.Tips.FirstCrash);
         var when = _home!.CrashTime is { } t ? Fmt.Ago(t, DateTimeOffset.Now) : "";
         LastRunTitle = L.F("instance.lastrun.title", when);
         // Joined a room with other mods than the host's: that comes first.

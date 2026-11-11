@@ -173,7 +173,7 @@ public static class LobbyJoin
     /// <param name="relayFound">连上了中继节点（大厅里看到了除自己以外的对端），在找房主。</param>
     public static async Task<KnockOutcome> KnockAsync(EasyTierInstaller installer, string workDir, IReadOnlyList<string> peers, JayInvite invite,
         X25519KeyPair me, string name, string version, Action<string>? log, Action? hostFound, CancellationToken ct, Action? relayFound = null,
-        Public.DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null)
+        Public.DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null, byte[]? expectedHost = null)
     {
         var localPort = EasyTierArgs.FreeTcpPort();
         var options = new LobbyOptions(LobbyKeys.LobbyName(invite.LobbyKey), LobbyKeys.LobbySecret(invite.LobbyKey), false, peers, EasyTierArgs.FreeTcpPort(), localPort);
@@ -195,7 +195,7 @@ public static class LobbyJoin
             try
             {
                 await client.ConnectAsync(IPAddress.Loopback, localPort, ct);
-                return await KnockClient.KnockAsync(client.GetStream(), invite, me, name, version, ct, device: device, account: account, jay: jay);
+                return await KnockClient.KnockAsync(client.GetStream(), invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHost, jay: jay);
             }
             catch (Exception e) when (attempt < 2 && e is IOException or SocketException && !ct.IsCancellationRequested)
             {
