@@ -154,8 +154,7 @@ public sealed partial class MultiplayerViewModel
     private async Task CopyNetworkAsync()
     {
         if (SelectedNetworkChoice is not { IsBuiltIn: false } choice || _service.Networks.Find(choice.Id) is not { } network) return;
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard })
-            await Avalonia.Input.Platform.ClipboardExtensions.SetTextAsync(clipboard, network.Text);
-        SetStatus(StatusMessage.Success("multiplayer.network.copied"));
+        if (await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(network.Text))
+            SetStatus(StatusMessage.Success("multiplayer.network.copied"));
     }
 }

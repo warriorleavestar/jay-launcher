@@ -227,6 +227,10 @@ public sealed class PublicNetworkSession : IPublicNetwork, IDisposable
 
     public Task<List<PeerInfo>> PeersAsync(CancellationToken ct = default) => EasyTierSession.QueryPeersAsync(_cliPath, Options.RpcPort, ct);
 
+    /// <summary>This computer's public IPv4 address as EasyTier's STUN check saw it, or null (see <see cref="VolunteerNodes.PublicAddressFromNodeInfo"/>).</summary>
+    public async Task<string?> PublicAddressAsync(CancellationToken ct = default) =>
+        await EasyTierSession.NodeInfoAsync(_cliPath, Options.RpcPort, ct) is { } json ? VolunteerNodes.PublicAddressFromNodeInfo(json) : null;
+
     /// <summary>Adds another peer to the running EasyTier (a volunteer node). Returns false when EasyTier refused it.</summary>
     public Task<bool> AddPeerAsync(string url, CancellationToken ct = default) =>
         VolunteerNodes.Normalize(url) is { } address ? EasyTierSession.AddConnectorAsync(_cliPath, Options.RpcPort, address, ct) : Task.FromResult(false);

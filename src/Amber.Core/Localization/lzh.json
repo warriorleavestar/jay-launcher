@@ -732,6 +732,7 @@
   "instance.export.title": "出",
   "instance.export.version_hint": "模組包之版號",
   "instance.files.added": "已增檔 {0}",
+  "instance.files.add_failed": "{0} 未能增：{1}",
   "instance.files.complete": "補檔",
   "instance.files.complete_status": "檔已全",
   "instance.files.progress": "驗而補之 {0}/{1}",
@@ -1175,6 +1176,7 @@
   "error.in_use_or_denied": "檔為他程所占，或無其權",
   "trash.failure.parent_missing": "其原所在之實例已不存，不能歸之",
   "common.copy_failed": "錄而未成",
+  "common.save_file_failed": "{0} 未能存：{1}",
   "instance.delete.running": "{0} 方行，先終戲乃除實例",
   "onboarding.title": "始用 Jay",
   "onboarding.intro": "二步即可入戲：增籍，置一戲版。",
@@ -2969,5 +2971,7 @@
   "tip.theme_import": "若主題致 Jay 不能啟，啟時按 Shift。",
   "tip.narrow_window": "側欄已斂，廣其窗則復展。",
   "tip.reset": "諸示皆復觀之",
-  "tip.reset_done": "諸示將復見。"
+  "tip.reset_done": "諸示將復見。",
+  "shortcut.look.restored": "已復常貌。",
+  "shortcut.look.already": "今即常貌。"
 }
