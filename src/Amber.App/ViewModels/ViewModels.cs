@@ -1196,6 +1196,14 @@ public sealed class RunLog : ObservableObject
     public DateTimeOffset StartedAt { get; }
     internal List<LogEntry> All { get; } = [];
 
+    /// <summary>
+    /// Bumped whenever <see cref="All"/> changes. Its count alone can't tell: once the log is full it stays at the cap
+    /// while old lines roll out and new ones come in.
+    /// </summary>
+    internal long Revision { get; private set; }
+
+    internal void Changed() => Revision++;
+
     /// <summary>The saved copy of this run's log (instance logs/jay), so earlier runs survive a restart.</summary>
     internal RunLogStore? Store { get; set; }
 
@@ -1355,6 +1363,7 @@ public sealed partial class LogViewModel : PageViewModel
         if (clear is not null)
         {
             clear.All.Clear();
+            clear.Changed();
             if (clear == Shown)
             {
                 Lines.Clear();
@@ -1371,12 +1380,14 @@ public sealed partial class LogViewModel : PageViewModel
         {
             group.Key.All.AddRange(group.Select(p => p.Entry));
             if (group.Key.All.Count > MaxLines) group.Key.All.RemoveRange(0, group.Key.All.Count - MaxLines);
+            group.Key.Changed();
         }
         var batch = pending.Where(p => (p.Target ?? shown) == shown).Select(p => p.Entry).ToList();
         if (batch.Count == 0) return;
 
         var previousCount = _all.Count;
         _all.AddRange(batch);
+        shown.Changed();
         var removed = Math.Max(0, _all.Count - MaxLines);
         if (removed > 0)
         {

@@ -127,43 +127,68 @@ public sealed partial class LibraryViewModel : PageViewModel
         var ids = _service.InstalledVersions();
         var running = _activity.Runs.Where(r => r.Session.IsActive).Select(r => r.Session.InstanceId).ToHashSet();
         var crashed = _activity.Runs.Where(r => r.Session.State == LaunchState.Crashed).Select(r => r.Session.InstanceId).ToHashSet();
+        // Read the settings' instance table here on the UI thread: it is a plain Dictionary that the UI thread changes
+        // (pin, play time, mod checks), and reading it from the worker while it changes can throw.
+        var metas = new Dictionary<string, InstanceMeta?>(StringComparer.Ordinal);
+        foreach (var id in ids) metas[id] = _service.MetaOf(id);
         _ = Task.Run(() =>
         {
-            var rows = new List<(LibraryEntry Entry, int Mods, double Minutes)>();
-            foreach (var id in ids)
+            try { return BuildRows(ids, metas, running, crashed); }
+            catch (Exception e)
             {
-                var meta = _service.MetaOf(id);
-                GameInstance? instance = null;
-                try { instance = _service.GetInstance(id); }
-                catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException) { }
-                var mods = 0;
-                if (instance is { Loader: not null })
-                {
-                    try { mods = Directory.Exists(instance.ModsDir) ? Directory.EnumerateFiles(instance.ModsDir, "*.jar").Count() : 0; }
-                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-                }
-                var entry = new LibraryEntry(id, meta?.DisplayName ?? id, instance?.McVersion ?? id, instance?.Loader, meta?.Pinned ?? false, meta?.LastPlayed,
-                    HasProblem: instance is null || meta?.State is not null || crashed.Contains(id), IsRunning: running.Contains(id));
-                rows.Add((entry, mods, meta?.PlayMinutes ?? 0));
+                // Never leave the refresh flag set: the library would stop updating for the rest of the session.
+                System.Diagnostics.Trace.WriteLine("Jay: library refresh failed: " + e);
+                return null;
             }
+        }).ContinueWith(t =>
+        {
+            var rows = t.Result;
             Dispatcher.UIThread.Post(() =>
             {
                 Interlocked.Exchange(ref _refreshing, 0);
-                _all = rows.Select(r => new LibraryCard(r.Entry, r.Mods, r.Minutes, this)).ToList();
-                var current = _service.CurrentInstance;
-                var pick = LibraryQuery.ContinueWith(_all.Select(c => c.Entry).ToList(),
-                    current is null ? _service.Settings.RecentInstances : [current, .. _service.Settings.RecentInstances ?? []], null);
-                Continue = pick is null ? null : _all.First(c => c.Id == pick.Id);
-                IsLoaded = true;
-                ApplyQuery();
-                RefreshNeeds();
+                if (rows is not null) Apply(rows);
                 if (_refreshAgain)
                 {
                     _refreshAgain = false;
                     Refresh();
                 }
             });
-        });
+        }, TaskScheduler.Default);
+    }
+
+    private List<(LibraryEntry Entry, int Mods, double Minutes)> BuildRows(IEnumerable<string> ids, Dictionary<string, InstanceMeta?> metas,
+        HashSet<string> running, HashSet<string> crashed)
+    {
+        var rows = new List<(LibraryEntry Entry, int Mods, double Minutes)>();
+        foreach (var id in ids)
+        {
+            var meta = metas.GetValueOrDefault(id);
+            GameInstance? instance = null;
+            try { instance = _service.GetInstance(id); }
+            catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException) { }
+            var mods = 0;
+            if (instance is { Loader: not null })
+            {
+                try { mods = Directory.Exists(instance.ModsDir) ? Directory.EnumerateFiles(instance.ModsDir, "*.jar").Count() : 0; }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
+            var entry = new LibraryEntry(id, meta?.DisplayName ?? id, instance?.McVersion ?? id, instance?.Loader, meta?.Pinned ?? false, meta?.LastPlayed,
+                HasProblem: instance is null || meta?.State is not null || crashed.Contains(id), IsRunning: running.Contains(id));
+            rows.Add((entry, mods, meta?.PlayMinutes ?? 0));
+        }
+        return rows;
+    }
+
+    private void Apply(List<(LibraryEntry Entry, int Mods, double Minutes)> rows)
+    {
+        _all = rows.Select(r => new LibraryCard(r.Entry, r.Mods, r.Minutes, this)).ToList();
+        var current = _service.CurrentInstance;
+        var pick = LibraryQuery.ContinueWith(_all.Select(c => c.Entry).ToList(),
+            current is null ? _service.Settings.RecentInstances : [current, .. _service.Settings.RecentInstances ?? []], null);
+        Continue = pick is null ? null : _all.First(c => c.Id == pick.Id);
+        IsLoaded = true;
+        ApplyQuery();
+        RefreshNeeds();
     }
 
     // ---- search, filter, sort, view ----

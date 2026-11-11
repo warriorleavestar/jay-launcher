@@ -529,7 +529,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
                 var item = new ProjectItem(p);
                 item.Queued = Queue.Contains(item.Project.Source, item.Project.Id);
                 Results.Add(item);
-                _ = LoadIconAsync(item);
+                _ = LoadIconAsync(item, cts.Token);
             }
             Status = result.Total == 0 ? L.T("content.search.no_results") : L.P("content.search.results", result.Total, result.Total, Page + 1);
             SetSearchState(false, empty: result.Total == 0 ? EmptyMessage(Query.Trim(), instance is not null) : null);
@@ -554,15 +554,18 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         _ => L.T("content.search.no_results"),
     };
 
-    private async Task LoadIconAsync(ProjectItem item)
+    /// <param name="ct">The search the item came from: icons of a search that was replaced (typing, next page) are skipped,
+    /// so they don't hold the six download slots while the current results wait.</param>
+    private async Task LoadIconAsync(ProjectItem item, CancellationToken ct)
     {
         if (item.Project.IconUrl is not { } url) return;
         await _iconGate.WaitAsync();
         try
         {
+            if (ct.IsCancellationRequested) return;
             byte[] bytes;
             using (Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.ContentApi))
-                bytes = await _service.Http.GetByteArrayAsync(url);
+                bytes = await _service.Http.GetByteArrayAsync(url, ct);
             item.Icon = await Task.Run(() =>
             {
                 using var memory = new MemoryStream(bytes);
