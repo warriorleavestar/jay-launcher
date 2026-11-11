@@ -31,6 +31,8 @@ curl -fL --retry 3 "https://archive.mesa3d.org/mesa-$version.tar.xz" -o "$archiv
 printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum --check --status
 tar -xf "$archive" -C "$work"
 source="$work/mesa-$version"
+patch_file="$(cd "$(dirname "$0")/../third_party/android-mesa" && pwd)/jay-android.patch"
+patch -d "$source" -p1 --forward --batch < "$patch_file"
 cross="$work/android-$abi.ini"
 cat >"$cross" <<EOF
 [binaries]
