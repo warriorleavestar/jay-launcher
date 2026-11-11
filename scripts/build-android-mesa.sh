@@ -56,7 +56,7 @@ meson setup "$work/build" "$source" --cross-file "$cross" \
   --prefix=/opt/jay-mesa --libdir=lib --buildtype=release \
   -Dc_link_args=-Wl,-z,max-page-size=16384 \
   -Dcpp_link_args=-Wl,-z,max-page-size=16384 \
-  -Dplatforms=android -Dplatform-sdk-version=35 -Dandroid-stub=true \
+  -Dplatforms=android -Dplatform-sdk-version=26 -Dandroid-stub=true \
   -Dandroid-libbacktrace=disabled -Dandroid-libperfetto=disabled \
   -Dgallium-drivers=zink -Dvulkan-drivers=[] -Dvulkan-layers=[] \
   -Dallow-fallback-for=libdrm \
@@ -65,7 +65,8 @@ meson setup "$work/build" "$source" --cross-file "$cross" \
   -Degl=enabled -Degl-native-platform=android -Dopengl=true \
   -Dgles1=disabled -Dgles2=enabled -Dglx=disabled -Dgbm=disabled \
   -Dllvm=disabled -Dlibunwind=disabled -Dvalgrind=disabled \
-  -Dexpat=disabled -Dxmlconfig=disabled -Dzstd=disabled -Dshader-cache=enabled \
+  -Dexpat=disabled -Dxmlconfig=disabled -Dzstd=disabled -Dzlib=disabled \
+  -Dshader-cache=disabled \
   -Dgallium-va=disabled -Dgallium-mediafoundation=disabled \
   -Dvideo-codecs=[] -Dbuild-tests=false -Dtools=[]
 meson compile -C "$work/build"
