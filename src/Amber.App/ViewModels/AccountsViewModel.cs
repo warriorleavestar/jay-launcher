@@ -327,7 +327,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             Changed();
             OfferJayFor(_service.Accounts.Store.Selected);
         }
-        catch (OperationCanceledException) when (_loginCts?.IsCancellationRequested == true)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             DeviceCode = null;
             SetStatus(StatusMessage.Warning("accounts.status.login_cancelled"));
@@ -349,7 +349,8 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
         {
             timer?.Stop();
             if (!CodeExpired) DeviceUri = null;
-            IsBusy = false;
+            // A newer login took over: it owns IsBusy now.
+            if (ReferenceEquals(_loginCts, cts)) IsBusy = false;
         }
     }
 
@@ -452,7 +453,9 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             SetStatus(StatusMessage.Warning("accounts.status.external_credentials_required"));
             return;
         }
-        _loginCts = new CancellationTokenSource();
+        // One login at a time: starting this one cancels a Microsoft login that is still waiting.
+        _loginCts?.Cancel();
+        var cts = _loginCts = new CancellationTokenSource();
         IsBusy = true;
         var password = ExternalPassword;
         ExternalPassword = "";
@@ -460,8 +463,8 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
         {
             SetStatus(StatusMessage.Info("accounts.status.connecting_external"));
             var auth = _service.Accounts.External;
-            var api = await auth.ResolveApiRootAsync(ServerUrl, _loginCts.Token);
-            var result = await auth.LoginAsync(api, ExternalUser.Trim(), password, _loginCts.Token);
+            var api = await auth.ResolveApiRootAsync(ServerUrl, cts.Token);
+            var result = await auth.LoginAsync(api, ExternalUser.Trim(), password, cts.Token);
             if (result.Account.Uuid == Guid.Empty)
             {
                 ExternalProfiles.Clear();
@@ -473,7 +476,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
             }
             FinishExternal(result.Account);
         }
-        catch (OperationCanceledException) when (_loginCts?.IsCancellationRequested == true)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             SetStatus(StatusMessage.Warning("accounts.status.login_cancelled"));
         }
@@ -483,7 +486,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
         }
         finally
         {
-            IsBusy = false;
+            if (ReferenceEquals(_loginCts, cts)) IsBusy = false;
         }
     }
 

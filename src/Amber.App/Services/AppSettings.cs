@@ -208,26 +208,45 @@ public sealed class AppSettings
         PostExitCommand = PostExitCommand,
     };
 
-    public static AppSettings Load()
+    public static AppSettings Load() => Load(FilePath, File.ReadAllText);
+
+    internal static AppSettings Load(string path, Func<string, string> read)
     {
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize(File.ReadAllText(FilePath), AppJsonContext.Default.AppSettings) ?? new AppSettings();
+            try
+            {
+                if (File.Exists(path))
+                    return JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
+                return new AppSettings { IsFresh = true };
+            }
+            catch (JsonException)
+            {
+                // 设置文件损坏时回到默认值，原文件保留一份方便排查。
+                try { File.Copy(path, path + ".broken", true); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                return new AppSettings();
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Locked by a sync client or antivirus: retry briefly, then run on defaults without
+                // ever saving over the real file (ReadOnly), so nothing the user set is lost.
+                if (attempt < 3) { Thread.Sleep(200); continue; }
+                return new AppSettings { ReadOnly = true };
+            }
         }
-        catch (JsonException)
-        {
-            // 设置文件损坏时回到默认值，原文件保留一份方便排查。
-            File.Copy(FilePath, FilePath + ".broken", true);
-        }
-        return new AppSettings { IsFresh = !File.Exists(FilePath) };
     }
+
+    /// <summary>The settings file could not be read at startup: this session runs on defaults and never writes it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ReadOnly { get; private init; }
 
     /// <summary>测试用：这份设置存到别的文件（不序列化）。</summary>
     internal string? SavePathForTest { get; set; }
 
     public void Save()
     {
+        if (ReadOnly) return;
         var path = SavePathForTest ?? FilePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";

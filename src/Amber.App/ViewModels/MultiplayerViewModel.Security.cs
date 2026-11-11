@@ -64,7 +64,14 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         members.Kick(entry, _lobby?.Book);
-        if (_hub is { } hub) await hub.BroadcastBreakerAsync();
+        // Telling the members is best effort; the breaker must trip whatever happens to the broadcast.
+        if (_hub is { } hub)
+        {
+            try { await hub.BroadcastBreakerAsync(); }
+            catch (Exception e) { System.Diagnostics.Trace.WriteLine("Jay: breaker broadcast failed: " + e.Message); }
+        }
+        // The host may have ended this room and opened another during the broadcast: never tear down the new one.
+        if (!ReferenceEquals(_members, members)) return;
         TripBreaker(L.F("multiplayer.breaker.reason_member", entry.Name));
     }
 

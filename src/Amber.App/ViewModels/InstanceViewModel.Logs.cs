@@ -215,8 +215,16 @@ public sealed partial class InstanceViewModel
 
     private void RebuildLogRows()
     {
+        // New rows are new objects: carry the selected row (F8 position, highlight) over by its event index.
+        var selected = SelectedLogRow?.Event.Index;
         LogRows.Clear();
         foreach (var e in _allEvents.Where(Shows)) LogRows.Add(new LogRow(e));
+        if (selected is { } index)
+        {
+            var again = LogRows.FirstOrDefault(r => r.Event.Index == index);
+            if (again is not null) again.IsHighlighted = true;
+            SelectedLogRow = again;
+        }
         LogErrorCount = _allEvents.Where(e => e.IsError).Sum(e => e.Repeats);
         LogWarningCount = _allEvents.Where(e => e.IsWarning).Sum(e => e.Repeats);
         OnPropertyChanged(nameof(LogErrorBadge));
