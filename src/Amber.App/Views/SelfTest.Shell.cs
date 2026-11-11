@@ -31,6 +31,8 @@ internal sealed partial class SelfTest
             await Task.Delay(200);
             Check("关掉卡片后不再显示，并记进设置", !window.MovedNotice.IsVisible && File.ReadAllText(AppSettings.FilePath).Contains("\"ShellMovedNoticeSeen\": true", StringComparison.Ordinal));
 
+            await RailOnMultiplayerAsync(shell);
+            await RailFooterWithThemesAsync();
             await MatrixAsync();
             await KeyboardAndHistoryAsync(shell);
             await KeyboardScopeAsync(shell);
@@ -90,6 +92,7 @@ internal sealed partial class SelfTest
                     var breaks = privacyText.TextLayout.TextLines.Skip(1).Select(l => l.FirstTextSourceIndex).ToList();
                     Check($"外壳（{tag}）：图标栏隐私行不从单词中间断行", breaks.All(i => i <= 0 || i >= text.Length
                         || !(char.IsAsciiLetter(text[i - 1]) && char.IsAsciiLetter(text[i]))), $"{text} 断在 {string.Join(",", breaks)}");
+                    if (!window.SidebarHost.Classes.Contains("horizontal")) RailFooterCentered(tag, privacy, items);
                 }
                 Check($"外壳（{tag}）：返回按钮可点区域 ≥ 32", window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32);
                 await ShotAsync($"shell-{lang}-{w}x{h}");
@@ -99,6 +102,63 @@ internal sealed partial class SelfTest
         window.Width = 1024;
         window.Height = 700;
         await Task.Delay(400);
+    }
+
+    /// <summary>The reported case: Multiplayer page in a 1280×677 window, sidebar in icon-rail mode.</summary>
+    private async Task RailOnMultiplayerAsync(ShellViewModel shell)
+    {
+        shell.Navigate("play");
+        window.Width = 1280;
+        window.Height = 677;
+        await Task.Delay(600);
+        if (!window.SidebarExpanded && !window.SidebarHost.Classes.Contains("horizontal"))
+            RailFooterCentered("联机 1280×677", window.GetVisualDescendants().OfType<PrivacyRow>().First(),
+                window.NavList.GetVisualDescendants().OfType<ListBoxItem>().ToList());
+        await ShotAsync("shell-rail-multiplayer-1280x677");
+    }
+
+    /// <summary>Icon rail: the settings gear and the account avatar sit centred under the privacy shield and the nav icons.</summary>
+    private void RailFooterCentered(string tag, PrivacyRow privacy, List<ListBoxItem> items)
+    {
+        double CenterX(Visual v) => v.TranslatePoint(new Point(v.Bounds.Width / 2, 0), window)?.X ?? double.NaN;
+        var gear = window.SettingsButton.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().First();
+        var avatar = window.AccountButton.GetVisualDescendants().OfType<Border>()
+            .First(b => b.Classes.Count == 0 && b.CornerRadius.TopLeft > 0 && b.Bounds.Width <= 32 && b.Parent is StackPanel);
+        var navIcon = items.Count > 0 ? CenterX(items[0]) : double.NaN;
+        var shield = CenterX(privacy);
+        var gearX = CenterX(gear);
+        var avatarX = CenterX(avatar);
+        Check($"外壳（{tag}）：图标栏设置和账号图标与隐私行、入口图标居中对齐",
+            Math.Abs(gearX - shield) <= 2 && Math.Abs(avatarX - shield) <= 2 && Math.Abs(gearX - navIcon) <= 2 && Math.Abs(avatarX - navIcon) <= 2,
+            $"settings {gearX:0.#}, account {avatarX:0.#}, privacy {shield:0.#}, nav {navIcon:0.#}; "
+            + $"row {string.Join("/", window.SettingsButton.GetVisualDescendants().OfType<StackPanel>().Take(1).Select(s => $"{s.Bounds} desired {s.DesiredSize}"))}, "
+            + $"label {string.Join("/", window.SettingsButton.GetVisualDescendants().OfType<TextBlock>().Where(t => t.Classes.Contains("foot-title")).Select(t => $"visible {t.IsVisible} desired {t.DesiredSize}"))}");
+    }
+
+    /// <summary>
+    /// The footer stayed flush left under the built-in high-contrast theme: the hidden label kept its old size.
+    /// Switch to each built-in theme in the icon rail, check the footer again, then go back to the default look.
+    /// </summary>
+    private async Task RailFooterWithThemesAsync()
+    {
+        window.Width = 1024;
+        window.Height = 700;
+        try
+        {
+            foreach (var id in Amber.Core.Themes.BuiltInThemes.Ids)
+            {
+                ThemeService.Apply(Amber.Core.Themes.BuiltInThemes.Load(id));
+                await Task.Delay(600);
+                RailFooterCentered($"主题 {id}", window.GetVisualDescendants().OfType<PrivacyRow>().First(),
+                    window.NavList.GetVisualDescendants().OfType<ListBoxItem>().ToList());
+                await ShotAsync($"shell-rail-{id}");
+            }
+        }
+        finally
+        {
+            ThemeService.Apply(null);
+            await Task.Delay(400);
+        }
     }
 
     private void Press(Key key, KeyModifiers modifiers) =>
@@ -210,9 +270,14 @@ internal sealed partial class SelfTest
         settings.SelectedSidebarIndex = (int)SidebarMode.Expanded;
         await Task.Delay(400);
         Check("设置成总是展开：内容区还够宽时展开", window.SidebarExpanded);
+        await ShotAsync("shell-expanded");
         window.Width = 760;
         await Task.Delay(400);
         Check("总是展开但展开后内容区不到 640：仍是图标栏", !window.SidebarExpanded);
+        // Expanded → rail at runtime: the footer buttons must re-centre, not keep the expanded layout.
+        RailFooterCentered("展开后收成图标栏", window.GetVisualDescendants().OfType<PrivacyRow>().First(),
+            window.NavList.GetVisualDescendants().OfType<ListBoxItem>().ToList());
+        await ShotAsync("shell-rail-after-expanded");
         settings.ResetFieldCommand.Execute("sidebar");
         await Task.Delay(300);
         Check("恢复默认：自动", settings.SelectedSidebarIndex == 0 && !File.ReadAllText(AppSettings.FilePath).Contains("\"SidebarMode\": \"expanded\"", StringComparison.Ordinal));
