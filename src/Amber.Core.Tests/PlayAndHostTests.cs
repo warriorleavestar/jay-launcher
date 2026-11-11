@@ -38,6 +38,17 @@ public sealed class PlayAndHostTests
         Assert.True(vm.ShowHostButton);
         Assert.Equal(L.T("multiplayer.lobby.host_button"), vm.HostButtonText);
         Assert.Single(started);
+
+        // Opening the room checks the game port with a real status ping. Let that check finish here: on Windows a
+        // refused loopback connect takes about two seconds, and a check still running would hold one of the shared
+        // server query slots while ServerStatusTests and ServerQueryLifecycleTests count them.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (vm.StatusInfo?.Key != "multiplayer.lan.port_unavailable" && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(10);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.Equal("multiplayer.lan.port_unavailable", vm.StatusInfo?.Key);
     });
 
     [Fact]

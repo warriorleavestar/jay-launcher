@@ -322,6 +322,53 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task MetricsArePrometheusTextBehindTheTokenWithOnlyTotals()
+    {
+        var server = await StartAsync(b => b.UseBlockedWords(["nope"]), admin: true);
+        var host = X25519KeyPair.Generate();
+        Assert.True(Ok(server.Directory!.Handle(Announce(new RoomSigner(), Listing(host, name: "公开房", hostName: "Steve")))));
+        Assert.True(Ok(server.Directory.Handle(Announce(new RoomSigner(), Listing(host, RoomVisibility.Hidden, name: "秘密房"), listed: false))));
+        server.Directory.Handle(Announce(new RoomSigner(), Listing(host, name: "nope")));
+        server.Ban("account", "someone@example", "test");
+
+        using var http = new HttpClient();
+        var port = server.AdminPort!.Value;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync($"http://127.0.0.1:{port}/metrics")).StatusCode);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/metrics");
+        request.Headers.Authorization = new("Bearer", File.ReadAllText(server.AdminTokenPath).Trim());
+        using var reply = await http.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, reply.StatusCode);
+        Assert.Equal("text/plain", reply.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("0.0.4", reply.Content.Headers.ContentType.Parameters.Single(p => p.Name == "version").Value);
+        var text = await reply.Content.ReadAsStringAsync();
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.Contains("jay_node_up 1", lines);
+        Assert.Contains("jay_directory_rooms 2", lines);
+        Assert.Contains("jay_directory_rooms_listed 1", lines);
+        Assert.Contains("jay_directory_rooms_published_total 2", lines);
+        Assert.Contains("jay_directory_rooms_rejected_total{reason=\"name\"} 1", lines);
+        Assert.Contains("jay_bans 1", lines);
+        Assert.Contains("jay_logins_total{result=\"ok\"} 0", lines);
+        Assert.Contains(lines, l => l.StartsWith("jay_node_info{network=\"", StringComparison.Ordinal) && l.EndsWith("} 1", StringComparison.Ordinal));
+        // Every sample has a TYPE line before it, and every TYPE is a gauge or a counter.
+        var typed = new HashSet<string>();
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("# TYPE ", StringComparison.Ordinal))
+            {
+                var parts = line.Split(' ');
+                Assert.Contains(parts[3], new[] { "gauge", "counter" });
+                Assert.True(typed.Add(parts[2]), "duplicate TYPE " + parts[2]);
+            }
+            else if (!line.StartsWith('#')) Assert.Contains(line.Split('{', ' ')[0], typed);
+        }
+        // Totals only: nothing about who hosts what.
+        foreach (var secret in new[] { "公开房", "秘密房", "Steve", "10.235.0.7", "someone@example", MemberIdentity.FingerprintOf(host.PublicKey) })
+            Assert.DoesNotContain(secret, text);
+    }
+
+    [Fact]
     public async Task AdminApiRejectsOversizedAndMalformedRequests()
     {
         var server = await StartAsync(admin: true);

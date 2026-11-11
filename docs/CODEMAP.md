@@ -110,6 +110,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `node/` | Install scripts and compose file for a community relay node. |
 | `server/` | `jay-server` deployment: systemd units, Docker, public node installer. |
 | `scripts/` | Release helpers: bundle EasyTier, publish and package macOS, attach the universal loader zip to its release (`attach-loader.ps1`, see `docs/universal-loader-release.md`). |
+| `build/` | `pins.json`: every binary Jay bundles or downloads with a fixed hash (source, SHA-256, size), embedded in Amber.Core; see `docs/pins.md`. |
 | `tools/` | GUI self-check runner, multiplayer test, NAT bench, brand icon export, this code index builder. |
 | `tools/FullLanCheck/` | Headless end-to-end check of full-LAN mode on macOS/Linux (needs root), used by the fulllan-e2e workflow. |
 | `.github/` | CI (`build.yml`), security regression tests, network registry checks, issue templates. |

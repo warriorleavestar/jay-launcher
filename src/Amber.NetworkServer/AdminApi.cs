@@ -27,7 +27,7 @@ public static class AdminToken
 /// <list type="bullet">
 /// <item><c>GET /health</c>：不用口令，给 systemd / Docker / 监控用。</item>
 /// <item>其他都要 <c>Authorization: Bearer &lt;admin.token&gt;</c>：
-/// <c>GET /stats</c>、<c>GET /rooms</c>、<c>GET /bans</c>、<c>POST /ban</c> {kind, value, reason}、<c>POST /unban</c> {kind, value}、<c>POST /remove</c> {id}。</item>
+/// <c>GET /stats</c>、<c>GET /metrics</c>（Prometheus 文本）、<c>GET /rooms</c>、<c>GET /bans</c>、<c>POST /ban</c> {kind, value, reason}、<c>POST /unban</c> {kind, value}、<c>POST /remove</c> {id}。</item>
 /// </list>
 /// 只听本机，又要口令：同一台机器上别的用户读不到口令文件，也就管不了。
 /// </summary>
@@ -93,6 +93,13 @@ public sealed class AdminApi : IAsyncDisposable
         else if (method == "GET" && AdminPanel.Find(path.Split('?')[0]) is { } file)
         {
             (status, contentType, bytes) = (200, file.ContentType, file.Bytes);
+        }
+        else if (method == "GET" && path.Split('?')[0] == "/metrics")
+        {
+            // Prometheus text, behind the same token (Prometheus: authorization.credentials_file = admin.token).
+            (status, contentType, bytes) = Authorized(headers.GetValueOrDefault("authorization"))
+                ? (200, NodeMetrics.ContentType, Encoding.UTF8.GetBytes(NodeMetrics.Render(_server)))
+                : (401, "application/json; charset=utf-8", Json(Fail("token")));
         }
         else
         {
@@ -160,12 +167,14 @@ public sealed class AdminApi : IAsyncDisposable
 
     private static JsonObject Fail(string error) => new() { ["ok"] = false, ["error"] = error };
 
+    private bool Authorized(string? authorization) =>
+        AdminToken.Matches(_token, authorization is { } a && a.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? a[7..] : null);
+
     internal (int Status, JsonObject Reply) Route(string method, string path, string? authorization, string body)
     {
         path = path.Split('?')[0];
         if (method == "GET" && path == "/health") return (200, _server.Health());
-        var bearer = authorization is { } a && a.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? a[7..] : null;
-        if (!AdminToken.Matches(_token, bearer)) return (401, Fail("token"));
+        if (!Authorized(authorization)) return (401, Fail("token"));
         try
         {
             JsonObject Body() => JsonNode.Parse(body.Length == 0 ? "{}" : body) as JsonObject ?? throw new FormatException();

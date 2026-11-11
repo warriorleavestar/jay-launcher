@@ -127,12 +127,12 @@ public sealed record RoomRekey(string Network, string Secret, int Epoch)
 public static partial class KnockProtocol
 {
     public const int Port = 47660;
-    public const int MaxFrame = 4096;
+    public const int MaxFrame = 8192;
     public const int MaxNameLength = 32;
     public const int IdLength = 8;
 
-    /// <summary>"JAY-KNOCK-1" + 大厅名 + 8 字节邀请编号：握手同时确认了双方说的是同一张邀请。</summary>
-    public static byte[] Prologue(string lobbyName, ReadOnlySpan<byte> inviteId) => [.. Encoding.ASCII.GetBytes("JAY-KNOCK-1" + lobbyName), .. inviteId];
+    /// <summary>"JAY-KNOCK-2" + 大厅名 + 8 字节邀请编号：握手同时确认了双方说的是同一张邀请。</summary>
+    public static byte[] Prologue(string lobbyName, ReadOnlySpan<byte> inviteId) => [.. Encoding.ASCII.GetBytes("JAY-KNOCK-2" + lobbyName), .. inviteId];
 
     /// <summary>房主要设备证明时在握手第二条消息里带的东西：名单里每个指纹码的版本和随机数（标签不发，留着自己比）。</summary>
     internal static JsonObject WriteChallenges(IReadOnlyList<Public.ParsedFingerprint> allowed) => new()
@@ -225,7 +225,7 @@ public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, 
     public string HostFingerprint => MemberIdentity.FingerprintOf(HostPublicKey);
 }
 
-/// <summary>加入方：经大厅连到房主的敲门端口，报上邀请编号，用 XXpsk0 握手证明自己拿着邀请，等房主批准。</summary>
+/// <summary>加入方：经大厅连到房主的敲门端口，报上邀请编号，用 XXhfspsk0 握手证明自己拿着邀请，等房主批准。</summary>
 public static class KnockClient
 {
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
@@ -248,7 +248,7 @@ public static class KnockClient
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
         var psk = LobbyKeys.KnockPsk(invite.Token);
         var inviteId = LobbyKeys.InviteId(invite.Token);
-        using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true, KnockProtocol.Prologue(lobbyName, inviteId), psk, me);
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, KnockProtocol.Prologue(lobbyName, inviteId), psk, me);
         CryptographicOperations.ZeroMemory(psk);
         using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
@@ -569,7 +569,7 @@ public sealed record KnockLimits
 
 /// <summary>
 /// 房主的敲门服务：只在大厅里听 47660。流程：
-/// 收 8 字节邀请编号（明文，不认识就断开）→ XXpsk0 握手（psk 由邀请令牌派生、第一条消息就混入，令牌不对第一条就失败；双方交换长期身份）→ 第三条消息验证通过时用掉一次邀请 →
+/// 收 8 字节邀请编号（明文，不认识就断开）→ XXhfspsk0 握手（psk 由邀请令牌派生、第一条消息就混入，令牌不对第一条就失败；双方交换长期身份）→ 第三条消息验证通过时用掉一次邀请 →
 /// 信任列表里的人或勾了“自动批准”的邀请直接批准，否则问房主（120 秒没点算拒绝）→ 加密发回房间凭据或拒绝原因 → 等对方确认。
 /// 同时最多 3 个人在敲；一分钟里失败 10 次就暂停 60 秒。
 /// </summary>
@@ -768,7 +768,7 @@ public sealed class KnockServer : IAsyncDisposable
                     return;
                 }
                 var psk = LobbyKeys.KnockPsk(invite.Invite.Token);
-                handshake = new NoiseHandshake(NoisePattern.XXpsk0, false, KnockProtocol.Prologue(lobby.Name, invite.Id), psk, _identity);
+                handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, false, KnockProtocol.Prologue(lobby.Name, invite.Id), psk, _identity);
                 CryptographicOperations.ZeroMemory(psk);
                 handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token));
                 var hello = new JsonObject { ["v"] = 1 };

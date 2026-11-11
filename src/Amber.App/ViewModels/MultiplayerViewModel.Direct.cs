@@ -155,18 +155,14 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
             return;
         }
-        var port = int.TryParse(ManualPort.Trim(), out var manual) && manual is > 0 and < 65536 ? manual : SelectedLanGame?.Game.Port;
-        if (port is null)
+        // No LAN world yet: the room and its invite are made now, and the game is picked up when it's opened to LAN.
+        if (await HostGamePortAsync(checkManual: false) is not (var gamePort, var relay)) return;
+        if (!IsIdle)
         {
-            SetStatus(StatusMessage.Warning("multiplayer.lan.port_required"));
+            if (relay is not null) await relay.DisposeAsync();
             return;
         }
-        if (port != manual && !await GamePortReadyAsync(port.Value, manual: false))
-        {
-            SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
-            return;
-        }
-        var credentials = NewCredentials(port.Value, TunnelSettings.Default);
+        var credentials = NewCredentials(gamePort, TunnelSettings.Default);
         var members = new MemberTable();
         var room = credentials.ToHostRoom(members, ChatName);
         var book = new InviteBook { KeepLobbyKey = true };
@@ -185,6 +181,8 @@ public sealed partial class MultiplayerViewModel
         {
             var code = await direct.PrepareAsync();
             AttachDirect(direct, room);
+            AdoptGameRelay(relay);
+            relay = null;
             Mode = "host";
             RoomCodeText = "";
             RestoreChatHistory(room);
@@ -196,12 +194,13 @@ public sealed partial class MultiplayerViewModel
                 ? L.T("multiplayer.direct.host_reachable")
                 : L.F("multiplayer.direct.host_reply_hint", DirectText.Nat(code.Nat));
             if (await IssueInviteAsync(1, InviteExpiryChoices[0].Lifetime, false) is null) return;
-            SetStatus(StatusMessage.Success("multiplayer.direct.created"));
+            SetStatus(HasGameRelay ? StatusMessage.Success("multiplayer.relay.created") : StatusMessage.Success("multiplayer.direct.created"));
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or System.Net.Sockets.SocketException or InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
         {
             if (_direct == direct) StopSession();
             else await direct.DisposeAsync();
+            if (relay is not null) await relay.DisposeAsync();
             SetStatus(StatusMessage.Failure("multiplayer.direct.create_failed", e, ErrorText.Of(e)));
         }
     }
