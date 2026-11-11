@@ -119,7 +119,7 @@
 
 ```bash
 jay-server directory --listen 11010
-# 第一次运行会自动下载 EasyTier（校验 SHA-256）。已经有 EasyTier 的可以用 --easytier <文件夹>。
+# 第一次运行会自动下载 EasyTier（校验 SHA-256）。已经有 EasyTier 的可以用 --easytier <文件夹>；这时不在固定哈希的保护里，日志会打印 easytier-core 的 SHA-256，核对后加 --easytier-sha256 <哈希> 固定它。
 # 有别的种子节点时：--seeds tcp://另一台:11010
 ```
 

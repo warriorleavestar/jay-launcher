@@ -2,7 +2,7 @@
 
 写给要把 Jay 适配到 macOS、Linux（以及以后别的平台）的合作者。文档按 main `89565b5`（2026-11-07）整理，覆盖 v0.7.0 正式版，以及之后合进 main、还没发布的功能（远程控制、Jay 服务器第二到四期、被踢提示修复）。
 
-**目标：Mac 和 Linux 版尽量做到和 Windows 版功能完全一致**，包括现在只有 Windows 有的完整局域网、全部流量出口、远程控制和 Native AOT 包。做不到完全一样的地方（受系统限制），要在界面上说清楚，并给出最接近的替代。
+**目标：Mac 和 Linux 版尽量做到和 Windows 版功能完全一致**，包括完整局域网、全部流量出口和远程控制。做不到完全一样的地方（受系统限制），要在界面上说清楚，并给出最接近的替代。三个桌面平台均以可靠的 ReadyToRun 发布包为准，Native AOT 不能拖住标准包。
 
 每个功能都写了三件事：它做什么、怎么实现、在各平台上的现状。第 5 节是逐项补齐的路线和验收标准。
 
@@ -91,7 +91,7 @@
 | `jay-server` 服务端【实验】 | ✅ | ✅ | ✅（systemd） | `src/Amber.Server` |
 | 模组烘焙【实验，默认关】 | ✅ | 🟡 | 🟡 | `Bake/BakeService.cs` |
 | 发布包：单文件 + ReadyToRun | ✅ | ✅ | ✅ | `.github/workflows/build.yml` |
-| 发布包：Native AOT | ✅ | ✅ `Jay-osx-*-aot.tar.gz`（待真机测） | ✅ `Jay-linux-*-aot.tar.gz` | 同上 |
+| 发布包：Native AOT | ❌ 托管 runner 超时 | ❌ 托管 runner 超时 | ❌ 托管 runner 内存耗尽 | 三平台均优先发布可靠的 ReadyToRun 包 |
 | 代码签名 | 无 | 只有 ad-hoc（`scripts/publish-macos.sh`） | 无 | |
 
 ## 3. 功能和实现
@@ -188,7 +188,7 @@ EasyTier（组网，P2P 或经节点中继）
 
 #### EasyTier 组件 🟡
 
-- `Multiplayer/EasyTier.cs`：固定版本 2.6.4，第一次用联机时从 EasyTier 的 GitHub 发布页下载对应平台的 zip，校验 SHA-256 和大小后解压到数据目录。七个平台都有哈希：windows x86_64 / arm64 / i686，macos x86_64 / aarch64，linux x86_64 / aarch64。Windows 另外要 `WinDivert64.sys`（完整局域网模式转发广播用）。非 Windows 解压后加执行权限。
+- `Multiplayer/EasyTier.cs`：固定版本 2.6.4，第一次用联机时从 EasyTier 的 GitHub 发布页下载对应平台的 zip，校验 SHA-256 和大小后解压到数据目录。七个平台都有哈希：windows x86_64 / arm64 / i686，macos x86_64 / aarch64，linux x86_64 / aarch64。Windows 另外要 WinDivert 驱动（32 位包是 `WinDivert32.sys`，其余是 `WinDivert64.sys`；完整局域网模式转发广播用）。非 Windows 解压后加执行权限。
 - 默认用 `--no-tun`（不建虚拟网卡），所以不需要管理员也不装驱动。加入方用 `--port-forward` 把本机端口转到房主的虚拟地址；房主只放行本次提供服务的 TCP 端口（`--tcp-whitelist`），UDP 全拦。
 - 房间密钥经环境变量 `ET_NETWORK_SECRET` 传，不放命令行。
 - 进程管理：Windows 上 easytier-core 放进作业对象（`ProcessJob.cs`），Jay 崩溃或被结束时系统会一起结束它。Mac/Linux 两层：`EasyTierProcessGuard.cs` 让 easytier-core 经一个 `/bin/sh` 看门脚本启动，脚本每秒看一次 Jay 的 PID，Jay 没了（包括 `kill -9`）就结束 core；`EasyTierProcessTracker.cs` 在工作目录里记录进程（PID、启动时间、可执行文件），下次在同一目录开始联机前清理对得上的旧进程，兜住看门进程也被单独结束的情况。没用 `PR_SET_PDEATHSIG`：它跟的是父线程，.NET 线程池线程退出就会误杀。
@@ -199,7 +199,7 @@ EasyTier（组网，P2P 或经节点中继）
 纯托管代码，理论上三平台一样，只是没在 Mac/Linux 上实测过。
 
 - `Invite.cs`：`JAY2-` 邀请码，里面是大厅密钥 L 和一次性令牌 K，没有房间密钥。默认 10 分钟、用一次。
-- `Lobby.cs`、`Knock.cs`：房主有可用邀请时开一个“大厅”（第二个 EasyTier 实例 + 敲门服务）。加入方用 Noise XXpsk0 敲门，房主在卡片上批准后，经加密通道发下房间凭据和这个成员自己的 memberId + psk。
+- `Lobby.cs`、`Knock.cs`：房主有可用邀请时开一个“大厅”（第二个 EasyTier 实例 + 敲门服务）。加入方用 Noise XXhfspsk0（X25519 + ML-KEM-768）敲门，房主在卡片上批准后，经加密通道发下房间凭据和这个成员自己的 memberId + psk。
 - `Members.cs`、`Transport/MemberChannel.cs`：每个成员一把钥匙，游戏通道、聊天、远程控制都用它握手；聊天发送者由房主核对。
 - 踢人：作废这个人的钥匙和他用过的邀请，房间换新网络名和密钥（epoch + 1），留下的人自动跟过去（`RoomChat.cs` 里的控制帧）。
 - `MemberIdentity.cs`：每台设备一把 X25519 长期身份密钥。Windows 用 DPAPI 加密（文件头 `AMBID1`）；其他平台用 AES-GCM，密钥在 `identity.wrap`（0600，文件头 `AMBID2`）。和账号令牌一样，建议改成钥匙串 / libsecret 存 wrap 密钥。
@@ -365,7 +365,7 @@ main 上 v0.7.0 之后新增【未发布】：
 
 ### 3.12 模组烘焙【实验，默认关闭】🟡
 
-`Bake/BakeService.cs`：启动前调用本机的通用加载器原型（Java 程序，`amber.ul.Bake`）预处理模组并缓存到 `<数据目录>/bake-cache`，只支持 1.21.1 的 Fabric、Quilt 和原版。要另外准备加载器目录（`build/loader`、`build/loader-cp.txt`、`mc/mappings-amber`），普通用户不用开。代码本身跨平台；Windows 上原型遇到过“系统代码页是 1252 时 Java 打不开中文路径”的问题，Mac/Linux 是 UTF-8，应该没有。
+`Bake/BakeService.cs`：启动前调用本机的通用加载器原型（Java 程序，`amber.ul.Bake`）预处理模组并缓存到 `<数据目录>-runtime/bake-cache`（数据目录旁边的运行时目录，不放设置、账号和密钥），只支持 1.21.1 的 Fabric、Quilt 和原版。要另外准备加载器目录（`build/loader`、`build/loader-cp.txt`、`mc/mappings-amber`），普通用户不用开。代码本身跨平台；Windows 上原型遇到过“系统代码页是 1252 时 Java 打不开中文路径”的问题，Mac/Linux 是 UTF-8，应该没有。
 
 ### 3.13 联机节点部署脚本
 
@@ -376,11 +376,11 @@ main 上 v0.7.0 之后新增【未发布】：
 | 产物 | 怎么出 | 平台 |
 |---|---|---|
 | 单文件 + ReadyToRun | `dotnet publish Amber.App -c Release -r <RID> --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishReadyToRun=true -p:DebugType=none` | CI 五个 RID 都出：win-x64、osx-x64、osx-arm64、linux-x64、linux-arm64，各在原生 runner 上 |
-| Native AOT | `dotnet publish Amber.App -c Release -r win-x64 -p:PublishAot=true -p:DebugType=none` | **只出 win-x64**（4 个文件，启动约 0.3 秒） |
+| Native AOT | `dotnet publish Amber.App -c Release -r <RID> -p:PublishAot=true -p:DebugType=none` | CI 暂停生成：Windows/macOS 超过 60 分钟，Linux 会耗尽托管 runner 内存 |
 | macOS `.app` | `scripts/publish-macos.sh [osx-arm64|osx-x64]`：生成图标、Info.plist（`io.github.amber.launcher`），ad-hoc 签名 | 只在 Mac 本机跑，CI 没用 |
 | `jay-server` | `dotnet publish Amber.Server …`（单文件，不开 ReadyToRun） | CI 五个 RID 都出 |
 
-AOT 相关：JSON 读写全部走源生成（`Core/AmberJson.cs` 的 `AmberJsonContext`），新加的序列化类型要加进去，否则 AOT 版本会出错（普通版本会退回反射，看不出来）。Avalonia 12 支持 macOS 和 Linux 的 AOT，要在对应系统上装好原生工具链（macOS 要 Xcode 命令行工具，Linux 要 clang 和 zlib 开发包）。想给 Mac/Linux 出 AOT 版，在 `build.yml` 的 matrix 里照 win-x64 加一步就行，但要先在真机上跑一遍自检，特别是 `MacGameProcess.cs` 这种用 `DllImport` 的地方。
+AOT 相关：JSON 读写全部走源生成（`Core/AmberJson.cs` 的 `AmberJsonContext`），新加的序列化类型要加进去，否则 AOT 本地构建会出错（普通版本会退回反射，看不出来）。CI 不再把 AOT 放在发布链中；如果恢复，必须放在独立 runner 上并在真机跑自检，不能影响 ReadyToRun 包上传。
 
 CI 的单元测试只在 `windows-latest` 上跑。有一些测试本身按 `OperatingSystem.IsWindows()` 分支（`TrashServiceTests`、`AuthTests`、`ExitDnsScriptTests` 等）。建议在 `validate` job 里加 macOS 和 Linux，这样 Mac/Linux 分支的代码也有测试兜底。
 
@@ -414,7 +414,7 @@ CI 的单元测试只在 `windows-latest` 上跑。有一些测试本身按 `Ope
 | 11 | Java 扫描补全 | `Java/JavaFinder.cs` | macOS：`/usr/libexec/java_home -V` 的结果、Homebrew（`/opt/homebrew/opt/openjdk*`、`/usr/local/opt/openjdk*`）；Linux：`/usr/lib64/jvm`、`/opt`、`~/.sdkman/candidates/java`、Flatpak/Snap 的 JDK | 常见安装方式装的 Java 都能被找到 |
 | 12 | Mojang 运行时的符号链接 | `Java/JavaRuntimeInstaller.cs` | 处理清单里 `type: link` 的条目：校验 `target` 在运行时目录内，用 `File.CreateSymbolicLink` 建 | Mac 上新下载的运行时和官方启动器下载的文件结构一致 |
 | 13 | Linux ARM64 自动下载 Java | `Java/JavaRuntimeInstaller.cs` | Mojang 没有 Linux ARM64 运行时。可以加一个备用来源：Adoptium API（`api.adoptium.net`，有 SHA-256）。这是新的联网地址，属于“用户发起的下载”，要写进 README 隐私一节；默认先问用户 | Linux ARM64 上能一键装好对应版本的 Java |
-| 14 | Mac/Linux 的 Native AOT 包 | `.github/workflows/build.yml` | 照 win-x64 的 AOT 步骤给 osx-arm64、osx-x64、linux-x64、linux-arm64 各加一步；先在真机上跑全套自检（特别是 `MacGameProcess.cs` 的 `DllImport`、Skia、剪贴板） | 发布页多出 `Jay-<RID>-aot` 包，功能和单文件版一致 |
+| 14 | Native AOT 独立构建 | `.github/workflows/build.yml` | 只有在有足够内存/时间的独立 runner 上才恢复；先在真机跑全套自检，且不得阻塞 ReadyToRun 包 | AOT 失败时标准包仍可发布 |
 | 15 | macOS `.app` 进 CI | `scripts/publish-macos.sh`、`build.yml` | 在 macOS runner 上跑这个脚本，发布 `Jay-osx-*.zip`（.app）。正式签名和公证要 Apple 开发者账号（年费），由 Yuma 决定；没有时保持 ad-hoc 签名 | 下载后双击 `Jay.app` 能打开 |
 | 16 | Linux 桌面集成（可选） | 新增 | 提供 `.desktop` 文件和图标，或者出 AppImage | 能从应用菜单启动 |
 | 17 | 测试跑在三个平台 | `build.yml` 的 `validate` | 加 macOS、Linux runner 跑 `dotnet test`；没有 IPv6 的 runner 上那些直连测试要按环境跳过（检测环境，不是按平台一刀切） | 三个平台单元测试都绿 |

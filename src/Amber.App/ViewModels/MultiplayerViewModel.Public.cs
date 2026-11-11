@@ -346,6 +346,11 @@ public sealed partial class MultiplayerViewModel
     private async Task PublishRoomAsync()
     {
         if (!IsHosting || _lobby is not { } lobby || _credentials is not { } credentials) return;
+        if (Child.InviteOnly)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.public.child_invite_only"));
+            return;
+        }
         if (_public is null)
         {
             SetStatus(StatusMessage.Warning("multiplayer.public.connect_first"));
@@ -385,18 +390,18 @@ public sealed partial class MultiplayerViewModel
                 _standing = lobby.Book.CreateStanding(false, credentials.Tunnel);
                 break;
             case RoomVisibility.Public:
-                _standing = lobby.Book.CreateStanding(PublishAutoApprove, credentials.Tunnel);
+                _standing = lobby.Book.CreateStanding(Child.MayAutoAdmit(PublishAutoApprove), credentials.Tunnel);
                 break;
             case RoomVisibility.Password:
                 var salt = RoomPassword.NewSalt();
                 var password = PublishPassword;
                 var token = await Task.Run(() => RoomPassword.Token(password, salt));
-                _standing = lobby.Book.CreateStanding(PublishAutoApprove, credentials.Tunnel, token);
+                _standing = lobby.Book.CreateStanding(Child.MayAutoAdmit(PublishAutoApprove), credentials.Tunnel, token);
                 _standingSalt = salt;
                 PublishPassword = "";
                 break;
             case RoomVisibility.Direct:
-                _standing = lobby.Book.CreateStanding(PublishAutoApprove, credentials.Tunnel);
+                _standing = lobby.Book.CreateStanding(Child.MayAutoAdmit(PublishAutoApprove), credentials.Tunnel);
                 if (_direct is { IsHost: true } direct) _standingDirect = direct.InviteCode(_standing.Invite).Encode();
                 break;
         }
@@ -416,6 +421,15 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>撤下（回到隐藏）：长期邀请作废，列表里不再显示；拿着普通邀请码的人仍能经公共网络找到你。</summary>
+    /// <summary>Child mode turned on (invite only): take the room off the public network and leave the network.</summary>
+    private void LeavePublicForChildMode()
+    {
+        var was = _standing is not null || _public is not null;
+        if (_standing is not null) UnpublishRoom();
+        if (_public is not null || IsPublicConnecting) DisconnectPublic();
+        if (was) SetStatus(StatusMessage.Warning("multiplayer.public.child_left"));
+    }
+
     [RelayCommand]
     private void UnpublishRoom()
     {

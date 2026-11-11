@@ -165,6 +165,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         .. NoiseHandshake.HybridSupported ? [new TransportChoice(TransportMode.Extreme)] : Array.Empty<TransportChoice>(),
     ];
 
+    /// <summary>
+    /// The transport a new room uses unless the host picks another. "MC 专用" gives every member their own
+    /// encrypted channel on top of EasyTier, so room traffic stays private even if EasyTier's own encryption
+    /// (one shared key per room) is weak or broken.
+    /// </summary>
+    public const TransportMode DefaultTransport = TransportMode.Minecraft;
+
     /// <summary>开房间时用的封装方式；加入时跟着房间码走。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanDisguise))]
@@ -245,12 +252,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         : L.F("multiplayer.component.required", EasyTierRelease.Version, EasyTierRelease.Current.Size / 1024 / 1024);
 
     public string LicenseText =>
-        L.F("multiplayer.component.license", EasyTierRelease.License, EasyTierRelease.ProjectUrl);
+        L.F("multiplayer.component.license", EasyTierRelease.License, EasyTierRelease.SourceUrl);
 
     public MultiplayerViewModel(LauncherService service)
     {
         _service = service;
-        SelectedTransport = TransportChoices[0];
+        SelectedTransport = TransportChoices.First(c => c.Mode == DefaultTransport);
         service.GameOutput += OnGameOutput;
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshInstances);
         service.CurrentInstanceChanged += () => Dispatcher.UIThread.Post(() =>
@@ -309,8 +316,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (LanGames_PortFromLog(line) is not { } port) return;
         Dispatcher.UIThread.Post(() =>
         {
-            var item = new LanGameItem(new LanGame(versionId, port), L.T("multiplayer.lan.amber_source"));
+            // The same port again moves to the top instead of adding a row; rows from the log are capped.
+            var source = L.T("multiplayer.lan.amber_source");
+            if (LanGames.FirstOrDefault(g => g.Game.Port == port && g.Source == source) is { } old) LanGames.Remove(old);
+            var item = new LanGameItem(new LanGame(versionId, port), source);
             LanGames.Insert(0, item);
+            while (LanGames.Count(g => g.Source == source) > MaxLogLanGames) LanGames.Remove(LanGames.Last(g => g.Source == source));
             SelectedLanGame = item;
             if (IsIdle) SetStatus(StatusMessage.Success("multiplayer.lan.opened", versionId, port));
             OnLanOpenedWhileWaiting();
@@ -499,8 +510,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private async Task ExportNodesAsync()
     {
         ShareCodeText = RelayNodes.Encode(null, Nodes.Select(n => n.Url));
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow.Clipboard: { } clipboard })
-            await clipboard.SetTextAsync(ShareCodeText);
+        await Amber.App.Services.AvaloniaClipboard.TrySetTextAsync(ShareCodeText);
         SetStatus(StatusMessage.Success("multiplayer.nodes.exported"));
     }
 
@@ -542,31 +552,32 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
             return;
         }
-        var port = int.TryParse(ManualPort.Trim(), out var manual) && manual is > 0 and < 65536 ? manual : SelectedLanGame?.Game.Port;
-        if (port is null)
-        {
-            SetStatus(StatusMessage.Warning("multiplayer.lan.port_required"));
-            return;
-        }
-        if (!await CanConnectAsync(port.Value))
-        {
-            SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
-            return;
-        }
         if ((TestPeers ?? _service.MultiplayerPeers).Count == 0 && TestListeners is null)
         {
             SetStatus(StatusMessage.Warning("multiplayer.nodes.host_required"));
             return;
         }
+        // No LAN world yet: the room opens on a relay and picks the game up when it's opened to LAN.
+        if (await HostGamePortAsync(checkManual: true) is not (var gamePort, var relay)) return;
+        if (!IsIdle)
+        {
+            if (relay is not null) await relay.DisposeAsync();
+            return;
+        }
         // 房间的网络名和密钥随机生成，只在批准加入时经加密的敲门通道发给对方；没有可以直接分享的房间码，靠“邀请”。
-        var credentials = NewCredentials(port.Value, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft));
+        var credentials = NewCredentials(gamePort, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft));
         // 成员表：批准一个人时发给他自己的钥匙（游戏通道和聊天按它认人）；房主自己的聊天客户端也有一把。
         var members = new MemberTable();
         var room = credentials.ToHostRoom(members, ChatName);
         if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
                 AllowProxy = AllowGameProxy,
-            })) return;
+            }))
+        {
+            if (relay is not null) await relay.DisposeAsync();
+            return;
+        }
+        AdoptGameRelay(relay);
         Mode = "host";
         RoomCodeText = "";
         _room = room;
@@ -577,7 +588,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
-            : L.T("multiplayer.room.created");
+            : relay is not null ? L.T("multiplayer.relay.created") : L.T("multiplayer.room.created");
     }
 
     [RelayCommand]
@@ -870,8 +881,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             var time = l.Message.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
             return l.IsNotice ? L.F("multiplayer.chat.export_notice", time, l.Text) : L.F("multiplayer.chat.export_line", time, l.Name, l.Text);
         });
-        File.WriteAllLines(path, lines);
-        SetStatus(StatusMessage.Success("multiplayer.chat.exported", path));
+        SaveFile(path, () => File.WriteAllLines(path, lines), "multiplayer.chat.exported");
     }
 
     /// <summary>每次刷新时看看聊天要不要连：房主在完整局域网模式下等虚拟网卡就绪后再监听虚拟 IP；加入方看到房主后连。</summary>
@@ -1044,6 +1054,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
     }
 
+    private const int MaxLogLanGames = 8;
+
+    /// <summary>
+    /// A port the user typed only has to be listening. One taken from the game's output or a LAN announcement has to answer
+    /// like a Minecraft world (status ping): otherwise text that reached the log (a server message, say) could point the
+    /// room at another local service, which room members could then reach.
+    /// </summary>
+    internal static async Task<bool> GamePortReadyAsync(int port, bool manual) =>
+        manual ? await CanConnectAsync(port) : (await ServerList.PingAsync("127.0.0.1:" + port, TimeSpan.FromSeconds(3))).Online;
+
     private static async Task<bool> CanConnectAsync(int port)
     {
         using var client = new TcpClient();
@@ -1075,8 +1095,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     {
         if (TargetInstance is not { } id || JoinAddress.Length == 0) return;
         var workDir = _service.WorkDirFor(id);
-        Directory.CreateDirectory(workDir);
-        ServerList.Add(workDir, new ServerEntry(L.T("multiplayer.room.server_name"), JoinAddress));
+        try
+        {
+            Directory.CreateDirectory(workDir);
+            ServerList.Add(workDir, new ServerEntry(L.T("multiplayer.room.server_name"), JoinAddress));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            SetStatus(StatusMessage.Failure("common.save_file_failed", e, Path.Combine(workDir, "servers.dat"), ErrorText.Of(e)));
+            return;
+        }
         SetStatus(StatusMessage.Success("multiplayer.room.added_to_servers", id, JoinAddress));
     }
 
@@ -1138,6 +1166,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // 直连房间的 EasyTier 归直连会话管，由它一起关掉。
         if (_direct is not null) _ = StopDirectAsync();
         else _session?.Dispose();
+        StopGameRelay();
         _session = null;
         _service.ActiveMultiplayer = null;
         SyncHotspotSharing();

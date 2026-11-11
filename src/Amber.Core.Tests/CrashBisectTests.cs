@@ -70,4 +70,38 @@ public sealed class CrashBisectTests : IDisposable
         Assert.Equal(1, bisect.Round);
         Assert.Equal(3, bisect.RoundsLeft);
     }
+
+    /// <summary>
+    /// A planted session file (from a modpack or another program) must not make [Help me fix…] rename anything outside mods.
+    /// </summary>
+    [Theory]
+    [InlineData("../options.txt")]
+    [InlineData("..\\options.txt")]
+    [InlineData("../saves/world/level.dat")]
+    [InlineData("/etc/passwd")]
+    [InlineData("C:\\Windows\\x.jar")]
+    [InlineData("sub/a.jar")]
+    [InlineData("options.txt")]
+    [InlineData("..")]
+    public void APlantedSessionWithPathsIsIgnored(string name)
+    {
+        var victim = Path.Combine(_work, "options.txt");
+        File.WriteAllText(victim, "keep");
+        var json = System.Text.Json.JsonSerializer.Serialize(new { StartedAt = DateTimeOffset.Now, Candidates = new[] { "a.jar", name }, Disabled = new[] { name }, Round = 1 });
+        File.WriteAllText(CrashBisect.PathFor(_work), json);
+        var bisect = CrashBisect.Load(_work);
+        Assert.Null(bisect);
+        Assert.True(File.Exists(victim));
+        Assert.False(File.Exists(victim + ".disabled"));
+    }
+
+    [Theory]
+    [InlineData("a.jar", true)]
+    [InlineData("Some Mod-1.2.JAR", true)]
+    [InlineData("../a.jar", false)]
+    [InlineData("a/b.jar", false)]
+    [InlineData("a.zip", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void ModFileNames(string? name, bool ok) => Assert.Equal(ok, CrashBisect.IsModFileName(name));
 }

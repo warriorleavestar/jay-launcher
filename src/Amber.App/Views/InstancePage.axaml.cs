@@ -1,7 +1,9 @@
+using Amber.Core.Navigation;
 using Amber.Core.Layout;
 using Amber.Core.Localization;
 using Amber.App.ViewModels;
 using Avalonia;
+using Avalonia.Threading;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -41,7 +43,8 @@ public partial class InstancePage : UserControl
     /// <summary>§6.6 world list: Enter opens the world panel (data packs, backups), B backs the world up.</summary>
     private void OnWorldsKeyDown(object? sender, KeyEventArgs e)
     {
-        if (Vm is not { } vm || WorldsList.SelectedItem is not ViewModels.WorldItem world || e.KeyModifiers != KeyModifiers.None) return;
+        if (Vm is not { } vm || WorldsList.SelectedItem is not ViewModels.WorldItem world || e.KeyModifiers != KeyModifiers.None
+            || !KeyboardScope.Allows(KeyScope.List, e)) return;
         switch (e.Key)
         {
             case Key.Enter:
@@ -59,7 +62,8 @@ public partial class InstancePage : UserControl
     /// <summary>§6.7 pack lists: Space on / off, Alt+↑↓ move (enabled list only), Delete moves the pack to Recently deleted.</summary>
     private void OnPacksKeyDown(object? sender, KeyEventArgs e)
     {
-        if (Vm is not { } vm || sender is not ListBox list || list.SelectedItem is not ViewModels.PackFileItem item) return;
+        if (Vm is not { } vm || sender is not ListBox list || list.SelectedItem is not ViewModels.PackFileItem item
+            || !KeyboardScope.Allows(KeyScope.List, e)) return;
         switch (e.Key)
         {
             case Key.Space when e.KeyModifiers == KeyModifiers.None:
@@ -69,7 +73,10 @@ public partial class InstancePage : UserControl
             case Key.Up or Key.Down when e.KeyModifiers == KeyModifiers.Alt && list == EnabledPackList:
                 vm.MovePack(item, e.Key == Key.Up ? -1 : 1);
                 list.SelectedItem = item;
-                list.ContainerFromItem(item)?.Focus();
+                // Moving the item replaces its row, which takes focus with it. The new row exists after the next layout pass,
+                // and list keys only work with focus inside the list, so put focus back there.
+                if (list.ContainerFromItem(item) is { } row) row.Focus();
+                else Dispatcher.UIThread.Post(() => list.ContainerFromItem(item)?.Focus(), DispatcherPriority.Loaded);
                 break;
             case Key.Delete when e.KeyModifiers == KeyModifiers.None:
                 vm.DeletePackCommand.Execute(item);
@@ -181,7 +188,7 @@ public partial class InstancePage : UserControl
         base.OnDetachedFromVisualTree(e);
     }
 
-    /// <summary>§6.3 keys: Ctrl+Tab / Ctrl+Shift+Tab switch tabs, Alt+1…8 go straight to a tab, Ctrl+Shift+Q quits the running game.</summary>
+    /// <summary>§6.3 keys: Ctrl+Tab / Ctrl+Shift+Tab switch tabs, Alt+1…8 go straight to a tab (Ctrl+Shift+Q is global, in MainWindow).</summary>
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (!IsEffectivelyVisible || Vm is not { HasInstance: true } vm) return;
@@ -202,11 +209,6 @@ public partial class InstancePage : UserControl
         else if (e.KeyModifiers == KeyModifiers.Alt && e.Key >= Key.D1 && e.Key < Key.D1 + count)
         {
             vm.TabIndex = e.Key - Key.D1;
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Q && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && vm.Start?.Side is Amber.Core.GameLibrary.StartSide.QuitGame)
-        {
-            vm.SideActionCommand.Execute(null);
             e.Handled = true;
         }
     }
@@ -288,7 +290,7 @@ public partial class InstancePage : UserControl
     /// </summary>
     private void OnModsKeyDown(object? sender, KeyEventArgs e)
     {
-        if (Vm is not { } vm) return;
+        if (Vm is not { } vm || !KeyboardScope.Allows(KeyScope.List, e)) return;
         var rows = vm.ModsView.ToList();
         var current = ModsList.SelectedItem as ModItem;
         var index = current is null ? -1 : rows.IndexOf(current);

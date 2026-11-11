@@ -9,9 +9,9 @@ public enum TransportMode
     General = 0,
     /// <summary>MC 专用：为 Minecraft 的小包、低延迟调优（关 Nagle、合并写入），加一层轻量的认证加密。</summary>
     Minecraft = 1,
-    /// <summary>高加密：X25519 前向保密握手 + ChaCha20-Poly1305，定期换钥，长度按 64 字节对齐。</summary>
+    /// <summary>High: the same hybrid handshake as every mode (X25519 + ML-KEM-768), ChaCha20-Poly1305, periodic rekey, lengths padded to 64 bytes.</summary>
     High = 2,
-    /// <summary>极端加密：再加 ML-KEM-768 混合（抗量子），更频繁换钥，长度填充到固定档位，空闲时发掩护流量。</summary>
+    /// <summary>Extreme: same handshake; rekeys more often, pads lengths to fixed buckets and sends cover traffic when idle.</summary>
     Extreme = 3,
 }
 
@@ -32,8 +32,8 @@ public sealed record TransportProfile(
 {
     public static TransportProfile For(TransportMode mode) => mode switch
     {
-        TransportMode.Minecraft => new(mode, NoisePattern.NNpsk0, 1L << 24, TimeSpan.FromHours(1), 1, null, null),
-        TransportMode.High => new(mode, NoisePattern.NNpsk0, 1L << 20, TimeSpan.FromMinutes(10), 64, null, null),
+        TransportMode.Minecraft => new(mode, NoisePattern.NNhfspsk0, 1L << 24, TimeSpan.FromHours(1), 1, null, null),
+        TransportMode.High => new(mode, NoisePattern.NNhfspsk0, 1L << 20, TimeSpan.FromMinutes(10), 64, null, null),
         TransportMode.Extreme => new(mode, NoisePattern.NNhfspsk0, 1L << 14, TimeSpan.FromMinutes(1), 1,
             [256, 1024, 4096, 16384, SecureStream.MaxPlaintext], TimeSpan.FromMilliseconds(250)),
         _ => throw new ArgumentException(L.T("core.mp.transport.general_unwrapped")),

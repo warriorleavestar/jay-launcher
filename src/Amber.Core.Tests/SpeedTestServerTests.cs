@@ -79,17 +79,20 @@ public sealed class SpeedTestServerTests
     [Fact]
     public async Task ProgressRefreshesIdleDeadlineAndReturnsExactAck()
     {
-        // 总传输时间超过一个空闲期限，同时给共享 CI 运行器留出调度余量。
-        await using var server = new SpeedTestServer(0, SpeedTestServer.Limits.Default with { Idle = TimeSpan.FromSeconds(1) });
+        // The whole transfer (10 x 500 ms) outlasts one idle period (4 s), so it only
+        // succeeds if every byte refreshes the deadline. Each gap stays far below the
+        // idle limit: with a 1 s limit and 200 ms gaps, a busy Windows runner sometimes
+        // stalled a gap past 1 s and the server reset the connection.
+        await using var server = new SpeedTestServer(0, SpeedTestServer.Limits.Default with { Idle = TimeSpan.FromSeconds(4) });
         using var client = await Connect(server.BoundPort);
         var stream = client.GetStream();
-        await stream.WriteAsync(BitConverter.GetBytes(8L));
-        for (var i = 0; i < 8; i++)
+        await stream.WriteAsync(BitConverter.GetBytes(10L));
+        for (var i = 0; i < 10; i++)
         {
             await stream.WriteAsync(new byte[] { 42 });
-            await Task.Delay(200);
+            await Task.Delay(500);
         }
-        Assert.Equal(8, await ReadAck(stream));
+        Assert.Equal(10, await ReadAck(stream));
         await WaitCount(server, 0);
     }
 

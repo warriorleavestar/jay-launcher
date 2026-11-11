@@ -79,6 +79,22 @@ public sealed class TrashServiceTests : IDisposable
     }
 
     [Fact]
+    public void GameDirectoryBelowAFolderNamedLikeAScannedOneStillWorks()
+    {
+        // A game directory such as ~/backups/mods/MyGame: the folders above it aren't read by the game.
+        var game = Path.Combine(_game, "mods", "versions", "MyGame");
+        var mod = Path.Combine(game, "mods", "x.jar");
+        Directory.CreateDirectory(Path.GetDirectoryName(mod)!);
+        File.WriteAllText(mod, "x");
+
+        var entry = TrashService.MoveToTrash(mod, game);
+
+        Assert.Equal(Path.Combine(game, TrashService.TrashFolder), entry.TrashRoot);
+        Assert.False(File.Exists(mod));
+        Assert.Equal(mod, TrashService.Restore(entry));
+    }
+
+    [Fact]
     public void MissingSourceThrowsWithReason()
     {
         var e = Assert.Throws<TrashException>(() => TrashService.MoveToTrash(Path.Combine(_game, "nope.jar"), _game));

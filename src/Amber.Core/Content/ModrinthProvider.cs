@@ -18,7 +18,10 @@ public sealed class ModrinthProvider(HttpClient http, string apiRoot = "https://
         // 资源包和光影的 loader 分类和模组不是一回事，只对模组和整合包过滤。
         // Quilt 能直接用 Fabric 模组，两种都搜（同一个数组里是“或”）。
         if (!string.IsNullOrEmpty(q.Loader) && q.Type is ContentType.Mod or ContentType.Modpack)
-            facets.Add(q.Loader == "quilt" ? ["categories:quilt", "categories:fabric"] : [$"categories:{q.Loader}"]);
+        {
+            var loaders = (q.Loader == "quilt" ? new[] { "quilt", "fabric" } : [q.Loader]).Concat(q.Type == ContentType.Mod ? q.ExtraLoaders : []).Distinct();
+            facets.Add(loaders.Select(l => $"categories:{l}").ToArray());
+        }
 
         var url = $"{apiRoot}/search?query={Uri.EscapeDataString(q.Text)}&limit={q.Limit}&offset={q.Offset}&index=relevance" +
                   $"&facets={Uri.EscapeDataString(JsonSerializer.Serialize(facets, AmberJsonContext.Default.ListStringArray))}";
@@ -32,7 +35,11 @@ public sealed class ModrinthProvider(HttpClient http, string apiRoot = "https://
             h.TryGetProperty("author", out var a) ? a.GetString() : null,
             h.TryGetProperty("icon_url", out var i) ? i.GetString() : null,
             h.TryGetProperty("downloads", out var n) ? n.GetInt64() : 0,
-            h.TryGetProperty("slug", out var s) ? $"https://modrinth.com/project/{s.GetString()}" : null)).ToList();
+            h.TryGetProperty("slug", out var s) ? $"https://modrinth.com/project/{s.GetString()}" : null)
+        {
+            Loaders = h.TryGetProperty("categories", out var c) && c.ValueKind == JsonValueKind.Array
+                ? c.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => KnownLoaders.Contains(x)).ToList() : [],
+        }).ToList();
         return new SearchResult(items, root.GetProperty("total_hits").GetInt32());
     }
 
@@ -137,6 +144,8 @@ public sealed class ModrinthProvider(HttpClient http, string apiRoot = "https://
             v.TryGetProperty("date_published", out var date) && date.TryGetDateTimeOffset(out var parsed) ? parsed : default,
             deps);
     }
+
+    private static readonly HashSet<string> KnownLoaders = ["fabric", "quilt", "forge", "neoforge"];
 
     private static string? StringOrNull(JsonElement e, string name) =>
         e.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;

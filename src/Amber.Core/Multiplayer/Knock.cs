@@ -127,12 +127,12 @@ public sealed record RoomRekey(string Network, string Secret, int Epoch)
 public static partial class KnockProtocol
 {
     public const int Port = 47660;
-    public const int MaxFrame = 4096;
+    public const int MaxFrame = 8192;
     public const int MaxNameLength = 32;
     public const int IdLength = 8;
 
-    /// <summary>"JAY-KNOCK-1" + 大厅名 + 8 字节邀请编号：握手同时确认了双方说的是同一张邀请。</summary>
-    public static byte[] Prologue(string lobbyName, ReadOnlySpan<byte> inviteId) => [.. Encoding.ASCII.GetBytes("JAY-KNOCK-1" + lobbyName), .. inviteId];
+    /// <summary>"JAY-KNOCK-2" + 大厅名 + 8 字节邀请编号：握手同时确认了双方说的是同一张邀请。</summary>
+    public static byte[] Prologue(string lobbyName, ReadOnlySpan<byte> inviteId) => [.. Encoding.ASCII.GetBytes("JAY-KNOCK-2" + lobbyName), .. inviteId];
 
     /// <summary>房主要设备证明时在握手第二条消息里带的东西：名单里每个指纹码的版本和随机数（标签不发，留着自己比）。</summary>
     internal static JsonObject WriteChallenges(IReadOnlyList<Public.ParsedFingerprint> allowed) => new()
@@ -225,7 +225,7 @@ public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, 
     public string HostFingerprint => MemberIdentity.FingerprintOf(HostPublicKey);
 }
 
-/// <summary>加入方：经大厅连到房主的敲门端口，报上邀请编号，用 XXpsk0 握手证明自己拿着邀请，等房主批准。</summary>
+/// <summary>加入方：经大厅连到房主的敲门端口，报上邀请编号，用 XXhfspsk0 握手证明自己拿着邀请，等房主批准。</summary>
 public static class KnockClient
 {
     public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
@@ -248,7 +248,7 @@ public static class KnockClient
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
         var psk = LobbyKeys.KnockPsk(invite.Token);
         var inviteId = LobbyKeys.InviteId(invite.Token);
-        using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true, KnockProtocol.Prologue(lobbyName, inviteId), psk, me);
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, KnockProtocol.Prologue(lobbyName, inviteId), psk, me);
         CryptographicOperations.ZeroMemory(psk);
         using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
@@ -332,6 +332,13 @@ public sealed class PendingInvite
     public bool Standing { get; }
 
     /// <summary>
+    /// A password room's invite: its token, and so its id, comes from the room password. Someone in the lobby can test
+    /// password guesses by sending the ids they derive, so the knock server stops answering to it while guessing is suspected
+    /// (see <see cref="KnockLimits.MaxUnknownPerMinute"/>).
+    /// </summary>
+    internal bool FromPassword { get; init; }
+
+    /// <summary>
     /// The only identity that may use this invite (an invite mailed to a contact). Anyone else who gets hold of the code
     /// is turned away without using it up. Null: whoever holds the code (the host still approves).
     /// </summary>
@@ -402,7 +409,7 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
             PruneLocked();
             _lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength);
             var jay = token is null ? JayInvite.Create(_lobbyKey, tunnel) : new JayInvite((byte[])_lobbyKey.Clone(), (byte[])token.Clone(), tunnel);
-            invite = new PendingInvite(jay, int.MaxValue, null, autoApprove, standing: true);
+            invite = new PendingInvite(jay, int.MaxValue, null, autoApprove, standing: true) { FromPassword = token is not null };
             _invites.Add(invite);
         }
         Changed?.Invoke();
@@ -551,11 +558,18 @@ public sealed record KnockLimits
     public int MaxConcurrent { get; init; } = 3;
     public int MaxFailuresPerMinute { get; init; } = 10;
     public TimeSpan PauseAfterFailures { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Unknown invite ids per minute before the password invite stops answering for <see cref="PauseAfterFailures"/>.
+    /// Unknown ids don't pause the whole lobby (anyone with the lobby key could keep it paused), but in a password room each
+    /// one may be a password guess, so only the password invite goes quiet. Random-token invites keep working.
+    /// </summary>
+    public int MaxUnknownPerMinute { get; init; } = 20;
 }
 
 /// <summary>
 /// 房主的敲门服务：只在大厅里听 47660。流程：
-/// 收 8 字节邀请编号（明文，不认识就断开）→ XXpsk0 握手（psk 由邀请令牌派生、第一条消息就混入，令牌不对第一条就失败；双方交换长期身份）→ 第三条消息验证通过时用掉一次邀请 →
+/// 收 8 字节邀请编号（明文，不认识就断开）→ XXhfspsk0 握手（psk 由邀请令牌派生、第一条消息就混入，令牌不对第一条就失败；双方交换长期身份）→ 第三条消息验证通过时用掉一次邀请 →
 /// 信任列表里的人或勾了“自动批准”的邀请直接批准，否则问房主（120 秒没点算拒绝）→ 加密发回房间凭据或拒绝原因 → 等对方确认。
 /// 同时最多 3 个人在敲；一分钟里失败 10 次就暂停 60 秒。
 /// </summary>
@@ -572,10 +586,12 @@ public sealed class KnockServer : IAsyncDisposable
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _stop = new();
     private readonly Queue<DateTimeOffset> _failures = new();
+    private readonly Queue<DateTimeOffset> _unknown = new();
     private readonly Lock _gate = new();
     private readonly Task _loop;
     private int _active;
     private DateTimeOffset _pausedUntil;
+    private DateTimeOffset _guessPausedUntil;
 
     /// <summary>批准了，给这个人发了钥匙（发出凭据之前就触发：对方不回确认也已经拿到了，房主必须看得到他）。</summary>
     public event Action<KnockRequest, MemberEntry>? Issued;
@@ -623,6 +639,12 @@ public sealed class KnockServer : IAsyncDisposable
     /// <summary>房主对敲门的人的账号要求（公共网络要求登录时才有；每次敲门时取）。</summary>
     public Func<Public.AccountPolicy?>? AccountPolicy { get; init; }
 
+    /// <summary>
+    /// Child mode's "always ask": checked at every knock, so it also covers invites made before it was turned on and the
+    /// standing invites of public, password and direct rooms. While it says true, an auto-approve invite still asks.
+    /// </summary>
+    public Func<bool>? AlwaysAsk { get; init; }
+
     /// <summary>Whether the host trusts a Jay account (any device the account certified). Null: trust goes by device key only.</summary>
     public Func<string, bool>? IsTrustedJayAccount { get; init; }
 
@@ -635,6 +657,35 @@ public sealed class KnockServer : IAsyncDisposable
     public bool IsPaused
     {
         get { lock (_gate) return _book.Now < _pausedUntil; }
+    }
+
+    /// <summary>Too many unknown invite ids: the password invite doesn't answer for now (someone may be guessing the password).</summary>
+    public bool IsPasswordPaused
+    {
+        get { lock (_gate) return _book.Now < _guessPausedUntil; }
+    }
+
+    /// <summary>
+    /// Counts an unknown invite id. Returns whether a password invite may answer now; the caller treats it as unknown when not,
+    /// so a guesser can't tell a right password from a wrong one while paused.
+    /// </summary>
+    private bool NoteUnknown()
+    {
+        var started = false;
+        lock (_gate)
+        {
+            var now = _book.Now;
+            _unknown.Enqueue(now);
+            while (_unknown.Count > 0 && now - _unknown.Peek() > TimeSpan.FromMinutes(1)) _unknown.Dequeue();
+            if (_unknown.Count >= _limits.MaxUnknownPerMinute)
+            {
+                started = now >= _guessPausedUntil;
+                _guessPausedUntil = now + _limits.PauseAfterFailures;
+                _unknown.Clear();
+            }
+        }
+        if (started) _log?.Invoke(L.T("core.mp.knock.guessing"));
+        return started;
     }
 
     private async Task AcceptLoopAsync()
@@ -706,14 +757,18 @@ public sealed class KnockServer : IAsyncDisposable
             {
                 var id = await KnockProtocol.ReadFrameAsync(stream, timeout.Token);
                 invite = id.Length == KnockProtocol.IdLength ? _book.Find(id) : null;
+                // A password invite while password guessing is suspected: answer exactly as for an unknown id.
+                if (invite is { FromPassword: true } && IsPasswordPaused) invite = null;
                 // 不认识、已过期、已用完或已撤销：都直接断开，不握手。不算失败次数：拿着大厅密钥乱报编号的人不能借此让敲门一直暂停。
+                // They do count towards the password pause above, which only quiets a password room's invite.
                 if (invite is null || !invite.IsUsable(_book.Now) || _book.Lobby is not { } lobby)
                 {
                     _log?.Invoke(L.F("core.mp.knock.failed", L.T("core.mp.knock.unknown")));
+                    NoteUnknown();
                     return;
                 }
                 var psk = LobbyKeys.KnockPsk(invite.Invite.Token);
-                handshake = new NoiseHandshake(NoisePattern.XXpsk0, false, KnockProtocol.Prologue(lobby.Name, invite.Id), psk, _identity);
+                handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, false, KnockProtocol.Prologue(lobby.Name, invite.Id), psk, _identity);
                 CryptographicOperations.ZeroMemory(psk);
                 handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token));
                 var hello = new JsonObject { ["v"] = 1 };
@@ -807,7 +862,7 @@ public sealed class KnockServer : IAsyncDisposable
                 if (!_book.TryConsume(invite)) reply = Reject("expired");
                 // 安全策略要求设备验证、对方却不支持（旧版或改过的客户端）：不放进来。旧版客户端只认识 denied。
                 else if (_members.RequireAttestation && (!guestAttests || _members.Attestation is null)) reply = Reject("denied");
-                else if (request.Trusted || invite.AutoApprove || await AskAsync(request, ct))
+                else if ((AlwaysAsk?.Invoke() != true && (request.Trusted || invite.AutoApprove)) || await AskAsync(request, ct))
                 {
                     member = _members.Issue(guestPub, request.Name, invite: invite);
                     var attestation = guestAttests ? _members.Attestation : null;

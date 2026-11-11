@@ -34,14 +34,14 @@ public sealed class KnockTests : IAsyncDisposable
         _credentials = RoomCredentials.Create(_host.PublicKey, 25565, new TunnelSettings(TransportMode.High, true));
     }
 
-    private KnockServer Server(KnockLimits? limits = null)
+    private KnockServer Server(KnockLimits? limits = null, Func<bool>? alwaysAsk = null)
     {
         if (_server is not null) return _server;
         _server = new KnockServer(_book, _host, () => _credentials, pub => _trusted(pub), (request, ct) =>
         {
             lock (_asked) _asked.Add(request);
             return _decide(request, ct);
-        }, IPAddress.Loopback, 0, limits: limits ?? Fast);
+        }, IPAddress.Loopback, 0, limits: limits ?? Fast) { AlwaysAsk = alwaysAsk };
         _server.Admitted += r =>
         {
             lock (_admitted) _admitted.Add(r);
@@ -196,7 +196,7 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.Equal(1, real.UsesLeft);
     }
 
-    /// <summary>编号对、令牌不对（psk 不对）：XXpsk0 的第一条消息房主就读不过，什么都不回（拿不到房主的长期公钥），也不算用掉。</summary>
+    /// <summary>编号对、令牌不对（psk 不对）：XXhfspsk0 的第一条消息房主就读不过，什么都不回（拿不到房主的长期公钥），也不算用掉。</summary>
     [Fact]
     public async Task WrongTokenFailsAtFirstMessage()
     {
@@ -207,7 +207,7 @@ public sealed class KnockTests : IAsyncDisposable
         var stream = client.GetStream();
         var wrongPsk = LobbyKeys.KnockPsk(RandomNumberGenerator.GetBytes(16));
         var id = LobbyKeys.InviteId(real.Invite.Token);
-        using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(real.Invite.LobbyKey), id), wrongPsk, _guest);
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(real.Invite.LobbyKey), id), wrongPsk, _guest);
         await KnockProtocol.WriteFrameAsync(stream, LobbyKeys.InviteId(real.Invite.Token), default);
         await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -288,7 +288,7 @@ public sealed class KnockTests : IAsyncDisposable
             await client.ConnectAsync(IPAddress.Loopback, server.Port);
             var stream = client.GetStream();
             var id = LobbyKeys.InviteId(invite.Invite.Token);
-            using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), id),
+            using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), id),
                 LobbyKeys.KnockPsk(RandomNumberGenerator.GetBytes(16)), _guest);
             await KnockProtocol.WriteFrameAsync(stream, id, default);
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
@@ -464,7 +464,7 @@ public sealed class KnockTests : IAsyncDisposable
         var stream = client.GetStream();
         var id = LobbyKeys.InviteId(invite.Invite.Token);
         var psk = LobbyKeys.KnockPsk(invite.Invite.Token);
-        using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), id), psk, _guest);
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), id), psk, _guest);
         await KnockProtocol.WriteFrameAsync(stream, id, default);
         await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
         handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, default));
@@ -511,6 +511,52 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.True((await KnockAsync(invite.Invite)).Approved);
     }
 
+    /// <summary>
+    /// In a password room every wrong guess is an unknown invite id. Too many of them and the password invite answers like an
+    /// unknown one for a while, even to the right password, so guessing gets no answer; ordinary invites keep working.
+    /// </summary>
+    [Fact]
+    public async Task UnknownInviteIdsQuietOnlyThePasswordInvite()
+    {
+        var invite = Invite(uses: 2);
+        var salt = Amber.Core.Multiplayer.Public.RoomPassword.NewSalt();
+        var room = _book.CreateStanding(true, TunnelSettings.Default, Amber.Core.Multiplayer.Public.RoomPassword.Token("hunter2", salt));
+        var server = Server();
+        for (var i = 0; i < Fast.MaxUnknownPerMinute; i++)
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, server.Port);
+            var stream = client.GetStream();
+            await KnockProtocol.WriteFrameAsync(stream, RandomNumberGenerator.GetBytes(KnockProtocol.IdLength), default);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, await ReadToEndAsync(stream, timeout.Token));
+        }
+        Assert.True(server.IsPasswordPaused);
+        Assert.False(server.IsPaused);
+        await Assert.ThrowsAnyAsync<IOException>(() => KnockAsync(room.Invite));
+        Assert.True((await KnockAsync(invite.Invite)).Approved);
+
+        _now += Fast.PauseAfterFailures + TimeSpan.FromSeconds(1);
+        Assert.False(server.IsPasswordPaused);
+        Assert.True((await KnockAsync(room.Invite)).Approved);
+    }
+
+    /// <summary>Child mode's "always ask" overrides both a trusted guest and an auto-approve invite, checked at each knock.</summary>
+    [Fact]
+    public async Task AlwaysAskOverridesTrustAndAutoApprove()
+    {
+        var always = true;
+        Server(alwaysAsk: () => always);
+        _decide = (_, _) => Task.FromResult(false);
+        _trusted = pub => pub.AsSpan().SequenceEqual(_guest.PublicKey);
+        var standing = _book.CreateStanding(true, TunnelSettings.Default);
+        Assert.False((await KnockAsync(standing.Invite)).Approved);
+        Assert.Single(_asked);
+        always = false;
+        Assert.True((await KnockAsync(standing.Invite)).Approved);
+        Assert.Single(_asked);
+    }
+
     /// <summary>prologue 里带着邀请编号：报的是这张邀请的编号、握手却按另一个编号做，第一条消息就失败。</summary>
     [Fact]
     public async Task PrologueBindsTheInviteId()
@@ -521,7 +567,7 @@ public sealed class KnockTests : IAsyncDisposable
         await client.ConnectAsync(IPAddress.Loopback, server.Port);
         var stream = client.GetStream();
         var psk = LobbyKeys.KnockPsk(invite.Invite.Token);
-        using var handshake = new NoiseHandshake(NoisePattern.XXpsk0, true,
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true,
             KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.Invite.LobbyKey), RandomNumberGenerator.GetBytes(KnockProtocol.IdLength)), psk, _guest);
         await KnockProtocol.WriteFrameAsync(stream, LobbyKeys.InviteId(invite.Invite.Token), default);
         await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
@@ -530,7 +576,7 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.Empty(_asked);
         Assert.Equal(1, invite.UsesLeft);
         // 两边按同一个编号做的照常通过。
-        Assert.Equal((byte[])[.. "JAY-KNOCK-1x"u8, 1, 2], KnockProtocol.Prologue("x", [1, 2]));
+        Assert.Equal((byte[])[.. "JAY-KNOCK-2x"u8, 1, 2], KnockProtocol.Prologue("x", [1, 2]));
     }
 
     [Fact]
@@ -545,10 +591,10 @@ public sealed class KnockTests : IAsyncDisposable
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         Assert.Equal(0, await ReadToEndAsync(stream, timeout.Token));
 
-        // 读的一方也拒绝超过 4 KB 的帧，不会照着长度去分配。
-        using var big = new MemoryStream([0x10, 0x01, .. new byte[4097]]);
+        // The reader also refuses frames over 8 KB instead of allocating whatever length it was given.
+        using var big = new MemoryStream([0x20, 0x01, .. new byte[8193]]);
         await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.ReadFrameAsync(big, default));
-        await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.WriteFrameAsync(new MemoryStream(), new byte[4097], default));
+        await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.WriteFrameAsync(new MemoryStream(), new byte[8193], default));
     }
 
     [Fact]

@@ -156,6 +156,9 @@ internal sealed partial class SelfTest
             vm.Mode = "join";
             vm.TestHostName = "Alex";
             vm.ModCheckInstance = "selftest-modcheck";
+            // An earlier step can leave a join target behind (an invite picks the closest instance when the test
+            // config has instances); the check would then name that instance instead of the stand-in one.
+            vm.TargetInstance = null;
             vm.ModCheck = ModCheckState.Checking;
         });
         await Task.Delay(300);

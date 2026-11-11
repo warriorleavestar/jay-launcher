@@ -33,7 +33,7 @@ public static class TunnelHandshake
         ? throw new InvalidOperationException("invite rooms use per-member keys")
         : HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(room.Secret), 32, Encoding.UTF8.GetBytes(room.NetworkName), "amber-tunnel-psk-v1"u8.ToArray());
 
-    internal static byte[] Prologue(TransportMode mode, bool disguise) => Encoding.ASCII.GetBytes($"amber-tunnel-v1|{(int)mode}|{(disguise ? 1 : 0)}");
+    internal static byte[] Prologue(TransportMode mode, bool disguise) => Encoding.ASCII.GetBytes($"amber-tunnel-v2|{(int)mode}|{(disguise ? 1 : 0)}");
 
     private static (LengthMask Initiator, LengthMask Responder) Masks(byte[] handshakeHash) =>
         (new LengthMask(HKDF.DeriveKey(HashAlgorithmName.SHA256, handshakeHash, 32, [], "amber-length-i2r"u8.ToArray())),

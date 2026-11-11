@@ -80,6 +80,21 @@ public static class LanguageListeners
         }
         foreach (var (t, notify) in live) notify(t);
     }
+
+    /// <summary>
+    /// Tests: notify only the given targets. Notify() reaches every live listener in the process, including
+    /// controls another test created on the UI thread, and touching those from a test thread throws.
+    /// </summary>
+    public static void NotifyOnly(params object[] targets)
+    {
+        List<(object Target, Action<object> Notify)> live = [];
+        lock (Gate)
+        {
+            foreach (var e in Items)
+                if (e.Target.TryGetTarget(out var t) && targets.Any(x => ReferenceEquals(x, t))) live.Add((t, e.Notify));
+        }
+        foreach (var (t, notify) in live) notify(t);
+    }
 }
 
 /// <summary>一个键的文字：订阅时先给当前值，换语言时再给新值。</summary>

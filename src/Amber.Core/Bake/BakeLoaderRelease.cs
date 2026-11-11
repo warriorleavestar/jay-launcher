@@ -22,14 +22,26 @@ public sealed record BakeLoaderRelease(string ReleasesBase, string LoaderVersion
     /// <summary>The loader's own repository, where its packages are released.</summary>
     public const string LoaderReleases = "https://github.com/warriorleavestar/jay-loader/releases/download/";
 
-    /// <summary>The pin: the loader project's release (tag, asset, SHA-256 and size of that exact zip).</summary>
-    public static BakeLoaderRelease Pinned { get; } = new(
-        LoaderReleases,
-        "0.3.0",
-        "v0.3.0",
-        "amber-ul-0.3.0.zip",
-        "3f6e8a40040bad1e362d71f8ebde3236105d776325b5f420acb1e44a14f97c8a",
-        4_878_654);
+    /// <summary>The pin id in build/pins.json.</summary>
+    public const string PinId = "jay-loader";
+
+    /// <summary>
+    /// The pin: the loader project's release (tag, asset, SHA-256 and size of that exact zip), read from
+    /// build/pins.json, the one place it is changed.
+    /// </summary>
+    public static BakeLoaderRelease Pinned { get; } = FromPin(Pins.Get(PinId));
+
+    /// <summary>The release a pin names: its first URL must be <c>&lt;releases base&gt;/&lt;tag&gt;/&lt;file&gt;</c>.</summary>
+    public static BakeLoaderRelease FromPin(Pins.Pin pin)
+    {
+        var tag = pin.Tag ?? "";
+        var file = pin.File ?? "";
+        var url = pin.Urls.FirstOrDefault() ?? "";
+        var suffix = "/" + tag + "/" + file;
+        if (tag.Length == 0 || file.Length == 0 || !url.EndsWith(suffix, StringComparison.Ordinal) || !url.Contains("/releases/download/", StringComparison.Ordinal))
+            throw new InvalidDataException($"pins: {pin.Id} URL must end in /releases/download/<tag>/<file>");
+        return new BakeLoaderRelease(url[..^suffix.Length] + "/", pin.Version ?? "", tag, file, pin.Sha256 ?? "", pin.Size ?? 0);
+    }
 
     /// <summary>False until the pin names a published zip: then nothing is downloaded.</summary>
     public bool IsPublished => Tag.Length > 0 && AssetName.Length > 0 && Size > 0 && Sha256.Length == 64 && Sha256.All(Uri.IsHexDigit);

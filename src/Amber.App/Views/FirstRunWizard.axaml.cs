@@ -34,6 +34,8 @@ public partial class FirstRunWizard : UserControl
                 if (e.PropertyName == nameof(FirstRunViewModel.IsOpen) && _vm.IsOpen) FocusFirst();
                 if (e.PropertyName == nameof(FirstRunViewModel.Step)) FocusFirst();
             };
+            // MainWindow builds the wizard on first open (LazyHost), so it may arrive already open.
+            if (_vm.IsOpen) FocusFirst();
         };
         SizeChanged += (_, e) => ApplySize(e.NewSize);
     }

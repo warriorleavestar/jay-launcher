@@ -13,7 +13,16 @@ namespace Amber.Core.Content;
 /// 整合包概况。Overrides 是压缩包里要原样复制到游戏目录的那一层（MultiMC / HMCL / MCBBS / 游戏文件夹压缩包用）。
 /// Root 是整合包套着的那一层文件夹（直接压缩整合包文件夹时会有），没有时为空。
 /// </summary>
-public sealed record ModpackInfo(string Format, string Name, string? Version, string McVersion, LoaderKind? Loader, string? LoaderVersion, int FileCount, string? Overrides = null, string Root = "");
+public sealed record ModpackInfo(string Format, string Name, string? Version, string McVersion, LoaderKind? Loader, string? LoaderVersion, int FileCount, string? Overrides = null, string Root = "")
+{
+    /// <summary>
+    /// A mixed pack: the other loaders the pack names besides <see cref="Loader"/> (the base Jay installs). Its mods for
+    /// those loaders run only through the universal loader. Empty for an ordinary pack.
+    /// </summary>
+    public IReadOnlyList<LoaderKind> ExtraLoaders { get; init; } = [];
+
+    public bool IsMixed => ExtraLoaders.Count > 0;
+}
 
 /// <summary>
 /// 导入 mrpack、CurseForge、MultiMC / Prism、HMCL、MCBBS 整合包，PCL 那种带启动器的压缩包和直接打包的 .minecraft 文件夹；
@@ -34,9 +43,10 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         {
             var index = ReadJson(mr);
             var deps = index["dependencies"]?.AsObject() ?? [];
-            var (loader, version) = MrpackLoader(deps);
+            var (loader, version, extra) = MrpackLoader(deps);
             return new ModpackInfo("Modrinth", index["name"]?.GetValue<string>() ?? L.T("core.content.modpack.defaultname"), index["versionId"]?.GetValue<string>(),
-                deps["minecraft"]?.GetValue<string>() ?? throw new InvalidDataException(L.T("core.content.modpack.nogameversion")), loader, version, (index["files"] as JsonArray)?.Count ?? 0, Root: root);
+                deps["minecraft"]?.GetValue<string>() ?? throw new InvalidDataException(L.T("core.content.modpack.nogameversion")), loader, version, (index["files"] as JsonArray)?.Count ?? 0, Root: root)
+            { ExtraLoaders = extra };
         }
         // MCBBS 整合包常常同时带一份 CurseForge 格式的 manifest.json，以 packmeta 为准；只有 manifest.json 但里面有 addons 的也是 MCBBS 格式。
         if (McbbsMeta(zip, root) is not null) return InspectOtherLaunchers(zip, root)!;
@@ -45,9 +55,10 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
             var manifest = ReadJson(cf);
             if (manifest["manifestType"]?.GetValue<string>() != "minecraftModpack") throw new InvalidDataException(L.T("core.content.modpack.notcurseforge"));
             var mc = manifest["minecraft"]!;
-            var (loader, version) = CurseForgeLoader(mc);
+            var (loader, version, extra) = CurseForgeLoader(mc);
             return new ModpackInfo("CurseForge", manifest["name"]?.GetValue<string>() ?? L.T("core.content.modpack.defaultname"), manifest["version"]?.GetValue<string>(),
-                mc["version"]!.GetValue<string>(), loader, version, (manifest["files"] as JsonArray)?.Count ?? 0, Root: root);
+                mc["version"]!.GetValue<string>(), loader, version, (manifest["files"] as JsonArray)?.Count ?? 0, Root: root)
+            { ExtraLoaders = extra };
         }
         return InspectOtherLaunchers(zip, root)
                ?? InspectGameFolder(zip)
@@ -81,12 +92,15 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
 
     /// <summary>安装整合包：先装加载器（版本名字用 name），再下载文件、释放 overrides 到版本隔离目录。</summary>
     /// <param name="onSkip">跳过了一个文件（整合包里的原路径）。进度消息会被后面的覆盖，界面要在导入完成后汇总时用这个。</param>
+    /// <param name="mixedRefusal">For a mixed pack: why it cannot be imported here (null when the universal loader runs the mix). Without it a mixed pack is refused.</param>
     public async Task<string> ImportAsync(string packPath, string name, Func<string, string> workDirForVersion, IProgress<LoaderProgress>? progress = null, CancellationToken ct = default,
-        Action<string>? onSkip = null)
+        Action<string>? onSkip = null, Func<ModpackInfo, string?>? mixedRefusal = null)
     {
         using var source = PackSource.Open(packPath);
         var zip = source.Zip;
         var info = Inspect(zip);
+        if (info.IsMixed && (mixedRefusal is null ? L.F("core.content.modpack.mixed_unsupported", MixedLoaders(info)) : mixedRefusal(info)) is { } refusal)
+            throw new InvalidDataException(refusal);
         name = name.Trim();
         if (string.IsNullOrEmpty(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) throw new ArgumentException(L.F("core.content.modpack.invalidname", name));
         InstanceInstallDirectory.CheckBase(ctx.Dir, name, info.McVersion);
@@ -363,32 +377,69 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         return Convert.ToHexStringLower(await System.Security.Cryptography.SHA512.HashDataAsync(stream, ct));
     }
 
-    private static (LoaderKind?, string?) MrpackLoader(JsonObject deps)
+    /// <summary>"NeoForge + Fabric": the base and the extra loaders of a mixed pack, for messages.</summary>
+    public static string MixedLoaders(ModpackInfo info) =>
+        string.Join(" + ", new[] { info.Loader }.Concat(info.ExtraLoaders.Select(k => (LoaderKind?)k)).OfType<LoaderKind>().Select(k => k.ToString()));
+
+    /// <summary>
+    /// Why a mixed pack cannot be imported, or null when it can: every extra loader must be one the universal loader
+    /// runs on the base (<paramref name="extras"/> from <see cref="Bake.CrossLoader.Extras"/>), and baking must be ready.
+    /// </summary>
+    public static string? MixedRefusal(ModpackInfo info, IReadOnlyList<string> extras, bool bakeReady)
     {
-        if (deps["fabric-loader"] is { } fabric) return (LoaderKind.Fabric, fabric.GetValue<string>());
-        if (deps["quilt-loader"] is { } quilt) return (LoaderKind.Quilt, quilt.GetValue<string>());
-        if (deps["neoforge"] is { } neo) return (LoaderKind.NeoForge, neo.GetValue<string>());
-        if (deps["forge"] is { } forge) return (LoaderKind.Forge, forge.GetValue<string>());
-        return (null, null);
+        if (!info.IsMixed) return null;
+        var missing = info.ExtraLoaders.Select(k => NewInstanceMods.LoaderId(k)).Where(id => id is null || !extras.Contains(id)).ToList();
+        if (missing.Count > 0) return L.F("core.content.modpack.mixed_unsupported", MixedLoaders(info));
+        return bakeReady ? null : L.F("core.content.modpack.mixed_needs_bake", MixedLoaders(info));
     }
 
-    private static (LoaderKind?, string?) CurseForgeLoader(JsonNode mc)
+    /// <summary>
+    /// The base loader of a pack that names several (a mixed pack): NeoForge or Forge is the base, since the universal
+    /// loader runs Fabric/Quilt mods on them and not the other way round; otherwise the first in pack order.
+    /// </summary>
+    internal static (LoaderKind?, string?, IReadOnlyList<LoaderKind>) PickBase(IReadOnlyList<(LoaderKind Kind, string Version)> named)
     {
-        var loaders = mc["modLoaders"] as JsonArray ?? [];
-        var primary = loaders.FirstOrDefault(l => l?["primary"]?.GetValue<bool>() == true) ?? loaders.FirstOrDefault();
-        var id = primary?["id"]?.GetValue<string>();
-        if (id is null) return (null, null);
-        var dash = id.IndexOf('-');
-        if (dash < 0) return (null, null);
-        var version = id[(dash + 1)..];
-        return id[..dash] switch
+        if (named.Count == 0) return (null, null, []);
+        var basis = named.Any(n => n.Kind == LoaderKind.NeoForge) ? named.First(n => n.Kind == LoaderKind.NeoForge)
+            : named.Any(n => n.Kind == LoaderKind.Forge) ? named.First(n => n.Kind == LoaderKind.Forge)
+            : named[0];
+        return (basis.Kind, basis.Version, named.Select(n => n.Kind).Where(k => k != basis.Kind).Distinct().ToList());
+    }
+
+    private static (LoaderKind?, string?, IReadOnlyList<LoaderKind>) MrpackLoader(JsonObject deps)
+    {
+        var named = new List<(LoaderKind, string)>();
+        foreach (var (key, kind) in new[] { ("fabric-loader", LoaderKind.Fabric), ("quilt-loader", LoaderKind.Quilt), ("neoforge", LoaderKind.NeoForge), ("forge", LoaderKind.Forge) })
+            if (deps[key] is { } node) named.Add((kind, node.GetValue<string>()));
+        return PickBase(named);
+    }
+
+    private static (LoaderKind?, string?, IReadOnlyList<LoaderKind>) CurseForgeLoader(JsonNode mc)
+    {
+        var loaders = (mc["modLoaders"] as JsonArray ?? []).OfType<JsonNode>().ToList();
+        var primary = loaders.FirstOrDefault(l => l["primary"]?.GetValue<bool>() == true) ?? loaders.FirstOrDefault();
+        var named = new List<(LoaderKind, string)>();
+        // The primary entry first, so an ordinary pack keeps its primary loader as the base.
+        foreach (var entry in primary is null ? loaders : [primary, .. loaders.Where(l => l != primary)])
         {
-            "forge" => (LoaderKind.Forge, version),
-            "neoforge" => (LoaderKind.NeoForge, version),
-            "fabric" => (LoaderKind.Fabric, version),
-            "quilt" => (LoaderKind.Quilt, version),
-            var other => throw new InvalidDataException(L.F("core.content.modpack.unsupportedloader", other)),
-        };
+            var id = entry["id"]?.GetValue<string>();
+            if (id is null) continue;
+            var dash = id.IndexOf('-');
+            if (dash < 0) continue;
+            var version = id[(dash + 1)..];
+            var parsed = id[..dash] switch
+            {
+                "forge" => (LoaderKind?)LoaderKind.Forge,
+                "neoforge" => LoaderKind.NeoForge,
+                "fabric" => LoaderKind.Fabric,
+                "quilt" => LoaderKind.Quilt,
+                // An unknown loader as the primary entry is an error; an unknown extra entry is ignored.
+                var other when entry == primary => throw new InvalidDataException(L.F("core.content.modpack.unsupportedloader", other)),
+                _ => (LoaderKind?)null,
+            };
+            if (parsed is { } kind) named.Add((kind, version));
+        }
+        return PickBase(named);
     }
 
     private static void ExtractPrefix(ZipArchive zip, string prefix, PackTarget target, IReadOnlyCollection<string>? skip = null, Func<string, bool>? skipWhere = null)
@@ -443,6 +494,8 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
             var workDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(WorkDir));
             var inWorkDir = Path.GetRelativePath(workDir, full).Split(Path.DirectorySeparatorChar);
             if (inWorkDir.Any(s => s.Equals(Launch.InstanceSettings.FileName, StringComparison.OrdinalIgnoreCase))) return true;
+            // [Help me fix…]'s saved session names the mod files it renames; only Jay writes it.
+            if (inWorkDir.Any(s => s.Equals(CrashBisect.FileName, StringComparison.OrdinalIgnoreCase))) return true;
             // 烘焙记录（实验）决定启动用的主类、classpath 和 JVM 参数，只能由本机烘焙生成。
             if (inWorkDir[0].Equals(Bake.BakeService.StateFolder, StringComparison.OrdinalIgnoreCase)) return true;
             var versionDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(VersionDir));

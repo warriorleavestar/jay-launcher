@@ -50,8 +50,17 @@ public sealed partial class MultiplayerViewModel
             ? L.F("multiplayer.guide.game_ready", game.Label)
             : L.T("multiplayer.guide.game_missing");
 
-    partial void OnSelectedLanGameChanged(LanGameItem? value) => NotifyGameStatus();
-    partial void OnManualPortChanged(string value) => NotifyGameStatus();
+    partial void OnSelectedLanGameChanged(LanGameItem? value)
+    {
+        NotifyGameStatus();
+        _ = RetargetGameRelayAsync(typed: false);
+    }
+
+    partial void OnManualPortChanged(string value)
+    {
+        NotifyGameStatus();
+        _ = RetargetGameRelayAsync(typed: true);
+    }
 
     private void NotifyGameStatus()
     {
@@ -69,7 +78,7 @@ public sealed partial class MultiplayerViewModel
             if (FullLanMode) on.Add(L.T("multiplayer.advanced.item.full_lan"));
             if (FullLanMode && AllowExitNode) on.Add(L.T("multiplayer.advanced.item.exit"));
             if (AllowGameProxy) on.Add(L.T("multiplayer.advanced.item.proxy"));
-            if (SelectedTransport.Mode != TransportMode.General) on.Add(L.F("multiplayer.advanced.item.transport", SelectedTransport.Label));
+            if (SelectedTransport.Mode != DefaultTransport) on.Add(L.F("multiplayer.advanced.item.transport", SelectedTransport.Label));
             return on.Count == 0
                 ? L.T("multiplayer.advanced.title")
                 : L.F("multiplayer.advanced.enabled", string.Join(L.T("multiplayer.advanced.separator"), on));
