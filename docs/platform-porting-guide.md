@@ -188,7 +188,7 @@ EasyTier（组网，P2P 或经节点中继）
 
 #### EasyTier 组件 🟡
 
-- `Multiplayer/EasyTier.cs`：固定版本 2.6.4，第一次用联机时从 EasyTier 的 GitHub 发布页下载对应平台的 zip，校验 SHA-256 和大小后解压到数据目录。七个平台都有哈希：windows x86_64 / arm64 / i686，macos x86_64 / aarch64，linux x86_64 / aarch64。Windows 另外要 `WinDivert64.sys`（完整局域网模式转发广播用）。非 Windows 解压后加执行权限。
+- `Multiplayer/EasyTier.cs`：固定版本 2.6.4，第一次用联机时从 EasyTier 的 GitHub 发布页下载对应平台的 zip，校验 SHA-256 和大小后解压到数据目录。七个平台都有哈希：windows x86_64 / arm64 / i686，macos x86_64 / aarch64，linux x86_64 / aarch64。Windows 另外要 WinDivert 驱动（32 位包是 `WinDivert32.sys`，其余是 `WinDivert64.sys`；完整局域网模式转发广播用）。非 Windows 解压后加执行权限。
 - 默认用 `--no-tun`（不建虚拟网卡），所以不需要管理员也不装驱动。加入方用 `--port-forward` 把本机端口转到房主的虚拟地址；房主只放行本次提供服务的 TCP 端口（`--tcp-whitelist`），UDP 全拦。
 - 房间密钥经环境变量 `ET_NETWORK_SECRET` 传，不放命令行。
 - 进程管理：Windows 上 easytier-core 放进作业对象（`ProcessJob.cs`），Jay 崩溃或被结束时系统会一起结束它。Mac/Linux 两层：`EasyTierProcessGuard.cs` 让 easytier-core 经一个 `/bin/sh` 看门脚本启动，脚本每秒看一次 Jay 的 PID，Jay 没了（包括 `kill -9`）就结束 core；`EasyTierProcessTracker.cs` 在工作目录里记录进程（PID、启动时间、可执行文件），下次在同一目录开始联机前清理对得上的旧进程，兜住看门进程也被单独结束的情况。没用 `PR_SET_PDEATHSIG`：它跟的是父线程，.NET 线程池线程退出就会误杀。

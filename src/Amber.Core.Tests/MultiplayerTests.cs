@@ -265,6 +265,41 @@ public class EasyTierExtractTests
         Assert.Throws<PlatformNotSupportedException>(() => EasyTierRelease.For("linux", System.Runtime.InteropServices.Architecture.Wasm));
     }
 
+    [Theory]
+    [InlineData(System.Runtime.InteropServices.Architecture.X86, "WinDivert32.sys")]
+    [InlineData(System.Runtime.InteropServices.Architecture.X64, "WinDivert64.sys")]
+    [InlineData(System.Runtime.InteropServices.Architecture.Arm64, "WinDivert64.sys")]
+    public void WindowsPackagesKeepTheirOwnWinDivertDriver(System.Runtime.InteropServices.Architecture arch, string driver)
+    {
+        // The 32-bit package ships WinDivert32.sys; keeping only WinDivert64.sys used to drop it, so full LAN on
+        // 32-bit Windows never counted as installed.
+        var asset = EasyTierRelease.For("windows", arch);
+        Assert.Equal(driver, asset.DriverName);
+        var root = Path.Combine(Path.GetTempPath(), "amber-et-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var zip = Path.Combine(root, "et.zip");
+            using (var archive = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create))
+                foreach (var name in new[] { "easytier-core.exe", "easytier-cli.exe", "wintun.dll", driver })
+                    using (var w = new StreamWriter(archive.CreateEntry($"easytier-{asset.Platform}/" + name).Open())) w.Write(name);
+            var target = Path.Combine(root, "out");
+            EasyTierInstaller.Extract(zip, target, asset);
+            Assert.True(File.Exists(Path.Combine(target, driver)));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void OnlyWindowsPackagesNeedADriver()
+    {
+        Assert.Null(EasyTierRelease.For("linux", System.Runtime.InteropServices.Architecture.X64).DriverName);
+        Assert.Null(EasyTierRelease.For("macos", System.Runtime.InteropServices.Architecture.Arm64).DriverName);
+    }
+
     [Fact]
     public void KeepsCoreCliDllsAndWinDivert()
     {

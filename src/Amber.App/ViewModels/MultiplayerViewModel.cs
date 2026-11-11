@@ -165,6 +165,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         .. NoiseHandshake.HybridSupported ? [new TransportChoice(TransportMode.Extreme)] : Array.Empty<TransportChoice>(),
     ];
 
+    /// <summary>
+    /// The transport a new room uses unless the host picks another. "MC 专用" gives every member their own
+    /// encrypted channel on top of EasyTier, so room traffic stays private even if EasyTier's own encryption
+    /// (one shared key per room) is weak or broken.
+    /// </summary>
+    public const TransportMode DefaultTransport = TransportMode.Minecraft;
+
     /// <summary>开房间时用的封装方式；加入时跟着房间码走。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanDisguise))]
@@ -250,7 +257,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     public MultiplayerViewModel(LauncherService service)
     {
         _service = service;
-        SelectedTransport = TransportChoices[0];
+        SelectedTransport = TransportChoices.First(c => c.Mode == DefaultTransport);
         service.GameOutput += OnGameOutput;
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshInstances);
         service.CurrentInstanceChanged += () => Dispatcher.UIThread.Post(() =>
