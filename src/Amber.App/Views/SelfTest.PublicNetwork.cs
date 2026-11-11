@@ -87,6 +87,11 @@ internal sealed partial class SelfTest
         host.SaveVolunteerCommand.Execute(null);
         Check("Volunteer relay: turned off again", !service.Settings.VolunteerNode, host.Status);
         // Detect and Test port need the public network; before connecting they say so and do nothing else.
+        // The buttons sit in the collapsed "Volunteer relay" expander on the settings tab: open both first.
+        Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("settings"));
+        var volunteerExpander = await FindAsync<Expander>(e => Equals(e.Header, L.T("multiplayer.volunteer.title")));
+        if (volunteerExpander is not null) Dispatcher.UIThread.Invoke(() => volunteerExpander.IsExpanded = true);
+        await Task.Delay(300);
         Check("Volunteer relay: Detect and Test port buttons shown",
             await FindAsync<Button>(b => ReferenceEquals(b.Command, host.DetectVolunteerAddressCommand)) is not null
             && await FindAsync<Button>(b => ReferenceEquals(b.Command, host.TestVolunteerPortCommand)) is not null);
