@@ -38,7 +38,8 @@ public partial class ContentPage : UserControl
         // Space on a result row: queue it or take it out (§6.12 keyboard).
         ResultsList.AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.Key == Key.Space && DataContext is ContentViewModel vm && ResultsList.SelectedItem is ProjectItem item && !vm.IsModpack)
+            if (e.Key == Key.Space && DataContext is ContentViewModel vm && ResultsList.SelectedItem is ProjectItem item && !vm.IsModpack
+                && KeyboardScope.Allows(Amber.Core.Navigation.KeyScope.List, ResultsList, e))
             {
                 vm.ToggleQueueCommand.Execute(item);
                 e.Handled = true;

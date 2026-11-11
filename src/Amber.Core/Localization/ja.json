@@ -3095,5 +3095,7 @@
   "tip.theme_import": "テーマのせいで Jay が開かなくなったら、起動中に Shift を押し続けてください。",
   "tip.narrow_window": "サイドバーをたたみました。ウィンドウを広げるとまた開きます。",
   "tip.reset": "すべてのヒントをもう一度表示",
-  "tip.reset_done": "すべてのヒントがまた表示されます。"
+  "tip.reset_done": "すべてのヒントがまた表示されます。",
+  "shortcut.look.restored": "標準の見た目に戻しました。",
+  "shortcut.look.already": "すでに標準の見た目です。"
 }

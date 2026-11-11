@@ -3095,5 +3095,7 @@
   "tip.theme_import": "主题让 Jay 打不开了？启动时按住 Shift。",
   "tip.narrow_window": "侧栏收起来了，窗口拉宽一些就会展开。",
   "tip.reset": "重新看所有提示",
-  "tip.reset_done": "所有提示会重新出现。"
+  "tip.reset_done": "所有提示会重新出现。",
+  "shortcut.look.restored": "已恢复默认外观。",
+  "shortcut.look.already": "现在就是默认外观。"
 }

@@ -1,3 +1,4 @@
+using Amber.Core.Navigation;
 using Amber.Core.Layout;
 using Amber.Core.Localization;
 using Amber.App.ViewModels;
@@ -41,7 +42,8 @@ public partial class InstancePage : UserControl
     /// <summary>§6.6 world list: Enter opens the world panel (data packs, backups), B backs the world up.</summary>
     private void OnWorldsKeyDown(object? sender, KeyEventArgs e)
     {
-        if (Vm is not { } vm || WorldsList.SelectedItem is not ViewModels.WorldItem world || e.KeyModifiers != KeyModifiers.None) return;
+        if (Vm is not { } vm || WorldsList.SelectedItem is not ViewModels.WorldItem world || e.KeyModifiers != KeyModifiers.None
+            || !KeyboardScope.Allows(KeyScope.List, WorldsList, e)) return;
         switch (e.Key)
         {
             case Key.Enter:
@@ -59,7 +61,8 @@ public partial class InstancePage : UserControl
     /// <summary>§6.7 pack lists: Space on / off, Alt+↑↓ move (enabled list only), Delete moves the pack to Recently deleted.</summary>
     private void OnPacksKeyDown(object? sender, KeyEventArgs e)
     {
-        if (Vm is not { } vm || sender is not ListBox list || list.SelectedItem is not ViewModels.PackFileItem item) return;
+        if (Vm is not { } vm || sender is not ListBox list || list.SelectedItem is not ViewModels.PackFileItem item
+            || !KeyboardScope.Allows(KeyScope.List, list, e)) return;
         switch (e.Key)
         {
             case Key.Space when e.KeyModifiers == KeyModifiers.None:
@@ -204,11 +207,6 @@ public partial class InstancePage : UserControl
             vm.TabIndex = e.Key - Key.D1;
             e.Handled = true;
         }
-        else if (e.Key == Key.Q && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && vm.Start?.Side is Amber.Core.GameLibrary.StartSide.QuitGame)
-        {
-            vm.SideActionCommand.Execute(null);
-            e.Handled = true;
-        }
     }
 
     private InstanceViewModel? _logsWired;
@@ -288,7 +286,7 @@ public partial class InstancePage : UserControl
     /// </summary>
     private void OnModsKeyDown(object? sender, KeyEventArgs e)
     {
-        if (Vm is not { } vm) return;
+        if (Vm is not { } vm || !KeyboardScope.Allows(KeyScope.List, ModsList, e)) return;
         var rows = vm.ModsView.ToList();
         var current = ModsList.SelectedItem as ModItem;
         var index = current is null ? -1 : rows.IndexOf(current);

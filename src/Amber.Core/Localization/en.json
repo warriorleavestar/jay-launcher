@@ -3170,5 +3170,7 @@
   "tip.theme_import": "If a theme ever stops Jay from opening, hold Shift while Jay starts.",
   "tip.narrow_window": "The sidebar folded up. Make the window wider and it opens again.",
   "tip.reset": "Show all tips again",
-  "tip.reset_done": "All tips will show again."
+  "tip.reset_done": "All tips will show again.",
+  "shortcut.look.restored": "Back to the default look.",
+  "shortcut.look.already": "Jay already has the default look."
 }
