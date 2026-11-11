@@ -53,10 +53,12 @@ internal sealed partial class SelfTest
             var page = window.PageHost.GetVisualDescendants().OfType<InstancePage>().First();
 
             // B on the world list backs it up (an Activity task).
+            await WaitAsync(() => Dispatcher.UIThread.Invoke(() => page.WorldsList.ContainerFromIndex(0) is not null), 5);
             Dispatcher.UIThread.Invoke(() =>
             {
                 page.WorldsList.SelectedIndex = 0;
-                page.WorldsList.Focus();
+                // The ListBox itself can't take focus; the row can, and list keys only act with focus inside the list.
+                page.WorldsList.ContainerFromIndex(0)?.Focus();
             });
             PressKey(page.WorldsList, Key.B);
             Check("B：备份选中的世界，进活动中心", service.Tasks.All.Any(t => t.Kind == "backup"), string.Join(",", service.Tasks.All.Select(t => t.Kind)));

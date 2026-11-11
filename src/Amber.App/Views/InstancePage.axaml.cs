@@ -3,6 +3,7 @@ using Amber.Core.Layout;
 using Amber.Core.Localization;
 using Amber.App.ViewModels;
 using Avalonia;
+using Avalonia.Threading;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -72,7 +73,10 @@ public partial class InstancePage : UserControl
             case Key.Up or Key.Down when e.KeyModifiers == KeyModifiers.Alt && list == EnabledPackList:
                 vm.MovePack(item, e.Key == Key.Up ? -1 : 1);
                 list.SelectedItem = item;
-                list.ContainerFromItem(item)?.Focus();
+                // Moving the item replaces its row, which takes focus with it. The new row exists after the next layout pass,
+                // and list keys only work with focus inside the list, so put focus back there.
+                if (list.ContainerFromItem(item) is { } row) row.Focus();
+                else Dispatcher.UIThread.Post(() => list.ContainerFromItem(item)?.Focus(), DispatcherPriority.Loaded);
                 break;
             case Key.Delete when e.KeyModifiers == KeyModifiers.None:
                 vm.DeletePackCommand.Execute(item);
