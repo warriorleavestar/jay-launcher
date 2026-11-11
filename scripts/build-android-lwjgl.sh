@@ -62,7 +62,8 @@ mkdir "$work/libffi-build"
   NM="$toolchain/bin/llvm-nm" OBJDUMP="$toolchain/bin/llvm-objdump" \
     "$work/libffi-$libffi_version/configure" \
       --host="$host_triple" --disable-shared --enable-static \
-      --disable-docs --disable-dependency-tracking --prefix="$work/libffi-install"
+      --disable-docs --disable-dependency-tracking --disable-exec-static-tramp \
+      --prefix="$work/libffi-install"
   make -j"${JAY_BUILD_JOBS:-4}"
   make install
 )
