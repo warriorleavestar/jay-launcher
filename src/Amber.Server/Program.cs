@@ -133,6 +133,7 @@ public static class Program
           jay-server release trust-change --key <发版钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
               换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）
           jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
+          EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 2/3 信任人签：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
 
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
@@ -337,7 +338,12 @@ public static class Program
             }
             case "prepare":
             {
-                var tag = ReleaseSignature.NormalizeTag(options.Get("tag") ?? throw new ArgumentException("要用 --tag 指定版本（例如 v0.9.0）"));
+                // --component easytier: a build of Jay's EasyTier fork (its own tag, such as jay-v2.6.4-1), not a Jay release.
+                var component = options.Get("component");
+                if (component is not null && !ReleaseStatement.Components.Contains(component))
+                    throw new ArgumentException($"不认识的 --component：{component}（可用：{string.Join("、", ReleaseStatement.Components)}）");
+                var rawTag = options.Get("tag") ?? throw new ArgumentException("要用 --tag 指定版本（例如 v0.9.0）");
+                var tag = component is null ? ReleaseSignature.NormalizeTag(rawTag) : rawTag.Trim();
                 var seq = long.Parse(options.Get("seq") ?? throw new ArgumentException("要用 --seq 指定发布序号（比上一版大 1）"), System.Globalization.CultureInfo.InvariantCulture);
                 var commit = (options.Get("commit") ?? throw new ArgumentException("要用 --commit 指定完整的 40 位提交号")).ToLowerInvariant();
                 var sumsPath = options.Get("sums") ?? ReleaseSignature.SumsFileName;
@@ -345,7 +351,7 @@ public static class Program
                 if (ReleaseSignature.ParseSums(Encoding.UTF8.GetString(sums)).Count == 0) throw new InvalidDataException($"{sumsPath} 里没有可用的 SHA-256 行");
                 var trust = options.Get("trust") is { } t ? ReadTrustList(t, options.Get("need")).Hash : TrustList.Jay.Hash;
                 var statement = new ReleaseStatement(tag, seq, commit, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(sums)), trust,
-                    (options.Get("log") ?? ReleaseStatement.NoLog).ToLowerInvariant());
+                    (options.Get("log") ?? ReleaseStatement.NoLog).ToLowerInvariant(), component);
                 if (!statement.IsValid) throw new ArgumentException("--tag、--seq、--commit 或 --log 的格式不对");
                 var outPath = options.Get("out") ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(sumsPath)) ?? ".", ReleaseSignature.SignatureFileName);
                 if (File.Exists(outPath)) throw new IOException($"{outPath} 已经存在，不覆盖");
@@ -387,7 +393,8 @@ public static class Program
             {
                 var package = rest.FirstOrDefault() ?? throw new ArgumentException("要给出安装包文件");
                 var own = options.Get("trust") is { } t ? ReadTrustList(t, options.Get("need")) : null;
-                var check = ReleaseSignature.VerifyPackageAsync(package, options.Get("tag"), options.Get("sums"), options.Get("sigs"), options.Get("chain"), own)
+                var check = ReleaseSignature.VerifyPackageAsync(package, options.Get("tag"), options.Get("sums"), options.Get("sigs"), options.Get("chain"), own,
+                        component: options.Get("component"))
                     .GetAwaiter().GetResult();
                 output.WriteLine(DescribeVerdict(check, Path.GetFileName(package)));
                 return check.IsValid ? 0 : 2;
@@ -410,6 +417,7 @@ public static class Program
         ReleaseVerdict.WrongTag => $"签名属于 {check.Tag}，不是你要的版本。不要安装。",
         ReleaseVerdict.NotListed => "清单里没有这个文件名。",
         ReleaseVerdict.HashMismatch => "安装包的 SHA-256 和清单不一样（文件被改过或没下载完整）。不要安装。",
+        ReleaseVerdict.WrongComponent => "签名是给别的程序的（Jay 发布和 EasyTier 加固版的签名不能互换；核对 EasyTier 包要加 --component easytier）。不要安装。",
         _ => check.Verdict.ToString(),
     };
 

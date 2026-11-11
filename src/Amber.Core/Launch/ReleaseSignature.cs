@@ -49,19 +49,22 @@ public static class ReleaseSignature
     /// </summary>
     /// <param name="own">The trustee list this Jay was built with (normally <see cref="TrustList.Jay"/>).</param>
     /// <param name="highestSeq">The highest release seq this Jay has accepted before: an older one is refused (no rollback).</param>
+    /// <param name="component">Null for a Jay release; a <see cref="ReleaseStatement.Components"/> name (for example
+    /// <c>easytier</c>) for a component build. A signature for anything else is refused, so one can never pass as the other.</param>
     public static ReleaseCheck Verify(string manifestJson, ReadOnlySpan<byte> sums, string? chainJson, string? expectedTag,
-        TrustList? own = null, long highestSeq = 0)
+        TrustList? own = null, long highestSeq = 0, string? component = null)
     {
         own ??= TrustList.Jay;
         if (own.Keys.Count == 0) return new(ReleaseVerdict.NoTrustedKey, null, 0);
         if (ReleaseManifest.Parse(manifestJson) is not { } manifest) return new(ReleaseVerdict.Malformed, null, 0);
         var s = manifest.Statement;
+        if (s.Component != component) return new(ReleaseVerdict.WrongComponent, s.Tag, s.Seq);
         if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(s.SumsHash), SHA256.HashData(sums)))
             return new(ReleaseVerdict.SumsMismatch, s.Tag, s.Seq);
         if (s.Seq < highestSeq) return new(ReleaseVerdict.Rollback, s.Tag, s.Seq);
         if (TrustChain.Resolve(own, s.TrustHash, chainJson, highestSeq) is not { } list) return new(ReleaseVerdict.BrokenChain, s.Tag, s.Seq);
         if (list.Votes(s.Bytes(), manifest.Signatures) < list.Need) return new(ReleaseVerdict.NotEnoughSignatures, s.Tag, s.Seq);
-        if (expectedTag is not null && NormalizeTag(expectedTag) != s.Tag) return new(ReleaseVerdict.WrongTag, s.Tag, s.Seq);
+        if (expectedTag is not null && (component is null ? NormalizeTag(expectedTag) : expectedTag) != s.Tag) return new(ReleaseVerdict.WrongTag, s.Tag, s.Seq);
         return new(ReleaseVerdict.Valid, s.Tag, s.Seq);
     }
 
@@ -70,7 +73,7 @@ public static class ReleaseSignature
     /// has one) next to it or given, a valid release, and the package's name and hash listed.
     /// </summary>
     public static async Task<ReleaseCheck> VerifyPackageAsync(string packagePath, string? expectedTag = null, string? sumsPath = null,
-        string? signaturePath = null, string? chainPath = null, TrustList? own = null, long highestSeq = 0, CancellationToken ct = default)
+        string? signaturePath = null, string? chainPath = null, TrustList? own = null, long highestSeq = 0, string? component = null, CancellationToken ct = default)
     {
         var dir = Path.GetDirectoryName(Path.GetFullPath(packagePath)) ?? ".";
         sumsPath ??= Path.Combine(dir, SumsFileName);
@@ -80,7 +83,7 @@ public static class ReleaseSignature
 
         var sums = await File.ReadAllBytesAsync(sumsPath, ct);
         var chain = File.Exists(chainPath) ? await File.ReadAllTextAsync(chainPath, ct) : null;
-        var check = Verify(await File.ReadAllTextAsync(signaturePath, ct), sums, chain, expectedTag, own, highestSeq);
+        var check = Verify(await File.ReadAllTextAsync(signaturePath, ct), sums, chain, expectedTag, own, highestSeq, component);
         if (check.Verdict != ReleaseVerdict.Valid) return check;
         return await CheckListedAsync(packagePath, Path.GetFileName(packagePath), sums, ct) ? check
             : check with { Verdict = ParseSums(Encoding.UTF8.GetString(sums)).ContainsKey(Path.GetFileName(packagePath)) ? ReleaseVerdict.HashMismatch : ReleaseVerdict.NotListed };
@@ -145,14 +148,24 @@ public static class ReleaseSignature
 /// <param name="SumsHash">SHA-256 (hex) of SHA256SUMS.txt.</param>
 /// <param name="TrustHash">Hash of the trustee list built into this release (<see cref="TrustList.Hash"/>).</param>
 /// <param name="LogHead">Head hash of the release log (privacy plan item 5); 64 zeros until the log exists.</param>
-public sealed record ReleaseStatement(string Tag, long Seq, string Commit, string SumsHash, string TrustHash, string LogHead)
+/// <param name="Component">
+/// Null for a Jay release. For a build of a component Jay ships from its own fork (see <see cref="Components"/>), its
+/// name: the signed bytes then start with <c>jay-component-v1</c> and the name, so a component signature and a Jay
+/// release signature can never be swapped for each other. The tag is the component's own (for example <c>jay-v2.6.4-1</c>).
+/// </param>
+public sealed record ReleaseStatement(string Tag, long Seq, string Commit, string SumsHash, string TrustHash, string LogHead, string? Component = null)
 {
     public static readonly string NoLog = new('0', 64);
 
-    public byte[] Bytes() => Encoding.UTF8.GetBytes(string.Concat(
-        "jay-release-v2\n", Tag, "\n", Seq.ToString(CultureInfo.InvariantCulture), "\n", Commit, "\n", SumsHash, "\n", TrustHash, "\n", LogHead, "\n"));
+    /// <summary>Components whose builds the trustees sign: EasyTier, from Jay's hardened fork.</summary>
+    public static readonly IReadOnlySet<string> Components = new HashSet<string>(StringComparer.Ordinal) { "easytier" };
 
-    public bool IsValid => Tag.Length is > 1 and <= 64 && Tag == ReleaseSignature.NormalizeTag(Tag) && Tag.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-')
+    public byte[] Bytes() => Encoding.UTF8.GetBytes(string.Concat(
+        Component is null ? "jay-release-v2\n" : "jay-component-v1\n" + Component + "\n",
+        Tag, "\n", Seq.ToString(CultureInfo.InvariantCulture), "\n", Commit, "\n", SumsHash, "\n", TrustHash, "\n", LogHead, "\n"));
+
+    public bool IsValid => Tag.Length is > 1 and <= 64 && Tag.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-')
+        && (Component is null ? Tag == ReleaseSignature.NormalizeTag(Tag) : Components.Contains(Component))
         && Seq >= 1 && ReleaseSignature.IsHex(Commit, 40) && ReleaseSignature.IsHex(SumsHash, 64) && ReleaseSignature.IsHex(TrustHash, 64) && ReleaseSignature.IsHex(LogHead, 64);
 }
 
@@ -178,22 +191,28 @@ public sealed record QuorumSignature(byte[] KeyId, byte[] EdSignature, byte[] Ml
     }
 }
 
-/// <summary>SHA256SUMS.txt.sigs: <c>{"v":2,"tag","seq","commit","sums","trust","log","sigs":[{"k","ed","ml"}…]}</c>.</summary>
+/// <summary>
+/// SHA256SUMS.txt.sigs: <c>{"v":2,"tag","seq","commit","sums","trust","log","sigs":[{"k","ed","ml"}…]}</c>, plus
+/// <c>"component"</c> for a component build (absent for a Jay release).
+/// </summary>
 public sealed record ReleaseManifest(ReleaseStatement Statement, IReadOnlyList<QuorumSignature> Signatures)
 {
-    private static readonly HashSet<string> Fields = ["v", "tag", "seq", "commit", "sums", "trust", "log", "sigs"];
+    private static readonly HashSet<string> Fields = ["v", "component", "tag", "seq", "commit", "sums", "trust", "log", "sigs"];
 
-    public string ToJson() => new JsonObject
+    public string ToJson()
     {
-        ["v"] = ReleaseSignature.Version,
-        ["tag"] = Statement.Tag,
-        ["seq"] = Statement.Seq,
-        ["commit"] = Statement.Commit,
-        ["sums"] = Statement.SumsHash,
-        ["trust"] = Statement.TrustHash,
-        ["log"] = Statement.LogHead,
-        ["sigs"] = new JsonArray([.. Signatures.Select(s => (JsonNode)s.ToJson())]),
-    }.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n";
+        var o = new JsonObject { ["v"] = ReleaseSignature.Version };
+        if (Statement.Component is { } component) o["component"] = component;
+        o["tag"] = Statement.Tag;
+        o["seq"] = Statement.Seq;
+        o["commit"] = Statement.Commit;
+        o["sums"] = Statement.SumsHash;
+        o["trust"] = Statement.TrustHash;
+        o["log"] = Statement.LogHead;
+        o["sigs"] = new JsonArray([.. Signatures.Select(s => (JsonNode)s.ToJson())]);
+        return o.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n";
+    }
+
 
     /// <summary>Reads the file. Unknown fields, a wrong version or a malformed entry: null. Doesn't verify signatures.</summary>
     public static ReleaseManifest? Parse(string json)
@@ -203,7 +222,8 @@ public sealed record ReleaseManifest(ReleaseStatement Statement, IReadOnlyList<Q
             if (json.Length > 128 * 1024 || JsonNode.Parse(json) is not JsonObject o || o.Any(p => !Fields.Contains(p.Key))) return null;
             if (o["v"]?.GetValue<int>() != ReleaseSignature.Version) return null;
             var statement = new ReleaseStatement(o["tag"]?.GetValue<string>() ?? "", o["seq"]?.GetValue<long>() ?? 0, o["commit"]?.GetValue<string>() ?? "",
-                o["sums"]?.GetValue<string>() ?? "", o["trust"]?.GetValue<string>() ?? "", o["log"]?.GetValue<string>() ?? "");
+                o["sums"]?.GetValue<string>() ?? "", o["trust"]?.GetValue<string>() ?? "", o["log"]?.GetValue<string>() ?? "",
+                o["component"] is { } c ? c.GetValue<string>() : null);
             if (!statement.IsValid || o["sigs"] is not JsonArray sigs || sigs.Count > ReleaseSignature.MaxSignatures) return null;
             var list = new List<QuorumSignature>();
             foreach (var entry in sigs)
@@ -374,6 +394,8 @@ public enum ReleaseVerdict
     WrongTag,
     NotListed,
     HashMismatch,
+    /// <summary>A valid signature for something else: a component build offered as a Jay release, or the other way round.</summary>
+    WrongComponent,
 }
 
 public sealed record ReleaseCheck(ReleaseVerdict Verdict, string? Tag, long Seq)

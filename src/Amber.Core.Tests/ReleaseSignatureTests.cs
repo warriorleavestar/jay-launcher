@@ -411,6 +411,39 @@ public sealed class ReleaseSignatureTests : IDisposable
     }
 
     [Fact]
+    public void ServerCommandsSignAnEasyTierBuildAsAComponent()
+    {
+        var pkgDir = Path.Combine(_dir, "et");
+        Directory.CreateDirectory(pkgDir);
+        var zip = Path.Combine(pkgDir, "easytier-linux-x86_64-v2.6.4-jay-89e36e45d7e2.zip");
+        File.WriteAllText(zip, "package");
+        var list = Path.Combine(_dir, "trustees.txt");
+        File.WriteAllLines(list, [.. Own.Keys.Select(Convert.ToBase64String)]);
+        var sums = Path.Combine(pkgDir, ReleaseSignature.SumsFileName);
+        Assert.Equal(0, Program.ReleaseCommand(Options.Parse(["release", "sums", zip, "--out", sums]), new StringWriter()));
+        Assert.Throws<ArgumentException>(() => Program.ReleaseCommand(Options.Parse(["release", "prepare", "--component", "other", "--tag", "jay-v2.6.4-1",
+            "--seq", "1", "--commit", new string('a', 40), "--sums", sums, "--trust", list]), new StringWriter()));
+        Assert.Equal(0, Program.ReleaseCommand(Options.Parse(["release", "prepare", "--component", "easytier", "--tag", "jay-v2.6.4-1",
+            "--seq", "1", "--commit", new string('a', 40), "--sums", sums, "--trust", list]), new StringWriter()));
+
+        // The trustee is told this is not a Jay release, and types the component's own tag.
+        IReadOnlyList<string>? shown = null;
+        string? code = null;
+        Program.ReleaseCommand(Options.Parse(["release", "cosign", "--key", KeyFile(_dir, 1), "--sums", sums, "--trust", list]), new StringWriter(),
+            (lines, _, expected) => { shown = lines; code = expected; return false; });
+        Assert.Equal("jay-v2.6.4-1", code);
+        Assert.Contains("easytier", shown![0], StringComparison.Ordinal);
+        foreach (var i in new[] { 1, 2 })
+            Assert.Equal(0, Program.ReleaseCommand(Options.Parse(["release", "cosign", "--key", KeyFile(_dir, i), "--sums", sums, "--trust", list]), new StringWriter(), (_, _, _) => true));
+
+        Assert.Equal(0, Program.ReleaseCommand(Options.Parse(["release", "verify", zip, "--component", "easytier", "--tag", "jay-v2.6.4-1", "--trust", list]), new StringWriter()));
+        // Checked as a Jay release it is refused, whatever the tag.
+        var output = new StringWriter();
+        Assert.Equal(2, Program.ReleaseCommand(Options.Parse(["release", "verify", zip, "--trust", list]), output));
+        Assert.Contains("--component easytier", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ServerCommandTrustChange()
     {
         var from = Path.Combine(_dir, "old.txt");
