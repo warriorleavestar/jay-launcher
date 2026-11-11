@@ -24,7 +24,7 @@ public static class CrossLoader
         public static Capabilities Of(BakePackage package) => new(package.Platforms, package.Bridges, package.Accepts);
 
         /// <summary>
-        /// What the pinned release (jay-loader v0.3.1) runs, from its manifest (platforms, bridges and its <c>accepts</c> array). Used only to tell the player what turning
+        /// What the pinned release (jay-loader v0.3.2) runs, from its manifest (platforms, bridges and its <c>accepts</c> array). Used only to tell the player what turning
         /// on baking would allow before the loader is downloaded; an installed package always speaks for itself.
         /// </summary>
         public static Capabilities PinnedRelease { get; } = new(

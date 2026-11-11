@@ -3,7 +3,7 @@ namespace Amber.Mobile;
 public enum MobileGameLauncherResult
 {
     Launched,
-    InstallPageOpened,
+    RuntimeSetupOpened,
     Unavailable
 }
 

@@ -42,6 +42,13 @@ public sealed record LaunchOptions
     public SandboxOptions Sandbox { get; init; } = SandboxOptions.Off;
 }
 
+/// <summary>A process-free Java invocation for hosts that embed a JVM, such as Jay on Android.</summary>
+public sealed record EmbeddedJavaInvocation(
+    IReadOnlyList<string> VmOptions,
+    string MainClass,
+    IReadOnlyList<string> Arguments,
+    string? TransientDirectory);
+
 /// <summary>拼装启动参数、准备 natives 与旧版资源，然后启动游戏进程。</summary>
 public sealed class GameLauncher(GameDirectory dir)
 {
@@ -78,6 +85,40 @@ public sealed class GameLauncher(GameDirectory dir)
 
     /// <summary>生成本次启动的完整命令行（不含 java 本身）。需要长期保存的脚本用 WriteLaunchScript，避免引用临时配置。</summary>
     public List<string> BuildArguments(LaunchOptions options, Action<string>? notice = null) => BuildArguments(options, notice, out _);
+
+    /// <summary>
+    /// Splits the normal, fully substituted launch command at the main class so an embedded JVM
+    /// receives exactly the same VM and game options as the desktop process launcher.
+    /// </summary>
+    public EmbeddedJavaInvocation BuildEmbeddedInvocation(LaunchOptions options, Action<string>? notice = null)
+    {
+        var marker = "-Djay.embedded.marker=" + Guid.NewGuid().ToString("N");
+        var marked = options with { ExtraJvmArgs = [.. options.ExtraJvmArgs, marker] };
+        var arguments = BuildArguments(marked, notice, out var transientDirectory);
+        var markerIndex = arguments.IndexOf(marker);
+        if (markerIndex < 0 || markerIndex + 1 >= arguments.Count)
+            throw new InvalidDataException("Could not split the embedded Java invocation.");
+
+        var vmOptions = new List<string>(markerIndex);
+        for (var i = 0; i < markerIndex; i++)
+        {
+            if (arguments[i] is "-cp" or "-classpath")
+            {
+                if (++i >= markerIndex) throw new InvalidDataException("The Java class path option has no value.");
+                vmOptions.Add("-Djava.class.path=" + arguments[i]);
+            }
+            else
+            {
+                vmOptions.Add(arguments[i]);
+            }
+        }
+
+        return new EmbeddedJavaInvocation(
+            vmOptions,
+            arguments[markerIndex + 1],
+            arguments.Skip(markerIndex + 2).ToArray(),
+            transientDirectory);
+    }
 
     /// <summary>导出可长期使用的脚本；无痕配置随脚本保存在“脚本名.amber”目录里，不参与启动时的临时文件清理。</summary>
     public string WriteLaunchScript(string path, LaunchOptions options, Action<string>? notice = null)

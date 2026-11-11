@@ -2,9 +2,10 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-android</TargetFramework>
-    <SupportedOSPlatformVersion>23</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationId>nz.work.minecraft.jay</ApplicationId>
     <ApplicationTitle>Jay</ApplicationTitle>
     <ApplicationVersion>$(MobileApplicationVersion)</ApplicationVersion>
@@ -17,7 +18,31 @@
     <AndroidResource Include="..\Amber.App\Assets\jay.png">
       <Link>Resources\drawable\jay.png</Link>
     </AndroidResource>
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so" Abi="x86_64" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so" Abi="x86_64" />
+    <AndroidAsset Include="$(IntermediateOutputPath)jay-runtime-probe.jar" LogicalName="jay-runtime-probe.jar" />
+    <AndroidAsset Include="..\..\third_party\android-glfw\LICENSE.md" LogicalName="licenses/GLFW-LICENSE.md" />
   </ItemGroup>
+
+  <Target Name="BuildJayRuntimeProbe" AfterTargets="_ResolveAndroidTooling" BeforeTargets="_BuildApkEmbed">
+    <PropertyGroup>
+      <_JayProbeClasses>$(IntermediateOutputPath)jay-runtime-probe-classes</_JayProbeClasses>
+      <_JayProbeSource>$(MSBuildProjectDirectory)/Java/nz/work/minecraft/jay/RuntimeProbe.java</_JayProbeSource>
+      <_JayBootstrapSource>$(MSBuildProjectDirectory)/Java/nz/work/minecraft/jay/AndroidGameBootstrap.java</_JayBootstrapSource>
+    </PropertyGroup>
+    <MakeDir Directories="$(_JayProbeClasses)" />
+    <Exec Command="&quot;$(_JavaSdkDirectory)/bin/javac&quot; --release 8 -encoding UTF-8 -d &quot;$(_JayProbeClasses)&quot; &quot;$(_JayProbeSource)&quot; &quot;$(_JayBootstrapSource)&quot;" />
+    <Exec Command="&quot;$(_JavaSdkDirectory)/bin/jar&quot; --create --file &quot;$(IntermediateOutputPath)jay-runtime-probe.jar&quot; -C &quot;$(_JayProbeClasses)&quot; ." />
+  </Target>
+
+  <Target Name="RequireJayJvmHost" BeforeTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/arm64-v8a/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-native/x86_64/libjayjvm.so')" Text="Build the Jay Android native host with scripts/build-android-native.sh before a Release build." />
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-glfw/arm64-v8a/libglfw.so')" Text="Build the Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
+    <Error Condition="!Exists('$(BaseIntermediateOutputPath)jay-glfw/x86_64/libglfw.so')" Text="Build the Jay Android GLFW bridge with scripts/build-android-glfw.sh before a Release build." />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Android" Version="12.1.4" />

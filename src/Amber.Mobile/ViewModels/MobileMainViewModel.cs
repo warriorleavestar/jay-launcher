@@ -192,7 +192,7 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
                     L.F("mobile.game.launched_ready", _platformServices.GameLauncherName, address),
                 MobileGameLauncherResult.Launched =>
                     L.F("mobile.game.launched_idle", _platformServices.GameLauncherName),
-                MobileGameLauncherResult.InstallPageOpened =>
+                MobileGameLauncherResult.RuntimeSetupOpened =>
                     L.F("mobile.game.install", _platformServices.GameLauncherName),
                 _ => L.F("mobile.game.unavailable", _platformServices.GameLauncherName)
             };
