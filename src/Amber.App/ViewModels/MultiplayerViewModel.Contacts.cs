@@ -115,6 +115,8 @@ public sealed partial class MultiplayerViewModel
     {
         var book = new ContactBook(Path.Combine(ContactsDir, ContactBook.FileName)) { Me = Identity.PublicKey };
         book.Changed += () => Dispatcher.UIThread.Post(RefreshContacts);
+        // Privacy plan item 7: a friend's new device is accepted on their account's signature, but never silently.
+        book.DeviceAdded += device => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Info("multiplayer.contacts.new_device", device.Name)));
         return book;
     }
 

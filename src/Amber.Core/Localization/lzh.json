@@ -2867,6 +2867,7 @@
   "multiplayer.contacts.remove_device": "去此器",
   "multiplayer.contacts.device_removed": "已去 {0} 之一器",
   "multiplayer.contacts.step.known": "{0}：故交之新器也。其 Jay 之籍已驗，不對符而納之",
+  "multiplayer.contacts.new_device": "{0} 新增一器。其 Jay 之籍已署，納之知交",
   "multiplayer.friends.backup": "錄知交",
   "multiplayer.friends.restore": "復知交",
   "multiplayer.friends.backup_hint": "所錄以汝 Jay 之籍鎖之，唯汝之記言可啟，置於何處皆可。易新機而復之，識汝 Jay 之籍之知交自相連。",

@@ -2993,6 +2993,7 @@
   "multiplayer.contacts.remove_device": "この端末を外す",
   "multiplayer.contacts.device_removed": "{0} さんの端末を 1 台外しました",
   "multiplayer.contacts.step.known": "{0}：知っている連絡先の新しい端末です。Jay アカウントが確認できたので、絵文字なしで追加します",
+  "multiplayer.contacts.new_device": "{0} さんが新しい端末を追加しました。Jay アカウントの署名があるので連絡先に入れました",
   "multiplayer.friends.backup": "連絡先をバックアップ",
   "multiplayer.friends.restore": "連絡先を復元",
   "multiplayer.friends.backup_hint": "バックアップは Jay アカウントで鍵がかかっていて、復元フレーズでしか開けません。USB メモリやクラウドに置いても大丈夫です。新しいパソコンで復元すると、あなたの Jay アカウントを知っている連絡先とは自動でつながり直します。",

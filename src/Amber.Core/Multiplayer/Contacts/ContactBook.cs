@@ -87,6 +87,12 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
 
     public event Action? Changed;
 
+    /// <summary>
+    /// A known friend's device I hadn't seen before was added without the emoji (their Jay account signed it).
+    /// The owner tells the user, so a device they didn't expect doesn't slip in unnoticed.
+    /// </summary>
+    public event Action<Contact>? DeviceAdded;
+
     public IReadOnlyList<Contact> All
     {
         get { lock (_gate) return [.. Load()]; }
@@ -174,6 +180,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         if (Me.Length != X25519KeyPair.Length || sender.Length != X25519KeyPair.Length) return null;
         var key = Convert.ToHexStringLower(sender);
         MailMessage? reply = null;
+        Contact? newDevice = null;
         lock (_gate)
         {
             PruneLocked();
@@ -212,7 +219,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     pending.Sas = ContactHandshake.Sas(Me, sender, pending.MyNonce!, nonce);
                     pending.Step = ContactStep.Compare;
                     reply = MailMessage.Create(MailKind.HelloNonce, sender, new JsonObject { ["n"] = Convert.ToHexStringLower(pending.MyNonce!) }, _now());
-                    if (pending.KnownFriend) ConfirmLocked(pending);
+                    if (pending.KnownFriend) newDevice = ConfirmKnownLocked(pending);
                     break;
                 }
                 case MailKind.HelloNonce when pending is { Initiator: false, Step: ContactStep.WaitingForNonce }:
@@ -227,7 +234,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     pending.TheirNonce = nonce;
                     pending.Sas = ContactHandshake.Sas(sender, Me, nonce, pending.MyNonce!);
                     pending.Step = ContactStep.Compare;
-                    if (pending.KnownFriend) ConfirmLocked(pending);
+                    if (pending.KnownFriend) newDevice = ConfirmKnownLocked(pending);
                     break;
                 }
                 default:
@@ -235,7 +242,16 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             }
         }
         Changed?.Invoke();
+        if (newDevice is not null) DeviceAdded?.Invoke(newDevice);
         return reply;
+    }
+
+    /// <summary>Confirms a known friend's device; returns it only when this device key is new to me.</summary>
+    private Contact? ConfirmKnownLocked(PendingContact pending)
+    {
+        var seen = Load().Any(c => c.Verified && c.PublicKey.AsSpan().SequenceEqual(pending.PublicKey));
+        var contact = ConfirmLocked(pending);
+        return seen ? null : contact;
     }
 
     /// <summary>My public key, for working out the emoji. Set once by the owner (the identity can be reset).</summary>

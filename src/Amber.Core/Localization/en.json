@@ -3068,6 +3068,7 @@
   "multiplayer.contacts.remove_device": "Remove this device",
   "multiplayer.contacts.device_removed": "Removed one of {0}'s devices",
   "multiplayer.contacts.step.known": "{0}: a new device of a contact you know. Their Jay account checks out, so it's added without the emoji",
+  "multiplayer.contacts.new_device": "{0} added a new device. Their Jay account signed it, so it's in your contacts",
   "multiplayer.friends.backup": "Back up contacts",
   "multiplayer.friends.restore": "Restore contacts",
   "multiplayer.friends.backup_hint": "The backup is locked with your Jay account: only your recovery phrase opens it, so it can go on a USB stick or in a cloud folder. After restoring on a new computer, contacts who know your Jay account reconnect by themselves.",

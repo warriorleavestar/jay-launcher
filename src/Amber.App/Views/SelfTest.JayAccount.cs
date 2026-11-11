@@ -212,6 +212,19 @@ internal sealed partial class SelfTest
         Check("好友：【恢复联系人】把人带回来，并记下要从这台设备打招呼",
             await WaitAsync(() => vm.ContactList.Count == 2, 3) && File.Exists(Path.Combine(dir, MultiplayerViewModel.RelinkFileName)), vm.Status);
 
+        // Bob shows up from a computer I've never seen: his account signed it, so it's added without the emoji, and I'm told.
+        using (var bobNew = Amber.Core.Multiplayer.X25519KeyPair.Generate())
+        {
+            var me = Dispatcher.UIThread.Invoke(() => vm.Contacts.Me);
+            var bobBook = new Amber.Core.Multiplayer.Contacts.ContactBook(Path.Combine(dir, "bob-new.json"))
+                { Me = bobNew.PublicKey, MyCertificate = bob.CertifyDevice(bobNew.PublicKey, "Linux", 0, DateTimeOffset.UtcNow) };
+            var reply = vm.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me");
+            if (reply is not null && bobBook.Receive(me, reply, "Bob") is { } nonce) vm.Contacts.Receive(bobNew.PublicKey, nonce, "Me");
+            var notice = L.F("multiplayer.contacts.new_device", "Bob");
+            Check("好友：认识的人换了新设备，不对表情就加上，并且告诉我",
+                await WaitAsync(() => vm.Status == notice && vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: true }, 3), vm.Status);
+        }
+
         var tampered = File.ReadAllBytes(backup);
         tampered[^5] ^= 1;
         File.WriteAllBytes(backup, tampered);
