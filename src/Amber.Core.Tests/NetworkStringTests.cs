@@ -8,7 +8,7 @@ public sealed class NetworkStringTests
 {
     private static readonly NetworkSigner Registry = NetworkSigner.Generate(out _);
     private static readonly NetworkSigner Someone = NetworkSigner.Generate(out _);
-    private static readonly byte[][] Trusted = [Registry.PublicKey];
+    private static readonly TrustQuorum[] Trusted = [new([Registry.PublicKey], 1)];
 
     private static NetworkInfo Info(string id = "nz-friends", long seq = 1) =>
         new(id, "新西兰朋友服", "jay-" + id, id + "-public-v1", ["tcp://node1.example.org:11010", "udp://node1.example.org:11010"], seq,
@@ -18,7 +18,7 @@ public sealed class NetworkStringTests
     public void RoundTripsAndKnowsWhoSignedIt()
     {
         var text = NetworkString.Create(Info(), Registry);
-        Assert.StartsWith("JAYNET1-", text);
+        Assert.StartsWith("JAYNET2-", text);
         var reviewed = NetworkString.Parse(text, Trusted);
         Assert.True(reviewed.Reviewed);
         Assert.Equal(Info().Nodes, reviewed.Info.Nodes);
@@ -27,7 +27,7 @@ public sealed class NetworkStringTests
         Assert.Equal(Registry.PublicKey, reviewed.SignerKey);
         // 别人签的：签名对，但不算审核过。
         Assert.False(NetworkString.Parse(NetworkString.Create(Info(), Someone), Trusted).Reviewed);
-        // 内置的注册表钥匙还没生成：什么都不算审核过。
+        // The Jay trustees have no keys yet: nothing counts as reviewed.
         Assert.False(NetworkString.Parse(text).Reviewed);
     }
 
@@ -35,10 +35,10 @@ public sealed class NetworkStringTests
     public void AnyChangeBreaksTheSignature()
     {
         var text = NetworkString.Create(Info(), Registry);
-        var body = text["JAYNET1-".Length..].Split('.');
+        var body = text["JAYNET2-".Length..].Split('.');
         var payload = NetworkString.FromBase64Url(body[0])!;
         var json = Encoding.UTF8.GetString(payload).Replace("node1.example.org", "evil.example.org");
-        var forged = "JAYNET1-" + NetworkString.Base64Url(Encoding.UTF8.GetBytes(json)) + "." + body[1];
+        var forged = "JAYNET2-" + NetworkString.Base64Url(Encoding.UTF8.GetBytes(json)) + "." + body[1];
         Assert.Throws<InvalidDataException>(() => NetworkString.Parse(forged, Trusted));
         // 把注册表的签名换成自己的钥匙重签：签名对了，但不再是“审核过”。
         Assert.False(NetworkString.Parse(NetworkString.Create(NetworkString.Parse(text, Trusted).Info, Someone), Trusted).Reviewed);
@@ -47,18 +47,21 @@ public sealed class NetworkStringTests
     [Theory]
     [InlineData("")]
     [InlineData("hello")]
-    [InlineData("JAYNET1-")]
-    [InlineData("JAYNET1-abc")]
-    [InlineData("JAYNET1-abc.def")]
+    [InlineData("JAYNET2-")]
+    [InlineData("JAYNET2-abc")]
+    [InlineData("JAYNET2-abc.def")]
     [InlineData("JAYNETx-abc.def")]
     public void RejectsGarbage(string text) => Assert.Null(NetworkString.TryParse(text, Trusted));
 
     [Fact]
     public void NewerFormatsAskForAnUpdate()
     {
-        var text = NetworkString.Create(Info(), Registry).Replace("JAYNET1-", "JAYNET2-");
+        var text = NetworkString.Create(Info(), Registry).Replace("JAYNET2-", "JAYNET3-");
         var e = Assert.Throws<InvalidDataException>(() => NetworkString.Parse(text, Trusted));
-        Assert.Contains("2", e.Message);
+        Assert.Contains("3", e.Message);
+        // Version 1 strings are no longer read.
+        var old = Assert.Throws<InvalidDataException>(() => NetworkString.Parse(NetworkString.Create(Info(), Registry).Replace("JAYNET2-", "JAYNET1-"), Trusted));
+        Assert.Contains("1", old.Message);
     }
 
     [Fact]
@@ -138,7 +141,7 @@ public sealed class NetworkStringTests
     {
         var good = NetworkString.Create(Info(), Registry);
         var expired = NetworkString.Create(Info("old") with { Expires = DateTimeOffset.UtcNow.AddSeconds(-1) }, Registry);
-        var list = new PublicNetworkList([good, "JAYNET1-garbage.x", expired, good], Trusted);
+        var list = new PublicNetworkList([good, "JAYNET2-garbage.x", expired, good], Trusted);
         Assert.Single(list.Networks);
         Assert.Equal([good], list.ToSaved());
         var profile = list.Current("nz-friends", null);

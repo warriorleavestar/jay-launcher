@@ -47,7 +47,7 @@ public sealed class JayNetworkServerBuilder
     /// <summary>数据目录：EasyTier、登录钥匙、账号表、封禁名单、管理口令都放这里。</summary>
     public JayNetworkServerBuilder UseDataDir(string path) { DataDir = Path.GetFullPath(path); return this; }
 
-    /// <summary>用自己的公共网络（JAYNET1- 连接串）。不调就是内置的 Jay 公共网络。</summary>
+    /// <summary>用自己的公共网络（JAYNET2- 连接串）。不调就是内置的 Jay 公共网络。</summary>
     public JayNetworkServerBuilder UseNetwork(SignedNetwork network) { Network = network; return this; }
 
     /// <summary>别的种子节点（tcp://host:11010），互相连起来组成一个网络。</summary>
@@ -279,7 +279,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 if (DirectoryCertificate.Parse(cert) is { } parsed && parsed.DirectoryKey.AsSpan().SequenceEqual(Directory.Identity!.PublicKey))
                 {
                     Directory.Certificate = cert;
-                    _b.Log($"目录证书 / directory certificate: root {Convert.ToBase64String(parsed.Root)}, until {parsed.Expires:yyyy-MM-dd}");
+                    _b.Log($"目录证书 / directory certificate: {parsed.Signatures.Count} root signature(s), until {parsed.Expires:yyyy-MM-dd}");
                 }
                 else _b.Log("directory.cert 不是这个节点的目录公钥签的，没有使用 / directory.cert doesn't match this node's key; not used");
             }

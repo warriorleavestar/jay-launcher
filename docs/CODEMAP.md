@@ -72,7 +72,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `JAYS1-` | Jay server invite | `Multiplayer/Gate/GateInvite.cs` |
 | `JAYC1-` | Contact code (identity public key) | `Multiplayer/Contacts/ContactCode.cs` |
 | `JAYR1-` | Relay node code | `Multiplayer/Gate/GateRelayCode.cs` |
-| `JAYNET1-` | Public network connection string | `Multiplayer/Public/NetworkString.cs` |
+| `JAYNET2-` | Public network connection string | `Multiplayer/Public/NetworkString.cs` |
 | `JAYF1-` | Device fingerprint | `Multiplayer/Public/DeviceFingerprint.cs` |
 
 ## src/Amber.App/
@@ -105,7 +105,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `docs/` | Design and operator docs: `public-network.md`, `network-server.md`, `network-server-framework.md`, `themes.md`, `platform-porting-guide.md`, `code-signing-policy.md`, `i18n-glossary.md`, `releases/`. |
 | `docs/help/` | In-app help articles per language (`zh-Hans`, `zh-Hant`, `en`, `ja`), embedded into Core. |
 | `themes/examples/` | Example theme packs (`pixel-night`, `sakura`, `topbar`). |
-| `networks/` | Registry of third-party public networks; CI (`networks.yml`) signs them into `JAYNET1-` strings after merge. |
+| `networks/` | Registry of third-party public networks; CI (`networks.yml`) signs them into `JAYNET2-` strings after merge. |
 | `node/` | Install scripts and compose file for a community relay node. |
 | `server/` | `jay-server` deployment: systemd units, Docker, public node installer. |
 | `scripts/` | Release helpers: bundle EasyTier, publish and package macOS, attach the universal loader zip to its release (`attach-loader.ps1`, see `docs/universal-loader-release.md`). |

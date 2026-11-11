@@ -1,9 +1,9 @@
 # 公共网络注册表
 
 Jay 默认进的是内置的 Jay 公共网络。别人也可以搭自己的公共网络（比如某个服务器社区、某个地区的玩家群），
-用一串 `JAYNET1-...` 的**连接串**分享出去，玩家在联机页“公共网络”里粘贴就能换过去。
+用一串 `JAYNET2-...` 的**连接串**分享出去，玩家在联机页“公共网络”里粘贴就能换过去。
 
-连接串带签名，内容一个字节都改不了。谁都能自己签一个，但 Jay 里只有 **Jay 注册表签的** 才显示“已审核”；
+连接串带签名，内容一个字节都改不了。谁都能自己签一个，但 Jay 里只有 **Jay 信任人里够数的人（3 人里 2 人）加签过的** 才显示“已审核”；
 没审核的网络，玩家添加时会看到提醒，确认后才加。
 
 ## 提交审核
@@ -11,15 +11,17 @@ Jay 默认进的是内置的 Jay 公共网络。别人也可以搭自己的公�
 1. 在这个文件夹里加一个 `<编号>.json`（文件名就是编号），格式见下面。
 2. 开 PR。CI 会检查格式（`jay-server network check`）。
 3. 维护者审核：节点能不能连、名字有没有冒充别人、有没有违规内容。
-4. 合并后，CI 用注册表钥匙签名，连接串发到仓库的 [networks Release](../../releases/tag/networks) 里（`<编号>.jaynet`）。
+4. 合并后，网络主人用自己的钥匙签名（`network sign`），把连接串交给 Jay 信任人。信任人各自在自己的离线电脑上加签
+   （`network cosign`），够 2 个以后连接串就是“已审核”的，再由维护者上传到仓库的 [networks Release](../../releases/tag/networks)
+   （`<编号>.jaynet`）。CI 只检查格式，不签名，也拿不到任何私钥。
 
-要更新节点，改 JSON 并把 `seq` 加一，再走一遍 PR。玩家粘贴新连接串时，同一把钥匙签的更大 `seq` 会直接替换旧的。
+要更新节点，改 JSON 并把 `seq` 加一，再走一遍 PR。玩家粘贴新连接串时，同一个网络主人签的更大 `seq` 会直接替换旧的。
 
 ## 格式
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "id": "nz-friends",
   "name": "新西兰朋友服",
   "network": "jay-nz-friends",
@@ -52,8 +54,19 @@ jay-server network sign nz-friends.json --key my-network.key
 jay-server directory --network <上面打印的连接串>    # 在有公网 IP 的机器上跑节点，放行 TCP/UDP 11010
 ```
 
-## 注册表钥匙（维护者）
+## Jay 信任人（维护者）
 
-注册表钥匙用 `jay-server network keygen` 生成。私钥放进仓库设置里 `network-registry` environment 的 secret `JAY_NETWORK_KEY`
-（建议给这个 environment 打开“需要人工批准”），公钥写进 `src/Amber.Core/Multiplayer/Public/NetworkString.cs` 的 `RegistryKeys`。
-换钥匙时新旧公钥并存一段时间，等旧连接串都重签以后再删旧的。
+“已审核”不由一把钥匙决定：Jay 有 3 个信任人，每人在自己的离线电脑上用 `jay-server network root-key --out <文件>`
+生成一把钥匙，私钥只留在本人手里（U 盘 + 手抄），不放进仓库、CI、服务器、网盘或聊天软件。三个公钥写进
+`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs` 的 `JayTrust.Keys`，`JayTrust.Need` 是要几个人签（2）。
+
+审核一个网络：
+
+```bash
+jay-server network cosign <网络主人签好的连接串或文件> --key <自己的信任钥匙> > 加签后.jaynet
+# 把输出交给下一个信任人，他在自己的离线电脑上再跑一次 cosign
+jay-server network show 加签后.jaynet   # 显示 “Jay 信任人签了 2/2，Jay 审核过”
+```
+
+同样的 2/3 规则也用在内置 Jay 公共网络的目录证书上（`network dir-cert`，第二个人用 `--cosign`）。一个人的钥匙丢了或泄露时，
+另外两个人照样能签，换钥匙要发一个新版 Jay，把新公钥换进 `JayTrust.Keys`。

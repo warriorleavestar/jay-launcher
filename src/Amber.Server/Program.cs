@@ -75,19 +75,22 @@ public static class Program
               马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
-        自己的公共网络（连接串 JAYNET1-...）：
+        自己的公共网络（连接串 JAYNET2-...）：
           jay-server network init <编号> --name <名字> --host <公网地址> [--listen 11010] [--out <文件夹>]
               一步生成签名钥匙、网络 JSON 和网络配置模板，并打印后面几步
           jay-server network config-hash <配置.json> --network <网络.json> [--url https://...]
               检查配置文件、算 SHA-256；给了 --url 就写进网络 JSON（版本号加一），然后重新 sign
           jay-server network keygen --out <钥匙文件>          生成签名钥匙（私钥存在文件里，只自己留着），打印公钥
-          jay-server network sign <网络.json> [--key <钥匙文件>]  签名并打印连接串（也可以用环境变量 JAY_NETWORK_KEY 给钥匙）
+          jay-server network sign <网络.json> [--key <钥匙文件>]  网络主人签名并打印连接串（也可以用环境变量 JAY_NETWORK_KEY 给钥匙）
+          jay-server network cosign <连接串或文件> --key <信任钥匙文件>  再加一个签名（Jay 信任人离线审核用，够数才算“已审核”）
           jay-server network check <网络.json> ...             只检查格式（注册表的 PR 检查用）
           jay-server network show <连接串或文件>              显示连接串里的内容和签名
           jay-server network dir-key [<网络.json>] --dir <节点数据目录>  打印目录公钥（没有就生成 directory.key），给了网络 JSON 就写进 dirKeys
-          jay-server network root-key --out <根钥匙文件>     生成目录根钥匙（离线保管，不放服务器、不进仓库），打印公钥（写进 dirRoots）
+          jay-server network root-key --out <钥匙文件>       生成一把信任 / 根钥匙（每个信任人在自己的离线电脑上各生成一把），打印公钥
           jay-server network dir-cert --root <根钥匙文件> --network <EasyTier 网络名> --dir-key <目录公钥> --out <证书文件> [--days 365]
               在离线电脑上用根钥匙给节点的目录公钥（dir-key 打印的）签证书，再把证书拷到节点数据目录，命名为 directory.cert
+          jay-server network dir-cert --cosign <证书文件> --root <根钥匙文件>
+              另一个信任人在自己的离线电脑上给同一张证书加签名（网络要求几个就签几个）
               （根钥匙和节点在同一台电脑时也可以用 --dir <节点数据目录> 直接写进去，但根钥匙不该放在服务器上）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
@@ -368,6 +371,16 @@ public static class Program
                 output.WriteLine(NetworkString.Create(info, NetworkSigner.FromSeed(keyText)));
                 return 0;
             }
+            case "cosign":
+            {
+                var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
+                var keyFile = options.Get("key") ?? throw new ArgumentException("要用 --key 指定自己的信任钥匙文件");
+                var signed = NetworkString.Cosign(File.Exists(text) ? File.ReadAllText(text) : text, NetworkSigner.FromSeed(File.ReadAllText(keyFile)));
+                output.WriteLine(signed);
+                var parsed = NetworkString.Parse(signed);
+                Console.Error.WriteLine($"签名数 {parsed.Signers.Count}，Jay 信任人 {JayTrust.Quorum.Count(parsed.Signers)}/{JayTrust.Need}{(parsed.Reviewed ? "，已审核" : "")}");
+                return 0;
+            }
             case "check":
             {
                 if (rest.Count == 0) throw new ArgumentException("要给网络 JSON 文件");
@@ -451,6 +464,14 @@ public static class Program
             case "dir-cert":
             {
                 var rootFile = options.Get("root") ?? throw new ArgumentException("要用 --root 指定根钥匙文件");
+                if (options.Get("cosign") is { } existing)
+                {
+                    var cosigned = DirectoryCertificate.Cosign(File.ReadAllBytes(existing), NetworkSigner.FromSeed(File.ReadAllText(rootFile)));
+                    File.WriteAllBytes(existing, cosigned);
+                    var c = DirectoryCertificate.Parse(cosigned)!;
+                    output.WriteLine($"已在 {existing} 上加签名（现在 {c.Signatures.Count} 个，Jay 信任人 {JayTrust.Quorum.Count(c.Signers)}/{JayTrust.Need}）。");
+                    return 0;
+                }
                 var networkName = options.Get("network") ?? throw new ArgumentException("要用 --network 指定 EasyTier 网络名（Jay 公共网络是 " + PublicNetworkProfile.JayNetworkName + "）");
                 var days = int.Parse(options.Get("days") ?? "365", System.Globalization.CultureInfo.InvariantCulture);
                 if (days is < 1 or > 3650) throw new ArgumentException("--days 要在 1 到 3650 之间");
@@ -497,11 +518,13 @@ public static class Program
                 var text = rest.FirstOrDefault() ?? throw new ArgumentException("要给连接串或文件");
                 var signed = NetworkString.Parse(File.Exists(text) ? File.ReadAllText(text) : text);
                 output.WriteLine(signed.Info.ToJson().ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                output.WriteLine($"签名钥匙：{Convert.ToBase64String(signed.SignerKey)}（{signed.SignerFingerprint}）{(signed.Reviewed ? "，Jay 审核过" : "，未经 Jay 审核")}");
+                output.WriteLine($"网络主人的钥匙：{Convert.ToBase64String(signed.SignerKey)}（{signed.SignerFingerprint}）");
+                foreach (var k in signed.Signers.Skip(1)) output.WriteLine($"加签：{Convert.ToBase64String(k)}");
+                output.WriteLine($"Jay 信任人签了 {JayTrust.Quorum.Count(signed.Signers)}/{JayTrust.Need}{(signed.Reviewed ? "，Jay 审核过" : "，未经 Jay 审核")}");
                 return 0;
             }
             default:
-                throw new ArgumentException("用法：jay-server network init|keygen|sign|config-hash|check|show|dir-key");
+                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|dir-key|dir-cert");
         }
     }
 

@@ -9,20 +9,23 @@ using Amber.Core.Localization;
 namespace Amber.Core.Multiplayer.Public;
 
 /// <summary>
-/// 别的公共网络的“连接串”：网络名、密钥、节点、（以后的）服务器配置文件哈希，加一个 Ed25519 签名。
-/// 格式：<c>JAYNET1-</c> + base64url(内容 JSON) + <c>.</c> + base64url(签名公钥 32 ‖ 签名 64)。
-/// 签名的是 <c>"jay-network-v1\n"</c> + 内容 JSON 的原始字节，所以内容一个字节都不能改。
-/// 前缀里的数字是格式版本，以后换算法就换数字，老版本照样能读。
+/// A public network's connection string: name, EasyTier secret, nodes, optional config hash, and one or more Ed25519
+/// signatures.
+/// Format: <c>JAYNET2-</c> + base64url(content JSON) + <c>.</c> + base64url(signature entries), each entry being
+/// public key 32 ‖ signature 64. Every entry signs <c>"jay-network-v2\n"</c> + the raw content JSON bytes.
 /// <para>
-/// 谁都能签一个连接串（自己搭的网络），但只有 Jay 注册表的钥匙签的才算“已审核”：
-/// 网络先在 GitHub 的 networks/ 里提交、审核合并，再由 CI 用注册表钥匙签名。没审核的要用户自己确认才加。
+/// The first entry is the network owner's key: it identifies the network (a string with the same id and another owner
+/// key is a conflict). Further entries are co-signatures. A string counts as reviewed when the Jay trustees' quorum
+/// (<see cref="JayTrust"/>, for example 2 of 3) is among the signers. Trustees sign offline, one after another, with
+/// <c>jay-server network cosign</c>; no single trustee can review a network alone. Unreviewed strings need the user's
+/// confirmation.
 /// </para>
 /// </summary>
 public static partial class NetworkString
 {
     public const string Prefix = "JAYNET";
-    public const int Version = 1;
-    public const string Current = "JAYNET1-";
+    public const int Version = 2;
+    public const string Current = "JAYNET2-";
     public const int MaxLength = 8192;
     public const int MaxNodes = 16;
     /// <summary>
@@ -35,13 +38,10 @@ public static partial class NetworkString
     /// <summary>At most this many directory root keys ("dirRoots"): the current one and a few for rotation.</summary>
     public const int MaxDirectoryRoots = 4;
 
-    /// <summary>
-    /// Jay 注册表的签名公钥（base64）。可以有多把（换钥匙时新旧并存一段时间）。
-    /// 还没生成注册表钥匙时为空：这时所有连接串都按“未审核”处理，要用户确认。
-    /// </summary>
-    public static readonly string[] RegistryKeys = [];
+    /// <summary>At most this many signatures: the owner plus co-signers.</summary>
+    public const int MaxSignatures = 8;
 
-    private static readonly byte[] Domain = "jay-network-v1\n"u8.ToArray();
+    private static readonly byte[] Domain = "jay-network-v2\n"u8.ToArray();
 
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{1,31}$")]
     private static partial Regex IdPattern();
@@ -49,44 +49,79 @@ public static partial class NetworkString
     /// <summary>网络编号能不能用：2~32 个小写字母、数字、减号，不能以减号开头。</summary>
     public static bool IsValidId(string? id) => id is not null && IdPattern().IsMatch(id);
 
-    /// <summary>用签名钥匙把网络信息做成连接串。</summary>
-    public static string Create(NetworkInfo info, NetworkSigner signer)
+    /// <summary>Makes a connection string signed by its owner, then by any co-signers in order.</summary>
+    public static string Create(NetworkInfo info, NetworkSigner owner, params NetworkSigner[] cosigners)
     {
         if (Validate(info) is { } problem) throw new InvalidDataException(problem);
         var payload = Encoding.UTF8.GetBytes(info.ToJson().ToJsonString());
-        var signature = signer.Sign([.. Domain, .. payload]);
-        return Current + Base64Url(payload) + "." + Base64Url([.. signer.PublicKey, .. signature]);
+        var text = Format(payload, [new TrustSignature(owner.PublicKey, owner.Sign([.. Domain, .. payload]))]);
+        foreach (var c in cosigners) text = Cosign(text, c);
+        return text;
     }
 
     /// <summary>
-    /// 读连接串并验签。格式不对、签名不对、内容不合规、已经过期都抛 <see cref="InvalidDataException"/>（消息给用户看）。
+    /// Adds one more signature to an existing string without changing its content. Checks every existing signature first.
+    /// A key that already signed is refused.
     /// </summary>
-    /// <param name="trusted">认哪些注册表钥匙；不给就用 <see cref="RegistryKeys"/>（测试里换成测试钥匙）。</param>
-    public static SignedNetwork Parse(string text, IEnumerable<byte[]>? trusted = null, DateTimeOffset? now = null)
+    public static string Cosign(string text, NetworkSigner signer)
+    {
+        var (payload, signatures) = Split(text);
+        if (signatures.Any(s => s.Key.AsSpan().SequenceEqual(signer.PublicKey))) throw new InvalidDataException(L.T("core.mp.network.already_signed"));
+        if (signatures.Count >= MaxSignatures) throw Bad("core.mp.network.bad_string");
+        return Format(payload, [.. signatures, new TrustSignature(signer.PublicKey, signer.Sign([.. Domain, .. payload]))]);
+    }
+
+    private static string Format(byte[] payload, IReadOnlyList<TrustSignature> signatures) =>
+        Current + Base64Url(payload) + "." + Base64Url(signatures.SelectMany(s => s.Key.Concat(s.Signature)).ToArray());
+
+    /// <summary>Reads the envelope and verifies every signature. Doesn't look at the content.</summary>
+    private static (byte[] Payload, List<TrustSignature> Signatures) Split(string text)
     {
         text = (text ?? "").Trim();
         if (text.Length is 0 or > MaxLength || !text.StartsWith(Prefix, StringComparison.Ordinal)) throw Bad("core.mp.network.bad_string");
         var dash = text.IndexOf('-');
         if (dash < 0 || !int.TryParse(text.AsSpan(Prefix.Length, dash - Prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var version))
             throw Bad("core.mp.network.bad_string");
-        if (version != Version) throw new InvalidDataException(L.F("core.mp.network.new_version", version));
+        if (version < Version) throw new InvalidDataException(L.F("core.mp.network.old_version", version));
+        if (version > Version) throw new InvalidDataException(L.F("core.mp.network.new_version", version));
         var parts = text[(dash + 1)..].Split('.');
-        if (parts.Length != 2 || FromBase64Url(parts[0]) is not { } payload || FromBase64Url(parts[1]) is not { Length: 96 } tail)
+        if (parts.Length != 2 || FromBase64Url(parts[0]) is not { } payload || FromBase64Url(parts[1]) is not { } tail
+            || tail.Length == 0 || tail.Length % TrustSignature.Size != 0 || tail.Length / TrustSignature.Size > MaxSignatures)
             throw Bad("core.mp.network.bad_string");
-        var key = tail[..32];
-        var signature = tail[32..];
-        if (!RoomSigner.Verify(key, [.. Domain, .. payload], signature)) throw Bad("core.mp.network.bad_signature");
+        var signatures = new List<TrustSignature>();
+        for (var i = 0; i < tail.Length; i += TrustSignature.Size)
+        {
+            var entry = new TrustSignature(tail[i..(i + 32)], tail[(i + 32)..(i + TrustSignature.Size)]);
+            if (signatures.Any(s => s.Key.AsSpan().SequenceEqual(entry.Key))) throw Bad("core.mp.network.bad_string");
+            if (!entry.Verify([.. Domain, .. payload])) throw Bad("core.mp.network.bad_signature");
+            signatures.Add(entry);
+        }
+        return (payload, signatures);
+    }
+
+    /// <summary>
+    /// 读连接串并验签。格式不对、签名不对、内容不合规、已经过期都抛 <see cref="InvalidDataException"/>（消息给用户看）。
+    /// </summary>
+    /// <param name="trusted">
+    /// Quorums that make a string reviewed (any one of them met is enough). Null: the Jay trustees (<see cref="JayTrust"/>).
+    /// Tests and test machines pass their own.
+    /// </param>
+    public static SignedNetwork Parse(string text, IReadOnlyList<TrustQuorum>? trusted = null, DateTimeOffset? now = null)
+    {
+        text = (text ?? "").Trim();
+        var (payload, signatures) = Split(text);
         NetworkInfo info;
         try { info = NetworkInfo.FromJson(JsonNode.Parse(payload) as JsonObject ?? throw Bad("core.mp.network.bad_string")); }
         catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException) { throw Bad("core.mp.network.bad_string"); }
         if (Validate(info) is { } problem) throw new InvalidDataException(problem);
         if (info.Expires is { } exp && exp <= (now ?? DateTimeOffset.UtcNow)) throw Bad("core.mp.network.expired");
-        var registry = (trusted ?? RegistryKeys.Select(Convert.FromBase64String)).Any(k => k.AsSpan().SequenceEqual(key));
-        return new SignedNetwork(info, key, registry, text);
+        var signers = signatures.Select(s => s.Key).ToList();
+        var reviewed = (trusted ?? [JayTrust.Quorum]).Any(q => q.IsMet(signers));
+        return new SignedNetwork(info, signers[0], reviewed, text) { Signers = signers };
     }
 
     /// <summary>不抛异常的版本：读不了返回 null。</summary>
-    public static SignedNetwork? TryParse(string? text, IEnumerable<byte[]>? trusted = null, DateTimeOffset? now = null)
+    public static SignedNetwork? TryParse(string? text, IReadOnlyList<TrustQuorum>? trusted = null, DateTimeOffset? now = null)
     {
         try { return Parse(text ?? "", trusted, now); }
         catch (InvalidDataException) { return null; }
@@ -107,6 +142,8 @@ public static partial class NetworkString
         if (info.DirectoryKeys is { } dirKeys && (dirKeys.Count is 0 or > MaxDirectoryKeys || dirKeys.Any(k => k.Length != DirectoryChannel.KeyLength)))
             return L.T("core.mp.network.bad_dir_keys");
         if (info.DirectoryRoots is { } roots && (roots.Count is 0 or > MaxDirectoryRoots || roots.Any(k => k.Length != 32)))
+            return L.T("core.mp.network.bad_dir_keys");
+        if (info.DirectoryRootsNeed < 1 || info.DirectoryRootsNeed > Math.Max(1, info.DirectoryRoots?.Count ?? 0))
             return L.T("core.mp.network.bad_dir_keys");
         return null;
     }
@@ -145,11 +182,12 @@ public sealed record NetworkConfigRef(string Url, string Sha256);
 /// </param>
 /// <param name="DirectoryRoots">
 /// Ed25519 root keys that certify directory keys ("dirRoots", optional, at most <see cref="NetworkString.MaxDirectoryRoots"/>),
-/// see <see cref="DirectoryCertificate"/>. Older Jay versions ignore the field.
+/// see <see cref="DirectoryCertificate"/>.
 /// </param>
+/// <param name="DirectoryRootsNeed">How many of <paramref name="DirectoryRoots"/> must sign a directory certificate ("dirRootsNeed", default 1).</param>
 public sealed record NetworkInfo(string Id, string Name, string NetworkName, string Secret, IReadOnlyList<string> Nodes, long Seq = 1,
     DateTimeOffset? Expires = null, string? Home = null, NetworkConfigRef? Config = null, IReadOnlyList<byte[]>? DirectoryKeys = null,
-    IReadOnlyList<byte[]>? DirectoryRoots = null)
+    IReadOnlyList<byte[]>? DirectoryRoots = null, int DirectoryRootsNeed = 1)
 {
     public JsonObject ToJson()
     {
@@ -168,6 +206,7 @@ public sealed record NetworkInfo(string Id, string Name, string NetworkName, str
         if (Config is not null) o["config"] = new JsonObject { ["url"] = Config.Url, ["sha256"] = Config.Sha256.ToLowerInvariant() };
         if (DirectoryKeys is { Count: > 0 } keys) o["dirKeys"] = new JsonArray([.. keys.Select(k => (JsonNode)JsonValue.Create(Convert.ToBase64String(k)))]);
         if (DirectoryRoots is { Count: > 0 } roots) o["dirRoots"] = new JsonArray([.. roots.Select(k => (JsonNode)JsonValue.Create(Convert.ToBase64String(k)))]);
+        if (DirectoryRootsNeed != 1) o["dirRootsNeed"] = DirectoryRootsNeed;
         return o;
     }
 
@@ -183,16 +222,20 @@ public sealed record NetworkInfo(string Id, string Name, string NetworkName, str
             o["exp"] is { } exp ? DateTimeOffset.FromUnixTimeSeconds(exp.GetValue<long>()) : null,
             o["home"]?.GetValue<string>(), config,
             o["dirKeys"] is JsonArray dk ? [.. dk.Select(k => Convert.FromBase64String(k?.GetValue<string>() ?? throw new FormatException("dirKeys")))] : null,
-            o["dirRoots"] is JsonArray dr ? [.. dr.Select(k => Convert.FromBase64String(k?.GetValue<string>() ?? throw new FormatException("dirRoots")))] : null);
+            o["dirRoots"] is JsonArray dr ? [.. dr.Select(k => Convert.FromBase64String(k?.GetValue<string>() ?? throw new FormatException("dirRoots")))] : null,
+            o["dirRootsNeed"]?.GetValue<int>() ?? 1);
     }
 }
 
 /// <summary>验过签的连接串。</summary>
-/// <param name="SignerKey">签名公钥（同一个网络换了钥匙要用户重新确认）。</param>
-/// <param name="Reviewed">是不是 Jay 注册表签的（GitHub 审核过）。</param>
+/// <param name="SignerKey">The owner's key, the first signature (a network whose owner key changed must be removed and re-added).</param>
+/// <param name="Reviewed">Whether a trusted quorum (normally the Jay trustees) signed it.</param>
 /// <param name="Text">原始连接串（保存在设置里，每次启动重新验签）。</param>
 public sealed record SignedNetwork(NetworkInfo Info, byte[] SignerKey, bool Reviewed, string Text)
 {
+    /// <summary>Every key that signed, owner first.</summary>
+    public IReadOnlyList<byte[]> Signers { get; init; } = [SignerKey];
+
     /// <summary>签名钥匙的短指纹（给用户核对用）。</summary>
     public string SignerFingerprint => Convert.ToHexString(SHA256.HashData(SignerKey)[..6]);
 
@@ -207,11 +250,11 @@ public sealed record SignedNetwork(NetworkInfo Info, byte[] SignerKey, bool Revi
         new(Info.Id, Info.Name, Info.NetworkName, Info.Secret, Info.Nodes)
         {
             Reviewed = Reviewed, Config = Info.Config, Home = Info.Home, DirectoryKeys = Info.DirectoryKeys ?? [],
-            DirectoryRoots = Info.DirectoryRoots ?? [],
+            DirectoryRoots = Info.DirectoryRoots ?? [], DirectoryRootsNeed = Info.DirectoryRootsNeed,
         };
 }
 
-/// <summary>签连接串的 Ed25519 钥匙（注册表 CI 或者自己搭网络的人用）。私钥是 32 字节种子。</summary>
+/// <summary>An Ed25519 signing key (a network owner's, or a trustee's). The private key is a 32-byte seed.</summary>
 public sealed class NetworkSigner
 {
     private readonly Org.BouncyCastle.Crypto.Parameters.Ed25519PrivateKeyParameters _key;

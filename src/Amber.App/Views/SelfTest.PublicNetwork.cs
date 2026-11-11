@@ -178,7 +178,7 @@ internal sealed partial class SelfTest
         var service = host.TestService;
         var registry = NetworkSigner.Generate(out _);
         var someone = NetworkSigner.Generate(out _);
-        service.TrustedNetworkKeys = [registry.PublicKey];
+        service.TrustedNetworkKeys = [new Amber.Core.Multiplayer.Public.TrustQuorum([registry.PublicKey], 1)];
         service.ReloadNetworks();
         Dispatcher.UIThread.Invoke(host.LoadNetworks);
         Check("换公共网络：默认是 Jay 公共网络", host.SelectedNetworkChoice is { IsBuiltIn: true } && host.NetworkChoices.Count == 1,
