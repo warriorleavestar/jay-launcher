@@ -3238,5 +3238,7 @@
   "core.content.modpack.mixed_unsupported": "This pack mixes {0}. The universal loader cannot run this combination, so it cannot be imported.",
   "core.content.modpack.mixed_needs_bake": "This pack mixes {0}. It runs only through the universal loader: turn on experimental baking and install the loader in Settings, then import it again.",
   "newinstance.pack.mixed": "Mixed pack: {0} mods run through the universal loader",
-  "content.loader.ul_missing_bridges": "No {0} build. The installed universal loader cannot run other mods on {0}: its package lacks {1}. Download the full loader package in Settings."
+  "content.loader.ul_missing_bridges": "No {0} build. The installed universal loader cannot run other mods on {0}: its package lacks {1}. Download the full loader package in Settings.",
+  "core.bake.problem.mixin_lambda_unresolved": "one of its Mixins changes a part of the game that NeoForge rewrites, and the universal loader could not find where that part went, so the game would not start with it. Remove this mod, or update it to a version that supports this platform",
+  "core.bake.problem.mixin_target_changed": "one of its Mixins changes a part of the game that moved on this platform, and the universal loader could not move the change with it, so the game may fail to start. If it does, remove or update this mod"
 }

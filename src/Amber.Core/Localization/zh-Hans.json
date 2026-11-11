@@ -3163,5 +3163,7 @@
   "core.content.modpack.mixed_unsupported": "这个整合包混用了 {0}。通用加载器跑不了这种组合，所以不能导入。",
   "core.content.modpack.mixed_needs_bake": "这个整合包混用了 {0}，只能经通用加载器运行：先在设置里开启实验性烘焙并装好加载器，再导入一次。",
   "newinstance.pack.mixed": "混合整合包：{0} 模组经通用加载器运行",
-  "content.loader.ul_missing_bridges": "没有 {0} 版。装的通用加载器在 {0} 上跑不了别的模组：包里缺 {1}。请在设置里下载完整的加载器包。"
+  "content.loader.ul_missing_bridges": "没有 {0} 版。装的通用加载器在 {0} 上跑不了别的模组：包里缺 {1}。请在设置里下载完整的加载器包。",
+  "core.bake.problem.mixin_lambda_unresolved": "它有 Mixin 要改的那段游戏代码被 NeoForge 改写了，通用加载器找不到它挪到了哪里，带着它游戏启动不了。请移除这个模组，或者换成支持这个平台的版本",
+  "core.bake.problem.mixin_target_changed": "它有 Mixin 要改的那段游戏代码在这个平台上挪了位置，通用加载器没能跟着调整，游戏可能启动不了。如果启动失败，请移除或更新这个模组"
 }
