@@ -9,6 +9,7 @@ internal static class AppRestart
 {
     public static void Restart()
     {
+        Amber.Core.Diagnostics.ExitTrail.Note("exit", "breaker restart");
         try
         {
             if (Environment.ProcessPath is { } path)

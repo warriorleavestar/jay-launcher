@@ -19,6 +19,8 @@ internal static class Program
             Environment.Exit(Amber.Core.Multiplayer.WindowsElevatedGuardHost.Run(args));
         // Linux：先确认 ICU 和图形界面要用的库都在（缺了给出看得懂的提示）。必须排在任何区域、格式化代码之前。
         LinuxStartup.BeforeAnything(args);
+        // Local-only breadcrumbs for exits that leave no crash report or console output (see ExitTrail).
+        Amber.Core.Diagnostics.ExitTrail.Start(Services.AppSettings.DataDir);
         StartupTrace.Mark("main");
         // 无人值守的开发运行（自检、截图、布局检查）：崩了写 crash.txt 并退出，不弹对话框。
         DevCrashGuard.InstallIfUnattended();
