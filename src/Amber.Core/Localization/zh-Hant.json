@@ -3011,7 +3011,7 @@
   "multiplayer.friends.backup_failed": "備份沒存上：{0}",
   "multiplayer.friends.not_backup": "這個檔案不是 Jay 的朋友列表備份",
   "multiplayer.friends.wrong_account": "這份備份屬於另一個 Jay 帳戶，或者檔案被改過",
-  "multiplayer.friends.restored": "已恢復 {0} 位朋友。這台裝置會經公共網路跟他們打招呼",
+  "multiplayer.friends.restored": "已恢復 {0} 位朋友。這台裝置會經公共網路跟他們打招呼，每個人要和你對一次表情",
   "multiplayer.friends.restored_none": "備份裡的人都已經在你的清單裡了",
   "multiplayer.friends.relinked": "已從這台裝置向 {0} 位朋友打招呼",
   "multiplayer.friends.restore_confirm": "恢復",

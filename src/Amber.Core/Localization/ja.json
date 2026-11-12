@@ -3011,7 +3011,7 @@
   "multiplayer.friends.backup_failed": "バックアップを保存できませんでした：{0}",
   "multiplayer.friends.not_backup": "このファイルは Jay のフレンドバックアップではありません",
   "multiplayer.friends.wrong_account": "このバックアップは別の Jay アカウントのものか、ファイルが変更されています",
-  "multiplayer.friends.restored": "フレンド {0} 人を復元しました。このデバイスから公開ネットワーク経由であいさつします",
+  "multiplayer.friends.restored": "フレンド {0} 人を復元しました。このデバイスから公開ネットワーク経由であいさつします。それぞれ一度だけ絵文字を照合してください",
   "multiplayer.friends.restored_none": "バックアップの人はみんなもうリストにいます",
   "multiplayer.friends.relinked": "このデバイスからフレンド {0} 人にあいさつしました",
   "multiplayer.friends.restore_confirm": "復元",

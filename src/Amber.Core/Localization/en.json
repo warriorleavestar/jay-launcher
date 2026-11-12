@@ -3086,7 +3086,7 @@
   "multiplayer.friends.backup_failed": "Couldn't save the backup: {0}",
   "multiplayer.friends.not_backup": "That file isn't a Jay friends backup",
   "multiplayer.friends.wrong_account": "This backup belongs to another Jay account, or the file was changed",
-  "multiplayer.friends.restored": "Restored {0} friends. This device will say hello to them over the public network",
+  "multiplayer.friends.restored": "Restored {0} friends. This device will say hello to them over the public network, and each of them compares the emoji with you once",
   "multiplayer.friends.restored_none": "Everyone in that backup is already in your list",
   "multiplayer.friends.relinked": "Said hello to {0} friends from this device",
   "multiplayer.friends.restore_confirm": "Restore",

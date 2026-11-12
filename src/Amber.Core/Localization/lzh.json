@@ -2884,7 +2884,7 @@
   "multiplayer.friends.backup_failed": "錄之未存：{0}",
   "multiplayer.friends.not_backup": "此卷非 Jay 錄知交之卷",
   "multiplayer.friends.wrong_account": "此錄屬他 Jay 之籍，或卷已被改",
-  "multiplayer.friends.restored": "已復知交 {0} 人。此器將經公網致意",
+  "multiplayer.friends.restored": "已復知交 {0} 人。此器將經公網致意，各須與君一對圖符",
   "multiplayer.friends.restored_none": "錄中之人皆已在汝列",
   "multiplayer.friends.relinked": "已自此器向知交 {0} 人致意",
   "multiplayer.friends.restore_confirm": "復之",
