@@ -132,7 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      RELEASE_SIGNED_ANDROID: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish_android_preview) }}
+      RELEASE_SIGNED_ANDROID: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview) }}
     defaults:
       run:
         working-directory: src
@@ -297,6 +297,10 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview)
     needs: [android, android-smoke]
+    # Two quick pushes to main must not let the older run overwrite the newer preview.
+    concurrency:
+      group: android-preview-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
