@@ -109,8 +109,8 @@ public sealed record SplitSettings(SplitPolicy Game, SplitPolicy Chat, int Paths
 
     /// <summary>
     /// Reads the host's split settings. Anything this version doesn't understand (an unknown policy, more paths than it
-    /// supports, a malformed network) means no split: the member then connects on one path, and a Strict host refuses
-    /// that connection with a clear reason instead of the member failing to join at all.
+    /// supports, a malformed network) means no split: the member still joins the room and connects on one path. A Strict
+    /// host then closes that connection; the member sees it drop, and the host's log records the refusal.
     /// </summary>
     internal static SplitSettings FromJson(JsonNode? json)
     {

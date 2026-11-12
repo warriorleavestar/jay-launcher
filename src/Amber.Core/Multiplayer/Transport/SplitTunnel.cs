@@ -173,6 +173,7 @@ public sealed class SplitConnector
     private readonly IReadOnlyList<Func<CancellationToken, Task<Stream>>>? _legs;
     private readonly Action<string>? _log;
     private readonly Func<string?>? _pathProblem;
+    private readonly string? _noLegsReason;
     private int _failures;
 
     public SplitPolicy Policy { get; }
@@ -184,10 +185,13 @@ public sealed class SplitConnector
     /// <param name="single">Opens a single-path tunnel connection (the existing way).</param>
     /// <param name="legs">Opens the raw connection for each leg, in leg order; null when the paths aren't set up (for example in TUN mode).</param>
     /// <param name="pathProblem">Why the paths can't be used right now (null: they can). Asked before every connection.</param>
+    /// <param name="noLegsReason">Why there are no legs, when <paramref name="legs"/> is null for a known reason (full-LAN mode).</param>
     public SplitConnector(RoomCode room, TunnelService service, Func<CancellationToken, Task<Stream>> single,
-        IReadOnlyList<Func<CancellationToken, Task<Stream>>>? legs, Action<string>? log = null, Func<string?>? pathProblem = null)
+        IReadOnlyList<Func<CancellationToken, Task<Stream>>>? legs, Action<string>? log = null, Func<string?>? pathProblem = null,
+        string? noLegsReason = null)
     {
         _pathProblem = pathProblem;
+        _noLegsReason = noLegsReason;
         _room = room;
         _service = service;
         _single = single;
@@ -199,7 +203,7 @@ public sealed class SplitConnector
     public async Task<Stream> OpenAsync(CancellationToken ct)
     {
         if (Policy == SplitPolicy.Off) return await _single(ct);
-        if (_legs is null) return await NotSplitAsync(L.T("core.mp.split.not_ready"), ct);
+        if (_legs is null) return await NotSplitAsync(_noLegsReason ?? L.T("core.mp.split.not_ready"), ct);
         if (_pathProblem?.Invoke() is { } problem) return await NotSplitAsync(problem, ct);
         if (Policy == SplitPolicy.Auto && Volatile.Read(ref _failures) >= MaxFailures) return await NotSplitAsync(L.T("core.mp.split.gave_up"), ct);
         try
@@ -227,7 +231,7 @@ public sealed class SplitConnector
     private async Task<Stream> NotSplitAsync(string reason, CancellationToken ct, Exception? inner = null)
     {
         LastReason = reason;
-        if (Policy == SplitPolicy.Strict) throw new IOException(L.T("core.mp.split.strict_unavailable") + " " + reason, inner);
+        if (Policy == SplitPolicy.Strict) throw new IOException(L.F("core.mp.split.strict_unavailable", reason), inner);
         var stream = await _single(ct);
         Interlocked.Increment(ref SinglePathConnections);
         return stream;
