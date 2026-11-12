@@ -39,9 +39,16 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     public int Tampered => Volatile.Read(ref _tampered);
 
     /// <param name="ports">Listening port per leg; defaults to <see cref="SplitSettings.LegPort"/> (tests pass 0).</param>
+    /// <param name="listeners">Already bound listeners, one per leg in leg order (from <see cref="SplitLegReservation"/>);
+    /// the server owns them from here on.</param>
     public SplitTunnelServer(RoomCode room, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null,
-        IPAddress? address = null, IReadOnlyList<int>? ports = null, SplitRegistry? registry = null)
+        IPAddress? address = null, IReadOnlyList<int>? ports = null, SplitRegistry? registry = null, IReadOnlyList<TcpListener>? listeners = null)
     {
+        if (listeners is not null && listeners.Count != room.Split.Paths)
+        {
+            foreach (var l in listeners) l.Stop();
+            throw new ArgumentException("one listener per leg", nameof(listeners));
+        }
         if (!room.FromInvite || !room.Tunnel.Wraps || !room.Split.Enabled || room.Members is null) throw new ArgumentException("split needs a wrapped invite room with split enabled", nameof(room));
         if (ports is not null && ports.Count != room.Split.Paths) throw new ArgumentException("one port per leg", nameof(ports));
         _room = room;
@@ -52,10 +59,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         try
         {
             for (var i = 0; i < _listeners.Length; i++)
-            {
-                _listeners[i] = new TcpListener(address ?? IPAddress.Loopback, ports?[i] ?? SplitSettings.LegPort(i));
-                _listeners[i].Start();
-            }
+                _listeners[i] = listeners?[i] ?? SplitLegReservation.Bind(address ?? IPAddress.Loopback, ports?[i] ?? SplitSettings.LegPort(i));
         }
         catch
         {
@@ -219,6 +223,7 @@ public sealed class SplitConnector
     private readonly Func<string?>? _pathProblem;
     private readonly string? _noLegsReason;
     private int _failures;
+    private int _lastSplit;
     private long _pausedUntil;
 
     /// <summary>How long Auto waits after <see cref="MaxFailures"/> failures in a row before it tries to split again.</summary>
@@ -270,7 +275,8 @@ public sealed class SplitConnector
                 (raw, leg, c) => TunnelHandshake.ConnectAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, _service, c, leg), ct);
             Interlocked.Exchange(ref _failures, 0);
             Interlocked.Increment(ref _splitConnections);
-            _log?.Invoke(L.F(_service == TunnelService.Game ? "core.mp.split.connected_game" : "core.mp.split.connected_chat", stream.LegCount));
+            // Logged when this service goes from one path to split, not for every connection (server list pings are many).
+            if (Interlocked.Exchange(ref _lastSplit, 1) == 0) _log?.Invoke(L.F(_service == TunnelService.Game ? "core.mp.split.connected_game" : "core.mp.split.connected_chat", stream.LegCount));
             LastReason = null;
             return stream;
         }
@@ -292,6 +298,7 @@ public sealed class SplitConnector
     private async Task<Stream> NotSplitAsync(string reason, CancellationToken ct, Exception? inner = null)
     {
         LastReason = reason;
+        Volatile.Write(ref _lastSplit, 0);
         if (Policy == SplitPolicy.Strict) throw new IOException(L.F("core.mp.split.strict_unavailable", reason), inner);
         var stream = await _single(ct);
         Interlocked.Increment(ref _singlePathConnections);

@@ -96,22 +96,24 @@ public sealed class RoomTransport : IAsyncDisposable
         // Opened before the single-path port, so a Strict room with a busy leg port fails before it listens anywhere.
         if (o.IsHost && HostSplits(o))
         {
-            try
+            // The session bound the leg ports before EasyTier started (EasyTier only lets members reach them then). Without
+            // a session, or when the transport starts again in the same session, they are bound here.
+            var legs = o.HostSplitLegs?.TryTake() ?? SplitLegReservation.TryReserve(room.Split.Paths, listen)?.TryTake();
+            if (legs is null)
+            {
+                // A leg port is taken by another program. Auto rooms carry on without splitting; a Strict service would be
+                // unreachable, so then the room doesn't start.
+                if (SplitLegReservation.NeedsLegs(room.Split)) throw SplitLegReservation.Busy(room.Split);
+                _log?.Invoke(L.T("core.mp.split.ports_busy"));
+            }
+            else
             {
                 SplitServer = Add(new SplitTunnelServer(room, service => service switch
                 {
                     TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
                     TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
                     _ => null,
-                }, _log, listen));
-            }
-            catch (SocketException e)
-            {
-                // A leg port is taken by another program. Auto rooms carry on without splitting; a Strict service would be
-                // unreachable, so then the room doesn't start.
-                if (room.Split.For(TunnelService.Game) == SplitPolicy.Strict || room.Split.For(TunnelService.Chat) == SplitPolicy.Strict)
-                    throw new IOException(L.F("core.mp.split.ports_busy_strict", SplitSettings.LegPort(0), SplitSettings.LegPort(room.Split.Paths - 1)), e);
-                _log?.Invoke(L.T("core.mp.split.ports_busy"));
+                }, _log, listeners: legs));
             }
         }
 

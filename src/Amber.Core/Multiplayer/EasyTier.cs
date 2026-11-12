@@ -364,6 +364,11 @@ public sealed record EasyTierOptions(
     /// game and chat then use one path (or fail in a Strict room).
     /// </summary>
     public IReadOnlyList<int>? LocalSplitPorts { get; init; }
+    /// <summary>
+    /// Host of a room that splits: the leg ports, bound by <see cref="EasyTierSession.Start"/> before EasyTier starts.
+    /// Null when they couldn't be bound; the leg ports are then not opened to the room and no extra instance starts.
+    /// </summary>
+    public Transport.SplitLegReservation? HostSplitLegs { get; init; }
     /// <summary>邀请房间的加入方：远程控制连房主用的本机端口（不建网卡时经 EasyTier 或封装通道转到房主的 47662）。</summary>
     public int? LocalRemotePort { get; init; }
     /// <summary>允许房间里的人经自己“仅游戏”转发（只开 SOCKS5，不用建网卡）。</summary>
@@ -533,8 +538,9 @@ public static class EasyTierArgs
                 ports.Add(RoomChat.Port);
                 if (o.Room.FromInvite) ports.Add(RemoteControl.RemoteHub.Port);
             }
-            // Split rooms: leg 0 of each split connection arrives over this network on its own port.
-            if (SplitsOnThisInstance(o)) ports.Add(Transport.SplitSettings.LegPort(0));
+            // Split rooms: leg 0 of each split connection arrives over this network on its own port, opened only when this
+            // machine holds the leg ports (never a port another program is using).
+            if (SplitsOnThisInstance(o) && o.HostSplitLegs is not null) ports.Add(Transport.SplitSettings.LegPort(0));
             if (o.ServesSpeedTest) ports.Add(SpeedTestServer.Port);
         }
         if (o.AllowProxy) ports.Add(o.Room.Tunnel.Wraps ? Transport.TunnelSettings.Port : Transport.TunnelSettings.PlainSocksPort);
@@ -610,12 +616,23 @@ public sealed class EasyTierSession : IEasyTierSession
 
     public static EasyTierSession Start(EasyTierInstaller installer, EasyTierOptions options, string workDir)
     {
-        var (process, job) = Launch(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), workDir);
-        var session = new EasyTierSession(process, installer.CliPath, options, job);
-        process.OutputDataReceived += (_, e) => session.OnLine(e.Data);
-        process.ErrorDataReceived += (_, e) => session.OnLine(e.Data);
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        options = WithSplitLegs(options, out var legsBusy);
+        EasyTierSession session;
+        try
+        {
+            var (process, job) = Launch(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), workDir);
+            session = new EasyTierSession(process, installer.CliPath, options, job);
+            process.OutputDataReceived += (_, e) => session.OnLine(e.Data);
+            process.ErrorDataReceived += (_, e) => session.OnLine(e.Data);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
+        catch
+        {
+            options.HostSplitLegs?.Dispose();
+            throw;
+        }
+        if (legsBusy) session.OnLine(L.T("core.mp.split.ports_busy"));
         try
         {
             session.SplitPaths = SplitPathGroup.Start(installer, options, workDir, session.PeersAsync, session.OnLine);
@@ -626,6 +643,27 @@ public sealed class EasyTierSession : IEasyTierSession
             throw;
         }
         return session;
+    }
+
+    /// <summary>
+    /// A host of a room that splits binds its leg ports first, so EasyTier opens them to the room only when this machine
+    /// holds them. A taken port: Auto goes on without splitting (<paramref name="busy"/>), Strict doesn't start.
+    /// Options carried over from an earlier session never keep that session's ports.
+    /// </summary>
+    internal static EasyTierOptions WithSplitLegs(EasyTierOptions options, out bool busy, IReadOnlyList<int>? ports = null)
+    {
+        busy = false;
+        options = options with { HostSplitLegs = null };
+        if (!options.IsHost || !EasyTierArgs.SplitsOnThisInstance(options)) return options;
+        var split = options.Room.Split;
+        var legs = Transport.SplitLegReservation.TryReserve(split.Paths, ports: ports);
+        if (legs is null)
+        {
+            if (Transport.SplitLegReservation.NeedsLegs(split)) throw Transport.SplitLegReservation.Busy(split);
+            busy = true;
+            return options;
+        }
+        return options with { HostSplitLegs = legs };
     }
 
     /// <summary>启动 easytier-core（密钥经环境变量传）；Windows 上放进作业对象。输出要调用方开始读。</summary>
@@ -763,6 +801,8 @@ public sealed class EasyTierSession : IEasyTierSession
     {
         SplitPaths?.Dispose();
         SplitPaths = null;
+        // Leg ports the transport never took over.
+        Options.HostSplitLegs?.Dispose();
         try
         {
             EasyTierProcessGuard.Stop(_process);

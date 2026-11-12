@@ -420,6 +420,25 @@ public sealed class SplitRoomTests
         Assert.Equal(0, rig.Server.Accepted);
     }
 
+    /// <summary>The "connected over N paths" line is written when a service goes from one path to split, not per connection.</summary>
+    [Fact]
+    public async Task TheSplitLineIsLoggedOnlyWhenSplittingStarts()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var dead = -1;
+        var log = new List<string>();
+        var connector = rig.Connector(TunnelService.Game, () => Volatile.Read(ref dead), log: line => { lock (log) log.Add(line); });
+        var line = L.F("core.mp.split.connected_game", 2);
+        int Count() { lock (log) return log.Count(l => l == line); }
+        for (var i = 0; i < 3; i++) await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(s);
+        Assert.Equal(1, Count());
+        Volatile.Write(ref dead, 1);
+        await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsNotType<SplitStream>(s);
+        Volatile.Write(ref dead, -1);
+        await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(s);
+        Assert.Equal(2, Count());
+    }
+
     /// <summary>
     /// After a kick rekeys the room, a host and member rebuilt from the rekeyed room code split again, and a host left on
     /// the old room code can't pair the new legs (why the app rebuilds the transport on both sides).
@@ -548,7 +567,7 @@ public sealed class SplitRoomTests
         public SplitConnector Connector(TunnelService service, bool legs = true, int deadLeg = -1) =>
             Connector(service, () => deadLeg, legs);
 
-        public SplitConnector Connector(TunnelService service, Func<int> deadLeg, bool legs = true, TimeSpan? retryAfter = null)
+        public SplitConnector Connector(TunnelService service, Func<int> deadLeg, bool legs = true, TimeSpan? retryAfter = null, Action<string>? log = null)
         {
             var port = ((IPEndPoint)_single.LocalEndpoint).Port;
             Func<CancellationToken, Task<Stream>> single = ct =>
@@ -563,7 +582,7 @@ public sealed class SplitRoomTests
                     return i == deadLeg() ? Task.FromException<Stream>(new SocketException((int)SocketError.ConnectionRefused)) : TunnelClient.Raw("127.0.0.1", p, ct);
                 }))]
                 : null;
-            return new SplitConnector(Member, service, single, openers) { RetryAfter = retryAfter ?? TimeSpan.FromSeconds(30) };
+            return new SplitConnector(Member, service, single, openers, log) { RetryAfter = retryAfter ?? TimeSpan.FromSeconds(30) };
         }
 
         public async ValueTask DisposeAsync()

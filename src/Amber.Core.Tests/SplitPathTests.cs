@@ -62,9 +62,13 @@ public sealed class SplitPathTests
     public void TheMainInstanceCarriesLegZero()
     {
         var (hostRoom, memberRoom) = Rooms(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
-        var host = new EasyTierOptions(hostRoom, true, [Community], 15000);
-        Assert.Contains(SplitSettings.LegPort(0), EasyTierArgs.ServedPorts(host));
-        Assert.Contains(TunnelSettings.Port, EasyTierArgs.ServedPorts(host));
+        // Opened when the host holds its leg ports (see AHostOpensItsLegPortsToTheRoomOnlyWhenItHoldsThem).
+        var host = WithLegs(new EasyTierOptions(hostRoom, true, [Community], 15000), out _, [FreePort(), FreePort()]);
+        using (host.HostSplitLegs)
+        {
+            Assert.Contains(SplitSettings.LegPort(0), EasyTierArgs.ServedPorts(host));
+            Assert.Contains(TunnelSettings.Port, EasyTierArgs.ServedPorts(host));
+        }
 
         var member = new EasyTierOptions(memberRoom, false, [Community], 15000) { LocalTunnelPort = 40000, LocalSplitPorts = [40010, 40011] };
         var args = EasyTierArgs.Build(member);
@@ -373,5 +377,83 @@ public sealed class SplitPathTests
     {
         Assert.Equal(RelayOperators.GroupOf("tcp://198.18.5.5:11010"), RelayOperators.GroupOf("tcp://[::ffff:198.18.0.1]:11010"));
         Assert.NotEqual(RelayOperators.GroupOf("tcp://198.19.5.5:11010"), RelayOperators.GroupOf("tcp://[::ffff:198.18.0.1]:11010"));
+    }
+
+    [Fact]
+    public async Task ACheckThatNeverReturnsMeansNotReady()
+    {
+        var hang = 0;
+        Task<List<PeerInfo>> Extra(SplitPathOptions o, CancellationToken ct) => Volatile.Read(ref hang) == 1
+            ? Task.Delay(Timeout.Infinite, ct).ContinueWith(_ => new List<PeerInfo>(), TaskScheduler.Default)
+            : Task.FromResult<List<PeerInfo>>([new("jay-path-host", SplitPathArgs.HostIp(o.Index), "relay(2)", 90, "tcp")]);
+        // Each round is cut off after its time limit.
+        using (var group = SplitPathGroup.ForTest(TwoExtraPaths(), _ => Task.FromResult<List<PeerInfo>>([DirectHost]), Extra,
+            TimeSpan.FromMilliseconds(20), minCheckTime: TimeSpan.FromMilliseconds(100)))
+        {
+            Assert.True(await Eventually(() => group.Problem is null));
+            Volatile.Write(ref hang, 1);
+            Assert.True(await Eventually(() => group.Problem == Amber.Core.Localization.L.T("core.mp.split.check_failed")));
+        }
+        // Even before that limit, a "ready" that hasn't been confirmed for a few rounds no longer counts.
+        Volatile.Write(ref hang, 0);
+        using (var group = SplitPathGroup.ForTest(TwoExtraPaths(), _ => Task.FromResult<List<PeerInfo>>([DirectHost]), Extra,
+            TimeSpan.FromMilliseconds(20), minCheckTime: TimeSpan.FromMinutes(1)))
+        {
+            Assert.True(await Eventually(() => group.Problem is null));
+            Volatile.Write(ref hang, 1);
+            Assert.True(await Eventually(() => group.Problem == Amber.Core.Localization.L.T("core.mp.split.check_failed")));
+        }
+    }
+
+    [Fact]
+    public void AHostOpensItsLegPortsToTheRoomOnlyWhenItHoldsThem()
+    {
+        var (hostRoom, _) = Rooms(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+        var options = new EasyTierOptions(hostRoom, true, [Community], 15000);
+        using var squatter = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        squatter.Start();
+        var taken = ((System.Net.IPEndPoint)squatter.LocalEndpoint).Port;
+        var free = FreePort();
+
+        // Another program has a leg port: Auto goes on without splitting, nothing of the leg ports is opened to the room,
+        // and no extra instance starts.
+        var busy = WithLegs(options, out var wasBusy, [free, taken]);
+        Assert.True(wasBusy);
+        Assert.Null(busy.HostSplitLegs);
+        Assert.DoesNotContain(SplitSettings.LegPort(0), EasyTierArgs.ServedPorts(busy));
+        var work = Path.Combine(Path.GetTempPath(), "jay-split-" + Guid.NewGuid().ToString("N"));
+        Assert.Null(SplitPathGroup.Start("missing-core", "missing-cli", busy, work, _ => Task.FromResult<List<PeerInfo>>([])));
+        Assert.False(Directory.Exists(work));
+        // The free port wasn't kept either.
+        using (var check = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, free)) check.Start();
+
+        // Strict needs them: the room doesn't start.
+        var (strictRoom, _) = Rooms(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
+        Assert.Throws<IOException>(() => WithLegs(new EasyTierOptions(strictRoom, true, [Community], 15000), out _, [free, taken]));
+
+        // Free ports: held, opened to the room, and handed to the transport once.
+        var second = FreePort();
+        var held = WithLegs(options with { HostSplitLegs = null }, out wasBusy, [free, second]);
+        Assert.False(wasBusy);
+        Assert.NotNull(held.HostSplitLegs);
+        Assert.Contains(SplitSettings.LegPort(0), EasyTierArgs.ServedPorts(held));
+        var listeners = held.HostSplitLegs!.TryTake();
+        Assert.NotNull(listeners);
+        Assert.Null(held.HostSplitLegs.TryTake());
+        foreach (var l in listeners!) l.Stop();
+
+        // Options carried over from an earlier session never keep its ports.
+        var carried = WithLegs(held with { Room = hostRoom with { Split = SplitSettings.None } }, out _);
+        Assert.Null(carried.HostSplitLegs);
+    }
+
+    private static EasyTierOptions WithLegs(EasyTierOptions o, out bool busy, IReadOnlyList<int>? ports = null) =>
+        EasyTierSession.WithSplitLegs(o, out busy, ports);
+
+    private static int FreePort()
+    {
+        using var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        l.Start();
+        return ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
     }
 }

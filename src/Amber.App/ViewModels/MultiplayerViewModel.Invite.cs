@@ -396,7 +396,7 @@ public sealed partial class MultiplayerViewModel
             return false;
         }
         _service.ActiveMultiplayer = _session;
-        if (!TryStartTransport(options))
+        if (!TryStartTransport(_session?.Options ?? options))
         {
             StopSession();
             return false;

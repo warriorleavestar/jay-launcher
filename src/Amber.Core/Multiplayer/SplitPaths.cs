@@ -182,12 +182,31 @@ public sealed class SplitPathGroup : IDisposable
     private Task? _watch;
     private volatile string? _problem;
     private int _disposed;
+    // When the last check finished (Stopwatch ticks); 0 before the first.
+    // Set by Dispose: the background wait for the instances to end. Tests wait on it.
+    private Task _released = Task.CompletedTask;
+    internal Task Released => _released;
+    private long _checkedAt;
 
     /// <summary>How often a member checks its paths.</summary>
     internal TimeSpan Interval { get; init; } = TimeSpan.FromSeconds(3);
+    /// <summary>The shortest time one check may take before it counts as failed.</summary>
+    internal TimeSpan MinCheckTime { get; init; } = TimeSpan.FromSeconds(6);
 
     /// <summary>Member: why the paths aren't usable right now (null when they are). Always null on the host.</summary>
-    public string? Problem => _isHost ? null : Volatile.Read(ref _disposed) != 0 ? L.T("core.mp.split.stopped") : _problem;
+    public string? Problem
+    {
+        get
+        {
+            if (_isHost) return null;
+            if (Volatile.Read(ref _disposed) != 0) return L.T("core.mp.split.stopped");
+            var problem = _problem;
+            // Fail closed: a "ready" that hasn't been confirmed for a few rounds (a check stuck somewhere) doesn't count.
+            if (problem is null && Stopwatch.GetElapsedTime(Volatile.Read(ref _checkedAt)) > Interval * 3)
+                return L.T("core.mp.split.check_failed");
+            return problem;
+        }
+    }
     public IReadOnlyList<SplitPathOptions> Instances => [.. _instances.Select(i => i.Options)];
 
     private SplitPathGroup(bool isHost, Func<CancellationToken, Task<List<PeerInfo>>>? mainPeers,
@@ -216,6 +235,8 @@ public sealed class SplitPathGroup : IDisposable
         var split = o.Room.Split;
         if (!split.Enabled || o.Tun || !o.Room.FromInvite || !o.Room.Tunnel.Wraps) return null;
         if (!o.IsHost && (o.LocalSplitPorts is not { } ports || ports.Count != split.Paths)) return null;
+        // A host without its leg ports serves no extra path (the ports may belong to another program).
+        if (o.IsHost && o.HostSplitLegs is null) return null;
         SplitPathPlan plan;
         if (o.IsHost) plan = new SplitPathPlan([.. Enumerable.Repeat(o.Peers, split.Paths - 1)], null);
         else plan = SplitPathPlanner.Plan(split.Paths, o.Peers, o.Room.Member?.Id ?? []);
@@ -254,9 +275,14 @@ public sealed class SplitPathGroup : IDisposable
 
     /// <summary>Tests: a member group over the given paths with no processes behind them.</summary>
     internal static SplitPathGroup ForTest(IReadOnlyList<SplitPathOptions> paths, Func<CancellationToken, Task<List<PeerInfo>>> mainPeers,
-        Func<SplitPathOptions, CancellationToken, Task<List<PeerInfo>>> extraPeers, TimeSpan interval, Action<string>? log = null)
+        Func<SplitPathOptions, CancellationToken, Task<List<PeerInfo>>> extraPeers, TimeSpan interval, Action<string>? log = null,
+        TimeSpan? minCheckTime = null)
     {
-        var group = new SplitPathGroup(false, mainPeers, extraPeers, log, L.T("core.mp.split.starting")) { Interval = interval };
+        var group = new SplitPathGroup(false, mainPeers, extraPeers, log, L.T("core.mp.split.starting"))
+        {
+            Interval = interval,
+            MinCheckTime = minCheckTime ?? TimeSpan.FromSeconds(6),
+        };
         group._instances.AddRange(paths.Select(p => new PathInstance(p, null, null)));
         group.StartWatch();
         return group;
@@ -275,7 +301,12 @@ public sealed class SplitPathGroup : IDisposable
         {
             try
             {
-                _problem = await CheckAsync(instances, ct);
+                // Each round has its own time limit, so a query that never returns ends as a failed check.
+                using var round = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                round.CancelAfter(Interval * 2 < MinCheckTime ? MinCheckTime : Interval * 2);
+                var problem = await CheckAsync(instances, round.Token);
+                _problem = problem;
+                Volatile.Write(ref _checkedAt, Stopwatch.GetTimestamp());
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -301,7 +332,7 @@ public sealed class SplitPathGroup : IDisposable
 
     private async Task<string?> CheckAsync(PathInstance[] instances, CancellationToken ct)
     {
-        var main = (await _mainPeers!(ct)).FirstOrDefault(p => p.Ip == EasyTierArgs.HostIp && p.Cost != "Local");
+        var main = (await _mainPeers!(ct)).FirstOrDefault(p => p.Ip == EasyTierArgs.HostIp && !string.Equals(p.Cost, "Local", StringComparison.OrdinalIgnoreCase));
         var extra = new List<PeerInfo?>();
         foreach (var path in instances)
         {
@@ -311,7 +342,7 @@ public sealed class SplitPathGroup : IDisposable
                 continue;
             }
             var peers = await _extraPeers(path.Options, ct);
-            extra.Add(peers.FirstOrDefault(p => p.Ip == SplitPathArgs.HostIp(path.Options.Index) && p.Cost != "Local"));
+            extra.Add(peers.FirstOrDefault(p => p.Ip == SplitPathArgs.HostIp(path.Options.Index) && !string.Equals(p.Cost, "Local", StringComparison.OrdinalIgnoreCase)));
         }
         return SplitPathPlanner.Check(main, extra);
     }
@@ -327,23 +358,30 @@ public sealed class SplitPathGroup : IDisposable
             try { if (process is { HasExited: false }) process.Kill(true); }
             catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
         }
-        var watchEnded = true;
-        if (_watch is { } watch)
-        {
-            try { watchEnded = watch.Wait(TimeSpan.FromSeconds(2)); }
-            catch (AggregateException) { }
-        }
-        var until = Environment.TickCount64 + 3000;
-        foreach (var (_, process, job) in _instances)
-        {
-            if (process is null) continue;
-            try { process.WaitForExit((int)Math.Max(0, until - Environment.TickCount64)); }
-            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
-            process.Dispose();
-            job?.Dispose();
-        }
+        // The stop is already sent; waiting for the processes to go and releasing them happens in the background, so
+        // closing a room never holds the caller (often the UI thread).
+        var instances = _instances.ToArray();
         _instances.Clear();
-        // A watch that didn't end in time may still touch the token; leave the source to the finalizer then.
-        if (watchEnded) _cts.Dispose();
+        var watch = _watch;
+        _released = Task.Run(() =>
+        {
+            var watchEnded = true;
+            if (watch is not null)
+            {
+                try { watchEnded = watch.Wait(TimeSpan.FromSeconds(2)); }
+                catch (AggregateException) { }
+            }
+            var until = Environment.TickCount64 + 3000;
+            foreach (var (_, process, job) in instances)
+            {
+                if (process is null) continue;
+                try { process.WaitForExit((int)Math.Max(0, until - Environment.TickCount64)); }
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                process.Dispose();
+                job?.Dispose();
+            }
+            // A watch that didn't end in time may still touch the token; leave the source to the finalizer then.
+            if (watchEnded) _cts.Dispose();
+        });
     }
 }

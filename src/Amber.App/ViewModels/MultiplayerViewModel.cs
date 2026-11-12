@@ -781,7 +781,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Failure("multiplayer.room.start_failed", e, ErrorText.Of(e)));
             return false;
         }
-        if (!TryStartTransport(options)) return false;
+        // The session's options carry the leg ports it bound for a room that splits.
+        if (!TryStartTransport(_session?.Options ?? options)) return false;
         _sessionCts = new CancellationTokenSource();
         var ipIndex = EasyTierArgs.Build(options).IndexOf("--ipv4");
         MyVirtualIp = options.Tun ? EasyTierArgs.Build(options)[ipIndex + 1] : "";
@@ -884,7 +885,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 return false;
             }
         }
-        if (!TryStartTransport(options))
+        if (!TryStartTransport(_session?.Options ?? options))
         {
             StopSession();
             return false;
