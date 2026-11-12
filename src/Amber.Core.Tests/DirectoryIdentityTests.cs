@@ -168,6 +168,69 @@ public class DirectoryIdentityTests
         await serverSide;
     }
 
+    [Theory]
+    [InlineData("""{"ok":"yes"}""")]
+    [InlineData("""{"ok":1,"error":7}""")]
+    [InlineData("""{"ok":false,"error":["rate"],"reason":{},"min":3}""")]
+    [InlineData("""{"ok":true,"ip":5,"key":false,"id":[],"room":"x","rooms":7,"nodes":[1,{},"tcp://203.0.113.9:11010"],"listed":"no","reachable":"yes","next":"2","items":[{"box":1,"blob":2}],"blob":9}""")]
+    public async Task ARogueDirectorysWronglyTypedReplyNeverEscapesAsAnUnexpectedException(string replyJson)
+    {
+        // On a network without pinned directory keys any member can answer as a backup directory. Whatever it sends,
+        // the client's calls end in a result or in the IOException family its callers handle.
+        using var identity = X25519KeyPair.Generate();
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var stop = new CancellationTokenSource();
+        var rogue = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                TcpClient c;
+                try { c = await listener.AcceptTcpClientAsync(stop.Token); }
+                catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { return; }
+                _ = Task.Run(async () =>
+                {
+                    using (c)
+                    {
+                        try
+                        {
+                            var s = c.GetStream();
+                            var first = new byte[1];
+                            if (!await SecureStream.ReadExactAsync(s, first, stop.Token)) return;
+                            if (await DirectoryChannel.AcceptAsync(s, first[0], identity, Secret, stop.Token) is { } accepted)
+                                await accepted.Reply((JsonObject)JsonNode.Parse(replyJson)!, stop.Token);
+                        }
+                        catch (Exception e) when (e is IOException or OperationCanceledException or InvalidDataException) { }
+                    }
+                });
+            }
+        });
+        var client = new RoomDirectoryClient(new Loopback(port, Pinned(identity.PublicKey)));
+        var calls = new (string Name, Func<Task> Run)[]
+        {
+            ("list", () => client.ListAsync(default)),
+            ("lookup", () => client.LookupAsync(new byte[32], default)),
+            ("find", () => client.FindAsync("JAYF1-TEST", default)),
+            ("nodes", () => client.NodesAsync(default)),
+            ("probe", () => client.ProbeAsync("tcp://relay.example.org:11010", default)),
+            ("volunteer", () => client.VolunteerAsync("tcp://relay.example.org:11010", default)),
+            ("fetch", () => client.FetchMailAsync(["box"], default)),
+            ("take", () => client.TakeRendezvousAsync(new byte[Rendezvous.IdLength], default)),
+            ("put", () => client.PutRendezvousAsync(new byte[Rendezvous.IdLength], new byte[8], TimeSpan.FromMinutes(1), default)),
+            ("get", () => client.GetRecordAsync(new byte[SignedRecord.LookupLength], _ => true, default)),
+        };
+        foreach (var (name, run) in calls)
+        {
+            try { await run(); }
+            catch (IOException) { }
+            catch (Exception e) { Assert.Fail($"{name}: {e.GetType().Name}: {e.Message}"); }
+        }
+        stop.Cancel();
+        listener.Stop();
+        await rogue;
+    }
+
     [Fact]
     public async Task ClientsFirstMessageHasTheExpectedLength()
     {

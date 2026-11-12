@@ -352,6 +352,40 @@ public sealed class ReleaseSignatureTests : IDisposable
         Assert.True(update!.IsVerified);
     }
 
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"v9.9.9\"")]
+    [InlineData("{\"tag_name\":5}")]
+    [InlineData("{\"tag_name\":\"v9.9.9\",\"html_url\":7}")]
+    [InlineData("{\"tag_name\":\"v9.9.9\",\"body\":[1],\"assets\":[1,\"x\",{\"name\":3},{\"name\":\"a.zip\",\"browser_download_url\":{}}]}")]
+    public async Task UpdateCheckSurvivesAFeedOfTheWrongShape(string json)
+    {
+        // A feed address that returns a list, an error page shaped as JSON or wrongly typed fields must end as
+        // "check failed" or "unsigned", never as an InvalidOperationException out of JsonElement.
+        var http = new FakeHttp();
+        http.On(Feed, json);
+        var checker = new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-shape"), Own);
+        try
+        {
+            var update = await checker.CheckAsync(Feed, "0.9.0");
+            Assert.NotNull(update);
+            Assert.False(update!.IsVerified);
+        }
+        catch (InvalidDataException) { }
+    }
+
+    [Theory]
+    [InlineData("not a url")]
+    [InlineData("releases.example.test/latest")]
+    [InlineData("file:///etc/passwd")]
+    public async Task UpdateCheckRefusesAFeedAddressThatIsNotHttp(string feed)
+    {
+        var http = new FakeHttp();
+        var checker = new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-url"), Own);
+        await Assert.ThrowsAsync<InvalidDataException>(() => checker.CheckAsync(feed, "0.9.0"));
+        Assert.Empty(http.Requests);
+    }
+
     [Fact]
     public async Task UpdateCheckWithoutFeedOrNewerVersionStaysQuiet()
     {

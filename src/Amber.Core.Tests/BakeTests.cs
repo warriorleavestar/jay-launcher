@@ -320,6 +320,31 @@ public sealed class BakeTests : IDisposable
     }
 
     [Theory]
+    [InlineData("..")]
+    [InlineData(".")]
+    [InlineData("0.3.0.")]
+    [InlineData("-0.3.0")]
+    public void LoaderVersionThatIsNotAPlainFolderNameIsRefused(string version)
+    {
+        // The version names the folder that is deleted and replaced: ".." would be the runtime folder itself.
+        var install = Path.Combine(_root, "runtime", "installed");
+        var keep = Path.Combine(install, "0.2.0", "loader.jar");
+        Directory.CreateDirectory(Path.GetDirectoryName(keep)!);
+        File.WriteAllText(keep, "other loader");
+        var sibling = Path.Combine(_root, "runtime", "cache.bin");
+        File.WriteAllText(sibling, "bake cache");
+        var folder = Path.Combine(_root, "zip-src-version", "amber-ul-bad");
+        Package(folder, tweak: m => m["loaderVersion"] = version);
+        var zip = Path.Combine(_root, "bad-version.zip");
+        ZipFile.CreateFromDirectory(Path.GetDirectoryName(folder)!, zip);
+        var e = Assert.Throws<BakeException>(() => BakePackage.InstallFromZip(zip, install));
+        Assert.Equal("package_bad", e.Code);
+        Assert.True(File.Exists(keep));
+        Assert.True(File.Exists(sibling));
+        Assert.Equal(["0.2.0"], Directory.GetDirectories(install).Select(Path.GetFileName));
+    }
+
+    [Theory]
     [InlineData("changed")]
     [InlineData("extra")]
     [InlineData("escape")]

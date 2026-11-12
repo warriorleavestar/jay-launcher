@@ -40,6 +40,9 @@ public sealed class JayAccountStore(string directory)
         lock (_gate) return _items.Select(i => i.Entry).FirstOrDefault(e => e.Address == address);
     }
 
+    /// <summary>The last second <see cref="DateTimeOffset.FromUnixTimeSeconds"/> accepts (end of year 9999).</summary>
+    private const long MaxUnixSeconds = 253_402_300_799;
+
     public void Load()
     {
         lock (_gate)
@@ -56,7 +59,7 @@ public sealed class JayAccountStore(string directory)
                     var seed = (string?)o["seed"];
                     if (!JayAddress.IsValid(address) || string.IsNullOrEmpty(seed) || _items.Any(i => i.Entry.Address == address)) continue;
                     var entry = new JayAccountEntry(address!, DeviceCertificate.CleanName((string?)o["label"]), (bool?)o["backedUp"] ?? false,
-                        Math.Max(0, (int?)o["epoch"] ?? 0), DateTimeOffset.FromUnixTimeSeconds(Math.Max(0, (long?)o["created"] ?? 0)),
+                        Math.Max(0, (int?)o["epoch"] ?? 0), DateTimeOffset.FromUnixTimeSeconds(Math.Clamp((long?)o["created"] ?? 0, 0, MaxUnixSeconds)),
                         DeviceCertificate.FromJson(o["device"]));
                     _items.Add((entry, seed));
                 }

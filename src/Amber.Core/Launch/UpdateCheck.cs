@@ -51,24 +51,27 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
     {
         if (string.IsNullOrWhiteSpace(feedUrl)) return null;
         using var scope = Net.NetworkPolicy.Scope(Net.NetworkCategory.UpdateCheck);
-        using var doc = JsonDocument.Parse(await http.GetStringAsync(feedUrl, ct));
+        // The feed address is typed by the user and the reply comes from the network: neither may throw anything but
+        // the exceptions callers already report (a bad address or a reply of the wrong shape is InvalidDataException).
+        if (!Uri.TryCreate(feedUrl.Trim(), UriKind.Absolute, out var feed) || (feed.Scheme != Uri.UriSchemeHttps && feed.Scheme != Uri.UriSchemeHttp))
+            throw new InvalidDataException(L.T("tools.download.invalid_url"));
+        using var doc = JsonDocument.Parse(await http.GetStringAsync(feed, ct));
         var root = doc.RootElement;
-        var tag = (root.TryGetProperty("tag_name", out var t) ? t.GetString() : null)
-                  ?? throw new InvalidDataException(L.T("core.launch.update.missingversion"));
+        var tag = Text(root, "tag_name") ?? throw new InvalidDataException(L.T("core.launch.update.missingversion"));
         if (!UpdateChecker.IsNewer(tag, currentVersion)) return null;
         string? page = null;
-        if (root.TryGetProperty("html_url", out var u) && u.GetString() is { } url)
+        if (Text(root, "html_url") is { } url)
         {
             if (!UpdateChecker.TryGetSafeUpdateUrl(url, out var validated)) throw new InvalidDataException(L.T("tools.download.invalid_url"));
             page = validated!.AbsoluteUri;
         }
-        var info = new UpdateInfo(tag.TrimStart('v', 'V'), page, root.TryGetProperty("body", out var b) ? b.GetString() : null);
+        var info = new UpdateInfo(tag.TrimStart('v', 'V'), page, Text(root, "body"));
 
         var assets = new Dictionary<string, Uri>(StringComparer.Ordinal);
         if (root.TryGetProperty("assets", out var list) && list.ValueKind == JsonValueKind.Array)
             foreach (var a in list.EnumerateArray())
-                if (a.TryGetProperty("name", out var n) && n.GetString() is { Length: > 0 } name && name == Path.GetFileName(name)
-                    && a.TryGetProperty("browser_download_url", out var d) && UpdateChecker.TryGetSafeUpdateUrl(d.GetString(), out var link)
+                if (Text(a, "name") is { Length: > 0 } name && name == Path.GetFileName(name)
+                    && UpdateChecker.TryGetSafeUpdateUrl(Text(a, "browser_download_url"), out var link)
                     && link!.Scheme == Uri.UriSchemeHttps)
                     assets.TryAdd(name, link);
 
@@ -131,6 +134,12 @@ public sealed class UpdateCheck(HttpClient http, string dataDir, TrustList? trus
         ReleaseVerdict.WrongComponent => "tools.update.verdict.wrongcomponent",
         _ => "tools.update.verdict.malformed",
     });
+
+    /// <summary>The string value of <paramref name="name"/>, or null when the element is not an object or the value is not a string.</summary>
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private void Remember(long seq)
     {

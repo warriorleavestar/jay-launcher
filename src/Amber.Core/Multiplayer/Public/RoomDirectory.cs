@@ -806,7 +806,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>至少一个目录收下就算成功；都不收时，有明确拒绝就报拒绝，否则报连不上。</summary>
     private static List<JsonObject> NeedOne(List<(JsonObject? Reply, Exception? Error)> results)
     {
-        var ok = results.Where(r => r.Reply?["ok"]?.GetValue<bool>() == true).Select(r => r.Reply!).ToList();
+        var ok = results.Where(r => r.Reply is { } reply && IsOk(reply)).Select(r => r.Reply!).ToList();
         if (ok.Count > 0) return ok;
         if (results.FirstOrDefault(r => r.Reply is not null).Reply is { } rejected) Check(rejected);
         throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
@@ -831,21 +831,29 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         return last ?? throw error ?? new IOException(L.T("core.mp.public.no_directory"));
     }
 
-    private static bool IsOk(JsonObject reply) => reply["ok"]?.GetValue<bool>() == true;
+    private static bool IsOk(JsonObject reply) => Flag(reply, "ok");
+
+    // A directory's reply is untrusted (on an unpinned network any member can answer as a backup directory). A field of
+    // the wrong JSON type counts as absent: JsonNode.GetValue would throw InvalidOperationException, which no caller expects.
+    private static bool Flag(JsonObject reply, string name) => reply[name] is JsonValue v && v.TryGetValue<bool>(out var flag) && flag;
+
+    private static string? Text(JsonNode? node) => node is JsonValue v && v.TryGetValue<string>(out var text) ? text : null;
+
+    private static string? Text(JsonObject reply, string name) => Text(reply[name]);
 
     private static void Check(JsonObject reply)
     {
-        if (reply["ok"]?.GetValue<bool>() == true) return;
-        var code = reply["error"]?.GetValue<string>() ?? "";
+        if (IsOk(reply)) return;
+        var code = Text(reply, "error") ?? "";
         // 网络节点自己的审核规则拒绝时会带一句原因（节点写的，只当文字显示）。
-        var reason = reply["reason"]?.GetValue<string>() is { } r ? RoomChat.Clean(r, DirectoryExtensions.MaxReason) : null;
+        var reason = Text(reply, "reason") is { } r ? RoomChat.Clean(r, DirectoryExtensions.MaxReason) : null;
         throw new DirectoryRejectedException(code, code switch
         {
             "owner" or "lookup" or "stale" => L.T("core.mp.public.err_owner"),
             "full" => L.T("core.mp.public.err_full"),
             "gone" => L.T("core.mp.public.err_gone"),
             "rate" => L.T("core.mp.public.err_rate"),
-            "version" => L.F("core.mp.public.err_version", reply["min"]?.GetValue<string>() is { Length: <= 32 } min ? min : "?"),
+            "version" => L.F("core.mp.public.err_version", Text(reply, "min") is { Length: <= 32 } min ? min : "?"),
             "login" => L.T("core.mp.public.err_login"),
             "off" => L.T("core.mp.public.volunteer_off"),
             _ when !string.IsNullOrWhiteSpace(reason) => L.F("core.mp.public.err_policy", reason),
@@ -866,7 +874,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         var request = new JsonObject { ["op"] = "rv.put", ["id"] = Convert.ToHexStringLower(id), ["blob"] = Convert.ToBase64String(sealedRecord), ["ttl"] = seconds };
         var results = await FanOutAsync(request, ct);
         if (results.Any(r => r.Reply is { } reply && IsOk(reply))) return true;
-        if (results.Any(r => r.Reply?["error"]?.GetValue<string>() == "exists")) return false;
+        if (results.Any(r => r.Reply is { } reply && Text(reply, "error") == "exists")) return false;
         NeedOne(results);
         return false;
     }
@@ -883,7 +891,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         var results = await FanOutAsync(request, ct);
         foreach (var (reply, _) in results)
         {
-            if (reply is null || !IsOk(reply) || reply["blob"]?.GetValue<string>() is not { } blob) continue;
+            if (reply is null || !IsOk(reply) || Text(reply, "blob") is not { } blob) continue;
             try
             {
                 var bytes = Convert.FromBase64String(blob);
@@ -966,7 +974,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             // Directories from before volunteer nodes existed.
             throw new DirectoryRejectedException("off", L.T("core.mp.public.volunteer_off"));
         }
-        return replies.Any(r => r["listed"]?.GetValue<bool>() == true);
+        return replies.Any(r => Flag(r, "listed"));
     }
 
     /// <summary>Volunteer nodes the directories know (merged, public addresses only). Empty when the network takes none.</summary>
@@ -978,16 +986,16 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     {
         var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
         var reply = await FirstAsync(new JsonObject { ["op"] = "probe", ["url"] = address }, IsOk, ct);
-        if (!IsOk(reply) && reply["error"]?.GetValue<string>() == "op") throw new DirectoryRejectedException("off", L.T("core.mp.public.volunteer_off"));
+        if (!IsOk(reply) && Text(reply, "error") == "op") throw new DirectoryRejectedException("off", L.T("core.mp.public.volunteer_off"));
         Check(reply);
-        return reply["reachable"]?.GetValue<bool>() == true;
+        return Flag(reply, "reachable");
     }
 
     public async Task<IReadOnlyList<string>> NodesAsync(CancellationToken ct)
     {
         var results = await FanOutAsync(new JsonObject { ["op"] = "nodes" }, ct);
         return [.. results.Select(r => r.Reply).OfType<JsonObject>().Where(IsOk)
-            .SelectMany(r => (r["nodes"] as JsonArray ?? []).Select(n => n?.GetValue<string>()))
+            .SelectMany(r => (r["nodes"] as JsonArray ?? []).Select(Text))
             .Select(VolunteerNodes.Normalize).OfType<string>().Distinct().Take(VolunteerNodes.PerRequest * 2)];
     }
 
@@ -1003,9 +1011,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         var reply = await FirstAsync(new JsonObject { ["op"] = "lookup", ["key"] = RoomDirectoryProtocol.LookupKey(lobbyKey.Span) },
             r => IsOk(r) && r["ip"] is not null, ct);
         Check(reply);
-        var ip = reply["ip"]?.GetValue<string>();
-        var key = reply["key"]?.GetValue<string>();
-        var id = reply["id"]?.GetValue<string>();
+        var ip = Text(reply, "ip");
+        var key = Text(reply, "key");
+        var id = Text(reply, "id");
         if (ip is null || key is not { Length: 64 } || id is null || !RoomListing.IsPublicNetworkIp(ip)) return null;
         try { return new DirectoryHit(id, ip, Convert.FromHexString(key)); }
         catch (FormatException) { return null; }
@@ -1025,7 +1033,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     {
         // 每个目录节点各算一次（请求里有时间戳，换个节点重发也一样）；没开登录的节点回 op，问下一个。
         var request = NetworkLoginClient.Request(me, login, user, password, DateTimeOffset.UtcNow, factors);
-        var reply = await FirstAsync(request, r => r["error"]?.GetValue<string>() != "op", ct);
+        var reply = await FirstAsync(request, r => Text(r, "error") != "op", ct);
         return NetworkLoginClient.Read(reply, me, login, network, DateTimeOffset.UtcNow);
     }
 
@@ -1060,7 +1068,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
                     };
                     var reply = await CallAsync(ip, request, ct);
                     replies.Add(reply);
-                    if (!IsOk(reply) || reply["next"]?.GetValue<int>() is not { } next || next <= from) break;
+                    if (!IsOk(reply) || reply["next"] is not JsonValue cursor || !cursor.TryGetValue<int>(out var next) || next <= from) break;
                     from = next;
                 }
             }
@@ -1073,8 +1081,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         var result = new List<(string, byte[])>();
         foreach (var item in pages.SelectMany(p => p.replies).Where(IsOk).SelectMany(r => (r["items"] as JsonArray ?? []).OfType<JsonObject>()))
         {
-            var box = item["box"]?.GetValue<string>();
-            var blob = item["blob"]?.GetValue<string>();
+            var box = Text(item, "box");
+            var blob = Text(item, "blob");
             if (box is null || blob is null || !boxes.Contains(box) || !seen.Add(blob)) continue;
             try
             {

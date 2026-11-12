@@ -114,7 +114,8 @@ public static partial class NetworkString
         var (payload, signatures) = Split(text);
         NetworkInfo info;
         try { info = NetworkInfo.FromJson(JsonNode.Parse(payload) as JsonObject ?? throw Bad("core.mp.network.bad_string")); }
-        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException) { throw Bad("core.mp.network.bad_string"); }
+        // ArgumentException: an "exp" outside the range of dates. Anyone can sign their own string, so every field is untrusted.
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or ArgumentException or OverflowException) { throw Bad("core.mp.network.bad_string"); }
         if (Validate(info) is { } problem) throw new InvalidDataException(problem);
         if (info.Expires is { } exp && exp <= (now ?? DateTimeOffset.UtcNow)) throw Bad("core.mp.network.expired");
         var signers = signatures.Select(s => s.Key).ToList();

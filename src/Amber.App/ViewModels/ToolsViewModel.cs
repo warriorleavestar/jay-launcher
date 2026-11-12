@@ -229,8 +229,10 @@ public sealed partial class ToolsViewModel : PageViewModel
                 UpdateStatus = L.F("tools.update.unverified", update.Info.Version, UpdateCheck.Explain(update.Check.Verdict));
             }
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException
+                                      or IOException or UnauthorizedAccessException)
         {
+            // IOException / UnauthorizedAccessException: the accepted release number could not be saved (read-only data folder).
             UpdateStatus = L.F("tools.update.failed", e.Message);
         }
     }

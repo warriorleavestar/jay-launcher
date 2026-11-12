@@ -154,7 +154,10 @@ public sealed record BakePackage(
                 .Select(f => Normalize(System.IO.Path.GetRelativePath(temp, f)))
                 .FirstOrDefault(f => f != ManifestName && !package.Files.ContainsKey(f));
             if (extra is not null) throw new BakeException(L.F("core.bake.package_extra", extra), [], "package_mismatch");
-            if (package.LoaderVersion.Length == 0 || package.LoaderVersion.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or '+')))
+            // The version becomes a folder name under installRoot that is deleted and replaced below. It must start and end
+            // with a letter or digit: "." and ".." would point at installRoot or above, and Windows drops trailing dots.
+            if (package.LoaderVersion.Length == 0 || package.LoaderVersion.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or '+'))
+                || !char.IsAsciiLetterOrDigit(package.LoaderVersion[0]) || !char.IsAsciiLetterOrDigit(package.LoaderVersion[^1]))
                 throw new BakeException(L.F("core.bake.package_bad", System.IO.Path.GetFileName(zipPath)), [], "package_bad");
 
             var final = System.IO.Path.Combine(installRoot, package.LoaderVersion);

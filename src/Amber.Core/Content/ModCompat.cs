@@ -85,7 +85,7 @@ public static partial class ModCompat
             loaders.Add("fabric");
             // Fabric 的内嵌 jar 列在 jars 里（一般在 META-INF/jars/）。Fabric API 的各个子模块（fabric-api-base 等）都在这里，
             // 不读的话依赖子模块的模组会被误报缺前置。
-            foreach (var j in fabric["jars"] as JsonArray ?? []) if (Str(j?["file"]) is { } file) fabricJars.Add(file);
+            foreach (var j in fabric["jars"] as JsonArray ?? []) if (j is JsonObject jar && Str(jar["file"]) is { } file) fabricJars.Add(file);
             AddId(ids, fabric["id"]);
             foreach (var p in fabric["provides"] as JsonArray ?? []) AddId(ids, p);
             string? mc = null;
@@ -108,10 +108,12 @@ public static partial class ModCompat
             var deps = new List<string>();
             foreach (var d in quilt["depends"] as JsonArray ?? [])
             {
-                var id = d is JsonValue ? Str(d) : Str(d?["id"]);
+                // An entry is either a plain mod id or an object with "id" (and maybe "versions" / "optional").
+                var entry = d as JsonObject;
+                var id = entry is null ? Str(d) : Str(entry["id"]);
                 if (id is null) continue;
-                if (id == "minecraft") mc ??= d is JsonObject o ? Range(o["versions"]) : null;
-                else if (!Builtin.Contains(id) && d?["optional"]?.GetValue<bool>() != true) deps.Add(id);
+                if (id == "minecraft") mc ??= entry is null ? null : Range(entry["versions"]);
+                else if (!Builtin.Contains(id) && !(entry?["optional"] is JsonValue flag && flag.TryGetValue<bool>(out var optional) && optional)) deps.Add(id);
             }
             per["quilt"] = new LoaderRequirement(mc, "fabric", deps);
         }

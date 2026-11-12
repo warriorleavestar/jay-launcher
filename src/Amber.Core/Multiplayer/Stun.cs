@@ -145,7 +145,10 @@ public static class Stun
     {
         var colon = server.LastIndexOf(':');
         var host = colon > 0 ? server[..colon] : server;
-        var port = colon > 0 ? int.Parse(server[(colon + 1)..]) : 3478;
+        var port = 3478;
+        // A port that isn't a number in 1-65535 is a bad entry (FormatException), which every caller skips.
+        if (colon > 0 && (!int.TryParse(server[(colon + 1)..], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out port) || port is < 1 or > 65535))
+            throw new FormatException($"Bad STUN server port: {server}");
         var addresses = await Dns.GetHostAddressesAsync(host.Trim('[', ']'), ct);
         var v4 = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ?? throw new SocketException((int)SocketError.HostNotFound);
         return new IPEndPoint(v4, port);

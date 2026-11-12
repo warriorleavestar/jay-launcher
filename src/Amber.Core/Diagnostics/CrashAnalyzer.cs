@@ -123,7 +123,10 @@ public static partial class CrashAnalyzer
             Match match;
             try { match = rule.Pattern.Match(text); }
             catch (RegexMatchTimeoutException) { continue; }
-            if (match.Success) findings.Add(rule.Build(match) with { Evidence = Clip(match.Value) });
+            if (!match.Success) continue;
+            // The text includes chat and mod output: a number a rule can't parse (too many digits) skips that rule only.
+            try { findings.Add(rule.Build(match) with { Evidence = Clip(match.Value) }); }
+            catch (Exception e) when (e is FormatException or OverflowException) { }
         }
         // 同样的标题只留一条，确定的排前面。
         var unique = findings.GroupBy(f => f.Title).Select(g => g.First()).OrderBy(f => f.Severity).ToList();
