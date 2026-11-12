@@ -155,7 +155,7 @@ public sealed class MobilePortTests
 
         Assert.True(router.Press(21, jump.CenterX, jump.CenterY, controlsEnabled: false));
         Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.Jump);
-        Assert.Equal((jump.CenterX, jump.CenterY, false), sink.LastPointer);
+        Assert.Equal((jump.CenterX, jump.CenterY, true), sink.LastPointer);
         Assert.True(router.Release(21));
         Assert.Equal((jump.CenterX, jump.CenterY, true), sink.LastPointer);
 

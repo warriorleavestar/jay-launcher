@@ -20,8 +20,9 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         if (!controlsEnabled && control?.Action != TouchControlAction.Menu) control = null;
         if (control is null)
         {
-            _pointers[pointerId] = new(null, x, y);
-            sink.SetPointer(x, y, false);
+            var clickOnRelease = controlsEnabled;
+            _pointers[pointerId] = new(null, x, y, clickOnRelease);
+            sink.SetPointer(x, y, !clickOnRelease);
             return true;
         }
         _pointers[pointerId] = new(control.Action, x, y);
@@ -55,7 +56,9 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         if (pointer.Action == TouchControlAction.Move)
             sink.SetMovement(0, 0);
         else if (pointer.Action is null)
-            sink.SetPointer(pointer.X, pointer.Y, true);
+        {
+            if (pointer.ClickOnRelease) sink.SetPointer(pointer.X, pointer.Y, true);
+        }
         else if (pointer.Action is { } action)
             sink.SetAction(action, false);
         return true;
@@ -66,5 +69,9 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         foreach (var pointerId in _pointers.Keys.ToArray()) Release(pointerId);
     }
 
-    private readonly record struct PointerState(TouchControlAction? Action, double X, double Y);
+    private readonly record struct PointerState(
+        TouchControlAction? Action,
+        double X,
+        double Y,
+        bool ClickOnRelease = true);
 }
