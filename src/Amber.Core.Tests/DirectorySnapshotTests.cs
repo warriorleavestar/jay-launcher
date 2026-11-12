@@ -420,8 +420,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
     {
         var signer = new RoomSigner();
         var listing = signer.Sign(Listing(mode), _now) with { Seq = seq, Signature = [] };
-        var sign = typeof(RoomSigner).GetMethod("SignBytes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        return listing with { Signature = (byte[])sign.Invoke(signer, [listing.SignedBytes()])! };
+        return listing with { Signature = signer.SignBytes(listing.SignedBytes()) };
     }
 
     [Fact]
@@ -651,11 +650,16 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         var lobby = RandomNumberGenerator.GetBytes(16);
         await HideAsync(new RoomSigner(), lobby);
         var searching = 0;
-        var hits = await client.LookupAllAsync(lobby, default, _host.PublicKey, () => searching++);
+        // A first look answers at once from the copy as it is (the caller tries the invite's own lobby next).
+        var lookedAt = client.Snapshots.RefreshedAt!.Value;
+        Assert.Empty(await client.LookupAllAsync(lobby, default, _host.PublicKey, waiting: () => searching++));
+        Assert.Equal(0, searching);
+        // A second try asks for a copy refreshed since: it waits for the next scheduled refresh and finds the room.
+        var hits = await client.LookupAllAsync(lobby, default, _host.PublicKey, lookedAt, () => searching++);
         Assert.Equal("10.235.0.7", Assert.Single(hits).Ip);
         Assert.Equal(1, searching);
-        // Found straight away from then on.
-        Assert.Single(await client.LookupAllAsync(lobby, default, _host.PublicKey, () => searching++));
+        // A copy refreshed since then is used as it is.
+        Assert.Single(await client.LookupAllAsync(lobby, default, _host.PublicKey, lookedAt, () => searching++));
         Assert.Equal(1, searching);
     }
 
@@ -681,5 +685,73 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         for (var i = 0; i < RoomDirectoryServer.MaxSnapshotsPerSourcePerMinute; i++)
             Assert.True((await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["ok"]!.GetValue<bool>());
         Assert.Equal("rate", (await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["error"]!.GetValue<string>());
+    }
+    [Fact]
+    public async Task DeltasForAnotherCopyDropIt()
+    {
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        await client.Snapshots.RefreshAsync(client, default);
+        await HideAsync(new RoomSigner(), RandomNumberGenerator.GetBytes(16));
+        // A reply that is a delta from some other version can't be applied: the copy goes, and the next round asks
+        // for the full snapshot.
+        var ip = client.Snapshots.CopiesForTests().Single();
+        var stray = _directory.Handle(new JsonObject { ["op"] = "snap" });
+        stray["full"] = false;
+        stray["from"] = stray["ver"]!.GetValue<long>() + 5;
+        Assert.False(client.Snapshots.ApplyForTests(ip, stray));
+        Assert.Empty(client.Snapshots.CopiesForTests());
+    }
+
+    [Fact]
+    public async Task ACancelledFirstRefreshDoesNotKeepReadersWaiting()
+    {
+        var client = new RoomDirectoryClient(new StallingNetwork());
+        var poll = client.Snapshots.StartPolling(() => client, TimeSpan.FromHours(1));
+        var read = client.Snapshots.ReadyAsync(client, default);
+        await Task.Delay(200);
+        Assert.False(read.IsCompleted);
+        // Stopping the poller cancels its first round: the reader gets an answer now, not after the long backstop.
+        poll.Dispose();
+        Assert.Same(read, await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(10))));
+        await Assert.ThrowsAnyAsync<IOException>(() => read);
+    }
+
+    /// <summary>Connects, then never answers.</summary>
+    private sealed class StallingNetwork : IPublicNetwork
+    {
+        public async Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new OperationCanceledException(ct);
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.9");
+    }
+
+    [Fact]
+    public async Task BehindAForwardBigSnapshotsHaveAByteBudget()
+    {
+        // Behind the forward every reader is loopback and per-source counting is off: large replies still stop once
+        // their byte budget is spent, and a small delta still gets through.
+        _directory.UncountedLoopback = true;
+        _directory.LargeSnapshotBytesPerSecond = 0;
+        FillPastSmall();
+        var first = await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" });
+        Assert.True(first["full"]!.GetValue<bool>());
+        var size = System.Text.Encoding.UTF8.GetByteCount(first.ToJsonString(Raw));
+        // Time moves on so starts are never short; only the bytes run out (they don't refill here).
+        var served = 1;
+        string? error = null;
+        while (error is null && served < 200)
+        {
+            _now += TimeSpan.FromSeconds(1);
+            var reply = await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" });
+            error = reply["error"]?.GetValue<string>();
+            if (error is null) served++;
+        }
+        Assert.Equal("busy", error);
+        Assert.InRange(served * (long)size, _directory.LargeSnapshotByteBurst - 2L * size, _directory.LargeSnapshotByteBurst + 2L * size);
+        var delta = await SnapOverChannelAsync(new JsonObject { ["op"] = "snap", ["epoch"] = first["epoch"]!.DeepClone(), ["have"] = first["ver"]!.DeepClone() });
+        Assert.False(delta["full"]!.GetValue<bool>());
     }
 }

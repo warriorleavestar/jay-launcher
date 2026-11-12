@@ -282,13 +282,16 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   2 × 60 s + the 90 s room lifetime (the directory went away) is dropped.
 - **Directory limits**: the snapshot is capped below the 16 MB reply limit (new publishes that would pass it get
   `full`); replies are serialized once per version. Small replies (up to 256 KB, the usual delta) have 32 slots of
-  their own; large ones have 8 slots and a start budget of 32 at once refilling at 4 per second (`busy` otherwise).
-  A large reply must go out at no less than 128 KB/s (10 s plus size over that rate), and each frame within 10 s.
+  their own; large ones have 8 slots, a start budget of 32 at once refilling at 4 per second, and a byte budget of
+  32 MB at once refilling at 4 MB per second (`busy` otherwise). The slot is chosen from what the request says (a copy
+  from another run or too old needs the full snapshot) before the directory plans or serializes anything.
+  A large reply must go out at no less than 256 KB/s (10 s plus size over that rate), and each frame within 10 s.
   The reader uses the same rule: once the reply's length arrives it waits that long for the rest, so a slow link
   still gets a full snapshot. A bucket start is taken only after a slot is free, and both before anything is serialized. A delta bigger than
   a quarter of the full snapshot (and than a small reply) is answered with the full snapshot, which is serialized once
   per version; cached deltas are capped at 512 KB together.
-  6 requests per source address per minute (`rate`).
+  Where the directory sees each reader's own address, 6 requests per source address per minute (`rate`); where it
+  doesn't, the slots and budgets above are the limit.
 - **Reader side**: the first refresh is awaited only until it has been tried; if it failed (`busy`, `version`,
   unreachable) the reader gets that error at once, and the poller tries again after 2, 5 and 10 s before going back to
   every 60 s. Every wait is spread ±20% so readers don't come back all at once. A reader whose copies have all gone stale gets an error, not an empty answer. When an invite finds nothing in the copy, the reader waits for the next scheduled refresh and looks once more, so a room opened a moment ago is found without an extra request.

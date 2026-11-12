@@ -276,6 +276,7 @@ public sealed class DirectorySnapshots
                 if (owner._polling == cts) owner._polling = null;
             cts.Cancel();
             cts.Dispose();
+            owner._firstAttempt.TrySetResult();
         }
     }
 
@@ -337,6 +338,8 @@ public sealed class DirectorySnapshots
         {
             _refreshing.Release();
             round?.TrySetResult();
+            // Even a cancelled first round counts as tried: readers waiting for it get an answer now.
+            _firstAttempt.TrySetResult();
         }
     }
 
@@ -383,11 +386,24 @@ public sealed class DirectorySnapshots
     }
 
     /// <summary>Applies one directory's checked reply. False when it isn't usable on top of the copy (a delta from elsewhere).</summary>
+    internal IReadOnlyList<string> CopiesForTests() { lock (_gate) return [.. _copies.Keys]; }
+
+    internal bool ApplyForTests(string ip, JsonObject reply)
+    {
+        if (Parse(reply) is not { } parsed) return false;
+        lock (_gate) return Apply(ip, parsed, _now());
+    }
+
     private bool Apply(string ip, Reply reply, DateTimeOffset now)
     {
         _copies.TryGetValue(ip, out var copy);
         // A delta only makes sense on top of the copy it was computed from.
-        if (!reply.Full && (copy is null || copy.Epoch != reply.Epoch || reply.From != copy.Version)) return false;
+        if (!reply.Full && (copy is null || copy.Epoch != reply.Epoch || reply.From != copy.Version))
+        {
+            // Deltas for some other copy: drop ours, so the next round asks for the full snapshot.
+            _copies.Remove(ip);
+            return false;
+        }
         if (copy is null || reply.Full) _copies[ip] = copy = new Copy();
         foreach (var key in reply.Gone)
         {

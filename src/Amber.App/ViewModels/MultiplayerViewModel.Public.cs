@@ -279,14 +279,15 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>加入方拿着邀请码、又连着公共网络：先在目录里找房主（隐藏房间也行），找不到再走邀请码自己的大厅。</summary>
+    /// <param name="freshSince">Second try: look in a copy of the directory refreshed after this time.</param>
     private async Task<KnockOutcome?> TryPublicKnockAsync(JayInvite invite, X25519KeyPair me, string name, CancellationToken ct, byte[]? expectedHost = null,
-        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, DateTimeOffset? freshSince = null)
     {
         if (_public is not { } network) return null;
         try
         {
-            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct,
-                // A room opened a moment ago shows up at the next directory refresh; say we're still looking meanwhile.
+            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct, freshSince: freshSince,
+                // A room opened after our copy was taken shows up at the next directory refresh; say we're still looking.
                 searching: () => Dispatcher.UIThread.Post(() =>
                 {
                     if (!ct.IsCancellationRequested) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));

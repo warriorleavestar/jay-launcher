@@ -90,7 +90,7 @@ await server.RunAsync(CancellationToken.None);
 
 ### 目录请求
 
-一条 TCP 连接一个请求，全程走加密的目录通道（`DirectoryChannel`，Noise XXhfspsk0，见 `docs/security/directory-identity.md`）：握手第三条消息里是请求 JSON（UTF-8，最长 16 KB）。回复是一帧加密的 JSON，然后关连接（各版本都读得懂，旧版 Jay 也能看到 `version` 错误）。只有 `snap` 的回复不同：先发一帧加密的 4 字节长度（大端，第一个字节是 0，JSON 不会以它开头），再按每帧最多 16 KB 发加密的 JSON，用空格补到 64 KB 的整数倍，最长 16 MB。10 秒内要回；`snap` 每一帧 10 秒内要发出去，整份按不低于 128 KB/s 算时限（10 秒加上大小除以这个速度，`RoomDirectoryProtocol.SnapshotDeadline`；Jay 读到长度后也按这个等）。不超过 256 KB 的回复（平常的增量）有自己的 32 个名额；更大的同时最多 8 个，开始发送另有一个桶（一次最多 32 个，每秒补 4 个）；没有名额回 `busy`；名额在生成回复之前就占好，按预计大小算大小。增量比整份的四分之一还大（又超过 256 KB）时直接给整份（每个版本只生成一次）；缓存的增量合计不超过 512 KB。每个来源地址每分钟最多 6 次（`rate`）。没有明文协议了：以 `{` 开头的旧请求直接断开。
+一条 TCP 连接一个请求，全程走加密的目录通道（`DirectoryChannel`，Noise XXhfspsk0，见 `docs/security/directory-identity.md`）：握手第三条消息里是请求 JSON（UTF-8，最长 16 KB）。回复是一帧加密的 JSON，然后关连接（各版本都读得懂，旧版 Jay 也能看到 `version` 错误）。只有 `snap` 的回复不同：先发一帧加密的 4 字节长度（大端，第一个字节是 0，JSON 不会以它开头），再按每帧最多 16 KB 发加密的 JSON，用空格补到 64 KB 的整数倍，最长 16 MB。10 秒内要回；`snap` 每一帧 10 秒内要发出去，整份按不低于 256 KB/s 算时限（10 秒加上大小除以这个速度，`RoomDirectoryProtocol.SnapshotDeadline`；Jay 读到长度后也按这个等）。不超过 256 KB 的回复（平常的增量）有自己的 32 个名额；更大的同时最多 8 个，开始发送另有一个桶（一次最多 32 个，每秒补 4 个），还有一个字节桶（一次最多 32 MB，每秒补 4 MB）；没有名额回 `busy`；名额按请求本身（`epoch`/`have` 对不上就要整份）先占好，再整理、生成回复。增量比整份的四分之一还大（又超过 256 KB）时直接给整份（每个版本只生成一次）；缓存的增量合计不超过 512 KB。目录看得到每个读者自己的地址时，每个来源地址每分钟最多 6 次（`rate`）；看不到时就只靠上面的名额和桶。没有明文协议了：以 `{` 开头的旧请求直接断开。
 回复都有 `ok`。失败时 `{ok: false, error: "<code>", reason?: "<给房主看的话，最多 120 字>"}`。
 
 每个请求都带 `jay: "<Jay 的版本号>"`（比如 `"0.8.0"`）。网络配置有 `policy.minVersion` 时，版本更低或者没带这个字段就回 `{ok: false, error: "version", min: "<最低版本>"}`，不处理请求。

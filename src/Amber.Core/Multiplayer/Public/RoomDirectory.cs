@@ -142,7 +142,20 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// A reader must take a snapshot at least this fast (bytes per second) on top of <see cref="RoomDirectoryProtocol.RequestTimeout"/>,
     /// and no single chunk may wait longer than that: slow readers are dropped instead of holding a slot.
     /// </summary>
-    public const int MinSnapshotRate = 128 * 1024;
+    public const int MinSnapshotRate = 256 * 1024;
+    /// <summary>
+    /// Bytes of large snapshot replies the directory starts sending per second on average (a bucket that holds
+    /// <see cref="LargeSnapshotByteBurst"/>), so a few small requests can't make it send without end.
+    /// </summary>
+    public long LargeSnapshotBytesPerSecond { get; set; } = 4L * 1024 * 1024;
+
+    /// <summary>The most the byte bucket holds (setting it fills the bucket).</summary>
+    public long LargeSnapshotByteBurst
+    {
+        get { lock (_gate) return _largeByteBurst; }
+        set { lock (_gate) _largeBytes = _largeByteBurst = Math.Max(value, RoomDirectoryProtocol.MaxReply); }
+    }
+    private long _largeByteBurst = 2L * RoomDirectoryProtocol.MaxReply;
     /// <summary>
     /// Snapshots one source address may ask for per minute (readers poll once a minute).
     /// </summary>
@@ -153,6 +166,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     private readonly SemaphoreSlim _snapshotSlots = new(MaxConcurrentSnapshots, MaxConcurrentSnapshots);
     private readonly SemaphoreSlim _smallSnapshotSlots = new(MaxConcurrentSmallSnapshots, MaxConcurrentSmallSnapshots);
     private double _largeTokens = LargeSnapshotBurst;
+    private double _largeBytes = 2L * RoomDirectoryProtocol.MaxReply;
     private DateTimeOffset _largeTokensAt = DateTimeOffset.MinValue;
     private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _snapshotAsks = new(StringComparer.Ordinal);
     /// <summary>Snapshot changes in order (version, key), for deltas. Trimmed to <see cref="MaxSnapshotLog"/>.</summary>
@@ -361,47 +375,91 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 return;
             }
         }
-        SnapshotPlan plan;
-        try { plan = PlanSnapshot(secure.Request); }
-        catch (Exception e) when (e is InvalidOperationException or FormatException)
+        // A slot comes first, chosen from what the request says (cheap, no scanning): a reader whose copy is from another
+        // run or too old needs the full snapshot. Planning and serializing happen only with a slot in hand.
+        if (SnapshotWanted(secure.Request) is not { } wanted)
         {
             await secure.Reply(Error("bad"), quick.Token);
             return;
         }
-        finally { Flush(); }
-        // The slot (and for a large reply a start from the bucket) comes before any serializing, sized from the plan,
-        // so readers the directory is going to turn away cost it nothing.
-        var large = plan.Size > SmallSnapshot;
-        var slots = large ? _snapshotSlots : _smallSnapshotSlots;
-        var gotSlot = slots.Wait(0);
-        if (!gotSlot || (large && !TakeLargeToken()))
-        {
-            if (gotSlot) slots.Release();
-            await secure.Reply(Error("busy"), quick.Token);
-            return;
-        }
+        SemaphoreSlim? slots = null;
         try
         {
+            if (wanted.Full && wanted.Size > SmallSnapshot) slots = TakeLargeSlot(wanted.Size);
+            else if (_smallSnapshotSlots.Wait(0)) slots = _smallSnapshotSlots;
+            if (slots is null)
+            {
+                await secure.Reply(Error("busy"), quick.Token);
+                return;
+            }
+            SnapshotPlan plan;
+            try { plan = PlanSnapshot(secure.Request); }
+            finally { Flush(); }
+            // A delta nearly as big as everything is answered with everything: that takes a large slot too.
+            if (plan.Size > SmallSnapshot && slots == _smallSnapshotSlots)
+            {
+                slots.Release();
+                slots = TakeLargeSlot(plan.Size);
+                if (slots is null)
+                {
+                    await secure.Reply(Error("busy"), quick.Token);
+                    return;
+                }
+            }
             var reply = BuildSnapshot(plan);
             using var whole = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
             whole.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(reply.Length));
             await secure.Snapshot(reply, RoomDirectoryProtocol.SnapshotPad, RoomDirectoryProtocol.RequestTimeout, whole.Token);
         }
-        finally { slots.Release(); }
+        finally { slots?.Release(); }
     }
 
+    /// <summary>
+    /// What a "snap" request asks for, without scanning anything: whether it needs the full snapshot, and about how
+    /// big that is. Null when its fields have the wrong types.
+    /// </summary>
+    private (bool Full, long Size)? SnapshotWanted(JsonObject request)
+    {
+        var epoch = request["epoch"];
+        var have = request["have"];
+        if (epoch is not null && Text(epoch) is null) return null;
+        long version = -1;
+        if (have is not null && !(have is JsonValue value && value.TryGetValue(out version))) return null;
+        lock (_gate)
+        {
+            var full = Text(epoch) != _snapshotEpoch || version < _snapshotFloor || version > _snapshotVersion;
+            return (full, _snapshotBytes + 256);
+        }
+    }
 
-    /// <summary>Takes one start from the large-snapshot bucket (refilled at <see cref="LargeSnapshotsPerSecond"/>).</summary>
-    private bool TakeLargeToken()
+    /// <summary>A large-snapshot slot plus a start and <paramref name="bytes"/> from the buckets, or null (all or nothing).</summary>
+    private SemaphoreSlim? TakeLargeSlot(long bytes)
+    {
+        if (!_snapshotSlots.Wait(0)) return null;
+        if (TakeLargeToken(bytes)) return _snapshotSlots;
+        _snapshotSlots.Release();
+        return null;
+    }
+
+    /// <summary>
+    /// Takes one start from the large-snapshot bucket (refilled at <see cref="LargeSnapshotsPerSecond"/>) and
+    /// <paramref name="bytes"/> from the byte bucket (refilled at <see cref="LargeSnapshotBytesPerSecond"/>): both or neither.
+    /// </summary>
+    private bool TakeLargeToken(long bytes)
     {
         lock (_gate)
         {
             var now = _now();
             if (_largeTokensAt != DateTimeOffset.MinValue)
-                _largeTokens = Math.Min(LargeSnapshotBurst, _largeTokens + (now - _largeTokensAt).TotalSeconds * LargeSnapshotsPerSecond);
+            {
+                var seconds = (now - _largeTokensAt).TotalSeconds;
+                _largeTokens = Math.Min(LargeSnapshotBurst, _largeTokens + seconds * LargeSnapshotsPerSecond);
+                _largeBytes = Math.Min(_largeByteBurst, _largeBytes + seconds * LargeSnapshotBytesPerSecond);
+            }
             _largeTokensAt = now;
-            if (_largeTokens < 1) return false;
+            if (_largeTokens < 1 || _largeBytes < bytes) return false;
             _largeTokens--;
+            _largeBytes -= bytes;
             return true;
         }
     }
@@ -1427,16 +1485,17 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         (await LookupAllAsync(lobbyKey, ct, expectedHost)) is [var one, ..] ? one : null;
 
     /// <summary>
-    /// Every address the directory copies give for this invite (see <see cref="DirectorySnapshots.FindAll"/>). When
-    /// nothing is found yet and the copy is kept fresh by polling, waits for the next scheduled refresh and looks again
-    /// (a room opened a moment ago isn't in the copy yet); <paramref name="waiting"/> is called before that wait.
+    /// Every address the directory copies give for this invite (see <see cref="DirectorySnapshots.FindAll"/>), at once.
+    /// With <paramref name="freshSince"/>, nothing found and a copy kept fresh by polling that wasn't refreshed after that
+    /// time, waits for the next scheduled refresh and looks again (a room opened after the copy was taken isn't in it);
+    /// <paramref name="waiting"/> is called before that wait.
     /// </summary>
     public async Task<IReadOnlyList<DirectoryHit>> LookupAllAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct, byte[]? expectedHost = null,
-        Action? waiting = null)
+        DateTimeOffset? freshSince = null, Action? waiting = null)
     {
         await Snapshots.ReadyAsync(this, ct);
         var hits = Snapshots.FindAll(lobbyKey.Span, expectedHost);
-        if (hits.Count > 0 || !Snapshots.IsPolling) return hits;
+        if (hits.Count > 0 || freshSince is not { } since || !Snapshots.IsPolling || Snapshots.RefreshedAt > since) return hits;
         waiting?.Invoke();
         await Snapshots.WaitForNextRefreshAsync(ct);
         return Snapshots.FindAll(lobbyKey.Span, expectedHost);
