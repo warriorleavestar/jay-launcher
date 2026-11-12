@@ -204,10 +204,12 @@ public sealed partial class ToolsViewModel : PageViewModel
     private async Task CheckUpdateAsync()
     {
         UpdateUrl = null;
-        var feed = service.Settings.UpdateFeedUrl;
-        if (string.IsNullOrWhiteSpace(feed))
+        // A blank update address means the official Jay releases.
+        var feed = AutoUpdateCheck.FeedFor(service.Settings.UpdateFeedUrl);
+        // Phones and tablets update through the stores: without an own address they don't ask the desktop releases.
+        if (!AutoUpdateCheck.IsSupported && string.IsNullOrWhiteSpace(service.Settings.UpdateFeedUrl))
         {
-            UpdateStatus = L.F("tools.update.no_feed", UpdateChecker.CurrentVersion);
+            UpdateStatus = L.T("tools.update.store");
             return;
         }
         try
@@ -220,8 +222,10 @@ public sealed partial class ToolsViewModel : PageViewModel
             }
             else if (update.IsVerified)
             {
-                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion);
-                UpdateUrl = update.Info.Url;
+                // Only a page Jay can vouch for: the feed's html_url is not covered by the signatures.
+                UpdateUrl = AutoUpdateCheck.ReleasePage(feed, update);
+                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion)
+                    + (UpdateUrl is null ? " " + L.T("tools.update.no_page") : "");
             }
             else
             {
