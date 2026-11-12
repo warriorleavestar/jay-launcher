@@ -776,7 +776,7 @@
   "instance.settings.join_server": "启动后进服",
   "instance.settings.transformer_cache": "启动缓存",
   "instance.settings.transformer_cache.on": "加快 Forge 1.12.2 启动（通用加载器）",
-  "instance.settings.transformer_cache.hint": "保存上一次启动时 Forge 处理好的类。游戏崩溃、看起来和缓存有关时可以关掉，关掉后按原版 Forge 的方式启动，会慢一些。",
+  "instance.settings.transformer_cache.hint": "保存上一次启动时 Forge 准备好的内容，下次直接用。游戏崩溃、看起来和缓存有关时可以关掉，关掉后会慢一些。",
   "instance.settings.join_server_hint": "每次启动直接进这个服务器，例如 play.example.com:25565",
   "instance.settings.jvm_args": "JVM 参数",
   "instance.settings.jvm_hint": "例如 -XX:+UseZGC，留空沿用全局",
@@ -3336,7 +3336,7 @@
   "instance.lastrun.legacy.cache": "启动缓存没能用上",
   "instance.lastrun.legacy.quickplay": "没能直接进存档",
   "instance.lastrun.fix.cache_off": "关掉启动缓存",
-  "instance.lastrun.fix.without_loader": "这次不用 Jay 加载器启动",
+  "instance.lastrun.fix.without_loader": "这次不用通用加载器启动",
   "instance.lastrun.cache_off_done": "这个实例的启动缓存关掉了。",
   "core.bake.runtime.legacy_quickplay": "游戏没能直接进存档，停在了主菜单。"
 }

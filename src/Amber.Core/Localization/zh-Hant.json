@@ -776,7 +776,7 @@
   "instance.settings.join_server": "啟動後加入伺服器",
   "instance.settings.transformer_cache": "啟動快取",
   "instance.settings.transformer_cache.on": "加快 Forge 1.12.2 啟動（通用載入器）",
-  "instance.settings.transformer_cache.hint": "保存上一次啟動時 Forge 處理好的類別。遊戲當機、看起來和快取有關時可以關掉，關掉後按原版 Forge 的方式啟動，會慢一些。",
+  "instance.settings.transformer_cache.hint": "保存上一次啟動時 Forge 準備好的內容，下次直接用。遊戲當機、看起來和快取有關時可以關掉，關掉後會慢一些。",
   "instance.settings.join_server_hint": "每次啟動時直接加入這個伺服器，例如 play.example.com:25565",
   "instance.settings.jvm_args": "JVM 參數",
   "instance.settings.jvm_hint": "例如 -XX:+UseZGC，留空沿用全域設定",
@@ -3336,7 +3336,7 @@
   "instance.lastrun.legacy.cache": "啟動快取沒能用上",
   "instance.lastrun.legacy.quickplay": "沒能直接進存檔",
   "instance.lastrun.fix.cache_off": "關掉啟動快取",
-  "instance.lastrun.fix.without_loader": "這次不用 Jay 載入器啟動",
+  "instance.lastrun.fix.without_loader": "這次不用通用載入器啟動",
   "instance.lastrun.cache_off_done": "這個實例的啟動快取關掉了。",
   "core.bake.runtime.legacy_quickplay": "遊戲沒能直接進存檔，停在了主選單。"
 }

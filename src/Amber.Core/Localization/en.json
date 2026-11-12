@@ -802,7 +802,7 @@
   "instance.settings.join_server": "Join server on launch",
   "instance.settings.transformer_cache": "Start-up cache",
   "instance.settings.transformer_cache.on": "Speed up Forge 1.12.2 starts (universal loader)",
-  "instance.settings.transformer_cache.hint": "Keeps Forge's class transformations from the last start. Turn it off if the game crashes and the crash looks cache related; it then starts like stock Forge, more slowly.",
+  "instance.settings.transformer_cache.hint": "Keeps what Forge prepared on the last start and uses it next time. Turn it off if the game crashes and it looks cache related; starts are slower then.",
   "instance.settings.join_server_hint": "Join this server on every launch, e.g. play.example.com:25565",
   "instance.settings.jvm_args": "JVM arguments",
   "instance.settings.jvm_hint": "E.g. -XX:+UseZGC; leave blank to use global settings",
@@ -3411,7 +3411,7 @@
   "instance.lastrun.legacy.cache": "The start cache could not be used",
   "instance.lastrun.legacy.quickplay": "The game could not open the world straight away",
   "instance.lastrun.fix.cache_off": "Turn the start cache off",
-  "instance.lastrun.fix.without_loader": "Start once without the Jay loader",
+  "instance.lastrun.fix.without_loader": "Start once without the universal loader",
   "instance.lastrun.cache_off_done": "Start cache off for this instance.",
   "core.bake.runtime.legacy_quickplay": "The game could not open the world straight away and stayed on the menu."
 }

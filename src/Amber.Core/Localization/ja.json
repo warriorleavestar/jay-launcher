@@ -776,7 +776,7 @@
   "instance.settings.join_server": "起動時にサーバーへ接続",
   "instance.settings.transformer_cache": "起動キャッシュ",
   "instance.settings.transformer_cache.on": "Forge 1.12.2 の起動を速くする（ユニバーサルローダー）",
-  "instance.settings.transformer_cache.hint": "前回の起動で Forge が変換したクラスを保存します。キャッシュが原因に見えるクラッシュが起きたらオフにしてください。オフにすると通常の Forge と同じ方法で起動し、少し遅くなります。",
+  "instance.settings.transformer_cache.hint": "前回の起動で Forge が用意した内容を保存し、次回そのまま使います。キャッシュが原因に見えるクラッシュが起きたらオフにできます。オフにすると起動が少し遅くなります。",
   "instance.settings.join_server_hint": "起動するたびにこのサーバーに接続します（例：play.example.com:25565）",
   "instance.settings.jvm_args": "JVM 引数",
   "instance.settings.jvm_hint": "例：-XX:+UseZGC、空欄で全体設定を使用",
@@ -3336,7 +3336,7 @@
   "instance.lastrun.legacy.cache": "起動キャッシュを使えませんでした",
   "instance.lastrun.legacy.quickplay": "ワールドにすぐ入れませんでした",
   "instance.lastrun.fix.cache_off": "起動キャッシュをオフにする",
-  "instance.lastrun.fix.without_loader": "今回は Jay ローダーなしで起動",
+  "instance.lastrun.fix.without_loader": "今回は汎用ローダーなしで起動",
   "instance.lastrun.cache_off_done": "このインスタンスの起動キャッシュをオフにしました。",
   "core.bake.runtime.legacy_quickplay": "ワールドにすぐ入れず、メニューのままです。"
 }

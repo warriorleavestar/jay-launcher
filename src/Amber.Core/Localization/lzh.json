@@ -771,7 +771,7 @@
   "instance.settings.join_server": "啟後入伺服器",
   "instance.settings.transformer_cache": "啟存",
   "instance.settings.transformer_cache.on": "速 Forge 1.12.2 之啟（通用載器）",
-  "instance.settings.transformer_cache.hint": "存前次啟時 Forge 所化之類。戲崩而疑由於存，則可閉之；閉則依原 Forge 之法啟，稍緩。",
+  "instance.settings.transformer_cache.hint": "存前次啟時 Forge 所備者，下次徑用之。戲崩而疑由於存，則可閉之；閉則稍緩。",
   "instance.settings.join_server_hint": "每啟逕入此伺服器，若 play.example.com:25565",
   "instance.settings.jvm_args": "JVM 之參",
   "instance.settings.jvm_hint": "若 -XX:+UseZGC，空則從全域之設",
@@ -3201,7 +3201,7 @@
   "instance.lastrun.legacy.cache": "啟緩未能用",
   "instance.lastrun.legacy.quickplay": "未能徑入存檔",
   "instance.lastrun.fix.cache_off": "閉啟緩",
-  "instance.lastrun.fix.without_loader": "此番不以 Jay 載器啟",
+  "instance.lastrun.fix.without_loader": "此番不以通用載器啟",
   "instance.lastrun.cache_off_done": "此例之啟緩已閉。",
   "core.bake.runtime.legacy_quickplay": "戲未能徑入存檔，止於主單。"
 }
