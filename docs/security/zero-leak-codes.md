@@ -250,13 +250,21 @@ locally, so the directory can't tell who looked for which room, or whether anyon
 - **Hidden entries**: for each open invite the host seals `{id, ip, key}` (padded to 256 bytes) with ChaCha20-Poly1305 under
   `HKDF-SHA256(lobbyKey, info "jay-dir-seal-v1")` and files it under index `HKDF-SHA256(lobbyKey, info "jay-dir-index-v1")`
   (32 bytes, also the associated data). Every entry is 284 bytes. The directory never sees the lobby key, so it can't
-  open an entry or tell which invite it belongs to. Indexes are first come, first served (`lookup` error), as the old
-  lookup keys were. Renewals reuse the same sealed bytes while nothing changed, so they don't show up as changes.
+  open an entry or tell which invite it belongs to. Up to 8 rooms (`MaxEntriesPerIndex`) may have an entry under the
+  same index, each under a random slot tag. A reader tries every entry under the index; junk doesn't open. When entries that open
+  point at different hosts (someone else holding the invite publishes under it), the reader trusts none of them.
+  Renewals reuse the same sealed bytes while nothing changed, so they don't show up as changes.
+- **Public rooms**: a renewal that only changes the seq, signature and time isn't a snapshot change; readers keep the
+  earlier signed version, and expiry shows up as `gone` either way.
 - **One request**: `snap` with the version of the copy Jay already has. The reply holds what changed since then (or
   everything, for a new copy or one from before the directory restarted), padded to a multiple of 64 KB.
 - **Fixed schedule**: while the public network is connected, the app refreshes every 60 seconds whatever the user does.
   Lookups and the public list read the local copy and make no request. Without a poller (CLI, tests) a read refreshes
-  first.
+  first. A reply is checked through before any of it is applied. A directory's copy that hasn't been refreshed for
+  2 × 60 s + the 90 s room lifetime (the directory went away) is dropped.
+- **Directory limits**: the snapshot is capped below the 16 MB reply limit (new publishes that would pass it get
+  `full`); replies are serialized once per version; at most 8 snapshots go out at once (`busy`) and 6 per source
+  address per minute (`rate`); a reader that stops reading for 10 s is dropped.
 - **Not signed by the directory**: the copy comes over the authenticated `DirectoryChannel`, which already proves it is
   this network's directory. The plan's separate snapshot signature only matters once snapshots are mirrored by others.
 - **Still on the wire**: `find` (fingerprint codes). A fingerprint code can only be matched with the host's search key,

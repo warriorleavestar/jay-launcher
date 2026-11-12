@@ -168,7 +168,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         // Expiry removes the entry.
         _now += RoomDirectoryProtocol.Ttl + TimeSpan.FromSeconds(1);
         var gone = _directory.Handle(new JsonObject { ["op"] = "snap", ["epoch"] = before["epoch"]!.GetValue<string>(), ["have"] = before["ver"]!.GetValue<long>() });
-        Assert.Contains("h:" + Convert.ToHexStringLower(HiddenEntry.Index(lobby)), gone["gone"]!.AsArray().Select(g => g!.GetValue<string>()));
+        Assert.Contains(gone["gone"]!.AsArray().Select(g => g!.GetValue<string>()), k => k.StartsWith("h:" + Convert.ToHexStringLower(HiddenEntry.Index(lobby)) + ":", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -208,6 +208,131 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.Equal("empty", _directory.Handle(request)["error"]!.GetValue<string>());
         Assert.Equal("op", _directory.Handle(new JsonObject { ["op"] = "lookup", ["key"] = new string('c', 64) })["error"]!.GetValue<string>());
         Assert.Equal("op", _directory.Handle(new JsonObject { ["op"] = "list" })["error"]!.GetValue<string>());
-        await Task.CompletedTask;
+    }
+
+    /// <summary>Publishes junk (not sealed with the invite) under <paramref name="lobby"/>'s index, as a stranger could.</summary>
+    private JsonObject Squat(byte[] lobby) => _directory.Handle(new JsonObject
+    {
+        ["op"] = "announce",
+        ["room"] = new RoomSigner().Sign(Listing(RoomVisibility.Hidden), _now).ToJson(),
+        ["listed"] = false,
+        ["hidden"] = new JsonArray(new JsonObject
+        {
+            ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)),
+            ["b"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(HiddenEntry.SealedLength)),
+        }),
+    });
+
+    [Fact]
+    public async Task StrangersCannotHoldAnInvitesIndexAgainstItsRoom()
+    {
+        // After a directory restart the index is free; a stranger who saw it in an old snapshot gets there first.
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        Assert.True(Squat(lobby)["ok"]!.GetValue<bool>());
+        var room = new RoomSigner();
+        await HideAsync(room, lobby);
+        var reader = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        Assert.Equal(room.RoomId, (await reader.LookupAsync(lobby, default))!.Id);
+        // Only a few rooms can share one index; once the room is there it keeps its place when it renews.
+        for (var i = 1; i < RoomDirectoryServer.MaxEntriesPerIndex - 1; i++) Assert.True(Squat(lobby)["ok"]!.GetValue<bool>());
+        Assert.Equal("lookup", Squat(lobby)["error"]!.GetValue<string>());
+        _now += TimeSpan.FromSeconds(30);
+        await HideAsync(room, lobby);
+        Assert.Equal(room.RoomId, (await reader.LookupAsync(lobby, default))!.Id);
+    }
+
+    [Fact]
+    public async Task EntriesForOneInviteThatPointAtDifferentHostsAreNotTrusted()
+    {
+        // Someone else holding the invite publishes their own host under it: the reader can't tell which is real.
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        await HideAsync(new RoomSigner(), lobby);
+        var other = new RoomSigner().Sign(Listing(RoomVisibility.Hidden) with { HostKey = X25519KeyPair.Generate().PublicKey }, _now);
+        await new RoomDirectoryClient(new CountingNetwork(_directory.Port)).AnnounceAsync(other, false, [lobby], default);
+        Assert.Null(await new RoomDirectoryClient(new CountingNetwork(_directory.Port)).LookupAsync(lobby, default));
+    }
+
+    [Fact]
+    public async Task PublicRenewalsThatChangeNothingVisibleAreNotSnapshotChanges()
+    {
+        var signer = new RoomSigner();
+        var room = Listing(RoomVisibility.Public);
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        await client.AnnounceAsync(signer.Sign(room, _now), true, [], default);
+        var before = _directory.Handle(new JsonObject { ["op"] = "snap" });
+        JsonObject Since() => _directory.Handle(new JsonObject { ["op"] = "snap", ["epoch"] = before["epoch"]!.GetValue<string>(), ["have"] = before["ver"]!.GetValue<long>() });
+        _now += TimeSpan.FromSeconds(30);
+        await client.AnnounceAsync(signer.Sign(room, _now), true, [], default);
+        Assert.Empty(Since()["rooms"]!.AsArray());
+        Assert.Single(await client.ListAsync(default));
+        // A visible change (another player joined) is.
+        await client.AnnounceAsync(signer.Sign(room with { Players = 2 }, _now), true, [], default);
+        Assert.Equal(2, Assert.Single(Since()["rooms"]!.AsArray())!["players"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void MalformedSnapshotRepliesAreNotUsedAtAll()
+    {
+        JsonObject Good() => new()
+        {
+            ["ok"] = true, ["epoch"] = "ab", ["ver"] = 3L, ["full"] = true,
+            ["rooms"] = new JsonArray(), ["hidden"] = new JsonArray(), ["gone"] = new JsonArray(),
+        };
+        Assert.True(DirectorySnapshots.IsUsable(Good()));
+        var badVersion = Good();
+        badVersion["ver"] = 1.5;
+        var badGone = Good();
+        badGone["gone"] = new JsonArray(5);
+        var badIndex = Good();
+        badIndex["hidden"] = new JsonArray(new JsonObject { ["k"] = 7, ["t"] = "00", ["b"] = "" });
+        var badBlob = Good();
+        badBlob["hidden"] = new JsonArray(new JsonObject { ["k"] = new string('a', 64), ["t"] = "00", ["b"] = "!!" });
+        foreach (var reply in new[] { badVersion, badGone, badIndex, badBlob }) Assert.False(DirectorySnapshots.IsUsable(reply));
+    }
+
+    [Fact]
+    public async Task CopiesOfADirectoryThatStoppedAnsweringAreDropped()
+    {
+        var clock = DateTimeOffset.UtcNow;
+        var copy = new DirectorySnapshots(() => clock);
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Public), _now), true, [], default);
+        await copy.RefreshAsync(client, default);
+        Assert.Single(copy.Rooms());
+        // The directory goes away: nothing refreshes the copy, and after a while its rooms are no longer shown.
+        await _directory.DisposeAsync();
+        await Assert.ThrowsAnyAsync<IOException>(() => copy.RefreshAsync(client, default));
+        Assert.Single(copy.Rooms());
+        clock += DirectorySnapshots.StaleAfter + TimeSpan.FromSeconds(1);
+        Assert.Empty(copy.Rooms());
+    }
+
+    [Fact]
+    public async Task TheSnapshotNeverOutgrowsTheLargestReply()
+    {
+        Assert.True(new RoomDirectoryServer(IPAddress.Loopback, 0) is var fresh && fresh.SnapshotBudget + 2 * RoomDirectoryProtocol.SnapshotPad <= RoomDirectoryProtocol.MaxReply);
+        await fresh.DisposeAsync();
+        // A small budget stands in for a full directory: publishes that would pass it are refused, renewals still work.
+        _directory.SnapshotBudget = 8 * 1024;
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        var signers = new List<RoomSigner>();
+        DirectoryRejectedException? refused = null;
+        for (var i = 0; i < 100 && refused is null; i++)
+        {
+            var signer = new RoomSigner();
+            try
+            {
+                await client.AnnounceAsync(signer.Sign(Listing(RoomVisibility.Hidden), _now), false, [RandomNumberGenerator.GetBytes(16), RandomNumberGenerator.GetBytes(16)], default);
+                signers.Add(signer);
+            }
+            catch (DirectoryRejectedException e) { refused = e; }
+        }
+        Assert.Equal("full", refused?.Code);
+        Assert.NotEmpty(signers);
+        var full = _directory.Handle(new JsonObject { ["op"] = "snap" });
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(full.ToJsonString()) <= _directory.SnapshotBudget + 512);
+        // The rooms already there keep renewing.
+        _now += TimeSpan.FromSeconds(30);
+        await HideAsync(signers[0], RandomNumberGenerator.GetBytes(16));
     }
 }

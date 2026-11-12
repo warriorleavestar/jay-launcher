@@ -165,13 +165,14 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task LookupKeysAreFirstComeFirstServed()
+    public async Task OneInvitesIndexHoldsOnlyAFewRooms()
     {
         var client = new RoomDirectoryClient(_net);
         var key = new byte[16];
-        await client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default);
-        var squat = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default));
-        Assert.Equal("lookup", squat.Code);
+        for (var i = 0; i < RoomDirectoryServer.MaxEntriesPerIndex; i++)
+            await client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default);
+        var more = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default));
+        Assert.Equal("lookup", more.Code);
     }
 
 

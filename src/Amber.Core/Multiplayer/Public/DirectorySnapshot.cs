@@ -122,20 +122,34 @@ public sealed class DirectorySnapshots
     /// <summary>The shared copy for <paramref name="network"/> (one per network session).</summary>
     public static DirectorySnapshots For(IPublicNetwork network) => PerNetwork.GetValue(network, _ => new DirectorySnapshots());
 
+    /// <summary>
+    /// A directory's copy is dropped when it hasn't been refreshed for this long (the directory went away): its rooms
+    /// would have expired there by now.
+    /// </summary>
+    public static readonly TimeSpan StaleAfter = 2 * PollEvery + RoomDirectoryProtocol.Ttl;
+
     private sealed class Copy
     {
         public string Epoch = "";
         public long Version;
+        public DateTimeOffset RefreshedAt;
         public readonly Dictionary<string, RoomListing> Rooms = new(StringComparer.Ordinal);
+        /// <summary>"index:tag" → sealed entry (several rooms may have an entry under one index).</summary>
         public readonly Dictionary<string, byte[]> Hidden = new(StringComparer.Ordinal);
     }
 
+    private readonly Func<DateTimeOffset> _now;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Copy> _copies = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _refreshing = new(1, 1);
     private CancellationTokenSource? _polling;
     private TaskCompletionSource _firstRefresh = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Exception? _lastError;
+    private DateTimeOffset? _refreshedAt;
+
+    public DirectorySnapshots() : this(() => DateTimeOffset.UtcNow) { }
+
+    internal DirectorySnapshots(Func<DateTimeOffset> now) => _now = now;
 
     /// <summary>True while a poller keeps this copy fresh.</summary>
     public bool IsPolling
@@ -144,7 +158,10 @@ public sealed class DirectorySnapshots
     }
 
     /// <summary>When the copy was last refreshed from at least one directory.</summary>
-    public DateTimeOffset? RefreshedAt { get; private set; }
+    public DateTimeOffset? RefreshedAt
+    {
+        get { lock (_gate) return _refreshedAt; }
+    }
 
     /// <summary>
     /// Refreshes the copy every <see cref="PollEvery"/> until the returned handle is disposed. The first refresh runs at
@@ -153,6 +170,7 @@ public sealed class DirectorySnapshots
     public IDisposable StartPolling(Func<RoomDirectoryClient> client, TimeSpan? every = null)
     {
         var cts = new CancellationTokenSource();
+        var token = cts.Token;
         lock (_gate)
         {
             _polling?.Cancel();
@@ -161,11 +179,12 @@ public sealed class DirectorySnapshots
         var interval = every ?? PollEvery;
         _ = Task.Run(async () =>
         {
-            while (!cts.IsCancellationRequested)
+            while (!token.IsCancellationRequested)
             {
-                try { await RefreshAsync(client(), cts.Token); }
-                catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or InvalidOperationException) { }
-                try { await Task.Delay(interval, cts.Token); }
+                // Nothing a directory sends may stop the poller: a bad reply only costs that round.
+                try { await RefreshAsync(client(), token); }
+                catch (Exception e) when (e is not OutOfMemoryException) { }
+                try { await Task.Delay(interval, token); }
                 catch (OperationCanceledException) { break; }
             }
         });
@@ -174,17 +193,22 @@ public sealed class DirectorySnapshots
 
     private sealed class Stop(DirectorySnapshots owner, CancellationTokenSource cts) : IDisposable
     {
+        private int _done;
+
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _done, 1) == 1) return;
             lock (owner._gate)
                 if (owner._polling == cts) owner._polling = null;
             cts.Cancel();
+            cts.Dispose();
         }
     }
 
     /// <summary>
-    /// Fetches what changed from every directory and applies it. Throws when no directory answered and there is no copy
-    /// from an earlier refresh.
+    /// Fetches what changed from every directory and applies it. Throws when no directory answered with a usable
+    /// snapshot. Copies of directories that weren't asked this round, or haven't answered for <see cref="StaleAfter"/>,
+    /// are dropped.
     /// </summary>
     public async Task RefreshAsync(RoomDirectoryClient client, CancellationToken ct)
     {
@@ -194,32 +218,33 @@ public sealed class DirectorySnapshots
             Dictionary<string, (string Epoch, long Version)> have;
             lock (_gate) have = _copies.ToDictionary(p => p.Key, p => (p.Value.Epoch, p.Value.Version), StringComparer.Ordinal);
             var replies = await client.SnapshotAsync(have, ct);
+            var parsed = replies.Select(r => (r.Ip, Parsed: r.Reply is null ? null : Parse(r.Reply), r.Error)).ToList();
             var any = false;
             Exception? error = null;
+            var now = _now();
             lock (_gate)
             {
-                foreach (var (ip, reply, failure) in replies)
+                foreach (var gone in _copies.Keys.Where(ip => !parsed.Any(r => r.Ip == ip)).ToList()) _copies.Remove(gone);
+                foreach (var (ip, reply, failure) in parsed)
                 {
                     if (reply is null)
                     {
-                        error ??= failure;
+                        error ??= failure ?? new InvalidDataException(Localization.L.T("core.mp.public.bad_reply"));
                         continue;
                     }
-                    any |= Apply(ip, reply);
+                    any |= Apply(ip, reply, now);
                 }
+                DropStale(now);
+                if (any)
+                {
+                    _refreshedAt = now;
+                    _lastError = null;
+                    _firstRefresh.TrySetResult();
+                }
+                else _lastError = error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
             }
-            if (any)
-            {
-                RefreshedAt = DateTimeOffset.UtcNow;
-                _lastError = null;
-                _firstRefresh.TrySetResult();
-            }
-            else
-            {
-                // Nobody answered: a reader that asked for fresh data gets the error; a poller keeps the copy it has.
-                _lastError = error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
-                throw _lastError;
-            }
+            // Nobody answered: a reader that asked for fresh data gets the error; a poller keeps the copy it has.
+            if (!any) throw error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
         }
         finally
         {
@@ -227,41 +252,65 @@ public sealed class DirectorySnapshots
         }
     }
 
-    /// <summary>Applies one directory's reply. False when the reply isn't a usable snapshot.</summary>
-    private bool Apply(string ip, JsonObject reply)
+    private void DropStale(DateTimeOffset now)
     {
-        if (reply["ok"]?.GetValue<bool>() != true || reply["epoch"]?.GetValue<string>() is not { Length: > 0 and <= 64 } epoch
-            || reply["ver"]?.GetValue<long>() is not { } version) return false;
-        if (!_copies.TryGetValue(ip, out var copy)) _copies[ip] = copy = new Copy();
-        var full = reply["full"]?.GetValue<bool>() == true;
-        // A delta only makes sense on top of the copy it was computed from.
-        if (!full && (copy.Epoch != epoch || reply["from"]?.GetValue<long>() != copy.Version)) return false;
-        if (full)
+        foreach (var (ip, copy) in _copies.Where(p => now - p.Value.RefreshedAt > StaleAfter).ToList()) _copies.Remove(ip);
+    }
+
+    /// <summary>One directory's reply, checked through before anything is applied.</summary>
+    private sealed record Reply(string Epoch, long Version, bool Full, long? From, List<string> Gone, List<RoomListing> Rooms, List<(string Key, byte[] Blob)> Hidden);
+
+    /// <summary>Reads a snapshot reply. Null when anything in it is malformed (then none of it is used).</summary>
+    internal static bool IsUsable(JsonObject reply) => Parse(reply) is not null;
+
+    private static Reply? Parse(JsonObject reply)
+    {
+        try
         {
-            copy.Rooms.Clear();
-            copy.Hidden.Clear();
+            if (reply["ok"]?.GetValue<bool>() != true || reply["epoch"]?.GetValue<string>() is not { Length: > 0 and <= 64 } epoch
+                || reply["ver"]?.GetValue<long>() is not { } version) return null;
+            var full = reply["full"]?.GetValue<bool>() == true;
+            var from = reply["from"]?.GetValue<long>();
+            var gone = new List<string>();
+            foreach (var key in reply["gone"] as JsonArray ?? [])
+                if (key?.GetValue<string>() is { } k) gone.Add(k);
+            var rooms = (reply["rooms"] as JsonArray ?? []).Select(RoomListing.FromJson).OfType<RoomListing>().ToList();
+            var hidden = new List<(string, byte[])>();
+            foreach (var item in (reply["hidden"] as JsonArray ?? []).OfType<JsonObject>())
+            {
+                var index = item["k"]?.GetValue<string>();
+                var tag = item["t"]?.GetValue<string>();
+                var blob = item["b"]?.GetValue<string>();
+                if (index is not { Length: HiddenEntry.IndexLength * 2 } || !index.All(char.IsAsciiHexDigit)
+                    || tag is not { Length: > 0 and <= 32 } || !tag.All(char.IsAsciiHexDigit) || blob is null) continue;
+                var bytes = Convert.FromBase64String(blob);
+                if (bytes.Length == HiddenEntry.SealedLength) hidden.Add((index.ToLowerInvariant() + ":" + tag.ToLowerInvariant(), bytes));
+            }
+            return new Reply(epoch, version, full, from, gone, rooms, hidden);
         }
-        foreach (var key in (reply["gone"] as JsonArray ?? []).Select(k => k?.GetValue<string>()).OfType<string>())
+        catch (Exception e) when (e is FormatException or InvalidOperationException or ArgumentException or System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Applies one directory's checked reply. False when it isn't usable on top of the copy (a delta from elsewhere).</summary>
+    private bool Apply(string ip, Reply reply, DateTimeOffset now)
+    {
+        _copies.TryGetValue(ip, out var copy);
+        // A delta only makes sense on top of the copy it was computed from.
+        if (!reply.Full && (copy is null || copy.Epoch != reply.Epoch || reply.From != copy.Version)) return false;
+        if (copy is null || reply.Full) _copies[ip] = copy = new Copy();
+        foreach (var key in reply.Gone)
         {
             if (key.StartsWith("r:", StringComparison.Ordinal)) copy.Rooms.Remove(key[2..]);
-            else if (key.StartsWith("h:", StringComparison.Ordinal)) copy.Hidden.Remove(key[2..]);
+            else if (key.StartsWith("h:", StringComparison.Ordinal)) copy.Hidden.Remove(key[2..].ToLowerInvariant());
         }
-        foreach (var room in (reply["rooms"] as JsonArray ?? []).Select(RoomListing.FromJson).OfType<RoomListing>())
-            copy.Rooms[room.Id] = room;
-        foreach (var item in (reply["hidden"] as JsonArray ?? []).OfType<JsonObject>())
-        {
-            var index = item["k"]?.GetValue<string>();
-            var blob = item["b"]?.GetValue<string>();
-            if (index is not { Length: HiddenEntry.IndexLength * 2 } || !index.All(char.IsAsciiHexDigit) || blob is null) continue;
-            try
-            {
-                var bytes = Convert.FromBase64String(blob);
-                if (bytes.Length == HiddenEntry.SealedLength) copy.Hidden[index.ToLowerInvariant()] = bytes;
-            }
-            catch (FormatException) { }
-        }
-        copy.Epoch = epoch;
-        copy.Version = version;
+        foreach (var room in reply.Rooms) copy.Rooms[room.Id] = room;
+        foreach (var (key, blob) in reply.Hidden) copy.Hidden[key] = blob;
+        copy.Epoch = reply.Epoch;
+        copy.Version = reply.Version;
+        copy.RefreshedAt = now;
         return true;
     }
 
@@ -279,12 +328,14 @@ public sealed class DirectorySnapshots
         Task first;
         lock (_gate) first = _firstRefresh.Task;
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        wait.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
+        // The first snapshot of a busy directory can take as long as the directory gives it.
+        wait.CancelAfter(RoomDirectoryProtocol.SnapshotTimeout + RoomDirectoryProtocol.RequestTimeout);
         try { await first.WaitAsync(wait.Token); }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            if (_lastError is { } error) throw error;
-            throw new IOException(Localization.L.T("core.mp.public.no_directory"));
+            Exception? error;
+            lock (_gate) error = _lastError;
+            throw error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
         }
     }
 
@@ -293,6 +344,7 @@ public sealed class DirectorySnapshots
     {
         lock (_gate)
         {
+            DropStale(_now());
             var rooms = new Dictionary<string, RoomListing>(StringComparer.Ordinal);
             foreach (var room in _copies.Values.SelectMany(c => c.Rooms.Values))
                 if (!rooms.TryGetValue(room.Id, out var have) || room.Seq > have.Seq) rooms[room.Id] = room;
@@ -300,14 +352,27 @@ public sealed class DirectorySnapshots
         }
     }
 
-    /// <summary>Where to knock for the room behind an invite's lobby key, from the local copy only. Null when no entry opens.</summary>
+    /// <summary>
+    /// Where to knock for the room behind an invite's lobby key, from the local copy only. Every entry under the invite's
+    /// index is tried (others' junk there doesn't open). Null when none opens, or when entries that open point at
+    /// different hosts: someone else holding the invite is publishing under it, and there is no telling which is real.
+    /// </summary>
     public DirectoryHit? Find(ReadOnlySpan<byte> lobbyKey)
     {
-        var index = Convert.ToHexStringLower(HiddenEntry.Index(lobbyKey));
+        var prefix = Convert.ToHexStringLower(HiddenEntry.Index(lobbyKey)) + ":";
         List<byte[]> candidates;
-        lock (_gate) candidates = [.. _copies.Values.Select(c => c.Hidden.GetValueOrDefault(index)).OfType<byte[]>()];
+        lock (_gate)
+        {
+            DropStale(_now());
+            candidates = [.. _copies.Values.SelectMany(c => c.Hidden).Where(p => p.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(p => p.Value)];
+        }
+        DirectoryHit? found = null;
         foreach (var blob in candidates)
-            if (HiddenEntry.Open(lobbyKey, blob) is { } hit) return hit;
-        return null;
+        {
+            if (HiddenEntry.Open(lobbyKey, blob) is not { } hit) continue;
+            if (found is null) found = hit;
+            else if (!found.HostKey.AsSpan().SequenceEqual(hit.HostKey)) return null;
+        }
+        return found;
     }
 }
