@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Transport;
 
@@ -183,7 +184,7 @@ public sealed class SplitTransportTests
     }
 
     [Fact]
-    public async Task OnePerMemberLimitOnWaitingSets()
+    public async Task AMemberHasAtMostFourWaitingSets()
     {
         await using var rig = await Rig.StartAsync(2);
         var waiting = new List<SecureStream>();
@@ -194,6 +195,111 @@ public sealed class SplitTransportTests
         await AssertDroppedAsync(extra);
         Assert.Equal(SplitRegistry.MaxPendingPerMember, rig.Registry.PendingCount);
         foreach (var w in waiting) w.Abort();
+    }
+
+    [Fact]
+    public async Task TheRoomHasALimitOnWaitingSets()
+    {
+        await using var rig = await Rig.StartAsync(2, pendingLimit: 2);
+        var bob = rig.AddMember(Pub(60), "Bob");
+        var waiting = new List<SecureStream>
+        {
+            await rig.ConnectLegAsync(rig.Guest, new SplitLeg(0, 2, Epoch), 0),
+            await rig.ConnectLegAsync(bob, new SplitLeg(0, 2, Epoch), 0),
+        };
+        Assert.True(await WaitAsync(() => rig.Registry.PendingCount == 2));
+        // Under the per-member limit, but the room is full.
+        var extra = await rig.ConnectLegAsync(bob, new SplitLeg(0, 2, Epoch), 0);
+        await AssertDroppedAsync(extra);
+        Assert.Equal(2, rig.Registry.PendingCount);
+        foreach (var w in waiting) w.Abort();
+    }
+
+    [Fact]
+    public async Task APairingIdIsBurnedOnlyForAWhile()
+    {
+        await using var rig = await Rig.StartAsync(2, tombstoneFor: TimeSpan.FromMilliseconds(300));
+        var pairId = RandomNumberGenerator.GetBytes(32);
+        var legs = await Task.WhenAll(
+            rig.ConnectLegAsync(rig.Guest, new SplitLeg(0, 2, Epoch), 0, pairId),
+            rig.ConnectLegAsync(rig.Guest, new SplitLeg(1, 2, Epoch), 1, pairId));
+        await rig.NextJoinedAsync();
+        // Right away the same id is refused at once ...
+        var replay = await rig.ConnectLegAsync(rig.Guest, new SplitLeg(0, 2, Epoch), 0, pairId);
+        await AssertDroppedAsync(replay);
+        Assert.Equal(0, rig.Registry.PendingCount);
+        // ... later it is forgotten and simply waits for its partner like any new set.
+        await Task.Delay(600);
+        var late = await rig.ConnectLegAsync(rig.Guest, new SplitLeg(0, 2, Epoch), 0, pairId);
+        Assert.True(await WaitAsync(() => rig.Registry.PendingCount == 1));
+        late.Abort();
+        foreach (var l in legs) l.Abort();
+    }
+
+    /// <summary>
+    /// A kick on one thread while the last leg completes (or a set times out) on another must never hang: the revocation
+    /// callback takes the registry lock, so the registry must not wait for that callback while holding the lock.
+    /// </summary>
+    [Fact]
+    public async Task KicksRacingJoinsNeverHangTheRegistry()
+    {
+        await using var rig = await Rig.StartAsync(2, abortOnKick: true);
+        for (var round = 0; round < 25; round++)
+        {
+            var key = rig.AddMember(Pub((byte)(120 + round)), "Racer", out var entry);
+            var pairId = RandomNumberGenerator.GetBytes(32);
+            var legs = await Task.WhenAll(
+                rig.ConnectLegAsync(key, new SplitLeg(0, 2, Epoch), 0, pairId, hello: false),
+                rig.ConnectLegAsync(key, new SplitLeg(1, 2, Epoch), 1, pairId, hello: false));
+            byte[] hello = [SplitLegs.HelloVersion, .. pairId];
+            await legs[0].WriteAsync(hello);
+            await Task.WhenAll(
+                Task.Run(async () => await legs[1].WriteAsync(hello)),
+                Task.Run(() => rig.Table.Remove(entry)));
+            foreach (var leg in legs) await AssertDroppedAsync(leg);
+        }
+        Assert.True(await WaitAsync(() => rig.Registry.PendingCount == 0));
+        // The registry still works for a member who wasn't kicked.
+        var (client, host) = await rig.JoinAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        await client.WriteAsync((byte[])[1, 2, 3]);
+        Assert.Equal([1, 2, 3], await ReadExactlyAsync(host, 3));
+    }
+
+    [Fact]
+    public async Task OneLegFailingStopsTheOthersAtOnce()
+    {
+        await using var rig = await Rig.StartAsync(2);
+        var connect = SplitLegs.ConnectAsync(async (i, ct) =>
+        {
+            if (i == 1) throw new InvalidOperationException("no path");
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new System.Diagnostics.UnreachableException();
+        }, 2, Epoch, rig.Guest, Profile, "tunnel", [Context]);
+        var e = await Assert.ThrowsAsync<InvalidOperationException>(() => connect.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("no path", e.Message);
+    }
+
+    [Fact]
+    public async Task AFailedWriteEndsTheStream()
+    {
+        await using var rig = await Rig.StartAsync(2, abortOnKick: true);
+        var (client, _) = await rig.JoinAsync();
+        rig.Table.Remove(rig.GuestEntry);
+        var chunk = new byte[SplitStream.MaxChunk];
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Assert.ThrowsAnyAsync<IOException>(async () =>
+        {
+            while (true) await client.WriteAsync(chunk, timeout.Token);
+        });
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await client.WriteAsync(chunk));
+    }
+
+    [Fact]
+    public void ThePrivacyPlusSplitKeepsItsOwnWording()
+    {
+        Assert.Equal("core.mp.split.path_lost", SplitWording.Room.PathLost);
+        Assert.Equal("core.gate.split.leg_lost", SplitWording.Gate.PathLost);
+        Assert.Equal("core.gate.split.mismatch", SplitWording.Gate.Mismatch);
     }
 
     [Fact]
@@ -228,6 +334,8 @@ public sealed class SplitTransportTests
         // Leg 0 closes properly (authenticated close record); leg 1 stays open and quiet.
         await legs[0].CloseAsync();
         var ex = await Assert.ThrowsAsync<IOException>(async () => await host.ReadAsync(new byte[8]));
+        // The quiet leg gets the end grace to close too, then everything is dropped.
+        Assert.Equal(L.T("core.mp.split.stalled"), ex.Message);
         Assert.False(host.ClosedCleanly);
         await AssertDroppedAsync(legs[1]);
     }
@@ -357,7 +465,8 @@ public sealed class SplitTransportTests
         public int[] Ports { get; private set; } = [];
         public IReadOnlyList<SplitStream> Joined { get { lock (_all) return [.. _all]; } }
 
-        public static Task<Rig> StartAsync(int legs, TimeSpan? pairTimeout = null, TimeSpan? stallTimeout = null, bool abortOnKick = false)
+        public static Task<Rig> StartAsync(int legs, TimeSpan? pairTimeout = null, TimeSpan? stallTimeout = null, bool abortOnKick = false,
+            int pendingLimit = SplitRegistry.MaxPending, TimeSpan? tombstoneFor = null)
         {
             var rig = new Rig { _count = legs, _abortOnKick = abortOnKick };
             rig.Registry = new SplitRegistry
@@ -365,6 +474,8 @@ public sealed class SplitTransportTests
                 PairTimeout = pairTimeout ?? TimeSpan.FromSeconds(10),
                 StallTimeout = stallTimeout ?? TimeSpan.FromSeconds(15),
                 EndGrace = stallTimeout ?? TimeSpan.FromSeconds(3),
+                PendingLimit = pendingLimit,
+                TombstoneFor = tombstoneFor ?? TimeSpan.FromSeconds(10),
             };
             rig.Guest = rig.AddMember(Pub(1), "Alice", out var entry);
             rig.GuestEntry = entry;
@@ -384,7 +495,7 @@ public sealed class SplitTransportTests
 
         public MemberKey AddMember(byte[] pub, string name) => AddMember(pub, name, out _);
 
-        private MemberKey AddMember(byte[] pub, string name, out MemberEntry entry)
+        public MemberKey AddMember(byte[] pub, string name, out MemberEntry entry)
         {
             entry = Table.Issue(pub, name);
             // The member's own copy (from the knock reply); the host's copy is zeroed on kick.
@@ -426,11 +537,12 @@ public sealed class SplitTransportTests
         }
 
         /// <summary>One member-side leg: handshake on the given port, then (unless pairId is null) the hello.</summary>
-        public async Task<SecureStream> ConnectLegAsync(MemberKey key, SplitLeg leg, int port, byte[]? pairId = null)
+        public async Task<SecureStream> ConnectLegAsync(MemberKey key, SplitLeg leg, int port, byte[]? pairId = null, bool hello = true)
         {
             var tcp = new TcpClient();
             await tcp.ConnectAsync(IPAddress.Loopback, Ports[port]);
             var secure = await MemberChannel.ConnectAsync(tcp.GetStream(), key, Profile, "tunnel", [Context], default, leg);
+            if (!hello) return secure;
             pairId ??= RandomNumberGenerator.GetBytes(32);
             await secure.WriteAsync((byte[])[SplitLegs.HelloVersion, .. pairId]);
             return secure;
