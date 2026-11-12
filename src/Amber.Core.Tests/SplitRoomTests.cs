@@ -189,6 +189,75 @@ public sealed class SplitRoomTests
         Assert.True(RoomTransport.ServesSinglePath(autoFullLan, TunnelService.Game));
     }
 
+    /// <summary>
+    /// A leg port taken by another program: an Auto room starts without splitting (and says so), a Strict room doesn't start.
+    /// Uses the real leg ports, so it occupies 47657 itself.
+    /// </summary>
+    [Fact]
+    public async Task ABusyLegPortStopsOnlyAStrictRoom()
+    {
+        using var squatter = new TcpListener(IPAddress.Loopback, SplitSettings.LegPort(0));
+        try { squatter.Start(); }
+        catch (SocketException) { /* already taken by something else: the same situation */ }
+
+        var (_, _, autoHost, _) = NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+        var log = new List<string>();
+        await using (var transport = RoomTransport.Start(new EasyTierOptions(autoHost, true, [], 15000), line => { lock (log) log.Add(line); }))
+        {
+            Assert.Null(transport.SplitServer);
+            Assert.NotNull(transport.Server);
+            lock (log) Assert.Contains(L.T("core.mp.split.ports_busy"), log);
+        }
+
+        var (_, _, strictHost, _) = NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
+        var e = Assert.Throws<IOException>(() => RoomTransport.Start(new EasyTierOptions(strictHost, true, [], 15000)));
+        Assert.Equal(L.T("core.mp.split.ports_busy_strict"), e.Message);
+    }
+
+    /// <summary>Garbage on a leg (here in the Minecraft disguise) is a failed leg: Auto falls back to one path, Strict refuses.</summary>
+    [Fact]
+    public async Task GarbageOnALegFallsBackUnderAuto()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Strict), new TunnelSettings(TransportMode.High, true));
+        var singles = 0;
+        Func<CancellationToken, Task<Stream>> single = _ =>
+        {
+            Interlocked.Increment(ref singles);
+            return Task.FromResult<Stream>(new MemoryStream());
+        };
+        IReadOnlyList<Func<CancellationToken, Task<Stream>>> legs =
+        [
+            ct => TunnelClient.Raw("127.0.0.1", rig.Server.Ports[0], ct),
+            _ => Task.FromResult<Stream>(new GarbageStream()),
+        ];
+        var game = new SplitConnector(rig.Member, TunnelService.Game, single, legs);
+        await using (var stream = await game.OpenAsync(CancellationToken.None)) Assert.IsNotType<SplitStream>(stream);
+        Assert.Equal(1, singles);
+        Assert.NotNull(game.LastReason);
+        var chat = new SplitConnector(rig.Member, TunnelService.Chat, single, legs);
+        await Assert.ThrowsAsync<IOException>(() => chat.OpenAsync(CancellationToken.None));
+        Assert.Equal(1, singles);
+    }
+
+    /// <summary>Answers every read with random bytes and swallows writes.</summary>
+    private sealed class GarbageStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanWrite => true;
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            RandomNumberGenerator.Fill(buffer.AsSpan(offset, count));
+            return count;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) { }
+    }
+
     [Fact]
     public async Task AFullLanMemberIsToldWhyItCantSplit()
     {

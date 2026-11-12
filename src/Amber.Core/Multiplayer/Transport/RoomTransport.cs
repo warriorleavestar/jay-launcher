@@ -1,5 +1,6 @@
 using Amber.Core.Localization;
 using System.Net;
+using System.Net.Sockets;
 
 namespace Amber.Core.Multiplayer.Transport;
 
@@ -111,12 +112,23 @@ public sealed class RoomTransport : IAsyncDisposable
         // Split listeners: wrapped invite rooms whose host turned splitting on. Not in full-LAN (TUN) mode in this version.
         if (o.IsHost && HostSplits(o))
         {
-            SplitServer = Add(new SplitTunnelServer(room, service => service switch
+            try
             {
-                TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
-                TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
-                _ => null,
-            }, _log, listen));
+                SplitServer = Add(new SplitTunnelServer(room, service => service switch
+                {
+                    TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
+                    TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
+                    _ => null,
+                }, _log, listen));
+            }
+            catch (SocketException e)
+            {
+                // A leg port is taken by another program. Auto rooms carry on without splitting; a Strict service would be
+                // unreachable, so then the room doesn't start.
+                if (room.Split.For(TunnelService.Game) == SplitPolicy.Strict || room.Split.For(TunnelService.Chat) == SplitPolicy.Strict)
+                    throw new IOException(L.T("core.mp.split.ports_busy_strict"), e);
+                _log?.Invoke(L.T("core.mp.split.ports_busy"));
+            }
         }
 
         if (!o.IsHost && settings.Wraps)
