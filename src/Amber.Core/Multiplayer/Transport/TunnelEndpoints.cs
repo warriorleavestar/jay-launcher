@@ -244,8 +244,10 @@ public sealed class TunnelServer : IAsyncDisposable
             Stream? stream = null;
             CancellationTokenRegistration revocation = default;
             var served = false;
-            // A member passed the handshake: from here its failures are logged in full, not limited.
+            // A member (with its own key) passed the handshake: from here its failures are logged in full, not limited.
+            // A room without members (shared room key only) and the unwrapped SOCKS mode stay limited.
             var authenticated = false;
+            var handshakeOk = false;
             try
             {
                 BeforeServeForTest?.Invoke(client);
@@ -264,7 +266,8 @@ public sealed class TunnelServer : IAsyncDisposable
                     HandshakeDone();
                     if (accepted is null) return;
                     (stream, service, var member) = accepted.Value;
-                    authenticated = true;
+                    authenticated = member is not null;
+                    handshakeOk = true;
                     // 邀请房间：这个成员的钥匙一作废（踢出、重新批准换了钥匙、房间结束）就断开这条连接。
                     // 握手完之前已经作废的，Register 会立刻调用。
                     if (member is not null)
@@ -294,7 +297,8 @@ public sealed class TunnelServer : IAsyncDisposable
                 (stream as IAuthenticatedStream)?.Abort();
                 // Only a connection that never got served counts as refused; a forwarding that ended is not.
                 if (!served) Interlocked.Increment(ref Rejected);
-                var what = served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+                // Once the handshake succeeded, a failure is a connection that ended, not a failed handshake.
+                var what = served || handshakeOk ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
                 var line = e is CryptographicException or PlatformNotSupportedException ? L.T(what) + e.Message
                     : e is InvalidOperationException or ArgumentException ? L.T(what) + e.GetType().Name : null;
                 // Anyone can cause this before a member's handshake succeeded: then at most one line a minute (only
@@ -307,7 +311,7 @@ public sealed class TunnelServer : IAsyncDisposable
                 (stream as IAuthenticatedStream)?.Abort();
                 if (!served) Interlocked.Increment(ref Rejected);
                 if (authenticated || OncePerMinute(ref _handshakeFailedLogged))
-                    _log?.Invoke(L.T(served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+                    _log?.Invoke(L.T(served || handshakeOk ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             }
             finally
             {

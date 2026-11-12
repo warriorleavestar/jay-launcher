@@ -282,14 +282,41 @@ public sealed class RekeyTests : IDisposable
             await idle.ConnectAsync(IPAddress.Loopback, server.Port);
             Assert.True(await WaitAsync(() => server.Rejected == 1));
         }
+        var failed = L.T("core.mp.transport.endpoint_handshake_failed");
+        // The timeout itself writes nothing.
+        lock (log) Assert.DoesNotContain(log, l => l.StartsWith(failed, StringComparison.Ordinal));
         for (var i = 0; i < 3; i++)
         {
             try { await using var t = await TunnelClient.Wrapped("127.0.0.1", server.Port, stranger, settings, TunnelService.Game)(default); }
             catch (Exception e) when (e is IOException or SocketException or CryptographicException or InvalidDataException or EndOfStreamException or OperationCanceledException) { }
         }
         Assert.True(await WaitAsync(() => server.Rejected == 4));
-        var failed = L.T("core.mp.transport.endpoint_handshake_failed");
-        lock (log) Assert.Single(log, l => l.StartsWith(failed, StringComparison.Ordinal));
+        lock (log)
+        {
+            // Exactly one line, and it is about the failed handshakes, not the timeout.
+            var line = Assert.Single(log, l => l.StartsWith(failed, StringComparison.Ordinal));
+            Assert.DoesNotContain(nameof(OperationCanceledException), line);
+            Assert.DoesNotContain(nameof(TimeoutException), line);
+        }
+    }
+
+    /// <summary>Unwrapped SOCKS connections are served without any handshake: their failures stay limited too.</summary>
+    [Fact]
+    public async Task UnwrappedFailuresAreLimited()
+    {
+        var log = new List<string>();
+        await using var server = new TunnelServer(HostRoom(TunnelSettings.Default).Host, TunnelSettings.Default, 0,
+            _ => (_, _) => throw new InvalidOperationException("socks"), line => { lock (log) log.Add(line); });
+        for (var i = 0; i < 3; i++)
+        {
+            using var c = new TcpClient();
+            await c.ConnectAsync(IPAddress.Loopback, server.Port);
+        }
+        Assert.True(await WaitAsync(() => server.Accepted == 3));
+        await Task.Delay(200);
+        var ended = L.T("core.mp.transport.endpoint_ended");
+        lock (log) Assert.Single(log, l => l.StartsWith(ended, StringComparison.Ordinal));
+        Assert.Equal(0, server.Rejected);
     }
 
     /// <summary>同一个人重新被批准、换了新钥匙：旧钥匙作废，旧的聊天和封装连接马上断开（不会同时出现两个他）。</summary>
