@@ -286,7 +286,8 @@ public sealed class AppSettings
                 // 设置文件损坏时回到默认值，原文件保留一份方便排查。
                 try { File.Copy(path, path + ".broken", true); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-                return new AppSettings();
+                // Only a real new install gets the daily check by default; a file that exists but can't be read keeps it off.
+                return new AppSettings { AutoUpdateCheckSaved = false };
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {

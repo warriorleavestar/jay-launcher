@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Amber.App.Services;
 using Amber.Core.Activity;
 using Amber.Core.Launch;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer.Public;
 
 namespace Amber.Core.Tests;
@@ -96,6 +97,7 @@ public sealed class UpdateNotifierTests : IDisposable
         Assert.True(await notifier.CheckIfDueAsync());
         var notice = Notice(service)!;
         Assert.DoesNotContain(notice.Spec.Choices, c => c.Id == "open");
+        Assert.Equal(L.F("update.notice.body_no_page", UpdateChecker.CurrentVersion), notice.Spec.Body);
         Assert.Contains(notice.Spec.Choices, c => c.Id == "later" && c.IsDefault);
         service.Requests.Resolve(notice, "later", RequestSource.Bar);
         Assert.Empty(_opened);
@@ -145,6 +147,11 @@ public sealed class UpdateNotifierTests : IDisposable
         var oldWithFeed = Path.Combine(_dir, "old-feed.json");
         File.WriteAllText(oldWithFeed, """{"GameDirectory":"x","UpdateFeedUrl":"https://mirror.example.test/latest"}""");
         Assert.False(AppSettings.Load(oldWithFeed, File.ReadAllText).AutoUpdateCheck);
+
+        // A settings file that exists but can't be read is not a new install either.
+        var broken = Path.Combine(_dir, "broken.json");
+        File.WriteAllText(broken, "{ not json");
+        Assert.False(AppSettings.Load(broken, File.ReadAllText).AutoUpdateCheck);
 
         // Once the user sets it, it is kept either way.
         foreach (var on in new[] { true, false })

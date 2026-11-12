@@ -216,9 +216,10 @@ public sealed partial class ToolsViewModel : PageViewModel
             }
             else if (update.IsVerified)
             {
-                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion);
                 // Only a page Jay can vouch for: the feed's html_url is not covered by the signatures.
                 UpdateUrl = AutoUpdateCheck.ReleasePage(feed, update);
+                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion)
+                    + (UpdateUrl is null ? " " + L.T("tools.update.no_page") : "");
             }
             else
             {

@@ -144,7 +144,7 @@ internal sealed class UpdateNotifier : IDisposable
         choices.Add(new("later", L.T("update.notice.later"), IsDefault: page is null));
         choices.Add(new("skip", L.T("update.notice.skip")));
         _service.Requests.Post(new RequestSpec(RequestKind, L.F("update.notice.title", version),
-            L.F("update.notice.body", UpdateChecker.CurrentVersion), choices, DedupeKey: key));
+            L.F(page is null ? "update.notice.body_no_page" : "update.notice.body", UpdateChecker.CurrentVersion), choices, DedupeKey: key));
     }
 
     private void OnResolved(RequestHandle request)

@@ -1918,8 +1918,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         var appSettings = Page<HomeViewModel>().Service.Settings;
         var feed = appSettings.UpdateFeedUrl;
         appSettings.UpdateFeedUrl = "http://127.0.0.1:9/jay-selftest/latest.json";
-        await tools.CheckUpdateCommand.ExecuteAsync(null);
-        appSettings.UpdateFeedUrl = feed;
+        try { await tools.CheckUpdateCommand.ExecuteAsync(null); }
+        finally { appSettings.UpdateFeedUrl = feed; }
         var failedPrefix = L.F("tools.update.failed", "");
         Check("更新地址连不上时写明检查失败", tools.UpdateStatus.StartsWith(failedPrefix, StringComparison.Ordinal), tools.UpdateStatus);
         tools.DownloadUrl = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";

@@ -160,6 +160,9 @@ internal sealed partial class SelfTest
             await Task.Delay(300);
             settings.OpenGroupCommand.Execute(settings.Groups.First(g => g.Id == SettingsCatalog.About));
             await Task.Delay(400);
+            Check("紧凑：关于里的每日检查更新开关和说明不超出宽度", Dispatcher.UIThread.Invoke(() => page.AutoUpdateBox.IsEffectivelyVisible
+                && page.FormScroll.Extent.Width <= page.FormScroll.Viewport.Width + 1),
+                Dispatcher.UIThread.Invoke(() => $"{page.FormScroll.Extent.Width:0} / {page.FormScroll.Viewport.Width:0}"));
             await ShotAsync("settings-600-about");
             settings.BackToGroupsCommand.Execute(null);
             await Task.Delay(300);
