@@ -82,7 +82,7 @@ public static class Program
           jay-server node panel               打印网页管理面板的链接（只能在本机打开；远程服务器用 ssh -L 转发端口）
           jay-server node ban host|room|account|room-host|node|operator <房主指纹|房间编号|账号|房间编号|志愿节点地址|志愿节点运营者的 Jay 账户> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
-              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
+              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|room-host|node|operator <...>
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
         自己的公共网络（连接串 JAYNET2-...）：
@@ -808,8 +808,6 @@ public static class Program
         // The directory only speaks the authenticated channel now; the old flag is accepted so existing scripts keep running.
         if (options.Has("secure-directory-only")) log("--secure-directory-only is the default now and can be removed");
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
-        if (options.Has("no-volunteers")) builder.WithoutVolunteers();
-        if (options.Has("signed-volunteers")) builder.RequireSignedVolunteers();
         else if (options.Get("rate-limit") is { } rate)
         {
             var parts = rate.Split(',', StringSplitOptions.TrimEntries);
@@ -818,6 +816,8 @@ public static class Program
             var n = parts.Select(int.Parse).ToArray();
             builder.UseRateLimit(n[0], n[1], n[2]);
         }
+        if (options.Has("no-volunteers")) builder.WithoutVolunteers();
+        if (options.Has("signed-volunteers")) builder.RequireSignedVolunteers();
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
         if (!options.Has("seed-only") && LoginFor(root, options, networkId, output) is { } login) builder.UseLogin(login);

@@ -181,8 +181,12 @@ public static class VolunteerOperator
     {
         try
         {
-            if (node is not JsonObject o || DeviceCertificate.FromJson(o["cert"]) is not { } cert || !cert.Verify(cert.DeviceKey)) return null;
-            if (o["at"]?.GetValue<long>() is not { } at || Math.Abs(at - now.ToUnixTimeSeconds()) > (long)MaxClockSkew.TotalSeconds) return null;
+            // The time first (cheap, and compared without overflow), then the certificate and signature.
+            if (node is not JsonObject o || o["at"]?.GetValue<long>() is not { } at) return null;
+            var n = now.ToUnixTimeSeconds();
+            var skew = (long)MaxClockSkew.TotalSeconds;
+            if (at < n - skew || at > n + skew) return null;
+            if (DeviceCertificate.FromJson(o["cert"]) is not { } cert || !cert.Verify(cert.DeviceKey)) return null;
             var sig = HybridSignature.Decode(Convert.FromBase64String(o["sig"]?.GetValue<string>() ?? ""));
             return HybridSignature.Verify(cert.DeviceEd, cert.DeviceMlDsa, Domain, Message(network, address, at), sig) ? (cert.Account, at) : null;
         }
@@ -190,8 +194,8 @@ public static class VolunteerOperator
     }
 }
 
-/// <summary>A volunteer node from the directory, with a tag for its operator ("" when it didn't say who runs it).</summary>
-/// <remarks>Tags only compare between nodes from the same directory reply; <see cref="RoomDirectoryClient.VolunteerNodesAsync"/> scopes them.</remarks>
+/// <summary>A volunteer node with a tag for its operator ("" when unknown), as the directory orders them.</summary>
+/// <remarks>Tags stay in the directory: members only get the addresses, already spread over operators.</remarks>
 public sealed record VolunteerNode(string Url, string Operator)
 {
     /// <summary>
@@ -212,6 +216,12 @@ public sealed record VolunteerNode(string Url, string Operator)
 }
 
 /// <summary>
+/// A listed volunteer as the network's operator sees it: the Jay account it was registered under (null: unsigned) and
+/// the latest conflicting claim, if any (a Jay account, or "" for an unsigned one).
+/// </summary>
+public sealed record VolunteerEntry(string Url, string? Operator, bool Disputed = false, string? ClaimedBy = null);
+
+/// <summary>
 /// The directory's list of volunteer nodes. Entries come in through <see cref="Register"/>, are probed in the background
 /// and only listed once the probe succeeded (re-probed every hour). Unrenewed entries drop out after
 /// <see cref="VolunteerNodes.Ttl"/>.
@@ -225,8 +235,13 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     {
         /// <summary>The Jay account that runs it (from a signed registration), or null.</summary>
         public string? Operator;
-        /// <summary>Someone else (or nobody) tried to register it under another operator: shown as unsigned until it lapses.</summary>
+        /// <summary>
+        /// Someone tried to register it under another operator (another account, or none). The operator stays; the
+        /// claim is kept for the network's operator to look at, and the node doesn't count as anyone's when spreading.
+        /// </summary>
         public bool Disputed;
+        /// <summary>The latest conflicting claim: a Jay account, or "" for an unsigned one.</summary>
+        public string? ClaimedBy;
         public DateTimeOffset Seen;
         public DateTimeOffset? VerifiedAt;
         public bool Probing;
@@ -257,6 +272,9 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     /// <summary>Raised when an address got listed or failed its probe (for logs and counters).</summary>
     public event Action<string, bool>? Probed;
+
+    /// <summary>Raised the first time an address gets a conflicting claim (for logs).</summary>
+    public event Action<string>? Disputed;
 
     /// <summary>The last probe started by <see cref="Register"/> (tests wait on it).</summary>
     public Task LastProbe { get; private set; } = Task.CompletedTask;
@@ -312,8 +330,10 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         }
         if (account is null && RequireOperator) return Error("operator");
         if (account is not null && BlockedOperator?.Invoke(account) == true) return Error("banned");
-        bool startProbe;
-        bool listed;
+        bool startProbe = false;
+        bool listed = false;
+        var conflict = false;
+        var newlyDisputed = false;
         lock (_gate)
         {
             Prune(now);
@@ -329,17 +349,27 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 _entries[address] = entry = new Entry { Operator = account };
             }
             // An address keeps its operator (or having none) until it lapses: nobody can take it over, add a signature
-            // to it or strip one. A conflicting claim can't be settled here (whoever registered first needn't be who runs
-            // the node), so the entry stops saying who runs it until it lapses.
+            // to it or strip one. Who registered first needn't be who runs the node, so a conflicting claim is kept for
+            // the network's operator to look at (it changes nothing else).
             else if (entry.Operator != account)
             {
+                conflict = true;
+                newlyDisputed = !entry.Disputed;
                 entry.Disputed = true;
-                return Error("owner");
+                entry.ClaimedBy = account ?? "";
             }
-            entry.Seen = now;
-            listed = entry.VerifiedAt is { } at && now - at < ReprobeEvery;
-            startProbe = !listed && !entry.Probing;
-            if (startProbe) entry.Probing = true;
+            if (!conflict)
+            {
+                entry.Seen = now;
+                listed = entry.VerifiedAt is { } at && now - at < ReprobeEvery;
+                startProbe = !listed && !entry.Probing;
+                if (startProbe) entry.Probing = true;
+            }
+        }
+        if (conflict)
+        {
+            if (newlyDisputed) Disputed?.Invoke(address);
+            return Error("owner");
         }
         if (startProbe) LastProbe = ProbeAsync(address);
         return new JsonObject { ["ok"] = true, ["listed"] = listed };
@@ -368,17 +398,20 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// </summary>
     public IReadOnlyList<VolunteerNode> Pick(int count = VolunteerNodes.PerRequest)
     {
-        var shuffled = Live().OrderBy(_ => Random.Shared.Next()).Select(p => new VolunteerNode(p.Url, Tag(p.Operator)));
+        var shuffled = Live().OrderBy(_ => Random.Shared.Next()).Select(p => new VolunteerNode(p.Url, Tag(p.Disputed ? null : p.Operator)));
         return [.. VolunteerNode.SpreadOperators(shuffled).Take(count)];
     }
 
     /// <summary>Every verified, live volunteer (admin API).</summary>
     public IReadOnlyList<string> Listed() => [.. Live().Select(p => p.Url)];
 
-    /// <summary>Every verified, live volunteer with the Jay account that runs it, if it said (admin API).</summary>
-    public IReadOnlyList<(string Url, string? Operator)> Operators() => Live();
+    /// <summary>
+    /// Every verified, live volunteer with the Jay account it was registered under (null: unsigned), and whether someone
+    /// claimed it under another operator since (admin API).
+    /// </summary>
+    public IReadOnlyList<VolunteerEntry> Operators() => Live();
 
-    private List<(string Url, string? Operator)> Live()
+    private List<VolunteerEntry> Live()
     {
         var now = _now();
         lock (_gate)
@@ -386,7 +419,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             Prune(now);
             return [.. _entries.Where(p => p.Value.VerifiedAt is not null && Blocked?.Invoke(p.Key) != true
                     && (p.Value.Operator is not { } op || BlockedOperator?.Invoke(op) != true))
-                .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => (p.Key, p.Value.Disputed ? null : p.Value.Operator))];
+                .OrderBy(p => p.Key, StringComparer.Ordinal)
+                .Select(p => new VolunteerEntry(p.Key, p.Value.Operator, p.Value.Disputed, p.Value.ClaimedBy))];
         }
     }
 

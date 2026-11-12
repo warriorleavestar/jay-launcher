@@ -284,6 +284,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
                     NetworkId = Profile.Id,
                 };
                 Volunteers.Probed += (url, ok) => _b.Log(ok ? $"Volunteer node listed: {url}" : $"Volunteer node not reachable, not listed: {url}");
+                Volunteers.Disputed += url => _b.Log($"Volunteer node claimed under another operator, see node nodes: {url}");
             }
             var gates = new List<IRoomGate>();
             if (Bans is not null) gates.Add(Bans);

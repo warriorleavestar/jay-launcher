@@ -240,6 +240,9 @@ public sealed class BanList : IRoomGate
 public sealed class RateLimitGate(int maxRoomsPerHost = 3, int newPerHostPerMinute = 6, int newPerMinute = 600, Func<DateTimeOffset>? clock = null)
     : IRoomGate, IDirectoryObserver
 {
+    /// <summary>The limits in force: rooms per host, new rooms per host per minute, new rooms per minute.</summary>
+    internal (int PerHost, int NewPerHost, int New) Limits => (maxRoomsPerHost, newPerHostPerMinute, newPerMinute);
+
     private readonly Lock _gate = new();
     private readonly Dictionary<string, HashSet<string>> _rooms = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _owner = new(StringComparer.Ordinal);
