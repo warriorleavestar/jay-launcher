@@ -145,6 +145,33 @@ public sealed class TrustQuorumTests
     }
 
     [Fact]
+    public void BuiltInNetworkDirectoryNeedsATrusteeCertificate()
+    {
+        // With trust keys built in, the built-in network's directory is no longer trusted on first use: it needs a
+        // certificate both trustees signed. Without one, or with signatures from anyone else, it is refused, even
+        // when this address was remembered under trust on first use before the upgrade.
+        var jay = PublicNetworkProfile.Jay();
+        using var identity = X25519KeyPair.Generate();
+        var dir = Directory.CreateTempSubdirectory("jay-dirtrust-");
+        try
+        {
+            var memory = new DirectoryKeyMemory(Path.Combine(dir.FullName, DirectoryKeyMemory.FileName));
+            memory.Remember(jay.NetworkName, "10.235.0.1", identity.PublicKey);
+            var trust = new DirectoryTrust { Network = jay.NetworkName, Roots = jay.DirectoryRoots, RootsNeed = jay.DirectoryRootsNeed, Memory = memory };
+
+            // Control: without roots the same memory still accepts the remembered key, so the refusals below come from strict mode.
+            Assert.True(new DirectoryTrust { Network = jay.NetworkName, Memory = memory }.Accepts("10.235.0.1", identity.PublicKey, []));
+            Assert.True(trust.IsStrict);
+            Assert.False(trust.Accepts("10.235.0.1", identity.PublicKey, []));
+            Assert.False(trust.Accepts("10.235.0.2", identity.PublicKey, []));
+            var one = DirectoryCertificate.Issue(A, identity.PublicKey, jay.NetworkName, DateTimeOffset.UtcNow.AddDays(30));
+            Assert.False(trust.Accepts("10.235.0.1", identity.PublicKey, one));
+            Assert.False(trust.Accepts("10.235.0.1", identity.PublicKey, DirectoryCertificate.Cosign(one, B)));
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
     public void BothAlgorithmsMustVerify()
     {
         var message = "jay-test\n"u8.ToArray();
