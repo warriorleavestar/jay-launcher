@@ -90,14 +90,14 @@ await server.RunAsync(CancellationToken.None);
 
 ### 目录请求
 
-一条 TCP 连接一个请求，全程走加密的目录通道（`DirectoryChannel`，Noise XXhfspsk0，见 `docs/security/directory-identity.md`）：握手第三条消息里是请求 JSON（UTF-8，最长 16 KB）。回复是一帧加密的 JSON，然后关连接（各版本都读得懂，旧版 Jay 也能看到 `version` 错误）。只有 `snap` 的回复不同：先发一帧加密的 4 字节长度（大端，第一个字节是 0，JSON 不会以它开头），再按每帧最多 16 KB 发加密的 JSON，用空格补到 64 KB 的整数倍，最长 16 MB。10 秒内要回；`snap` 每一帧 10 秒内要发出去，整份最多 60 秒，同时最多 8 个（多了回 `busy`），每个来源地址每分钟最多 6 次（`rate`）。没有明文协议了：以 `{` 开头的旧请求直接断开。
+一条 TCP 连接一个请求，全程走加密的目录通道（`DirectoryChannel`，Noise XXhfspsk0，见 `docs/security/directory-identity.md`）：握手第三条消息里是请求 JSON（UTF-8，最长 16 KB）。回复是一帧加密的 JSON，然后关连接（各版本都读得懂，旧版 Jay 也能看到 `version` 错误）。只有 `snap` 的回复不同：先发一帧加密的 4 字节长度（大端，第一个字节是 0，JSON 不会以它开头），再按每帧最多 16 KB 发加密的 JSON，用空格补到 64 KB 的整数倍，最长 16 MB。10 秒内要回；`snap` 每一帧 10 秒内要发出去，整份按不低于 128 KB/s 算时限（10 秒加上大小除以这个速度）。不超过 256 KB 的回复（平常的增量）有自己的 32 个名额；更大的同时最多 8 个，开始发送另有一个桶（一次最多 32 个，每秒补 4 个）；没有名额回 `busy`。每个来源地址每分钟最多 6 次（`rate`）；经 EasyTier 转进来的请求都来自本机，这条（以及 `rv.put` / `rec.put` 的同类限制）在那里不起作用，名额和桶照样起作用。没有明文协议了：以 `{` 开头的旧请求直接断开。
 回复都有 `ok`。失败时 `{ok: false, error: "<code>", reason?: "<给房主看的话，最多 120 字>"}`。
 
 每个请求都带 `jay: "<Jay 的版本号>"`（比如 `"0.8.0"`）。网络配置有 `policy.minVersion` 时，版本更低或者没带这个字段就回 `{ok: false, error: "version", min: "<最低版本>"}`，不处理请求。
 
 | op | 请求 | 回复 |
 |---|---|---|
-| `announce` | `{room: <房间>, listed: bool, hidden: [{k: "<64 位十六进制>", b: "<284 字节，base64>"}, ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`hidden` 是房主给每张还有效的邀请封好的条目（`HiddenEntry`），目录原样放进快照，长度不对回 `bad`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok}` |
+| `announce` | `{room: <房间>, listed: bool, hidden: [{k: "<64 位十六进制>", b: "<284 字节，base64>", p: "<64 位十六进制>", s: "<128 位十六进制>"}, ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`hidden` 是房主给每张还有效的邀请封好的条目（`HiddenEntry`），目录原样放进快照，长度不对回 `bad`。`p` 是从邀请算出的条目公钥，`k` 必须是它的哈希；`s` 是这把钥匙对条目、房间编号和 `seq` 的签名（`HiddenEntry.VerifyPublish`），不对回 `lookup`。房间的 `seq` 是毫秒时间，和目录的时钟差超过 10 分钟回 `clock`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok}` |
 | `withdraw` | `{id, seq, sig}`：`sig` 是房间签名钥匙对 `"jay-withdraw-v1\n<id>\n<seq>"` 的 Ed25519 签名（十六进制） | `{ok}` |
 | `snap` | `{epoch?, have?}`：本机那份快照来自哪次启动、到第几版；第一次不带 | `{ok, epoch, ver, full, from?, rooms: [<房间>, ...], hidden: [{k, t, b}, ...], gone: ["r:<id>" 或 "h:<k>:<t>", ...]}`。`t` 是随机的槽位标记：同一个索引 `k` 下最多 8 个房间各有一条。公开房间只改了 `seq`、签名和时间的续期不算变化。整份快照有上限，再发布会超过时回 `full`。`epoch` 对得上、`have` 还在变更记录里时只给之后变了的（`full` 为假，`from` = `have`），否则给全部。`rooms` 是 `listed` 为真且不是隐藏房间的。每个请求者都发一样的请求，目录看不出谁在找哪个房间 |
 | `find` | `{code: "JAYF1-..."}` | `{ok, room?}`：用登记的指纹密钥算标签，见 `FingerprintCode.Matches` |
@@ -107,7 +107,7 @@ await server.RunAsync(CancellationToken.None);
 | `probe` | `{url: "tcp://<公网地址>:<端口>"}`：想当志愿中转的人先测端口 | `{ok, reachable}`：目录从外网连一次，不列出。不收志愿中转时回 `off`，被封回 `banned`，地址不是公网回 `bad`，测得太频繁回 `rate` |
 | `x-*` | 你自己的 | 你自己的 |
 
-Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别人占着、旧版本）、`full`（满了）、`gone`、`rate`（限流）、`version`（Jay 太旧，带 `min`）、`login`（要先登录），其他码有 `reason` 就显示 `reason`。
+Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别人占着、旧版本）、`full`（满了）、`gone`、`rate`（限流）、`busy`（快照名额满了，稍后再试）、`clock`（房主电脑时间不准）、`version`（Jay 太旧，带 `min`）、`login`（要先登录），其他码有 `reason` 就显示 `reason`。
 
 ### 房间（room）
 

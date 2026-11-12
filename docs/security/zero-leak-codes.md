@@ -248,11 +248,20 @@ longer asks a directory "where is the room for this invite?". Every Jay download
 locally, so the directory can't tell who looked for which room, or whether anyone looked at all.
 
 - **Hidden entries**: for each open invite the host seals `{id, ip, key}` (padded to 256 bytes) with ChaCha20-Poly1305 under
-  `HKDF-SHA256(lobbyKey, info "jay-dir-seal-v1")` and files it under index `HKDF-SHA256(lobbyKey, info "jay-dir-index-v1")`
-  (32 bytes, also the associated data). Every entry is 284 bytes. The directory never sees the lobby key, so it can't
-  open an entry or tell which invite it belongs to. Up to 8 rooms (`MaxEntriesPerIndex`) may have an entry under the
-  same index, each under a random slot tag. A reader tries every entry under the index; junk doesn't open. When entries that open
-  point at different hosts (someone else holding the invite publishes under it), the reader trusts none of them.
+  `HKDF-SHA256(lobbyKey, info "jay-dir-seal-v1")`. Every entry is 284 bytes.
+- **Self-certifying index**: the invite also gives an Ed25519 entry key (seed `HKDF-SHA256(lobbyKey, info
+  "jay-dir-entry-key-v1")`). The index is `SHA-256("jay-dir-index-v2" || entry public key)` (32 bytes, also the sealing
+  associated data). A publish carries the entry public key `p` and a signature `s` over
+  `"jay-dir-entry-v1\n" || index || sealed entry || room id || seq (int64 BE)`. The directory checks that the key hashes
+  to the index and that the signature holds, so only holders of the invite can publish under its index: someone who
+  only saw the index (say in an old snapshot, or after a directory restart) gets `lookup`. The signature covers the room
+  and the listing version, and the version is the listing's time in milliseconds, which must be within 10 minutes of
+  the directory's clock (`clock` otherwise), so a captured entry can't be replayed for another room or much later. The
+  directory still never sees the lobby key, so it can't open an entry or tell which invite it belongs to.
+- **Sharing an index**: up to 8 rooms (`MaxEntriesPerIndex`) may have an entry under the same index, each under a
+  random slot tag; only holders of the invite can fill those places. A reader tries every entry under the index. When
+  the invite names its host (the host key is in it), the entry for that host is the answer; otherwise, when entries
+  that open point at different hosts, the reader trusts none of them.
   Renewals reuse the same sealed bytes while nothing changed, so they don't show up as changes.
 - **Public rooms**: a renewal that only changes the seq, signature and time isn't a snapshot change; readers keep the
   earlier signed version, and expiry shows up as `gone` either way.
@@ -263,8 +272,15 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   first. A reply is checked through before any of it is applied. A directory's copy that hasn't been refreshed for
   2 × 60 s + the 90 s room lifetime (the directory went away) is dropped.
 - **Directory limits**: the snapshot is capped below the 16 MB reply limit (new publishes that would pass it get
-  `full`); replies are serialized once per version; at most 8 snapshots go out at once (`busy`) and 6 per source
-  address per minute (`rate`); a reader that stops reading for 10 s is dropped.
+  `full`); replies are serialized once per version. Small replies (up to 256 KB, the usual delta) have 32 slots of
+  their own; large ones have 8 slots and a start budget of 32 at once refilling at 4 per second (`busy` otherwise).
+  A large reply must go out at no less than 128 KB/s (10 s plus size over that rate), and each frame within 10 s.
+  6 requests per source address per minute (`rate`). Behind the EasyTier forward every request comes from loopback,
+  so the per-source limit (and the same limit on `rv.put` / `rec.put`) does not apply there; the slot and budget limits
+  do.
+- **Reader side**: the first refresh is awaited only until it has been tried; if it failed (`busy`, `version`,
+  unreachable) the reader gets that error at once, and the poller tries again after 2, 5 and 10 s before going back to
+  every 60 s. A reader whose copies have all gone stale gets an error, not an empty answer.
 - **Not signed by the directory**: the copy comes over the authenticated `DirectoryChannel`, which already proves it is
   this network's directory. The plan's separate snapshot signature only matters once snapshots are mirrored by others.
 - **Still on the wire**: `find` (fingerprint codes). A fingerprint code can only be matched with the host's search key,

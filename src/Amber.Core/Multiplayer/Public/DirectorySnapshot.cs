@@ -12,6 +12,11 @@ namespace Amber.Core.Multiplayer.Public;
 /// <para>
 /// Every entry has the same size (<see cref="SealedLength"/>), so entries say nothing about their room.
 /// </para>
+/// <para>
+/// The index is self-certifying: it is the hash of an Ed25519 key derived from the lobby key, and the directory only
+/// files an entry under it when the publish is signed with that key (<see cref="SignPublish"/>). Only holders of the
+/// invite can derive the key, so nobody else can put anything under an invite's index.
+/// </para>
 /// </summary>
 public static class HiddenEntry
 {
@@ -27,14 +32,64 @@ public static class HiddenEntry
     /// <summary>Length of every sealed entry.</summary>
     public const int SealedLength = NonceLength + PlaintextLength + TagLength;
 
-    private static readonly byte[] IndexInfo = "jay-dir-index-v1"u8.ToArray();
+    /// <summary>Length of the entry key's public half and of a publish signature.</summary>
+    public const int PublicKeyLength = 32;
+    public const int SignatureLength = 64;
+
+    /// <summary>How far a publish signature's time may be from the directory's clock.</summary>
+    public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(10);
+
+    private static readonly byte[] EntryKeyInfo = "jay-dir-entry-key-v1"u8.ToArray();
+    private static readonly byte[] IndexDomain = "jay-dir-index-v2"u8.ToArray();
+    private static readonly byte[] PublishDomain = "jay-dir-entry-v1\n"u8.ToArray();
     private static readonly byte[] SealInfo = "jay-dir-seal-v1"u8.ToArray();
 
-    /// <summary>The index for an invite's <paramref name="lobbyKey"/> (at least 16 bytes).</summary>
-    public static byte[] Index(ReadOnlySpan<byte> lobbyKey)
+    /// <summary>The public half of the entry key for an invite's <paramref name="lobbyKey"/> (at least 16 bytes).</summary>
+    public static byte[] PublicKey(ReadOnlySpan<byte> lobbyKey)
+    {
+        var seed = EntrySeed(lobbyKey);
+        try { return new Org.BouncyCastle.Crypto.Parameters.Ed25519PrivateKeyParameters(seed).GeneratePublicKey().GetEncoded(); }
+        finally { CryptographicOperations.ZeroMemory(seed); }
+    }
+
+    /// <summary>The index for an invite's <paramref name="lobbyKey"/>: the hash of its entry key.</summary>
+    public static byte[] Index(ReadOnlySpan<byte> lobbyKey) => IndexOf(PublicKey(lobbyKey));
+
+    /// <summary>The index an entry key may publish under (the directory checks this).</summary>
+    public static byte[] IndexOf(ReadOnlySpan<byte> publicKey) => SHA256.HashData([.. IndexDomain, .. publicKey]);
+
+    /// <summary>Signs publishing <paramref name="sealedEntry"/> for room <paramref name="roomId"/> at <paramref name="at"/> (Unix seconds).</summary>
+    public static byte[] SignPublish(ReadOnlySpan<byte> lobbyKey, ReadOnlySpan<byte> sealedEntry, string roomId, long at)
+    {
+        var seed = EntrySeed(lobbyKey);
+        try
+        {
+            var key = new Org.BouncyCastle.Crypto.Parameters.Ed25519PrivateKeyParameters(seed);
+            var message = PublishBytes(IndexOf(key.GeneratePublicKey().GetEncoded()), sealedEntry, roomId, at);
+            var signer = new Org.BouncyCastle.Crypto.Signers.Ed25519Signer();
+            signer.Init(true, key);
+            signer.BlockUpdate(message, 0, message.Length);
+            return signer.GenerateSignature();
+        }
+        finally { CryptographicOperations.ZeroMemory(seed); }
+    }
+
+    /// <summary>True when <paramref name="signature"/> by <paramref name="publicKey"/> publishes this entry under this index.</summary>
+    public static bool VerifyPublish(ReadOnlySpan<byte> index, ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> sealedEntry, string roomId, long at, byte[] signature) =>
+        publicKey.Length == PublicKeyLength && signature.Length == SignatureLength && index.SequenceEqual(IndexOf(publicKey))
+        && RoomSigner.Verify(publicKey.ToArray(), PublishBytes(index, sealedEntry, roomId, at), signature);
+
+    private static byte[] PublishBytes(ReadOnlySpan<byte> index, ReadOnlySpan<byte> sealedEntry, string roomId, long at)
+    {
+        var time = new byte[8];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(time, at);
+        return [.. PublishDomain, .. index, .. sealedEntry, .. Encoding.UTF8.GetBytes(roomId), .. time];
+    }
+
+    private static byte[] EntrySeed(ReadOnlySpan<byte> lobbyKey)
     {
         Check(lobbyKey);
-        return HKDF.DeriveKey(HashAlgorithmName.SHA256, lobbyKey.ToArray(), IndexLength, [], IndexInfo);
+        return HKDF.DeriveKey(HashAlgorithmName.SHA256, lobbyKey.ToArray(), 32, [], EntryKeyInfo);
     }
 
     /// <summary>Seals where to knock for holders of <paramref name="lobbyKey"/>. The index is bound as associated data.</summary>
@@ -143,7 +198,11 @@ public sealed class DirectorySnapshots
     private readonly Dictionary<string, Copy> _copies = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _refreshing = new(1, 1);
     private CancellationTokenSource? _polling;
-    private TaskCompletionSource _firstRefresh = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>Done once the first refresh was tried, whether it worked or not.</summary>
+    private readonly TaskCompletionSource _firstAttempt = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Waits after failed refreshes before trying again (then back to <see cref="PollEvery"/>).</summary>
+    internal static readonly TimeSpan[] RetryAfterFailure = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)];
     private Exception? _lastError;
     private DateTimeOffset? _refreshedAt;
 
@@ -179,12 +238,19 @@ public sealed class DirectorySnapshots
         var interval = every ?? PollEvery;
         _ = Task.Run(async () =>
         {
+            var failures = 0;
             while (!token.IsCancellationRequested)
             {
                 // Nothing a directory sends may stop the poller: a bad reply only costs that round.
-                try { await RefreshAsync(client(), token); }
-                catch (Exception e) when (e is not OutOfMemoryException) { }
-                try { await Task.Delay(interval, token); }
+                try
+                {
+                    await RefreshAsync(client(), token);
+                    failures = 0;
+                }
+                catch (Exception e) when (e is not OutOfMemoryException) { failures++; }
+                // A failed round (busy, unreachable) is tried again soon, a few times, before going back to the schedule.
+                var wait = failures is > 0 and <= 3 ? RetryAfterFailure[failures - 1] : interval;
+                try { await Task.Delay(wait < interval ? wait : interval, token); }
                 catch (OperationCanceledException) { break; }
             }
         });
@@ -217,7 +283,14 @@ public sealed class DirectorySnapshots
         {
             Dictionary<string, (string Epoch, long Version)> have;
             lock (_gate) have = _copies.ToDictionary(p => p.Key, p => (p.Value.Epoch, p.Value.Version), StringComparer.Ordinal);
-            var replies = await client.SnapshotAsync(have, ct);
+            List<(string Ip, JsonObject? Reply, Exception? Error)> replies;
+            try { replies = await client.SnapshotAsync(have, ct); }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                lock (_gate) _lastError = e;
+                _firstAttempt.TrySetResult();
+                throw;
+            }
             var parsed = replies.Select(r => (r.Ip, Parsed: r.Reply is null ? null : Parse(r.Reply), r.Error)).ToList();
             var any = false;
             Exception? error = null;
@@ -239,10 +312,10 @@ public sealed class DirectorySnapshots
                 {
                     _refreshedAt = now;
                     _lastError = null;
-                    _firstRefresh.TrySetResult();
                 }
                 else _lastError = error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
             }
+            _firstAttempt.TrySetResult();
             // Nobody answered: a reader that asked for fresh data gets the error; a poller keeps the copy it has.
             if (!any) throw error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
         }
@@ -315,8 +388,8 @@ public sealed class DirectorySnapshots
     }
 
     /// <summary>
-    /// Makes sure the copy is good to read: while polling, waits for the first refresh (or returns the copy as it is
-    /// when that failed); otherwise refreshes now.
+    /// Makes sure the copy is good to read: while polling, waits until the first refresh was tried and then needs a copy
+    /// that is still fresh, else throws the last error; without polling, refreshes now.
     /// </summary>
     internal async Task ReadyAsync(RoomDirectoryClient client, CancellationToken ct)
     {
@@ -325,17 +398,16 @@ public sealed class DirectorySnapshots
             await RefreshAsync(client, ct);
             return;
         }
-        Task first;
-        lock (_gate) first = _firstRefresh.Task;
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // The first snapshot of a busy directory can take as long as the directory gives it.
         wait.CancelAfter(RoomDirectoryProtocol.SnapshotTimeout + RoomDirectoryProtocol.RequestTimeout);
-        try { await first.WaitAsync(wait.Token); }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        try { await _firstAttempt.Task.WaitAsync(wait.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+        lock (_gate)
         {
-            Exception? error;
-            lock (_gate) error = _lastError;
-            throw error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
+            DropStale(_now());
+            if (_copies.Count > 0) return;
+            throw _lastError ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
         }
     }
 
@@ -354,10 +426,11 @@ public sealed class DirectorySnapshots
 
     /// <summary>
     /// Where to knock for the room behind an invite's lobby key, from the local copy only. Every entry under the invite's
-    /// index is tried (others' junk there doesn't open). Null when none opens, or when entries that open point at
-    /// different hosts: someone else holding the invite is publishing under it, and there is no telling which is real.
+    /// index is tried. Only holders of the invite can publish there, but several may: with <paramref name="expectedHost"/>
+    /// (a mailed invite names its host) the entry for that host wins; without it, entries that point at different hosts
+    /// cancel out (null), since there is no telling which is real.
     /// </summary>
-    public DirectoryHit? Find(ReadOnlySpan<byte> lobbyKey)
+    public DirectoryHit? Find(ReadOnlySpan<byte> lobbyKey, byte[]? expectedHost = null)
     {
         var prefix = Convert.ToHexStringLower(HiddenEntry.Index(lobbyKey)) + ":";
         List<byte[]> candidates;
@@ -370,6 +443,11 @@ public sealed class DirectorySnapshots
         foreach (var blob in candidates)
         {
             if (HiddenEntry.Open(lobbyKey, blob) is not { } hit) continue;
+            if (expectedHost is not null)
+            {
+                if (hit.HostKey.AsSpan().SequenceEqual(expectedHost)) return hit;
+                continue;
+            }
             if (found is null) found = hit;
             else if (!found.HostKey.AsSpan().SequenceEqual(hit.HostKey)) return null;
         }

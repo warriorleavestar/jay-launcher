@@ -167,7 +167,7 @@ public static class DirectoryChannel
                     if (total > RoomDirectoryProtocol.MaxReply) throw new InvalidDataException(L.T("core.mp.public.too_large"));
                     var header = new byte[4];
                     BinaryPrimitives.WriteInt32BigEndian(header, total);
-                    await Stalled(WriteFrameAsync(stream, send.EncryptWithAd(Prologue, header), token));
+                    await Stalled(send.EncryptWithAd(Prologue, header));
                     // Trailing spaces are JSON whitespace: the client parses the padded reply as it is.
                     var chunk = new byte[ReplyChunk];
                     for (var at = 0; at < total; at += ReplyChunk)
@@ -176,19 +176,18 @@ public static class DirectoryChannel
                         var fromJson = Math.Clamp(json.Length - at, 0, length);
                         json.AsSpan(at < json.Length ? at : 0, fromJson).CopyTo(chunk);
                         chunk.AsSpan(fromJson, length - fromJson).Fill((byte)' ');
-                        await Stalled(WriteFrameAsync(stream, send.EncryptWithAd(Prologue, chunk.AsSpan(0, length)), token));
+                        await Stalled(send.EncryptWithAd(Prologue, chunk.AsSpan(0, length)));
                     }
                 }
 
                 // Each frame must go out within the stall time: a reader that stops reading is dropped.
-                async Task Stalled(Task write)
+                async Task Stalled(byte[] frame)
                 {
-                    if (await Task.WhenAny(write, Task.Delay(stall, token)) != write)
-                    {
-                        stream.Dispose();
-                        throw new OperationCanceledException();
-                    }
-                    await write;
+                    using var frameDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    frameDeadline.CancelAfter(stall);
+                    // Not every stream honours cancellation of a pending write; closing it always ends the write.
+                    await using var close = frameDeadline.Token.Register(stream.Dispose);
+                    await WriteFrameAsync(stream, frame, frameDeadline.Token);
                 }
             });
         }

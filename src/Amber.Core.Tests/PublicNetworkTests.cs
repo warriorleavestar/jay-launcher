@@ -30,7 +30,8 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult(Ip);
     }
 
-    private DateTimeOffset _now = new(2026, 11, 9, 0, 0, 0, TimeSpan.Zero);
+    // Real time, truncated: the announcer signs with the wall clock and hidden entries are checked against the directory clock.
+    private DateTimeOffset _now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     private readonly RoomDirectoryServer _directory;
     private readonly FakeNetwork _net = new();
     private readonly X25519KeyPair _host = X25519KeyPair.Generate();

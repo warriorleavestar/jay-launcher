@@ -1831,6 +1831,8 @@
   "core.mp.public.err_login": "このネットワークではログインしたアカウントだけがルームを開けます。先に公開ネットワークでログインしてください",
   "core.mp.public.observer_error": "ディレクトリのイベント処理でエラー：{0}",
   "core.mp.public.err_rate": "公開の頻度が高すぎます。このネットワークから少し待つよう求められています",
+  "core.mp.public.err_busy": "ディレクトリが混み合っています。Jay が少ししてから自動で再試行します。",
+  "core.mp.public.err_clock": "このパソコンの時計がディレクトリと大きくずれています。システムの時刻を合わせてからやり直してください。",
   "core.mp.public.err_policy": "このネットワークはこのルームを受け付けません：{0}",
   "core.mp.public.no_address": "公開ネットワークのアドレスがまだ割り当てられていません",
   "core.mp.public.announce_failed": "ルームを公開ネットワークに掲載できませんでした：{0}",

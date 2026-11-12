@@ -41,22 +41,29 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Salt = mode == RoomVisibility.Password ? new string('b', 32) : null,
     };
 
-    private JsonObject Announce(RoomSigner signer, RoomListing listing, bool listed = true) => new()
+    private JsonObject Announce(RoomSigner signer, RoomListing listing, bool listed = true)
     {
-        ["op"] = "announce",
-        ["room"] = signer.Sign(listing, _now).ToJson(),
-        ["listed"] = listed,
-        ["hidden"] = new JsonArray(listed ? [] : [HiddenFor(listing)]),
-    };
+        var signed = signer.Sign(listing, _now);
+        return new()
+        {
+            ["op"] = "announce",
+            ["room"] = signed.ToJson(),
+            ["listed"] = listed,
+            ["hidden"] = new JsonArray(listed ? [] : [HiddenFor(signed)]),
+        };
+    }
 
     /// <summary>A hidden entry under a fresh invite (each hidden test room gets its own index).</summary>
     private static JsonNode HiddenFor(RoomListing listing)
     {
         var lobby = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        var sealedEntry = HiddenEntry.Seal(lobby, new DirectoryHit("room", "10.235.0.7", new byte[32]));
         return new JsonObject
         {
             ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)),
-            ["b"] = Convert.ToBase64String(HiddenEntry.Seal(lobby, new DirectoryHit("room", "10.235.0.7", new byte[32]))),
+            ["b"] = Convert.ToBase64String(sealedEntry),
+            ["p"] = Convert.ToHexStringLower(HiddenEntry.PublicKey(lobby)),
+            ["s"] = Convert.ToHexStringLower(HiddenEntry.SignPublish(lobby, sealedEntry, listing.Id, listing.Seq)),
         };
     }
 

@@ -184,7 +184,7 @@ public static class PublicJoin
         CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
         byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
-        var hit = await (client ?? new RoomDirectoryClient(network)).LookupAsync(invite.LobbyKey, ct);
+        var hit = await (client ?? new RoomDirectoryClient(network)).LookupAsync(invite.LobbyKey, ct, expectedHost);
         if (hit is null) return null;
         if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) return null;
         return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);

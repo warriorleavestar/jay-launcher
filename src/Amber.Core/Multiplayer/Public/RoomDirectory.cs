@@ -106,11 +106,31 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// </summary>
     internal long SnapshotBudget { get; set; } = RoomDirectoryProtocol.MaxReply - 4L * RoomDirectoryProtocol.SnapshotPad;
 
-    /// <summary>Snapshots sent at the same time at most (each holds a few MB for as long as the reader takes).</summary>
+    /// <summary>
+    /// Large snapshot replies (a full snapshot of a busy directory) sent at the same time at most, and how many may start
+    /// per second on average (a bucket of <see cref="LargeSnapshotBurst"/>). Small replies (the usual once-a-minute
+    /// deltas) have their own <see cref="MaxConcurrentSmallSnapshots"/> slots, so large ones never hold them up.
+    /// </summary>
     public const int MaxConcurrentSnapshots = 8;
-    /// <summary>Snapshots one source address may ask for per minute (readers poll once a minute).</summary>
+    public const int MaxConcurrentSmallSnapshots = 32;
+    public const int LargeSnapshotBurst = 32;
+    public const double LargeSnapshotsPerSecond = 4;
+    /// <summary>Replies up to this size count as small.</summary>
+    public const int SmallSnapshot = 4 * RoomDirectoryProtocol.SnapshotPad;
+    /// <summary>
+    /// A reader must take a snapshot at least this fast (bytes per second) on top of <see cref="RoomDirectoryProtocol.RequestTimeout"/>,
+    /// and no single chunk may wait longer than that: slow readers are dropped instead of holding a slot.
+    /// </summary>
+    public const int MinSnapshotRate = 128 * 1024;
+    /// <summary>
+    /// Snapshots one source address may ask for per minute (readers poll once a minute). Only counted for real
+    /// addresses: behind the usual local forward every reader is loopback, and the slots and bucket above are the limit.
+    /// </summary>
     public const int MaxSnapshotsPerSourcePerMinute = 6;
     private readonly SemaphoreSlim _snapshotSlots = new(MaxConcurrentSnapshots, MaxConcurrentSnapshots);
+    private readonly SemaphoreSlim _smallSnapshotSlots = new(MaxConcurrentSmallSnapshots, MaxConcurrentSmallSnapshots);
+    private double _largeTokens = LargeSnapshotBurst;
+    private DateTimeOffset _largeTokensAt = DateTimeOffset.MinValue;
     private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _snapshotAsks = new(StringComparer.Ordinal);
     /// <summary>Snapshot changes in order (version, key), for deltas. Trimmed to <see cref="MaxSnapshotLog"/>.</summary>
     private readonly Queue<(long Version, string Key)> _snapshotLog = new();
@@ -315,26 +335,47 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 return;
             }
         }
-        if (!_snapshotSlots.Wait(0))
+        byte[] reply;
+        try { reply = SnapshotReply(secure.Request); }
+        catch (Exception e) when (e is InvalidOperationException or FormatException)
+        {
+            await secure.Reply(Error("bad"), quick.Token);
+            return;
+        }
+        finally { Flush(); }
+        var large = reply.Length > SmallSnapshot;
+        var slots = large ? _snapshotSlots : _smallSnapshotSlots;
+        if ((large && !TakeLargeToken()) || !slots.Wait(0))
         {
             await secure.Reply(Error("busy"), quick.Token);
             return;
         }
         try
         {
-            byte[] reply;
-            try { reply = SnapshotReply(secure.Request); }
-            catch (Exception e) when (e is InvalidOperationException or FormatException)
-            {
-                await secure.Reply(Error("bad"), quick.Token);
-                return;
-            }
-            finally { Flush(); }
             using var whole = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-            whole.CancelAfter(RoomDirectoryProtocol.SnapshotTimeout);
+            whole.CancelAfter(SnapshotDeadline(reply.Length));
             await secure.Snapshot(reply, RoomDirectoryProtocol.SnapshotPad, RoomDirectoryProtocol.RequestTimeout, whole.Token);
         }
-        finally { _snapshotSlots.Release(); }
+        finally { slots.Release(); }
+    }
+
+    /// <summary>How long a reader may take for a reply of <paramref name="bytes"/>: a base plus the time at <see cref="MinSnapshotRate"/>.</summary>
+    internal static TimeSpan SnapshotDeadline(int bytes) =>
+        RoomDirectoryProtocol.RequestTimeout + TimeSpan.FromSeconds((double)bytes / MinSnapshotRate);
+
+    /// <summary>Takes one start from the large-snapshot bucket (refilled at <see cref="LargeSnapshotsPerSecond"/>).</summary>
+    private bool TakeLargeToken()
+    {
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (_largeTokensAt != DateTimeOffset.MinValue)
+                _largeTokens = Math.Min(LargeSnapshotBurst, _largeTokens + (now - _largeTokensAt).TotalSeconds * LargeSnapshotsPerSecond);
+            _largeTokensAt = now;
+            if (_largeTokens < 1) return false;
+            _largeTokens--;
+            return true;
+        }
     }
 
     private static string? Source(TcpClient client) => (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString();
@@ -523,9 +564,18 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         {
             var index = item["k"]?.GetValue<string>()?.ToLowerInvariant();
             var blob = item["b"]?.GetValue<string>();
-            if (!IsHex(index, HiddenEntry.IndexLength * 2) || blob is null || blob.Length != (HiddenEntry.SealedLength + 2) / 3 * 4) return Error("bad");
-            if (Convert.FromBase64String(blob).Length != HiddenEntry.SealedLength) return Error("bad");
-            if (hidden.Count < RoomDirectoryProtocol.MaxLookupKeys) hidden.TryAdd(index!, blob);
+            var key = item["p"]?.GetValue<string>();
+            var sig = item["s"]?.GetValue<string>();
+            if (!IsHex(index, HiddenEntry.IndexLength * 2) || blob is null || blob.Length != (HiddenEntry.SealedLength + 2) / 3 * 4
+                || !IsHex(key, HiddenEntry.PublicKeyLength * 2) || !IsHex(sig, HiddenEntry.SignatureLength * 2)) return Error("bad");
+            var bytes = Convert.FromBase64String(blob);
+            if (bytes.Length != HiddenEntry.SealedLength) return Error("bad");
+            if (hidden.Count >= RoomDirectoryProtocol.MaxLookupKeys) continue;
+            // Only a holder of the invite can sign for its index; the signature covers this room and this version of
+            // the listing, and the listing's version is its time, so it can't be replayed for another room or much later.
+            if (Math.Abs(listing.Seq - _now().ToUnixTimeMilliseconds()) > (long)HiddenEntry.MaxClockSkew.TotalMilliseconds) return Error("clock");
+            if (!HiddenEntry.VerifyPublish(Convert.FromHexString(index!), Convert.FromHexString(key!), bytes, listing.Id, listing.Seq, Convert.FromHexString(sig!))) return Error("lookup");
+            hidden.TryAdd(index!, blob);
         }
         var keys = hidden.Keys.ToArray();
         var fp = request["fp"]?.GetValue<string>();
@@ -705,7 +755,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 ? [.. _snapshot.Select(p => (p.Key, (SnapItem?)p.Value))]
                 : [.. _snapshotLog.Where(c => c.Version > have).Select(c => c.Key).Distinct(StringComparer.Ordinal).Select(k => (k, _snapshot.GetValueOrDefault(k)))];
         }
-        var text = new StringBuilder(full ? (int)Math.Min(int.MaxValue, _snapshotBytes + 256) : 256);
+        var text = new StringBuilder(full ? (int)Math.Min(int.MaxValue, items.Sum(i => (long)(i.Item?.Json.Length ?? 0) + 1) + 256) : 256);
         text.Append("{\"ok\":true,\"epoch\":\"").Append(_snapshotEpoch).Append("\",\"ver\":").Append(version).Append(",\"full\":").Append(full ? "true" : "false");
         if (!full) text.Append(",\"from\":").Append(have);
         void List(string name, IEnumerable<string> json)
@@ -940,8 +990,11 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             _search.Remove(Convert.ToHexStringLower(search));
     }
 
+    private int _disposed;
+
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
         _cts.Cancel();
         _listener.Stop();
         try { await _accept; } catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException) { }
@@ -1089,6 +1142,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             "full" => L.T("core.mp.public.err_full"),
             "gone" => L.T("core.mp.public.err_gone"),
             "rate" => L.T("core.mp.public.err_rate"),
+            "busy" => L.T("core.mp.public.err_busy"),
+            "clock" => L.T("core.mp.public.err_clock"),
             "version" => L.F("core.mp.public.err_version", reply["min"]?.GetValue<string>() is { Length: <= 32 } min ? min : "?"),
             "login" => L.T("core.mp.public.err_login"),
             "off" => L.T("core.mp.public.volunteer_off"),
@@ -1212,7 +1267,17 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         var hit = new DirectoryHit(listing.Id, listing.Ip, listing.HostKey);
         var hidden = new JsonArray();
         foreach (var lobby in lobbyKeys.Take(RoomDirectoryProtocol.MaxLookupKeys))
-            hidden.Add((JsonNode)new JsonObject { ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)), ["b"] = Convert.ToBase64String(SealedFor(lobby, hit)) });
+        {
+            var entry = SealedFor(lobby, hit);
+            hidden.Add((JsonNode)new JsonObject
+            {
+                ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)),
+                ["b"] = Convert.ToBase64String(entry),
+                // Proves this publish comes from a holder of the invite (the index is the hash of this key).
+                ["p"] = Convert.ToHexStringLower(HiddenEntry.PublicKey(lobby)),
+                ["s"] = Convert.ToHexStringLower(HiddenEntry.SignPublish(lobby, entry, listing.Id, listing.Seq)),
+            });
+        }
         var request = new JsonObject
         {
             ["op"] = "announce",
@@ -1284,10 +1349,10 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>
     /// 按邀请码里的大厅密钥找房主：只在本机的目录快照里找（目录看不到谁找了哪个房间）。没有时返回 null。
     /// </summary>
-    public async Task<DirectoryHit?> LookupAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct)
+    public async Task<DirectoryHit?> LookupAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct, byte[]? expectedHost = null)
     {
         await Snapshots.ReadyAsync(this, ct);
-        return Snapshots.Find(lobbyKey.Span);
+        return Snapshots.Find(lobbyKey.Span, expectedHost);
     }
 
     /// <summary>按设备指纹码找房间；没找到返回 null。</summary>

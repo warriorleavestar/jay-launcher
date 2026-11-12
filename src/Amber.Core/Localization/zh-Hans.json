@@ -1831,6 +1831,8 @@
   "core.mp.public.err_login": "这个网络只让登录了账号的人开房间，请先在公共网络里登录",
   "core.mp.public.observer_error": "目录事件处理出错：{0}",
   "core.mp.public.err_rate": "发布得太频繁了，这个网络让你稍等一会儿",
+  "core.mp.public.err_busy": "目录现在太忙，Jay 稍后会自动再试。",
+  "core.mp.public.err_clock": "这台电脑的时间和目录差得太多，请校准系统时间后再试。",
   "core.mp.public.err_policy": "这个网络不收这个房间：{0}",
   "core.mp.public.no_address": "还没在公共网络里分到地址",
   "core.mp.public.announce_failed": "房间发布到公共网络失败：{0}",

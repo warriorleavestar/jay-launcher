@@ -210,35 +210,62 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.Equal("op", _directory.Handle(new JsonObject { ["op"] = "list" })["error"]!.GetValue<string>());
     }
 
-    /// <summary>Publishes junk (not sealed with the invite) under <paramref name="lobby"/>'s index, as a stranger could.</summary>
-    private JsonObject Squat(byte[] lobby) => _directory.Handle(new JsonObject
+    /// <summary>
+    /// Publishes junk under <paramref name="index"/>'s index, signed with <paramref name="signWith"/>'s entry key: a
+    /// stranger signs with a key of their own, someone who holds the invite with the invite's.
+    /// </summary>
+    private JsonObject Publish(byte[] index, byte[] signWith, RoomListing? signedFor = null, RoomListing? sentWith = null)
     {
-        ["op"] = "announce",
-        ["room"] = new RoomSigner().Sign(Listing(RoomVisibility.Hidden), _now).ToJson(),
-        ["listed"] = false,
-        ["hidden"] = new JsonArray(new JsonObject
+        var listing = signedFor ?? new RoomSigner().Sign(Listing(RoomVisibility.Hidden), _now);
+        var junk = RandomNumberGenerator.GetBytes(HiddenEntry.SealedLength);
+        return _directory.Handle(new JsonObject
         {
-            ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)),
-            ["b"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(HiddenEntry.SealedLength)),
-        }),
-    });
+            ["op"] = "announce",
+            ["room"] = (sentWith ?? listing).ToJson(),
+            ["listed"] = false,
+            ["hidden"] = new JsonArray(new JsonObject
+            {
+                ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(index)),
+                ["b"] = Convert.ToBase64String(junk),
+                ["p"] = Convert.ToHexStringLower(HiddenEntry.PublicKey(signWith)),
+                ["s"] = Convert.ToHexStringLower(HiddenEntry.SignPublish(signWith, junk, listing.Id, listing.Seq)),
+            }),
+        });
+    }
+
+    private static string? ErrorOf(JsonObject reply) => reply["error"]?.GetValue<string>();
 
     [Fact]
-    public async Task StrangersCannotHoldAnInvitesIndexAgainstItsRoom()
+    public async Task StrangersCannotPublishUnderAnInvitesIndex()
     {
-        // After a directory restart the index is free; a stranger who saw it in an old snapshot gets there first.
+        // Someone who saw the index (say in an old snapshot) but doesn't hold the invite can't sign for it.
         var lobby = RandomNumberGenerator.GetBytes(16);
-        Assert.True(Squat(lobby)["ok"]!.GetValue<bool>());
+        Assert.Equal("lookup", ErrorOf(Publish(lobby, RandomNumberGenerator.GetBytes(16))));
         var room = new RoomSigner();
         await HideAsync(room, lobby);
         var reader = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
         Assert.Equal(room.RoomId, (await reader.LookupAsync(lobby, default))!.Id);
-        // Only a few rooms can share one index; once the room is there it keeps its place when it renews.
-        for (var i = 1; i < RoomDirectoryServer.MaxEntriesPerIndex - 1; i++) Assert.True(Squat(lobby)["ok"]!.GetValue<bool>());
-        Assert.Equal("lookup", Squat(lobby)["error"]!.GetValue<string>());
+        // Only a few rooms can share one index, and only holders of the invite can take those places;
+        // once the room is there it keeps its place when it renews.
+        for (var i = 1; i < RoomDirectoryServer.MaxEntriesPerIndex; i++) Assert.True(Publish(lobby, lobby)["ok"]!.GetValue<bool>());
+        Assert.Equal("lookup", ErrorOf(Publish(lobby, lobby)));
         _now += TimeSpan.FromSeconds(30);
         await HideAsync(room, lobby);
         Assert.Equal(room.RoomId, (await reader.LookupAsync(lobby, default))!.Id);
+    }
+
+    [Fact]
+    public void AHiddenEntrysSignatureOnlyCoversItsOwnRoomAndTime()
+    {
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        var signed = new RoomSigner().Sign(Listing(RoomVisibility.Hidden), _now);
+        // Replayed with another room, or with a later version of the same room: refused.
+        Assert.Equal("lookup", ErrorOf(Publish(lobby, lobby, signed, new RoomSigner().Sign(Listing(RoomVisibility.Hidden), _now))));
+        Assert.Equal("lookup", ErrorOf(Publish(lobby, lobby, signed, new RoomSigner().Sign(Listing(RoomVisibility.Hidden), _now + TimeSpan.FromSeconds(1)))));
+        // A listing whose time is far from the directory's: refused with a reason the host can act on.
+        var old = new RoomSigner().Sign(Listing(RoomVisibility.Hidden), _now - HiddenEntry.MaxClockSkew - TimeSpan.FromMinutes(1));
+        Assert.Equal("clock", ErrorOf(Publish(lobby, lobby, old)));
+        Assert.True(Publish(lobby, lobby, signed)["ok"]!.GetValue<bool>());
     }
 
     [Fact]
@@ -250,6 +277,9 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         var other = new RoomSigner().Sign(Listing(RoomVisibility.Hidden) with { HostKey = X25519KeyPair.Generate().PublicKey }, _now);
         await new RoomDirectoryClient(new CountingNetwork(_directory.Port)).AnnounceAsync(other, false, [lobby], default);
         Assert.Null(await new RoomDirectoryClient(new CountingNetwork(_directory.Port)).LookupAsync(lobby, default));
+        // When the invite says which host it is for, the entry for that host is the answer.
+        var hit = await new RoomDirectoryClient(new CountingNetwork(_directory.Port)).LookupAsync(lobby, default, _host.PublicKey);
+        Assert.Equal(_host.PublicKey, hit!.HostKey);
     }
 
     [Fact]
@@ -334,5 +364,51 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         // The rooms already there keep renewing.
         _now += TimeSpan.FromSeconds(30);
         await HideAsync(signers[0], RandomNumberGenerator.GetBytes(16));
+    }
+
+    [Fact]
+    public async Task AFailedFirstRefreshReachesTheReaderQuickly()
+    {
+        // Nothing listens on this port: the first poll fails at once, and a reader hears so without waiting for the schedule.
+        var closed = new TcpListener(IPAddress.Loopback, 0);
+        closed.Start();
+        var port = ((IPEndPoint)closed.LocalEndpoint).Port;
+        closed.Stop();
+        var copy = new DirectorySnapshots();
+        var client = new RoomDirectoryClient(new CountingNetwork(port)) { Snapshots = copy };
+        using var poll = copy.StartPolling(() => client, TimeSpan.FromHours(1));
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<Exception>(() => client.LookupAsync(RandomNumberGenerator.GetBytes(16), default));
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(10), started.Elapsed.ToString());
+    }
+
+    [Fact]
+    public async Task ACopyThatWentStaleIsNotReadyEvenWhilePolling()
+    {
+        var clock = DateTimeOffset.UtcNow;
+        var copy = new DirectorySnapshots(() => clock);
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port)) { Snapshots = copy };
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Public), _now), true, [], default);
+        using (copy.StartPolling(() => client, TimeSpan.FromHours(1)))
+        {
+            await copy.ReadyAsync(client, default);
+            await _directory.DisposeAsync();
+            clock += DirectorySnapshots.StaleAfter + TimeSpan.FromSeconds(1);
+            await Assert.ThrowsAnyAsync<Exception>(() => copy.ReadyAsync(client, default));
+        }
+    }
+
+    [Fact]
+    public async Task StoppingThePollerTwiceIsHarmless()
+    {
+        var copy = new DirectorySnapshots();
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port)) { Snapshots = copy };
+        var poll = copy.StartPolling(() => client, TimeSpan.FromHours(1));
+        await copy.ReadyAsync(client, default);
+        poll.Dispose();
+        poll.Dispose();
+        Assert.False(copy.IsPolling);
+        await _directory.DisposeAsync();
+        await _directory.DisposeAsync();
     }
 }
