@@ -1658,6 +1658,7 @@
   "core.mp.split.main_not_direct": "到房主的主路径不是直连，可能和另外一路经过同一个中继",
   "core.mp.split.relay_unreachable": "另外一路还没能经中继连到房主",
   "core.mp.split.starting": "另外几路正在启动",
+  "core.mp.split.connected": "{0} 经 {1} 路连上了",
   "core.gate.split.need_two": "两路连接需要两个能连上的中转，现在凑不齐（不会退回直连）。中转都在线的话，可能是服主改了设置，请找服主要一张新邀请",
   "core.gate.run.not_initialized": "还没初始化，先运行 jay-server init --host <地址>（或在 Jay 的“开服”里填好地址）",
   "core.gate.run.not_setup": "MC 服务端还没准备好，先运行 jay-server setup（或在 Jay 里点“准备 MC 服务端”）",

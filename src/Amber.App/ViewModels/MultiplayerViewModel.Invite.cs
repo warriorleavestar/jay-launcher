@@ -214,7 +214,8 @@ public sealed partial class MultiplayerViewModel
     // ---- 房主 ----
 
     /// <summary>开房间时调用：生成这个房间的随机凭据。</summary>
-    private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) => RoomCredentials.Create(Identity.PublicKey, port, tunnel);
+    private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) =>
+        RoomCredentials.Create(Identity.PublicKey, port, tunnel) with { Split = tunnel.Wraps ? SplitSettings.Requested : SplitSettings.None };
 
     private IReadOnlyList<string> LobbyPeers(bool host) =>
         [.. (host ? TestListeners ?? [] : []), .. TestPeers ?? _service.MultiplayerPeers];

@@ -1608,6 +1608,7 @@
   "core.mp.split.main_not_direct": "主路非直達，或與他路同經一中繼",
   "core.mp.split.relay_unreachable": "他路未經中繼達房主",
   "core.mp.split.starting": "他路方啟",
+  "core.mp.split.connected": "{0} 經 {1} 路而通",
   "core.gate.split.need_two": "二路之連須二可連之轉驛，今不能備（不退直連）。若轉驛皆在，或服主易其設，請向服主求新邀碼",
   "core.gate.run.not_initialized": "未初設，先行 jay-server init --host <址>（或於 Jay 之「開服」書其址）",
   "core.gate.run.not_setup": "MC 伺服器端未備，先行 jay-server setup（或於 Jay 按「備 MC 伺服器端」）",

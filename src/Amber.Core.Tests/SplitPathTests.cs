@@ -140,6 +140,31 @@ public sealed class SplitPathTests
         Assert.True(chosen > 1);
     }
 
+    // ---- developer switch ----
+
+    [Theory]
+    [InlineData("auto,auto", SplitPolicy.Auto, SplitPolicy.Auto, 2)]
+    [InlineData("strict, off, 3", SplitPolicy.Strict, SplitPolicy.Off, 3)]
+    [InlineData("AUTO,Strict,2", SplitPolicy.Auto, SplitPolicy.Strict, 2)]
+    public void TheDeveloperSwitchTurnsSplittingOn(string value, SplitPolicy game, SplitPolicy chat, int paths)
+    {
+        var split = SplitSettings.FromSwitch(value);
+        Assert.True(split.Enabled);
+        Assert.Equal((game, chat, paths), (split.Game, split.Chat, split.Paths));
+        Assert.Equal(paths - 1, split.Nets.Count);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("auto")]
+    [InlineData("off,off")]
+    [InlineData("auto,auto,4")]
+    [InlineData("auto,auto,1")]
+    [InlineData("maybe,auto")]
+    [InlineData("auto,auto,2,extra")]
+    public void AnythingElseMeansNoSplit(string? value) => Assert.False(SplitSettings.FromSwitch(value).Enabled);
+
     // ---- readiness ----
 
     [Fact]

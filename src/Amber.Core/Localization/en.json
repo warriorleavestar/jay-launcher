@@ -1689,6 +1689,7 @@
   "core.mp.split.main_not_direct": "The main path to the host isn't direct, so it could share a relay with an extra path",
   "core.mp.split.relay_unreachable": "An extra path can't reach the host through its relay yet",
   "core.mp.split.starting": "The extra paths are starting",
+  "core.mp.split.connected": "{0} connected over {1} paths",
   "core.gate.split.need_two": "The two-path connection needs two reachable relays and fewer are available (Jay won't fall back to a direct connection). If the relays are online, the server owner may have changed settings; ask them for a new invite",
   "core.gate.run.not_initialized": "Not set up yet. Run jay-server init --host <address> first (or fill in the address under Host a server in Jay)",
   "core.gate.run.not_setup": "The Minecraft server isn't prepared yet. Run jay-server setup first (or click Prepare Minecraft server in Jay)",
