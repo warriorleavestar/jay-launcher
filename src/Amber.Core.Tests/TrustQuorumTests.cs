@@ -136,6 +136,15 @@ public sealed class TrustQuorumTests
     }
 
     [Fact]
+    public void OnlyTheSelfCheckCanPinABuiltInDirectory()
+    {
+        // Outside a GUI self-check process the built-in network pins no directory key and refuses to pin one.
+        Assert.Null(Environment.GetEnvironmentVariable("AMBER_SELFTEST"));
+        Assert.Throws<InvalidOperationException>(() => PublicNetworkProfile.PinSelfTestDirectory(new byte[32]));
+        Assert.Empty(PublicNetworkProfile.Jay().DirectoryKeys);
+    }
+
+    [Fact]
     public void BuiltInNetworkUsesTheJayTrustees()
     {
         var jay = PublicNetworkProfile.Jay();

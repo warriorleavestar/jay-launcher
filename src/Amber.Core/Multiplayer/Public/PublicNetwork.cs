@@ -53,7 +53,23 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
         {
             DirectoryRoots = JayTrust.Quorum.Keys,
             DirectoryRootsNeed = JayTrust.Need,
+            DirectoryKeys = _selfTestDirectoryKey is { } k ? [(byte[])k.Clone()] : [],
         };
+    }
+
+    private static byte[]? _selfTestDirectoryKey;
+
+    /// <summary>
+    /// GUI self-check only: the built-in network also accepts this one directory key, for the directory the self-check
+    /// runs on this computer (it can't have a certificate from the Jay trustees). Works only in a process started with
+    /// AMBER_SELFTEST, set from code only (never from settings, files or other environment variables), and nothing is saved.
+    /// </summary>
+    public static void PinSelfTestDirectory(byte[] key)
+    {
+        if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is not { Length: > 0 })
+            throw new InvalidOperationException("Only the GUI self-check can pin a directory key for the built-in network.");
+        if (key.Length != DirectoryChannel.KeyLength) throw new ArgumentException("Not a directory key.", nameof(key));
+        _selfTestDirectoryKey = (byte[])key.Clone();
     }
 
     public bool IsUsable => Nodes.Count > 0;
