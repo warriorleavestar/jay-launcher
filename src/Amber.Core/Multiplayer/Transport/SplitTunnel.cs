@@ -27,12 +27,16 @@ public sealed class SplitTunnelServer : IAsyncDisposable
 
     public SplitRegistry Registry { get; }
     public IReadOnlyList<int> Ports => [.. _listeners.Select(l => ((IPEndPoint)l.LocalEndpoint).Port)];
+    private int _accepted;
+    private int _rejected;
+    private int _tampered;
+
     /// <summary>Joined split connections handed to a handler.</summary>
-    public int Accepted;
-    /// <summary>Legs refused before pairing (bad handshake, a service that isn't split).</summary>
-    public int Rejected;
+    public int Accepted => Volatile.Read(ref _accepted);
+    /// <summary>Legs refused before pairing (bad handshake, a service that isn't split, an unexpected failure).</summary>
+    public int Rejected => Volatile.Read(ref _rejected);
     /// <summary>Joined connections dropped because the legs went out of step.</summary>
-    public int Tampered;
+    public int Tampered => Volatile.Read(ref _tampered);
 
     /// <param name="ports">Listening port per leg; defaults to <see cref="SplitSettings.LegPort"/> (tests pass 0).</param>
     public SplitTunnelServer(RoomCode room, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null,
@@ -108,7 +112,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             var handler = member is null || _room.Split.For(service) == SplitPolicy.Off ? null : _route(service);
             if (handler is null)
             {
-                Interlocked.Increment(ref Rejected);
+                Interlocked.Increment(ref _rejected);
                 _log?.Invoke(L.F("core.mp.transport.endpoint_service_unavailable", service));
                 return;
             }
@@ -120,14 +124,22 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             if (joined is null) return;
             joined.Tampered += () =>
             {
-                Interlocked.Increment(ref Tampered);
+                Interlocked.Increment(ref _tampered);
                 _log?.Invoke(L.T("core.mp.split.mismatch"));
             };
             // The member's key revoked (kick, re-approval, room ended): drop every leg at once.
             var target = joined;
             revocation = member!.Revocation.Register(target.Abort);
-            Interlocked.Increment(ref Accepted);
-            await handler(joined, ct);
+            Interlocked.Increment(ref _accepted);
+            try
+            {
+                await handler(joined, ct);
+            }
+            catch (Exception e) when (e is IOException or SocketException or OperationCanceledException or ObjectDisposedException or CryptographicException)
+            {
+                // The forwarding ended (the other side closed, a kick, the room ending): not a refused leg.
+                joined.Abort();
+            }
         }
         catch (Exception e) when (e is CryptographicException or IOException or SocketException or OperationCanceledException or ObjectDisposedException
                                    or PlatformNotSupportedException or InvalidDataException or ArgumentException)
@@ -135,7 +147,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             // Failed: no close records, the other side sees a cut connection.
             secure?.Abort();
             joined?.Abort();
-            Interlocked.Increment(ref Rejected);
+            Interlocked.Increment(ref _rejected);
             if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
         }
         catch (Exception e)
@@ -143,7 +155,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             // Anything else still ends this leg quietly, is counted, and is logged by type only (no member details).
             secure?.Abort();
             joined?.Abort();
-            Interlocked.Increment(ref Rejected);
+            Interlocked.Increment(ref _rejected);
             _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
         }
         finally
@@ -204,9 +216,14 @@ public sealed class SplitConnector
     internal TimeSpan RetryAfter { get; init; } = TimeSpan.FromSeconds(30);
 
     public SplitPolicy Policy { get; }
-    public int SplitConnections;
-    public int SinglePathConnections;
-    /// <summary>Why the last connection used one path (null when it was split, or splitting is off).</summary>
+    private int _splitConnections;
+    private int _singlePathConnections;
+    public int SplitConnections => Volatile.Read(ref _splitConnections);
+    public int SinglePathConnections => Volatile.Read(ref _singlePathConnections);
+    /// <summary>
+    /// Why the last connection used one path (null when it was split, or splitting is off). Only for showing: connections
+    /// opened at the same time may overwrite each other's reason.
+    /// </summary>
     public string? LastReason { get; private set; }
 
     /// <param name="single">Opens a single-path tunnel connection (the existing way).</param>
@@ -243,7 +260,7 @@ public sealed class SplitConnector
             var stream = await SplitLegs.ConnectAsync((i, c) => _legs[i](c), _room.Split.Paths, _room.Epoch,
                 (raw, leg, c) => TunnelHandshake.ConnectAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, _service, c, leg), ct);
             Interlocked.Exchange(ref _failures, 0);
-            Interlocked.Increment(ref SplitConnections);
+            Interlocked.Increment(ref _splitConnections);
             _log?.Invoke(L.F(_service == TunnelService.Game ? "core.mp.split.connected_game" : "core.mp.split.connected_chat", stream.LegCount));
             LastReason = null;
             return stream;
@@ -252,7 +269,9 @@ public sealed class SplitConnector
         {
             throw;
         }
-        catch (Exception e) when (!ct.IsCancellationRequested && e is IOException or CryptographicException or SocketException or OperationCanceledException or ObjectDisposedException)
+        // The same failures the host side treats as a failed handshake (the Minecraft disguise can raise the last three).
+        catch (Exception e) when (!ct.IsCancellationRequested && e is IOException or CryptographicException or SocketException or OperationCanceledException
+                                   or ObjectDisposedException or InvalidDataException or ArgumentException or PlatformNotSupportedException)
         {
             if (Interlocked.Increment(ref _failures) >= MaxFailures)
                 Interlocked.Exchange(ref _pausedUntil, System.Diagnostics.Stopwatch.GetTimestamp() + (long)(RetryAfter.TotalSeconds * System.Diagnostics.Stopwatch.Frequency));
@@ -266,7 +285,7 @@ public sealed class SplitConnector
         LastReason = reason;
         if (Policy == SplitPolicy.Strict) throw new IOException(L.F("core.mp.split.strict_unavailable", reason), inner);
         var stream = await _single(ct);
-        Interlocked.Increment(ref SinglePathConnections);
+        Interlocked.Increment(ref _singlePathConnections);
         return stream;
     }
 }

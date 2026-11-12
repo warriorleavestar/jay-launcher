@@ -1664,6 +1664,8 @@
   "core.mp.split.starting": "另外几路正在启动",
   "core.mp.split.connected_game": "游戏经 {0} 路连上了",
   "core.mp.split.connected_chat": "聊天经 {0} 路连上了",
+  "core.mp.split.ports_busy": "拆分连接要用的端口被别的程序占用了，这个房间这次不拆分",
+  "core.mp.split.ports_busy_strict": "拆分连接要用的端口被别的程序占用了，只允许拆分连接的房间开不了。关掉占用 47657 到 47659 端口的程序再试",
   "core.gate.split.need_two": "两路连接需要两个能连上的中转，现在凑不齐（不会退回直连）。中转都在线的话，可能是服主改了设置，请找服主要一张新邀请",
   "core.gate.run.not_initialized": "还没初始化，先运行 jay-server init --host <地址>（或在 Jay 的“开服”里填好地址）",
   "core.gate.run.not_setup": "MC 服务端还没准备好，先运行 jay-server setup（或在 Jay 里点“准备 MC 服务端”）",

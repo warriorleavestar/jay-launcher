@@ -1664,6 +1664,8 @@
   "core.mp.split.starting": "ほかの経路を起動しています",
   "core.mp.split.connected_game": "ゲームを {0} 経路で接続しました",
   "core.mp.split.connected_chat": "チャットを {0} 経路で接続しました",
+  "core.mp.split.ports_busy": "分割接続に使うポートがほかのプログラムに使われているため、今回はこのルームを分割しません",
+  "core.mp.split.ports_busy_strict": "分割接続に使うポートがほかのプログラムに使われているため、分割した接続しか受け付けないルームを開けません。ポート 47657〜47659 を使っているプログラムを閉じてから、もう一度試してください",
   "core.gate.split.need_two": "2 経路接続には接続可能な中継が 2 つ必要ですが、足りません（直接接続には切り替えません）。中継がオンラインなら、サーバー側の設定が変わった可能性があります。管理者に新しい招待をもらってください",
   "core.gate.run.not_initialized": "まだ初期化されていません。先に jay-server init --host <アドレス> を実行してください（または Jay の「サーバーを開く」でアドレスを入力）",
   "core.gate.run.not_setup": "MC サーバーの準備ができていません。先に jay-server setup を実行してください（または Jay で「MC サーバーを準備」を押す）",
