@@ -4,7 +4,8 @@ namespace Amber.Core.Multiplayer.Public;
 
 /// <summary>
 /// "At least <see cref="Need"/> of these <see cref="Keys"/> must have signed." Used for everything the Jay project vouches for
-/// (reviewed networks, directory certificates, node hardware certificates), so no single person's key can do it alone.
+/// (reviewed networks, directory certificates, node hardware certificates), so no single key can do it alone. (For now
+/// both of Jay's keys belong to one trustee, one of them an offline cold backup; see <see cref="JayTrust"/>.)
 /// Each signature is a hybrid Ed25519 + ML-DSA-65 signature (<see cref="TrustSignature"/>) over the same domain-separated
 /// bytes; the quorum only counts how many distinct listed key ids signed. A key listed twice counts once.
 /// </summary>
@@ -175,21 +176,25 @@ public static class JayTrust
 
     /// <summary>
     /// The trustees' separate release-signing keys (full public keys, base64), used only for Jay releases and trust-chain
-    /// changes (<c>Amber.Core.Launch.TrustList.Jay</c>). Each trustee holds one of these and one of <see cref="Keys"/>;
-    /// the two are never the same key, so a key used to review networks can't sign a release and the other way round.
+    /// changes (<c>Amber.Core.Launch.TrustList.Jay</c>). Each key set (a trustee's, or for now the cold backup) has one of
+    /// these and one of <see cref="Keys"/>; the two are never the same key, so a key used to review networks can't sign a release and the other way round.
     /// </summary>
     public static readonly string[] ReleaseKeys = [];
 
     /// <summary>How many release keys must sign a release.</summary>
     public const int ReleaseNeed = 2;
 
+    // Ids decoded once: a malformed key fails at first use of JayTrust (and in JayTrustTests), not deep inside a check.
+    private static readonly byte[][] ReleaseIds = [.. ReleaseKeys.Select(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))];
+    private static readonly byte[][] KeyIds = [.. Keys.Select(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))];
+    private static readonly TrustQuorum JayQuorum = KeyIds.Length == 0 ? TrustQuorum.None : new(KeyIds, Need);
+
     /// <summary>Whether <paramref name="id"/> is one of the release keys (refused for network, directory and hardware signing).</summary>
-    public static bool IsReleaseKey(byte[] id) => ReleaseKeys.Any(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)).AsSpan().SequenceEqual(id));
+    public static bool IsReleaseKey(byte[] id) => ReleaseIds.Any(k => k.AsSpan().SequenceEqual(id));
 
     /// <summary>Whether <paramref name="id"/> is one of <see cref="Keys"/> (refused for release signing).</summary>
-    public static bool IsNetworkKey(byte[] id) => Keys.Any(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)).AsSpan().SequenceEqual(id));
+    public static bool IsNetworkKey(byte[] id) => KeyIds.Any(k => k.AsSpan().SequenceEqual(id));
 
     /// <summary>The quorum over the trustees' ids.</summary>
-    public static TrustQuorum Quorum => Keys.Length == 0 ? TrustQuorum.None
-        : new([.. Keys.Select(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))], Need);
+    public static TrustQuorum Quorum => JayQuorum;
 }

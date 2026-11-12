@@ -138,10 +138,24 @@ public sealed class ReleaseSignatureTests : IDisposable
     }
 
     [Fact]
-    public void NoTrusteeKeysAreBuiltInYet()
+    public void BuiltInKeysAreWellFormed()
     {
-        // The three trustees add their release public keys (jay-server key-public) before the first release with this check.
-        foreach (var key in JayTrust.ReleaseKeys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
+        // Each list: full hybrid public keys, no duplicates, enough of them for its quorum, and the two lists disjoint.
+        foreach (var (keys, need) in new[] { (JayTrust.Keys, JayTrust.Need), (JayTrust.ReleaseKeys, JayTrust.ReleaseNeed) })
+        {
+            foreach (var key in keys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
+            Assert.Equal(keys.Length, keys.Distinct().Count());
+            Assert.True(keys.Length == 0 || keys.Length >= need);
+        }
+        Assert.Empty(JayTrust.ReleaseKeys.Intersect(JayTrust.Keys));
+
+        // The fingerprints printed when the keys were made (and written next to them in JayTrust): a swapped key fails here.
+        string[] Prints(string[] keys) => [.. keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k))))];
+        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D"], Prints(JayTrust.Keys));
+        Assert.Equal([], Prints(JayTrust.ReleaseKeys));
+        Assert.Equal(JayTrust.Keys.Length, JayTrust.Quorum.Keys.Count);
+        Assert.True(JayTrust.IsNetworkKey(JayTrust.Quorum.Keys[0]));
+        Assert.False(JayTrust.IsReleaseKey(JayTrust.Quorum.Keys[0]));
     }
 
     [Fact]
