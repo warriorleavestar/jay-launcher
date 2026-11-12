@@ -17,6 +17,8 @@ public partial class MultiplayerViewModel
     private CancellationTokenSource? _volunteerCts;
 
     [ObservableProperty] private bool _volunteerEnabled;
+    /// <summary>Sign registrations with the bound Jay account (its own switch, off by default; see the privacy text).</summary>
+    [ObservableProperty] private bool _volunteerSigned;
     [ObservableProperty] private string _volunteerAddress = "";
     [ObservableProperty] private string _volunteerPort = VolunteerNodes.DefaultPort.ToString(CultureInfo.InvariantCulture);
     [ObservableProperty] private string _volunteerLimit = "1024";
@@ -31,6 +33,7 @@ public partial class MultiplayerViewModel
     {
         var s = _service.Settings;
         VolunteerEnabled = s.VolunteerNode;
+        VolunteerSigned = s.VolunteerSigned;
         VolunteerAddress = s.VolunteerAddress ?? "";
         VolunteerPort = s.VolunteerPort.ToString(CultureInfo.InvariantCulture);
         VolunteerLimit = s.VolunteerLimitKBps.ToString(CultureInfo.InvariantCulture);
@@ -75,6 +78,8 @@ public partial class MultiplayerViewModel
         }
         var s = _service.Settings;
         var changed = s.VolunteerNode != VolunteerEnabled || s.VolunteerAddress != VolunteerAddress.Trim() || s.VolunteerPort != port || s.VolunteerLimitKBps != limit;
+        // Signing takes effect at the next renewal; it needs no reconnect.
+        s.VolunteerSigned = VolunteerSigned;
         s.VolunteerNode = VolunteerEnabled;
         s.VolunteerAddress = VolunteerAddress.Trim();
         s.VolunteerPort = port;
@@ -232,18 +237,22 @@ public partial class MultiplayerViewModel
         {
             try
             {
-                var listed = await client.VolunteerAsync(url, ct, JayCertificate);
+                // Only with the person's say-so: signing tells the network's operator which Jay account runs this relay.
+                var listed = await client.VolunteerAsync(url, ct, _service.Settings.VolunteerSigned ? JayCertificate : null);
                 VolunteerStatus = listed ? L.F("multiplayer.volunteer.status_listed", url) : L.F("multiplayer.volunteer.status_checking", url);
             }
             catch (DirectoryRejectedException e)
             {
-                VolunteerStatus = e.Message;
+                // A network that only takes signed relays: say how, rather than repeat the directory's code.
+                VolunteerStatus = e.Code == "operator" && !_service.Settings.VolunteerSigned ? L.T("multiplayer.volunteer.needs_signing") : e.Message;
                 if (e.Code is "off" or "banned" or "bad") return;
             }
             catch (Exception e) when (e is IOException or InvalidDataException) { VolunteerStatus = L.T("multiplayer.volunteer.status_retry"); }
             catch (OperationCanceledException) { return; }
             // Shortly after the first registration the directory has probed us; renew then so we show up sooner.
+            // A network that wants a signature waits for the person: ask again only at the usual renewal.
             var wait = VolunteerStatus.Length > 0 && !VolunteerStatus.Equals(L.F("multiplayer.volunteer.status_listed", url), StringComparison.Ordinal)
+                && !VolunteerStatus.Equals(L.T("multiplayer.volunteer.needs_signing"), StringComparison.Ordinal)
                 ? TimeSpan.FromSeconds(20) : VolunteerNodes.RenewEvery;
             try { await Task.Delay(wait, ct); }
             catch (OperationCanceledException) { return; }
