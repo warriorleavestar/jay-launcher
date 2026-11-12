@@ -102,6 +102,9 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                     return;
                 }
                 var warning = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
+                // A listed room carries its invite in its listing, so invites still find it without the hidden entry:
+                // nothing for the host to fix.
+                if (listing.Mode != RoomVisibility.Hidden) warning = null;
                 if (warning != Warning)
                 {
                     Warning = warning;
@@ -166,7 +169,12 @@ public static class PublicJoin
                 {
                     // An address that never answers costs at most this long, like a handshake that never finishes.
                     connect.CancelAfter(KnockClient.HandshakeTimeout);
-                    stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, connect.Token);
+                    try { stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, connect.Token); }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        // Our own time limit, not the person cancelling: say the host didn't answer.
+                        throw new TimeoutException(L.T("core.mp.public.host_unreachable"));
+                    }
                 }
                 await using var _ = stream;
                 connected = true;

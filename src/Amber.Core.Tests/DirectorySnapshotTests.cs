@@ -730,22 +730,31 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
     public async Task ARoomOpenedJustNowIsFoundAtTheNextRefresh()
     {
         var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
-        using var poll = client.Snapshots.StartPolling(() => client, TimeSpan.FromMilliseconds(300));
+        // The schedule is far off: the test makes the "next scheduled refresh" happen itself, so timing can't decide it.
+        using var poll = client.Snapshots.StartPolling(() => client, TimeSpan.FromMinutes(10));
         await client.Snapshots.ReadyAsync(client, default);
-        // The room is announced after the reader's copy was taken: the lookup waits for the next scheduled refresh.
+        // The room is announced after the reader's copy was taken: the lookup waits for the next refresh.
         var lobby = RandomNumberGenerator.GetBytes(16);
         await HideAsync(new RoomSigner(), lobby);
         var searching = 0;
         // A first look answers at once from the copy as it is (the caller tries the invite's own lobby next).
-        var lookedAt = client.Snapshots.RefreshedAt!.Value;
-        Assert.Empty(await client.LookupAllAsync(lobby, default, _host.PublicKey, waiting: () => searching++));
+        var lookedAt = client.Snapshots.RefreshedAt!.Value + TimeSpan.FromTicks(1);
+        Assert.Empty(await client.LookupAllAsync(lobby, default, _host.PublicKey, waiting: () => Interlocked.Increment(ref searching)));
         Assert.Equal(0, searching);
-        // A second try asks for a copy refreshed since: it waits for the next scheduled refresh and finds the room.
-        var hits = await client.LookupAllAsync(lobby, default, _host.PublicKey, lookedAt, () => searching++);
+        // A second try asks for a copy refreshed since: it waits for the next refresh and finds the room.
+        var second = client.LookupAllAsync(lobby, default, _host.PublicKey, lookedAt, () => Interlocked.Increment(ref searching));
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        while (!second.IsCompleted && DateTime.UtcNow < deadline)
+        {
+            _now += TimeSpan.FromSeconds(1);
+            if (Volatile.Read(ref searching) == 1) await client.Snapshots.RefreshAsync(client, default);
+            await Task.WhenAny(second, Task.Delay(20));
+        }
+        var hits = await second;
         Assert.Equal("10.235.0.7", Assert.Single(hits).Ip);
         Assert.Equal(1, searching);
         // A copy refreshed since then is used as it is.
-        Assert.Single(await client.LookupAllAsync(lobby, default, _host.PublicKey, lookedAt, () => searching++));
+        Assert.Single(await client.LookupAllAsync(lobby, default, _host.PublicKey, lookedAt, () => Interlocked.Increment(ref searching)));
         Assert.Equal(1, searching);
     }
 
@@ -839,5 +848,39 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.InRange(served * (long)size, _directory.LargeSnapshotByteBurst - 2L * size, _directory.LargeSnapshotByteBurst + 2L * size);
         var delta = await SnapOverChannelAsync(new JsonObject { ["op"] = "snap", ["epoch"] = first["epoch"]!.DeepClone(), ["have"] = first["ver"]!.DeepClone() });
         Assert.False(delta["full"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task AClockThatGoesBackDoesNotEmptyTheBuckets()
+    {
+        _directory.UncountedLoopback = true;
+        FillPastSmall();
+        Assert.True((await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["full"]!.GetValue<bool>());
+        // The server's clock goes back an hour: big snapshots are served at once, not after the hour has passed again.
+        _now -= TimeSpan.FromHours(1);
+        Assert.Null((await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["error"]);
+        _now += TimeSpan.FromSeconds(1);
+        Assert.Null((await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["error"]);
+    }
+
+    [Fact]
+    public async Task AFullIndexOnlyWarnsTheHostOfAHiddenRoom()
+    {
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        for (var i = 0; i < RoomDirectoryServer.MaxEntriesPerIndex; i++) Assert.True(Publish(lobby, lobby)["ok"]!.GetValue<bool>());
+        var net = new CountingNetwork(_directory.Port);
+        // A public room carries its invite in its listing: invites still find it, so there is nothing to warn about.
+        await using (var listed = new RoomAnnouncer(net, () => Listing(RoomVisibility.Public), () => [lobby], every: TimeSpan.FromHours(1)))
+        {
+            await listed.AnnounceOnceAsync(default);
+            Assert.True(listed.Published);
+            Assert.Null(listed.Warning);
+        }
+        // A hidden room found by its friend code only: invites can't find it, and the host is told.
+        var search = RandomNumberGenerator.GetBytes(32);
+        await using var hidden = new RoomAnnouncer(net, () => Listing(RoomVisibility.Hidden), () => [lobby], every: TimeSpan.FromHours(1), searchKey: () => search);
+        await hidden.AnnounceOnceAsync(default);
+        Assert.True(hidden.Published);
+        Assert.Equal(AnnounceWarning.Lookup, hidden.Warning);
     }
 }

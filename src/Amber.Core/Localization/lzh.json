@@ -1755,6 +1755,7 @@
   "settings.themepack.dev_error": "主題讀之未成，留前之貌：{0}",
   "core.mp.public.jay_name": "Jay 公共網路",
   "core.mp.public.exited": "公共網路之件意外而終：{0}",
+  "core.mp.public.host_unreachable": "房主之機於公共網路無應。房或方閉，請少頃再試",
   "core.mp.public.no_directory": "不能連公共網路之目錄服：網之服器或不在，或君之網不能達網之服器。請少頃再試，或於聯機之設易一種址",
   "core.mp.public.socks_failed": "公共網路本機之轉無應",
   "core.mp.public.unreachable": "於公共網路不能達彼（彼或已離線，或已閉房）",

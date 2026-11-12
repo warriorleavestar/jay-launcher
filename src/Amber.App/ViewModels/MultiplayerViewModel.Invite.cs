@@ -664,7 +664,7 @@ public sealed partial class MultiplayerViewModel
             {
                 // No host in the invite's lobby. A room opened after our copy of the directory was taken isn't in it yet:
                 // look once more in a copy refreshed since (by then there usually is one, so this rarely waits).
-                SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+                if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
                 var again = await TryPublicKnockAsync(invite, me, name, cts.Token, expectedHost, answerDirect, lookedAt);
                 if (again is null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(e);
                 outcome = again;

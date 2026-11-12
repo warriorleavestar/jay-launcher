@@ -377,7 +377,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             lock (_gate)
             {
                 var now = _now();
-                foreach (var (who, _) in _snapshotAsks.Where(p => p.Value.Until <= now).ToList()) _snapshotAsks.Remove(who);
+                // Windows that ended, or that end further off than one minute (the clock went back), start over.
+                foreach (var (who, _) in _snapshotAsks.Where(p => p.Value.Until <= now || p.Value.Until > now + TimeSpan.FromMinutes(1)).ToList())
+                    _snapshotAsks.Remove(who);
                 var (count, until) = _snapshotAsks.TryGetValue(source, out var used) ? used : (0, now + TimeSpan.FromMinutes(1));
                 limited = count >= MaxSnapshotsPerSourcePerMinute;
                 if (!limited) _snapshotAsks[source] = (count + 1, until);
@@ -421,7 +423,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             }
             var reply = BuildSnapshot(plan);
             using var whole = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-            whole.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(reply.Length));
+            // The reader's deadline is from the length it is told, which is the padded one: use the same here.
+            var padded = (reply.LongLength + RoomDirectoryProtocol.SnapshotPad - 1) / RoomDirectoryProtocol.SnapshotPad * RoomDirectoryProtocol.SnapshotPad;
+            whole.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(padded));
             await secure.Snapshot(reply, RoomDirectoryProtocol.SnapshotPad, RoomDirectoryProtocol.RequestTimeout, whole.Token);
         }
         finally { slots?.Release(); }
@@ -465,7 +469,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             var now = _now();
             if (_largeTokensAt != DateTimeOffset.MinValue)
             {
-                var seconds = (now - _largeTokensAt).TotalSeconds;
+                // A clock that went back adds nothing (and takes nothing): the buckets don't sink below what they hold.
+                var seconds = Math.Max(0, (now - _largeTokensAt).TotalSeconds);
                 _largeTokens = Math.Min(LargeSnapshotBurst, _largeTokens + seconds * LargeSnapshotsPerSecond);
                 _largeBytes = Math.Min(_largeByteBurst, _largeBytes + seconds * LargeSnapshotBytesPerSecond);
             }
@@ -850,8 +855,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>
     /// Plans the snapshot reply: everything when the caller's copy is from another run or too old, otherwise only the
-    /// keys that changed after its version. A delta nearly as big as everything is answered with everything (one cached
-    /// reply per version), so no request can make the directory serialize something big that isn't shared.
+    /// keys that changed after its version. A delta bigger than a quarter of everything is answered with everything (one
+    /// cached reply per version). A delta between a small reply and that size is built for its request, so it is held to
+    /// the large-reply slots and byte budget like the full snapshot.
     /// </summary>
     private SnapshotPlan PlanSnapshot(JsonObject request)
     {

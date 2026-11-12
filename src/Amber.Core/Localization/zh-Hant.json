@@ -1811,6 +1811,7 @@
   "settings.themepack.dev_error": "主題讀取失敗，保留上一次的樣子：{0}",
   "core.mp.public.jay_name": "Jay 公共網路",
   "core.mp.public.exited": "公共網路元件意外結束：{0}",
+  "core.mp.public.host_unreachable": "房主的電腦在公共網路上沒有回應。房間可能剛關了，稍後再試一次",
   "core.mp.public.no_directory": "連不上這個公共網路：它可能不在線，或者你的網路連不到它。請稍後再試，或在連線設定裡換一個種子位址",
   "core.mp.public.socks_failed": "公共網路的本機轉發沒有回應",
   "core.mp.public.unreachable": "在公共網路裡連不到對方（對方可能已經離線或關掉了房間）",

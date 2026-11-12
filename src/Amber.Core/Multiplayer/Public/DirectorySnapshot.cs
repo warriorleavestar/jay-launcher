@@ -300,6 +300,9 @@ public sealed class DirectorySnapshots
             lock (_gate) have = _copies.ToDictionary(p => p.Key, p => (p.Value.Epoch, p.Value.Version), StringComparer.Ordinal);
             var any = false;
             Exception? error = null;
+            // Taken before anything is asked, on purpose: a copy holds at least everything published before this moment,
+            // so "refreshed after T" (RefreshedAt > T) never claims more than the copy has. A round already under way
+            // when someone starts waiting doesn't count for them either (see WaitForNextRefreshAsync).
             var now = _now();
             // Each directory's answer is applied as it comes in: readers waiting for the first refresh can go on as soon as
             // one copy is usable, without waiting for the slowest directory.

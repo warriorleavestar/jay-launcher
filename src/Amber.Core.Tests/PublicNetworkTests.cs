@@ -352,6 +352,27 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         }
     }
 
+    private sealed class NeverAnswers : IPublicNetwork
+    {
+        public async Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException();
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.8");
+    }
+
+    [Fact]
+    public async Task AHostThatNeverAnswersIsATimeoutNotACancel()
+    {
+        // Joining from the room list: an address that never answers ends in a message, not in a knock left waiting.
+        var invite = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
+        var e = await Assert.ThrowsAsync<TimeoutException>(() =>
+            PublicJoin.KnockAsync(new NeverAnswers(), "10.235.0.66", invite, _guest, "Steve", "0.8.0", null, default));
+        Assert.False(string.IsNullOrEmpty(e.Message));
+    }
+
     [Fact]
     public async Task AnnouncerReportsMissingAddress()
     {

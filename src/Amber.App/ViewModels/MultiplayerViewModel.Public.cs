@@ -288,7 +288,12 @@ public sealed partial class MultiplayerViewModel
         try
         {
             return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct, freshSince: freshSince,
-                failed: (ip, e) => _diag.Add(L.T("multiplayer.public.diagnostics_category"), $"{ip}: {e.GetType().Name}: {e.Message}"),
+                failed: (ip, e) =>
+                {
+                    // Anything an address does is caught (it may be someone else's); a bug of ours shows in debug builds.
+                    System.Diagnostics.Debug.Assert(e is not NullReferenceException, e.ToString());
+                    _diag.Add(L.T("multiplayer.public.diagnostics_category"), $"{ip}: {e.GetType().FullName}: {e.Message}");
+                },
                 // A room opened after our copy was taken shows up at the next directory refresh; say we're still looking.
                 searching: () => Dispatcher.UIThread.Post(() =>
                 {
@@ -298,7 +303,8 @@ public sealed partial class MultiplayerViewModel
         // Anything that goes wrong here (the directory, an address) leaves the invite's own lobby to try.
         catch (Exception e) when (e is not OutOfMemoryException && !ct.IsCancellationRequested)
         {
-            _diag.Add(L.T("multiplayer.public.diagnostics_category"), e.Message);
+            System.Diagnostics.Debug.Assert(e is not NullReferenceException, e.ToString());
+            _diag.Add(L.T("multiplayer.public.diagnostics_category"), $"{e.GetType().FullName}: {e.Message}");
             return null;
         }
     }
