@@ -192,15 +192,25 @@ public sealed class TunnelServer : IAsyncDisposable
         }
     }
 
-    /// <summary>The caller's address for handshake places, or null for loopback (callers handed over there can't be told apart).</summary>
+    /// <summary>
+    /// The caller for handshake places: an IPv4 address, or the /64 of an IPv6 one (one machine usually has a whole /64).
+    /// Null for loopback, where callers handed over can't be told apart.
+    /// </summary>
     internal static string? CallerOf(TcpClient client)
     {
-        try
-        {
-            return (client.Client.RemoteEndPoint as IPEndPoint)?.Address is { } a && !IPAddress.IsLoopback(a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a)
-                ? (a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a).ToString() : null;
-        }
+        try { return CallerOf((client.Client.RemoteEndPoint as IPEndPoint)?.Address); }
         catch (Exception e) when (e is SocketException or ObjectDisposedException) { return null; }
+    }
+
+    internal static string? CallerOf(IPAddress? address)
+    {
+        if (address is null) return null;
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address)) return null;
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return address.ToString();
+        var bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new IPAddress(bytes) + "/64";
     }
 
     /// <summary>Logs that the handshake places are full, at most once a minute.</summary>

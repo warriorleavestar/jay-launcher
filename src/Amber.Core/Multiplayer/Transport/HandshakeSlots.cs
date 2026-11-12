@@ -48,7 +48,7 @@ internal sealed class HandshakeSlots(int max, int perSource)
             if (_held >= max * 2) return null;
             Slot? victim = null;
             if (source is not null && _liveBySource.GetValueOrDefault(key) >= perSource) victim = OldestOf(key);
-            else if (_live.Count >= max) victim = OldestOf(_liveBySource.MaxBy(p => p.Value).Key);
+            else if (_live.Count >= max) victim = OldestOfBusiest();
             if (victim is not null)
             {
                 Unlink(victim);
@@ -80,6 +80,15 @@ internal sealed class HandshakeSlots(int max, int perSource)
             slot.Evict = null;
             _held--;
         }
+    }
+
+    /// <summary>The oldest connection among the callers holding the most places (ties go to the oldest, never the newest).</summary>
+    private Slot? OldestOfBusiest()
+    {
+        var most = _liveBySource.Values.Max();
+        for (var node = _live.First; node is not null; node = node.Next)
+            if (_liveBySource[node.Value.Source] == most) return node.Value;
+        return null;
     }
 
     private Slot? OldestOf(string source)

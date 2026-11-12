@@ -166,14 +166,14 @@ public sealed class RekeyTests : IDisposable
             {
                 while (!stop.IsCancellationRequested)
                 {
-                    // About 200 a second, each held open until the server closes it or 2 000 are open.
+                    // About 200 a second, each held open until the server closes it or a bit more than the places are open.
                     for (var i = 0; i < 10; i++)
                     {
                         var c = new TcpClient();
                         try { await c.ConnectAsync(IPAddress.Loopback, server.Port); }
                         catch (SocketException) { }
                         open.Enqueue(c);
-                        if (open.Count > 2000) open.Dequeue().Dispose();
+                        if (open.Count > TunnelServer.MaxPendingHandshakes + 150) open.Dequeue().Dispose();
                     }
                     await Task.Delay(50);
                 }

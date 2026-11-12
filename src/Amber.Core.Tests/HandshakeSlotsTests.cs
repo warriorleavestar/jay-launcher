@@ -71,4 +71,29 @@ public sealed class HandshakeSlotsTests
         Assert.True(second.Closed());
         Assert.Null(slots.TryTake(null, () => { }, out _));
     }
+
+    [Fact]
+    public void TiesCloseTheOldestNeverTheNewest()
+    {
+        // Every caller holds one place: each newcomer must push out the oldest, so a member who just arrived survives.
+        var slots = new HandshakeSlots(8, 4);
+        var stalled = Enumerable.Range(0, 8).Select(i => Take(slots, $"10.2.0.{i}")).ToList();
+        var member = Take(slots, "10.3.0.1");
+        Assert.True(stalled[0].Closed());
+        for (var i = 0; i < 5; i++) Take(slots, $"10.4.0.{i}");
+        Assert.False(member.Closed());
+        Assert.All(stalled.Take(6), s => Assert.True(s.Closed()));
+        Assert.All(stalled.Skip(6), s => Assert.False(s.Closed()));
+    }
+
+    [Theory]
+    [InlineData("10.1.2.3", "10.1.2.3")]
+    [InlineData("::ffff:10.1.2.3", "10.1.2.3")]
+    [InlineData("fd00:1:2:3:4:5:6:7", "fd00:1:2:3::/64")]
+    [InlineData("fd00:1:2:3:ffff::1", "fd00:1:2:3::/64")]
+    [InlineData("127.0.0.1", null)]
+    [InlineData("127.235.1.2", null)]
+    [InlineData("::1", null)]
+    public void CallersAreIPv4AddressesOrIPv6Prefixes(string address, string? caller) =>
+        Assert.Equal(caller, TunnelServer.CallerOf(System.Net.IPAddress.Parse(address)));
 }
