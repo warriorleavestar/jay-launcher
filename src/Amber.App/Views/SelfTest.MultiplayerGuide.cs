@@ -238,6 +238,8 @@ internal sealed partial class SelfTest
         Check("加入框里的中转分享码：点加入", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.JoinCommand))));
         await Task.Delay(300);
         var importBox = await FindAsync<TextBox>(t => t.PlaceholderText == L.T("multiplayer.nodes.share_placeholder"));
+        // Settings › Network was built again on the way back: look the header up again.
+        relayHeader = await FindAsync<TextBlock>(t => t.Name == "RelayHeader");
         Check("中转分享码转到设置 › 网络，不静默导入", Route() == LegacyRoutes.RelaySettings && vm.Nodes.Count == 0 && vm.JoinCode == "" && importBox?.Text == nodeCode && vm.IsIdle, Route());
         Check("用户点导入才添加", Press(await FindAsync<Button>(b => ReferenceEquals(b.Command, vm.ImportNodesCommand)))
             && await WaitAsync(() => Dispatcher.UIThread.Invoke(() => vm.Nodes.Count == 1), 5) && vm.Nodes[0].Url == "tcp://example.invalid:11010");
