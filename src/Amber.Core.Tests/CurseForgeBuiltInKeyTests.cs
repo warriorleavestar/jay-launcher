@@ -22,6 +22,10 @@ public sealed class CurseForgeBuiltInKeyTests
         Assert.Equal("user", CurseForgeBuiltInKey.Resolve("user", "env"));
         Assert.Equal("env", CurseForgeBuiltInKey.Resolve(" ", "env"));
         Assert.Equal(CurseForgeBuiltInKey.Value, CurseForgeBuiltInKey.Resolve(null, ""));
+        // 仓库构建里 Value 是 null，用假的内置值把"都没填时用内置 Key"这一支测到。
+        Assert.Equal("built-in", CurseForgeBuiltInKey.Resolve(null, " ", "built-in"));
+        Assert.Equal("env", CurseForgeBuiltInKey.Resolve("", "env", "built-in"));
+        Assert.Equal("user", CurseForgeBuiltInKey.Resolve("user", "env", "built-in"));
     }
 
     [Fact]
