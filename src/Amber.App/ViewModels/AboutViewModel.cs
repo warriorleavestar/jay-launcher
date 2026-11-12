@@ -30,7 +30,8 @@ public static class NetworkList
         var external = service.Accounts.Store.Accounts.Count(a => a.Kind == AccountKind.External);
         var login = microsoft == 0 && external == 0 ? L.T("about.net.login.none") : L.F("about.net.login.count", microsoft + external);
         // Phones and tablets never check by themselves (the stores update them), whatever the saved switch says.
-        var update = settings.AutoUpdateCheck && AutoUpdateCheck.IsSupported ? L.T("about.net.update.auto") : L.T("about.net.update.manual");
+        var update = !AutoUpdateCheck.IsSupported && string.IsNullOrWhiteSpace(settings.UpdateFeedUrl) ? L.T("about.net.update.never")
+            : settings.AutoUpdateCheck && AutoUpdateCheck.IsSupported ? L.T("about.net.update.auto") : L.T("about.net.update.manual");
         var play = multiplayer is null || multiplayer.IsIdle ? L.T("about.net.play.idle")
             : multiplayer.IsHosting ? L.T("about.net.play.hosting") : L.T("about.net.play.joined");
         return

@@ -2620,6 +2620,7 @@
   "about.net.update.when_mobile": "自分の更新先を設定して「更新を確認」を押したときだけ問い合わせます。スマートフォンとタブレットはストアで更新されます",
   "about.net.update.auto": "1 日 1 回と、「更新を確認」を押したとき",
   "about.net.update.manual": "「更新を確認」を押したときだけ",
+  "about.net.update.never": "確認しません（更新先が未設定。Jay はストアで更新されます）",
   "about.net.play": "マルチプレイ",
   "about.net.play.when": "ルーム作成、参加、公開ルーム、サーバーへの参加、サーバー状態",
   "about.net.play.idle": "今はマルチプレイしていません",

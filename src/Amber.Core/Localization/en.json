@@ -2681,6 +2681,7 @@
   "about.net.update.when_mobile": "Only when you click Check for updates and have set your own update address; phones and tablets are updated by the store",
   "about.net.update.auto": "Once a day, and when you click Check for updates",
   "about.net.update.manual": "Only when you click Check for updates",
+  "about.net.update.never": "Never (no update address set; the store updates Jay)",
   "about.net.play": "Multiplayer",
   "about.net.play.when": "Rooms, joining, public rooms, joining servers, server status",
   "about.net.play.idle": "Not playing online now",
