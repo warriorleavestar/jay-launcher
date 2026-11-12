@@ -100,6 +100,15 @@ public sealed partial class RequestItem : ObservableObject
     public string Title => Handle.Spec.Title;
     public string? Body => Handle.Spec.Body;
     public bool HasBody => !string.IsNullOrEmpty(Body);
+    public string? Note => Handle.Spec.Note;
+    public bool HasNote => !string.IsNullOrEmpty(Note);
+    public string? Details => Handle.Spec.Details;
+    public bool HasDetails => !string.IsNullOrEmpty(Details);
+    public string DetailsLabel => Handle.Spec.DetailsLabel ?? L.T("activity.request.details");
+    [ObservableProperty] public partial bool ShowDetails { get; set; }
+
+    [RelayCommand]
+    private void ToggleDetails() => ShowDetails = !ShowDetails;
     public bool IsSafety => Handle.Spec.IsSafety;
     public IReadOnlyList<RequestButton> Buttons { get; }
 

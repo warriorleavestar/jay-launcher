@@ -7,6 +7,7 @@ using Amber.Core.Layout;
 using Amber.Core.Localization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.Interactivity;
@@ -122,6 +123,8 @@ internal sealed partial class SelfTest
                 instance.LaunchStep == L.F("launch.step.count", L.T("launch.step.loader"), 12, 87) && Math.Abs(home.Progress - 100.0 * 12 / 87) < 0.01,
                 $"{instance.LaunchStep} {home.Progress:F1}");
             Check("启动步骤：界面上没有“烘焙”", !instance.LaunchStep.Contains("烘焙"), instance.LaunchStep);
+            Check("启动步骤：跑着的时候开始按钮是“正在准备”，不是琥珀色的“启动游戏”",
+                instance.Start?.Kind == StartKind.Preparing && instance.StartBusy && instance.StartLabel != L.T("home.launch"), instance.StartLabel);
             await ShotAsync("instance-steps-mid");
             steps.Count(LaunchStepId.Loader, 13, 87);
             Check("启动步骤：比平时久时写“这一步比平时久”和在等什么",
@@ -130,7 +133,6 @@ internal sealed partial class SelfTest
             home.SetOwnedStatusForTest(StatusMessage.Plain(new LaunchStep(LaunchStepId.Loader, LaunchStepState.Running, Done: 13, Total: 87, Slow: true).StatusLine()));
             await Task.Delay(200);
             await ShotAsync("instance-steps-slow");
-            main.Activity.Track(HomeViewModel.SessionForTest(fetching));
             steps.Count(LaunchStepId.Loader, 14, 87);
             main.Activity.IsOpen = true;
             main.Activity.Tab = 2;
@@ -150,7 +152,17 @@ internal sealed partial class SelfTest
                 consent is { Spec.IsSafety: true } && consent.Spec.Choices.Single(c => c.IsDefault).Id == "later" && window.RequestBar.IsEffectivelyVisible
                 && Dispatcher.UIThread.Invoke(() => window.GetVisualDescendants().OfType<Window>().Count(w => w != window) == 0),
                 consent?.Spec.Title ?? "(none)");
+            Check("强沙盒：卡片只有一句正文和一行淡字，不写 AppContainer，细节收在“这会改什么”后面",
+                consent is { Spec.Body: { } body, Spec.Note: { Length: > 0 }, Spec.Details: { Length: > 0 } } && !body.Contains("AppContainer") && !body.Contains('\n')
+                && Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).All(t => t.Text != consent.Spec.Details)
+                    && window.RequestBar.GetVisualDescendants().OfType<Button>().Any(t => t.IsEffectivelyVisible && t.Classes.Contains("ghost") && t.Content as string == L.T("home.sandbox.consent.details_label"))),
+                consent?.Spec.Body ?? "(none)");
             await ShotAsync("instance-steps-sandbox-request");
+            Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<Button>().First(t => t.IsEffectivelyVisible && t.Content as string == L.T("home.sandbox.consent.details_label")).Command?.Execute(null));
+            await Task.Delay(200);
+            Check("强沙盒：点“这会改什么”才展开细节", Dispatcher.UIThread.Invoke(() =>
+                window.RequestBar.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == consent?.Spec.Details)));
+            await ShotAsync("instance-steps-sandbox-details");
             if (consent is not null) service.Requests.Resolve(consent, "later", Amber.Core.Activity.RequestSource.Bar);
             Check("强沙盒：选【这次不用】就按标准沙盒继续", await Task.WhenAny(asked, Task.Delay(2000)) == asked && !asked.Result);
 

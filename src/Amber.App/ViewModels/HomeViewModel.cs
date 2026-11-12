@@ -537,7 +537,12 @@ public sealed partial class HomeViewModel : PageViewModel
         _service.Requests.Resolved += OnResolved;
         handle = _service.Requests.Post(new RequestSpec("sandbox", L.T("home.sandbox.consent.title"), L.T("home.sandbox.consent.body"),
             [new("allow", L.T("home.sandbox.consent.confirm")), new("later", L.T("launch.step.sandbox.not_now"), IsDefault: true)],
-            IsSafety: true, DedupeKey: SandboxConsentKey));
+            IsSafety: true, DedupeKey: SandboxConsentKey)
+        {
+            Note = L.T("home.sandbox.consent.note"),
+            Details = L.T("home.sandbox.consent.details"),
+            DetailsLabel = L.T("home.sandbox.consent.details_label"),
+        });
         if (handle.IsResolved) OnResolved(handle);
         return answer.Task;
     }
@@ -1161,8 +1166,11 @@ public sealed partial class HomeViewModel : PageViewModel
         run.Session.Steps = new LaunchSteps(timings: _stepTimings, instance: id);
         run.Session.Steps.Changed += () => OnStepsChanged(run);
         _runs.Add(run);
+        // As a real start does: the instance's start button shows this run as preparing.
+        _sessions[id] = run.Session;
         LastRunInstance = id;
         _launchMeter.Reset();
+        SessionStarted?.Invoke(run.Session);
         UpdateRunState();
         return run;
     }
@@ -1183,8 +1191,11 @@ public sealed partial class HomeViewModel : PageViewModel
 
     internal void RemoveRunForTest(object run)
     {
-        _runs.Remove((GameRun)run);
+        var r = (GameRun)run;
+        _runs.Remove(r);
+        if (_sessions.TryGetValue(r.Id, out var s) && s == r.Session) _sessions.Remove(r.Id);
         UpdateRunState();
+        RunStateChanged?.Invoke();
     }
 
     internal void ExitGameForTest(object run) => ExitGame((GameRun)run);
