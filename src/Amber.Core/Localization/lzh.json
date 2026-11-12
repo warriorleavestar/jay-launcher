@@ -2868,7 +2868,6 @@
   "multiplayer.contacts.devices": "器 {0}",
   "multiplayer.contacts.remove_device": "去此器",
   "multiplayer.contacts.device_removed": "已去 {0} 之一器",
-  "multiplayer.contacts.step.known": "{0}：故交之新器也。其 Jay 之籍已驗，不對符而納之",
   "multiplayer.contacts.new_device_unnamed": "無名",
   "multiplayer.contacts.new_device_tag": "新器，待君察",
   "multiplayer.contacts.new_device_removed": "已去此器。非復對符不得歸",

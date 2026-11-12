@@ -53,10 +53,9 @@ public sealed class ContactRequestItem(PendingContact pending)
 {
     public PendingContact Pending { get; } = pending;
     public ContactStep Step { get; } = pending.Step;
-    public string Who => (Pending.Name.Length > 0 ? Pending.Name + " · " + Pending.Fingerprint : Pending.Fingerprint)
-        + (MultiplayerViewModel.JayLine(Pending.JayAccount) is { } jay ? " · " + jay : "");
+    public string Who => Pending.Name.Length > 0 ? Pending.Name + " · " + Pending.Fingerprint : Pending.Fingerprint;
 
-    public string Title => Pending.KnownFriend ? L.F("multiplayer.contacts.step.known", Who) : Step switch
+    public string Title => Step switch
     {
         ContactStep.WaitingForThem => L.F("multiplayer.contacts.step.waiting_them", Who),
         ContactStep.AskingMe => L.F("multiplayer.contacts.step.asking_me", Who),
@@ -131,8 +130,6 @@ public sealed partial class MultiplayerViewModel
         get
         {
             if (_public is not { } network) return null;
-            // Add-contact mail carries this device's Jay account certificate, so friends recognize me on my other devices.
-            Contacts.MyCertificate = JayCertificate;
             if (_post is null || !ReferenceEquals(_postNetwork, network))
             {
                 _postNetwork = network;

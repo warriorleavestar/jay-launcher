@@ -155,7 +155,7 @@ public sealed class MemberIdentityTests : IDisposable
     public void DeviceKeysRoundTrip()
     {
         byte[] ed, mlDsa;
-        Amber.Core.Identity.DeviceSignature signature;
+        Amber.Core.Identity.HybridSignature signature;
         using (var identity = MemberIdentity.LoadOrCreate(_dir))
         {
             Assert.Same(identity.Device.Dh, identity.KeyPair);

@@ -252,6 +252,7 @@ public sealed partial class MultiplayerViewModel
             for (var i = Members.Count - 1; i >= 0; i--)
                 if (Members[i].PublicKey.AsSpan().SequenceEqual(request.PublicKey)) Members.RemoveAt(i);
             Members.Insert(0, new MemberItem(request.Name, request.PublicKey, request.Trusted) { JayAccount = request.JayAccount });
+            SeenJayDevice(request.PublicKey, request.JayDevice);
             // A trusted friend on a new device: remember this device too, so the list shows it.
             if (request.TrustedByAccount)
             {
@@ -682,6 +683,7 @@ public sealed partial class MultiplayerViewModel
             {
                 HostFingerprint = outcome.HostFingerprint;
                 HostJayAccount = outcome.HostJayAccount;
+                SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);
             }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)

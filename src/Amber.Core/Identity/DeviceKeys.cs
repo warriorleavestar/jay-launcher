@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using Amber.Core.Multiplayer.Transport;
 using Org.BouncyCastle.Crypto.Parameters;
-using Org.BouncyCastle.Crypto.Signers;
 
 namespace Amber.Core.Identity;
 
@@ -68,35 +67,16 @@ public sealed class DeviceKeys : IDisposable
     /// Signs <paramref name="domain"/> ‖ <paramref name="message"/> with both signing keys. Each use has its own domain
     /// string so a signature can't be replayed somewhere else.
     /// </summary>
-    public DeviceSignature Sign(ReadOnlySpan<byte> domain, ReadOnlySpan<byte> message)
+    public HybridSignature Sign(ReadOnlySpan<byte> domain, ReadOnlySpan<byte> message)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        byte[] signed = [.. domain, .. message];
-        var ed = new Ed25519Signer();
-        ed.Init(true, new Ed25519PrivateKeyParameters(_edPrivate));
-        ed.BlockUpdate(signed, 0, signed.Length);
-        return new DeviceSignature(ed.GenerateSignature(), MlDsa65.Sign(_mlDsaSeed, signed));
+        return HybridSignature.Sign(_edPrivate, _mlDsaSeed, domain, message);
     }
 
     /// <summary>True only when both halves of <paramref name="signature"/> verify against the device's two public keys.</summary>
     public static bool Verify(ReadOnlySpan<byte> edPublicKey, ReadOnlySpan<byte> mlDsaPublicKey, ReadOnlySpan<byte> domain,
-        ReadOnlySpan<byte> message, DeviceSignature signature)
-    {
-        if (edPublicKey.Length != 32 || signature.Ed.Length != 64) return false;
-        byte[] signed = [.. domain, .. message];
-        try
-        {
-            var ed = new Ed25519Signer();
-            ed.Init(false, new Ed25519PublicKeyParameters(edPublicKey.ToArray()));
-            ed.BlockUpdate(signed, 0, signed.Length);
-            if (!ed.VerifySignature(signature.Ed)) return false;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        return MlDsa65.Verify(mlDsaPublicKey, signed, signature.MlDsa);
-    }
+        ReadOnlySpan<byte> message, HybridSignature? signature) =>
+        HybridSignature.Verify(edPublicKey, mlDsaPublicKey, domain, message, signature);
 
     private byte[] Derive(byte[] label) => HKDF.DeriveKey(HashAlgorithmName.SHA256, _seed, 32, [], label);
 
@@ -109,15 +89,4 @@ public sealed class DeviceKeys : IDisposable
         CryptographicOperations.ZeroMemory(_mlDsaSeed);
         Dh.Dispose();
     }
-}
-
-/// <summary>Ed25519 (64 bytes) and ML-DSA-65 (3309 bytes) over the same bytes.</summary>
-public sealed record DeviceSignature(byte[] Ed, byte[] MlDsa)
-{
-    public const int Size = 64 + MlDsa65.SignatureSize;
-
-    public byte[] Encode() => [.. Ed, .. MlDsa];
-
-    public static DeviceSignature? Decode(ReadOnlySpan<byte> data) =>
-        data.Length == Size ? new DeviceSignature(data[..64].ToArray(), data[64..].ToArray()) : null;
 }

@@ -70,8 +70,8 @@ public sealed class JayAccountStore(string directory)
         }
     }
 
-    /// <summary>Saves an account (replacing one with the same address) and certifies this device's multiplayer key for it.</summary>
-    public JayAccountEntry Add(JayAccount account, string label, bool backedUp, ReadOnlySpan<byte> deviceKey, string deviceName, DateTimeOffset now)
+    /// <summary>Saves an account (replacing one with the same address) and certifies this device's keys for it.</summary>
+    public JayAccountEntry Add(JayAccount account, string label, bool backedUp, DeviceKeys device, string deviceName, DateTimeOffset now)
     {
         Directory.CreateDirectory(directory);
         var seed = account.ExportSeed();
@@ -85,7 +85,7 @@ public sealed class JayAccountStore(string directory)
             var epoch = existing >= 0 ? _items[existing].Entry.Epoch : 0;
             var created = existing >= 0 ? _items[existing].Entry.Created : DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
             var entry = new JayAccountEntry(account.Address, DeviceCertificate.CleanName(label), backedUp || (existing >= 0 && _items[existing].Entry.BackedUp),
-                epoch, created, account.CertifyDevice(deviceKey, deviceName, epoch, now));
+                epoch, created, account.CertifyDevice(device, deviceName, epoch, now));
             if (existing >= 0) _items[existing] = (entry, protectedSeed);
             else _items.Add((entry, protectedSeed));
             SaveLocked();
@@ -119,17 +119,18 @@ public sealed class JayAccountStore(string directory)
     }
 
     /// <summary>
-    /// Makes sure this device's certificate matches its current multiplayer key (it changes when the user resets the identity).
+    /// Makes sure this device's certificate matches its current device keys (they change when the user resets the identity).
     /// Returns the entry, re-signed if needed; null when the account isn't saved here or can't be opened.
     /// </summary>
-    public JayAccountEntry? EnsureDeviceCertificate(string address, ReadOnlySpan<byte> deviceKey, string deviceName, DateTimeOffset now)
+    public JayAccountEntry? EnsureDeviceCertificate(string address, DeviceKeys device, string deviceName, DateTimeOffset now)
     {
         var entry = Find(address);
         if (entry is null) return null;
-        if (entry.Device is { } cert && cert.Verify(deviceKey) && cert.Epoch == entry.Epoch && cert.DeviceName == DeviceCertificate.CleanName(deviceName)) return entry;
+        if (entry.Device is { } cert && cert.Names(device) && cert.Account == entry.Address && cert.Epoch == entry.Epoch
+            && cert.DeviceName == DeviceCertificate.CleanName(deviceName) && cert.Verify(device.Dh.PublicKey)) return entry;
         using var account = Open(address);
         if (account is null) return null;
-        return Add(account, entry.Label, entry.BackedUp, deviceKey, deviceName, now);
+        return Add(account, entry.Label, entry.BackedUp, device, deviceName, now);
     }
 
     public void MarkBackedUp(string address) => Update(address, e => e with { BackedUp = true });

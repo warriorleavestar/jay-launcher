@@ -113,13 +113,17 @@ public sealed class JayAccountTests : IDisposable
     [InlineData("1qyrz8wqd2c9m")]
     public void Bech32mInvalidVectors(string text) => Assert.False(Bech32m.TryDecode(text, out _, out _));
 
+    private const string PinnedAbandonAddress = "jay1p7q30y99dgwtvgzxvxq8fg6k26ugsmv6xeg6x32pjgp9pcpgtqc8sxwq6ju";
+
     [Fact]
     public void AccountFromPhraseIsDeterministicAndUsesJaysOwnRootKey()
     {
         using var account = JayAccount.FromMnemonic(Bip39.Split(Abandon), null);
         // Pinned vector, cross-checked with an independent Python implementation (hashlib + hmac + cryptography + reference bech32m).
         Assert.Equal("93d93e2ba5180567d5ce978c28c4b46cb13cd3da72ea0a3b6b3fb9519946bf92", Convert.ToHexStringLower(account.PublicKey));
-        Assert.Equal("jay1qj0vnu2a9rqzk04wwj7xz3395djcne576wt4q5wmt87u4rx2xh7fqdxvdag", account.Address);
+        // The address is the hash of both account keys; the ML-DSA key comes from m/9'/0' (pinned below, both implementations agree).
+        Assert.Equal(PinnedAbandonAddress, account.Address);
+        Assert.Equal(JayAddress.Encode(JayAddress.AccountId(account.PublicKey, account.MlDsaPublicKey)), account.Address);
 
         // Same words with the standard SLIP-0010 root key (what a wallet would use) give a different key.
         var seed = Bip39.ToSeed(Bip39.Split(Abandon), null);
@@ -136,25 +140,28 @@ public sealed class JayAccountTests : IDisposable
     {
         using var account = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
         Assert.Equal(63, account.Address.Length);
-        Assert.StartsWith("jay1q", account.Address);
+        Assert.StartsWith("jay1p", account.Address);
         Assert.True(JayAddress.TryDecode(account.Address, out var key));
-        Assert.Equal(account.PublicKey, key);
+        Assert.Equal(account.Id, key);
         Assert.True(JayAddress.TryDecode("  " + account.Address.ToUpperInvariant() + " ", out _));
         var typo = account.Address[..20] + (account.Address[20] == 'q' ? 'p' : 'q') + account.Address[21..];
         Assert.False(JayAddress.IsValid(typo));
         Assert.False(JayAddress.IsValid(account.Address[..^1]));
         Assert.False(JayAddress.IsValid(Bech32m.Encode("abc", Bech32m.ConvertBits(account.PublicKey, 8, 5, true))));
         Assert.Equal($"{account.Address[..8]}…{account.Address[^4..]}", JayAddress.Short(account.Address));
-        Assert.Equal(4, JayAddress.CheckWords(account.PublicKey, MnemonicLanguage.ChineseSimplified).Length);
-        Assert.Equal(JayAddress.CheckWords(account.PublicKey, MnemonicLanguage.English), JayAddress.CheckWords(key, MnemonicLanguage.English));
+        Assert.Equal(4, JayAddress.CheckWords(account.Id, MnemonicLanguage.ChineseSimplified).Length);
+        Assert.Equal(JayAddress.CheckWords(account.Id, MnemonicLanguage.English), JayAddress.CheckWords(key, MnemonicLanguage.English));
+        // The single-key addresses from before (version 0, the Ed25519 key itself) are not addresses any more.
+        Assert.False(JayAddress.IsValid(Bech32m.Encode(JayAddress.Hrp, [0, .. Bech32m.ConvertBits(account.PublicKey, 8, 5, true)!])));
     }
 
     [Fact]
     public void DeviceCertificatesBindTheDeviceKey()
     {
         using var account = JayAccount.FromMnemonic(Bip39.Split(Abandon), null);
-        var device = RandomNumberGenerator.GetBytes(32);
-        var cert = account.CertifyDevice(device, "Desk‮ PC\n", 0, DateTimeOffset.UtcNow);
+        using var keys = DeviceKeys.Generate();
+        var device = keys.Dh.PublicKey.ToArray();
+        var cert = account.CertifyDevice(keys, "Desk‮ PC\n", 0, DateTimeOffset.UtcNow);
         Assert.Equal("Desk PC", cert.DeviceName);
         Assert.True(cert.Verify(device));
         Assert.False(cert.Verify(RandomNumberGenerator.GetBytes(32)));
@@ -165,14 +172,17 @@ public sealed class JayAccountTests : IDisposable
         Assert.False((parsed with { DeviceName = "Other" }).Verify(device));
         Assert.False((parsed with { Epoch = 1 }).Verify(device));
         using var other = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
-        Assert.False((parsed with { Account = other.Address }).Verify(device));
-        Assert.Null(DeviceCertificate.FromJson(System.Text.Json.Nodes.JsonNode.Parse("{\"account\":\"x\"}")));
+        Assert.False((parsed with { AccountEd = other.PublicKey, AccountMlDsa = other.MlDsaPublicKey }).Verify(device));
+        Assert.False((parsed with { DeviceEd = other.PublicKey }).Verify(device));
+        Assert.Equal(account.Address, parsed.Account);
+        Assert.Null(DeviceCertificate.FromJson(System.Text.Json.Nodes.JsonNode.Parse("{\"v\":2,\"account\":\"x\"}")));
     }
 
     [Fact]
     public void StoreKeepsSeedsEncryptedAndReopensAccounts()
     {
-        var device = RandomNumberGenerator.GetBytes(32);
+        using var keys = DeviceKeys.Generate();
+        var device = keys.Dh.PublicKey.ToArray();
         var words = Bip39.Generate(MnemonicLanguage.English);
         string address;
         byte[] seed;
@@ -181,7 +191,7 @@ public sealed class JayAccountTests : IDisposable
             address = account.Address;
             seed = Bip39.ToSeed(words, null);
             var store = new JayAccountStore(_dir);
-            var entry = store.Add(account, "Main", backedUp: false, device, "PC", DateTimeOffset.UtcNow);
+            var entry = store.Add(account, "Main", backedUp: false, keys, "PC", DateTimeOffset.UtcNow);
             Assert.True(entry.Device!.Verify(device));
         }
 
@@ -201,9 +211,10 @@ public sealed class JayAccountTests : IDisposable
         }
 
         again.MarkBackedUp(address);
-        var newDevice = RandomNumberGenerator.GetBytes(32);
-        var renewed = again.EnsureDeviceCertificate(address, newDevice, "PC", DateTimeOffset.UtcNow);
-        Assert.True(renewed!.Device!.Verify(newDevice));
+        using var newKeys = DeviceKeys.Generate();
+        var renewed = again.EnsureDeviceCertificate(address, newKeys, "PC", DateTimeOffset.UtcNow);
+        Assert.True(renewed!.Device!.Verify(newKeys.Dh.PublicKey) && renewed.Device.Names(newKeys));
+        Assert.Same(renewed, again.EnsureDeviceCertificate(address, newKeys, "PC", DateTimeOffset.UtcNow));
         Assert.True(renewed.BackedUp);
 
         again.Remove(address);

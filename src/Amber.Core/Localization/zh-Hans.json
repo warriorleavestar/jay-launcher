@@ -2995,7 +2995,6 @@
   "multiplayer.contacts.devices": "{0} 台设备",
   "multiplayer.contacts.remove_device": "移除这台设备",
   "multiplayer.contacts.device_removed": "已移除 {0} 的一台设备",
-  "multiplayer.contacts.step.known": "{0}：你认识的朋友的新设备。TA 的 Jay 账户验证通过，不用对表情就会加上",
   "multiplayer.contacts.new_device_unnamed": "未命名",
   "multiplayer.contacts.new_device_tag": "新设备，待你确认",
   "multiplayer.contacts.new_device_removed": "已移除这台设备。它只有重新对表情才能回来",

@@ -233,7 +233,7 @@ public sealed partial class AccountsViewModel
         try
         {
             using var device = MemberIdentity.LoadOrCreate(Amber.App.Services.AppSettings.DataDir);
-            _service.JayAccounts.Add(account, "", backedUp: true, device.PublicKey, DeviceName(), DateTimeOffset.UtcNow);
+            _service.JayAccounts.Add(account, "", backedUp: true, device.Device, DeviceName(), DateTimeOffset.UtcNow);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

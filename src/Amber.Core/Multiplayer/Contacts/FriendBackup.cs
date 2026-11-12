@@ -71,7 +71,7 @@ public static class FriendBackup
             var nonce = output.AsSpan(Magic.Length, NonceLength);
             RandomNumberGenerator.Fill(nonce);
             using var aes = new AesGcm(key, TagLength);
-            aes.Encrypt(nonce, plain, output.AsSpan(Magic.Length + NonceLength, plain.Length), output.AsSpan(output.Length - TagLength), Aad(account.PublicKey));
+            aes.Encrypt(nonce, plain, output.AsSpan(Magic.Length + NonceLength, plain.Length), output.AsSpan(output.Length - TagLength), Aad(account.Id));
             return output;
         }
         finally
@@ -97,7 +97,7 @@ public static class FriendBackup
         try
         {
             using var aes = new AesGcm(key, TagLength);
-            aes.Decrypt(data.Slice(Magic.Length, NonceLength), cipher, data[^TagLength..], plain, Aad(account.PublicKey));
+            aes.Decrypt(data.Slice(Magic.Length, NonceLength), cipher, data[^TagLength..], plain, Aad(account.Id));
             if (JsonNode.Parse(plain) is not JsonObject root || (int?)root["v"] != 1 || (string?)root["account"] != account.Address) return null;
             var result = new List<Contact>();
             foreach (var item in root["contacts"] as JsonArray ?? [])
@@ -134,7 +134,7 @@ public static class FriendBackup
         }
     }
 
-    private static byte[] Aad(ReadOnlySpan<byte> accountKey) => [.. Magic, .. accountKey];
+    private static byte[] Aad(ReadOnlySpan<byte> accountId) => [.. Magic, .. accountId];
 }
 
 /// <summary>What a friend list backup holds: the verified contacts, the devices I had removed, and when it was made.</summary>

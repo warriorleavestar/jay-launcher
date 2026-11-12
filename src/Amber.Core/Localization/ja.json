@@ -2995,7 +2995,6 @@
   "multiplayer.contacts.devices": "デバイス {0} 台",
   "multiplayer.contacts.remove_device": "このデバイスを外す",
   "multiplayer.contacts.device_removed": "{0} さんのデバイスを 1 台外しました",
-  "multiplayer.contacts.step.known": "{0}：知っているフレンドの新しいデバイスです。Jay アカウントが確認できたので、絵文字なしで追加します",
   "multiplayer.contacts.new_device_unnamed": "名前なし",
   "multiplayer.contacts.new_device_tag": "新しいデバイス・未確認",
   "multiplayer.contacts.new_device_removed": "デバイスを削除しました。絵文字の確認をやり直さない限り戻れません",

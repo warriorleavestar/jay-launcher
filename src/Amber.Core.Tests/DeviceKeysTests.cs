@@ -1,4 +1,4 @@
-using Amber.Core.Identity;
+﻿using Amber.Core.Identity;
 
 namespace Amber.Core.Tests;
 
@@ -40,8 +40,8 @@ public sealed class DeviceKeysTests
         // Only the Ed25519 half is right: refused.
         var mixed = sig with { MlDsa = other.Sign("d\n"u8, "m"u8).MlDsa };
         Assert.False(DeviceKeys.Verify(keys.EdPublicKey, keys.MlDsaPublicKey, "d\n"u8, "m"u8, mixed));
-        var decoded = DeviceSignature.Decode(sig.Encode());
-        Assert.Equal(sig.Ed, decoded.Ed);
+        var decoded = HybridSignature.Decode(sig.Encode());
+        Assert.Equal(sig.Ed, decoded!.Ed);
         Assert.Equal(sig.MlDsa, decoded.MlDsa);
         // Two devices never share keys.
         Assert.NotEqual(keys.Dh.PublicKey, other.Dh.PublicKey);

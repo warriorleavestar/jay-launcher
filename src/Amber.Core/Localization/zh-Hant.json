@@ -2995,7 +2995,6 @@
   "multiplayer.contacts.devices": "{0} 台裝置",
   "multiplayer.contacts.remove_device": "移除這台裝置",
   "multiplayer.contacts.device_removed": "已移除 {0} 的一台裝置",
-  "multiplayer.contacts.step.known": "{0}：你認識的朋友的新裝置。TA 的 Jay 帳戶驗證通過，不用對表情就會加上",
   "multiplayer.contacts.new_device_unnamed": "未命名",
   "multiplayer.contacts.new_device_tag": "新裝置，待你確認",
   "multiplayer.contacts.new_device_removed": "已移除這台裝置。它只有重新對表情才能回來",

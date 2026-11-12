@@ -3070,7 +3070,6 @@
   "multiplayer.contacts.devices": "{0} devices",
   "multiplayer.contacts.remove_device": "Remove this device",
   "multiplayer.contacts.device_removed": "Removed one of {0}'s devices",
-  "multiplayer.contacts.step.known": "{0}: a new device of a friend you know. Their Jay account checks out, so it's added without the emoji",
   "multiplayer.contacts.new_device_unnamed": "no name",
   "multiplayer.contacts.new_device_tag": "new, not confirmed yet",
   "multiplayer.contacts.new_device_removed": "Device removed. It can only come back through the emoji check",
