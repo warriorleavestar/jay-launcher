@@ -44,6 +44,10 @@ the command line.
 - **Doesn't protect:** two trustees acting together, or the very first download (that copy of Jay has
   no reason to trust anything yet). It also doesn't remove Windows SmartScreen / Smart App Control or
   macOS Gatekeeper warnings; those need real code signing, which Jay doesn't have yet.
+- **For now there are two release keys, and both belong to one trustee** (their own key and an offline cold
+  backup), with both needed. Until a third trustee joins, this guards against one stolen key, not against that one
+  person. Each key has a checked paper backup. If a key and its paper are both lost, old installs can't follow a
+  trust-chain step, so they have to reinstall from a fresh download.
 - Losing two of the three keys can't be repaired by a trust-chain step; old installs then have to
   reinstall from a fresh download.
 - A self-signed Authenticode certificate is not a substitute. Windows doesn't trust it, and asking
