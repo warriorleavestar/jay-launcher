@@ -3593,5 +3593,11 @@
   "maintenance.failed_because": "未畢：{0}",
   "maintenance.exited": "戲中途而退（退碼 {0}）。",
   "maintenance.ended": "戲未啟。",
-  "core.bake.maintenance_unsupported": "通用載器太舊，不能治存。請更之。"
+  "core.bake.maintenance_unsupported": "通用載器太舊，不能治存。請更之。",
+  "maintenance.row.backing_up": "備中",
+  "maintenance.step.backup": "備存",
+  "maintenance.backup_failed": "備未成，故未始：{0}",
+  "maintenance.backup_note": "舊存備於 備份 中。",
+  "maintenance.pregen.backup": "始前先備此存。",
+  "maintenance.disk_short": "碟不足：需 {0}，唯餘 {1}。"
 }

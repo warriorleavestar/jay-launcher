@@ -2,6 +2,7 @@ using Amber.App.Localization;
 using Amber.App.Services;
 using Amber.Core.Activity;
 using Amber.Core.Bake;
+using Amber.Core.Game;
 using Amber.Core.Localization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -22,12 +23,34 @@ public sealed partial class InstanceViewModel
     [ObservableProperty] public partial bool PregenOpen { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PregenTitle), nameof(PregenEstimate), nameof(PregenResumeNote), nameof(HasPregenResume))]
+    [NotifyPropertyChangedFor(nameof(PregenTitle), nameof(PregenEstimate), nameof(PregenResumeNote), nameof(HasPregenResume),
+        nameof(PregenDiskShort), nameof(PregenBlocker), nameof(CanStartPregen))]
     public partial WorldItem? PregenWorld { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PregenEstimate), nameof(PregenResumeNote), nameof(HasPregenResume), nameof(PregenRadius))]
+    [NotifyPropertyChangedFor(nameof(PregenEstimate), nameof(PregenResumeNote), nameof(HasPregenResume), nameof(PregenRadius),
+        nameof(PregenDiskShort), nameof(PregenBlocker), nameof(CanStartPregen))]
     public partial int PregenRadiusIndex { get; set; }
+
+    /// <summary>Free bytes on the drive of a folder (null when it cannot be told). The self-check replaces it.</summary>
+    internal Func<string, long?> FreeSpaceFor { get; set; } = path =>
+    {
+        try { return Path.GetPathRoot(Path.GetFullPath(path)) is { Length: > 0 } root ? new DriveInfo(root).AvailableFreeSpace : null; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { return null; }
+    };
+
+    private long PregenDiskNeed => WorldMaintenance.DiskBytes(PregenRadius, PregenState()?.DoneFor(PregenRadius) ?? 0);
+
+    private long? PregenDiskFree => PregenWorld is { } w ? FreeSpaceFor(w.World.Path) : null;
+
+    /// <summary>The estimate is bigger than the free space on the game folder's drive.</summary>
+    public bool PregenDiskShort => PregenDiskFree is { } free && PregenDiskNeed > free;
+
+    /// <summary>Why [Start] is off: the instance (no loader, a game running) or the disk; null when it can start.</summary>
+    public string? PregenBlocker => MaintenanceBlocker
+        ?? (PregenDiskShort ? L.F("maintenance.disk_short", Fmt.Size(PregenDiskNeed), Fmt.Size(PregenDiskFree ?? 0)) : null);
+
+    public bool CanStartPregen => PregenBlocker is null;
 
     public int PregenRadius => WorldMaintenance.Radii[Math.Clamp(PregenRadiusIndex, 0, WorldMaintenance.Radii.Count - 1)];
 
@@ -78,6 +101,9 @@ public sealed partial class InstanceViewModel
         PregenWorld = item;
         OnPropertyChanged(nameof(MaintenanceBlocker));
         OnPropertyChanged(nameof(CanMaintainWorlds));
+        OnPropertyChanged(nameof(PregenBlocker));
+        OnPropertyChanged(nameof(CanStartPregen));
+        OnPropertyChanged(nameof(PregenDiskShort));
         PregenOpen = true;
     }
 
@@ -87,7 +113,7 @@ public sealed partial class InstanceViewModel
     [RelayCommand]
     private void StartPregen()
     {
-        if (PregenWorld is not { } item) return;
+        if (PregenWorld is not { } item || !CanStartPregen) return;
         if (StartMaintenance(item, WorldMaintenance.Pregen(item.World.FolderName, PregenRadius))) PregenOpen = false;
     }
 
@@ -115,13 +141,31 @@ public sealed partial class InstanceViewModel
         var title = spec.PregenRadius > 0 ? L.F("maintenance.task.pregen", item.Name, spec.PregenRadius) : L.F("maintenance.task.upgrade", item.Name);
         _maintenance[key] = run;
         SetWorldBusy(key, L.T("maintenance.row.preparing"));
+        var world = item.World;
+        var workDir = c.WorkDir;
         _service.Tasks.Start("world-maintenance", title, async (ctx, ct) =>
         {
-            run.Progressed += p => ctx.Report(p.Fraction, StepText(p));
-            using var stop = ct.Register(run.Cancel);
-            ctx.Report(null, L.T("maintenance.step.preparing"));
-            (launch ?? _service.RequestLaunch)(new LaunchRequest(c.Id) { Maintenance = run });
-            try { return await run.Done; }
+            try
+            {
+                // First a backup, the same as the world's ⋯ › 备份: an upgrade cannot be undone by the game.
+                SetBusyLater(key, L.T("maintenance.row.backing_up"));
+                ctx.Report(0, L.T("maintenance.step.backup"));
+                try
+                {
+                    run.Backup = await Task.Run(() => WorldBackups.Create(world, workDir, new Progress<double>(p => ctx.Report(p, L.T("maintenance.step.backup"))), ct), ct);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    return TaskOutcome.Failure(L.F("maintenance.backup_failed", ErrorText.Describe(e)));
+                }
+                ct.ThrowIfCancellationRequested();
+                SetBusyLater(key, L.T("maintenance.row.preparing"));
+                run.Progressed += p => ctx.Report(p.Fraction, StepText(p));
+                using var stop = ct.Register(run.Cancel);
+                ctx.Report(null, L.T("maintenance.step.preparing"));
+                (launch ?? _service.RequestLaunch)(new LaunchRequest(c.Id) { Maintenance = run });
+                return await run.Done;
+            }
             finally
             {
                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -154,6 +198,9 @@ public sealed partial class InstanceViewModel
     internal static string RowText(MaintenanceProgress p) => p.Fraction is { } f && p.Step is "spawn" or "pregen"
         ? L.F("maintenance.row.progress", (int)Math.Floor(f * 100))
         : p.Step == "upgrade" ? L.T("maintenance.row.upgrading") : L.T("maintenance.row.preparing");
+
+    private void SetBusyLater((string Instance, string World) key, string text) =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (_maintenance.ContainsKey(key)) SetWorldBusy(key, text); });
 
     private void SetWorldBusy((string Instance, string World) key, string? text)
     {

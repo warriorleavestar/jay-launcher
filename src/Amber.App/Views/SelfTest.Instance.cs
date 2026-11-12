@@ -391,14 +391,73 @@ internal sealed partial class SelfTest
             await Task.Delay(300);
             Check("选 128：估算跟着变，开了通用加载器后能开始", instance.PregenRadius == 128 && instance.PregenEstimate.Contains("2,048") && instance.CanMaintainWorlds
                 && Dispatcher.UIThread.Invoke(() => page?.StartPregenButton.IsEnabled == true), instance.PregenEstimate);
+            Check("抽屉写“开始前会先备份这个存档。”", Dispatcher.UIThread.Invoke(() => page?.PregenBackupText.IsEffectivelyVisible == true && page.PregenBackupText.Text == L.T("maintenance.pregen.backup")));
             await ShotAsync("instance-world-pregen-drawer");
+
+            // Esc closes it and gives focus back to the world's ⋯; opening focuses the chosen radius.
+            Dispatcher.UIThread.Invoke(() => page?.PregenRadiusChips.Focus());
+            window.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape, Source = window });
+            await Task.Delay(300);
+            var focused = Dispatcher.UIThread.Invoke(() => window.FocusManager?.GetFocusedElement());
+            Check("Esc 关掉抽屉，焦点回到这个世界的 ⋯", !instance.PregenOpen && focused is not null && focused == Dispatcher.UIThread.Invoke(() => page?.WorldMoreButton("Survival")),
+                focused?.GetType().Name ?? "(none)");
+            instance.OpenPregenCommand.Execute(world);
+            await Task.Delay(300);
+            focused = Dispatcher.UIThread.Invoke(() => window.FocusManager?.GetFocusedElement());
+            Check("打开抽屉：焦点在选中的半径芯片上", focused is ListBoxItem { IsSelected: true } chip && chip.DataContext == instance.PregenRadiusChoices[instance.PregenRadiusIndex],
+                focused?.GetType().Name ?? "(none)");
+
+            // Not enough disk: the estimate turns into a warning and [Start] is off.
+            var freeBefore = instance.FreeSpaceFor;
+            instance.FreeSpaceFor = _ => 100L * 1024 * 1024;
+            instance.PregenRadiusIndex = 0;
+            instance.PregenRadiusIndex = 1;
+            await Task.Delay(300);
+            Check("磁盘不够：估算一行变成警告，写“磁盘空间不够：要…，只剩…”，【开始预生成】不能点",
+                instance.PregenDiskShort && instance.PregenBlocker == L.F("maintenance.disk_short", Fmt.Size(Amber.Core.Bake.WorldMaintenance.DiskBytes(128, 4000)), Fmt.Size(100L * 1024 * 1024))
+                && Dispatcher.UIThread.Invoke(() => page?.PregenEstimateText.Classes.Contains("warn") == true && page.StartPregenButton.IsEnabled == false && page.PregenBlockerText.IsEffectivelyVisible),
+                instance.PregenBlocker ?? "");
+            await ShotAsync("instance-world-pregen-disk");
+            instance.FreeSpaceFor = freeBefore;
+            instance.PregenRadiusIndex = 0;
+            instance.PregenRadiusIndex = 1;
+
+            // Compact: the drawer fills the content area.
+            window.Width = 600;
+            await Task.Delay(500);
+            var widths = Dispatcher.UIThread.Invoke(() => (Drawer: page?.PregenDrawer.Bounds.Width ?? 0, Page: page?.Bounds.Width ?? 0));
+            Check("窄窗口：抽屉铺满内容区", widths.Drawer > 0 && Math.Abs(widths.Drawer - widths.Page) < 30, $"{widths.Drawer:F0} / {widths.Page:F0}");
+            await ShotAsync("instance-world-pregen-600");
+            window.Width = 1024;
+            await Task.Delay(400);
+
+            // A backup that fails stops it before anything starts.
+            var levelDat = Path.Combine(world.World.Path, "level.dat");
+            LaunchRequest? refused = null;
+            Amber.Core.Activity.TaskHandle? failedTask = null;
+            using (new FileStream(levelDat, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                instance.StartMaintenance(world, Amber.Core.Bake.WorldMaintenance.UpgradeOnly("Survival"), r => refused = r);
+                await WaitAsync(() => (failedTask = service.Tasks.All.FirstOrDefault(t => t.Kind == "world-maintenance")) is { IsRunning: false }, 10);
+            }
+            Check("备份失败：不开始维护，任务失败并说备份没成功", refused is null && failedTask?.State == Amber.Core.Activity.TaskState.Failed
+                && failedTask.Message?.StartsWith(L.F("maintenance.backup_failed", "").TrimEnd()) == true, $"{failedTask?.State} {failedTask?.Message}");
+            await WaitAsync(() => instance.Worlds.FirstOrDefault(w => w.World.FolderName == "Survival")?.Busy is null, 3);
+            service.Tasks.ClearFinished();
+            // The list was reread while the test held level.dat: read it again now that it is free.
+            service.NotifyContentChanged();
+            await WaitAsync(() => instance.Worlds.FirstOrDefault(w => w.World.FolderName == "Survival")?.Name == "生存世界", 5);
+            world = instance.Worlds.First(w => w.World.FolderName == "Survival");
+            var backupsBefore = Amber.Core.Game.WorldBackups.List(service.WorkDirFor(id), "Survival").Count;
 
             // A run: an Activity task, the row says 准备中, then how far it is.
             LaunchRequest? asked = null;
             var run = instance.StartMaintenance(world, Amber.Core.Bake.WorldMaintenance.Pregen("Survival", instance.PregenRadius), r => asked = r);
             instance.ClosePregenCommand.Execute(null);
-            await WaitAsync(() => asked is not null, 3);
+            await WaitAsync(() => asked is not null, 10);
             var task = service.Tasks.Active.FirstOrDefault(t => t.Kind == "world-maintenance");
+            Check("开始前先备份（和 ⋯ › 备份 一样），再启动", asked is not null && run?.Backup is not null
+                && Amber.Core.Game.WorldBackups.List(service.WorkDirFor(id), "Survival").Count == backupsBefore + 1, $"{backupsBefore} {run?.Backup}");
             var row = instance.Worlds.First(w => w.World.FolderName == "Survival");
             Check("开始后：活动里一个任务，启动请求带着这个存档和半径，世界行写“准备中”",
                 task is not null && asked?.Maintenance == run && run?.Spec.PregenRadius == 128 && row.Busy == L.T("maintenance.row.preparing")
@@ -422,7 +481,7 @@ internal sealed partial class SelfTest
             await Task.Delay(300);
             row = instance.Worlds.First(w => w.World.FolderName == "Survival");
             Check("做完：任务成功、写世界的名字，世界行不再写准备中", task?.State == Amber.Core.Activity.TaskState.Succeeded && row.Busy is null
-                && task?.Message?.StartsWith(row.Name) == true, $"{task?.State} {task?.Message}");
+                && task?.Message?.StartsWith(row.Name) == true && task.Message.EndsWith(L.T("maintenance.backup_note")), $"{task?.State} {task?.Message}");
         }
         finally
         {

@@ -1153,7 +1153,7 @@
     </Border>
 
     <!-- Pre-generate a world (universal loader): the radius, what it costs, then an Activity task. -->
-    <Border x:Name="PregenDrawer" Grid.Row="0" Grid.RowSpan="4" Width="440" HorizontalAlignment="Right" VerticalAlignment="Top" ZIndex="10"
+    <Border x:Name="PregenDrawer" Grid.Row="0" Grid.RowSpan="4" Width="560" HorizontalAlignment="Right" VerticalAlignment="Top" ZIndex="10"
             Classes="card" Margin="0" Padding="16" BoxShadow="0 4 24 0 #40000000" IsVisible="{Binding PregenOpen}">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
@@ -1171,14 +1171,15 @@
               <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
-          <TextBlock x:Name="PregenEstimateText" Text="{Binding PregenEstimate}" TextWrapping="Wrap" />
+          <TextBlock x:Name="PregenEstimateText" Text="{Binding PregenEstimate}" Classes.warn="{Binding PregenDiskShort}" TextWrapping="Wrap" />
           <TextBlock x:Name="PregenResumeText" Classes="hint" FontSize="12" Text="{Binding PregenResumeNote}" IsVisible="{Binding HasPregenResume}" TextWrapping="Wrap" />
         </StackPanel>
+        <TextBlock x:Name="PregenBackupText" Classes="hint" FontSize="12" Text="{l:T maintenance.pregen.backup}" TextWrapping="Wrap" />
         <TextBlock Classes="hint" FontSize="12" Text="{l:T maintenance.pregen.how}" TextWrapping="Wrap" />
-        <TextBlock x:Name="PregenBlockerText" Classes="warn" FontSize="12" Text="{Binding MaintenanceBlocker}" IsVisible="{Binding !CanMaintainWorlds}" TextWrapping="Wrap" />
+        <TextBlock x:Name="PregenBlockerText" Classes="warn" FontSize="12" Text="{Binding PregenBlocker}" IsVisible="{Binding !CanStartPregen}" TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
           <Button Content="{l:T common.cancel}" Command="{Binding ClosePregenCommand}" />
-          <Button x:Name="StartPregenButton" Classes="primary" Content="{l:T maintenance.pregen.start}" Command="{Binding StartPregenCommand}" IsEnabled="{Binding CanMaintainWorlds}" />
+          <Button x:Name="StartPregenButton" Classes="primary" Content="{l:T maintenance.pregen.start}" Command="{Binding StartPregenCommand}" IsEnabled="{Binding CanStartPregen}" />
         </StackPanel>
       </StackPanel>
     </Border>

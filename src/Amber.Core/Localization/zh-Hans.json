@@ -3727,5 +3727,11 @@
   "maintenance.failed_because": "没做完：{0}",
   "maintenance.exited": "游戏中途退出了（退出码 {0}）。",
   "maintenance.ended": "游戏没有启动。",
-  "core.bake.maintenance_unsupported": "通用加载器版本太旧，不能整理存档。请更新通用加载器。"
+  "core.bake.maintenance_unsupported": "通用加载器版本太旧，不能整理存档。请更新通用加载器。",
+  "maintenance.row.backing_up": "备份中",
+  "maintenance.step.backup": "备份存档",
+  "maintenance.backup_failed": "备份没成功，没有开始：{0}",
+  "maintenance.backup_note": "旧的存档备份在 备份 里。",
+  "maintenance.pregen.backup": "开始前会先备份这个存档。",
+  "maintenance.disk_short": "磁盘空间不够：要 {0}，只剩 {1}。"
 }

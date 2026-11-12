@@ -905,6 +905,9 @@ public sealed class MaintenanceRun(Amber.Core.Bake.WorldMaintenance spec)
 
     /// <summary>The world's name as the world list shows it (its folder when not given).</summary>
     public string Name { get; init; } = spec.World;
+
+    /// <summary>The backup made before the run (its path), or null before it is made.</summary>
+    public string? Backup { get; internal set; }
     public Task<Amber.Core.Activity.TaskOutcome> Done => _done.Task;
     public bool CancelRequested { get; private set; }
     public Amber.Core.Bake.MaintenanceProgress? Last { get; private set; }

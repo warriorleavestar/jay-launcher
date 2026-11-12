@@ -3727,5 +3727,11 @@
   "maintenance.failed_because": "完了しませんでした：{0}",
   "maintenance.exited": "ゲームが途中で終了しました（終了コード {0}）。",
   "maintenance.ended": "ゲームが起動しませんでした。",
-  "core.bake.maintenance_unsupported": "汎用ローダーが古いため、ワールドを処理できません。汎用ローダーを更新してください。"
+  "core.bake.maintenance_unsupported": "汎用ローダーが古いため、ワールドを処理できません。汎用ローダーを更新してください。",
+  "maintenance.row.backing_up": "バックアップ中",
+  "maintenance.step.backup": "ワールドをバックアップ",
+  "maintenance.backup_failed": "バックアップできなかったため、開始しませんでした：{0}",
+  "maintenance.backup_note": "以前のワールドは バックアップ にあります。",
+  "maintenance.pregen.backup": "開始する前にこのワールドをバックアップします。",
+  "maintenance.disk_short": "ディスクの空きが足りません：{0} 必要ですが、残りは {1} です。"
 }

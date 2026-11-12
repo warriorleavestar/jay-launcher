@@ -873,9 +873,9 @@ public sealed partial class HomeViewModel : PageViewModel
     /// <summary>How a maintenance run ended, from its last progress line and the exit code.</summary>
     internal static TaskOutcome MaintenanceOutcome(MaintenanceRun run, int exitCode) => run.Last?.Step switch
     {
-        "done" => TaskOutcome.Success(run.Spec.PregenRadius > 0
+        "done" => TaskOutcome.Success((run.Spec.PregenRadius > 0
             ? L.F("maintenance.done_pregen", run.Name, Amber.Core.Bake.WorldMaintenance.Chunks(run.Spec.PregenRadius).ToString("N0"))
-            : L.F("maintenance.done_upgrade", run.Name)),
+            : L.F("maintenance.done_upgrade", run.Name)) + (run.Backup is not null ? " " + L.T("maintenance.backup_note") : "")),
         "cancelled" => new TaskOutcome(TaskState.Cancelled, L.T("maintenance.cancelled")),
         "failed" => TaskOutcome.Failure(run.Last.Message is { Length: > 0 } why ? L.F("maintenance.failed_because", why) : L.T("maintenance.failed")),
         _ when run.CancelRequested => new TaskOutcome(TaskState.Cancelled, L.T("maintenance.cancelled")),

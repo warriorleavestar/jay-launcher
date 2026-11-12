@@ -3804,5 +3804,11 @@
   "maintenance.failed_because": "Not finished: {0}",
   "maintenance.exited": "The game quit part way (exit code {0}).",
   "maintenance.ended": "The game did not start.",
-  "core.bake.maintenance_unsupported": "The universal loader is too old to work on worlds. Update the universal loader."
+  "core.bake.maintenance_unsupported": "The universal loader is too old to work on worlds. Update the universal loader.",
+  "maintenance.row.backing_up": "Backing up",
+  "maintenance.step.backup": "Backing up the world",
+  "maintenance.backup_failed": "The backup did not work, so nothing was started: {0}",
+  "maintenance.backup_note": "The old world is kept in Backups.",
+  "maintenance.pregen.backup": "The world is backed up before it starts.",
+  "maintenance.disk_short": "Not enough disk space: needs {0}, only {1} free."
 }
