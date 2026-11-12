@@ -145,7 +145,7 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
   - **钥匙串 / Secret Service 暂不做（2026-11-09 评估）**：
     - macOS：现在是临时签名，每次更新签名都变，钥匙串会在每次更新后弹框要密码，拒绝了就得重新登录；等正式签名（SignPath / Apple 开发者账号）后再做，存进钥匙串的只是那把 32 字节包裹密钥，数据格式不变。
     - Linux：Secret Service 没有按程序隔离，同一用户的任何程序都能读已解锁的条目，安全上只比 0600 文件多了“不在数据目录里”；而迁移后钥匙环没解锁或没装（无界面登录、KDE 没开 KWallet）时会读不到身份和登录，代价大于收益。
-- CurseForge API Key 存在 `settings.json`（或 `AMBER_CF_KEY`），是明文；仓库里不放任何 Key。
+- CurseForge API Key：用户自己的存在 `settings.json`（或 `AMBER_CF_KEY`），是明文；官方桌面版另有构建时由 CI secret 注入的第三方 Key（`CurseForgeBuiltInKey.cs`），Android 还没有接入。仓库里不放任何 Key。
 
 ### 3.5 模组、整合包、资源 ✅
 

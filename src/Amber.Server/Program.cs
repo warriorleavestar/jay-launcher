@@ -1210,7 +1210,9 @@ public static class Program
                     case "on":
                     {
                         var network = options.Get("network") ?? Amber.Core.Multiplayer.Public.PublicNetworkProfile.Jay().Id;
-                        if (File.Exists(network)) network = File.ReadAllText(network).Trim();
+                        // The built-in network ID can also be the name of the executable in the current directory.
+                        if (network != Amber.Core.Multiplayer.Public.PublicNetworkProfile.Jay().Id && File.Exists(network))
+                            network = File.ReadAllText(network).Trim();
                         if (GateStore.RecordNetworkId(network) is not { } networkId) throw new ArgumentException("--network 要写 jay、一个 JAYNET2- 连接串或 .jaynet 文件");
                         store.EnableRecords(network);
                         output.WriteLine($"已开启地址记录：公共网络 {networkId}。之后给没有域名的服务器发的邀请码只写记录编号，不写 IP，也不用口令。");

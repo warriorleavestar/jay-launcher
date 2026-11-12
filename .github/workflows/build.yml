@@ -73,7 +73,24 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Require CurseForge key on release tags
+        # 标签上的构建（推送或手动运行）都会发版，所以下面在标签上一定注入 Key，这里一定检查。
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          JAY_CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        # 只判断是否为空，不输出值；secret 没配时正式版不能悄悄不带 Key 发出去。
+        run: |
+          if [ -z "$JAY_CURSEFORGE_API_KEY" ]; then
+            echo "::error::CURSEFORGE_API_KEY secret is empty; release builds must include the CurseForge key."
+            exit 1
+          fi
+
       - name: Publish single-file ReadyToRun
+        env:
+          # CurseForge 第三方 API Key（仓库 secret）只在推到 main 和标签上的构建里编进程序（on.push 只含 main 和 v* 标签）；
+          # 在标签上手动运行也会发版，所以同样注入。PR 构建不带，见 Amber.Core.csproj。
+          JAY_CURSEFORGE_API_KEY: ${{ (github.event_name == 'push' || startsWith(github.ref, 'refs/tags/')) && secrets.CURSEFORGE_API_KEY || '' }}
         run: >-
           dotnet publish Amber.App -c Release -r ${{ matrix.rid }} --self-contained
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true

@@ -251,6 +251,23 @@ public sealed class TunnelClient : IAsyncDisposable
         _loop = Task.Run(() => AcceptLoopAsync(_cts.Token));
     }
 
+    /// <summary>A plain TCP connection to host:port (one leg of a split connection, before its handshake).</summary>
+    internal static async Task<Stream> Raw(string host, int port, CancellationToken ct)
+    {
+        var tcp = new TcpClient();
+        try
+        {
+            await tcp.ConnectAsync(host, port, ct);
+            Pump.Tune(tcp);
+            return new OwnedStream(tcp);
+        }
+        catch
+        {
+            tcp.Dispose();
+            throw;
+        }
+    }
+
     /// <summary>经 EasyTier 连到 host:port，再按房间设置做封装握手。</summary>
     public static Func<CancellationToken, Task<Stream>> Wrapped(string host, int port, RoomCode room, TunnelSettings settings, TunnelService service) => async ct =>
     {

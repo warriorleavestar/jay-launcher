@@ -312,6 +312,43 @@ public sealed class JayAccountMultiplayerTests : IAsyncDisposable, IDisposable
         Assert.Single(book.All);
     }
 
+    /// <summary>Comparing the emoji again with a friend (a relink) checks the device, not the account: a pending link stays pending.</summary>
+    [Fact]
+    public void AnotherEmojiExchangeDoesNotConfirmTheAccount()
+    {
+        using var aliceLaptop = DeviceKeys.Generate();
+        using var bobPc = DeviceKeys.Generate();
+        var bookA = new ContactBook(Path.Combine(_dir, "ea.json"), () => Now) { Me = aliceLaptop.Dh.PublicKey.ToArray() };
+        var bookB = new ContactBook(Path.Combine(_dir, "eb.json"), () => Now) { Me = bobPc.Dh.PublicKey.ToArray() };
+        byte[] alice = aliceLaptop.Dh.PublicKey.ToArray(), bob = bobPc.Dh.PublicKey.ToArray();
+        void Exchange(bool relink = true)
+        {
+            var hello = relink ? bookA.StartRelink(alice, bob, "Alice") : bookA.StartAdd(alice, bob, "Alice");
+            Assert.Null(bookB.Receive(alice, hello!, "Bob"));
+            var nonce = bookA.Receive(bob, bookB.Accept(alice, "Bob")!, "Alice")!;
+            bookB.Receive(alice, nonce, "Bob");
+            bookA.Confirm(bob);
+            Assert.NotNull(bookB.Confirm(alice));
+        }
+        Exchange(relink: false);
+        bookB.SeenLive(alice, _alice.CertifyDevice(aliceLaptop, "Windows", 0, Now));
+        Assert.True(bookB.Find(alice)!.AccountPending);
+
+        Exchange();
+        var again = new ContactBook(Path.Combine(_dir, "eb.json"), () => Now).Find(alice)!;
+        Assert.Equal((_alice.Address, true), (again.JayAccount, again.AccountPending));
+        Assert.Null(bookB.FindVerifiedByJayAccount(_alice.Address));
+        using var phone = DeviceKeys.Generate();
+        Assert.Null(bookB.SeenLive(phone.Dh.PublicKey, _alice.CertifyDevice(phone, "Phone", 0, Now)));
+
+        // A refused account stays refused through another exchange too.
+        bookB.ConfirmAccount(alice, isTheirs: false);
+        Exchange();
+        var refused = bookB.Find(alice)!;
+        Assert.Equal((null, _alice.Address), (refused.JayAccount, refused.RefusedAccount));
+        Assert.Null(bookB.SeenLive(alice, _alice.CertifyDevice(aliceLaptop, "Windows", 1, Now)));
+    }
+
     /// <summary>A contact saved with a version 0 account address loses the account: it is learned again from the next knock.</summary>
     [Fact]
     public void ContactWithVersion0AccountForgetsIt()
