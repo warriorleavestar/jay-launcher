@@ -2620,6 +2620,7 @@
   "about.net.update.when_mobile": "只在你填了自己的更新位址並點「檢查更新」時查詢；手機和平板由應用程式商店更新",
   "about.net.update.auto": "每天一次，以及你點「檢查更新」時",
   "about.net.update.manual": "只在你點「檢查更新」時",
+  "about.net.update.never": "不查詢（沒填更新位址，Jay 由應用程式商店更新）",
   "about.net.play": "連線",
   "about.net.play.when": "開房間、加入、公開房間、進伺服器、查伺服器狀態",
   "about.net.play.idle": "現在沒在連線",
