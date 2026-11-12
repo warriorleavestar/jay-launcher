@@ -85,7 +85,7 @@ public sealed class UniversalLoaderTests : IDisposable
         Assert.Null(UniversalLoaderFit.BaseLoaderFor(Pinned, "1.20.4"));
         Assert.Null(UniversalLoaderFit.BaseLoaderFor(null, "1.21.1"));
         Assert.Null(UniversalLoaderFit.BaseLoaderFor(Pinned, null));
-        var legacy = new CrossLoader.Capabilities(new Dictionary<string, IReadOnlyList<string>> { [BakePlatform.Forge] = ["1.12.2"] }, []);
+        var legacy = new CrossLoader.Capabilities(new Dictionary<string, IReadOnlyList<string>> { ["forge-1.12.2"] = ["1.12.2"] }, []);
         Assert.Equal(Amber.Core.Install.LoaderKind.Forge, UniversalLoaderFit.BaseLoaderFor(legacy, "1.12.2"));
         // 1.12.2 starts only on Forge 14.23.5.x; other versions take any build.
         Assert.True(UniversalLoaderFit.AcceptsBase("1.12.2", Amber.Core.Install.LoaderKind.Forge, "14.23.5.2860"));

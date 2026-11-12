@@ -3659,5 +3659,6 @@
   "settings.ul.used_by_none": "No instance uses it yet",
   "settings.ul.cache": "Cache: {0}",
   "settings.ul.developers": "For developers",
+  "settings.ul.upgrade_note": "After you install a new version of the loader, each instance prepares its mods again the first time it starts. That takes longer than usual once and is normal.",
   "instance.ul.downloading": "Downloading the universal loader…"
 }

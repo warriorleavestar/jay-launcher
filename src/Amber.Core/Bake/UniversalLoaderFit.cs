@@ -33,8 +33,13 @@ public static class UniversalLoaderFit
     {
         if (caps is null || string.IsNullOrEmpty(mcVersion)) return null;
         bool Runs(string platform) => caps.Platforms.GetValueOrDefault(platform) is { } versions && versions.Contains(mcVersion);
-        return Runs(BakePlatform.NeoForge) ? Install.LoaderKind.NeoForge : Runs(BakePlatform.Forge) ? Install.LoaderKind.Forge : null;
+        return Runs(BakePlatform.NeoForge) ? Install.LoaderKind.NeoForge
+            : Runs(BakePlatform.Forge) || Runs(ForgeLegacyPlatform) ? Install.LoaderKind.Forge
+            : null;
     }
+
+    /// <summary>Where newer loader releases list 1.12.2 (Forge 14.23.5.x), apart from modern Forge.</summary>
+    internal const string ForgeLegacyPlatform = "forge-1.12.2";
 
     /// <summary>A base loader build the universal loader starts on: on 1.12.2 only Forge 14.23.5.x, elsewhere any.</summary>
     public static bool AcceptsBase(string mcVersion, Install.LoaderKind kind, string loaderVersion) =>
