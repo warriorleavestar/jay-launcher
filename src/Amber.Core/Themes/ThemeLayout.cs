@@ -24,6 +24,28 @@ public static partial class ThemeLayout
     /// </summary>
     public static readonly string[] PageIds = ["home", "accounts", "instances", "downloads", "content", "multiplayer", "tools", "settings", "log"];
 
+    /// <summary>
+    /// Pages added with the "people, rooms, networks" structure. They are not old navigation items, so they are not in
+    /// <see cref="PageIds"/>: "me" (the page behind the avatar, which the accounts page grew into) and "people" (friends).
+    /// </summary>
+    public static readonly string[] NewPageIds = ["me", "people"];
+
+    /// <summary>Every page a pack may carry a layout file for, in the order the files are read.</summary>
+    public static readonly string[] LayoutFiles = [.. PageIds, .. NewPageIds];
+
+    /// <summary>A layout file under an old page name lays out the page that replaced it (accounts.json → the "me" page).</summary>
+    public static readonly IReadOnlyDictionary<string, string> PageAliases = new Dictionary<string, string> { ["accounts"] = "me" };
+
+    /// <summary>Old region names and the names they have now. A pack may use either.</summary>
+    public static readonly IReadOnlyDictionary<string, string> RegionAliases = new Dictionary<string, string>
+    {
+        ["accounts.title"] = "me.title",
+        ["accounts.list"] = "me.accounts",
+        ["accounts.jay"] = "me.jay",
+        ["accounts.add"] = "me.add",
+        ["accounts.status"] = "me.status",
+    };
+
     /// <summary>不能隐藏的页面：启动页和设置页（设置页里有“恢复默认主题”）。</summary>
     public static readonly string[] RequiredPages = ["home", "settings"];
 
@@ -35,7 +57,9 @@ public static partial class ThemeLayout
         ["home"] = (["home.title", "home.pending", "home.onboarding", "home.instance", "home.crash", "home.launch"],
                     ["home.pending", "home.onboarding", "home.instance", "home.crash", "home.launch"]),
         // 其余页面：标题可以不要，带按钮、输入的区块都必须在。设置页不开放（“恢复默认主题”在那里，排版固定）。
-        ["accounts"] = Page("accounts", ["list", "add", "status"], "title"),
+        // "Me": game accounts, the Jay account, my friend code, my devices, appearance. accounts.json lays out this page.
+        ["me"] = Page("me", ["accounts", "add", "jay", "code", "devices", "appearance", "status"], "title"),
+        ["people"] = Page("people", ["list", "detail", "status"], "title"),
         ["instances"] = Page("instances", ["header", "picker", "details", "status"]),
         ["downloads"] = Page("downloads", ["search", "filters", "body", "status"], "title"),
         ["content"] = Page("content", ["header", "filters", "body", "status"]),
@@ -59,10 +83,10 @@ public static partial class ThemeLayout
     private static partial Regex GridLengthPattern();
 
     /// <summary>侧栏一级入口的 id（shell.json 的 pages / hidden 用）。</summary>
-    public static readonly string[] SectionIds = ["library", "discover", "multiplayer"];
+    public static readonly string[] SectionIds = ["library", "discover", "multiplayer", "people"];
 
-    /// <summary>主题能藏的入口：只有发现和联机。游戏库、设置、帮助、账号、隐私行永远在。</summary>
-    public static readonly string[] HideableSections = ["discover", "multiplayer"];
+    /// <summary>主题能藏的入口：发现、联机和朋友。游戏库、设置、帮助、“我”、隐私行永远在。</summary>
+    public static readonly string[] HideableSections = ["discover", "multiplayer", "people"];
 
     /// <summary>
     /// layout/shell.json（官方设计 §10.5）。format 1 的字段自动升级（§10.8）：
@@ -156,12 +180,20 @@ public static partial class ThemeLayout
             if (olds.Count > 0 && olds.All(hiddenOld.Contains) && !shell.Hidden.Contains(section)) shell.Hidden.Add(section);
         }
         // 没写进顺序的入口接在后面（新版本 Jay 加的入口也不会丢）。
+        var placedPeople = shell.Sections.Contains("people");
         shell.Sections = [.. shell.Sections, .. SectionIds.Where(id => !shell.Sections.Contains(id))];
+        // Packs written before the Friends entry existed: it goes right after multiplayer, wherever the pack put that.
+        if (!placedPeople)
+        {
+            shell.Sections.Remove("people");
+            shell.Sections.Insert(shell.Sections.IndexOf("multiplayer") + 1, "people");
+        }
         pack.Shell = shell;
     }
 
     public static void ReadPage(ThemePack pack, string page, JsonElement root)
     {
+        if (PageAliases.TryGetValue(page, out var now)) page = now;
         if (!Regions.TryGetValue(page, out var regions)) { pack.Problems.Add(new(page == "settings" ? "page_locked" : "page_not_supported_yet", page)); return; }
         if (root.ValueKind != JsonValueKind.Object) { pack.Problems.Add(new("bad_value", $"layout/pages/{page}.json")); return; }
         var layout = new PageLayout();
@@ -299,6 +331,7 @@ public static partial class ThemeLayout
 
     private static LayoutNode? Region(ThemePack pack, string where, string name, string[] allowed, HashSet<string> used)
     {
+        if (RegionAliases.TryGetValue(name, out var now)) name = now;
         if (!allowed.Contains(name)) { pack.Problems.Add(new("unknown_region", $"{where}: {name}")); return null; }
         if (!used.Add(name)) { pack.Problems.Add(new("duplicate_region", $"{where}: {name}")); return null; }
         return new LayoutNode { Type = "region", Region = name };

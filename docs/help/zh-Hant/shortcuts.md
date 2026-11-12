@@ -11,7 +11,7 @@ related: settings, moved
 
 ## 全域性
 - Ctrl+K：命令面板（搜實例、設定、頁面）。
-- Ctrl+1 / Ctrl+2 / Ctrl+3：遊戲庫 / 發現 / 連線。
+- Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4：遊戲庫 / 發現 / 連線 / 朋友。
 - Ctrl+,：設定。
 - Ctrl+J：活動中心。
 - F1：本頁幫助；Shift+F1：幫助中心。

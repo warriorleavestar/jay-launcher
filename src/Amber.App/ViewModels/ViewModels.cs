@@ -299,11 +299,17 @@ public sealed partial class MainViewModel : ObservableObject
             log,
             new AboutViewModel(service),
             new HelpCenterViewModel(Help),
+            new PeopleViewModel(multiplayer),
         ];
         var accounts = (AccountsViewModel)Pages[1];
         Shell = new ShellViewModel(this, service);
         var shell = Shell;
-        home.NavigateToAccounts = () => shell.Navigate("accounts");
+        // "Me" shows the friend code and this device (owned by multiplayer) and the quick light/dark and language switches.
+        accounts.Multiplayer = multiplayer;
+        accounts.Appearance = new QuickAppearanceViewModel(this);
+        accounts.Navigate = r => shell.Navigate(r);
+        Pages.OfType<PeopleViewModel>().Single().Navigate = r => shell.Navigate(r);
+        home.NavigateToAccounts = () => shell.Navigate("me");
         home.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
         // The live log has no page: "view log" on a failure opens it docked under the page the player is on.
         home.NavigateToLog = () => LogDocked = true;
@@ -312,7 +318,7 @@ public sealed partial class MainViewModel : ObservableObject
         home.Onboarding.MicrosoftLogin = () =>
         {
             accounts.LoginTab = AccountsViewModel.MicrosoftTab;
-            shell.Navigate("accounts");
+            shell.Navigate("me");
         };
         home.Onboarding.ChooseVersion = () => shell.Navigate(LegacyRoutes.NewInstance);
         home.Onboarding.ImportPack = async path =>
@@ -390,7 +396,7 @@ public sealed partial class MainViewModel : ObservableObject
             OpenLogin = tab =>
             {
                 accounts.LoginTab = tab;
-                shell.Navigate("accounts");
+                shell.Navigate("me");
             },
             OpenNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance),
             ShowLibrary = () => shell.Navigate("library"),

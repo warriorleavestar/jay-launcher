@@ -7,7 +7,7 @@ related: library, settings, shortcuts
 
 # Where things moved
 
-Jay's new layout has three places: the library, Discover and Multiplayer. Here is where the old pages went.
+Jay's layout has four places: the library, Discover, Multiplayer and Friends. Here is where the old pages went.
 
 ## Old page → new place
 - **Launch** → the library: the big start button on each instance.
@@ -16,4 +16,8 @@ Jay's new layout has three places: the library, Discover and Multiplayer. Here i
 - **Instances** → the library; click an instance to open it.
 - **Logs** → each instance's Logs tab.
 - **Toolbox** → clean-up is in Settings › Storage, the Java download in Settings › Game defaults, the update check in Settings › About.
+- **Accounts** → **Me**: click your avatar at the bottom left. Your friend code and your devices are there too.
+- **Light/dark and language** (they were in the avatar's menu) → **Me** › Appearance, and Settings as before.
+- **Friends** (they were only in Multiplayer settings) → the Friends entry in the sidebar.
+- Which network Jay is using → the network status at the top right, on every page.
 - Ctrl+K finds anything, including the old page names.
