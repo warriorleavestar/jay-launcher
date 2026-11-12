@@ -404,16 +404,13 @@
                  mode (Windows), quiet buttons for the admin step's leftovers, and the escape hatch. settings#GameSandbox. -->
             <Border x:Name="GameSandbox" Classes="card">
               <StackPanel Spacing="8">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                  <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Classes="h2" Text="{l:T settings.sandbox.label}" Margin="0" />
-                    <TextBlock x:Name="SandboxStatusLine" Text="{Binding SandboxStatusText}" FontSize="12" TextWrapping="Wrap" />
-                  </StackPanel>
-                </Grid>
+                <StackPanel Spacing="2">
+                  <TextBlock Classes="h2" Text="{l:T settings.sandbox.label}" Margin="0" />
+                  <TextBlock x:Name="SandboxStatusLine" Text="{Binding SandboxStatusText}" ToolTip.Tip="{Binding SandboxStatusTip}" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
                 <StackPanel Spacing="4" IsVisible="{Binding IsWindowsSandbox}">
-                  <ToggleSwitch x:Name="StrongSandboxBox" IsChecked="{Binding StrongSandbox}" IsEnabled="{Binding !LaunchWithoutSandbox}"
-                                OnContent="{l:T settings.sandbox.strong}" OffContent="{l:T settings.sandbox.strong}"
-                                AutomationProperties.Name="{l:T settings.sandbox.strong}" />
+                  <CheckBox x:Name="StrongSandboxBox" IsChecked="{Binding StrongSandbox}" IsEnabled="{Binding !LaunchWithoutSandbox}"
+                            Content="{l:T settings.sandbox.strong}" />
                   <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.strong.hint}" TextWrapping="Wrap" />
                   <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.java_note}" TextWrapping="Wrap" />
                   <WrapPanel ItemSpacing="14" LineSpacing="4">
@@ -424,7 +421,7 @@
                   </WrapPanel>
                   <TextBlock Classes="hint" FontSize="12" Text="{Binding SandboxPermissionsError}" IsVisible="{Binding SandboxPermissionsError, Converter={x:Static ObjectConverters.IsNotNull}}" TextWrapping="Wrap" />
                 </StackPanel>
-                <Separator Margin="0,2" />
+                <Separator Margin="0,2" IsVisible="{Binding IsWindowsSandbox}" />
                 <CheckBox x:Name="LaunchWithoutSandboxBox" IsChecked="{Binding LaunchWithoutSandbox}" Content="{l:T settings.sandbox.without}" />
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.without.hint}" TextWrapping="Wrap" />
               </StackPanel>

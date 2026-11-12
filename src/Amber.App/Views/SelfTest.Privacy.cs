@@ -105,9 +105,9 @@ internal sealed partial class SelfTest
                 return (list, card);
             });
             Check("游戏沙盒卡片紧跟在联网清单那张卡后面", order.list >= 0 && order.card == order.list + 1, $"{order.list} {order.card}");
-            Check("卡片里：状态一行，Windows 上强沙盒是开关", Dispatcher.UIThread.Invoke(() =>
+            Check("卡片里：状态一行，Windows 上强沙盒是和这页其他项一样的勾选框", Dispatcher.UIThread.Invoke(() =>
                 window.PageHost.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "SandboxStatusLine" && t.IsEffectivelyVisible && t.Text == settings.SandboxStatusText)
-                && (!OperatingSystem.IsWindows() || window.PageHost.GetVisualDescendants().OfType<ToggleSwitch>().Any(t => t.Name == "StrongSandboxBox" && t.IsEffectivelyVisible))),
+                && (!OperatingSystem.IsWindows() || window.PageHost.GetVisualDescendants().OfType<CheckBox>().Any(t => t.Name == "StrongSandboxBox" && t.IsEffectivelyVisible))),
                 settings.SandboxStatusText);
             Check("卡片里：撤掉沙盒权限 / 重试强沙盒是不显眼的按钮", Dispatcher.UIThread.Invoke(() =>
                 window.PageHost.GetVisualDescendants().OfType<Button>().Where(b => b.Name is "RetryStrongSandboxButton" or "RemoveSandboxPermissionsButton").All(b => b.Classes.Contains("ghost"))));
