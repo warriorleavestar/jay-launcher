@@ -1647,7 +1647,6 @@
   "core.mp.split.mismatch": "拆分连接的几路数据对不上，连接已断开",
   "core.mp.split.stalled": "拆分连接的一路没有响应，所有路都已断开",
   "core.mp.split.exhausted": "拆分连接用完了块序号，已断开，会重新连接",
-  "core.mp.split.timeout": "等拆分连接的其他路超时",
   "core.mp.split.rejected": "拆分连接的几路对不上号，已拒绝",
   "core.mp.split.not_ready": "另外几路还没准备好，这次连接只走一路",
   "core.mp.split.gave_up": "拆分连续失败了几次，这次联机剩下的连接都只走一路",
