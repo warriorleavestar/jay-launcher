@@ -333,4 +333,45 @@ public sealed class SplitPathTests
         Assert.Equal(1, singles);
         Assert.Equal(0, legOpens);
     }
+
+    // ---- review follow-ups ----
+
+    [Fact]
+    public void ExtraPathOutputIsMaskedBeforeLogging()
+    {
+        var net = SplitNet.Create();
+        var o = new SplitPathOptions(1, net, true, [], 15001);
+        foreach (var line in new[]
+        {
+            $"network_secret = \"{net.Secret}\"",
+            $"  network_secret = '{net.Secret}'",
+            $"network_secret: {net.Secret}",
+            $"something else mentioning {net.Secret} in passing",
+        })
+        {
+            var scrubbed = SplitPathArgs.Scrub(line, o);
+            Assert.DoesNotContain(net.Secret, scrubbed);
+            Assert.Contains("***", scrubbed);
+        }
+        // A field of that name is masked even when the value isn't this path's own.
+        Assert.Equal("network_secret = \"***\"", SplitPathArgs.Scrub("network_secret = \"other\"", o));
+        Assert.Equal("peer connected", SplitPathArgs.Scrub("peer connected", o));
+    }
+
+    [Fact]
+    public void OnlyWrappedRoomsOutsideFullLanCarrySplitSettings()
+    {
+        var requested = SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Strict);
+        Assert.Same(requested, SplitSettings.ForNewRoom(wraps: true, fullLan: false, requested));
+        Assert.Same(SplitSettings.None, SplitSettings.ForNewRoom(wraps: true, fullLan: true, requested));
+        Assert.Same(SplitSettings.None, SplitSettings.ForNewRoom(wraps: false, fullLan: false, requested));
+        Assert.Same(SplitSettings.None, SplitSettings.ForNewRoom(wraps: false, fullLan: true, requested));
+    }
+
+    [Fact]
+    public void MappedAddressesGroupLikeTheirIPv4()
+    {
+        Assert.Equal(RelayOperators.GroupOf("tcp://198.18.5.5:11010"), RelayOperators.GroupOf("tcp://[::ffff:198.18.0.1]:11010"));
+        Assert.NotEqual(RelayOperators.GroupOf("tcp://198.19.5.5:11010"), RelayOperators.GroupOf("tcp://[::ffff:198.18.0.1]:11010"));
+    }
 }

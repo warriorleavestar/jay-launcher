@@ -28,6 +28,20 @@ public sealed record SplitPathOptions(int Index, SplitNet Net, bool IsHost, IRea
 /// <summary>easytier-core arguments for an extra split path. Path i uses 10.236.i.0/24, the host always .1.</summary>
 public static class SplitPathArgs
 {
+    private static readonly System.Text.RegularExpressions.Regex SecretField = new(
+        @"(network_secret\s*[=:]\s*)(""[^""]*""|'[^']*'|\S+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// An extra instance's output line with its network secret taken out, before it reaches any log. The room log masks
+    /// the room's secrets again later; this keeps the secret out even where a line is kept before that (EasyTier prints
+    /// its whole configuration at start).
+    /// </summary>
+    internal static string Scrub(string line, SplitPathOptions o)
+    {
+        if (o.Net.Secret.Length > 0) line = line.Replace(o.Net.Secret, "***", StringComparison.Ordinal);
+        return SecretField.Replace(line, m => m.Groups[1].Value + "\"***\"");
+    }
+
     public static string HostIp(int index) => $"10.236.{index}.1";
 
     public static string MemberIp(SplitPathOptions o) =>
@@ -88,6 +102,7 @@ public static class RelayOperators
         if (Labels.TryGetValue(host, out var label)) return "label:" + label;
         if (IPAddress.TryParse(host, out var ip))
         {
+            if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
             var b = ip.GetAddressBytes();
             return ip.AddressFamily == AddressFamily.InterNetwork
                 ? $"v4:{b[0]}.{b[1]}"
@@ -216,15 +231,16 @@ public sealed class SplitPathGroup : IDisposable
                     o.IsHost ? null : o.LocalSplitPorts![i], o.QuicProxy, o.IsHost ? null : EasyTierArgs.JoinerHost(o.MachineId));
                 var (process, job) = EasyTierSession.Launch(corePath, SplitPathArgs.Build(options), SplitPathArgs.Environment(options),
                     Path.Combine(workDir, $"path{i}"));
+                // Owned by the group from here on, so a failure below still ends this process.
+                group._instances.Add(new PathInstance(options, process, job));
                 var prefix = $"path{i}: ";
                 var index = i;
-                process.OutputDataReceived += (_, e) => { if (e.Data is { } line) log?.Invoke(prefix + line); };
-                process.ErrorDataReceived += (_, e) => { if (e.Data is { } line) log?.Invoke(prefix + line); };
+                process.OutputDataReceived += (_, e) => { if (e.Data is { } line) log?.Invoke(prefix + SplitPathArgs.Scrub(line, options)); };
+                process.ErrorDataReceived += (_, e) => { if (e.Data is { } line) log?.Invoke(prefix + SplitPathArgs.Scrub(line, options)); };
                 process.EnableRaisingEvents = true;
                 process.Exited += (_, _) => { if (Volatile.Read(ref group._disposed) == 0) log?.Invoke(L.F("core.mp.split.path_exited", index)); };
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
-                group._instances.Add(new PathInstance(options, process, job));
             }
         }
         catch
@@ -304,20 +320,24 @@ public sealed class SplitPathGroup : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _cts.Cancel();
+        // Every instance is told to stop first, then they are waited for together, so closing a room waits for one
+        // deadline rather than one per path.
+        foreach (var (_, process, _) in _instances)
+        {
+            try { if (process is { HasExited: false }) process.Kill(true); }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        }
         var watchEnded = true;
         if (_watch is { } watch)
         {
-            try { watchEnded = watch.Wait(TimeSpan.FromSeconds(5)); }
+            try { watchEnded = watch.Wait(TimeSpan.FromSeconds(2)); }
             catch (AggregateException) { }
         }
+        var until = Environment.TickCount64 + 3000;
         foreach (var (_, process, job) in _instances)
         {
             if (process is null) continue;
-            try
-            {
-                if (!process.HasExited) process.Kill(true);
-                process.WaitForExit(3000);
-            }
+            try { process.WaitForExit((int)Math.Max(0, until - Environment.TickCount64)); }
             catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             process.Dispose();
             job?.Dispose();

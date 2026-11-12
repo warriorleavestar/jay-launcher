@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Transport;
+using Xunit.Abstractions;
 
 namespace Amber.Core.Tests;
 
@@ -581,8 +582,10 @@ public sealed class RealRoomPorts;
 
 /// <summary>Split room tests that need the real room ports.</summary>
 [Collection(nameof(RealRoomPorts))]
-public sealed class SplitRoomPortTests
+public sealed class SplitRoomPortTests(ITestOutputHelper output)
 {
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// A leg port taken by another program: an Auto room starts without splitting (and says so), a Strict room doesn't start.
     /// Uses the real room ports (it occupies 47657 itself, and the Auto room listens on 47656), so it runs on its own,
@@ -596,13 +599,17 @@ public sealed class SplitRoomPortTests
         catch (SocketException) { /* already taken by something else: the same situation for the leg port */ }
         // The Auto room listens on the real single-path port. When Jay is running a room on this machine it's taken, and
         // there is nothing to test here.
+        // xunit 2 has no runtime skip, so the test says why it did nothing.
         try
         {
-            var probe = new TcpListener(IPAddress.Loopback, TunnelSettings.Port);
+            using var probe = new TcpListener(IPAddress.Loopback, TunnelSettings.Port);
             probe.Start();
-            probe.Stop();
         }
-        catch (SocketException) { return; }
+        catch (SocketException)
+        {
+            _output.WriteLine($"Skipped: port {TunnelSettings.Port} is in use on this machine.");
+            return;
+        }
 
         var (_, _, autoHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
         var log = new List<string>();

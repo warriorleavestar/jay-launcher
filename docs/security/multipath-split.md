@@ -45,10 +45,13 @@ The split adds no MAC of its own, because each leg is already authenticated end 
 - **Choice.** A member's extra path *i* uses the nodes of one operator group, a different group per path.
   - **Groups.** A signed operator label wins when there is one. Otherwise nodes are grouped by registered domain, or by IPv4 /16 or IPv6 /32. This is a guess, and the interface doesn't claim the groups are different operators.
   - **Order.** Groups are ordered by HMAC-SHA256 keyed with the member's id. The same member always lands on the same groups, including after a rekey, and doesn't draw new relays per connection.
-- **Ready.** A member splits only while:
+  - **Trade-off.** Because the choice is fixed, a member whose groups are offline, or missing from the host's node list, doesn't split at all (Auto uses one path, Strict refuses) even if other independent groups are online. Drawing again would let anyone who can take relays down steer a member onto relays of their choosing.
+- **Ready.** A member splits a new connection only while:
   - the room's own instance reaches the host peer to peer (relayed, path 0 could go through the same node as an extra path);
   - every extra instance sees the host through its relay.
   - This is checked every 3 seconds. Until it holds, Auto uses one path and Strict refuses, both with the reason.
+  - It is a condition for opening a connection. A connection that is already split stays split until it ends, even if path 0 later falls back to a relay. A connection Auto opened on one path stays on one path; the next connection splits. Chat opens as soon as a member joins, usually before the paths are ready, so under Auto it starts on one path. Under Strict it is refused and the app keeps retrying until the paths are ready.
+  - The host's extra instances have no readiness of their own: if one stops, it is logged, and members see their path to the host fail and count as not ready.
   - The check fails closed: when it can't finish (a peer query failing, unreadable output, an instance gone) or has stopped, the paths count as not ready until a later check succeeds.
 - **Not in this version.**
   - Two relays of different groups when path 0 can't go direct. That needs path 0's own nodes restricted, which can cut a member off from the host.
