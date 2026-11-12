@@ -199,9 +199,9 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>
     /// Turns direct connections of this computer off or on. EasyTier takes it as a start-up flag, so the component
-    /// restarts on the same room (a few seconds; chat reconnects). Other members' Jay then does not start a direct
-    /// link to this computer, so in normal use nobody in the room learns its IP address (a modified program could
-    /// still ask for it, which the wording on screen says).
+    /// restarts on the same room (a few seconds; chat reconnects). The component then shares no address list, refuses
+    /// hole punching and asks no STUN server, so nobody in the room learns this computer's IP address; only the relay
+    /// sees it.
     /// </summary>
     internal async Task SetRelayOnlyAsync(bool on)
     {
