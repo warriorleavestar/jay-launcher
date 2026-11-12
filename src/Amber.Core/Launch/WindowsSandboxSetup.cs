@@ -115,7 +115,17 @@ public static class WindowsSandboxSetup
         return ok ? 0 : 1;
     }
 
+    /// <summary>
+    /// The loopback exemption (the game may connect out to Jay) plus Jay's inbound filters (Jay may connect into the
+    /// game, e.g. a world opened to LAN); see <see cref="WindowsLoopbackInbound"/>.
+    /// </summary>
     private static bool Loopback(bool remove)
+    {
+        var inbound = remove ? WindowsLoopbackInbound.Remove() : WindowsLoopbackInbound.Add(WindowsSandbox.ContainerSid());
+        return Exempt(remove) && inbound == 0;
+    }
+
+    private static bool Exempt(bool remove)
     {
         var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "CheckNetIsolation.exe"),
             $"LoopbackExempt {(remove ? "-d" : "-a")} -p={WindowsSandbox.ContainerSid().Value}")

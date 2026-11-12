@@ -563,7 +563,7 @@ public sealed class LauncherService : IDisposable
     }
 
     /// <summary>Whether Jay's admin step left anything to take away (the loopback exemption or opened parent folders).</summary>
-    public bool HasSandboxPermissions => OperatingSystem.IsWindows() && (Settings.StrongSandboxFolders.Count > 0 || WindowsSandbox.LoopbackExempt());
+    public bool HasSandboxPermissions => OperatingSystem.IsWindows() && (Settings.StrongSandboxFolders.Count > 0 || WindowsSandbox.HasLoopbackSetup());
 
     /// <summary>
     /// "Remove sandbox permissions": one admin prompt takes the loopback exemption and Jay's entries on the recorded
@@ -574,7 +574,7 @@ public sealed class LauncherService : IDisposable
     {
         if (!OperatingSystem.IsWindows()) return null;
         var folders = Settings.StrongSandboxFolders.Where(System.IO.Directory.Exists).ToList();
-        var error = await RunSandboxSetupAsync(undo: true, WindowsSandbox.LoopbackExempt(), folders, ct);
+        var error = await RunSandboxSetupAsync(undo: true, WindowsSandbox.HasLoopbackSetup(), folders, ct);
         if (error is not null) return error;
         Settings.StrongSandboxFolders = [];
         Settings.StrongSandbox = false;

@@ -347,10 +347,13 @@ public static unsafe class WindowsSandbox
     }
 
     /// <summary>
-    /// True when Jay's game container may use loopback (the exemption the one admin prompt adds). Reading the list needs
-    /// no admin. False when the container does not exist yet.
+    /// True when Jay's game container may use loopback both ways (the exemption and the inbound filters the one admin
+    /// prompt adds). Reading both needs no admin. False when the container does not exist yet.
     /// </summary>
-    public static bool LoopbackExempt() => LoopbackExempt(ContainerName);
+    public static bool LoopbackExempt() => LoopbackExempt(ContainerName) && WindowsLoopbackInbound.Present();
+
+    /// <summary>True when any part of the admin step's loopback setup is there (what "remove sandbox permissions" undoes).</summary>
+    public static bool HasLoopbackSetup() => LoopbackExempt(ContainerName) || WindowsLoopbackInbound.Present();
 
     internal static bool LoopbackExempt(string name)
     {
