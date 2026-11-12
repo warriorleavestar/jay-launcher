@@ -173,7 +173,52 @@ public sealed class Downloader
     }
 
     /// <summary>按候选源获取一段文本（版本清单、版本 JSON 等小文件）。</summary>
-    public async Task<string> GetStringAsync(string officialUrl, CancellationToken ct = default)
+    public Task<string> GetStringAsync(string officialUrl, CancellationToken ct = default) => GetStringAsync(officialUrl, null, ct);
+
+    /// <summary>
+    /// Like <see cref="GetStringAsync(string, CancellationToken)"/>, but when <paramref name="sha1"/> is given the bytes
+    /// must have that SHA-1 (a content-addressed manifest). A source that serves other bytes counts as failed and the
+    /// next one is tried; when none matches, an <see cref="InvalidDataException"/> is thrown.
+    /// </summary>
+    public async Task<string> GetStringAsync(string officialUrl, string? sha1, CancellationToken ct = default)
+    {
+        if (sha1 is null) return await GetUncheckedStringAsync(officialUrl, ct);
+        Exception? last = null;
+        foreach (var url in OrderedCandidates(officialUrl))
+        {
+            using var slot = await EnterHostAsync(url, ct);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(MetadataTimeout);
+            try
+            {
+                using var response = await _http.GetAsync(url, timeout.Token);
+                ThrowIfThrottled(url, response);
+                response.EnsureSuccessStatusCode();
+                var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token);
+                if (!Convert.ToHexStringLower(System.Security.Cryptography.SHA1.HashData(bytes)).Equals(sha1, StringComparison.OrdinalIgnoreCase))
+                {
+                    last = new InvalidDataException(L.F("core.net.download.hashmismatch", officialUrl));
+                    NoteFailure(url);
+                    continue;
+                }
+                NoteSuccess(url);
+                return new System.Text.UTF8Encoding(false).GetString(bytes);
+            }
+            catch (HostThrottledException e)
+            {
+                last = e;
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                last = e;
+                NoteFailure(url);
+            }
+        }
+        if (last is InvalidDataException bad) throw bad;
+        throw new HttpRequestException(L.F("core.net.download.allsourcesfailed", officialUrl), last);
+    }
+
+    private async Task<string> GetUncheckedStringAsync(string officialUrl, CancellationToken ct)
     {
         Exception? last = null;
         foreach (var url in OrderedCandidates(officialUrl))

@@ -379,7 +379,9 @@ public sealed class GameLauncher(GameDirectory dir)
         {
             if (options.Sandbox.Enabled && GameSandbox.IsSupported)
             {
-                windowsLevel = Sandbox(psi, options.Sandbox, workDir, legacyHome, onOutput);
+                // A writable cache folder must exist before the sandbox labels or binds it.
+                if (options.Baked?.WritableCache is { Length: > 0 } writableCache) Directory.CreateDirectory(writableCache);
+                windowsLevel = Sandbox(psi, SandboxFor(options), workDir, legacyHome, onOutput);
                 sandboxed = true;
                 onOutput?.Invoke(windowsLevel switch
                 {
@@ -423,6 +425,15 @@ public sealed class GameLauncher(GameDirectory dir)
     /// when the sandbox cannot start; the game is then not launched. On Windows the process is started by
     /// <see cref="WindowsSandbox.Start"/> afterwards, at the level returned here.
     /// </summary>
+    /// <summary>
+    /// The launch's sandbox plus what a baked launch writes outside the instance: forge-1.12.2's transformer cache
+    /// fills while the game runs, so that one folder of the loader's cache is read-write (the rest stays as granted).
+    /// </summary>
+    internal static SandboxOptions SandboxFor(LaunchOptions options) =>
+        options.Baked?.WritableCache is { Length: > 0 } cache
+            ? options.Sandbox with { ExtraReadWrite = [.. options.Sandbox.ExtraReadWrite, cache] }
+            : options.Sandbox;
+
     private WindowsSandboxLevel? Sandbox(ProcessStartInfo psi, SandboxOptions sandbox, string workDir, string? legacyHome, Action<string>? onOutput)
     {
         List<string> extraReadOnly = [];

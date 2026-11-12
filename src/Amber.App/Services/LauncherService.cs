@@ -699,10 +699,10 @@ public sealed class LauncherService : IDisposable
         {
             var instance = GetInstance(ctx, id);
             var versionMajor = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin;
-            var major = bake.JavaMajorFor(instance, versionMajor);
-            if (major != versionMajor) javaPath = await ctx.Java.ForMajorAsync(major, ct);
-            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct);
-            return (done.Launch, done.Reason, javaPath);
+            // forge-1.12.2 bakes on the loader's Java (21) and launches on Java 8; everything else uses one Java.
+            var (java, gamePath) = await bake.ChooseJavaAsync(instance, versionMajor, javaPath, ctx.Java.ForMajorAsync, ct);
+            var done = await bake.PrepareAsync(java, ctx.Directory, instance, warm, progress, ct);
+            return (done.Launch, done.Reason, gamePath);
         }
         finally
         {
@@ -754,8 +754,9 @@ public sealed class LauncherService : IDisposable
                 {
                     var instance = GetInstance(ctx, id);
                     if (Amber.Core.Bake.BakeRecord.Read(instance.WorkDir) is not { } record || !File.Exists(record.Launch.StateFile)) return;
+                    if (!Amber.Core.Bake.BakeService.CanWarm(Amber.Core.Bake.BakePlatform.KindOf(instance) ?? Amber.Core.Bake.BakePlatform.Vanilla)) return;
                     var major = bake.JavaMajorFor(instance, ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin);
-                    var java = await ctx.Java.ForMajorAsync(major, CancellationToken.None);
+                    var java = await ctx.Java.ForMajorAsync(bake.ToolJavaMajorFor(instance, major), CancellationToken.None);
                     bake.Toolkit.Verify();
                     await bake.WarmAsync(java, record.Launch.StateFile, null, CancellationToken.None);
                 }

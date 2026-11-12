@@ -87,6 +87,8 @@ public sealed class BakeTests : IDisposable
             ["version"] = _ => ([Version12], 0),
         };
         public List<(string Stage, JsonObject? Request)> Calls { get; } = [];
+        /// <summary>The Java each stage ran on.</summary>
+        public List<(string Stage, string Java)> JavaPaths { get; } = [];
         public HashSet<string> Hang { get; } = [];
         /// <summary>A stage that dies before printing anything, with these stderr lines (for example an old JVM).</summary>
         public Dictionary<string, string[]> Crash { get; } = [];
@@ -97,6 +99,7 @@ public sealed class BakeTests : IDisposable
             var request = requestFile is null ? null : JsonNode.Parse(await File.ReadAllTextAsync(requestFile, ct)) as JsonObject;
             if (requestFile is not null) RequestFiles.Add(requestFile);
             Calls.Add((stage, request));
+            JavaPaths.Add((stage, javaPath));
             if (Hang.Contains(stage))
             {
                 stdout("""{"type":"progress","stage":"bake-instance","step":"resolve","done":0,"total":3,"message":"resolving"}""");
@@ -1040,6 +1043,332 @@ public sealed class BakeTests : IDisposable
                 return Task.CompletedTask;
             }, null, CancellationToken.None));
         Assert.Contains("forge-1.20.1-47.4.28-client.jar", e.Message);
+    }
+
+    // ---- Interface v1.3.2: forge-1.12.2 (stages on Java 21, game on Java 8) ----
+
+    private const string LegacyForge = "1.12.2-14.23.5.2860";
+
+    /// <summary>A Forge 1.12.2 install as Jay leaves it (universal jar and libraries in the game's libraries) plus a fake old-format installer.</summary>
+    private void LegacyInstall(bool withLaunchWrapper = true)
+    {
+        Version("1.12.2");
+        var profile = new JsonObject
+        {
+            ["install"] = new JsonObject { ["path"] = $"net.minecraftforge:forge:{LegacyForge}", ["filePath"] = $"forge-{LegacyForge}-universal.jar" },
+            ["versionInfo"] = new JsonObject
+            {
+                ["id"] = "1.12.2-forge-14.23.5.2860",
+                ["mainClass"] = "net.minecraft.launchwrapper.Launch",
+                ["libraries"] = new JsonArray(
+                    new JsonObject { ["name"] = $"net.minecraftforge:forge:{LegacyForge}" },
+                    new JsonObject { ["name"] = "net.minecraft:launchwrapper:1.12" },
+                    new JsonObject { ["name"] = "org.example:server-only:1.0", ["clientreq"] = false }),
+            },
+        };
+        var installer = Path.Combine(_root, "forge-1.12.2-installer.jar");
+        using (var zip = ZipFile.Open(installer, ZipArchiveMode.Create))
+        {
+            using var w = new StreamWriter(zip.CreateEntry("install_profile.json").Open());
+            w.Write(profile.ToJsonString());
+        }
+        FakeFiles[BakePlatform.InstallerUrl(BakePlatform.ForgeLegacy, LegacyForge)] = installer;
+        var dir = new GameDirectory(Game);
+        foreach (var coordinate in new[] { $"net.minecraftforge:forge:{LegacyForge}", withLaunchWrapper ? "net.minecraft:launchwrapper:1.12" : null })
+        {
+            if (coordinate is null) continue;
+            var path = dir.LibraryPath(MavenCoordinate.Parse(coordinate).RelativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, coordinate);
+        }
+    }
+
+    private const string Version132 = """{"type":"result","schema":"amber-ul/version-result@1","loaderVersion":"0.4.0","protocol":1,"interface":"1.3","interfaceRevision":"1.3.2","supportedMc":["1.12.2","1.21.1"],"platforms":{"vanilla":["1.21.1"],"forge-1.12.2":["1.12.2"]},"javaMin":{"vanilla":21,"forge-1.12.2":21},"javaLaunch":{"forge-1.12.2":{"min":8,"max":8}},"javaRuntime":21}""";
+
+    /// <summary>A loader that knows forge-1.12.2: its bake-instance answers like LegacyPlatform (no cache list, transformer cache, Java 8 launch).</summary>
+    private FakeLoader LegacyLoader(string? transformerCache = null)
+    {
+        var loader = new FakeLoader();
+        loader.Stages["version"] = _ => ([Version132], 0);
+        loader.Stages["requirements"] = _ => (["""{"type":"result","schema":"amber-ul/requirements-result@1","files":[],"javaMin":21,"javaLaunch":{"min":8,"max":8}}"""], 0);
+        loader.Stages["bake-instance"] = request =>
+        {
+            var state = Path.Combine(request!["instanceDir"]!.GetValue<string>(), BakeService.StateFolder, "state.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(state)!);
+            File.WriteAllText(state, new JsonObject { ["schema"] = "amber-ul/state@1", ["platform"] = new JsonObject { ["kind"] = "forge-1.12.2" } }.ToJsonString());
+            var cache = transformerCache ?? Path.Combine(request["cacheRoot"]!.GetValue<string>(), "legacy-1.12.2", "0123456789abcdef");
+            var result = new JsonObject
+            {
+                ["type"] = "result",
+                ["stateKey"] = "legacy",
+                ["launch"] = new JsonObject
+                {
+                    ["mainClass"] = "amber.ul.legacy.LegacyLaunch",
+                    ["classpath"] = new JsonArray("fmlbridge-1.12.2.jar"),
+                    ["jvmArgs"] = new JsonArray("-Damber.ul.legacy.cache=" + cache),
+                    ["gameArgsPrefix"] = new JsonArray(),
+                    ["javaMin"] = 8,
+                    ["javaMax"] = 8,
+                    ["modsDir"] = "mods",
+                    ["stateFile"] = state,
+                },
+                ["cache"] = new JsonObject { ["state"] = "new", ["warm"] = false, ["transformerCache"] = cache },
+            };
+            return ([result.ToJsonString()], 0);
+        };
+        loader.Stages["warm"] = _ => (["""{"type":"error","code":"not_supported","message":"warm does not apply to forge-1.12.2"}"""], 1);
+        return loader;
+    }
+
+    [Fact]
+    public void Forge1122IsItsOwnPlatformOnJava8()
+    {
+        Assert.Equal(BakePlatform.ForgeLegacy, BakePlatform.KindOf(Instance("forge", "1.12.2", LegacyForge, "f1122")));
+        Assert.Equal(BakePlatform.Forge, BakePlatform.KindOf(Instance("forge", "1.20.1", "47.4.28")));
+        Assert.Null(BakePlatform.KindOf(Instance("optifine", "1.12.2", "HD_U_G5", "o1122")));
+        Assert.Equal(L.T("core.bake.platform.forge_legacy"), BakePlatform.DisplayName(BakePlatform.ForgeLegacy));
+        Assert.Equal(new JavaRange(8, 8), BakePlatform.KnownJavaLaunch(BakePlatform.ForgeLegacy));
+        Assert.Null(BakePlatform.KnownJavaLaunch(BakePlatform.Forge));
+
+        // A build folder (no manifest): Jay's own knowledge. Game on 8 whatever the version asks, stages on 21.
+        var bake = Service();
+        var legacy = Instance("forge", "1.12.2", LegacyForge, "f1122");
+        Assert.Equal(8, bake.JavaMajorFor(legacy, 8));
+        Assert.Equal(8, bake.JavaMajorFor(legacy, 17));
+        Assert.Equal(21, bake.ToolJavaMajorFor(legacy, 8));
+        // Other platforms are unchanged: one Java for both.
+        Assert.Equal(21, bake.JavaMajorFor(Instance(), 17));
+        Assert.Equal(25, bake.ToolJavaMajorFor(Instance(), 25));
+        Assert.Equal(21, bake.ToolJavaMajorFor(Instance(), 21));
+    }
+
+    [Fact]
+    public void JavaLaunchComesFromThePackageManifest()
+    {
+        var root = Package(javaMin: """{"vanilla":21,"forge-1.12.2":21}""", tweak: m =>
+            m["javaLaunch"] = JsonNode.Parse("""{"forge-1.12.2":{"min":8,"max":11},"bad":{"min":9,"max":8},"vanilla":"x"}"""));
+        var toolkit = BakeToolkit.Find(root)!;
+        Assert.Equal(new JavaRange(8, 11), toolkit.JavaLaunchFor(BakePlatform.ForgeLegacy));
+        Assert.Null(toolkit.JavaLaunchFor("bad"));
+        Assert.Null(toolkit.JavaLaunchFor(BakePlatform.Vanilla));
+        var bake = PackagedService(root, new FakeLoader());
+        var legacy = Instance("forge", "1.12.2", LegacyForge, "f1122");
+        Assert.Equal(8, bake.JavaMajorFor(legacy, 8));
+        Assert.Equal(11, bake.JavaMajorFor(legacy, 17));
+
+        var info = BakeLoaderInfo.Parse(JsonNode.Parse(Version132)!.AsObject());
+        Assert.Equal(new JavaRange(8, 8), info.JavaLaunch[BakePlatform.ForgeLegacy]);
+        Assert.Equal(21, info.JavaMinFor(BakePlatform.ForgeLegacy));
+    }
+
+    [Fact]
+    public async Task Forge1122BakesOnTheLoadersJavaAndLaunchesOnJava8()
+    {
+        LegacyInstall();
+        var dir = new GameDirectory(Game);
+        var instance = Instance("forge", "1.12.2", LegacyForge, "f1122");
+        var loader = LegacyLoader();
+        var downloads = new List<DownloadItem>();
+        var bake = Service(loader, downloads);
+
+        // The instance's Java (unknown version here: the path does not exist) is kept for the game; the stages get Java 21.
+        var asked = new List<int>();
+        var (java, gamePath) = await bake.ChooseJavaAsync(instance, 8, "instance-java", (major, _) => { asked.Add(major); return Task.FromResult("java" + major); }, CancellationToken.None);
+        Assert.Equal("instance-java", gamePath);
+        Assert.Equal(new BakeJava("java21", 21, 8), java);
+        Assert.Equal([21], asked);
+
+        var done = await bake.PrepareAsync(java, dir, instance, warm: true, null, CancellationToken.None);
+        var launch = done.Launch!;
+        Assert.All(loader.JavaPaths, p => Assert.Equal("java21", p.Java));
+        Assert.Equal(0, loader.Count("warm"));   // nothing to warm: the transformer cache fills while the game runs
+        Assert.Equal("forge-1.12.2", loader.Last("requirements")["platform"]!.GetValue<string>());
+        var request = loader.Last("bake-instance");
+        Assert.Equal(8, request["javaMajor"]!.GetValue<int>());
+        Assert.Equal(dir.LibrariesDir, request["libRoot"]!.GetValue<string>());
+        Assert.Contains(downloads, d => d.Url.EndsWith($"forge-{LegacyForge}-installer.jar"));
+
+        // The platform folder: Forge's version.json without server-only libraries, and libraries linked, not copied.
+        var installDir = request["platform"]!["installDir"]!.GetValue<string>();
+        Assert.Equal("forge-1.12.2", request["platform"]!["kind"]!.GetValue<string>());
+        var versionJson = JsonNode.Parse(File.ReadAllText(Path.Combine(installDir, "version.json")))!.AsObject();
+        Assert.Equal("net.minecraft.launchwrapper.Launch", versionJson["mainClass"]!.GetValue<string>());
+        Assert.Equal(2, versionJson["libraries"]!.AsArray().Count);
+        Assert.NotNull(new DirectoryInfo(Path.Combine(installDir, "libraries")).LinkTarget);
+        Assert.True(File.Exists(Path.Combine(installDir, "libraries", "net", "minecraft", "launchwrapper", "1.12", "launchwrapper-1.12.jar")));
+
+        // The launch block: Java 8 exactly, and the transformer cache is the one cache folder the game may write.
+        Assert.Equal(8, launch.JavaMin);
+        Assert.Equal(8, launch.JavaMax);
+        Assert.Equal(Path.Combine(Cache, "legacy-1.12.2", "0123456789abcdef"), launch.WritableCache);
+        // Forge 1.12.2's update check is off.
+        Assert.Contains("B:Global=false", File.ReadAllText(Path.Combine(instance.WorkDir, "config", "forge.cfg")));
+
+        // Unchanged inputs: the record is reused, with its Java range.
+        var again = await bake.PrepareAsync(java, dir, instance, warm: false, null, CancellationToken.None);
+        Assert.True(again.Reused);
+        Assert.Equal(8, again.Launch!.JavaMax);
+        Assert.Equal(launch.WritableCache, again.Launch.WritableCache);
+        Assert.Equal(1, loader.Count("bake-instance"));
+
+        // The record is in the instance folder, which the game may write: a widened writable cache is not granted.
+        var recordPath = BakeRecord.PathFor(instance.WorkDir);
+        var record = JsonNode.Parse(File.ReadAllText(recordPath))!.AsObject();
+        record["writableCache"] = Path.Combine(Cache, "baked");
+        File.WriteAllText(recordPath, record.ToJsonString());
+        var tampered = await bake.PrepareAsync(java, dir, instance, warm: false, null, CancellationToken.None);
+        Assert.True(tampered.Reused);
+        Assert.Null(tampered.Launch!.WritableCache);
+    }
+
+    [Theory]
+    [InlineData(17, "java_too_new")]
+    [InlineData(21, "java_too_new")]
+    [InlineData(7, "java_too_old")]
+    public async Task Forge1122RefusesAGameJavaOutsideJava8BeforeAnyProcess(int gameMajor, string code)
+    {
+        LegacyInstall();
+        var loader = LegacyLoader();
+        var e = await Assert.ThrowsAsync<BakeException>(() => Service(loader).PrepareAsync(new BakeJava("java21", 21, gameMajor),
+            new GameDirectory(Game), Instance("forge", "1.12.2", LegacyForge, "f1122"), false, null, CancellationToken.None));
+        Assert.Equal(code, e.Code);
+        Assert.Empty(loader.Calls);
+        if (code == "java_too_new") Assert.Equal(L.F("core.bake.java_too_new", 8, gameMajor), e.Message);
+    }
+
+    [Fact]
+    public async Task Forge1122StagesStillNeedTheLoadersJava()
+    {
+        LegacyInstall();
+        var loader = LegacyLoader();
+        // Running the stages on Java 8 would fail with UnsupportedClassVersionError: refused first.
+        var e = await Assert.ThrowsAsync<BakeException>(() => Service(loader).PrepareAsync("java8", 8,
+            new GameDirectory(Game), Instance("forge", "1.12.2", LegacyForge, "f1122"), false, null, CancellationToken.None));
+        Assert.Equal("java_too_old", e.Code);
+        Assert.Empty(loader.Calls);
+    }
+
+    [Fact]
+    public async Task Forge1122PlatformNamesMissingLibrariesAndAcceptsAShortVersion()
+    {
+        LegacyInstall(withLaunchWrapper: false);
+        Func<IReadOnlyCollection<DownloadItem>, CancellationToken, Task> download = (items, _) =>
+        {
+            foreach (var item in items) { Directory.CreateDirectory(Path.GetDirectoryName(item.LocalPath)!); File.Copy(FakeFiles[item.Url], item.LocalPath, true); }
+            return Task.CompletedTask;
+        };
+        // An instance that knows only the build number still finds the 1.12.2-… installer.
+        var e = await Assert.ThrowsAsync<BakeException>(() => BakePlatform.PrepareAsync(new GameDirectory(Game),
+            Instance("forge", "1.12.2", "14.23.5.2860", "f1122"), Data, download, null, CancellationToken.None));
+        Assert.Contains("launchwrapper-1.12.jar", e.Message);
+        Assert.DoesNotContain("server-only", e.Message);
+    }
+
+    [Fact]
+    public async Task AWritableCacheOutsideTheCacheIsNotGranted()
+    {
+        LegacyInstall();
+        var loader = LegacyLoader(transformerCache: Path.Combine(_root, "elsewhere"));
+        var done = await Service(loader).PrepareAsync(new BakeJava("java21", 21, 8), new GameDirectory(Game),
+            Instance("forge", "1.12.2", LegacyForge, "f1122"), false, null, CancellationToken.None);
+        Assert.Null(done.Launch!.WritableCache);
+
+        // Only one transformer cache folder: not the cache root, not the shared baked jars, not the transformer area
+        // itself; relative or escaping paths are refused.
+        var bake = Service();
+        var launch = new BakedLaunch("m", [], [], [], "s", "k");
+        Assert.Null(bake.Checked(launch with { WritableCache = Cache }).WritableCache);
+        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine(Cache, "baked") }).WritableCache);
+        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine(Cache, "legacy-1.12.2") }).WritableCache);
+        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine(Cache, "legacy-1.12.2", "..", "baked") }).WritableCache);
+        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine("legacy-1.12.2", "x") }).WritableCache);
+        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine(Cache, "..", "x") }).WritableCache);
+        Assert.Equal(Path.Combine(Cache, "legacy-1.12.2", "x"), bake.Checked(launch with { WritableCache = Path.Combine(Cache, "legacy-1.12.2", "x") }).WritableCache);
+    }
+
+    [Fact]
+    public void TheSandboxGrantsTheTransformerCacheReadWrite()
+    {
+        var cache = Path.Combine(Cache, "legacy-1.12.2", "x");
+        var options = new LaunchOptions
+        {
+            VersionId = "1.12.2",
+            JavaPath = "java",
+            Session = OfflineAccount.Create("Tester"),
+            Sandbox = new SandboxOptions { Enabled = true, ExtraReadOnly = [Cache] },
+        };
+        Assert.Same(options.Sandbox, GameLauncher.SandboxFor(options));
+        var baked = options with { Baked = new BakedLaunch("m", [], [], [], "s", "k") { WritableCache = cache } };
+        var sandbox = GameLauncher.SandboxFor(baked);
+        Assert.Contains(cache, sandbox.ExtraReadWrite);
+        Assert.Contains(Cache, sandbox.ExtraReadOnly);
+        Assert.DoesNotContain(Cache, sandbox.ExtraReadWrite);
+    }
+
+    [Fact]
+    public async Task CleanupKeepsForge1122StatesWithoutWarmingThem()
+    {
+        LegacyInstall();
+        var loader = LegacyLoader();
+        JsonObject? gc = null;
+        loader.Stages["gc"] = request => { gc = request; return (["""{"type":"result","apply":false,"liveStates":1,"removable":0,"removableBytes":0}"""], 0); };
+        var bake = Service(loader);
+        var instance = Instance("forge", "1.12.2", LegacyForge, "f1122");
+        var state = (await bake.PrepareAsync(new BakeJava("java21", 21, 8), new GameDirectory(Game), instance, false, null, CancellationToken.None)).Launch!.StateFile;
+        Directory.CreateDirectory(Path.Combine(Cache, "legacy-1.12.2", "0123456789abcdef"));
+
+        var result = await bake.CollectGarbageAsync("java21", apply: false, null, CancellationToken.None);
+        Assert.NotNull(result);
+        Assert.Equal(0, loader.Count("warm"));
+        Assert.Contains(Path.GetFullPath(state), gc!["liveStateFiles"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.True(File.Exists(BakeRecord.PathFor(instance.WorkDir)));
+    }
+
+    [Fact]
+    public void Forge1122ProblemCodesReadInJaysWords()
+    {
+        var missing = JsonNode.Parse("""{"type":"problem","code":"missing_dependency","severity":"error","modId":"jei","dependency":{"id":"baubles","range":"[1.5,)"}}""")!.AsObject();
+        var old = JsonNode.Parse("""{"type":"problem","code":"missing_dep","severity":"error","modId":"jei","dependency":{"id":"baubles","range":"[1.5,)"}}""")!.AsObject();
+        Assert.Equal(BakeService.DescribeProblem(old), BakeService.DescribeProblem(missing));
+        Assert.StartsWith("jei: " + L.T("core.bake.problem.missing_dep"), BakeService.DescribeProblem(missing));
+        Assert.True(BakeService.IsKnownProblem("bad_metadata"));
+        Assert.True(BakeService.IsKnownProblem("platform_unavailable"));
+        var bad = JsonNode.Parse("""{"type":"problem","code":"bad_metadata","severity":"error","file":"broken.jar"}""")!.AsObject();
+        Assert.Equal("broken.jar: " + L.T("core.bake.problem.bad_metadata"), BakeService.DescribeProblem(bad));
+    }
+
+    [Fact]
+    public async Task ABadPlatformErrorReadsInJaysWords()
+    {
+        LegacyInstall();
+        var loader = LegacyLoader();
+        loader.Stages["bake-instance"] = _ => (["""{"type":"error","code":"bad_platform","message":"Forge libraries missing: x.jar"}"""], 1);
+        var e = await Assert.ThrowsAsync<BakeException>(() => Service(loader).PrepareAsync(new BakeJava("java21", 21, 8), new GameDirectory(Game),
+            Instance("forge", "1.12.2", LegacyForge, "f1122"), false, null, CancellationToken.None));
+        Assert.Equal("bad_platform", e.Code);
+        Assert.Equal(L.F("core.bake.bad_platform", "Forge libraries missing: x.jar"), e.Message);
+    }
+
+    [Fact]
+    public void LegacyForgeUpdateCheckIsTurnedOff()
+    {
+        var work = Directory.CreateDirectory(Path.Combine(_root, "legacy-work")).FullName;
+        var cfg = Path.Combine(work, "config", "forge.cfg");
+        BakePlatform.DisableLegacyForgeUpdateCheck(work);
+        Assert.Equal("version_checking {\n    B:Global=false\n}\n", File.ReadAllText(cfg));
+
+        // Forge's own file: the value is switched, everything else stays.
+        File.WriteAllText(cfg, "general {\r\n    B:disableVersionCheck=false\r\n}\r\n\r\nversion_checking {\r\n    # Enable the entire mod update check system.\r\n    B:Global=true\r\n}\r\n");
+        BakePlatform.DisableLegacyForgeUpdateCheck(work);
+        var text = File.ReadAllText(cfg);
+        Assert.Contains("    B:Global=false\r\n", text);
+        Assert.Contains("B:disableVersionCheck=false", text);
+        Assert.Contains("# Enable the entire mod update check system.", text);
+
+        // The category without the value: added inside it.
+        File.WriteAllText(cfg, "version_checking {\n    B:other=true\n}\n");
+        BakePlatform.DisableLegacyForgeUpdateCheck(work);
+        Assert.Equal("version_checking {\n    B:Global=false\n    B:other=true\n}\n", File.ReadAllText(cfg));
     }
 
     [Fact]

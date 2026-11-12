@@ -65,6 +65,14 @@ public sealed record BakeToolkit(string Root, IReadOnlyList<string> Classpath, B
 
     /// <summary>The Java that runs every platform of this loader (for stages that are not about one instance, like gc).</summary>
     public int JavaMinForAll => Package is { JavaMin.Count: > 0 } p ? Math.Max(p.JavaMin.Values.Max(), BakeService.DefaultJavaMin) : BakeService.DefaultJavaMin;
+
+    /// <summary>
+    /// The Java the game itself must run on for a platform, when it differs from the loader's stages (v1.3.2
+    /// <c>javaLaunch</c>): the package manifest's, else what Jay knows of the platform (forge-1.12.2: Java 8). Null:
+    /// the game runs on the stages' Java (<see cref="JavaMinFor"/>).
+    /// </summary>
+    public JavaRange? JavaLaunchFor(string kind) =>
+        Package?.JavaLaunch.GetValueOrDefault(kind) ?? BakePlatform.KnownJavaLaunch(kind);
 }
 
 /// <summary>What <c>amber.ul.Bake version</c> reported.</summary>
@@ -74,6 +82,12 @@ public sealed record BakeLoaderInfo(string LoaderVersion, int Protocol, Version 
     public IReadOnlyDictionary<string, int> JavaMin { get; init; } = new Dictionary<string, int>();
 
     public int JavaMinFor(string kind) => JavaMin.TryGetValue(kind, out var major) ? major : BakeService.DefaultJavaMin;
+
+    /// <summary>
+    /// Interface v1.3.2 <c>javaLaunch</c>: platforms whose game runs on a different Java than the loader's stages
+    /// (forge-1.12.2: Java 8 exactly, while the stages need <see cref="JavaMin"/>). Empty from older loaders.
+    /// </summary>
+    public IReadOnlyDictionary<string, JavaRange> JavaLaunch { get; init; } = new Dictionary<string, JavaRange>();
 
     /// <summary>The cache protocol this Jay understands. A different protocol means a different cache layout.</summary>
     public const int SupportedProtocol = 1;
@@ -103,7 +117,11 @@ public sealed record BakeLoaderInfo(string LoaderVersion, int Protocol, Version 
         if (result["javaMin"] is JsonObject mins)
             foreach (var (kind, value) in mins)
                 if (value is JsonValue v && v.TryGetValue<int>(out var major)) javaMin[kind] = major;
-        return new BakeLoaderInfo(result["loaderVersion"]?.GetValue<string>() ?? "", result["protocol"]?.GetValue<int>() ?? 0, version, platforms) { JavaMin = javaMin };
+        return new BakeLoaderInfo(result["loaderVersion"]?.GetValue<string>() ?? "", result["protocol"]?.GetValue<int>() ?? 0, version, platforms)
+        {
+            JavaMin = javaMin,
+            JavaLaunch = JavaRange.ParseTable(result["javaLaunch"]),
+        };
     }
 
     /// <summary>Throws a localized <see cref="BakeException"/> when Jay cannot talk to this loader.</summary>
@@ -116,6 +134,12 @@ public sealed record BakeLoaderInfo(string LoaderVersion, int Protocol, Version 
     }
 }
 
+/// <summary>
+/// The Javas of one bake: the loader's stages run on <paramref name="ToolPath"/> (major <paramref name="ToolMajor"/>),
+/// the baked game on major <paramref name="GameMajor"/> (the request's <c>javaMajor</c> and the bake key).
+/// </summary>
+public sealed record BakeJava(string ToolPath, int ToolMajor, int GameMajor);
+
 /// <summary>A progress or problem line from the loader.</summary>
 public sealed record BakeEvent(string Stage, string Message, bool IsProblem, bool IsError, string? Code = null);
 
@@ -124,7 +148,40 @@ public sealed record BakeEvent(string Stage, string Message, bool IsProblem, boo
 /// (interface 1.3) is where the launch writes its runtime problems; null from older loaders.
 /// </summary>
 public sealed record BakedLaunch(string MainClass, IReadOnlyList<string> Classpath, IReadOnlyList<string> JvmArgs, IReadOnlyList<string> GameArgsPrefix, string StateFile, string StateKey,
-    string? ProblemsFile = null);
+    string? ProblemsFile = null)
+{
+    /// <summary>The Java range this launch needs (launch block <c>javaMin</c>/<c>javaMax</c>, v1.3.2); null when the loader does not say.</summary>
+    public int? JavaMin { get; init; }
+    public int? JavaMax { get; init; }
+
+    /// <summary>
+    /// A folder inside the loader's cache that the game itself writes while it runs (forge-1.12.2's transformer
+    /// cache, <c>cache.transformerCache</c>). The sandbox grants it read-write even when the rest of the cache is
+    /// read-only. Null for platforms that write only inside the instance.
+    /// </summary>
+    public string? WritableCache { get; init; }
+}
+
+/// <summary>A Java major-version range (both ends included), for platforms whose game needs a Java the loader's tools do not run on.</summary>
+public sealed record JavaRange(int Min, int Max)
+{
+    public bool Contains(int major) => major >= Min && major <= Max;
+
+    /// <summary>The major version closest to <paramref name="wanted"/> inside the range.</summary>
+    public int Clamp(int wanted) => Math.Clamp(wanted, Min, Max);
+
+    /// <summary><c>{"forge-1.12.2": {"min": 8, "max": 8}}</c> (interface v1.3.2 <c>javaLaunch</c>); ranges that make no sense are skipped.</summary>
+    internal static Dictionary<string, JavaRange> ParseTable(JsonNode? node)
+    {
+        var table = new Dictionary<string, JavaRange>(StringComparer.Ordinal);
+        foreach (var (kind, value) in node as JsonObject ?? [])
+            if (value is JsonObject o && Int(o["min"]) is { } min && Int(o["max"]) is { } max && min > 0 && max >= min)
+                table[kind] = new JavaRange(min, max);
+        return table;
+
+        static int? Int(JsonNode? n) => n is JsonValue v && v.TryGetValue<int>(out var i) ? i : null;
+    }
+}
 
 /// <summary>
 /// What bake-instance did with the loader's cache (interface 1.3): State is <c>new</c>, <c>rebuilt</c> or <c>reused</c>;
@@ -222,8 +279,53 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// The Java major version to bake and launch this instance with: a baked game starts through the loader's own
     /// launcher class, so it needs the loader's minimum even when the version asks for less (Forge 1.20.1 asks for 17).
     /// </summary>
-    public int JavaMajorFor(GameInstance instance, int versionMajor) =>
-        Math.Max(versionMajor, toolkit.JavaMinFor(BakePlatform.KindOf(instance) ?? BakePlatform.Vanilla));
+    /// <remarks>
+    /// A platform with its own launch range (<see cref="BakeToolkit.JavaLaunchFor"/>, forge-1.12.2) takes the version's
+    /// Java pulled into that range instead: Forge 1.12.2 runs on Java 8 only.
+    /// </remarks>
+    public int JavaMajorFor(GameInstance instance, int versionMajor)
+    {
+        var kind = BakePlatform.KindOf(instance) ?? BakePlatform.Vanilla;
+        return toolkit.JavaLaunchFor(kind) is { } range ? range.Clamp(versionMajor) : Math.Max(versionMajor, toolkit.JavaMinFor(kind));
+    }
+
+    /// <summary>
+    /// Picks the Javas for baking and launching this instance. <paramref name="javaPath"/> is the Java the launch would
+    /// use (the version's, or one chosen in the instance settings); <paramref name="forMajor"/> finds or downloads a
+    /// Java of a major version. The game keeps <paramref name="javaPath"/> when it fits: for a platform with a launch
+    /// range (forge-1.12.2) when its real version is inside the range, otherwise when the version already asks for
+    /// what the loader needs. The stages run on the game's Java when they can, else on the loader's
+    /// (<see cref="ToolJavaMajorFor"/>).
+    /// </summary>
+    public async Task<(BakeJava Java, string GamePath)> ChooseJavaAsync(GameInstance instance, int versionMajor, string javaPath,
+        Func<int, CancellationToken, Task<string>> forMajor, CancellationToken ct)
+    {
+        var major = JavaMajorFor(instance, versionMajor);
+        var range = toolkit.JavaLaunchFor(BakePlatform.KindOf(instance) ?? BakePlatform.Vanilla);
+        bool keep;
+        if (range is null) keep = major == versionMajor;
+        else
+        {
+            var actual = Java.JavaFinder.MajorOf(javaPath);
+            keep = actual > 0 ? range.Contains(actual) : major == versionMajor;
+            if (keep && actual > 0) major = actual;
+        }
+        var gamePath = keep ? javaPath : await forMajor(major, ct);
+        var toolMajor = ToolJavaMajorFor(instance, major);
+        var toolPath = toolMajor == major ? gamePath : await forMajor(toolMajor, ct);
+        return (new BakeJava(toolPath, toolMajor, major), gamePath);
+    }
+
+    /// <summary>
+    /// The Java major version the loader's own stages (version, requirements, bake-instance, warm) run on for this
+    /// instance: the game's Java (<paramref name="gameMajor"/>) when it can run them, as before; for a platform whose
+    /// game needs an older Java (forge-1.12.2 on Java 8) the loader's <c>javaMin</c> (21).
+    /// </summary>
+    public int ToolJavaMajorFor(GameInstance instance, int gameMajor)
+    {
+        var min = toolkit.JavaMinFor(BakePlatform.KindOf(instance) ?? BakePlatform.Vanilla);
+        return gameMajor >= min ? gameMajor : Math.Max(min, DefaultJavaMin);
+    }
     public BakeToolkit Toolkit => toolkit;
     public string CacheRoot => cacheRoot;
     public string DataRoot => dataRoot;
@@ -257,47 +359,82 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// lists, prepare the NeoForge/Forge install and run <c>bake-instance</c>; then <c>warm</c> when asked and the
     /// loader has it. Launch is null when the instance cannot be baked (Reason says why).
     /// </summary>
-    public async Task<BakePreparation> PrepareAsync(string javaPath, int javaMajor, GameDirectory dir, GameInstance instance, bool warm,
+    public Task<BakePreparation> PrepareAsync(string javaPath, int javaMajor, GameDirectory dir, GameInstance instance, bool warm,
+        IProgress<BakeEvent>? progress, CancellationToken ct) =>
+        PrepareAsync(new BakeJava(javaPath, javaMajor, javaMajor), dir, instance, warm, progress, ct);
+
+    /// <summary>
+    /// The same, with the loader's stages on one Java (<see cref="BakeJava.ToolPath"/>) and the game on another
+    /// (<see cref="BakeJava.GameMajor"/>): forge-1.12.2 bakes on Java 21 and launches on Java 8.
+    /// </summary>
+    public async Task<BakePreparation> PrepareAsync(BakeJava java, GameDirectory dir, GameInstance instance, bool warm,
         IProgress<BakeEvent>? progress, CancellationToken ct)
     {
         // A package is checked file by file before any of it runs, and its Java minimum before the first process:
         // a JVM older than the loader cannot even print an error line.
         toolkit.Verify();
         var kind = BakePlatform.KindOf(instance) ?? BakePlatform.Vanilla;
-        EnsureJava(javaMajor, toolkit.JavaMinFor(kind));
-        var loader = await VersionAsync(javaPath, ct);
+        EnsureJava(java.ToolMajor, toolkit.JavaMinFor(kind));
+        if (toolkit.JavaLaunchFor(kind) is { } known) EnsureGameJava(java.GameMajor, known);
+        var loader = await VersionAsync(java.ToolPath, ct);
         loader.EnsureCompatible();
         if (!Supports(instance, loader, out var reason)) return new BakePreparation(null, reason, false, null);
-        EnsureJava(javaMajor, loader.JavaMinFor(kind));
+        EnsureJava(java.ToolMajor, loader.JavaMinFor(kind));
+        var launchRange = loader.JavaLaunch.GetValueOrDefault(kind) ?? toolkit.JavaLaunchFor(kind);
+        if (launchRange is not null) EnsureGameJava(java.GameMajor, launchRange);
+        else EnsureJava(java.GameMajor, loader.JavaMinFor(kind));
         if (kind == BakePlatform.Forge) BakePlatform.DisableForgeUpdateCheck(instance.WorkDir);
-        if (Current(dir, instance, javaMajor) is { } current) return new BakePreparation(current, L.T("core.bake.reused"), true, null);
-        await EnsureRequirementsAsync(javaPath, dir, instance, progress, ct);
+        if (kind == BakePlatform.ForgeLegacy) BakePlatform.DisableLegacyForgeUpdateCheck(instance.WorkDir);
+        if (Current(dir, instance, java.GameMajor) is { } current && FitsJava(current, java.GameMajor))
+            return new BakePreparation(current, L.T("core.bake.reused"), true, null);
+        await EnsureRequirementsAsync(java.ToolPath, dir, instance, progress, ct);
         var installDir = await BakePlatform.PrepareAsync(dir, instance, dataRoot, download, progress, ct);
         progress?.Report(new BakeEvent("bake-instance", L.F("core.bake.instance_progress", BakePlatform.DisplayName(kind)), false, false));
         BakedLaunch launch;
         BakeCacheInfo? cache;
         try
         {
-            (launch, cache) = await BakeInstanceAsync(javaPath, javaMajor, dir, instance, installDir, progress, ct);
+            (launch, cache) = await BakeInstanceAsync(java.ToolPath, java.GameMajor, dir, instance, installDir, progress, ct);
         }
         catch (BakeException e) when (e.Code == "java_too_old")
         {
-            throw new BakeException(L.F("core.bake.java_too_old", loader.JavaMinFor(kind), javaMajor), e.Problems, e.Code);
+            throw new BakeException(L.F("core.bake.java_too_old", loader.JavaMinFor(kind), java.GameMajor), e.Problems, e.Code);
         }
+        // The launch block's own range (v1.3.2) has the last word: a game Java outside it would fail at the first class.
+        if (launch.JavaMin is not null || launch.JavaMax is not null)
+            EnsureGameJava(java.GameMajor, new JavaRange(launch.JavaMin ?? 1, launch.JavaMax ?? int.MaxValue));
         var done = cache?.State == "reused" ? L.T("core.bake.done_reused") : L.T("core.bake.done");
         // Interface 1.3 says when a warm is worth it (something was built, or the state has no cache list yet);
-        // an older loader does not, so warm whenever asked.
-        if (!warm || !loader.CanWarm || cache is { Warm: false }) return new BakePreparation(launch, done, false, null, cache);
+        // an older loader does not, so warm whenever asked. forge-1.12.2 has nothing to warm: its transformer cache
+        // fills while the game runs (the loader answers not_supported).
+        if (!warm || !loader.CanWarm || cache is { Warm: false } || !CanWarm(kind)) return new BakePreparation(launch, done, false, null, cache);
         progress?.Report(new BakeEvent("warm", L.T("core.bake.warming"), false, false));
-        var stats = await WarmAsync(javaPath, launch.StateFile, progress, ct);
+        var stats = await WarmAsync(java.ToolPath, launch.StateFile, progress, ct);
         return new BakePreparation(launch, L.F("core.bake.done_warm", stats.CacheFiles, stats.Hits + stats.Misses), false, stats, cache);
     }
+
+    /// <summary>Whether <c>warm</c> applies to a platform (not to forge-1.12.2, whose cache fills at run time).</summary>
+    public static bool CanWarm(string kind) => kind != BakePlatform.ForgeLegacy;
 
     /// <summary>Refuses a Java older than the loader needs, before it runs (localized, code <c>java_too_old</c>).</summary>
     private static void EnsureJava(int javaMajor, int javaMin)
     {
         if (javaMajor < javaMin) throw new BakeException(L.F("core.bake.java_too_old", javaMin, javaMajor), [], "java_too_old");
     }
+
+    /// <summary>
+    /// Refuses a game Java outside a platform's launch range (localized): <c>java_too_old</c> below it,
+    /// <c>java_too_new</c> above it (Forge 1.12.2 and most of its coremods break on Java 9+).
+    /// </summary>
+    private static void EnsureGameJava(int gameMajor, JavaRange range)
+    {
+        if (gameMajor < range.Min) throw new BakeException(L.F("core.bake.java_too_old", range.Min, gameMajor), [], "java_too_old");
+        if (gameMajor > range.Max) throw new BakeException(L.F("core.bake.java_too_new", range.Max, gameMajor), [], "java_too_new");
+    }
+
+    /// <summary>A recorded launch block whose Java range the game Java still fits (records from before v1.3.2 have none).</summary>
+    private static bool FitsJava(BakedLaunch launch, int gameMajor) =>
+        (launch.JavaMin is not { } min || gameMajor >= min) && (launch.JavaMax is not { } max || gameMajor <= max);
 
     /// <summary><c>version</c>: what the loader supports. Does not check compatibility; see <see cref="BakeLoaderInfo.EnsureCompatible"/>.</summary>
     public async Task<BakeLoaderInfo> VersionAsync(string javaPath, CancellationToken ct) =>
@@ -389,7 +526,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     {
         var request = InstanceRequest(dir, instance, javaMajor, installDir);
         var result = await RunAsync(javaPath, "bake-instance", request, progress, ct);
-        var launch = ParseLaunch(result);
+        var launch = Checked(ParseLaunch(result));
         BakeRecord.Write(instance.WorkDir, new BakeRecord(InputKey(dir, instance, javaMajor), launch));
         Remember(launch.StateFile);
         return (launch, BakeCacheInfo.Parse(result["cache"]));
@@ -440,13 +577,20 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// </summary>
     public async Task<BakeGcResult?> CollectGarbageAsync(string javaPath, bool apply, IProgress<BakeEvent>? progress, CancellationToken ct)
     {
-        if (!Directory.Exists(cacheRoot) || !new[] { "baked", "nested", "mappings" }.Any(d => Directory.Exists(Path.Combine(cacheRoot, d))))
+        if (!Directory.Exists(cacheRoot) || !new[] { "baked", "nested", "mappings", "legacy-1.12.2" }.Any(d => Directory.Exists(Path.Combine(cacheRoot, d))))
             return null;
         toolkit.Verify();
         var live = new List<string>();
         var dropped = new List<string>();
         foreach (var state in KnownStates())
         {
+            // A forge-1.12.2 state has no cache list and cannot be warmed (its transformer cache fills at run time):
+            // it stays live as it is, so gc keeps what it points to.
+            if (!CanWarm(StatePlatform(state)))
+            {
+                live.Add(state);
+                continue;
+            }
             if (!HasCacheFiles(state))
             {
                 try { await WarmAsync(javaPath, state, progress, ct); }
@@ -520,6 +664,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     {
         var launch = result["launch"]?.AsObject() ?? throw new InvalidDataException(L.T("core.bake.bad_result"));
         static List<string> Strings(JsonNode? node) => node?.AsArray().Select(n => n!.GetValue<string>()).ToList() ?? [];
+        static int? Int(JsonNode? n) => n is JsonValue v && v.TryGetValue<int>(out var i) && i > 0 ? i : null;
         return new BakedLaunch(
             launch["mainClass"]?.GetValue<string>() ?? throw new InvalidDataException(L.T("core.bake.bad_result")),
             Strings(launch["classpath"]),
@@ -527,7 +672,43 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
             Strings(launch["gameArgsPrefix"]),
             launch["stateFile"]?.GetValue<string>() ?? "",
             result["stateKey"]?.GetValue<string>() ?? "",
-            launch["problemsFile"] is JsonValue pf && pf.TryGetValue<string>(out var problems) && problems.Length > 0 ? problems : null);
+            launch["problemsFile"] is JsonValue pf && pf.TryGetValue<string>(out var problems) && problems.Length > 0 ? problems : null)
+        {
+            JavaMin = Int(launch["javaMin"]),
+            JavaMax = Int(launch["javaMax"]),
+            WritableCache = result["cache"]?["transformerCache"] is JsonValue tc && tc.TryGetValue<string>(out var cache) && cache.Length > 0 ? cache : null,
+        };
+    }
+
+    /// <summary>Where forge-1.12.2 keeps its run-time transformer caches, one folder per mod set: <c>&lt;cacheRoot&gt;/legacy-1.12.2/&lt;key&gt;</c>.</summary>
+    public const string LegacyTransformerFolder = "legacy-1.12.2";
+
+    /// <summary>
+    /// Keeps a launch's writable cache folder only when it is one transformer cache folder, below
+    /// <c>&lt;cacheRoot&gt;/legacy-1.12.2/</c>. The path comes from the loader or from the instance's bake record (which
+    /// the game itself can write), and the sandbox grants it read-write: anything wider (the cache root, the baked
+    /// jars other instances share) would let one game change what another one runs.
+    /// </summary>
+    internal BakedLaunch Checked(BakedLaunch launch)
+    {
+        if (launch.WritableCache is not { } folder) return launch;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string full;
+        try { full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)); }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return launch with { WritableCache = null }; }
+        var area = Path.Combine(Path.TrimEndingDirectorySeparator(Path.GetFullPath(cacheRoot)), LegacyTransformerFolder);
+        var inside = Path.IsPathFullyQualified(folder) && !GameDirectoryPaths.IsWithin(area, full, comparison) && GameDirectoryPaths.IsWithin(full, area, comparison);
+        return inside ? launch with { WritableCache = full } : launch with { WritableCache = null };
+    }
+
+    /// <summary>The platform kind a state file was baked for (<c>platform.kind</c>), or vanilla.</summary>
+    internal static string StatePlatform(string stateFile)
+    {
+        try
+        {
+            return JsonNode.Parse(File.ReadAllText(stateFile))?["platform"]?["kind"] is JsonValue v && v.TryGetValue<string>(out var kind) ? kind : BakePlatform.Vanilla;
+        }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException) { return BakePlatform.Vanilla; }
     }
 
     /// <summary>
@@ -592,7 +773,8 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         var record = BakeRecord.Read(instance.WorkDir);
         if (record is null || !File.Exists(record.Launch.StateFile)) return null;
         if (record.Key != InputKey(dir, instance, javaMajor)) return null;
-        return CacheFilesPresent(record.Launch.StateFile) ? record.Launch : null;
+        // A writable cache folder from the record is granted read-write by the sandbox: only inside the cache root.
+        return CacheFilesPresent(record.Launch.StateFile) ? Checked(record.Launch) : null;
     }
 
     internal static bool CacheFilesPresent(string stateFile)
@@ -673,6 +855,9 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
             throw new BakeException(L.F("core.bake.stage_unsupported", stage), problems, errorCode);
         if (errorCode == "stale_state")
             throw new BakeException(L.T("core.bake.stale_state"), problems, errorCode);
+        // forge-1.12.2: the platform folder Jay prepared does not hold what the loader needs (Forge's version.json, its libraries).
+        if (errorCode == "bad_platform")
+            throw new BakeException(L.F("core.bake.bad_platform", error ?? tail), problems, errorCode);
         var reason = error ?? (problems.Count > 0 ? string.Join(L.T("core.mp.format.listseparator"), problems.Take(3)) : tail);
         if (reason.Length == 0) reason = L.F("core.bake.exit_code", exit);
         throw new BakeException(exit == 2 ? L.F("core.bake.dependency_failed", reason) : L.F("core.bake.failed", stage, reason), problems, errorCode);
@@ -693,7 +878,10 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// </summary>
     private static string? ProblemKey(string code) => code switch
     {
-        "missing_dep" => "core.bake.problem.missing_dep",
+        // forge-1.12.2 (v1.3.2) says missing_dependency for the same thing.
+        "missing_dep" or "missing_dependency" => "core.bake.problem.missing_dep",
+        "bad_metadata" => "core.bake.problem.bad_metadata",
+        "platform_unavailable" => "core.bake.problem.platform_unavailable",
         "version_mismatch" => "core.bake.problem.version_mismatch",
         "incompatible_loader" => "core.bake.problem.incompatible_loader",
         "incompatible_mc" => "core.bake.problem.incompatible_mc",
@@ -764,6 +952,9 @@ public sealed record BakeRecord(string Key, BakedLaunch Launch)
             ["stateKey"] = record.Launch.StateKey,
         };
         if (record.Launch.ProblemsFile is { } problems) json["problemsFile"] = problems;
+        if (record.Launch.JavaMin is { } javaMin) json["javaMin"] = javaMin;
+        if (record.Launch.JavaMax is { } javaMax) json["javaMax"] = javaMax;
+        if (record.Launch.WritableCache is { } cache) json["writableCache"] = cache;
         var temp = path + ".tmp";
         File.WriteAllText(temp, json.ToJsonString(), new UTF8Encoding(false));
         File.Move(temp, path, true);
@@ -779,7 +970,13 @@ public sealed record BakeRecord(string Key, BakedLaunch Launch)
             static List<string> Strings(JsonNode? node) => node?.AsArray().Select(n => n!.GetValue<string>()).ToList() ?? [];
             var launch = new BakedLaunch(o["mainClass"]?.GetValue<string>() ?? "", Strings(o["classpath"]), Strings(o["jvmArgs"]),
                 Strings(o["gameArgsPrefix"]), o["stateFile"]?.GetValue<string>() ?? "", o["stateKey"]?.GetValue<string>() ?? "",
-                o["problemsFile"]?.GetValue<string>());
+                o["problemsFile"]?.GetValue<string>())
+            {
+                JavaMin = o["javaMin"] is JsonValue min && min.TryGetValue<int>(out var lo) ? lo : null,
+                JavaMax = o["javaMax"] is JsonValue max && max.TryGetValue<int>(out var hi) ? hi : null,
+                // The record sits in the instance folder, which the game may write: BakeService.Current checks this again.
+                WritableCache = o["writableCache"]?.GetValue<string>(),
+            };
             return launch.MainClass.Length == 0 ? null : new BakeRecord(o["key"]?.GetValue<string>() ?? "", launch);
         }
         catch (Exception e) when (e is IOException or JsonException or InvalidOperationException) { return null; }

@@ -608,7 +608,10 @@ try
             break;
         }
         case "java-install":
-            Console.WriteLine(await javaManager.ForMajorAsync(int.Parse(argList[1]), cts.Token));
+            // java-install <major> [--mojang]: --mojang always downloads Mojang's runtime, even when a matching Java is installed.
+            Console.WriteLine(argList.Remove("--mojang")
+                ? await new JavaRuntimeInstaller(downloader, dir.Root).InstallAsync(null, int.Parse(argList[1]), null, cts.Token)
+                : await javaManager.ForMajorAsync(int.Parse(argList[1]), cts.Token));
             break;
         case "bake-install":
         {
@@ -641,7 +644,8 @@ try
 
             await installer.CompleteAsync(id, null, cts.Token);
             var version = dir.ResolveVersion(id);
-            var javaPath = await javaManager.ForVersionAsync(version, cts.Token);
+            // --java <path>: a Java chosen by hand, as an instance's own Java setting would be.
+            var javaPath = TakeOption(argList, "--java") ?? await javaManager.ForVersionAsync(version, cts.Token);
             Console.WriteLine($"使用 {javaPath}");
 
             var options = new LaunchOptions
@@ -675,16 +679,17 @@ try
                     (items, ct) => downloader.DownloadAllAsync(items, null, ct));
                 var instance = Instance(id, isolate);
                 var versionMajor = version.JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin;
-                var major = bake.JavaMajorFor(instance, versionMajor);
-                if (major != versionMajor)
+                var (bakeJava, gameJava) = await bake.ChooseJavaAsync(instance, versionMajor, javaPath, javaManager.ForMajorAsync, cts.Token);
+                if (gameJava != javaPath)
                 {
-                    javaPath = await javaManager.ForMajorAsync(major, cts.Token);
-                    Console.WriteLine($"BAKE Java {major}: {javaPath}");
+                    javaPath = gameJava;
+                    Console.WriteLine($"BAKE Java {bakeJava.GameMajor}: {javaPath}");
                     options = options with { JavaPath = javaPath };
                 }
+                if (bakeJava.ToolPath != gameJava) Console.WriteLine($"BAKE tools on Java {bakeJava.ToolMajor}: {bakeJava.ToolPath}");
                 var bakeWatch = System.Diagnostics.Stopwatch.StartNew();
                 var events = new SyncProgress<Amber.Core.Bake.BakeEvent>(e => Console.WriteLine((e.IsProblem ? "BAKE PROBLEM " : "BAKE ") + e.Message));
-                var prepared = await bake.PrepareAsync(javaPath, major, dir, instance, argList.Remove("--bake-warm"), events, cts.Token);
+                var prepared = await bake.PrepareAsync(bakeJava, dir, instance, argList.Remove("--bake-warm"), events, cts.Token);
                 var baked = prepared.Launch ?? throw new InvalidOperationException(prepared.Reason);
                 Console.WriteLine($"BAKE READY {bakeWatch.Elapsed.TotalSeconds:F1}s reused={prepared.Reused} cache={prepared.Cache?.State ?? "-"} warm={(prepared.Warm is null ? "no" : "yes")} {prepared.Reason} {baked.StateFile}");
                 options = options with { Baked = baked };

@@ -3361,5 +3361,11 @@
   "people.detail.invite_hint": "Open a room first. Then invite them from here or from the room.",
   "shell.me_tip": "Me: accounts, friend code, devices, appearance",
   "me.appearance.mode": "Light/dark",
-  "me.appearance.language": "Language"
+  "me.appearance.language": "Language",
+  "core.net.download.hashmismatch": "The downloaded file does not match its checksum: {0}",
+  "core.bake.platform.forge_legacy": "Forge 1.12.2",
+  "core.bake.java_too_new": "This game needs Java {0} or older (this launch would use Java {1}). Forge 1.12.2 and most of its mods only work on Java 8. Jay picks Java 8 for it; if this instance uses a Java you chose yourself, choose Java 8 in its settings.",
+  "core.bake.bad_platform": "The Forge install prepared for the universal loader is incomplete: {0}. Reinstall the instance, then bake again.",
+  "core.bake.problem.bad_metadata": "its mod information (mcmod.info or @Mod) cannot be read",
+  "core.bake.problem.platform_unavailable": "this loader build cannot run this platform yet"
 }

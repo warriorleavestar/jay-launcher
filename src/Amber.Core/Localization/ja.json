@@ -3286,5 +3286,11 @@
   "people.detail.invite_hint": "先にルームを開いてください。その後、ここかルームから招待できます。",
   "shell.me_tip": "自分：アカウント、フレンドコード、デバイス、外観",
   "me.appearance.mode": "ライト/ダーク",
-  "me.appearance.language": "言語"
+  "me.appearance.language": "言語",
+  "core.net.download.hashmismatch": "ダウンロードしたファイルがチェックサムと一致しません：{0}",
+  "core.bake.platform.forge_legacy": "Forge 1.12.2",
+  "core.bake.java_too_new": "このゲームには Java {0} 以前が必要です（今回は Java {1} が使われます）。Forge 1.12.2 とその Mod のほとんどは Java 8 でしか動きません。Jay は Java 8 を使います。このインスタンスで自分で選んだ Java を使っている場合は、インスタンス設定で Java 8 を選んでください。",
+  "core.bake.bad_platform": "汎用ローダー用に準備した Forge のインストールが不完全です：{0}。インスタンスをインストールし直してから、もう一度ベイクしてください。",
+  "core.bake.problem.bad_metadata": "Mod の情報（mcmod.info または @Mod）を読み取れません",
+  "core.bake.problem.platform_unavailable": "このバージョンのローダーはこのプラットフォームにまだ対応していません"
 }

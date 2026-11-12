@@ -155,6 +155,20 @@ public static partial class JavaFinder
         }
     }
 
+    /// <summary>
+    /// The major version of one java executable: from the <c>release</c> file next to <c>bin</c>, else by running it
+    /// (some runtimes, such as older Mojang ones, have no release file). 0 when it cannot be told.
+    /// </summary>
+    public static int MajorOf(string javaPath)
+    {
+        if (!File.Exists(javaPath)) return 0;
+        var full = Path.GetFullPath(javaPath);
+        var bin = Path.GetDirectoryName(full) ?? full;
+        var home = Path.GetFileName(bin) == "bin" ? Path.GetDirectoryName(bin) ?? bin : bin;
+        try { return Probe(home, full)?.MajorVersion ?? 0; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return 0; }
+    }
+
     /// <summary>"1.8.0_401" → 8，"17.0.10" → 17，"21" → 21。</summary>
     public static int ParseMajor(string version)
     {

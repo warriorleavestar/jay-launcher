@@ -460,7 +460,8 @@ public static unsafe class WindowsSandbox
                     return Java.JavaFinder.ParseMajor(line["JAVA_VERSION=".Length..].Trim('"'));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        return 0;
+        // No release file: ask the Java itself. Guessing wrong matters: a Java 8 given Java 9's --patch-module does not start.
+        return Java.JavaFinder.MajorOf(javaPath);
     }
 
     /// <summary>The resolver jar's resource; missing when the build had no JDK (then Java 18+ uses the standard level).</summary>

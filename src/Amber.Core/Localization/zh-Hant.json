@@ -3286,5 +3286,11 @@
   "people.detail.invite_hint": "先開一個房間，再從這裡或房間裡邀請 TA。",
   "shell.me_tip": "我：帳號、好友碼、裝置、外觀",
   "me.appearance.mode": "深淺色",
-  "me.appearance.language": "語言"
+  "me.appearance.language": "語言",
+  "core.net.download.hashmismatch": "下載的檔案和校驗值對不上：{0}",
+  "core.bake.platform.forge_legacy": "Forge 1.12.2",
+  "core.bake.java_too_new": "這個遊戲需要 Java {0} 或更舊的版本（這次會用 Java {1}）。Forge 1.12.2 和它的大多數模組只能在 Java 8 上執行。Jay 會自動給它用 Java 8；如果這個實例用的是你自己選的 Java，請在實例設定裡換成 Java 8。",
+  "core.bake.bad_platform": "給通用載入器準備的 Forge 安裝不完整：{0}。請重新安裝這個實例，再烘焙一次。",
+  "core.bake.problem.bad_metadata": "讀不出它的模組資訊（mcmod.info 或 @Mod）",
+  "core.bake.problem.platform_unavailable": "這個版本的載入器還跑不了這個平台"
 }

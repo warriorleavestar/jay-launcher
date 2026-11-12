@@ -3151,5 +3151,11 @@
   "people.detail.invite_hint": "先開一室，乃自此或自室邀之。",
   "shell.me_tip": "吾：名籍、友碼、諸機、觀",
   "me.appearance.mode": "明暗",
-  "me.appearance.language": "言語"
+  "me.appearance.language": "言語",
+  "core.net.download.hashmismatch": "所下之檔與校驗不合：{0}",
+  "core.bake.platform.forge_legacy": "Forge 1.12.2",
+  "core.bake.java_too_new": "此戲須 Java {0} 或更舊者（此番將用 Java {1}）。Forge 1.12.2 及其多數模組唯行於 Java 8。Jay 自為之用 Java 8；若此實例用君自擇之 Java，請於其設定易以 Java 8。",
+  "core.bake.bad_platform": "為通用載入器所備之 Forge 未全：{0}。請重裝此實例，復烘之。",
+  "core.bake.problem.bad_metadata": "其模組之訊（mcmod.info 或 @Mod）不可讀",
+  "core.bake.problem.platform_unavailable": "此版載入器尚不能行此平臺"
 }
