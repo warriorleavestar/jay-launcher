@@ -30,7 +30,7 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         {
             var clickOnRelease = controlsEnabled;
             var pointerHeld = !controlsEnabled;
-            var heldAction = pointerHeld
+            TouchControlAction? heldAction = pointerHeld
                 ? IsMenuSplitModifierHeld() ? TouchControlAction.SecondaryAction : TouchControlAction.PrimaryAction
                 : null;
             _pointers[pointerId] = new(null, x, y, clickOnRelease, pointerHeld, heldAction: heldAction);
