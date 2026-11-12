@@ -1,11 +1,15 @@
 using System.Security.Cryptography;
 using System.Text;
+using Amber.Core.Identity;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer.Transport;
 
 namespace Amber.Core.Multiplayer;
 
 /// <summary>
+/// This device's multiplayer identity. The file holds the device seed (<see cref="DeviceKeys"/>, privacy plan item 7):
+/// the X25519 handshake key hosts know this device by, plus the Ed25519 and ML-DSA-65 device signing keys, all derived
+/// from it. An identity file from before device seeds (a bare X25519 key) is replaced by a new seed with a warning.
 /// 这台电脑上 Amber 的联机身份：一把长期的 X25519 密钥（每次安装一把），房主靠它认出“还是那个人”。
 /// 保存在数据目录的 identity.key，和账号一样加密：Windows 用 DPAPI（当前用户），macOS/Linux 用仅当前用户可读（0600）的本机密钥文件 + AES-GCM。
 /// DPAPI 拒绝时（比如 SSH 密钥登录、没有密码），Windows 也退回本机密钥文件。
@@ -22,14 +26,18 @@ public sealed class MemberIdentity : IDisposable
 
     private readonly string _directory;
     private readonly Lock _gate = new();
-    private X25519KeyPair _key;
+    private DeviceKeys _device;
     // 重置后换下来的旧密钥：可能还有握手在用，等这个对象 Dispose 时再清零。
-    private readonly List<X25519KeyPair> _retired = [];
+    private readonly List<DeviceKeys> _retired = [];
 
-    private MemberIdentity(string directory, X25519KeyPair key, string? warning, bool persisted = true)
+    /// <summary>Stored plaintext: a format byte, then the 32-byte device seed.</summary>
+    private const byte SeedFormat = 0x02;
+    private const int StoredLength = 1 + DeviceKeys.SeedLength;
+
+    private MemberIdentity(string directory, DeviceKeys device, string? warning, bool persisted = true)
     {
         _directory = directory;
-        _key = key;
+        _device = device;
         Warning = warning;
         IsPersisted = persisted;
     }
@@ -38,7 +46,10 @@ public sealed class MemberIdentity : IDisposable
     public bool IsPersisted { get; private set; }
 
     /// <summary>当前的密钥对。<see cref="Reset"/> 之后换成新的，旧的被清零，别长期持有。</summary>
-    public X25519KeyPair KeyPair { get { lock (_gate) return _key; } }
+    public X25519KeyPair KeyPair => Device.Dh;
+
+    /// <summary>All of this device's keys. <see cref="Reset"/> replaces them; don't hold on to them for long.</summary>
+    public DeviceKeys Device { get { lock (_gate) return _device; } }
 
     public byte[] PublicKey => (byte[])KeyPair.PublicKey.Clone();
 
@@ -61,10 +72,24 @@ public sealed class MemberIdentity : IDisposable
         {
             try
             {
-                var raw = Unprotect(directory, File.ReadAllBytes(path));
+                var raw = Unprotect(directory, File.ReadAllBytes(path), l => l is StoredLength or X25519KeyPair.Length);
                 try
                 {
-                    return new MemberIdentity(directory, X25519KeyPair.FromPrivateKey(raw), null);
+                    if (raw.Length == StoredLength)
+                    {
+                        if (raw[0] != SeedFormat) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
+                        return new MemberIdentity(directory, DeviceKeys.FromSeed(raw.AsSpan(1)), null);
+                    }
+                    // A bare X25519 key from before device seeds: it can't give the signing keys, so this device starts
+                    // over with a seed (no backward compatibility, privacy plan item 7). Saving overwrites the old key.
+                    var upgraded = new MemberIdentity(directory, DeviceKeys.Generate(), L.T("core.mp.identity.upgraded"));
+                    try { upgraded.Save(); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException)
+                    {
+                        upgraded.IsPersisted = false;
+                        upgraded.Warning = L.T("core.mp.identity.unsaved");
+                    }
+                    return upgraded;
                 }
                 finally
                 {
@@ -73,18 +98,18 @@ public sealed class MemberIdentity : IDisposable
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                return new MemberIdentity(directory, X25519KeyPair.Generate(), L.T("core.mp.identity.unreadable"), persisted: false);
+                return new MemberIdentity(directory, DeviceKeys.Generate(), L.T("core.mp.identity.unreadable"), persisted: false);
             }
             catch (Exception e) when (e is CryptographicException or FormatException)
             {
                 try { File.Copy(path, path + ".broken", true); }
                 catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
-                var fresh = new MemberIdentity(directory, X25519KeyPair.Generate(), L.T("core.mp.identity.corrupt"));
+                var fresh = new MemberIdentity(directory, DeviceKeys.Generate(), L.T("core.mp.identity.corrupt"));
                 fresh.Save();
                 return fresh;
             }
         }
-        var created = new MemberIdentity(directory, X25519KeyPair.Generate(), null);
+        var created = new MemberIdentity(directory, DeviceKeys.Generate(), null);
         try
         {
             created.Save();
@@ -104,16 +129,16 @@ public sealed class MemberIdentity : IDisposable
     {
         lock (_gate)
         {
-            var fresh = X25519KeyPair.Generate();
-            var old = _key;
-            _key = fresh;
+            var fresh = DeviceKeys.Generate();
+            var old = _device;
+            _device = fresh;
             try
             {
                 Save();
             }
             catch
             {
-                _key = old;
+                _device = old;
                 fresh.Dispose();
                 throw;
             }
@@ -126,7 +151,9 @@ public sealed class MemberIdentity : IDisposable
     private void Save()
     {
         Directory.CreateDirectory(_directory);
-        var raw = KeyPair.ExportPrivateKey();
+        var seed = _device.ExportSeed();
+        byte[] raw = [SeedFormat, .. seed];
+        CryptographicOperations.ZeroMemory(seed);
         try
         {
             var data = Protect(_directory, raw);
@@ -170,7 +197,7 @@ public sealed class MemberIdentity : IDisposable
     {
         lock (_gate)
         {
-            _key.Dispose();
+            _device.Dispose();
             foreach (var old in _retired) old.Dispose();
             _retired.Clear();
         }
@@ -210,22 +237,28 @@ public sealed class MemberIdentity : IDisposable
         return [.. MagicAesGcm, .. nonce, .. tag, .. cipher];
     }
 
-    private static byte[] Unprotect(string directory, byte[] stored) => Unprotect(directory, stored, X25519KeyPair.Length);
-
     /// <summary>解开 <see cref="Protect"/> 包起来的密钥；<paramref name="length"/> 是原文的长度。</summary>
-    internal static byte[] Unprotect(string directory, byte[] stored, int length)
+    internal static byte[] Unprotect(string directory, byte[] stored, int length) => Unprotect(directory, stored, l => l == length);
+
+    /// <summary>Like <see cref="Unprotect(string, byte[], int)"/>, accepting any plaintext length <paramref name="lengthOk"/> allows.</summary>
+    internal static byte[] Unprotect(string directory, byte[] stored, Func<int, bool> lengthOk)
     {
         if (stored.AsSpan().StartsWith(MagicDpapi))
         {
             if (!OperatingSystem.IsWindows()) throw new CryptographicException(L.T("core.mp.identity.otherplatform"));
             var raw = ProtectedData.Unprotect(stored[MagicDpapi.Length..], Entropy, DataProtectionScope.CurrentUser);
-            if (raw.Length != length) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
+            if (!lengthOk(raw.Length))
+            {
+                CryptographicOperations.ZeroMemory(raw);
+                throw new CryptographicException(L.T("core.mp.identity.corrupt"));
+            }
             return raw;
         }
         if (stored.AsSpan().StartsWith(MagicAesGcm))
         {
             var body = stored.AsSpan(MagicAesGcm.Length);
-            if (body.Length != 12 + 16 + length) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
+            var length = body.Length - 12 - 16;
+            if (length <= 0 || !lengthOk(length)) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
             var raw = new byte[length];
             var key = WrapKey(directory, create: false);
             try

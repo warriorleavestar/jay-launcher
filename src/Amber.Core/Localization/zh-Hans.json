@@ -1288,6 +1288,7 @@
   "core.mp.hotspot.requires_exit": "请先在“整个局域网”范围下经一位成员上网。",
   "core.mp.noise.staticrequired": "XX 握手必须提供本机长期密钥，NN 握手不能提供",
   "core.mp.identity.corrupt": "这台设备的身份文件损坏或解不开（可能换了系统用户），已换成新的身份。之前认识你的房主会把你当成新成员。",
+  "core.mp.identity.upgraded": "这台设备的身份已升级（加上了签名用的钥匙），所以换了新的。之前认识你的房主会把你当成新成员一次。",
   "core.mp.identity.otherplatform": "这台设备的身份文件是在别的系统上加密的，这里解不开",
   "core.mp.knock.badreply": "对方的回复格式不对",
   "core.mp.knock.toolarge": "敲门消息太长",

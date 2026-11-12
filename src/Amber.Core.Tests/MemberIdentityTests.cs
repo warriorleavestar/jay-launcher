@@ -150,6 +150,61 @@ public sealed class MemberIdentityTests : IDisposable
         Assert.Equal(recovered, again.PublicKey);
     }
 
+    /// <summary>The file holds the device seed: all three device keys come back the same, and signatures still verify.</summary>
+    [Fact]
+    public void DeviceKeysRoundTrip()
+    {
+        byte[] ed, mlDsa;
+        Amber.Core.Identity.DeviceSignature signature;
+        using (var identity = MemberIdentity.LoadOrCreate(_dir))
+        {
+            Assert.Same(identity.Device.Dh, identity.KeyPair);
+            ed = identity.Device.EdPublicKey;
+            mlDsa = identity.Device.MlDsaPublicKey;
+            signature = identity.Device.Sign("test"u8, "hello"u8);
+        }
+        using var again = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Equal(ed, again.Device.EdPublicKey);
+        Assert.Equal(mlDsa, again.Device.MlDsaPublicKey);
+        Assert.True(Amber.Core.Identity.DeviceKeys.Verify(ed, mlDsa, "test"u8, "hello"u8, signature));
+    }
+
+    /// <summary>An identity file from before device seeds (a bare X25519 key) is replaced by a seed, once, with a warning.</summary>
+    [Fact]
+    public void OldBareKeyIsUpgradedToASeed()
+    {
+        Directory.CreateDirectory(_dir);
+        using var legacy = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        var raw = legacy.ExportPrivateKey();
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.FileName), MemberIdentity.Protect(_dir, raw));
+
+        byte[] upgraded;
+        using (var identity = MemberIdentity.LoadOrCreate(_dir))
+        {
+            Assert.NotNull(identity.Warning);
+            Assert.True(identity.IsPersisted);
+            Assert.NotEqual(legacy.PublicKey, identity.PublicKey);
+            upgraded = identity.PublicKey;
+        }
+        Assert.False(File.Exists(Path.Combine(_dir, MemberIdentity.FileName + ".broken")));
+        using var again = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Null(again.Warning);
+        Assert.Equal(upgraded, again.PublicKey);
+    }
+
+    /// <summary>A seed-sized plaintext with an unknown format byte is treated as damaged, not as a seed.</summary>
+    [Fact]
+    public void UnknownFormatByteIsCorrupt()
+    {
+        Directory.CreateDirectory(_dir);
+        var raw = new byte[33];
+        raw[0] = 0x07;
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.FileName), MemberIdentity.Protect(_dir, raw));
+        using var identity = MemberIdentity.LoadOrCreate(_dir);
+        Assert.NotNull(identity.Warning);
+        Assert.True(File.Exists(Path.Combine(_dir, MemberIdentity.FileName + ".broken")));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_dir)) Directory.Delete(_dir, true);
