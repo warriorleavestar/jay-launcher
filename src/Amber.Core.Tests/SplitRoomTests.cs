@@ -403,6 +403,33 @@ public sealed class SplitRoomTests
         }
     }
 
+    /// <summary>A failure after a leg's handshake (here: picking the service) is a connection that ended, not a failed handshake.</summary>
+    [Fact]
+    public async Task ARouteThatFailsAfterTheHandshakeIsLoggedAsEnded()
+    {
+        var log = new List<string>();
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict), Wrapped,
+            log: line => { lock (log) log.Add(line); }, route: _ => throw new InvalidOperationException("route"));
+        var connector = rig.Connector(TunnelService.Game);
+        try
+        {
+            await using var stream = await connector.OpenAsync(CancellationToken.None);
+            await stream.ReadAsync(new byte[1]);
+        }
+        catch (Exception e) when (e is IOException or SocketException or CryptographicException or InvalidDataException or EndOfStreamException
+                                   or InvalidOperationException or OperationCanceledException) { }
+        var ended = L.T("core.mp.transport.endpoint_ended");
+        Assert.True(await WaitAsync(() => { lock (log) return log.Any(l => l.StartsWith(ended, StringComparison.Ordinal)); }));
+        await Task.Delay(100);
+        Assert.True(rig.Server.Rejected >= 1);
+        Assert.Equal(0, rig.Server.Accepted);
+        lock (log)
+        {
+            Assert.Contains(log, l => l.StartsWith(ended, StringComparison.Ordinal) && l.EndsWith(nameof(InvalidOperationException), StringComparison.Ordinal));
+            Assert.DoesNotContain(log, l => l.StartsWith(L.T("core.mp.transport.endpoint_handshake_failed"), StringComparison.Ordinal));
+        }
+    }
+
     [Fact]
     public async Task StrictWithoutPathsRefusesAndNeverUsesOnePath()
     {
@@ -687,12 +714,13 @@ public sealed class SplitRoomTests
         public IReadOnlyList<TunnelService> Served { get { lock (_served) return [.. _served]; } }
 
         public static Task<Rig> StartAsync(SplitSettings split, TunnelSettings tunnel, bool hostEpochBump = false, Action<TcpClient>? beforeServe = null,
-            TimeSpan? handshakeTimeout = null, Func<Stream, CancellationToken, Task>? handler = null, Action<string>? log = null)
+            TimeSpan? handshakeTimeout = null, Func<Stream, CancellationToken, Task>? handler = null, Action<string>? log = null,
+            Func<TunnelService, Func<Stream, CancellationToken, Task>?>? route = null)
         {
             var (credentials, table, host, guest) = NewRoom(split, tunnel);
             var rig = new Rig { Table = table, GuestEntry = guest, Member = credentials.ToRoom() };
             if (hostEpochBump) host = host with { Epoch = host.Epoch + 1 };
-            rig.Server = new SplitTunnelServer(host, service => handler ?? Echo(rig, service), log, ports: [.. Enumerable.Repeat(0, split.Paths)]) { BeforeServeForTest = beforeServe, HandshakeTimeout = handshakeTimeout ?? TunnelHandshake.Timeout };
+            rig.Server = new SplitTunnelServer(host, route ?? (service => handler ?? Echo(rig, service)), log, ports: [.. Enumerable.Repeat(0, split.Paths)]) { BeforeServeForTest = beforeServe, HandshakeTimeout = handshakeTimeout ?? TunnelHandshake.Timeout };
             rig._single.Start();
             rig._singleLoop = Task.Run(rig.SingleLoopAsync);
             return Task.FromResult(rig);
