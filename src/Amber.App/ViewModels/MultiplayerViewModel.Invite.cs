@@ -236,7 +236,8 @@ public sealed partial class MultiplayerViewModel
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy,
             () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)),
             account => !Child.AlwaysAskKnock && Trusted.IsTrustedJayAccount(account), () => jayCertificate, () => Child.AlwaysAskKnock,
-            direct is null ? null : direct.Offer);
+            direct is null ? null : direct.Offer,
+            name => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Warning("multiplayer.room.relay_only_old", name))));
         if (direct is not null)
             lobby.DirectAnswered += (request, entry, addresses) => _ = AddDirectGuestAsync(direct, request, addresses);
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
@@ -646,7 +647,8 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>贴了邀请码：进大厅、敲门、等批准；批准后离开大厅，用拿到的凭据加入房间。</summary>
     /// <param name="knock">从公共网络的房间列表加入时：经公共网络敲门。不给时先在公共网络的目录里找（连着时），找不到再进邀请码的大厅。</param>
-    private async Task KnockAndJoinAsync(JayInvite invite,
+    /// <returns>How it ended, for callers that keep the invite around to try again.</returns>
+    private async Task<KnockEnd> KnockAndJoinAsync(JayInvite invite,
         Func<X25519KeyPair, string, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>, CancellationToken, Task<KnockOutcome>>? knock = null,
         byte[]? expectedHost = null)
     {
@@ -685,31 +687,30 @@ public sealed partial class MultiplayerViewModel
             if (_knockCts != cts)
             {
                 if (guestDirect is not null) await guestDirect.DisposeAsync();
-                return;
+                return KnockEnd.NotAnswered;
             }
             if (outcome.Credentials is not { } credentials)
             {
                 if (guestDirect is not null) await guestDirect.DisposeAsync();
                 SetStatus(StatusMessage.Warning(KnockReasonKey(outcome.Reason)));
-                return;
+                return outcome.Reason is "expired" or "invalid" or "removed" or "closed" ? KnockEnd.InviteSpent : KnockEnd.NotAnswered;
             }
             if (credentials.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)
             {
                 if (guestDirect is not null) await guestDirect.DisposeAsync();
                 SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
-                return;
+                return KnockEnd.NotAnswered;
             }
             IsKnocking = false;
             if (guestDirect is not null)
             {
                 await CompleteDirectJoinAsync(guestDirect, credentials.ToRoom(), outcome);
-                return;
+                return KnockEnd.Joined;
             }
-            if (StartJoin(credentials.ToRoom()))
-            {
-                HostFingerprint = outcome.HostFingerprint;
-                HostJayAccount = outcome.HostJayAccount;
-            }
+            if (!StartJoin(credentials.ToRoom())) return KnockEnd.NotAnswered;
+            HostFingerprint = outcome.HostFingerprint;
+            HostJayAccount = outcome.HostJayAccount;
+            return KnockEnd.Joined;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -722,7 +723,10 @@ public sealed partial class MultiplayerViewModel
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or System.Security.Cryptography.CryptographicException
             or InvalidDataException or System.ComponentModel.Win32Exception or InvalidOperationException or OperationCanceledException or System.Text.Json.JsonException)
         {
+            // A host that is not the friend the invite names: the invite is no use any more.
+            var wrongHost = e is WrongHostException;
             SetStatus(StatusMessage.Failure("multiplayer.invite.knock_failed", e, ErrorText.Of(e)));
+            if (wrongHost) return KnockEnd.InviteSpent;
         }
         finally
         {
@@ -733,6 +737,18 @@ public sealed partial class MultiplayerViewModel
             }
             cts.Dispose();
         }
+        return KnockEnd.NotAnswered;
+    }
+
+    /// <summary>How a knock ended.</summary>
+    internal enum KnockEnd
+    {
+        /// <summary>Not in the room, and the invite may still work: no connection, cancelled, declined this time, the room full.</summary>
+        NotAnswered,
+        /// <summary>In the room.</summary>
+        Joined,
+        /// <summary>The host says the invite is over (run out, I was removed, the room closed), or the host is not who the invite names.</summary>
+        InviteSpent,
     }
 
     [RelayCommand]
