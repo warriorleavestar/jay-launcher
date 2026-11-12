@@ -100,7 +100,7 @@ public static class SettingsCatalog
     ];
 
     /// <summary>The settings this system shows (Windows-only ones elsewhere, desktop-only ones on phones and tablets are dropped).</summary>
-    public static readonly IReadOnlyList<SettingsField> Fields = [.. All.Where(f => (!f.WindowsOnly || OperatingSystem.IsWindows()) && (!f.DesktopOnly || Launch.AutoUpdateCheck.IsSupported))];
+    public static readonly IReadOnlyList<SettingsField> Fields = [.. All.Where(f => (!f.WindowsOnly || OperatingSystem.IsWindows()) && (!f.DesktopOnly || PlatformFeatures.IsDesktop))];
 
     public static SettingsGroup? Group(string? id) =>
         Groups.FirstOrDefault(g => string.Equals(g.Id, id, StringComparison.OrdinalIgnoreCase));
