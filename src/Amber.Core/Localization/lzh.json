@@ -3536,5 +3536,8 @@
   "settings.ul.cache": "緩存：{0}",
   "settings.ul.developers": "為製者",
   "settings.ul.upgrade_note": "既裝載器新版，諸例初啟時當重備模組一遍，此一次較常為久，非誤也。",
-  "instance.ul.downloading": "方下載通用載器……"
+  "instance.ul.downloading": "方下載通用載器……",
+  "settings.sandbox.card_hint": "戲之所行：唯見己之夾，不觸 Jay 之資與覽器。",
+  "multiplayer.room.no_sandbox": "戲不行於沙盒。",
+  "multiplayer.room.no_sandbox.link": "戲之沙盒 ›"
 }

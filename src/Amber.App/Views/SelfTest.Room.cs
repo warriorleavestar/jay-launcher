@@ -77,6 +77,30 @@ internal sealed partial class SelfTest
             vm.RememberInviteTerms(1, TimeSpan.FromMinutes(10), false);
         });
         await Task.Delay(400);
+
+        // Launch without sandbox: in a room it is one muted line under the header (not the page's warning box), and
+        // its link opens the game sandbox card.
+        var sandboxSettings = Page<SettingsViewModel>();
+        var hadNoSandbox = main.Service.Settings.LaunchWithoutSandbox;
+        Dispatcher.UIThread.Invoke(() => sandboxSettings.LaunchWithoutSandbox = true);
+        await Task.Delay(300);
+        Check("房间：游戏不在沙盒里时，房间横幅下面一行灰字，不是页面顶上的警告框",
+            Dispatcher.UIThread.Invoke(() => Named<WrapPanel>("RoomNoSandboxLine")?.IsEffectivelyVisible == true && Named<Border>("NoSandboxLine")?.IsVisible == false
+                && HasText(L.T("multiplayer.room.no_sandbox"))));
+        await ShotAsync("房间-没有沙盒-1440");
+        // The link's route, without leaving the room page (the rest of this check uses it).
+        string? route = null;
+        var savedNavigate = vm.Navigate;
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.Navigate = r => route = r;
+            vm.OpenSandboxSettingsCommand.Execute(null);
+            vm.Navigate = savedNavigate;
+        });
+        Check("房间：那一行的链接去 settings#GameSandbox（设置 › 隐私与安全 › 游戏沙盒）", route == "settings#GameSandbox", route ?? "");
+        Dispatcher.UIThread.Invoke(() => sandboxSettings.LaunchWithoutSandbox = hadNoSandbox);
+        await Task.Delay(300);
+        Check("房间：沙盒开回来后那一行收起", Dispatcher.UIThread.Invoke(() => Named<WrapPanel>("RoomNoSandboxLine")?.IsVisible == false));
         void SetPeers(params PeerInfo[] peers) => Dispatcher.UIThread.Invoke(() =>
         {
             vm.Peers.Clear();

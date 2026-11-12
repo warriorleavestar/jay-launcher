@@ -43,6 +43,7 @@ public sealed class SettingsCatalogTests
     [InlineData("SidebarBox", "Sidebar", "appearance")]
     [InlineData("gamedirectory", "GameDirectory", "storage")]
     [InlineData("NoTrace", "NoTrace", "privacy")]
+    [InlineData("GameSandbox", "GameSandbox", "privacy")]
     [InlineData("TransportBox", "Transport", "multiplayer")]
     [InlineData("Breaker", "Breaker", "multiplayer")]   // emergency disconnect moved from Privacy (batch 7)
     [InlineData("StunBox", "Stun", "network")]

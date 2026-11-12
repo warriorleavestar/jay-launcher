@@ -3747,5 +3747,8 @@
   "settings.ul.cache": "Cache: {0}",
   "settings.ul.developers": "For developers",
   "settings.ul.upgrade_note": "After you install a new version of the loader, each instance prepares its mods again the first time it starts. That takes longer than usual once and is normal.",
-  "instance.ul.downloading": "Downloading the universal loader…"
+  "instance.ul.downloading": "Downloading the universal loader…",
+  "settings.sandbox.card_hint": "Where the game runs: its own folder only, away from Jay's data and your browser.",
+  "multiplayer.room.no_sandbox": "The game runs without a sandbox.",
+  "multiplayer.room.no_sandbox.link": "Game sandbox ›"
 }

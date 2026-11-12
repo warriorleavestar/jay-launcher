@@ -400,6 +400,35 @@
                 <Button Classes="ghost" Content="{l:T settings.privacy.open_about}" Command="{Binding GoAboutCommand}" HorizontalAlignment="Left" Padding="0,2" />
               </StackPanel>
             </Border>
+            <!-- Game sandbox (privacy plan item 15), right after the network list: which level the next launch uses, strong
+                 mode (Windows), quiet buttons for the admin step's leftovers, and the escape hatch. settings#GameSandbox. -->
+            <Border x:Name="GameSandbox" Classes="card">
+              <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                  <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Classes="h2" Text="{l:T settings.sandbox.label}" Margin="0" />
+                    <TextBlock x:Name="SandboxStatusLine" Text="{Binding SandboxStatusText}" FontSize="12" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Grid>
+                <StackPanel Spacing="4" IsVisible="{Binding IsWindowsSandbox}">
+                  <ToggleSwitch x:Name="StrongSandboxBox" IsChecked="{Binding StrongSandbox}" IsEnabled="{Binding !LaunchWithoutSandbox}"
+                                OnContent="{l:T settings.sandbox.strong}" OffContent="{l:T settings.sandbox.strong}"
+                                AutomationProperties.Name="{l:T settings.sandbox.strong}" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.strong.hint}" TextWrapping="Wrap" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.java_note}" TextWrapping="Wrap" />
+                  <WrapPanel ItemSpacing="14" LineSpacing="4">
+                    <Button x:Name="RetryStrongSandboxButton" Classes="ghost small" Content="{l:T settings.sandbox.retry}" Command="{Binding RetryStrongSandboxCommand}"
+                            IsVisible="{Binding CanRetryStrongSandbox}" Padding="0,2" />
+                    <Button x:Name="RemoveSandboxPermissionsButton" Classes="ghost small" Content="{l:T settings.sandbox.remove}" Command="{Binding RemoveSandboxPermissionsCommand}"
+                            IsVisible="{Binding CanRemoveSandboxPermissions}" Padding="0,2" ToolTip.Tip="{l:T settings.sandbox.remove.hint}" />
+                  </WrapPanel>
+                  <TextBlock Classes="hint" FontSize="12" Text="{Binding SandboxPermissionsError}" IsVisible="{Binding SandboxPermissionsError, Converter={x:Static ObjectConverters.IsNotNull}}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Separator Margin="0,2" />
+                <CheckBox x:Name="LaunchWithoutSandboxBox" IsChecked="{Binding LaunchWithoutSandbox}" Content="{l:T settings.sandbox.without}" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.without.hint}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
             <!-- For a child (§9.6): one main switch, six items, the time of the last change. No parent password. -->
             <Border Classes="card">
               <StackPanel Spacing="8">
@@ -422,25 +451,6 @@
                 <TextBlock Text="{l:T settings.notrace.label}" FontWeight="SemiBold" />
                 <CheckBox x:Name="NoTraceBox" IsChecked="{Binding NoTrace}" Content="{l:T settings.notrace.toggle}" />
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.notrace.hint}" TextWrapping="Wrap" />
-              </StackPanel>
-            </Border>
-            <!-- Game sandbox (privacy plan item 15): which level the next launch uses, strong mode (Windows), the escape hatch -->
-            <Border Classes="card">
-              <StackPanel Spacing="8">
-                <TextBlock Text="{l:T settings.sandbox.label}" FontWeight="SemiBold" />
-                <TextBlock x:Name="SandboxStatusLine" Text="{Binding SandboxStatusText}" FontSize="12" TextWrapping="Wrap" />
-                <StackPanel Spacing="4" IsVisible="{Binding IsWindowsSandbox}">
-                  <CheckBox x:Name="StrongSandboxBox" IsChecked="{Binding StrongSandbox}" IsEnabled="{Binding !LaunchWithoutSandbox}" Content="{l:T settings.sandbox.strong}" />
-                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.strong.hint}" TextWrapping="Wrap" />
-                  <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.java_note}" TextWrapping="Wrap" />
-                  <Button x:Name="RetryStrongSandboxButton" Classes="ghost" Content="{l:T settings.sandbox.retry}" Command="{Binding RetryStrongSandboxCommand}"
-                          IsVisible="{Binding CanRetryStrongSandbox}" HorizontalAlignment="Left" Padding="0,2" />
-                  <Button x:Name="RemoveSandboxPermissionsButton" Classes="ghost" Content="{l:T settings.sandbox.remove}" Command="{Binding RemoveSandboxPermissionsCommand}"
-                          IsVisible="{Binding CanRemoveSandboxPermissions}" HorizontalAlignment="Left" Padding="0,2" ToolTip.Tip="{l:T settings.sandbox.remove.hint}" />
-                  <TextBlock Classes="hint" FontSize="12" Text="{Binding SandboxPermissionsError}" IsVisible="{Binding SandboxPermissionsError, Converter={x:Static ObjectConverters.IsNotNull}}" TextWrapping="Wrap" />
-                </StackPanel>
-                <CheckBox x:Name="LaunchWithoutSandboxBox" IsChecked="{Binding LaunchWithoutSandbox}" Content="{l:T settings.sandbox.without}" />
-                <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.sandbox.without.hint}" TextWrapping="Wrap" />
               </StackPanel>
             </Border>
             <Border Classes="card">

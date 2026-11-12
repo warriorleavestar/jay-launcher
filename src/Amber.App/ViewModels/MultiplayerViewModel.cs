@@ -267,7 +267,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         SelectedTransport = TransportChoices.First(c => c.Mode == DefaultTransport);
         service.GameOutput += OnGameOutput;
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshInstances);
-        service.SandboxStateChanged += () => Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(RunsWithoutSandbox)));
+        service.SandboxStateChanged += () => Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(RunsWithoutSandbox));
+            OnPropertyChanged(nameof(ShowLobbySandboxLine));
+            OnPropertyChanged(nameof(ShowRoomSandboxLine));
+        });
         service.CurrentInstanceChanged += () => Dispatcher.UIThread.Post(() =>
         {
             if (_service.CurrentInstance is { } id && Instances.Contains(id)) TargetInstance = id;
