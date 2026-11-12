@@ -108,6 +108,40 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(await Until(() => watch.HasExited && !Alive(core)));
     }
 
+    [Fact]
+    public async Task StopEndsWatcherAndCoreWithoutStoppingAnything()
+    {
+        // #229: Kill(entireProcessTree) SIGSTOPs the watcher first, and on macOS a stopped member of Jay's orphaned process
+        // group gets SIGHUP sent to the whole group, Jay included. Stop must end both politely, with no SIGSTOP.
+        if (OperatingSystem.IsWindows()) return;
+        var info = new ProcessStartInfo("/bin/sleep") { UseShellExecute = false };
+        info.ArgumentList.Add("600");
+        EasyTierProcessGuard.Wrap(info);
+        var watch = Process.Start(info)!;
+        _started.Add(watch);
+        Assert.True(await Until(() => Children(watch.Id).Count > 0));
+        var core = Children(watch.Id)[0];
+        var started = DateTime.UtcNow;
+        EasyTierProcessGuard.Stop(watch);
+        Assert.True(watch.HasExited, "watcher ended through SIGTERM");
+        Assert.True(DateTime.UtcNow - started < EasyTierProcessGuard.StopTimeout, "no fallback to the tree kill");
+        Assert.True(await Until(() => !Alive(core)), "core ended with the watcher");
+    }
+
+    [Fact]
+    public async Task CoreIgnoresHangUpSentToTheGroup()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var watch = Start("/bin/sh", "-c", EasyTierProcessGuard.WatchScript, "jay-easytier", Environment.ProcessId.ToString(), "/bin/sleep", "600");
+        Assert.True(await Until(() => Children(watch.Id).Count > 0));
+        var core = Children(watch.Id).First(pid => pid != 0);
+        await Task.Delay(300);
+        Process.Start("kill", ["-HUP", watch.Id.ToString(), core.ToString()])!.WaitForExit();
+        await Task.Delay(1500);
+        Assert.False(watch.HasExited, "watcher survives SIGHUP");
+        Assert.True(Alive(core), "core survives SIGHUP");
+    }
+
     /// <summary>直接子进程（Linux 读 /proc，macOS 用 pgrep）。</summary>
     private static List<int> Children(int pid)
     {

@@ -5,6 +5,8 @@ namespace Amber.App;
 
 internal static class Program
 {
+    private static System.Runtime.InteropServices.PosixSignalRegistration? _ignoreHangUp;
+
     [STAThread]
     public static void Main(string[] args)
     {
@@ -24,6 +26,11 @@ internal static class Program
         LinuxStartup.BeforeAnything(args);
         // Local-only breadcrumbs for exits that leave no crash report or console output (see ExitTrail).
         Amber.Core.Diagnostics.ExitTrail.Start(Services.AppSettings.DataDir);
+        // A GUI app has no terminal to hang up. macOS sends SIGHUP to a whole orphaned process group when a member is
+        // stopped, and Jay shares its group with EasyTier: don't let that end Jay (#229).
+        if (!OperatingSystem.IsWindows())
+            _ignoreHangUp = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+                System.Runtime.InteropServices.PosixSignal.SIGHUP, c => c.Cancel = true);
         StartupTrace.Mark("main");
         // 无人值守的开发运行（自检、截图、布局检查）：崩了写 crash.txt 并退出，不弹对话框。
         DevCrashGuard.InstallIfUnattended();

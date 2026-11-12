@@ -10,10 +10,15 @@ namespace Amber.Core.Multiplayer;
 /// </summary>
 internal static class EasyTierProcessGuard
 {
-    /// <summary>看门脚本：$1 是 Jay 的 PID，后面是 easytier-core 和它的参数。收到 TERM/INT/HUP 时也转给 core。</summary>
+    /// <summary>
+    /// The watcher script: $1 is Jay's PID, then easytier-core and its arguments. TERM/INT are passed on to the core.
+    /// SIGHUP is ignored before the core starts, so the core inherits that too: the watcher and core share Jay's process
+    /// group, and macOS sends SIGHUP to a whole orphaned group that has a stopped member (see <see cref="Stop"/>).
+    /// A SIGHUP meant for the group must not take down a room that is still running.
+    /// </summary>
     internal const string WatchScript =
-        "p=$1; shift; \"$@\" & c=$!; " +
-        "trap 'kill -TERM $c 2>/dev/null' TERM INT HUP; " +
+        "trap '' HUP; p=$1; shift; \"$@\" & c=$!; " +
+        "trap 'kill -TERM $c 2>/dev/null' TERM INT; " +
         "while kill -0 \"$p\" 2>/dev/null && kill -0 \"$c\" 2>/dev/null; do sleep 1; done; " +
         "kill -TERM \"$c\" 2>/dev/null; wait \"$c\"";
 
@@ -58,6 +63,48 @@ internal static class EasyTierProcessGuard
 
     [System.Runtime.InteropServices.DllImport("libc")]
     private static extern void free(IntPtr p);
+
+    /// <summary>How long <see cref="Stop"/> waits for the watcher to end the core before forcing it.</summary>
+    internal static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(4);
+
+    /// <summary>
+    /// Ends an EasyTier process started through <see cref="Wrap"/> (or the core itself on Windows).
+    /// On Mac/Linux it asks the watcher with SIGTERM first; its trap ends the core and waits for it.
+    /// <c>Process.Kill(entireProcessTree: true)</c> is only the fallback: on Unix it SIGSTOPs the watcher before killing
+    /// the tree. A stopped process in Jay's process group, which is orphaned when Jay was started from the Dock or Finder,
+    /// makes macOS send SIGHUP to the whole group. That SIGHUP closed Jay itself right after the knock lobby ended (#229).
+    /// </summary>
+    /// <param name="wrapped">Whether <paramref name="process"/> is the watcher. Left out, it is read from the start info,
+    /// which only processes this Jay started have.</param>
+    internal static void Stop(Process process, bool? wrapped = null, TimeSpan? timeout = null)
+    {
+        try
+        {
+            if (process.HasExited) return;
+            if (!OperatingSystem.IsWindows() && (wrapped ?? StartedThroughWatcher(process))
+                && SendTerm(process.Id) && process.WaitForExit(timeout ?? StopTimeout))
+            {
+                return;
+            }
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    }
+
+    private static bool StartedThroughWatcher(Process process)
+    {
+        try { return process.StartInfo.FileName == "/bin/sh"; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    private static bool SendTerm(int pid)
+    {
+        try { return kill(pid, 15) == 0; }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { return false; }
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int kill(int pid, int signal);
 
     /// <summary>给 <see cref="EasyTierProcessTracker"/> 记录的可执行文件：套了看门脚本时是 sh，否则是 easytier-core 本身。</summary>
     internal static string TrackedExecutable(ProcessStartInfo info) =>
