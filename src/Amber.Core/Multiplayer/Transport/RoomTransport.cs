@@ -43,6 +43,8 @@ public sealed class RoomTransport : IAsyncDisposable
     /// <summary>Member: how game and chat connections are opened (split or one path, and why).</summary>
     public SplitConnector? GameSplit { get; private set; }
     public SplitConnector? ChatSplit { get; private set; }
+    /// <summary>The chat connection went on one path, and a new one would split now.</summary>
+    public bool ChatCouldSplit => ChatSplit?.CouldSplitNow == true;
     public TunnelClient? Game { get; private set; }
     public TunnelClient? Chat { get; private set; }
     public TunnelClient? Remote { get; private set; }

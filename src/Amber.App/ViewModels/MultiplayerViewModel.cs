@@ -912,9 +912,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
     }
 
-    private async Task ConnectChatAsync(string host, int port)
+    /// <param name="replacing">The current chat connection, when this one takes over from it (moving chat onto the split
+    /// paths). The hub drops the old one without announcing anything.</param>
+    private async Task ConnectChatAsync(string host, int port, ChatClient? replacing = null)
     {
-        if (_chat is not null || _chatConnecting || _room is not { } room) return;
+        if ((replacing is null ? _chat is not null : _chat != replacing) || _chatConnecting || _room is not { } room) return;
         _chatConnecting = true;
         var client = new ChatClient(room, ChatName);
         client.Received += m => Dispatcher.UIThread.Post(() => OnChatMessage(client, m));
@@ -924,7 +926,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         client.RemoteRequested += sid => Dispatcher.UIThread.Post(() => _ = OnRemoteRequestedAsync(client, sid));
         client.Disconnected += () => Dispatcher.UIThread.Post(() =>
         {
-            if (_chat != client) return;
+            // A connection that was replaced: it ends quietly.
+            if (_chat != client)
+            {
+                _ = client.CloseQuietlyAsync();
+                return;
+            }
             _chat = null;
             StopPrivate();
             ChatReady = false;
@@ -935,10 +942,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await client.ConnectAsync(host, port, timeout.Token);
-            if (_room != room)
+            // Taking over: the old connection may already be gone (null), but not replaced by another one.
+            if (_room != room || (replacing is null ? _chat is not null : _chat is not null && _chat != replacing))
             {
-                await client.DisposeAsync();
+                await client.CloseQuietlyAsync();
                 return;
+            }
+            if (replacing is not null)
+            {
+                StopPrivate();
+                _ = CloseReplacedChatAsync(replacing);
             }
             _chat = client;
             ChatReady = true;
@@ -1003,6 +1016,18 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     }
 
     /// <summary>每次刷新时看看聊天要不要连：房主在完整局域网模式下等虚拟网卡就绪后再监听虚拟 IP；加入方看到房主后连。</summary>
+    /// <summary>
+    /// The hub drops a replaced connection once the new one has joined; this only closes it (without a goodbye) in case it
+    /// is still open a little later.
+    /// </summary>
+    private static async Task CloseReplacedChatAsync(ChatClient old)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        await old.CloseQuietlyAsync();
+    }
+
+    private DateTime _chatSplitTriedAt;
+
     private void TickChat(bool hostVisible)
     {
         if (_room is null) return;
@@ -1012,6 +1037,14 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             if (_localChatPort is { } port) _ = ConnectChatAsync("127.0.0.1", port);
             else _ = ConnectChatAsync(EasyTierArgs.HostIp, RoomChat.Port);
+        }
+        // Chat opens as soon as a member joins, usually before the direct path is up, so under Auto it starts on one path.
+        // Once a new connection would split, chat moves over (at most every 30 seconds, in case splitting keeps failing).
+        else if (IsJoined && _chat is { } current && ChatReady && !_chatConnecting && _localChatPort is { } local
+                 && _transport?.ChatCouldSplit == true && DateTime.UtcNow - _chatSplitTriedAt > TimeSpan.FromSeconds(30))
+        {
+            _chatSplitTriedAt = DateTime.UtcNow;
+            _ = ConnectChatAsync("127.0.0.1", local, current);
         }
         // 端口一时被占（比如刚结束的房间还没放开）时，下次刷新再试。
         if (IsHosting && _hub is null && _room is { } room) StartHub(room);

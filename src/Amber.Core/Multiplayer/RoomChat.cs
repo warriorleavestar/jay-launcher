@@ -846,10 +846,14 @@ public sealed class ChatHub : IAsyncDisposable
                     // 第一帧必须是加入。AMB- 房间：别的连接正在用这个 id 就不让进。
                     // 邀请房间：id 是握手认出来的，同一个成员重新连上时顶掉他的旧连接（旧连接不再宣布离开）。
                     if (message.Kind != ChatKind.Join) break;
+                    var rejoined = false;
                     lock (_identityGate)
                     {
                         var holders = _members.Values.Where(m => m != member && m.Authenticated && m.SenderId == message.SenderId).ToList();
                         if (holders.Count > 0 && _table is null) break;
+                        // The same member taking over from a connection that was already announced (a reconnect, or a member
+                        // moving chat onto split paths): nobody sees them leave and join again.
+                        rejoined = holders.Any(h => h.JoinAnnounced);
                         foreach (var old in holders)
                         {
                             old.JoinAnnounced = false;
@@ -859,7 +863,8 @@ public sealed class ChatHub : IAsyncDisposable
                         member.Name = message.Name;
                         member.Authenticated = true;
                     }
-                    if (member.IsHost || PresenceLimiter.TryAcquire())
+                    if (rejoined) member.JoinAnnounced = true;
+                    else if (member.IsHost || PresenceLimiter.TryAcquire())
                     {
                         member.JoinAnnounced = true;
                         Broadcast(_cipher is not null ? frame : Seal(message));
@@ -1212,9 +1217,21 @@ public sealed class ChatClient : IAsyncDisposable, IPrivateLink
         catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException or InvalidOperationException or SocketException or CryptographicException) { }
     }
 
+    /// <summary>
+    /// Closes this connection without saying goodbye: for a connection the same member has already replaced (the hub then
+    /// drops it without telling anyone).
+    /// </summary>
+    public ValueTask CloseQuietlyAsync()
+    {
+        _quiet = true;
+        return DisposeAsync();
+    }
+
+    private volatile bool _quiet;
+
     public async ValueTask DisposeAsync()
     {
-        if (_client.Connected && _stream is not null)
+        if (!_quiet && _client.Connected && _stream is not null)
         {
             try
             {

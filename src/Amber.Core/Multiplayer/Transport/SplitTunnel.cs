@@ -343,6 +343,17 @@ public sealed class SplitConnector
         _legs = legs is not null && legs.Count == room.Split.Paths ? legs : null;
     }
 
+    /// <summary>Whether the last connection this connector opened was split.</summary>
+    public bool LastWasSplit => Volatile.Read(ref _lastSplit) == 1;
+
+    /// <summary>
+    /// Auto, and the last connection went on one path, but a new one would split now (the paths are ready and Auto isn't
+    /// pausing): a long-lived connection such as chat can be opened again to move onto the split paths.
+    /// </summary>
+    public bool CouldSplitNow =>
+        Policy == SplitPolicy.Auto && _legs is not null && !LastWasSplit && _pathProblem?.Invoke() is null
+        && !(Volatile.Read(ref _failures) >= MaxFailures && System.Diagnostics.Stopwatch.GetTimestamp() < Interlocked.Read(ref _pausedUntil));
+
     public async Task<Stream> OpenAsync(CancellationToken ct)
     {
         if (Policy == SplitPolicy.Off) return await _single(ct);
