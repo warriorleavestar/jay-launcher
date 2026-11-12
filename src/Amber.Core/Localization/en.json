@@ -3246,6 +3246,7 @@
   "core.launch.sandbox.win.reason.failed": "Jay's admin step did not finish ({0}).",
   "home.sandbox.consent.title": "Strong sandbox for the game",
   "home.sandbox.consent.body": "Jay runs the game in a Windows AppContainer, so it cannot see Jay's data, your browsers or your other files. Windows needs one admin confirmation, once, for two things: letting the game talk to Jay on this computer (loopback, for multiplayer), and letting sandboxed apps see the names in the folders above the game folder (only names, only those folders, nothing inside them), which Java needs to find its files.\n\nIf you say no, the game uses the standard sandbox and Jay will not ask again. You can retry, or remove these permissions again, in Settings › Privacy & security.",
+  "home.sandbox.consent.body_folders": "Strong sandbox needs one more admin confirmation for this launch, so sandboxed apps can see the names in these folders (only names, never what is inside):\n{0}\n\nThis happens when the game folder, Java or Jay's loader folder is new. If you decline, this launch uses the standard sandbox.",
   "home.sandbox.consent.confirm": "Allow (one admin prompt)",
   "home.sandbox.standard_because": "Standard sandbox this time: {0}",
   "settings.sandbox.label": "Game sandbox",

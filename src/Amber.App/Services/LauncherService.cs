@@ -481,14 +481,15 @@ public sealed class LauncherService : IDisposable
     /// in one admin prompt; declined, no admin or failed: the standard level, remembered so Jay does not ask again.
     /// <paramref name="note"/> gets a line for the launch status when this launch uses less than the player chose.
     /// </summary>
-    public async Task<SandboxOptions> SandboxForLaunchAsync(string javaPath, Func<Task<bool>> ask, Action<string> note, CancellationToken ct = default)
+    public async Task<SandboxOptions> SandboxForLaunchAsync(string javaPath, Func<IReadOnlyList<string>, Task<bool>> ask, Action<string> note, CancellationToken ct = default)
     {
         var options = GameSandboxOptions;
         if (!options.Enabled || !OperatingSystem.IsWindows()) return options;
         var decision = DecideWindowsSandbox(javaPath);
         if (decision.AskFirst)
         {
-            if (!await ask())
+            // The first time the whole step is explained; later (loopback already done) the dialog names the new folders.
+            if (!await ask(WindowsSandbox.LoopbackExempt() ? WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)) : []))
             {
                 RememberSandboxFallback(WindowsSandboxPolicy.Refused, null);
             }
@@ -519,9 +520,14 @@ public sealed class LauncherService : IDisposable
     /// <summary>
     /// The folders a launch grants whose parents the container must be able to list: inside the game folder (so the game
     /// folder itself is one of the parents: a launch grants its subfolders, not the folder), Java and the universal loader's runtime.
+    /// The missing parents of those folders are created first, so the admin step opens them now rather than on the next launch.
     /// </summary>
-    private IEnumerable<string?> SandboxSetupPaths(string javaPath) =>
-        [Path.Combine(Context.Directory.Root, "versions"), GameSandbox.JavaHome(javaPath), .. BakeRuntime.SandboxGrants.Select(g => g.Path)];
+    private IReadOnlyList<string?> SandboxSetupPaths(string javaPath)
+    {
+        IReadOnlyList<string?> paths = [Path.Combine(Context.Directory.Root, "versions"), GameSandbox.JavaHome(javaPath), .. BakeRuntime.SandboxGrants.Select(g => g.Path)];
+        if (OperatingSystem.IsWindows()) WindowsSandboxSetup.CreateMissingParents(paths);
+        return paths;
+    }
 
     /// <summary>
     /// Runs Jay's admin step (Windows shows its admin prompt): the loopback exemption when asked and the parent folders,

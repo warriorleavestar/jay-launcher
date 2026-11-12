@@ -511,12 +511,16 @@ public sealed partial class HomeViewModel : PageViewModel
     /// Before the first strong-sandbox launch: explain and ask whether to show Windows' admin prompt for the loopback
     /// exemption. Replaced in the self-check and tests.
     /// </summary>
-    internal Func<Task<bool>> AskSandboxConsent { get; set; } = DefaultSandboxConsentAsync;
+    internal Func<IReadOnlyList<string>, Task<bool>> AskSandboxConsent { get; set; } = DefaultSandboxConsentAsync;
 
-    private static Task<bool> DefaultSandboxConsentAsync() =>
+    /// <summary>The strong-mode consent: the whole step the first time, or (folders given) which new folders the admin step is for.</summary>
+    private static Task<bool> DefaultSandboxConsentAsync(IReadOnlyList<string> folders) =>
         Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner }
-            ? Views.ConfirmDialog.AskAsync(owner, L.T("home.sandbox.consent.title"), L.T("home.sandbox.consent.body"), L.T("home.sandbox.consent.confirm"))
+            ? Views.ConfirmDialog.AskAsync(owner, L.T("home.sandbox.consent.title"), SandboxConsentBody(folders), L.T("home.sandbox.consent.confirm"))
             : Task.FromResult(false);
+
+    internal static string SandboxConsentBody(IReadOnlyList<string> folders) =>
+        folders.Count == 0 ? L.T("home.sandbox.consent.body") : L.F("home.sandbox.consent.body_folders", string.Join("\n", folders.Select(f => "• " + f)));
 
     private async Task RunAsync(LaunchRequest request, bool allowSecond = false)
     {

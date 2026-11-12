@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Amber.Core.Launch;
+using Amber.Core.Localization;
 
 namespace Amber.Core.Tests;
 
@@ -497,6 +498,39 @@ public sealed class GameSandboxTests : IDisposable
         WindowsSandboxSetup.RemoveListing(games);
         Assert.Contains(games, WindowsSandboxSetup.FoldersToOpen([game]));
         Assert.Equal(Path.GetPathRoot(game), WindowsSandboxSetup.Parents(game).Last());
+    }
+
+    [Fact]
+    public void AGrantedFolderThatDoesNotExistYetHasItsParentCreatedBeforeTheAdminStep()
+    {
+        // Seen in a real run: on a fresh install the universal loader's runtime folder did not exist at the first strong
+        // launch, so its parent was not opened; the launch created it, and the next launch asked for the admin step again.
+        var runtime = Path.Combine(_root, "data-runtime");
+        var cache = Path.Combine(runtime, "bake-cache");
+        var loader = Path.Combine(runtime, "universal-loader");
+        var game = Dir("game", "versions");
+        var created = WindowsSandboxSetup.CreateMissingParents([game, cache, loader, null, Path.Combine("relative", "x")]);
+        Assert.Equal([runtime], created);
+        Assert.True(Directory.Exists(runtime));
+        // Only the parent: the granted folders themselves are left to their owners (an empty loader folder is not an install).
+        Assert.False(Directory.Exists(cache));
+        Assert.False(Directory.Exists(loader));
+        Assert.False(Directory.Exists(Path.Combine(Environment.CurrentDirectory, "relative")));
+        Assert.Empty(WindowsSandboxSetup.CreateMissingParents([cache, loader]));
+
+        if (!OperatingSystem.IsWindows()) return;
+        // So the first admin step already opens it.
+        Assert.Contains(runtime, WindowsSandboxSetup.FoldersToOpen([game, cache, loader]));
+    }
+
+    [Fact]
+    public void TheStrongSandboxConsentNamesTheFoldersWhenItAsksAgain()
+    {
+        Assert.Equal(L.T("home.sandbox.consent.body"), Amber.App.ViewModels.HomeViewModel.SandboxConsentBody([]));
+        var folders = new[] { Path.Combine(_root, "data-runtime"), Path.Combine(_root, "jdk8") };
+        var body = Amber.App.ViewModels.HomeViewModel.SandboxConsentBody(folders);
+        Assert.NotEqual(L.T("home.sandbox.consent.body"), body);
+        Assert.All(folders, f => Assert.Contains(f, body));
     }
 
     [Fact]
