@@ -1039,7 +1039,7 @@
   "settings.curseforge.endpoint": "CurseForge API エンドポイント",
   "settings.curseforge.endpoint_hint": "空欄で公式を使用します。信頼できる互換サードパーティーのエンドポイントも指定できます。",
   "settings.curseforge.key": "CurseForge API キー",
-  "settings.curseforge.key_hint": "公式リリース版にはキーが入っているので、空欄のままで使えます。自分のキーを使う場合は console.curseforge.com で取得してください。自分でビルドした版はキーがないと Modrinth のみ利用できます。",
+  "settings.curseforge.key_hint": "公式のデスクトップ版にはキーが入っているので、空欄のままで使えます。それ以外の版は console.curseforge.com で自分のキーを取得してください。キーがないと Modrinth のみ利用できます。",
   "settings.directory.label": "ゲームディレクトリ",
   "settings.directory.picker": "ゲームディレクトリを選択（.minecraft）",
   "settings.download.concurrency": "同時ダウンロード数",

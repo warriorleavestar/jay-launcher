@@ -25,7 +25,11 @@ public sealed class CurseForgeBuiltInKeyTests
     }
 
     [Fact]
-    public void RepositoryBuildsCarryNoKey() =>
-        // CI 只在推到 main 和打标签时注入；PR 和本机构建都不该带 Key。
+    public void RepositoryBuildsCarryNoKey()
+    {
+        // CI 护栏：只有推到 main 和打标签时才注入，跑测试的构建不该带 Key。
+        // MSBuild 会把环境变量当属性读入，本机设了 JAY_CURSEFORGE_API_KEY 时这条不适用，直接跳过。
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JAY_CURSEFORGE_API_KEY"))) return;
         Assert.Null(CurseForgeBuiltInKey.Value);
+    }
 }

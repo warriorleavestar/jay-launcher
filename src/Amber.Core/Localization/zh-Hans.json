@@ -1039,7 +1039,7 @@
   "settings.curseforge.endpoint": "CurseForge 接口",
   "settings.curseforge.endpoint_hint": "留空用官方；也可以填你信任的第三方兼容接口",
   "settings.curseforge.key": "CurseForge API 密钥",
-  "settings.curseforge.key_hint": "官方发布版已内置密钥，可以留空。想用自己的密钥，到 console.curseforge.com 申请。自己编译的版本没有密钥时只能用 Modrinth",
+  "settings.curseforge.key_hint": "官方桌面版已内置密钥，可以留空。其他版本要到 console.curseforge.com 申请自己的密钥，没有密钥时只能用 Modrinth",
   "settings.directory.label": "游戏目录",
   "settings.directory.picker": "选择游戏目录（.minecraft）",
   "settings.download.concurrency": "同时下载",

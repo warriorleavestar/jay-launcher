@@ -1068,7 +1068,7 @@
   "settings.curseforge.endpoint": "CurseForge API endpoint",
   "settings.curseforge.endpoint_hint": "Leave blank to use the official endpoint, or enter a compatible third-party endpoint you trust",
   "settings.curseforge.key": "CurseForge API key",
-  "settings.curseforge.key_hint": "Official Jay releases include a key, so you can leave this empty. To use your own, get one at console.curseforge.com. Builds you compile yourself need a key for CurseForge; without one only Modrinth is available.",
+  "settings.curseforge.key_hint": "Official desktop releases include a key, so you can leave this empty. Other builds need your own key from console.curseforge.com; without one only Modrinth is available.",
   "settings.directory.label": "Game directory",
   "settings.directory.picker": "Choose game directory (.minecraft)",
   "settings.download.concurrency": "Concurrent downloads",
