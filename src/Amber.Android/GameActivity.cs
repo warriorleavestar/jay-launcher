@@ -321,7 +321,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _stroke.SetStyle(Paint.Style.Stroke);
         foreach (var control in TouchControlLayout.Default)
         {
-            if (!gameplayControlsActive && control.Action != TouchControlAction.Menu) continue;
+            if (!gameplayControlsActive &&
+                control.Action is not (TouchControlAction.Menu or TouchControlAction.Keyboard)) continue;
             var x = (float)(control.CenterX * Width);
             var y = (float)(control.CenterY * Height);
             var radius = (float)(control.Radius * Math.Min(Width, Height));
