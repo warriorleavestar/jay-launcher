@@ -56,6 +56,9 @@ public sealed class AppSettings
     /// </summary>
     public List<string> StrongSandboxFolders { get; set; } = [];
 
+    /// <summary>The admin step set up loopback (exemption and inbound filters) successfully on this machine; cleared by undo.</summary>
+    public bool StrongSandboxLoopbackSetUp { get; set; }
+
     public string PlayerName { get; set; } = "Player";
     public string? LastVersion { get; set; }
     public int? WindowWidth { get; set; }

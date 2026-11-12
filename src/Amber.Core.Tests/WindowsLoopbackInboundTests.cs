@@ -25,8 +25,9 @@ public sealed class WindowsLoopbackInboundTests
         // be a definite answer, never "unknown", and never need elevation.
         WindowsLoopbackInbound.Invalidate();
         var state = WindowsLoopbackInbound.Check();
-        // A runner without a reachable filter engine answers "unknown"; then there is nothing more to check here.
-        Assert.Equal(state == true, WindowsLoopbackInbound.Present());
+        // A runner whose filter engine cannot be opened answers "unknown"; anywhere else the answer must be definite.
+        if (!WindowsLoopbackInbound.EngineReachable()) return;
+        Assert.True(state is not null, "the filter engine is reachable, so Check() must say present or missing");
     }
 }
 

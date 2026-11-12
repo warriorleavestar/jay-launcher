@@ -76,14 +76,12 @@ public static unsafe class WindowsLoopbackInbound
     public static bool? Check()
     {
         lock (CacheLock)
-        {
-            var now = Environment.TickCount64;
-            if (_cache.Valid && now - _cache.At < CacheMilliseconds) return _cache.Value;
-            using var identity = WindowsIdentity.GetCurrent();
-            var value = identity.User is { } user ? Query(user) : null;
-            _cache = (value, now, true);
-            return value;
-        }
+            if (_cache.Valid && Environment.TickCount64 - _cache.At < CacheMilliseconds) return _cache.Value;
+        // The lookups run outside the lock: two callers may both query, which is harmless.
+        using var identity = WindowsIdentity.GetCurrent();
+        var value = identity.User is { } user ? Query(user) : null;
+        lock (CacheLock) _cache = (value, Environment.TickCount64, true);
+        return value;
     }
 
     /// <summary>Only "definitely there" counts as ready.</summary>
@@ -91,6 +89,14 @@ public static unsafe class WindowsLoopbackInbound
 
     /// <summary>Forgets the cached <see cref="Check"/> answer (call after the admin step ran).</summary>
     public static void Invalidate() { lock (CacheLock) _cache = default; }
+
+    /// <summary>Whether this user can open the filter engine at all (tests: a definite answer is expected then).</summary>
+    internal static bool EngineReachable()
+    {
+        if (FwpmEngineOpen0(null, RPC_C_AUTHN_DEFAULT, 0, 0, out var engine) != 0) return false;
+        FwpmEngineClose0(engine);
+        return true;
+    }
 
     private static bool? Query(SecurityIdentifier user)
     {

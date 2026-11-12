@@ -357,9 +357,12 @@ public static unsafe class WindowsSandbox
 
     /// <summary>
     /// True when any part of the admin step's loopback setup is there (what "remove sandbox permissions" undoes). An
-    /// unknown filter state counts too: undoing filters that are not there is harmless, leaving them behind is not.
+    /// unknown filter state counts only when this Jay recorded a successful loopback setup
+    /// (<paramref name="setupRecorded"/>): then leaving filters behind is the risk; otherwise a machine whose filter
+    /// engine never answers would offer to undo something that was never done.
     /// </summary>
-    public static bool HasLoopbackSetup() => LoopbackExempt(ContainerName) || WindowsLoopbackInbound.Check() != false;
+    public static bool HasLoopbackSetup(bool setupRecorded) =>
+        LoopbackExempt(ContainerName) || WindowsLoopbackInbound.Check() is true || setupRecorded && WindowsLoopbackInbound.Check() is null;
 
     internal static bool LoopbackExempt(string name)
     {

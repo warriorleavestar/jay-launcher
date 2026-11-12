@@ -543,9 +543,11 @@ public sealed class LauncherService : IDisposable
             if (!undo)
             {
                 Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
+                if (loopback && process.ExitCode == 0) Settings.StrongSandboxLoopbackSetUp = true;
                 Settings.Save();
             }
-            return process.ExitCode == 0 ? null : Failed($"exit {process.ExitCode}");
+            // A negative exit code is the filter engine's HRESULT (inbound loopback filters).
+            return process.ExitCode == 0 ? null : Failed(process.ExitCode < 0 ? $"WFP 0x{process.ExitCode:X8}" : $"exit {process.ExitCode}");
         }
         catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223)
         {
@@ -565,7 +567,7 @@ public sealed class LauncherService : IDisposable
     }
 
     /// <summary>Whether Jay's admin step left anything to take away (the loopback exemption, the inbound loopback filters or opened parent folders).</summary>
-    public bool HasSandboxPermissions => OperatingSystem.IsWindows() && (Settings.StrongSandboxFolders.Count > 0 || WindowsSandbox.HasLoopbackSetup());
+    public bool HasSandboxPermissions => OperatingSystem.IsWindows() && (Settings.StrongSandboxFolders.Count > 0 || WindowsSandbox.HasLoopbackSetup(Settings.StrongSandboxLoopbackSetUp));
 
     /// <summary>
     /// "Remove sandbox permissions": one admin prompt takes the loopback exemption, the inbound loopback filters and Jay's entries on the recorded
@@ -576,9 +578,10 @@ public sealed class LauncherService : IDisposable
     {
         if (!OperatingSystem.IsWindows()) return null;
         var folders = Settings.StrongSandboxFolders.Where(System.IO.Directory.Exists).ToList();
-        var error = await RunSandboxSetupAsync(undo: true, WindowsSandbox.HasLoopbackSetup(), folders, ct);
+        var error = await RunSandboxSetupAsync(undo: true, WindowsSandbox.HasLoopbackSetup(Settings.StrongSandboxLoopbackSetUp), folders, ct);
         if (error is not null) return error;
         Settings.StrongSandboxFolders = [];
+        Settings.StrongSandboxLoopbackSetUp = false;
         Settings.StrongSandbox = false;
         Settings.Save();
         SandboxStateChanged?.Invoke();
