@@ -332,6 +332,38 @@ public sealed class JayAccountTests : IDisposable
         Assert.DoesNotContain(JayAddress.EncodeVersion0(stuck.PublicKey), File.ReadAllText(path));
     }
 
+    /// <summary>
+    /// Windows only: when the key protection can't be opened this logon (an SSH logon without a password), a version 0
+    /// entry isn't moved and nothing throws; it is kept as it is for a later start.
+    /// </summary>
+    [Fact]
+    public void LockedKeyProtectionLeavesVersion0EntriesForLater()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var account = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        Directory.CreateDirectory(_dir);
+        var legacyPath = Path.Combine(_dir, JayAccountStore.LegacyFileName);
+        var old = JayAddress.EncodeVersion0(account.PublicKey);
+        var seed = Convert.ToBase64String([.. "AMBID1"u8.ToArray(), .. new byte[200]]);
+        File.WriteAllText(legacyPath, new System.Text.Json.Nodes.JsonObject
+        {
+            ["version"] = 1,
+            ["accounts"] = new System.Text.Json.Nodes.JsonArray { new System.Text.Json.Nodes.JsonObject { ["address"] = old, ["seed"] = seed } },
+        }.ToJsonString());
+        Amber.Core.Multiplayer.MemberIdentity.DpapiProbe = () => false;
+        try
+        {
+            var store = new JayAccountStore(_dir);
+            store.Load();
+            Assert.Empty(store.Accounts);
+            Assert.Contains(old, File.ReadAllText(Path.Combine(_dir, JayAccountStore.FileName)));
+        }
+        finally
+        {
+            Amber.Core.Multiplayer.MemberIdentity.DpapiProbe = null;
+        }
+    }
+
     /// <summary>A "was" that isn't a version 0 address is ignored, so two entries with the same junk can't break startup.</summary>
     [Fact]
     public void JunkFormerAddressesAreIgnored()
