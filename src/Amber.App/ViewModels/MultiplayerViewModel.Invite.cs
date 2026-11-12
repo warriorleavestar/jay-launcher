@@ -663,9 +663,9 @@ public sealed partial class MultiplayerViewModel
                         if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
                     }), device, AccountToken, jay, expectedHost, answerDirect));
             }
-            // Only "no host was found" (never a timeout after the knock was sent, such as waiting for approval) looks again.
-            catch (TimeoutException e) when (e is LobbyNoHostException or LobbyUnreachableException
-                && knock is null && viaPublic is null && _public is not null && !cts.IsCancellationRequested)
+            // Only "the lobby was reached but no host was there" looks again: not "no relay reachable", and never a timeout
+            // after the knock was sent (such as waiting for approval).
+            catch (LobbyNoHostException e) when (knock is null && viaPublic is null && _public is not null && !cts.IsCancellationRequested)
             {
                 // No host in the invite's lobby. A room opened after our copy of the directory was taken isn't in it yet:
                 // look once more in a copy refreshed since (by then there usually is one, so this rarely waits).

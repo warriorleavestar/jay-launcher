@@ -300,7 +300,13 @@ public sealed partial class MultiplayerViewModel
                     if (!ct.IsCancellationRequested) SetStatus(StatusMessage.Info("multiplayer.invite.finding_host"));
                 }));
         }
-        // Anything that goes wrong here (the directory, an address) leaves the invite's own lobby to try.
+        // The host already has this request: what went wrong is the answer (knocking again in the lobby would ask twice).
+        catch (HostReachedException e) when (e.InnerException is { } inner)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
+            throw;
+        }
+        // Anything else that goes wrong here (the directory, an address) leaves the invite's own lobby to try.
         catch (Exception e) when (e is not OutOfMemoryException && !ct.IsCancellationRequested)
         {
             System.Diagnostics.Debug.Assert(e is not NullReferenceException, e.ToString());
@@ -327,7 +333,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (_announcer != announcer) return;
             PublishStatus = announcer.Published
-                ? announcer.Warning is { } warning ? L.F("core.mp.public.published_warning", warning.Text())
+                ? announcer.Warning is { } warning ? L.F("core.mp.public.hidden_warning", warning.Text())
                 : L.T(CurrentVisibility == RoomVisibility.Hidden ? "multiplayer.public.registered_hidden" : "multiplayer.public.published")
                 : announcer.LastError is { } error ? L.F("core.mp.public.announce_failed", error) : "";
         });

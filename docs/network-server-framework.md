@@ -95,6 +95,8 @@ await server.RunAsync(CancellationToken.None);
 
 每个请求都带 `jay: "<Jay 的版本号>"`（比如 `"0.8.0"`）。网络配置有 `policy.minVersion` 时，版本更低或者没带这个字段就回 `{ok: false, error: "version", min: "<最低版本>"}`，不处理请求。
 
+**升级顺序**：这一版目录去掉了 `list` 和 `lookup` 两个操作，改用 `snap`。先升级目录、Jay 还没升级时，旧版 Jay 看公开房间列表会收到操作错误，按邀请找房间也找不到（会改走邀请自己的大厅）；只靠隐藏条目登记的旧版房主发布时回 `lookup`，房间登记不上。所以随这一版发布 Jay 的同时把网络配置的 `policy.minVersion` 提到这一版，让旧版直接看到“Jay 太旧”的提示，而不是上面这些含糊的失败。
+
 | op | 请求 | 回复 |
 |---|---|---|
 | `announce` | `{room: <房间>, listed: bool, hidden: [{k: "<64 位十六进制>", b: "<284 字节，base64>", p: "<64 位十六进制>", s: "<128 位十六进制>"}, ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`hidden` 是房主给房间的大厅密钥封好的条目（`HiddenEntry`，大厅密钥在多久就发布多久，公开房间也发），目录原样放进快照，长度不对回 `bad`。`p` 是从邀请算出的条目公钥，`k` 必须是它的哈希；`s` 是这把钥匙对条目、房间编号和 `seq` 的签名（`HiddenEntry.VerifyPublish`），不对回 `lookup`。同一个索引下已经有 8 个别的房间时只丢这一条，房间照常登记，回复带 `warn: "lookup"`（只有隐藏条目的房间回 `lookup`）。房间的 `seq` 是毫秒时间，和目录的时钟差超过 10 分钟时不收 `hidden`：房间还要上公开列表（或有 `fp`）就照常登记，回复带 `warn: "clock"`；别的都没有时回 `clock`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok, warn?}`（`warn` 是 `"lookup"` 或 `"clock"`，见左边） |

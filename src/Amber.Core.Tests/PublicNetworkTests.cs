@@ -352,6 +352,82 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         }
     }
 
+    /// <summary>Knocks at the host go to its knock port and drop once it has the request; other addresses refuse.</summary>
+    private sealed class DroppingNetwork(int hostPort, Task drop) : IPublicNetwork
+    {
+        public readonly List<string> Order = [];
+
+        public async Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct)
+        {
+            lock (Order) Order.Add(ip);
+            if (ip != "10.235.0.7") throw new SocketException((int)SocketError.ConnectionRefused);
+            var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, hostPort, ct);
+            return new DropsAfter(client.GetStream(), drop);
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.8");
+    }
+
+    private sealed class DropsAfter(NetworkStream inner, Task drop) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            var read = inner.ReadAsync(buffer, ct).AsTask();
+            if (await Task.WhenAny(read, drop) != read) throw new IOException("connection dropped");
+            return await read;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) => inner.WriteAsync(buffer, ct);
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct) => inner.WriteAsync(buffer, offset, count, ct);
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    [Fact]
+    public async Task AFailureAfterReachingTheHostTriesNoOtherAddress()
+    {
+        var book = new InviteBook();
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var credentials = RoomCredentials.Create(_host.PublicKey, 25565, TunnelSettings.Default);
+        var server = new KnockServer(book, _host, () => credentials, _ => false, async (_, ct) =>
+        {
+            asked.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            return false;
+        }, IPAddress.Loopback, 0, members: new MemberTable());
+        _cleanup.Add(server);
+        var standing = book.CreateStanding(false, TunnelSettings.Default);
+        var client = new RoomDirectoryClient(_net);
+        // The host's listing, and others under its (public) key at addresses that refuse.
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(invite: standing.Invite.ToString()), _now), true, [], default);
+        foreach (var ip in new[] { "10.235.0.66", "10.235.0.67" })
+            await client.AnnounceAsync(new RoomSigner().Sign(Listing(invite: standing.Invite.ToString()) with { Ip = ip }, _now), true, [], default);
+        await client.Snapshots.RefreshAsync(client, default);
+        // The connection drops while the guest waits for the host's answer: that is the outcome, reported as such.
+        var network = new DroppingNetwork(server.Port, asked.Task);
+        var e = await Assert.ThrowsAsync<HostReachedException>(() => PublicJoin.TryKnockByInviteAsync(network, standing.Invite, _guest, "Steve", "0.8.0", default,
+            client: client, expectedHost: _host.PublicKey));
+        Assert.IsType<IOException>(e.InnerException);
+        // The host was knocked once (no retry), and nothing else was tried after it.
+        Assert.Single(network.Order, "10.235.0.7");
+        Assert.Equal("10.235.0.7", network.Order[^1]);
+    }
+
     private sealed class NeverAnswers : IPublicNetwork
     {
         public async Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct)

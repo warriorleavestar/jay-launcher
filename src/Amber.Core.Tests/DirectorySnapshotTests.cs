@@ -633,8 +633,13 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.Equal(hits.Count, hits.DistinctBy(h => h.Ip).Count());
     }
 
-    /// <summary>Directory requests go to the test directory; knocks are counted and refused, or never answered.</summary>
-    private sealed class KnockTrap(int directoryPort, bool hang) : IPublicNetwork
+    public enum Trap { Refuse, HangConnect, SilentHandshake }
+
+    /// <summary>
+    /// Directory requests go to the test directory; knocks are counted and refused, never connected, or connected to
+    /// something that never says a word.
+    /// </summary>
+    private sealed class KnockTrap(int directoryPort, Trap trap) : IPublicNetwork
     {
         public readonly ConcurrentBag<string> Knocked = [];
 
@@ -643,7 +648,8 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
             if (port == KnockProtocol.Port)
             {
                 Knocked.Add(ip);
-                if (hang) await Task.Delay(Timeout.Infinite, ct);
+                if (trap == Trap.SilentHandshake) return new Silent();
+                if (trap == Trap.HangConnect) await Task.Delay(Timeout.Infinite, ct);
                 throw new SocketException((int)SocketError.ConnectionRefused);
             }
             var client = new TcpClient();
@@ -654,17 +660,41 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.9");
     }
 
+    /// <summary>Takes whatever is written and never answers.</summary>
+    private sealed class Silent : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            return 0;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) { }
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct) => Task.CompletedTask;
+    }
+
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task HiddenEntriesForgedForTheHostCostABoundedNumberOfKnocks(bool hang)
+    [InlineData(Trap.Refuse)]
+    [InlineData(Trap.HangConnect)]
+    [InlineData(Trap.SilentHandshake)]
+    public async Task HiddenEntriesForgedForTheHostCostABoundedNumberOfKnocks(Trap trap)
     {
         // Someone holding the invite fills its index with entries under the host's (public) key, each at another address.
         var invite = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
         var writer = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
         for (var i = 0; i < RoomDirectoryServer.MaxEntriesPerIndex; i++)
             await writer.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden) with { Ip = $"10.235.1.{10 + i}" }, _now), false, [invite.LobbyKey], default);
-        var network = new KnockTrap(_directory.Port, hang);
+        var network = new KnockTrap(_directory.Port, trap);
         var client = new RoomDirectoryClient(network);
         Assert.Equal(DirectorySnapshots.MaxAddressesToTry, (await client.LookupAllAsync(invite.LobbyKey, default, _host.PublicKey)).Count);
         var budget = TimeSpan.FromSeconds(1);
@@ -675,7 +705,8 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.Null(outcome);
         Assert.InRange(network.Knocked.Count, 1, DirectorySnapshots.MaxAddressesToTry);
         Assert.Equal(network.Knocked.Count, network.Knocked.Distinct().Count());
-        if (!hang) Assert.Equal(DirectorySnapshots.MaxAddressesToTry, network.Knocked.Count);
+        if (trap == Trap.Refuse) Assert.Equal(DirectorySnapshots.MaxAddressesToTry, network.Knocked.Count);
+        // The budget covers the handshake too, not only connecting: well under one handshake timeout.
         Assert.True(watch.Elapsed < budget + TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
     }
     [Fact]
