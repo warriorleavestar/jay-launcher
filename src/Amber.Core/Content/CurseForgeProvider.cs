@@ -14,6 +14,8 @@ public sealed class CurseForgeProvider(HttpClient http, Func<string?> apiKey, st
     public ContentSource Source => ContentSource.CurseForge;
 
     /// <summary>Key 为空但地址不是官方（用户自己配的代理）时也放行。</summary>
+    private bool IsOfficialRoot => string.Equals(apiRoot.TrimEnd('/'), DefaultApiRoot, StringComparison.OrdinalIgnoreCase);
+
     private bool CanRequest => !string.IsNullOrWhiteSpace(apiKey()) || apiRoot != DefaultApiRoot;
 
     private async Task<JsonDocument> GetAsync(string path, CancellationToken ct)
@@ -37,7 +39,8 @@ public sealed class CurseForgeProvider(HttpClient http, Func<string?> apiKey, st
     {
         if (!CanRequest) throw new MissingApiKeyException();
         var request = new HttpRequestMessage(method, apiRoot + path);
-        if (apiKey() is { Length: > 0 } key) request.Headers.Add("x-api-key", key.Trim());
+        // CurseForge 条款：Key 不得交给第三方。用户换了接口地址（镜像或代理）时不带 Key。
+        if (IsOfficialRoot && apiKey() is { Length: > 0 } key) request.Headers.Add("x-api-key", key.Trim());
         return request;
     }
 
