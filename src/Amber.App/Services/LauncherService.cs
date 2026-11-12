@@ -223,7 +223,7 @@ public sealed class LauncherService : IDisposable
     }
 
     private string? CurseForgeKey() =>
-        string.IsNullOrWhiteSpace(Settings.CurseForgeApiKey) ? Environment.GetEnvironmentVariable("AMBER_CF_KEY") : Settings.CurseForgeApiKey;
+        CurseForgeBuiltInKey.Resolve(Settings.CurseForgeApiKey, Environment.GetEnvironmentVariable("AMBER_CF_KEY"));
 
     /// <summary>有 Key 或自定义接口地址时才用 CurseForge 查更新。</summary>
     public CurseForgeProvider? CurseForgeIfConfigured =>

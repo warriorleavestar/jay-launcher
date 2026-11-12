@@ -1021,7 +1021,7 @@
   "settings.curseforge.endpoint": "CurseForge API 之端",
   "settings.curseforge.endpoint_hint": "空則用官端；亦可書君所信且相容之他端",
   "settings.curseforge.key": "CurseForge API 金鑰",
-  "settings.curseforge.key_hint": "請於 console.curseforge.com 請之。無金鑰則唯可用 Modrinth",
+  "settings.curseforge.key_hint": "官版已內置金鑰，可留空。欲用己鑰，請於 console.curseforge.com 請之。自編之版無金鑰則唯可用 Modrinth",
   "settings.directory.label": "戲之目錄",
   "settings.directory.picker": "擇戲之目錄（.minecraft）",
   "settings.download.concurrency": "同取之數",

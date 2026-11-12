@@ -248,7 +248,7 @@ Everything works out of the box. Two settings are optional:
 | Item | Where | Environment variable | Notes |
 |---|---|---|---|
 | Microsoft Client ID | Accounts | `AMBER_MS_CLIENT_ID` | A built-in default is used if empty |
-| CurseForge API key | Settings | `AMBER_CF_KEY` | Free from [console.curseforge.com](https://console.curseforge.com). Without one, CurseForge is unavailable and everything else still works |
+| CurseForge API key | Settings | `AMBER_CF_KEY` | Official releases include one, so this is optional. Builds you compile yourself need your own, free from [console.curseforge.com](https://console.curseforge.com); without one, CurseForge is unavailable and everything else still works |
 
 Settings live in `Amber/settings.json` under your system's app-data folder (`%APPDATA%\Amber`, `~/Library/Application Support/Amber` or `~/.config/Amber`).
 
@@ -287,7 +287,7 @@ Read the error message and make sure the account owns Minecraft. You can also us
 <details>
 <summary><b>Why can't I find anything on CurseForge?</b></summary>
 
-The CurseForge API needs a key; see [Configuration](#configuration). Modrinth doesn't.
+The CurseForge API needs a key. Official releases have one built in; for your own builds see [Configuration](#configuration). Modrinth doesn't need one.
 </details>
 
 <details>

@@ -1039,7 +1039,7 @@
   "settings.curseforge.endpoint": "CurseForge API 端點",
   "settings.curseforge.endpoint_hint": "留空使用官方端點；也可填入你信任且相容的第三方 API 端點",
   "settings.curseforge.key": "CurseForge API 金鑰",
-  "settings.curseforge.key_hint": "請至 console.curseforge.com 申請。沒有 API 金鑰時只能使用 Modrinth",
+  "settings.curseforge.key_hint": "官方發布版已內建金鑰，可以留空。想用自己的金鑰，請至 console.curseforge.com 申請。自行編譯的版本沒有金鑰時只能使用 Modrinth",
   "settings.directory.label": "遊戲目錄",
   "settings.directory.picker": "選擇遊戲目錄（.minecraft）",
   "settings.download.concurrency": "同時下載數量",

@@ -15,5 +15,5 @@ related: instance, network-list
 - 点结果看详情：宽窗口在右边一栏，窄窗口从右边滑出。Esc 关闭。
 
 ## 出问题了
-- CurseForge 搜不到：需要你自己的 CurseForge 密钥，填在 [设置 › 下载与服务](jay:settings#CurseForgeKey)。
+- CurseForge 搜不到：官方发布版已内置密钥。如果是自己编译的版本，要把你自己的 CurseForge 密钥填在 [设置 › 下载与服务](jay:settings#CurseForgeKey)。
 - 只有你打开这一页或点“检查更新”时 Jay 才会连 Modrinth / CurseForge，后台从不自己查。
