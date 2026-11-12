@@ -45,6 +45,22 @@ public sealed class MixedContentTests : IDisposable
     public void ExtrasFollowThePinnedPackage(string loader, string mc, string expected) =>
         Assert.Equal(expected, string.Join(",", CrossLoader.Extras(Full, loader, mc)));
 
+    /// <summary>
+    /// Loader 0.4.0 lists Forge 1.12.2 as its own platform, not under "forge": whatever asks "does the universal loader
+    /// run Forge on this version" (the new-instance "Jay loader" choice) must map forge + 1.12.2 to it.
+    /// </summary>
+    [Fact]
+    public void PinnedCapsListForge1122AsItsOwnPlatform()
+    {
+        Assert.Equal(["1.12.2"], Full.Platforms[BakePlatform.ForgeLegacy]);
+        Assert.DoesNotContain("1.12.2", Full.Platforms[BakePlatform.Forge]);
+        Assert.Equal(BakePlatform.ForgeLegacy, CrossLoader.PlatformOf("forge", "1.12.2"));
+        Assert.Equal(BakePlatform.Forge, CrossLoader.PlatformOf("forge", "1.20.1"));
+        Assert.Equal(BakePlatform.Forge, CrossLoader.PlatformOf("forge"));
+        Assert.Empty(CrossLoader.Extras(Full, "forge", "1.12.2"));
+        Assert.Empty(CrossLoader.MissingBridges(Full, "forge", "1.12.2"));
+    }
+
     [Fact]
     public void ExtrasNeedTheBridges()
     {
