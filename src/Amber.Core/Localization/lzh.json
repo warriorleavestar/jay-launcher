@@ -3535,5 +3535,6 @@
   "settings.ul.used_by_none": "尚無例用之",
   "settings.ul.cache": "緩存：{0}",
   "settings.ul.developers": "為製者",
+  "settings.ul.upgrade_note": "既裝載器新版，諸例初啟時當重備模組一遍，此一次較常為久，非誤也。",
   "instance.ul.downloading": "方下載通用載器……"
 }

@@ -3669,5 +3669,6 @@
   "settings.ul.used_by_none": "まだどのインスタンスも使っていません",
   "settings.ul.cache": "キャッシュ：{0}",
   "settings.ul.developers": "開発者向け",
+  "settings.ul.upgrade_note": "ローダーの新しいバージョンを入れたあとは、各インスタンスが最初に起動するときに MOD をもう一度準備します。その 1 回は普段より時間がかかりますが、正常です。",
   "instance.ul.downloading": "汎用ローダーをダウンロード中…"
 }
