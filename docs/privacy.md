@@ -27,6 +27,8 @@ Jay 是绿色版，不需要安装，不写注册表，不装服务。/ Jay is p
   To uninstall, delete `Jay.exe` and the settings folder (`%APPDATA%\Amber` on Windows). Your game folder is yours and is never deleted automatically.
 - 只有在联机页选择“完整局域网”或“出口节点”模式时，才会经管理员确认（Windows 的 UAC，macOS / Linux 的管理员密码）创建虚拟网卡和临时路由；路由带租期，退出联机时删除。
   Only the "full LAN" and "exit node" multiplayer modes, after you confirm an administrator prompt (UAC on Windows, your password on macOS and Linux), create a virtual network adapter and temporary leased routes, which are removed when you leave the room.
+- 设置目录下的 `diagnostics/` 里有一份只存本机的退出记录（这次和上次意外退出那次）：联机走到哪一步（只记状态名，不记邀请码、地址或名字）、EasyTier 的启动和退出、系统信号和异常堆栈（家目录写成 `~`）。它不会被发送，只有你自己附到问题反馈里时别人才看得到。
+  The settings folder holds a local-only exit record in `diagnostics/` (this run, and the last run that ended unexpectedly): multiplayer steps by status name only (no invite codes, addresses or names), EasyTier starts and exits, system signals and exception stacks (with your home folder written as `~`). It is never sent; others see it only if you attach it to a report yourself.
 - macOS 的设置目录是 `~/Library/Application Support/Amber`，Linux 通常是 `~/.config/Amber`。/ The settings folder is `~/Library/Application Support/Amber` on macOS and usually `~/.config/Amber` on Linux.
 
 ## 问题反馈 / Reporting

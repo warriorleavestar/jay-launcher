@@ -185,6 +185,15 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Opens multiplayer help (set by the window: help/{id}).</summary>
     public Action<string>? Navigate { get; set; }
 
+    /// <summary>
+    /// "Launch without sandbox" is on: the page keeps a line saying the game (and its mods) can read Jay's keys, with a
+    /// way back to the setting (privacy plan item 15).
+    /// </summary>
+    public bool RunsWithoutSandbox => _service.Settings.LaunchWithoutSandbox;
+
+    [RelayCommand]
+    private void OpenSandboxSettings() => Navigate?.Invoke("settings#LaunchWithoutSandbox");
+
     [RelayCommand]
     private void OpenHelp(string? article) => Navigate?.Invoke(string.IsNullOrEmpty(article) ? "help" : "help/" + article);
 

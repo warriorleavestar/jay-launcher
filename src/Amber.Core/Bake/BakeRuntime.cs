@@ -40,7 +40,33 @@ public sealed record BakeRuntime(string Root)
     /// the loader package and the platform/mapping data read-only, the cache read-write (a launch may rebake an
     /// entry). Platform installs link to the game directory's libraries, which the sandbox grants anyway.
     /// </summary>
-    public IReadOnlyList<Grant> SandboxGrants => [new(LoaderRoot, false), new(DataRoot, false), new(CacheRoot, true)];
+    public IReadOnlyList<Grant> SandboxGrants => SandboxGrantsFor(null);
+
+    /// <summary>
+    /// The grants for a launch with loader <paramref name="loaderVersion"/>: a loader that writes only inside the
+    /// instance at launch (<see cref="LaunchWritesOnlyInstance"/>) gets the cache read-only too. bake-instance, warm
+    /// and gc write the cache, and Jay runs them outside the sandbox.
+    /// </summary>
+    public IReadOnlyList<Grant> SandboxGrantsFor(string? loaderVersion) =>
+        [new(LoaderRoot, false), new(DataRoot, false), new(CacheRoot, !LaunchWritesOnlyInstance(loaderVersion))];
+
+    /// <summary>The last loader whose launch still writes the shared cache (class cache, missing products, isolation files).</summary>
+    public static readonly Version LastSharedCacheWriter = new(0, 3, 1);
+
+    /// <summary>
+    /// Whether a launch with this loader writes only under <c>&lt;instance&gt;/.amber-ul/</c> (its class cache and a
+    /// cache overlay for missing products), so the shared cache can be read-only for the game. Loaders after 0.3.1;
+    /// an unknown version (a dev folder without a package) counts as an old one.
+    /// </summary>
+    public static bool LaunchWritesOnlyInstance(string? loaderVersion)
+    {
+        if (string.IsNullOrEmpty(loaderVersion)) return false;
+        var core = loaderVersion.Split('-', '+')[0];
+        return Version.TryParse(core.Count(c => c == '.') == 0 ? core + ".0" : core, out var version)
+            && Normalize(version) > LastSharedCacheWriter;
+    }
+
+    private static Version Normalize(Version v) => new(v.Major, v.Minor, Math.Max(v.Build, 0));
 
     /// <summary>
     /// Moves loader packages and caches that older versions kept in the data folder into the runtime folder (once;

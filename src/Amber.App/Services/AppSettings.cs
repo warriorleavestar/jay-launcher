@@ -28,6 +28,34 @@ public sealed class AppSettings
 
     /// <summary>无痕模式：游戏日志（logs/latest.log）里不写聊天行。默认关。</summary>
     public bool NoTrace { get; set; }
+
+    /// <summary>
+    /// Launch the game without the OS sandbox (privacy plan item 15). Off by default: the game only sees its own
+    /// instance folder. When on, the multiplayer page says so on a line that stays.
+    /// </summary>
+    public bool LaunchWithoutSandbox { get; set; }
+
+    /// <summary>
+    /// Windows: strong sandbox mode (AppContainer). On by default; the first launch asks once for the loopback exemption.
+    /// Off: the standard sandbox (low integrity).
+    /// </summary>
+    public bool StrongSandbox { get; set; } = true;
+
+    /// <summary>
+    /// Why strong mode fell back to the standard sandbox (a localization key: declined, no admin, failed), so Jay does
+    /// not ask on every launch. Cleared by "Retry strong mode".
+    /// </summary>
+    public string? StrongSandboxFallback { get; set; }
+
+    /// <summary>Detail for <see cref="StrongSandboxFallback"/> (the error of a failed exemption).</summary>
+    public string? StrongSandboxFallbackDetail { get; set; }
+
+    /// <summary>
+    /// Parent folders Jay's admin step let app containers list (names only, that folder only), so "remove sandbox
+    /// permissions" takes exactly these entries away again.
+    /// </summary>
+    public List<string> StrongSandboxFolders { get; set; } = [];
+
     public string PlayerName { get; set; } = "Player";
     public string? LastVersion { get; set; }
     public int? WindowWidth { get; set; }

@@ -25,6 +25,14 @@ internal static unsafe class LinuxGameProcess
 
     internal static ExitRequest RequestExit(int processId)
     {
+        if (LinuxSandbox.IsSandboxed(processId))
+        {
+            // processId is bwrap's. The game runs as a child in its own PID namespace, where its window says another
+            // PID; matching on that is only unambiguous while one sandboxed game is running.
+            if (LinuxSandbox.GameProcess(processId) is not { } game) return ExitRequest.NotSent;
+            if (LinuxSandbox.RunningCount == 1 && TryCloseX11Windows(game.Inner) is > 0) return ExitRequest.WindowClose;
+            return UnixGameProcess.RequestExit(game.Outer) ? ExitRequest.Signal : ExitRequest.NotSent;
+        }
         if (TryCloseX11Windows(processId) is > 0) return ExitRequest.WindowClose;
         // Wayland 原生窗口、没有 X11、窗口还没出来或者老 LWJGL 没设 _NET_WM_PID：退而发 SIGTERM，JVM 会跑关闭钩子。
         return UnixGameProcess.RequestExit(processId) ? ExitRequest.Signal : ExitRequest.NotSent;

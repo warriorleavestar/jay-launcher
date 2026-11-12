@@ -180,7 +180,9 @@ public class ElevatedGuardTests
         var guard = ElevatedGuard.Start(Core, args, Env, elevate: false, connectTimeoutForTest: TimeSpan.FromMilliseconds(1));
         try
         {
-            Assert.True(await WaitAsync(() => guard.ConnectFailed, 5));
+            // The 1 ms connect timeout fires at once, but on a busy CI runner the faulted connect task can take longer
+            // than 5 s to be observed (thread pool under load from the parallel suite), so allow the usual 20 s.
+            Assert.True(await WaitAsync(() => guard.ConnectFailed), "connect timeout was not reported");
             Assert.False(guard.StartPending); // 没真正发出去的重启不算“正在重启”
             // 守护自己的期限是 20 秒；被关掉管道的话早于这个时间退出（满负荷跑全部测试时 Jay.exe 冷启动可能要好几秒）。
             Assert.True(await WaitAsync(() => guard.HasExited, 18), "守护没有被关在外面");

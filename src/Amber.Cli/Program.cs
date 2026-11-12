@@ -43,7 +43,7 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 //   lan-direct-join <JAYDS1 加密码> --passphrase <口令> ...        打印 REPLY 回复码（交给房主），打通后经直连桥敲门
 //   lan-host <本机游戏端口> [--peer url]... [--listen url]... [--seconds N]   开房间，打印房间码
 //   lan-join <房间码> [--peer url]... [--listen url]... [--seconds N]         加入房间，打印本机转发地址
-//   （--peer 不写时用 EasyTier 社区公共节点；联机组件放在 %APPDATA%\Amber\easytier）
+//   （--peer 不写时用 EasyTier 社区公共节点；联机组件放在数据目录的 easytier 下：AMBER_DATA_DIR，默认 %APPDATA%\Amber）
 var argList = args.ToList();
 var root = TakeOption(argList, "--dir") ?? GameDirectory.DefaultRoot();
 var sources = TakeOption(argList, "--source") switch
@@ -245,7 +245,7 @@ try
         {
             // 检查选中的微软账号能不能正常进服务器，只打印不涉密的结果。--force-refresh：在内存里强制走一次刷新令牌（不写回文件）。
             var force = argList.Remove("--force-refresh");
-            var dataDir = Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
+            var dataDir = AmberDataDir();
             var store = new AccountStore(Path.Combine(dataDir, "accounts.json"));
             store.Load();
             var account = store.Selected;
@@ -633,6 +633,11 @@ try
             var extraJvm = TakeOption(argList, "--jvm");
             // --bake <加载器目录>：实验功能，先用通用加载器烘焙模组和实例，再用烘焙结果启动。
             var bakeLoader = TakeOption(argList, "--bake");
+            // --sandbox off|standard|strong: run the game in the OS sandbox (privacy plan item 15). Linux and macOS have
+            // one level; on Windows strong mode needs the loopback exemption for multiplayer (Jay asks for it, the CLI does not).
+            var sandboxMode = TakeOption(argList, "--sandbox") ?? "off";
+            string? bakeDataDir = null;
+            var bakeCacheReadOnly = false;
 
             await installer.CompleteAsync(id, null, cts.Token);
             var version = dir.ResolveVersion(id);
@@ -663,6 +668,9 @@ try
             {
                 var toolkit = Amber.Core.Bake.BakeToolkit.Find(bakeLoader) ?? throw new DirectoryNotFoundException(bakeLoader);
                 var bakeData = Environment.GetEnvironmentVariable("AMBER_BAKE_DATA") is { Length: > 0 } bd ? bd : Path.Combine(dir.Root, ".amber-bake-data");
+                bakeDataDir = bakeData;
+                // A loader that writes only inside the instance at launch (after 0.3.1) gets the shared cache read-only.
+                bakeCacheReadOnly = Amber.Core.Bake.BakeRuntime.LaunchWritesOnlyInstance(toolkit.Package?.LoaderVersion);
                 var bake = new Amber.Core.Bake.BakeService(toolkit, Path.Combine(bakeData, "cache"), bakeData,
                     (items, ct) => downloader.DownloadAllAsync(items, null, ct));
                 var instance = Instance(id, isolate);
@@ -681,6 +689,23 @@ try
                 Console.WriteLine($"BAKE READY {bakeWatch.Elapsed.TotalSeconds:F1}s reused={prepared.Reused} cache={prepared.Cache?.State ?? "-"} warm={(prepared.Warm is null ? "no" : "yes")} {prepared.Reason} {baked.StateFile}");
                 options = options with { Baked = baked };
             }
+            if (sandboxMode != "off")
+            {
+                // The data folder (AMBER_DATA_DIR in tests) stays hidden; a bake's loader and data are granted.
+                var dataDir = AmberDataDir();
+                options = options with
+                {
+                    Sandbox = new SandboxOptions
+                    {
+                        Enabled = true,
+                        WindowsLevel = sandboxMode == "strong" ? WindowsSandboxLevel.Strong : WindowsSandboxLevel.Standard,
+                        Hidden = [Path.GetFullPath(dataDir)],
+                        ExtraReadOnly = [.. new[] { bakeLoader, bakeCacheReadOnly ? bakeDataDir : null }.OfType<string>().Select(Path.GetFullPath)],
+                        ExtraReadWrite = bakeDataDir is null || bakeCacheReadOnly ? [] : [Path.GetFullPath(bakeDataDir)],
+                    },
+                };
+                Console.WriteLine($"SANDBOX {sandboxMode}");
+            }
             var launcher = new GameLauncher(dir);
             if (dryRun)
             {
@@ -696,6 +721,9 @@ try
                 var legacyProblems = options.Baked is { ProblemsFile: null };
                 var game = launcher.Launch(options, line =>
                 {
+                    // Jay's own notes about the sandbox (which level this launch really uses) are not game log lines.
+                    if (line.Contains("sandbox", StringComparison.OrdinalIgnoreCase) && !line.TrimStart().StartsWith('<') && !line.StartsWith('['))
+                        Console.WriteLine("SANDBOX NOTE " + line);
                     if (options.Baked is not null && Amber.Core.Bake.BakeRuntimeProblem.Parse(line, legacyProblems) is { } runtimeProblem)
                         Console.WriteLine($"BAKE RUNTIME {runtimeProblem.Severity} {runtimeProblem.Code} {runtimeProblem.Describe()}");
                     lock (tail)
@@ -704,8 +732,18 @@ try
                         if (parsed is null) return;
                         tail.Enqueue(parsed.Message);
                         if (tail.Count > 25) tail.Dequeue();
+                        // With --world or --server the smoke test waits until the player is in the world.
+                        var wantsWorld = options.JoinWorld is not null || options.JoinServer is not null;
                         if (parsed.Message.Contains("Sound engine started") || parsed.Message.Contains("OpenAL initialized") || parsed.Message.Contains("SoundSystem Author"))
+                        {
+                            Console.WriteLine("SMOKE SOUND " + parsed.Message);
+                            if (!wantsWorld) reached.TrySetResult(parsed.Message);
+                        }
+                        if (wantsWorld && parsed.Message.Contains("logged in with entity id", StringComparison.Ordinal))
+                        {
+                            Console.WriteLine("SMOKE WORLD " + parsed.Message);
                             reached.TrySetResult(parsed.Message);
+                        }
                     }
                 });
                 var finished = await Task.WhenAny(reached.Task, game.WaitForExitAsync(cts.Token), Task.Delay(TimeSpan.FromSeconds(smoke.Value), cts.Token));
@@ -746,7 +784,10 @@ catch (Exception e)
     return 1;
 }
 
-static string AmberDataDir() => Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
+// The same data folder as the app: AMBER_DATA_DIR when set (tests), else %APPDATA%\Amber.
+static string AmberDataDir() => Environment.GetEnvironmentVariable("AMBER_DATA_DIR") is { Length: > 0 } configured
+    ? configured
+    : Path.Combine(Amber.Core.SpecialFolders.ApplicationData(), "Amber");
 
 static List<string> TakeAll(List<string> list, string name)
 {

@@ -10,7 +10,16 @@
              x:Class="Amber.App.Views.MultiplayerPage"
              x:DataType="vm:MultiplayerViewModel">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-    <TextBlock svc:ThemeRegion.Name="multiplayer.title" Classes="h1" Text="{l:T multiplayer.title}" />
+    <StackPanel Spacing="6" Margin="0,0,14,0">
+      <TextBlock svc:ThemeRegion.Name="multiplayer.title" Classes="h1" Text="{l:T multiplayer.title}" />
+      <!-- Privacy plan item 15: while "Launch without sandbox" is on, this line stays on every tab. -->
+      <Border x:Name="NoSandboxLine" Classes="callout warning" Padding="10,6" Margin="0,0,0,8" IsVisible="{Binding RunsWithoutSandbox}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+          <TextBlock Text="{l:T multiplayer.no_sandbox}" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="12" />
+          <Button x:Name="NoSandboxFixButton" Grid.Column="1" Classes="ghost small" Content="{l:T multiplayer.no_sandbox.fix}" Command="{Binding OpenSandboxSettingsCommand}" VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+    </StackPanel>
 
     <!-- Tabs (official §6.14): play · public rooms · servers · settings. A scrolling segmented strip in compact windows. -->
     <ScrollViewer svc:ThemeRegion.Name="multiplayer.tabs" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,0,14,10">

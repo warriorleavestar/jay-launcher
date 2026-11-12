@@ -622,6 +622,7 @@ public sealed class EasyTierSession : IEasyTierSession
         var process = Process.Start(info) ?? throw new InvalidOperationException(L.T("core.mp.component.startfailed"));
         // 记录的是实际启动的程序（套了看门脚本时是 sh），清理时按它核对，结束整棵进程树。
         EasyTierProcessTracker.Track(process, workDir, EasyTierProcessGuard.TrackedExecutable(info));
+        Amber.Core.Diagnostics.ExitTrail.TrackProcess($"easytier ({Path.GetFileName(Path.TrimEndingDirectorySeparator(workDir))})", process);
         ProcessJob? job = null;
         if (OperatingSystem.IsWindows())
         {
