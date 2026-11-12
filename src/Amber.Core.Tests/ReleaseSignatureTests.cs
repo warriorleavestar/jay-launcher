@@ -140,14 +140,16 @@ public sealed class ReleaseSignatureTests : IDisposable
     [Fact]
     public void BuiltInKeysAreWellFormed()
     {
-        // Each list: full hybrid public keys, no duplicates, enough of them for its quorum, and the two lists disjoint.
+        // Each list: full hybrid public keys, no key twice (compared by id), enough of them for its quorum, and the two
+        // lists disjoint.
+        string IdHex(string key) => Convert.ToHexString(TrustSigner.IdOfPublicKey(Convert.FromBase64String(key)));
         foreach (var (keys, need) in new[] { (JayTrust.Keys, JayTrust.Need), (JayTrust.ReleaseKeys, JayTrust.ReleaseNeed) })
         {
             foreach (var key in keys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
-            Assert.Equal(keys.Count, keys.Distinct().Count());
+            Assert.Equal(keys.Count, keys.Select(IdHex).Distinct().Count());
             Assert.True(keys.Count == 0 || keys.Count >= need);
         }
-        Assert.Empty(JayTrust.ReleaseKeys.Intersect(JayTrust.Keys));
+        Assert.Empty(JayTrust.ReleaseKeys.Select(IdHex).Intersect(JayTrust.Keys.Select(IdHex)));
 
         // The full key ids printed when the keys were made (their first 8 bytes are the fingerprints written next to them
         // in JayTrust): a swapped or mistyped key fails here.
