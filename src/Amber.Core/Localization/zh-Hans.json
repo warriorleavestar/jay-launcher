@@ -1833,6 +1833,8 @@
   "core.mp.public.err_rate": "发布得太频繁了，这个网络让你稍等一会儿",
   "core.mp.public.err_busy": "目录现在太忙，Jay 稍后会自动再试。",
   "core.mp.public.err_clock": "这台电脑的时间和目录差得太多，请校准系统时间后再试。",
+  "core.mp.public.warn_lookup": "目录里用这张邀请的别的房间太多了，暂时没法按这张邀请找到你的房间。换一张新邀请吧",
+  "core.mp.public.published_warning": "已发布，但别人暂时没法按邀请找到房间：{0}",
   "core.mp.public.err_policy": "这个网络不收这个房间：{0}",
   "core.mp.public.no_address": "还没在公共网络里分到地址",
   "core.mp.public.announce_failed": "房间发布到公共网络失败：{0}",

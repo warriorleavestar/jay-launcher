@@ -704,9 +704,11 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var client = new RoomDirectoryClient(net) { NetworkSecret = main.NetworkSecret };
         var host = X25519KeyPair.Generate();
         var signer = new RoomSigner();
-        var lobby = new byte[32];
-        Random.Shared.NextBytes(lobby);
-        await client.AnnounceAsync(signer.Sign(Listing(host), _now), true, [lobby], default);
+        // A public room is found by its invite from the listing itself.
+        var room = Listing(host);
+        Assert.True(JayInvite.TryParse(room.Invite, out var invite));
+        var lobby = invite.LobbyKey;
+        await client.AnnounceAsync(signer.Sign(room, _now), true, [lobby], default);
 
         // 两个目录都有，列表合并后不重复。
         Assert.Equal(1, main.Count);

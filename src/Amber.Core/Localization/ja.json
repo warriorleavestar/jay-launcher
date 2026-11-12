@@ -1833,6 +1833,8 @@
   "core.mp.public.err_rate": "公開の頻度が高すぎます。このネットワークから少し待つよう求められています",
   "core.mp.public.err_busy": "ディレクトリが混み合っています。Jay が少ししてから自動で再試行します。",
   "core.mp.public.err_clock": "このパソコンの時計がディレクトリと大きくずれています。システムの時刻を合わせてからやり直してください。",
+  "core.mp.public.warn_lookup": "この招待を使うほかのルームがディレクトリに多すぎるため、今はこの招待でルームを見つけられません。新しい招待を作ってください",
+  "core.mp.public.published_warning": "公開しましたが、今は招待からルームを見つけられません：{0}",
   "core.mp.public.err_policy": "このネットワークはこのルームを受け付けません：{0}",
   "core.mp.public.no_address": "公開ネットワークのアドレスがまだ割り当てられていません",
   "core.mp.public.announce_failed": "ルームを公開ネットワークに掲載できませんでした：{0}",

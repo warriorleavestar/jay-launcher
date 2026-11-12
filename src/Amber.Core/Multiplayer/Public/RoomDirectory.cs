@@ -103,9 +103,22 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     private readonly Dictionary<string, SnapItem> _snapshot = new(StringComparer.Ordinal);
     /// <summary>Bytes of every item's JSON together (a full snapshot is about this plus a little framing).</summary>
     private long _snapshotBytes;
-    /// <summary>The last full snapshot and the last deltas, serialized, for <see cref="_snapshotVersion"/>.</summary>
+    /// <summary>The full snapshot and some small deltas, serialized, for <see cref="_snapshotVersion"/>.</summary>
     private byte[]? _fullReply;
     private readonly Dictionary<long, byte[]> _deltaReplies = [];
+    private long _deltaReplyBytes;
+    /// <summary>Bytes of cached deltas, and how many replies were serialized (tests).</summary>
+    internal long CachedDeltaBytes { get { lock (_gate) return _deltaReplyBytes; } }
+    internal int SnapshotsBuilt => Volatile.Read(ref _snapshotsBuilt);
+    private int _snapshotsBuilt;
+    internal SemaphoreSlim LargeSnapshotSlots => _snapshotSlots;
+    /// <summary>Cached deltas together stay under this; only small deltas are cached at all.</summary>
+    internal const long MaxCachedDeltaBytes = 2L * SmallSnapshot;
+    /// <summary>
+    /// A delta that would carry more than this share of the full snapshot is served as the (cached) full snapshot
+    /// instead, so asking from many old versions costs no more than asking for the full one.
+    /// </summary>
+    internal const int DeltaShareOfFull = 4;
     private long _repliesVersion = -1;
 
     /// <summary>
@@ -343,17 +356,18 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 return;
             }
         }
-        byte[] reply;
-        try { reply = SnapshotReply(secure.Request); }
+        SnapshotPlan plan;
+        try { plan = PlanSnapshot(secure.Request); }
         catch (Exception e) when (e is InvalidOperationException or FormatException)
         {
             await secure.Reply(Error("bad"), quick.Token);
             return;
         }
         finally { Flush(); }
-        var large = reply.Length > SmallSnapshot;
+        // The slot (and for a large reply a start from the bucket) comes before any serializing, sized from the plan,
+        // so readers the directory is going to turn away cost it nothing.
+        var large = plan.Size > SmallSnapshot;
         var slots = large ? _snapshotSlots : _smallSnapshotSlots;
-        // A slot first, then a start from the bucket, so a refused start doesn't use up a token for nothing.
         var gotSlot = slots.Wait(0);
         if (!gotSlot || (large && !TakeLargeToken()))
         {
@@ -363,6 +377,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
         try
         {
+            var reply = BuildSnapshot(plan);
             using var whole = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
             whole.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(reply.Length));
             await secure.Snapshot(reply, RoomDirectoryProtocol.SnapshotPad, RoomDirectoryProtocol.RequestTimeout, whole.Token);
@@ -376,7 +391,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     {
         lock (_gate)
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _now();
             if (_largeTokensAt != DateTimeOffset.MinValue)
                 _largeTokens = Math.Min(LargeSnapshotBurst, _largeTokens + (now - _largeTokensAt).TotalSeconds * LargeSnapshotsPerSecond);
             _largeTokensAt = now;
@@ -406,7 +421,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             {
                 "announce" => Announce(request),
                 "withdraw" => Withdraw(request),
-                "snap" => JsonNode.Parse(SnapshotReply(request)) as JsonObject ?? Error("bad"),
+                "snap" => JsonNode.Parse(BuildSnapshot(PlanSnapshot(request))) as JsonObject ?? Error("bad"),
                 "find" => Find(request),
                 "post" => Post(request),
                 "fetch" => Fetch(request),
@@ -752,35 +767,55 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// The snapshot reply (UTF-8 JSON): everything when the caller's copy is from another run or too old, otherwise only
-    /// the keys that changed after its version. Public rooms are signed listings; hidden entries are sealed
-    /// (<see cref="HiddenEntry"/>). Items are serialized when they change, and each reply once per version, so the lock is
-    /// held only to pick them up; every reader at the same version gets the same bytes.
+    /// What a snapshot request will get: already serialized bytes (the cached full snapshot or a cached delta), or the
+    /// items to serialize and about how big that will be. Taken under the lock; serializing happens later, outside it.
     /// </summary>
-    private byte[] SnapshotReply(JsonObject request)
+    private sealed record SnapshotPlan(byte[]? Cached, bool Full, long Version, long Have, List<(string Key, SnapItem? Item)> Items, long Size);
+
+    /// <summary>
+    /// Plans the snapshot reply: everything when the caller's copy is from another run or too old, otherwise only the
+    /// keys that changed after its version. A delta nearly as big as everything is answered with everything (one cached
+    /// reply per version), so no request can make the directory serialize something big that isn't shared.
+    /// </summary>
+    private SnapshotPlan PlanSnapshot(JsonObject request)
     {
         var epoch = request["epoch"]?.GetValue<string>();
         var have = request["have"]?.GetValue<long>() ?? -1;
-        bool full;
-        long version;
-        List<(string Key, SnapItem? Item)> items;
         lock (_gate)
         {
             Prune();
-            version = _snapshotVersion;
+            var version = _snapshotVersion;
             if (_repliesVersion != version)
             {
                 _fullReply = null;
                 _deltaReplies.Clear();
+                _deltaReplyBytes = 0;
                 _repliesVersion = version;
             }
-            full = epoch != _snapshotEpoch || have < _snapshotFloor || have > version;
-            if (full && _fullReply is { } cachedFull) return cachedFull;
-            if (!full && _deltaReplies.TryGetValue(have, out var cachedDelta)) return cachedDelta;
-            items = full
-                ? [.. _snapshot.Select(p => (p.Key, (SnapItem?)p.Value))]
-                : [.. _snapshotLog.Where(c => c.Version > have).Select(c => c.Key).Distinct(StringComparer.Ordinal).Select(k => (k, _snapshot.GetValueOrDefault(k)))];
+            var full = epoch != _snapshotEpoch || have < _snapshotFloor || have > version;
+            if (!full)
+            {
+                if (_deltaReplies.TryGetValue(have, out var cachedDelta)) return new SnapshotPlan(cachedDelta, false, version, have, [], cachedDelta.Length);
+                List<(string Key, SnapItem? Item)> changed = [.. _snapshotLog.Where(c => c.Version > have).Select(c => c.Key)
+                    .Distinct(StringComparer.Ordinal).Select(k => (k, _snapshot.GetValueOrDefault(k)))];
+                var size = changed.Sum(i => (long)(i.Item?.Json.Length ?? i.Key.Length + 3) + 1) + 256;
+                if (size * DeltaShareOfFull <= _snapshotBytes + 256 || size <= SmallSnapshot) return new SnapshotPlan(null, false, version, have, changed, size);
+            }
+            if (_fullReply is { } cachedFull) return new SnapshotPlan(cachedFull, true, version, have, [], cachedFull.Length);
+            return new SnapshotPlan(null, true, version, have, [.. _snapshot.Select(p => (p.Key, (SnapItem?)p.Value))], _snapshotBytes + 256);
         }
+    }
+
+    /// <summary>
+    /// The snapshot reply (UTF-8 JSON) for <paramref name="plan"/>. Public rooms are signed listings; hidden entries are
+    /// sealed (<see cref="HiddenEntry"/>). Items are serialized when they change and each reply once per version, so
+    /// every reader at the same version gets the same bytes.
+    /// </summary>
+    private byte[] BuildSnapshot(SnapshotPlan plan)
+    {
+        if (plan.Cached is { } cached) return cached;
+        Interlocked.Increment(ref _snapshotsBuilt);
+        var (full, version, have, items) = (plan.Full, plan.Version, plan.Have, plan.Items);
         var text = new StringBuilder(full ? (int)Math.Min(int.MaxValue, items.Sum(i => (long)(i.Item?.Json.Length ?? 0) + 1) + 256) : 256);
         text.Append("{\"ok\":true,\"epoch\":\"").Append(_snapshotEpoch).Append("\",\"ver\":").Append(version).Append(",\"full\":").Append(full ? "true" : "false");
         if (!full) text.Append(",\"from\":").Append(have);
@@ -806,7 +841,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (_repliesVersion == version)
             {
                 if (full) _fullReply = bytes;
-                else if (_deltaReplies.Count < 64) _deltaReplies[have] = bytes;
+                else if (bytes.Length <= SmallSnapshot && _deltaReplyBytes + bytes.Length <= MaxCachedDeltaBytes && _deltaReplies.TryAdd(have, bytes))
+                    _deltaReplyBytes += bytes.Length;
             }
         }
         return bytes;
@@ -1296,7 +1332,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     {
         var hit = new DirectoryHit(listing.Id, listing.Ip, listing.HostKey);
         var hidden = new JsonArray();
-        foreach (var lobby in lobbyKeys.Take(RoomDirectoryProtocol.MaxLookupKeys))
+        // A room listed with its invite in the open is found from its listing; entries for it would only invite clashes.
+        foreach (var lobby in listing.Mode == RoomVisibility.Hidden ? lobbyKeys.Take(RoomDirectoryProtocol.MaxLookupKeys) : [])
         {
             var entry = SealedFor(lobby, hit);
             hidden.Add((JsonNode)new JsonObject
@@ -1318,7 +1355,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         if (account is not null) request["account"] = account;
         var replies = NeedOne(await FanOutAsync(request, ct));
-        return replies.Any(r => r["warn"]?.GetValue<string>() == "clock") ? L.T("core.mp.public.err_clock") : null;
+        if (replies.Any(r => r["warn"]?.GetValue<string>() == "clock")) return L.T("core.mp.public.err_clock");
+        return replies.Any(r => r["warn"]?.GetValue<string>() == "lookup") ? L.T("core.mp.public.warn_lookup") : null;
     }
 
     /// <summary>

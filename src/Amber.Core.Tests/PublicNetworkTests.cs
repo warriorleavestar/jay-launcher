@@ -171,12 +171,9 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var client = new RoomDirectoryClient(_net);
         var key = new byte[16];
         for (var i = 0; i < RoomDirectoryServer.MaxEntriesPerIndex; i++)
-            await client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default);
-        // One more listed room still gets in, without an entry there; a hidden one with nothing else is refused.
-        var listed = new RoomSigner();
-        await client.AnnounceAsync(listed.Sign(Listing(), _now), true, [key], default);
-        Assert.Contains(await client.ListAsync(default), r => r.Id == listed.RoomId);
-        var more = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), false, [key], default));
+            await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden, invite: ""), _now), false, [key], default);
+        // One more hidden room with nothing else to register is refused.
+        var more = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden, invite: ""), _now), false, [key], default));
         Assert.Equal("lookup", more.Code);
     }
 

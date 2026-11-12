@@ -133,8 +133,10 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.True(net.BytesIn > RoomDirectoryProtocol.SnapshotPad);
 
         var signer = new RoomSigner();
-        var lobby = RandomNumberGenerator.GetBytes(16);
-        await new RoomDirectoryClient(net).AnnounceAsync(signer.Sign(Listing(RoomVisibility.Public), _now), true, [lobby], default);
+        var room = Listing(RoomVisibility.Public);
+        Assert.True(JayInvite.TryParse(room.Invite, out var invite));
+        var lobby = invite.LobbyKey;
+        await new RoomDirectoryClient(net).AnnounceAsync(signer.Sign(room, _now), true, [lobby], default);
         Assert.Single(await client.ListAsync(default));
         Assert.NotNull(await client.LookupAsync(lobby, default));
         // The second refresh named the version it had, so the reply was a delta.
@@ -517,5 +519,82 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         await client.Snapshots.RefreshAsync(client, default);
         Assert.Null(await client.LookupAsync(standing.LobbyKey, default));
         Assert.Equal(room.RoomId, (await client.LookupAsync(standing.LobbyKey, default, _host.PublicKey))!.Id);
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions Raw = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    private async Task<JsonObject> SnapOverChannelAsync(JsonObject request)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _directory.Port);
+        await using var stream = client.GetStream();
+        request["jay"] = "9.9.9";
+        return await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", request, default);
+    }
+
+    /// <summary>Fills the directory with public rooms until a full snapshot is a large reply.</summary>
+    private void FillPastSmall()
+    {
+        var bytes = 0;
+        while (bytes < RoomDirectoryServer.SmallSnapshot * 3 / 2)
+        {
+            var listing = new RoomSigner().Sign(Listing(RoomVisibility.Public) with { Name = new string('x', 40) }, _now);
+            Assert.True(_directory.Handle(new JsonObject { ["op"] = "announce", ["room"] = listing.ToJson(), ["listed"] = true })["ok"]!.GetValue<bool>());
+            bytes += listing.ToJson().ToJsonString().Length;
+        }
+    }
+
+    [Fact]
+    public async Task ManyDifferentVersionsCostNoMoreThanTheFullSnapshot()
+    {
+        FillPastSmall();
+        var first = _directory.Handle(new JsonObject { ["op"] = "snap" });
+        var epoch = first["epoch"]!.GetValue<string>();
+        var version = first["ver"]!.GetValue<long>();
+        var built = _directory.SnapshotsBuilt;
+        // Asking from old versions all over the range (within the large-reply bucket): deltas nearly as big as
+        // everything are answered with the one cached full reply.
+        var step = Math.Max(1, version / (RoomDirectoryServer.LargeSnapshotBurst - 4));
+        for (var have = 0L; have < version; have += step)
+        {
+            var reply = await SnapOverChannelAsync(new JsonObject { ["op"] = "snap", ["epoch"] = epoch, ["have"] = have });
+            Assert.True(reply["ok"]!.GetValue<bool>());
+            if (reply["full"]!.GetValue<bool>() == false)
+                Assert.True(System.Text.Encoding.UTF8.GetByteCount(reply.ToJsonString(Raw)) <= RoomDirectoryServer.SmallSnapshot + 1024);
+        }
+        Assert.True(_directory.CachedDeltaBytes <= RoomDirectoryServer.MaxCachedDeltaBytes);
+        // Only small deltas were serialized one by one; the big answers all came from the cache.
+        Assert.True(_directory.SnapshotsBuilt - built <= RoomDirectoryServer.LargeSnapshotBurst);
+        var recent = await SnapOverChannelAsync(new JsonObject { ["op"] = "snap", ["epoch"] = epoch, ["have"] = version - 1 });
+        Assert.False(recent["full"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task NothingBigIsSerializedForAReaderTurnedAway()
+    {
+        FillPastSmall();
+        var slots = _directory.LargeSnapshotSlots;
+        for (var i = 0; i < RoomDirectoryServer.MaxConcurrentSnapshots; i++) Assert.True(slots.Wait(0));
+        try
+        {
+            var built = _directory.SnapshotsBuilt;
+            var reply = await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" });
+            Assert.Equal("busy", reply["error"]!.GetValue<string>());
+            Assert.Equal(built, _directory.SnapshotsBuilt);
+        }
+        finally { slots.Release(RoomDirectoryServer.MaxConcurrentSnapshots); }
+        Assert.True((await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["full"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void ListedRoomsSendNoHiddenEntries()
+    {
+        // A listed room's renewal from a public room carries no hidden entries, whatever invites the host has.
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        var sent = new List<JsonObject>();
+        _directory.OnRequest = r => { lock (sent) sent.Add(r); };
+        new RoomDirectoryClient(new CountingNetwork(_directory.Port))
+            .AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Public), _now), true, [lobby], default).GetAwaiter().GetResult();
+        Assert.Empty(Assert.Single(sent)["hidden"]!.AsArray());
     }
 }

@@ -161,7 +161,13 @@ public static class DirectoryChannel
             receive.Dispose();
             return (request, async (reply, token) =>
             {
-                using (send) await WriteFrameAsync(stream, send.EncryptWithAd(Prologue, Encoding.UTF8.GetBytes(reply.ToJsonString())), token);
+                using (send)
+                {
+                    // Every reply but a snapshot is one frame; a bigger one is a bug on this side, not something to send.
+                    var bytes = Encoding.UTF8.GetBytes(reply.ToJsonString());
+                    if (bytes.Length > RoomDirectoryProtocol.MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
+                    await WriteFrameAsync(stream, send.EncryptWithAd(Prologue, bytes), token);
+                }
             }, async (json, padTo, stall, token) =>
             {
                 using (send)

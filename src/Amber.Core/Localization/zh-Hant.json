@@ -1833,6 +1833,8 @@
   "core.mp.public.err_rate": "發佈得太頻繁了，這個網路讓你稍等一會兒",
   "core.mp.public.err_busy": "目錄現在太忙，Jay 稍後會自動再試。",
   "core.mp.public.err_clock": "這台電腦的時間和目錄差得太多，請校準系統時間後再試。",
+  "core.mp.public.warn_lookup": "目錄裡用這張邀請的別的房間太多了，暫時沒法按這張邀請找到你的房間。換一張新邀請吧",
+  "core.mp.public.published_warning": "已發佈，但別人暫時沒法按邀請找到房間：{0}",
   "core.mp.public.err_policy": "這個網路不收這個房間：{0}",
   "core.mp.public.no_address": "還沒在公共網路裡分到位址",
   "core.mp.public.announce_failed": "房間發佈到公共網路失敗：{0}",

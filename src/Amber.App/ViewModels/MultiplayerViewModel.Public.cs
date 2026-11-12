@@ -311,7 +311,9 @@ public sealed partial class MultiplayerViewModel
         announcer.StateChanged += () => Dispatcher.UIThread.Post(() =>
         {
             if (_announcer != announcer) return;
-            PublishStatus = announcer.Published ? L.T(CurrentVisibility == RoomVisibility.Hidden ? "multiplayer.public.registered_hidden" : "multiplayer.public.published")
+            PublishStatus = announcer.Published
+                ? announcer.Warning is { } warning ? L.F("core.mp.public.published_warning", warning)
+                : L.T(CurrentVisibility == RoomVisibility.Hidden ? "multiplayer.public.registered_hidden" : "multiplayer.public.published")
                 : announcer.LastError is { } error ? L.F("core.mp.public.announce_failed", error) : "";
         });
         _announcer = announcer;
@@ -323,12 +325,12 @@ public sealed partial class MultiplayerViewModel
     private IDisposable? _snapshotPolling;
 
     /// <summary>
-    /// The lobby key for hidden entries, so invite codes find the room through the directory. All of a room's invites
-    /// share it. A room listed with its invite in the open (public, direct, password) has none: anyone could sign entries
-    /// with that key, and readers find the room from its listing instead.
+    /// The lobby key for hidden entries, so invite codes find the room through the directory (all of a room's invites
+    /// share it). The announcer only uses it while the room is hidden: a room listed with its invite in the open
+    /// (public, direct, password) is found from its listing.
     /// </summary>
-    private IReadOnlyList<byte[]> LobbyKeys() =>
-        BuildListing() is { Mode: not RoomVisibility.Hidden } || _lobby is not { Book.Pending.Count: > 0 } lobby ? [] : [lobby.Book.Pending[0].Invite.LobbyKey];
+    private IReadOnlyList<byte[]> LobbyKeys() => _lobby?.Book.Pending.Count > 0 && _lobby.Book.Pending[0].Invite.LobbyKey is { } key
+        ? [key] : [];
 
     private RoomListing BuildListing()
     {

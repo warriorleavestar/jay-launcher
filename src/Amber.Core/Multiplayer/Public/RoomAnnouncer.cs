@@ -83,7 +83,8 @@ public sealed class RoomAnnouncer : IAsyncDisposable
             else
             {
                 var listing = _signer.Sign(_listing() with { Ip = ip }, DateTimeOffset.UtcNow);
-                var keys = _lobbyKeys();
+                // Hidden entries only for a hidden room, decided from the listing just signed (not a second look at the room).
+                var keys = listing.Mode == RoomVisibility.Hidden ? _lobbyKeys() : [];
                 var search = _searchKey?.Invoke();
                 // 隐藏房间又没有能用的邀请、也没开指纹查找：目录里没什么可登记的（之前登记的 90 秒后自己过期）。
                 if (listing.Mode == RoomVisibility.Hidden && keys.Count == 0 && search is null)
@@ -102,7 +103,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                 if (warning != Warning)
                 {
                     Warning = warning;
-                    if (warning is not null) _log?.Invoke(L.F("core.mp.public.announce_failed", warning));
+                    if (warning is not null) _log?.Invoke(L.F("core.mp.public.published_warning", warning));
                     StateChanged?.Invoke();
                 }
             }
