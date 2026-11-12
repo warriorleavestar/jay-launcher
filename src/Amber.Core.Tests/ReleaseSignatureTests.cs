@@ -138,10 +138,32 @@ public sealed class ReleaseSignatureTests : IDisposable
     }
 
     [Fact]
-    public void NoTrusteeKeysAreBuiltInYet()
+    public void BuiltInKeysAreWellFormed()
     {
-        // The three trustees add their release public keys (jay-server key-public) before the first release with this check.
-        foreach (var key in JayTrust.ReleaseKeys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
+        // Each list: full hybrid public keys, no key twice (compared by id), enough of them for its quorum, and the two
+        // lists disjoint.
+        string IdHex(string key) => Convert.ToHexString(TrustSigner.IdOfPublicKey(Convert.FromBase64String(key)));
+        foreach (var (keys, need) in new[] { (JayTrust.Keys, JayTrust.Need), (JayTrust.ReleaseKeys, JayTrust.ReleaseNeed) })
+        {
+            foreach (var key in keys) Assert.Equal(TrustSigner.PublicKeySize, Convert.FromBase64String(key).Length);
+            Assert.Equal(keys.Count, keys.Select(IdHex).Distinct().Count());
+            Assert.True(keys.Count == 0 || keys.Count >= need);
+        }
+        Assert.Empty(JayTrust.ReleaseKeys.Select(IdHex).Intersect(JayTrust.Keys.Select(IdHex)));
+
+        // The full key ids printed when the keys were made (their first 8 bytes are the fingerprints written next to them
+        // in JayTrust): a swapped or mistyped key fails here.
+        string[] Ids(IReadOnlyList<string> keys) => [.. keys.Select(k => Convert.ToHexString(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k))))];
+        Assert.Equal(["9D47BBDA24BF2956AF370F64F4DF2B6FE9A1F89DB71E79A0747D9E616D94E6ED", "75CD82DBE5DF8E4D4856BCE20C662B588CC8AE8441208A79C5FB1CE8BBD8E2D9"], Ids(JayTrust.Keys));
+        Assert.Equal([], Ids(JayTrust.ReleaseKeys));
+        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D"], JayTrust.Keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+
+        // Changing what Quorum hands out doesn't change the built-in list.
+        var quorum = JayTrust.Quorum;
+        quorum.Keys[0][0] ^= 0xFF;
+        Assert.False(JayTrust.IsNetworkKey(quorum.Keys[0]));
+        Assert.True(JayTrust.IsNetworkKey(JayTrust.Quorum.Keys[0]));
+        Assert.Equal(JayTrust.Keys.Count, JayTrust.Quorum.Keys.Count);
     }
 
     [Fact]
