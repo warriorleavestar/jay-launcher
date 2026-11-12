@@ -225,8 +225,10 @@ public sealed record VolunteerNode(string Url, string Operator)
 /// other Jay accounts that claimed it with a signed registration since (the few seen most recently, in the order they
 /// first claimed), and how many unsigned registrations of it were turned away while it was signed.
 /// </summary>
+/// <param name="Claims">Signed claims of it so far (renewals included), and <paramref name="Claimants"/> how many different
+/// accounts made them (counted up to <see cref="VolunteerRegistry.MaxClaimantsCounted"/>): many accounts suggest a flood.</param>
 public sealed record VolunteerEntry(string Url, string? Operator, IReadOnlyList<string>? ClaimedBy = null, int UnsignedAttempts = 0,
-    DateTimeOffset? LastUnsigned = null)
+    DateTimeOffset? LastUnsigned = null, int Claims = 0, int Claimants = 0)
 {
     /// <summary>Someone claimed the address under another operator.</summary>
     public bool Disputed => ClaimedBy is { Count: > 0 };
@@ -254,7 +256,10 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         /// can't be kept out by a few one-off claims. The operator stays; the claims are for the network's operator to
         /// look at, and a disputed node doesn't count as anyone's when spreading.
         /// </summary>
-        public List<(string Account, DateTimeOffset Seen)>? ClaimedBy;
+        public List<(string Account, DateTimeOffset First, DateTimeOffset Seen)>? ClaimedBy;
+        /// <summary>Signed claims so far, and the different accounts behind them (the set stops growing at a cap).</summary>
+        public int Claims;
+        public HashSet<string>? Claimants;
         /// <summary>Unsigned registrations turned away while the address was signed (not claims; see <see cref="Register"/>).</summary>
         public int UnsignedAttempts;
         public DateTimeOffset? LastUnsigned;
@@ -282,11 +287,23 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     /// <summary>Conflicting claims kept per address.</summary>
     public const int MaxClaims = 4;
+    /// <summary>Different claimant accounts counted per address.</summary>
+    public const int MaxClaimantsCounted = 256;
 
     // A signed registration is good once and only newer ones count: the last accepted signing time lives on the entry.
     // When an entry goes away its time stays a little while (until it falls out of the clock window) so the old
     // registration can't bring it back; that list is bounded and drops its oldest when full, never refusing anyone.
     private readonly Dictionary<string, long> _tombstones = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Tombstones of addresses that were listed (passed a probe) when they went away: only their volunteer comes back
+    /// without counting as new. One that failed its probe keeps just its signing time (against replays).
+    /// </summary>
+    private readonly HashSet<string> _mayReturn = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Addresses whose probe just failed, and when: such an address isn't taken (and dialed) again until
+    /// <see cref="CheckSameAddressEvery"/> has passed, whoever registers it.
+    /// </summary>
+    private readonly Dictionary<string, DateTimeOffset> _lastDialed = new(StringComparer.Ordinal);
     private readonly Queue<(string Key, long At)> _tombstoneOrder = new();
     /// <summary>Signing times kept for addresses that went away.</summary>
     public const int MaxTombstones = 2 * MaxEntries;
@@ -370,6 +387,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
                 if (signedBy is null && Full(_newUnsigned, NewPerMinute, now)) return Error("rate");
             }
+            // Claims on a known address count against their caller too (only conflicting ones are charged, below).
+            else if (signedBy is not null && source is not null && Full(_newBy, "claim-src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
         }
         string? account = null;
         long signedAt = 0;
@@ -395,15 +414,18 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 if (account is not null && _tombstones.TryGetValue(Key(account, address), out var gone))
                 {
                     if (signedAt <= gone) return Error("stale");
-                    returning = true;
+                    returning = _mayReturn.Contains(Key(account, address));
                 }
-                // A volunteer coming back to its own address isn't new.
+                // Each new entry is dialed: an address that just failed isn't dialed again sooner than a reachability check allows.
+                foreach (var (dialed, _) in _lastDialed.Where(p => now - p.Value > CheckSameAddressEvery || p.Value > now).ToList()) _lastDialed.Remove(dialed);
+                if (_lastDialed.ContainsKey(address)) return Error("rate");
+                // The caller's limit holds for everyone.
+                if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
+                // A listed volunteer coming back to its own address isn't new.
                 if (!returning)
                 {
-                    if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
                     if (account is null ? Full(_newUnsigned, NewPerMinute, now)
                         : Full(_newSigned, NewPerMinute, now) || Full(_newBy, "acct:" + account, NewPerAccountPerMinute, now)) return Error("rate");
-                    if (source is not null) Take(_newBy, "src:" + source, now);
                     if (account is null) _newUnsigned.Enqueue(now);
                     else
                     {
@@ -411,6 +433,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                         Take(_newBy, "acct:" + account, now);
                     }
                 }
+                if (source is not null) Take(_newBy, "src:" + source, now);
             }
             if (known && entry!.Operator != account)
             {
@@ -425,21 +448,37 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 }
                 else
                 {
+                    // Claims have the same per-account and per-caller limits as new addresses.
+                    if (Full(_newBy, "claim:" + account, NewPerAccountPerMinute, now)) return Error("rate");
+                    Take(_newBy, "claim:" + account, now);
+                    if (source is not null) Take(_newBy, "claim-src:" + source, now);
                     newlyDisputed = entry.ClaimedBy is null;
                     entry.ClaimedBy ??= [];
+                    entry.Claims++;
+                    entry.Claimants ??= new HashSet<string>(StringComparer.Ordinal);
+                    if (entry.Claimants.Count < MaxClaimantsCounted) entry.Claimants.Add(account);
                     var mine = entry.ClaimedBy.FindIndex(c => c.Account == account);
-                    if (mine >= 0) entry.ClaimedBy[mine] = (account, now);
+                    if (mine >= 0) entry.ClaimedBy[mine] = (account, entry.ClaimedBy[mine].First, now);
                     else
                     {
-                        // Full: the claim not renewed for longest makes room.
+                        // Full: the claim not renewed for longest makes room, except the longest-held claim still being
+                        // renewed (a flood of new accounts can't push out whoever has been claiming it all along).
                         if (entry.ClaimedBy.Count >= MaxClaims)
-                            entry.ClaimedBy.RemoveAt(entry.ClaimedBy.Select((c, i) => (c.Seen, i)).Min().i);
-                        entry.ClaimedBy.Add((account, now));
+                        {
+                            var active = entry.ClaimedBy.Where(c => now - c.Seen <= 2 * VolunteerNodes.RenewEvery).ToList();
+                            var kept = active.Count > 0 ? active.MinBy(c => c.First).Account : null;
+                            var evict = entry.ClaimedBy.Select((c, i) => (c, i)).Where(x => x.c.Account != kept).MinBy(x => x.c.Seen).i;
+                            entry.ClaimedBy.RemoveAt(evict);
+                        }
+                        entry.ClaimedBy.Add((account, now, now));
                     }
                 }
             }
             else if (known && account is not null && signedAt <= entry!.SignedAt) return Error("stale");
-            if (!known && !conflict) _entries[address] = entry = new Entry { Operator = account };
+            if (!known && !conflict)
+            {
+                _entries[address] = entry = new Entry { Operator = account };
+            }
             if (!conflict && account is not null) entry!.SignedAt = signedAt;
             // An address keeps its operator (or having none) until it lapses: nobody can take it over, add a signature
             // to it or strip one. Who registered first needn't be who runs the node, so a conflicting claim (above) is
@@ -472,7 +511,11 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             {
                 entry.Probing = false;
                 if (ok) entry.VerifiedAt = _now();
-                else Drop(address, entry);
+                else
+                {
+                    _lastDialed[address] = _now();
+                    Drop(address, entry);
+                }
             }
         }
         Probed?.Invoke(address, ok);
@@ -511,7 +554,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     }
 
     private static VolunteerEntry Public(string url, Entry e) =>
-        new(url, e.Operator, e.ClaimedBy?.Select(c => c.Account).ToList(), e.UnsignedAttempts, e.LastUnsigned);
+        new(url, e.Operator, e.ClaimedBy?.Select(c => c.Account).ToList(), e.UnsignedAttempts, e.LastUnsigned, e.Claims, e.Claimants?.Count ?? 0);
 
     /// <summary>Drops an address now (it can register again unless it is also banned).</summary>
     public bool Remove(string url)
@@ -563,11 +606,17 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         if (entry.SignedAt < (_now() - VolunteerOperator.MaxClockSkew).ToUnixTimeSeconds()) return true;
         var key = Key(account, address);
         _tombstones[key] = entry.SignedAt;
+        if (entry.VerifiedAt is not null) _mayReturn.Add(key);
+        else _mayReturn.Remove(key);
         _tombstoneOrder.Enqueue((key, entry.SignedAt));
         while (_tombstoneOrder.Count > MaxTombstones)
         {
             var (oldKey, oldAt) = _tombstoneOrder.Dequeue();
-            if (_tombstones.TryGetValue(oldKey, out var at) && at == oldAt) _tombstones.Remove(oldKey);
+            if (_tombstones.TryGetValue(oldKey, out var at) && at == oldAt)
+            {
+                _tombstones.Remove(oldKey);
+                _mayReturn.Remove(oldKey);
+            }
         }
         return true;
     }
@@ -578,7 +627,11 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         // by signing time, so the list itself is swept (it is small); the queue only decides who goes first when full,
         // and skips keys already gone.
         var oldest = (now - VolunteerOperator.MaxClockSkew).ToUnixTimeSeconds();
-        foreach (var (key, _) in _tombstones.Where(p => p.Value < oldest).ToList()) _tombstones.Remove(key);
+        foreach (var (key, _) in _tombstones.Where(p => p.Value < oldest).ToList())
+        {
+            _tombstones.Remove(key);
+            _mayReturn.Remove(key);
+        }
         while (_tombstoneOrder.TryPeek(out var head) && !(_tombstones.TryGetValue(head.Key, out var at) && at == head.At)) _tombstoneOrder.Dequeue();
         foreach (var (key, entry) in _entries.Where(p => now - p.Value.Seen > VolunteerNodes.Ttl && !p.Value.Probing).ToList())
             Drop(key, entry);

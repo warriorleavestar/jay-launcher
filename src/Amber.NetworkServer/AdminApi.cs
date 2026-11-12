@@ -212,6 +212,7 @@ public sealed class AdminApi : IAsyncDisposable
                         {
                             ["url"] = n.Url, ["operator"] = n.Operator, ["disputed"] = n.Disputed, ["claimedBy"] = n.ClaimedBy is { } claims ? new JsonArray([.. claims.Select(c => (JsonNode)c)]) : null,
                             ["unsignedAttempts"] = n.UnsignedAttempts, ["lastUnsigned"] = n.LastUnsigned?.ToUnixTimeSeconds(),
+                            ["claims"] = n.Claims, ["claimants"] = n.Claimants,
                         })]),
                     });
                 case ("GET", "/bans"):

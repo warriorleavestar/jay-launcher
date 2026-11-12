@@ -95,6 +95,29 @@ internal sealed partial class SelfTest
             await ShotAsync("Volunteer relay signing");
             host.SaveVolunteerCommand.Execute(null);
             Check("Volunteer relay: signing saved", service.Settings.VolunteerSigned, host.Status);
+            // The longest volunteer message wraps in a narrow window, in the languages where it is longest.
+            var width = Dispatcher.UIThread.Invoke(() => window.Width);
+            foreach (var language in new[] { "en", "ja" })
+            {
+                Dispatcher.UIThread.Invoke(() =>
+                {
+                    Amber.Core.Localization.L.SetLanguage(language);
+                    window.Width = 640;
+                    host.VolunteerStatus = L.T("core.mp.public.volunteer_owner");
+                });
+                await Task.Delay(400);
+                var status = await FindAsync<TextBlock>(t => t.Text == host.VolunteerStatus && t.IsEffectivelyVisible);
+                if (status is not null) Dispatcher.UIThread.Invoke(() => status.BringIntoView());
+                Check($"Volunteer relay: long message wraps in a narrow window ({language})",
+                    status is not null && Dispatcher.UIThread.Invoke(() => status.Bounds.Height > status.FontSize * 2 && status.Bounds.Right <= (status.Parent as Control)!.Bounds.Width + 1));
+                await ShotAsync($"Volunteer relay narrow {language}");
+            }
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                Amber.Core.Localization.L.SetLanguage("zh-Hans");
+                window.Width = width;
+                host.VolunteerStatus = "";
+            });
             Dispatcher.UIThread.Invoke(() => { host.VolunteerSigned = false; host.VolunteerEnabled = false; });
             host.SaveVolunteerCommand.Execute(null);
             Check("Volunteer relay: signing turned off again", !service.Settings.VolunteerSigned && !service.Settings.VolunteerNode, host.Status);

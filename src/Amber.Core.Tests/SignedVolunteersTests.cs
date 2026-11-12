@@ -273,6 +273,68 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AnUnreachableAddressIsNotDialedOverAndOver()
+    {
+        var dials = 0;
+        var registry = new VolunteerRegistry((_, _) => { Interlocked.Increment(ref dials); return Task.FromResult(false); }, () => _now) { NetworkId = Net };
+        var mallory = Person();
+        var target = "tcp://target.example.org:11010";
+        // Signed again and again a second apart: each failed probe leaves only a replay guard, not a way back in, and the
+        // same address is dialed at most once per check interval.
+        var accepted = 0;
+        for (var i = 0; i < 60; i++)
+        {
+            _now += TimeSpan.FromSeconds(1);
+            if (Ok(registry.Register(target, VolunteerOperator.Sign(mallory, Net, target, _now)))) accepted++;
+            await registry.LastProbe;
+        }
+        var allowed = (int)(TimeSpan.FromSeconds(60) / VolunteerRegistry.CheckSameAddressEvery) + 1;
+        Assert.InRange(dials, 1, allowed);
+        Assert.Equal(dials, accepted);
+        // Many addresses: the account's allowance holds (failed probes don't make them "returning").
+        var others = 0;
+        for (var i = 0; i < 40; i++)
+        {
+            var url = $"tcp://t{i}.example.org:11010";
+            if (Ok(registry.Register(url, VolunteerOperator.Sign(mallory, Net, url, _now)))) others++;
+            await registry.LastProbe;
+        }
+        Assert.True(others <= VolunteerRegistry.NewPerAccountPerMinute);
+    }
+
+    [Fact]
+    public async Task AFloodOfClaimsCannotPushOutTheLongestClaimant()
+    {
+        var registry = Registry();
+        var squatter = Person();
+        var victim = Person();
+        var url = "tcp://v.example.org:11010";
+        Assert.True(Ok(await RegisterAsync(registry, url, squatter)));
+        await registry.LastProbe;
+        Assert.Equal("owner", ErrorOf(await RegisterAsync(registry, url, victim)));
+        // Throwaway accounts claim over and over while the victim keeps renewing.
+        for (var round = 0; round < 3; round++)
+        {
+            for (var i = 0; i < 6; i++) await RegisterAsync(registry, url, Person());
+            Assert.Equal("owner", ErrorOf(await RegisterAsync(registry, url, victim)));
+        }
+        var entry = registry.Operators().Single();
+        Assert.Contains(victim.Certificate.Account, entry.ClaimedBy!);
+        // The operator sees how many claims and accounts there were.
+        Assert.Equal(1 + 3 * 6 + 3, entry.Claims);
+        Assert.Equal(1 + 3 * 6, entry.Claimants);
+        // One account can't claim without limit either.
+        var spammer = Person();
+        string? last = null;
+        for (var i = 0; i < VolunteerRegistry.NewPerAccountPerMinute + 2; i++)
+        {
+            _now += TimeSpan.FromMilliseconds(1100);
+            last = ErrorOf(registry.Register(url, VolunteerOperator.Sign(spammer, Net, url, _now)));
+        }
+        Assert.Equal("rate", last);
+    }
+
+    [Fact]
     public void BrokenCertificatesAndSignaturesAreRefused()
     {
         var signed = VolunteerOperator.Sign(Person(), Net, "tcp://x.example.org:11010", _now);
