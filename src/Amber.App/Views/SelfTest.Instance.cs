@@ -228,6 +228,9 @@ internal sealed partial class SelfTest
             // ---- Start and go to (quick play) ----
             await QuickPlayAsync(instance, page, id);
 
+            // ---- World maintenance (upgrade, pre-generate) ----
+            await WorldMaintenanceAsync(instance, page, id);
+
             // ---- English ----
             L.SetLanguage("en");
             instance.TabIndex = (int)InstanceTab.Overview;
@@ -345,6 +348,88 @@ internal sealed partial class SelfTest
         window.Height = 720;
         instance.TabIndex = (int)InstanceTab.Overview;
         await Task.Delay(200);
+    }
+
+    /// <summary>
+    /// World maintenance: the world row's ⋯ has 升级存档 and 预生成…, the drawer has the radius chips and an estimate,
+    /// and a run is an Activity task while the row says 准备中. Nothing is launched (the start is replaced).
+    /// </summary>
+    private async Task WorldMaintenanceAsync(InstanceViewModel instance, InstancePage? page, string id)
+    {
+        var service = main.Service;
+        var loaderBefore = service.UsesUniversalLoader(id);
+        try
+        {
+            instance.TabIndex = (int)InstanceTab.Worlds;
+            service.NotifyContentChanged();
+            await WaitAsync(() => instance.Worlds.Any(w => w.World.FolderName == "Survival"), 5);
+            var world = instance.Worlds.FirstOrDefault(w => w.World.FolderName == "Survival");
+            Check("世界页签列出 Survival", world is not null, string.Join(", ", instance.Worlds.Select(w => w.World.FolderName)));
+            if (world is null) return;
+            await Task.Delay(300);
+            var menu = Dispatcher.UIThread.Invoke(() => page?.WorldsList.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Content as string == "⋯" && b.DataContext == world)?.Flyout as MenuFlyout);
+            var headers = Dispatcher.UIThread.Invoke(() => menu?.Items.OfType<MenuItem>().Select(m => m.Header as string).ToList() ?? []);
+            Check("世界行 ⋯：有“升级存档”和“预生成…”", headers.Contains(L.T("maintenance.menu.upgrade")) && headers.Contains(L.T("maintenance.menu.pregen")), string.Join(", ", headers));
+
+            // An earlier run stopped part way: the drawer says it continues.
+            File.WriteAllText(Path.Combine(world.World.Path, Amber.Core.Bake.PregenState.FileName),
+                """{"schema":"amber-ul/pregen@1","dimension":"minecraft:overworld","centerX":0,"centerZ":0,"radius":64,"done":4000,"total":16641,"complete":false}""");
+            service.SetUniversalLoader(id, false);
+            instance.OpenPregenCommand.Execute(world);
+            await Task.Delay(400);
+            Check("预生成抽屉：三个半径芯片 64 / 128 / 256，默认 64，写距离、区块数、时间和磁盘",
+                Dispatcher.UIThread.Invoke(() => page?.PregenDrawer.IsEffectivelyVisible == true && page.PregenRadiusChips.ItemCount == 3)
+                && instance.PregenRadius == 64 && instance.PregenEstimate.Contains("1,024") && instance.PregenEstimate.Contains("16,641"), instance.PregenEstimate);
+            Check("预生成抽屉：上次做到一半时说这次接着做", instance.HasPregenResume && instance.PregenResumeNote!.Contains("4,000"), instance.PregenResumeNote ?? "");
+            Check("没开通用加载器：说要开、【开始预生成】不能点", !instance.CanMaintainWorlds && instance.MaintenanceBlocker == L.T("maintenance.needs_loader")
+                && Dispatcher.UIThread.Invoke(() => page?.StartPregenButton.IsEnabled == false && page.PregenBlockerText.IsEffectivelyVisible));
+            Check("抽屉里没有“烘焙”这个词", !instance.PregenEstimate.Contains("烘焙") && !L.T("maintenance.pregen.how").Contains("烘焙") && !L.T("maintenance.pregen.intro").Contains("烘焙"));
+            service.SetUniversalLoader(id, true);
+            instance.ClosePregenCommand.Execute(null);
+            instance.OpenPregenCommand.Execute(world);
+            instance.PregenRadiusIndex = 1;
+            await Task.Delay(300);
+            Check("选 128：估算跟着变，开了通用加载器后能开始", instance.PregenRadius == 128 && instance.PregenEstimate.Contains("2,048") && instance.CanMaintainWorlds
+                && Dispatcher.UIThread.Invoke(() => page?.StartPregenButton.IsEnabled == true), instance.PregenEstimate);
+            await ShotAsync("instance-world-pregen-drawer");
+
+            // A run: an Activity task, the row says 准备中, then how far it is.
+            LaunchRequest? asked = null;
+            var run = instance.StartMaintenance(world, Amber.Core.Bake.WorldMaintenance.Pregen("Survival", instance.PregenRadius), r => asked = r);
+            instance.ClosePregenCommand.Execute(null);
+            await WaitAsync(() => asked is not null, 3);
+            var task = service.Tasks.Active.FirstOrDefault(t => t.Kind == "world-maintenance");
+            var row = instance.Worlds.First(w => w.World.FolderName == "Survival");
+            Check("开始后：活动里一个任务，启动请求带着这个存档和半径，世界行写“准备中”",
+                task is not null && asked?.Maintenance == run && run?.Spec.PregenRadius == 128 && row.Busy == L.T("maintenance.row.preparing")
+                && Dispatcher.UIThread.Invoke(() => page?.WorldsList.GetVisualDescendants().OfType<Border>().Any(b => b.Name == "WorldBusyPill" && b.IsEffectivelyVisible) == true),
+                $"{task?.Title} / {row.Busy}");
+            await ShotAsync("instance-world-maintenance-row");
+            run!.Report(new Amber.Core.Bake.MaintenanceProgress("pregen", 16_513, 66_049, "Survival", null));
+            await Task.Delay(300);
+            Check("进度：活动里写“生成区块 16,512/66,049”，世界行写“预生成 25%”",
+                task?.Detail == L.F("maintenance.step.chunks", "16,513", "66,049") && Math.Abs((task?.Progress ?? 0) - 0.25) < 0.01
+                && row.Busy == L.F("maintenance.row.progress", 25), $"{task?.Detail} {task?.Progress} / {row.Busy}");
+            Check("进行中：这个世界的其他操作不能点", Dispatcher.UIThread.Invoke(() =>
+                page?.WorldsList.GetVisualDescendants().OfType<StackPanel>().Any(p => p.DataContext == row && p.Orientation == Avalonia.Layout.Orientation.Horizontal && !p.IsEnabled && p.Children.OfType<Button>().Any()) == true));
+            main.Activity.IsOpen = true;
+            await Task.Delay(400);
+            await ShotAsync("instance-world-maintenance-activity");
+            main.Activity.IsOpen = false;
+            run.Report(new Amber.Core.Bake.MaintenanceProgress("done", 66_049, 66_049, "Survival", null));
+            run.Finish(HomeViewModel.MaintenanceOutcome(run, 0));
+            await WaitAsync(() => task?.State == Amber.Core.Activity.TaskState.Succeeded, 3);
+            await Task.Delay(300);
+            row = instance.Worlds.First(w => w.World.FolderName == "Survival");
+            Check("做完：任务成功、写世界的名字，世界行不再写准备中", task?.State == Amber.Core.Activity.TaskState.Succeeded && row.Busy is null
+                && task?.Message?.StartsWith(row.Name) == true, $"{task?.State} {task?.Message}");
+        }
+        finally
+        {
+            service.SetUniversalLoader(id, loaderBefore);
+            instance.TabIndex = (int)InstanceTab.Overview;
+            await Task.Delay(200);
+        }
     }
 
     private async Task MenuShotAsync(InstancePage? page, string name, bool openWorlds)
