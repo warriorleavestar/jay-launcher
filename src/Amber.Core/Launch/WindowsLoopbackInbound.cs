@@ -26,8 +26,11 @@ namespace Amber.Core.Launch;
 public static unsafe class WindowsLoopbackInbound
 {
     internal static readonly Guid SubLayerKey = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d13");
-    internal static readonly Guid FilterV4Key = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d14");
-    internal static readonly Guid FilterV6Key = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d16");
+    // Version 2 keys (with the remote-user condition). Present() only knows these, so a machine with the first
+    // version's filters (…d14/…d16, no user condition) asks for the admin step again, which deletes them.
+    internal static readonly Guid FilterV4Key = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d24");
+    internal static readonly Guid FilterV6Key = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d26");
+    private static readonly Guid[] OldFilterKeys = [new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d14"), new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d16")];
     /// <summary>A key Jay never creates: its lookup must say "not found" before "access denied" can be read as "exists".</summary>
     internal static readonly Guid ControlKey = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9dff");
 
@@ -196,6 +199,8 @@ public static unsafe class WindowsLoopbackInbound
         {
             () => FwpmFilterDeleteByKey0(engine, FilterV4Key),
             () => FwpmFilterDeleteByKey0(engine, FilterV6Key),
+            () => FwpmFilterDeleteByKey0(engine, OldFilterKeys[0]),
+            () => FwpmFilterDeleteByKey0(engine, OldFilterKeys[1]),
             () => FwpmSubLayerDeleteByKey0(engine, SubLayerKey),
         })
         {
