@@ -13,7 +13,8 @@ namespace Amber.Core.Multiplayer.Public;
 /// 目录服务的协议：一条连接一个请求，请求和回复各是一段 JSON（UTF-8，最长 16 KB），只经 <see cref="DirectoryChannel"/>
 /// 加密传输（不再有明文请求）。
 /// announce 发布 / 续期房间（房主用房间的签名钥匙签过，房间编号由签名公钥派生，序号只能变大）；
-/// withdraw 撤下；list 看公开列表；lookup 按大厅名找房主（拿着邀请码的人用它找到隐藏房间）；
+/// withdraw 撤下；snap 取整份目录快照（公开房间 + 每个隐藏房间封好的条目，见 <see cref="DirectorySnapshots"/>：
+/// 拿着邀请码的人在本机的快照里找房主，目录看不到谁找了哪个房间）；
 /// find 按设备指纹码找房间（房主打开了“可以用指纹码找到这个房间”时，发布时带上指纹密钥，目录拿它认码）。
 /// 目录服务只存这些，不经手任何钥匙；房主 90 秒没续期就从列表里消失。
 /// <para>
@@ -25,6 +26,12 @@ namespace Amber.Core.Multiplayer.Public;
 public static class RoomDirectoryProtocol
 {
     public const int MaxLine = 16 * 1024;
+
+    /// <summary>Largest reply (a full snapshot of a busy directory); every other reply stays within <see cref="MaxLine"/>.</summary>
+    public const int MaxReply = 16 * 1024 * 1024;
+
+    /// <summary>Snapshot replies are padded to a multiple of this, so their size says little about what changed.</summary>
+    public const int SnapshotPad = 64 * 1024;
     public const int MaxLookupKeys = 4;
     /// <summary>Sealed mail kept per mailbox; more is refused with "full" until the recipient picks some up or it expires.</summary>
     public const int MaxMailPerBox = 32;
@@ -34,10 +41,8 @@ public static class RoomDirectoryProtocol
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan RenewEvery = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    public static readonly TimeSpan SnapshotTimeout = TimeSpan.FromSeconds(60);
 
-    /// <summary>邀请码的大厅名 → 目录里的查找键（不直接存大厅名，免得目录拿它去进大厅）。</summary>
-    public static string LookupKey(ReadOnlySpan<byte> lobbyKey) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.ASCII.GetBytes("jay-lookup-v1:" + LobbyKeys.LobbyName(lobbyKey))));
 }
 
 /// <summary>目录服务（跑在公共网络节点那台机器上，监听 127.0.0.1:47668，由同一台机器上的公共网络 EasyTier 把 10.235.0.1:47668 交过来）。</summary>
@@ -51,6 +56,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     {
         public required RoomListing Listing;
         public bool Listed;
+        /// <summary>Indexes (hex) of this room's hidden entries in the snapshot (<see cref="HiddenEntry"/>).</summary>
         public string[] Lookup = [];
         /// <summary>房主的指纹密钥（没打开指纹查找时为 null）。</summary>
         public byte[]? Search;
@@ -69,7 +75,21 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     private readonly Action<string>? _log;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Entry> _rooms = new(StringComparer.Ordinal);
+    /// <summary>Hidden entry index (hex) → room id, first come first served.</summary>
     private readonly Dictionary<string, string> _lookup = new(StringComparer.Ordinal);
+
+    /// <summary>The snapshot as it is now: "r:&lt;id&gt;" → public listing, "h:&lt;index&gt;" → sealed hidden entry (base64).</summary>
+    private readonly Dictionary<string, JsonNode> _snapshot = new(StringComparer.Ordinal);
+    /// <summary>Snapshot changes in order (version, key), for deltas. Trimmed to <see cref="MaxSnapshotLog"/>.</summary>
+    private readonly Queue<(long Version, string Key)> _snapshotLog = new();
+    private long _snapshotVersion;
+    /// <summary>Deltas can be served from this version on (older ones get the full snapshot).</summary>
+    private long _snapshotFloor;
+    /// <summary>Changes with every start, so a client never applies a delta to a copy from an earlier run.</summary>
+    private readonly string _snapshotEpoch = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+
+    /// <summary>Snapshot changes kept for deltas (a few renewals of every room).</summary>
+    public const int MaxSnapshotLog = 8 * MaxRooms;
     /// <summary>指纹密钥（十六进制）→ 房间编号，先到先得。</summary>
     private readonly Dictionary<string, string> _search = new(StringComparer.Ordinal);
     /// <summary>撤下过的房间和撤下时的序号（之后拿旧签名重新发布的不认）。只留最近的一些。</summary>
@@ -220,12 +240,18 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             // fails the handshake's first-message check and is dropped without a reply too.
             if (first[0] == DirectoryChannel.LegacyFirstByte) return;
             if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
-            await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
+            var snapshot = secure.Request["op"]?.GetValue<string>() == "snap";
+            // A full snapshot of a busy directory is megabytes over the network's tunnel: give it longer.
+            if (snapshot) deadline.CancelAfter(RoomDirectoryProtocol.SnapshotTimeout);
+            await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token, snapshot ? RoomDirectoryProtocol.SnapshotPad : 0);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
     }
 
     private static string? Source(TcpClient client) => (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString();
+
+    /// <summary>Sees every request as it arrives (tests check that readers all send the same thing).</summary>
+    internal Action<JsonObject>? OnRequest { get; set; }
 
     /// <summary>处理一个请求（测试和框架的宿主直接调）。</summary>
     public JsonObject Handle(JsonObject request) => Handle(request, source: null);
@@ -233,6 +259,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Handles one request. <paramref name="source"/>: the caller's address, for per-source limits.</summary>
     internal JsonObject Handle(JsonObject request, string? source)
     {
+        OnRequest?.Invoke((JsonObject)request.DeepClone());
         try
         {
             var op = request["op"]?.GetValue<string>();
@@ -242,8 +269,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             {
                 "announce" => Announce(request),
                 "withdraw" => Withdraw(request),
-                "list" => List(),
-                "lookup" => Lookup(request),
+                "snap" => Snapshot(request),
                 "find" => Find(request),
                 "post" => Post(request),
                 "fetch" => Fetch(request),
@@ -399,8 +425,16 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         // FromJson 已经核对过签名和编号。
         if (RoomListing.FromJson(request["room"]) is not { } listing || listing.Ip.Length == 0) return Error("room");
         var listed = request["listed"]?.GetValue<bool>() ?? false;
-        var keys = (request["lookup"] as JsonArray ?? []).Select(k => k?.GetValue<string>()).OfType<string>()
-            .Where(k => k.Length == 64 && k.All(char.IsAsciiHexDigit)).Distinct().Take(RoomDirectoryProtocol.MaxLookupKeys).ToArray();
+        var hidden = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var item in (request["hidden"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            var index = item["k"]?.GetValue<string>()?.ToLowerInvariant();
+            var blob = item["b"]?.GetValue<string>();
+            if (!IsHex(index, HiddenEntry.IndexLength * 2) || blob is null || blob.Length != (HiddenEntry.SealedLength + 2) / 3 * 4) return Error("bad");
+            if (Convert.FromBase64String(blob).Length != HiddenEntry.SealedLength) return Error("bad");
+            if (hidden.Count < RoomDirectoryProtocol.MaxLookupKeys) hidden.TryAdd(index!, blob);
+        }
+        var keys = hidden.Keys.ToArray();
         var fp = request["fp"]?.GetValue<string>();
         if (fp is not null && (fp.Length != 64 || !fp.All(char.IsAsciiHexDigit))) return Error("bad");
         fp = fp?.ToLowerInvariant();
@@ -439,8 +473,16 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 if (!isNew) RemoveLocked(listing.Id, entry, RoomRemoval.Removed);
                 return Error(verdict);
             }
-            foreach (var old in entry.Lookup) _lookup.Remove(old);
-            foreach (var key in keys) _lookup[key] = listing.Id;
+            foreach (var old in entry.Lookup)
+            {
+                _lookup.Remove(old);
+                if (!hidden.ContainsKey(old)) SetSnapshot("h:" + old, null);
+            }
+            foreach (var (key, blob) in hidden)
+            {
+                _lookup[key] = listing.Id;
+                SetSnapshot("h:" + key, JsonValue.Create(blob));
+            }
             entry.Lookup = keys;
             if (entry.Search is { } oldSearch) _search.Remove(Convert.ToHexStringLower(oldSearch));
             entry.Search = fp is null ? null : Convert.FromHexString(fp);
@@ -450,6 +492,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             entry.Account = account;
             entry.Expires = _now() + RoomDirectoryProtocol.Ttl;
             _rooms[listing.Id] = entry;
+            SetSnapshot("r:" + listing.Id, listed && listing.Mode != RoomVisibility.Hidden ? entry.Listing.ToJson() : null);
             var published = entry.Listing;
             _events.Add(o => o.OnAnnounced(published, listed, isNew));
             return new JsonObject { ["ok"] = true };
@@ -473,28 +516,51 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
-    private JsonObject List()
+    /// <summary>Records a snapshot change (null removes the key). Unchanged values aren't logged.</summary>
+    private void SetSnapshot(string key, JsonNode? value)
     {
-        lock (_gate)
+        if (value is null)
         {
-            Prune();
-            var rooms = _rooms.Values.Where(e => e.Listed && e.Listing.Mode != RoomVisibility.Hidden)
-                .OrderByDescending(e => e.Listing.Players).ThenByDescending(e => e.Listing.Updated).Take(MaxListed)
-                .Select(e => (JsonNode?)e.Listing.ToJson()).ToArray();
-            return new JsonObject { ["ok"] = true, ["rooms"] = new JsonArray(rooms) };
+            if (!_snapshot.Remove(key)) return;
         }
+        else
+        {
+            if (_snapshot.TryGetValue(key, out var have) && JsonNode.DeepEquals(have, value)) return;
+            _snapshot[key] = value;
+        }
+        _snapshotVersion++;
+        _snapshotLog.Enqueue((_snapshotVersion, key));
+        while (_snapshotLog.Count > MaxSnapshotLog) _snapshotFloor = _snapshotLog.Dequeue().Version;
     }
 
-    private JsonObject Lookup(JsonObject request)
+    /// <summary>
+    /// The snapshot: everything when the caller's copy is from another run or too old, otherwise only the keys that
+    /// changed after its version. Public rooms are signed listings; hidden entries are sealed (<see cref="HiddenEntry"/>).
+    /// </summary>
+    private JsonObject Snapshot(JsonObject request)
     {
-        var key = request["key"]?.GetValue<string>();
-        if (key is null) return Error("bad");
+        var epoch = request["epoch"]?.GetValue<string>();
+        var have = request["have"]?.GetValue<long>() ?? -1;
         lock (_gate)
         {
             Prune();
-            if (!_lookup.TryGetValue(key, out var id) || !_rooms.TryGetValue(id, out var entry)) return new JsonObject { ["ok"] = true };
-            // 只给地址和房主公钥（隐藏房间的其他信息不外露）。
-            return new JsonObject { ["ok"] = true, ["ip"] = entry.Listing.Ip, ["key"] = Convert.ToHexStringLower(entry.Listing.HostKey), ["id"] = id };
+            var full = epoch != _snapshotEpoch || have < _snapshotFloor || have > _snapshotVersion;
+            IEnumerable<string> keys = full ? _snapshot.Keys : _snapshotLog.Where(c => c.Version > have).Select(c => c.Key).Distinct(StringComparer.Ordinal);
+            var rooms = new JsonArray();
+            var hidden = new JsonArray();
+            var gone = new JsonArray();
+            foreach (var key in keys)
+            {
+                if (!_snapshot.TryGetValue(key, out var value)) gone.Add((JsonNode)key);
+                else if (key.StartsWith("r:", StringComparison.Ordinal)) rooms.Add(value.DeepClone());
+                else hidden.Add((JsonNode)new JsonObject { ["k"] = key[2..], ["b"] = value.DeepClone() });
+            }
+            var reply = new JsonObject { ["ok"] = true, ["epoch"] = _snapshotEpoch, ["ver"] = _snapshotVersion, ["full"] = full };
+            if (!full) reply["from"] = have;
+            reply["rooms"] = rooms;
+            reply["hidden"] = hidden;
+            reply["gone"] = gone;
+            return reply;
         }
     }
 
@@ -696,8 +762,13 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     {
         if (!_rooms.Remove(id)) return;
         _events.Add(o => o.OnRemoved(id, reason));
+        SetSnapshot("r:" + id, null);
         foreach (var key in entry.Lookup)
-            if (_lookup.TryGetValue(key, out var holder) && holder == id) _lookup.Remove(key);
+            if (_lookup.TryGetValue(key, out var holder) && holder == id)
+            {
+                _lookup.Remove(key);
+                SetSnapshot("h:" + key, null);
+            }
         if (entry.Search is { } search && _search.TryGetValue(Convert.ToHexStringLower(search), out var finder) && finder == id)
             _search.Remove(Convert.ToHexStringLower(search));
     }
@@ -755,6 +826,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// </summary>
     public DirectoryKeyMemory? KeyMemory { get; init; }
 
+    /// <summary>This Jay's copy of the directories' snapshots (shared by every client of the same network session).</summary>
+    public DirectorySnapshots Snapshots { get; init; } = DirectorySnapshots.For(network);
+
+    /// <summary>Sealed hidden entries made for earlier announces, reused while nothing in them changes (so renewals aren't snapshot changes).</summary>
+    private readonly Dictionary<string, byte[]> _sealed = new(StringComparer.Ordinal);
+
     /// <summary>The network's EasyTier secret, for the channel's psk. Defaults to the network's.</summary>
     public string NetworkSecret { get; init; } = network.Profile?.Secret ?? "";
 
@@ -768,12 +845,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     };
 
     /// <summary>Every request goes through <see cref="DirectoryChannel"/>; there is no plaintext protocol any more.</summary>
-    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct)
+    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct, TimeSpan? timeout = null)
     {
         request["jay"] = Version;
         var trust = Trust;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
+        deadline.CancelAfter(timeout ?? RoomDirectoryProtocol.RequestTimeout);
         try
         {
             await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
@@ -922,30 +999,59 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
     }
 
-    /// <summary>公开列表：合并所有在线目录的结果，同一个房间取序号最大的版本。</summary>
+    /// <summary>
+    /// Asks every directory what changed since the version in <paramref name="have"/> (by directory address; missing
+    /// means "everything"). Every reader sends the same request, whatever it is looking for.
+    /// </summary>
+    internal async Task<List<(string Ip, JsonObject? Reply, Exception? Error)>> SnapshotAsync(IReadOnlyDictionary<string, (string Epoch, long Version)> have, CancellationToken ct)
+    {
+        var targets = await TargetsAsync(ct);
+        var tasks = targets.Select(async ip =>
+        {
+            var request = new JsonObject { ["op"] = "snap" };
+            if (have.TryGetValue(ip, out var mine))
+            {
+                request["epoch"] = mine.Epoch;
+                request["have"] = mine.Version;
+            }
+            try
+            {
+                var reply = await CallAsync(ip, request, ct, RoomDirectoryProtocol.SnapshotTimeout);
+                if (!IsOk(reply)) Check(reply);
+                return (ip, (JsonObject?)reply, (Exception?)null);
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException or EndOfStreamException) { return (ip, null, e); }
+        }).ToList();
+        var results = (await Task.WhenAll(tasks)).ToList();
+        ct.ThrowIfCancellationRequested();
+        return results;
+    }
+
+    /// <summary>公开列表：本机快照里所有目录的公开房间，同一个房间取序号最大的版本。</summary>
     public async Task<IReadOnlyList<RoomListing>> ListAsync(CancellationToken ct)
     {
-        var replies = NeedOne(await FanOutAsync(new JsonObject { ["op"] = "list" }, ct));
-        var rooms = new Dictionary<string, RoomListing>(StringComparer.Ordinal);
-        foreach (var reply in replies)
-            foreach (var room in (reply["rooms"] as JsonArray ?? []).Select(RoomListing.FromJson).OfType<RoomListing>())
-                if (!rooms.TryGetValue(room.Id, out var have) || room.Seq > have.Seq) rooms[room.Id] = room;
-        return [.. rooms.Values.OrderByDescending(r => r.Players).ThenByDescending(r => r.Updated).Take(RoomDirectoryServer.MaxListed)];
+        await Snapshots.ReadyAsync(this, ct);
+        return [.. Snapshots.Rooms().OrderByDescending(r => r.Players).ThenByDescending(r => r.Updated).Take(RoomDirectoryServer.MaxListed)];
     }
 
     /// <summary>发布或续期（发给每个在线的目录）。返回目录里给房主捎的话（直连回复码）。</summary>
     /// <param name="listing">已经用 <see cref="RoomSigner.Sign"/> 签好的房间信息。</param>
+    /// <param name="lobbyKeys">Lobby keys of the invites still open: each gets a sealed hidden entry, so holders of the invite find the room in their snapshot.</param>
     /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
     /// <param name="account">This network's login token, if logged in: lets networks that require login accept the room and tie it to the account.</param>
-    public async Task AnnounceAsync(RoomListing listing, bool listed, IEnumerable<string> lookupKeys, CancellationToken ct,
+    public async Task AnnounceAsync(RoomListing listing, bool listed, IEnumerable<byte[]> lobbyKeys, CancellationToken ct,
         byte[]? searchKey = null, string? account = null)
     {
+        var hit = new DirectoryHit(listing.Id, listing.Ip, listing.HostKey);
+        var hidden = new JsonArray();
+        foreach (var lobby in lobbyKeys.Take(RoomDirectoryProtocol.MaxLookupKeys))
+            hidden.Add((JsonNode)new JsonObject { ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)), ["b"] = Convert.ToBase64String(SealedFor(lobby, hit)) });
         var request = new JsonObject
         {
             ["op"] = "announce",
             ["room"] = listing.ToJson(),
             ["listed"] = listed,
-            ["lookup"] = new JsonArray(lookupKeys.Select(k => (JsonNode?)k).ToArray()),
+            ["hidden"] = hidden,
         };
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         if (account is not null) request["account"] = account;
@@ -997,18 +1103,24 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         NeedOne(await FanOutAsync(new JsonObject { ["op"] = "withdraw", ["id"] = signer.RoomId, ["seq"] = seq, ["sig"] = Convert.ToHexStringLower(sig) }, ct));
     }
 
-    /// <summary>按邀请码里的大厅密钥找房主；目录里没有时返回 null。</summary>
+    private byte[] SealedFor(byte[] lobbyKey, DirectoryHit hit)
+    {
+        var cacheKey = Convert.ToHexStringLower(SHA256.HashData([.. lobbyKey, .. Encoding.UTF8.GetBytes($"|{hit.Id}|{hit.Ip}|"), .. hit.HostKey]));
+        lock (_sealed)
+        {
+            if (_sealed.TryGetValue(cacheKey, out var have)) return have;
+            if (_sealed.Count >= 16) _sealed.Clear();
+            return _sealed[cacheKey] = HiddenEntry.Seal(lobbyKey, hit);
+        }
+    }
+
+    /// <summary>
+    /// 按邀请码里的大厅密钥找房主：只在本机的目录快照里找（目录看不到谁找了哪个房间）。没有时返回 null。
+    /// </summary>
     public async Task<DirectoryHit?> LookupAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct)
     {
-        var reply = await FirstAsync(new JsonObject { ["op"] = "lookup", ["key"] = RoomDirectoryProtocol.LookupKey(lobbyKey.Span) },
-            r => IsOk(r) && r["ip"] is not null, ct);
-        Check(reply);
-        var ip = reply["ip"]?.GetValue<string>();
-        var key = reply["key"]?.GetValue<string>();
-        var id = reply["id"]?.GetValue<string>();
-        if (ip is null || key is not { Length: 64 } || id is null || !RoomListing.IsPublicNetworkIp(ip)) return null;
-        try { return new DirectoryHit(id, ip, Convert.FromHexString(key)); }
-        catch (FormatException) { return null; }
+        await Snapshots.ReadyAsync(this, ct);
+        return Snapshots.Find(lobbyKey.Span);
     }
 
     /// <summary>按设备指纹码找房间；没找到返回 null。</summary>

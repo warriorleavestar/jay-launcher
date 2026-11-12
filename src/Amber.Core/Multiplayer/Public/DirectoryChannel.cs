@@ -25,7 +25,9 @@ namespace Amber.Core.Multiplayer.Public;
 /// different networks apart. The authentication comes from the pinned static key.
 /// </para>
 /// <para>
-/// On the wire every message is a 2-byte big-endian length and the bytes. A legacy request is a JSON line starting with
+/// On the wire every message is a 2-byte big-endian length and the bytes. A reply is one encrypted frame holding its
+/// 4-byte length, then encrypted frames of at most <see cref="ReplyChunk"/> bytes each (a snapshot can be megabytes),
+/// padded with spaces when the directory asks for it. A legacy request is a JSON line starting with
 /// '{' (0x7B); a Noise first message is 1248 bytes, so its first length byte is 0x04. The directory tells them apart by that byte.
 /// </para>
 /// </summary>
@@ -41,6 +43,9 @@ public static class DirectoryChannel
     /// (1184 + 16) + payload tag (16).
     /// </summary>
     private const int FirstMessageLength = X25519KeyPair.Length + MlKem768.EncapsulationKeySize + 2 * CipherState.TagLength;
+
+    /// <summary>Plaintext bytes per reply frame.</summary>
+    private const int ReplyChunk = RoomDirectoryProtocol.MaxLine;
 
     /// <summary>Directory keys are X25519 public keys, 32 bytes.</summary>
     public const int KeyLength = X25519KeyPair.Length;
@@ -89,8 +94,19 @@ public static class DirectoryChannel
             using (send)
             using (receive)
             {
-                var frame = await ReadFrameAsync(stream, ct);
-                var reply = receive.DecryptWithAd(Prologue, frame);
+                var headerFrame = await ReadFrameAsync(stream, ct);
+                var header = receive.DecryptWithAd(Prologue, headerFrame);
+                var total = header.Length == 4 ? BinaryPrimitives.ReadInt32BigEndian(header) : 0;
+                if (total is <= 0 or > RoomDirectoryProtocol.MaxReply) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
+                var reply = new byte[total];
+                for (var at = 0; at < total;)
+                {
+                    var frame = await ReadFrameAsync(stream, ct);
+                    var chunk = receive.DecryptWithAd(Prologue, frame);
+                    if (chunk.Length == 0 || chunk.Length > total - at) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
+                    chunk.CopyTo(reply, at);
+                    at += chunk.Length;
+                }
                 try
                 {
                     return JsonNode.Parse(reply) as JsonObject ?? throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
@@ -112,7 +128,7 @@ public static class DirectoryChannel
     /// The directory's side, after it read <paramref name="firstByte"/> and found it isn't a legacy request.
     /// Returns the request and a function that sends the reply, or null when the handshake fails (the caller just closes).
     /// </summary>
-    public static async Task<(JsonObject Request, Func<JsonObject, CancellationToken, Task> Reply)?> AcceptAsync(
+    public static async Task<(JsonObject Request, DirectoryReply Reply)?> AcceptAsync(
         Stream stream, byte firstByte, X25519KeyPair identity, string networkSecret, CancellationToken ct, byte[]? certificate = null)
     {
         var psk = Psk(networkSecret);
@@ -132,13 +148,22 @@ public static class DirectoryChannel
             catch (JsonException) { return null; }
             var (send, receive) = hs.Split();
             receive.Dispose();
-            return (request, async (reply, token) =>
+            return (request, async (reply, token, padTo) =>
             {
                 using (send)
                 {
-                    var bytes = Encoding.UTF8.GetBytes(reply.ToJsonString());
-                    if (bytes.Length > RoomDirectoryProtocol.MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
-                    await WriteFrameAsync(stream, send.EncryptWithAd(Prologue, bytes), token);
+                    var json = Encoding.UTF8.GetBytes(reply.ToJsonString());
+                    var total = padTo > 0 ? (json.Length + padTo - 1) / padTo * padTo : json.Length;
+                    if (total > RoomDirectoryProtocol.MaxReply) throw new InvalidDataException(L.T("core.mp.public.too_large"));
+                    // Trailing spaces are JSON whitespace: the client parses the padded reply as it is.
+                    var bytes = new byte[total];
+                    json.CopyTo(bytes, 0);
+                    bytes.AsSpan(json.Length).Fill((byte)' ');
+                    var header = new byte[4];
+                    BinaryPrimitives.WriteInt32BigEndian(header, total);
+                    await WriteFrameAsync(stream, send.EncryptWithAd(Prologue, header), token);
+                    for (var at = 0; at < total; at += ReplyChunk)
+                        await WriteFrameAsync(stream, send.EncryptWithAd(Prologue, bytes.AsSpan(at, Math.Min(ReplyChunk, total - at))), token);
                 }
             });
         }
@@ -206,6 +231,9 @@ public static class DirectoryChannel
         return message;
     }
 }
+
+/// <summary>Sends the directory's reply; <paramref name="padTo"/> &gt; 0 pads it with spaces to a multiple of that many bytes.</summary>
+public delegate Task DirectoryReply(JsonObject reply, CancellationToken ct, int padTo = 0);
 
 /// <summary>
 /// The machine at the directory address doesn't hold any of the network's directory keys. Nothing was sent to it.

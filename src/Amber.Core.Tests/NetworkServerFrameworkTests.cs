@@ -46,8 +46,19 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         ["op"] = "announce",
         ["room"] = signer.Sign(listing, _now).ToJson(),
         ["listed"] = listed,
-        ["lookup"] = new JsonArray(listed ? [] : [(JsonNode)new string('c', 64)]),
+        ["hidden"] = new JsonArray(listed ? [] : [HiddenFor(listing)]),
     };
+
+    /// <summary>A hidden entry under a fresh invite (each hidden test room gets its own index).</summary>
+    private static JsonNode HiddenFor(RoomListing listing)
+    {
+        var lobby = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        return new JsonObject
+        {
+            ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)),
+            ["b"] = Convert.ToBase64String(HiddenEntry.Seal(lobby, new DirectoryHit("room", "10.235.0.7", new byte[32]))),
+        };
+    }
 
     private static bool Ok(JsonObject reply) => reply["ok"]?.GetValue<bool>() == true;
 
@@ -490,7 +501,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var server = await StartAsync(b => b.UseConfig(config));
         JsonObject List(string? version)
         {
-            var request = new JsonObject { ["op"] = "list" };
+            var request = new JsonObject { ["op"] = "snap" };
             if (version is not null) request["jay"] = version;
             return server.Directory!.Handle(request);
         }
@@ -688,7 +699,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         var signer = new RoomSigner();
         var lobby = new byte[32];
         Random.Shared.NextBytes(lobby);
-        await client.AnnounceAsync(signer.Sign(Listing(host), _now), true, [RoomDirectoryProtocol.LookupKey(lobby)], default);
+        await client.AnnounceAsync(signer.Sign(Listing(host), _now), true, [lobby], default);
 
         // 两个目录都有，列表合并后不重复。
         Assert.Equal(1, main.Count);

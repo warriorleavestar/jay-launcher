@@ -6,15 +6,14 @@ Status: implemented and waiting for security review. Every directory request goe
 
 A public network is an EasyTier network whose name and secret are public, so anyone can join it. Its room directory sits at a fixed address: `10.235.0.1`, with backups at `10.235.255.254`, `.253` and `.252`, on TCP port 47668. Jay sends every directory request to those addresses:
 
-- `list` and `find` to browse public rooms
+- `snap` to download the whole directory (public rooms and every hidden room's sealed entry), and `find` for fingerprint codes
 - `announce` and `withdraw` to publish your own room
-- `lookup` to turn an invite code's lobby into the host's knock address
 - `login`, sealed mail (`post` / `fetch` / `drop`), rendezvous and signed records, and `x-*` extensions
 
 The 2026-11-10 real-device test (finding 8) showed that EasyTier's DHCP handed the address `10.235.0.1` to an ordinary member while the directory was offline. Any member can also take the address on purpose with `--ipv4 10.235.0.1`. A machine holding the address can:
 
-- read every announce: room names, host fingerprints, lookup keys and knock addresses. Hidden rooms only publish lookup keys, but the impostor still learns which keys are looked up and when;
-- answer `list`, `find` and `lookup` with rooms it made up, which sends players to a knock port of the impostor's choosing (the knock handshake and the room's signed listing still stop impersonation of a specific host, but not phishing with fake rooms);
+- read every announce: room names, host fingerprints and knock addresses of public rooms. Hidden rooms only publish sealed entries (see zero-leak-codes.md, "Directory snapshot");
+- answer `snap` and `find` with rooms it made up, which sends players to a knock port of the impostor's choosing (the knock handshake and the room's signed listing still stop impersonation of a specific host, but not phishing with fake rooms);
 - see login requests (the password is sealed to the network's login key, so it isn't exposed) and mail;
 - drop everything (denial of service).
 
@@ -47,7 +46,7 @@ Details:
 
 - **Prologue.** `"jay-directory-v2"` (v1 was the classic X25519-only handshake; a v1 client and a v2 directory never complete a handshake).
 - **Psk.** `HKDF-SHA256(ikm = network EasyTier secret, salt = prologue, info = "jay-directory-psk-v1")`. The secret is public for public networks, so the psk only keeps handshakes of different networks apart. It is not an authentication factor; the pinned static key is.
-- **Framing.** Every message is a 2-byte big-endian length followed by the bytes. The maximum is `RoomDirectoryProtocol.MaxLine + 256`, and the request and reply JSON are each capped at `MaxLine`.
+- **Framing.** Every message is a 2-byte big-endian length followed by the bytes. The request JSON is capped at `RoomDirectoryProtocol.MaxLine`. The reply is one encrypted frame with its 4-byte length, then encrypted frames of at most `MaxLine` bytes each, up to `RoomDirectoryProtocol.MaxReply` (16 MB, for a full snapshot). Snapshot replies are padded with spaces to a multiple of 64 KB.
 - **Old clients.** There is no plaintext protocol any more. An old Jay's JSON request starts with `{` (0x7B) and is dropped at once; a Noise frame starts with the high byte of its length, 0x04 for the 1248-byte first message. A directory with no configured key uses a throwaway one, so the channel is still encrypted; clients can then only trust it on first use.
 - **Server failures.** A first frame that isn't exactly 1248 bytes is dropped before any DH or ML-KEM work. Any other handshake or decrypt failure on the server just closes the connection. The existing 64-slot concurrency cap and the request timeout apply to both protocols.
 

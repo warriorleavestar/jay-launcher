@@ -101,7 +101,7 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var signer = new RoomSigner();
         var book = new InviteBook();
         var standing = book.CreateStanding(false, TunnelSettings.Default);
-        var key = RoomDirectoryProtocol.LookupKey(standing.Invite.LobbyKey);
+        var key = standing.Invite.LobbyKey;
         await client.AnnounceAsync(signer.Sign(Listing(invite: standing.Invite.ToString()), _now), true, [key], default);
 
         var rooms = await client.ListAsync(default);
@@ -127,7 +127,7 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var client = new RoomDirectoryClient(_net);
         var book = new InviteBook();
         var invite = book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default);
-        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden, invite: ""), _now), false, [RoomDirectoryProtocol.LookupKey(invite.Invite.LobbyKey)], default);
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden, invite: ""), _now), false, [invite.Invite.LobbyKey], default);
         Assert.Empty(await client.ListAsync(default));
         Assert.NotNull(await client.LookupAsync(invite.Invite.LobbyKey, default));
     }
@@ -168,7 +168,7 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     public async Task LookupKeysAreFirstComeFirstServed()
     {
         var client = new RoomDirectoryClient(_net);
-        var key = RoomDirectoryProtocol.LookupKey(new byte[16]);
+        var key = new byte[16];
         await client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default);
         var squat = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.AnnounceAsync(new RoomSigner().Sign(Listing(), _now), true, [key], default));
         Assert.Equal("lookup", squat.Code);
@@ -276,7 +276,7 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var book = new InviteBook();
         StartKnock(book, new MemberTable());
         var invite = book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default);
-        await using (var announcer = new RoomAnnouncer(_net, () => Listing(RoomVisibility.Hidden, invite: ""), () => [RoomDirectoryProtocol.LookupKey(invite.Invite.LobbyKey)]))
+        await using (var announcer = new RoomAnnouncer(_net, () => Listing(RoomVisibility.Hidden, invite: ""), () => [invite.Invite.LobbyKey]))
         {
             await announcer.AnnounceOnceAsync(default);
             Assert.True(announcer.Published, announcer.LastError);

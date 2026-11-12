@@ -13,7 +13,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     private readonly IPublicNetwork _network;
     private readonly RoomDirectoryClient _client;
     private readonly Func<RoomListing> _listing;
-    private readonly Func<IReadOnlyList<string>> _lookupKeys;
+    private readonly Func<IReadOnlyList<byte[]>> _lobbyKeys;
     private readonly Func<byte[]?>? _searchKey;
     private readonly Func<string?>? _account;
     private readonly Action<string>? _log;
@@ -31,8 +31,8 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     public string RoomId => _signer.RoomId;
 
     /// <param name="listing">当前的房间信息（每次续期时取，地址由这里填）。</param>
-    /// <param name="lookupKeys">现在还能用的邀请码对应的查找键（<see cref="RoomDirectoryProtocol.LookupKey"/>）。</param>
-    public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<string>> lookupKeys,
+    /// <param name="lobbyKeys">Lobby keys of the invites still open; each gets a sealed hidden entry (<see cref="HiddenEntry"/>).</param>
+    public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<byte[]>> lobbyKeys,
         Action<string>? log = null, TimeSpan? every = null, RoomDirectoryClient? client = null, Func<byte[]?>? searchKey = null, Func<string?>? account = null)
     {
         _account = account;
@@ -40,7 +40,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
         _network = network;
         _client = client ?? new RoomDirectoryClient(network);
         _listing = listing;
-        _lookupKeys = lookupKeys;
+        _lobbyKeys = lobbyKeys;
         _log = log;
         _every = every ?? RoomDirectoryProtocol.RenewEvery;
         _loop = Task.Run(LoopAsync);
@@ -80,7 +80,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
             else
             {
                 var listing = _signer.Sign(_listing() with { Ip = ip }, DateTimeOffset.UtcNow);
-                var keys = _lookupKeys();
+                var keys = _lobbyKeys();
                 var search = _searchKey?.Invoke();
                 // 隐藏房间又没有能用的邀请、也没开指纹查找：目录里没什么可登记的（之前登记的 90 秒后自己过期）。
                 if (listing.Mode == RoomVisibility.Hidden && keys.Count == 0 && search is null)

@@ -168,6 +168,9 @@ public sealed partial class MultiplayerViewModel
             _public = session;
             session = null;
             IsPublicConnected = true;
+            // Keep this network's directory snapshot fresh on a fixed schedule: lookups and the room list read it locally.
+            var connected = _public;
+            _snapshotPolling = DirectorySnapshots.For(connected).StartPolling(() => DirectoryClient(connected));
             SetStatus(StatusMessage.Success("multiplayer.public.connected", profile.Name));
             StartAnnouncerIfHosting();
             StartVolunteerWork(_public, profile);
@@ -210,6 +213,8 @@ public sealed partial class MultiplayerViewModel
         StopAnnouncer();
         StopVolunteering();
         if (VolunteerEnabled) VolunteerStatus = L.T("multiplayer.volunteer.status_next_connect");
+        _snapshotPolling?.Dispose();
+        _snapshotPolling = null;
         _public?.Dispose();
         _public = null;
         IsPublicConnected = false;
@@ -300,7 +305,7 @@ public sealed partial class MultiplayerViewModel
     private void StartAnnouncerIfHosting()
     {
         if (_public is not { } network || _announcer is not null || !IsHosting || _lobby is null) return;
-        var announcer = new RoomAnnouncer(network, BuildListing, LookupKeys,
+        var announcer = new RoomAnnouncer(network, BuildListing, LobbyKeys,
             line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), client: DirectoryClient(network), searchKey: SearchKeyForAnnounce,
             account: () => AccountToken);
         announcer.StateChanged += () => Dispatcher.UIThread.Post(() =>
@@ -314,8 +319,11 @@ public sealed partial class MultiplayerViewModel
 
     private RoomVisibility CurrentVisibility { get; set; } = RoomVisibility.Hidden;
 
-    private IReadOnlyList<string> LookupKeys() => _lobby?.Book.Pending.Count > 0 && _lobby.Book.Pending[0].Invite.LobbyKey is { } key
-        ? [RoomDirectoryProtocol.LookupKey(key)] : [];
+    /// <summary>Stops the directory snapshot poller started when the public network connected.</summary>
+    private IDisposable? _snapshotPolling;
+
+    private IReadOnlyList<byte[]> LobbyKeys() => _lobby?.Book.Pending.Count > 0 && _lobby.Book.Pending[0].Invite.LobbyKey is { } key
+        ? [key] : [];
 
     private RoomListing BuildListing()
     {
