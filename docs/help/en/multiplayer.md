@@ -23,6 +23,13 @@ The Multiplayer page has no tabs: it is the lobby until you are in a room, and t
 - Safety code: if both of you see the same safety code, nobody is pretending to be someone else in between.
 - The first time, multiplayer needs one extra download. The button reads "Install the multiplayer component first": click once to install it, then again to open the room or join.
 
+## In the room
+- The top shows the room's name, how many people are in it, and the connection mark ("Direct · 18 ms" or "Via relay · 82 ms"). A thin line under each face says whether that person is reached directly or through a relay. Friends you have verified have a tick on their face.
+- **Invite**: pick how long it is valid (10 minutes, 1 day, 30 days) and how many uses (once, no limit), then click **Create invite**. The invite is a small card: **Copy** it or **Send to a friend**; the code itself only appears when you click **Show**. A 30-day invite works in every room you open later, and you can revoke it at any time.
+- Click the connection mark for "Who can see what": a fixed table of who sees your IP address and who sees the content. Under it is the switch "Relays only": people in the room can't see your IP, and latency is somewhat higher; changing it reconnects you to the room. To have it on in every room, turn it on under relays in multiplayer settings.
+- Click a person to see their safety code, whether they are a friend, and how you are connected. "Share with them" holds remote help, forwarding their game, and letting them get online through you; each one asks you first.
+- **Enter the game**: someone who joined clicks it to go straight into the friend's world with the instance they picked.
+
 ## If something goes wrong
 - Cannot connect: run "Check network"; it tells you which step fails.
 - For a child: remote help, public networks and more can be turned off; see [For a child](help:child-mode).

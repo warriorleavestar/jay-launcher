@@ -183,7 +183,7 @@ public sealed partial class MultiplayerViewModel
             StartHostLobby(credentials, members, book, direct.LobbyUdpPort, direct: direct);
             StartAnnouncerIfHosting();
             DirectHint = L.F("multiplayer.direct.host_hint", DirectText.Nat(addresses.Nat));
-            if (await IssueInviteAsync(1, InviteExpiryChoices[0].Lifetime, false) is null) return;
+            if (await IssueInviteAsync(1, InviteOffer.Lifetime(InviteLife.TenMinutes), false) is null) return;
             SetStatus(HasGameRelay ? StatusMessage.Success("multiplayer.relay.created") : StatusMessage.Success("multiplayer.direct.created"));
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or System.Net.Sockets.SocketException or InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)

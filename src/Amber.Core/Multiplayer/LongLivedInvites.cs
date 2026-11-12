@@ -48,13 +48,18 @@ public sealed class LongLivedInvites
         }
     }
 
-    public LongLivedInvite Create(string label, TimeSpan? lifetime = null)
+    /// <param name="lobbyKey">
+    /// The lobby key of the room that is open right now. It is taken over only when there is no long-lived invite yet
+    /// (so no key of our own): the new invite then works in that room at once instead of from the next room on.
+    /// </param>
+    public LongLivedInvite Create(string label, TimeSpan? lifetime = null, byte[]? lobbyKey = null)
     {
+        if (lobbyKey is { Length: not JayInvite.KeyLength }) throw new ArgumentException(null, nameof(lobbyKey));
         Prune();
         if (_items.Count >= MaxInvites) throw new InvalidOperationException("too many long-lived invites");
         var life = lifetime ?? DefaultLifetime;
         if (life <= TimeSpan.Zero || life > MaxLifetime) throw new ArgumentOutOfRangeException(nameof(lifetime));
-        _lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength);
+        _lobbyKey ??= lobbyKey is null ? RandomNumberGenerator.GetBytes(JayInvite.KeyLength) : (byte[])lobbyKey.Clone();
         var clean = new string([.. (label ?? "").Where(c => !char.IsControl(c)).Take(MaxLabel)]).Trim();
         var now = _now();
         var invite = new LongLivedInvite(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)), clean, RandomNumberGenerator.GetBytes(JayInvite.KeyLength), now, now + life);

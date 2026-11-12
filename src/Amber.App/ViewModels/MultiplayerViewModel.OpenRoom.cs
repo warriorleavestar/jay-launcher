@@ -276,5 +276,10 @@ public sealed partial class MultiplayerViewModel
     {
         foreach (var choice in WhoChoices.Concat(RouteChoices).Concat(ProtectionChoices).Concat(ScopeChoices)) choice.Relabel();
         RefreshOpenChoices();
+        RefreshRoomFacts();
+        RefreshLinks();
+        NotifyRelayOnly();
+        NotifyScene();
+        NotifyInvitePanel();
     }
 }

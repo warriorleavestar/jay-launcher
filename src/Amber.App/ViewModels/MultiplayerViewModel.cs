@@ -276,6 +276,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitHotspot();
         InitGuide();
         InitRoom();
+        InitScene();
+        InitInvitePanel();
+        InitShare();
         InitRequests();
         InitPublic();
         InitContacts();
@@ -682,7 +685,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var credentials = NewCredentials(gamePort, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft)) with { RelayOnly = relayOnly };
         // 成员表：批准一个人时发给他自己的钥匙（游戏通道和聊天按它认人）；房主自己的聊天客户端也有一把。
         var members = new MemberTable();
-        var room = credentials.ToHostRoom(members, ChatName);
+        // My own "always relays only" setting turns direct connections off on this computer without making it the room's rule.
+        var room = WithMyRelayChoice(credentials.ToHostRoom(members, ChatName));
         if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
                 AllowProxy = AllowGameProxy,
@@ -698,6 +702,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         RestoreChatHistory(room);
         StartHub(room);
         StartHostLobby(credentials, members);
+        _openedAccess = OpenAccess;
+        OnRoomEntered();
         if (_lobby is { } lobby) SeedLongInvites(lobby, credentials.Tunnel);
         StartAnnouncerIfHosting();
         Status = FullLanMode
@@ -754,6 +760,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var local = FullLanMode && !wraps ? (int?)null : EasyTierArgs.FreeTcpPort();
         var chatPort = FullLanMode && !wraps ? (int?)null : EasyTierArgs.FreeTcpPort();
         var remotePort = room.FromInvite && !(FullLanMode && !wraps) ? EasyTierArgs.FreeTcpPort() : (int?)null;
+        // What the host decided for the room, then my own "always relays only" setting on top of it.
+        var relayRule = room.RelayOnly;
+        room = WithMyRelayChoice(room);
         if (!TryStartSession(new EasyTierOptions(room, false, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), local, TestListeners, Guid.NewGuid().ToString(), FullLanMode, chatPort, FullLanMode && AllowExitNode)
             {
                 LocalTunnelPort = wraps && !FullLanMode ? EasyTierArgs.FreeTcpPort() : null,
@@ -761,12 +770,14 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 AllowProxy = AllowGameProxy,
             })) return false;
         _room = room;
+        _joinedRelayRule = relayRule;
         MarkJoinStarted(newRoom: true);
         RestoreChatHistory(room);
         _localChatPort = chatPort;
         _localRemotePort = remotePort;
         ChatStatus = L.T("multiplayer.chat.awaiting_host");
         Mode = "join";
+        OnRoomEntered();
         // 完整局域网模式下直接连房主的虚拟 IP；普通模式连本机转发端口。
         JoinAddress = local is { } l ? $"127.0.0.1:{l}" : $"{EasyTierArgs.HostIp}:{room.Port}";
         RoomCodeText = "";
@@ -1025,6 +1036,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (IsHosting && _hub is null && _room is { } room) StartHub(room);
         if (IsHosting && _chat is null && _hub is not null) _ = ConnectChatAsync("127.0.0.1", _hub.HostPort);
         TickRemote();
+        // The invite card counts down ("9 minutes left").
+        if (HasInvite) OnPropertyChanged(nameof(InviteSummary));
     }
 
     private bool _hubOnVirtualIp;

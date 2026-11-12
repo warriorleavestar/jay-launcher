@@ -192,6 +192,11 @@ public sealed class AppSettings
     public bool NewInstanceModsOpen { get; set; }
     /// <summary>How long a room waits for the host to answer a knock: "2m", "10m" or "forever".</summary>
     public string MultiplayerKnockWait { get; set; } = "10m";
+    /// <summary>
+    /// "Always relays only": in every room I open or join, this computer makes no direct connections, so people in the
+    /// room do not see its IP address (slower). A room opened as "relays only" does this for everyone regardless.
+    /// </summary>
+    public bool MultiplayerRelayOnly { get; set; }
     /// <summary>Knocks and incoming files while Jay is in the background open a small topmost window.</summary>
     public bool MultiplayerRequestPopup { get; set; } = true;
     /// <summary>The last room I opened, for the lobby's “Open like last time”.</summary>

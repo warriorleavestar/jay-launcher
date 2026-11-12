@@ -92,6 +92,50 @@ public sealed class LongLivedInviteTests : IDisposable
     }
 
     [Fact]
+    public void TheFirstOneTakesOverTheOpenRoomsKeySoThatRoomAnswersItToo()
+    {
+        var book = new InviteBook(() => _now);
+        var ordinary = book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default);
+        var store = Store();
+        var invite = store.Create("Bob", lobbyKey: book.CurrentLobbyKey());
+        Assert.Equal(ordinary.Invite.LobbyKey, store.CodeOf(invite, TunnelSettings.Default).LobbyKey);
+        Assert.Equal(1, store.SeedInto(book, TunnelSettings.Default));
+        Assert.Contains(book.Pending, p => p.Standing && p.Invite.Token.AsSpan().SequenceEqual(invite.Token));
+        // The key is kept with the invite: a later room accepts it as well.
+        var later = new InviteBook(() => _now);
+        Assert.Equal(1, Store().SeedInto(later, TunnelSettings.Default));
+        Assert.Equal(ordinary.Invite.LobbyKey, later.Pending.Single().Invite.LobbyKey);
+    }
+
+    [Fact]
+    public void AnExistingKeyIsNeverReplacedByARoomsKey()
+    {
+        var store = Store();
+        var first = store.Create("A");
+        var key = store.CodeOf(first, TunnelSettings.Default).LobbyKey;
+        var book = new InviteBook(() => _now);
+        book.Create(1, null, false, TunnelSettings.Default);
+        var second = store.Create("B", lobbyKey: book.CurrentLobbyKey());
+        // The friend who holds the first code must not be locked out.
+        Assert.Equal(key, store.CodeOf(first, TunnelSettings.Default).LobbyKey);
+        Assert.Equal(key, store.CodeOf(second, TunnelSettings.Default).LobbyKey);
+        Assert.Equal(0, store.SeedInto(book, TunnelSettings.Default));
+        Assert.Throws<ArgumentException>(() => store.Create("C", lobbyKey: new byte[5]));
+    }
+
+    [Fact]
+    public void SeedingTwiceDoesNotDoubleAnInvite()
+    {
+        var store = Store();
+        store.Create("A");
+        var book = new InviteBook(() => _now);
+        store.SeedInto(book, TunnelSettings.Default);
+        store.Create("B");
+        store.SeedInto(book, TunnelSettings.Default);
+        Assert.Equal(2, book.Pending.Count(p => p.Standing));
+    }
+
+    [Fact]
     public void DamagedFileStartsEmpty()
     {
         File.WriteAllText(FilePath, "{ not json");

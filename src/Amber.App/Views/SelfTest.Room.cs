@@ -13,10 +13,12 @@ namespace Amber.App.Views;
 internal sealed partial class SelfTest
 {
     /// <summary>
-    /// The room console (official §6.15) with a stand-in room: no component, no connection. The page is put in host mode
-    /// with two people, a chat line and a knock, and the real controls are checked: the sticky header, people | chat |
-    /// details at three widths, the locked knock panel ("No" focused, Alt+N / Alt+Y, let in next time), the invite terms,
-    /// the room settings drawer with the knock wait, and Ctrl+Shift+I.
+    /// The room (UI restructure: people, rooms, networks) with a stand-in room: no component, no connection. The page is
+    /// put in host mode with two people, a chat line and a knock, and the real controls are checked: the banner (cover,
+    /// faces with the friend tick and the link line, the connection mark, the one amber button), "who can see what" with
+    /// the "relays only" switch, people | chat | details at three widths, a person's facts and "Share with them", the
+    /// invite panel (two choices, the invite as a card, three lines, send to a friend, thirty days), the locked knock
+    /// panel ("No" focused, Alt+N / Alt+Y, let in next time), the room settings drawer and Ctrl+Shift+I; then a guest's view.
     /// </summary>
     private async Task RoomConsoleAsync()
     {
@@ -28,7 +30,18 @@ internal sealed partial class SelfTest
         var page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
         if (page is null)
         {
-            Check("房间：页面显示", false);
+            // Say why: a page that fails to build (a bad resource or binding in its markup) throws here too.
+            string why;
+            try
+            {
+                Dispatcher.UIThread.Invoke(() => new MultiplayerPage());
+                why = "the page builds, but it never became visible";
+            }
+            catch (Exception e)
+            {
+                why = e.ToString();
+            }
+            Check("房间：页面显示", false, why);
             return;
         }
         bool HasText(string text) => page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == text);
@@ -39,9 +52,23 @@ internal sealed partial class SelfTest
         var boKey = new byte[32];
         boKey[0] = 2;
         var alexFingerprint = MemberIdentity.FingerprintOf(alexKey);
+        var hostRoom = RoomCredentials.Create(vm.Identity.PublicKey, 25565, RoomOpening.Tunnel(RoomProtection.Standard)!).ToHostRoom(new MemberTable(), vm.ChatName);
+        var confirms = new List<string>();
+        var answer = false;
+        var savedConfirm = vm.Confirm;
+        var savedTarget = vm.TargetInstance;
         Dispatcher.UIThread.Invoke(() =>
         {
-            vm.Mode = "host";
+            // Alex is a friend I compared emoji with: the tick on the face comes from the contact book (a test one).
+            vm.ContactsDir = Path.Combine(reportDir, "room-contacts");
+            vm.Contacts.Import([new Amber.Core.Multiplayer.Contacts.Contact(alexKey, "Alex", true, DateTimeOffset.UtcNow)]);
+            vm.RefreshContacts();
+            vm.Confirm = (title, _, _) =>
+            {
+                confirms.Add(title);
+                return Task.FromResult(answer);
+            };
+            vm.EnterTestRoom(hostRoom, host: true, lobby: true);
             vm.Members.Add(new MemberItem("Alex", alexKey, false, true));
             vm.OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(alexFingerprint, alexKey, "Alex")));
             vm.BannedPeople.Add(new BannedItem(new BannedMember(boKey, "Bo")));
@@ -49,12 +76,36 @@ internal sealed partial class SelfTest
             vm.RememberInviteTerms(1, TimeSpan.FromMinutes(10), false);
         });
         await Task.Delay(400);
+        void SetPeers(params PeerInfo[] peers) => Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.Peers.Clear();
+            foreach (var peer in peers) vm.Peers.Add(new PeerItem(peer));
+        });
+        void Click(CheckBox? box, bool on) => Dispatcher.UIThread.Invoke(() =>
+        {
+            if (box is not { IsEffectivelyEnabled: true, IsEffectivelyVisible: true }) return;
+            box.IsChecked = on;
+            box.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        });
+        int AmberButtons() => page.GetVisualDescendants().OfType<Button>().Count(b => b.IsEffectivelyVisible && b.Classes.Contains("play"));
 
         Check("房间：顶栏写我的房间、人数", vm.ShowRoomHeader && Named<StackPanel>("RoomHeaderArea")?.IsEffectivelyVisible == true
             && vm.RoomHeaderText.StartsWith(L.T("multiplayer.room.my_room")) && vm.RoomHeaderText.Contains(L.P("multiplayer.room.people", 2, 2)), vm.RoomHeaderText);
         Check("房间：顶栏不随内容滚动（在内容区外面）", Named<StackPanel>("RoomHeaderArea") is { } area && !page.FindControl<ScrollViewer>("MpBody")!.IsVisualAncestorOf(area));
-        Check("房间：顶栏有邀请朋友、⋯、结束房间", Named<Button>("HeaderInviteButton")?.IsEffectivelyVisible == true && Named<Button>("RoomMenuButton")?.IsEffectivelyVisible == true
+        Check("房间：顶栏有【邀请】、⋯、【结束房间】", (Named<Button>("HeaderInviteButton")?.Content as string) == L.T("multiplayer.room.invite")
+            && Named<Button>("HeaderInviteButton")!.IsEffectivelyVisible && Named<Button>("RoomMenuButton")?.IsEffectivelyVisible == true
             && (Named<Button>("EndRoomButton")?.Content as string) == L.T("multiplayer.room.end"));
+        Check("横幅：封面压暗，上面写房间名、人数、保护", Named<Border>("RoomHeader") is { Background: not null } banner && banner.Classes.Contains("scene")
+            && Named<Border>("RoomCoverShade")?.IsEffectivelyVisible == true && Named<TextBlock>("RoomTitleText")?.Text == L.T("multiplayer.room.my_room")
+            && vm.PeopleCountText == L.P("multiplayer.room.people", 2, 2) && Named<Border>("PeopleCountChip")?.IsEffectivelyVisible == true
+            && vm.RoomProtectionText == L.F("multiplayer.room.protection", L.T("multiplayer.open.protection.standard")) && Named<Border>("ProtectionChip")?.IsEffectivelyVisible == true,
+            vm.PeopleCountText + " / " + vm.RoomProtectionText);
+        Check("横幅：没人连上时连接标记写“等朋友进来”", vm.IsMarkWaiting && Named<TextBlock>("ConnectionMarkText")?.Text == L.T("multiplayer.room.waiting_friends"), vm.ConnectionMarkText);
+        Check("横幅：房主的游戏已经开着时没有琥珀按钮", !vm.ShowEnterGame && AmberButtons() == 0, AmberButtons().ToString());
+        var faces = Named<ItemsControl>("RoomFaces");
+        Check("横幅：一排头像，一人一个，核对过的朋友有对勾", faces is not null && faces.GetVisualDescendants().OfType<Border>().Count(b => b.IsEffectivelyVisible && b.Classes.Contains("face")) == 2
+            && faces.GetVisualDescendants().OfType<Border>().Count(b => b.IsEffectivelyVisible && b.Classes.Contains("friend-tick")) == 1
+            && vm.People[1].IsFriend && !vm.People[0].IsFriend);
         Check("房间：宽窗口三栏（人 | 聊天 | 详情）", page.RoomLayout == MultiplayerPage.RoomArrangement.ThreeColumns
             && Named<Border>("PeopleColumn")!.IsEffectivelyVisible && Named<Border>("ChatColumn")!.IsEffectivelyVisible && Named<StackPanel>("DetailsColumn")!.IsEffectivelyVisible,
             page.RoomLayout + " " + page.Bounds.Width);
@@ -62,12 +113,106 @@ internal sealed partial class SelfTest
         Check("人：我排第一（房主），Alex 在线", vm.People.Count == 2 && vm.People[0].IsMe && vm.People[0].DisplayName == L.F("multiplayer.people.me_host", vm.ChatName)
             && vm.People[1].Name == "Alex" && vm.People[1].IsOnline && vm.People[1].Status == L.T("multiplayer.people.online"));
 
-        // Pick Alex: safety code and actions; "Message" opens private chat with them.
-        vm.SelectedPerson = vm.People[1];
+        // The connection mark and the line under each face follow the peer list.
+        SetPeers(new PeerInfo("amber-guest", "10.144.144.2", "p2p", 18, "udp"));
+        await Task.Delay(300);
+        bool Line(string kind) => faces!.GetVisualDescendants().OfType<Border>().Any(b => b.IsEffectivelyVisible && b.Classes.Contains("link-line") && b.Classes.Contains(kind));
+        Check("连接标记：直连时写“直连 · 18 ms”，头像下面是直连的线", vm.IsMarkDirect && Named<TextBlock>("ConnectionMarkText")?.Text == L.T("multiplayer.room.direct") + " · 18 ms"
+            && Line("direct") && !Line("relayed") && vm.People[1].Status == vm.ConnectionMarkText, vm.ConnectionMarkText);
+        Check("横幅：两种线的意思写在旁边（不只靠颜色）", Named<StackPanel>("RoomFacesLegend")?.IsEffectivelyVisible == true);
+        SetPeers(new PeerInfo("amber-guest", "10.144.144.2", "relay(2)", 82, "tcp"));
+        await Task.Delay(300);
+        Check("连接标记：经中转时写“经中转 · 82 ms”，线换成中转的", vm.IsMarkRelayed && Named<TextBlock>("ConnectionMarkText")?.Text == L.T("multiplayer.room.relayed") + " · 82 ms"
+            && Line("relayed") && !Line("direct"), vm.ConnectionMarkText);
+        SetPeers(new PeerInfo("amber-guest", "10.144.144.2", "p2p", 18, "udp"), new PeerInfo("amber-guest", "10.144.144.3", "relay(2)", 82, "tcp"));
+        await Task.Delay(300);
+        Check("连接标记：有直连有中转时写各几个；分不清是谁的线就不画", vm.IsMarkMixed && vm.ConnectionMarkText == L.F("multiplayer.room.mark_mixed", 1, 1)
+            && !Line("direct") && !Line("relayed") && !vm.People[1].HasLink, vm.ConnectionMarkText);
+        SetPeers(new PeerInfo("amber-guest", "10.144.144.2", "p2p", 18, "udp"));
         await Task.Delay(200);
+
+        // The mark opens "who can see what": the fixed table, the rows that apply now, and the "relays only" switch.
+        Check("谁能看到什么：点连接标记打开", Press(Named<Button>("ConnectionMarkButton")) && vm.WhoSeesOpen);
+        await Task.Delay(400);
+        var seesRows = Named<ItemsControl>("WhoSeesRows");
+        Check("谁能看到什么：固定的五行，写是 / 否，不写保证", Named<Border>("WhoSeesCard")?.IsEffectivelyVisible == true && vm.WhoSeesLines.Count == 5
+            && seesRows!.GetVisualDescendants().OfType<Border>().Count(b => b.Classes.Contains("sees-row") && b.IsEffectivelyVisible) == 5
+            && HasText(L.T("multiplayer.sees.row.operator")) && HasText(L.T("multiplayer.sees.only_them"))
+            && vm.WhoSeesLines.All(l => !(l.Who + l.Ip + l.Content).Contains("安全") && !(l.Who + l.Ip + l.Content).Contains("放心")));
+        Check("谁能看到什么：标出现在的情况（直连那一行）", vm.WhoSeesLines.Single(l => l.Row.Id == "direct").Now && !vm.WhoSeesLines.Single(l => l.Row.Id == "relayed").Now
+            && seesRows!.GetVisualDescendants().OfType<Border>().Count(b => b.Classes.Contains("sees-row") && b.Classes.Contains("now")) >= 1
+            && Named<TextBlock>("WhoSeesNowHint")?.IsEffectivelyVisible == true);
+        var relayBox = Named<CheckBox>("RelayOnlyBox");
+        Check("只走中转：表下面的开关，默认关，写清楚换来什么", relayBox is { IsEffectivelyVisible: true, IsEffectivelyEnabled: true, IsChecked: false }
+            && HasText(L.T("multiplayer.sees.relay_only")) && !vm.MyRelayOnly);
+        await ShotAsync("房间-谁能看到什么-1440");
+        RoomCode? switchedTo = null;
+        vm.TestSwitchNetwork = next =>
+        {
+            switchedTo = next;
+            return true;
+        };
+        Click(relayBox, true);
+        Check("只走中转：打开后我这边改成不直连（联机组件按新设置重启）", await WaitAsync(() => vm.MyRelayOnly && vm.CanChangeRelayOnly, 3) && switchedTo is { RelayOnly: true }
+            && relayBox!.IsChecked == true && vm.Status == L.T("multiplayer.sees.relay_only.turned_on")
+            && vm.RoomFacts.Any(f => f.Value == L.T("multiplayer.open.route.relay")), vm.Status);
+        vm.TestSwitchNetwork = _ => false;
+        Click(relayBox, false);
+        await Task.Delay(400);
+        Check("只走中转：没换成时开关回到真实状态", vm.MyRelayOnly && relayBox!.IsChecked == true);
+        vm.TestSwitchNetwork = _ => true;
+        Click(relayBox, false);
+        Check("只走中转：能关掉", await WaitAsync(() => !vm.MyRelayOnly && vm.CanChangeRelayOnly, 3) && relayBox!.IsChecked == false);
+        Check("谁能看到什么：✕ 收起", Press(Named<Button>("WhoSeesCloseButton")) && !vm.WhoSeesOpen);
+        await Task.Delay(200);
+
+        // Pick Alex (from the banner): safety code, friend or not, the link, actions; "Message" opens private chat with them.
+        var alexFace = faces!.GetVisualDescendants().OfType<Button>().LastOrDefault(b => b.IsEffectivelyVisible && b.DataContext is PersonItem { Name: "Alex" });
+        Check("人：点横幅上的头像就选中这个人", Press(alexFace) && vm.SelectedPerson?.Name == "Alex");
+        await Task.Delay(300);
         Check("人：选中后显示安全码和按钮", Named<SelectableTextBlock>("PersonSafetyCode")?.Text == alexFingerprint
             && Named<Button>("PersonChatButton")?.IsEffectivelyVisible == true && Named<Button>("PersonTrustButton")?.IsEffectivelyVisible == true
             && Named<Button>("PersonRemoveButton")?.IsEffectivelyVisible == true);
+        Check("人：写是不是朋友、怎么连的", Named<Border>("PersonFriendChip") is { IsEffectivelyVisible: true } friendChip && friendChip.Classes.Contains("ok")
+            && vm.SelectedPerson!.FriendText == L.T("multiplayer.people.friend") && Named<Border>("PersonLinkChip")?.IsEffectivelyVisible == true
+            && vm.SelectedPerson.LinkText == L.T("multiplayer.room.direct") + " · 18 ms", vm.SelectedPerson?.Summary);
+
+        // "Share with them": three things in one place, each behind the locked confirmation.
+        Check("和 TA 共享：远程协助、转发游戏、经我上网三样在一起", Named<StackPanel>("ShareGroup")?.IsEffectivelyVisible == true && Named<StackPanel>("ShareRemoteRow")?.IsEffectivelyVisible == true
+            && Named<StackPanel>("ShareProxyRow")?.IsEffectivelyVisible == true && Named<StackPanel>("ShareExitRow")?.IsEffectivelyVisible == true
+            && Named<TextBlock>("ShareExitText")?.Text == L.T("multiplayer.share.exit.off"));
+        confirms.Clear();
+        answer = false;
+        if (vm.CanAskRemoteHelp)
+        {
+            Press(Named<Button>("ShareRemoteButton"));
+            await Task.Delay(300);
+            Check("和 TA 共享：远程协助先走确认，写明是谁", confirms.Count == 1 && confirms[0] == L.F("multiplayer.share.remote.confirm_title", "Alex") && !vm.RemoteWaiting, string.Join("|", confirms));
+        }
+        else Check("和 TA 共享：这台电脑用不了远程协助时按钮灰掉并写原因", Named<Button>("ShareRemoteButton")?.IsEffectivelyEnabled == false && vm.HasRemoteHelpNote, vm.RemoteHelpNote);
+        var proxyBox = Named<CheckBox>("ShareProxyBox");
+        EasyTierOptions? restarted = null;
+        vm.TestRestartForProxy = next =>
+        {
+            restarted = next;
+            return true;
+        };
+        Dispatcher.UIThread.Invoke(() => vm.UseTestOptions(new EasyTierOptions(hostRoom, true, [], 0)));
+        await Task.Delay(200);
+        confirms.Clear();
+        Click(proxyBox, true);
+        await Task.Delay(400);
+        Check("和 TA 共享：转发游戏先走确认；点取消就不开", confirms.Count == 1 && confirms[0] == L.T("multiplayer.share.proxy.confirm_title") && !vm.SharingGameProxy
+            && restarted is null && proxyBox!.IsChecked == false, string.Join("|", confirms));
+        answer = true;
+        Click(proxyBox, true);
+        Check("和 TA 共享：确认后打开，并写明对房间里每个人生效", await WaitAsync(() => vm.SharingGameProxy && vm.CanShareGameProxy, 3) && restarted is { AllowProxy: true }
+            && proxyBox!.IsChecked == true && HasText(L.T("multiplayer.share.proxy.line")) && vm.Status == L.T("multiplayer.share.proxy.turned_on"), vm.Status);
+        await ShotAsync("房间-和TA共享-1440");
+        confirms.Clear();
+        Click(proxyBox, false);
+        Check("和 TA 共享：关掉不用确认", await WaitAsync(() => !vm.SharingGameProxy && vm.CanShareGameProxy, 3) && confirms.Count == 0 && proxyBox!.IsChecked == false);
+        Dispatcher.UIThread.Invoke(() => vm.UseTestOptions(null));
         Check("人：私聊转到私聊页签并选好人", Press(Named<Button>("PersonChatButton")) && vm.PrivateChatMode && vm.SelectedPeer?.Entry.Fingerprint == alexFingerprint);
         await Task.Delay(200);
         Check("聊天：私聊和房间聊天切换", Named<StackPanel>("PrivateChat")?.IsEffectivelyVisible == true && Named<StackPanel>("RoomChat")?.IsEffectivelyVisible == false);
@@ -75,15 +220,76 @@ internal sealed partial class SelfTest
         await Task.Delay(200);
         Check("聊天：回到房间聊天", Named<StackPanel>("RoomChat")?.IsEffectivelyVisible == true && HasText("hi!"));
 
-        // Invite card: no code yet → create; the terms read in words.
-        Check("邀请卡：还没邀请时给【生成邀请】", Named<Button>("CreateFirstInviteButton")?.IsEffectivelyVisible == true);
-        Check("邀请卡：条款写成一句话", vm.InviteTerms == L.F("multiplayer.invite.terms", L.P("multiplayer.invite.terms_uses", 1, 1),
+        // Invite panel: two choices, three lines that are always there, the invite as a card.
+        var createButton = Named<Button>("CreateFirstInviteButton");
+        Check("邀请：还没邀请时【生成邀请】是这张卡的主按钮", createButton is { IsEffectivelyVisible: true } && createButton.Classes.Contains("primary")
+            && Named<Border>("InviteCodeCard")?.IsEffectivelyVisible == false);
+        Check("邀请：条款写成一句话", vm.InviteTerms == L.F("multiplayer.invite.terms", L.P("multiplayer.invite.terms_uses", 1, 1),
             L.F("multiplayer.invite.terms_life", L.P("multiplayer.invite.minutes", 10, 10)), L.T("multiplayer.invite.terms_ask")), vm.InviteTerms);
-        Check("邀请卡：【改…】展开选项", Press(Named<Button>("InviteChangeButton")) && vm.InviteOptionsOpen);
+        var lifeBox = Named<ComboBox>("InviteLifeBox");
+        var useBox = Named<ComboBox>("InviteUseBox");
+        Check("邀请：两个下拉框，10 分钟 / 1 天 / 30 天，1 次 / 不限；默认 10 分钟、1 次", lifeBox is { IsEffectivelyVisible: true, ItemCount: 3 } && useBox is { IsEffectivelyVisible: true, ItemCount: 2 }
+            && lifeBox.SelectedItem is InviteLifeChoice { Life: InviteLife.TenMinutes } && useBox.SelectedItem is InviteUseChoice { Use: InviteUse.Once }
+            && vm.InviteLifeChoices.Select(c => c.Label).SequenceEqual(new[] { L.T("multiplayer.invite.life.ten_minutes"), L.T("multiplayer.invite.life.day"), L.T("multiplayer.invite.life.month") }));
+        Check("邀请：常驻三行（码里有什么、拿到的人能做什么、什么时候失效）", Named<TextBlock>("InviteFactHolds") is { IsEffectivelyVisible: true } holds && holds.Text == L.T("multiplayer.invite.fact.holds")
+            && Named<TextBlock>("InviteFactKnock")?.Text == L.T("multiplayer.invite.fact.knock") && Named<TextBlock>("InviteTermsText") is { IsEffectivelyVisible: true, Text.Length: > 0 });
+        var autoBox = Named<CheckBox>("InviteAutoBox");
+        Dispatcher.UIThread.Invoke(() => vm.InviteAutoApprove = true);
         await Task.Delay(200);
-        Check("邀请卡：选项里有次数、有效期", Named<StackPanel>("InviteOptions")?.IsEffectivelyVisible == true);
-        vm.InviteOptionsOpen = false;
+        Check("邀请：勾了自动批准，第二行跟着改", autoBox?.IsEffectivelyVisible == true && Named<TextBlock>("InviteFactKnock")?.Text == L.T("multiplayer.invite.fact.auto"));
+        Dispatcher.UIThread.Invoke(() => vm.InviteAutoApprove = false);
+        Check("邀请：【生成邀请】做出一张 10 分钟、1 次的", Press(createButton) && await WaitAsync(() => vm.HasInvite && vm.PendingInvites.Count == 1, 5), vm.Status);
+        await Task.Delay(300);
+        Check("邀请：是一张小卡片，写还剩多久、几次，不直接亮出码", Named<Border>("InviteCodeCard")?.IsEffectivelyVisible == true
+            && Named<TextBlock>("InviteSummaryText")?.Text == L.F("multiplayer.invite.summary", L.F("multiplayer.invite.left", L.P("multiplayer.invite.minutes", 10, 10)), L.P("multiplayer.invite.uses_left", 1, 1))
+            && Named<TextBox>("InviteCodeBox")?.IsEffectivelyVisible == false && Named<Button>("CopyInviteButton")?.IsEffectivelyVisible == true
+            && !createButton!.Classes.Contains("primary"), vm.InviteSummary);
+        Check("邀请：点【显示】才看到码（还是打码前的完整码）", Press(Named<Button>("ShowInviteButton")) && vm.InviteShown && Named<TextBox>("InviteCodeBox") is { IsEffectivelyVisible: true } codeBox
+            && codeBox.Text == vm.TestInviteText);
+        vm.InviteShown = false;
+        Check("邀请：【发给朋友】打开朋友列表；没连网络时写原因", Press(Named<Button>("SendInviteButton")) && vm.InviteFriendsOpen && Named<StackPanel>("InviteFriendsPanel")?.IsEffectivelyVisible == true
+            && (vm.CanMailInvites || Named<TextBlock>("InviteFriendsNote") is { IsEffectivelyVisible: true, Text.Length: > 0 }), vm.InviteFriendsNote);
+        await Task.Delay(200);
         await ShotAsync("房间-1440");
+        vm.InviteFriendsOpen = false;
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            lifeBox!.SelectedItem = vm.InviteLifeChoices[1];
+            useBox!.SelectedItem = vm.InviteUseChoices[1];
+        });
+        Check("邀请：1 天、不限次数的一张", Press(createButton) && await WaitAsync(() => vm.PendingInvites.Count == 2, 5)
+            && vm.InviteSummary == L.F("multiplayer.invite.summary", L.F("multiplayer.invite.left", L.P("multiplayer.invite.hours", 24, 24)), L.T("multiplayer.invite.use.unlimited"))
+            && vm.PendingInvites.Any(i => i.Invite.Unlimited && i.Label.Contains(L.F("multiplayer.invite.pending_item_unlimited", "", "", "").Split(" · ")[1])), vm.InviteSummary);
+
+        // Thirty days is the long-lived invite: no use count, a name to recognise it by, and it works in this room at once.
+        Dispatcher.UIThread.Invoke(() => lifeBox!.SelectedItem = vm.InviteLifeChoices[2]);
+        await Task.Delay(300);
+        Check("30 天邀请：次数固定成不限，多一行说明和“给谁的”", useBox is { IsEffectivelyEnabled: false, SelectedItem: InviteUseChoice { Use: InviteUse.Unlimited } }
+            && Named<TextBlock>("InviteMonthNote")?.IsEffectivelyVisible == true && Named<TextBox>("LongInviteLabelBox")?.IsEffectivelyVisible == true);
+        Check("30 天邀请：开始时没有", !vm.HasLongInvites);
+        Dispatcher.UIThread.Invoke(() => vm.LongInviteLabel = "Bob");
+        Press(createButton);
+        await WaitAsync(() => vm.HasLongInvites, 5);
+        await Task.Delay(300);
+        var longItem = vm.LongInviteItems.FirstOrDefault();
+        Check("30 天邀请：做好一张给 Bob 的，卡片写还剩 30 天、不限", longItem is { Label: "Bob" } && longItem.Left == L.P("multiplayer.longinvite.days_left", 30, 30)
+            && JayInvite.TryParse(longItem.Code, out _) && vm.LongInviteLabel.Length == 0
+            && vm.InviteSummary == L.F("multiplayer.invite.summary", longItem.Left, L.T("multiplayer.invite.use.unlimited")), vm.InviteSummary);
+        Check("30 天邀请：这个房间马上认它（用的是房间现在的大厅钥匙）", !vm.ShowInviteNextRoomNote && vm.Status == L.T("multiplayer.longinvite.created")
+            && JayInvite.TryParse(vm.TestInviteText ?? "", out var monthCode) && vm.PendingInvites.Count == 2
+            && JayInvite.TryParse(vm.PendingInvites[0].Invite.Invite.ToString(), out var roomCode) && monthCode.LobbyKey.AsSpan().SequenceEqual(roomCode.LobbyKey), vm.Status);
+        Check("30 天邀请：在卡片下面单独列着，能复制、作废", Named<ItemsControl>("RoomLongInviteList")?.IsEffectivelyVisible == true);
+        await ShotAsync("房间-30天邀请-1440");
+        Dispatcher.UIThread.Invoke(() => vm.RevokeLongInviteCommand.Execute(longItem));
+        await Task.Delay(300);
+        Check("30 天邀请：作废后列表清空，卡片也收起", !vm.HasLongInvites && !vm.HasInvite && Named<StackPanel>("RoomLongInvites")?.IsEffectivelyVisible == false);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            lifeBox!.SelectedItem = vm.InviteLifeChoices[0];
+            useBox!.SelectedItem = vm.InviteUseChoices[0];
+            foreach (var item in vm.PendingInvites.ToList()) vm.RevokeInviteCommand.Execute(item);
+        });
+        await Task.Delay(300);
 
         // Room opened before the game: the invite card says what it waits for and takes a port; nothing is connected yet.
         Check("先开房间：有游戏时不显示等游戏", Named<Border>("GameLinkPanel")?.IsEffectivelyVisible == false);
@@ -172,6 +378,7 @@ internal sealed partial class SelfTest
         window.Height = 700;
         await Task.Delay(500);
         Check("房间 900：两栏，详情在下面", page.RoomLayout == MultiplayerPage.RoomArrangement.TwoColumns, page.RoomLayout + " " + page.Bounds.Width);
+        Check("房间 900：横幅还有头像", Named<StackPanel>("RoomFacesRow")?.IsEffectivelyVisible == true);
         await ShotAsync("房间-900");
         vm.CompactSection = 0;
         window.Width = 600;
@@ -179,6 +386,8 @@ internal sealed partial class SelfTest
         await Task.Delay(500);
         Check("房间 600：分段，一次一块", page.RoomLayout == MultiplayerPage.RoomArrangement.Sections && Named<StackPanel>("RoomSections")?.IsEffectivelyVisible == true
             && Named<Border>("PeopleColumn")!.IsEffectivelyVisible && !Named<Border>("ChatColumn")!.IsEffectivelyVisible, page.RoomLayout.ToString());
+        Check("房间 600：横幅收掉头像一排（人在“人”那一段里），按钮排到下面", Named<StackPanel>("RoomFacesRow")?.IsVisible == false
+            && Named<Button>("EndRoomButton")?.IsEffectivelyVisible == true && Named<Button>("ConnectionMarkButton")?.IsEffectivelyVisible == true);
         vm.CompactSection = 1;
         await Task.Delay(200);
         Check("房间 600：切到聊天", Named<Border>("ChatColumn")!.IsEffectivelyVisible && !Named<Border>("PeopleColumn")!.IsEffectivelyVisible);
@@ -194,6 +403,8 @@ internal sealed partial class SelfTest
         window.Width = 1440;
         window.Height = 900;
         await Task.Delay(400);
+        Check("房间（英文）：邀请的三行跟着换语言", Named<TextBlock>("InviteTermsText")?.Text is { } enTerms && enTerms == vm.InviteTerms && enTerms.Contains("10 minutes")
+            && Named<TextBlock>("InviteSummaryText")?.Text == vm.InviteSummary, Named<TextBlock>("InviteTermsText")?.Text ?? "");
         await ShotAsync("房间-1440-en");
         L.SetLanguage("zh-Hans");
 
@@ -201,8 +412,14 @@ internal sealed partial class SelfTest
         vm.ShowTabCommand.Execute("settings");
         await Task.Delay(300);
         Check("联机设置：新房间的默认等待时长", Named<ComboBox>("DefaultKnockWaitBox")?.IsEffectivelyVisible == true && vm.SelectedDefaultKnockWait.Wait == KnockWait.TenMinutes);
+        Check("联机设置：能把“只走中转”设成默认；没有 30 天邀请时不单独占一块", Named<CheckBox>("DefaultRelayOnlyBox") is { IsEffectivelyVisible: true, IsChecked: false }
+            && !vm.DefaultRelayOnly && Named<TextBlock>("LongInviteTitle")?.IsVisible == false && Named<Button>("CreateLongInviteButton") is null);
         Check("房间：不在一起玩页签时顶栏收起", !vm.ShowRoomHeader);
 
+        // A guest's view: the one amber button is [Enter the game]; the host is reached through a relay; remote help is asked from the host.
+        var hostKey = new byte[32];
+        hostKey[0] = 9;
+        var hostFingerprint = MemberIdentity.FingerprintOf(hostKey);
         Dispatcher.UIThread.Invoke(() =>
         {
             vm.ShowTabCommand.Execute("play");
@@ -210,7 +427,49 @@ internal sealed partial class SelfTest
             vm.OnlinePeers.Clear();
             vm.BannedPeople.Clear();
             vm.ChatLines.Clear();
-            vm.Mode = "";
+            vm.Peers.Clear();
+            vm.LeaveTestRoom();
+            vm.EnterTestRoom(hostRoom with { RelayOnly = true }, host: false, relayRule: true);
+            vm.HostFingerprint = hostFingerprint;
+            vm.OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(hostFingerprint, hostKey, "Robin")));
+            vm.Peers.Add(new PeerItem(new PeerInfo("amber-host", "10.144.144.1", "relay(2)", 82, "tcp")));
+            vm.JoinAddress = "127.0.0.1:25565";
+            vm.TargetInstance = null;
+        });
+        await Task.Delay(500);
+        var enter = Named<Button>("EnterGameButton");
+        Check("加入方：横幅上【进入游戏】是这一屏唯一的琥珀按钮", vm.IsJoined && vm.ShowEnterGame && enter is { IsEffectivelyVisible: true } && enter.Classes.Contains("play")
+            && (enter.Content as string) == L.T("multiplayer.room.enter_game") && AmberButtons() == 1 && (Named<Button>("EndRoomButton")?.Content as string) == L.T("multiplayer.room.leave"),
+            AmberButtons().ToString());
+        Check("加入方：还没选用哪个游戏进时，【进入游戏】先提示去选（不启动游戏）", Press(enter) && vm.Status == L.T("multiplayer.room.enter_game_pick")
+            && Named<ComboBox>("RoomInstanceBox")?.IsEffectivelyVisible == true, vm.Status);
+        Check("加入方：房主经中转，标记和房主那一行都写“经中转 · 82 ms”", vm.IsMarkRelayed && vm.People.Count == 2 && vm.People[1] is { IsHost: true, IsRelayed: true }
+            && vm.People[1].LinkText == L.T("multiplayer.room.relayed") + " · 82 ms" && vm.WhoSeesLines.Single(l => l.Row.Id == "relayed").Now, vm.ConnectionMarkText);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.SelectedPerson = vm.People[1];
+            if (!vm.WhoSeesOpen) vm.ToggleWhoSeesCommand.Execute(null);
+        });
+        await Task.Delay(400);
+        Check("加入方：房间开的时候就定了只走中转，开关固定开着并写原因", Named<CheckBox>("RelayOnlyBox") is { IsEffectivelyVisible: true, IsEffectivelyEnabled: false, IsChecked: true }
+            && Named<TextBlock>("RelayOnlyNote")?.Text == L.T("multiplayer.sees.relay_only.room_rule"), vm.RelayOnlyNote);
+        Check("加入方：远程协助向房主请求；没有邀请面板", vm.ShowRemoteHelp && (vm.CanAskRemoteHelp || vm.HasRemoteHelpNote) && Named<Border>("InviteCard")?.IsEffectivelyVisible == false
+            && Named<Button>("HeaderInviteButton")?.IsEffectivelyVisible == false && Named<Border>("RoomFactsCard")?.IsEffectivelyVisible == true);
+        await ShotAsync("房间-加入方-1440");
+
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.OnlinePeers.Clear();
+            vm.Peers.Clear();
+            vm.HostFingerprint = "";
+            vm.JoinAddress = "";
+            vm.TargetInstance = savedTarget;
+            vm.LeaveTestRoom();
+            vm.TestSwitchNetwork = null;
+            vm.TestRestartForProxy = null;
+            vm.Confirm = savedConfirm;
+            foreach (var friend in vm.ContactList.ToList()) foreach (var device in friend.Devices) vm.Contacts.Remove(device.PublicKey);
+            vm.RefreshContacts();
         });
         await Task.Delay(300);
         Check("房间：回到大厅", vm.IsIdle && !vm.ShowRoomHeader && Named<Grid>("LobbyGrid")?.IsEffectivelyVisible == true);

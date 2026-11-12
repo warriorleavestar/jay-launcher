@@ -82,8 +82,8 @@ public sealed partial class MultiplayerViewModel
         await CreateRoomAsync();
         if (!IsHosting) return;
         var lifetime = last.LifetimeMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : (TimeSpan?)null;
-        SelectedInviteExpiry = InviteExpiryChoices.FirstOrDefault(c => c.Lifetime == lifetime) ?? InviteExpiryChoices[0];
-        InviteUses = last.Uses;
+        // The panel shows the closest of its own choices; the invite itself is made with the remembered terms.
+        PickInviteChoices(InviteOffer.LifeFromMinutes(last.LifetimeMinutes), InviteOffer.UseFromCount(last.Uses));
         InviteAutoApprove = last.AutoApprove;
         InviteDialogOpen = true;
         if (await IssueInviteAsync(Math.Clamp(last.Uses, 1, 20), lifetime, last.AutoApprove) is null) return;

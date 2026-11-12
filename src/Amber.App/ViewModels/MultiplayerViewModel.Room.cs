@@ -15,15 +15,42 @@ public sealed record PersonItem(string Name, string Fingerprint, bool IsMe, bool
         ? IsHost ? L.F("multiplayer.people.me_host", Name) : L.F("multiplayer.people.me", Name)
         : IsHost ? L.F("multiplayer.people.host", Name) : Name.Length > 0 ? Name : L.T("multiplayer.peers.player");
 
+    /// <summary>What the list says under the name: where they are, or how they are reached ("Direct · 18 ms").</summary>
     public string Status => IsMe ? L.T("multiplayer.people.here")
         : Member is { NeedsInvite: true } ? L.T("multiplayer.kick.needs_invite")
-        : Online is not null ? L.T("multiplayer.people.online")
+        : Online is not null ? (LinkText.Length > 0 ? LinkText : L.T("multiplayer.people.online"))
         : Member is { Confirmed: false } ? L.T("multiplayer.invite.member_unconfirmed")
         : L.T("multiplayer.people.offline");
 
     /// <summary>Their verified Jay account: from their knock (host), or the host's approval (guest looking at the host).</summary>
     public string? JayAccount { get; init; }
     public bool HasJayAccount => JayAccount is not null;
+
+    /// <summary>A friend I compared emoji with (the small tick on the face). Everyone else in a room is "someone I've met".</summary>
+    public bool IsFriend { get; init; }
+    public string FriendText => IsMe ? "" : L.T(IsFriend ? "multiplayer.people.friend" : "multiplayer.people.met");
+
+    private RoomLink _link;
+
+    /// <summary>How my computer reaches theirs right now (<see cref="RoomLinks"/>); none for me and for people who are away.</summary>
+    public RoomLink Link
+    {
+        get => _link;
+        set
+        {
+            if (_link == value) return;
+            _link = value;
+            foreach (var name in (string[])[nameof(Link), nameof(LinkText), nameof(IsDirect), nameof(IsRelayed), nameof(HasLink), nameof(Status), nameof(Summary)]) OnPropertyChanged(name);
+        }
+    }
+
+    public string LinkText => MultiplayerViewModel.LinkLabel(Link);
+    public bool HasLink => LinkText.Length > 0;
+    public bool IsDirect => Link.Kind == LinkKind.Direct;
+    public bool IsRelayed => Link.Kind == LinkKind.Relay;
+
+    /// <summary>For screen readers and the tooltip on a face in the banner: "Alex · Friend · Direct · 18 ms".</summary>
+    public string Summary => string.Join(" · ", new[] { DisplayName, FriendText, Status }.Where(s => s.Length > 0));
 
     public bool IsOnline => IsMe || Online is not null;
     public bool CanPrivate => !IsMe && Online is not null;
@@ -54,14 +81,8 @@ public sealed partial class MultiplayerViewModel
 
     public int PeopleCount => Math.Max(1, People.Count(p => p.IsOnline));
 
-    /// <summary>"Direct · 31 ms" for the first other player, or "waiting for friends".</summary>
-    public string ConnectionSummary => OtherPlayers.FirstOrDefault() is { } p
-        ? string.Join(" · ", new[]
-        {
-            p.Peer.Cost.Contains("p2p", StringComparison.OrdinalIgnoreCase) ? L.T("multiplayer.room.direct") : L.T("multiplayer.room.relayed"),
-            p.Peer.LatencyMs is { } ms ? $"{ms:F0} ms" : null,
-        }.Where(s => s is not null))
-        : IsHosting ? L.T("multiplayer.room.waiting_friends") : L.T("multiplayer.room.connecting");
+    /// <summary>The connection mark as words: "Direct · 31 ms", "1 direct · 1 relayed", or "waiting for friends".</summary>
+    public string ConnectionSummary => ConnectionMarkText;
 
     public bool IsConnectedToOthers => OtherPlayers.Any();
 
@@ -89,6 +110,7 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(HasVirtualIp));
         OnPropertyChanged(nameof(VirtualIpLabel));
         OnPropertyChanged(nameof(EndRoomLabel));
+        OnPropertyChanged(nameof(PeopleCountText));
     }
 
     /// <summary>The sticky room header (and the knock panel under it) on the play tab while in a room.</summary>
@@ -115,6 +137,16 @@ public sealed partial class MultiplayerViewModel
 
     public ObservableCollection<PersonItem> People { get; } = [];
 
+    /// <summary>How many faces the banner shows before it says "+3".</summary>
+    internal const int BannerFaces = 10;
+
+    /// <summary>The faces in the banner: the first few people; the rest are counted in <see cref="ExtraPeopleText"/>.</summary>
+    public ObservableCollection<PersonItem> BannerPeople { get; } = [];
+
+    public bool HasExtraPeople => People.Count > BannerFaces;
+
+    public string ExtraPeopleText => HasExtraPeople ? "+" + (People.Count - BannerFaces) : "";
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelectedPerson))]
     public partial PersonItem? SelectedPerson { get; set; }
@@ -125,6 +157,7 @@ public sealed partial class MultiplayerViewModel
     {
         Members.CollectionChanged += (_, _) => RefreshPeople();
         OnlinePeers.CollectionChanged += (_, _) => RefreshPeople();
+        ContactList.CollectionChanged += (_, _) => RefreshPeople();
         Peers.CollectionChanged += (_, _) => NotifyRoomHeader();
         ApprovalCards.CollectionChanged += (_, _) =>
         {
@@ -157,22 +190,41 @@ public sealed partial class MultiplayerViewModel
     {
         var selected = SelectedPerson?.Fingerprint;
         People.Clear();
-        if (IsIdle) return;
+        if (IsIdle)
+        {
+            RefreshBannerPeople();
+            return;
+        }
         var me = Identity.Fingerprint;
         People.Add(new PersonItem(ChatName, me, true, IsHosting, null, null));
+        var friends = ContactList.SelectMany(f => f.Devices).Where(d => d.Verified).Select(d => MemberIdentity.FingerprintOf(d.PublicKey)).ToHashSet();
         var online = OnlinePeers.ToDictionary(p => p.Entry.Fingerprint);
         foreach (var m in Members)
         {
             online.Remove(m.Fingerprint, out var peer);
-            People.Add(new PersonItem(m.Name, m.Fingerprint, false, false, m, peer) { JayAccount = m.JayAccount });
+            People.Add(new PersonItem(m.Name, m.Fingerprint, false, false, m, peer) { JayAccount = m.JayAccount, IsFriend = friends.Contains(m.Fingerprint) });
         }
         foreach (var peer in online.Values.Where(p => p.Entry.Fingerprint != me))
         {
             var isHost = !IsHosting && peer.Entry.Fingerprint == HostFingerprint;
-            People.Add(new PersonItem(peer.Entry.Name, peer.Entry.Fingerprint, false, isHost, null, peer) { JayAccount = isHost ? HostJayAccount : null });
+            People.Add(new PersonItem(peer.Entry.Name, peer.Entry.Fingerprint, false, isHost, null, peer)
+            {
+                JayAccount = isHost ? HostJayAccount : null,
+                IsFriend = friends.Contains(peer.Entry.Fingerprint),
+            });
         }
         SelectedPerson = People.FirstOrDefault(p => p.Fingerprint == selected);
+        RefreshBannerPeople();
+        RefreshLinks();
         NotifyRoomHeader();
+    }
+
+    private void RefreshBannerPeople()
+    {
+        BannerPeople.Clear();
+        foreach (var person in People.Take(BannerFaces)) BannerPeople.Add(person);
+        OnPropertyChanged(nameof(HasExtraPeople));
+        OnPropertyChanged(nameof(ExtraPeopleText));
     }
 
     [RelayCommand]
@@ -196,10 +248,13 @@ public sealed partial class MultiplayerViewModel
         if (person?.Member is { } member) await AskKickMemberCommand.ExecuteAsync(member);
     }
 
+    /// <summary>A face in the banner: show that person in the list (compact windows switch to the people section).</summary>
     [RelayCommand]
-    private void RemoteControlPerson(PersonItem? person)
+    private void SelectPerson(PersonItem? person)
     {
-        if (person?.Member is { } member) RequestRemoteCommand.Execute(member);
+        if (person is null || !People.Contains(person)) return;
+        SelectedPerson = person;
+        CompactSection = 0;
     }
 
     // ---- chat: one panel, room or private ----
@@ -321,34 +376,26 @@ public sealed partial class MultiplayerViewModel
 
     // ---- invite card ----
 
-    private string _inviteTerms = "";
+    private (int Uses, TimeSpan? Lifetime, bool Auto)? _inviteTermsOf;
 
     internal void RememberInviteTerms(int uses, TimeSpan? lifetime, bool autoApprove)
     {
-        _inviteTerms = L.F("multiplayer.invite.terms", L.P("multiplayer.invite.terms_uses", uses, uses),
-            lifetime is { } life ? L.F("multiplayer.invite.terms_life", life.TotalMinutes >= 60 ? L.P("multiplayer.invite.hours", (int)life.TotalHours, (int)life.TotalHours) : L.P("multiplayer.invite.minutes", (int)life.TotalMinutes, (int)life.TotalMinutes))
-                : L.T("multiplayer.invite.terms_room"),
-            autoApprove ? L.T("multiplayer.invite.terms_auto") : L.T("multiplayer.invite.terms_ask"));
+        _inviteTermsOf = (uses, lifetime, autoApprove);
         OnPropertyChanged(nameof(InviteTerms));
+        OnPropertyChanged(nameof(InviteTermsFact));
     }
 
-    /// <summary>"This invite: 1 use · valid for 10 minutes · asks you first".</summary>
-    public string InviteTerms => _inviteTerms;
+    /// <summary>"This invite: 1 use · valid for 10 minutes · asks you first". Written when read, so it follows the language.</summary>
+    public string InviteTerms => _inviteTermsOf is not { } terms ? "" : L.F("multiplayer.invite.terms",
+        terms.Uses == InviteBook.UnlimitedUses ? L.T("multiplayer.invite.use.unlimited") : L.P("multiplayer.invite.terms_uses", terms.Uses, terms.Uses),
+        terms.Lifetime is { } life ? L.F("multiplayer.invite.terms_life", Span(life)) : L.T("multiplayer.invite.terms_room"),
+        terms.Auto ? L.T("multiplayer.invite.terms_auto") : L.T("multiplayer.invite.terms_ask"));
 
-    /// <summary>Invite options ("Change…") are folded away until asked for.</summary>
-    [ObservableProperty] public partial bool InviteOptionsOpen { get; set; }
-
-    [RelayCommand]
-    private void ToggleInviteOptions() => InviteOptionsOpen = !InviteOptionsOpen;
-
-    /// <summary>"Copy a message": a short paragraph with the code, ready to paste into any chat.</summary>
-    [RelayCommand]
-    private async Task CopyInviteMessageAsync()
-    {
-        if (_lastInvite is not { } invite) return;
-        if (await SecretClipboard.CopyAsync(L.F("multiplayer.invite.message", invite.ToString())))
-            SetStatus(StatusMessage.Success("multiplayer.invite.message_copied"));
-    }
+    /// <summary>"10 minutes", "2 hours", "30 days": the largest whole unit.</summary>
+    private static string Span(TimeSpan span) =>
+        span.TotalDays >= 1 ? L.P("multiplayer.invite.days", (int)span.TotalDays, (int)span.TotalDays)
+        : span.TotalHours >= 1 ? L.P("multiplayer.invite.hours", (int)span.TotalHours, (int)span.TotalHours)
+        : L.P("multiplayer.invite.minutes", (int)span.TotalMinutes, (int)span.TotalMinutes);
 
     // ---- room settings drawer ----
 

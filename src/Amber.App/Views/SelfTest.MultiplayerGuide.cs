@@ -170,20 +170,27 @@ internal sealed partial class SelfTest
         Check("联机设置：分组都在", HasText("multiplayer.settings.identity") && HasText("multiplayer.settings.invites") && HasText("multiplayer.settings.component")
             && HasText("multiplayer.settings.diagnostics"));
 
-        // Long-lived invites for regular friends: made here, 30 days, masked, revoke.
-        Check("长期邀请：开始时没有", !vm.HasLongInvites);
-        Dispatcher.UIThread.Invoke(() => vm.LongInviteLabel = "Bob");
-        Press(Visible("CreateLongInviteButton"));
+        // Thirty-day invites are made in a room's invite panel. They outlive the room, so multiplayer settings lists the
+        // ones that exist (masked, copy, revoke) and takes no space when there are none.
+        Check("30 天邀请：没有时联机设置里不占一块", !vm.HasLongInvites && Visible("CreateLongInviteButton") is null
+            && !page.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "LongInviteList" && i.IsEffectivelyVisible));
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.LongInviteLabel = "Bob";
+            vm.PickInviteChoices(InviteLife.ThirtyDays, InviteUse.Unlimited);
+        });
+        await vm.CreateInviteCommand.ExecuteAsync(null);
         await WaitAsync(() => vm.HasLongInvites, 3);
         await Task.Delay(200);
         var longItem = vm.LongInviteItems.FirstOrDefault();
-        Check("长期邀请：做好一张给 Bob 的，30 天、默认打码、能被认出是邀请", longItem is { Label: "Bob" } && longItem.Left == L.P("multiplayer.longinvite.days_left", 30, 30)
+        Check("30 天邀请：有一张时列在联机设置里，30 天、默认打码、能被认出是邀请", longItem is { Label: "Bob" } && longItem.Left == L.P("multiplayer.longinvite.days_left", 30, 30)
             && longItem.CodeDisplay.Contains('•') && JayInvite.TryParse(longItem.Code, out _) && vm.LongInviteLabel.Length == 0
             && page.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "LongInviteList" && i.IsEffectivelyVisible), longItem?.Left);
         await ShotAsync("长期邀请");
         Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Classes.Contains("long-revoke") && b.IsEffectivelyVisible));
         await Task.Delay(200);
-        Check("长期邀请：作废后列表清空", !vm.HasLongInvites);
+        Check("30 天邀请：作废后列表清空", !vm.HasLongInvites && !vm.HasInvite);
+        Dispatcher.UIThread.Invoke(() => vm.PickInviteChoices(InviteLife.TenMinutes, InviteUse.Once));
         await ContactsAsync(vm, page);
         var relayHeader = page.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "RelayHeader");
         // "On by default" is about a fresh install, not about this test profile: a reused profile may have it switched off
