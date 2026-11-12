@@ -38,7 +38,7 @@ public static class NetworkList
             Row(NetworkCategory.Download, "about.net.download", "about.net.download.when", L.T("about.net.download.status"), "settings#Source"),
             Row(NetworkCategory.Login, "about.net.login", "about.net.login.when", login, "me"),
             Row(NetworkCategory.ContentApi, "about.net.content", "about.net.content.when", L.T("about.net.content.status"), "settings#CurseForgeKey"),
-            Row(NetworkCategory.UpdateCheck, "about.net.update", "about.net.update.when", update, AutoUpdateCheck.IsSupported ? "settings#AutoUpdate" : "settings#UpdateFeed"),
+            Row(NetworkCategory.UpdateCheck, "about.net.update", AutoUpdateCheck.IsSupported ? "about.net.update.when" : "about.net.update.when_mobile", update, AutoUpdateCheck.IsSupported ? "settings#AutoUpdate" : "settings#UpdateFeed"),
             Row(NetworkCategory.Multiplayer, "about.net.play", "about.net.play.when", play, "play"),
         ];
     }

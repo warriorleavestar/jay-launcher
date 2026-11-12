@@ -2593,6 +2593,7 @@
   "about.net.content.status": "「見つける」を開いたときか更新チェックを押したときだけ",
   "about.net.update": "Jay の更新チェック",
   "about.net.update.when": "1 日 1 回（オフにできます）と「更新を確認」を押したときに、Jay 公式のリリースか入れた更新先に最新バージョンを問い合わせます",
+  "about.net.update.when_mobile": "自分の更新先を設定して「更新を確認」を押したときだけ問い合わせます。スマートフォンとタブレットはストアで更新されます",
   "about.net.update.auto": "1 日 1 回と、「更新を確認」を押したとき",
   "about.net.update.manual": "「更新を確認」を押したときだけ",
   "about.net.play": "マルチプレイ",

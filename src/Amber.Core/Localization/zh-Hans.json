@@ -2593,6 +2593,7 @@
   "about.net.content.status": "只在你打开发现或点检查更新时",
   "about.net.update": "检查 Jay 更新",
   "about.net.update.when": "每天一次（可以关）和你点“检查更新”时，向 Jay 官方发布页或你填的地址查最新版本",
+  "about.net.update.when_mobile": "只在你填了自己的更新地址并点“检查更新”时查；手机和平板由应用商店更新",
   "about.net.update.auto": "每天一次，以及你点“检查更新”时",
   "about.net.update.manual": "只在你点“检查更新”时",
   "about.net.play": "联机",
