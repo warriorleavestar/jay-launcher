@@ -55,7 +55,10 @@ public sealed class SplitTunnelServer : IAsyncDisposable
 
     /// <summary>Joined split connections handed to a handler.</summary>
     public int Accepted => Volatile.Read(ref _accepted);
-    /// <summary>Legs refused before pairing (bad handshake, a service that isn't split, an unexpected failure).</summary>
+    /// <summary>
+    /// Legs never handed to a handler (bad or timed-out handshake, closed to make room, a service that isn't split, an
+    /// unexpected failure before pairing). A handler that fails later doesn't count, as for <see cref="TunnelServer.Rejected"/>.
+    /// </summary>
     public int Rejected => Volatile.Read(ref _rejected);
     /// <summary>Joined connections dropped because the legs went out of step.</summary>
     public int Tampered => Volatile.Read(ref _tampered);
@@ -167,6 +170,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         SplitStream? joined = null;
         CancellationTokenRegistration revocation = default;
         void HandshakeDone() => _slots.Release(slot);
+        var authenticated = false;
+        var served = false;
         try
         {
             (SecureStream Stream, TunnelService Service, MemberEntry? Member)? accepted;
@@ -179,6 +184,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             HandshakeDone();
             if (accepted is null) return;
             rawOwned = false;
+            authenticated = true;
             (secure, var service, var member) = accepted.Value;
             var handler = member is null || _room.Split.For(service) == SplitPolicy.Off ? null : _route(service);
             if (handler is null)
@@ -202,6 +208,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             var target = joined;
             revocation = member!.Revocation.Register(target.Abort);
             Interlocked.Increment(ref _accepted);
+            served = true;
             try
             {
                 await handler(joined, ct);
@@ -225,17 +232,19 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             // Failed: no close records, the other side sees a cut connection.
             secure?.Abort();
             joined?.Abort();
-            Interlocked.Increment(ref _rejected);
-            if ((e is CryptographicException or PlatformNotSupportedException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
-                _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
+            if (!served) Interlocked.Increment(ref _rejected);
+            var what = served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+            if ((e is CryptographicException or PlatformNotSupportedException) && (authenticated || TunnelServer.OncePerMinute(ref _handshakeFailedLogged)))
+                _log?.Invoke(L.T(what) + e.Message);
         }
         catch (Exception e)
         {
             // Anything else still ends this leg quietly, is counted, and is logged by type only (no member details).
             secure?.Abort();
             joined?.Abort();
-            Interlocked.Increment(ref _rejected);
-            if (TunnelServer.OncePerMinute(ref _handshakeFailedLogged)) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+            if (!served) Interlocked.Increment(ref _rejected);
+            if (authenticated || TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
+                _log?.Invoke(L.T(served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
         }
         finally
         {

@@ -115,6 +115,11 @@ internal sealed class HandshakeSlots(int max, int perSource, TimeSpan? grace = n
         return _live.First?.Value;
     }
 
+    /// <summary>
+    /// A caller over its own limit loses its oldest, grace period or not: the list is oldest first, so that is one past
+    /// the grace period whenever it has one, and a caller can't shelter behind fresh connections it keeps opening.
+    /// (Several members behind one address share its limit of <c>perSource</c>.)
+    /// </summary>
     private Slot? OldestOf(string source)
     {
         for (var node = _live.First; node is not null; node = node.Next)
