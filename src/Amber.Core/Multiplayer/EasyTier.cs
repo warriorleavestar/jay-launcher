@@ -781,6 +781,9 @@ public static class LobbyArgs
             "--machine-id", Guid.NewGuid().ToString(),
             "--no-tun",
             "--latency-first",
+            // A knock is a short exchange that works fine through the node. Nobody in a lobby needs a direct link,
+            // and the knocker can't know yet whether the room is "relays only".
+            "--disable-p2p",
         };
         // 直连房间的房主：只在本机回环上监听，给直连桥用；其他情况不监听。
         if (o.IsHost && o.ListenUdpPort is { } listen) args.AddRange(["--listeners", $"udp://127.0.0.1:{listen.ToString(System.Globalization.CultureInfo.InvariantCulture)}"]);

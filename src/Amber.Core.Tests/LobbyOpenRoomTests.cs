@@ -302,6 +302,25 @@ public sealed class LobbyOpenRoomTests
         Assert.False(vm.ShowFriendRoomsEmpty);
     });
 
+    /// <summary>The name of a guest turned away from a "relays only" room is theirs to pick: one line a minute per name.</summary>
+    [Fact]
+    public void AGuestTurnedAwayForRelaysOnlyIsMentionedAtMostOnceAMinute() => UiTestThread.Run(() =>
+    {
+        var (_, vm, _) = Create();
+        vm.OnRelayOnlyRefused("Alex");
+        Assert.Equal("multiplayer.room.relay_only_old", vm.StatusInfo?.Key);
+        vm.SetStatus(StatusMessage.Info("common.raw", "other"));
+        vm.OnRelayOnlyRefused("Alex");
+        Assert.Equal("common.raw", vm.StatusInfo?.Key);
+        vm.OnRelayOnlyRefused("Sam");
+        Assert.Equal("multiplayer.room.relay_only_old", vm.StatusInfo?.Key);
+        // A flood of made-up names stops showing once 32 are waiting out their minute.
+        for (var i = 0; i < 40; i++) vm.OnRelayOnlyRefused("guest" + i);
+        vm.SetStatus(StatusMessage.Info("common.raw", "other"));
+        vm.OnRelayOnlyRefused("one more");
+        Assert.Equal("common.raw", vm.StatusInfo?.Key);
+    });
+
     [Fact]
     public void ARoomAFriendInvitedMeToIsListedUntilItRunsOut() => UiTestThread.Run(() =>
     {
@@ -468,6 +487,20 @@ public sealed class LobbyOpenRoomTests
                 vm.RefreshContacts();
                 Assert.Equal(1, Assert.Single(lobby.Book.Pending).BoundTo![0]);
                 Assert.Single(vm.PendingInvites);
+
+                // An invite bound to a key that I did not mail to a friend is not theirs to end.
+                var other = lobby.Book.Create(1, TimeSpan.FromMinutes(10), false, credentials.Tunnel, boundTo: Key(9));
+                vm.RefreshContacts();
+                Assert.Contains(other, lobby.Book.Pending);
+
+                // A contacts file that can't be read is not "everyone was removed": Robin keeps the invite.
+                var broken = Path.Combine(root, "broken");
+                Directory.CreateDirectory(broken);
+                File.WriteAllText(Path.Combine(broken, ContactBook.FileName), "{ not json");
+                vm.ContactsDir = broken;
+                Assert.True(vm.Contacts.Unreadable);
+                Assert.Contains(lobby.Book.Pending, i => i.BoundTo is [1, ..]);
+                Assert.Equal(2, lobby.Book.Pending.Count);
             }
             finally
             {

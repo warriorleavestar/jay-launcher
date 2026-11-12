@@ -233,11 +233,20 @@ public sealed partial class MultiplayerViewModel
         JayServers.InviteText = JoinCode.Trim();
         JayServers.InvitePassphrase = JoinPassphrase;
         var before = JayServers.Servers.Count;
-        await JayServers.JoinCommand.ExecuteAsync(null);
+        try
+        {
+            await JayServers.JoinCommand.ExecuteAsync(null);
+        }
+        finally
+        {
+            // The server page that used to show these fields is gone: nothing should keep the invite or passphrase.
+            JayServers.InviteText = "";
+            JayServers.InvitePassphrase = "";
+            JoinPassphrase = "";
+        }
         if (JayServers.Status.Length > 0) SetStatus(new StatusMessage("common.raw", [JayServers.Status], StatusKind.Info));
         if (JayServers.Servers.Count <= before) return;
         JoinCode = "";
-        JoinPassphrase = "";
         Where = WhereFilter.Servers;
     }
 

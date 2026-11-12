@@ -149,16 +149,24 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>
-    /// Someone is no longer a friend (removed, or a device taken off): the invites mailed to their devices stop
-    /// working, so they can't keep knocking on the room that is open.
+    /// Someone is no longer a friend (removed, or a device taken off): the invites I mailed to their devices stop
+    /// working, so they can't keep knocking on the room that is open. Only invites mailed to friends are looked at,
+    /// and nothing happens while the contacts file can't be read.
     /// </summary>
     private void RevokeInvitesOfRemovedFriends()
     {
-        if (_lobby is not { } lobby) return;
-        var friends = ContactList.SelectMany(f => f.Devices).Select(d => Convert.ToHexString(d.PublicKey)).ToHashSet();
-        var gone = lobby.Book.Pending.Where(i => i.BoundTo is { } key && !friends.Contains(Convert.ToHexString(key))).ToList();
+        if (_lobby is not { } lobby || _friendInvites.Count == 0) return;
+        var stillOut = lobby.Book.Pending.ToHashSet(ReferenceEqualityComparer.Instance);
+        _friendInvites.RemoveWhere(i => !stillOut.Contains(i));
+        if (_friendInvites.Count == 0 || Contacts.Unreadable) return;
+        var devices = Contacts.All.Select(c => Convert.ToHexString(c.PublicKey)).ToHashSet();
+        var gone = _friendInvites.Where(i => i.BoundTo is { } key && !devices.Contains(Convert.ToHexString(key))).ToList();
         if (gone.Count == 0) return;
-        foreach (var invite in gone) lobby.Book.Revoke(invite);
+        foreach (var invite in gone)
+        {
+            lobby.Book.Revoke(invite);
+            _friendInvites.Remove(invite);
+        }
         RefreshInvites();
     }
 
