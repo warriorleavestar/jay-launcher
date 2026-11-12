@@ -139,9 +139,26 @@ public sealed class TrustQuorumTests
     public void OnlyTheSelfCheckCanPinABuiltInDirectory()
     {
         // Outside a GUI self-check process the built-in network pins no directory key and refuses to pin one.
-        Assert.Null(Environment.GetEnvironmentVariable("AMBER_SELFTEST"));
-        Assert.Throws<InvalidOperationException>(() => PublicNetworkProfile.PinSelfTestDirectory(new byte[32]));
-        Assert.Empty(PublicNetworkProfile.Jay().DirectoryKeys);
+        var before = Environment.GetEnvironmentVariable("AMBER_SELFTEST");
+        try
+        {
+            Environment.SetEnvironmentVariable("AMBER_SELFTEST", null);
+            Assert.Throws<InvalidOperationException>(() => PublicNetworkProfile.PinSelfTestDirectory(new byte[32]));
+            Assert.Empty(PublicNetworkProfile.Jay().DirectoryKeys);
+        }
+        finally { Environment.SetEnvironmentVariable("AMBER_SELFTEST", before); }
+    }
+
+    [Fact]
+    public void APinnedKeyPassesTheStrictBuiltInDirectoryAndNoOtherDoes()
+    {
+        // What the self-check's pin amounts to, without touching the static pin: the built-in roots plus one pinned key.
+        var jay = PublicNetworkProfile.Jay();
+        using var pinned = X25519KeyPair.Generate();
+        using var other = X25519KeyPair.Generate();
+        var trust = new DirectoryTrust { Network = jay.NetworkName, Pinned = [pinned.PublicKey], Roots = jay.DirectoryRoots, RootsNeed = jay.DirectoryRootsNeed };
+        Assert.True(trust.Accepts("127.0.0.1", pinned.PublicKey, []));
+        Assert.False(trust.Accepts("127.0.0.1", other.PublicKey, []));
     }
 
     [Fact]
