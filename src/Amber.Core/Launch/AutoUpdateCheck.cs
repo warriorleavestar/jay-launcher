@@ -20,13 +20,20 @@ public static class AutoUpdateCheck
     /// Whether this platform has the daily check and the official desktop releases at all: phones and tablets are updated
     /// by the stores and the preview channel, so there Jay neither checks by itself nor asks the desktop releases.
     /// </summary>
-    public static bool IsSupported { get; } = !(OperatingSystem.IsAndroid() || OperatingSystem.IsIOS());
+    public static bool IsSupported => PlatformFeatures.IsDesktop;
 
     /// <summary>How often the automatic check runs.</summary>
     public static readonly TimeSpan Interval = TimeSpan.FromHours(24);
 
     /// <summary>The feed to use: the user's own address, or the official one when none is set.</summary>
     public static string FeedFor(string? userFeed) => string.IsNullOrWhiteSpace(userFeed) ? OfficialFeed : userFeed.Trim();
+
+    /// <summary>
+    /// The feed a manual check asks, or null when it makes no request at all: on a phone or tablet
+    /// (<paramref name="supported"/> false) without an own address, since the store updates Jay there.
+    /// </summary>
+    public static string? ManualFeed(string? userFeed, bool supported) =>
+        !supported && string.IsNullOrWhiteSpace(userFeed) ? null : FeedFor(userFeed);
 
     /// <summary>Whether an automatic check is due. A last check in the future (clock moved back) counts as due.</summary>
     public static bool IsDue(DateTimeOffset? lastCheck, DateTimeOffset now) =>
