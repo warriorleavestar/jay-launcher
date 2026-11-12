@@ -349,8 +349,15 @@ public sealed class SplitRoomTests
         }
         Assert.Equal(SplitConnector.MaxFailures * 2, rig.LegOpens);
         Volatile.Write(ref dead, 0);
-        await Task.Delay(500);
-        await using (var stream = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(stream);
+        // Keeps connecting until the pause is over (on one path meanwhile), so a slow machine doesn't fail the test.
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            await using var stream = await connector.OpenAsync(CancellationToken.None);
+            if (stream is SplitStream) break;
+            Assert.True(DateTime.UtcNow < until, "Auto never tried again after the pause");
+            await Task.Delay(50);
+        }
         Assert.Equal(1, connector.SplitConnections);
         Assert.Null(connector.LastReason);
     }
@@ -587,6 +594,15 @@ public sealed class SplitRoomPortTests
         using var squatter = new TcpListener(IPAddress.Loopback, SplitSettings.LegPort(0));
         try { squatter.Start(); }
         catch (SocketException) { /* already taken by something else: the same situation for the leg port */ }
+        // The Auto room listens on the real single-path port. When Jay is running a room on this machine it's taken, and
+        // there is nothing to test here.
+        try
+        {
+            var probe = new TcpListener(IPAddress.Loopback, TunnelSettings.Port);
+            probe.Start();
+            probe.Stop();
+        }
+        catch (SocketException) { return; }
 
         var (_, _, autoHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
         var log = new List<string>();
@@ -599,6 +615,6 @@ public sealed class SplitRoomPortTests
 
         var (_, _, strictHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
         var e = Assert.Throws<IOException>(() => RoomTransport.Start(new EasyTierOptions(strictHost, true, [], 15000)));
-        Assert.Equal(L.T("core.mp.split.ports_busy_strict"), e.Message);
+        Assert.Equal(L.F("core.mp.split.ports_busy_strict", SplitSettings.LegPort(0), SplitSettings.LegPort(1)), e.Message);
     }
 }

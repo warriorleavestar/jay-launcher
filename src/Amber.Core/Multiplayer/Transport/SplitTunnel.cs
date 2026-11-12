@@ -140,6 +140,13 @@ public sealed class SplitTunnelServer : IAsyncDisposable
                 // The forwarding ended (the other side closed, a kick, the room ending): not a refused leg.
                 joined.Abort();
             }
+            catch (Exception e)
+            {
+                // Forwarding failed some other way. The legs were already accepted, so this isn't a refused leg either;
+                // logged by type only (no member details).
+                joined.Abort();
+                _log?.Invoke(L.T("core.mp.split.forward_failed") + e.GetType().Name);
+            }
         }
         catch (Exception e) when (e is CryptographicException or IOException or SocketException or OperationCanceledException or ObjectDisposedException
                                    or PlatformNotSupportedException or InvalidDataException or ArgumentException)

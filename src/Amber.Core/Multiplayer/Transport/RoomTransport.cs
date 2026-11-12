@@ -110,7 +110,7 @@ public sealed class RoomTransport : IAsyncDisposable
                 // A leg port is taken by another program. Auto rooms carry on without splitting; a Strict service would be
                 // unreachable, so then the room doesn't start.
                 if (room.Split.For(TunnelService.Game) == SplitPolicy.Strict || room.Split.For(TunnelService.Chat) == SplitPolicy.Strict)
-                    throw new IOException(L.T("core.mp.split.ports_busy_strict"), e);
+                    throw new IOException(L.F("core.mp.split.ports_busy_strict", SplitSettings.LegPort(0), SplitSettings.LegPort(room.Split.Paths - 1)), e);
                 _log?.Invoke(L.T("core.mp.split.ports_busy"));
             }
         }
