@@ -147,6 +147,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// Snapshots one source address may ask for per minute (readers poll once a minute).
     /// </summary>
     public const int MaxSnapshotsPerSourcePerMinute = 6;
+
+    /// <summary>Don't count loopback sources against <see cref="MaxSnapshotsPerSourcePerMinute"/> (off by default).</summary>
+    public bool UncountedLoopback { get; set; }
     private readonly SemaphoreSlim _snapshotSlots = new(MaxConcurrentSnapshots, MaxConcurrentSnapshots);
     private readonly SemaphoreSlim _smallSnapshotSlots = new(MaxConcurrentSmallSnapshots, MaxConcurrentSmallSnapshots);
     private double _largeTokens = LargeSnapshotBurst;
@@ -312,15 +315,19 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             // fails the handshake's first-message check and is dropped without a reply too.
             if (first[0] == DirectoryChannel.LegacyFirstByte) return;
             if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
-            if (secure.Request["op"]?.GetValue<string>() == "snap")
+            if (Text(secure.Request["op"]) == "snap")
             {
                 await SnapshotAsync(secure, Source(client));
                 return;
             }
             await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
         }
-        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException or ObjectDisposedException) { }
+        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException
+            or ObjectDisposedException or InvalidOperationException or FormatException) { }
     }
+
+    /// <summary>A JSON string value, or null for anything else (a number where a string belongs isn't an exception).</summary>
+    private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
     /// <summary>
     /// Sends a snapshot: its own few slots and a per-source limit, so slow or greedy readers can't hold up the other ops;
@@ -337,7 +344,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             await secure.Reply(old, quick.Token);
             return;
         }
-        if (source is not null && !(IPAddress.TryParse(source, out var address) && IPAddress.IsLoopback(address)))
+        if (source is not null && !(UncountedLoopback && IPAddress.TryParse(source, out var address) && IPAddress.IsLoopback(address)))
         {
             bool limited;
             lock (_gate)
@@ -448,7 +455,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     }
 
     private JsonObject? VersionError(JsonObject request) =>
-        MinClientVersion is { } min && !ClientVersion.Meets(request["jay"]?.GetValue<string>(), min)
+        MinClientVersion is { } min && !ClientVersion.Meets(Text(request["jay"]), min)
             ? new JsonObject { ["ok"] = false, ["error"] = "version", ["min"] = min.ToString() }
             : null;
 
@@ -1416,16 +1423,22 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>
     /// 按邀请码里的大厅密钥找房主：只在本机的目录快照里找（目录看不到谁找了哪个房间）。没有时返回 null。
     /// </summary>
-    public async Task<DirectoryHit?> LookupAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct, byte[]? expectedHost = null)
-    {
-        await Snapshots.ReadyAsync(this, ct);
-        return Snapshots.Find(lobbyKey.Span, expectedHost);
-    }
+    public async Task<DirectoryHit?> LookupAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct, byte[]? expectedHost = null) =>
+        (await LookupAllAsync(lobbyKey, ct, expectedHost)) is [var one, ..] ? one : null;
 
-    /// <summary>Every address the directory copies give for this invite (see <see cref="DirectorySnapshots.FindAll"/>).</summary>
-    public async Task<IReadOnlyList<DirectoryHit>> LookupAllAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct, byte[]? expectedHost = null)
+    /// <summary>
+    /// Every address the directory copies give for this invite (see <see cref="DirectorySnapshots.FindAll"/>). When
+    /// nothing is found yet and the copy is kept fresh by polling, waits for the next scheduled refresh and looks again
+    /// (a room opened a moment ago isn't in the copy yet); <paramref name="waiting"/> is called before that wait.
+    /// </summary>
+    public async Task<IReadOnlyList<DirectoryHit>> LookupAllAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct, byte[]? expectedHost = null,
+        Action? waiting = null)
     {
         await Snapshots.ReadyAsync(this, ct);
+        var hits = Snapshots.FindAll(lobbyKey.Span, expectedHost);
+        if (hits.Count > 0 || !Snapshots.IsPolling) return hits;
+        waiting?.Invoke();
+        await Snapshots.WaitForNextRefreshAsync(ct);
         return Snapshots.FindAll(lobbyKey.Span, expectedHost);
     }
 

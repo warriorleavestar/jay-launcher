@@ -190,24 +190,27 @@ public static class PublicJoin
 
     /// <summary>拿着邀请码：先在目录里找房主；找到就经公共网络敲门，找不到返回 null（调用方改走邀请码自己的大厅）。</summary>
     /// <param name="expectedHost">A mailed invite names its host: a directory entry with another key is ignored (null).</param>
+    /// <param name="searching">Called when nothing was found yet and the lookup waits for the next directory refresh.</param>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
-        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
+        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, Action? searching = null)
     {
-        var hits = await (client ?? new RoomDirectoryClient(network)).LookupAllAsync(invite.LobbyKey, ct, expectedHost);
-        KnockOutcome? last = null;
+        var hits = await (client ?? new RoomDirectoryClient(network)).LookupAllAsync(invite.LobbyKey, ct, expectedHost, searching);
+        // The first "invalid" (the invite is used up or expired) is the answer, even if a later address says "mismatch".
+        KnockOutcome? invalid = null;
         foreach (var hit in hits)
         {
             if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) continue;
             try
             {
-                last = await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);
+                var outcome = await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);
                 // Someone else (or nobody we can talk to) at that address: the next address may be the host's.
-                if (last.Reason is not ("mismatch" or "invalid")) return last;
+                if (outcome.Reason is not ("mismatch" or "invalid")) return outcome;
+                if (outcome.Reason == "invalid") invalid ??= outcome;
             }
             catch (IOException) when (!ct.IsCancellationRequested) { }
             catch (SocketException) when (!ct.IsCancellationRequested) { }
         }
-        return last is { Reason: "invalid" } ? last : null;
+        return invalid;
     }
 }

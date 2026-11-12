@@ -285,7 +285,12 @@ public sealed partial class MultiplayerViewModel
         if (_public is not { } network) return null;
         try
         {
-            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct);
+            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct,
+                // A room opened a moment ago shows up at the next directory refresh; say we're still looking meanwhile.
+                searching: () => Dispatcher.UIThread.Post(() =>
+                {
+                    if (!ct.IsCancellationRequested) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+                }));
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException && !ct.IsCancellationRequested)
         {

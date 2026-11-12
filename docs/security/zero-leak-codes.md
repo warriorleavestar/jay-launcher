@@ -291,7 +291,7 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   6 requests per source address per minute (`rate`).
 - **Reader side**: the first refresh is awaited only until it has been tried; if it failed (`busy`, `version`,
   unreachable) the reader gets that error at once, and the poller tries again after 2, 5 and 10 s before going back to
-  every 60 s. Every wait is spread ±20% so readers don't come back all at once. A reader whose copies have all gone stale gets an error, not an empty answer.
+  every 60 s. Every wait is spread ±20% so readers don't come back all at once. A reader whose copies have all gone stale gets an error, not an empty answer. When an invite finds nothing in the copy, the reader waits for the next scheduled refresh and looks once more, so a room opened a moment ago is found without an extra request.
 - **Not signed by the directory**: the copy comes over the authenticated `DirectoryChannel`, which already proves it is
   this network's directory. The plan's separate snapshot signature only matters once snapshots are mirrored by others.
 - **Still on the wire**: `find` (fingerprint codes). A fingerprint code can only be matched with the host's search key,

@@ -208,6 +208,8 @@ public sealed class DirectorySnapshots
     internal static readonly TimeSpan[] RetryAfterFailure = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10)];
     private Exception? _lastError;
     private DateTimeOffset? _refreshedAt;
+    /// <summary>Done when the next refresh that starts from now on has finished (see <see cref="WaitForNextRefreshAsync"/>).</summary>
+    private TaskCompletionSource? _nextRound;
 
     public DirectorySnapshots() : this(() => DateTimeOffset.UtcNow) { }
 
@@ -285,6 +287,12 @@ public sealed class DirectorySnapshots
     public async Task RefreshAsync(RoomDirectoryClient client, CancellationToken ct)
     {
         await _refreshing.WaitAsync(ct);
+        TaskCompletionSource? round;
+        lock (_gate)
+        {
+            round = _nextRound;
+            _nextRound = null;
+        }
         try
         {
             Dictionary<string, (string Epoch, long Version)> have;
@@ -328,6 +336,7 @@ public sealed class DirectorySnapshots
         finally
         {
             _refreshing.Release();
+            round?.TrySetResult();
         }
     }
 
@@ -416,6 +425,28 @@ public sealed class DirectorySnapshots
             throw _lastError ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
         }
     }
+
+    /// <summary>
+    /// While polling, waits for the next scheduled refresh that starts after this call to finish (at most about one
+    /// poll interval), so something published a moment ago can be found without asking the directories out of turn.
+    /// Returns at once when not polling.
+    /// </summary>
+    internal async Task WaitForNextRefreshAsync(CancellationToken ct)
+    {
+        Task round;
+        lock (_gate)
+        {
+            if (_polling is null) return;
+            round = (_nextRound ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+        }
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        wait.CancelAfter(NextRefreshWait);
+        try { await round.WaitAsync(wait.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+    }
+
+    /// <summary>Longest wait in <see cref="WaitForNextRefreshAsync"/>: the longest poll interval plus time for the round.</summary>
+    internal static readonly TimeSpan NextRefreshWait = PollEvery * 1.2 + RoomDirectoryProtocol.RequestTimeout;
 
     /// <summary>Public rooms from every directory, each room once at its highest seq.</summary>
     public IReadOnlyList<RoomListing> Rooms()

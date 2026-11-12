@@ -63,7 +63,8 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
     private readonly RoomDirectoryServer _directory;
     private readonly X25519KeyPair _host = X25519KeyPair.Generate();
 
-    public DirectorySnapshotTests() => _directory = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => _now);
+    // Every test reader comes from loopback; the per-source limit has its own test.
+    public DirectorySnapshotTests() => _directory = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => _now) { UncountedLoopback = true };
 
     public async ValueTask DisposeAsync() => await _directory.DisposeAsync();
 
@@ -639,5 +640,46 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.Equal("10.235.0.7", hits[0].Ip);
         Assert.Equal(1 + DirectorySnapshots.MaxAddressesToTry, hits.Count);
         Assert.Equal(hits.Count, hits.DistinctBy(h => h.Ip).Count());
+    }
+    [Fact]
+    public async Task ARoomOpenedJustNowIsFoundAtTheNextRefresh()
+    {
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        using var poll = client.Snapshots.StartPolling(() => client, TimeSpan.FromMilliseconds(300));
+        await client.Snapshots.ReadyAsync(client, default);
+        // The room is announced after the reader's copy was taken: the lookup waits for the next scheduled refresh.
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        await HideAsync(new RoomSigner(), lobby);
+        var searching = 0;
+        var hits = await client.LookupAllAsync(lobby, default, _host.PublicKey, () => searching++);
+        Assert.Equal("10.235.0.7", Assert.Single(hits).Ip);
+        Assert.Equal(1, searching);
+        // Found straight away from then on.
+        Assert.Single(await client.LookupAllAsync(lobby, default, _host.PublicKey, () => searching++));
+        Assert.Equal(1, searching);
+    }
+
+    [Fact]
+    public async Task NonStringFieldsGetAnAnswerNotACrash()
+    {
+        _directory.MinClientVersion = new Version(0, 8, 0);
+        async Task<JsonObject> CallAsync(JsonObject request)
+        {
+            using var tcp = new TcpClient();
+            await tcp.ConnectAsync(IPAddress.Loopback, _directory.Port);
+            await using var stream = tcp.GetStream();
+            return await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", request, default);
+        }
+        Assert.Equal("version", (await CallAsync(new JsonObject { ["op"] = "snap", ["jay"] = 5 }))["error"]!.GetValue<string>());
+        Assert.Equal("bad", (await CallAsync(new JsonObject { ["op"] = 5, ["jay"] = "9.9.9" }))["error"]!.GetValue<string>());
+        Assert.True((await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["ok"]!.GetValue<bool>());
+    }
+    [Fact]
+    public async Task LoopbackReadersCountPerSourceByDefault()
+    {
+        _directory.UncountedLoopback = false;
+        for (var i = 0; i < RoomDirectoryServer.MaxSnapshotsPerSourcePerMinute; i++)
+            Assert.True((await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["ok"]!.GetValue<bool>());
+        Assert.Equal("rate", (await SnapOverChannelAsync(new JsonObject { ["op"] = "snap" }))["error"]!.GetValue<string>());
     }
 }
