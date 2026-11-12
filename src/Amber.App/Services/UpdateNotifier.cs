@@ -70,7 +70,7 @@ internal sealed class UpdateNotifier : IDisposable
     /// <summary>Starts the timer. Not on phones and tablets (the stores and the preview channel update those).</summary>
     public static UpdateNotifier? Start(LauncherService service)
     {
-        if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS()) return null;
+        if (!AutoUpdateCheck.IsSupported) return null;
         // Self-checks and page snapshots must not reach the network or put a notice on the request bar.
         if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 } || Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR") is { Length: > 0 }) return null;
         var notifier = new UpdateNotifier(service);

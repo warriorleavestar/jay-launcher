@@ -163,7 +163,8 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
 ### 3.7 崩溃分析、工具箱、更新检查 ✅
 
 - `Diagnostics/CrashAnalyzer.cs`：分析崩溃日志，列出疑似模组，导出报告。
-- `Launch/Toolbox.cs`：清理日志、崩溃报告、natives 和下载残留；提前下载 Java；更新检查默认每天一次查官方发布页（可关、可换地址），只提示签过名的新版本，不下载。
+- `Launch/Toolbox.cs`：清理日志、崩溃报告、natives 和下载残留；提前下载 Java。
+- 更新检查：`Launch/UpdateCheck.cs` 验签（3 位信任人里 2 位），`Launch/AutoUpdateCheck.cs` 定官方源、每天一次的间隔和可信的下载页，`Amber.App/Services/UpdateNotifier.cs` 跑定时检查并把新版本放进请求条。新装默认开、从旧版升级保持关，可换地址，只提示不下载。Android/iOS 没有每日检查（`AutoUpdateCheck.IsSupported`），没填地址时手动检查也不查桌面版发布页。
 
 ### 3.8 界面 ✅
 

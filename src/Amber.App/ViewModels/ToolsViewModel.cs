@@ -206,6 +206,12 @@ public sealed partial class ToolsViewModel : PageViewModel
         UpdateUrl = null;
         // A blank update address means the official Jay releases.
         var feed = AutoUpdateCheck.FeedFor(service.Settings.UpdateFeedUrl);
+        // Phones and tablets update through the stores: without an own address they don't ask the desktop releases.
+        if (!AutoUpdateCheck.IsSupported && string.IsNullOrWhiteSpace(service.Settings.UpdateFeedUrl))
+        {
+            UpdateStatus = L.T("tools.update.store");
+            return;
+        }
         try
         {
             // Privacy plan item 2: a newer release is offered only when 2 of the 3 Jay trustees signed it.

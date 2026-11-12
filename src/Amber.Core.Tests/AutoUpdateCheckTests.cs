@@ -33,6 +33,8 @@ public sealed class AutoUpdateCheckTests
     [InlineData("http://api.github.com/repos/warriorleavestar/jay-launcher/releases/latest", false)]
     [InlineData("https://api.github.com/repos/someone/jay-launcher/releases/latest", false)]
     [InlineData("https://api.github.com/repos/warriorleavestar/jay-launcher/releases/latest?x=1", false)]
+    [InlineData("https://api.github.com:8443/repos/warriorleavestar/jay-launcher/releases/latest", false)]
+    [InlineData("https://x@api.github.com/repos/warriorleavestar/jay-launcher/releases/latest", false)]
     [InlineData("abc", false)]
     public void RecognisesTheOfficialFeedTypedByHand(string feed, bool official) => Assert.Equal(official, AutoUpdateCheck.IsOfficial(feed));
 

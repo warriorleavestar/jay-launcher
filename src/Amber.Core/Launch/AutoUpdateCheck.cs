@@ -13,6 +13,12 @@ public static class AutoUpdateCheck
     /// <summary>Release pages of the official feed: the verified tag is appended.</summary>
     public const string OfficialReleasePages = "https://github.com/warriorleavestar/jay-launcher/releases/tag/";
 
+    /// <summary>
+    /// Whether this platform has the daily check and the official desktop releases at all: phones and tablets are updated
+    /// by the stores and the preview channel, so there Jay neither checks by itself nor asks the desktop releases.
+    /// </summary>
+    public static bool IsSupported { get; } = !(OperatingSystem.IsAndroid() || OperatingSystem.IsIOS());
+
     /// <summary>How often the automatic check runs.</summary>
     public static readonly TimeSpan Interval = TimeSpan.FromHours(24);
 
@@ -42,7 +48,8 @@ public static class AutoUpdateCheck
 
     /// <summary>Whether <paramref name="feed"/> is the official feed, also when typed in by hand (case, a trailing slash).</summary>
     public static bool IsOfficial(string feed) =>
-        Uri.TryCreate(feed.Trim(), UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.Query.Length == 0 && uri.Fragment.Length == 0
+        Uri.TryCreate(feed.Trim(), UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort && uri.UserInfo.Length == 0
+        && uri.Query.Length == 0 && uri.Fragment.Length == 0
         && string.Equals(uri.IdnHost, new Uri(OfficialFeed).IdnHost, StringComparison.OrdinalIgnoreCase)
         && string.Equals(uri.AbsolutePath.TrimEnd('/'), new Uri(OfficialFeed).AbsolutePath, StringComparison.OrdinalIgnoreCase);
 

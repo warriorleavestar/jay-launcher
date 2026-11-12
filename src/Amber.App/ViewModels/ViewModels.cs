@@ -696,6 +696,9 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// <summary>Check for a signed newer Jay once a day (only a notice; never a download).</summary>
     [ObservableProperty] public partial bool AutoUpdate { get; set; }
 
+    /// <summary>The daily check exists only on desktops; phones and tablets hide the switch.</summary>
+    public bool AutoUpdateSupported => AutoUpdateCheck.IsSupported;
+
     public string SettingsPath => AppSettings.FilePath;
     public string SettingsPathLabel => L.F("settings.file_path", SettingsPath);
 

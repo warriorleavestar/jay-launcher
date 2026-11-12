@@ -1076,6 +1076,7 @@
   "tools.update.failed": "察而未成：{0}",
   "tools.update.hint": "唯告新版，Jay 不自取不自代。",
   "tools.update.latest": "今之 {0} 已最新矣",
+  "tools.update.store": "手機平板之 Jay 由商肆或先覽之途更之，不問桌面之發布。亦可於 設定 › 下載與服務 自設更新處。",
   "tools.update.open_page": "啟取頁",
   "update.notice.title": "Jay {0} 新版出矣",
   "update.notice.body": "Jay 信人三中二已署。汝今用 {0}，暇時往取頁更之。",

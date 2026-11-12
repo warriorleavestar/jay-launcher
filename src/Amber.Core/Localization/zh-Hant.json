@@ -1105,6 +1105,7 @@
   "tools.update.failed": "檢查失敗：{0}",
   "tools.update.hint": "僅提示新版本，Jay 不會自行下載或取代。",
   "tools.update.latest": "目前的 {0} 已是最新版本",
+  "tools.update.store": "手機和平板上的 Jay 由應用程式商店或預覽管道更新，不會去查詢桌面版發布頁。也可以在 設定 › 下載與服務 填入自己的更新位址。",
   "tools.update.open_page": "開啟下載頁面",
   "update.notice.title": "Jay {0} 推出新版了",
   "update.notice.body": "3 位 Jay 信任人中有 2 位簽過。你目前是 {0}，方便時到下載頁更新。",

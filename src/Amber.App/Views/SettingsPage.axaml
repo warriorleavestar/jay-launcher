@@ -473,10 +473,10 @@
                            IsVisible="{Binding Tools.UpdateStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 <Button x:Name="OpenUpdatePageButton" Grid.Row="3" Grid.ColumnSpan="2" Classes="secondary" Content="{l:T tools.update.open_page}" Command="{Binding Tools.OpenUpdateUrlCommand}"
                         IsVisible="{Binding Tools.UpdateUrl, Converter={x:Static ObjectConverters.IsNotNull}}" HorizontalAlignment="Left" Margin="0,8,0,0" />
-                <CheckBox x:Name="AutoUpdateBox" Grid.Row="4" Grid.ColumnSpan="2" IsChecked="{Binding AutoUpdate}" Margin="0,12,0,0">
+                <CheckBox x:Name="AutoUpdateBox" Grid.Row="4" Grid.ColumnSpan="2" IsChecked="{Binding AutoUpdate}" IsVisible="{Binding AutoUpdateSupported}" Margin="0,12,0,0">
                   <TextBlock Text="{l:T settings.update.auto}" TextWrapping="Wrap" />
                 </CheckBox>
-                <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Classes="hint" Text="{l:T settings.update.auto_hint}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Classes="hint" Text="{l:T settings.update.auto_hint}" TextWrapping="Wrap" IsVisible="{Binding AutoUpdateSupported}" Margin="0,4,0,0" />
               </Grid>
             </Border>
             <Border Classes="card">

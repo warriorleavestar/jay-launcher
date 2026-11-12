@@ -1134,6 +1134,7 @@
   "tools.update.failed": "Update check failed: {0}",
   "tools.update.hint": "Only tells you about new versions. Jay never downloads or replaces itself.",
   "tools.update.latest": "Version {0} is up to date",
+  "tools.update.store": "On phones and tablets Jay is updated by the store or the preview channel, so it doesn't ask the desktop releases. You can set your own update address in Settings › Downloads and services.",
   "tools.update.open_page": "Open download page",
   "update.notice.title": "Jay {0} is out",
   "update.notice.body": "Signed by 2 of the 3 Jay trustees. You have {0}. Get it from the download page when it suits you.",
