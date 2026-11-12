@@ -1015,7 +1015,6 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         SaveFile(path, () => File.WriteAllLines(path, lines), "multiplayer.chat.exported");
     }
 
-    /// <summary>每次刷新时看看聊天要不要连：房主在完整局域网模式下等虚拟网卡就绪后再监听虚拟 IP；加入方看到房主后连。</summary>
     /// <summary>
     /// The hub drops a replaced connection once the new one has joined; this only closes it (without a goodbye) in case it
     /// is still open a little later.
@@ -1028,6 +1027,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private DateTime _chatSplitTriedAt;
 
+    /// <summary>每次刷新时看看聊天要不要连：房主在完整局域网模式下等虚拟网卡就绪后再监听虚拟 IP；加入方看到房主后连。</summary>
     private void TickChat(bool hostVisible)
     {
         if (_room is null) return;

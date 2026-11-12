@@ -1228,9 +1228,12 @@ public sealed class ChatClient : IAsyncDisposable, IPrivateLink
     }
 
     private volatile bool _quiet;
+    private int _disposed;
 
+    /// <summary>Safe to call more than once (a replaced connection can be closed from two places).</summary>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         if (!_quiet && _client.Connected && _stream is not null)
         {
             try
