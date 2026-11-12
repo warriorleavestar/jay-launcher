@@ -1597,7 +1597,6 @@
   "core.mp.split.mismatch": "分路之資不合，連已斷",
   "core.mp.split.stalled": "分路之一無應，諸路皆閉",
   "core.mp.split.exhausted": "分路之序已盡，連已斷，將復連",
-  "core.mp.split.timeout": "候他路之連逾時",
   "core.mp.split.rejected": "分路不相屬，已拒",
   "core.gate.split.need_two": "二路之連須二可連之轉驛，今不能備（不退直連）。若轉驛皆在，或服主易其設，請向服主求新邀碼",
   "core.gate.run.not_initialized": "未初設，先行 jay-server init --host <址>（或於 Jay 之「開服」書其址）",

@@ -1647,7 +1647,6 @@
   "core.mp.split.mismatch": "拆分连接的几路数据对不上，连接已断开",
   "core.mp.split.stalled": "拆分连接的一路没有响应，所有路都已断开",
   "core.mp.split.exhausted": "拆分连接用完了块序号，已断开，会重新连接",
-  "core.mp.split.timeout": "等拆分连接的其他路超时",
   "core.mp.split.rejected": "拆分连接的几路对不上号，已拒绝",
   "core.gate.split.need_two": "两路连接需要两个能连上的中转，现在凑不齐（不会退回直连）。中转都在线的话，可能是服主改了设置，请找服主要一张新邀请",
   "core.gate.run.not_initialized": "还没初始化，先运行 jay-server init --host <地址>（或在 Jay 的“开服”里填好地址）",
