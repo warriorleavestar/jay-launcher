@@ -58,14 +58,17 @@ public static class HiddenEntry
     /// <summary>The index an entry key may publish under (the directory checks this).</summary>
     public static byte[] IndexOf(ReadOnlySpan<byte> publicKey) => SHA256.HashData([.. IndexDomain, .. publicKey]);
 
-    /// <summary>Signs publishing <paramref name="sealedEntry"/> for room <paramref name="roomId"/> at <paramref name="at"/> (Unix seconds).</summary>
-    public static byte[] SignPublish(ReadOnlySpan<byte> lobbyKey, ReadOnlySpan<byte> sealedEntry, string roomId, long at)
+    /// <summary>
+    /// Signs publishing <paramref name="sealedEntry"/> for room <paramref name="roomId"/> in the listing version
+    /// <paramref name="seq"/> (the listing's signing time in Unix milliseconds).
+    /// </summary>
+    public static byte[] SignPublish(ReadOnlySpan<byte> lobbyKey, ReadOnlySpan<byte> sealedEntry, string roomId, long seq)
     {
         var seed = EntrySeed(lobbyKey);
         try
         {
             var key = new Org.BouncyCastle.Crypto.Parameters.Ed25519PrivateKeyParameters(seed);
-            var message = PublishBytes(IndexOf(key.GeneratePublicKey().GetEncoded()), sealedEntry, roomId, at);
+            var message = PublishBytes(IndexOf(key.GeneratePublicKey().GetEncoded()), sealedEntry, roomId, seq);
             var signer = new Org.BouncyCastle.Crypto.Signers.Ed25519Signer();
             signer.Init(true, key);
             signer.BlockUpdate(message, 0, message.Length);
@@ -75,14 +78,14 @@ public static class HiddenEntry
     }
 
     /// <summary>True when <paramref name="signature"/> by <paramref name="publicKey"/> publishes this entry under this index.</summary>
-    public static bool VerifyPublish(ReadOnlySpan<byte> index, ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> sealedEntry, string roomId, long at, byte[] signature) =>
+    public static bool VerifyPublish(ReadOnlySpan<byte> index, ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> sealedEntry, string roomId, long seq, byte[] signature) =>
         publicKey.Length == PublicKeyLength && signature.Length == SignatureLength && index.SequenceEqual(IndexOf(publicKey))
-        && RoomSigner.Verify(publicKey.ToArray(), PublishBytes(index, sealedEntry, roomId, at), signature);
+        && RoomSigner.Verify(publicKey.ToArray(), PublishBytes(index, sealedEntry, roomId, seq), signature);
 
-    private static byte[] PublishBytes(ReadOnlySpan<byte> index, ReadOnlySpan<byte> sealedEntry, string roomId, long at)
+    private static byte[] PublishBytes(ReadOnlySpan<byte> index, ReadOnlySpan<byte> sealedEntry, string roomId, long seq)
     {
         var time = new byte[8];
-        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(time, at);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(time, seq);
         return [.. PublishDomain, .. index, .. sealedEntry, .. Encoding.UTF8.GetBytes(roomId), .. time];
     }
 
@@ -250,12 +253,15 @@ public sealed class DirectorySnapshots
                 catch (Exception e) when (e is not OutOfMemoryException) { failures++; }
                 // A failed round (busy, unreachable) is tried again soon, a few times, before going back to the schedule.
                 var wait = failures is > 0 and <= 3 ? RetryAfterFailure[failures - 1] : interval;
-                try { await Task.Delay(wait < interval ? wait : interval, token); }
+                try { await Task.Delay(Jitter(wait < interval ? wait : interval), token); }
                 catch (OperationCanceledException) { break; }
             }
         });
         return new Stop(this, cts);
     }
+
+    /// <summary>±20%, so readers don't all come back at the same moment after a directory restart or a busy spell.</summary>
+    internal static TimeSpan Jitter(TimeSpan wait) => wait * (0.8 + 0.4 * Random.Shared.NextDouble());
 
     private sealed class Stop(DirectorySnapshots owner, CancellationTokenSource cts) : IDisposable
     {
@@ -400,7 +406,7 @@ public sealed class DirectorySnapshots
         }
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // The first snapshot of a busy directory can take as long as the directory gives it.
-        wait.CancelAfter(RoomDirectoryProtocol.SnapshotTimeout + RoomDirectoryProtocol.RequestTimeout);
+        wait.CancelAfter(RoomDirectoryProtocol.SnapshotTimeout + RoomDirectoryProtocol.SnapshotDeadline(RoomDirectoryProtocol.MaxReply));
         try { await _firstAttempt.Task.WaitAsync(wait.Token); }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
         lock (_gate)

@@ -26,6 +26,9 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     /// <summary>上一次发布成功了没有（界面显示“已发布” / 失败原因）。</summary>
     public bool Published { get; private set; }
     public string? LastError { get; private set; }
+
+    /// <summary>Published, but with a problem the host should fix (a wrong clock: the room's invites can't be found).</summary>
+    public string? Warning { get; private set; }
     public event Action? StateChanged;
 
     public string RoomId => _signer.RoomId;
@@ -95,7 +98,13 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                     }
                     return;
                 }
-                await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
+                var warning = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
+                if (warning != Warning)
+                {
+                    Warning = warning;
+                    if (warning is not null) _log?.Invoke(L.F("core.mp.public.announce_failed", warning));
+                    StateChanged?.Invoke();
+                }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }

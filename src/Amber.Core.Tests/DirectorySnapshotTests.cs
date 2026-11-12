@@ -214,7 +214,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
     /// Publishes junk under <paramref name="index"/>'s index, signed with <paramref name="signWith"/>'s entry key: a
     /// stranger signs with a key of their own, someone who holds the invite with the invite's.
     /// </summary>
-    private JsonObject Publish(byte[] index, byte[] signWith, RoomListing? signedFor = null, RoomListing? sentWith = null)
+    private JsonObject Publish(byte[] index, byte[] signWith, RoomListing? signedFor = null, RoomListing? sentWith = null, bool listed = false)
     {
         var listing = signedFor ?? new RoomSigner().Sign(Listing(RoomVisibility.Hidden), _now);
         var junk = RandomNumberGenerator.GetBytes(HiddenEntry.SealedLength);
@@ -222,7 +222,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         {
             ["op"] = "announce",
             ["room"] = (sentWith ?? listing).ToJson(),
-            ["listed"] = false,
+            ["listed"] = listed,
             ["hidden"] = new JsonArray(new JsonObject
             {
                 ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(index)),
@@ -410,5 +410,58 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.False(copy.IsPolling);
         await _directory.DisposeAsync();
         await _directory.DisposeAsync();
+    }
+
+    /// <summary>A listing signed with any seq, as a hand-made publisher could send.</summary>
+    private RoomListing SignedWithSeq(RoomVisibility mode, long seq)
+    {
+        var signer = new RoomSigner();
+        var listing = signer.Sign(Listing(mode), _now) with { Seq = seq, Signature = [] };
+        var sign = typeof(RoomSigner).GetMethod("SignBytes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        return listing with { Signature = (byte[])sign.Invoke(signer, [listing.SignedBytes()])! };
+    }
+
+    [Fact]
+    public void AWrongClockOnlyLeavesOutTheHiddenEntries()
+    {
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        // A public room from a host whose clock is hours off: listed, its invite entry left out, the host told.
+        var skewed = new RoomSigner().Sign(Listing(RoomVisibility.Public), _now - TimeSpan.FromHours(3));
+        var reply = Publish(lobby, lobby, skewed, null, listed: true);
+        Assert.True(reply["ok"]!.GetValue<bool>());
+        Assert.Equal("clock", reply["warn"]!.GetValue<string>());
+        var snap = _directory.Handle(new JsonObject { ["op"] = "snap" });
+        Assert.Single(snap["rooms"]!.AsArray());
+        Assert.Empty(snap["hidden"]!.AsArray());
+        // Seqs at the very ends of the range are refused cleanly, not with an overflow.
+        foreach (var seq in new[] { long.MinValue, long.MinValue + _now.ToUnixTimeMilliseconds(), long.MaxValue, 0L })
+            Assert.Equal("clock", ErrorOf(Publish(lobby, lobby, SignedWithSeq(RoomVisibility.Hidden, seq))));
+    }
+
+    [Fact]
+    public async Task TheReaderLearnsASnapshotsLengthBeforeReadingIt()
+    {
+        // The reader resets its deadline from the length, using the directory's own rule.
+        await HideAsync(new RoomSigner(), RandomNumberGenerator.GetBytes(16));
+        var lengths = new List<int>();
+        var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _directory.Port);
+        await using (var stream = client.GetStream())
+        {
+            var trust = new DirectoryTrust { Network = "", Pinned = [] };
+            await DirectoryChannel.CallAsync(stream, trust, "", "", new JsonObject { ["op"] = "snap", ["jay"] = "9.9.9" }, default, lengths.Add);
+        }
+        Assert.Equal(RoomDirectoryProtocol.SnapshotPad, Assert.Single(lengths));
+        // A full-size snapshot at the slowest rate the directory accepts fits the reader's wait.
+        Assert.True(RoomDirectoryProtocol.SnapshotDeadline(RoomDirectoryProtocol.MaxReply) > RoomDirectoryProtocol.SnapshotTimeout);
+        Assert.Equal(RoomDirectoryProtocol.RequestTimeout + TimeSpan.FromSeconds(1), RoomDirectoryProtocol.SnapshotDeadline(RoomDirectoryServer.MinSnapshotRate));
+    }
+
+    [Fact]
+    public void RetriesAreSpreadOut()
+    {
+        var waits = Enumerable.Range(0, 200).Select(_ => DirectorySnapshots.Jitter(TimeSpan.FromSeconds(10))).ToList();
+        Assert.All(waits, w => Assert.InRange(w, TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(12)));
+        Assert.True(waits.Distinct().Count() > 100);
     }
 }

@@ -41,7 +41,14 @@ public static class RoomDirectoryProtocol
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan RenewEvery = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>How long a snapshot call may take until the reply's length arrives (then <see cref="SnapshotDeadline"/> applies).</summary>
     public static readonly TimeSpan SnapshotTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// How long a reply of <paramref name="bytes"/> may take to go out: a base plus the time at
+    /// <see cref="RoomDirectoryServer.MinSnapshotRate"/>. The directory and the reader use the same rule.
+    /// </summary>
+    public static TimeSpan SnapshotDeadline(long bytes) => RequestTimeout + TimeSpan.FromSeconds((double)bytes / RoomDirectoryServer.MinSnapshotRate);
 
 }
 
@@ -345,23 +352,23 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         finally { Flush(); }
         var large = reply.Length > SmallSnapshot;
         var slots = large ? _snapshotSlots : _smallSnapshotSlots;
-        if ((large && !TakeLargeToken()) || !slots.Wait(0))
+        // A slot first, then a start from the bucket, so a refused start doesn't use up a token for nothing.
+        var gotSlot = slots.Wait(0);
+        if (!gotSlot || (large && !TakeLargeToken()))
         {
+            if (gotSlot) slots.Release();
             await secure.Reply(Error("busy"), quick.Token);
             return;
         }
         try
         {
             using var whole = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-            whole.CancelAfter(SnapshotDeadline(reply.Length));
+            whole.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(reply.Length));
             await secure.Snapshot(reply, RoomDirectoryProtocol.SnapshotPad, RoomDirectoryProtocol.RequestTimeout, whole.Token);
         }
         finally { slots.Release(); }
     }
 
-    /// <summary>How long a reader may take for a reply of <paramref name="bytes"/>: a base plus the time at <see cref="MinSnapshotRate"/>.</summary>
-    internal static TimeSpan SnapshotDeadline(int bytes) =>
-        RoomDirectoryProtocol.RequestTimeout + TimeSpan.FromSeconds((double)bytes / MinSnapshotRate);
 
     /// <summary>Takes one start from the large-snapshot bucket (refilled at <see cref="LargeSnapshotsPerSecond"/>).</summary>
     private bool TakeLargeToken()
@@ -560,6 +567,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         if (RoomListing.FromJson(request["room"]) is not { } listing || listing.Ip.Length == 0) return Error("room");
         var listed = request["listed"]?.GetValue<bool>() ?? false;
         var hidden = new Dictionary<string, string>(StringComparer.Ordinal);
+        var clockOff = false;
         foreach (var item in (request["hidden"] as JsonArray ?? []).OfType<JsonObject>())
         {
             var index = item["k"]?.GetValue<string>()?.ToLowerInvariant();
@@ -573,7 +581,14 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (hidden.Count >= RoomDirectoryProtocol.MaxLookupKeys) continue;
             // Only a holder of the invite can sign for its index; the signature covers this room and this version of
             // the listing, and the listing's version is its time, so it can't be replayed for another room or much later.
-            if (Math.Abs(listing.Seq - _now().ToUnixTimeMilliseconds()) > (long)HiddenEntry.MaxClockSkew.TotalMilliseconds) return Error("clock");
+            // A host whose clock is off still gets a public room listed; only its hidden entries are left out (and it is told).
+            var nowMs = _now().ToUnixTimeMilliseconds();
+            var skew = (long)HiddenEntry.MaxClockSkew.TotalMilliseconds;
+            if (listing.Seq < nowMs - skew || listing.Seq > nowMs + skew)
+            {
+                clockOff = true;
+                continue;
+            }
             if (!HiddenEntry.VerifyPublish(Convert.FromHexString(index!), Convert.FromHexString(key!), bytes, listing.Id, listing.Seq, Convert.FromHexString(sig!))) return Error("lookup");
             hidden.TryAdd(index!, blob);
         }
@@ -581,7 +596,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         var fp = request["fp"]?.GetValue<string>();
         if (fp is not null && (fp.Length != 64 || !fp.All(char.IsAsciiHexDigit))) return Error("bad");
         fp = fp?.ToLowerInvariant();
-        if (!listed && keys.Length == 0 && fp is null) return Error("empty");
+        if (!listed && keys.Length == 0 && fp is null) return Error(clockOff ? "clock" : "empty");
         // The host's account: a login token this node's login service signed for exactly this host identity.
         string? account = null;
         if (Login is { } login && request["account"]?.GetValue<string>() is { Length: > 0 and <= 2048 } token)
@@ -640,7 +655,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             SetSnapshot("r:" + listing.Id, listed && listing.Mode != RoomVisibility.Hidden ? PublicItem(entry.Listing) : null);
             var published = entry.Listing;
             _events.Add(o => o.OnAnnounced(published, listed, isNew));
-            return new JsonObject { ["ok"] = true };
+            return clockOff ? new JsonObject { ["ok"] = true, ["warn"] = "clock" } : new JsonObject { ["ok"] = true };
         }
     }
 
@@ -1065,7 +1080,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     };
 
     /// <summary>Every request goes through <see cref="DirectoryChannel"/>; there is no plaintext protocol any more.</summary>
-    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct, TimeSpan? timeout = null)
+    /// <param name="snapshot">Once a snapshot reply says how long it is, the deadline becomes the time the directory itself
+    /// allows for that size (<see cref="RoomDirectoryProtocol.SnapshotDeadline"/>), so slow links still get big snapshots.</param>
+    private async Task<JsonObject> CallAsync(string ip, JsonObject request, CancellationToken ct, TimeSpan? timeout = null, bool snapshot = false)
     {
         request["jay"] = Version;
         var trust = Trust;
@@ -1074,7 +1091,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         try
         {
             await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
-            return await DirectoryChannel.CallAsync(stream, trust, ip, NetworkSecret, request, deadline.Token);
+            return await DirectoryChannel.CallAsync(stream, trust, ip, NetworkSecret, request, deadline.Token,
+                snapshot ? total => deadline.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(total)) : null);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -1238,7 +1256,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             }
             try
             {
-                var reply = await CallAsync(ip, request, ct, RoomDirectoryProtocol.SnapshotTimeout);
+                var reply = await CallAsync(ip, request, ct, RoomDirectoryProtocol.SnapshotTimeout, snapshot: true);
                 if (!IsOk(reply)) Check(reply);
                 return (ip, (JsonObject?)reply, (Exception?)null);
             }
@@ -1261,7 +1279,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <param name="lobbyKeys">Lobby keys of the invites still open: each gets a sealed hidden entry, so holders of the invite find the room in their snapshot.</param>
     /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
     /// <param name="account">This network's login token, if logged in: lets networks that require login accept the room and tie it to the account.</param>
-    public async Task AnnounceAsync(RoomListing listing, bool listed, IEnumerable<byte[]> lobbyKeys, CancellationToken ct,
+    /// <returns>A warning to show the host (the room is listed but its invites can't be found), or null.</returns>
+    public async Task<string?> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<byte[]> lobbyKeys, CancellationToken ct,
         byte[]? searchKey = null, string? account = null)
     {
         var hit = new DirectoryHit(listing.Id, listing.Ip, listing.HostKey);
@@ -1287,7 +1306,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         };
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         if (account is not null) request["account"] = account;
-        NeedOne(await FanOutAsync(request, ct));
+        var replies = NeedOne(await FanOutAsync(request, ct));
+        return replies.Any(r => r["warn"]?.GetValue<string>() == "clock") ? L.T("core.mp.public.err_clock") : null;
     }
 
     /// <summary>

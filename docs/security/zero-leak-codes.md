@@ -256,7 +256,7 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   to the index and that the signature holds, so only holders of the invite can publish under its index: someone who
   only saw the index (say in an old snapshot, or after a directory restart) gets `lookup`. The signature covers the room
   and the listing version, and the version is the listing's time in milliseconds, which must be within 10 minutes of
-  the directory's clock (`clock` otherwise), so a captured entry can't be replayed for another room or much later. The
+  the directory's clock (otherwise its hidden entries are left out: a listed room is still listed and the reply carries `warn: "clock"`; a room with nothing else to list gets `clock`), so a captured entry can't be replayed for another room or much later. The
   directory still never sees the lobby key, so it can't open an entry or tell which invite it belongs to.
 - **Sharing an index**: up to 8 rooms (`MaxEntriesPerIndex`) may have an entry under the same index, each under a
   random slot tag; only holders of the invite can fill those places. A reader tries every entry under the index. When
@@ -264,7 +264,8 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   that open point at different hosts, the reader trusts none of them.
   Renewals reuse the same sealed bytes while nothing changed, so they don't show up as changes.
 - **Public rooms**: a renewal that only changes the seq, signature and time isn't a snapshot change; readers keep the
-  earlier signed version, and expiry shows up as `gone` either way.
+  earlier signed version, and expiry shows up as `gone` either way. So a room's `updated` in a snapshot is when it was published or
+  last visibly changed, not its last renewal; the "newest" sort means most recently opened or changed.
 - **One request**: `snap` with the version of the copy Jay already has. The reply holds what changed since then (or
   everything, for a new copy or one from before the directory restarted), padded to a multiple of 64 KB.
 - **Fixed schedule**: while the public network is connected, the app refreshes every 60 seconds whatever the user does.
@@ -275,12 +276,14 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   `full`); replies are serialized once per version. Small replies (up to 256 KB, the usual delta) have 32 slots of
   their own; large ones have 8 slots and a start budget of 32 at once refilling at 4 per second (`busy` otherwise).
   A large reply must go out at no less than 128 KB/s (10 s plus size over that rate), and each frame within 10 s.
+  The reader uses the same rule: once the reply's length arrives it waits that long for the rest, so a slow link
+  still gets a full snapshot. A bucket start is taken only after a slot is free.
   6 requests per source address per minute (`rate`). Behind the EasyTier forward every request comes from loopback,
   so the per-source limit (and the same limit on `rv.put` / `rec.put`) does not apply there; the slot and budget limits
   do.
 - **Reader side**: the first refresh is awaited only until it has been tried; if it failed (`busy`, `version`,
   unreachable) the reader gets that error at once, and the poller tries again after 2, 5 and 10 s before going back to
-  every 60 s. A reader whose copies have all gone stale gets an error, not an empty answer.
+  every 60 s. Every wait is spread ±20% so readers don't come back all at once. A reader whose copies have all gone stale gets an error, not an empty answer.
 - **Not signed by the directory**: the copy comes over the authenticated `DirectoryChannel`, which already proves it is
   this network's directory. The plan's separate snapshot signature only matters once snapshots are mirrored by others.
 - **Still on the wire**: `find` (fingerprint codes). A fingerprint code can only be matched with the host's search key,

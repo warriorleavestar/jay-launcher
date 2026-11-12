@@ -76,7 +76,9 @@ public static class DirectoryChannel
     /// payload of its handshake message. Throws <see cref="DirectoryImpostorException"/> before writing the request when
     /// the key isn't accepted, or <see cref="DirectoryKeyChangedException"/> when it differs from the remembered one.
     /// </summary>
-    public static async Task<JsonObject> CallAsync(Stream stream, DirectoryTrust trust, string address, string networkSecret, JsonObject request, CancellationToken ct)
+    /// <param name="snapshotLength">Called with a snapshot reply's length once it is known (to set a deadline that fits it).</param>
+    public static async Task<JsonObject> CallAsync(Stream stream, DirectoryTrust trust, string address, string networkSecret, JsonObject request, CancellationToken ct,
+        Action<int>? snapshotLength = null)
     {
         var payload = Encoding.UTF8.GetBytes(request.ToJsonString());
         if (payload.Length > RoomDirectoryProtocol.MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
@@ -101,6 +103,7 @@ public static class DirectoryChannel
                 if (first.Length != 4 || first[0] != 0) return Parse(first);
                 var total = BinaryPrimitives.ReadInt32BigEndian(first);
                 if (total is <= 0 or > RoomDirectoryProtocol.MaxReply) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
+                snapshotLength?.Invoke(total);
                 var reply = new byte[total];
                 for (var at = 0; at < total;)
                 {
@@ -186,8 +189,11 @@ public static class DirectoryChannel
                     using var frameDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
                     frameDeadline.CancelAfter(stall);
                     // Not every stream honours cancellation of a pending write; closing it always ends the write.
-                    await using var close = frameDeadline.Token.Register(stream.Dispose);
-                    await WriteFrameAsync(stream, frame, frameDeadline.Token);
+                    var close = frameDeadline.Token.Register(stream.Dispose);
+                    try { await WriteFrameAsync(stream, frame, frameDeadline.Token); }
+                    finally { await close.DisposeAsync(); }
+                    // The deadline may have fired just as the write finished: the stream is closed then, so stop here.
+                    frameDeadline.Token.ThrowIfCancellationRequested();
                 }
             });
         }
