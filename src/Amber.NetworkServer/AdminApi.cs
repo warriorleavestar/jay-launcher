@@ -243,8 +243,8 @@ public sealed class AdminApi : IAsyncDisposable
                 case ("POST", "/unban"):
                 {
                     var o = Body();
-                    if (_server.Bans is not { } bans) return (400, Fail("no_bans"));
-                    var ok = bans.Remove(o["kind"]?.GetValue<string>() ?? "", o["value"]?.GetValue<string>() ?? "");
+                    if (_server.Bans is null) return (400, Fail("no_bans"));
+                    var ok = _server.Unban(o["kind"]?.GetValue<string>() ?? "", o["value"]?.GetValue<string>() ?? "");
                     return (ok ? 200 : 404, ok ? new JsonObject { ["ok"] = true } : Fail("not_found"));
                 }
                 case ("POST", "/remove"):

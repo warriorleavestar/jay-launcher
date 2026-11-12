@@ -154,6 +154,49 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         Assert.Equal((bob.Certificate.Account, false), (mine.Operator, mine.Disputed));
     }
 
+    [Fact]
+    public async Task BanningASquatterDoesNotBanTheAddressItTook()
+    {
+        var server = await StartAsync();
+        var mallory = Person();
+        var victim = Person();
+        Assert.True(Ok(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(mallory, server.Profile.Id, "tcp://v.example.org:11010", _now))));
+        Assert.True(Ok(Volunteer(server, "tcp://m.example.org:11010", VolunteerOperator.Sign(mallory, server.Profile.Id, "tcp://m.example.org:11010", _now))));
+        Assert.Equal("owner", ErrorOf(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(victim, server.Profile.Id, "tcp://v.example.org:11010", _now))));
+        await server.Volunteers!.LastProbe;
+        Assert.Equal(2, server.Ban("operator", mallory.Certificate.Account, "abuse", TimeSpan.FromDays(7)));
+        // Mallory's own address is banned with them; the one the victim also claimed is only dropped, and is the victim's now.
+        Assert.Contains(server.Bans!.List(), b => b.Kind == "node" && b.Value == "tcp://m.example.org:11010");
+        Assert.DoesNotContain(server.Bans.List(), b => b.Kind == "node" && b.Value == "tcp://v.example.org:11010");
+        _now += TimeSpan.FromSeconds(1);
+        Assert.True(Ok(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(victim, server.Profile.Id, "tcp://v.example.org:11010", _now))));
+    }
+
+    [Fact]
+    public void BrokenCertificatesAndSignaturesAreRefused()
+    {
+        var signed = VolunteerOperator.Sign(Person(), Net, "tcp://x.example.org:11010", _now);
+        JsonObject With(string field, JsonNode? value)
+        {
+            var copy = (JsonObject)signed.DeepClone();
+            copy[field] = value;
+            return copy;
+        }
+        var cert = (JsonObject)signed["cert"]!;
+        var brokenKey = (JsonObject)cert.DeepClone();
+        foreach (var field in brokenKey.Select(p => p.Key).ToList())
+            if (brokenKey[field] is JsonValue v && v.TryGetValue<string>(out var text) && text.Length > 40) brokenKey[field] = Convert.ToBase64String(new byte[text.Length * 3 / 4]);
+        foreach (var bad in new[]
+        {
+            With("sig", "not base64!"), With("sig", Convert.ToBase64String(new byte[10])), With("sig", Convert.ToBase64String(new byte[5000])),
+            With("cert", "x"), With("cert", new JsonObject()), With("cert", brokenKey), With("at", "now"), With("sig", 5),
+        })
+            Assert.Null(VolunteerOperator.Verify(bad, Net, "tcp://x.example.org:11010", _now));
+        // A little ahead of the directory's clock is fine; more isn't.
+        Assert.NotNull(VolunteerOperator.Verify(VolunteerOperator.Sign(Person(), Net, "tcp://x.example.org:11010", _now + TimeSpan.FromSeconds(50)), Net, "tcp://x.example.org:11010", _now));
+        Assert.Null(VolunteerOperator.Verify(VolunteerOperator.Sign(Person(), Net, "tcp://x.example.org:11010", _now + VolunteerOperator.MaxClockAhead + TimeSpan.FromSeconds(1)), Net, "tcp://x.example.org:11010", _now));
+    }
+
     [Theory]
     [InlineData(long.MinValue)]
     [InlineData(long.MaxValue)]
@@ -238,44 +281,48 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
     }
 
     [Fact]
-    public void SigningTimesStayBounded()
+    public void AFloodOfNewAddressesDoesNotStopRenewals()
     {
-        // Many accounts signing for many addresses, each accepted once and probed away: the remembered signing times
-        // stay bounded, refused registrations leave nothing behind, and the work per request doesn't grow with them.
-        var registry = new VolunteerRegistry((_, _) => Task.FromResult(false), () => _now) { NetworkId = Net };
+        // Many accounts signing for many addresses nobody can reach: new addresses are taken at a limited rate, what's
+        // remembered about them stays bounded, and the volunteer already on the list keeps renewing.
+        const string listedUrl = "tcp://x.example.org:11010";
+        var registry = new VolunteerRegistry((url, _) => Task.FromResult(url == listedUrl), () => _now) { NetworkId = Net };
+        var alice = Person();
+        Assert.True(Ok(registry.Register(listedUrl, VolunteerOperator.Sign(alice, Net, listedUrl, _now))));
+        registry.LastProbe.GetAwaiter().GetResult();
         var people = Enumerable.Range(0, 4).Select(_ => Person()).ToList();
         var refused = registry.Register("tcp://r.example.org:11010", VolunteerOperator.Sign(people[0], "other-net", "tcp://r.example.org:11010", _now));
         Assert.Equal("operator", ErrorOf(refused));
-        Assert.Equal(0, registry.SignedRecords);
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        var full = 0;
-        for (var i = 0; i < VolunteerRegistry.MaxSignedRecords + 200; i++)
+        var rate = 0;
+        for (var minute = 0; minute < 6; minute++)
         {
-            var url = $"tcp://n{i}.example.org:11010";
-            var reply = registry.Register(url, VolunteerOperator.Sign(people[i % people.Count], Net, url, _now));
-            if (ErrorOf(reply) == "full") full++;
-            registry.LastProbe.GetAwaiter().GetResult();
+            for (var i = 0; i < VolunteerRegistry.NewPerMinute + 20; i++)
+            {
+                var url = $"tcp://n{minute}-{i}.example.org:11010";
+                var reply = registry.Register(url, VolunteerOperator.Sign(people[i % people.Count], Net, url, _now));
+                if (ErrorOf(reply) == "rate") rate++;
+                registry.LastProbe.GetAwaiter().GetResult();
+            }
+            Assert.True(registry.TombstoneCount <= VolunteerRegistry.MaxTombstones);
+            _now += TimeSpan.FromSeconds(61);
+            // The listed volunteer renews as usual.
+            Assert.True(Ok(registry.Register(listedUrl, VolunteerOperator.Sign(alice, Net, listedUrl, _now))));
         }
-        Assert.True(registry.SignedRecords <= VolunteerRegistry.MaxSignedRecords);
-        Assert.True(full >= 200);
-        // Once the clock window has passed, they are dropped and signing works again.
-        _now += VolunteerOperator.MaxClockSkew + TimeSpan.FromSeconds(1);
-        Assert.True(Ok(registry.Register("tcp://later.example.org:11010", VolunteerOperator.Sign(people[0], Net, "tcp://later.example.org:11010", _now))));
-        Assert.Equal(1, registry.SignedRecords);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60));
+        Assert.True(rate >= 6 * 20);
+        Assert.Equal([listedUrl], registry.Listed());
     }
 
     [Fact]
     public async Task TheClientNeverSignsTheSameSecondTwice()
     {
-        await using var directory = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => DateTimeOffset.UtcNow) { Volunteers = new VolunteerRegistry((_, _) => Task.FromResult(true)) { NetworkId = Net } };
-        var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net };
+        await using var directory = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => _now) { Volunteers = Registry() };
+        var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net, Clock = () => _now };
         var alice = Person();
         // Renewals right after each other (same second) are all accepted.
         for (var i = 0; i < 3; i++) await client.VolunteerAsync("tcp://x.example.org:11010", default, alice);
         // A directory that already has a newer one (clock went back) says so with its own code.
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
-            new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net }.VolunteerAsync("tcp://x.example.org:11010", default, alice));
+            new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net, Clock = () => _now }.VolunteerAsync("tcp://x.example.org:11010", default, alice));
         Assert.Equal("stale", e.Code);
     }
 
@@ -316,7 +363,9 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         Assert.Empty(server.Volunteers.Listed());
         Assert.Equal("banned", ErrorOf(Volunteer(server, "tcp://z.example.org:11010", VolunteerOperator.Sign(alice, server.Profile.Id, "tcp://z.example.org:11010", _now))));
         Assert.Throws<ArgumentException>(() => server.Ban("operator", "not-an-address", null));
-        Assert.True(server.Bans!.Remove("operator", alice.Certificate.Account));
+        // Unbanning the person lifts the address bans that came with it.
+        Assert.True(server.Unban("operator", alice.Certificate.Account));
+        Assert.DoesNotContain(server.Bans!.List(), b => b.Kind == "node");
         _now += TimeSpan.FromSeconds(1);
         Assert.True(Ok(Volunteer(server, "tcp://z.example.org:11010", VolunteerOperator.Sign(alice, server.Profile.Id, "tcp://z.example.org:11010", _now))));
 

@@ -72,7 +72,7 @@ await server.RunAsync(CancellationToken.None);
 | `GET /rooms` | `{ok, total, hidden, rooms: [{id, name, host, hostFingerprint, mode, players, game, account, updated}]}`（只有公开房间） |
 | `GET /nodes` | `{ok, enabled, nodes: ["tcp://...", ...], operators: [{url, operator, disputed, claimedBy}]}`：列出的志愿中转；`operator` 是签名登记的志愿者的 Jay 账户（`jay1...`），没签名是 null；`disputed` 为真表示有人以别的运营者（别的账户或不签名）认领过这个地址，`claimedBy` 是最早的最多 4 个认领者（账户，不签名为 ""），`operator` 不变 |
 | `GET /bans` | `{ok, bans: [{kind, value, reason, at, until}]}`（`until` 为 null 是永久） |
-| `POST /ban` `{kind: host\|room\|account\|node\|operator, value, reason?, for?}` | `{ok, removed}`；`for` 是秒数，`node` 的值是志愿中转地址，`operator` 的值是志愿者的 Jay 账户（他登记的所有中转一起拿掉，这些地址也按 `node` 封同样的时间）。封运营者只挡得住这个账户的签名登记；没开 `RequireSignedVolunteers` 时不签名的登记挡不住，换一个新账户也挡不住 |
+| `POST /ban` `{kind: host\|room\|account\|node\|operator, value, reason?, for?}` | `{ok, removed}`；`for` 是秒数，`node` 的值是志愿中转地址，`operator` 的值是志愿者的 Jay 账户（他登记的所有中转一起拿掉，这些地址也按 `node` 封同样的时间，原因写 `with operator <账户>`；别人也认领过的地址只拿掉不封；`/unban` 这个账户时一起解封）。封运营者总是挡得住这个账户的签名登记；没开 `RequireSignedVolunteers` 时不签名的登记挡不住，换一个新账户也挡不住 |
 | `POST /ban` `{kind: room-host, value: <房间编号>, reason?, for?}` | `{ok, removed, host, account}`：封这个房间房主的指纹和账号；房间不在回 404 |
 | `POST /unban` `{kind, value}` | `{ok}` 或 404 |
 | `POST /remove` `{id}` | `{ok}` 或 404 |
@@ -103,7 +103,7 @@ await server.RunAsync(CancellationToken.None);
 | `lookup` | `{key}`：邀请码大厅名的查找键 | `{ok, ip?, key?, id?}` |
 | `find` | `{code: "JAYF1-..."}` | `{ok, room?}`：用登记的指纹密钥算标签，见 `FingerprintCode.Matches` |
 | `login` | 见 `NetworkLoginClient.Request` / `LoginAuthority.Handle` | 加密的凭证或 `factor` 提示 |
-| `volunteer` | `{url: "tcp://<公网地址>:<端口>", operator?: {cert, at, sig}}`：登记或续期志愿中转（每 3 分钟）。`operator` 是志愿者的 Jay 账户给这台设备签的证书（`DeviceCertificate`）、Unix 秒和设备混合签名（`"jay-volunteer-v2\n" ‖ 网络编号 ‖ "\n" ‖ url ‖ "\n" ‖ at`，64 位大端；网络编号是 `PublicNetworkProfile.Id`），见 `VolunteerOperator` | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad`；签名或证书不对、不是这个网络的、时间差超过 3 分钟、或网络要求签名（`RequireSignedVolunteers`）而没带时回 `operator`；同一账户给同一地址的签名时间没有比上次接受的新时回 `stale`（Jay 每次至少比上次晚 1 秒）；地址已由别的运营者登记（别的账户、没签名换成签名、或签过名换成不签）、还没过期时回 `owner`，运营者不变，管理接口的 `/nodes` 记下这次认领 |
+| `volunteer` | `{url: "tcp://<公网地址>:<端口>", operator?: {cert, at, sig}}`：登记或续期志愿中转（每 3 分钟）。`operator` 是志愿者的 Jay 账户给这台设备签的证书（`DeviceCertificate`）、Unix 秒和设备混合签名（`"jay-volunteer-v2\n" ‖ 网络编号 ‖ "\n" ‖ url ‖ "\n" ‖ at`，64 位大端；网络编号是 `PublicNetworkProfile.Id`），见 `VolunteerOperator` | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。新地址每分钟最多收 120 个（续期不算），多了回 `rate`。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad`；签名或证书不对、不是这个网络的、时间比目录慢 3 分钟以上或快 1 分钟以上、或网络要求签名（`RequireSignedVolunteers`）而没带时回 `operator`；同一账户给同一地址的签名时间没有比上次接受的新时回 `stale`（Jay 每次至少比上次晚 1 秒）；地址已由别的运营者登记（别的账户、没签名换成签名、或签过名换成不签）、还没过期时回 `owner`，运营者不变，管理接口的 `/nodes` 记下这次认领 |
 | `nodes` | `{}` | `{ok, nodes: ["tcp://...", ...最多 8 个，随机]}`：探测过、还在续期的志愿中转，同一个运营者的先只给一个（目录按签名登记的账户分散，只用来分散负载，不是安全保证：一个人可以有好几个 Jay 账户）。谁运行哪个中转只留在目录里，不发给成员 |
 | `probe` | `{url: "tcp://<公网地址>:<端口>"}`：想当志愿中转的人先测端口 | `{ok, reachable}`：目录从外网连一次，不列出。不收志愿中转时回 `off`，被封回 `banned`，地址不是公网回 `bad`，测得太频繁回 `rate` |
 | `x-*` | 你自己的 | 你自己的 |

@@ -2979,7 +2979,7 @@
   "core.mp.public.volunteer_bad_address": "請填這台電腦的公網位址（公網 IP 或網域），不能是家裡區域網路的位址",
   "multiplayer.volunteer.title": "志願中轉",
   "multiplayer.volunteer.hint": "讓別的玩家經你的電腦進這個公共網路，官方伺服器慢或掛了的時候也能連上。經過你的只有公共網路的流量（房間列表、敲門）；遊戲、聊天、檔案都在各個房間自己的加密子網裡。",
-  "multiplayer.volunteer.privacy": "別的玩家向網路要志願中轉時，會拿到你的公網位址。MC 帳號綁定了 Jay 帳戶時，網路的營運者還會知道這個中轉是哪個 Jay 帳戶在運行（別的玩家不會知道）。你不介意再打開。",
+  "multiplayer.volunteer.privacy": "別的玩家向網路要志願中轉時，會拿到你的公網位址。MC 帳號綁定了 Jay 帳戶時，網路的營運者還會知道這個中轉是哪個 Jay 帳戶在運行，以及這台裝置在帳戶裡的名字（別的玩家不會知道）。你不介意再打開。",
   "multiplayer.volunteer.enable": "當志願中轉",
   "multiplayer.volunteer.address": "這台電腦的公網位址（IP 或網域）",
   "multiplayer.volunteer.port": "連接埠",

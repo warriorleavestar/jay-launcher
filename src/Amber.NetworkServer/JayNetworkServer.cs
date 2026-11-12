@@ -420,14 +420,29 @@ public sealed class JayNetworkServer : IAsyncDisposable
 
     /// <summary>
     /// Drops an operator's nodes and bans their addresses for as long as the operator, so coming back unsigned (or under
-    /// a new account) from the same addresses doesn't work either.
+    /// a new account) from the same addresses doesn't work either. An address someone else also claimed is only dropped,
+    /// not banned: it may be theirs and taken first. Unbanning the operator lifts these address bans too.
     /// </summary>
     private int BanOperatorNodes(BanList.Ban ban)
     {
         var removed = Volunteers?.RemoveOperator(ban.Value) ?? [];
-        foreach (var url in removed)
-            Bans!.Add("node", url, ban.Reason ?? $"operator {ban.Value}", Now, ban.Until is { } until ? until - Now : null);
+        foreach (var node in removed.Where(n => !n.Disputed))
+            Bans!.Add("node", node.Url, OperatorBanReason(ban.Value), Now, ban.Until is { } until ? until - Now : null);
         return removed.Count;
+    }
+
+    /// <summary>The reason on address bans that came with banning an operator (how unbanning finds them).</summary>
+    private static string OperatorBanReason(string account) => "with operator " + account;
+
+    /// <summary>Lifts a ban. Lifting an operator ban also lifts the address bans that came with it.</summary>
+    public bool Unban(string kind, string value)
+    {
+        if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
+        if (!Bans.Remove(kind, value)) return false;
+        if (kind == "operator" && Amber.Core.Identity.JayAddress.Canonical(value.Trim()) is { } account)
+            foreach (var node in Bans.List().Where(b => b.Kind == "node" && b.Reason == OperatorBanReason(account)).ToList())
+                Bans.Remove("node", node.Value);
+        return true;
     }
 
     /// <summary>

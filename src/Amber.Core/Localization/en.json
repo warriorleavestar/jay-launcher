@@ -3054,7 +3054,7 @@
   "core.mp.public.volunteer_bad_address": "Enter this computer's public address (an internet IP or a domain), not a home-network address",
   "multiplayer.volunteer.title": "Volunteer relay",
   "multiplayer.volunteer.hint": "Let other players get into this public network through your computer. It helps when the official servers are slow or down. Only public-network traffic (room lists and knocks) passes through you; games, chat and files stay in each room's own encrypted subnet.",
-  "multiplayer.volunteer.privacy": "Your public address will be given to other players who ask the network for volunteer relays. If your Minecraft account has a Jay account bound, the network's operator also learns which Jay account runs this relay (other players don't). Turn this on only if that is fine with you.",
+  "multiplayer.volunteer.privacy": "Your public address will be given to other players who ask the network for volunteer relays. If your Minecraft account has a Jay account bound, the network's operator also learns which Jay account runs this relay and this device's name in that account (other players don't). Turn this on only if that is fine with you.",
   "multiplayer.volunteer.enable": "Be a volunteer relay",
   "multiplayer.volunteer.address": "This computer's public address (IP or domain)",
   "multiplayer.volunteer.port": "Port",

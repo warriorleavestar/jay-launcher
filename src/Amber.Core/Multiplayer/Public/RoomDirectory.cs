@@ -986,6 +986,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         return replies.Any(r => r["listed"]?.GetValue<bool>() == true);
     }
 
+    /// <summary>The clock signed volunteer registrations use (tests replace it).</summary>
+    internal Func<DateTimeOffset> Clock { get; init; } = () => DateTimeOffset.UtcNow;
+
     // Each signed registration of an address must carry a later time than the last (seconds): never the same twice.
     private readonly Dictionary<string, long> _lastVolunteerAt = new(StringComparer.Ordinal);
 
@@ -993,7 +996,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     {
         lock (_lastVolunteerAt)
         {
-            var at = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var at = Clock().ToUnixTimeSeconds();
             if (_lastVolunteerAt.TryGetValue(address, out var last) && at <= last) at = last + 1;
             _lastVolunteerAt[address] = at;
             return DateTimeOffset.FromUnixTimeSeconds(at);
