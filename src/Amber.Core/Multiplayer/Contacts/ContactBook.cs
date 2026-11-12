@@ -360,11 +360,16 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         list.RemoveAll(c => c.PublicKey.AsSpan().SequenceEqual(pending.PublicKey));
         // A friend I already had (a relink after restoring a backup) keeps the name I gave them.
         var name = old is { Verified: true, Name.Length: > 0 } ? old.Name : pending.Name;
+        // The emoji checks this device, not the Jay account it once claimed: an account link still waiting for my OK keeps
+        // waiting, one I refused stays refused, and nothing is carried over from a contact that wasn't verified.
+        var kept = old is { Verified: true } ? old : null;
         var contact = new Contact(pending.PublicKey, name, Verified: true, old?.Added ?? _now())
         {
-            JayAccount = old?.JayAccount,
-            DeviceName = old?.DeviceName ?? "",
-            Epoch = old?.Epoch ?? 0,
+            JayAccount = kept?.JayAccount,
+            AccountPending = kept is { JayAccount: not null, AccountPending: true },
+            RefusedAccount = old?.RefusedAccount,
+            DeviceName = kept?.DeviceName ?? "",
+            Epoch = kept?.Epoch ?? 0,
         };
         list.Add(contact);
         // Through the emoji again: a device I once removed is back because I checked it myself.
