@@ -2626,6 +2626,7 @@
   "multiplayer.knock.verify": "問 {0}：其所見安碼與此同否？同乃納之。",
   "multiplayer.knock.trust_after": "後 {0} 叩門則徑入（可於知交之頁罷之）",
   "multiplayer.knock.jay_hint": "其 Jay 之籍已驗。信之，則其以此籍之他器亦徑納之。",
+  "multiplayer.knock.jay_hint_friend": "其 Jay 之籍已驗。其為汝友，其器未經汝認者，仍先問汝。",
   "multiplayer.knock.remaining": "餘 {0}，不答則拒",
   "multiplayer.knock.waiting_forever": "待汝之答",
   "multiplayer.knock.timed_out": "{0} 叩門待 {1} 無答，已拒之。",

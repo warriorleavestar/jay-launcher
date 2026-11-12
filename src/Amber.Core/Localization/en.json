@@ -2792,6 +2792,7 @@
   "multiplayer.knock.verify": "Ask {0} whether the safety code they see matches this one. Let them in only if it does.",
   "multiplayer.knock.trust_after": "Let {0} straight in from now on (you can turn this off on the Friends page)",
   "multiplayer.knock.jay_hint": "Their Jay account checks out. Trusting them also lets in their other devices that use this account.",
+  "multiplayer.knock.jay_hint_friend": "Their Jay account checks out. They are your friend, so a device of theirs you have not confirmed still asks first.",
   "multiplayer.knock.remaining": "{0} left; no answer means no",
   "multiplayer.knock.waiting_forever": "Waiting for your answer",
   "multiplayer.knock.timed_out": "{0} knocked and waited {1} without an answer, so they were turned away.",

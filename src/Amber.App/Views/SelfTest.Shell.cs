@@ -96,8 +96,8 @@ internal sealed partial class SelfTest
                         || !(char.IsAsciiLetter(text[i - 1]) && char.IsAsciiLetter(text[i]))), $"{text} 断在 {string.Join(",", breaks)}");
                     if (!window.SidebarHost.Classes.Contains("horizontal")) RailFooterCentered(tag, privacy, items);
                 }
-                Check($"外壳（{tag}）：返回按钮只在有地方可回时出现，出现时可点区域 ≥ 32", window.BackButton.IsEffectivelyVisible == shell.CanGoBack
-                    && (!shell.CanGoBack || window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32));
+                Check($"外壳（{tag}）：返回按钮只在有地方可回时出现，出现时可点区域 ≥ 32", window.BackButton.IsEffectivelyVisible == main.Shell.CanGoBack
+                    && (!main.Shell.CanGoBack || window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32));
                 await ShotAsync($"shell-{lang}-{w}x{h}");
             }
         }

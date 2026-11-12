@@ -27,16 +27,10 @@ public partial class PeoplePage : UserControl
         };
         DataContextChanged += (_, _) =>
         {
-            if (_vm is not null) _vm.LineAdded -= ScrollToNewest;
+            Unhook();
             _vm = DataContext as PeopleViewModel;
             if (_vm is null) return;
-            _vm.LineAdded += ScrollToNewest;
-            // The question about removing a friend takes the focus on [Keep], the safe answer.
-            _vm.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(PeopleViewModel.IsConfirmingRemove) && _vm?.IsConfirmingRemove == true)
-                    Dispatcher.UIThread.Post(() => KeepFriendButton.Focus(), DispatcherPriority.Loaded);
-            };
+            if (VisualRoot is not null) Hook();
             // The backup and restore of the friend list are in this page's [...]: it owns their file dialogs.
             _vm.Multiplayer.PickFriendBackupSave = async () =>
             {
@@ -56,6 +50,34 @@ public partial class PeoplePage : UserControl
                 return files.Count > 0 ? files[0].TryGetLocalPath() : null;
             };
         };
+        // The view model outlives this page (a new page is made on every visit): listen only while the page is shown.
+        AttachedToVisualTree += (_, _) => Hook();
+        DetachedFromVisualTree += (_, _) => Unhook();
+    }
+
+    private bool _hooked;
+
+    private void Hook()
+    {
+        if (_vm is null || _hooked) return;
+        _vm.LineAdded += ScrollToNewest;
+        _vm.PropertyChanged += OnViewModelChanged;
+        _hooked = true;
+    }
+
+    private void Unhook()
+    {
+        if (_vm is null || !_hooked) return;
+        _vm.LineAdded -= ScrollToNewest;
+        _vm.PropertyChanged -= OnViewModelChanged;
+        _hooked = false;
+    }
+
+    /// <summary>The question about removing a friend takes the focus on [Keep], the safe answer.</summary>
+    private void OnViewModelChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PeopleViewModel.IsConfirmingRemove) && _vm?.IsConfirmingRemove == true)
+            Dispatcher.UIThread.Post(() => KeepFriendButton.Focus(), DispatcherPriority.Loaded);
     }
 
     /// <summary>The least the add panel gets, however short the window: its header, my code and the box for theirs.</summary>
