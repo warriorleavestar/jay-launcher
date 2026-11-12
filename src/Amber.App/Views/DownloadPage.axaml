@@ -42,7 +42,9 @@
     </ListBox>
 
     <!-- Version: type chips, search, refresh. -->
-    <Grid x:Name="VersionToolbar" svc:ThemeRegion.Name="downloads.search" Grid.Row="2" Grid.Column="1" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,8" IsVisible="{Binding IsVersionSource}">
+    <Grid x:Name="VersionToolbar" svc:ThemeRegion.Name="downloads.search" Grid.Row="2" Grid.Column="1" RowDefinitions="Auto,Auto" Margin="0,0,0,8" IsVisible="{Binding IsVersionSource}">
+      <!-- The search box stops growing on wide windows; refresh stays next to it. -->
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" MaxWidth="600" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
       <ListBox x:Name="TypeChips" Classes="subtabs" ItemsSource="{Binding Filters}" SelectedItem="{Binding Filter}" Background="Transparent"
                AutomationProperties.Name="{l:T newinstance.version.type}">
         <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ListBox.ItemsPanel>

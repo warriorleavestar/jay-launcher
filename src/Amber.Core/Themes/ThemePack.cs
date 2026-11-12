@@ -77,6 +77,15 @@ public sealed class ThemePack
 
     /// <summary>读取和校验时发现的问题（能用的部分照常用，有问题的部分用默认值）。</summary>
     public List<ThemeProblem> Problems { get; } = [];
+
+    /// <summary>
+    /// Keys this version reserves for later features and reads past without a problem: tokens.json "motion3d" (tilt,
+    /// depth and timing for pseudo-3D motion) and the image slot "scene". A pack that already has them still loads here.
+    /// </summary>
+    public List<string> ReservedKeys { get; } = [];
+
+    /// <summary>Top-level tokens.json keys reserved for later versions (see <see cref="ReservedKeys"/>).</summary>
+    public static readonly IReadOnlyList<string> ReservedTokens = ["motion3d"];
 }
 
 /// <summary>一条问题。Code 是固定的英文代码（测试和日志用），Detail 是给人看的位置或值。</summary>
@@ -357,6 +366,8 @@ public static partial class ThemePackReader
         if (has("sizes", out var sizes)) ReadNumbers(sizes, NumberKeys, pack.Numbers, pack.Problems, "sizes");
         if (has("radius", out var radius)) ReadNumbers(radius, RadiusKeys, pack.Radii, pack.Problems, "radius");
         if (has("motion", out var motion)) ThemeFormat.ReadMotion(pack, motion);
+        foreach (var key in ThemePack.ReservedTokens)
+            if (has(key, out var reserved)) pack.ReservedKeys.Add(key);
         if (has("illustration", out var illo) && illo.ValueKind == JsonValueKind.Object)
         {
             ReadColors(illo, pack.DarkColors, pack, "illustration");

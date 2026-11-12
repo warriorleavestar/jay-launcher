@@ -33,5 +33,18 @@ public partial class AboutPage : UserControl
         if (width <= 0) return;
         Tier = LayoutTiers.ForWidth(width, Tier);
         if (DataContext is AboutViewModel vm) vm.List.IsCompact = Tier == WidthTier.Compact;
+        // Wide windows: two reading columns instead of one narrow column that scrolls.
+        var two = width >= TwoColumnWidth;
+        TwoColumns = two;
+        Columns.ColumnDefinitions = new ColumnDefinitions(two ? "*,32,*" : "*");
+        Grid.SetRow(RightColumn, two ? 0 : 1);
+        Grid.SetColumn(RightColumn, two ? 2 : 0);
+        RightColumn.Margin = two ? default : new Avalonia.Thickness(0, 16, 0, 0);
+        Surface.MaxWidth = two ? 640 * 2 + 32 + 40 : 640;
     }
+
+    internal const double TwoColumnWidth = 1200;
+
+    /// <summary>Whether the page is in its two-column arrangement (self-check).</summary>
+    internal bool TwoColumns { get; private set; }
 }
