@@ -86,11 +86,11 @@ public sealed class RoomSceneTests : IDisposable
         {
             L.SetLanguage(language);
         }
-        // A code carries no address; without "relays only" the room can see mine; with it, not in normal use (never
-        // a plain "no": a modified program can still ask); a relay sees it itself.
+        // A code carries no address; without "relays only" the room can see mine; with it, nobody in the room can (my
+        // component shares no address list, refuses hole punching and asks no STUN server); a relay sees it itself.
         Assert.Equal("multiplayer.sees.no", WhoSeesWhat.Rows[0].IpKey);
         Assert.Equal("multiplayer.sees.yes", WhoSeesWhat.Rows[1].IpKey);
-        Assert.Equal("multiplayer.sees.not_normally", WhoSeesWhat.Rows[2].IpKey);
+        Assert.Equal("multiplayer.sees.no", WhoSeesWhat.Rows[2].IpKey);
         Assert.Equal("multiplayer.sees.yes", WhoSeesWhat.Rows[3].IpKey);
         Assert.Equal("multiplayer.sees.no", WhoSeesWhat.Rows[3].ContentKey);
     }
