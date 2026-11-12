@@ -118,12 +118,18 @@ public sealed class TunnelServer : IAsyncDisposable
 
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
     public int Accepted;
+    /// <summary>
+    /// Connections never handed to a handler: refused for want of a place, handshake failed or timed out, closed to make
+    /// room, failed before the handshake, or a service that isn't offered. A handler that fails later doesn't count.
+    /// </summary>
     public int Rejected;
 
     /// <summary>
     /// Connections still in their handshake at most. Past that one still in its handshake is closed to make room
     /// (<see cref="HandshakeSlots"/>), so unauthenticated connections can only tie up so much, and keeping new members
-    /// out takes refilling every place faster than a member's handshake.
+    /// out takes refilling every place faster than a member's handshake. Connections handed over on loopback (a local
+    /// relay or port forwarder in front of the listener) can't be told apart: they share one group with no per-caller
+    /// limit, so behind such a forwarder the choice of who makes room is by age only and the protection is weaker.
     /// </summary>
     public const int MaxPendingHandshakes = 256;
 
@@ -238,6 +244,8 @@ public sealed class TunnelServer : IAsyncDisposable
             Stream? stream = null;
             CancellationTokenRegistration revocation = default;
             var served = false;
+            // A member passed the handshake: from here its failures are logged in full, not limited.
+            var authenticated = false;
             try
             {
                 BeforeServeForTest?.Invoke(client);
@@ -256,6 +264,7 @@ public sealed class TunnelServer : IAsyncDisposable
                     HandshakeDone();
                     if (accepted is null) return;
                     (stream, service, var member) = accepted.Value;
+                    authenticated = true;
                     // 邀请房间：这个成员的钥匙一作废（踢出、重新批准换了钥匙、房间结束）就断开这条连接。
                     // 握手完之前已经作废的，Register 会立刻调用。
                     if (member is not null)
@@ -286,17 +295,18 @@ public sealed class TunnelServer : IAsyncDisposable
                 // Only a connection that never got served counts as refused; a forwarding that ended is not.
                 if (!served) Interlocked.Increment(ref Rejected);
                 var what = served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
-                // Before the handshake succeeded anyone can cause this: at most one line a minute.
-                if (!served && !OncePerMinute(ref _handshakeFailedLogged)) { }
-                else if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T(what) + e.Message);
-                else if (e is InvalidOperationException or ArgumentException) _log?.Invoke(L.T(what) + e.GetType().Name);
+                var line = e is CryptographicException or PlatformNotSupportedException ? L.T(what) + e.Message
+                    : e is InvalidOperationException or ArgumentException ? L.T(what) + e.GetType().Name : null;
+                // Anyone can cause this before a member's handshake succeeded: then at most one line a minute (only
+                // lines actually written use it up).
+                if (line is not null && (authenticated || OncePerMinute(ref _handshakeFailedLogged))) _log?.Invoke(line);
             }
             catch (Exception e)
             {
                 // Anything else still ends this connection quietly and is logged by type only (no member details).
                 (stream as IAuthenticatedStream)?.Abort();
                 if (!served) Interlocked.Increment(ref Rejected);
-                if (served || OncePerMinute(ref _handshakeFailedLogged))
+                if (authenticated || OncePerMinute(ref _handshakeFailedLogged))
                     _log?.Invoke(L.T(served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             }
             finally

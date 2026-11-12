@@ -260,6 +260,38 @@ public sealed class RekeyTests : IDisposable
         Assert.Equal(0, server.Accepted);
     }
 
+    /// <summary>
+    /// Failures before a handshake succeeded are logged at most once a minute, and failures that write nothing (a stalled
+    /// connection timing out) don't use that line up: a failed handshake right after is still logged.
+    /// </summary>
+    [Fact]
+    public async Task QuietFailuresDontUseUpTheHandshakeLogLine()
+    {
+        var settings = new TunnelSettings(TransportMode.High, false);
+        var room = HostRoom(settings);
+        var other = HostRoom(settings);
+        var stranger = GuestRoom(other, other.Table.Issue(_alice.PublicKey, "Alice"));
+        var log = new List<string>();
+        await using var server = new TunnelServer(room.Host, settings, 0, _ => async (stream, ct) => await stream.CopyToAsync(stream, ct),
+            line => { lock (log) log.Add(line); })
+        {
+            HandshakeTimeout = TimeSpan.FromMilliseconds(300),
+        };
+        using (var idle = new TcpClient())
+        {
+            await idle.ConnectAsync(IPAddress.Loopback, server.Port);
+            Assert.True(await WaitAsync(() => server.Rejected == 1));
+        }
+        for (var i = 0; i < 3; i++)
+        {
+            try { await using var t = await TunnelClient.Wrapped("127.0.0.1", server.Port, stranger, settings, TunnelService.Game)(default); }
+            catch (Exception e) when (e is IOException or SocketException or CryptographicException or InvalidDataException or EndOfStreamException or OperationCanceledException) { }
+        }
+        Assert.True(await WaitAsync(() => server.Rejected == 4));
+        var failed = L.T("core.mp.transport.endpoint_handshake_failed");
+        lock (log) Assert.Single(log, l => l.StartsWith(failed, StringComparison.Ordinal));
+    }
+
     /// <summary>同一个人重新被批准、换了新钥匙：旧钥匙作废，旧的聊天和封装连接马上断开（不会同时出现两个他）。</summary>
     [Fact]
     public async Task ReissuingClosesTheOldSessions()
