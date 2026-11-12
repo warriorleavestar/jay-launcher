@@ -172,6 +172,24 @@ public class SignedRecordTests
     }
 
     [Fact]
+    public async Task RenewalsDontDrawOnTheDirectoryWideBudget()
+    {
+        var now = DateTimeOffset.UtcNow;
+        using var key = X25519KeyPair.Generate();
+        await using var server = Server(key, () => now);
+        var mine = new RecordSigner();
+        var lookup = SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16));
+        Assert.True(server.Handle(PutOp(mine.Sign(lookup, [1], TimeSpan.FromHours(2), now)), source: null)["ok"]?.GetValue<bool>());
+        // Others use up the rest of this minute's budget for new records.
+        for (var i = 1; i < RoomDirectoryServer.MaxRecordPutsPerMinute; i++)
+            server.Handle(PutOp(new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now)), source: null);
+        var late = new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now);
+        Assert.Equal("rate", server.Handle(PutOp(late), source: null)["error"]?.GetValue<string>());
+        // A record already held can still be renewed.
+        Assert.True(server.Handle(PutOp(mine.Sign(lookup, [2], TimeSpan.FromHours(2), now)), source: null)["ok"]?.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task GetPicksTheNewestAcrossDirectories()
     {
         using var k1 = X25519KeyPair.Generate();

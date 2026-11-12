@@ -109,21 +109,50 @@ public static class VolunteerNodes
     /// Default reachability check the directory runs before listing a volunteer: resolve the host, refuse it if any
     /// address is not public, then open (and close) a TCP connection within 5 seconds.
     /// </summary>
-    public static async Task<bool> ProbeAsync(string url, CancellationToken ct)
+    public static async Task<bool> ProbeAsync(string url, CancellationToken ct) =>
+        await ResolveAsync(url, ct) is { } address && await ConnectAsync(address, new Uri(Normalize(url)!).Port, ct);
+
+    /// <summary>
+    /// The one address the directory will dial for <paramref name="url"/>: the host resolved once (within 5 seconds), or
+    /// null when it doesn't resolve or any of its addresses is not public.
+    /// </summary>
+    public static async Task<IPAddress?> ResolveAsync(string url, CancellationToken ct)
     {
-        if (Normalize(url) is not { } normalized) return false;
+        if (Normalize(url) is not { } normalized) return null;
         var uri = new Uri(normalized);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
             var addresses = IPAddress.TryParse(uri.Host.Trim('[', ']'), out var literal) ? [literal] : await Dns.GetHostAddressesAsync(uri.DnsSafeHost, deadline.Token);
-            if (addresses.Length == 0 || !addresses.All(IsPublic)) return false;
-            using var client = new TcpClient(addresses[0].AddressFamily);
-            await client.ConnectAsync(addresses[0], uri.Port, deadline.Token);
+            return addresses.Length > 0 && addresses.All(IsPublic) ? addresses[0] : null;
+        }
+        catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException) { return null; }
+    }
+
+    /// <summary>Opens (and closes) a TCP connection to an address already resolved, within 5 seconds.</summary>
+    public static async Task<bool> ConnectAsync(IPAddress address, int port, CancellationToken ct)
+    {
+        if (!IsPublic(address)) return false;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            using var client = new TcpClient(address.AddressFamily);
+            await client.ConnectAsync(address, port, deadline.Token);
             return true;
         }
         catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException) { return false; }
+    }
+
+    /// <summary>The machine an address belongs to, for per-machine caps: the IPv4 address, or the /64 of an IPv6 one.</summary>
+    public static string MachineOf(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return address.ToString();
+        var bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new IPAddress(bytes) + "/64";
     }
 }
 
@@ -132,7 +161,13 @@ public static class VolunteerNodes
 /// and only listed once the probe succeeded (re-probed every hour). Unrenewed entries drop out after
 /// <see cref="VolunteerNodes.Ttl"/>.
 /// </summary>
-public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>>? probe = null, Func<DateTimeOffset>? clock = null)
+/// <param name="resolve">
+/// Resolves an address to the one IP the directory dials, for the per-machine cap. Defaults to
+/// <see cref="VolunteerNodes.ResolveAsync"/> when <paramref name="probe"/> is the default too; with a custom probe and no
+/// resolver, only the host name counts.
+/// </param>
+public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>>? probe = null, Func<DateTimeOffset>? clock = null,
+    Func<string, CancellationToken, Task<IPAddress?>>? resolve = null)
 {
     public const int MaxEntries = 256;
     public static readonly TimeSpan ReprobeEvery = TimeSpan.FromHours(1);
@@ -142,9 +177,12 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         public DateTimeOffset Seen;
         public DateTimeOffset? VerifiedAt;
         public bool Probing;
+        /// <summary>The machine it resolved to (<see cref="VolunteerNodes.MachineOf"/>), once known.</summary>
+        public string? Machine;
     }
 
-    private readonly Func<string, CancellationToken, Task<bool>> _probe = probe ?? VolunteerNodes.ProbeAsync;
+    private readonly Func<string, CancellationToken, Task<bool>>? _customProbe = probe;
+    private readonly Func<string, CancellationToken, Task<IPAddress?>>? _resolve = resolve ?? (probe is null ? VolunteerNodes.ResolveAsync : null);
     private readonly Func<DateTimeOffset> _now = clock ?? (() => DateTimeOffset.UtcNow);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
@@ -167,7 +205,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// <summary>New addresses the whole directory takes per minute ("volunteer" op; renewals of known ones don't count).</summary>
     public const int RegistrationsPerMinute = 60;
 
-    /// <summary>Entries one host (IP or domain name) may have, whatever the port.</summary>
+    /// <summary>Entries one host may have, whatever the port: counted by name, and by the machine it resolves to.</summary>
     public const int MaxPerHost = 2;
 
     private readonly Queue<DateTimeOffset> _registrations = new();
@@ -193,8 +231,22 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             _checks.Enqueue(now);
             _lastCheck[address] = now;
         }
+        IPAddress? ip = null;
+        if (_resolve is not null)
+        {
+            try { ip = await _resolve(address, ct); }
+            catch (Exception e) when (e is not OutOfMemoryException) { ip = null; }
+            if (ip is null) return new JsonObject { ["ok"] = true, ["reachable"] = false };
+            // Also one check per machine at a time, so many names or ports of one machine can't be swept either.
+            var machine = "machine:" + VolunteerNodes.MachineOf(ip);
+            lock (_gate)
+            {
+                if (_lastCheck.ContainsKey(machine)) return Error("rate");
+                _lastCheck[machine] = now;
+            }
+        }
         bool reachable;
-        try { reachable = await _probe(address, ct); }
+        try { reachable = await Dial(address, ip, ct); }
         catch (Exception e) when (e is not OutOfMemoryException) { reachable = false; }
         return new JsonObject { ["ok"] = true, ["reachable"] = reachable };
     }
@@ -233,11 +285,41 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         return new JsonObject { ["ok"] = true, ["listed"] = listed };
     }
 
+    /// <summary>
+    /// Dials the address: at the IP it already resolved to when there is one (it isn't looked up again, so a name can't
+    /// point somewhere else between the check and the connection), or through the custom probe.
+    /// </summary>
+    private Task<bool> Dial(string address, IPAddress? ip, CancellationToken ct) =>
+        _customProbe is not null ? _customProbe(address, ct)
+        : ip is not null ? VolunteerNodes.ConnectAsync(ip, new Uri(address).Port, ct)
+        : VolunteerNodes.ProbeAsync(address, ct);
+
     private async Task ProbeAsync(string address)
     {
         bool ok;
-        try { ok = await _probe(address, CancellationToken.None); }
-        catch (Exception e) when (e is not OutOfMemoryException) { ok = false; }
+        IPAddress? ip = null;
+        var crowded = false;
+        if (_resolve is not null)
+        {
+            try { ip = await _resolve(address, CancellationToken.None); }
+            catch (Exception e) when (e is not OutOfMemoryException) { ip = null; }
+            if (ip is not null)
+            {
+                var machine = VolunteerNodes.MachineOf(ip);
+                lock (_gate)
+                {
+                    // Many names for one machine count as that machine: over the cap, the entry goes without being dialled.
+                    crowded = _entries.Count(p => p.Key != address && p.Value.Machine == machine) >= MaxPerHost;
+                    if (!crowded && _entries.TryGetValue(address, out var mine)) mine.Machine = machine;
+                }
+            }
+        }
+        if (crowded || (_resolve is not null && ip is null)) ok = false;
+        else
+        {
+            try { ok = await Dial(address, ip, CancellationToken.None); }
+            catch (Exception e) when (e is not OutOfMemoryException) { ok = false; }
+        }
         lock (_gate)
         {
             if (_entries.TryGetValue(address, out var entry))

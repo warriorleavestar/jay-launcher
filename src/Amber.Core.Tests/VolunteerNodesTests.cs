@@ -142,6 +142,56 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ManyNamesForOneMachineCountAsThatMachine()
+    {
+        // Fake resolver: every name under one.example.org is the same machine; the v6 names share one /64.
+        var dialled = new List<string>();
+        Task<IPAddress?> Resolve(string url, CancellationToken _)
+        {
+            var host = new Uri(url).Host;
+            IPAddress? ip = host.EndsWith(".one.example.org") ? IPAddress.Parse("10.20.30.40")
+                : host.EndsWith(".six.example.org") ? IPAddress.Parse($"fd00:1:2:3::{host.Length:x}")
+                : host.EndsWith(".gone.example.org") ? null
+                : IPAddress.Parse("10.99.0." + (host.Length % 200));
+            return Task.FromResult(ip);
+        }
+        var registry = new VolunteerRegistry((url, _) => { lock (dialled) dialled.Add(url); return Task.FromResult(true); }, () => _now, Resolve);
+        foreach (var name in new[] { "a", "bb", "ccc" })
+        {
+            Assert.True(Ok(registry.Register($"tcp://{name}.one.example.org:11010")));
+            await registry.LastProbe;
+            _now += TimeSpan.FromSeconds(1.1);
+        }
+        // Two listed; the third name of that machine was dropped without being dialled.
+        Assert.Equal(VolunteerRegistry.MaxPerHost, registry.Listed().Count(u => u.Contains(".one.")));
+        Assert.DoesNotContain("tcp://ccc.one.example.org:11010", dialled);
+        // IPv6 counts by /64.
+        foreach (var name in new[] { "a", "bb", "ccc" })
+        {
+            registry.Register($"tcp://{name}.six.example.org:11010");
+            await registry.LastProbe;
+            _now += TimeSpan.FromSeconds(1.1);
+        }
+        Assert.Equal(VolunteerRegistry.MaxPerHost, registry.Listed().Count(u => u.Contains(".six.")));
+        // A name that doesn't resolve is never dialled or listed.
+        registry.Register("tcp://x.gone.example.org:11010");
+        await registry.LastProbe;
+        Assert.DoesNotContain("tcp://x.gone.example.org:11010", dialled);
+        Assert.DoesNotContain("tcp://x.gone.example.org:11010", registry.Listed());
+        // Checks: one at a time per machine, whatever the name.
+        _now += TimeSpan.FromMinutes(1);
+        Assert.True((await registry.CheckAsync("tcp://p.one.example.org:11010"))["ok"]!.GetValue<bool>());
+        Assert.Equal("rate", (await registry.CheckAsync("tcp://q.one.example.org:11011"))["error"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("10.1.2.3", "10.1.2.3")]
+    [InlineData("::ffff:10.1.2.3", "10.1.2.3")]
+    [InlineData("fd00:1:2:3:4:5:6:7", "fd00:1:2:3::/64")]
+    public void MachinesAreIPv4AddressesOrIPv6Prefixes(string address, string machine) =>
+        Assert.Equal(machine, VolunteerNodes.MachineOf(IPAddress.Parse(address)));
+
+    [Fact]
     public async Task ClientRegistersAndFetchesVolunteersThroughTheDirectory()
     {
         await using var directory = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => _now)
