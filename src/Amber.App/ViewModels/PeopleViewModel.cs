@@ -131,15 +131,17 @@ public sealed partial class PeopleViewModel : PageViewModel
 
     partial void OnSelectedChanged(FriendRow? value)
     {
-        // A question about removing someone is about that person only.
-        IsConfirmingRemove = false;
-        if (value is not null)
+        // A question about removing someone is about that person only, so it goes when someone else is picked; a refresh
+        // that picks the same person again keeps it.
+        if (value is null) { if (!_rebuilding) IsConfirmingRemove = false; }
+        else
         {
             // Someone else than before: their safety codes start folded and the draft is not carried over.
             if (_selectedKey is null || !value.Friend.Devices.Any(d => _selectedKey.Contains(d.Fingerprint)))
             {
                 ShowSafety = false;
                 Draft = "";
+                IsConfirmingRemove = false;
             }
             _selectedKey = [.. value.Friend.Devices.Select(d => d.Fingerprint)];
             _selectedMetKey = null;
@@ -160,14 +162,22 @@ public sealed partial class PeopleViewModel : PageViewModel
         NotifyMet();
     }
 
+    // True while the list is rebuilt: the list briefly drops its selection, which is not the user picking nobody.
+    private bool _rebuilding;
+
     private void RebuildFriends()
     {
-        Friends.Clear();
-        foreach (var friend in _multiplayer.ContactList) Friends.Add(new FriendRow(friend));
-        RefreshStates();
         var keys = _selectedKey;
-        Selected = keys is null ? null : Friends.FirstOrDefault(f => f.Friend.Devices.Any(d => keys.Contains(d.Fingerprint)));
-        if (Selected is null) _selectedKey = null;
+        _rebuilding = true;
+        try
+        {
+            Friends.Clear();
+            foreach (var friend in _multiplayer.ContactList) Friends.Add(new FriendRow(friend));
+            RefreshStates();
+            Selected = keys is null ? null : Friends.FirstOrDefault(f => f.Friend.Devices.Any(d => keys.Contains(d.Fingerprint)));
+        }
+        finally { _rebuilding = false; }
+        if (Selected is null) { _selectedKey = null; IsConfirmingRemove = false; }
         NotifyList();
         NotifyFriend();
     }

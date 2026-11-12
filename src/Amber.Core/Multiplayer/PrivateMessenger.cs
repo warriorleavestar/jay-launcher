@@ -364,6 +364,8 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
 
     private void OnFrame(PrivateFrame frame)
     {
+        // Replies and offers are keyed by the sender's fingerprint, so it must be the fingerprint of the key that sealed it.
+        if (MemberIdentity.FingerprintOf(frame.FromPublicKey) != frame.FromFingerprint) return;
         var plain = PrivateSeal.Open(_me, frame.FromPublicKey, frame.Sealed);
         if (plain is null) return;
         JsonObject? body;
