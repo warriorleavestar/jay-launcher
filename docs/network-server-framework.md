@@ -97,7 +97,7 @@ await server.RunAsync(CancellationToken.None);
 
 | op | 请求 | 回复 |
 |---|---|---|
-| `announce` | `{room: <房间>, listed: bool, hidden: [{k: "<64 位十六进制>", b: "<284 字节，base64>", p: "<64 位十六进制>", s: "<128 位十六进制>"}, ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`hidden` 是房主给每张还有效的邀请封好的条目（`HiddenEntry`），目录原样放进快照，长度不对回 `bad`。`p` 是从邀请算出的条目公钥，`k` 必须是它的哈希；`s` 是这把钥匙对条目、房间编号和 `seq` 的签名（`HiddenEntry.VerifyPublish`），不对回 `lookup`。房间的 `seq` 是毫秒时间，和目录的时钟差超过 10 分钟时不收 `hidden`：房间还要上公开列表（或有 `fp`）就照常登记，回复带 `warn: "clock"`；别的都没有时回 `clock`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok}` |
+| `announce` | `{room: <房间>, listed: bool, hidden: [{k: "<64 位十六进制>", b: "<284 字节，base64>", p: "<64 位十六进制>", s: "<128 位十六进制>"}, ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`hidden` 是房主给每张还有效的邀请封好的条目（`HiddenEntry`），目录原样放进快照，长度不对回 `bad`。`p` 是从邀请算出的条目公钥，`k` 必须是它的哈希；`s` 是这把钥匙对条目、房间编号和 `seq` 的签名（`HiddenEntry.VerifyPublish`），不对回 `lookup`。同一个索引下已经有 8 个别的房间时只丢这一条，房间照常登记，回复带 `warn: "lookup"`（只有隐藏条目的房间回 `lookup`）。房间的 `seq` 是毫秒时间，和目录的时钟差超过 10 分钟时不收 `hidden`：房间还要上公开列表（或有 `fp`）就照常登记，回复带 `warn: "clock"`；别的都没有时回 `clock`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok}` |
 | `withdraw` | `{id, seq, sig}`：`sig` 是房间签名钥匙对 `"jay-withdraw-v1\n<id>\n<seq>"` 的 Ed25519 签名（十六进制） | `{ok}` |
 | `snap` | `{epoch?, have?}`：本机那份快照来自哪次启动、到第几版；第一次不带 | `{ok, epoch, ver, full, from?, rooms: [<房间>, ...], hidden: [{k, t, b}, ...], gone: ["r:<id>" 或 "h:<k>:<t>", ...]}`。`t` 是随机的槽位标记：同一个索引 `k` 下最多 8 个房间各有一条。公开房间只改了 `seq`、签名和时间的续期不算变化。整份快照有上限，再发布会超过时回 `full`。`epoch` 对得上、`have` 还在变更记录里时只给之后变了的（`full` 为假，`from` = `have`），否则给全部。`rooms` 是 `listed` 为真且不是隐藏房间的。每个请求者都发一样的请求，目录看不出谁在找哪个房间 |
 | `find` | `{code: "JAYF1-..."}` | `{ok, room?}`：用登记的指纹密钥算标签，见 `FingerprintCode.Matches` |

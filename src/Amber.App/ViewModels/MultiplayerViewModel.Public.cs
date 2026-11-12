@@ -322,8 +322,13 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Stops the directory snapshot poller started when the public network connected.</summary>
     private IDisposable? _snapshotPolling;
 
-    private IReadOnlyList<byte[]> LobbyKeys() => _lobby?.Book.Pending.Count > 0 && _lobby.Book.Pending[0].Invite.LobbyKey is { } key
-        ? [key] : [];
+    /// <summary>
+    /// The lobby key for hidden entries, so invite codes find the room through the directory. All of a room's invites
+    /// share it. A room listed with its invite in the open (public, direct, password) has none: anyone could sign entries
+    /// with that key, and readers find the room from its listing instead.
+    /// </summary>
+    private IReadOnlyList<byte[]> LobbyKeys() =>
+        BuildListing() is { Mode: not RoomVisibility.Hidden } || _lobby is not { Book.Pending.Count: > 0 } lobby ? [] : [lobby.Book.Pending[0].Invite.LobbyKey];
 
     private RoomListing BuildListing()
     {

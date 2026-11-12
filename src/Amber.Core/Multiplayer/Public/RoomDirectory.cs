@@ -84,8 +84,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     private readonly Dictionary<string, Entry> _rooms = new(StringComparer.Ordinal);
     /// <summary>
     /// Hidden entry index (hex) → the rooms with an entry there (room id → slot tag). Several rooms may share an index, up
-    /// to <see cref="MaxEntriesPerIndex"/>: nobody can hold an index against its real owner, and only holders of the
-    /// invite can open the entries, so a stranger's junk under the same index is just skipped.
+    /// to <see cref="MaxEntriesPerIndex"/>. Only holders of the invite can publish or open entries there, but holders
+    /// aren't necessarily the host: a full index only costs the host that one entry (the room is still registered), and
+    /// readers that don't know the host's key trust no index whose entries disagree about the host.
     /// </summary>
     private readonly Dictionary<string, Dictionary<string, string>> _lookup = new(StringComparer.Ordinal);
 
@@ -592,11 +593,10 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (!HiddenEntry.VerifyPublish(Convert.FromHexString(index!), Convert.FromHexString(key!), bytes, listing.Id, listing.Seq, Convert.FromHexString(sig!))) return Error("lookup");
             hidden.TryAdd(index!, blob);
         }
-        var keys = hidden.Keys.ToArray();
         var fp = request["fp"]?.GetValue<string>();
         if (fp is not null && (fp.Length != 64 || !fp.All(char.IsAsciiHexDigit))) return Error("bad");
         fp = fp?.ToLowerInvariant();
-        if (!listed && keys.Length == 0 && fp is null) return Error(clockOff ? "clock" : "empty");
+        if (!listed && hidden.Count == 0 && fp is null) return Error(clockOff ? "clock" : "empty");
         // The host's account: a login token this node's login service signed for exactly this host identity.
         string? account = null;
         if (Login is { } login && request["account"]?.GetValue<string>() is { Length: > 0 and <= 2048 } token)
@@ -616,9 +616,17 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 if (_withdrawn.TryGetValue(listing.Id, out var gone) && listing.Seq <= gone) return Error("stale");
                 entry = new Entry { Listing = listing };
             }
-            // 查找键先到先得：别人的房间已经占着的键不给（拿着同一张公开邀请的人不能把找房主的人引到自己那里）。
-            foreach (var key in keys)
-                if (_lookup.TryGetValue(key, out var holders) && !holders.ContainsKey(listing.Id) && holders.Count >= MaxEntriesPerIndex) return Error("lookup");
+            // An index that is already full of other rooms' entries: only that entry is left out, the room itself is
+            // still registered (whoever filled the index can't keep the room off the directory).
+            var crowded = false;
+            foreach (var key in hidden.Keys.ToList())
+                if (_lookup.TryGetValue(key, out var holders) && !holders.ContainsKey(listing.Id) && holders.Count >= MaxEntriesPerIndex)
+                {
+                    hidden.Remove(key);
+                    crowded = true;
+                }
+            if (!listed && hidden.Count == 0 && fp is null) return Error("lookup");
+            var keys = hidden.Keys.ToArray();
             // Everything this publish adds to the snapshot must fit (a renewal mostly replaces what the room has there).
             var adding = hidden.Count * (HiddenItemLength + 1L) + (listed ? listing.ToJson().ToJsonString().Length + 64L : 0);
             if (_snapshotBytes - SnapshotBytesOf(listing.Id, entry) + adding > SnapshotBudget) return Error("full");
@@ -655,7 +663,10 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             SetSnapshot("r:" + listing.Id, listed && listing.Mode != RoomVisibility.Hidden ? PublicItem(entry.Listing) : null);
             var published = entry.Listing;
             _events.Add(o => o.OnAnnounced(published, listed, isNew));
-            return clockOff ? new JsonObject { ["ok"] = true, ["warn"] = "clock" } : new JsonObject { ["ok"] = true };
+            var reply = new JsonObject { ["ok"] = true };
+            if (clockOff) reply["warn"] = "clock";
+            else if (crowded) reply["warn"] = "lookup";
+            return reply;
         }
     }
 

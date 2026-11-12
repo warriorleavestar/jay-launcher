@@ -259,9 +259,15 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   the directory's clock (otherwise its hidden entries are left out: a listed room is still listed and the reply carries `warn: "clock"`; a room with nothing else to list gets `clock`), so a captured entry can't be replayed for another room or much later. The
   directory still never sees the lobby key, so it can't open an entry or tell which invite it belongs to.
 - **Sharing an index**: up to 8 rooms (`MaxEntriesPerIndex`) may have an entry under the same index, each under a
-  random slot tag; only holders of the invite can fill those places. A reader tries every entry under the index. When
-  the invite names its host (the host key is in it), the entry for that host is the answer; otherwise, when entries
-  that open point at different hosts, the reader trusts none of them.
+  random slot tag. Holding the invite is what it takes to fill those places, and holding the invite doesn't make you
+  the host. So a full index only costs a publish that entry: the room is still registered (the reply carries
+  `warn: "lookup"`), and a hidden room with nothing else to register gets `lookup`. A reader tries every entry under
+  the index. When the reader knows the host's key (a contact's invite, a listing), the entry for that host is the
+  answer; otherwise, when entries that open point at different hosts, the reader trusts none of them.
+- **Rooms listed with their invite**: public, direct and password rooms carry the invite (or its lobby key) in their
+  listing, so anyone on the network could sign entries for its index. Jay publishes no hidden entries for them; an
+  invite code for such a room is matched against the listings in the snapshot instead (same rule: one host, or the
+  expected host).
   Renewals reuse the same sealed bytes while nothing changed, so they don't show up as changes.
 - **Public rooms**: a renewal that only changes the seq, signature and time isn't a snapshot change; readers keep the
   earlier signed version, and expiry shows up as `gone` either way. So a room's `updated` in a snapshot is when it was published or

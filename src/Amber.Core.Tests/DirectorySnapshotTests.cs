@@ -464,4 +464,58 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.All(waits, w => Assert.InRange(w, TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(12)));
         Assert.True(waits.Distinct().Count() > 100);
     }
+
+    [Fact]
+    public async Task AFullIndexDoesNotKeepARoomOffTheDirectory()
+    {
+        // The invite of a public room is in the open, so anyone can sign entries for its index and fill it.
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        for (var i = 0; i < RoomDirectoryServer.MaxEntriesPerIndex; i++) Assert.True(Publish(lobby, lobby)["ok"]!.GetValue<bool>());
+        var host = new RoomSigner();
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        // The host's publish and renewals still go through; only its hidden entry is left out.
+        await client.AnnounceAsync(host.Sign(Listing(RoomVisibility.Public), _now), true, [lobby], default);
+        _now += TimeSpan.FromSeconds(30);
+        await client.AnnounceAsync(host.Sign(Listing(RoomVisibility.Public), _now), true, [lobby], default);
+        Assert.Contains(await client.ListAsync(default), r => r.Id == host.RoomId);
+        var renewal = host.Sign(Listing(RoomVisibility.Public), _now + TimeSpan.FromSeconds(1));
+        var reply = _directory.Handle(new JsonObject
+        {
+            ["op"] = "announce", ["room"] = renewal.ToJson(), ["listed"] = true, ["hidden"] = new JsonArray(HiddenItem(lobby, renewal)),
+        });
+        Assert.True(reply["ok"]!.GetValue<bool>());
+        Assert.Equal("lookup", reply["warn"]!.GetValue<string>());
+        // A hidden room with nothing else to register is refused, so it knows.
+        Assert.Equal("lookup", ErrorOf(Publish(lobby, lobby)));
+    }
+
+    private static JsonObject HiddenItem(byte[] lobby, RoomListing signed)
+    {
+        var entry = HiddenEntry.Seal(lobby, new DirectoryHit(signed.Id, signed.Ip, signed.HostKey));
+        return new JsonObject
+        {
+            ["k"] = Convert.ToHexStringLower(HiddenEntry.Index(lobby)),
+            ["b"] = Convert.ToBase64String(entry),
+            ["p"] = Convert.ToHexStringLower(HiddenEntry.PublicKey(lobby)),
+            ["s"] = Convert.ToHexStringLower(HiddenEntry.SignPublish(lobby, entry, signed.Id, signed.Seq)),
+        };
+    }
+
+    [Fact]
+    public async Task AnInviteForAListedRoomIsFoundFromTheListing()
+    {
+        var standing = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
+        var room = new RoomSigner();
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        // A public room publishes no hidden entry; the invite in its listing is enough to find it.
+        await client.AnnounceAsync(room.Sign(Listing(RoomVisibility.Public) with { Invite = standing.ToString() }, _now), true, [], default);
+        Assert.Equal(room.RoomId, (await client.LookupAsync(standing.LobbyKey, default))!.Id);
+        // Someone else lists the same invite with their own host: without the host's key nothing is trusted, with it
+        // the right room is found.
+        var other = new RoomSigner().Sign(Listing(RoomVisibility.Public) with { Invite = standing.ToString(), HostKey = X25519KeyPair.Generate().PublicKey }, _now);
+        await client.AnnounceAsync(other, true, [], default);
+        await client.Snapshots.RefreshAsync(client, default);
+        Assert.Null(await client.LookupAsync(standing.LobbyKey, default));
+        Assert.Equal(room.RoomId, (await client.LookupAsync(standing.LobbyKey, default, _host.PublicKey))!.Id);
+    }
 }

@@ -440,15 +440,22 @@ public sealed class DirectorySnapshots
     {
         var prefix = Convert.ToHexStringLower(HiddenEntry.Index(lobbyKey)) + ":";
         List<byte[]> candidates;
+        List<DirectoryHit> listed;
+        var keyHex = Convert.ToHexStringLower(lobbyKey);
+        var key = lobbyKey.ToArray();
         lock (_gate)
         {
             DropStale(_now());
             candidates = [.. _copies.Values.SelectMany(c => c.Hidden).Where(p => p.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(p => p.Value)];
+            // A room listed with this invite in the open (public, direct or password rooms carry it) has no hidden entry;
+            // its listing says where it is.
+            listed = [.. _copies.Values.SelectMany(c => c.Rooms.Values)
+                .Where(r => r.Lobby == keyHex || (JayInvite.TryParse(r.Invite, out var invite) && invite.LobbyKey.AsSpan().SequenceEqual(key)))
+                .Select(r => new DirectoryHit(r.Id, r.Ip, r.HostKey))];
         }
         DirectoryHit? found = null;
-        foreach (var blob in candidates)
+        foreach (var hit in candidates.Select(blob => HiddenEntry.Open(key, blob)).OfType<DirectoryHit>().Concat(listed))
         {
-            if (HiddenEntry.Open(lobbyKey, blob) is not { } hit) continue;
             if (expectedHost is not null)
             {
                 if (hit.HostKey.AsSpan().SequenceEqual(expectedHost)) return hit;
