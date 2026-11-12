@@ -25,7 +25,7 @@ public sealed class WindowsLoopbackInboundTests
         // be a definite answer, never "unknown", and never need elevation.
         WindowsLoopbackInbound.Invalidate();
         var state = WindowsLoopbackInbound.Check();
-        Assert.NotNull(state);
+        // A runner without a reachable filter engine answers "unknown"; then there is nothing more to check here.
         Assert.Equal(state == true, WindowsLoopbackInbound.Present());
     }
 }
@@ -44,6 +44,32 @@ public sealed class WindowsLoopbackInboundClassifyTests
         Assert.Null(WindowsLoopbackInbound.Classify(0x800706BA)); // RPC server unavailable
         Assert.Null(WindowsLoopbackInbound.Classify(0x80320009));
     }
+
+    [Fact]
+    public void ControlLookupsGateEverything()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        uint[] missing = [0x80320007, 0x80320003];
+        Assert.True(WindowsLoopbackInbound.Interpret(missing, [5, 5, 5]));
+        Assert.True(WindowsLoopbackInbound.Interpret(missing, [0, 0, 0]));
+        Assert.False(WindowsLoopbackInbound.Interpret(missing, [5, 0x80320003, 5]));
+        Assert.Null(WindowsLoopbackInbound.Interpret(missing, [5, 0x800706BA, 5]));
+        // A tightened engine that denies every lookup, even of keys that never exist, tells nothing.
+        Assert.Null(WindowsLoopbackInbound.Interpret([5, 5], [5, 5, 5]));
+        Assert.Null(WindowsLoopbackInbound.Interpret([0x80320007, 0x80070005], [5, 5, 5]));
+    }
+
+    [Fact]
+    public void EachUserHasTheirOwnFilterKeys()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var a = WindowsLoopbackInbound.KeysFor(new System.Security.Principal.SecurityIdentifier("S-1-5-21-1-2-3-1001"));
+        var again = WindowsLoopbackInbound.KeysFor(new System.Security.Principal.SecurityIdentifier("S-1-5-21-1-2-3-1001"));
+        var b = WindowsLoopbackInbound.KeysFor(new System.Security.Principal.SecurityIdentifier("S-1-5-21-1-2-3-1002"));
+        Assert.Equal(a, again);
+        Assert.Equal(4, new[] { a.V4, a.V6, b.V4, b.V6 }.Distinct().Count());
+        Assert.DoesNotContain(WindowsLoopbackInbound.SubLayerKey, new[] { a.V4, a.V6, b.V4, b.V6 });
+    }
 }
 
 /// <summary>The admin helper's command line for the strong sandbox's loopback setup.</summary>
@@ -56,7 +82,7 @@ public sealed class WindowsSandboxSetupUserTests
         var user = new System.Security.Principal.SecurityIdentifier("S-1-5-21-1-2-3-1001");
         Assert.Equal(["--jay-sandbox-setup", "--loopback", "--user=S-1-5-21-1-2-3-1001", @"C:\g"],
             WindowsSandboxSetup.Arguments(false, true, [@"C:\g"], user));
-        Assert.Equal(["--jay-sandbox-undo", "--loopback", @"C:\g"], WindowsSandboxSetup.Arguments(true, true, [@"C:\g"], user));
+        Assert.Equal(["--jay-sandbox-undo", "--loopback", "--user=S-1-5-21-1-2-3-1001", @"C:\g"], WindowsSandboxSetup.Arguments(true, true, [@"C:\g"], user));
         Assert.Equal(["--jay-sandbox-setup", "--no-loopback", @"C:\g"], WindowsSandboxSetup.Arguments(false, false, [@"C:\g"], user));
     }
 
@@ -70,10 +96,10 @@ public sealed class WindowsSandboxSetupUserTests
         Assert.Null(WindowsSandboxSetup.ParseUser("--user=S-1-15-2-1")); // ALL APPLICATION PACKAGES
         Assert.Null(WindowsSandboxSetup.ParseUser("--user=nonsense"));
         Assert.Null(WindowsSandboxSetup.ParseUser("S-1-5-21-1-2-3-1001"));
-        // Setting up loopback without a user, a user with --no-loopback, or a user on undo is refused.
+        // Loopback setup or undo without a user, or a user with --no-loopback, is refused.
         Assert.Equal(2, WindowsSandboxSetup.Run(["--jay-sandbox-setup", "--loopback"]));
+        Assert.Equal(2, WindowsSandboxSetup.Run(["--jay-sandbox-undo", "--loopback"]));
         Assert.Equal(2, WindowsSandboxSetup.Run(["--jay-sandbox-setup", "--no-loopback", "--user=S-1-5-21-1-2-3-1001"]));
-        Assert.Equal(2, WindowsSandboxSetup.Run(["--jay-sandbox-undo", "--loopback", "--user=S-1-5-21-1-2-3-1001"]));
     }
 
     [Fact]

@@ -88,20 +88,20 @@ public static class WindowsSandboxSetup
         };
 
     /// <summary>
-    /// The helper's arguments. Setting up loopback also names the Windows user Jay runs as (taken here, before
+    /// The helper's arguments. Loopback setup and undo also name the Windows user Jay runs as (taken here, before
     /// elevation: with "over the shoulder" elevation the admin step runs as another account), because the inbound
-    /// filters only let that user's processes connect into the game.
+    /// filters are per user: they only let that user's processes connect into the game, and undo removes only theirs.
     /// </summary>
     internal static IReadOnlyList<string> Arguments(bool undo, bool loopback, IReadOnlyList<string> folders)
     {
-        if (!loopback || undo) return Arguments(undo, loopback, folders, null);
+        if (!loopback) return Arguments(undo, loopback, folders, null);
         using var identity = WindowsIdentity.GetCurrent();
         return Arguments(undo, loopback, folders, identity.User);
     }
 
     internal static IReadOnlyList<string> Arguments(bool undo, bool loopback, IReadOnlyList<string> folders, SecurityIdentifier? user) =>
         [undo ? UndoArgument : SetupArgument, loopback ? LoopbackOption : NoLoopbackOption,
-            .. loopback && !undo && user is not null ? [UserOption + user.Value] : Array.Empty<string>(), .. folders];
+            .. loopback && user is not null ? [UserOption + user.Value] : Array.Empty<string>(), .. folders];
 
     /// <summary>A user account SID from the helper's command line: a real account (S-1-5-21-…), nothing else.</summary>
     internal static SecurityIdentifier? ParseUser(string arg)
@@ -129,11 +129,11 @@ public static class WindowsSandboxSetup
         if (rest.Count > 0 && rest[0].StartsWith(UserOption, StringComparison.Ordinal))
         {
             user = ParseUser(rest[0]);
-            if (user is null || undo || !loopback) return 2;
+            if (user is null || !loopback) return 2;
             rest.RemoveAt(0);
         }
-        // Setting up the inbound filters needs the user they are for.
-        if (loopback && !undo && user is null) return 2;
+        // The inbound filters are per user: setting them up or removing them needs the user.
+        if (loopback && user is null) return 2;
         var folders = rest;
         if (folders.Any(f => !Path.IsPathFullyQualified(f) || !Directory.Exists(f))) return 2;
         var ok = !loopback || Loopback(undo, user);
@@ -158,8 +158,10 @@ public static class WindowsSandboxSetup
     /// </summary>
     private static bool Loopback(bool remove, SecurityIdentifier? user)
     {
-        var inbound = remove ? WindowsLoopbackInbound.Remove() : WindowsLoopbackInbound.Add(WindowsSandbox.ContainerSid(), user!);
-        return Exempt(remove) && inbound == 0;
+        // Undo with the filter engine unreachable cannot remove (or even see) the filters; that must not keep the
+        // exemption and the folders from being undone, or "remove sandbox permissions" could never finish.
+        var inbound = remove ? WindowsLoopbackInbound.Remove(user!) : WindowsLoopbackInbound.Add(WindowsSandbox.ContainerSid(), user!);
+        return Exempt(remove) && (inbound == 0 || remove && inbound == WindowsLoopbackInbound.EngineUnavailable);
     }
 
     /// <summary>Adds or removes the exemption, skipping CheckNetIsolation when it is already that way (its exit code then is not documented).</summary>

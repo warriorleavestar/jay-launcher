@@ -1,7 +1,9 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Text;
 
 namespace Amber.Core.Launch;
 
@@ -12,26 +14,33 @@ namespace Amber.Core.Launch;
 /// container, Jay's 127.0.0.1 and ::1 connects timed out, so opening a room failed). Windows' own server switch
 /// (<c>LoopbackExempt -is</c>) only lasts while that admin process keeps running.
 /// <para>
-/// So the one admin step adds two persistent WFP filters of Jay's own, in Jay's own sublayer: permit inbound loopback
-/// (ALE receive/accept, IPv4 and IPv6) into Jay's game container, from processes of the Windows user Jay runs as (named
-/// on the admin helper's command line before elevation; remote user condition), and nothing else. The permit clears the
-/// action right, so the lower-weight AppContainer loopback block cannot override it. Trade-off, accepted on purpose:
-/// for that user's loopback into the game this is the standard sandbox's level (any of the user's processes may connect
-/// to the game's ports), and it also outranks other lower-weight loopback blocks for exactly that traffic. Only
-/// loopback is matched: what the game accepts from the network is still up to the firewall. Undo deletes exactly these
-/// three objects by their fixed keys.
+/// So the one admin step adds two persistent WFP filters for the Windows user Jay runs as (named on the admin helper's
+/// command line before elevation), in a sublayer all Jay users share: permit inbound loopback (ALE receive/accept, IPv4
+/// and IPv6) into Jay's game container from that user's processes (remote user condition). Each user's filters have
+/// their own keys, derived from the user's SID, so one user's admin step or undo never touches another user's filters.
+/// The permit clears the action right, so the lower-weight AppContainer loopback block cannot override it.
+/// </para>
+/// <para>
+/// Trade-offs, accepted on purpose: for that user's loopback into the game this is the standard sandbox's level (any
+/// of the user's processes may connect to the game's ports), and it outranks other lower-weight loopback blocks for
+/// exactly that traffic. The container's SID is the same for every Windows user on the PC (it is derived from the
+/// container name), so a user whose filters exist may also connect into ANOTHER user's sandboxed game over loopback;
+/// telling those apart needs a container per user (a separate change). Only loopback is matched: what the game accepts
+/// from the network is still up to the firewall.
 /// </para>
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static unsafe class WindowsLoopbackInbound
 {
+    /// <summary>Shared by every user's filters; deleted with the last of them.</summary>
     internal static readonly Guid SubLayerKey = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d13");
-    // Version 2 keys (with the remote-user condition). The first version (…d14/…d16, no user condition) never reached
-    // main; it only exists on machines that ran a test build of PR #267. Present() only knows the v2 keys, so such a
-    // machine asks for the admin step again, which deletes the old ones.
-    internal static readonly Guid FilterV4Key = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d24");
-    internal static readonly Guid FilterV6Key = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d26");
-    private static readonly Guid[] OldFilterKeys = [new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d14"), new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d16")];
+    // The first test builds of PR #267 (never in main) used fixed keys for everybody: …d14/…d16 (no user condition),
+    // then …d24/…d26. Every admin step deletes them; Present() never looks at them, so such a machine asks once more.
+    private static readonly Guid[] OldFilterKeys =
+    [
+        new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d14"), new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d16"),
+        new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d24"), new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d26"),
+    ];
     /// <summary>A key Jay never creates: its lookup must say "not found" before "access denied" can be read as "exists".</summary>
     internal static readonly Guid ControlKey = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9dff");
 
@@ -41,16 +50,28 @@ public static unsafe class WindowsLoopbackInbound
     private static readonly Guid ConditionFlags = new("632ce23b-5167-435c-86d7-e903684aa80c");
     private static readonly Guid ConditionRemoteUserId = new("f63073b7-0189-4ab0-95a4-6123cbfab862");
 
+    /// <summary>This user's filter keys: a name-based GUID per user SID and IP version (deterministic, never shared).</summary>
+    internal static (Guid V4, Guid V6) KeysFor(SecurityIdentifier user) => (Derive(user, "v4"), Derive(user, "v6"));
+
+    private static Guid Derive(SecurityIdentifier user, string family)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"jay-sandbox-inbound-loopback|{user.Value}|{family}"));
+        var bytes = hash.AsSpan(0, 16).ToArray();
+        bytes[7] = (byte)((bytes[7] & 0x0F) | 0x50); // RFC 4122 version 5 style
+        bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);
+        return new Guid(bytes);
+    }
+
     private static readonly object CacheLock = new();
     private static (bool? Value, long At, bool Valid) _cache;
     private const long CacheMilliseconds = 5000;
 
     /// <summary>
-    /// True when Jay's filters are there, false when they are missing, null when Windows could not say (the filter
-    /// engine is not running, an RPC error). Needs no admin: any user may open the engine and look objects up by key;
-    /// once the admin step added them the lookup answers "access denied", which means they exist. Settings and the
-    /// launch read this often, so the answer is kept for a few seconds (the lookups are local RPCs to the filter
-    /// engine; <see cref="Invalidate"/> after the admin step).
+    /// True when this Windows user's filters are there, false when they are missing, null when Windows could not say
+    /// (the filter engine is not running, an RPC error, a tightened engine). Needs no admin: any user may open the
+    /// engine and look objects up by key; once the admin step added them the lookup answers "access denied", which
+    /// means they exist. Settings and the launch read this often, so the answer is kept for a few seconds (the lookups
+    /// are local RPCs to the filter engine; <see cref="Invalidate"/> after the admin step).
     /// </summary>
     public static bool? Check()
     {
@@ -58,53 +79,60 @@ public static unsafe class WindowsLoopbackInbound
         {
             var now = Environment.TickCount64;
             if (_cache.Valid && now - _cache.At < CacheMilliseconds) return _cache.Value;
-            var value = Query();
+            using var identity = WindowsIdentity.GetCurrent();
+            var value = identity.User is { } user ? Query(user) : null;
             _cache = (value, now, true);
             return value;
         }
     }
 
-    /// <summary>Only "definitely there" counts: an unknown answer is not ready (and not something to undo).</summary>
+    /// <summary>Only "definitely there" counts as ready.</summary>
     public static bool Present() => Check() == true;
 
     /// <summary>Forgets the cached <see cref="Check"/> answer (call after the admin step ran).</summary>
     public static void Invalidate() { lock (CacheLock) _cache = default; }
 
-    private static bool? Query()
+    private static bool? Query(SecurityIdentifier user)
     {
         if (FwpmEngineOpen0(null, RPC_C_AUTHN_DEFAULT, 0, 0, out var engine) != 0) return null;
         try
         {
-            // If even a key that never exists is not answered with "not found" (a tightened engine), nothing can be read.
-            if (Classify(FwpmSubLayerGetByKey0(engine, ControlKey, out var control), control, controlLookup: true) != false
-                || Classify(FwpmFilterGetByKey0(engine, ControlKey, out var controlFilter), controlFilter, controlLookup: true) != false) return null;
-            bool? all = true;
-            foreach (var state in new[]
-            {
-                Classify(FwpmSubLayerGetByKey0(engine, SubLayerKey, out var s), s),
-                Classify(FwpmFilterGetByKey0(engine, FilterV4Key, out var f4), f4),
-                Classify(FwpmFilterGetByKey0(engine, FilterV6Key, out var f6), f6),
-            })
-            {
-                if (state == false) return false;
-                if (state is null) all = null;
-            }
-            return all;
+            var (v4, v6) = KeysFor(user);
+            return Interpret(
+                [Lookup(FwpmSubLayerGetByKey0(engine, ControlKey, out var c1), c1), Lookup(FwpmFilterGetByKey0(engine, ControlKey, out var c2), c2)],
+                [
+                    Lookup(FwpmSubLayerGetByKey0(engine, SubLayerKey, out var s), s),
+                    Lookup(FwpmFilterGetByKey0(engine, v4, out var f4), f4),
+                    Lookup(FwpmFilterGetByKey0(engine, v6, out var f6), f6),
+                ]);
         }
         finally { FwpmEngineClose0(engine); }
     }
 
-    private static bool? Classify(uint result, nint memory, bool controlLookup = false)
+    private static uint Lookup(uint result, nint memory)
     {
         if (memory != 0) FwpmFreeMemory0(ref memory);
-        // The control key never exists, so "access denied" there means this user cannot tell anything apart.
-        return controlLookup && result is ERROR_ACCESS_DENIED or E_ACCESSDENIED ? null : Classify(result);
+        return result;
     }
 
     /// <summary>
-    /// One lookup's answer: found (or "access denied": Jay's objects are admin-only, and the control lookup already
-    /// showed this user can tell missing keys apart) = true, "not found" = false, any other error = unknown.
+    /// Reads the lookups: the control lookups (keys that never exist) must both say "not found", or nothing can be
+    /// told apart (null). Then any "not found" means missing, any other unexpected error means unknown, and found or
+    /// "access denied" (Jay's objects are admin-only) means there.
     /// </summary>
+    internal static bool? Interpret(IReadOnlyList<uint> controls, IReadOnlyList<uint> lookups)
+    {
+        if (controls.Any(c => c is not (FWP_E_FILTER_NOT_FOUND or FWP_E_SUBLAYER_NOT_FOUND))) return null;
+        bool? all = true;
+        foreach (var state in lookups.Select(Classify))
+        {
+            if (state == false) return false;
+            if (state is null) all = null;
+        }
+        return all;
+    }
+
+    /// <summary>One lookup's answer: found or "access denied" = true, "not found" = false, any other error = unknown.</summary>
     internal static bool? Classify(uint result) => result switch
     {
         0 or ERROR_ACCESS_DENIED or E_ACCESSDENIED => true,
@@ -113,18 +141,19 @@ public static unsafe class WindowsLoopbackInbound
     };
 
     /// <summary>
-    /// Adds (or re-adds) Jay's sublayer and filters: loopback into <paramref name="container"/> from processes of
-    /// <paramref name="user"/> only (other Windows users on the same PC, e.g. remote desktop sessions, stay blocked).
-    /// Admin only. 0 when done.
+    /// Adds (or re-adds) <paramref name="user"/>'s filters: loopback into <paramref name="container"/> from that user's
+    /// processes only (see the class remarks for what this does and does not separate). Other users' filters are left
+    /// alone. Admin only. 0 when done.
     /// </summary>
     public static uint Add(SecurityIdentifier container, SecurityIdentifier user)
     {
         var sid = new byte[container.BinaryLength];
         container.GetBinaryForm(sid, 0);
         var sd = UserDescriptor(user);
+        var (v4, v6) = KeysFor(user);
         return InTransaction(engine =>
         {
-            var removed = RemoveAll(engine);
+            var removed = DeleteFilters(engine, [v4, v6, .. OldFilterKeys]);
             if (removed != 0) return removed;
             var name = Marshal.StringToHGlobalUni("Jay game sandbox: loopback into the game");
             var description = Marshal.StringToHGlobalUni("Lets Jay connect into its game sandbox container over loopback (e.g. a world opened to LAN). Added and removed by Jay's sandbox admin step.");
@@ -137,11 +166,10 @@ public static unsafe class WindowsLoopbackInbound
             try
             {
                 // Highest sublayer weight + CLEAR_ACTION_RIGHT on purpose: the permit must win over the system's AppContainer
-                // loopback block, and Windows gives no documented weight just above that sublayer. It also wins over other
-                // lower sublayers' blocks, but only for this user's loopback into Jay's own container (see the class remarks).
+                // loopback block, and Windows gives no documented weight just above that sublayer (see the class remarks).
                 var subLayer = new FWPM_SUBLAYER0 { subLayerKey = SubLayerKey, name = name, description = description, flags = FWPM_SUBLAYER_FLAG_PERSISTENT, weight = 0xFFFF };
                 var r = FwpmSubLayerAdd0(engine, ref subLayer, 0);
-                if (r != 0) return r;
+                if (r is not (0 or FWP_E_ALREADY_EXISTS)) return r;
                 conditions[0] = new FWPM_FILTER_CONDITION0
                 {
                     fieldKey = ConditionPackageId, matchType = FWP_MATCH_EQUAL,
@@ -157,7 +185,7 @@ public static unsafe class WindowsLoopbackInbound
                     fieldKey = ConditionRemoteUserId, matchType = FWP_MATCH_EQUAL,
                     conditionValue = new FWP_VALUE0 { type = FWP_SECURITY_DESCRIPTOR_TYPE, value = (nint)blob },
                 };
-                foreach (var (key, layer) in new[] { (FilterV4Key, LayerRecvAcceptV4), (FilterV6Key, LayerRecvAcceptV6) })
+                foreach (var (key, layer) in new[] { (v4, LayerRecvAcceptV4), (v6, LayerRecvAcceptV6) })
                 {
                     var filter = new FWPM_FILTER0
                     {
@@ -192,30 +220,44 @@ public static unsafe class WindowsLoopbackInbound
         return bytes;
     }
 
-    /// <summary>Deletes Jay's filters and sublayer (missing ones are fine). Admin only. 0 when done, else the first real error.</summary>
-    public static uint Remove() => InTransaction(RemoveAll);
+    /// <summary>Returned by <see cref="Remove"/> when the filter engine cannot be reached at all (nothing could be checked or removed).</summary>
+    public const uint EngineUnavailable = 0xA0000001;
 
-    /// <summary>Filters first (the sublayer cannot go while they use it). 0, or the first error other than "not found".</summary>
-    private static uint RemoveAll(nint engine)
+    /// <summary>
+    /// Deletes <paramref name="user"/>'s filters (and the first test builds' shared ones), then the shared sublayer
+    /// unless another user's filters still use it. Missing objects are fine. Admin only. 0 when done,
+    /// <see cref="EngineUnavailable"/> when the engine cannot be opened, else the first real error.
+    /// </summary>
+    public static uint Remove(SecurityIdentifier user)
     {
-        foreach (var r in new Func<uint>[]
+        var (v4, v6) = KeysFor(user);
+        var r = InTransaction(engine =>
         {
-            () => FwpmFilterDeleteByKey0(engine, FilterV4Key),
-            () => FwpmFilterDeleteByKey0(engine, FilterV6Key),
-            () => FwpmFilterDeleteByKey0(engine, OldFilterKeys[0]),
-            () => FwpmFilterDeleteByKey0(engine, OldFilterKeys[1]),
-            () => FwpmSubLayerDeleteByKey0(engine, SubLayerKey),
-        })
+            var deleted = DeleteFilters(engine, [v4, v6, .. OldFilterKeys]);
+            if (deleted != 0) return deleted;
+            var sub = FwpmSubLayerDeleteByKey0(engine, SubLayerKey);
+            return sub is 0 or FWP_E_SUBLAYER_NOT_FOUND or FWP_E_IN_USE ? 0u : sub;
+        }, out var opened);
+        return opened ? r : EngineUnavailable;
+    }
+
+    /// <summary>0, or the first delete error other than "not found".</summary>
+    private static uint DeleteFilters(nint engine, IEnumerable<Guid> keys)
+    {
+        foreach (var key in keys)
         {
-            var result = r();
-            if (result is not (0 or FWP_E_FILTER_NOT_FOUND or FWP_E_SUBLAYER_NOT_FOUND)) return result;
+            var result = FwpmFilterDeleteByKey0(engine, key);
+            if (result is not (0 or FWP_E_FILTER_NOT_FOUND)) return result;
         }
         return 0;
     }
 
-    private static uint InTransaction(Func<nint, uint> work)
+    private static uint InTransaction(Func<nint, uint> work) => InTransaction(work, out _);
+
+    private static uint InTransaction(Func<nint, uint> work, out bool opened)
     {
         var r = FwpmEngineOpen0(null, RPC_C_AUTHN_DEFAULT, 0, 0, out var engine);
+        opened = r == 0;
         if (r != 0) return r;
         try
         {
@@ -233,6 +275,8 @@ public static unsafe class WindowsLoopbackInbound
     private const uint E_ACCESSDENIED = 0x80070005;
     private const uint FWP_E_FILTER_NOT_FOUND = 0x80320003;
     private const uint FWP_E_SUBLAYER_NOT_FOUND = 0x80320007;
+    private const uint FWP_E_IN_USE = 0x8032000A;
+    private const uint FWP_E_ALREADY_EXISTS = 0x80320009;
     private const uint FWPM_SUBLAYER_FLAG_PERSISTENT = 0x1;
     private const uint FWPM_FILTER_FLAG_PERSISTENT = 0x1;
     private const uint FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT = 0x8;
