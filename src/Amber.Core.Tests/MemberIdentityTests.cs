@@ -150,6 +150,51 @@ public sealed class MemberIdentityTests : IDisposable
         Assert.Equal(recovered, again.PublicKey);
     }
 
+    [Fact]
+    public void LockedKeyProtectionKeepsTheIdentityFile()
+    {
+        // Windows only: DPAPI refusing for this logon (an SSH logon without a password) must not replace a good identity.
+        if (!OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, MemberIdentity.FileName);
+        byte[] stored = [.. "AMBID1"u8.ToArray(), .. new byte[200]];
+        File.WriteAllBytes(path, stored);
+        MemberIdentity.DpapiProbe = () => false;
+        try
+        {
+            using var identity = MemberIdentity.LoadOrCreate(_dir);
+            Assert.False(identity.IsPersisted);
+            Assert.Equal(Amber.Core.Localization.L.T("core.mp.identity.locked"), identity.Warning);
+            Assert.Equal(stored, File.ReadAllBytes(path));
+            Assert.False(File.Exists(path + ".broken"));
+        }
+        finally
+        {
+            MemberIdentity.DpapiProbe = null;
+        }
+    }
+
+    [Fact]
+    public void UndecryptableFileWithWorkingKeyProtectionIsReplaced()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, MemberIdentity.FileName);
+        File.WriteAllBytes(path, [.. "AMBID1"u8.ToArray(), .. new byte[200]]);
+        MemberIdentity.DpapiProbe = () => true;
+        try
+        {
+            using var identity = MemberIdentity.LoadOrCreate(_dir);
+            Assert.True(identity.IsPersisted);
+            Assert.Equal(Amber.Core.Localization.L.T("core.mp.identity.corrupt"), identity.Warning);
+            Assert.True(File.Exists(path + ".broken"));
+        }
+        finally
+        {
+            MemberIdentity.DpapiProbe = null;
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_dir)) Directory.Delete(_dir, true);

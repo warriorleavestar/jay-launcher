@@ -24,13 +24,13 @@ public static class EasyTierRelease
     /// <summary>The upstream EasyTier version the hardened build is based on.</summary>
     public const string Version = "2.6.4";
     /// <summary>Release tag of Jay's hardened build.</summary>
-    public const string ReleaseTag = "jay-v2.6.4-1";
+    public const string ReleaseTag = "jay-v2.6.4-3";
     /// <summary>First 12 hex digits of the hardened build's commit; part of every package name.</summary>
-    public const string Commit = "89e36e45d7e2";
+    public const string Commit = "9407746b1ce1";
     /// <summary>The hardened build's full commit, as the trustees' signature names it.</summary>
-    public const string FullCommit = "89e36e45d7e2c45eb7144a10afd272c084ad6d82";
+    public const string FullCommit = "9407746b1ce1dc4d977441c47dfdcb303363a62a";
     /// <summary>Signature seq of this build: one more for every hardened release.</summary>
-    public const long Seq = 1;
+    public const long Seq = 3;
     /// <summary>Component name in the trustees' signature (<see cref="ReleaseStatement.Components"/>).</summary>
     public const string Component = "easytier";
     /// <summary>Install folder name: a new hardened build never reuses files from an older or an upstream install.</summary>
@@ -57,13 +57,13 @@ public static class EasyTierRelease
 
     internal static Asset For(string os, Architecture arch) => (os, arch) switch
     {
-        ("windows", Architecture.X64) => A("windows-x86_64", "780be28da60a2c6c0cdb305998cceb57c79b8474f53812ef1212432709182f83", 12_049_938, true),
-        ("windows", Architecture.Arm64) => A("windows-arm64", "8d90565d4d27e30eca5c6749b5e8562ba8227be5dd4c6e2d8a2afd661a37380f", 11_047_777, true),
-        ("windows", Architecture.X86) => A("windows-i686", "3a03cf82399216112703eda40f0157b6f08f7f2e50b8df41a81ef55255bb7d18", 11_600_648, true),
-        ("macos", Architecture.X64) => A("macos-x86_64", "fd04ff0dd835a5ee573bb1abbdbc110821e04cb28030168ad12836312df89907", 12_547_528),
-        ("macos", Architecture.Arm64) => A("macos-aarch64", "70a2ddc3259a3f8791a4695557091fef7492f4a928780b7eb0289e27e9748501", 11_136_375),
-        ("linux", Architecture.X64) => A("linux-x86_64", "4d2c3e962259fd9c72cee59f23cb707c91aa2702af26413438683446a989fa9a", 13_992_778),
-        ("linux", Architecture.Arm64) => A("linux-aarch64", "15a21e30b1a50cb8cb72e9be297a2dd88856639c5efe7f0fd860154b0034fc49", 12_525_937),
+        ("windows", Architecture.X64) => A("windows-x86_64", "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888", 11_621_165, true),
+        ("windows", Architecture.Arm64) => A("windows-arm64", "a5ce68a4a6f0e458e10ff3dbabadedacc6ddcf621bd5c4338efe613cabfceefa", 10_643_891, true),
+        ("windows", Architecture.X86) => A("windows-i686", "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b", 11_223_763, true),
+        ("macos", Architecture.X64) => A("macos-x86_64", "74e059185ba6cc32e3464cad66eab0ff8c86c5cbbb12b51ffaa41dda38a3724b", 12_104_239),
+        ("macos", Architecture.Arm64) => A("macos-aarch64", "57063f611183f30804f3104498859166845eaa7b9e93a8a769cedb9eca66bc79", 10_738_210),
+        ("linux", Architecture.X64) => A("linux-x86_64", "6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300", 13_500_986),
+        ("linux", Architecture.Arm64) => A("linux-aarch64", "6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac", 12_087_737),
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
@@ -76,7 +76,7 @@ public static class EasyTierRelease
 
     /// <summary>
     /// The trustees' signature over this build (embedded SHA256SUMS.txt and SHA256SUMS.txt.sigs from the release):
-    /// valid when 2 of the 3 Jay trustees signed exactly this tag, seq and commit as an EasyTier build, and every
+    /// valid when enough Jay release keys (JayTrust.ReleaseNeed) signed exactly this tag, seq and commit as an EasyTier build, and every
     /// pinned package hash above is in the signed list. Checked once per run.
     /// </summary>
     public static ReleaseCheck Signature => SignatureCheck.Value;
@@ -283,7 +283,7 @@ public sealed class EasyTierInstaller
             if (hash != Asset.Sha256)
                 throw new InvalidDataException(L.F("core.mp.component.hashfailed", hash));
         }
-        // Once release keys are built in, the pinned build must also carry 2 of 3 trustee release signatures.
+        // Once release keys are built in, the pinned build must also carry enough trustee release signatures (JayTrust.ReleaseNeed).
         if (!EasyTierRelease.SignatureAllowsInstall)
             throw new InvalidDataException(L.F("core.mp.component.unsigned", UpdateCheck.Explain(EasyTierRelease.Signature.Verdict)));
         Extract(zip, InstallDir, Asset);
@@ -765,7 +765,7 @@ public sealed class EasyTierSession : IEasyTierSession
         SplitPaths = null;
         try
         {
-            if (!_process.HasExited) _process.Kill(true);
+            EasyTierProcessGuard.Stop(_process);
             _process.WaitForExit(3000);
         }
         catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
@@ -874,7 +874,7 @@ public sealed class EasyTierLobby : IDisposable
     {
         try
         {
-            if (!_process.HasExited) _process.Kill(true);
+            EasyTierProcessGuard.Stop(_process);
             _process.WaitForExit(3000);
         }
         catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
