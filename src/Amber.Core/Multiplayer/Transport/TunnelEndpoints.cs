@@ -138,6 +138,8 @@ public sealed class TunnelServer : IAsyncDisposable
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, MaxPendingPerCaller);
     private long _slotsFullLogged;
     private long _handshakeFailedLogged;
+    // Its own limit, so frequent ended lines (a room without members) don't hide the failed handshakes.
+    private long _endedLogged;
 
     /// <summary>Connections in their handshake right now.</summary>
     public int PendingHandshakes => _slots.Held;
@@ -298,20 +300,22 @@ public sealed class TunnelServer : IAsyncDisposable
                 // Only a connection that never got served counts as refused; a forwarding that ended is not.
                 if (!served) Interlocked.Increment(ref Rejected);
                 // Once the handshake succeeded, a failure is a connection that ended, not a failed handshake.
-                var what = served || handshakeOk ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+                var ended = served || handshakeOk;
+                var what = ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
                 var line = e is CryptographicException or PlatformNotSupportedException ? L.T(what) + e.Message
                     : e is InvalidOperationException or ArgumentException ? L.T(what) + e.GetType().Name : null;
                 // Anyone can cause this before a member's handshake succeeded: then at most one line a minute (only
                 // lines actually written use it up).
-                if (line is not null && (authenticated || OncePerMinute(ref _handshakeFailedLogged))) _log?.Invoke(line);
+                if (line is not null && (authenticated || OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged))) _log?.Invoke(line);
             }
             catch (Exception e)
             {
                 // Anything else still ends this connection quietly and is logged by type only (no member details).
                 (stream as IAuthenticatedStream)?.Abort();
                 if (!served) Interlocked.Increment(ref Rejected);
-                if (authenticated || OncePerMinute(ref _handshakeFailedLogged))
-                    _log?.Invoke(L.T(served || handshakeOk ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+                var ended = served || handshakeOk;
+                if (authenticated || OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged))
+                    _log?.Invoke(L.T(ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             }
             finally
             {

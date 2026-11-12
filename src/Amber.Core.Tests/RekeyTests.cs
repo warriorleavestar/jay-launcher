@@ -283,8 +283,9 @@ public sealed class RekeyTests : IDisposable
             Assert.True(await WaitAsync(() => server.Rejected == 1));
         }
         var failed = L.T("core.mp.transport.endpoint_handshake_failed");
-        // The timeout itself writes nothing.
-        lock (log) Assert.DoesNotContain(log, l => l.StartsWith(failed, StringComparison.Ordinal));
+        // The timeout itself writes nothing (the counter goes up first, so give a line time to show up).
+        await Task.Delay(200);
+        lock (log) Assert.Empty(log);
         for (var i = 0; i < 3; i++)
         {
             try { await using var t = await TunnelClient.Wrapped("127.0.0.1", server.Port, stranger, settings, TunnelService.Game)(default); }
@@ -299,7 +300,9 @@ public sealed class RekeyTests : IDisposable
             // Exactly one line, and it is about the failed handshakes, not the timeout.
             var line = Assert.Single(log, l => l.StartsWith(failed, StringComparison.Ordinal));
             Assert.DoesNotContain(nameof(OperationCanceledException), line);
+            Assert.DoesNotContain(new OperationCanceledException().Message, line);
             Assert.DoesNotContain(nameof(TimeoutException), line);
+            Assert.DoesNotContain(new TimeoutException().Message, line);
         }
     }
 
@@ -316,10 +319,39 @@ public sealed class RekeyTests : IDisposable
             await c.ConnectAsync(IPAddress.Loopback, server.Port);
         }
         Assert.True(await WaitAsync(() => server.Accepted == 3));
-        await Task.Delay(200);
         var ended = L.T("core.mp.transport.endpoint_ended");
+        // The counter goes up before the line is written: wait for the line itself.
+        Assert.True(await WaitAsync(() => { lock (log) return log.Any(l => l.StartsWith(ended, StringComparison.Ordinal)); }));
+        await Task.Delay(100);
         lock (log) Assert.Single(log, l => l.StartsWith(ended, StringComparison.Ordinal));
         Assert.Equal(0, server.Rejected);
+    }
+
+    /// <summary>A failure after the handshake (here: picking the service) is a connection that ended, not a failed handshake.</summary>
+    [Fact]
+    public async Task ARouteThatFailsAfterTheHandshakeIsLoggedAsEnded()
+    {
+        var settings = new TunnelSettings(TransportMode.High, false);
+        var room = HostRoom(settings);
+        var guest = GuestRoom(room, room.Table.Issue(_alice.PublicKey, "Alice"));
+        var log = new List<string>();
+        await using var server = new TunnelServer(room.Host, settings, 0, _ => throw new InvalidOperationException("route"),
+            line => { lock (log) log.Add(line); });
+        try
+        {
+            await using var t = await TunnelClient.Wrapped("127.0.0.1", server.Port, guest, settings, TunnelService.Game)(default);
+            await t.ReadAsync(new byte[1]);
+        }
+        catch (Exception e) when (e is IOException or SocketException or CryptographicException or InvalidDataException or EndOfStreamException or OperationCanceledException) { }
+        var ended = L.T("core.mp.transport.endpoint_ended");
+        Assert.True(await WaitAsync(() => { lock (log) return log.Any(l => l.StartsWith(ended, StringComparison.Ordinal)); }));
+        Assert.Equal(1, server.Rejected);
+        Assert.Equal(0, server.Accepted);
+        lock (log)
+        {
+            Assert.Contains(log, l => l.StartsWith(ended, StringComparison.Ordinal) && l.EndsWith(nameof(InvalidOperationException), StringComparison.Ordinal));
+            Assert.DoesNotContain(log, l => l.StartsWith(L.T("core.mp.transport.endpoint_handshake_failed"), StringComparison.Ordinal));
+        }
     }
 
     /// <summary>同一个人重新被批准、换了新钥匙：旧钥匙作废，旧的聊天和封装连接马上断开（不会同时出现两个他）。</summary>

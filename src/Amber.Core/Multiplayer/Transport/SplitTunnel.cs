@@ -34,6 +34,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, TunnelServer.MaxPendingPerCaller);
     private long _slotsFullLogged;
     private long _handshakeFailedLogged;
+    // Its own limit, so frequent ended lines don't hide the failed handshakes.
+    private long _endedLogged;
 
     /// <summary>
     /// Legs still in their handshake at most, across all ports. Past that one still in its handshake is closed to make
@@ -155,7 +157,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         catch (Exception e)
         {
             // Whatever failed, the leg gives its place back.
-            if (e is not (SocketException or ObjectDisposedException or IOException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
+            if (e is not (SocketException or ObjectDisposedException or IOException) && TunnelServer.OncePerMinute(ref _endedLogged))
                 _log?.Invoke(L.T("core.mp.transport.endpoint_ended") + e.GetType().Name);
             _slots.Release(slot);
             Interlocked.Increment(ref _rejected);
@@ -171,6 +173,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         CancellationTokenRegistration revocation = default;
         void HandshakeDone() => _slots.Release(slot);
         var authenticated = false;
+        var handshakeOk = false;
         var served = false;
         try
         {
@@ -184,6 +187,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             HandshakeDone();
             if (accepted is null) return;
             rawOwned = false;
+            handshakeOk = true;
             (secure, var service, var member) = accepted.Value;
             // Only a member with its own key counts as authenticated (its failures are then logged in full).
             authenticated = member is not null;
@@ -235,8 +239,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             joined?.Abort();
             if (!served) Interlocked.Increment(ref _rejected);
             // Once the leg's handshake succeeded, a failure is a connection that ended, not a failed handshake.
-            var what = served || !rawOwned ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
-            if ((e is CryptographicException or PlatformNotSupportedException) && (authenticated || TunnelServer.OncePerMinute(ref _handshakeFailedLogged)))
+            var ended = served || handshakeOk;
+            var what = ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+            if ((e is CryptographicException or PlatformNotSupportedException) && (authenticated || TunnelServer.OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged)))
                 _log?.Invoke(L.T(what) + e.Message);
         }
         catch (Exception e)
@@ -245,8 +250,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             secure?.Abort();
             joined?.Abort();
             if (!served) Interlocked.Increment(ref _rejected);
-            if (authenticated || TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
-                _log?.Invoke(L.T(served || !rawOwned ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+            var ended = served || handshakeOk;
+            if (authenticated || TunnelServer.OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged))
+                _log?.Invoke(L.T(ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
         }
         finally
         {
