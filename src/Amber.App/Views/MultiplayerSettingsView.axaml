@@ -4,15 +4,160 @@
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:c="using:Amber.App.Views.Controls"
              x:Class="Amber.App.Views.MultiplayerSettingsView"
-             x:DataType="vm:MultiplayerViewModel">
-  <!-- Settings › Multiplayer (redesign batch 7): what used to be the lobby's settings tab, minus the networks (Settings ›
-       Network), this computer's identity (Me › My devices) and the checks (the "Connection problems?" drawer).
-       Each control's x:Name is its settings#Field. -->
-  <StackPanel Spacing="14">
-    <!-- Invites and alerts -->
-    <Border x:Name="InvitesCard" Classes="card" Margin="0">
-      <StackPanel Spacing="8">
-        <TextBlock Classes="h2" Text="{l:T multiplayer.settings.invites}" Margin="0" />
+             x:DataType="vm:SettingsViewModel">
+  <!-- Settings › Multiplayer as the multiplayer advanced settings panel (redesign batch 10): every multiplayer setting,
+       in groups that open one at a time. Each group header says what is inside and carries "Customised" when something
+       in it is not the default; [Reset all to defaults] at the bottom asks first. Each control's x:Name is its
+       settings#Field; revealing a field opens its group. Files and calls get their groups with the batches that add them. -->
+  <UserControl.Styles>
+    <Style Selector="Expander.mp-group">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+  </UserControl.Styles>
+  <StackPanel Spacing="8">
+    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.intro}" />
+    <TextBlock x:Name="RoomDefaultsBusyText" Classes="hint" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource WarningText}"
+               Text="{l:T settings.mp.room_defaults_busy}" IsVisible="{Binding !Multiplayer.IsIdle, FallbackValue=False}" />
+
+    <!-- Protection: the level and what it sets, the device check and the emergency disconnect -->
+    <Expander x:Name="MpGroupProtection" Classes="mp-group" IsExpanded="True">
+      <Expander.Header>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="{l:T settings.mp.group.protection}" FontWeight="SemiBold" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.group.protection.summary}" />
+          </StackPanel>
+          <Border x:Name="MpProtectionTag" Grid.Column="1" Classes="tag" VerticalAlignment="Center" IsVisible="{Binding ProtectionCustomized}">
+            <TextBlock Text="{l:T settings.mp.customized}" FontSize="12" />
+          </Border>
+        </Grid>
+      </Expander.Header>
+      <StackPanel>
+        <StackPanel Spacing="8" DataContext="{Binding Multiplayer}" x:DataType="vm:MultiplayerViewModel" IsEnabled="{Binding IsIdle}">
+          <TextBlock Text="{l:T settings.mp.protection.level}" FontWeight="SemiBold" />
+          <ComboBox x:Name="ProtectionLevelBox" ItemsSource="{Binding ProtectionChoices}" SelectedItem="{Binding SelectedProtection}" MinWidth="200">
+            <ComboBox.ItemTemplate>
+              <DataTemplate DataType="vm:OpenChoice">
+                <StackPanel MaxWidth="460">
+                  <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Line}" FontSize="12" TextWrapping="Wrap" Opacity="0.75" />
+                </StackPanel>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+            <ComboBox.SelectionBoxItemTemplate>
+              <DataTemplate DataType="vm:OpenChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+            </ComboBox.SelectionBoxItemTemplate>
+          </ComboBox>
+          <WrapPanel x:Name="ProtectionCustomLine" ItemSpacing="8" LineSpacing="4" IsVisible="{Binding IsProtectionCustom}">
+            <TextBlock Text="{Binding ProtectionCustomText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button x:Name="ProtectionResetButton" Classes="small" Content="{l:T multiplayer.open.protection.reset}" Command="{Binding ResetProtectionCommand}" />
+          </WrapPanel>
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.protection.level_hint}" />
+
+          <!-- What the level sets: the transport and the Minecraft disguise. Changing either makes the level "Customised". -->
+          <WrapPanel ItemSpacing="8" LineSpacing="4" Margin="0,6,0,0">
+            <TextBlock Text="{l:T multiplayer.transport.label}" VerticalAlignment="Center" FontWeight="SemiBold" />
+            <ComboBox x:Name="TransportBox" ItemsSource="{Binding TransportChoices}" SelectedItem="{Binding SelectedTransport}" MinWidth="140">
+              <ComboBox.ItemTemplate>
+                <DataTemplate DataType="vm:TransportChoice">
+                  <StackPanel MaxWidth="420">
+                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Privacy}" FontSize="12" TextWrapping="Wrap" Opacity="0.75" />
+                  </StackPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+              <ComboBox.SelectionBoxItemTemplate>
+                <DataTemplate DataType="vm:TransportChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+              </ComboBox.SelectionBoxItemTemplate>
+            </ComboBox>
+          </WrapPanel>
+          <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding SelectedTransport.Privacy}" />
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding SelectedTransport.Detail}" />
+          <CheckBox x:Name="DisguiseBox" IsChecked="{Binding DisguiseAsMinecraft}" IsEnabled="{Binding CanDisguise}">
+            <TextBlock Text="{l:T multiplayer.transport.disguise}" TextWrapping="Wrap" />
+          </CheckBox>
+          <TextBlock x:Name="DisguiseReason" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.disguise_needs_mode}" IsVisible="{Binding !CanDisguise}" />
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.transport.hint}" />
+        </StackPanel>
+
+        <!-- Emergency disconnect: device check, circuit breaker and the countdown before a restart -->
+        <TextBlock Text="{l:T settings.mp.emergency}" FontWeight="SemiBold" Margin="0,10,0,0" />
+        <TextBlock Classes="hint" FontSize="12" Text="{l:T settings.security.hint}" TextWrapping="Wrap" />
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="10">
+          <TextBlock Text="{l:T settings.security.attest.label}" VerticalAlignment="Center" />
+          <ComboBox x:Name="AttestationBox" Grid.Column="1" ItemsSource="{Binding AttestationOptions}" SelectedIndex="{Binding AttestationIndex}" HorizontalAlignment="Stretch" />
+          <TextBlock Grid.Row="1" Text="{l:T settings.security.breaker.label}" VerticalAlignment="Center" />
+          <CheckBox x:Name="BreakerBox" Grid.Row="1" Grid.Column="1" IsChecked="{Binding SecurityBreaker}" Content="{l:T settings.security.breaker.toggle}" />
+          <TextBlock Grid.Row="2" Text="{l:T settings.security.delay.label}" VerticalAlignment="Top" Margin="0,6,0,0" />
+          <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+            <TextBox x:Name="BreakerDelayBox" Text="{Binding BreakerRestartDelay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding !BreakerSkipDelay}" MaxWidth="120" HorizontalAlignment="Left" />
+            <TextBlock Classes="field-error" Text="{Binding BreakerDelayError}" IsVisible="{Binding HasBreakerDelayError}" />
+          </StackPanel>
+          <CheckBox x:Name="BreakerSkipBox" Grid.Row="3" Grid.Column="1" IsChecked="{Binding BreakerSkipDelay}" Content="{l:T settings.security.skip.toggle}" />
+        </Grid>
+      </StackPanel>
+    </Expander>
+
+    <!-- Connection: relays only, the whole LAN, the multiplayer component -->
+    <Expander x:Name="MpGroupConnection" Classes="mp-group">
+      <Expander.Header>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="{l:T settings.mp.group.connection}" FontWeight="SemiBold" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.group.connection.summary}" />
+          </StackPanel>
+          <Border x:Name="MpConnectionTag" Grid.Column="1" Classes="tag" VerticalAlignment="Center" IsVisible="{Binding ConnectionCustomized}">
+            <TextBlock Text="{l:T settings.mp.customized}" FontSize="12" />
+          </Border>
+        </Grid>
+      </Expander.Header>
+      <StackPanel Spacing="8" DataContext="{Binding Multiplayer}" x:DataType="vm:MultiplayerViewModel">
+        <CheckBox x:Name="DefaultRelayOnlyBox" IsChecked="{Binding DefaultRelayOnly}">
+          <TextBlock Text="{l:T multiplayer.settings.relay_only}" TextWrapping="Wrap" />
+        </CheckBox>
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.settings.relay_only_hint}" />
+        <StackPanel Spacing="4" IsEnabled="{Binding IsIdle}" Margin="0,6,0,0">
+          <CheckBox x:Name="FullLanModeBox" IsChecked="{Binding FullLanMode}" IsEnabled="{Binding CanUseFullLan}">
+            <TextBlock Text="{l:T multiplayer.lan.full_mode}" TextWrapping="Wrap" />
+          </CheckBox>
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.lan.full_mode_hint}" />
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource WarningText}"
+                     Text="{Binding FullLanUnavailableText}" IsVisible="{Binding !CanUseFullLan}" />
+        </StackPanel>
+
+        <!-- The multiplayer component: version, download, import from a file -->
+        <StackPanel x:Name="MultiplayerComponentCard" Spacing="8" Margin="0,10,0,0">
+          <TextBlock Text="{l:T multiplayer.settings.component}" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" />
+          <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
+            <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
+            <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
+          </WrapPanel>
+          <c:ProgressLine x:Name="ComponentLineSettings" IsVisible="{Binding IsDownloading}" Step="{Binding Status}"
+                          Percent="{Binding ComponentWork.Percent}" IsIndeterminate="{Binding ComponentWork.IsIndeterminate}"
+                          BytesPerSecond="{Binding ComponentWork.BytesPerSecond}" Remaining="{Binding ComponentWork.Remaining}"
+                          CancelCommand="{Binding CancelDownloadCommand}" />
+          <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding LicenseText}" />
+        </StackPanel>
+      </StackPanel>
+    </Expander>
+
+    <!-- Invites and knocks -->
+    <Expander x:Name="MpGroupInvites" Classes="mp-group">
+      <Expander.Header>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="{l:T settings.mp.group.invites}" FontWeight="SemiBold" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.group.invites.summary}" />
+          </StackPanel>
+          <Border x:Name="MpInvitesTag" Grid.Column="1" Classes="tag" VerticalAlignment="Center" IsVisible="{Binding InvitesCustomized}">
+            <TextBlock Text="{l:T settings.mp.customized}" FontSize="12" />
+          </Border>
+        </Grid>
+      </Expander.Header>
+      <StackPanel Spacing="8" DataContext="{Binding Multiplayer}" x:DataType="vm:MultiplayerViewModel">
         <CheckBox x:Name="InviteAutoCopyBox" IsChecked="{Binding AutoCopyInvite}">
           <TextBlock Text="{l:T multiplayer.lobby.auto_copy}" TextWrapping="Wrap" />
         </CheckBox>
@@ -47,84 +192,98 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
       </StackPanel>
-    </Border>
+    </Expander>
 
-    <!-- What a new room starts with: "relays only", the full LAN, what members may route through me, and the
-         transport. The lobby's four choices pick from these; a room that is open keeps what it opened with. -->
-    <Border x:Name="RoomDefaultsCard" Classes="card" Margin="0">
-      <StackPanel Spacing="8">
-        <TextBlock Classes="h2" Text="{l:T settings.mp.room_defaults}" Margin="0" />
-        <TextBlock x:Name="RoomDefaultsBusyText" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.room_defaults_busy}" IsVisible="{Binding !IsIdle}" />
-        <CheckBox x:Name="DefaultRelayOnlyBox" IsChecked="{Binding DefaultRelayOnly}">
-          <TextBlock Text="{l:T multiplayer.settings.relay_only}" TextWrapping="Wrap" />
-        </CheckBox>
-        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.settings.relay_only_hint}" />
-        <StackPanel Spacing="14" IsEnabled="{Binding IsIdle}">
-          <StackPanel Spacing="4">
-            <CheckBox x:Name="FullLanModeBox" Content="{l:T multiplayer.lan.full_mode}" IsChecked="{Binding FullLanMode}" IsEnabled="{Binding CanUseFullLan}" />
-            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap"
-                       Text="{l:T multiplayer.lan.full_mode_hint}" />
-            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource WarningText}"
-                       Text="{Binding FullLanUnavailableText}" IsVisible="{Binding !CanUseFullLan}" />
-            <CheckBox Content="{l:T multiplayer.exit.allow}" IsChecked="{Binding AllowExitNode}" IsEnabled="{Binding FullLanMode}" IsVisible="{Binding ShowNetworkExit}" Margin="0,6,0,0" />
-            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding AllowExitNode}" Foreground="{DynamicResource WarningText}"
-                       Text="{l:T multiplayer.exit.warning}" />
-            <CheckBox x:Name="AllowGameProxyBox" Content="{l:T multiplayer.proxy.allow}" IsChecked="{Binding AllowGameProxy}" Margin="0,6,0,0" />
-            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding AllowGameProxy}" Foreground="{DynamicResource WarningText}"
-                       Text="{l:T multiplayer.proxy.allow_warning}" />
+    <!-- What people can do in my rooms: mod sync, forwarding games through me, going online through me, hotspot -->
+    <Expander x:Name="MpGroupRoom" Classes="mp-group">
+      <Expander.Header>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="{l:T settings.mp.group.room}" FontWeight="SemiBold" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.group.room.summary}" />
           </StackPanel>
-
-          <!-- 数据封装（开房间时选；加入时按房间码） -->
-          <StackPanel Spacing="4">
-            <!-- 窄窗口、长译文时自动换行。 -->
-            <WrapPanel ItemSpacing="8" LineSpacing="4">
-              <TextBlock Text="{l:T multiplayer.transport.label}" VerticalAlignment="Center" FontWeight="SemiBold" />
-              <ComboBox x:Name="TransportBox" ItemsSource="{Binding TransportChoices}" SelectedItem="{Binding SelectedTransport}" MinWidth="140">
-                <!-- 下拉里每种模式带一句说明；选中后框里只显示名字 -->
-                <ComboBox.ItemTemplate>
-                  <DataTemplate DataType="vm:TransportChoice">
-                    <StackPanel MaxWidth="420">
-                      <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
-                      <TextBlock Text="{Binding Privacy}" FontSize="12" TextWrapping="Wrap" Opacity="0.75" />
-                    </StackPanel>
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-                <ComboBox.SelectionBoxItemTemplate>
-                  <DataTemplate DataType="vm:TransportChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
-                </ComboBox.SelectionBoxItemTemplate>
-              </ComboBox>
-              <CheckBox Content="{l:T multiplayer.transport.disguise}" IsChecked="{Binding DisguiseAsMinecraft}" IsEnabled="{Binding CanDisguise}" />
-            </WrapPanel>
-            <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding SelectedTransport.Privacy}" />
-            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding SelectedTransport.Detail}" />
-            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap"
-                       Text="{l:T multiplayer.transport.hint}" />
-          </StackPanel>
-        </StackPanel>
-      </StackPanel>
-    </Border>
-
-    <!-- The multiplayer component: version, download, import from a file -->
-    <Border x:Name="MultiplayerComponentCard" Classes="card" Margin="0">
-      <StackPanel Spacing="8">
-        <TextBlock Classes="h2" Text="{l:T multiplayer.settings.component}" Margin="0" />
-        <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
-          <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-          <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
-            <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
-            <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
-          </WrapPanel>
+          <Border x:Name="MpRoomTag" Grid.Column="1" Classes="tag" VerticalAlignment="Center" IsVisible="{Binding RoomCustomized}">
+            <TextBlock Text="{l:T settings.mp.customized}" FontSize="12" />
+          </Border>
         </Grid>
-        <c:ProgressLine x:Name="ComponentLineSettings" IsVisible="{Binding IsDownloading}" Step="{Binding Status}"
-                        Percent="{Binding ComponentWork.Percent}" IsIndeterminate="{Binding ComponentWork.IsIndeterminate}"
-                        BytesPerSecond="{Binding ComponentWork.BytesPerSecond}" Remaining="{Binding ComponentWork.Remaining}"
-                        CancelCommand="{Binding CancelDownloadCommand}" />
-        <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
-        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding LicenseText}" />
+      </Expander.Header>
+      <StackPanel Spacing="8" DataContext="{Binding Multiplayer}" x:DataType="vm:MultiplayerViewModel">
+        <CheckBox x:Name="ModSyncDefaultBox" IsChecked="{Binding AllowModSync}">
+          <TextBlock Text="{l:T multiplayer.room.mod_sync_allow}" TextWrapping="Wrap" />
+        </CheckBox>
+        <!-- Routing through me is fixed for a room once it is open; "give TA" in a member's card turns it on per person. -->
+        <StackPanel Spacing="4" IsEnabled="{Binding IsIdle}" IsVisible="{Binding ShowNetworkExit}" Margin="0,6,0,0">
+          <CheckBox x:Name="AllowGameProxyBox" IsChecked="{Binding AllowGameProxy}">
+            <TextBlock Text="{l:T multiplayer.proxy.allow}" TextWrapping="Wrap" />
+          </CheckBox>
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding AllowGameProxy}" Foreground="{DynamicResource WarningText}"
+                     Text="{l:T multiplayer.proxy.allow_warning}" />
+          <CheckBox x:Name="AllowExitNodeBox" IsChecked="{Binding AllowExitNode}" IsEnabled="{Binding FullLanMode}" Margin="0,6,0,0">
+            <TextBlock Text="{l:T multiplayer.exit.allow}" TextWrapping="Wrap" />
+          </CheckBox>
+          <TextBlock x:Name="AllowExitNodeReason" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.exit_needs_lan}" IsVisible="{Binding !FullLanMode}" />
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding AllowExitNode}" Foreground="{DynamicResource WarningText}"
+                     Text="{l:T multiplayer.exit.warning}" />
+        </StackPanel>
+        <!-- 手机通过当前网络出口上网。共享状态由提权守护确认。 -->
+        <c:HotspotSharingPanel DataContext="{Binding Hotspot}" />
       </StackPanel>
-    </Border>
+    </Expander>
 
-    <!-- 手机通过当前网络出口上网。共享状态由提权守护确认。 -->
-    <c:HotspotSharingPanel DataContext="{Binding Hotspot}" />
+    <!-- Networks and relays live in Settings › Network; this group points there. -->
+    <Expander x:Name="MpGroupNetwork" Classes="mp-group">
+      <Expander.Header>
+        <StackPanel Spacing="2">
+          <TextBlock Text="{l:T settings.mp.group.network}" FontWeight="SemiBold" />
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.group.network.summary}" />
+        </StackPanel>
+      </Expander.Header>
+      <StackPanel Spacing="8">
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.network.hint}" />
+        <WrapPanel ItemSpacing="6" LineSpacing="6">
+          <Button x:Name="MpNetworksLink" Classes="ghost" Content="{l:T settings.mp.network.manage}" Command="{Binding RevealNetworkFieldCommand}" CommandParameter="NetworksCard"
+                  IsVisible="{Binding Multiplayer.ShowPublicNetworks, FallbackValue=False}" />
+          <Button x:Name="MpRelaysLink" Classes="ghost" Content="{l:T settings.mp.network.relays}" Command="{Binding RevealNetworkFieldCommand}" CommandParameter="RelayGroup" />
+          <Button x:Name="MpStunLink" Classes="ghost" Content="{l:T settings.mp.network.stun}" Command="{Binding RevealNetworkFieldCommand}" CommandParameter="Stun" />
+          <Button x:Name="MpVolunteerLink" Classes="ghost" Content="{l:T settings.mp.network.volunteer}" Command="{Binding RevealNetworkFieldCommand}" CommandParameter="Volunteer"
+                  IsVisible="{Binding Multiplayer.VolunteersAllowed, FallbackValue=False}" />
+        </WrapPanel>
+      </StackPanel>
+    </Expander>
+
+    <!-- Troubleshooting: the "Connection problems?" drawer holds the check, the full test and the report -->
+    <Expander x:Name="MpGroupTroubleshoot" Classes="mp-group">
+      <Expander.Header>
+        <StackPanel Spacing="2">
+          <TextBlock Text="{l:T settings.mp.group.troubleshoot}" FontWeight="SemiBold" />
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.group.troubleshoot.summary}" />
+        </StackPanel>
+      </Expander.Header>
+      <StackPanel Spacing="8">
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.troubleshoot.hint}" />
+        <Button x:Name="Troubleshoot" Content="{l:T multiplayer.room.problems}" Command="{Binding OpenConnectionProblemsCommand}" HorizontalAlignment="Left" />
+      </StackPanel>
+    </Expander>
+
+    <!-- Reset all: asks first (focus on [Cancel]); networks and relays stay. -->
+    <StackPanel Spacing="6" Margin="0,6,0,0">
+      <WrapPanel ItemSpacing="8" LineSpacing="4">
+        <Button x:Name="MultiplayerReset" Content="{l:T settings.mp.reset_all}" Command="{Binding AskAdvancedResetCommand}" IsEnabled="{Binding AnyAdvancedCustomized}"
+                IsVisible="{Binding !ConfirmingAdvancedReset}" />
+        <TextBlock x:Name="MultiplayerAllDefault" Classes="hint" FontSize="12" VerticalAlignment="Center" Text="{l:T settings.mp.all_default}"
+                   IsVisible="{Binding !AnyAdvancedCustomized}" />
+      </WrapPanel>
+      <Border x:Name="MultiplayerResetConfirm" Classes="card" Margin="0" IsVisible="{Binding ConfirmingAdvancedReset}">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{l:T settings.mp.reset_confirm}" TextWrapping="Wrap" />
+          <WrapPanel ItemSpacing="8" LineSpacing="6">
+            <Button x:Name="MultiplayerResetDo" Content="{l:T settings.mp.reset_do}" Command="{Binding ResetAdvancedCommand}" />
+            <Button x:Name="MultiplayerResetCancel" Content="{l:T common.cancel}" Command="{Binding CancelAdvancedResetCommand}" />
+          </WrapPanel>
+        </StackPanel>
+      </Border>
+      <TextBlock x:Name="MultiplayerResetStatus" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding AdvancedResetStatus}"
+                 IsVisible="{Binding !!AdvancedResetStatus.Length}" />
+    </StackPanel>
   </StackPanel>
 </UserControl>

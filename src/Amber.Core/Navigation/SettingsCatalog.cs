@@ -88,25 +88,31 @@ public static class SettingsCatalog
         new("ChildMode", Privacy, "settings.child.title", "settings.child.hint"),
         new("DataFolder", Privacy, "settings.privacy.data_folder"),
 
-        // The cards that used to be the lobby's settings tab (redesign batch 7).
-        new("InviteAutoCopy", Multiplayer, "multiplayer.lobby.auto_copy", "multiplayer.clipboard.autoclear_hint"),
-        new("DefaultKnockWait", Multiplayer, "multiplayer.settings.knock_wait"),
-        new("RequestPopup", Multiplayer, "multiplayer.settings.request_popup"),
-        new("DefaultRelayOnly", Multiplayer, "multiplayer.settings.relay_only", "multiplayer.settings.relay_only_hint"),
-        new("FullLanMode", Multiplayer, "multiplayer.lan.full_mode", "multiplayer.lan.full_mode_hint"),
-        new("AllowGameProxy", Multiplayer, "multiplayer.proxy.allow"),
+        // The multiplayer advanced settings panel (redesign batch 10), group by group.
+        new("ProtectionLevel", Multiplayer, "settings.mp.protection.level", "settings.mp.protection.level_hint"),
         new("Transport", Multiplayer, "multiplayer.transport.label", "multiplayer.transport.hint"),
-        new("MultiplayerComponentCard", Multiplayer, "multiplayer.settings.component", "multiplayer.component.import"),
-        // Emergency disconnect: the device check and the circuit breaker (moved from Privacy).
+        new("Disguise", Multiplayer, "multiplayer.transport.disguise"),
         new("Attestation", Multiplayer, "settings.security.attest.label", "settings.security.hint"),
         new("Breaker", Multiplayer, "settings.security.breaker.label", "settings.security.breaker.toggle"),
         new("BreakerDelay", Multiplayer, "settings.security.delay.label"),
         new("BreakerSkip", Multiplayer, "settings.security.skip.toggle"),
+        new("DefaultRelayOnly", Multiplayer, "multiplayer.settings.relay_only", "multiplayer.settings.relay_only_hint"),
+        new("FullLanMode", Multiplayer, "multiplayer.lan.full_mode", "multiplayer.lan.full_mode_hint"),
+        new("MultiplayerComponentCard", Multiplayer, "multiplayer.settings.component", "multiplayer.component.import"),
+        new("InviteAutoCopy", Multiplayer, "multiplayer.lobby.auto_copy", "multiplayer.clipboard.autoclear_hint"),
+        new("DefaultKnockWait", Multiplayer, "multiplayer.settings.knock_wait"),
+        new("RequestPopup", Multiplayer, "multiplayer.settings.request_popup"),
+        new("ModSyncDefault", Multiplayer, "multiplayer.room.mod_sync_allow", "multiplayer.room.mod_sync"),
+        new("AllowGameProxy", Multiplayer, "multiplayer.proxy.allow"),
+        new("AllowExitNode", Multiplayer, "multiplayer.exit.allow", "multiplayer.exit.warning"),
+        new("Troubleshoot", Multiplayer, "multiplayer.room.problems", "settings.mp.troubleshoot.hint"),
+        new("MultiplayerReset", Multiplayer, "settings.mp.reset_all", "settings.mp.reset_confirm"),
 
         new("NetworksCard", Network, "multiplayer.settings.public", "multiplayer.network.hint"),
         new("PublicNodes", Network, "multiplayer.public.nodes_title", "multiplayer.public.nodes_hint"),
         new("RelayGroup", Network, "settings.network.relays", "multiplayer.nodes.hint"),
         new("Stun", Network, "multiplayer.direct.stun_heading"),
+        new("Volunteer", Network, "multiplayer.volunteer.title", "multiplayer.volunteer.enable"),
 
         new("ThemeDev", Experimental, "settings.themedev.label", "settings.themedev.hint"),
 

@@ -450,13 +450,17 @@ internal sealed partial class SelfTest
         await ShotAsync("房间-1440-en");
         L.SetLanguage("zh-Hans");
 
-        // Settings › Multiplayer: the default wait for new rooms, and the room-defaults card says a room is open.
-        main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.MultiplayerSettings);
-        await Task.Delay(300);
+        // Settings › Multiplayer: the default wait for new rooms, and the panel says a room is open. The panel opens one
+        // group at a time, so each check reveals its field (which opens the group).
+        main.Shell.Navigate("settings#DefaultKnockWait");
+        await Task.Delay(400);
         T? Anywhere<T>(string name) where T : Control => window.GetVisualDescendants().OfType<T>().FirstOrDefault(c => c.Name == name);
         Check("设置 › 联机：新房间的默认等待时长", Anywhere<ComboBox>("DefaultKnockWaitBox")?.IsEffectivelyVisible == true && vm.SelectedDefaultKnockWait.Wait == KnockWait.TenMinutes);
-        Check("设置 › 联机：能把“只走中转”设成默认；没有 30 天邀请时不单独占一块", Anywhere<CheckBox>("DefaultRelayOnlyBox") is { IsEffectivelyVisible: true, IsChecked: false }
-            && !vm.DefaultRelayOnly && Anywhere<TextBlock>("LongInviteTitle")?.IsVisible == false && Anywhere<Button>("CreateLongInviteButton") is null);
+        Check("设置 › 联机：没有 30 天邀请时不单独占一块", Anywhere<TextBlock>("LongInviteTitle")?.IsVisible == false && Anywhere<Button>("CreateLongInviteButton") is null);
+        main.Shell.Navigate("settings#DefaultRelayOnly");
+        await Task.Delay(400);
+        Check("设置 › 联机：能把“只走中转”设成默认", Anywhere<CheckBox>("DefaultRelayOnlyBox") is { IsEffectivelyVisible: true, IsChecked: false }
+            && !vm.DefaultRelayOnly);
         Check("设置 › 联机：在房间里时写明改动从下一个房间生效，完整局域网等不能改", Anywhere<TextBlock>("RoomDefaultsBusyText")?.IsEffectivelyVisible == true
             && Anywhere<CheckBox>("FullLanModeBox")?.IsEffectivelyEnabled == false && Anywhere<CheckBox>("DefaultRelayOnlyBox")?.IsEffectivelyEnabled == true);
         await ShotAsync("设置-联机-在房间里");

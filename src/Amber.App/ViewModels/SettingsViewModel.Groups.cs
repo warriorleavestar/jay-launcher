@@ -145,7 +145,17 @@ public sealed partial class SettingsViewModel
     public Action<string>? Navigate { get; set; }
 
     /// <summary>The multiplayer page's view model: Settings › Multiplayer and Settings › Network bind to it.</summary>
-    public MultiplayerViewModel? Multiplayer { get; set; }
+    public MultiplayerViewModel? Multiplayer
+    {
+        get;
+        set
+        {
+            if (field is { } old) old.PropertyChanged -= OnMultiplayerChanged;
+            field = value;
+            if (value is not null) value.PropertyChanged += OnMultiplayerChanged;
+            RefreshAdvanced();
+        }
+    }
 
     [RelayCommand]
     private void OpenHit(SettingsSearchHit? hit)

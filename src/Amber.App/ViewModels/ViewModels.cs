@@ -1104,10 +1104,26 @@ public sealed partial class SettingsViewModel : PageViewModel
         Persist();
     }
     partial void OnNoTraceChanged(bool value) => Persist();
-    partial void OnAttestationIndexChanged(int value) => Persist();
-    partial void OnSecurityBreakerChanged(bool value) => Persist();
-    partial void OnBreakerRestartDelayChanged(string value) => Persist();
-    partial void OnBreakerSkipDelayChanged(bool value) => Persist();
+    partial void OnAttestationIndexChanged(int value)
+    {
+        Persist();
+        RefreshAdvanced();
+    }
+    partial void OnSecurityBreakerChanged(bool value)
+    {
+        Persist();
+        RefreshAdvanced();
+    }
+    partial void OnBreakerRestartDelayChanged(string value)
+    {
+        Persist();
+        RefreshAdvanced();
+    }
+    partial void OnBreakerSkipDelayChanged(bool value)
+    {
+        Persist();
+        RefreshAdvanced();
+    }
     partial void OnExperimentalBakeChanged(bool value)
     {
         Persist();
