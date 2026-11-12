@@ -186,7 +186,7 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
 
 ## layout/shell.json：窗口外壳
 
-侧栏上只有三个一级入口：游戏库、发现、联机。设置、账号和隐私行在侧栏底部，主题藏不掉。
+侧栏上有四个一级入口：游戏库、发现、联机、朋友（`library` `discover` `multiplayer` `people`）。设置、头像（“我”页）和隐私行在侧栏底部，主题藏不掉。
 
 ```jsonc
 {
@@ -197,17 +197,19 @@ Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥�
   "showBrand": true,         // 显示 Jay 的标志
   "showShelf": true,         // 侧栏的“常玩”（后续版本）
   "contentMaxWidth": 1280,   // 页面内容最宽多少（大屏上居中），640–4000
-  "pages": ["library", "multiplayer", "discover"],  // 入口顺序；没写到的按原顺序接在后面
-  "hidden": ["discover"]     // 只能藏 discover、multiplayer（入口还在，从别的地方还能跳过去）
+  "pages": ["library", "multiplayer", "people", "discover"],  // 入口顺序；没写到的按原顺序接在后面
+  "hidden": ["discover"]     // 只能藏 discover、multiplayer、people（入口还在，从别的地方还能跳过去）
 }
 ```
+
+`people`（朋友）是后来加的入口：没写它的主题包，Jay 把它排在 `multiplayer` 后面，不管 `multiplayer` 被排到了哪。
 
 用户在 设置 › 侧栏 里选了“总是展开”或“总是只显示图标”时，以用户的为准。“总是展开”只在展开后内容区还有 640 宽时生效。
 
 旧版（format 1）的写法自动升级：
 - `navWidth` 小于 120 变成 `navStyle: "rail"`、`railWidth` 取 64–96；其余变成 `sidebarWidth`（夹到 200–320）。
 - `navStyle`：`full` → `expanded`，`icons` → `rail`。
-- `pages` / `hidden` 里的旧页面名：`home` `instances` `log` → `library`；`downloads` `content` → `discover`；`multiplayer` 不变；`accounts` `tools` `settings` 不再是导航项，忽略。`hidden` 里一个入口下的旧页面全藏了才藏这个入口（只藏 `content` 不会把整个发现藏掉）。`home`、`settings`、`library` 不能隐藏。
+- `pages` / `hidden` 里的旧页面名：`home` `instances` `log` → `library`；`downloads` `content` → `discover`；`multiplayer` 不变；`accounts`（现在是头像后面的“我”页）`tools` `settings` 不是导航项，忽略。`hidden` 里一个入口下的旧页面全藏了才藏这个入口（只藏 `content` 不会把整个发现藏掉）。`home`、`settings`、`library` 不能隐藏。
 
 ## layout/pages/*.json：页面布局
 
@@ -217,7 +219,8 @@ Pages and their regions (every region except a title is required):
 
 | 页面文件 | 区块 |
 |---|---|
-| `accounts.json` | `accounts.title` `accounts.list` `accounts.add` `accounts.status` |
+| `me.json` | `me.title` `me.accounts` (game accounts) `me.add` `me.jay` (Jay account) `me.code` (my friend code) `me.devices` `me.appearance` (light/dark, language) `me.status` |
+| `people.json` | `people.title` `people.list` (the friends) `people.detail` (the selected friend, or the empty state) `people.status` (which network delivers to friends) |
 | `instances.json` | `instances.header` (the hero) `instances.lastrun` `instances.details` `instances.status` |
 | `downloads.json` | `downloads.title` `downloads.search` `downloads.filters` `downloads.body` `downloads.status` |
 | `content.json` | `content.header` `content.filters` `content.body` `content.status` |
@@ -227,6 +230,12 @@ Pages and their regions (every region except a title is required):
 gone (starting a game happens on each instance, the toolbox moved into Settings, the live log is a dock: Ctrl+`). A pack
 that still carries these files installs as before and their regions (`home.*`, `tools.*`, `log.*`) still validate; Jay
 just has no page to apply them to.
+
+The accounts page grew into the "Me" page. `accounts.json` still works and lays out that page, and the old region names
+map to the new ones: `accounts.title` → `me.title`, `accounts.list` → `me.accounts`, `accounts.jay` → `me.jay`,
+`accounts.add` → `me.add`, `accounts.status` → `me.status`. The regions an old pack does not mention (`me.code`,
+`me.devices`, `me.appearance`) are added at the end like any other missing required region. When a pack carries both
+`accounts.json` and `me.json`, `me.json` wins.
 
 设置页的排版固定，不能改（“恢复默认主题”在那里）。
 

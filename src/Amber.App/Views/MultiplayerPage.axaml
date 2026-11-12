@@ -1078,7 +1078,7 @@
           <c:HotspotSharingPanel DataContext="{Binding Hotspot}" />
 
           <!-- Safety code and friends -->
-          <Border Classes="card" Margin="0">
+          <Border x:Name="IdentityCard" Classes="card" Margin="0">
             <StackPanel Spacing="8">
               <TextBlock Classes="h2" Text="{l:T multiplayer.settings.identity}" Margin="0" />
               <SelectableTextBlock Text="{Binding MyFingerprint}" TextWrapping="Wrap" FontWeight="SemiBold" />
@@ -1306,7 +1306,7 @@
           </Border>
 
           <!-- Public networks -->
-          <Border Classes="card" Margin="0" IsVisible="{Binding ShowPublicNetworks}">
+          <Border x:Name="NetworksCard" Classes="card" Margin="0" IsVisible="{Binding ShowPublicNetworks}">
             <StackPanel Spacing="8">
               <TextBlock Classes="h2" Text="{l:T multiplayer.settings.public}" Margin="0" />
               <Expander Header="{l:T multiplayer.network.title}" HorizontalAlignment="Stretch">

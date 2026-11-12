@@ -42,21 +42,22 @@
   </UserControl.Styles>
 
   <Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="*,Auto" Container.Name="AccountsPageRoot" Container.Sizing="Width">
-    <TextBlock svc:ThemeRegion.Name="accounts.title" Classes="h1" Text="{l:T accounts.title}" Grid.ColumnSpan="2" />
+    <TextBlock svc:ThemeRegion.Name="me.title" Classes="h1" Text="{l:T me.title}" Grid.ColumnSpan="2" />
 
     <!-- Left column scrolls as a whole: the MC account list, then the Jay account card (its create / restore steps can be tall). -->
     <ScrollViewer x:Name="AccountsLeftScroll" Grid.Row="1" Margin="0,0,0,14">
     <StackPanel Spacing="14">
-    <Border svc:ThemeRegion.Name="accounts.list" Classes="card" Padding="8" Margin="0">
+    <Border svc:ThemeRegion.Name="me.accounts" x:Name="GameAccountsCard" Classes="card" Padding="8" Margin="0">
       <!-- 皮肤预览放在列表左边一块固定大小的区域里，不再挤在下面留一大块空白；页面窄时收起，给列表让位置 -->
-      <Grid ColumnDefinitions="Auto,*">
-        <Panel x:Name="SkinPreviewHost">
+      <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,*">
+        <TextBlock Classes="h2" Text="{l:T me.accounts.title}" Grid.ColumnSpan="2" Margin="8,4,8,6" />
+        <Panel x:Name="SkinPreviewHost" Grid.Row="1">
           <Border Width="104" Margin="4,4,10,4" VerticalAlignment="Top" IsVisible="{Binding Current.Body, Converter={x:Static ObjectConverters.IsNotNull}}">
             <Image Source="{Binding Current.Body}" Width="96" Height="192" Stretch="Uniform"
                    RenderOptions.BitmapInterpolationMode="None" ToolTip.Tip="{l:T accounts.skin.tooltip}" />
           </Border>
         </Panel>
-        <ListBox Grid.Column="1" ItemsSource="{Binding Accounts}" Background="Transparent">
+        <ListBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Accounts}" Background="Transparent">
           <ListBox.ItemTemplate>
             <DataTemplate DataType="vm:AccountItem">
               <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="4" Container.Name="AccountItem" Container.Sizing="Width">
@@ -93,7 +94,7 @@
 
 
     <!-- Jay account (recovery-phrase identity): list, create (words → check → save), restore. Words are never copied or saved. -->
-    <Border svc:ThemeRegion.Name="accounts.jay" x:Name="JayCard" Classes="card" Margin="0">
+    <Border svc:ThemeRegion.Name="me.jay" x:Name="JayCard" Classes="card" Margin="0">
         <StackPanel Spacing="10">
           <TextBlock Classes="h2" Text="{l:T accounts.jay.title}" Margin="0" />
 
@@ -210,10 +211,81 @@
           </Border>
         </StackPanel>
     </Border>
+
+    <!-- My friend code: what a friend needs to ask to add me. Adding and managing friends is on the Friends page. -->
+    <Border svc:ThemeRegion.Name="me.code" x:Name="FriendCodeCard" Classes="card" Margin="0">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h2" Text="{l:T multiplayer.contacts.my_code}" Margin="0" />
+        <StackPanel Spacing="8" IsVisible="{Binding ShowFriendCode}">
+          <Grid ColumnDefinitions="*,Auto">
+            <SelectableTextBlock x:Name="MyFriendCodeText" Text="{Binding MyFriendCode}" FontFamily="Consolas,Menlo,monospace" FontSize="12"
+                                 TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button x:Name="CopyFriendCodeButton" Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="{l:T common.copy}"
+                    Command="{Binding CopyFriendCodeCommand}" VerticalAlignment="Center" />
+          </Grid>
+          <TextBlock Classes="hint" FontSize="12" Text="{l:T me.code.hint}" TextWrapping="Wrap" />
+          <Button x:Name="OpenPeopleButton" Classes="secondary small" Content="{l:T me.code.people}" Command="{Binding OpenPeopleCommand}" HorizontalAlignment="Left" />
+        </StackPanel>
+        <TextBlock x:Name="FriendCodeChildNote" Classes="hint" Text="{l:T me.code.child}" IsVisible="{Binding !ShowFriendCode}" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
+    <!-- My devices: this computer's identity. Computers under the same Jay account count as one person. -->
+    <Border svc:ThemeRegion.Name="me.devices" x:Name="DevicesCard" Classes="card" Margin="0">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h2" Text="{l:T me.devices.title}" Margin="0" />
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+          <Border Classes="led online" VerticalAlignment="Top" Margin="0,6,0,0" />
+          <StackPanel Grid.Column="1" Spacing="1">
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap">
+              <Run Text="{l:T me.devices.this}" /><Run Text=" · " /><Run Text="{Binding ThisDeviceName, Mode=OneWay}" />
+            </TextBlock>
+            <SelectableTextBlock x:Name="ThisDeviceCodeText" Classes="hint" FontSize="12" Text="{Binding ThisDeviceCode}" TextWrapping="Wrap" />
+          </StackPanel>
+        </Grid>
+        <TextBlock x:Name="DevicesNote" Classes="hint" FontSize="12" Text="{Binding DevicesNote}" TextWrapping="Wrap" />
+        <WrapPanel ItemSpacing="8" LineSpacing="6">
+          <Button x:Name="DevicesCreateJay" Classes="small" Content="{l:T me.devices.create_jay}" Command="{Binding StartCreateJayCommand}"
+                  IsVisible="{Binding ShowJayIntro}" />
+          <Button x:Name="DeviceSettingsButton" Classes="secondary small" Content="{l:T me.devices.manage}" Command="{Binding OpenDeviceSettingsCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- Appearance: light/dark and the language right here; theme packs are in the settings. -->
+    <Border svc:ThemeRegion.Name="me.appearance" x:Name="AppearanceCard" Classes="card" Margin="0">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h2" Text="{l:T settings.group.appearance}" Margin="0" />
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" DataContext="{Binding Appearance}" x:DataType="vm:QuickAppearanceViewModel">
+          <TextBlock Text="{l:T me.appearance.mode}" VerticalAlignment="Center" />
+          <UniformGrid x:Name="MeTheme" Grid.Column="1" Columns="3" Classes="segmented" MaxWidth="360" HorizontalAlignment="Left">
+            <RadioButton x:Name="MeThemeSystem" GroupName="MeTheme" IsChecked="{Binding IsSystemTheme}" ToolTip.Tip="{l:T settings.theme.system}">
+              <TextBlock Text="{l:T settings.theme.system}" TextTrimming="CharacterEllipsis" />
+            </RadioButton>
+            <RadioButton x:Name="MeThemeLight" GroupName="MeTheme" IsChecked="{Binding IsLightTheme}" ToolTip.Tip="{l:T settings.theme.light}">
+              <TextBlock Text="{l:T settings.theme.light}" TextTrimming="CharacterEllipsis" />
+            </RadioButton>
+            <RadioButton x:Name="MeThemeDark" GroupName="MeTheme" IsChecked="{Binding IsDarkTheme}" ToolTip.Tip="{l:T settings.theme.dark}">
+              <TextBlock Text="{l:T settings.theme.dark}" TextTrimming="CharacterEllipsis" />
+            </RadioButton>
+          </UniformGrid>
+        </Grid>
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" DataContext="{Binding Appearance}" x:DataType="vm:QuickAppearanceViewModel">
+          <TextBlock Text="{l:T me.appearance.language}" VerticalAlignment="Center" />
+          <ComboBox x:Name="MeLanguage" Grid.Column="1" MinWidth="180" HorizontalAlignment="Left"
+                    ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding LanguageIndex}"
+                    AutomationProperties.Name="{l:T me.appearance.language}" />
+        </Grid>
+        <WrapPanel ItemSpacing="8" LineSpacing="6">
+          <Button x:Name="MeThemesButton" Classes="secondary small" Content="{l:T me.appearance.themes}" Command="{Binding OpenThemesCommand}" />
+          <Button x:Name="MeAboutButton" Classes="ghost small" Content="{l:T about.title}" Command="{Binding OpenAboutCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
     </StackPanel>
     </ScrollViewer>
 
-    <Border svc:ThemeRegion.Name="accounts.add" x:Name="AddCard" Grid.Row="1" Grid.Column="1" Classes="card" Margin="14,0,0,14">
+    <Border svc:ThemeRegion.Name="me.add" x:Name="AddCard" Grid.Row="1" Grid.Column="1" Classes="card" Margin="14,0,0,14">
       <ScrollViewer>
         <StackPanel Spacing="10">
           <TextBlock Classes="h2" Text="{l:T accounts.add.title}" Margin="0" />
@@ -314,7 +386,7 @@
       </ScrollViewer>
     </Border>
 
-    <Border svc:ThemeRegion.Name="accounts.status" Grid.Row="2" Grid.ColumnSpan="2" Classes="card" Margin="0">
+    <Border svc:ThemeRegion.Name="me.status" Grid.Row="2" Grid.ColumnSpan="2" Classes="card" Margin="0">
       <Border.IsVisible>
         <MultiBinding Converter="{x:Static BoolConverters.Or}">
           <Binding Path="IsShowing" ElementName="PageStatus" />

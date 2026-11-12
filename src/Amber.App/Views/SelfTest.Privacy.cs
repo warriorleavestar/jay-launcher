@@ -102,7 +102,7 @@ internal sealed partial class SelfTest
             L.SetLanguage("zh-Hans");
 
             // Every page: no request outside the network list.
-            foreach (var route in (string[])["library", "library/new", "discover", "play", "accounts", "settings", "about"])
+            foreach (var route in (string[])["library", "library/new", "discover", "play", "people", "me", "settings", "about"])
             {
                 main.Shell.Navigate(route);
                 await Task.Delay(700);

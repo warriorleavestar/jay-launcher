@@ -51,7 +51,7 @@ public partial class MainWindow
                 // Knocks and incoming files while Jay is in the background: a small topmost window (on by default).
                 Popups = new RequestPopups(this, main.Service.Requests, () => main.Service.Settings.MultiplayerRequestPopup);
                 UpdateMovedNotice();
-                main.Shell.AccountMenu.Done += () => AccountMenuFlyout.Hide();
+                main.Shell.Network.Done += () => NetworkFlyout.Hide();
             }
             ApplyShell();
         };
@@ -68,18 +68,7 @@ public partial class MainWindow
             _movedNoticeTooShort = e.NewSize.Height < MovedNoticeHiddenBelow;
             UpdateMovedNotice();
         };
-        AccountMenuFlyout.Opening += (_, _) =>
-        {
-            // Open away from the navigation bar, wherever a theme pack put it.
-            AccountMenuFlyout.Placement = ShellNav switch
-            {
-                "right" => PlacementMode.LeftEdgeAlignedBottom,
-                "top" => PlacementMode.BottomEdgeAlignedRight,
-                "bottom" => PlacementMode.TopEdgeAlignedRight,
-                _ => PlacementMode.RightEdgeAlignedBottom,
-            };
-            (DataContext as MainViewModel)?.Shell.AccountMenu.Refresh();
-        };
+        NetworkFlyout.Opening += (_, _) => (DataContext as MainViewModel)?.Shell.Network.Refresh();
         // The icon rail hides the footer labels with a style. When that happens with no change in the row's
         // constraint (e.g. a theme applied while already in the rail), the hidden label keeps its old DesiredSize:
         // the row still counts it plus the spacing, fills the rail, and the gear and avatar sit flush left instead of
@@ -97,8 +86,8 @@ public partial class MainWindow
         ApplyShell();
     }
 
-    /// <summary>The account menu behind the sidebar avatar.</summary>
-    internal Flyout AccountMenuFlyout => (Flyout)AccountButton.Flyout!;
+    /// <summary>The network panel behind the top bar's network status.</summary>
+    internal Flyout NetworkFlyout => (Flyout)NetworkButton.Flyout!;
 
     /// <summary>Topmost request popups (self-check uses it to open one directly).</summary>
     internal RequestPopups? Popups { get; private set; }
@@ -222,6 +211,8 @@ public partial class MainWindow
         RequestBar.Margin = new Thickness(pad, 0, pad, 8);
         // 活动抽屉：紧凑档铺满内容区，其余 400 宽从右边滑出（§5.3）。
         ApplyOverlayTier();
+        // The network status keeps its words at every width (a light alone says nothing); narrow windows trim them sooner.
+        NetworkText.MaxWidth = ContentTier == WidthTier.Compact ? 110 : 180;
         ContentColumn.Classes.Set("compact", ContentTier == WidthTier.Compact);
         ContentColumn.Classes.Set("wide", ContentTier == WidthTier.Wide);
     }
@@ -294,7 +285,7 @@ public partial class MainWindow
         }
         if (e.KeyModifiers == KeyModifiers.Control)
         {
-            string? id = e.Key switch { Key.D1 or Key.NumPad1 => "library", Key.D2 or Key.NumPad2 => "discover", Key.D3 or Key.NumPad3 => "multiplayer", _ => null };
+            string? id = e.Key switch { Key.D1 or Key.NumPad1 => "library", Key.D2 or Key.NumPad2 => "discover", Key.D3 or Key.NumPad3 => "multiplayer", Key.D4 or Key.NumPad4 => "people", _ => null };
             if (id is not null) { shell.GoSectionCommand.Execute(id); e.Handled = true; return; }
             if (e.Key == Key.OemComma) { shell.OpenSettingsCommand.Execute(null); e.Handled = true; return; }
         }

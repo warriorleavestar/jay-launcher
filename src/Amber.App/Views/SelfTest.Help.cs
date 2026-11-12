@@ -43,7 +43,7 @@ internal sealed partial class SelfTest
 
             // Every route has an article.
             var missing = new List<string>();
-            foreach (var route in (string[])["library", "library/start", "library/new", "library/logs", "discover", "play", "settings", "settings/tools", "accounts", "about", "help"])
+            foreach (var route in (string[])["library", "library/start", "library/new", "library/logs", "discover", "play", "people", "settings", "settings/tools", "me", "accounts", "about", "help"])
             {
                 main.Shell.Navigate(route);
                 await Task.Delay(250);

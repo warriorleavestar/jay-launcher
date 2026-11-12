@@ -11,7 +11,7 @@ related: settings, moved
 
 ## 全局
 - Ctrl+K：命令面板（搜实例、设置、页面）。
-- Ctrl+1 / Ctrl+2 / Ctrl+3：游戏库 / 发现 / 联机。
+- Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4：游戏库 / 发现 / 联机 / 朋友。
 - Ctrl+,：设置。
 - Ctrl+J：活动中心。
 - F1：本页帮助；Shift+F1：帮助中心。

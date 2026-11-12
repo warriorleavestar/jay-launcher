@@ -11,7 +11,7 @@ related: settings, moved
 
 ## どこでも
 - Ctrl+K：コマンドパレット（インスタンス、設定、ページ）。
-- Ctrl+1 / Ctrl+2 / Ctrl+3：ライブラリ / 見つける / マルチプレイ。
+- Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4：ライブラリ / 見つける / マルチプレイ / フレンド。
 - Ctrl+,：設定。
 - Ctrl+J：アクティビティ。
 - F1：このページのヘルプ。Shift+F1：ヘルプセンター。

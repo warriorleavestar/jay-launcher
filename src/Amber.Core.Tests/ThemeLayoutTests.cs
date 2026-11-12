@@ -45,9 +45,53 @@ public class ThemeLayoutTests
         Assert.Equal(320, shell.SidebarWidth); // 旧导航宽度夹到 200–320
         Assert.False(shell.ShowBrand);
         Assert.Equal(1200, shell.ContentMaxWidth);
-        Assert.Equal(["library", "discover", "multiplayer"], shell.Sections); // 设置不再是导航项；没写的入口接在后面
+        Assert.Equal(["library", "discover", "multiplayer", "people"], shell.Sections); // 设置不再是导航项；没写的入口接在后面
         Assert.Empty(shell.Hidden); // 日志归游戏库，游戏库藏不掉；设置页藏不掉
         Assert.Contains(pack.Problems, p => p.Code == "required_page");
+    }
+
+    [Fact]
+    public void FriendsEntryFollowsMultiplayerUnlessThePackPlacesIt()
+    {
+        // A pack from before the Friends entry: it lands right after multiplayer, not at the end.
+        var old = Read(("layout/shell.json", """{ "pages": ["multiplayer", "library", "discover"] }"""));
+        Assert.Equal(["multiplayer", "people", "library", "discover"], old.Shell!.Sections);
+        Assert.Empty(old.Problems);
+
+        // A pack that knows it: its order and its choice to hide it are kept.
+        var placed = Read(("layout/shell.json", """{ "pages": ["people", "library"], "hidden": ["people"] }"""));
+        Assert.Equal(["people", "library", "discover", "multiplayer"], placed.Shell!.Sections);
+        Assert.Equal(["people"], placed.Shell.Hidden);
+        Assert.Empty(placed.Problems);
+    }
+
+    [Fact]
+    public void AccountsLayoutBecomesTheMePage()
+    {
+        // The accounts page is the "Me" page now: accounts.json lays it out, and its region names map to the new ones.
+        var pack = Read(("layout/pages/accounts.json", """
+            { "type": "stack", "children": [ "accounts.title", "accounts.list", "accounts.jay", "accounts.add", "accounts.status" ] }
+            """));
+        Assert.False(pack.Pages.ContainsKey("accounts"));
+        var regions = RegionsIn(ThemeLayout.TreeFor(pack.Pages["me"], "wide")!).ToList();
+        Assert.Equal(["me.title", "me.accounts", "me.jay", "me.add", "me.status"], regions[..5]);
+        // The blocks an old pack could not know about are added, so nothing on the page is lost.
+        Assert.Equal(["me.appearance", "me.code", "me.devices"], regions[5..].Order());
+        Assert.DoesNotContain(pack.Problems, p => p.Code == "unknown_region");
+    }
+
+    [Fact]
+    public void MeAndPeoplePagesCanBeLaidOut()
+    {
+        var pack = Read(
+            ("layout/pages/me.json", """{ "type": "stack", "children": [ "me.title", "me.appearance", "me.accounts", "me.add", "me.jay", "me.code", "me.devices", "me.status" ] }"""),
+            ("layout/pages/people.json", """{ "type": "dock", "children": [ { "type": "region", "name": "people.title", "dock": "top" }, { "type": "region", "name": "people.status", "dock": "bottom" }, { "type": "region", "name": "people.list", "dock": "left" }, "people.detail" ] }"""));
+        Assert.Empty(pack.Problems);
+        Assert.Equal("me.appearance", RegionsIn(ThemeLayout.TreeFor(pack.Pages["me"], "wide")!).ElementAt(1));
+        Assert.Equal(["people.title", "people.status", "people.list", "people.detail"], RegionsIn(ThemeLayout.TreeFor(pack.Pages["people"], "wide")!));
+        // A region of another page cannot be borrowed.
+        var mixed = Read(("layout/pages/people.json", """{ "type": "stack", "children": [ "people.title", "people.list", "people.detail", "people.status", "me.code" ] }"""));
+        Assert.Contains(mixed.Problems, p => p.Code == "unknown_region");
     }
 
     [Fact]

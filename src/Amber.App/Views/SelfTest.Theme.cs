@@ -111,8 +111,8 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
             main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.NewInstance);
             await Task.Delay(500);
             var newInstance = window.GetVisualDescendants().OfType<DownloadPage>().First();
-            Check("恢复默认后导航回到左边、三个入口都在、新建实例页用回自带布局",
-                window.ShellNav == "left" && main.Shell.Sections.Count == 3 && !newInstance.ThemeLayout.UsingThemeLayout
+            Check("恢复默认后导航回到左边、四个入口都在、新建实例页用回自带布局",
+                window.ShellNav == "left" && main.Shell.Sections.Count == 4 && !newInstance.ThemeLayout.UsingThemeLayout
                 && newInstance.ThemeLayout.Regions["downloads.title"].Parent is not null);
             main.CurrentPage = settings;
             await Task.Delay(300);
@@ -164,8 +164,9 @@ internal sealed class ThemeSelfTest(MainWindow window, MainViewModel main, strin
         Check("导入带排版的主题包：导航挪到顶上", window.ShellNav == "top" && window.SidebarHost.Bounds.Width > window.Bounds.Width - 4
             && window.SidebarHost.Bounds.Height < 120, $"导航 {window.ShellNav} {window.SidebarHost.Bounds}");
         // format 1 的页面名升级成入口：home → 游戏库、multiplayer → 联机；下载和资源都藏了 → 藏掉发现。
-        Check("旧版 shell.json 升级：入口按主题排序、藏掉发现，游戏库和联机还在",
-            main.Shell.Sections.Select(s => s.Id).SequenceEqual(["library", "multiplayer"]) && main.Pages.OfType<ContentViewModel>().Any() && main.Pages.OfType<MultiplayerViewModel>().Any(),
+        // 这个主题包写在“朋友”入口之前：朋友跟在联机后面。
+        Check("旧版 shell.json 升级：入口按主题排序、藏掉发现，游戏库和联机还在，朋友跟在联机后面",
+            main.Shell.Sections.Select(s => s.Id).SequenceEqual(["library", "multiplayer", "people"]) && main.Pages.OfType<ContentViewModel>().Any() && main.Pages.OfType<MultiplayerViewModel>().Any(),
             string.Join(",", main.Shell.Sections.Select(s => s.Id)));
         // 藏起来的入口还能跳过去，侧栏上没有选中项。
         main.Shell.Navigate("discover");

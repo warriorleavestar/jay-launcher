@@ -10,6 +10,6 @@ public partial class AccountsPage : UserControl
     public AccountsPage()
     {
         InitializeComponent();
-        ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "accounts");
+        ThemeLayout = Amber.App.Services.ThemeLayoutHost.Attach(this, "me");
     }
 }

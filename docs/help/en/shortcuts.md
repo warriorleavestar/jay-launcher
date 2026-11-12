@@ -11,7 +11,7 @@ Everything can be done with the mouse; these are the matching shortcuts.
 
 ## Everywhere
 - Ctrl+K: command palette (instances, settings, pages).
-- Ctrl+1 / Ctrl+2 / Ctrl+3: Library / Discover / Multiplayer.
+- Ctrl+1 / Ctrl+2 / Ctrl+3 / Ctrl+4: Library / Discover / Multiplayer / Friends.
 - Ctrl+,: Settings.
 - Ctrl+J: Activity.
 - F1: help for this page; Shift+F1: help center.
