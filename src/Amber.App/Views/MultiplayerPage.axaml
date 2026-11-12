@@ -396,7 +396,6 @@
                     <StackPanel Spacing="8">
                       <WrapPanel ItemSpacing="6" LineSpacing="4">
                         <Button Content="{l:T multiplayer.network.check}" Command="{Binding CheckNetworkCommand}" IsEnabled="{Binding !IsCheckingNetwork}" />
-                        <CheckBox Content="{l:T multiplayer.direct.use_nodes}" IsChecked="{Binding DirectUseNodes}" />
                         <CheckBox Content="{l:T multiplayer.diagnostics.debug_mode}" IsChecked="{Binding DebugMode}" ToolTip.Tip="{l:T multiplayer.diagnostics.debug_tooltip}" />
                       </WrapPanel>
                       <SelectableTextBlock Text="{Binding NetworkCheckText}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding NetworkCheckText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />

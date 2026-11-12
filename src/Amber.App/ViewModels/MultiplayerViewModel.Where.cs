@@ -136,12 +136,7 @@ public sealed partial class MultiplayerViewModel
         FriendRooms.Insert(0, new FriendRoomItem(key, invite, who, room));
     }
 
-    private void UnlistFriendRoom(string key)
-    {
-        if (FriendRooms.FirstOrDefault(r => r.Key == key) is { } row) FriendRooms.Remove(row);
-    }
-
-    /// <summary>Drops rows whose invite has run out.</summary>
+    /// <summary>Drops rows whose invite has run out, with the request that offered to join.</summary>
     internal void PruneFriendRooms()
     {
         var now = DateTimeOffset.UtcNow;
@@ -149,7 +144,22 @@ public sealed partial class MultiplayerViewModel
         {
             FriendRooms.Remove(row);
             _mailedInvites.Remove(row.Key);
+            _service.Requests.Withdraw(row.Key);
         }
+    }
+
+    /// <summary>
+    /// Someone is no longer a friend (removed, or a device taken off): the invites mailed to their devices stop
+    /// working, so they can't keep knocking on the room that is open.
+    /// </summary>
+    private void RevokeInvitesOfRemovedFriends()
+    {
+        if (_lobby is not { } lobby) return;
+        var friends = ContactList.SelectMany(f => f.Devices).Select(d => Convert.ToHexString(d.PublicKey)).ToHashSet();
+        var gone = lobby.Book.Pending.Where(i => i.BoundTo is { } key && !friends.Contains(Convert.ToHexString(key))).ToList();
+        if (gone.Count == 0) return;
+        foreach (var invite in gone) lobby.Book.Revoke(invite);
+        RefreshInvites();
     }
 
     /// <summary>Someone is no longer a friend: the rooms they invited me to go, with their requests.</summary>
@@ -181,10 +191,12 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.contacts.invite.busy"));
             return;
         }
+        // The request goes (the join is under way); the row stays until the host has answered, so a knock that
+        // never got through (no connection, the host busy) can be tried again while the invite lasts.
+        _service.Requests.Withdraw(row.Key);
+        if (!await JoinMailedInviteAsync(row.Invite)) return;
         _mailedInvites.Remove(row.Key);
         FriendRooms.Remove(row);
-        _service.Requests.Withdraw(row.Key);
-        await JoinMailedInviteAsync(row.Invite);
     }
 
     /// <summary>"Public" with a network that is not connected: connect it; what is still needed is asked on the network view.</summary>

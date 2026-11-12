@@ -22,7 +22,11 @@ public sealed partial class MultiplayerViewModel
 
     [ObservableProperty] public partial bool DebugMode { get; set; }
     [ObservableProperty] public partial bool IncludePublicIps { get; set; }
-    [ObservableProperty] public partial bool DirectUseNodes { get; set; } = true;
+    /// <summary>
+    /// A direct room also connects to the relays. Off: the lobby's "No server" means no relay, so a direct room that
+    /// can't connect says so instead of quietly going through one. Only the connection tests turn it on.
+    /// </summary>
+    internal bool DirectUseNodes { get; set; }
     [ObservableProperty] public partial bool DirectSimulate { get; set; }
     [ObservableProperty] public partial string StunText { get; set; } = string.Join(", ", Stun.DefaultServers);
     [ObservableProperty] public partial string DirectHint { get; set; } = "";
@@ -88,7 +92,7 @@ public sealed partial class MultiplayerViewModel
     private List<string> StunServers() =>
         StunText.Split([',', '\uFF0C', ' ', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-    private DirectOptions MakeDirectOptions() => new(
+    internal DirectOptions MakeDirectOptions() => new(
         StunServers(),
         !DirectSimulate,
         DirectUseNodes ? (TestPeers ?? _service.MultiplayerPeers).ToList() : [],
