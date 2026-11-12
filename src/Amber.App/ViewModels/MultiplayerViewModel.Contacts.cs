@@ -199,6 +199,7 @@ public sealed partial class MultiplayerViewModel
             .Select(g => g.OrderByDescending(c => c.Added).ToList())
             .Select(devices => new ContactItem(devices[0]) { Devices = devices });
         foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
+        DropRoomsOfRemovedFriends();
         ContactRequests.Clear();
         var pending = book.Pending;
         foreach (var p in pending.OrderByDescending(p => p.Step == ContactStep.Compare).ThenByDescending(p => p.Step == ContactStep.AskingMe))
@@ -395,6 +396,7 @@ public sealed partial class MultiplayerViewModel
             _mailedInvites[key] = m;
             var who = new ContactItem(m.From).Name;
             var room = m.Room.Length > 0 ? m.Room : L.T("multiplayer.room.friend_room");
+            ListFriendRoom(key, m, who, room);
             _service.Requests.Post(new RequestSpec("contact-invite", L.F("multiplayer.contacts.invite.title", who, room),
                 L.F("multiplayer.contacts.invite.body", m.From.Fingerprint),
                 [new("ignore", L.T("multiplayer.contacts.ignore"), IsDefault: true), new("join", L.T("multiplayer.contacts.invite.join"))],
@@ -419,7 +421,12 @@ public sealed partial class MultiplayerViewModel
                 Navigate?.Invoke("play/settings");
                 break;
             case "contact-invite":
-                if (_mailedInvites.Remove(key, out var invite) && handle.Choice == "join") _ = JoinMailedInviteAsync(invite);
+                // "Ignore" only closes the request: the room stays under "where to play" until the invite runs out.
+                if (handle.Choice == "join" && _mailedInvites.Remove(key, out var invite))
+                {
+                    UnlistFriendRoom(key);
+                    _ = JoinMailedInviteAsync(invite);
+                }
                 break;
             case "contact-new-device" when key.StartsWith("contact-new-device:", StringComparison.Ordinal):
             {
@@ -454,18 +461,27 @@ public sealed partial class MultiplayerViewModel
     /// Mails a contact an invite bound to their key: one use, 30 minutes, let in without asking (it can only be them).
     /// </summary>
     [RelayCommand]
-    private async Task InviteContactAsync(ContactItem? item)
+    private Task InviteContactAsync(ContactItem? item) => MailInviteAsync(item, 1, ContactInviteLifetime, askFirst: false, quiet: false);
+
+    /// <summary>
+    /// Mails one invite per device of a friend, each bound to that device's key: whichever computer they are at, they
+    /// can come in, and nobody else can use it.
+    /// </summary>
+    /// <param name="askFirst">The host approves the knock even for a friend who could be let straight in.</param>
+    /// <param name="quiet">No status line per friend (the caller sums up).</param>
+    private async Task<bool> MailInviteAsync(ContactItem? item, int uses, TimeSpan lifetime, bool askFirst, bool quiet)
     {
-        if (item is null || _lobby is not { } lobby || _credentials is not { } credentials) return;
+        if (item is null || _lobby is not { } lobby || _credentials is not { } credentials) return false;
         if (Post is not { } post)
         {
-            SetStatus(StatusMessage.Warning("multiplayer.contacts.needs_public"));
-            return;
+            if (!quiet) SetStatus(StatusMessage.Warning("multiplayer.contacts.needs_public"));
+            return false;
         }
         lobby.Book.Game = await HostGameAsync();
-        if (_lobby != lobby) return;
-        // One invite per device, each bound to that device's key: whichever computer they're at, they can come in.
-        var pendings = item.Devices.Select(d => (Device: d, Invite: lobby.Book.Create(1, ContactInviteLifetime, Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
+        if (_lobby != lobby) return false;
+        IReadOnlyList<Contact> devices = askFirst ? [.. item.Devices.Where(d => d.Verified)] : item.Devices;
+        if (devices.Count == 0) return false;
+        var pendings = devices.Select(d => (Device: d, Invite: lobby.Book.Create(uses, lifetime, !askFirst && Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
         RefreshInvites();
         try
         {
@@ -473,17 +489,19 @@ public sealed partial class MultiplayerViewModel
             var room = PublishRoomName.Trim().Length > 0 ? PublishRoomName.Trim() : L.F("multiplayer.public.default_name", ChatName);
             foreach (var (device, pending) in pendings)
             {
-                var id = await post.SendInviteAsync(device, pending.Invite, Identity.PublicKey, room, DateTimeOffset.UtcNow + ContactInviteLifetime, default);
+                var id = await post.SendInviteAsync(device, pending.Invite, Identity.PublicKey, room, DateTimeOffset.UtcNow + lifetime, default);
                 // Only the newest device's receipt counts: an older computer that's switched off shouldn't raise "held back".
-                if (ReferenceEquals(device, item.Devices[0])) _sentInvites[id] = item.Name;
+                if (!quiet && ReferenceEquals(device, devices[0])) _sentInvites[id] = item.Name;
             }
-            SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
+            if (!quiet) SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
+            return true;
         }
         catch (Exception e) when (IsMailError(e) || e is System.ComponentModel.Win32Exception)
         {
             foreach (var (_, pending) in pendings) lobby.Book.Revoke(pending);
             RefreshInvites();
-            SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
+            if (!quiet) SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
+            return false;
         }
     }
 

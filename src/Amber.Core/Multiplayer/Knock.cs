@@ -22,6 +22,13 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     /// <summary>这个成员要用的设备验证方案（房主开了验证、对方也支持时才有；只走加密的敲门回复）。</summary>
     public AttestationScheme? Scheme { get; init; }
 
+    /// <summary>
+    /// "Relays only": the host opened the room so that members never connect to each other directly, which keeps
+    /// their IP addresses from one another. Every member runs EasyTier with p2p off. Sent in the knock reply; a member
+    /// on a version that does not know the field still reaches the host through relays, because the host has p2p off.
+    /// </summary>
+    public bool RelayOnly { get; init; }
+
     public static RoomCredentials Create(byte[] hostPublicKey, int gamePort, TunnelSettings tunnel) =>
         new(NewNetwork(), NewSecret(), 1, (byte[])hostPublicKey.Clone(), gamePort, RoomChat.Port, tunnel);
 
@@ -35,7 +42,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     public RoomRekey ToRekey() => new(Network, Secret, Epoch);
 
     /// <summary>加入方：按凭据建出内部的房间对象。</summary>
-    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch);
+    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch) with { RelayOnly = RelayOnly };
 
     /// <summary>房主：建房间对象，带上成员表，并给自己（本机的聊天客户端）发一把钥匙。</summary>
     public RoomCode ToHostRoom(MemberTable members, string hostName)
@@ -43,12 +50,20 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         // 已经有房主自己的那把就接着用：再发一把会让房主本机正在用的聊天钥匙作废。
         var self = members.Host ?? members.Issue(HostPublicKey, hostName, isHost: true);
         if (!self.PublicKey.AsSpan().SequenceEqual(HostPublicKey)) throw new InvalidOperationException("member table belongs to another host");
-        return RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, self.Key, members, Epoch);
+        return RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, self.Key, members, Epoch) with { RelayOnly = RelayOnly };
     }
 
     public override string ToString() => "RoomCredentials";
 
-    internal JsonObject ToJson() => new()
+    internal JsonObject ToJson()
+    {
+        var json = ToJsonCore();
+        // Written only when on, so a room opened the usual way sends exactly what it always did.
+        if (RelayOnly) json["relayOnly"] = true;
+        return json;
+    }
+
+    private JsonObject ToJsonCore() => new()
     {
         ["ok"] = true,
         ["net"] = Network,
@@ -86,6 +101,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
             {
                 Member = new MemberKey(Convert.FromHexString(memberId), psk),
                 Scheme = json["attest"] is JsonObject attest ? AttestationScheme.FromJson(attest) : null,
+                RelayOnly = json["relayOnly"] is JsonValue relayOnly && relayOnly.TryGetValue<bool>(out var on) && on,
             };
         }
         finally

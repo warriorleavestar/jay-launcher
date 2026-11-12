@@ -13,9 +13,10 @@ namespace Amber.App.Views;
 internal sealed partial class SelfTest
 {
     /// <summary>
-    /// The multiplayer lobby and tabs (official §6.14): no component download and no connection. Checks the real
-    /// controls: four tabs, the two cards, the paste box that recognises every code, one amber button, Ctrl+V, codes
-    /// pasted in the wrong box going to the right place, relay servers and the server wizard's first step.
+    /// The multiplayer lobby (UI restructure: people, rooms, networks): no component download and no connection. Checks
+    /// the real controls: no tab strip, join on top, the open-a-room card with its four choices, "where to play", the
+    /// paste box that recognises every code, one amber button, Ctrl+V, codes pasted in the wrong box going to the right
+    /// place, the sub-views with their back row, relay servers and the server wizard's first step.
     /// </summary>
     private async Task MultiplayerGuideAsync()
     {
@@ -37,9 +38,16 @@ internal sealed partial class SelfTest
         Control? Shown(string name) => page.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible);
         Button? Visible(string name) => page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == name && b.IsEffectivelyVisible);
 
-        Check("联机页：四个页签", HasText("multiplayer.tab.play") && HasText("multiplayer.tab.public") && HasText("multiplayer.tab.servers") && HasText("multiplayer.tab.settings"));
-        Check("大厅：开房间和加入朋友两张卡", vm.IsPlayTab && HasText("multiplayer.lobby.host_title") && HasText("multiplayer.lobby.join_title"));
-        Check("大厅：宽窗口两张卡并排", page.LobbyLayout == MultiplayerPage.LobbyArrangement.SideBySide);
+        Border? Card(string name) => page.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Name == name && b.IsEffectivelyVisible);
+        Check("联机页：没有页签，页面就是大厅", vm.IsPlayTab && !vm.IsSubView && Shown("MpSubViewRow") is null
+            && !page.GetVisualDescendants().OfType<Control>().Any(c => c.Name is "MpTabs" or "PlayTabButton"));
+        Check("大厅：加入、开房间、去哪玩三块", HasText("multiplayer.lobby.join_title") && HasText("multiplayer.lobby.host_title") && HasText("multiplayer.where.title"));
+        var (joinCard, hostCard, whereCard) = (Card("JoinCard"), Card("HostCard"), Card("WhereCard"));
+        Check("大厅：加入在最上面占满宽度，开房间和去哪玩在下面并排", page.LobbyLayout == MultiplayerPage.LobbyArrangement.SideBySide
+            && joinCard is not null && hostCard is not null && whereCard is not null
+            && joinCard.Bounds.Bottom <= hostCard.Bounds.Top && Math.Abs(hostCard.Bounds.Top - whereCard.Bounds.Top) < 1 && hostCard.Bounds.Right <= whereCard.Bounds.Left
+            && joinCard.Bounds.Width >= hostCard.Bounds.Width + whereCard.Bounds.Width,
+            $"{joinCard?.Bounds} {hostCard?.Bounds} {whereCard?.Bounds}");
         Check("大厅：自动复制邀请码的勾选框看得见、默认开", vm.AutoCopyInvite
             && page.GetVisualDescendants().OfType<CheckBox>().Any(c => c.Name == "AutoCopyInviteBox" && c.IsEffectivelyVisible));
         Check("大厅：组件没装时底部状态行是注意色", vm.LobbyStatusWarns && vm.LobbyStatusText.Contains(L.T("multiplayer.lobby.status_component_missing")));
@@ -48,9 +56,24 @@ internal sealed partial class SelfTest
         var host = Visible("LobbyHostButton");
         var join = Visible("LobbyJoinButton");
         Check("一盏灯：没贴码时开房间是琥珀，加入是蓝色", host?.Classes.Contains("play") == true && join?.Classes.Contains("play") == false && join?.Classes.Contains("primary") == true);
+        // The component is missing: no card for it; installing is the first step of the open-a-room button.
+        TextBlock? Text(string name) => page.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == name && t.IsEffectivelyVisible);
+        Check("缺组件：开房间按钮写“先装联机组件 N MB”，下面有说明和【导入】，没有单独的卡片", vm.ShowComponentStep
+            && Text("LobbyHostButtonText")?.Text == vm.ComponentStepText && vm.ComponentStepText.Contains("MB")
+            && Shown("ComponentStep") is not null && Text("ComponentStepHint") is not null && Visible("ImportComponentButton") is not null
+            && page.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => e.Name == "ComponentAbout") is { IsEffectivelyVisible: true, IsExpanded: false },
+            Text("LobbyHostButtonText")?.Text ?? "none");
+        Check("缺组件：没贴码时加入按钮还是【加入】", Text("LobbyJoinButtonText")?.Text == L.T("multiplayer.lobby.join_button"), Text("LobbyJoinButtonText")?.Text ?? "none");
+        vm.IsComponentReady = true;
+        await Task.Delay(150);
+        Check("组件装好后：这一步收起，按钮回到开房间", !vm.ShowComponentStep && Shown("ComponentStep") is null
+            && Text("LobbyHostButtonText")?.Text == (vm.StartsGameToHost ? L.T("multiplayer.lobby.play_and_host") : L.T("multiplayer.lobby.host_button")));
         if (vm.StartsGameToHost)
             Check("Lobby: with no LAN world the button is [Play and open a room] and names the game it starts",
                 HasText("multiplayer.lobby.play_and_host") && Shown("PlayAndHostHint") is not null, vm.PlayAndHostHint);
+        await OpenChoicesAsync(vm, page);
+        vm.IsComponentReady = false;
+        await Task.Delay(150);
         var relayInvite = JayInvite.Create(new byte[16], Amber.Core.Multiplayer.Transport.TunnelSettings.Default).ToString();
         var roomCode = await FindAsync<TextBox>(t => t.Name == "JoinCodeBox");
         Dispatcher.UIThread.Invoke(() => roomCode!.Text = relayInvite);
@@ -58,6 +81,7 @@ internal sealed partial class SelfTest
         Check("一盏灯：贴进邀请后琥珀移到加入", host?.Classes.Contains("play") == false && join?.Classes.Contains("play") == true);
         Check("万能粘贴框：认出房间邀请", vm.JoinCodeRecognition == L.T("multiplayer.lobby.code.invite") && !vm.JoinCodeRecognitionWarns && HasText("multiplayer.lobby.code.invite"));
         Check("万能粘贴框：邀请码默认打码", roomCode?.PasswordChar == '•' && !vm.JoinCodeShown);
+        Check("缺组件：贴进邀请后加入按钮写“先装联机组件 N MB”", Text("LobbyJoinButtonText")?.Text == vm.ComponentStepText);
 
         // Invite v3: the host's game is in the code; Jay picks the closest instance or offers to install one.
         var hostMods = new ModManifest([new ModManifestEntry("a.jar", new string('a', 40), 1), new ModManifestEntry("b.jar", new string('b', 40), 1)]);
@@ -91,6 +115,21 @@ internal sealed partial class SelfTest
         Dispatcher.UIThread.Invoke(() => roomCode!.Text = "hello");
         await Task.Delay(100);
         Check("万能粘贴框：认不出时写邀请码长什么样", vm.JoinCodeRecognition == L.T("multiplayer.lobby.code.unknown") && host?.Classes.Contains("play") == true);
+        // A server invite, a friend's code and a network address are told apart, and the button says what it will do.
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = "JAYS2-0123456789ABCDEFGHJK");
+        await Task.Delay(100);
+        Check("万能粘贴框：服务器邀请写“一个一直在线的服务器的邀请”，按钮是【加入并存下】", vm.JoinCodeRecognition == L.T("multiplayer.lobby.code.server")
+            && Text("LobbyJoinButtonText")?.Text == L.T("multiplayer.lobby.join.server") && !vm.JoinNeedsPassphrase, Text("LobbyJoinButtonText")?.Text ?? "none");
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = "JAYSS1-QUJDREVGR0hJSktMTU5PUA");
+        await Task.Delay(100);
+        Check("万能粘贴框：加密的服务器邀请出现口令框", vm.JoinNeedsPassphrase && Shown("JoinPassphraseBox") is not null);
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = "JAYC1-ABCD-EFGH-JKMN-PQRS-TVWX");
+        await Task.Delay(100);
+        Check("万能粘贴框：朋友的码，按钮是【加朋友】", Text("LobbyJoinButtonText")?.Text == L.T("multiplayer.lobby.join.friend"), Text("LobbyJoinButtonText")?.Text ?? "none");
+        Dispatcher.UIThread.Invoke(() => roomCode!.Text = "JAYNET2-ABCDEFGH");
+        await Task.Delay(100);
+        Check("万能粘贴框：网络地址，按钮是【添加网络】", vm.JoinCodeKind == PastedCodeKind.PublicNetwork && Text("LobbyJoinButtonText")?.Text == L.T("multiplayer.lobby.join.network"),
+            Text("LobbyJoinButtonText")?.Text ?? "none");
         Dispatcher.UIThread.Invoke(() => roomCode!.Text = "");
         // "Open like last time": hidden until a room was opened once; says what it repeats.
         Check("和上次一样开：没开过房间时不显示", !vm.HasLastRoom && Shown("LastRoomRow") is null);
@@ -99,16 +138,33 @@ internal sealed partial class SelfTest
         await Task.Delay(200);
         Check("和上次一样开：写上次的世界、要我同意、谁能找到", Shown("LastRoomRow") is not null && Visible("RepeatLastRoomButton") is not null
             && vm.LastRoomText == L.F("multiplayer.lobby.last_room", "新世界 · " + L.T("multiplayer.invite.terms_ask") + " · " + L.T("multiplayer.public.visibility.public")), vm.LastRoomText);
+        main.Service.Settings.MultiplayerLastRoom = new Amber.App.Services.LastRoom
+        {
+            World = "新世界", Access = nameof(RoomAccess.Invited), Route = nameof(RoomRoute.RelayOnly), Protection = nameof(RoomProtection.Standard), Scope = nameof(RoomScope.Game),
+        };
+        vm.NotifyLastRoom();
+        Check("和上次一样开：新开的房间写四个选择里和默认不一样的", vm.LastRoomText == L.F("multiplayer.lobby.last_room",
+            "新世界 · " + L.T("multiplayer.invite.terms_ask") + " · " + L.T("multiplayer.open.who.invited") + " · " + L.T("multiplayer.open.route.relay")), vm.LastRoomText);
         await ShotAsync("和上次一样开");
         Press(Visible("RepeatLastRoomButton"));
         await Task.Delay(300);
         Check("和上次一样开：组件没装时先说要下载，不出错", vm.IsIdle && vm.Status == L.T("multiplayer.component.download_required"), vm.Status);
         main.Service.Settings.MultiplayerLastRoom = null;
         vm.NotifyLastRoom();
+        // The repeat picked last time's choices: back to the defaults for the rest of the checks.
+        vm.PickOpenChoices(nameof(RoomAccess.Invited), nameof(RoomRoute.Auto), null, null);
+        vm.SetStatus(null);
+        await Task.Delay(150);
         await ShotAsync("联机大厅-1440");
         await LayoutHereAsync("联机大厅");
 
-        // Relay servers live in multiplayer settings; built-in ones are on out of the box.
+        // Relay servers live in multiplayer settings, reached from [Advanced settings] under the open-a-room card; built-in
+        // ones are on out of the box. A sub-view has a row to go back and its name.
+        Check("开房间卡下面的【高级设置】打开联机设置", Press(Visible("OpenAdvancedButton")) && vm.IsSettingsTab);
+        await Task.Delay(300);
+        Check("子页面：顶上有【返回】和这一页的名字，大厅收起", vm.IsSubView && Visible("MpBackButton") is not null
+            && Text("MpSubViewTitle")?.Text == L.T("multiplayer.tab.settings") && Card("JoinCard") is null, Text("MpSubViewTitle")?.Text ?? "none");
+        Check("子页面：【返回】回到大厅", Press(Visible("MpBackButton")) && vm.IsPlayTab && !vm.IsSubView);
         vm.ShowTabCommand.Execute("settings");
         await Task.Delay(300);
         Check("联机设置：分组都在", HasText("multiplayer.settings.identity") && HasText("multiplayer.settings.invites") && HasText("multiplayer.settings.component")
@@ -214,37 +270,40 @@ internal sealed partial class SelfTest
             && vm.JoinCode == relayInvite && !vm.IsKnocking && vm.IsIdle);
         Check("Ctrl+V 贴普通文字：不做事", !main.PasteCode("hello world"));
         main.Shell.Navigate("library");
-        Check("Ctrl+V 贴好友码：到公开房间的查找框", main.PasteCode("JAYF1-ABCD-EFGH-JKMN-PQRS-TVWX") && vm.IsPublicTab && vm.FindCodeInput == "JAYF1-ABCD-EFGH-JKMN-PQRS-TVWX");
+        Check("Ctrl+V 贴好友码：到网络页的查找框", main.PasteCode("JAYF1-ABCD-EFGH-JKMN-PQRS-TVWX") && vm.IsPublicTab && vm.FindCodeInput == "JAYF1-ABCD-EFGH-JKMN-PQRS-TVWX");
         vm.FindCodeInput = "";
         vm.JoinCode = "";
 
-        // Routes: play/public, play/servers, play/settings.
+        // Routes: play/public, play/servers and play/settings are sub-views now, each named in the back row.
         main.Shell.Navigate("play/servers");
-        await Task.Delay(200);
-        // The two segments have their own labels ("Joined" / "Hosted by me"); the card title belongs to the Joined segment.
-        // A segment's label is read from its content: the template may not be applied yet right after the tab first shows.
-        bool Segment(string name, string key) => page.GetVisualDescendants().OfType<RadioButton>()
-            .Any(r => r.Name == name && r.IsEffectivelyVisible && (r.Content as TextBlock)?.Text == L.T(key));
-        Check("路由 play/servers 打开服务器页签", vm.IsServersTab && Segment("JayServersSegment", "multiplayer.servers.jay") && Segment("MyServerSegment", "multiplayer.servers.mine")
-            && (!vm.ShowJayServerList || HasText("multiplayer.jayserver.title")));
+        await Task.Delay(300);
+        page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
+        Check("路由 play/servers 打开我的服务器，只有开服这一块", vm.IsServersTab && Text("MpSubViewTitle")?.Text == L.T("multiplayer.subview.server")
+            && Shown("MyServerPanel") is not null && !page.GetVisualDescendants().OfType<RadioButton>().Any(r => r.Name is "JayServersSegment" or "MyServerSegment"));
         main.Shell.Navigate("play/public");
-        await Task.Delay(200);
-        Check("路由 play/public 打开公开房间", vm.IsPublicTab && HasText("multiplayer.public.title"));
-        Check("公开房间：没有公共网络时说明从哪来、给【添加公共网络…】", vm.ShowPublicSetup && Visible("AddPublicNetworkButton") is not null
+        await Task.Delay(300);
+        Check("路由 play/public 打开网络页", vm.IsPublicTab && HasText("multiplayer.public.title") && Text("MpSubViewTitle")?.Text == L.T("multiplayer.subview.network"));
+        Check("网络页：没有公共网络时说明从哪来、给【添加公共网络…】", vm.ShowPublicSetup && Visible("AddPublicNetworkButton") is not null
             && HasText("multiplayer.public.setup_body"));
-        await ShotAsync("公开房间-1440");
-        await PublicListAsync(vm);
+        Check("网络页：房间列表不在这里了（在大厅的去哪玩）", !page.GetVisualDescendants().OfType<Control>().Any(c => c.Name is "PublicRoomList" or "RoomSearchBox" && c.IsEffectivelyVisible));
+        await ShotAsync("网络页-1440");
 
-        // Width tiers: medium stacks the cards, compact puts "join" first. (Leaving the page rebuilt its view: find it again.)
+        // Where to play: one list with filter chips. (Leaving the page rebuilt its view: find it again.)
         main.Shell.Navigate("play");
         await Task.Delay(300);
         page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;
-        foreach (var (w, h, expected) in new[] { (900, 700, MultiplayerPage.LobbyArrangement.Stacked), (600, 420, MultiplayerPage.LobbyArrangement.JoinFirst) })
+        await WhereToPlayAsync(vm, page);
+        await PublicListAsync(vm);
+
+        // Width tiers: medium and compact put the three cards in one column, join first.
+        foreach (var (w, h, expected) in new[] { (900, 700, MultiplayerPage.LobbyArrangement.Stacked), (600, 420, MultiplayerPage.LobbyArrangement.Compact) })
         {
             window.Width = w;
             window.Height = h;
             await Task.Delay(500);
-            Check($"大厅 {w}：卡片排法", page.LobbyLayout == expected, page.LobbyLayout.ToString());
+            var (j, o, wh) = (Card("JoinCard"), Card("HostCard"), Card("WhereCard"));
+            Check($"大厅 {w}：加入、开房间、去哪玩从上到下一列", page.LobbyLayout == expected && j is not null && o is not null && wh is not null
+                && j.Bounds.Bottom <= o.Bounds.Top && o.Bounds.Bottom <= wh.Bounds.Top && wh.Bounds.Right <= page.Bounds.Width + 1, $"{page.LobbyLayout} {j?.Bounds} {o?.Bounds} {wh?.Bounds}");
             await ShotAsync($"联机大厅-{w}");
         }
         L.SetLanguage("en");
@@ -258,8 +317,8 @@ internal sealed partial class SelfTest
 
         // The server wizard: before set-up only the address step shows; a bad address is explained, nothing is created.
         var server = vm.HostServer;
-        vm.ShowTabCommand.Execute("servers");
-        vm.ShowMyServer = true;
+        Dispatcher.UIThread.Invoke(() => Visible("OpenServerButton")?.BringIntoView());
+        Check("开房间卡下面的【开一个一直在线的服务器…】打开我的服务器", Press(Visible("OpenServerButton")) && vm.IsServersTab);
         await Task.Delay(300);
         if (!server.IsInitialized)
         {
@@ -277,11 +336,6 @@ internal sealed partial class SelfTest
             });
         }
         else Check("开服：测试配置里已经初始化过，跳过第一步检查", true);
-        vm.ShowMyServer = false;
-        vm.ShowJayServerList = true;
-        await Task.Delay(200);
-        Check("Jay 服务器：没加入过时写怎么做", vm.JayServers.Servers.Count > 0
-            || page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "NoJayServersText" && t.IsEffectivelyVisible));
         vm.ShowTabCommand.Execute("play");
         vm.UseBuiltInNodes = profileUsesBuiltIn;
 
@@ -465,11 +519,14 @@ internal sealed partial class SelfTest
         };
         Dispatcher.UIThread.Invoke(() =>
         {
+            vm.ShowTabCommand.Execute("play");
+            vm.Where = WhereFilter.Public;
             vm.IsPublicConnected = true;
             vm.PublicRooms.Clear();
         });
         await Task.Delay(300);
-        Check("公开房间：连上但没有房间时写出来并给【刷新】", vm.ShowNoPublicRooms && !vm.ShowPublicSetup);
+        Check("公开房间：连上但没有房间时写出来并给【刷新】", vm.ShowNoPublicRooms && !vm.ShowPublicSetup && vm.ShowPublicRoomList
+            && page.GetVisualDescendants().OfType<Control>().Any(c => c.Name == "WherePublicRooms" && c.IsEffectivelyVisible));
         Dispatcher.UIThread.Invoke(() =>
         {
             vm.PublicRooms.Add(new PublicRoomItem(Room("Sky island", "Alex", "1.20.1 Fabric", 5, Amber.Core.Multiplayer.Public.RoomVisibility.Public, true)));
@@ -478,6 +535,14 @@ internal sealed partial class SelfTest
         });
         await Task.Delay(300);
         Check("公开房间：人多的在前", vm.VisibleRooms.Select(r => r.Listing.Name).SequenceEqual(["Open farm", "Sky island", "Build contest"]));
+        Check("公开房间：列表里有带锁的房间时才出现密码框", vm.ShowPublicRoomPassword
+            && page.GetVisualDescendants().OfType<TextBox>().Any(t => t.Name == "PublicRoomPasswordBox" && t.IsEffectivelyVisible));
+        Dispatcher.UIThread.Invoke(() => vm.Where = WhereFilter.All);
+        await Task.Delay(200);
+        Check("去哪玩 › 全部：有公开房间时也列出来", vm.ShowPublicRoomList && !vm.ShowWhereEmpty
+            && page.GetVisualDescendants().OfType<ItemsControl>().Any(i => i.Name == "PublicRoomList" && i.IsEffectivelyVisible));
+        Dispatcher.UIThread.Invoke(() => vm.Where = WhereFilter.Public);
+        await Task.Delay(200);
         Check("公开房间：版本筛选列出全部版本和每个版本", vm.RoomGameChoices.Count == 3 && vm.SelectedRoomGame?.Game == "");
         await ShotAsync("公开房间-列表-1440");
         var search = page.GetVisualDescendants().OfType<TextBox>().FirstOrDefault(t => t.Name == "RoomSearchBox");
@@ -497,6 +562,8 @@ internal sealed partial class SelfTest
         });
         await Task.Delay(200);
         Check("公开房间：只看能直接进的", vm.VisibleRooms.Count == 1 && vm.VisibleRooms[0].Listing.Name == "Open farm");
+        Check("公开房间：列表里没有带锁的房间时不出现密码框", !vm.ShowPublicRoomPassword
+            && !page.GetVisualDescendants().OfType<TextBox>().Any(t => t.Name == "PublicRoomPasswordBox" && t.IsEffectivelyVisible));
         Dispatcher.UIThread.Invoke(() =>
         {
             vm.OpenRoomsOnly = false;
@@ -515,8 +582,138 @@ internal sealed partial class SelfTest
             vm.SelectedRoomGame = vm.RoomGameChoices[0];
             vm.PublicRooms.Clear();
             vm.IsPublicConnected = false;
+            vm.Where = WhereFilter.All;
         });
         await Task.Delay(300);
+    }
+
+    /// <summary>
+    /// The open-a-room card's four choices: defaults, each option with what it means, greyed-out options with the reason,
+    /// "no server" changing the button, protection following the transport, and the public options.
+    /// </summary>
+    private async Task OpenChoicesAsync(MultiplayerViewModel vm, MultiplayerPage page)
+    {
+        ComboBox? Box(string name) => page.GetVisualDescendants().OfType<ComboBox>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible);
+        Control? Shown(string name) => page.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible);
+        TextBlock? Text(string name) => page.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == name && t.IsEffectivelyVisible);
+        var (who, route, protection, scope) = (Box("OpenWhoBox"), Box("OpenRouteBox"), Box("OpenProtectionBox"), Box("OpenScopeBox"));
+        Check("开房间：四个选择都在（谁能进、怎么连、保护、范围）", who is not null && route is not null && protection is not null && scope is not null
+            && who.ItemCount == 3 && route.ItemCount == 3 && protection.ItemCount == 3 && scope.ItemCount == 2);
+        Check("开房间：默认是只有我邀请的人、自动、标准、只联这个游戏", vm.OpenAccess == RoomAccess.Invited && vm.OpenRoute == RoomRoute.Auto
+            && vm.SelectedProtection?.Id == nameof(RoomProtection.Standard) && vm.SelectedScope.Id == nameof(RoomScope.Game)
+            && ReferenceEquals(who?.SelectedItem, vm.WhoChoices[0]) && ReferenceEquals(route?.SelectedItem, vm.RouteChoices[0]),
+            $"{vm.OpenAccess} {vm.OpenRoute} {vm.SelectedProtection?.Id} {vm.SelectedScope.Id}");
+        // No network is connected in this scope: friends and public are greyed out, and say why.
+        Check("开房间：没连网络时“朋友可以敲门”和“公开”是灰的，写原因", !vm.WhoChoices[1].IsEnabled && !vm.WhoChoices[2].IsEnabled
+            && vm.WhoChoices[2].Line == L.T("multiplayer.open.blocked.network") && vm.WhoChoices[0].Line == L.T("multiplayer.open.who.invited_detail"),
+            vm.WhoChoices[1].Line + " / " + vm.WhoChoices[2].Line);
+        if (who is not null)
+        {
+            Dispatcher.UIThread.Invoke(() => who.IsDropDownOpen = true);
+            await Task.Delay(300);
+            var items = Dispatcher.UIThread.Invoke(() => Enumerable.Range(0, who.ItemCount).Select(i => who.ContainerFromIndex(i) as ComboBoxItem).ToList());
+            Check("开房间：下拉里每项写它的意思，灰的那项点不了", items.Count == 3 && items[0] is { IsEnabled: true } && items[2] is { IsEnabled: false }
+                && items[0]!.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == L.T("multiplayer.open.who.invited_detail"))
+                && items[2]!.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == L.T("multiplayer.open.blocked.network")),
+                string.Join(",", items.Select(i => i?.IsEnabled.ToString() ?? "none")));
+            await ShotAsync("开房间-谁能进");
+            Dispatcher.UIThread.Invoke(() => who.IsDropDownOpen = false);
+            Dispatcher.UIThread.Invoke(() => who.SelectedItem = vm.WhoChoices[2]);
+            await Task.Delay(150);
+            Check("开房间：选灰的那项不生效", vm.OpenAccess == RoomAccess.Invited && ReferenceEquals(who.SelectedItem, vm.WhoChoices[0]), vm.OpenAccess.ToString());
+        }
+        // Connected with a verified friend: both can be picked; "public" shows the room name and the optional password.
+        Dispatcher.UIThread.Invoke(() => vm.IsPublicConnected = true);
+        await Task.Delay(150);
+        Check("开房间：连上网络后“公开”能选，没有朋友时“朋友可以敲门”写原因", vm.WhoChoices[2].IsEnabled
+            && (vm.WhoChoices[1].IsEnabled || vm.WhoChoices[1].Line == L.T("multiplayer.open.blocked.no_friends")), vm.WhoChoices[1].Line);
+        Dispatcher.UIThread.Invoke(() => who!.SelectedItem = vm.WhoChoices[2]);
+        await Task.Delay(200);
+        Check("开房间：选“公开”后出现房间名和可选的密码", vm.ShowPublicOptions && Shown("OpenRoomNameBox") is not null && Shown("OpenRoomPasswordBox") is not null);
+        await ShotAsync("开房间-公开");
+
+        // Relays only: just a choice. No server: the button makes a sealed direct code, protection is not asked, and
+        // friends / public cannot be picked (they need a network).
+        Dispatcher.UIThread.Invoke(() => route!.SelectedItem = vm.RouteChoices[1]);
+        await Task.Delay(150);
+        Check("开房间：只走中转能选，按钮不变", vm.OpenRoute == RoomRoute.RelayOnly && Text("LobbyHostButtonText")?.Text != L.T("multiplayer.open.make_sealed") && vm.OpenAccess == RoomAccess.Public);
+        Dispatcher.UIThread.Invoke(() => route!.SelectedItem = vm.RouteChoices[2]);
+        await Task.Delay(200);
+        Check("开房间：不经服务器时按钮变成【生成加密直连码】，下面写怎么用", vm.IsServerlessChosen && Text("LobbyHostButtonText")?.Text == L.T("multiplayer.open.make_sealed")
+            && Shown("OpenServerlessNote") is not null && Shown("PlayAndHostHint") is null, Text("LobbyHostButtonText")?.Text ?? "none");
+        Check("开房间：不经服务器时回到“只有我邀请的人”，保护那一格不能选", vm.OpenAccess == RoomAccess.Invited && !vm.WhoChoices[2].IsEnabled
+            && vm.WhoChoices[2].Line == L.T("multiplayer.open.blocked.serverless") && !vm.ProtectionEnabled && protection is { IsEnabled: false }, vm.WhoChoices[2].Line);
+        await ShotAsync("开房间-不经服务器");
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            route!.SelectedItem = vm.RouteChoices[0];
+            vm.IsPublicConnected = false;
+        });
+        await Task.Delay(150);
+
+        // Protection is a view over the transport: picking a level sets it, a hand-set transport shows as customised.
+        var transport = vm.SelectedTransport;
+        var disguise = vm.DisguiseAsMinecraft;
+        Dispatcher.UIThread.Invoke(() => protection!.SelectedItem = vm.ProtectionChoices[1]);
+        await Task.Delay(150);
+        Check("开房间：选“加强”换成对应的传输方式", vm.SelectedTransport.Mode == Amber.Core.Multiplayer.Transport.TransportMode.High && !vm.IsProtectionCustom);
+        Dispatcher.UIThread.Invoke(() => vm.SelectedTransport = vm.TransportChoices.First(c => c.Mode == Amber.Core.Multiplayer.Transport.TransportMode.General));
+        await Task.Delay(200);
+        Check("开房间：手动改过传输方式时写“已自定义”，给【恢复标准】", vm.IsProtectionCustom && Shown("OpenProtectionCustomRow") is not null
+            && page.GetVisualDescendants().OfType<Button>().Any(b => b.Name == "ResetProtectionButton" && b.IsEffectivelyVisible) && protection?.SelectedItem is null);
+        Check("开房间：【恢复标准】回到标准", Press(page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.Name == "ResetProtectionButton" && b.IsEffectivelyVisible))
+            && vm.SelectedProtection?.Id == nameof(RoomProtection.Standard) && Shown("OpenProtectionCustomRow") is null);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.SelectedTransport = transport;
+            vm.DisguiseAsMinecraft = disguise;
+        });
+        if (!vm.CanUseFullLan)
+            Check("开房间：这台电脑用不了整个局域网时那一项是灰的，写原因", !vm.ScopeChoices[1].IsEnabled && vm.ScopeChoices[1].Line.Length > 0, vm.ScopeChoices[1].Line);
+        await Task.Delay(100);
+    }
+
+    /// <summary>"Where to play": the filter chips, the empty lines, a room a friend invited me to, and where saved servers go.</summary>
+    private async Task WhereToPlayAsync(MultiplayerViewModel vm, MultiplayerPage page)
+    {
+        Control? Shown(string name) => page.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name && c.IsEffectivelyVisible);
+        RadioButton? Chip(string name) => page.GetVisualDescendants().OfType<RadioButton>().FirstOrDefault(r => r.Name == name && r.IsEffectivelyVisible);
+        Check("去哪玩：四个筛选（全部、朋友、公开、服务器），默认全部", Chip("WhereAllButton") is { IsChecked: true } && Chip("WhereFriendsButton") is not null
+            && Chip("WherePublicButton") is not null && Chip("WhereServersButton") is not null && vm.Where == WhereFilter.All);
+        if (vm.JayServers.Servers.Count == 0)
+            Check("去哪玩：什么都没有时写这里会出现什么", vm.ShowWhereEmpty && Shown("WhereEmptyText") is not null);
+        Dispatcher.UIThread.Invoke(() => Chip("WhereFriendsButton")!.IsChecked = true);
+        await Task.Delay(200);
+        Check("去哪玩 › 朋友：没人邀请时写出来", vm.Where == WhereFilter.Friends && Shown("FriendRoomsEmptyText") is not null && Shown("WhereEmptyText") is null);
+        Dispatcher.UIThread.Invoke(() => Chip("WherePublicButton")!.IsChecked = true);
+        await Task.Delay(200);
+        Check("去哪玩 › 公开：没有公共网络时说明从哪来、给【添加公共网络…】", vm.ShowPublicSetup ? Shown("WherePublicSetup") is not null && Shown("WhereAddNetworkButton") is not null
+            : Shown("WherePublicConnect") is not null && Shown("WhereConnectButton") is not null);
+        await ShotAsync("去哪玩-公开-没有网络");
+        Dispatcher.UIThread.Invoke(() => Chip("WhereServersButton")!.IsChecked = true);
+        await Task.Delay(200);
+        Check("去哪玩 › 服务器：没存过时写怎么加入", vm.JayServers.Servers.Count > 0 ? Shown("SavedServerList") is not null
+            : Shown("SavedServersEmpty") is not null && page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Name == "NoJayServersText" && t.IsEffectivelyVisible));
+        Dispatcher.UIThread.Invoke(() => Chip("WhereAllButton")!.IsChecked = true);
+        await Task.Delay(200);
+
+        // A friend's room: a mailed invite is one row with who it is from, until it runs out.
+        using var friend = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        using var hostKey = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        var contact = new Amber.Core.Multiplayer.Contacts.Contact(friend.PublicKey, "Robin", true, DateTimeOffset.UtcNow);
+        var invite = new InviteBook().Create(1, TimeSpan.FromMinutes(30), true, Amber.Core.Multiplayer.Transport.TunnelSettings.Default, boundTo: vm.Identity.PublicKey).Invite;
+        Dispatcher.UIThread.Invoke(() => vm.ShowMailedInvites([new Amber.Core.Multiplayer.Contacts.MailedInvite(contact, invite, hostKey.PublicKey, "Robin's world", DateTimeOffset.UtcNow.AddMinutes(30))]));
+        await Task.Delay(300);
+        var row = vm.FriendRooms.FirstOrDefault();
+        Check("去哪玩：朋友邀请我的房间排进列表，写是谁的", row is { Title: "Robin's world" } && row.Meta.Contains(L.F("multiplayer.where.friend_room.from", "Robin"))
+            && Shown("FriendRoomList") is not null && !vm.ShowWhereEmpty, row?.Meta ?? "none");
+        await ShotAsync("去哪玩-朋友的房间");
+        var request = main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-invite");
+        if (request is not null) main.Service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
+        await Task.Delay(200);
+        Check("去哪玩：在请求条里点“先不”后这一行还在（之后还能进）", vm.FriendRooms.Count == 1);
+        Dispatcher.UIThread.Invoke(() => vm.FriendRooms.Clear());
+        await Task.Delay(100);
     }
 
     /// <summary>
@@ -596,5 +793,6 @@ internal sealed partial class SelfTest
         Dispatcher.UIThread.Invoke(() => vm.RemoveContactCommand.Execute(vm.ContactList[0]));
         await Task.Delay(200);
         Check("Contacts: removing empties the list", !vm.HasContacts);
+        Check("Contacts: removing a friend takes the room they invited me to off \"where to play\"", vm.FriendRooms.Count == 0);
     }
 }

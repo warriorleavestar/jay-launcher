@@ -279,10 +279,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitRequests();
         InitPublic();
         InitContacts();
+        InitOpenRoom();
+        InitWhere();
         InitPublicList();
         RefreshLongInvites();
         JayServers = new JayServersViewModel(service, () => TargetInstance, () => NavigateHome?.Invoke(), () => Identity);
         HostServer = new HostServerViewModel(service);
+        WatchSavedServers();
     }
 
     /// <summary>开服：在这台电脑上跑 Jay 服务器版。</summary>
@@ -674,7 +677,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             return;
         }
         // 房间的网络名和密钥随机生成，只在批准加入时经加密的敲门通道发给对方；没有可以直接分享的房间码，靠“邀请”。
-        var credentials = NewCredentials(gamePort, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft));
+        // "Relays only" travels with the credentials, so every member the host lets in turns direct connections off too.
+        var relayOnly = OpenRoute == RoomRoute.RelayOnly;
+        var credentials = NewCredentials(gamePort, new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft)) with { RelayOnly = relayOnly };
         // 成员表：批准一个人时发给他自己的钥匙（游戏通道和聊天按它认人）；房主自己的聊天客户端也有一把。
         var members = new MemberTable();
         var room = credentials.ToHostRoom(members, ChatName);
@@ -697,7 +702,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
-            : relay is not null ? L.T("multiplayer.relay.created") : L.T("multiplayer.room.created");
+            : relay is not null ? L.T("multiplayer.relay.created") : L.T(relayOnly ? "multiplayer.room.created_relay_only" : "multiplayer.room.created");
     }
 
     [RelayCommand]
@@ -709,12 +714,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             await JoinSealedAsync();
             return;
         }
-        if (RouteMisplacedCode(JoinCode, PastedCodeKind.Invite, () => JoinCode = "")) return;
-        if (!IsComponentReady)
+        if (JoinCodeKind == PastedCodeKind.JayServer)
         {
-            SetStatus(StatusMessage.Warning("multiplayer.component.download_required"));
+            await JoinServerFromPasteBoxAsync();
             return;
         }
+        if (RouteMisplacedCode(JoinCode, PastedCodeKind.Invite, () => JoinCode = "")) return;
+        // A code that cannot work says so before anything is downloaded for it.
         if (!JayInvite.TryParse(JoinCode, out var invite))
         {
             SetStatus(JayInvite.LooksLikeOldCode(JoinCode) ? StatusMessage.Warning("multiplayer.invite.old_code") : StatusMessage.Error("multiplayer.room.invalid_code"));
@@ -723,6 +729,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (invite.Tunnel.Mode == TransportMode.Extreme && !NoiseHandshake.HybridSupported)
         {
             SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
+            return;
+        }
+        if (!IsComponentReady)
+        {
+            // The component is a step on the button: install it here, then the same button joins.
+            await InstallComponentStepAsync();
             return;
         }
         if ((TestPeers ?? _service.MultiplayerPeers).Count == 0)

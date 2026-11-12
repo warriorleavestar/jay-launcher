@@ -469,6 +469,8 @@ public static class EasyTierArgs
         if (o.Peers.Concat(o.Listeners ?? []).Any(IsLoopback)) args.AddRange(["--bind-device", "false"]);
         else if (o.ExitNode is not null) args.AddRange(["--bind-device", "true"]);
         if (o.ExtraArgs is { } extra) args.AddRange(extra);
+        // "Relays only": this member neither opens nor accepts direct connections, so nobody in the room sees its address.
+        if (o.Room.RelayOnly && !args.Contains("--disable-p2p")) args.Add("--disable-p2p");
         // 不建网卡时，EasyTier 会把别的成员发到本机虚拟地址的连接交给本机同一端口——不限制的话，
         // 房间里的人（自己改 EasyTier 参数就行）能连到本机回环上的任何服务，包括 EasyTier 自己的管理端口。
         // 所以只放行这台电脑在这次联机里真正提供的端口；UDP 都不需要。完整局域网模式本来就是要互通，不限制。

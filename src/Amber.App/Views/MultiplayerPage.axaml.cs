@@ -35,6 +35,7 @@ public partial class MultiplayerPage : UserControl
             // Pictures hide in short windows (official §4.9).
             LessonArt.IsVisible = e.NewSize.Height >= 560;
         };
+        foreach (var box in (ComboBox[])[OpenWhoBox, OpenRouteBox, OpenProtectionBox, OpenScopeBox]) box.SelectionChanged += OnOpenChoiceChanged;
         AddHandler(KeyDownEvent, OnRoomKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         DataContextChanged += (_, _) =>
         {
@@ -110,37 +111,46 @@ public partial class MultiplayerPage : UserControl
         };
     }
 
-    /// <summary>Lobby cards at the page's width: side by side when there is room, else stacked (compact: join first).</summary>
+    /// <summary>
+    /// Lobby cards at the page's width. Join is always on top across the whole width; under it "open a room" and
+    /// "where to play" sit side by side when there is room, else one under the other.
+    /// </summary>
     internal LobbyArrangement LobbyLayout { get; private set; } = LobbyArrangement.SideBySide;
 
-    internal enum LobbyArrangement { SideBySide, Stacked, JoinFirst }
+    internal enum LobbyArrangement { SideBySide, Stacked, Compact }
 
     private void ApplyLobbyLayout(double width)
     {
-        var layout = width >= 820 ? LobbyArrangement.SideBySide : width >= 560 ? LobbyArrangement.Stacked : LobbyArrangement.JoinFirst;
+        var layout = width >= 820 ? LobbyArrangement.SideBySide : width >= 560 ? LobbyArrangement.Stacked : LobbyArrangement.Compact;
         LobbyLayout = layout;
-        var grid = LobbyGrid;
-        if (layout == LobbyArrangement.SideBySide)
+        var wide = layout == LobbyArrangement.SideBySide;
+        LobbyGrid.ColumnDefinitions = new ColumnDefinitions(wide ? "*,14,*" : "*");
+        var span = wide ? 3 : 1;
+        Place(JoinCard, 0, 0, span);
+        Place(HostCard, 1, 0, 1);
+        Place(WhereCard, wide ? 1 : 2, wide ? 2 : 0, 1);
+        Place(LobbyFooter, 3, 0, span);
+        // Wide: a join button as wide as the page would shout; it sits at the end of the card instead.
+        LobbyJoinButton.HorizontalAlignment = wide ? Avalonia.Layout.HorizontalAlignment.Right : Avalonia.Layout.HorizontalAlignment.Stretch;
+        LobbyJoinButton.MinWidth = wide ? 240 : 0;
+        // Stacked: the cards keep a readable width in the middle of the page.
+        var centred = layout == LobbyArrangement.Stacked;
+        foreach (var card in (Border[])[JoinCard, HostCard, WhereCard])
         {
-            grid.ColumnDefinitions = new ColumnDefinitions("*,14,*");
-            Place(HostCard, 0, 0, 1);
-            Place(JoinCard, 0, 2, 1);
+            card.MaxWidth = centred ? 720 : double.PositiveInfinity;
+            card.HorizontalAlignment = centred ? Avalonia.Layout.HorizontalAlignment.Center : Avalonia.Layout.HorizontalAlignment.Stretch;
+            card.Width = centred ? Math.Min(720, width - 14) : double.NaN;
         }
-        else
-        {
-            grid.ColumnDefinitions = new ColumnDefinitions("*");
-            var hostFirst = layout == LobbyArrangement.Stacked;
-            Place(HostCard, hostFirst ? 0 : 1, 0, 1);
-            Place(JoinCard, hostFirst ? 1 : 0, 0, 1);
-            HostCard.Margin = JoinCard.Margin = new Avalonia.Thickness(0);
-            (hostFirst ? JoinCard : HostCard).Margin = new Avalonia.Thickness(0, 14, 0, 0);
-        }
-        if (layout == LobbyArrangement.SideBySide) HostCard.Margin = JoinCard.Margin = new Avalonia.Thickness(0);
-        Grid.SetColumnSpan(LobbyFooter, layout == LobbyArrangement.SideBySide ? 3 : 1);
-        HostCard.MaxWidth = JoinCard.MaxWidth = layout == LobbyArrangement.Stacked ? 720 : double.PositiveInfinity;
-        HostCard.HorizontalAlignment = JoinCard.HorizontalAlignment = layout == LobbyArrangement.Stacked ? Avalonia.Layout.HorizontalAlignment.Center : Avalonia.Layout.HorizontalAlignment.Stretch;
-        if (layout == LobbyArrangement.Stacked) HostCard.Width = JoinCard.Width = Math.Min(720, width - 14);
-        else HostCard.Width = JoinCard.Width = double.NaN;
+    }
+
+    /// <summary>
+    /// A greyed-out option of the four open-a-room choices cannot be picked by any route (keyboard, type-ahead): the
+    /// drop-down goes back to what it showed. The view model ignores such a value too.
+    /// </summary>
+    private static void OnOpenChoiceChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox { SelectedItem: OpenChoice { IsEnabled: false } } box)
+            box.SelectedItem = e.RemovedItems.Count > 0 ? e.RemovedItems[0] : null;
     }
 
     /// <summary>Room console at the page's width: people | chat | details, or people | chat with details below, or one section at a time.</summary>
@@ -205,12 +215,13 @@ public partial class MultiplayerPage : UserControl
             e.Handled = true;
             return;
         }
-        // Public rooms: F5 refreshes, "/" jumps to the search box (not while typing).
-        if (vm.IsPublicTab && vm.IsPublicConnected)
+        // Public rooms in "where to play": F5 refreshes, "/" jumps to the search box (not while typing).
+        if (vm.IsPlayTab && vm.IsIdle && vm.ShowPublicRoomList)
         {
             if (e.Key == Key.F5 && e.KeyModifiers == KeyModifiers.None) { vm.RefreshRoomsCommand.Execute(null); e.Handled = true; return; }
             if (e.Key is Key.Oem2 or Key.Divide && e.KeyModifiers == KeyModifiers.None && e.Source is not TextBox)
             {
+                RoomSearchBox.BringIntoView();
                 RoomSearchBox.Focus();
                 e.Handled = true;
                 return;

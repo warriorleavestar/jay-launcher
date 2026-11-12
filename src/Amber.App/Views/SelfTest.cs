@@ -1304,7 +1304,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await PasteBoxMaskedAsync(host);
         // The lobby's join button (official §6.14): found by its command, not its text, which the terminology pass renamed.
         Check("联机：邀请码格式错误有提示", Press(await FindAsync<Button>(b => b.Name == "LobbyJoinButton" && b.IsEffectivelyVisible))
-            && (host.IsComponentReady ? host.Status.Contains(L.T("multiplayer.room.invalid_code")) : host.Status.Contains(L.T("multiplayer.component.download_required"))), host.Status);
+            && host.Status.Contains(L.T("multiplayer.room.invalid_code")) && !host.IsDownloading, host.Status);
         if (host.IsComponentReady)
         {
             host.JoinCode = "AMB-K7Q2M9XD-4HZP8RW2N6TC-25565";

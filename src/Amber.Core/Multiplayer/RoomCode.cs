@@ -34,6 +34,12 @@ public sealed record RoomCode(string Network, string Secret, int Port)
         ? this with { Network = next.Network, Secret = next.Secret, Epoch = next.Epoch }
         : throw new InvalidOperationException("stale or non-invite rekey");
 
+    /// <summary>
+    /// "Relays only" (invite rooms): no member connects to another directly, so members do not learn each other's IP
+    /// address. EasyTier runs with p2p off on every member.
+    /// </summary>
+    public bool RelayOnly { get; init; }
+
     /// <summary>邀请房间的房主：成员表（编号 → psk），游戏通道和聊天按它认人。加入方是 null。</summary>
     public MemberTable? Members { get; init; }
 
