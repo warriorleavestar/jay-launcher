@@ -30,6 +30,13 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private int _accepted;
     private int _rejected;
     private int _tampered;
+    private int _pending;
+
+    /// <summary>
+    /// Legs still in their handshake at most, across all ports. More are closed at once: every caller looks the same here
+    /// (the local EasyTier hands them over from loopback), so this caps what unauthenticated connections can tie up.
+    /// </summary>
+    public const int MaxPendingHandshakes = 64;
 
     /// <summary>Joined split connections handed to a handler.</summary>
     public int Accepted => Volatile.Read(ref _accepted);
@@ -79,6 +86,14 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             {
                 return;
             }
+            if (Interlocked.Increment(ref _pending) > MaxPendingHandshakes)
+            {
+                Interlocked.Decrement(ref _pending);
+                Interlocked.Increment(ref _rejected);
+                Pump.Abort(client);
+                client.Dispose();
+                continue;
+            }
             Track(HandleLegAsync(client, index, ct));
         }
     }
@@ -103,9 +118,16 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         SecureStream? secure = null;
         SplitStream? joined = null;
         CancellationTokenRegistration revocation = default;
+        var pending = true;
+        void HandshakeDone()
+        {
+            if (pending) Interlocked.Decrement(ref _pending);
+            pending = false;
+        }
         try
         {
             var accepted = await TunnelHandshake.AcceptWithMemberAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, ct, leg);
+            HandshakeDone();
             if (accepted is null) return;
             rawOwned = false;
             (secure, var service, var member) = accepted.Value;
@@ -160,6 +182,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         }
         finally
         {
+            HandshakeDone();
             await revocation.DisposeAsync();
             if (secure is not null) secure.Abort();
             // Closing a joined connection writes a close record, which fails when the other side is already gone.

@@ -120,6 +120,16 @@ public sealed class TunnelServer : IAsyncDisposable
     public int Accepted;
     public int Rejected;
 
+    /// <summary>
+    /// Connections still in their handshake at most. More are closed at once: every caller looks the same here (the
+    /// local EasyTier hands them over from loopback), so this caps what unauthenticated connections can tie up.
+    /// </summary>
+    public const int MaxPendingHandshakes = 64;
+    private int _pending;
+
+    /// <summary>Connections in their handshake right now.</summary>
+    public int PendingHandshakes => Volatile.Read(ref _pending);
+
     /// <param name="route">每种服务怎么处理；返回 null 表示不提供这个服务（连接会被关掉）。</param>
     public TunnelServer(RoomCode room, TunnelSettings settings, int port, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null, IPAddress? address = null)
     {
@@ -155,12 +165,26 @@ public sealed class TunnelServer : IAsyncDisposable
             {
                 return;
             }
+            if (Interlocked.Increment(ref _pending) > MaxPendingHandshakes)
+            {
+                Interlocked.Decrement(ref _pending);
+                Interlocked.Increment(ref Rejected);
+                Pump.Abort(client);
+                client.Dispose();
+                continue;
+            }
             _ = HandleAsync(client, ct);
         }
     }
 
     private async Task HandleAsync(TcpClient client, CancellationToken ct)
     {
+        var pending = true;
+        void HandshakeDone()
+        {
+            if (pending) Interlocked.Decrement(ref _pending);
+            pending = false;
+        }
         using (client)
         {
             Pump.Tune(client);
@@ -172,6 +196,7 @@ public sealed class TunnelServer : IAsyncDisposable
                 if (_settings.Wraps)
                 {
                     var accepted = await TunnelHandshake.AcceptWithMemberAsync(stream, _room, _settings.Mode, _settings.Disguise, ct);
+                    HandshakeDone();
                     if (accepted is null) return;
                     (stream, service, var member) = accepted.Value;
                     // 邀请房间：这个成员的钥匙一作废（踢出、重新批准换了钥匙、房间结束）就断开这条连接。
@@ -184,6 +209,7 @@ public sealed class TunnelServer : IAsyncDisposable
                         });
                 }
                 else service = TunnelService.Socks;
+                HandshakeDone();
                 var handler = _route(service);
                 if (handler is null)
                 {
@@ -203,6 +229,7 @@ public sealed class TunnelServer : IAsyncDisposable
             }
             finally
             {
+                HandshakeDone();
                 await revocation.DisposeAsync();
                 await stream.DisposeAsync();
             }

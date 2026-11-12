@@ -98,6 +98,52 @@ public sealed class RekeyTests : IDisposable
         Assert.Throws<CryptographicException>(() => alice.Key.CopyPsk());
     }
 
+    /// <summary>Connections that never finish the handshake are capped; past the cap new ones are closed at once, and a member still gets in once they go.</summary>
+    [Fact]
+    public async Task StalledHandshakesAreCapped()
+    {
+        var settings = new TunnelSettings(TransportMode.High, false);
+        var room = HostRoom(settings);
+        var alice = room.Table.Issue(_alice.PublicKey, "Alice");
+        await using var server = new TunnelServer(room.Host, settings, 0, _ => async (stream, ct) => await stream.CopyToAsync(stream, ct));
+        var idle = new List<TcpClient>();
+        try
+        {
+            for (var i = 0; i < TunnelServer.MaxPendingHandshakes; i++)
+            {
+                var c = new TcpClient();
+                await c.ConnectAsync(IPAddress.Loopback, server.Port);
+                idle.Add(c);
+            }
+            Assert.True(await WaitAsync(() => server.PendingHandshakes == TunnelServer.MaxPendingHandshakes, 15));
+            Assert.Equal(0, server.Rejected);
+            using var extra = new TcpClient();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var closed = false;
+            // The server resets it at once, which can already show up while connecting.
+            try
+            {
+                await extra.ConnectAsync(IPAddress.Loopback, server.Port);
+                closed = await extra.GetStream().ReadAsync(new byte[1], timeout.Token) == 0;
+            }
+            catch (Exception e) when (e is IOException or SocketException) { closed = true; }
+            Assert.True(closed);
+            Assert.True(await WaitAsync(() => server.Rejected == 1));
+        }
+        finally
+        {
+            foreach (var c in idle) c.Dispose();
+        }
+        // The stalled ones fail their handshakes and free their places.
+        Assert.True(await WaitAsync(() => server.PendingHandshakes == 0, 20));
+        await using var tunnel = await TunnelClient.Wrapped("127.0.0.1", server.Port, GuestRoom(room, alice), settings, TunnelService.Game)(default);
+        await tunnel.WriteAsync(new byte[] { 7 });
+        await tunnel.FlushAsync();
+        var echo = new byte[1];
+        Assert.Equal(1, await tunnel.ReadAsync(echo));
+        Assert.Equal(7, echo[0]);
+    }
+
     /// <summary>同一个人重新被批准、换了新钥匙：旧钥匙作废，旧的聊天和封装连接马上断开（不会同时出现两个他）。</summary>
     [Fact]
     public async Task ReissuingClosesTheOldSessions()
