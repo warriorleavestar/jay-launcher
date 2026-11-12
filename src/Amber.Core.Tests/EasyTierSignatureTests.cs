@@ -94,7 +94,10 @@ public sealed class EasyTierSignatureTests
         Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, seq: EasyTierRelease.Seq + 1), T[0], T[1])));
         Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, commit: new string('c', 40)), T[0], T[1])));
         // The signature is for a different SHA256SUMS.txt.
-        var other = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(sums).Replace("98dbf4c9", "08dbf4c9", StringComparison.Ordinal));
+        var hash = EasyTierRelease.All[0].Sha256;
+        var tampered = (hash[0] == '0' ? "1" : "0") + hash[1..];
+        var other = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(sums).Replace(hash, tampered, StringComparison.Ordinal));
+        Assert.NotEqual(sums, other);
         Assert.Equal(ReleaseVerdict.SumsMismatch, Check(Signed(Statement(other), T[0], T[1])));
     }
 
