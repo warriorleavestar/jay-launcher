@@ -33,7 +33,7 @@ The account id is `SHA-256("jay-account-id-v1\n" ‖ Ed25519 public key ‖ ML-D
 
 Version 0 addresses (the bare Ed25519 key) are no longer valid. Migration works like this:
 
-- Saved accounts move to their new address when the store loads (the seed is checked against the old address). Minecraft account bindings follow.
+- Saved accounts move to their new address when the store loads (the seed is checked against the old address). The old address is kept with the entry, so Minecraft account bindings follow on any later start too. A copy of the file from before the move is kept as `.v0.bak`. An entry whose seed can't be opened yet is kept unchanged and tried again next time.
 - Other people's version 0 addresses in contacts and trust lists are dropped, and learned again from their next knock.
 - Friend backups from before this change still open: the old AAD binding and old address are accepted for the same account.
 
@@ -57,7 +57,9 @@ In a knock, each side sends a `JayProof`: the certificate plus a fresh device si
 - The guest's proof is inside the last handshake message, so it covers the hash before that message.
 - The host's proof is in the encrypted reply, so it covers the finished handshake.
 
-A proof copied into another session doesn't verify. A proof also holds if X25519 alone were broken, because the device's signing keys are named in the certificate.
+A proof copied into another session doesn't verify. Once an account is known, the step from that account to each of its devices is signed with both account keys and checked with both device signing keys, so it holds even if X25519 alone were broken.
+
+The first link between a contact and an account is weaker. It rests on the contact's X25519 key and the emoji check, so it counts only after the user confirms it (see below).
 
 A proof is about 14.5 KB of JSON, and the knock frame limit is 32 KiB. Older versions read at most 8 KB, so proofs are negotiated:
 
@@ -69,7 +71,8 @@ A proof is about 14.5 KB of JSON, and the knock frame limit is 32 KiB. Older ver
 
 Add-contact mail carries no account. The other side learns which person a device belongs to from a live knock (`ContactBook.SeenLive`):
 
-- A verified contact without an account is grouped under the proven account.
-- A device the user doesn't have yet, certified by the account of someone already verified, joins that person as a new device waiting for the user's OK. This does not happen if the user removed that device, or if the certificate's epoch is older than one already seen from that account.
+- A verified contact without an account gets the proven account, waiting for the user's OK. Until the user confirms it, the account vouches for nothing. If the user says no, the link is dropped and the same account isn't offered again for that device.
+- A device the user doesn't have yet, certified by a confirmed account of someone already verified, joins that person as a new device waiting for the user's OK. This does not happen if the user removed that device, or if the certificate's epoch is older than any already seen from that account (devices still waiting for an OK count too).
+- A contact saved with a version 0 account address forgets it, and learns the account again from the next knock.
 
 Relinking after a friend list restore is an ordinary add-contact request, and each friend compares the emoji once.

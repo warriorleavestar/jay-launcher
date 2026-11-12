@@ -252,6 +252,28 @@ internal sealed partial class SelfTest
             vm.Contacts.Dismiss(bobNew.PublicKey);
         }
 
+        // A verified friend without an account knocks with one: the link waits for my OK in a safety request (the safe
+        // answer is the default), and only after "yes" does the account count.
+        using (var annDevice = DeviceKeys.Generate())
+        using (var annAccount = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null))
+        {
+            var ann = annDevice.Dh.PublicKey.ToArray();
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                vm.Contacts.Import([new Amber.Core.Multiplayer.Contacts.Contact(ann, "Ann", true, DateTimeOffset.UtcNow)]);
+                vm.Contacts.SeenLive(ann, annAccount.CertifyDevice(annDevice, "macOS", 0, DateTimeOffset.UtcNow));
+            });
+            RequestHandle? Link() => main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-account");
+            Check("好友：敲门把朋友的设备连到一个 Jay 账户时，先在请求条里问我（安全类，默认“不是”）",
+                await WaitAsync(() => Link() is { Spec.IsSafety: true } n && n.Spec.Title == L.F("multiplayer.contacts.account_link", "Ann")
+                    && n.Spec.Choices.Single(c => c.IsDefault).Id == "no" && vm.Contacts.FindVerifiedByJayAccount(annAccount.Address) is null, 3),
+                string.Join(", ", main.Service.Requests.Pending.Select(r => r.Spec.Kind + ":" + r.Spec.Title)));
+            await ShotAsync("Jay账户-确认朋友的账户");
+            Dispatcher.UIThread.Invoke(() => main.Service.Requests.Resolve(Link()!, "ok", RequestSource.Bar));
+            Check("好友：点“是 TA”后这个账户才算数，请求收起",
+                await WaitAsync(() => vm.Contacts.FindVerifiedByJayAccount(annAccount.Address) is not null && Link() is null, 3), vm.Status);
+        }
+
         var tampered = File.ReadAllBytes(backup);
         tampered[^5] ^= 1;
         File.WriteAllBytes(backup, tampered);

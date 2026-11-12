@@ -3,6 +3,7 @@
 namespace Amber.Core.Tests;
 
 /// <summary>Privacy plan item 7: one random seed per device, three keys from it, both signatures must verify.</summary>
+[Collection(MlDsaImplementation.Name)]
 public sealed class DeviceKeysTests
 {
     private static readonly byte[] Seed = Enumerable.Range(1, 32).Select(i => (byte)i).ToArray();
@@ -51,4 +52,11 @@ public sealed class DeviceKeysTests
         // Two devices never share keys.
         Assert.NotEqual(keys.Dh.PublicKey, other.Dh.PublicKey);
     }
+}
+
+/// <summary>Tests that switch the ML-DSA implementation run alone, so no other test signs while it is switched.</summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class MlDsaImplementation
+{
+    public const string Name = "MlDsaImplementation";
 }

@@ -36,13 +36,31 @@ public sealed class DeviceKeys : IDisposable
         if (seed.Length != SeedLength || keptDh.Length is not (0 or X25519KeyPair.Length)) throw new CryptographicException("device seed size");
         _seed = seed.ToArray();
         _keptDh = keptDh.IsEmpty ? null : keptDh.ToArray();
+        _edPrivate = [];
+        _mlDsaSeed = [];
         var dh = _keptDh is null ? Derive(DhLabel) : (byte[])_keptDh.Clone();
-        try { Dh = X25519KeyPair.FromPrivateKey(dh); }
-        finally { CryptographicOperations.ZeroMemory(dh); }
-        _edPrivate = Derive(EdLabel);
-        EdPublicKey = new Ed25519PrivateKeyParameters(_edPrivate).GeneratePublicKey().GetEncoded();
-        _mlDsaSeed = Derive(MlDsaLabel);
-        MlDsaPublicKey = MlDsa65.PublicKey(_mlDsaSeed);
+        try
+        {
+            Dh = X25519KeyPair.FromPrivateKey(dh);
+            _edPrivate = Derive(EdLabel);
+            EdPublicKey = new Ed25519PrivateKeyParameters(_edPrivate).GeneratePublicKey().GetEncoded();
+            _mlDsaSeed = Derive(MlDsaLabel);
+            MlDsaPublicKey = MlDsa65.PublicKey(_mlDsaSeed);
+        }
+        catch
+        {
+            // Nothing secret is left behind when deriving fails part way.
+            Dh?.Dispose();
+            CryptographicOperations.ZeroMemory(_seed);
+            CryptographicOperations.ZeroMemory(_edPrivate);
+            CryptographicOperations.ZeroMemory(_mlDsaSeed);
+            if (_keptDh is not null) CryptographicOperations.ZeroMemory(_keptDh);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dh);
+        }
     }
 
     /// <summary>A new device: a fresh random seed.</summary>

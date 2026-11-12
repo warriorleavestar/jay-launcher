@@ -8,6 +8,9 @@ namespace Amber.Core.Identity;
 /// <summary>One saved Jay account on this computer (the seed itself stays encrypted on disk until <see cref="JayAccountStore.Open"/>).</summary>
 public sealed record JayAccountEntry(string Address, string Label, bool BackedUp, int Epoch, DateTimeOffset Created, DeviceCertificate? Device)
 {
+    /// <summary>The version 0 address this account had before addresses covered both account keys, when it was moved.</summary>
+    public string? FormerAddress { get; init; }
+
     public string ShortAddress => JayAddress.Short(Address);
 }
 
@@ -40,15 +43,21 @@ public sealed class JayAccountStore(string directory)
         lock (_gate) return _items.Select(i => i.Entry).FirstOrDefault(e => e.Address == address);
     }
 
-    private readonly Dictionary<string, string> _readdressed = [];
+    // Version 0 entries that couldn't be moved this time (the seed didn't open: a locked file, DPAPI unavailable, ...).
+    // They are written back unchanged, so a later start can still move them and the seed is never lost.
+    private readonly List<JsonNode> _unmoved = [];
 
     /// <summary>
-    /// Old address → new address for accounts <see cref="Load"/> moved to version 1 addresses. The owner points
-    /// Minecraft account bindings at the new addresses; the file itself is rewritten during the load.
+    /// Old address → new address for every account moved from a version 0 address (kept in the file as "was"), so the
+    /// owner can point Minecraft account bindings at the new address on any start, not only the one that moved it.
     /// </summary>
     public IReadOnlyDictionary<string, string> Readdressed
     {
-        get { lock (_gate) return new Dictionary<string, string>(_readdressed); }
+        get
+        {
+            lock (_gate)
+                return _items.Where(i => i.Entry.FormerAddress is not null).ToDictionary(i => i.Entry.FormerAddress!, i => i.Entry.Address);
+        }
     }
 
     /// <summary>The version 1 address of a saved version 0 account, when its seed opens here and matches the old address.</summary>
@@ -77,7 +86,8 @@ public sealed class JayAccountStore(string directory)
         lock (_gate)
         {
             _items.Clear();
-            _readdressed.Clear();
+            _unmoved.Clear();
+            var moved = false;
             if (!File.Exists(PathOnDisk)) return;
             try
             {
@@ -88,30 +98,42 @@ public sealed class JayAccountStore(string directory)
                     var address = (string?)o["address"];
                     var seed = (string?)o["seed"];
                     if (string.IsNullOrEmpty(seed)) continue;
+                    var former = JayAddress.IsValid((string?)o["was"]) ? null : (string?)o["was"];
                     if (!JayAddress.IsValid(address))
                     {
                         // An account saved before addresses became a hash of both account keys (version 0, the bare
-                        // Ed25519 key): work out its new address from the seed, and remember the change so the bindings
-                        // that point at it can follow.
-                        if (NewAddressFor(address, seed) is not { } renamed) continue;
-                        _readdressed[address!] = renamed;
+                        // Ed25519 key): work out its new address from the seed, and remember the old one so the bindings
+                        // that point at it can follow. If that can't be done now, keep the entry exactly as it is.
+                        if (!JayAddress.TryDecodeVersion0(address, out _) || NewAddressFor(address, seed) is not { } renamed)
+                        {
+                            _unmoved.Add(o.DeepClone());
+                            continue;
+                        }
+                        former = address;
                         address = renamed;
+                        moved = true;
                     }
                     if (_items.Any(i => i.Entry.Address == address)) continue;
                     var entry = new JayAccountEntry(address!, DeviceCertificate.CleanName((string?)o["label"]), (bool?)o["backedUp"] ?? false,
                         Math.Max(0, (int?)o["epoch"] ?? 0), DateTimeOffset.FromUnixTimeSeconds(Math.Max(0, (long?)o["created"] ?? 0)),
-                        DeviceCertificate.FromJson(o["device"]));
+                        DeviceCertificate.FromJson(o["device"])) { FormerAddress = former };
                     _items.Add((entry, seed));
                 }
-                if (_readdressed.Count > 0)
+                if (moved)
                 {
-                    try { SaveLocked(); }
+                    try
+                    {
+                        // A copy of the file as it was, before the first rewrite with new addresses.
+                        var backup = PathOnDisk + ".v0.bak";
+                        if (!File.Exists(backup)) File.Copy(PathOnDisk, backup);
+                        SaveLocked();
+                    }
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 }
             }
             catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException)
             {
-                _readdressed.Clear();
+                _unmoved.Clear();
                 try { File.Copy(PathOnDisk, PathOnDisk + ".broken", true); }
                 catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
                 _items.Clear();
@@ -134,7 +156,7 @@ public sealed class JayAccountStore(string directory)
             var epoch = existing >= 0 ? _items[existing].Entry.Epoch : 0;
             var created = existing >= 0 ? _items[existing].Entry.Created : DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds());
             var entry = new JayAccountEntry(account.Address, DeviceCertificate.CleanName(label), backedUp || (existing >= 0 && _items[existing].Entry.BackedUp),
-                epoch, created, account.CertifyDevice(device, deviceName, epoch, now));
+                epoch, created, account.CertifyDevice(device, deviceName, epoch, now)) { FormerAddress = existing >= 0 ? _items[existing].Entry.FormerAddress : null };
             if (existing >= 0) _items[existing] = (entry, protectedSeed);
             else _items.Add((entry, protectedSeed));
             SaveLocked();
@@ -220,8 +242,10 @@ public sealed class JayAccountStore(string directory)
                 ["epoch"] = entry.Epoch,
                 ["created"] = entry.Created.ToUnixTimeSeconds(),
                 ["device"] = entry.Device?.ToJson(),
+                ["was"] = entry.FormerAddress,
             });
         }
+        foreach (var node in _unmoved) accounts.Add(node.DeepClone());
         Directory.CreateDirectory(directory);
         var temp = PathOnDisk + ".tmp";
         MemberIdentity.WritePrivate(temp, System.Text.Encoding.UTF8.GetBytes(new JsonObject { ["version"] = 1, ["accounts"] = accounts }.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));

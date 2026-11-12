@@ -12,10 +12,19 @@ public sealed record Contact(byte[] PublicKey, string Name, bool Verified, DateT
     public string Code => ContactCode.Format(PublicKey);
 
     /// <summary>
-    /// Their Jay account (jay1…), when they sent a certificate the account signed for this device key while adding.
-    /// A later add-contact request from another device of the same account is recognized as the same person.
+    /// Their Jay account (jay1…), proven live for this device key in a knock (<see cref="ContactBook.SeenLive"/>).
+    /// Other devices of the same account are recognized as the same person once I've confirmed the account.
     /// </summary>
     public string? JayAccount { get; init; }
+
+    /// <summary>
+    /// <see cref="JayAccount"/> was linked to this (emoji-verified) device in a knock and I haven't confirmed it yet. Until
+    /// then the account vouches for no other device: the link itself rests only on this device's X25519 key.
+    /// </summary>
+    public bool AccountPending { get; init; }
+
+    /// <summary>An account I said isn't theirs for this device; a knock proving it again doesn't ask again.</summary>
+    public string? RefusedAccount { get; init; }
 
     /// <summary>The device name and epoch from the certificate this device sent (empty and 0 without one).</summary>
     public string DeviceName { get; init; } = "";
@@ -32,6 +41,9 @@ public sealed record Contact(byte[] PublicKey, string Name, bool Verified, DateT
     /// until then the host is asked when it knocks, like for anyone else.
     /// </summary>
     public bool MayBeAutoAdmitted => Verified && !NewDevice;
+
+    /// <summary>This device stands for its account: verified, not a new device awaiting my OK, and the account confirmed.</summary>
+    internal bool VouchesForAccount => Verified && !NewDevice && !AccountPending && JayAccount is not null;
 }
 
 /// <summary>A device I removed from someone's devices. It has to go through the emoji again to come back.</summary>
@@ -132,7 +144,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     public Contact? FindVerifiedByJayAccount(string? account)
     {
         if (account is null) return null;
-        lock (_gate) return Load().FirstOrDefault(c => c.Verified && c.JayAccount is not null && string.Equals(c.JayAccount, account, StringComparison.OrdinalIgnoreCase));
+        lock (_gate) return Load().FirstOrDefault(c => c.VouchesForAccount && string.Equals(c.JayAccount, account, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -140,9 +152,10 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     /// account signatures and a fresh device signature checked out (privacy plan item 7). Add-contact mail never carries
     /// the certificate (it is about 7 KB and mail is 4 KiB), so this is where devices learn which person they belong to.
     /// <list type="bullet">
-    /// <item>A verified contact without an account gets this one, so the list groups it under the person; one with this
-    /// account keeps the newest epoch and device name. A contact under another account is left alone.</item>
-    /// <item>A device I don't have, certified by the account of someone verified in the list, joins them as a new device
+    /// <item>A verified contact without an account gets this one, waiting for my OK (<see cref="Contact.AccountPending"/>):
+    /// the link rests only on the device's X25519 key, so it vouches for nothing until I confirm it. One with this account
+    /// keeps the newest epoch and device name. A contact under another account, or one I refused, is left alone.</item>
+    /// <item>A device I don't have, certified by a confirmed account of someone verified in the list, joins them as a new device
     /// waiting for my OK (<see cref="Contact.NewDevice"/>, <see cref="DeviceAdded"/>), unless I removed that device or the
     /// certificate is older (lower epoch) than one I've seen from that account.</item>
     /// </list>
@@ -165,14 +178,23 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                 // Nothing older than the newest certificate seen from this account changes anything, the name included.
                 var newest = list.Where(c => c.Verified && c.JayAccount == account).Select(c => c.Epoch).DefaultIfEmpty(0).Max();
                 if (!known.Verified || (known.JayAccount is not null && known.JayAccount != account) || certificate.Epoch < newest
+                    || known.RefusedAccount == account
                     || (known.JayAccount == account && known.Epoch == certificate.Epoch && known.DeviceName == certificate.DeviceName)) return null;
-                list[i] = known with { JayAccount = account, DeviceName = certificate.DeviceName, Epoch = certificate.Epoch };
+                list[i] = known with
+                {
+                    JayAccount = account,
+                    AccountPending = known.JayAccount is null || known.AccountPending,
+                    DeviceName = certificate.DeviceName,
+                    Epoch = certificate.Epoch,
+                };
                 changed = true;
             }
             else
             {
-                var devices = list.Where(c => c.Verified && c.JayAccount == account).ToList();
-                if (devices.Count == 0 || _removed.ContainsKey(Convert.ToHexStringLower(deviceKey)) || certificate.Epoch < devices.Max(c => c.Epoch)) return null;
+                var devices = list.Where(c => c.VouchesForAccount && c.JayAccount == account).ToList();
+                // The epoch floor counts every certificate seen from this account, including devices still waiting for my OK.
+                var newest = list.Where(c => c.Verified && c.JayAccount == account).Max(c => (int?)c.Epoch) ?? 0;
+                if (devices.Count == 0 || _removed.ContainsKey(Convert.ToHexStringLower(deviceKey)) || certificate.Epoch < newest) return null;
                 // The person keeps the name I gave them, wherever the device came from.
                 added = new Contact(key, devices[0].Name, Verified: true, _now())
                 {
@@ -458,6 +480,26 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         }
     }
 
+    /// <summary>
+    /// My answer about the Jay account a knock linked to this device: yes, it's theirs (from now on it vouches for their
+    /// other devices), or no (the link is dropped, and the same account doesn't ask again for this device).
+    /// </summary>
+    public void ConfirmAccount(ReadOnlySpan<byte> theirs, bool isTheirs)
+    {
+        lock (_gate)
+        {
+            var list = Load();
+            var key = theirs.ToArray();
+            var i = list.FindIndex(c => c.PublicKey.AsSpan().SequenceEqual(key));
+            if (i < 0 || !list[i].AccountPending) return;
+            list[i] = isTheirs
+                ? list[i] with { AccountPending = false }
+                : list[i] with { AccountPending = false, RefusedAccount = list[i].JayAccount, JayAccount = null, DeviceName = "", Epoch = 0 };
+            Save(list);
+        }
+        Changed?.Invoke();
+    }
+
     /// <summary>I've seen the notice about a friend's new device and it's fine: stop asking.</summary>
     public void AcknowledgeDevice(ReadOnlySpan<byte> theirs)
     {
@@ -511,6 +553,8 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     DeviceName = Identity.DeviceCertificate.CleanName(item["device"]?.GetValue<string>()),
                     Epoch = Math.Max(0, item["epoch"]?.GetValue<int>() ?? 0),
                     NewDevice = item["new"]?.GetValue<bool>() == true,
+                    AccountPending = account is not null && item["acctPending"]?.GetValue<bool>() == true,
+                    RefusedAccount = Identity.JayAddress.Canonical(item["refused"]?.GetValue<string>()),
                 });
             }
         }
@@ -539,6 +583,8 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             if (c.DeviceName.Length > 0) item["device"] = c.DeviceName;
             if (c.Epoch > 0) item["epoch"] = c.Epoch;
             if (c.NewDevice) item["new"] = true;
+            if (c.AccountPending) item["acctPending"] = true;
+            if (c.RefusedAccount is not null) item["refused"] = c.RefusedAccount;
             array.Add((JsonNode)item);
         }
         foreach (var (pub, account) in _removed)

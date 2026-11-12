@@ -32,15 +32,28 @@ public sealed class JayAccount : IDisposable
     {
         if (seed.Length != SeedLength) throw new ArgumentException("seed must be 64 bytes", nameof(seed));
         _seed = (byte[])seed.Clone();
-        var (key, chain) = Slip10.Derive(_seed, Slip10.JayRootKey, AccountPath);
-        CryptographicOperations.ZeroMemory(chain);
-        _edPrivate = key;
-        PublicKey = new Ed25519PrivateKeyParameters(_edPrivate).GeneratePublicKey().GetEncoded();
-        var (node, pqChain) = Slip10.Derive(_seed, Slip10.JayRootKey, PostQuantumPath);
-        CryptographicOperations.ZeroMemory(pqChain);
-        try { _mlDsaSeed = HKDF.DeriveKey(HashAlgorithmName.SHA256, node, MlDsa65.SeedSize, [], "jay-account-mldsa-v1"u8.ToArray()); }
-        finally { CryptographicOperations.ZeroMemory(node); }
-        MlDsaPublicKey = MlDsa65.PublicKey(_mlDsaSeed);
+        _edPrivate = [];
+        _mlDsaSeed = [];
+        try
+        {
+            var (key, chain) = Slip10.Derive(_seed, Slip10.JayRootKey, AccountPath);
+            CryptographicOperations.ZeroMemory(chain);
+            _edPrivate = key;
+            PublicKey = new Ed25519PrivateKeyParameters(_edPrivate).GeneratePublicKey().GetEncoded();
+            var (node, pqChain) = Slip10.Derive(_seed, Slip10.JayRootKey, PostQuantumPath);
+            CryptographicOperations.ZeroMemory(pqChain);
+            try { _mlDsaSeed = HKDF.DeriveKey(HashAlgorithmName.SHA256, node, MlDsa65.SeedSize, [], "jay-account-mldsa-v1"u8.ToArray()); }
+            finally { CryptographicOperations.ZeroMemory(node); }
+            MlDsaPublicKey = MlDsa65.PublicKey(_mlDsaSeed);
+        }
+        catch
+        {
+            // Nothing secret is left behind when deriving fails part way.
+            CryptographicOperations.ZeroMemory(_seed);
+            CryptographicOperations.ZeroMemory(_edPrivate);
+            CryptographicOperations.ZeroMemory(_mlDsaSeed);
+            throw;
+        }
         Id = JayAddress.AccountId(PublicKey, MlDsaPublicKey);
         Address = JayAddress.Encode(Id);
     }
@@ -147,14 +160,14 @@ public static class JayAddress
 
     public static bool IsValid(string? text) => TryDecode(text, out _);
 
-    /// <summary>
-    /// Reads a version 0 address (the bare Ed25519 account key, from before addresses covered both account keys). Only
-    /// for moving saved accounts to their new address; version 0 addresses are not valid anywhere else.
-    /// </summary>
     /// <summary>The version 0 form of an account (for reading things saved before version 1 addresses).</summary>
     internal static string EncodeVersion0(ReadOnlySpan<byte> edPublicKey) =>
         Bech32m.Encode(Hrp, [0, .. Bech32m.ConvertBits(edPublicKey, 8, 5, pad: true)!]);
 
+    /// <summary>
+    /// Reads a version 0 address (the bare Ed25519 account key, from before addresses covered both account keys). Only
+    /// for moving saved accounts to their new address; version 0 addresses are not valid anywhere else.
+    /// </summary>
     internal static bool TryDecodeVersion0(string? text, out byte[] edPublicKey)
     {
         edPublicKey = [];

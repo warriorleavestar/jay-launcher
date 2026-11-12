@@ -243,22 +243,36 @@ public sealed class JayAccountTests : IDisposable
         var moved = Assert.Single(again.Accounts);
         Assert.Equal((account.Address, "Main", true), (moved.Address, moved.Label, moved.BackedUp));
         Assert.Equal(account.Address, again.Readdressed[old]);
-        Assert.DoesNotContain(old, File.ReadAllText(path));
+        var written = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!["accounts"]![0]!;
+        Assert.Equal((account.Address, old), ((string?)written["address"], (string?)written["was"]));
+        Assert.True(File.Exists(path + ".v0.bak"));
+        // Later starts still know where the old address went, so bindings missed the first time can still follow.
+        var later = new JayAccountStore(_dir);
+        later.Load();
+        Assert.Equal(account.Address, later.Readdressed[old]);
         using (var opened = again.Open(account.Address)) Assert.NotNull(opened);
         // The certificate is made once and then reused, not re-signed every time it is asked for.
         var first = again.EnsureDeviceCertificate(account.Address, keys, "PC", DateTimeOffset.UtcNow);
         Assert.Same(first, again.EnsureDeviceCertificate(account.Address, keys, "PC", DateTimeOffset.UtcNow));
         Assert.Single(again.Accounts);
 
-        // An old address that the saved seed doesn't match is dropped, not moved.
+        // An old address that the saved seed doesn't match isn't moved. The entry is kept as it is, through later saves,
+        // so its seed is never lost.
         using var other = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
         json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
-        json["accounts"]![0]!["address"] = JayAddress.EncodeVersion0(other.PublicKey);
+        var otherOld = JayAddress.EncodeVersion0(other.PublicKey);
+        json["accounts"]![0]!["address"] = otherOld;
+        json["accounts"]![0]!.AsObject().Remove("was");
         File.WriteAllText(path, json.ToJsonString());
         var wrong = new JayAccountStore(_dir);
         wrong.Load();
         Assert.Empty(wrong.Accounts);
         Assert.Empty(wrong.Readdressed);
+        using var third = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        wrong.Add(third, "Third", backedUp: false, keys, "PC", DateTimeOffset.UtcNow);
+        var kept = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!["accounts"]!.AsArray();
+        Assert.Equal(2, kept.Count);
+        Assert.Contains(kept, n => (string?)n!["address"] == otherOld && !string.IsNullOrEmpty((string?)n["seed"]));
     }
 
     [Fact]

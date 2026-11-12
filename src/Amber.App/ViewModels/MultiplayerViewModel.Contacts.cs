@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Amber.App.Services;
 using Amber.Core.Activity;
 using Amber.Core.Localization;
+using Amber.Core.Identity;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Contacts;
 using Amber.Core.Multiplayer.Public;
@@ -174,7 +175,7 @@ public sealed partial class MultiplayerViewModel
         ContactRequests.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasContactRequests));
         _service.Requests.Resolved += handle =>
         {
-            if (handle.ResolvedBy == RequestSource.Program || handle.Spec.Kind is not ("contact" or "contact-compare" or "contact-invite" or "contact-new-device")) return;
+            if (handle.ResolvedBy == RequestSource.Program || handle.Spec.Kind is not ("contact" or "contact-compare" or "contact-invite" or "contact-new-device" or "contact-account")) return;
             Dispatcher.UIThread.Post(() => AnswerContactRequest(handle));
         };
         PropertyChanged += (_, e) =>
@@ -236,8 +237,20 @@ public sealed partial class MultiplayerViewModel
                 [new("ok", L.T("multiplayer.contacts.new_device_ok"), IsDefault: true), new("remove", L.T("multiplayer.contacts.new_device_remove"), IsDanger: true)],
                 IsSafety: true, DedupeKey: dedupe));
         }
+        // A knock linked a friend's device to a Jay account. The link rests only on that device's key, so it vouches for
+        // their other devices only after I confirm it.
+        foreach (var d in book.All.Where(c => c.Verified && c.AccountPending && c.JayAccount is not null))
+        {
+            var dedupe = "contact-account:" + Convert.ToHexStringLower(d.PublicKey);
+            wanted.Add(dedupe);
+            var who = new ContactItem(d).Name;
+            _service.Requests.Post(new RequestSpec("contact-account", L.F("multiplayer.contacts.account_link", who),
+                L.F("multiplayer.contacts.account_link_body", d.Fingerprint, JayAddress.Short(d.JayAccount!)),
+                [new("ok", L.T("multiplayer.contacts.account_link_ok")), new("no", L.T("multiplayer.contacts.account_link_no"), IsDefault: true)],
+                IsSafety: true, DedupeKey: dedupe));
+        }
         foreach (var r in _service.Requests.Pending)
-            if (r.Spec.Kind is "contact" or "contact-compare" or "contact-new-device" && r.Spec.DedupeKey is { } key && !wanted.Contains(key))
+            if (r.Spec.Kind is "contact" or "contact-compare" or "contact-new-device" or "contact-account" && r.Spec.DedupeKey is { } key && !wanted.Contains(key))
                 _service.Requests.Withdraw(key);
     }
 
@@ -417,6 +430,9 @@ public sealed partial class MultiplayerViewModel
                 break;
             case "contact-invite":
                 if (_mailedInvites.Remove(key, out var invite) && handle.Choice == "join") _ = JoinMailedInviteAsync(invite);
+                break;
+            case "contact-account" when key.StartsWith("contact-account:", StringComparison.Ordinal):
+                if (handle.Choice is "ok" or "no") Contacts.ConfirmAccount(Convert.FromHexString(key["contact-account:".Length..]), handle.Choice == "ok");
                 break;
             case "contact-new-device" when key.StartsWith("contact-new-device:", StringComparison.Ordinal):
             {

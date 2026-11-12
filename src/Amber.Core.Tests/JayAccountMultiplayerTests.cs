@@ -257,14 +257,23 @@ public sealed class JayAccountMultiplayerTests : IAsyncDisposable, IDisposable
         Assert.Null(bookA.Confirm(bob)!.JayAccount);
         Assert.Null(bookB.Confirm(alice)!.JayAccount);
 
-        // Alice knocks on Bob's room: the knock proved her account live, so Bob's list groups her device under it.
+        // Alice knocks on Bob's room: the knock proved her account live, so Bob's list groups her device under it,
+        // waiting for Bob's OK, because the link rests only on her X25519 key and the emoji.
         Assert.Null(bookB.SeenLive(alice, _alice.CertifyDevice(aliceLaptop, "Windows", 0, Now)));
-        Assert.Equal(_alice.Address, new ContactBook(Path.Combine(_dir, "b.json")).All.Single().JayAccount);
+        var pending = new ContactBook(Path.Combine(_dir, "b.json")).All.Single();
+        Assert.Equal((_alice.Address, true), (pending.JayAccount, pending.AccountPending));
+        Assert.Null(bookB.FindVerifiedByJayAccount(_alice.Address));
 
-        // Alice restores her words on a new computer and knocks again: the new device joins her, waiting for Bob's OK.
+        // Until Bob confirms, another device of that account joins nobody.
         using var aliceNew = DeviceKeys.Generate();
         var added = new List<Contact>();
         bookB.DeviceAdded += added.Add;
+        Assert.Null(bookB.SeenLive(aliceNew.Dh.PublicKey, _alice.CertifyDevice(aliceNew, "macOS", 0, Now)));
+        Assert.Empty(added);
+        bookB.ConfirmAccount(alice, isTheirs: true);
+        Assert.False(new ContactBook(Path.Combine(_dir, "b.json")).All.Single().AccountPending);
+
+        // Alice restores her words on a new computer and knocks again: the new device joins her, waiting for Bob's OK.
         var fresh = bookB.SeenLive(aliceNew.Dh.PublicKey, _alice.CertifyDevice(aliceNew, "macOS", 0, Now));
         Assert.NotNull(fresh);
         Assert.True(fresh.NewDevice);
@@ -281,6 +290,47 @@ public sealed class JayAccountMultiplayerTests : IAsyncDisposable, IDisposable
         bookB.SeenLive(aliceLaptop.Dh.PublicKey, _alice.CertifyDevice(aliceLaptop, "Windows", 2, Now));
         Assert.Null(bookB.SeenLive(oldDevice.Dh.PublicKey, _alice.CertifyDevice(oldDevice, "Old", 1, Now)));
         Assert.Single(added);
+    }
+
+    /// <summary>When I say an account isn't theirs, the link is dropped, it doesn't ask again, and it vouches for no device.</summary>
+    [Fact]
+    public void RefusedAccountVouchesForNothing()
+    {
+        using var aliceLaptop = DeviceKeys.Generate();
+        using var other = DeviceKeys.Generate();
+        var path = Path.Combine(_dir, "refuse.json");
+        var book = new ContactBook(path, () => Now) { Me = new byte[32] };
+        book.Import([new Contact(aliceLaptop.Dh.PublicKey.ToArray(), "Alice", true, Now)]);
+        book.SeenLive(aliceLaptop.Dh.PublicKey, _alice.CertifyDevice(aliceLaptop, "Windows", 0, Now));
+        book.ConfirmAccount(aliceLaptop.Dh.PublicKey, isTheirs: false);
+
+        var saved = new ContactBook(path, () => Now).All.Single();
+        Assert.Equal((null, false, _alice.Address), (saved.JayAccount, saved.AccountPending, saved.RefusedAccount));
+        Assert.Null(book.SeenLive(aliceLaptop.Dh.PublicKey, _alice.CertifyDevice(aliceLaptop, "Windows", 1, Now)));
+        Assert.Null(book.SeenLive(other.Dh.PublicKey, _alice.CertifyDevice(other, "macOS", 1, Now)));
+        Assert.Null(book.FindVerifiedByJayAccount(_alice.Address));
+        Assert.Single(book.All);
+    }
+
+    /// <summary>A contact saved with a version 0 account address loses the account: it is learned again from the next knock.</summary>
+    [Fact]
+    public void ContactWithVersion0AccountForgetsIt()
+    {
+        var path = Path.Combine(_dir, "v0.json");
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(path, new System.Text.Json.Nodes.JsonArray
+        {
+            new System.Text.Json.Nodes.JsonObject
+            {
+                ["pub"] = Convert.ToHexStringLower(new byte[32].Select((_, i) => (byte)(i + 1)).ToArray()),
+                ["name"] = "Alice",
+                ["verified"] = true,
+                ["jay"] = JayAddress.EncodeVersion0(_alice.PublicKey),
+                ["acctPending"] = true,
+            },
+        }.ToJsonString());
+        var contact = new ContactBook(path, () => Now).All.Single();
+        Assert.Equal(("Alice", true, null, false), (contact.Name, contact.Verified, contact.JayAccount, contact.AccountPending));
     }
 
     public async ValueTask DisposeAsync()

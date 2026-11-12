@@ -101,7 +101,7 @@ public sealed class FriendBackupTests : IDisposable
 
     /// <summary>
     /// Bob knows Alice on her laptop (emoji); a knock from each of her devices proved her account live, so the laptop is
-    /// grouped under it and her phone was added as her new device.
+    /// grouped under it (Bob said yes) and her phone was added as her new device.
     /// </summary>
     private (ContactBook bob, X25519KeyPair bobKey, DeviceKeys laptop, DeviceKeys phone) FriendWithTwoDevices(int phoneEpoch = 0)
     {
@@ -111,6 +111,7 @@ public sealed class FriendBackupTests : IDisposable
         var b = Book("bob", bobKey);
         Assert.True(Exchange(Book("laptop", laptop.Dh), laptop.Dh, b, bobKey));
         b.SeenLive(laptop.Dh.PublicKey, _alice.CertifyDevice(laptop, "Laptop", 0, Now));
+        b.ConfirmAccount(laptop.Dh.PublicKey, isTheirs: true);
         Assert.NotNull(b.SeenLive(phone.Dh.PublicKey, _alice.CertifyDevice(phone, "Phone", phoneEpoch, Now)));
         Assert.True(b.IsVerified(phone.Dh.PublicKey));
         return (b, bobKey, laptop, phone);

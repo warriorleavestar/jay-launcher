@@ -129,12 +129,18 @@ public sealed class LauncherService : IDisposable
         JayAccounts = new Amber.Core.Identity.JayAccountStore(AppSettings.DataDir);
         JayAccounts.Load();
         // Jay accounts saved before addresses covered both account keys got new addresses: move the bindings along.
-        if (JayAccounts.Readdressed is { Count: > 0 } moved)
+        // The old addresses stay in the Jay account file, so this runs on every start until the bindings are saved.
+        var moved = JayAccounts.Readdressed;
+        if (store.Accounts.Any(a => a.JayAddress is { } old && moved.ContainsKey(old)))
         {
             foreach (var account in store.Accounts)
                 if (account.JayAddress is { } old && moved.TryGetValue(old, out var renamed)) account.JayAddress = renamed;
             try { store.Save(); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Bound correctly in memory for this run; the next start tries to save again.
+                System.Diagnostics.Trace.WriteLine("Jay: saving moved Jay account bindings failed: " + e.Message);
+            }
         }
         MigrateBakeRuntime(settings);
         if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
