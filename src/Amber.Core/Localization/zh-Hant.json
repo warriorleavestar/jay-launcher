@@ -2975,6 +2975,7 @@
   "core.mp.public.volunteer_off": "這個網路不收志願中轉",
   "core.mp.public.volunteer_operator": "目錄核對不了你的 Jay 帳戶簽名。請校準這台電腦的時間；這個網路也可能要求志願中轉綁定 Jay 帳戶",
   "core.mp.public.volunteer_owner": "這個位址以別的身分（別的 Jay 帳戶，或者沒簽名）登記過志願中轉。如果你剛換過 MC 帳號綁定的 Jay 帳戶，約 10 分鐘後再試；一直這樣的話，可能是別人搶先登記了你的位址，請聯絡這個網路的營運者",
+  "core.mp.public.volunteer_rate": "目錄這一分鐘收的新志願中轉已經滿了，下次續期會再試",
   "core.mp.public.volunteer_stale": "目錄裡已經有你的 Jay 帳戶對這個位址更新的登記了（這台電腦的時間可能往回調過）。下次續期會再試",
   "core.mp.public.volunteer_bad_address": "請填這台電腦的公網位址（公網 IP 或網域），不能是家裡區域網路的位址",
   "multiplayer.volunteer.title": "志願中轉",

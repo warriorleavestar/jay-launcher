@@ -82,7 +82,7 @@ public static class Program
           jay-server node panel               打印网页管理面板的链接（只能在本机打开；远程服务器用 ssh -L 转发端口）
           jay-server node ban host|room|account|room-host|node|operator <房主指纹|房间编号|账号|房间编号|志愿节点地址|志愿节点运营者的 Jay 账户> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
-              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|room-host|node|operator <...>
+              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|node|operator <...>（room-host 封的要分别解封 host 和 account）
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
         自己的公共网络（连接串 JAYNET2-...）：
@@ -963,8 +963,10 @@ public static class Program
             return 0;
         }
         output.WriteLine(reply.ToJsonString(pretty));
+        if (sub == "ban" && reply["bannedNodes"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } bannedNodes)
+            output.WriteLine($"一起封掉的地址：{string.Join("、", bannedNodes)}（封错了用 node unban node <地址> 解封）");
         if (sub == "ban" && reply["disputedNotBanned"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } spared)
-            output.WriteLine($"这些地址还有别人认领，只移除、没封：{string.Join("、", spared)}（认领的也可能是同一个人的另一个账户，看看 node nodes）");
+            output.WriteLine($"这些地址可能是别人的，只移除、没封：{string.Join("、", spared)}（也可能是同一个人的另一个账户，看看 node nodes）");
         return reply["ok"]?.GetValue<bool>() == true ? 0 : 1;
     }
 

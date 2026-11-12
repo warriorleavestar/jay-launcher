@@ -105,7 +105,7 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         for (var i = 0; i < VolunteerRegistry.MaxEntries; i++)
         {
             // New addresses are taken at a limited rate per minute.
-            if (i > 0 && i % 100 == 0) _now += TimeSpan.FromSeconds(61);
+            if (i > 0 && i % (VolunteerRegistry.NewPerMinute / 2) == 0) _now += TimeSpan.FromSeconds(61);
             Assert.True(Ok(registry.Register($"tcp://node{i}.example.org:11010")));
             await registry.LastProbe;
         }

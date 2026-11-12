@@ -206,10 +206,12 @@ public sealed class AdminApi : IAsyncDisposable
                         ["enabled"] = _server.Volunteers is not null,
                         ["nodes"] = new JsonArray([.. (_server.Volunteers?.Listed() ?? []).Select(n => (JsonNode)n)]),
                         // Who runs each node, for operator bans; null when the volunteer didn't sign with a Jay account.
-                        // "disputed": someone claimed the address under another operator ("claimedBy": the first few, "" = unsigned).
+                        // "disputed": another Jay account claimed the address with a signature ("claimedBy": those seen most
+                        // recently); "unsignedAttempts": unsigned registrations turned away while it was signed.
                         ["operators"] = new JsonArray([.. (_server.Volunteers?.Operators() ?? []).Select(n => (JsonNode)new JsonObject
                         {
                             ["url"] = n.Url, ["operator"] = n.Operator, ["disputed"] = n.Disputed, ["claimedBy"] = n.ClaimedBy is { } claims ? new JsonArray([.. claims.Select(c => (JsonNode)c)]) : null,
+                            ["unsignedAttempts"] = n.UnsignedAttempts, ["lastUnsigned"] = n.LastUnsigned?.ToUnixTimeSeconds(),
                         })]),
                     });
                 case ("GET", "/bans"):
@@ -238,13 +240,15 @@ public sealed class AdminApi : IAsyncDisposable
                     }
                     if (kind == "operator")
                     {
-                        var (dropped, spared) = _server.BanOperator(value, reason, duration);
-                        _log($"admin: banned operator {value}, removed {dropped} node(s)");
+                        var result = _server.BanOperator(value, reason, duration);
+                        _log($"admin: banned operator {value}, removed {result.Removed} node(s)");
                         return (200, new JsonObject
                         {
-                            ["ok"] = true, ["removed"] = dropped,
-                            // Dropped but not banned: another account also claimed them (possibly the operator's own).
-                            ["disputedNotBanned"] = new JsonArray([.. spared.Select(u => (JsonNode)JsonValue.Create(u))]),
+                            ["ok"] = true, ["removed"] = result.Removed,
+                            // Banned with the operator, so a wrongly banned address can be seen (and unbanned) at once.
+                            ["bannedNodes"] = new JsonArray([.. result.BannedNodes.Select(u => (JsonNode)JsonValue.Create(u))]),
+                            // Dropped but not banned: they may be someone else's (or the operator's second account's).
+                            ["disputedNotBanned"] = new JsonArray([.. result.DisputedNotBanned.Select(u => (JsonNode)JsonValue.Create(u))]),
                         });
                     }
                     var removed = _server.Ban(kind, value, reason, duration);

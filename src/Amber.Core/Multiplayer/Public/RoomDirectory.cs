@@ -252,7 +252,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "rv.take" => RendezvousTake(request),
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
-                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"]) : Error("off"),
+                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], source) : Error("off"),
                 // Blocks this connection's task for at most a few seconds while the directory dials the address.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
                 "nodes" => Volunteers is { } v ? NodesReply(v.Pick()) : Error("off"),
@@ -978,6 +978,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         try { replies = NeedOne(await FanOutAsync(request, ct)); }
         catch (DirectoryRejectedException e) when (e.Code == "owner") { throw new DirectoryRejectedException("owner", L.T("core.mp.public.volunteer_owner")); }
         catch (DirectoryRejectedException e) when (e.Code == "stale") { throw new DirectoryRejectedException("stale", L.T("core.mp.public.volunteer_stale")); }
+        catch (DirectoryRejectedException e) when (e.Code == "rate") { throw new DirectoryRejectedException("rate", L.T("core.mp.public.volunteer_rate")); }
         catch (DirectoryRejectedException e) when (e.Code == "op")
         {
             // Directories from before volunteer nodes existed.

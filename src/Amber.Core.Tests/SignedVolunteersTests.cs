@@ -144,11 +144,17 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         Assert.Equal("owner", ErrorOf(await RegisterAsync(registry, "tcp://b.example.org:11010", bob)));
         var entry = registry.Operators().Single(n => n.Url == "tcp://b.example.org:11010");
         Assert.Equal((mallory.Certificate.Account, true), (entry.Operator, entry.Disputed));
-        // Later claims can't push Bob's out: the first few are kept.
-        for (var i = 0; i < 10; i++) await RegisterAsync(registry, "tcp://b.example.org:11010", Person());
+        // One-off claims filling the list can't keep Bob out while he keeps renewing: the claim not seen for longest makes room.
+        for (var i = 0; i < 10; i++)
+        {
+            _now += TimeSpan.FromSeconds(1);
+            await RegisterAsync(registry, "tcp://b.example.org:11010", Person());
+            _now += TimeSpan.FromSeconds(1);
+            await RegisterAsync(registry, "tcp://b.example.org:11010", bob);
+        }
         entry = registry.Operators().Single(n => n.Url == "tcp://b.example.org:11010");
         Assert.Equal(VolunteerRegistry.MaxClaims, entry.ClaimedBy!.Count);
-        Assert.Equal(bob.Certificate.Account, entry.ClaimedBy[0]);
+        Assert.Contains(bob.Certificate.Account, entry.ClaimedBy);
         Assert.True(registry.Remove("tcp://b.example.org:11010"));
         Assert.True(Ok(await RegisterAsync(registry, "tcp://b.example.org:11010", bob)));
         var mine = registry.Operators().Single(n => n.Url == "tcp://b.example.org:11010");
@@ -182,20 +188,23 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         string Url(string name) => $"tcp://{name}.example.org:11010";
         JsonObject As(JayProof who, string url) => VolunteerOperator.Sign(who, server.Profile.Id, url, _now);
         foreach (var name in new[] { "a", "b", "c" }) Assert.True(Ok(Volunteer(server, Url(name), As(mallory, Url(name)))));
-        // An unsigned registration of a signed address is turned away without counting as a claim.
+        // An unsigned registration of a signed address is turned away without counting as a claim, but it is counted.
         Assert.Equal("owner", ErrorOf(Volunteer(server, Url("a"), null)));
-        Assert.False(server.Volunteers!.Operators().Single(n => n.Url == Url("a")).Disputed);
+        var a = server.Volunteers!.Operators().Single(n => n.Url == Url("a"));
+        Assert.False(a.Disputed);
+        Assert.Equal(1, a.UnsignedAttempts);
         // A claim from another account spares the address; one from an account that is banned by then doesn't.
         Assert.Equal("owner", ErrorOf(Volunteer(server, Url("b"), As(other, Url("b")))));
         var banned = Person();
         Assert.Equal("owner", ErrorOf(Volunteer(server, Url("c"), As(banned, Url("c")))));
         server.Ban("operator", banned.Certificate.Account, "spam");
         await server.Volunteers.LastProbe;
-        var (removed, spared) = server.BanOperator(mallory.Certificate.Account, "abuse", TimeSpan.FromDays(1));
-        Assert.Equal(3, removed);
-        Assert.Equal([Url("b")], spared);
-        var nodeBans = server.Bans!.List().Where(b => b.Kind == "node").ToList();
-        Assert.Equal([Url("a"), Url("c")], nodeBans.Select(b => b.Value).Order());
+        var result = server.BanOperator(mallory.Certificate.Account, "abuse", TimeSpan.FromDays(1));
+        Assert.Equal(3, result.Removed);
+        // "a" may be run by someone who never signed (Mallory registered it first): dropped, not banned.
+        Assert.Equal([Url("a"), Url("b")], result.DisputedNotBanned.Order());
+        Assert.Equal([Url("c")], result.BannedNodes);
+        Assert.Equal([Url("c")], server.Bans!.List().Where(b => b.Kind == "node").Select(b => b.Value));
 
         // Banning again for longer moves the end of the address bans with it.
         server.BanOperator(mallory.Certificate.Account, "again", TimeSpan.FromDays(30));
@@ -203,6 +212,64 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         // And for good.
         server.BanOperator(mallory.Certificate.Account, "for good");
         Assert.All(server.Bans.List().Where(b => b.Kind == "node"), b => Assert.Null(b.Until));
+    }
+
+    [Fact]
+    public async Task BanningAHijackerOfAnUnsignedVolunteerSparesTheirAddress()
+    {
+        var server = await StartAsync();
+        var victim = "tcp://v.example.org:11010";
+        // The victim's entry lapsed; someone signs for the address before the victim (who never signs) renews.
+        var hijacker = Person();
+        Assert.True(Ok(Volunteer(server, victim, VolunteerOperator.Sign(hijacker, server.Profile.Id, victim, _now))));
+        Assert.Equal("owner", ErrorOf(Volunteer(server, victim, null)));
+        await server.Volunteers!.LastProbe;
+        var result = server.BanOperator(hijacker.Certificate.Account, "hijack");
+        Assert.Equal([victim], result.DisputedNotBanned);
+        Assert.Empty(result.BannedNodes);
+        Assert.True(Ok(Volunteer(server, victim, null)));
+    }
+
+    [Fact]
+    public void AnUnsignedFloodDoesNotKeepSignedVolunteersOut()
+    {
+        var registry = Registry();
+        for (var i = 0; i < VolunteerRegistry.NewPerMinute; i++) Assert.True(Ok(registry.Register($"tcp://f{i}.example.org:11010")));
+        Assert.Equal("rate", ErrorOf(registry.Register("tcp://more.example.org:11010")));
+        // A signed volunteer has its own allowance.
+        var alice = Person();
+        Assert.True(Ok(registry.Register("tcp://alice.example.org:11010", VolunteerOperator.Sign(alice, Net, "tcp://alice.example.org:11010", _now))));
+        // One account gets only a few new addresses a minute.
+        for (var i = 1; i < VolunteerRegistry.NewPerAccountPerMinute; i++)
+            Assert.True(Ok(registry.Register($"tcp://a{i}.example.org:11010", VolunteerOperator.Sign(alice, Net, $"tcp://a{i}.example.org:11010", _now))));
+        Assert.Equal("rate", ErrorOf(registry.Register("tcp://a99.example.org:11010", VolunteerOperator.Sign(alice, Net, "tcp://a99.example.org:11010", _now))));
+        // One caller gets only a few new addresses a minute, signed or not (a loopback caller isn't told apart).
+        var bob = Person();
+        for (var i = 0; i < VolunteerRegistry.NewPerSourcePerMinute; i++)
+        {
+            var url = $"tcp://s{i}.example.org:11010";
+            Assert.True(Ok(registry.Register(url, VolunteerOperator.Sign(i % 2 == 0 ? bob : Person(), Net, url, _now), "10.235.0.9")));
+        }
+        Assert.Equal("rate", ErrorOf(registry.Register("tcp://s99.example.org:11010", VolunteerOperator.Sign(Person(), Net, "tcp://s99.example.org:11010", _now), "10.235.0.9")));
+        Assert.True(Ok(registry.Register("tcp://s98.example.org:11010", VolunteerOperator.Sign(Person(), Net, "tcp://s98.example.org:11010", _now), "127.0.0.1")));
+        // A minute later there is room again.
+        _now += TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(1);
+        Assert.True(Ok(registry.Register("tcp://more.example.org:11010")));
+    }
+
+    [Fact]
+    public void AVolunteerComingBackIsNotNew()
+    {
+        var registry = Registry();
+        var alice = Person();
+        var url = "tcp://alice.example.org:11010";
+        Assert.True(Ok(registry.Register(url, VolunteerOperator.Sign(alice, Net, url, _now))));
+        Assert.True(registry.Remove(url));
+        // Alice's allowance is used up by other addresses; coming back to her own address still works.
+        for (var i = 1; i < VolunteerRegistry.NewPerAccountPerMinute; i++)
+            Assert.True(Ok(registry.Register($"tcp://a{i}.example.org:11010", VolunteerOperator.Sign(alice, Net, $"tcp://a{i}.example.org:11010", _now))));
+        _now += TimeSpan.FromSeconds(1);
+        Assert.True(Ok(registry.Register(url, VolunteerOperator.Sign(alice, Net, url, _now))));
     }
 
     [Fact]

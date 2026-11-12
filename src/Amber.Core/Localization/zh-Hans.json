@@ -2975,6 +2975,7 @@
   "core.mp.public.volunteer_off": "这个网络不收志愿中转",
   "core.mp.public.volunteer_operator": "目录核对不了你的 Jay 账户签名。请校准这台电脑的时间；这个网络也可能要求志愿中转绑定 Jay 账户",
   "core.mp.public.volunteer_owner": "这个地址以别的身份（别的 Jay 账户，或者没签名）登记过志愿中转。如果你刚换过 MC 账号绑定的 Jay 账户，约 10 分钟后再试；一直这样的话，可能是别人抢先登记了你的地址，请联系这个网络的运营者",
+  "core.mp.public.volunteer_rate": "目录这一分钟收的新志愿中转已经满了，下次续期会再试",
   "core.mp.public.volunteer_stale": "目录里已经有你的 Jay 账户对这个地址更新的登记了（这台电脑的时间可能往回调过）。下次续期会再试",
   "core.mp.public.volunteer_bad_address": "请填这台电脑的公网地址（公网 IP 或域名），不能是家里局域网的地址",
   "multiplayer.volunteer.title": "志愿中转",

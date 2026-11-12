@@ -221,10 +221,12 @@ public sealed record VolunteerNode(string Url, string Operator)
 }
 
 /// <summary>
-/// A listed volunteer as the network's operator sees it: the Jay account it was registered under (null: unsigned) and
-/// the first few other operators that claimed it since (Jay accounts, or "" for an unsigned claim), oldest first.
+/// A listed volunteer as the network's operator sees it: the Jay account it was registered under (null: unsigned), the
+/// other Jay accounts that claimed it with a signed registration since (the few seen most recently, in the order they
+/// first claimed), and how many unsigned registrations of it were turned away while it was signed.
 /// </summary>
-public sealed record VolunteerEntry(string Url, string? Operator, IReadOnlyList<string>? ClaimedBy = null)
+public sealed record VolunteerEntry(string Url, string? Operator, IReadOnlyList<string>? ClaimedBy = null, int UnsignedAttempts = 0,
+    DateTimeOffset? LastUnsigned = null)
 {
     /// <summary>Someone claimed the address under another operator.</summary>
     public bool Disputed => ClaimedBy is { Count: > 0 };
@@ -247,11 +249,15 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         /// <summary>The signing time of the last accepted signed registration (Unix seconds).</summary>
         public long SignedAt;
         /// <summary>
-        /// Others that tried to register it under another operator (Jay accounts, or "" for unsigned), the first
-        /// <see cref="MaxClaims"/> in order: later ones can't push the earliest out. The operator stays; the claims are
-        /// for the network's operator to look at, and a disputed node doesn't count as anyone's when spreading.
+        /// Other Jay accounts that registered it with a signature, and when each last did. At most <see cref="MaxClaims"/>:
+        /// a new claimant replaces the one not seen for longest, so someone who keeps renewing (the node's real runner)
+        /// can't be kept out by a few one-off claims. The operator stays; the claims are for the network's operator to
+        /// look at, and a disputed node doesn't count as anyone's when spreading.
         /// </summary>
-        public List<string>? ClaimedBy;
+        public List<(string Account, DateTimeOffset Seen)>? ClaimedBy;
+        /// <summary>Unsigned registrations turned away while the address was signed (not claims; see <see cref="Register"/>).</summary>
+        public int UnsignedAttempts;
+        public DateTimeOffset? LastUnsigned;
         public DateTimeOffset Seen;
         public DateTimeOffset? VerifiedAt;
         public bool Probing;
@@ -287,11 +293,19 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     internal int TombstoneCount { get { lock (_gate) return _tombstones.Count; } }
 
     /// <summary>
-    /// New addresses taken per minute (each one is dialed to probe it). Renewals of listed addresses don't count, so a
-    /// flood of new registrations can't push out the volunteers already on the list.
+    /// New addresses taken per minute (each one is dialed to probe it), counted apart for unsigned and signed
+    /// registrations so an unsigned flood can't keep signed volunteers out. Renewals of listed addresses don't count, so a
+    /// flood of new registrations can't push out the volunteers already on the list, and neither does a volunteer coming
+    /// back to an address it signed for a moment ago.
     /// </summary>
-    public const int NewPerMinute = 120;
-    private readonly Queue<DateTimeOffset> _newAddresses = new();
+    public const int NewPerMinute = 60;
+    /// <summary>New addresses per minute for one Jay account.</summary>
+    public const int NewPerAccountPerMinute = 8;
+    /// <summary>New addresses per minute from one caller address (callers seen as loopback, behind a forward, aren't told apart).</summary>
+    public const int NewPerSourcePerMinute = 10;
+    private readonly Queue<DateTimeOffset> _newUnsigned = new();
+    private readonly Queue<DateTimeOffset> _newSigned = new();
+    private readonly Dictionary<string, Queue<DateTimeOffset>> _newBy = new(StringComparer.Ordinal);
 
     /// <summary>Raised when an address got listed or failed its probe (for logs and counters).</summary>
     public event Action<string, bool>? Probed;
@@ -340,11 +354,23 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// registered this address with the same or a later time, "owner" when the address is registered under another
     /// operator (another account, or none) that hasn't let it lapse, "rate" when too many new addresses came this minute.
     /// </summary>
-    public JsonObject Register(string? url, JsonNode? signedBy = null)
+    /// <param name="source">The caller's address, for a per-caller limit on new addresses (null or loopback: none).</param>
+    public JsonObject Register(string? url, JsonNode? signedBy = null, string? source = null)
     {
         if (VolunteerNodes.Normalize(url) is not { } address) return Error("bad");
         if (Blocked?.Invoke(address) == true) return Error("banned");
         var now = _now();
+        if (source is not null && System.Net.IPAddress.TryParse(source, out var from) && System.Net.IPAddress.IsLoopback(from)) source = null;
+        // The cheap limits come before the signature is checked: a new address from a caller (or, unsigned, from anyone)
+        // over its limit costs no verification.
+        lock (_gate)
+        {
+            if (!_entries.ContainsKey(address))
+            {
+                if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
+                if (signedBy is null && Full(_newUnsigned, NewPerMinute, now)) return Error("rate");
+            }
+        }
         string? account = null;
         long signedAt = 0;
         if (signedBy is not null)
@@ -365,28 +391,55 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             if (!known)
             {
                 if (_entries.Count >= MaxEntries) return Error("full");
-                if (account is not null && _tombstones.TryGetValue(Key(account, address), out var gone) && signedAt <= gone) return Error("stale");
-                while (_newAddresses.Count > 0 && now - _newAddresses.Peek() > TimeSpan.FromMinutes(1)) _newAddresses.Dequeue();
-                if (_newAddresses.Count >= NewPerMinute) return Error("rate");
+                var returning = false;
+                if (account is not null && _tombstones.TryGetValue(Key(account, address), out var gone))
+                {
+                    if (signedAt <= gone) return Error("stale");
+                    returning = true;
+                }
+                // A volunteer coming back to its own address isn't new.
+                if (!returning)
+                {
+                    if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
+                    if (account is null ? Full(_newUnsigned, NewPerMinute, now)
+                        : Full(_newSigned, NewPerMinute, now) || Full(_newBy, "acct:" + account, NewPerAccountPerMinute, now)) return Error("rate");
+                    if (source is not null) Take(_newBy, "src:" + source, now);
+                    if (account is null) _newUnsigned.Enqueue(now);
+                    else
+                    {
+                        _newSigned.Enqueue(now);
+                        Take(_newBy, "acct:" + account, now);
+                    }
+                }
             }
             if (known && entry!.Operator != account)
             {
                 conflict = true;
-                // Only a signed claim counts: an unsigned registration of a signed address says nothing about who runs it
-                // (and would let anyone, the operator included, mark their own address as disputed).
-                if (account is not null)
+                if (account is null)
+                {
+                    // An unsigned registration of a signed address isn't a claim (it would let anyone, the operator
+                    // included, mark the address as disputed), but it is counted: the address may be someone's who never
+                    // signed and was registered first by somebody else.
+                    entry.UnsignedAttempts++;
+                    entry.LastUnsigned = now;
+                }
+                else
                 {
                     newlyDisputed = entry.ClaimedBy is null;
                     entry.ClaimedBy ??= [];
-                    if (entry.ClaimedBy.Count < MaxClaims && !entry.ClaimedBy.Contains(account)) entry.ClaimedBy.Add(account);
+                    var mine = entry.ClaimedBy.FindIndex(c => c.Account == account);
+                    if (mine >= 0) entry.ClaimedBy[mine] = (account, now);
+                    else
+                    {
+                        // Full: the claim not renewed for longest makes room.
+                        if (entry.ClaimedBy.Count >= MaxClaims)
+                            entry.ClaimedBy.RemoveAt(entry.ClaimedBy.Select((c, i) => (c.Seen, i)).Min().i);
+                        entry.ClaimedBy.Add((account, now));
+                    }
                 }
             }
             else if (known && account is not null && signedAt <= entry!.SignedAt) return Error("stale");
-            if (!known && !conflict)
-            {
-                _newAddresses.Enqueue(now);
-                _entries[address] = entry = new Entry { Operator = account };
-            }
+            if (!known && !conflict) _entries[address] = entry = new Entry { Operator = account };
             if (!conflict && account is not null) entry!.SignedAt = signedAt;
             // An address keeps its operator (or having none) until it lapses: nobody can take it over, add a signature
             // to it or strip one. Who registered first needn't be who runs the node, so a conflicting claim (above) is
@@ -453,9 +506,12 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             return [.. _entries.Where(p => p.Value.VerifiedAt is not null && Blocked?.Invoke(p.Key) != true
                     && (p.Value.Operator is not { } op || BlockedOperator?.Invoke(op) != true))
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
-                .Select(p => new VolunteerEntry(p.Key, p.Value.Operator, p.Value.ClaimedBy?.ToList()))];
+                .Select(p => Public(p.Key, p.Value))];
         }
     }
+
+    private static VolunteerEntry Public(string url, Entry e) =>
+        new(url, e.Operator, e.ClaimedBy?.Select(c => c.Account).ToList(), e.UnsignedAttempts, e.LastUnsigned);
 
     /// <summary>Drops an address now (it can register again unless it is also banned).</summary>
     public bool Remove(string url)
@@ -472,17 +528,39 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         {
             var gone = _entries.Where(p => p.Value.Operator == account).ToList();
             foreach (var (key, entry) in gone) Drop(key, entry);
-            return [.. gone.Select(p => new VolunteerEntry(p.Key, p.Value.Operator, p.Value.ClaimedBy?.ToList()))];
+            return [.. gone.Select(p => Public(p.Key, p.Value))];
         }
     }
 
     private static string Key(string account, string address) => account + "\n" + address;
+
+    private static bool Full(Queue<DateTimeOffset> times, int limit, DateTimeOffset now)
+    {
+        // A time ahead of now (the clock went back) is dropped too, so the limit can't stick.
+        while (times.TryPeek(out var at) && (now - at > TimeSpan.FromMinutes(1) || at > now)) times.Dequeue();
+        return times.Count >= limit;
+    }
+
+    private static bool Full(Dictionary<string, Queue<DateTimeOffset>> counts, string key, int limit, DateTimeOffset now)
+    {
+        if (counts.Count > 4096)
+            foreach (var (k, _) in counts.Where(p => !p.Value.TryPeek(out var at) || now - at > TimeSpan.FromMinutes(1)).ToList()) counts.Remove(k);
+        return counts.TryGetValue(key, out var times) && Full(times, limit, now);
+    }
+
+    private static void Take(Dictionary<string, Queue<DateTimeOffset>> counts, string key, DateTimeOffset now)
+    {
+        if (!counts.TryGetValue(key, out var times)) counts[key] = times = new Queue<DateTimeOffset>();
+        times.Enqueue(now);
+    }
 
     /// <summary>Removes an entry, keeping its signing time for a while (see <see cref="_tombstones"/>). Under the lock.</summary>
     private bool Drop(string address, Entry entry)
     {
         if (!_entries.Remove(address)) return false;
         if (entry.Operator is not { } account || entry.SignedAt == 0) return true;
+        // A signing time already outside the clock window can't be replayed: nothing to keep.
+        if (entry.SignedAt < (_now() - VolunteerOperator.MaxClockSkew).ToUnixTimeSeconds()) return true;
         var key = Key(account, address);
         _tombstones[key] = entry.SignedAt;
         _tombstoneOrder.Enqueue((key, entry.SignedAt));
@@ -496,13 +574,12 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     private void Prune(DateTimeOffset now)
     {
-        // Times older than the clock window can't be replayed anyway (at most a minute ahead, so the order holds).
+        // Times older than the clock window can't be replayed anyway. The queue is in the order entries went away, not
+        // by signing time, so the list itself is swept (it is small); the queue only decides who goes first when full,
+        // and skips keys already gone.
         var oldest = (now - VolunteerOperator.MaxClockSkew).ToUnixTimeSeconds();
-        while (_tombstoneOrder.TryPeek(out var head) && head.At < oldest)
-        {
-            _tombstoneOrder.Dequeue();
-            if (_tombstones.TryGetValue(head.Key, out var at) && at == head.At) _tombstones.Remove(head.Key);
-        }
+        foreach (var (key, _) in _tombstones.Where(p => p.Value < oldest).ToList()) _tombstones.Remove(key);
+        while (_tombstoneOrder.TryPeek(out var head) && !(_tombstones.TryGetValue(head.Key, out var at) && at == head.At)) _tombstoneOrder.Dequeue();
         foreach (var (key, entry) in _entries.Where(p => now - p.Value.Seen > VolunteerNodes.Ttl && !p.Value.Probing).ToList())
             Drop(key, entry);
     }

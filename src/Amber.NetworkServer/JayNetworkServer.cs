@@ -419,10 +419,10 @@ public sealed class JayNetworkServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Bans a volunteer operator (see <see cref="BanOperatorNodes"/>). Returns how many of their nodes were dropped and
-    /// the addresses left unbanned because someone else claimed them, for the network's operator to look at.
+    /// Bans a volunteer operator (see <see cref="BanOperatorNodes"/>): how many of their nodes were dropped, which
+    /// addresses were banned with them, and which were only dropped, for the network's operator to look at.
     /// </summary>
-    public (int Removed, IReadOnlyList<string> DisputedNotBanned) BanOperator(string account, string? reason, TimeSpan? duration = null)
+    public OperatorBan BanOperator(string account, string? reason, TimeSpan? duration = null)
     {
         if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
         return BanOperatorNodes(Bans.Add("operator", account, reason, Now, duration));
@@ -430,29 +430,36 @@ public sealed class JayNetworkServer : IAsyncDisposable
 
     /// <summary>
     /// Drops an operator's nodes and bans their addresses for as long as the operator, so coming back unsigned (or under
-    /// a new account) from the same addresses doesn't work either. An address another account also claimed is only
-    /// dropped, not banned: it may be theirs and taken first. Claims from banned accounts don't count. The addresses
-    /// left unbanned are logged and returned, since the claim may come from the operator's own second account.
-    /// Banning again carries the new end over to the address bans the operator already has. Unbanning the operator
-    /// lifts these address bans too.
+    /// a new account) from the same addresses doesn't work either. An address that may be someone else's is only dropped,
+    /// not banned: another unbanned account claimed it with a signature, or unsigned registrations of it were turned away
+    /// (someone who never signed may run it, registered first by the operator). Both lists are returned and logged, since
+    /// a claim may also come from the operator's own second account. Banning again carries the new end over to the
+    /// address bans the operator already has. Unbanning the operator lifts these address bans too.
     /// </summary>
-    private (int Removed, IReadOnlyList<string> DisputedNotBanned) BanOperatorNodes(BanList.Ban ban)
+    private OperatorBan BanOperatorNodes(BanList.Ban ban)
     {
         var bans = Bans!;
         var duration = ban.Until is { } until ? until - Now : (TimeSpan?)null;
-        var banned = bans.List().Where(b => b.Kind == "operator").Select(b => b.Value).ToHashSet(StringComparer.Ordinal);
+        var bannedAccounts = bans.List().Where(b => b.Kind == "operator").Select(b => b.Value).ToHashSet(StringComparer.Ordinal);
         var removed = Volunteers?.RemoveOperator(ban.Value) ?? [];
+        var banned = new List<string>();
         var spared = new List<string>();
         foreach (var node in removed)
         {
-            if (node.ClaimedBy?.Any(c => c.Length > 0 && !banned.Contains(c)) == true) spared.Add(node.Url);
-            else bans.Add("node", node.Url, OperatorBanReason(ban.Value), Now, duration);
+            if (node.UnsignedAttempts > 0 || node.ClaimedBy?.Any(c => !bannedAccounts.Contains(c)) == true) spared.Add(node.Url);
+            else
+            {
+                bans.Add("node", node.Url, OperatorBanReason(ban.Value), Now, duration);
+                banned.Add(node.Url);
+            }
         }
         // Address bans from an earlier ban of the same operator end with this one.
         foreach (var old in bans.List().Where(b => b.Kind == "node" && b.Reason == OperatorBanReason(ban.Value)).ToList())
             if (old.Until != ban.Until) bans.Add("node", old.Value, old.Reason, Now, duration);
-        if (spared.Count > 0) _b.Log($"Operator {ban.Value} banned; addresses also claimed by others were dropped but not banned: {string.Join(", ", spared)}");
-        return (removed.Count, spared);
+        _b.Log($"Operator {ban.Value} banned: {removed.Count} node(s) dropped; addresses banned with them: "
+            + (banned.Count > 0 ? string.Join(", ", banned) : "none")
+            + (spared.Count > 0 ? "; dropped but not banned (may be someone else's): " + string.Join(", ", spared) : ""));
+        return new OperatorBan(removed.Count, banned, spared);
     }
 
     /// <summary>The reason on address bans that came with banning an operator (how unbanning finds them).</summary>
@@ -538,3 +545,9 @@ public sealed class DirectoryStats : IDirectoryObserver
         };
     }
 }
+
+/// <summary>What banning a volunteer operator did (see <see cref="JayNetworkServer.BanOperator"/>).</summary>
+/// <param name="Removed">Their nodes dropped from the list.</param>
+/// <param name="BannedNodes">Addresses banned with them.</param>
+/// <param name="DisputedNotBanned">Addresses only dropped: they may be someone else's.</param>
+public sealed record OperatorBan(int Removed, IReadOnlyList<string> BannedNodes, IReadOnlyList<string> DisputedNotBanned);
