@@ -279,6 +279,37 @@ public sealed class SplitTransportTests
         Assert.Equal("no path", e.Message);
     }
 
+    /// <summary>
+    /// A failed attempt sends no hellos, so the host holds no waiting set for it: quick retries never run into the
+    /// per-member limit while old sets time out.
+    /// </summary>
+    [Fact]
+    public async Task AFailedAttemptLeavesNothingWaitingOnTheHost()
+    {
+        await using var rig = await Rig.StartAsync(2);
+        for (var attempt = 0; attempt < SplitRegistry.MaxPendingPerMember + 2; attempt++)
+        {
+            var connect = SplitLegs.ConnectAsync(async (i, ct) =>
+            {
+                if (i == 1)
+                {
+                    // Give leg 0 time to finish its handshake first.
+                    await Task.Delay(300, ct);
+                    throw new IOException("path down");
+                }
+                var tcp = new TcpClient();
+                await tcp.ConnectAsync(IPAddress.Loopback, rig.Ports[i], ct);
+                return tcp.GetStream();
+            }, 2, Epoch, rig.Guest, Profile, "tunnel", [Context]);
+            await Assert.ThrowsAsync<IOException>(() => connect);
+        }
+        await Task.Delay(200);
+        Assert.Equal(0, rig.Registry.PendingCount);
+        var (client, host) = await rig.JoinAsync();
+        await client.WriteAsync((byte[])[7]);
+        Assert.Equal([7], await ReadExactlyAsync(host, 1));
+    }
+
     [Fact]
     public async Task AFailedWriteEndsTheStream()
     {
@@ -453,7 +484,7 @@ public sealed class SplitTransportTests
         private readonly List<TcpListener> _listeners = [];
         private readonly CancellationTokenSource _cts = new();
         private readonly List<Task> _loops = [];
-        private readonly System.Threading.Channels.Channel<SplitStream> _joined = System.Threading.Channels.Channel.CreateUnbounded<SplitStream>();
+        private readonly System.Threading.Channels.Channel<(MemberEntry Member, SplitStream Stream)> _joined = System.Threading.Channels.Channel.CreateUnbounded<(MemberEntry, SplitStream)>();
         private readonly List<SplitStream> _all = [];
         private int _count;
         private bool _abortOnKick;
@@ -520,7 +551,7 @@ public sealed class SplitTransportTests
                         if (joined is null) return;
                         if (_abortOnKick) member.Revocation.Register(joined.Abort);
                         lock (_all) _all.Add(joined);
-                        await _joined.Writer.WriteAsync(joined);
+                        await _joined.Writer.WriteAsync((member, joined));
                     }
                     catch (Exception e) when (e is IOException or CryptographicException or OperationCanceledException or ObjectDisposedException or SocketException or EndOfStreamException)
                     {
@@ -533,7 +564,12 @@ public sealed class SplitTransportTests
         public async Task<SplitStream> NextJoinedAsync()
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            return await _joined.Reader.ReadAsync(timeout.Token);
+            while (true)
+            {
+                // Connections of members kicked meanwhile (racing tests) were already dropped: skip them.
+                var (member, stream) = await _joined.Reader.ReadAsync(timeout.Token);
+                if (!member.Revoked) return stream;
+            }
         }
 
         /// <summary>One member-side leg: handshake on the given port, then (unless pairId is null) the hello.</summary>

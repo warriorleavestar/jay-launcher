@@ -23,6 +23,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private readonly TcpListener[] _listeners;
     private readonly Task[] _loops;
     private readonly CancellationTokenSource _cts = new();
+    private readonly HashSet<Task> _running = [];
 
     public SplitRegistry Registry { get; }
     public IReadOnlyList<int> Ports => [.. _listeners.Select(l => ((IPEndPoint)l.LocalEndpoint).Port)];
@@ -74,8 +75,16 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             {
                 return;
             }
-            _ = HandleLegAsync(client, index, ct);
+            Track(HandleLegAsync(client, index, ct));
         }
+    }
+
+    /// <summary>Keeps each leg's task until it ends, so <see cref="DisposeAsync"/> can wait for the open connections.</summary>
+    private void Track(Task task)
+    {
+        lock (_running) _running.Add(task);
+        _ = task.ContinueWith(t => { lock (_running) _running.Remove(t); }, CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     private async Task HandleLegAsync(TcpClient client, int index, CancellationToken ct)
@@ -129,6 +138,14 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             Interlocked.Increment(ref Rejected);
             if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
         }
+        catch (Exception e)
+        {
+            // Anything else still ends this leg quietly, is counted, and is logged by type only (no member details).
+            secure?.Abort();
+            joined?.Abort();
+            Interlocked.Increment(ref Rejected);
+            _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+        }
         finally
         {
             await revocation.DisposeAsync();
@@ -149,6 +166,11 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         _cts.Cancel();
         foreach (var l in _listeners) l.Stop();
         try { await Task.WhenAll(_loops); } catch (OperationCanceledException) { }
+        // Open connections see the cancellation and end; wait a little for them so nothing is still forwarding afterwards.
+        Task[] running;
+        lock (_running) running = [.. _running];
+        try { await Task.WhenAll(running).WaitAsync(TimeSpan.FromSeconds(5)); }
+        catch (TimeoutException) { }
         _cts.Dispose();
     }
 }
@@ -158,7 +180,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
 /// <list type="bullet">
 /// <item>Off: always one path, as before.</item>
 /// <item>Auto: split when every leg can be opened; otherwise one path, and <see cref="LastReason"/> says why. After
-/// <see cref="MaxFailures"/> split attempts in a row fail, it stops trying for this session instead of retrying forever.</item>
+/// <see cref="MaxFailures"/> split attempts in a row fail, it uses one path for <see cref="RetryAfter"/> before trying again,
+/// instead of retrying on every connection.</item>
 /// <item>Strict: split or nothing. A connection that can't be split fails with the reason.</item>
 /// </list>
 /// A device attestation failure is never a reason to fall back: it is reported like on one path.
@@ -174,6 +197,10 @@ public sealed class SplitConnector
     private readonly Action<string>? _log;
     private readonly string? _noLegsReason;
     private int _failures;
+    private long _pausedUntil;
+
+    /// <summary>How long Auto waits after <see cref="MaxFailures"/> failures in a row before it tries to split again.</summary>
+    internal TimeSpan RetryAfter { get; init; } = TimeSpan.FromSeconds(30);
 
     public SplitPolicy Policy { get; }
     public int SplitConnections;
@@ -200,7 +227,12 @@ public sealed class SplitConnector
     {
         if (Policy == SplitPolicy.Off) return await _single(ct);
         if (_legs is null) return await NotSplitAsync(_noLegsReason ?? L.T("core.mp.split.not_ready"), ct);
-        if (Policy == SplitPolicy.Auto && Volatile.Read(ref _failures) >= MaxFailures) return await NotSplitAsync(L.T("core.mp.split.gave_up"), ct);
+        if (Policy == SplitPolicy.Auto && Volatile.Read(ref _failures) >= MaxFailures)
+        {
+            if (System.Diagnostics.Stopwatch.GetTimestamp() < Interlocked.Read(ref _pausedUntil)) return await NotSplitAsync(L.T("core.mp.split.gave_up"), ct);
+            // The pause is over: one more try. Another failure pauses again.
+            Interlocked.Exchange(ref _failures, MaxFailures - 1);
+        }
         try
         {
             var stream = await SplitLegs.ConnectAsync((i, c) => _legs[i](c), _room.Split.Paths, _room.Epoch,
@@ -216,7 +248,8 @@ public sealed class SplitConnector
         }
         catch (Exception e) when (!ct.IsCancellationRequested && e is IOException or CryptographicException or SocketException or OperationCanceledException or ObjectDisposedException)
         {
-            Interlocked.Increment(ref _failures);
+            if (Interlocked.Increment(ref _failures) >= MaxFailures)
+                Interlocked.Exchange(ref _pausedUntil, System.Diagnostics.Stopwatch.GetTimestamp() + (long)(RetryAfter.TotalSeconds * System.Diagnostics.Stopwatch.Frequency));
             _log?.Invoke(L.T("core.mp.split.failed") + e.Message);
             return await NotSplitAsync(L.T("core.mp.split.failed") + e.Message, ct, e);
         }

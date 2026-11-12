@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Amber.Core.Localization;
@@ -33,7 +32,8 @@ public static class SplitLegs
     /// <summary>
     /// Member side: opens every leg in parallel (<paramref name="openLeg"/> gives the raw connection for leg i), runs the handshakes,
     /// sends the hellos and returns the joined stream. The first leg to fail cancels the others at once, and every leg that
-    /// did connect is aborted, so the host's waiting set times out instead of being completed.
+    /// did connect is aborted. The hellos go out only once every handshake has succeeded, so a failed attempt never leaves
+    /// a waiting set on the host that would count against the member's limit while it times out.
     /// </summary>
     public static Task<SplitStream> ConnectAsync(Func<int, CancellationToken, Task<Stream>> openLeg, int count, int epoch, MemberKey key,
         TransportProfile profile, string purpose, byte[] payload, CancellationToken ct = default) =>
@@ -61,6 +61,15 @@ public static class SplitLegs
                 // Rethrows the first failure as it is; the catch below cleans up the rest.
                 if (!done.IsCompletedSuccessfully) await done;
             }
+            byte[] hello = [HelloVersion, .. pairId];
+            try
+            {
+                await Task.WhenAll(legs.Select(l => l.Result.WriteAsync(hello, linked.Token).AsTask()));
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(hello);
+            }
             return new SplitStream([.. legs.Select(l => l.Result)]);
         }
         catch
@@ -87,7 +96,6 @@ public static class SplitLegs
             try
             {
                 secure = await handshake(raw, new SplitLeg(index, count, epoch), linked.Token);
-                await secure.WriteAsync((byte[])[HelloVersion, .. pairId], linked.Token);
                 return secure;
             }
             catch
@@ -178,8 +186,9 @@ public sealed class SplitRegistry
             helloTimeout.CancelAfter(PairTimeout);
             pairId = await SplitLegs.ReadHelloAsync(secure, helloTimeout.Token);
         }
-        catch (Exception e) when (e is IOException or CryptographicException or OperationCanceledException or ObjectDisposedException)
+        catch (Exception e)
         {
+            // Whatever went wrong reading the hello (a socket error included), the leg is dropped and counted.
             secure.Abort();
             Interlocked.Increment(ref _rejected);
             throw Refused(e);

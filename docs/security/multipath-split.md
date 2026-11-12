@@ -27,10 +27,10 @@ The split adds no MAC of its own, because each leg is already authenticated end 
 - **Settings.** The host decides per service: game and chat are each Off, Auto or Strict, over 2 or 3 paths. Remote control and the "game only" exit proxy are never split. Splitting needs the wrapped tunnel, so general mode never splits, and full-LAN (TUN) mode doesn't split in this version.
 - **Credentials.** The room credentials carry `"split": {"game", "chat", "paths", "nets": [{"net", "secret"}]}`, one extra EasyTier network per extra path, random like the room's own network. They hold no address: which nodes a path uses is up to each member's own node list. A version that doesn't understand the field, or finds it malformed, connects on one path.
 - **Rekey.** After a kick the host replaces every extra network along with the room's own (`"split": {"nets": [...]}` in the rekey message). A rekey without them turns splitting off, because the old networks are known to whoever was just kicked.
-- **Host.** Leg *i* listens on port 47657 + *i* (47657, 47658, 47659). The handshake payload names the service, as on the single-path port 47656. A Strict service is not served on 47656 at all, except by a host in full-LAN (TUN) mode: it runs no split listeners in this version, so it serves every service on one path. A member in full-LAN mode doesn't split either; Auto uses one path and Strict fails, both with that reason. A member that can't read the split settings (an old version) still joins on one path, and a Strict host closes that connection and logs the refusal.
+- **Host.** Leg *i* listens on port 47657 + *i* (47657, 47658, 47659). The handshake payload names the service, as on the single-path port 47656. A Strict service is not served on 47656 at all. A host in full-LAN (TUN) mode runs no split listeners in this version, so it refuses to start a room with a Strict service and says why; with Auto it serves everything on one path. A member in full-LAN mode doesn't split either; Auto uses one path and Strict fails, both with that reason. A member that can't read the split settings (an old version) still joins on one path, and a Strict host closes that connection and logs the refusal.
 - **Member.** Each game or chat connection is opened by `SplitConnector`:
   - Auto splits when every leg opens. Otherwise it uses one path and records why.
-  - After 3 failed split attempts in a row, Auto stops trying for the rest of the session instead of retrying forever.
+  - After 3 failed split attempts in a row, Auto uses one path for 30 seconds before trying again, instead of retrying on every connection.
   - Strict splits or fails with the reason.
   - A device attestation failure never leads to a fallback.
 
@@ -50,7 +50,7 @@ There is never a quiet fallback to fewer legs in the middle of a connection.
 
 - settings, credentials and rekey round trips, and anything not understood meaning no split;
 - game and chat end to end with 2 and 3 paths, and with the Minecraft disguise;
-- Off, Auto and Strict with and without paths, a dead path, and Auto giving up after repeated failures;
+- Off, Auto and Strict with and without paths, a dead path, and Auto pausing after repeated failures and trying again later;
 - a kick dropping a joined connection, remote control legs refused, and legs from an older epoch failing.
 
 `src/Amber.Core.Tests/SplitTransportTests.cs` covers:

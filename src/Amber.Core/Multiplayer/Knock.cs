@@ -35,7 +35,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     public RoomCredentials Rotate() => this with { Network = NewNetwork(), Secret = NewSecret(), Epoch = Epoch + 1, Member = null, Split = Split.Rotate() };
 
     /// <summary>发给留下来的成员的那部分（经他们各自的成员通道）。</summary>
-    public RoomRekey ToRekey() => new(Network, Secret, Epoch) { SplitNets = Split.Nets };
+    public RoomRekey ToRekey() => new(Network, Secret, Epoch) { SplitNets = UsableSplit.Nets };
 
     /// <summary>加入方：按凭据建出内部的房间对象。</summary>
     public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch) with { Split = UsableSplit };
