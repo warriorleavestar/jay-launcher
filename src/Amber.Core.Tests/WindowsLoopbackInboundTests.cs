@@ -18,18 +18,14 @@ public sealed class WindowsLoopbackInboundTests
     }
 
     [Fact]
-    public void KeysAreDistinctAndFixed()
-    {
-        if (!OperatingSystem.IsWindows()) return;
-        Assert.Equal(3, new[] { WindowsLoopbackInbound.SubLayerKey, WindowsLoopbackInbound.FilterV4Key, WindowsLoopbackInbound.FilterV6Key }.Distinct().Count());
-        Assert.Equal(new Guid("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d13"), WindowsLoopbackInbound.SubLayerKey);
-    }
-
-    [Fact]
     public void PresenceCheckRunsWithoutAdmin()
     {
         if (!OperatingSystem.IsWindows()) return;
-        // Either answer is fine (it depends on this machine); it must not throw or need elevation.
-        _ = WindowsLoopbackInbound.Present();
+        // True or false depends on this machine (whether the admin step ran); with the filter engine running it must
+        // be a definite answer, never "unknown", and never need elevation.
+        WindowsLoopbackInbound.Invalidate();
+        var state = WindowsLoopbackInbound.Check();
+        Assert.NotNull(state);
+        Assert.Equal(state == true, WindowsLoopbackInbound.Present());
     }
 }

@@ -538,6 +538,7 @@ public sealed class LauncherService : IDisposable
             using var process = System.Diagnostics.Process.Start(WindowsSandboxSetup.Command(jay, undo, loopback, folders));
             if (process is null) return Failed("no process");
             await process.WaitForExitAsync(ct);
+            WindowsLoopbackInbound.Invalidate();
             if (!undo)
             {
                 Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
@@ -562,11 +563,11 @@ public sealed class LauncherService : IDisposable
         }
     }
 
-    /// <summary>Whether Jay's admin step left anything to take away (the loopback exemption or opened parent folders).</summary>
+    /// <summary>Whether Jay's admin step left anything to take away (the loopback exemption, the inbound loopback filters or opened parent folders).</summary>
     public bool HasSandboxPermissions => OperatingSystem.IsWindows() && (Settings.StrongSandboxFolders.Count > 0 || WindowsSandbox.HasLoopbackSetup());
 
     /// <summary>
-    /// "Remove sandbox permissions": one admin prompt takes the loopback exemption and Jay's entries on the recorded
+    /// "Remove sandbox permissions": one admin prompt takes the loopback exemption, the inbound loopback filters and Jay's entries on the recorded
     /// parent folders away again, and strong mode is switched off so the next launch does not ask straight away.
     /// Returns null when done, else why not.
     /// </summary>
