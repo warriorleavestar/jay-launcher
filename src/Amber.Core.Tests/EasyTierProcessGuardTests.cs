@@ -109,10 +109,11 @@ public sealed class EasyTierProcessGuardTests : IDisposable
     }
 
     [Fact]
-    public async Task StopEndsWatcherAndCoreWithoutStoppingAnything()
+    public async Task StopEndsWatcherAndCoreThroughSigtermWithoutFallback()
     {
         // #229: Kill(entireProcessTree) SIGSTOPs the watcher first, and on macOS a stopped member of Jay's orphaned process
-        // group gets SIGHUP sent to the whole group, Jay included. Stop must end both politely, with no SIGSTOP.
+        // group gets SIGHUP sent to the whole group, Jay included. Stop must end both through the watcher's TERM trap,
+        // well inside the timeout, so the SIGKILL fallback is never reached. (A SIGSTOP itself can't be observed here.)
         if (OperatingSystem.IsWindows()) return;
         var info = new ProcessStartInfo("/bin/sleep") { UseShellExecute = false };
         info.ArgumentList.Add("600");
@@ -174,6 +175,43 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(await Until(() => watch.HasExited && !Alive(core), 5));
     }
 
+    [Fact]
+    public async Task StopRightAfterStartLeavesNoCore()
+    {
+        // A SIGTERM can reach sh before its TERM trap is set (Dispose right after Launch). The core must not outlive it.
+        if (OperatingSystem.IsWindows()) return;
+        for (var i = 0; i < 20; i++)
+        {
+            // A sleep length nothing else uses, so leftovers can be found by their command line.
+            var marker = $"6{Random.Shared.Next(10, 99)}.{Random.Shared.Next(100000, 999999)}";
+            var info = new ProcessStartInfo("/bin/sleep") { UseShellExecute = false };
+            info.ArgumentList.Add(marker);
+            EasyTierProcessGuard.Wrap(info);
+            var watch = Process.Start(info)!;
+            _started.Add(watch);
+            if (i % 2 == 1) await Task.Delay(i); // vary where in the script the signal lands
+            EasyTierProcessGuard.Stop(watch);
+            Assert.True(watch.HasExited, "watcher ended");
+            Assert.True(await Until(() => WithMarker(marker).Count == 0, 5), $"core left behind (round {i})");
+        }
+    }
+
+    [Fact]
+    public async Task TermBeforeTheTrapIsSetStillEndsTheCore()
+    {
+        // Deterministic version of the race above: the real script with a pause between starting the core and setting
+        // the TERM trap, and the SIGTERM sent inside that pause.
+        if (OperatingSystem.IsWindows()) return;
+        const string started = "c=$!; ";
+        Assert.Contains(started, EasyTierProcessGuard.WatchScript);
+        var script = EasyTierProcessGuard.WatchScript.Replace(started, started + "sleep 1; ", StringComparison.Ordinal);
+        var marker = $"6{Random.Shared.Next(10, 99)}.{Random.Shared.Next(100000, 999999)}";
+        var watch = Start("/bin/sh", "-c", script, "jay-easytier", Environment.ProcessId.ToString(), "/bin/sleep", marker);
+        Assert.True(await Until(() => WithMarker(marker).Count > 0, 5), "core started");
+        Process.Start("kill", ["-TERM", watch.Id.ToString()])!.WaitForExit();
+        Assert.True(await Until(() => watch.HasExited && WithMarker(marker).Count == 0, 5), "core left behind");
+    }
+
     /// <summary>The core: the watcher's child running "sleep 600" (the watcher also has short-lived "sleep 1" children).</summary>
     private static int Core(int watcher) =>
         Children(watcher).FirstOrDefault(pid => CommandLine(pid).Contains("600", StringComparison.Ordinal));
@@ -188,15 +226,18 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         return text;
     }
 
-    /// <summary>直接子进程（Linux 读 /proc，macOS 用 pgrep）。</summary>
-    private static List<int> Children(int pid)
+    /// <summary>Direct children, the same way the guard finds them (Linux reads /proc, macOS asks pgrep).</summary>
+    private static List<int> Children(int pid) => EasyTierProcessGuard.ChildPids(pid);
+
+    /// <summary>Processes whose command line holds <paramref name="marker"/>.</summary>
+    private static List<int> WithMarker(string marker)
     {
         var info = new ProcessStartInfo("pgrep") { UseShellExecute = false, RedirectStandardOutput = true };
-        info.ArgumentList.Add("-P");
-        info.ArgumentList.Add(pid.ToString());
+        info.ArgumentList.Add("-f");
+        info.ArgumentList.Add(marker);
         using var p = Process.Start(info)!;
         var text = p.StandardOutput.ReadToEnd();
         p.WaitForExit();
-        return [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse)];
+        return [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).Where(n => n != p.Id)];
     }
 }

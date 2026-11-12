@@ -17,9 +17,12 @@ internal static class EasyTierProcessGuard
     /// A SIGHUP meant for the group must not take down a room that is still running.
     /// </summary>
     internal const string WatchScript =
-        "trap '' HUP; p=$1; shift; \"$@\" & c=$!; " +
+        // A TERM/INT that arrives before the real trap is in place only sets a flag, checked right after (#239 review):
+        // otherwise sh would die by default and leave the core it had just started running on its own.
+        "trap '' HUP; t=; trap 't=1' TERM INT; p=$1; shift; \"$@\" & c=$!; " +
         // On TERM/INT: end the core, wait for it and leave at once (no further polling round).
         "trap 'kill -TERM $c 2>/dev/null; wait \"$c\"; exit' TERM INT; " +
+        "[ -z \"$t\" ] || { kill -TERM \"$c\" 2>/dev/null; wait \"$c\"; exit; }; " +
         // `sleep 1 & wait` instead of a foreground sleep, so the trap runs as soon as the signal arrives.
         "while kill -0 \"$p\" 2>/dev/null && kill -0 \"$c\" 2>/dev/null; do sleep 1 & wait $!; done; " +
         "kill -TERM \"$c\" 2>/dev/null; wait \"$c\"";
@@ -71,11 +74,14 @@ internal static class EasyTierProcessGuard
 
     /// <summary>
     /// Ends an EasyTier process started through <see cref="Wrap"/> (or the core itself on Windows).
-    /// On Mac/Linux it asks the watcher with SIGTERM first; its trap ends the core and waits for it.
-    /// If the watcher hasn't ended within the timeout, the fallback SIGKILLs the core and the watcher directly
-    /// (children first), and the exit trail notes it. It never uses <c>Process.Kill(entireProcessTree: true)</c>: on Unix
-    /// that SIGSTOPs the watcher before killing the tree. A stopped process in Jay's process group, which is orphaned when Jay was started from the Dock or Finder,
-    /// makes macOS send SIGHUP to the whole group. That SIGHUP closed Jay itself right after the knock lobby ended (#229).
+    /// On Mac/Linux it asks the watcher with SIGTERM first; its trap ends the core and waits for it. The watcher's children
+    /// are noted before the SIGTERM, and any still alive once the watcher is gone are SIGKILLed (a signal can reach sh
+    /// before its trap is set). If the watcher hasn't ended within the timeout, the fallback SIGKILLs the core and the
+    /// watcher directly (children first), and the exit trail notes it. It never uses <c>Process.Kill(entireProcessTree: true)</c>:
+    /// on Unix that SIGSTOPs the watcher before killing the tree. A stopped process in Jay's process group, which is orphaned
+    /// when Jay was started from the Dock or Finder, makes macOS send SIGHUP to the whole group. That SIGHUP closed Jay itself
+    /// right after the knock lobby ended (#229).
+    /// Normally this returns within milliseconds: the timeout only runs out for a core that ignores SIGTERM.
     /// </summary>
     /// <param name="wrapped">Whether <paramref name="process"/> is the watcher. Left out, it is read from the start info,
     /// which only processes this Jay started have.</param>
@@ -84,18 +90,29 @@ internal static class EasyTierProcessGuard
         try
         {
             if (process.HasExited) return;
-            if (!OperatingSystem.IsWindows() && (wrapped ?? StartedThroughWatcher(process))
-                && SendTerm(process.Id) && process.WaitForExit(timeout ?? StopTimeout))
+            if (OperatingSystem.IsWindows())
             {
+                process.Kill(entireProcessTree: true);
                 return;
             }
-            if (process.HasExited) return;
-            if (OperatingSystem.IsWindows()) process.Kill(entireProcessTree: true);
-            else
+            var pid = process.Id;
+            if (wrapped ?? StartedThroughWatcher(process))
             {
-                Amber.Core.Diagnostics.ExitTrail.Note("process", $"easytier watcher pid {process.Id} did not stop on SIGTERM, killing it");
-                KillTreeWithoutStopping(process.Id);
+                var children = ChildPids(pid);
+                if (SendTerm(pid))
+                {
+                    if (process.WaitForExit(timeout ?? StopTimeout))
+                    {
+                        foreach (var child in children) KillIfAlive(child);
+                        return;
+                    }
+                    Amber.Core.Diagnostics.ExitTrail.Note("process", $"easytier watcher pid {pid} did not stop on SIGTERM, killing it");
+                }
             }
+            if (process.HasExited) return;
+            foreach (var child in ChildPids(pid)) KillTreeWithoutStopping(child);
+            // The root through Process.Kill(): it checks the process hasn't exited (and been reaped) first, so a reused PID is safe.
+            process.Kill();
         }
         catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
     }
@@ -108,8 +125,63 @@ internal static class EasyTierProcessGuard
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
     }
 
-    /// <summary>Direct children, via pgrep (present on macOS and Linux). Empty when pgrep is missing or finds none.</summary>
-    internal static List<int> ChildPids(int pid)
+    /// <summary>A child the watcher left behind: SIGKILL it and anything it started, if it is still there.</summary>
+    private static void KillIfAlive(int pid)
+    {
+        try
+        {
+            if (kill(pid, 0) != 0) return;
+            KillTreeWithoutStopping(pid);
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
+    }
+
+    /// <summary>
+    /// Direct children of <paramref name="pid"/>. Linux reads /proc (no external tools needed); macOS asks pgrep.
+    /// Empty when none are found.
+    /// </summary>
+    internal static List<int> ChildPids(int pid) => OperatingSystem.IsLinux() ? ProcChildPids(pid) : PgrepChildPids(pid);
+
+    private static List<int> ProcChildPids(int pid)
+    {
+        var result = new List<int>();
+        var tasks = $"/proc/{pid.ToString(CultureInfo.InvariantCulture)}/task";
+        try
+        {
+            var read = false;
+            foreach (var task in Directory.EnumerateDirectories(tasks))
+            {
+                var file = Path.Combine(task, "children");
+                if (!File.Exists(file)) continue;
+                read = true;
+                foreach (var part in File.ReadAllText(file).Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    if (int.TryParse(part, CultureInfo.InvariantCulture, out var n) && n > 0 && !result.Contains(n)) result.Add(n);
+            }
+            if (read) return result;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return result; }
+        // Kernels without /proc/<pid>/task/*/children: scan every process's parent PID in /proc/*/stat.
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories("/proc"))
+            {
+                if (!int.TryParse(Path.GetFileName(dir), CultureInfo.InvariantCulture, out var candidate)) continue;
+                string stat;
+                try { stat = File.ReadAllText(Path.Combine(dir, "stat")); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+                // "pid (comm) state ppid ...": comm may hold spaces and parentheses, so read after the last ')'.
+                var close = stat.LastIndexOf(')');
+                if (close < 0) continue;
+                var fields = stat[(close + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (fields.Length > 1 && int.TryParse(fields[1], CultureInfo.InvariantCulture, out var ppid) && ppid == pid)
+                    result.Add(candidate);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return result;
+    }
+
+    private static List<int> PgrepChildPids(int pid)
     {
         try
         {
