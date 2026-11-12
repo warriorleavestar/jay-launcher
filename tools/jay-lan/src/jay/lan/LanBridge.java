@@ -12,13 +12,14 @@ import java.nio.charset.StandardCharsets;
  * Jay's LAN bridge for the Windows strong sandbox. A game in an AppContainer cannot be reached from outside it over
  * loopback, so Jay cannot connect to the world the player opened to LAN. It may still connect out, and the game may
  * connect to its own ports. This agent runs inside the game and keeps one control connection out to Jay (port and
- * secret on the command line: {@code -javaagent:jay-lan.jar=<port>:<secret>}). When a room member arrives, Jay asks
+ * this launch's token on the command line: {@code -javaagent:jay-lan.jar=<port>:<token>}). When a room member arrives, Jay asks
  * for the game's port; the agent connects to that port on 127.0.0.1 (its own process), opens a second connection out
  * to Jay for that member, and passes bytes between the two. Nothing in the game listens for Jay and nothing is opened
  * to the network.
  * <p>
- * Lines are ASCII: the agent sends {@code JAYLAN1 <secret> control} or {@code JAYLAN1 <secret> data <id>};
- * Jay sends {@code open <id> <port>}; the agent answers a failed open with {@code fail <id>}.
+ * Lines are ASCII: the agent sends {@code JAYLAN1 <token> control} or {@code JAYLAN1 <token> data <id>};
+ * Jay answers an accepted control connection with {@code ok}, then sends {@code open <id> <port>}; the agent answers a
+ * failed open with {@code fail <id>}. Jay accepts both kinds only from the process it started with this token.
  */
 public final class LanBridge implements Runnable {
     private static final int MAX_LINE = 128;
@@ -43,7 +44,7 @@ public final class LanBridge implements Runnable {
             return;
         }
         String secret = args.substring(colon + 1);
-        if (port <= 0 || port > 65535 || !secret.matches("[0-9a-f]{32,64}")) return;
+        if (port <= 0 || port > 65535 || !secret.matches("[0-9a-f]{32}")) return;
         daemon(new LanBridge(port, secret), "Jay LAN bridge");
     }
 
@@ -53,16 +54,26 @@ public final class LanBridge implements Runnable {
         thread.start();
     }
 
-    /** Keeps the control connection up while the game runs (Jay may not be listening yet, or may come back). */
+    /**
+     * Keeps the control connection up while the game runs: a dropped connection is retried with a growing pause. The
+     * port and token belong to the Jay that started the game, so once that Jay is gone (closed or restarted, which picks
+     * a new port and token) nothing answers again and the game has to be restarted to host rooms; that is said once in
+     * the game's log.
+     */
     @Override
     public void run() {
         long wait = 1000;
+        int failures = 0;
+        boolean told = false;
         while (true) {
             try {
                 Socket socket = connectToJay();
                 try {
-                    wait = 1000;
-                    serve(socket);
+                    // The pause only starts over once Jay accepted this connection, not merely because TCP connected.
+                    if (serve(socket)) {
+                        wait = 1000;
+                        failures = 0;
+                    }
                 } finally {
                     synchronized (writeLock) {
                         control = null;
@@ -70,7 +81,11 @@ public final class LanBridge implements Runnable {
                     closeQuietly(socket);
                 }
             } catch (IOException ignored) {
-                // Jay is not there (yet): try again later.
+                // Jay is not there: try again later.
+            }
+            if (++failures >= 5 && !told) {
+                told = true;
+                System.err.println("[Jay LAN bridge] Lost the connection to Jay. Restart the game to host a room from it again.");
             }
             try {
                 Thread.sleep(wait);
@@ -93,7 +108,8 @@ public final class LanBridge implements Runnable {
         }
     }
 
-    private void serve(Socket socket) throws IOException {
+    /** Serves one control connection; true when Jay accepted it (said "ok"). */
+    private boolean serve(Socket socket) throws IOException {
         OutputStream out = socket.getOutputStream();
         out.write(("JAYLAN1 " + secret + " control\n").getBytes(StandardCharsets.US_ASCII));
         out.flush();
@@ -101,6 +117,8 @@ public final class LanBridge implements Runnable {
             control = out;
         }
         InputStream in = socket.getInputStream();
+        String first = readLine(in);
+        if (!"ok".equals(first)) return false;
         String line;
         while ((line = readLine(in)) != null) {
             String[] parts = line.split(" ");
@@ -112,7 +130,7 @@ public final class LanBridge implements Runnable {
             } catch (NumberFormatException e) {
                 continue;
             }
-            if (!id.matches("[0-9]{1,18}") || port <= 0 || port > 65535) continue;
+            if (!id.matches("[0-9]{1,19}") || port <= 0 || port > 65535) continue;
             daemon(new Runnable() {
                 @Override
                 public void run() {
@@ -120,6 +138,7 @@ public final class LanBridge implements Runnable {
                 }
             }, "Jay LAN bridge " + id);
         }
+        return true;
     }
 
     private void open(String id, int port) {

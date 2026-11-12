@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -14,61 +16,152 @@ namespace Amber.Core.Multiplayer;
 /// names the owning process), Jay asks that agent to connect to its own port and to open a second connection out to Jay
 /// for this one player. Nothing is opened into the container, and other games and local services are reached as before.
 /// <para>
-/// The listener is on 127.0.0.1 only. An agent proves it was started by this Jay with the secret on its command line,
-/// and its process is read from Windows' connection table, never from what it says.
+/// The listener is on 127.0.0.1 only. Each launch gets its own token on the agent's command line, and the token is bound
+/// to the process Jay started. The token is not a secret from the game or its mods (they can read the JVM arguments),
+/// so what counts is the process: every connection's process is read from Windows' connection table, never from what it
+/// says, and must be the launch's process. A request is answered only by a data connection from the agent's process,
+/// and only that agent can turn its own requests down.
 /// </para>
 /// </summary>
 public static class GameLanBridge
 {
     internal const string Magic = "JAYLAN1";
-    private const int MaxLine = 128;
+    private const int MaxLine = 160;
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(5);
 
-    private static readonly object Gate = new();
-    private static TcpListener? _listener;
-    private static string _secret = "";
-    private static readonly List<Agent> Agents = [];
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, TaskCompletionSource<Socket?>> Pending = new();
-    private static long _nextId;
+    /// <summary>How long a control connection waits for Jay to learn which process its launch started.</summary>
+    private static readonly TimeSpan BindTimeout = TimeSpan.FromSeconds(10);
 
-    private sealed class Agent(Socket control, int pid)
+    /// <summary>Connections still sending their first line; more are closed at once.</summary>
+    private const int MaxHandshakes = 32;
+
+    private static readonly object Gate = new();
+    private static readonly SemaphoreSlim Handshakes = new(MaxHandshakes, MaxHandshakes);
+    private static TcpListener? _listener;
+    private static readonly Dictionary<string, Launch> Launches = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<long, Request> Pending = new();
+
+    /// <summary>One game launch: its token, the process it started (once known) and that process's agent.</summary>
+    private sealed class Launch
     {
+        public TaskCompletionSource<int> Pid { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Agent? Agent { get; set; }
+    }
+
+    private sealed class Agent(Launch launch, Socket control, int pid)
+    {
+        public Launch Launch { get; } = launch;
         public Socket Control { get; } = control;
         public int Pid { get; } = pid;
         public SemaphoreSlim Write { get; } = new(1, 1);
         public TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
+    private sealed record Request(Agent Agent, TaskCompletionSource<Socket?> Reply);
+
     /// <summary>
-    /// The JVM argument that loads the agent from <paramref name="jar"/> and points it at this Jay (the listener starts
-    /// on first use). The secret is random per Jay run.
+    /// The JVM argument that loads the agent from <paramref name="jar"/> with a new launch token (the listener starts on
+    /// first use), or null when the path can't be passed: the JVM splits <c>-javaagent:</c> at the first "=". Call
+    /// <see cref="Started"/> with the process once it runs.
     /// </summary>
-    public static string AgentArgument(string jar)
+    public static string? AgentArgument(string jar)
     {
-        var (port, secret) = Start();
-        return $"-javaagent:{jar}={port}:{secret}";
+        if (jar.Contains('=')) return null;
+        var port = Start();
+        var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+        lock (Gate) Launches[token] = new Launch();
+        return $"-javaagent:{jar}={port}:{token}";
+    }
+
+    /// <summary>
+    /// The launch with these arguments started <paramref name="process"/>: its agent is accepted from that process only,
+    /// and the launch is forgotten when the process exits. Arguments without an agent are ignored.
+    /// </summary>
+    public static void Started(IEnumerable<string> arguments, Process process)
+    {
+        if (TokenIn(arguments) is not { } token) return;
+        Launch? launch;
+        lock (Gate) Launches.TryGetValue(token, out launch);
+        if (launch is null) return;
+        launch.Pid.TrySetResult(process.Id);
+        process.EnableRaisingEvents = true;
+        process.Exited += (_, _) => Ended(token);
+        if (process.HasExited) Ended(token);
+    }
+
+    /// <summary>The launch failed to start, or its process exited: forget its token and close its agent.</summary>
+    public static void Ended(IEnumerable<string> arguments)
+    {
+        if (TokenIn(arguments) is { } token) Ended(token);
+    }
+
+    private static void Ended(string token)
+    {
+        Launch? launch;
+        lock (Gate)
+        {
+            if (!Launches.Remove(token, out launch)) return;
+        }
+        launch.Pid.TrySetResult(0);
+        launch.Agent?.Control.Dispose();
+    }
+
+    private static string? TokenIn(IEnumerable<string> arguments)
+    {
+        foreach (var a in arguments)
+        {
+            if (!a.StartsWith("-javaagent:", StringComparison.Ordinal)) continue;
+            var colon = a.LastIndexOf(':');
+            if (colon > 0 && a[(colon + 1)..] is { Length: 32 } token)
+                lock (Gate)
+                    if (Launches.ContainsKey(token)) return token;
+        }
+        return null;
     }
 
     /// <summary>Games with a connected agent (tests, diagnostics).</summary>
     public static int AgentCount
     {
-        get { lock (Gate) return Agents.Count; }
+        get
+        {
+            lock (Gate) return Launches.Values.Count(l => l.Agent is not null);
+        }
     }
 
     /// <summary>Whether a game with a bridge agent is running: rooms then pass the game port through Jay's relay.</summary>
     public static bool HasAgents => AgentCount > 0;
 
     /// <summary>
-    /// Connects to <paramref name="port"/> on 127.0.0.1: through the agent of the game that listens there, else directly.
-    /// Null when nothing answered within <paramref name="timeout"/>; throws only when <paramref name="ct"/> is cancelled.
+    /// Something listens on <paramref name="port"/> but can't be reached: most likely a game in the strong sandbox
+    /// started without a working agent (or before Jay was restarted, which gives the agent a dead address).
     /// </summary>
-    public static async Task<Socket?> ConnectAsync(int port, TimeSpan timeout, CancellationToken ct = default)
+    public static async Task<bool> ListenedButUnreachableAsync(int port)
+    {
+        if (!OperatingSystem.IsWindows() || LocalPortOwners.ListenerPids(port).Count == 0 || AgentFor(port) is not null) return false;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        try
+        {
+            using var socket = await DirectAsync(port, timeout.Token).ConfigureAwait(false);
+            return socket is null;
+        }
+        catch (OperationCanceledException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Connects to <paramref name="port"/> on this computer: through the agent of the game that listens there, else
+    /// directly to <paramref name="direct"/> (127.0.0.1 unless given). Null when nothing answered within
+    /// <paramref name="timeout"/>; throws only when <paramref name="ct"/> is cancelled.
+    /// </summary>
+    public static async Task<Socket?> ConnectAsync(int port, TimeSpan timeout, CancellationToken ct = default, IPAddress? direct = null)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         if (timeout != Timeout.InfiniteTimeSpan) linked.CancelAfter(timeout);
         try
         {
-            return AgentFor(port) is { } agent ? await ViaAgentAsync(agent, port, linked.Token).ConfigureAwait(false) : await DirectAsync(port, linked.Token).ConfigureAwait(false);
+            return AgentFor(port) is { } agent ? await ViaAgentAsync(agent, port, linked.Token).ConfigureAwait(false) : await DirectAsync(port, linked.Token, direct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -76,12 +169,13 @@ public static class GameLanBridge
         }
     }
 
-    private static async Task<Socket?> DirectAsync(int port, CancellationToken ct)
+    private static async Task<Socket?> DirectAsync(int port, CancellationToken ct, IPAddress? address = null)
     {
-        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        address ??= IPAddress.Loopback;
+        var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
         try
         {
-            await socket.ConnectAsync(new IPEndPoint(IPAddress.Loopback, port), ct).ConfigureAwait(false);
+            await socket.ConnectAsync(new IPEndPoint(address, port), ct).ConfigureAwait(false);
             return socket;
         }
         catch (SocketException)
@@ -98,21 +192,20 @@ public static class GameLanBridge
 
     private static Agent? AgentFor(int port)
     {
-        lock (Gate)
-            if (Agents.Count == 0) return null;
-        if (!OperatingSystem.IsWindows()) return null;
+        List<Agent> agents;
+        lock (Gate) agents = [.. Launches.Values.Select(l => l.Agent).OfType<Agent>()];
+        if (agents.Count == 0 || !OperatingSystem.IsWindows()) return null;
         var owners = LocalPortOwners.ListenerPids(port);
-        lock (Gate)
-            for (var i = Agents.Count - 1; i >= 0; i--)
-                if (owners.Contains(Agents[i].Pid)) return Agents[i];
-        return null;
+        return agents.FirstOrDefault(a => owners.Contains(a.Pid));
     }
 
     private static async Task<Socket?> ViaAgentAsync(Agent agent, int port, CancellationToken ct)
     {
-        var id = Interlocked.Increment(ref _nextId);
+        long id;
         var reply = new TaskCompletionSource<Socket?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Pending[id] = reply;
+        // Random ids: knowing one request's id tells nothing about the next.
+        do id = BitConverter.ToInt64(RandomNumberGenerator.GetBytes(8)) & long.MaxValue;
+        while (!Pending.TryAdd(id, new Request(agent, reply)));
         Socket? result = null;
         try
         {
@@ -149,19 +242,18 @@ public static class GameLanBridge
         }
     }
 
-    private static (int Port, string Secret) Start()
+    private static int Start()
     {
         lock (Gate)
         {
             if (_listener is null)
             {
-                _secret = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
                 var listener = new TcpListener(IPAddress.Loopback, 0);
                 listener.Start();
                 _listener = listener;
                 _ = Task.Run(() => AcceptLoopAsync(listener));
             }
-            return (((IPEndPoint)_listener.LocalEndpoint).Port, _secret);
+            return ((IPEndPoint)_listener.LocalEndpoint).Port;
         }
     }
 
@@ -182,6 +274,11 @@ public static class GameLanBridge
             {
                 continue;
             }
+            if (!Handshakes.Wait(0))
+            {
+                socket.Dispose();
+                continue;
+            }
             _ = Task.Run(() => HandshakeAsync(socket));
         }
     }
@@ -189,54 +286,74 @@ public static class GameLanBridge
     private static async Task HandshakeAsync(Socket socket)
     {
         var keep = false;
+        var released = false;
+        void Release()
+        {
+            if (!released) Handshakes.Release();
+            released = true;
+        }
         try
         {
             string? line;
             using (var timeout = new CancellationTokenSource(HandshakeTimeout))
                 line = await ReadLineAsync(socket, timeout.Token);
-            if (line is null || Parse(line, _secret) is not { } hello) return;
+            if (line is null || Parse(line) is not { } hello || !OperatingSystem.IsWindows()) return;
+            Launch? launch;
+            lock (Gate) Launches.TryGetValue(hello.Token, out launch);
+            if (launch is null) return;
+            var pid = LocalPortOwners.ConnectionPid((IPEndPoint)socket.RemoteEndPoint!, (IPEndPoint)socket.LocalEndPoint!);
+            if (pid is null) return;
             socket.NoDelay = true;
             if (hello.Data is { } id)
             {
-                if (Pending.TryGetValue(id, out var reply) && reply.TrySetResult(socket)) keep = true;
+                // Only the agent that was asked may answer, from its own process.
+                if (Pending.TryGetValue(id, out var request) && request.Agent.Launch == launch && request.Agent.Pid == pid
+                    && request.Reply.TrySetResult(socket))
+                    keep = true;
                 return;
             }
-            if (!OperatingSystem.IsWindows()
-                || LocalPortOwners.ConnectionPid((IPEndPoint)socket.RemoteEndPoint!, (IPEndPoint)socket.LocalEndPoint!) is not { } pid)
-                return;
+            // The agent runs in the process this launch started (the JVM loads it before the game).
+            using (var wait = new CancellationTokenSource(BindTimeout))
+                if (await launch.Pid.Task.WaitAsync(wait.Token) != pid) return;
+            Release();
             keep = true;
-            await ServeControlAsync(new Agent(socket, pid));
+            await ServeControlAsync(new Agent(launch, socket, pid.Value));
         }
-        catch (Exception e) when (e is SocketException or OperationCanceledException or ObjectDisposedException or IOException)
+        catch (Exception e) when (e is SocketException or OperationCanceledException or ObjectDisposedException or IOException or TimeoutException)
         {
         }
         finally
         {
+            Release();
             if (!keep) socket.Dispose();
         }
     }
 
-    /// <summary>More control connections than any number of running games needs; more are turned away.</summary>
-    private const int MaxAgents = 16;
-
     private static async Task ServeControlAsync(Agent agent)
     {
+        Agent? replaced;
         lock (Gate)
         {
-            if (Agents.Count >= MaxAgents)
+            // One control connection per launch: a new one replaces the old.
+            if (!Launches.ContainsValue(agent.Launch))
             {
                 agent.Control.Dispose();
                 return;
             }
-            Agents.Add(agent);
+            replaced = agent.Launch.Agent;
+            agent.Launch.Agent = agent;
         }
+        replaced?.Control.Dispose();
         try
         {
+            // Tells the agent it was accepted (it waits for this before it stops backing off).
+            if (!await SendAsync(agent, "ok\n", CancellationToken.None)) return;
             while (await ReadLineAsync(agent.Control, CancellationToken.None) is { } line)
             {
-                var parts = line.Split(' ');
-                if (parts is ["fail", var text] && long.TryParse(text, out var id) && Pending.TryGetValue(id, out var reply))
-                    reply.TrySetResult(null);
+                // An agent can only turn down its own requests.
+                if (line.Split(' ') is ["fail", var text] && long.TryParse(text, out var id)
+                    && Pending.TryGetValue(id, out var request) && request.Agent == agent)
+                    request.Reply.TrySetResult(null);
             }
         }
         catch (Exception e) when (e is SocketException or ObjectDisposedException or IOException)
@@ -244,22 +361,22 @@ public static class GameLanBridge
         }
         finally
         {
-            lock (Gate) Agents.Remove(agent);
+            lock (Gate)
+                if (agent.Launch.Agent == agent) agent.Launch.Agent = null;
             agent.Closed.TrySetResult();
             agent.Control.Dispose();
         }
     }
 
-    /// <summary>The first line of a connection from an agent: control, or data for request <c>id</c>. Null when it is not one.</summary>
-    internal static (bool Control, long? Data)? Parse(string line, string secret)
+    /// <summary>The first line of a connection from an agent: its launch token, and for a data connection the request id.</summary>
+    internal static (string Token, long? Data)? Parse(string line)
     {
         var parts = line.Split(' ');
-        if (parts.Length < 3 || parts[0] != Magic || secret.Length == 0) return null;
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(parts[1]), Encoding.ASCII.GetBytes(secret))) return null;
+        if (parts.Length < 3 || parts[0] != Magic || parts[1].Length != 32 || !parts[1].All(char.IsAsciiHexDigitLower)) return null;
         return parts switch
         {
-            [_, _, "control"] => (true, null),
-            [_, _, "data", var id] when long.TryParse(id, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) => (false, n),
+            [_, var token, "control"] => (token, null),
+            [_, var token, "data", var id] when long.TryParse(id, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) => (token, n),
             _ => null,
         };
     }
@@ -285,6 +402,9 @@ public static class GameLanBridge
 
     /// <summary>Tests: whether a connection to <paramref name="port"/> would go through an agent.</summary>
     internal static bool HasAgentFor(int port) => AgentFor(port) is not null;
+
+    /// <summary>Tests: the listener's port.</summary>
+    internal static int PortForTest => Start();
 }
 
 /// <summary>Which process owns a TCP listener or connection on this computer (Windows' TCP tables; no admin needed).</summary>

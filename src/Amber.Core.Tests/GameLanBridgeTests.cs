@@ -8,70 +8,186 @@ using Amber.Core.Multiplayer;
 namespace Amber.Core.Tests;
 
 /// <summary>
+/// The bridge is process-wide and these tests act as agents of this test process: nothing else may connect to this
+/// process's own ports meanwhile, or it would be routed through them.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class GameLanBridgeCollection
+{
+    public const string Name = "GameLanBridge";
+}
+
+/// <summary>
 /// Rooms reaching a game in the Windows strong sandbox: the game's LAN bridge agent (tools/jay-lan) connects out to Jay,
 /// and Jay sends a connection through it only when the port belongs to that game.
 /// </summary>
+[Collection(GameLanBridgeCollection.Name)]
 public sealed class GameLanBridgeTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "jay-lan-bridge-" + Guid.NewGuid().ToString("N"));
+    private readonly List<List<string>> _launches = [];
+    private readonly List<IDisposable> _cleanup = [];
 
     public GameLanBridgeTests() => Directory.CreateDirectory(_root);
 
     public void Dispose()
     {
+        foreach (var args in _launches) GameLanBridge.Ended(args);
+        foreach (var d in _cleanup) d.Dispose();
         try { Directory.Delete(_root, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     [Fact]
-    public void FirstLineNeedsTheSecret()
+    public void FirstLineNamesTheLaunch()
     {
-        const string secret = "0123456789abcdef0123456789abcdef";
-        Assert.Equal((true, (long?)null), GameLanBridge.Parse($"JAYLAN1 {secret} control", secret));
-        Assert.Equal((false, (long?)42), GameLanBridge.Parse($"JAYLAN1 {secret} data 42", secret));
-        Assert.Null(GameLanBridge.Parse("JAYLAN1 0123456789abcdef0123456789abcdee control", secret));
-        Assert.Null(GameLanBridge.Parse($"JAYLAN1 {secret} data -1", secret));
-        Assert.Null(GameLanBridge.Parse($"JAYLAN1 {secret} data", secret));
-        Assert.Null(GameLanBridge.Parse($"JAYLAN1 {secret} open 1 25565", secret));
-        Assert.Null(GameLanBridge.Parse($"JAYLAN2 {secret} control", secret));
-        Assert.Null(GameLanBridge.Parse("JAYLAN1  control", ""));
+        const string token = "0123456789abcdef0123456789abcdef";
+        Assert.Equal((token, (long?)null), GameLanBridge.Parse($"JAYLAN1 {token} control"));
+        Assert.Equal((token, (long?)42), GameLanBridge.Parse($"JAYLAN1 {token} data 42"));
+        Assert.Null(GameLanBridge.Parse($"JAYLAN1 {token} data -1"));
+        Assert.Null(GameLanBridge.Parse($"JAYLAN1 {token} data"));
+        Assert.Null(GameLanBridge.Parse($"JAYLAN1 {token} open 1 25565"));
+        Assert.Null(GameLanBridge.Parse($"JAYLAN2 {token} control"));
+        Assert.Null(GameLanBridge.Parse("JAYLAN1 0123456789ABCDEF0123456789ABCDEF control"));
+        Assert.Null(GameLanBridge.Parse("JAYLAN1 0123 control"));
+    }
+
+    [Fact]
+    public void JarPathWithEqualsSignIsNotPassed()
+    {
+        // -javaagent:<jar>=<options> splits at the first "=": such a path would stop the game from starting.
+        Assert.Null(GameLanBridge.AgentArgument(@"D:\MC=1.20\libraries\jay\jay-lan\jay-lan-0.jar"));
+        var argument = GameLanBridge.AgentArgument(@"D:\MC 1.20\libraries\jay\jay-lan\jay-lan-0.jar");
+        Assert.NotNull(argument);
+        _launches.Add([argument]);
+        Assert.Matches(@"^-javaagent:D:\\MC 1\.20\\libraries\\jay\\jay-lan\\jay-lan-0\.jar=\d+:[0-9a-f]{32}$", argument);
     }
 
     [Fact]
     public void PortOwnersNameThisProcess()
     {
         if (!OperatingSystem.IsWindows()) return;
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        try
-        {
-            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            Assert.Contains(Environment.ProcessId, LocalPortOwners.ListenerPids(port));
-            using var client = new TcpClient();
-            client.Connect(IPAddress.Loopback, port);
-            Assert.Equal(Environment.ProcessId, LocalPortOwners.ConnectionPid((IPEndPoint)client.Client.LocalEndPoint!, (IPEndPoint)client.Client.RemoteEndPoint!));
-        }
-        finally
-        {
-            listener.Stop();
-        }
+        using var listener = new Listener();
+        Assert.Contains(Environment.ProcessId, LocalPortOwners.ListenerPids(listener.Port));
+        using var client = new TcpClient();
+        client.Connect(IPAddress.Loopback, listener.Port);
+        Assert.Equal(Environment.ProcessId, LocalPortOwners.ConnectionPid((IPEndPoint)client.Client.LocalEndPoint!, (IPEndPoint)client.Client.RemoteEndPoint!));
     }
 
     [Fact]
-    public async Task PortsOfOtherProcessesAreReachedDirectly()
+    public async Task PortsWithoutAnAgentAreReachedDirectly()
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        try
+        using var listener = new Listener();
+        Assert.False(GameLanBridge.HasAgentFor(listener.Port));
+        Assert.False(await GameLanBridge.ListenedButUnreachableAsync(listener.Port));
+        using var socket = await GameLanBridge.ConnectAsync(listener.Port, TimeSpan.FromSeconds(5));
+        Assert.NotNull(socket);
+    }
+
+    [Fact]
+    public async Task DataConnectionForAnUnknownRequestIsClosed()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var token = Launch();
+        using var data = await DialAsync($"JAYLAN1 {token} data 123456789");
+        Assert.Null(await ReadLineAsync(data));
+    }
+
+    [Fact]
+    public async Task ControlFromAnotherProcessIsRefused()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        // The launch started another process: its token alone gets this one nowhere.
+        var token = Launch(OtherProcess());
+        using var control = await DialAsync($"JAYLAN1 {token} control");
+        Assert.Null(await ReadLineAsync(control));
+        Assert.Equal(0, GameLanBridge.AgentCount);
+    }
+
+    [Fact]
+    public async Task RepeatedControlConnectionsReplaceEachOtherWithoutCrowdingOutOtherGames()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var a = Launch();
+        var old = new List<Socket>();
+        for (var i = 0; i < 20; i++)
         {
-            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            Assert.False(GameLanBridge.HasAgentFor(port));
-            using var socket = await GameLanBridge.ConnectAsync(port, TimeSpan.FromSeconds(5));
-            Assert.NotNull(socket);
+            var control = await DialAsync($"JAYLAN1 {a} control");
+            _cleanup.Add(control);
+            Assert.Equal("ok", await ReadLineAsync(control));
+            old.Add(control);
         }
-        finally
+        // Each new connection replaced the one before: only the last is still open.
+        foreach (var s in old.Take(19)) Assert.Null(await ReadLineAsync(s));
+        var b = Launch();
+        using var other = await DialAsync($"JAYLAN1 {b} control");
+        Assert.Equal("ok", await ReadLineAsync(other));
+        Assert.Equal(2, GameLanBridge.AgentCount);
+    }
+
+    [Fact]
+    public async Task OnlyTheAskedAgentCanAnswerOrTurnDownARequest()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var tokens = new[] { Launch(), Launch() };
+        var controls = new Socket[2];
+        for (var i = 0; i < 2; i++)
         {
-            listener.Stop();
+            controls[i] = await DialAsync($"JAYLAN1 {tokens[i]} control");
+            _cleanup.Add(controls[i]);
+            Assert.Equal("ok", await ReadLineAsync(controls[i]));
         }
+        using var game = new Listener();
+        var connecting = GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(20));
+        var reads = controls.Select(c => ReadLineAsync(c, TimeSpan.FromSeconds(10))).ToArray();
+        var first = await Task.WhenAny(reads);
+        var asked = Array.IndexOf(reads, first);
+        var parts = (await first)?.Split(' ');
+        Assert.True(parts is ["open", _, _], "no request reached an agent");
+        var id = parts![1];
+
+        // The other launch's agent (a game that could be malicious) turns the request down and answers it: neither counts.
+        var other = 1 - asked;
+        await controls[other].SendAsync(Encoding.ASCII.GetBytes($"fail {id}\n"));
+        using (var stray = await DialAsync($"JAYLAN1 {tokens[other]} data {id}"))
+            Assert.Null(await ReadLineAsync(stray, TimeSpan.FromSeconds(5)));
+        Assert.False(connecting.IsCompleted);
+
+        using var genuine = await DialAsync($"JAYLAN1 {tokens[asked]} data {id}");
+        using var result = await connecting;
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task DataFromAnotherProcessIsRejected()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var token = Launch();
+        using var control = await DialAsync($"JAYLAN1 {token} control");
+        Assert.Equal("ok", await ReadLineAsync(control));
+        using var game = new Listener();
+        var connecting = GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(60));
+        var parts = (await ReadLineAsync(control))?.Split(' ');
+        Assert.True(parts is ["open", _, _]);
+        var id = parts![1];
+
+        // Another process with the right token and id: closed, and the request stays open.
+        var powershell = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+        };
+        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command",
+                     $"$c=[Net.Sockets.TcpClient]::new('127.0.0.1',{GameLanBridge.PortForTest});$s=$c.GetStream();" +
+                     $"$b=[Text.Encoding]::ASCII.GetBytes(\"JAYLAN1 {token} data {id}`n\");$s.Write($b,0,$b.Length);" +
+                     "$s.ReadTimeout=8000;try{$r=$s.ReadByte()}catch{$r=-2};\"R=$r\"" })
+            powershell.ArgumentList.Add(a);
+        using var process = Process.Start(powershell)!;
+        var output = await process.StandardOutput.ReadToEndAsync() + await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.Contains("R=-1", output);
+        Assert.False(connecting.IsCompleted);
+
+        await control.SendAsync(Encoding.ASCII.GetBytes($"fail {id}\n"));
+        Assert.Null(await connecting);
     }
 
     [Fact]
@@ -83,8 +199,8 @@ public sealed class GameLanBridgeTests : IDisposable
 
     /// <summary>
     /// The real thing: a game in the AppContainer (where Windows drops loopback connections from outside) is reached
-    /// through its agent, whose control connection comes out of the container. Needs the
-    /// container's loopback exemption (Jay's admin step), so it is skipped on machines without it (CI runners).
+    /// through its agent, whose control connection comes out of the container. Needs the container's loopback
+    /// exemption (Jay's admin step), so it is skipped on machines without it (CI runners).
     /// </summary>
     [Fact]
     public async Task AgentReachesAGameInTheStrongSandbox()
@@ -94,9 +210,84 @@ public sealed class GameLanBridgeTests : IDisposable
         await RunGameAsync(psi, WindowsSandboxLevel.Strong);
     }
 
+    // ---------------------------------------------------------------- helpers
+
+    /// <summary>A launch whose process is <paramref name="process"/> (this test process unless given); returns its token.</summary>
+    private string Launch(Process? process = null)
+    {
+        var argument = GameLanBridge.AgentArgument(Path.Combine(_root, "jay-lan.jar"))!;
+        List<string> args = [argument];
+        _launches.Add(args);
+        GameLanBridge.Started(args, process ?? Process.GetCurrentProcess());
+        return argument[(argument.LastIndexOf(':') + 1)..];
+    }
+
+    /// <summary>A process that is not this one and waits (killed when the test ends).</summary>
+    private Process OtherProcess()
+    {
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "ping.exe"))
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true,
+        };
+        foreach (var a in new[] { "-n", "60", "127.0.0.1" }) psi.ArgumentList.Add(a);
+        var process = Process.Start(psi)!;
+        _cleanup.Add(new Killer(process));
+        return process;
+    }
+
+    private sealed class Killer(Process process) : IDisposable
+    {
+        public void Dispose()
+        {
+            try { process.Kill(); } catch (InvalidOperationException) { }
+            process.Dispose();
+        }
+    }
+
+    private static async Task<Socket> DialAsync(string firstLine)
+    {
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await socket.ConnectAsync(new IPEndPoint(IPAddress.Loopback, GameLanBridge.PortForTest));
+        await socket.SendAsync(Encoding.ASCII.GetBytes(firstLine + "\n"));
+        return socket;
+    }
+
+    /// <summary>One line, or null when the other side closed (or nothing came in time).</summary>
+    private static async Task<string?> ReadLineAsync(Socket socket, TimeSpan? timeout = null)
+    {
+        using var cts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(15));
+        var line = new StringBuilder();
+        var one = new byte[1];
+        try
+        {
+            while (true)
+            {
+                if (await socket.ReceiveAsync(one, SocketFlags.None, cts.Token) == 0) return null;
+                if (one[0] == '\n') return line.ToString();
+                line.Append((char)one[0]);
+            }
+        }
+        catch (Exception e) when (e is SocketException or OperationCanceledException or ObjectDisposedException)
+        {
+            return null;
+        }
+    }
+
+    private sealed class Listener : IDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+
+        public Listener() => _listener.Start();
+
+        public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+
+        public void Dispose() => _listener.Stop();
+    }
+
     private async Task RunGameAsync(ProcessStartInfo psi, WindowsSandboxLevel level)
     {
         using var process = level == WindowsSandboxLevel.Standard ? Process.Start(psi)! : WindowsSandbox.Start(psi, level);
+        GameLanBridge.Started(psi.ArgumentList, process);
         var output = new StringBuilder();
         var portSeen = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         process.OutputDataReceived += (_, e) =>
@@ -140,7 +331,8 @@ public sealed class GameLanBridgeTests : IDisposable
     private (ProcessStartInfo Psi, string JavaHome)? Prepare()
     {
         if (FindJava() is not { } javaHome) return null;
-        if (WindowsSandbox.LanBridgeJar(_root) is not { } jar) return null;
+        if (WindowsSandbox.LanBridgeJar(_root) is not { } jar || GameLanBridge.AgentArgument(jar) is not { } agent) return null;
+        _launches.Add([agent]);
         var source = Path.Combine(_root, "Game.java");
         File.WriteAllText(source, """
             import java.io.*;
@@ -172,7 +364,7 @@ public sealed class GameLanBridgeTests : IDisposable
         {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = _root,
         };
-        psi.ArgumentList.Add(GameLanBridge.AgentArgument(jar));
+        psi.ArgumentList.Add(agent);
         psi.ArgumentList.Add(source);
         return (psi, javaHome);
     }
@@ -180,13 +372,15 @@ public sealed class GameLanBridgeTests : IDisposable
     private static string? FindJava()
     {
         foreach (var name in new[] { "JAVA_HOME_21_X64", "JAVA_HOME_25_X64", "JAVA_HOME_17_X64", "JAVA_HOME" })
-            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } home && File.Exists(Path.Combine(home, "bin", "java.exe"))
-                && WindowsSandbox.JavaMajor(Path.Combine(home, "bin", "java.exe")) is 0 or >= 11)
-                return home;
+            if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } home && Usable(Path.TrimEndingDirectorySeparator(home)))
+                return Path.TrimEndingDirectorySeparator(home);
+        // A PATH entry is the JDK's bin folder, with or without a trailing separator or quotes.
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
-            if (dir.Length > 0 && File.Exists(Path.Combine(dir, "java.exe")) && Path.GetDirectoryName(dir) is { } home
-                && WindowsSandbox.JavaMajor(Path.Combine(dir, "java.exe")) >= 11)
+            if (dir.Trim('"') is { Length: > 0 } bin && Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(bin)) is { } home && Usable(home))
                 return home;
         return null;
+
+        static bool Usable(string home) =>
+            File.Exists(Path.Combine(home, "bin", "java.exe")) && WindowsSandbox.JavaMajor(Path.Combine(home, "bin", "java.exe")) >= 11;
     }
 }

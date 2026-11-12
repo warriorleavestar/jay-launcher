@@ -48,7 +48,7 @@ public sealed partial class MultiplayerViewModel
         {
             if ((manual is null || checkManual) && !await GamePortReadyAsync(known, manual: manual is not null))
             {
-                SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", known));
+                SetStatus(await PortUnavailableAsync(known));
                 return null;
             }
             // A game in the strong sandbox can't be reached by EasyTier or the direct bridge over loopback, only
@@ -70,6 +70,15 @@ public sealed partial class MultiplayerViewModel
         var relay = new GamePortRelay();
         return (relay.Port, relay);
     }
+
+    /// <summary>
+    /// The game port didn't answer. When something does listen there, it is most likely a game in the strong sandbox
+    /// whose LAN bridge isn't connected (started before Jay was restarted): say to restart the game.
+    /// </summary>
+    private static async Task<StatusMessage> PortUnavailableAsync(int port) =>
+        await GameLanBridge.ListenedButUnreachableAsync(port)
+            ? StatusMessage.Error("multiplayer.lan.port_unreachable_sandbox", port)
+            : StatusMessage.Error("multiplayer.lan.port_unavailable", port);
 
     private void AdoptGameRelay(GamePortRelay? relay)
     {
@@ -112,7 +121,7 @@ public sealed partial class MultiplayerViewModel
         if (version != _relayCheck || _gameRelay != relay) return;
         if (!ok)
         {
-            SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
+            SetStatus(await PortUnavailableAsync(port));
             return;
         }
         relay.SetTarget(port);

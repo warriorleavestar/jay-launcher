@@ -238,8 +238,8 @@ public static class ServerList
             var (host, port) = ParseAddress(address);
             using var tcp = new TcpClient();
             // A world on this computer may be a game in the strong sandbox, reached through its LAN bridge.
-            using var stream = host == "127.0.0.1"
-                ? new NetworkStream(await Multiplayer.GameLanBridge.ConnectAsync(port, Timeout.InfiniteTimeSpan, linked.Token).ConfigureAwait(false)
+            using var stream = IsLoopbackHost(host)
+                ? new NetworkStream(await Multiplayer.GameLanBridge.ConnectAsync(port, Timeout.InfiniteTimeSpan, linked.Token, LoopbackAddress(host)).ConfigureAwait(false)
                     ?? throw new SocketException((int)SocketError.ConnectionRefused), ownsSocket: true)
                 : await ConnectAsync(tcp, host, port, linked.Token).ConfigureAwait(false);
 
@@ -283,6 +283,14 @@ public static class ServerList
             if (acquired) PingSlots.Release();
         }
     }
+
+    /// <summary>localhost, 127.x and ::1: this computer, where a world may be a game in the strong sandbox.</summary>
+    internal static bool IsLoopbackHost(string host) =>
+        host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+        || System.Net.IPAddress.TryParse(host.Trim('[', ']'), out var ip) && System.Net.IPAddress.IsLoopback(ip);
+
+    private static System.Net.IPAddress LoopbackAddress(string host) =>
+        System.Net.IPAddress.TryParse(host.Trim('[', ']'), out var ip) ? ip : System.Net.IPAddress.Loopback;
 
     private static async Task<NetworkStream> ConnectAsync(TcpClient tcp, string host, int port, CancellationToken ct)
     {
