@@ -149,8 +149,7 @@ internal sealed partial class SelfTest
         Check("谁能看到什么：“现在”写成字（不只靠底色），读屏也读得到", NowTags() == 1 && HasText(L.T("multiplayer.sees.now"))
             && nowLine.SpokenName == L.F("multiplayer.sees.row_name_now", nowLine.Who, nowLine.Ip, nowLine.Content)
             && seesRows!.GetVisualDescendants().OfType<Border>().Where(b => b.Classes.Contains("sees-row")).All(b => !string.IsNullOrEmpty(Avalonia.Automation.AutomationProperties.GetName(b))), nowLine.SpokenName);
-        Check("谁能看到什么：开了只走中转那一行不写“否”，写“正常使用时”", vm.WhoSeesLines.Single(l => l.Row.Id == "relayed").Ip == L.T("multiplayer.sees.not_normally")
-            && vm.WhoSeesLines.Single(l => l.Row.Id == "relayed").Ip != L.T("multiplayer.sees.no"));
+        Check("谁能看到什么：开了只走中转那一行写“否”", vm.WhoSeesLines.Single(l => l.Row.Id == "relayed").Ip == L.T("multiplayer.sees.no"));
         var relayBox = Named<CheckBox>("RelayOnlyBox");
         Check("只走中转：表下面的开关，默认关，写清楚换来什么", relayBox is { IsEffectivelyVisible: true, IsEffectivelyEnabled: true, IsChecked: false }
             && HasText(L.T("multiplayer.sees.relay_only")) && !vm.MyRelayOnly);
@@ -165,8 +164,8 @@ internal sealed partial class SelfTest
         Check("只走中转：打开后我这边改成不直连（联机组件按新设置重启）", await WaitAsync(() => vm.MyRelayOnly && vm.CanChangeRelayOnly, 3) && switchedTo is { RelayOnly: true }
             && relayBox!.IsChecked == true && vm.Status == L.T("multiplayer.sees.relay_only.turned_on")
             && vm.RoomFacts.Any(f => f.Value == L.T("multiplayer.open.route.relay")), vm.Status);
-        Check("只走中转：写的是 Jay 做什么（请别人不直连我），不写别人一定看不到", !L.T("multiplayer.sees.relay_only").Contains("看不到") && !L.T("multiplayer.sees.relay_only.turned_on").Contains("看不到你的 IP。")
-            && HasText(L.T("multiplayer.sees.relay_only")));
+        Check("只走中转：开关写明房间里的人看不到我的 IP、延迟会高一些，打开后也这么说", L.T("multiplayer.sees.relay_only").Contains("看不到我的 IP")
+            && L.T("multiplayer.sees.relay_only.turned_on").Contains("看不到你的 IP") && HasText(L.T("multiplayer.sees.relay_only")));
         SetPeers(new PeerInfo("amber-guest", "10.144.144.2", "relay(2)", 82, "tcp"));
         await Task.Delay(300);
         Check("谁能看到什么：开着只走中转、连接也确实经中转时，“现在”换到那一行", Now("relayed") && !Now("direct") && NowTags() == 1);
