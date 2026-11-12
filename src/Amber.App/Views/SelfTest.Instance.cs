@@ -281,7 +281,7 @@ internal sealed partial class SelfTest
 
         window.Height = 900;
         instance.TabIndex = (int)InstanceTab.Settings;
-        await Task.Delay(500);
+        await Task.Delay(Toasts.UndoDuration + TimeSpan.FromSeconds(1)); // the fixes above left undo toasts over the page
         Check("启动后直接进：设置页签里一个下拉，四项（标题页、存档、服务器、当前 Jay 房间），默认标题页",
             instance.StartIntoChoices.Length == 4 && instance.StartIntoIndex == (int)StartInto.Title
             && Dispatcher.UIThread.Invoke(() => page?.StartIntoBox.IsEffectivelyVisible == true && page.StartWorldBox.IsVisible == false && page.StartServerBox.IsVisible == false),
@@ -319,6 +319,10 @@ internal sealed partial class SelfTest
             title.Chosen && worlds.Count == 1 && worlds[0].Value == "Survival" && servers.Count == 2
             && servers.Any(t => t.Value == "friends.example.invalid:25565") && servers.Any(t => t.Value == "mc.example.invalid:25566") && room is null,
             $"{worlds.Count} {servers.Count} {room is null}");
+        var menuWorld = instance.StartMenuEntries.FirstOrDefault(e => e.Children?.Any(c => c.Target?.Into == StartInto.World) == true)?.Children?[0].Header;
+        Check("存档名在设置下拉和 ▾ 菜单里写法一样：生存世界 · Survival",
+            menuWorld == "生存世界 · Survival" && instance.StartWorldChoices.FirstOrDefault(w => w.Folder == "Survival")?.Label == menuWorld,
+            $"{menuWorld} / {instance.StartWorldChoices.FirstOrDefault()?.Label}");
         Check("▾ 按钮挨着开始按钮，读屏名字写下一次去哪", Dispatcher.UIThread.Invoke(() => page?.StartIntoButton.IsEffectivelyVisible == true)
             && instance.StartIntoLabel == L.F("quickplay.menu.name", L.T("quickplay.title")), instance.StartIntoLabel);
         await MenuShotAsync(page, "instance-quickplay-menu", openWorlds: true);

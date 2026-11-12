@@ -48,7 +48,7 @@ public sealed partial class InstanceViewModel
     public void RefreshStartMenu()
     {
         var (title, worlds, servers, room) = StartMenu();
-        StartMenuEntry Choice(StartTarget t) => new(t.Detail is { } d ? $"{t.Label}  ·  {d}" : t.Label, t, go: StartAndGoToCommand);
+        StartMenuEntry Choice(StartTarget t) => new(t.Detail is { } d ? Labeled(t.Label, d) : t.Label, t, go: StartAndGoToCommand);
         StartMenuEntry Sub(string header, IReadOnlyList<StartTarget> list, string empty) =>
             new(header, children: list.Count > 0 ? [.. list.Select(Choice)] : [new StartMenuEntry(empty)]);
         StartMenuEntries.Clear();
@@ -94,7 +94,7 @@ public sealed partial class InstanceViewModel
         StartWorldChoices.Clear();
         if (Current is { } c)
             foreach (var w in WorldManager.List(c.SavesDir).OrderByDescending(w => w.LastPlayed ?? DateTimeOffset.MinValue))
-                StartWorldChoices.Add(new StartWorldChoice(w.FolderName, w.Name == w.FolderName ? w.Name : $"{w.Name} ({w.FolderName})"));
+                StartWorldChoices.Add(new StartWorldChoice(w.FolderName, WorldLabel(w.Name, w.FolderName)));
         OnPropertyChanged(nameof(HasNoStartWorlds));
         StartIntoIndex = (int)QuickPlay.Parse(s.StartInto, s.JoinServer);
         SelectedStartWorld = StartWorldChoices.FirstOrDefault(w => w.Folder == s.StartWorld)
@@ -102,6 +102,11 @@ public sealed partial class InstanceViewModel
         OnPropertyChanged(nameof(StartIntoHint));
         RefreshStartMenu();
     }
+
+    /// <summary>A world, a server: its name, then its folder or address when that differs. One form in the dropdown and the ▾ menu.</summary>
+    internal static string Labeled(string name, string detail) => $"{name} · {detail}";
+
+    internal static string WorldLabel(string name, string folder) => name == folder ? name : Labeled(name, folder);
 
     /// <summary>The saved world is gone: keep it in the list (marked) rather than silently picking another.</summary>
     private StartWorldChoice AddMissingWorld(string folder)
