@@ -96,10 +96,20 @@ public sealed class RoomTransport : IAsyncDisposable
         // Opened before the single-path port, so a Strict room with a busy leg port fails before it listens anywhere.
         if (o.IsHost && HostSplits(o))
         {
-            // The session bound the leg ports before EasyTier started (EasyTier only lets members reach them then). Without
-            // a session, or when the transport starts again in the same session, they are bound here.
-            var legs = o.HostSplitLegs?.TryTake() ?? SplitLegReservation.TryReserve(room.Split.Paths, listen)?.TryTake();
-            if (legs is null)
+            // The session bound the leg ports before EasyTier started (EasyTier only lets members reach them then) and keeps
+            // them for as long as it runs; the transport borrows them, also when it starts again in the same session. Only
+            // without a session are they bound here. When the session found a leg port taken it said so, and EasyTier
+            // doesn't serve the leg ports: no second try, which could open listeners no member can reach.
+            Action? giveBack = null;
+            TcpListener[]? legs;
+            if (o.HostSplitLegs is { } held)
+            {
+                legs = held.TryBorrow();
+                if (legs is not null) giveBack = held.Return;
+            }
+            else legs = o.HostSplitLegsBusy ? null : SplitLegReservation.TryReserve(room.Split.Paths, listen)?.TryTake();
+            if (legs is null && o.HostSplitLegsBusy) { }
+            else if (legs is null)
             {
                 // A leg port is taken by another program. Auto rooms carry on without splitting; a Strict service would be
                 // unreachable, so then the room doesn't start.
@@ -113,7 +123,7 @@ public sealed class RoomTransport : IAsyncDisposable
                     TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
                     TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
                     _ => null,
-                }, _log, listeners: legs));
+                }, _log, listeners: legs, giveBack: giveBack));
             }
         }
 

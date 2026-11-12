@@ -24,6 +24,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private readonly Task[] _loops;
     private readonly CancellationTokenSource _cts = new();
     private readonly HashSet<Task> _running = [];
+    private readonly Action? _giveBack;
 
     public SplitRegistry Registry { get; }
     public IReadOnlyList<int> Ports => [.. _listeners.Select(l => ((IPEndPoint)l.LocalEndpoint).Port)];
@@ -40,17 +41,26 @@ public sealed class SplitTunnelServer : IAsyncDisposable
 
     /// <param name="ports">Listening port per leg; defaults to <see cref="SplitSettings.LegPort"/> (tests pass 0).</param>
     /// <param name="listeners">Already bound listeners, one per leg in leg order (from <see cref="SplitLegReservation"/>);
-    /// the server owns them from here on.</param>
+    /// the server owns them from here on, unless <paramref name="giveBack"/> is set.</param>
+    /// <param name="giveBack">The listeners are lent: when the server stops (or refuses to start) it leaves them bound and
+    /// calls this instead of stopping them.</param>
     public SplitTunnelServer(RoomCode room, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null,
-        IPAddress? address = null, IReadOnlyList<int>? ports = null, SplitRegistry? registry = null, IReadOnlyList<TcpListener>? listeners = null)
+        IPAddress? address = null, IReadOnlyList<int>? ports = null, SplitRegistry? registry = null, IReadOnlyList<TcpListener>? listeners = null,
+        Action? giveBack = null)
     {
-        if (listeners is not null && listeners.Count != room.Split.Paths)
+        _giveBack = listeners is null ? null : giveBack;
+        // Listeners passed in are this server's from the start: any refusal below releases them.
+        ArgumentException? invalid =
+            !room.FromInvite || !room.Tunnel.Wraps || !room.Split.Enabled || room.Members is null ? new("split needs a wrapped invite room with split enabled", nameof(room))
+            : ports is not null && ports.Count != room.Split.Paths ? new("one port per leg", nameof(ports))
+            : listeners is not null && listeners.Count != room.Split.Paths ? new("one listener per leg", nameof(listeners))
+            : null;
+        if (invalid is not null)
         {
-            foreach (var l in listeners) l.Stop();
-            throw new ArgumentException("one listener per leg", nameof(listeners));
+            if (_giveBack is not null) _giveBack();
+            else foreach (var l in listeners ?? []) l.Stop();
+            throw invalid;
         }
-        if (!room.FromInvite || !room.Tunnel.Wraps || !room.Split.Enabled || room.Members is null) throw new ArgumentException("split needs a wrapped invite room with split enabled", nameof(room));
-        if (ports is not null && ports.Count != room.Split.Paths) throw new ArgumentException("one port per leg", nameof(ports));
         _room = room;
         _route = route;
         _log = log;
@@ -63,7 +73,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         }
         catch
         {
-            foreach (var l in _listeners) l?.Stop();
+            if (_giveBack is not null) _giveBack();
+            // Lent listeners are left bound; only the ones bound here are stopped.
+            foreach (var l in _listeners) if (l is not null && (_giveBack is null || listeners?.Contains(l) != true)) l.Stop();
             throw;
         }
         // On the thread pool, away from any UI synchronization context.
@@ -188,8 +200,10 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _cts.Cancel();
-        foreach (var l in _listeners) l.Stop();
+        // Lent listeners stay bound: the accept loops end on the cancellation and the ports go back to the session.
+        if (_giveBack is null) foreach (var l in _listeners) l.Stop();
         try { await Task.WhenAll(_loops); } catch (OperationCanceledException) { }
+        _giveBack?.Invoke();
         // Open connections see the cancellation and end; wait a little for them so nothing is still forwarding afterwards.
         Task[] running;
         lock (_running) running = [.. _running];
@@ -240,6 +254,9 @@ public sealed class SplitConnector
     /// </summary>
     public string? LastReason { get; private set; }
 
+    /// <summary>Auto: the longest a split attempt may take before the connection goes on one path instead.</summary>
+    public TimeSpan AutoBudget { get; init; } = TimeSpan.FromSeconds(3);
+
     /// <param name="single">Opens a single-path tunnel connection (the existing way).</param>
     /// <param name="legs">Opens the raw connection for each leg, in leg order; null when the paths aren't set up (for example in TUN mode).</param>
     /// <param name="pathProblem">Why the paths can't be used right now (null: they can). Asked before every connection.</param>
@@ -269,10 +286,14 @@ public sealed class SplitConnector
             // The pause is over: one more try. Another failure pauses again.
             Interlocked.Exchange(ref _failures, MaxFailures - 1);
         }
+        // Auto never makes a connection wait long for the extra paths: a split attempt that takes longer than its budget
+        // falls back to one path with the time the caller has left (chat, for one, gives a connection 5 seconds).
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (Policy == SplitPolicy.Auto) budget.CancelAfter(AutoBudget);
         try
         {
             var stream = await SplitLegs.ConnectAsync((i, c) => _legs[i](c), _room.Split.Paths, _room.Epoch,
-                (raw, leg, c) => TunnelHandshake.ConnectAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, _service, c, leg), ct);
+                (raw, leg, c) => TunnelHandshake.ConnectAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, _service, c, leg), budget.Token);
             Interlocked.Exchange(ref _failures, 0);
             Interlocked.Increment(ref _splitConnections);
             // Logged when this service goes from one path to split, not for every connection (server list pings are many).
@@ -290,8 +311,9 @@ public sealed class SplitConnector
         {
             if (Interlocked.Increment(ref _failures) >= MaxFailures)
                 Interlocked.Exchange(ref _pausedUntil, System.Diagnostics.Stopwatch.GetTimestamp() + (long)(RetryAfter.TotalSeconds * System.Diagnostics.Stopwatch.Frequency));
-            _log?.Invoke(L.T("core.mp.split.failed") + e.Message);
-            return await NotSplitAsync(L.T("core.mp.split.failed") + e.Message, ct, e);
+            var reason = e is OperationCanceledException ? L.T("core.mp.split.too_slow") : L.T("core.mp.split.failed") + e.Message;
+            _log?.Invoke(reason);
+            return await NotSplitAsync(reason, ct, e);
         }
     }
 
