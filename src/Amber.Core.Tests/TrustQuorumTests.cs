@@ -140,7 +140,7 @@ public sealed class TrustQuorumTests
     {
         var jay = PublicNetworkProfile.Jay();
         Assert.Equal(JayTrust.Need, jay.DirectoryRootsNeed);
-        Assert.Equal(JayTrust.Keys.Length, jay.DirectoryRoots.Count);
+        Assert.Equal(JayTrust.Keys.Count, jay.DirectoryRoots.Count);
         Assert.Equal(2, JayTrust.Need);
     }
 

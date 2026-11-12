@@ -163,7 +163,7 @@ public static class JayTrust
     /// The trustees' full public keys (<see cref="TrustSigner.PublicKey"/>, base64: Ed25519 ‖ ML-DSA-65). Full keys rather
     /// than ids so release signatures (which carry only ids) can be checked against them.
     /// </summary>
-    public static readonly string[] Keys =
+    public static readonly IReadOnlyList<string> Keys =
     [
         // Trustee 1 (fingerprint 9D47 BBDA 24BF 2956)
         "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",
@@ -179,7 +179,7 @@ public static class JayTrust
     /// changes (<c>Amber.Core.Launch.TrustList.Jay</c>). Each key set (a trustee's, or for now the cold backup) has one of
     /// these and one of <see cref="Keys"/>; the two are never the same key, so a key used to review networks can't sign a release and the other way round.
     /// </summary>
-    public static readonly string[] ReleaseKeys = [];
+    public static readonly IReadOnlyList<string> ReleaseKeys = [];
 
     /// <summary>How many release keys must sign a release.</summary>
     public const int ReleaseNeed = 2;
@@ -188,13 +188,12 @@ public static class JayTrust
     private static readonly byte[][] ReleaseIds = [.. ReleaseKeys.Select(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))];
     private static readonly byte[][] KeyIds = [.. Keys.Select(k => TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))];
 
-
     /// <summary>Whether <paramref name="id"/> is one of the release keys (refused for network, directory and hardware signing).</summary>
     public static bool IsReleaseKey(byte[] id) => ReleaseIds.Any(k => k.AsSpan().SequenceEqual(id));
 
     /// <summary>Whether <paramref name="id"/> is one of <see cref="Keys"/> (refused for release signing).</summary>
     public static bool IsNetworkKey(byte[] id) => KeyIds.Any(k => k.AsSpan().SequenceEqual(id));
 
-    /// <summary>The quorum over the trustees' ids. A fresh copy each time, so no caller can change the built-in ids.</summary>
+    /// <summary>The quorum over the trustees' ids. A fresh copy each time; the key lists themselves are read-only.</summary>
     public static TrustQuorum Quorum => KeyIds.Length == 0 ? TrustQuorum.None : new([.. KeyIds.Select(id => (byte[])id.Clone())], Need);
 }
