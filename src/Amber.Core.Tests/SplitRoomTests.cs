@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Transport;
+using Xunit.Abstractions;
 
 namespace Amber.Core.Tests;
 
@@ -349,8 +350,15 @@ public sealed class SplitRoomTests
         }
         Assert.Equal(SplitConnector.MaxFailures * 2, rig.LegOpens);
         Volatile.Write(ref dead, 0);
-        await Task.Delay(500);
-        await using (var stream = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(stream);
+        // Keeps connecting until the pause is over (on one path meanwhile), so a slow machine doesn't fail the test.
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            await using var stream = await connector.OpenAsync(CancellationToken.None);
+            if (stream is SplitStream) break;
+            Assert.True(DateTime.UtcNow < until, "Auto never tried again after the pause");
+            await Task.Delay(50);
+        }
         Assert.Equal(1, connector.SplitConnections);
         Assert.Null(connector.LastReason);
     }
@@ -410,6 +418,25 @@ public sealed class SplitRoomTests
         Assert.Equal(0, connector.SplitConnections);
         await WaitUntilAsync(() => rig.Server.Rejected >= 2);
         Assert.Equal(0, rig.Server.Accepted);
+    }
+
+    /// <summary>The "connected over N paths" line is written when a service goes from one path to split, not per connection.</summary>
+    [Fact]
+    public async Task TheSplitLineIsLoggedOnlyWhenSplittingStarts()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var dead = -1;
+        var log = new List<string>();
+        var connector = rig.Connector(TunnelService.Game, () => Volatile.Read(ref dead), log: line => { lock (log) log.Add(line); });
+        var line = L.F("core.mp.split.connected_game", 2);
+        int Count() { lock (log) return log.Count(l => l == line); }
+        for (var i = 0; i < 3; i++) await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(s);
+        Assert.Equal(1, Count());
+        Volatile.Write(ref dead, 1);
+        await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsNotType<SplitStream>(s);
+        Volatile.Write(ref dead, -1);
+        await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(s);
+        Assert.Equal(2, Count());
     }
 
     /// <summary>
@@ -540,7 +567,7 @@ public sealed class SplitRoomTests
         public SplitConnector Connector(TunnelService service, bool legs = true, int deadLeg = -1) =>
             Connector(service, () => deadLeg, legs);
 
-        public SplitConnector Connector(TunnelService service, Func<int> deadLeg, bool legs = true, TimeSpan? retryAfter = null)
+        public SplitConnector Connector(TunnelService service, Func<int> deadLeg, bool legs = true, TimeSpan? retryAfter = null, Action<string>? log = null)
         {
             var port = ((IPEndPoint)_single.LocalEndpoint).Port;
             Func<CancellationToken, Task<Stream>> single = ct =>
@@ -555,7 +582,7 @@ public sealed class SplitRoomTests
                     return i == deadLeg() ? Task.FromException<Stream>(new SocketException((int)SocketError.ConnectionRefused)) : TunnelClient.Raw("127.0.0.1", p, ct);
                 }))]
                 : null;
-            return new SplitConnector(Member, service, single, openers) { RetryAfter = retryAfter ?? TimeSpan.FromSeconds(30) };
+            return new SplitConnector(Member, service, single, openers, log) { RetryAfter = retryAfter ?? TimeSpan.FromSeconds(30) };
         }
 
         public async ValueTask DisposeAsync()
@@ -574,8 +601,10 @@ public sealed class RealRoomPorts;
 
 /// <summary>Split room tests that need the real room ports.</summary>
 [Collection(nameof(RealRoomPorts))]
-public sealed class SplitRoomPortTests
+public sealed class SplitRoomPortTests(ITestOutputHelper output)
 {
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// A leg port taken by another program: an Auto room starts without splitting (and says so), a Strict room doesn't start.
     /// Uses the real room ports (it occupies 47657 itself, and the Auto room listens on 47656), so it runs on its own,
@@ -587,6 +616,19 @@ public sealed class SplitRoomPortTests
         using var squatter = new TcpListener(IPAddress.Loopback, SplitSettings.LegPort(0));
         try { squatter.Start(); }
         catch (SocketException) { /* already taken by something else: the same situation for the leg port */ }
+        // The Auto room listens on the real single-path port. When Jay is running a room on this machine it's taken, and
+        // there is nothing to test here.
+        // xunit 2 has no runtime skip, so the test says why it did nothing.
+        try
+        {
+            using var probe = new TcpListener(IPAddress.Loopback, TunnelSettings.Port);
+            probe.Start();
+        }
+        catch (SocketException)
+        {
+            _output.WriteLine($"Skipped: port {TunnelSettings.Port} is in use on this machine.");
+            return;
+        }
 
         var (_, _, autoHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
         var log = new List<string>();
@@ -599,6 +641,6 @@ public sealed class SplitRoomPortTests
 
         var (_, _, strictHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
         var e = Assert.Throws<IOException>(() => RoomTransport.Start(new EasyTierOptions(strictHost, true, [], 15000)));
-        Assert.Equal(L.T("core.mp.split.ports_busy_strict"), e.Message);
+        Assert.Equal(L.F("core.mp.split.ports_busy_strict", SplitSettings.LegPort(0), SplitSettings.LegPort(1)), e.Message);
     }
 }
