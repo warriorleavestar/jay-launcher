@@ -595,6 +595,7 @@
   "core.mp.transport.description.minecraft": "MC-specific: post-quantum handshake (X25519 + ML-KEM-768) and authenticated encryption, tuned for small game packets and low latency",
   "core.mp.transport.endpoint_connect_failed": "[Protection] Could not connect to the peer: ",
   "core.mp.transport.endpoint_handshake_failed": "[Protection] Handshake or authentication failed; disconnected: ",
+  "core.mp.transport.handshake_slots_full": "[Protection] Too many connections are stuck in their handshake; closing the oldest ones to let new members in.",
   "core.mp.transport.endpoint_service_unavailable": "[Protection] Rejected: {0} is not available here",
   "core.mp.transport.exit_port_required": "Forwarding requires the other side's local forwarding port",
   "core.mp.transport.general_unwrapped": "General protection adds no outer encryption layer",

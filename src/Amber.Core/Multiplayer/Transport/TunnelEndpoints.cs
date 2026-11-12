@@ -121,14 +121,19 @@ public sealed class TunnelServer : IAsyncDisposable
     public int Rejected;
 
     /// <summary>
-    /// Connections still in their handshake at most. More are closed at once, so
-    /// unauthenticated connections can only tie up so much.
+    /// Connections still in their handshake at most. Past that the oldest one still in its handshake is closed to make
+    /// room (<see cref="HandshakeSlots"/>), so unauthenticated connections can only tie up so much, and stalling them
+    /// can't keep new members out.
     /// </summary>
     public const int MaxPendingHandshakes = 64;
-    private int _pending;
+    private readonly HandshakeSlots _slots = new(MaxPendingHandshakes);
+    private long _slotsFullLogged;
 
     /// <summary>Connections in their handshake right now.</summary>
-    public int PendingHandshakes => Volatile.Read(ref _pending);
+    public int PendingHandshakes => _slots.Held;
+
+    /// <summary>Connections closed in their handshake to make room for newer ones.</summary>
+    public int Evicted => _slots.Evicted;
 
     /// <summary>How long one connection may take to finish its handshake.</summary>
     internal TimeSpan HandshakeTimeout { get; init; } = TunnelHandshake.Timeout;
@@ -171,26 +176,31 @@ public sealed class TunnelServer : IAsyncDisposable
             {
                 return;
             }
-            if (Interlocked.Increment(ref _pending) > MaxPendingHandshakes)
+            var slot = _slots.TryTake(() => { Pump.Abort(client); client.Dispose(); }, out var evicted);
+            if (evicted) LogSlotsFull(_log, ref _slotsFullLogged);
+            if (slot is null)
             {
-                Interlocked.Decrement(ref _pending);
                 Interlocked.Increment(ref Rejected);
                 Pump.Abort(client);
                 client.Dispose();
                 continue;
             }
-            _ = HandleAsync(client, ct);
+            _ = HandleAsync(client, slot, ct);
         }
     }
 
-    private async Task HandleAsync(TcpClient client, CancellationToken ct)
+    /// <summary>Logs that the handshake places are full, at most once a minute.</summary>
+    internal static void LogSlotsFull(Action<string>? log, ref long lastLogged)
     {
-        var pending = true;
-        void HandshakeDone()
-        {
-            if (pending) Interlocked.Decrement(ref _pending);
-            pending = false;
-        }
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref lastLogged);
+        if (last != 0 && now - last < 60_000) return;
+        if (Interlocked.CompareExchange(ref lastLogged, now, last) == last) log?.Invoke(L.T("core.mp.transport.handshake_slots_full"));
+    }
+
+    private async Task HandleAsync(TcpClient client, HandshakeSlots.Slot slot, CancellationToken ct)
+    {
+        void HandshakeDone() => _slots.Release(slot);
         using (client)
         {
             Stream? stream = null;

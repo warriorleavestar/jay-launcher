@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -105,43 +106,45 @@ public sealed class RekeyTests : IDisposable
         var settings = new TunnelSettings(TransportMode.High, false);
         var room = HostRoom(settings);
         var alice = room.Table.Issue(_alice.PublicKey, "Alice");
-        await using var server = new TunnelServer(room.Host, settings, 0, _ => async (stream, ct) => await stream.CopyToAsync(stream, ct));
+        var log = new List<string>();
+        await using var server = new TunnelServer(room.Host, settings, 0, _ => async (stream, ct) => await stream.CopyToAsync(stream, ct),
+            line => { lock (log) log.Add(line); });
         var idle = new List<TcpClient>();
         try
         {
             for (var i = 0; i < TunnelServer.MaxPendingHandshakes; i++)
             {
                 var c = new TcpClient();
-                await c.ConnectAsync(IPAddress.Loopback, server.Port);
+                try { await c.ConnectAsync(IPAddress.Loopback, server.Port); }
+                catch (SocketException) { }
                 idle.Add(c);
             }
-            Assert.True(await WaitAsync(() => server.PendingHandshakes == TunnelServer.MaxPendingHandshakes, 15));
-            Assert.Equal(0, server.Rejected);
-            using var extra = new TcpClient();
+            Assert.True(await WaitAsync(() => server.PendingHandshakes == TunnelServer.MaxPendingHandshakes, 60));
+            Assert.Equal(0, server.Evicted);
+            // Every place is held by a stalled connection, yet a member still gets in: the oldest stalled one makes room.
+            await using (var tunnel = await TunnelClient.Wrapped("127.0.0.1", server.Port, GuestRoom(room, alice), settings, TunnelService.Game)(default))
+            {
+                await tunnel.WriteAsync(new byte[] { 7 });
+                await tunnel.FlushAsync();
+                var echo = new byte[1];
+                Assert.Equal(1, await tunnel.ReadAsync(echo));
+                Assert.Equal(7, echo[0]);
+            }
+            Assert.Equal(1, server.Evicted);
+            Assert.True(server.PendingHandshakes <= TunnelServer.MaxPendingHandshakes);
+            lock (log) Assert.Contains(L.T("core.mp.transport.handshake_slots_full"), log);
+            // The first stalled connection is the one that was closed.
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var closed = false;
-            // The server resets it at once, which can already show up while connecting.
-            try
-            {
-                await extra.ConnectAsync(IPAddress.Loopback, server.Port);
-                closed = await extra.GetStream().ReadAsync(new byte[1], timeout.Token) == 0;
-            }
+            try { closed = await idle[0].GetStream().ReadAsync(new byte[1], timeout.Token) == 0; }
             catch (Exception e) when (e is IOException or SocketException) { closed = true; }
             Assert.True(closed);
-            Assert.True(await WaitAsync(() => server.Rejected == 1));
         }
         finally
         {
             foreach (var c in idle) c.Dispose();
         }
-        // The stalled ones fail their handshakes and free their places.
         Assert.True(await WaitAsync(() => server.PendingHandshakes == 0, 20));
-        await using var tunnel = await TunnelClient.Wrapped("127.0.0.1", server.Port, GuestRoom(room, alice), settings, TunnelService.Game)(default);
-        await tunnel.WriteAsync(new byte[] { 7 });
-        await tunnel.FlushAsync();
-        var echo = new byte[1];
-        Assert.Equal(1, await tunnel.ReadAsync(echo));
-        Assert.Equal(7, echo[0]);
     }
 
     /// <summary>A connection that fails before its handshake starts still gives its place back.</summary>

@@ -30,7 +30,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private int _accepted;
     private int _rejected;
     private int _tampered;
-    private int _pending;
+    private readonly HandshakeSlots _slots = new(MaxPendingHandshakes);
+    private long _slotsFullLogged;
 
     /// <summary>
     /// Legs still in their handshake at most, across all ports. More are closed at once,
@@ -39,7 +40,10 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     public const int MaxPendingHandshakes = 64;
 
     /// <summary>Legs in their handshake right now, across all ports.</summary>
-    public int PendingHandshakes => Volatile.Read(ref _pending);
+    public int PendingHandshakes => _slots.Held;
+
+    /// <summary>Legs closed in their handshake to make room for newer ones.</summary>
+    public int Evicted => _slots.Evicted;
 
     /// <summary>Tests: runs on each accepted socket before anything else (to make that step fail).</summary>
     internal Action<TcpClient>? BeforeServeForTest { get; init; }
@@ -95,15 +99,16 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             {
                 return;
             }
-            if (Interlocked.Increment(ref _pending) > MaxPendingHandshakes)
+            var slot = _slots.TryTake(() => { Pump.Abort(client); client.Dispose(); }, out var evicted);
+            if (evicted) TunnelServer.LogSlotsFull(_log, ref _slotsFullLogged);
+            if (slot is null)
             {
-                Interlocked.Decrement(ref _pending);
                 Interlocked.Increment(ref _rejected);
                 Pump.Abort(client);
                 client.Dispose();
                 continue;
             }
-            Track(HandleLegAsync(client, index, ct));
+            Track(HandleLegAsync(client, index, slot, ct));
         }
     }
 
@@ -115,7 +120,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
-    private async Task HandleLegAsync(TcpClient client, int index, CancellationToken ct)
+    private async Task HandleLegAsync(TcpClient client, int index, HandshakeSlots.Slot slot, CancellationToken ct)
     {
         Stream raw;
         SplitLeg leg;
@@ -131,8 +136,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         {
             // Whatever failed, the leg gives its place back.
             if (e is not (SocketException or ObjectDisposedException or IOException)) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
-            Interlocked.Decrement(ref _pending);
+            _slots.Release(slot);
             Interlocked.Increment(ref _rejected);
+            Pump.Abort(client);
             client.Dispose();
             return;
         }
@@ -142,12 +148,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         SecureStream? secure = null;
         SplitStream? joined = null;
         CancellationTokenRegistration revocation = default;
-        var pending = true;
-        void HandshakeDone()
-        {
-            if (pending) Interlocked.Decrement(ref _pending);
-            pending = false;
-        }
+        void HandshakeDone() => _slots.Release(slot);
         try
         {
             (SecureStream Stream, TunnelService Service, MemberEntry? Member)? accepted;

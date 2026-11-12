@@ -215,8 +215,8 @@ public sealed class SplitRoomTests
     }
 
     /// <summary>
-    /// The cap on legs in their handshake counts across all ports: past it a leg is reset, and once the stalled ones
-    /// are gone a member still gets a split connection.
+    /// The places for legs in their handshake are shared across all ports: when stalled legs hold every one, the oldest
+    /// makes room, so a member still gets a split connection.
     /// </summary>
     [Fact]
     public async Task StalledLegsAreCappedAcrossPorts()
@@ -233,33 +233,43 @@ public sealed class SplitRoomTests
                 catch (SocketException) { }
                 idle.Add(c);
             }
-            Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == SplitTunnelServer.MaxPendingHandshakes, 15));
-            Assert.Equal(0, rig.Server.Rejected);
-            using var extra = new TcpClient();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var closed = false;
-            try
+            Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == SplitTunnelServer.MaxPendingHandshakes, 60));
+            Assert.Equal(0, rig.Server.Evicted);
+            var connector = rig.Connector(TunnelService.Game);
+            await using (var stream = await connector.OpenAsync(CancellationToken.None))
             {
-                await extra.ConnectAsync(IPAddress.Loopback, ports[^1]);
-                closed = await extra.GetStream().ReadAsync(new byte[1], timeout.Token) == 0;
+                Assert.IsType<SplitStream>(stream);
+                await stream.WriteAsync(new byte[] { 5 });
+                await stream.FlushAsync();
+                var back = new byte[1];
+                Assert.True(await SecureStream.ReadExactAsync(stream, back, CancellationToken.None));
+                Assert.Equal(5, back[0]);
             }
-            catch (Exception e) when (e is IOException or SocketException) { closed = true; }
-            Assert.True(closed);
-            Assert.True(await WaitAsync(() => rig.Server.Rejected >= 1));
+            Assert.Equal(ports.Count, rig.Server.Evicted);
+            Assert.True(rig.Server.PendingHandshakes <= SplitTunnelServer.MaxPendingHandshakes);
         }
         finally
         {
             foreach (var c in idle) c.Dispose();
         }
         Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == 0, 20));
-        var connector = rig.Connector(TunnelService.Game);
-        await using var stream = await connector.OpenAsync(CancellationToken.None);
-        Assert.IsType<SplitStream>(stream);
-        await stream.WriteAsync(new byte[] { 5 });
-        await stream.FlushAsync();
-        var back = new byte[1];
-        Assert.True(await SecureStream.ReadExactAsync(stream, back, CancellationToken.None));
-        Assert.Equal(5, back[0]);
+    }
+
+    /// <summary>A leg that says nothing and never closes is let go after the handshake deadline.</summary>
+    [Fact]
+    public async Task StalledLegsAreReleasedAtTheDeadline()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped,
+            handshakeTimeout: TimeSpan.FromMilliseconds(300));
+        using var idle = new TcpClient();
+        await idle.ConnectAsync(IPAddress.Loopback, rig.Server.Ports[1]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var closed = false;
+        try { closed = await idle.GetStream().ReadAsync(new byte[1], timeout.Token) == 0; }
+        catch (Exception e) when (e is IOException or SocketException) { closed = true; }
+        Assert.True(closed);
+        Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == 0));
+        Assert.Equal(0, rig.Server.Accepted);
     }
 
     /// <summary>Legs that fail before their handshake starts give their place back, whatever the failure.</summary>
@@ -589,12 +599,13 @@ public sealed class SplitRoomTests
         public int LegOpens => Volatile.Read(ref _legOpens);
         public IReadOnlyList<TunnelService> Served { get { lock (_served) return [.. _served]; } }
 
-        public static Task<Rig> StartAsync(SplitSettings split, TunnelSettings tunnel, bool hostEpochBump = false, Action<TcpClient>? beforeServe = null)
+        public static Task<Rig> StartAsync(SplitSettings split, TunnelSettings tunnel, bool hostEpochBump = false, Action<TcpClient>? beforeServe = null,
+            TimeSpan? handshakeTimeout = null)
         {
             var (credentials, table, host, guest) = NewRoom(split, tunnel);
             var rig = new Rig { Table = table, GuestEntry = guest, Member = credentials.ToRoom() };
             if (hostEpochBump) host = host with { Epoch = host.Epoch + 1 };
-            rig.Server = new SplitTunnelServer(host, service => Echo(rig, service), ports: [.. Enumerable.Repeat(0, split.Paths)]) { BeforeServeForTest = beforeServe };
+            rig.Server = new SplitTunnelServer(host, service => Echo(rig, service), ports: [.. Enumerable.Repeat(0, split.Paths)]) { BeforeServeForTest = beforeServe, HandshakeTimeout = handshakeTimeout ?? TunnelHandshake.Timeout };
             rig._single.Start();
             rig._singleLoop = Task.Run(rig.SingleLoopAsync);
             return Task.FromResult(rig);
