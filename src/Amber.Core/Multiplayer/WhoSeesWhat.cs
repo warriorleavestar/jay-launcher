@@ -24,7 +24,7 @@ public static class WhoSeesWhat
     [
         new(CodeHolders, "multiplayer.sees.row.code", "multiplayer.sees.no", "multiplayer.sees.no"),
         new(RoomDirect, "multiplayer.sees.row.direct", "multiplayer.sees.yes", "multiplayer.sees.room_content"),
-        new(RoomRelayed, "multiplayer.sees.row.relayed", "multiplayer.sees.not_normally", "multiplayer.sees.room_content"),
+        new(RoomRelayed, "multiplayer.sees.row.relayed", "multiplayer.sees.no", "multiplayer.sees.room_content"),
         new(Operators, "multiplayer.sees.row.operator", "multiplayer.sees.yes", "multiplayer.sees.no"),
         new(PrivateChat, "multiplayer.sees.row.private", "multiplayer.sees.as_above", "multiplayer.sees.only_them"),
     ];
