@@ -71,6 +71,9 @@ public sealed class RoomTransport : IAsyncDisposable
 
     private void StartCore(EasyTierOptions o, Func<string?>? splitProblem)
     {
+        // Strict means split or nothing, and a full-LAN host can't split in this version: refuse to start rather than
+        // run a room whose Strict service nobody can reach.
+        if (HostProblem(o) is { } problem) throw new InvalidOperationException(problem);
         var room = o.Room;
         var settings = room.Tunnel;
         // 不建网卡时 EasyTier 把发往自己虚拟地址的连接交给本机同一端口；完整局域网模式下连接从虚拟网卡进来，听虚拟地址。
@@ -86,7 +89,6 @@ public sealed class RoomTransport : IAsyncDisposable
             _exitPolicy.Start(log: _log);
         }
         // Strict split: game and chat are only served over the split listeners, never on the single-path port.
-        // Only when those listeners run: a full-LAN (TUN) host doesn't split in this version and serves one path.
         bool SinglePathAllowed(TunnelService service) => ServesSinglePath(o, service);
         if (o.IsHost && settings.Wraps || allowProxy)
         {
@@ -157,9 +159,16 @@ public sealed class RoomTransport : IAsyncDisposable
     internal static bool HostSplits(EasyTierOptions o) =>
         o.Room.Tunnel.Wraps && o.Room.FromInvite && o.Room.Split.Enabled && !o.Tun;
 
-    /// <summary>Whether the host serves this service on the single-path port: always, unless it is Strict and split listeners run.</summary>
+    /// <summary>Whether the host serves this service on the single-path port: always, unless the room makes it Strict.</summary>
     internal static bool ServesSinglePath(EasyTierOptions o, TunnelService service) =>
-        !(HostSplits(o) && o.Room.Split.For(service) == SplitPolicy.Strict);
+        !(o.Room.FromInvite && o.Room.Tunnel.Wraps && o.Room.Split.For(service) == SplitPolicy.Strict);
+
+    /// <summary>Why this host can't run the room as set up (null: it can). A full-LAN (TUN) host can't serve a Strict service.</summary>
+    internal static string? HostProblem(EasyTierOptions o) =>
+        o.IsHost && o.Tun && o.Room.FromInvite && o.Room.Tunnel.Wraps
+        && (o.Room.Split.For(TunnelService.Game) == SplitPolicy.Strict || o.Room.Split.For(TunnelService.Chat) == SplitPolicy.Strict)
+            ? L.T("core.mp.split.full_lan_strict")
+            : null;
 
     private T Add<T>(T part) where T : IAsyncDisposable
     {

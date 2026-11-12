@@ -161,23 +161,32 @@ public sealed class SplitRoomTests
     }
 
     /// <summary>
-    /// A full-LAN (TUN) host doesn't run the split listeners in this version, so a Strict service must stay on the
-    /// single-path port there; otherwise nobody could reach it at all.
+    /// Strict means split or nothing on every host. A full-LAN (TUN) host can't split in this version, so it refuses to
+    /// start a Strict room with a reason instead of running one whose Strict service nobody can reach.
     /// </summary>
     [Fact]
-    public void AFullLanHostServesStrictServicesOnOnePath()
+    public void AFullLanHostWontRunAStrictRoom()
     {
         var (_, _, host, _) = NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
         var wrapped = new EasyTierOptions(host, true, [], 15000);
         Assert.True(RoomTransport.HostSplits(wrapped));
+        Assert.Null(RoomTransport.HostProblem(wrapped));
         Assert.False(RoomTransport.ServesSinglePath(wrapped, TunnelService.Game));
         Assert.True(RoomTransport.ServesSinglePath(wrapped, TunnelService.Chat));
         Assert.True(RoomTransport.ServesSinglePath(wrapped, TunnelService.Remote));
 
         var fullLan = wrapped with { Tun = true };
         Assert.False(RoomTransport.HostSplits(fullLan));
-        Assert.True(RoomTransport.ServesSinglePath(fullLan, TunnelService.Game));
-        Assert.True(RoomTransport.ServesSinglePath(fullLan, TunnelService.Chat));
+        Assert.False(RoomTransport.ServesSinglePath(fullLan, TunnelService.Game));
+        Assert.Equal(L.T("core.mp.split.full_lan_strict"), RoomTransport.HostProblem(fullLan));
+        var e = Assert.Throws<InvalidOperationException>(() => RoomTransport.Start(fullLan));
+        Assert.Equal(L.T("core.mp.split.full_lan_strict"), e.Message);
+
+        // Auto in full-LAN mode is fine: nothing splits, every service stays on one path.
+        var (_, _, autoHost, _) = NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+        var autoFullLan = new EasyTierOptions(autoHost, true, [], 15000) { Tun = true };
+        Assert.Null(RoomTransport.HostProblem(autoFullLan));
+        Assert.True(RoomTransport.ServesSinglePath(autoFullLan, TunnelService.Game));
     }
 
     [Fact]
@@ -264,9 +273,9 @@ public sealed class SplitRoomTests
         Assert.Equal(0, rig.LegOpens);
     }
 
-    /// <summary>A dead path: Auto falls back to one path each time, and after a few failures in a row stops trying the legs.</summary>
+    /// <summary>A dead path: Auto falls back to one path each time, and after a few failures in a row pauses trying the legs.</summary>
     [Fact]
-    public async Task AutoGivesUpAfterRepeatedFailures()
+    public async Task AutoPausesAfterRepeatedFailures()
     {
         await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
         var connector = rig.Connector(TunnelService.Game, deadLeg: 1);
@@ -279,6 +288,27 @@ public sealed class SplitRoomTests
         // Only the first MaxFailures attempts touched the legs (two legs each).
         Assert.Equal(SplitConnector.MaxFailures * 2, rig.LegOpens);
         Assert.Equal(0, connector.SplitConnections);
+        Assert.Equal(L.T("core.mp.split.gave_up"), connector.LastReason);
+    }
+
+    /// <summary>The pause ends: paths that came up late (the extra instances start after the room) still get used.</summary>
+    [Fact]
+    public async Task AutoTriesAgainAfterThePause()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var dead = 1;
+        var connector = rig.Connector(TunnelService.Game, deadLeg: () => Volatile.Read(ref dead) == 1 ? 1 : -1, retryAfter: TimeSpan.FromMilliseconds(300));
+        for (var i = 0; i < SplitConnector.MaxFailures + 1; i++)
+        {
+            await using var stream = await connector.OpenAsync(CancellationToken.None);
+            Assert.IsNotType<SplitStream>(stream);
+        }
+        Assert.Equal(SplitConnector.MaxFailures * 2, rig.LegOpens);
+        Volatile.Write(ref dead, 0);
+        await Task.Delay(500);
+        await using (var stream = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(stream);
+        Assert.Equal(1, connector.SplitConnections);
+        Assert.Null(connector.LastReason);
     }
 
     [Fact]
@@ -415,7 +445,10 @@ public sealed class SplitRoomTests
 
         /// <param name="legs">False: the member has no paths set up.</param>
         /// <param name="deadLeg">This leg's port refuses connections.</param>
-        public SplitConnector Connector(TunnelService service, bool legs = true, int deadLeg = -1)
+        public SplitConnector Connector(TunnelService service, bool legs = true, int deadLeg = -1) =>
+            Connector(service, () => deadLeg, legs);
+
+        public SplitConnector Connector(TunnelService service, Func<int> deadLeg, bool legs = true, TimeSpan? retryAfter = null)
         {
             var port = ((IPEndPoint)_single.LocalEndpoint).Port;
             Func<CancellationToken, Task<Stream>> single = ct =>
@@ -427,10 +460,10 @@ public sealed class SplitRoomTests
                 ? [.. Server.Ports.Select((p, i) => (Func<CancellationToken, Task<Stream>>)(ct =>
                 {
                     Interlocked.Increment(ref _legOpens);
-                    return i == deadLeg ? Task.FromException<Stream>(new SocketException((int)SocketError.ConnectionRefused)) : TunnelClient.Raw("127.0.0.1", p, ct);
+                    return i == deadLeg() ? Task.FromException<Stream>(new SocketException((int)SocketError.ConnectionRefused)) : TunnelClient.Raw("127.0.0.1", p, ct);
                 }))]
                 : null;
-            return new SplitConnector(Member, service, single, openers);
+            return new SplitConnector(Member, service, single, openers) { RetryAfter = retryAfter ?? TimeSpan.FromSeconds(30) };
         }
 
         public async ValueTask DisposeAsync()
