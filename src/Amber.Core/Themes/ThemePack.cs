@@ -368,7 +368,7 @@ public static partial class ThemePackReader
         pack.Open = open;
         if (open("layout/shell.json") is { } shellBytes && ParseJsonOrProblem(shellBytes, "layout/shell.json", pack.Problems) is { } shell)
             using (shell) ThemeLayout.ReadShell(pack, shell.RootElement);
-        foreach (var page in ThemeLayout.PageIds)
+        foreach (var page in ThemeLayout.LayoutFiles)
             if (open($"layout/pages/{page}.json") is { } pageBytes && ParseJsonOrProblem(pageBytes, $"layout/pages/{page}.json", pack.Problems) is { } pageDoc)
                 using (pageDoc) ThemeLayout.ReadPage(pack, page, pageDoc.RootElement);
         pack.Open = null;

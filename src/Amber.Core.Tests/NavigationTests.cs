@@ -14,7 +14,9 @@ public class NavigationTests
     [InlineData("discover/mod?target=abc", Section.Discover)]
     [InlineData("play/servers", Section.Play)]
     [InlineData("settings/general#motion", Section.Settings)]
-    [InlineData("accounts", Section.Accounts)]
+    [InlineData("me", Section.Me)]
+    [InlineData("accounts", Section.Me)]
+    [InlineData("people", Section.People)]
     [InlineData("help/first-run", Section.Help)]
     [InlineData("", Section.Library)]
     [InlineData("nonsense/x", Section.Library)]
@@ -123,7 +125,7 @@ public class NavigationTests
     [InlineData("multiplayer", "play")]
     [InlineData("tools", "settings#Junk")]
     [InlineData("settings", "settings")]
-    [InlineData("accounts", "accounts")]
+    [InlineData("accounts", "me")]
     public void EveryOldPageHasANewHome(string page, string route) => Assert.Equal(route, LegacyRoutes.For(page)?.ToString());
 
     [Theory]
@@ -217,7 +219,7 @@ public class NavigationTests
         var shell = ReadShell("""{ "navWidth": 64, "pages": ["multiplayer", "settings", "content"], "hidden": ["downloads", "content", "tools"] }""").Shell!;
         Assert.Equal("rail", shell.NavStyle); // 窄于 120 的旧导航是图标栏
         Assert.Equal(64, shell.RailWidth);
-        Assert.Equal(["multiplayer", "discover", "library"], shell.Sections);
+        Assert.Equal(["multiplayer", "people", "discover", "library"], shell.Sections); // Friends follows multiplayer in packs that predate it
         Assert.Equal(["discover"], shell.Hidden); // 下载和资源都藏了才藏发现
 
         shell = ReadShell("""{ "navWidth": 150, "navStyle": "full", "hidden": ["content"] }""").Shell!;
@@ -235,7 +237,7 @@ public class NavigationTests
         Assert.Equal(96, shell.RailWidth);
         Assert.Equal(200, shell.SidebarWidth);
         Assert.False(shell.ShowShelf);
-        Assert.Equal(["discover", "library", "multiplayer"], shell.Sections);
+        Assert.Equal(["discover", "library", "multiplayer", "people"], shell.Sections);
         Assert.Equal(["multiplayer"], shell.Hidden);
         Assert.Equal(2, pack.Problems.Count(p => p.Code == "required_page"));
     }

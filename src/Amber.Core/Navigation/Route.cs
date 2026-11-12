@@ -1,11 +1,13 @@
 namespace Amber.Core.Navigation;
 
-/// <summary>一级入口。侧栏上只有前三个；设置、账号、关于、帮助在侧栏底部。</summary>
-public enum Section { Library, Discover, Play, Settings, Accounts, About, Help }
+/// <summary>
+/// The top-level places. The sidebar lists the first four; settings, "Me" (the avatar), about and help sit at its foot.
+/// </summary>
+public enum Section { Library, Discover, Play, People, Settings, Me, About, Help }
 
 /// <summary>
 /// 界面路由（官方设计 §2.2、§11.5）：一串用 / 分开的段，可以带 ?查询 和 #字段。
-/// 例：library、library/{实例}/mods、discover/mod?target={实例}、play/servers、settings/general#motion。
+/// 例：library、library/{实例}/mods、discover/mod?target={实例}、play/servers、people/{朋友}、me#FriendCode、settings/general#motion。
 /// 路由只在 Jay 里面用，不注册系统协议。
 /// </summary>
 public sealed record Route
@@ -35,8 +37,9 @@ public sealed record Route
     {
         Section.Discover => "discover",
         Section.Play => "play",
+        Section.People => "people",
         Section.Settings => "settings",
-        Section.Accounts => "accounts",
+        Section.Me => "me",
         Section.About => "about",
         Section.Help => "help",
         _ => "library",
@@ -46,8 +49,9 @@ public sealed record Route
     {
         "discover" => Section.Discover,
         "play" => Section.Play,
+        "people" => Section.People,
         "settings" => Section.Settings,
-        "accounts" => Section.Accounts,
+        "me" => Section.Me,
         "about" => Section.About,
         "help" => Section.Help,
         _ => Section.Library,
@@ -80,6 +84,8 @@ public sealed record Route
         }
         var segments = text.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(Uri.UnescapeDataString).ToList();
+        // The accounts page became "Me": routes saved under its old name still open it.
+        if (segments.Count > 0 && segments[0] == "accounts") segments[0] = "me";
         if (segments.Count == 0 || RootOf(SectionOf(segments[0])) != segments[0]) segments.Insert(0, "library");
         return new Route(segments, query, fragment);
     }

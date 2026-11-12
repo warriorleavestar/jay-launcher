@@ -309,27 +309,27 @@ internal sealed partial class SelfTest
 
         await ToLibraryAsync();
         Begin("J7 dark", 2);
-        if (await OpenAccountMenuAsync())
+        if (await OpenMeAsync() is { } mePage)
         {
-            await TapAsync(window.AccountMenuDark, "theme: dark");
+            await TapAsync(mePage.MeThemeDark, "theme: dark");
             if (!await WaitAsync(() => Dispatcher.UIThread.Invoke(() => Application.Current!.ActualThemeVariant == ThemeVariant.Dark), 3)) _journey!.Problems.Add("not dark");
         }
         await EndAsync(where);
-        Dispatcher.UIThread.Invoke(() => { window.AccountMenuFlyout.Hide(); settings.SelectedThemeIndex = theme; });
+        Dispatcher.UIThread.Invoke(() => settings.SelectedThemeIndex = theme);
 
         await ToLibraryAsync();
         Begin("J7 language", 3);
-        if (await OpenAccountMenuAsync())
+        if (await OpenMeAsync() is { } languagePage)
         {
             var target = lang == "en" ? "zh-Hans" : "en";
             // LanguageOptions: "system", then L.Languages.
             var index = 1 + L.Languages.Select((l, i) => (l, i)).First(p => p.l.Code == target).i;
             var original = settings.SelectedLanguageIndex;
-            await PickAsync(window.AccountMenuLanguage, index, "language: " + target);
+            await PickAsync(languagePage.MeLanguage, index, "language: " + target);
             if (!await WaitAsync(() => L.Language != lang, 3)) _journey!.Problems.Add("language didn't change");
             if (Dispatcher.UIThread.Invoke(() => settings.SelectedLanguageIndex) != index) _journey!.Problems.Add("settings page not in sync");
             await EndAsync(where);
-            Dispatcher.UIThread.Invoke(() => { window.AccountMenuFlyout.Hide(); settings.SelectedLanguageIndex = original; });
+            Dispatcher.UIThread.Invoke(() => settings.SelectedLanguageIndex = original);
             L.SetLanguage(lang);
             await Task.Delay(200);
         }
@@ -618,13 +618,13 @@ internal sealed partial class SelfTest
         await Task.Delay(300);
     }
 
-    /// <summary>The sidebar avatar opens the account menu (1 click).</summary>
-    private async Task<bool> OpenAccountMenuAsync()
+    /// <summary>The sidebar avatar opens the "Me" page (1 click; a sidebar move, not a page change).</summary>
+    private async Task<AccountsPage?> OpenMeAsync()
     {
-        if (!await TapAsync(window.AccountButton, "account menu")) return false;
-        if (await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.AccountMenuFlyout.IsOpen && window.AccountMenuDark.IsEffectivelyVisible), 3)) return true;
-        _journey!.Problems.Add("account menu didn't open");
-        return false;
+        if (!await TapAsync(window.AccountButton, "me")) return null;
+        if (await FindAsync<AccountsPage>(p => p.IsEffectivelyVisible) is { } page && main.CurrentPage is AccountsViewModel) return page;
+        _journey!.Problems.Add("the Me page didn't open");
+        return null;
     }
 
     /// <summary>Settings (sidebar footer) → a group: a list item when the list shows, else the drop-down.</summary>

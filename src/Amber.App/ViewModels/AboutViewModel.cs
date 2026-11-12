@@ -34,7 +34,7 @@ public static class NetworkList
         return
         [
             Row(NetworkCategory.Download, "about.net.download", "about.net.download.when", L.T("about.net.download.status"), "settings#Source"),
-            Row(NetworkCategory.Login, "about.net.login", "about.net.login.when", login, "accounts"),
+            Row(NetworkCategory.Login, "about.net.login", "about.net.login.when", login, "me"),
             Row(NetworkCategory.ContentApi, "about.net.content", "about.net.content.when", L.T("about.net.content.status"), "settings#CurseForgeKey"),
             Row(NetworkCategory.UpdateCheck, "about.net.update", "about.net.update.when", update, "settings#UpdateFeed"),
             Row(NetworkCategory.Multiplayer, "about.net.play", "about.net.play.when", play, "play"),

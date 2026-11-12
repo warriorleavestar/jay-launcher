@@ -23,6 +23,7 @@
 
     <DataTemplate DataType="vm:SettingsViewModel"><views:SettingsPage /></DataTemplate>
     <DataTemplate DataType="vm:AboutViewModel"><views:AboutPage /></DataTemplate>
+    <DataTemplate DataType="vm:PeopleViewModel"><views:PeoplePage /></DataTemplate>
     <DataTemplate DataType="vm:HelpCenterViewModel"><views:HelpCenterPage /></DataTemplate>
 
     <!-- 请求条上的一条请求（§6.22）：安全类用锁定的安全横幅和安全按钮，其余用普通横幅 -->
@@ -159,64 +160,9 @@
               <TextBlock Classes="foot-title" Text="{l:T shell.settings}" Foreground="{DynamicResource SidebarText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </StackPanel>
           </Button>
-          <!-- Account menu (§6.13): switch account, add / manage, light-dark and language in one place. -->
-          <Button x:Name="AccountButton" Classes="ghost shell-foot"
-                  Classes.active="{Binding Shell.IsAccountsActive}" ToolTip.Tip="{l:T shell.account_menu.tip}" AutomationProperties.Name="{l:T shell.account}">
-            <Button.Flyout>
-              <Flyout Placement="RightEdgeAlignedBottom">
-                <Border DataContext="{Binding Shell.AccountMenu}">
-                <StackPanel x:Name="AccountMenuPanel" Width="300" Spacing="2" x:DataType="vm:AccountMenuViewModel">
-                  <ItemsControl x:Name="AccountMenuList" ItemsSource="{Binding Accounts}">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate DataType="vm:AccountMenuItem">
-                        <Button Classes="ghost" Padding="8,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                                Command="{Binding $parent[ItemsControl].((vm:AccountMenuViewModel)DataContext).SwitchCommand}" CommandParameter="{Binding}"
-                                AutomationProperties.Name="{Binding Name}">
-                          <Grid ColumnDefinitions="Auto,*">
-                            <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource AccentTint}" VerticalAlignment="Center">
-                              <TextBlock Text="{Binding Initial}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentText}"
-                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                              <TextBlock Classes="hint" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                          </Grid>
-                        </Button>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                  <Button x:Name="AccountMenuAdd" Classes="ghost" Padding="8,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          Content="{l:T shell.account_menu.add}" Command="{Binding AddAccountCommand}" />
-                  <Button x:Name="AccountMenuManage" Classes="ghost" Padding="8,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          Content="{l:T shell.account_menu.manage}" Command="{Binding ManageCommand}" IsVisible="{Binding HasAccounts}" />
-                  <Separator Margin="0,4" />
-                  <Grid ColumnDefinitions="Auto,*" Margin="8,2">
-                    <TextBlock Text="{l:T shell.account_menu.theme}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                    <UniformGrid x:Name="AccountMenuTheme" Grid.Column="1" Columns="3" Classes="segmented">
-                      <RadioButton x:Name="AccountMenuSystem" GroupName="MenuTheme" IsChecked="{Binding IsSystemTheme}" ToolTip.Tip="{l:T settings.theme.system}">
-                        <TextBlock Text="{l:T settings.theme.system}" TextTrimming="CharacterEllipsis" />
-                      </RadioButton>
-                      <RadioButton x:Name="AccountMenuLight" GroupName="MenuTheme" IsChecked="{Binding IsLightTheme}" ToolTip.Tip="{l:T settings.theme.light}">
-                        <TextBlock Text="{l:T settings.theme.light}" TextTrimming="CharacterEllipsis" />
-                      </RadioButton>
-                      <RadioButton x:Name="AccountMenuDark" GroupName="MenuTheme" IsChecked="{Binding IsDarkTheme}" ToolTip.Tip="{l:T settings.theme.dark}">
-                        <TextBlock Text="{l:T settings.theme.dark}" TextTrimming="CharacterEllipsis" />
-                      </RadioButton>
-                    </UniformGrid>
-                  </Grid>
-                  <Grid ColumnDefinitions="Auto,*" Margin="8,2">
-                    <TextBlock Text="{l:T shell.account_menu.language}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                    <ComboBox x:Name="AccountMenuLanguage" Grid.Column="1" HorizontalAlignment="Stretch"
-                              ItemsSource="{Binding LanguageOptions}" SelectedIndex="{Binding LanguageIndex}"
-                              AutomationProperties.Name="{l:T shell.account_menu.language}" />
-                  </Grid>
-                  <Button x:Name="AccountMenuAbout" Classes="ghost" Padding="8,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          Content="{l:T about.title}" Command="{Binding AboutCommand}" />
-                </StackPanel>
-                </Border>
-              </Flyout>
-            </Button.Flyout>
+          <!-- "Me": game accounts, Jay account, my friend code, my devices, light/dark and language. -->
+          <Button x:Name="AccountButton" Classes="ghost shell-foot" Command="{Binding Shell.OpenMeCommand}"
+                  Classes.active="{Binding Shell.IsMeActive}" ToolTip.Tip="{l:T shell.me_tip}" AutomationProperties.Name="{l:T me.title}">
             <StackPanel Classes="foot-row" Orientation="Horizontal" Spacing="12">
               <Border Width="24" Height="24" CornerRadius="12" Background="{DynamicResource AccentTint}">
                 <TextBlock Text="{Binding Shell.AccountInitial}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource AccentText}"
@@ -232,7 +178,7 @@
     <!-- Content column: top bar, request bar, "where things moved", page -->
     <Grid x:Name="ContentColumn" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
       <!-- 顶栏（§3.1）：← 返回 + 标题或面包屑；带上下文跳过来时有【完成，返回】 -->
-      <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" Margin="8,0,16,0">
+      <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto,Auto" Margin="8,0,16,0">
         <Button x:Name="BackButton" Classes="ghost icon-only" Command="{Binding Shell.BackCommand}" IsEnabled="{Binding Shell.CanGoBack}"
                 ToolTip.Tip="{l:T shell.back_tip}" AutomationProperties.Name="{l:T shell.back}" VerticalAlignment="Center">
           <Path Classes="icon" Data="{StaticResource Icon.ChevronLeft}" Width="20" Height="20" />
@@ -253,8 +199,59 @@
         </StackPanel>
         <Button Grid.Column="3" Classes="secondary small" Content="{l:T shell.return_done}" Command="{Binding Shell.ReturnCommand}"
                 IsVisible="{Binding Shell.HasReturn}" VerticalAlignment="Center" />
+        <!-- Network status, on every page: which networks Jay is using now. The panel lists each one with what it can do. -->
+        <Button x:Name="NetworkButton" Grid.Column="4" Classes="ghost small net-status" Margin="8,0,0,0" VerticalAlignment="Center"
+                ToolTip.Tip="{Binding Shell.Network.Tip}" AutomationProperties.Name="{Binding Shell.Network.Tip}">
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedRight">
+              <Border DataContext="{Binding Shell.Network}">
+                <StackPanel x:Name="NetworkPanel" Width="340" Spacing="8" x:DataType="vm:NetworkStatusViewModel">
+                  <TextBlock Text="{l:T shell.network.title}" FontWeight="SemiBold" />
+                  <ItemsControl x:Name="NetworkRows" ItemsSource="{Binding Rows}">
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Spacing="10" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:NetworkStatusRow">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                          <Border Classes="led" Classes.online="{Binding IsOn}" Classes.busy="{Binding IsConnecting}" Classes.off="{Binding IsOff}"
+                                  VerticalAlignment="Top" Margin="0,6,0,0" />
+                          <StackPanel Grid.Column="1" Spacing="1">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Tip}" />
+                            <TextBlock Classes="hint" FontSize="12" Text="{Binding TrustText}" Classes.warn="{Binding IsUnreviewed}" TextWrapping="Wrap" />
+                            <TextBlock Classes="hint" FontSize="12" Text="{Binding CanText}" TextWrapping="Wrap" />
+                            <TextBlock Classes="hint" FontSize="12" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <ToggleSwitch Grid.Column="2" Classes="compact" IsChecked="{Binding Wanted}"
+                                        OnContent="" OffContent="" MinWidth="0" VerticalAlignment="Top" IsVisible="{Binding CanSwitch}"
+                                        AutomationProperties.Name="{Binding SwitchName}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock x:Name="NetworkEmptyNote" Classes="hint" FontSize="12" Text="{l:T shell.network.empty}" IsVisible="{Binding ShowEmptyNote}" TextWrapping="Wrap" />
+                  <TextBlock x:Name="NetworkChildNote" Classes="hint" FontSize="12" Text="{l:T shell.network.child}" IsVisible="{Binding IsChildMode}" TextWrapping="Wrap" />
+                  <Separator Margin="0,2" />
+                  <WrapPanel ItemSpacing="8" LineSpacing="6">
+                    <Button x:Name="NetworkAdd" Classes="secondary small" Content="{l:T shell.network.add}" Command="{Binding AddNetworkCommand}"
+                            IsVisible="{Binding CanAddNetworks}" />
+                    <Button x:Name="NetworkSettings" Classes="ghost small" Command="{Binding OpenSettingsCommand}">
+                      <StackPanel Orientation="Horizontal" Spacing="2">
+                        <TextBlock Text="{l:T shell.network.settings}" VerticalAlignment="Center" />
+                        <Path Classes="icon sm" Data="{StaticResource Icon.ChevronRight}" Width="14" Height="14" />
+                      </StackPanel>
+                    </Button>
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+            </Flyout>
+          </Button.Flyout>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Border x:Name="NetworkLight" Classes="led" Classes.online="{Binding Shell.Network.IsOn}" Classes.busy="{Binding Shell.Network.IsConnecting}"
+                    Classes.off="{Binding Shell.Network.IsOff}" VerticalAlignment="Center" />
+            <TextBlock x:Name="NetworkText" Text="{Binding Shell.Network.StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="180" />
+          </StackPanel>
+        </Button>
         <!-- 正在玩胶囊：有游戏准备中、运行中或刚崩溃时才出现；点它去游戏库 -->
-        <Button x:Name="PlayingPill" Grid.Column="4" Classes="pill-play" Classes.crash="{Binding Activity.PillIsCrash}" Command="{Binding Activity.OpenPillCommand}"
+        <Button x:Name="PlayingPill" Grid.Column="5" Classes="pill-play" Classes.crash="{Binding Activity.PillIsCrash}" Command="{Binding Activity.OpenPillCommand}"
                 IsVisible="{Binding Activity.HasPill}" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip.Tip="{Binding Activity.PillText}"
                 AutomationProperties.Name="{Binding Activity.PillText}">
           <StackPanel Orientation="Horizontal" Spacing="6">
@@ -263,7 +260,7 @@
           </StackPanel>
         </Button>
         <!-- 活动：铃铛；有任务时外圈是总进度，有没看过的失败或请求时红点。Ctrl+J -->
-        <Button x:Name="ActivityButton" Grid.Column="5" Classes="ghost icon-only" Command="{Binding Activity.ToggleCommand}" Margin="4,0,0,0"
+        <Button x:Name="ActivityButton" Grid.Column="6" Classes="ghost icon-only" Command="{Binding Activity.ToggleCommand}" Margin="4,0,0,0"
                 VerticalAlignment="Center" ToolTip.Tip="{Binding Activity.ActivityTip}" AutomationProperties.Name="{l:T activity.title}">
           <Panel Width="28" Height="28">
             <Arc Stroke="{DynamicResource Accent}" StrokeThickness="2" StartAngle="-90" SweepAngle="{Binding Activity.RingSweep}" Width="28" Height="28"
@@ -273,7 +270,7 @@
           </Panel>
         </Button>
         <!-- Help: this page's article in a drawer. F1; Shift+F1 opens the help center -->
-        <Button x:Name="HelpButton" Grid.Column="6" Classes="ghost icon-only" Command="{Binding OpenHelpCommand}" Margin="4,0,0,0"
+        <Button x:Name="HelpButton" Grid.Column="7" Classes="ghost icon-only" Command="{Binding OpenHelpCommand}" Margin="4,0,0,0"
                 VerticalAlignment="Center" ToolTip.Tip="{l:T help.button_tip}" AutomationProperties.Name="{l:T help.title}">
           <Path Classes="icon" Data="{StaticResource Icon.Help}" Width="18" Height="18" />
         </Button>

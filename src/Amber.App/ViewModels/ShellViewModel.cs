@@ -13,7 +13,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Amber.App.ViewModels;
 
-/// <summary>侧栏上的一级入口：游戏库、发现、联机。</summary>
+/// <summary>侧栏上的一级入口：游戏库、发现、联机、朋友。</summary>
 public sealed partial class NavSection : ObservableObject
 {
     private readonly string _titleKey;
@@ -34,7 +34,7 @@ public sealed partial class NavSection : ObservableObject
         });
     }
 
-    /// <summary>主题包 shell.json 里的名字：library / discover / multiplayer。</summary>
+    /// <summary>主题包 shell.json 里的名字：library / discover / multiplayer / people。</summary>
     public string Id { get; }
 
     public Section Section { get; }
@@ -54,7 +54,7 @@ public sealed partial class NavSection : ObservableObject
 
     [ObservableProperty] public partial bool IsActive { get; set; }
 
-    /// <summary>快捷键（Ctrl+1/2/3），显示在提示里。</summary>
+    /// <summary>快捷键（Ctrl+1/2/3/4），显示在提示里。</summary>
     public string Shortcut { get; init; } = "";
 
     public string ToolTip => Shortcut.Length == 0 ? Title : $"{Title} ({Shortcut})";
@@ -78,6 +78,7 @@ public sealed partial class ShellViewModel : ObservableObject
         new("library", Section.Library, "shell.nav.library", "shell.nav.library_short", "Icon.Library") { Shortcut = "Ctrl+1" },
         new("discover", Section.Discover, "shell.nav.discover", "shell.nav.discover_short", "Icon.Discover") { Shortcut = "Ctrl+2" },
         new("multiplayer", Section.Play, "shell.nav.multiplayer", "shell.nav.multiplayer_short", "Icon.Multiplayer") { Shortcut = "Ctrl+3" },
+        new("people", Section.People, "shell.nav.people", "shell.nav.people_short", "Icon.Chat") { Shortcut = "Ctrl+4" },
     ];
 
     /// <summary>侧栏上显示的入口（主题包可以排顺序、藏掉发现或联机；藏掉的还能从别处跳过去）。</summary>
@@ -125,8 +126,9 @@ public sealed partial class ShellViewModel : ObservableObject
             },
             Section.Discover => Find<ContentViewModel>(),
             Section.Play => Find<MultiplayerViewModel>(),
+            Section.People => Find<PeopleViewModel>(),
             Section.Settings => Find<SettingsViewModel>(),
-            Section.Accounts => Find<AccountsViewModel>(),
+            Section.Me => Find<AccountsViewModel>(),
             Section.About => Find<AboutViewModel>(),
             Section.Help => Find<HelpCenterViewModel>(),
             _ => Find<SettingsViewModel>(),
@@ -140,10 +142,11 @@ public sealed partial class ShellViewModel : ObservableObject
         DownloadViewModel => Route.Parse(LegacyRoutes.NewInstance),
         ContentViewModel => Route.Parse("discover"),
         MultiplayerViewModel => Route.Parse("play"),
+        PeopleViewModel => Route.Parse("people"),
         SettingsViewModel => Route.Parse("settings"),
         AboutViewModel => Route.Parse("about"),
         HelpCenterViewModel help => Route.Parse(help.Selected is { } a ? "help/" + a.Id : "help"),
-        AccountsViewModel => Route.Parse("accounts"),
+        AccountsViewModel => Route.Parse("me"),
         _ => Route.Library,
     };
 
@@ -208,7 +211,8 @@ public sealed partial class ShellViewModel : ObservableObject
         Section.Library => L.T("shell.nav.library"),
         Section.Discover => L.T("shell.nav.discover"),
         Section.Play => L.T("shell.nav.multiplayer"),
-        Section.Accounts => _main.Pages.OfType<AccountsViewModel>().First().Title,
+        Section.People => L.T("shell.nav.people"),
+        Section.Me => L.T("me.title"),
         Section.About => L.T("about.title"),
         Section.Help => L.T("help.center.title"),
         _ => L.T("shell.settings"),
@@ -251,7 +255,7 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     public bool IsSettingsActive => Router.CurrentSection is Section.Settings or Section.About or Section.Help;
-    public bool IsAccountsActive => Router.CurrentSection == Section.Accounts;
+    public bool IsMeActive => Router.CurrentSection == Section.Me;
 
     [ObservableProperty] public partial NavSection? SelectedSection { get; set; }
 
@@ -283,7 +287,7 @@ public sealed partial class ShellViewModel : ObservableObject
         OnPropertyChanged(nameof(HasCrumb));
         OnPropertyChanged(nameof(Heading));
         OnPropertyChanged(nameof(IsSettingsActive));
-        OnPropertyChanged(nameof(IsAccountsActive));
+        OnPropertyChanged(nameof(IsMeActive));
     }
 
     /// <summary>按主题包的 shell 布局排入口；传空恢复 Jay 自带的顺序。</summary>
@@ -315,7 +319,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private void Return() => Router.Return();
 
-    /// <summary>按 id 切入口（侧栏、品牌、Ctrl+1/2/3）。藏起来的入口也能切过去。</summary>
+    /// <summary>按 id 切入口（侧栏、品牌、Ctrl+1/2/3/4）。藏起来的入口也能切过去。</summary>
     [RelayCommand]
     private void GoSection(string id)
     {
@@ -325,13 +329,14 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     private void OpenSettings() => Router.SwitchTo(Section.Settings);
 
+    /// <summary>The sidebar avatar: the "Me" page (game accounts, Jay account, friend code, devices, appearance).</summary>
     [RelayCommand]
-    private void OpenAccounts() => Router.SwitchTo(Section.Accounts);
+    private void OpenMe() => Router.SwitchTo(Section.Me);
 
-    private AccountMenuViewModel? _accountMenu;
+    private NetworkStatusViewModel? _network;
 
-    /// <summary>The menu behind the sidebar avatar (§6.13).</summary>
-    public AccountMenuViewModel AccountMenu => _accountMenu ??= new(_main, this);
+    /// <summary>The network status in the top bar and its panel.</summary>
+    public NetworkStatusViewModel Network => _network ??= new(_main.Multiplayer, r => Navigate(r));
 
     // ---- 侧栏底部 ----
 
@@ -373,8 +378,9 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         ContentViewModel => Section.Discover,
         MultiplayerViewModel => Section.Play,
+        PeopleViewModel => Section.People,
         SettingsViewModel or AboutViewModel or HelpCenterViewModel => Section.Settings,
-        AccountsViewModel => Section.Accounts,
+        AccountsViewModel => Section.Me,
         _ => Section.Library,
     };
 }

@@ -50,7 +50,7 @@ public sealed partial class AccountsViewModel : PageViewModel, ISnapshotDemo
     private readonly LauncherService _service;
     private CancellationTokenSource? _loginCts;
 
-    public override string Title => L.T("accounts.title");
+    public override string Title => L.T("me.title");
     public override string Icon => "M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v2h16v-2c0-2.8-3.6-5-8-5z";
 
     public ObservableCollection<AccountItem> Accounts { get; } = [];

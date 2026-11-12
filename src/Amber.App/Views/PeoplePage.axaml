@@ -1,0 +1,139 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:v="using:Amber.App.Views"
+             xmlns:l="using:Amber.App.Localization"
+             x:Class="Amber.App.Views.PeoplePage"
+             x:DataType="vm:PeopleViewModel">
+  <!-- Laid out by the page's own width: the friend list on the left and the selected friend on the right; below 640 the
+       list sits above the detail. Properties the width changes are set in styles (a value on the control would win). -->
+  <UserControl.Styles>
+    <Style Selector="Border#FriendListCard">
+      <Setter Property="Grid.Row" Value="1" />
+      <Setter Property="Grid.RowSpan" Value="2" />
+      <Setter Property="Width" Value="300" />
+      <Setter Property="Margin" Value="0,0,14,14" />
+    </Style>
+    <Style Selector="Border#FriendDetailCard">
+      <Setter Property="Grid.Row" Value="1" />
+      <Setter Property="Grid.RowSpan" Value="2" />
+      <Setter Property="Grid.Column" Value="1" />
+      <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+    <ContainerQuery Name="PeoplePageRoot" Query="max-width:640">
+      <Style Selector="Border#FriendListCard">
+        <Setter Property="Grid.RowSpan" Value="1" />
+        <Setter Property="Grid.ColumnSpan" Value="2" />
+        <Setter Property="Width" Value="NaN" />
+        <Setter Property="MaxHeight" Value="200" />
+        <Setter Property="Margin" Value="0,0,0,10" />
+      </Style>
+      <Style Selector="Border#FriendDetailCard">
+        <Setter Property="Grid.Row" Value="2" />
+        <Setter Property="Grid.RowSpan" Value="1" />
+        <Setter Property="Grid.Column" Value="0" />
+        <Setter Property="Grid.ColumnSpan" Value="2" />
+        <Setter Property="Margin" Value="0,0,0,10" />
+      </Style>
+    </ContainerQuery>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,Auto,*,Auto" ColumnDefinitions="Auto,*" Container.Name="PeoplePageRoot" Container.Sizing="Width">
+    <Grid svc:ThemeRegion.Name="people.title" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto">
+      <TextBlock Classes="h1" Text="{l:T shell.nav.people}" TextTrimming="CharacterEllipsis" />
+      <Button x:Name="AddFriendButton" Grid.Column="1" Classes="secondary" Content="{l:T people.add}" Command="{Binding ManageCommand}"
+              IsVisible="{Binding HasFriends}" VerticalAlignment="Center" />
+    </Grid>
+
+    <!-- The friends: one row per person (their devices are in the detail). -->
+    <Border svc:ThemeRegion.Name="people.list" x:Name="FriendListCard" Classes="card" Padding="6" IsVisible="{Binding HasFriends}">
+      <ListBox x:Name="FriendList" ItemsSource="{Binding Friends}" SelectedItem="{Binding Selected}" Background="Transparent"
+               AutomationProperties.Name="{l:T shell.nav.people}">
+        <ListBox.ItemTemplate>
+          <DataTemplate DataType="vm:ContactItem">
+            <Grid ColumnDefinitions="Auto,*" Margin="2,4">
+              <Border Classes="face" Background="{Binding Name, Converter={x:Static v:FaceBrush.Instance}}" VerticalAlignment="Center" />
+              <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="hint" FontSize="12" Text="{Binding DevicesText}" IsVisible="{Binding HasSeveralDevices}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="hint" FontSize="12" Text="{Binding Fingerprint}" IsVisible="{Binding HasOneDevice}" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </Border>
+
+    <!-- The selected friend, or what to do when there is nobody yet. -->
+    <Border svc:ThemeRegion.Name="people.detail" x:Name="FriendDetailCard" Classes="card">
+      <ScrollViewer>
+        <Panel>
+          <StackPanel x:Name="PeopleChildNote" Classes="empty-state" IsVisible="{Binding IsChildMode}">
+            <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
+            <TextBlock Classes="hint" Text="{l:T people.child}" />
+          </StackPanel>
+
+          <StackPanel x:Name="PeopleEmpty" Classes="empty-state" IsVisible="{Binding IsEmpty}">
+            <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
+            <TextBlock Classes="title" Text="{l:T people.empty.title}" />
+            <TextBlock Classes="hint" Text="{l:T people.empty.body}" />
+            <WrapPanel HorizontalAlignment="Center" ItemSpacing="8" LineSpacing="8" Margin="0,8,0,0">
+              <Button x:Name="CopyMyCodeButton" Content="{l:T people.empty.copy}" Command="{Binding CopyMyCodeCommand}" />
+              <Button x:Name="EmptyAddButton" Classes="secondary" Content="{l:T people.add}" Command="{Binding ManageCommand}" />
+            </WrapPanel>
+          </StackPanel>
+
+          <StackPanel x:Name="PeoplePickHint" Classes="empty-state" IsVisible="{Binding ShowPickHint}">
+            <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
+            <TextBlock Classes="hint" Text="{l:T people.detail.pick}" />
+          </StackPanel>
+
+          <StackPanel x:Name="FriendDetail" Spacing="10" IsVisible="{Binding HasSelected}">
+            <Grid ColumnDefinitions="Auto,*">
+              <Border Classes="face large" Background="{Binding Selected.Name, Converter={x:Static v:FaceBrush.Instance}}" VerticalAlignment="Center" />
+              <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                <TextBlock x:Name="FriendName" Classes="h2" Margin="0" Text="{Binding Selected.Name}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="hint" Text="{Binding Selected.JayText}" IsVisible="{Binding Selected.HasJay}" TextWrapping="Wrap" />
+                <TextBlock Classes="hint" Text="{l:T people.detail.no_jay}" IsVisible="{Binding SelectedHasNoJay}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Grid>
+
+            <TextBlock Text="{l:T people.detail.devices}" FontWeight="SemiBold" />
+            <ItemsControl x:Name="FriendDevices" ItemsSource="{Binding Selected.DeviceItems}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:ContactDeviceItem">
+                  <SelectableTextBlock Text="{Binding Fingerprint}" TextWrapping="Wrap" Margin="0,2" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <WrapPanel ItemSpacing="8" LineSpacing="8" Margin="0,4,0,0">
+              <Button x:Name="InviteFriendButton" Content="{l:T people.detail.invite}" Command="{Binding InviteCommand}" IsEnabled="{Binding CanInvite}" />
+              <Button x:Name="ManageFriendsButton" Classes="secondary" Content="{l:T people.manage}" Command="{Binding ManageCommand}" />
+            </WrapPanel>
+            <TextBlock Classes="hint" Text="{l:T people.detail.invite_hint}" IsVisible="{Binding ShowInviteHint}" TextWrapping="Wrap" />
+          </StackPanel>
+        </Panel>
+      </ScrollViewer>
+    </Border>
+
+    <!-- Through which network an invite reaches a friend, and requests still in progress. -->
+    <Border svc:ThemeRegion.Name="people.status" x:Name="PeopleStatusCard" Grid.Row="3" Grid.ColumnSpan="2" Classes="card" Margin="0" Padding="12,8"
+            IsVisible="{Binding !IsChildMode}">
+      <StackPanel Spacing="6">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+          <Border Classes="led" Classes.online="{Binding CanDeliver}" Classes.off="{Binding !CanDeliver}" VerticalAlignment="Center" />
+          <TextBlock x:Name="DeliveryText" Grid.Column="1" Text="{Binding DeliveryText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          <Button x:Name="ConnectNetworkButton" Grid.Column="2" Classes="secondary small" Content="{l:T people.delivery.connect}" Command="{Binding ConnectCommand}"
+                  IsVisible="{Binding ShowConnect}" VerticalAlignment="Center" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding HasRequests}">
+          <TextBlock x:Name="RequestsText" Text="{Binding RequestsText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          <Button x:Name="OpenRequestsButton" Grid.Column="1" Classes="secondary small" Content="{l:T people.requests.open}" Command="{Binding ManageCommand}"
+                  VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

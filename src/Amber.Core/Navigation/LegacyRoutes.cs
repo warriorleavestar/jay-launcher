@@ -31,7 +31,7 @@ public static class LegacyRoutes
         "multiplayer" => Route.Parse("play"),
         "tools" => Route.Parse(Tools),
         "settings" => Route.Parse("settings"),
-        "accounts" => Route.Parse("accounts"),
+        "accounts" => Route.Parse("me"),
         _ => null,
     };
 
@@ -53,13 +53,14 @@ public static class LegacyRoutes
 
     /// <summary>
     /// The sidebar section an old page id belongs to (upgrading pages / hidden in a format 1 shell.json, §10.8).
-    /// Accounts, tools and settings are not navigation items any more: null.
+    /// Accounts ("Me"), tools and settings are not navigation items: null.
     /// </summary>
     public static string? NavSectionFor(string pageId) => pageId switch
     {
         "home" or "instances" or "log" or "library" => "library",
         "downloads" or "content" or "discover" => "discover",
         "multiplayer" => "multiplayer",
+        "people" => "people",
         _ => null,
     };
 }

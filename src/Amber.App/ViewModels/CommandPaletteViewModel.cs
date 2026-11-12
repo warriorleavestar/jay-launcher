@@ -267,7 +267,8 @@ public sealed partial class CommandPaletteViewModel : ObservableObject
         list.Add(Page("settings", "shell.settings"));
         list.Add(Page(LegacyRoutes.Tools, "tools.junk.title", [.. NamesOf("palette.old.toolbox"), "tools", "toolbox"]));
         list.Add(Page(LegacyRoutes.Logs, "log.title", "log"));
-        list.Add(Page("accounts", "accounts.title"));
+        list.Add(Page("people", "shell.nav.people", [.. NamesOf("multiplayer.contacts.title"), "friends", "contacts", "people"]));
+        list.Add(Page("me", "me.title", [.. NamesOf("accounts.title", "me.accounts.title", "multiplayer.contacts.my_code", "me.devices.title"), "accounts", "me"]));
         list.Add(Page("settings#RecycleKeep", "recycle.title", "trash", "recycle"));
         list.Add(Page("about", "about.title", "privacy", "about"));
         list.Add(Page("help", "help.center.title", "help", "F1"));
