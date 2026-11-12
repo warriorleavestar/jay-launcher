@@ -1394,6 +1394,36 @@ public sealed class BakeTests : IDisposable
     }
 
     [Fact]
+    public async Task Forge1122PlatformReadsTheNewerInstallerLayoutToo()
+    {
+        // Seen with the real 14.23.5.2860 installer: no versionInfo; the profile is version.json, named by "json".
+        LegacyInstall();
+        var installer = Path.Combine(_root, "forge-1.12.2-installer.jar");
+        using (var zip = ZipFile.Open(installer, ZipArchiveMode.Update))
+        {
+            var entry = zip.GetEntry("install_profile.json")!;
+            JsonObject profile;
+            using (var r = new StreamReader(entry.Open())) profile = JsonNode.Parse(r.ReadToEnd())!.AsObject();
+            var info = profile["versionInfo"]!.DeepClone().AsObject();
+            info["inheritsFrom"] = "1.12.2";
+            entry.Delete();
+            var newer = new JsonObject { ["spec"] = 0, ["profile"] = "forge", ["version"] = "1.12.2-forge-14.23.5.2860", ["json"] = "/version.json", ["libraries"] = new JsonArray() };
+            using (var w = new StreamWriter(zip.CreateEntry("install_profile.json").Open())) w.Write(newer.ToJsonString());
+            using (var w = new StreamWriter(zip.CreateEntry("version.json").Open())) w.Write(info.ToJsonString());
+        }
+        Func<IReadOnlyCollection<DownloadItem>, CancellationToken, Task> download = (items, _) =>
+        {
+            foreach (var item in items) { Directory.CreateDirectory(Path.GetDirectoryName(item.LocalPath)!); File.Copy(FakeFiles[item.Url], item.LocalPath, true); }
+            return Task.CompletedTask;
+        };
+        var root = (await BakePlatform.PrepareAsync(new GameDirectory(Game), Instance("forge", "1.12.2", LegacyForge, "f1122"), Data, download, null, CancellationToken.None))!;
+        var versionJson = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "version.json")))!.AsObject();
+        Assert.Equal("net.minecraft.launchwrapper.Launch", versionJson["mainClass"]!.GetValue<string>());
+        Assert.Equal("1.12.2", versionJson["inheritsFrom"]!.GetValue<string>());
+        Assert.Equal(2, versionJson["libraries"]!.AsArray().Count);
+    }
+
+    [Fact]
     public void Forge1122ProblemLinesAreAsciiWithEscapes()
     {
         // Java 8 writes stdout in the platform code page, so the loader escapes everything outside printable ASCII.

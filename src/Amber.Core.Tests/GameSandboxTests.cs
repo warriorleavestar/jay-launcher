@@ -561,6 +561,31 @@ public sealed class GameSandboxTests : IDisposable
         WindowsSandbox.Ungrant(Environment.SystemDirectory, sid);
     }
 
+    [Fact]
+    public void Windows_StandardLevel_TakesTheContainerOffTheSharedGameFolder()
+    {
+        // Seen in a real run: a strong launch of an instance that shares the game folder granted the game folder itself;
+        // the next isolated standard launch granted only versions, libraries and assets, which inherited the container's
+        // entry, and Windows refused the low-integrity game reading them ("could not find java.dll").
+        if (!OperatingSystem.IsWindows()) return;
+        var game = Dir("shared-game");
+        var libraries = Dir("shared-game", "libraries");
+        var lib = Path.Combine(libraries, "a.jar");
+        File.WriteAllText(lib, "jar");
+        var sid = new System.Security.Principal.SecurityIdentifier("S-1-15-2-1-2-3-4-5-6-9");
+        bool Named(string path) => (Directory.Exists(path) ? (System.Security.AccessControl.FileSystemSecurity)new DirectoryInfo(path).GetAccessControl() : new FileInfo(path).GetAccessControl())
+            .GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+            .OfType<System.Security.AccessControl.FileSystemAccessRule>().Any(r => r.IdentityReference == sid);
+        WindowsSandbox.Grant(game, sid, write: true);
+        Assert.True(Named(lib));
+
+        var targets = WindowsSandbox.UngrantTargets([libraries]).ToList();
+        Assert.Contains(GameSandbox.Full(game), targets, StringComparer.OrdinalIgnoreCase);
+        foreach (var path in targets) WindowsSandbox.Ungrant(path, sid);
+        Assert.False(Named(lib));
+        Assert.False(Named(game));
+    }
+
     /// <summary>A JDK for the real-Java tests: JAVA_HOME, else an Adoptium install; null skips them.</summary>
     private static string? TestJava()
     {

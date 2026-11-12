@@ -229,12 +229,16 @@ public static unsafe class WindowsSandbox
     /// grants, the folder of every granted file, and the folders right inside every granted folder. The last two catch
     /// another instance's folder: a strong launch of instance A grants <c>versions\A</c> itself, and a standard launch
     /// of B that runs on A's game jar (a modded instance on the vanilla version) grants only <c>versions</c> and the jar.
+    /// Every folder above a grant is included too: a strong launch of an instance that shares the game folder grants
+    /// the game folder itself, and everything a later isolated standard launch reads inherits that entry.
     /// </summary>
     internal static IEnumerable<string> UngrantTargets(IEnumerable<string> grants)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in grants)
         {
+            for (var up = Path.GetDirectoryName(GameSandbox.Full(path)); !string.IsNullOrEmpty(up); up = Path.GetDirectoryName(up))
+                if (seen.Add(up)) yield return up;
             if (Directory.Exists(path))
             {
                 if (seen.Add(path)) yield return path;
@@ -244,11 +248,7 @@ public static unsafe class WindowsSandbox
                 foreach (var folder in inside)
                     if (seen.Add(folder)) yield return folder;
             }
-            else if (File.Exists(path))
-            {
-                if (seen.Add(path)) yield return path;
-                if (Path.GetDirectoryName(path) is { } folder && seen.Add(folder)) yield return folder;
-            }
+            else if (File.Exists(path) && seen.Add(path)) yield return path;
         }
     }
 

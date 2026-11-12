@@ -163,9 +163,20 @@ public static partial class BakePlatform
         using (var zip = ZipFile.OpenRead(installer))
         {
             var entry = zip.GetEntry("install_profile.json") ?? throw new InvalidDataException(L.T("core.install.forge.missingprofile"));
-            using var stream = entry.Open();
-            info = (JsonNode.Parse(stream) as JsonObject)?["versionInfo"] as JsonObject
-                   ?? throw new BakeException(L.F("core.bake.platform_incomplete", DisplayName(ForgeLegacy), "versionInfo"), []);
+            JsonObject? profile;
+            using (var stream = entry.Open()) profile = JsonNode.Parse(stream) as JsonObject;
+            // Two installer layouts: the old one keeps the profile in install_profile.json's versionInfo; the later 1.12.2
+            // builds (14.23.5.2851 and up) ship it as its own entry named by "json" (/version.json).
+            if (profile?["versionInfo"] is JsonObject embedded) info = embedded;
+            else
+            {
+                var name = (profile?["json"] is JsonValue j && j.TryGetValue<string>(out var n) ? n : "/version.json").TrimStart('/');
+                var versionEntry = zip.GetEntry(name)
+                    ?? throw new BakeException(L.F("core.bake.platform_incomplete", DisplayName(ForgeLegacy), name), []);
+                using var versionStream = versionEntry.Open();
+                info = JsonNode.Parse(versionStream) as JsonObject
+                       ?? throw new BakeException(L.F("core.bake.platform_incomplete", DisplayName(ForgeLegacy), name), []);
+            }
         }
         info = (JsonObject)info.DeepClone();
         // The loader checks the profile is for 1.12.2 (inheritsFrom or id); the installer's versionInfo says so, made sure here.
