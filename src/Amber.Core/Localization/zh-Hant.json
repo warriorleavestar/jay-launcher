@@ -3670,5 +3670,9 @@
   "settings.ul.cache": "快取：{0}",
   "settings.ul.developers": "給開發者",
   "settings.ul.upgrade_note": "裝了新版本的載入器以後，每個實例第一次開始時都會重新準備一遍模組，這一次會比平時久。這是正常的。",
-  "instance.ul.downloading": "正在下載通用載入器……"
+  "instance.ul.downloading": "正在下載通用載入器……",
+  "settings.motion3d": "立體效果",
+  "settings.motion3d.hint": "卡片跟著指標微微傾斜，新頁面從後面浮上來，主題的場景跟著指標移動。開啟「減少動畫」時全部關掉；安全卡片始終不動。",
+  "me.skin.figure": "你的外觀：拖曳轉一轉，或按 ← →",
+  "me.skin.figure.tip": "拖曳轉一轉"
 }

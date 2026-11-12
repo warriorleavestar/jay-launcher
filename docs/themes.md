@@ -112,16 +112,47 @@ JSON 里可以写 `//` 注释和结尾逗号。每一部分都可选，没写的
 - 写了 `slots.background` 时它优先；旧的 `background` 照样能用（相当于 `dim = 1 - opacity`）。用图片做主题时 Jay 两个都写，旧版 Jay 读不懂 `slots` 也能显示背景。
 - 立绘和背景都在内容后面，画不到锁定的安全界面和侧栏的隐私行上。
 
-### Reserved for later: `motion3d` and the `scene` slot
+### Pseudo-3D: `motion3d` and the `scene` slot
 
-Two names are reserved for pseudo-3D motion and 3D scenes, which a later Jay will read. This version reads past
-them without a problem, so a pack written for that later Jay still loads here:
+Jay's 3D effects are pseudo-3D: flat layers turned with a perspective transform, so they run on every computer with no
+graphics card and no 3D renderer. A pack only sets numbers and pictures, never code or shaders. Three things move:
+library cards lean toward the pointer, a new page comes forward from a little behind the screen, and the scene behind
+the pages moves with the pointer. The skin figure on the "Me" page turns by itself while the pointer is on it.
 
-- `tokens.json` → `"motion3d"`: tilt, depth and timing for page and card motion. Data only, never code or shaders.
-- `slots` → `"scene"`: a scene behind the pages.
+`tokens.json` → `"motion3d"` (every key optional; Jay's value when left out):
 
-Whatever they will hold, reduced motion turns all of it off, and safety surfaces (knock, file offer, privacy row)
-stay flat and unthemed.
+| Key | Default | Range | What it does |
+|---|---|---|---|
+| `tilt` | 8 | 0–15 degrees | How far a card leans toward the pointer. 0: cards stay flat. |
+| `pageDepth` | 0.015 | 0–0.06 | How far behind the screen a new page starts, as a share of its size. 0: a plain change. |
+| `parallax` | 12 | 0–32 px | How far the nearest scene layer moves against the pointer. 0: the scene stays still. |
+| `perspective` | 600 | 300–4000 px | Distance from the eye to the screen: smaller looks deeper. |
+| `turntable` | true | true / false | Whether the skin figure turns by itself under the pointer. |
+
+```json
+"motion3d": { "tilt": 6, "pageDepth": 0.02, "parallax": 20 }
+```
+
+`slots` → `"scene"`: up to four pictures (PNG or JPEG in `assets/`), far to near. `depth` is 0 for a layer that stays
+still and 1 for the nearest, which moves the full `parallax`. Each layer is drawn a little larger than the window, so it
+never shows an edge. `dim` (0–0.9, default 0.55) covers the scene with the theme's page colour so text stays readable;
+`focus` is the point that stays in view, as for the other slots. One picture can go straight in `"image"`: it is a
+single layer halfway back (depth 0.5).
+
+```json
+"slots": { "scene": { "layers": [
+  { "image": "assets/sky.png", "depth": 0 },
+  { "image": "assets/hills.png", "depth": 0.4 },
+  { "image": "assets/trees.png", "depth": 1 }
+], "dim": 0.4 } }
+```
+
+The scene sits under everything, like the background picture, and takes no clicks. "Make a theme from pictures" does not
+make a scene yet; write it by hand.
+
+Out of a pack's hands: **Settings › Appearance › 3D effects** and **Reduce motion** turn all of it off (with reduced
+motion the skin figure still turns when dragged, but never by itself). Safety surfaces (knock, file offer, privacy row)
+never lean or move. Numbers out of range are pulled in and noted on the theme card.
 
 ### 颜色名
 

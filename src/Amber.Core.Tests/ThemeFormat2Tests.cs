@@ -263,16 +263,10 @@ public class ThemeFormat2Tests
     }
 
     [Fact]
-    public void KeysReservedForLaterMotionAndScenesLoadWithoutProblems()
+    public void UnknownSlotsAreReported()
     {
-        // A pack written for a later Jay with pseudo-3D motion and a scene slot still loads here: the reserved keys are
-        // read past and listed, never reported as unknown.
-        var pack = Read(V2, """{ "motion3d": { "tilt": 6, "depth": 0.4 }, "slots": { "scene": { "image": "assets/scene.png" } } }""");
-        Assert.Empty(pack.Problems);
-        Assert.Equal(["motion3d", "slots.scene"], pack.ReservedKeys.OrderBy(k => k).ToArray());
-        Assert.Empty(pack.Slots);
-
         var other = Read(V2, """{ "slots": { "floor": { "image": "assets/floor.png" } } }""");
         Assert.Contains(other.Problems, p => p.Code == "unknown_key" && p.Detail == "slots.floor");
+        Assert.Empty(other.ReservedKeys);
     }
 }

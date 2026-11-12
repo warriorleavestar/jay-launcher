@@ -57,9 +57,9 @@
       <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,*">
         <TextBlock Classes="h2" Text="{l:T me.accounts.title}" Grid.ColumnSpan="2" Margin="8,4,8,6" />
         <Panel x:Name="SkinPreviewHost" Grid.Row="1">
-          <Border Width="104" Margin="4,4,10,4" VerticalAlignment="Top" IsVisible="{Binding Current.Body, Converter={x:Static ObjectConverters.IsNotNull}}">
-            <Image Source="{Binding Current.Body}" Width="96" Height="192" Stretch="Uniform"
-                   RenderOptions.BitmapInterpolationMode="None" ToolTip.Tip="{l:T accounts.skin.tooltip}" />
+          <!-- The skin as a figure that turns (pseudo-3D): drag it or use ← →. Accounts without a skin get one drawn from the name. -->
+          <Border Width="128" Margin="4,4,10,4" VerticalAlignment="Top" IsVisible="{Binding Current.Skin, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <c:SkinFigure x:Name="SkinFigure" Skin="{Binding Current.Skin}" Width="126" Height="231" />
           </Border>
         </Panel>
         <ListBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Accounts}" Background="Transparent">

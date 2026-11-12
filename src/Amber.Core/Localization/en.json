@@ -3747,5 +3747,9 @@
   "settings.ul.cache": "Cache: {0}",
   "settings.ul.developers": "For developers",
   "settings.ul.upgrade_note": "After you install a new version of the loader, each instance prepares its mods again the first time it starts. That takes longer than usual once and is normal.",
-  "instance.ul.downloading": "Downloading the universal loader…"
+  "instance.ul.downloading": "Downloading the universal loader…",
+  "settings.motion3d": "3D effects",
+  "settings.motion3d.hint": "Cards lean toward the pointer, a new page comes forward, and a theme's scene moves with the pointer. Reduce motion turns all of it off, and safety cards never move.",
+  "me.skin.figure": "Your skin. Drag to turn it, or use ← and →.",
+  "me.skin.figure.tip": "Drag to turn"
 }

@@ -14,6 +14,7 @@ Your account decides your name and skin in the game, and whether you can join on
 - Offline account: just a name; good for single player and LAN.
 - Skin-site account: enter the skin site's address, your account and password.
 - Switch: click your avatar at the bottom left to open **Me**, then click **Use** on an account.
+- The skin figure: drag the figure on the "Me" page to turn it, or click it and use ← and →. Offline accounts get a figure drawn from their name.
 
 ## What else is on Me
 - **Jay account**: one identity for multiplayer on every computer you use, made from 12 words you write down.

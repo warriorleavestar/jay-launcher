@@ -546,6 +546,9 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial JavaOption? SelectedJava { get; set; }
     [ObservableProperty] public partial bool AutoJavaDownload { get; set; }
     [ObservableProperty] public partial bool AllowNetworkThemes { get; set; }
+
+    /// <summary>3D effects: cards lean, pages come forward, the theme's scene moves (reduced motion turns them off anyway).</summary>
+    [ObservableProperty] public partial bool Effects3D { get; set; } = true;
     [ObservableProperty] public partial bool NoTrace { get; set; }
     [ObservableProperty] public partial int AttestationIndex { get; set; }
     [ObservableProperty] public partial bool SecurityBreaker { get; set; }
@@ -784,6 +787,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         Concurrency = s.DownloadConcurrency.ToString();
         AutoJavaDownload = s.AutoJavaDownload;
         AllowNetworkThemes = s.AllowNetworkThemes;
+        Effects3D = s.Motion3D;
         NoTrace = s.NoTrace;
         AttestationIndex = Math.Max(0, Array.IndexOf(AttestationKeys, s.SecurityAttestation));
         SecurityBreaker = s.SecurityBreaker;
@@ -1118,6 +1122,11 @@ public sealed partial class SettingsViewModel : PageViewModel
         Persist();
     }
     partial void OnNoTraceChanged(bool value) => Persist();
+    partial void OnEffects3DChanged(bool value)
+    {
+        Depth3D.SetEnabled(value);
+        Persist();
+    }
     partial void OnAttestationIndexChanged(int value)
     {
         Persist();
@@ -1216,6 +1225,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         if (SelectedJava is not null) s.JavaPath = SelectedJava.Path;
         s.AutoJavaDownload = AutoJavaDownload;
         s.AllowNetworkThemes = AllowNetworkThemes;
+        s.Motion3D = Effects3D;
         s.NoTrace = NoTrace;
         s.SecurityAttestation = AttestationKeys[Math.Clamp(AttestationIndex, 0, AttestationKeys.Length - 1)];
         s.SecurityBreaker = SecurityBreaker;
@@ -1304,7 +1314,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             case "post": PostExit = d.PostExitCommand ?? ""; break;
             case "java": SelectedJava = JavaOptions.FirstOrDefault(o => o.Path is null); break;
             case "theme": SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, d.Theme)); break;
-            case "motion": SelectedMotionIndex = 0; break;
+            case "motion": SelectedMotionIndex = 0; Effects3D = true; break;
             case "density": SelectedDensityIndex = 0; break;
             case "sidebar": SelectedSidebarIndex = 0; break;
             case "theme_pack": SelectedThemePack = ThemePacks.FirstOrDefault(); AllowNetworkThemes = true; break;

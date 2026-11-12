@@ -78,14 +78,20 @@ public sealed class ThemePack
     /// <summary>读取和校验时发现的问题（能用的部分照常用，有问题的部分用默认值）。</summary>
     public List<ThemeProblem> Problems { get; } = [];
 
+    /// <summary>Pseudo-3D motion (tokens.json "motion3d"), or null when the pack leaves it to Jay.</summary>
+    public Motion3D? Motion3D { get; set; }
+
+    /// <summary>The scene behind the pages (the "scene" image slot), or null.</summary>
+    public ThemeScene? Scene { get; set; }
+
     /// <summary>
-    /// Keys this version reserves for later features and reads past without a problem: tokens.json "motion3d" (tilt,
-    /// depth and timing for pseudo-3D motion) and the image slot "scene". A pack that already has them still loads here.
+    /// Keys this version reserves for later features and reads past without a problem, so a pack written for a later Jay
+    /// still loads here. None at the moment ("motion3d" and the "scene" slot were reserved before they were read).
     /// </summary>
     public List<string> ReservedKeys { get; } = [];
 
     /// <summary>Top-level tokens.json keys reserved for later versions (see <see cref="ReservedKeys"/>).</summary>
-    public static readonly IReadOnlyList<string> ReservedTokens = ["motion3d"];
+    public static readonly IReadOnlyList<string> ReservedTokens = [];
 }
 
 /// <summary>一条问题。Code 是固定的英文代码（测试和日志用），Detail 是给人看的位置或值。</summary>
@@ -366,6 +372,7 @@ public static partial class ThemePackReader
         if (has("sizes", out var sizes)) ReadNumbers(sizes, NumberKeys, pack.Numbers, pack.Problems, "sizes");
         if (has("radius", out var radius)) ReadNumbers(radius, RadiusKeys, pack.Radii, pack.Problems, "radius");
         if (has("motion", out var motion)) ThemeFormat.ReadMotion(pack, motion);
+        if (has("motion3d", out var motion3d)) pack.Motion3D = Motion3D.Read(pack, motion3d);
         foreach (var key in ThemePack.ReservedTokens)
             if (has(key, out var reserved)) pack.ReservedKeys.Add(key);
         if (has("illustration", out var illo) && illo.ValueKind == JsonValueKind.Object)
