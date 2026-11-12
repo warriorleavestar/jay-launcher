@@ -170,7 +170,8 @@ public sealed partial class MultiplayerViewModel
             IsPublicConnected = true;
             // Keep this network's directory snapshot fresh on a fixed schedule: lookups and the room list read it locally.
             var connected = _public;
-            _snapshotPolling = DirectorySnapshots.For(connected).StartPolling(() => DirectoryClient(connected));
+            // The same copy every DirectoryClient(connected) reads (one per network), so lookups never ask on their own.
+            _snapshotPolling = DirectoryClient(connected).Snapshots.StartPolling(() => DirectoryClient(connected));
             SetStatus(StatusMessage.Success("multiplayer.public.connected", profile.Name));
             StartAnnouncerIfHosting();
             StartVolunteerWork(_public, profile);
@@ -287,13 +288,15 @@ public sealed partial class MultiplayerViewModel
         try
         {
             return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct, freshSince: freshSince,
+                failed: (ip, e) => _diag.Add(L.T("multiplayer.public.diagnostics_category"), $"{ip}: {e.GetType().Name}: {e.Message}"),
                 // A room opened after our copy was taken shows up at the next directory refresh; say we're still looking.
                 searching: () => Dispatcher.UIThread.Post(() =>
                 {
                     if (!ct.IsCancellationRequested) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
                 }));
         }
-        catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException && !ct.IsCancellationRequested)
+        // Anything that goes wrong here (the directory, an address) leaves the invite's own lobby to try.
+        catch (Exception e) when (e is not OutOfMemoryException && !ct.IsCancellationRequested)
         {
             _diag.Add(L.T("multiplayer.public.diagnostics_category"), e.Message);
             return null;

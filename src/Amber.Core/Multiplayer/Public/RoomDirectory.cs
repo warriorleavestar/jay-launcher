@@ -337,7 +337,20 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException
-            or ObjectDisposedException or InvalidOperationException or FormatException) { }
+            or ObjectDisposedException) { }
+        // A request this code didn't expect to fail on: dropped like the rest, but noted (once a minute at most).
+        catch (Exception e) when (e is InvalidOperationException or FormatException) { LogDropped(e); }
+    }
+
+    private long _droppedLoggedAt;
+
+    private void LogDropped(Exception e)
+    {
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref _droppedLoggedAt);
+        if (now - last < 60_000 && last != 0) return;
+        if (Interlocked.CompareExchange(ref _droppedLoggedAt, now, last) != last) return;
+        _log?.Invoke($"Directory request dropped: {e.GetType().Name}: {e.Message}");
     }
 
     /// <summary>A JSON string value, or null for anything else (a number where a string belongs isn't an exception).</summary>

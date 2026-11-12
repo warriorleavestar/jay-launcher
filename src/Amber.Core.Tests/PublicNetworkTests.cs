@@ -292,6 +292,56 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AddressesThatHangOrAnswerGarbageDontStopTheHost()
+    {
+        var book = new InviteBook();
+        StartKnock(book, new MemberTable());
+        var standing = book.CreateStanding(false, TunnelSettings.Default);
+        var client = new RoomDirectoryClient(_net);
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(invite: standing.Invite.ToString()), _now), true, [], default);
+        // Someone lists the same invite under the host's (public) key at addresses of their own: one accepts and never
+        // answers, the other answers garbage.
+        var silent = new TcpListener(IPAddress.Loopback, 0);
+        var garbage = new TcpListener(IPAddress.Loopback, 0);
+        silent.Start();
+        garbage.Start();
+        try
+        {
+            var held = new List<TcpClient>();
+            _ = Task.Run(async () => { while (true) held.Add(await silent.AcceptTcpClientAsync()); });
+            _ = Task.Run(async () =>
+            {
+                while (true)
+                {
+                    using var c = await garbage.AcceptTcpClientAsync();
+                    var junk = new byte[64];
+                    Array.Fill(junk, (byte)0x7f);
+                    try { await c.GetStream().WriteAsync(junk); await Task.Delay(200); } catch (IOException) { }
+                }
+            });
+            _net.Map[("10.235.0.66", KnockProtocol.Port)] = ((IPEndPoint)silent.LocalEndpoint).Port;
+            _net.Map[("10.235.0.67", KnockProtocol.Port)] = ((IPEndPoint)garbage.LocalEndpoint).Port;
+            foreach (var ip in new[] { "10.235.0.66", "10.235.0.67" })
+                await client.AnnounceAsync(new RoomSigner().Sign(Listing(invite: standing.Invite.ToString()) with { Ip = ip }, _now), true, [], default);
+            await client.Snapshots.RefreshAsync(client, default);
+            Assert.Equal(3, (await client.LookupAllAsync(standing.Invite.LobbyKey, default, _host.PublicKey)).Count);
+            // Whatever order they come in, the host is still reached.
+            var failed = new List<string>();
+            var outcome = await PublicJoin.TryKnockByInviteAsync(_net, standing.Invite, _guest, "Steve", "0.8.0", default, client: client,
+                expectedHost: _host.PublicKey, failed: (ip, _) => { lock (failed) failed.Add(ip); });
+            Assert.NotNull(outcome);
+            Assert.True(outcome.Approved);
+            Assert.DoesNotContain("10.235.0.7", failed);
+            held.ForEach(c => c.Dispose());
+        }
+        finally
+        {
+            silent.Stop();
+            garbage.Stop();
+        }
+    }
+
+    [Fact]
     public async Task AnnouncerReportsMissingAddress()
     {
         _net.Ip = null;

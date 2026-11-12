@@ -156,7 +156,14 @@ public static class PublicJoin
             var connected = false;
             try
             {
-                await using var stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, ct);
+                Stream stream;
+                using (var connect = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    // An address that never answers costs at most this long, like a handshake that never finishes.
+                    connect.CancelAfter(KnockClient.HandshakeTimeout);
+                    stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, connect.Token);
+                }
+                await using var _ = stream;
                 connected = true;
                 var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHostKey, jay: jay, direct: direct);
                 if (expectedHostKey is not null && !outcome.HostPublicKey.AsSpan().SequenceEqual(expectedHostKey))
@@ -193,9 +200,10 @@ public static class PublicJoin
     /// <param name="freshSince">Look in a copy of the directory refreshed after this time (waiting for the next refresh if
     /// needed): for a second try after the room wasn't there. Null: look in the copy as it is, at once.</param>
     /// <param name="searching">Called when nothing was found yet and the lookup waits for the next directory refresh.</param>
+    /// <param name="failed">Called for an address that failed (then the next one is tried), for diagnostics.</param>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
-        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, DateTimeOffset? freshSince = null, Action? searching = null)
+        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, DateTimeOffset? freshSince = null, Action? searching = null, Action<string, Exception>? failed = null)
     {
         var hits = await (client ?? new RoomDirectoryClient(network)).LookupAllAsync(invite.LobbyKey, ct, expectedHost, freshSince, searching);
         // The first "invalid" (the invite is used up or expired) is the answer, even if a later address says "mismatch".
@@ -210,8 +218,9 @@ public static class PublicJoin
                 if (outcome.Reason is not ("mismatch" or "invalid")) return outcome;
                 if (outcome.Reason == "invalid") invalid ??= outcome;
             }
-            catch (IOException) when (!ct.IsCancellationRequested) { }
-            catch (SocketException) when (!ct.IsCancellationRequested) { }
+            // Whatever goes wrong at one address (no answer within the handshake time, garbage, a broken handshake), the
+            // next one is still tried: an address listed by someone else must not stop the real host from being reached.
+            catch (Exception e) when (e is not OutOfMemoryException && !ct.IsCancellationRequested) { failed?.Invoke(hit.Ip, e); }
         }
         return invalid;
     }

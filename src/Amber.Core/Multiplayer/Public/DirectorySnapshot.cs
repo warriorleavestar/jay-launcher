@@ -351,9 +351,10 @@ public sealed class DirectorySnapshots
     /// <summary>One directory's reply, checked through before anything is applied.</summary>
     private sealed record Reply(string Epoch, long Version, bool Full, long? From, List<string> Gone, List<RoomListing> Rooms, List<(string Key, byte[] Blob)> Hidden);
 
-    /// <summary>Reads a snapshot reply. Null when anything in it is malformed (then none of it is used).</summary>
+    /// <summary>Whether a snapshot reply is well formed throughout.</summary>
     internal static bool IsUsable(JsonObject reply) => Parse(reply) is not null;
 
+    /// <summary>Reads a snapshot reply. Null when anything in it is malformed (then none of it is used).</summary>
     private static Reply? Parse(JsonObject reply)
     {
         try
@@ -385,7 +386,6 @@ public sealed class DirectorySnapshots
         }
     }
 
-    /// <summary>Applies one directory's checked reply. False when it isn't usable on top of the copy (a delta from elsewhere).</summary>
     internal IReadOnlyList<string> CopiesForTests() { lock (_gate) return [.. _copies.Keys]; }
 
     internal bool ApplyForTests(string ip, JsonObject reply)
@@ -394,6 +394,7 @@ public sealed class DirectorySnapshots
         lock (_gate) return Apply(ip, parsed, _now());
     }
 
+    /// <summary>Applies one directory's checked reply. False when it isn't usable on top of the copy (a delta from elsewhere).</summary>
     private bool Apply(string ip, Reply reply, DateTimeOffset now)
     {
         _copies.TryGetValue(ip, out var copy);
