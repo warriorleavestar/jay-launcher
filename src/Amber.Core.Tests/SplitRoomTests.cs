@@ -420,6 +420,43 @@ public sealed class SplitRoomTests
         Assert.Equal(0, rig.Server.Accepted);
     }
 
+    /// <summary>
+    /// Auto never holds a connection up for long: a leg that never answers falls back to one path within the budget, in
+    /// time for the caller's own deadline (chat gives a connection 5 seconds).
+    /// </summary>
+    [Fact]
+    public async Task AutoDoesntWaitLongForASlowLeg()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        using var silent = new TcpListener(IPAddress.Loopback, 0);
+        silent.Start();
+        var held = new List<TcpClient>();
+        var accepting = Task.Run(async () =>
+        {
+            try { while (true) { var c = await silent.AcceptTcpClientAsync(); lock (held) held.Add(c); } }
+            catch (Exception e) when (e is SocketException or ObjectDisposedException) { }
+        });
+        var silentPort = ((IPEndPoint)silent.LocalEndpoint).Port;
+        var singlePort = rig.SinglePort;
+        IReadOnlyList<Func<CancellationToken, Task<Stream>>> legs =
+        [
+            ct => TunnelClient.Raw("127.0.0.1", rig.Server.Ports[0], ct),
+            ct => TunnelClient.Raw("127.0.0.1", silentPort, ct),
+        ];
+        var connector = new SplitConnector(rig.Member, TunnelService.Chat, ct => TunnelClient.Raw("127.0.0.1", singlePort, ct), legs)
+        {
+            AutoBudget = TimeSpan.FromMilliseconds(300),
+        };
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await using (var stream = await connector.OpenAsync(deadline.Token)) Assert.IsNotType<SplitStream>(stream);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"took {watch.Elapsed}");
+        Assert.Equal(L.T("core.mp.split.too_slow"), connector.LastReason);
+        silent.Stop();
+        await accepting;
+        lock (held) foreach (var c in held) c.Dispose();
+    }
+
     /// <summary>The "connected over N paths" line is written when a service goes from one path to split, not per connection.</summary>
     [Fact]
     public async Task TheSplitLineIsLoggedOnlyWhenSplittingStarts()
@@ -527,6 +564,7 @@ public sealed class SplitRoomTests
         public MemberEntry GuestEntry { get; private set; } = null!;
         public RoomCode Member { get; private set; } = null!;
         public int SingleCalls => Volatile.Read(ref _singleCalls);
+        public int SinglePort => ((IPEndPoint)_single.LocalEndpoint).Port;
         public int LegOpens => Volatile.Read(ref _legOpens);
         public IReadOnlyList<TunnelService> Served { get { lock (_served) return [.. _served]; } }
 
