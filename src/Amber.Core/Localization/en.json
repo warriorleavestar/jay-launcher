@@ -2690,7 +2690,7 @@
   "files.card.packing": "Packing it into one file…",
   "files.card.waiting": "Waiting for {0} to accept",
   "files.card.queued": "{0} isn't in this room. It starts by itself when you're in the same room",
-  "files.card.unreachable": "{0} isn't online, so it can't be sent now. Queueing is off in Settings › Multiplayer › Files",
+  "files.card.unreachable": "{0} isn't in this room, so it can't be sent now",
   "files.card.sending": "{0}% sent",
   "files.card.receiving": "{0}% received",
   "files.card.interrupted": "The connection broke at {0}%. It carries on from there once you're connected again",
@@ -2767,8 +2767,8 @@
   "settings.files.folder_reset": "Back to Downloads/Jay",
   "settings.files.auto_accept": "Take files from friends I checked without asking",
   "settings.files.auto_accept_hint": "Only friends whose emoji you compared. Programs and scripts still ask every time. Off for “For a child”.",
-  "settings.files.queue": "When a friend isn't online, keep the file and send it later",
-  "settings.files.queue_hint": "The file stays on your computer and starts when you're both online. Nothing is stored on a server. Off: you're told right away that it can't be sent.",
+  "settings.files.queue": "When a friend isn't in the room, keep the file and send it later",
+  "settings.files.queue_hint": "The file stays on your computer and starts when you're in the same room. Nothing is stored on a server. Off: you're told right away that it can't be sent.",
   "settings.files.speed": "Speed",
   "settings.files.speed.unlimited": "As fast as the room allows",
   "settings.files.speed.give_way": "Give way while I'm playing",
@@ -3746,5 +3746,6 @@
   "settings.ul.used_by_none": "No instance uses it yet",
   "settings.ul.cache": "Cache: {0}",
   "settings.ul.developers": "For developers",
+  "settings.ul.upgrade_note": "After you install a new version of the loader, each instance prepares its mods again the first time it starts. That takes longer than usual once and is normal.",
   "instance.ul.downloading": "Downloading the universal loader…"
 }

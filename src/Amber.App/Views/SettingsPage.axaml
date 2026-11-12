@@ -269,6 +269,8 @@
                   <TextBlock x:Name="BakeDownloadUnpublishedText" Classes="hint" FontSize="12" Text="{l:T core.bake.download_unpublished}" IsVisible="{Binding !BakeLoaderPublished}"
                              VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0" />
                 </WrapPanel>
+                <!-- After a loader upgrade every instance prepares its mods again once: say so before it looks like a fault. -->
+                <TextBlock x:Name="UniversalLoaderUpgradeNote" Classes="hint" FontSize="12" Text="{l:T settings.ul.upgrade_note}" TextWrapping="Wrap" />
                 <WrapPanel x:Name="BakeCleanup" Orientation="Horizontal">
                   <Button Classes="secondary" Content="{l:T settings.bake.gc}" Command="{Binding CleanBakeCacheCommand}" IsEnabled="{Binding !IsCleaningBake}"
                           ToolTip.Tip="{l:T settings.bake.gc_hint}" Margin="0,0,8,0" />

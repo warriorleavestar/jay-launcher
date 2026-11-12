@@ -2629,7 +2629,7 @@
   "files.card.packing": "正在打包成一個檔案…",
   "files.card.waiting": "等 {0} 點接收",
   "files.card.queued": "{0} 不在這個房間。你們在同一個房間時自動開始",
-  "files.card.unreachable": "{0} 不在線，現在傳不了。設定 › 連線 › 檔案裡關掉了排隊",
+  "files.card.unreachable": "{0} 不在這個房間，現在傳不了",
   "files.card.sending": "已傳 {0}%",
   "files.card.receiving": "已收 {0}%",
   "files.card.interrupted": "傳到 {0}% 時斷了。連上後從斷的地方接著傳",
@@ -2706,8 +2706,8 @@
   "settings.files.folder_reset": "改回 下載/Jay",
   "settings.files.auto_accept": "朋友傳的檔案直接收下",
   "settings.files.auto_accept_hint": "只對對過表情的朋友。程式和指令碼仍然每次都問。「給孩子用」時不生效。",
-  "settings.files.queue": "對方不在線時先排著",
-  "settings.files.queue_hint": "檔案一直留在你的電腦上，你們都在線時開始，不存到任何伺服器。關掉後對方不在線就直接告訴你傳不了。",
+  "settings.files.queue": "對方不在房間裡時先排著",
+  "settings.files.queue_hint": "檔案一直留在你的電腦上，你們在同一個房間時開始，不存到任何伺服器。關掉後對方不在房間裡就直接告訴你傳不了。",
   "settings.files.speed": "速度",
   "settings.files.speed.unlimited": "不限速",
   "settings.files.speed.give_way": "玩遊戲時讓路",
@@ -3669,5 +3669,6 @@
   "settings.ul.used_by_none": "還沒有實例用它",
   "settings.ul.cache": "快取：{0}",
   "settings.ul.developers": "給開發者",
+  "settings.ul.upgrade_note": "裝了新版本的載入器以後，每個實例第一次開始時都會重新準備一遍模組，這一次會比平時久。這是正常的。",
   "instance.ul.downloading": "正在下載通用載入器……"
 }

@@ -2524,7 +2524,7 @@
   "files.card.packing": "方束為一檔…",
   "files.card.waiting": "待 {0} 受之",
   "files.card.queued": "{0} 未在此室。同室時自啟",
-  "files.card.unreachable": "{0} 未在，今不可遞。設置 › 聯機 › 檔中已止候列",
+  "files.card.unreachable": "{0} 不在此室，今不可遞",
   "files.card.sending": "已遞 {0}%",
   "files.card.receiving": "已收 {0}%",
   "files.card.interrupted": "遞至 {0}% 而斷。再連則自斷處續之",
@@ -2601,8 +2601,8 @@
   "settings.files.folder_reset": "復為 下載/Jay",
   "settings.files.auto_accept": "已核之友所遞之檔，不問而受",
   "settings.files.auto_accept_hint": "唯對已校表情之友。程式與腳本仍每次問之。「為孩童」時不行。",
-  "settings.files.queue": "彼不在時先候之",
-  "settings.files.queue_hint": "檔常留汝機，二人俱在時啟，不存於任何伺服。止之，則彼不在時即告不可遞。",
+  "settings.files.queue": "彼不在室時先候之",
+  "settings.files.queue_hint": "檔常留汝機，同室時啟，不存於任何伺服。止之，則彼不在室時即告不可遞。",
   "settings.files.speed": "速",
   "settings.files.speed.unlimited": "不限",
   "settings.files.speed.give_way": "遊時讓之",
@@ -3535,5 +3535,6 @@
   "settings.ul.used_by_none": "尚無例用之",
   "settings.ul.cache": "緩存：{0}",
   "settings.ul.developers": "為製者",
+  "settings.ul.upgrade_note": "既裝載器新版，諸例初啟時當重備模組一遍，此一次較常為久，非誤也。",
   "instance.ul.downloading": "方下載通用載器……"
 }

@@ -2629,7 +2629,7 @@
   "files.card.packing": "正在打包成一个文件…",
   "files.card.waiting": "等 {0} 点接收",
   "files.card.queued": "{0} 不在这个房间。你们在同一个房间时自动开始",
-  "files.card.unreachable": "{0} 不在线，现在发不了。设置 › 联机 › 文件里关掉了排队",
+  "files.card.unreachable": "{0} 不在这个房间，现在发不了",
   "files.card.sending": "已发 {0}%",
   "files.card.receiving": "已收 {0}%",
   "files.card.interrupted": "传到 {0}% 时断了。连上后从断的地方接着传",
@@ -2706,8 +2706,8 @@
   "settings.files.folder_reset": "改回 下载/Jay",
   "settings.files.auto_accept": "朋友发的文件直接收下",
   "settings.files.auto_accept_hint": "只对对过表情的朋友。程序和脚本仍然每次都问。“给孩子用”时不生效。",
-  "settings.files.queue": "对方不在线时先排着",
-  "settings.files.queue_hint": "文件一直留在你的电脑上，你们都在线时开始，不存到任何服务器。关掉后对方不在线就直接告诉你发不了。",
+  "settings.files.queue": "对方不在房间里时先排着",
+  "settings.files.queue_hint": "文件一直留在你的电脑上，你们在同一个房间时开始，不存到任何服务器。关掉后对方不在房间里就直接告诉你发不了。",
   "settings.files.speed": "速度",
   "settings.files.speed.unlimited": "不限速",
   "settings.files.speed.give_way": "玩游戏时让路",
@@ -3669,5 +3669,6 @@
   "settings.ul.used_by_none": "还没有实例用它",
   "settings.ul.cache": "缓存：{0}",
   "settings.ul.developers": "给开发者",
+  "settings.ul.upgrade_note": "装了新版本的加载器以后，每个实例第一次开始时都会重新准备一遍模组，这一次会比平时久。这是正常的。",
   "instance.ul.downloading": "正在下载通用加载器……"
 }
