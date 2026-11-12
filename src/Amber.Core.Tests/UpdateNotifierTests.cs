@@ -132,13 +132,13 @@ public sealed class UpdateNotifierTests : IDisposable
         fresh.Save();
         Assert.True(AppSettings.Load(fresh.SavePathForTest, File.ReadAllText).AutoUpdateCheck);
 
-        // A settings file written by a Jay without the switch: checks stay on if it had an update address, off if not.
+        // A settings file written by a Jay without the switch stays off, with or without an update address (that Jay only checked on click).
         var old = Path.Combine(_dir, "old.json");
         File.WriteAllText(old, """{"GameDirectory":"x"}""");
         Assert.False(AppSettings.Load(old, File.ReadAllText).AutoUpdateCheck);
         var oldWithFeed = Path.Combine(_dir, "old-feed.json");
         File.WriteAllText(oldWithFeed, """{"GameDirectory":"x","UpdateFeedUrl":"https://mirror.example.test/latest"}""");
-        Assert.True(AppSettings.Load(oldWithFeed, File.ReadAllText).AutoUpdateCheck);
+        Assert.False(AppSettings.Load(oldWithFeed, File.ReadAllText).AutoUpdateCheck);
 
         // Once the user sets it, it is kept either way.
         foreach (var on in new[] { true, false })
