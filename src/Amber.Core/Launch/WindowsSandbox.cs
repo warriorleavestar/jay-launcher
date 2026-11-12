@@ -352,6 +352,9 @@ public static unsafe class WindowsSandbox
     /// </summary>
     public static bool LoopbackExempt() => LoopbackExempt(ContainerName) && WindowsLoopbackInbound.Present();
 
+    /// <summary>Only the exemption (the game may connect out to loopback), without the inbound filters.</summary>
+    public static bool IsExempt() => LoopbackExempt(ContainerName);
+
     /// <summary>True when any part of the admin step's loopback setup is there (what "remove sandbox permissions" undoes).</summary>
     public static bool HasLoopbackSetup() => LoopbackExempt(ContainerName) || WindowsLoopbackInbound.Present();
 
