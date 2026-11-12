@@ -74,6 +74,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Repo
 只验证 Jay 账户（助记词账户）时设置 `AMBER_SELFTEST_SCOPE=jay-account`：加离线账号后提示创建、显示 12 个编号的词、核对 3 个词（答错不创建）、创建后绑定到该 MC 账号、复制 jay1 地址、从本机移除并解绑、写错一个词时提示是第几个、同一组词恢复出同一个地址；再进模拟的房主状态，检查敲门证书验得过本机联机密钥、敲门卡片写出对方的 Jay 账户和“其他设备也能进”的说明、信任后信任列表记的是账户、房间成员详情有完整地址、取消信任连同这个账户的设备一起移除、批准后请求条里的敲门也收起；再看联系人按“人 + 设备”分组（同一 Jay 账户的设备算一个人、名下写账户、能只移除一台设备）、【备份联系人】存出加密文件、【恢复联系人】先写明备份日期和会回来的人、把人带回来并记下要打招呼、改过的备份不认；认识的人新增设备时请求条里留一条安全提示（设备名、安全码、【不是 TA？移除这台设备】），设备列表标“待你确认”，移除后它再来要重新对表情；不联网。
 只验证联机安全（设置页“联机安全”卡片、熔断倒计时盖住窗口、空格取消、到点重启、10 分钟内不再自动重启、跳过等待）时设置 `AMBER_SELFTEST_SCOPE=security`；重启这一步换成计数，不会真的重启。
 开服端到端要开两个 Jay：一个 `AMBER_SELFTEST_SCOPE=host-server`（按“开服”卡片的按钮走完 填地址 → 准备服务端 → 启动 → 邀请 → 等进服 → 撤销 → 停服 → 再开后关窗口），一个 `AMBER_SELFTEST_SCOPE=jay-client`（离线账号 Steve，用 `AMBER_SELFTEST_VERSION` 指定的实例进服）。两边各用自己的 `AMBER_DATA_DIR`，`AMBER_SELFTEST_INVITE` 指向同一个邀请码文件。`AMBER_SELFTEST_SCOPE=host-exit` 只测“服务器开着时关 Jay 会先存盘”。
+只验证开服的高级设置时设置 `AMBER_SELFTEST_SCOPE=host-server-advanced`（配一个全新的 `AMBER_DATA_DIR`）：只生成服务器身份、不下载服务端也不启动，展开高级设置，检查没中转时隐私+被拒并写原因、中转地址写错的提示、加中转后给一次性中转码（码里没有地址）和中转电脑上的命令、【新的码】、两个中转后选得上隐私+ 和隐私++、端口轮换（范围不对被拒、打开后写出各中转现在的端口、关掉）、【吊销…】先问再吊销（纪元加一）和【取消】、删除中转、地址记录开关，每一步对照数据目录；宽窄两种宽度两种语言截图，不联网。
 
 Other developer switches are environment variables:
 
