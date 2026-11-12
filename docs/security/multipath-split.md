@@ -19,14 +19,14 @@ The split adds no MAC of its own, because each leg is already authenticated end 
 ## Legs and pairing
 
 - Each leg is a full `MemberChannel` handshake. Its prologue is `jay-member-split-v1|purpose|mode|disguise|epoch|count|index|` followed by the member id, and its psk is `HKDF-SHA256(memberPsk, salt "jay-split-v1", info "path|<index>")`. A leg sent to the wrong port, with a different leg count or with credentials from an older key epoch fails the handshake. The host takes the index from the listening port, and the count and epoch from the room.
-- After the handshake, the member sends a hello inside the encrypted leg: `[u8 version = 1][32-byte pairing id]`. The pairing id is random and identical on every leg of one connection.
+- After the handshake, the member sends a hello inside the encrypted leg: `[u8 version = 1][32-byte pairing id]`. The pairing id is random and identical on every leg of one connection. The member sends the hellos only after every leg's handshake has succeeded, so a failed handshake leaves no waiting set on the host. A hello write that fails after that aborts the other legs, and a set the host already started waits out its 10 s.
 - `SplitRegistry` (host) joins legs only when all of these hold: they authenticated as the same member entry, they carry the same leg count and service, and they fill distinct indexes. A leg that breaks any rule drops the whole set; the registry never picks a winner. A set waits at most 10 s. Each member may have at most 4 sets waiting, and the room at most 64. Used pairing ids are remembered for 10 s, so a replayed or late leg is dropped at once. A kick drops a member's waiting legs.
 
 ## Rooms
 
 - **Settings.** The host decides per service: game and chat are each Off, Auto or Strict, over 2 or 3 paths. Remote control and the "game only" exit proxy are never split. Splitting needs the wrapped tunnel, so general mode never splits, and full-LAN (TUN) mode doesn't split in this version.
 - **Credentials.** The room credentials carry `"split": {"game", "chat", "paths", "nets": [{"net", "secret"}]}`, one extra EasyTier network per extra path, random like the room's own network. They hold no address: which nodes a path uses is up to each member's own node list. A version that doesn't understand the field, or finds it malformed, connects on one path.
-- **Rekey.** After a kick the host replaces every extra network along with the room's own (`"split": {"nets": [...]}` in the rekey message). A rekey without them turns splitting off, because the old networks are known to whoever was just kicked.
+- **Rekey.** After a kick the host replaces every extra network along with the room's own (`"split": {"nets": [...]}` in the rekey message). A rekey without them turns splitting off, because the old networks are known to whoever was just kicked. Leg handshakes bind the epoch, so the host and every member rebuild their room transport from the rekeyed room code (the app's network switch does this on both sides); a transport left on the old epoch can't pair legs with the new one.
 - **Host.** Leg *i* listens on port 47657 + *i* (47657, 47658, 47659). The handshake payload names the service, as on the single-path port 47656. A Strict service is not served on 47656 at all. If a leg port is taken by another program, an Auto room starts without splitting and logs why, and a Strict room doesn't start. A host in full-LAN (TUN) mode runs no split listeners in this version, so it refuses to start a room with a Strict service and says why; with Auto it serves everything on one path. A member in full-LAN mode doesn't split either; Auto uses one path and Strict fails, both with that reason. A member that can't read the split settings (an old version) still joins on one path, and a Strict host closes that connection and logs the refusal.
 - **Member.** Each game or chat connection is opened by `SplitConnector`:
   - Auto splits when every leg opens. Otherwise it uses one path and records why.
@@ -79,7 +79,8 @@ There is never a quiet fallback to fewer legs in the middle of a connection.
 - settings, credentials and rekey round trips, and anything not understood meaning no split;
 - game and chat end to end with 2 and 3 paths, and with the Minecraft disguise;
 - Off, Auto and Strict with and without paths, a dead path, and Auto pausing after repeated failures and trying again later;
-- a kick dropping a joined connection, remote control legs refused, and legs from an older epoch failing.
+- a kick dropping a joined connection, remote control legs refused, and legs from an older epoch failing;
+- splitting again after a kick: the rebuilt host and member pair, a host still on the old epoch doesn't.
 
 `src/Amber.Core.Tests/SplitTransportTests.cs` covers:
 

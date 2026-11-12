@@ -189,31 +189,6 @@ public sealed class SplitRoomTests
         Assert.True(RoomTransport.ServesSinglePath(autoFullLan, TunnelService.Game));
     }
 
-    /// <summary>
-    /// A leg port taken by another program: an Auto room starts without splitting (and says so), a Strict room doesn't start.
-    /// Uses the real leg ports, so it occupies 47657 itself.
-    /// </summary>
-    [Fact]
-    public async Task ABusyLegPortStopsOnlyAStrictRoom()
-    {
-        using var squatter = new TcpListener(IPAddress.Loopback, SplitSettings.LegPort(0));
-        try { squatter.Start(); }
-        catch (SocketException) { /* already taken by something else: the same situation */ }
-
-        var (_, _, autoHost, _) = NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
-        var log = new List<string>();
-        await using (var transport = RoomTransport.Start(new EasyTierOptions(autoHost, true, [], 15000), line => { lock (log) log.Add(line); }))
-        {
-            Assert.Null(transport.SplitServer);
-            Assert.NotNull(transport.Server);
-            lock (log) Assert.Contains(L.T("core.mp.split.ports_busy"), log);
-        }
-
-        var (_, _, strictHost, _) = NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
-        var e = Assert.Throws<IOException>(() => RoomTransport.Start(new EasyTierOptions(strictHost, true, [], 15000)));
-        Assert.Equal(L.T("core.mp.split.ports_busy_strict"), e.Message);
-    }
-
     /// <summary>Garbage on a leg (here in the Minecraft disguise) is a failed leg: Auto falls back to one path, Strict refuses.</summary>
     [Fact]
     public async Task GarbageOnALegFallsBackUnderAuto()
@@ -437,9 +412,57 @@ public sealed class SplitRoomTests
         Assert.Equal(0, rig.Server.Accepted);
     }
 
+    /// <summary>
+    /// After a kick rekeys the room, a host and member rebuilt from the rekeyed room code split again, and a host left on
+    /// the old room code can't pair the new legs (why the app rebuilds the transport on both sides).
+    /// </summary>
+    [Fact]
+    public async Task SplittingWorksAgainAfterAKick()
+    {
+        var (credentials, _, host, _) = NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
+        var member = credentials.ToRoom();
+        var rekey = RoomRekey.FromJson(JsonNode.Parse(credentials.Rotate().ToRekey().ToJson().ToJsonString())!)!;
+        var hostNext = host.Rekeyed(rekey);
+        var memberNext = member.Rekeyed(rekey);
+        Assert.True(memberNext.Epoch > member.Epoch);
+        Func<Stream, CancellationToken, Task> echo = async (stream, ct) =>
+        {
+            var buffer = new byte[256];
+            int n;
+            while ((n = await stream.ReadAsync(buffer, ct)) > 0)
+            {
+                await stream.WriteAsync(buffer.AsMemory(0, n), ct);
+                await stream.FlushAsync(ct);
+            }
+        };
+        Func<CancellationToken, Task<Stream>> noSingle = _ => throw new InvalidOperationException("Strict never uses one path");
+        static IReadOnlyList<Func<CancellationToken, Task<Stream>>> Legs(SplitTunnelServer server) =>
+            [.. server.Ports.Select(p => (Func<CancellationToken, Task<Stream>>)(ct => TunnelClient.Raw("127.0.0.1", p, ct)))];
+
+        await using (var stale = new SplitTunnelServer(host, _ => echo, ports: [0, 0]))
+        {
+            var connector = new SplitConnector(memberNext, TunnelService.Game, noSingle, Legs(stale));
+            await Assert.ThrowsAsync<IOException>(() => connector.OpenAsync(CancellationToken.None));
+            await WaitUntilAsync(() => stale.Rejected >= 2);
+            Assert.Equal(0, stale.Accepted);
+        }
+
+        await using var rebuilt = new SplitTunnelServer(hostNext, _ => echo, ports: [0, 0]);
+        var game = new SplitConnector(memberNext, TunnelService.Game, noSingle, Legs(rebuilt));
+        await using var stream = await game.OpenAsync(CancellationToken.None);
+        Assert.IsType<SplitStream>(stream);
+        byte[] ping = [1, 2, 3, 4];
+        await stream.WriteAsync(ping);
+        await stream.FlushAsync();
+        var back = new byte[ping.Length];
+        await stream.ReadExactlyAsync(back);
+        Assert.Equal(ping, back);
+        Assert.Equal(1, rebuilt.Accepted);
+    }
+
     // ---- helpers ----
 
-    private static (RoomCredentials Credentials, MemberTable Table, RoomCode Host, MemberEntry Guest) NewRoom(SplitSettings split, TunnelSettings? tunnel = null)
+    internal static (RoomCredentials Credentials, MemberTable Table, RoomCode Host, MemberEntry Guest) NewRoom(SplitSettings split, TunnelSettings? tunnel = null)
     {
         using var host = X25519KeyPair.Generate();
         var credentials = RoomCredentials.Create(host.PublicKey, 25565, tunnel ?? Wrapped) with { Split = split };
@@ -543,5 +566,39 @@ public sealed class SplitRoomTests
             await Server.DisposeAsync();
             _cts.Dispose();
         }
+    }
+}
+
+[CollectionDefinition(nameof(RealRoomPorts), DisableParallelization = true)]
+public sealed class RealRoomPorts;
+
+/// <summary>Split room tests that need the real room ports.</summary>
+[Collection(nameof(RealRoomPorts))]
+public sealed class SplitRoomPortTests
+{
+    /// <summary>
+    /// A leg port taken by another program: an Auto room starts without splitting (and says so), a Strict room doesn't start.
+    /// Uses the real room ports (it occupies 47657 itself, and the Auto room listens on 47656), so it runs on its own,
+    /// never alongside another test.
+    /// </summary>
+    [Fact]
+    public async Task ABusyLegPortStopsOnlyAStrictRoom()
+    {
+        using var squatter = new TcpListener(IPAddress.Loopback, SplitSettings.LegPort(0));
+        try { squatter.Start(); }
+        catch (SocketException) { /* already taken by something else: the same situation for the leg port */ }
+
+        var (_, _, autoHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+        var log = new List<string>();
+        await using (var transport = RoomTransport.Start(new EasyTierOptions(autoHost, true, [], 15000), line => { lock (log) log.Add(line); }))
+        {
+            Assert.Null(transport.SplitServer);
+            Assert.NotNull(transport.Server);
+            lock (log) Assert.Contains(L.T("core.mp.split.ports_busy"), log);
+        }
+
+        var (_, _, strictHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
+        var e = Assert.Throws<IOException>(() => RoomTransport.Start(new EasyTierOptions(strictHost, true, [], 15000)));
+        Assert.Equal(L.T("core.mp.split.ports_busy_strict"), e.Message);
     }
 }

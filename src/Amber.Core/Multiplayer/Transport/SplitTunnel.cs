@@ -162,7 +162,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         {
             await revocation.DisposeAsync();
             if (secure is not null) secure.Abort();
-            if (joined is not null) await joined.DisposeAsync();
+            // Closing a joined connection writes a close record, which fails when the other side is already gone.
+            if (joined is not null) await DisposeQuietlyAsync(joined);
             if (rawOwned) await DisposeQuietlyAsync(raw);
         }
     }
@@ -181,8 +182,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         // Open connections see the cancellation and end; wait a little for them so nothing is still forwarding afterwards.
         Task[] running;
         lock (_running) running = [.. _running];
-        try { await Task.WhenAll(running).WaitAsync(TimeSpan.FromSeconds(5)); }
-        catch (TimeoutException) { }
+        // Only waiting here: a leg's own failure was already counted and logged where it happened, and must not stop the
+        // room from closing the rest.
+        await Task.WhenAny(Task.WhenAll(running), Task.Delay(TimeSpan.FromSeconds(5)));
         _cts.Dispose();
     }
 }

@@ -91,26 +91,9 @@ public sealed class RoomTransport : IAsyncDisposable
         }
         // Strict split: game and chat are only served over the split listeners, never on the single-path port.
         bool SinglePathAllowed(TunnelService service) => ServesSinglePath(o, service);
-        if (o.IsHost && settings.Wraps || allowProxy)
-        {
-            Server = Add(new TunnelServer(room, settings, settings.Wraps ? TunnelSettings.Port : TunnelSettings.PlainSocksPort, service => service switch
-            {
-                TunnelService.Game when o.IsHost && settings.Wraps && SinglePathAllowed(TunnelService.Game) => TunnelServer.ToLocalPort(room.Port),
-                TunnelService.Chat when o.IsHost && settings.Wraps && SinglePathAllowed(TunnelService.Chat) => TunnelServer.ToLocalPort(RoomChat.Port),
-                TunnelService.Remote when o.IsHost && settings.Wraps && room.FromInvite => TunnelServer.ToLocalPort(RemoteControl.RemoteHub.Port),
-                TunnelService.Socks when allowProxy => async (stream, ct) =>
-                {
-                    // 收到 CONNECT 请求时（不是连接刚开时）确认公网 IP：查到太久了（路由器可能重新拨号）就先重查（最多 8 秒）；
-                    // 还是不行就回“出口还没准备好”，不去解析和连接。
-                    var policy = _exitPolicy!;
-                    await Socks5.ServeAsync(stream, ct, _log, policy.Allows, ensureReady: c => policy.EnsureFreshAsync(TimeSpan.FromSeconds(8), c),
-                        stillReady: () => policy.CanForward);
-                },
-                _ => null,
-            }, _log, listen));
-        }
 
         // Split listeners: wrapped invite rooms whose host turned splitting on. Not in full-LAN (TUN) mode in this version.
+        // Opened before the single-path port, so a Strict room with a busy leg port fails before it listens anywhere.
         if (o.IsHost && HostSplits(o))
         {
             try
@@ -130,6 +113,25 @@ public sealed class RoomTransport : IAsyncDisposable
                     throw new IOException(L.T("core.mp.split.ports_busy_strict"), e);
                 _log?.Invoke(L.T("core.mp.split.ports_busy"));
             }
+        }
+
+        if (o.IsHost && settings.Wraps || allowProxy)
+        {
+            Server = Add(new TunnelServer(room, settings, settings.Wraps ? TunnelSettings.Port : TunnelSettings.PlainSocksPort, service => service switch
+            {
+                TunnelService.Game when o.IsHost && settings.Wraps && SinglePathAllowed(TunnelService.Game) => TunnelServer.ToLocalPort(room.Port),
+                TunnelService.Chat when o.IsHost && settings.Wraps && SinglePathAllowed(TunnelService.Chat) => TunnelServer.ToLocalPort(RoomChat.Port),
+                TunnelService.Remote when o.IsHost && settings.Wraps && room.FromInvite => TunnelServer.ToLocalPort(RemoteControl.RemoteHub.Port),
+                TunnelService.Socks when allowProxy => async (stream, ct) =>
+                {
+                    // 收到 CONNECT 请求时（不是连接刚开时）确认公网 IP：查到太久了（路由器可能重新拨号）就先重查（最多 8 秒）；
+                    // 还是不行就回“出口还没准备好”，不去解析和连接。
+                    var policy = _exitPolicy!;
+                    await Socks5.ServeAsync(stream, ct, _log, policy.Allows, ensureReady: c => policy.EnsureFreshAsync(TimeSpan.FromSeconds(8), c),
+                        stillReady: () => policy.CanForward);
+                },
+                _ => null,
+            }, _log, listen));
         }
 
         if (!o.IsHost && settings.Wraps)
