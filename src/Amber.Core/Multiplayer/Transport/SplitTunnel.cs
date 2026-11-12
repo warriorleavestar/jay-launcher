@@ -157,8 +157,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         catch (Exception e)
         {
             // Whatever failed, the leg gives its place back.
-            if (e is not (SocketException or ObjectDisposedException or IOException) && TunnelServer.OncePerMinute(ref _endedLogged))
-                _log?.Invoke(L.T("core.mp.transport.endpoint_ended") + e.GetType().Name);
+            if (e is not (SocketException or ObjectDisposedException or IOException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
+                _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             _slots.Release(slot);
             Interlocked.Increment(ref _rejected);
             Pump.Abort(client);

@@ -420,8 +420,8 @@ public sealed class SplitRoomTests
                                    or InvalidOperationException or OperationCanceledException) { }
         var ended = L.T("core.mp.transport.endpoint_ended");
         Assert.True(await WaitAsync(() => { lock (log) return log.Any(l => l.StartsWith(ended, StringComparison.Ordinal)); }));
-        await Task.Delay(100);
-        Assert.True(rig.Server.Rejected >= 1);
+        // One refusal per leg, each counted once.
+        await WaitUntilAsync(() => rig.Server.Rejected == 2);
         Assert.Equal(0, rig.Server.Accepted);
         lock (log)
         {
