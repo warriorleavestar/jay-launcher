@@ -577,7 +577,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// </summary>
     public async Task<BakeGcResult?> CollectGarbageAsync(string javaPath, bool apply, IProgress<BakeEvent>? progress, CancellationToken ct)
     {
-        if (!Directory.Exists(cacheRoot) || !new[] { "baked", "nested", "mappings" }.Any(d => Directory.Exists(Path.Combine(cacheRoot, d))))
+        if (!Directory.Exists(cacheRoot) || !new[] { "baked", "nested", "mappings", LegacyTransformerFolder }.Any(d => Directory.Exists(Path.Combine(cacheRoot, d))))
             return null;
         toolkit.Verify();
         var live = new List<string>();
@@ -680,7 +680,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         };
     }
 
-    /// <summary>Where forge-1.12.2 keeps its run-time transformer caches, one folder per mod set: <c>&lt;instance&gt;/.amber-ul/legacy-1.12.2/&lt;key&gt;</c>.</summary>
+    /// <summary>forge-1.12.2's transformer cache folder name: <c>&lt;instance&gt;/.amber-ul/legacy-1.12.2/&lt;key&gt;</c> (a <c>legacy-1.12.2</c> folder under the shared cache is an earlier prototype layout that gc removes).</summary>
     public const string LegacyTransformerFolder = "legacy-1.12.2";
 
     /// <summary>
@@ -881,7 +881,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// </summary>
     private static string? ProblemKey(string code) => code switch
     {
-        // forge-1.12.2 (v1.3.2) says missing_dependency for the same thing.
+        // missing_dep is the code; missing_dependency is an older spelling the loader asks Jay to keep accepting.
         "missing_dep" or "missing_dependency" => "core.bake.problem.missing_dep",
         "bad_metadata" => "core.bake.problem.bad_metadata",
         "platform_unavailable" => "core.bake.problem.platform_unavailable",

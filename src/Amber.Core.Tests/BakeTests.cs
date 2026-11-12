@@ -1324,6 +1324,29 @@ public sealed class BakeTests : IDisposable
     }
 
     [Fact]
+    public void Forge1122RuntimeProblemsReadInJaysWords()
+    {
+        // What LegacyLaunch reports before the game takes over (loader 0.4.0), as lines of the problems file.
+        var path = Path.Combine(_root, "runtime-problems.jsonl");
+        File.WriteAllLines(path,
+        [
+            """{"type":"launch","loaderVersion":"0.4.0"}""",
+            """{"type":"problem","code":"legacy_java_unsupported","severity":"error","javaVersion":"17","required":"8"}""",
+            """{"type":"problem","code":"legacy_launchwrapper_missing","severity":"error"}""",
+            """{"type":"problem","code":"legacy_launch_failed","severity":"error","exception":"java.lang.RuntimeException","rootCause":"java.lang.NoClassDefFoundError: x","log":"logs/latest.log"}""",
+            """{"type":"problem","code":"legacy_launch_failed","severity":"error","exception":"java.lang.RuntimeException"}""",
+        ]);
+        var problems = BakeRuntimeProblem.ReadFile(path);
+        Assert.Equal(4, problems.Count);
+        Assert.All(problems, p => Assert.True(p.IsError));
+        Assert.Equal(L.F("core.bake.runtime.legacy_java", "17"), problems[0].Describe());
+        Assert.Equal(L.T("core.bake.runtime.legacy_launchwrapper"), problems[1].Describe());
+        Assert.Equal(L.F("core.bake.runtime.legacy_failed", "java.lang.NoClassDefFoundError: x"), problems[2].Describe());
+        // Without a root cause (LaunchWrapper caught it): the exception, and the game log has the rest.
+        Assert.Equal(L.F("core.bake.runtime.legacy_failed", "java.lang.RuntimeException"), problems[3].Describe());
+    }
+
+    [Fact]
     public async Task ABadPlatformErrorReadsInJaysWords()
     {
         LegacyInstall();
