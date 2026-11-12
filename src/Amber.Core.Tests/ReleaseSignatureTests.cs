@@ -149,10 +149,16 @@ public sealed class ReleaseSignatureTests : IDisposable
         }
         Assert.Empty(JayTrust.ReleaseKeys.Intersect(JayTrust.Keys));
 
-        // The fingerprints printed when the keys were made (and written next to them in JayTrust): a swapped key fails here.
-        string[] Prints(string[] keys) => [.. keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k))))];
-        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D"], Prints(JayTrust.Keys));
-        Assert.Equal([], Prints(JayTrust.ReleaseKeys));
+        // The full key ids printed when the keys were made (their first 8 bytes are the fingerprints written next to them
+        // in JayTrust): a swapped or mistyped key fails here.
+        string[] Ids(string[] keys) => [.. keys.Select(k => Convert.ToHexString(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k))))];
+        Assert.Equal(["9D47BBDA24BF2956AF370F64F4DF2B6FE9A1F89DB71E79A0747D9E616D94E6ED", "75CD82DBE5DF8E4D4856BCE20C662B588CC8AE8441208A79C5FB1CE8BBD8E2D9"], Ids(JayTrust.Keys));
+        Assert.Equal([], Ids(JayTrust.ReleaseKeys));
+        Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D"], JayTrust.Keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+
+        // Changing what Quorum hands out doesn't change the built-in list.
+        JayTrust.Quorum.Keys[0][0] ^= 0xFF;
+        Assert.True(JayTrust.IsNetworkKey(JayTrust.Quorum.Keys[0]));
         Assert.Equal(JayTrust.Keys.Length, JayTrust.Quorum.Keys.Count);
         Assert.True(JayTrust.IsNetworkKey(JayTrust.Quorum.Keys[0]));
         Assert.False(JayTrust.IsReleaseKey(JayTrust.Quorum.Keys[0]));
