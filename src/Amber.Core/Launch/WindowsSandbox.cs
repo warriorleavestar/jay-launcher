@@ -356,7 +356,8 @@ public static unsafe class WindowsSandbox
     public static bool IsExempt() => LoopbackExempt(ContainerName);
 
     /// <summary>True when any part of the admin step's loopback setup is there (what "remove sandbox permissions" undoes).</summary>
-    public static bool HasLoopbackSetup() => LoopbackExempt(ContainerName) || WindowsLoopbackInbound.Present();
+    /// An unknown filter state counts too: undoing filters that are not there is harmless, leaving them behind is not.
+    public static bool HasLoopbackSetup() => LoopbackExempt(ContainerName) || WindowsLoopbackInbound.Check() != false;
 
     internal static bool LoopbackExempt(string name)
     {

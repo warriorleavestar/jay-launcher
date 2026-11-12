@@ -496,7 +496,8 @@ public sealed class LauncherService : IDisposable
             {
                 var error = await RunSandboxSetupAsync(undo: false, !WindowsSandbox.LoopbackExempt(), WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)), ct);
                 if (error is null && StrongSandboxReady(javaPath)) return options with { WindowsLevel = WindowsSandboxLevel.Strong };
-                if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).FirstOrDefault() ?? "CheckNetIsolation");
+                if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).FirstOrDefault()
+                    ?? (WindowsSandbox.IsExempt() ? "WFP loopback filters" : "CheckNetIsolation"));
             }
             decision = DecideWindowsSandbox(javaPath);
         }

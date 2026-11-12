@@ -26,8 +26,9 @@ namespace Amber.Core.Launch;
 public static unsafe class WindowsLoopbackInbound
 {
     internal static readonly Guid SubLayerKey = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d13");
-    // Version 2 keys (with the remote-user condition). Present() only knows these, so a machine with the first
-    // version's filters (…d14/…d16, no user condition) asks for the admin step again, which deletes them.
+    // Version 2 keys (with the remote-user condition). The first version (…d14/…d16, no user condition) never reached
+    // main; it only exists on machines that ran a test build of PR #267. Present() only knows the v2 keys, so such a
+    // machine asks for the admin step again, which deletes the old ones.
     internal static readonly Guid FilterV4Key = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d24");
     internal static readonly Guid FilterV6Key = new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d26");
     private static readonly Guid[] OldFilterKeys = [new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d14"), new("5a8f3c1e-7d2b-4e69-9a41-6c0b2f7e9d16")];
@@ -48,7 +49,8 @@ public static unsafe class WindowsLoopbackInbound
     /// True when Jay's filters are there, false when they are missing, null when Windows could not say (the filter
     /// engine is not running, an RPC error). Needs no admin: any user may open the engine and look objects up by key;
     /// once the admin step added them the lookup answers "access denied", which means they exist. Settings and the
-    /// launch read this often, so the answer is kept for a few seconds (<see cref="Invalidate"/> after the admin step).
+    /// launch read this often, so the answer is kept for a few seconds (the lookups are local RPCs to the filter
+    /// engine; <see cref="Invalidate"/> after the admin step).
     /// </summary>
     public static bool? Check()
     {
@@ -74,7 +76,8 @@ public static unsafe class WindowsLoopbackInbound
         try
         {
             // If even a key that never exists is not answered with "not found" (a tightened engine), nothing can be read.
-            if (Classify(FwpmSubLayerGetByKey0(engine, ControlKey, out var control), control, controlLookup: true) != false) return null;
+            if (Classify(FwpmSubLayerGetByKey0(engine, ControlKey, out var control), control, controlLookup: true) != false
+                || Classify(FwpmFilterGetByKey0(engine, ControlKey, out var controlFilter), controlFilter, controlLookup: true) != false) return null;
             bool? all = true;
             foreach (var state in new[]
             {

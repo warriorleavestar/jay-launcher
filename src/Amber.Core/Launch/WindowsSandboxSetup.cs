@@ -92,8 +92,12 @@ public static class WindowsSandboxSetup
     /// elevation: with "over the shoulder" elevation the admin step runs as another account), because the inbound
     /// filters only let that user's processes connect into the game.
     /// </summary>
-    internal static IReadOnlyList<string> Arguments(bool undo, bool loopback, IReadOnlyList<string> folders) =>
-        Arguments(undo, loopback, folders, WindowsIdentity.GetCurrent().User);
+    internal static IReadOnlyList<string> Arguments(bool undo, bool loopback, IReadOnlyList<string> folders)
+    {
+        if (!loopback || undo) return Arguments(undo, loopback, folders, null);
+        using var identity = WindowsIdentity.GetCurrent();
+        return Arguments(undo, loopback, folders, identity.User);
+    }
 
     internal static IReadOnlyList<string> Arguments(bool undo, bool loopback, IReadOnlyList<string> folders, SecurityIdentifier? user) =>
         [undo ? UndoArgument : SetupArgument, loopback ? LoopbackOption : NoLoopbackOption,

@@ -44,7 +44,11 @@ public sealed class WindowsLoopbackInboundClassifyTests
         Assert.Null(WindowsLoopbackInbound.Classify(0x800706BA)); // RPC server unavailable
         Assert.Null(WindowsLoopbackInbound.Classify(0x80320009));
     }
+}
 
+/// <summary>The admin helper's command line for the strong sandbox's loopback setup.</summary>
+public sealed class WindowsSandboxSetupUserTests
+{
     [Fact]
     public void HelperNamesTheUserOnlyWhenSettingUpLoopback()
     {
