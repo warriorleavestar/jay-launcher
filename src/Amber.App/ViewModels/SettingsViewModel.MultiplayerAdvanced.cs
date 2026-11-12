@@ -59,7 +59,13 @@ public sealed partial class SettingsViewModel
             RequestPopup: s.MultiplayerRequestPopup,
             ModSync: s.MultiplayerAllowModSync,
             GameProxy: m?.AllowGameProxy ?? false,
-            NetworkExit: m?.AllowExitNode ?? false);
+            NetworkExit: m?.AllowExitNode ?? false,
+            CallsWho: s.CallsWhoCanCall,
+            CallsNoise: s.CallsNoiseSuppression,
+            CallsPushToTalk: s.CallsPushToTalk,
+            CallsQuality: s.CallsVideoQuality,
+            CallsShareGameOnly: s.CallsShareGameOnly,
+            CallsAllowControl: s.CallsAllowControlRequests);
     }
 
     private void RefreshAdvanced()
@@ -72,6 +78,7 @@ public sealed partial class SettingsViewModel
         OnPropertyChanged(nameof(ConnectionCustomized));
         OnPropertyChanged(nameof(InvitesCustomized));
         OnPropertyChanged(nameof(RoomCustomized));
+        OnPropertyChanged(nameof(CallsCustomized));
         OnPropertyChanged(nameof(AnyAdvancedCustomized));
         if (now.Count > 0) AdvancedResetStatus = "";
         else ConfirmingAdvancedReset = false;
@@ -100,6 +107,7 @@ public sealed partial class SettingsViewModel
         SecurityBreaker = d.Breaker;
         BreakerRestartDelay = d.BreakerDelay.ToString();
         BreakerSkipDelay = d.BreakerSkip;
+        ResetCalls(d);
         var roomOpen = false;
         if (Multiplayer is { } m)
         {

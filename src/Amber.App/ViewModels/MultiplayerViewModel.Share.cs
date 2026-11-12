@@ -21,7 +21,8 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Remote help runs between the host and one member, so a guest can only ask the host.</summary>
     private bool RemoteHelpFits => SelectedPerson is { } person && (IsHosting ? person.Member is not null : person.IsHost);
 
-    public bool ShowRemoteHelp => ShowShareGroup && ShowRemoteControl;
+    /// <summary>With calls on, remote help is the last step of a call (share, then let them control) and has no entry of its own.</summary>
+    public bool ShowRemoteHelp => ShowShareGroup && ShowRemoteControl && !Amber.Core.Calls.CallFeature.Enabled;
 
     public bool CanAskRemoteHelp => ShowRemoteHelp && RemoteHelpFits && CanRemoteControl && !RemoteWaiting;
 

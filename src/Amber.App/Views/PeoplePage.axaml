@@ -309,6 +309,12 @@
 
           <ScrollViewer x:Name="ConversationScroll" Grid.Row="1">
             <StackPanel Spacing="10">
+              <!-- A call with this friend (reserved): the panel sits at the top of the conversation. -->
+              <Panel x:Name="FriendCallHost" IsVisible="{Binding Call.ShowInPeople, FallbackValue=False}">
+                <c:CallPanel x:Name="FriendCallPanel" DataContext="{Binding Call}" />
+              </Panel>
+              <TextBlock x:Name="FriendCallEnded" Classes="hint" Text="{Binding Call.EndedText, FallbackValue=''}" TextWrapping="Wrap"
+                         IsVisible="{Binding Call.ShowEndedInPeople, FallbackValue=False}" />
               <Border x:Name="FriendSafetyPanel" Classes="callout info" IsVisible="{Binding ShowSafety}">
                 <StackPanel Spacing="6">
                   <TextBlock Text="{Binding SafetyHint}" TextWrapping="Wrap" />
@@ -347,6 +353,10 @@
                   <TextBlock Text="{Binding JoinRoomText}" TextTrimming="CharacterEllipsis" MaxWidth="260" />
                 </Button>
                 <Button x:Name="InviteFriendButton" Content="{l:T people.detail.invite}" Command="{Binding InviteCommand}" IsEnabled="{Binding CanInvite}" />
+                <!-- Calls (reserved; hidden while calls are off): voice, video, or straight to sharing the screen. -->
+                <Button x:Name="CallVoiceButton" Content="{l:T call.voice}" Command="{Binding CallVoiceCommand}" IsVisible="{Binding ShowCallButtons}" IsEnabled="{Binding CanCall}" />
+                <Button x:Name="CallVideoButton" Content="{l:T call.video}" Command="{Binding CallVideoCommand}" IsVisible="{Binding ShowVideoButton}" IsEnabled="{Binding CanCall}" />
+                <Button x:Name="CallShareButton" Content="{l:T call.share}" Command="{Binding CallShareCommand}" IsVisible="{Binding ShowCallButtons}" IsEnabled="{Binding CanCall}" />
               </WrapPanel>
               <TextBlock x:Name="InviteHintText" Classes="hint" FontSize="12" Text="{l:T people.detail.invite_hint}" IsVisible="{Binding ShowInviteHint}" TextWrapping="Wrap" />
 

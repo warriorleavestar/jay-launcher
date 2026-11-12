@@ -1,0 +1,120 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Amber.App.Services"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:v="using:Amber.App.Views"
+             xmlns:safety="using:Amber.App.Controls.Safety"
+             x:Class="Amber.App.Views.Controls.CallPanel"
+             x:DataType="vm:CallViewModel">
+  <!--
+    The call panel (redesign batch 11, reserved): the stage, the bar and the locked control confirmation. It sits in the
+    friend's conversation and under the room banner, in the same place, and builds up step by step: voice, camera,
+    sharing the screen, letting the other side control it. It lives inside people.detail and multiplayer.room, so a
+    theme layout moves it with them; call.panel, call.stage and call.bar are reserved region names (docs/themes.md).
+  -->
+  <UserControl.Styles>
+    <Style Selector="Border.call-tile.speaking"><Setter Property="BorderBrush" Value="{DynamicResource Success}" /></Style>
+    <!-- A switch that is on is a light tint with a frame, never a solid accent fill (art style: one solid accent per screen). -->
+    <Style Selector="WrapPanel#CallBar ToggleButton:checked /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    </Style>
+    <Style Selector="WrapPanel#CallBar ToggleButton:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+    </Style>
+  </UserControl.Styles>
+  <Border x:Name="Panel" Classes="card call-panel" Padding="12">
+    <StackPanel Spacing="10">
+      <!-- Who and how: the route says whether the other side sees my IP. -->
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <Border Classes="led playing" VerticalAlignment="Center" Margin="0,0,8,0" />
+        <StackPanel Grid.Column="1" Spacing="2">
+          <TextBlock x:Name="CallTitle" Text="{Binding ChipText}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock x:Name="CallRoute" Classes="hint" Text="{Binding RouteText}" TextWrapping="Wrap" />
+        </StackPanel>
+        <Border Grid.Column="2" Classes="tag" VerticalAlignment="Top">
+          <TextBlock Text="{l:T call.preview_tag}" FontSize="11" />
+        </Border>
+      </Grid>
+      <TextBlock x:Name="CallPreviewNote" Classes="hint" Text="{l:T call.preview}" TextWrapping="Wrap" />
+
+      <!-- The stage: the shared screen takes the big tile, people sit beside it in small tiles. -->
+      <StackPanel x:Name="CallStage" Spacing="8">
+        <Border x:Name="StageTile" Classes="call-screen" IsVisible="{Binding HasStage}" Height="180" CornerRadius="{DynamicResource RadiusSm}"
+                Background="{DynamicResource Sunken}" BorderBrush="{DynamicResource Danger}" BorderThickness="2">
+          <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+            <Path Classes="icon lg" Data="{StaticResource Icon.Monitor}" HorizontalAlignment="Center" />
+            <TextBlock Text="{Binding StageTile.Label}" HorizontalAlignment="Center" FontWeight="SemiBold" />
+          </StackPanel>
+        </Border>
+        <ItemsControl x:Name="CallTiles" ItemsSource="{Binding Tiles}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:CallTile">
+              <!-- Speaking: a green frame around the tile, never colour alone (the name stays under it). -->
+              <Border Classes="call-tile" Classes.speaking="{Binding Speaking}" Width="120" Height="90" CornerRadius="{DynamicResource RadiusSm}" Padding="6"
+                      Background="{DynamicResource Sunken}" BorderThickness="2" BorderBrush="{DynamicResource BorderSubtle}"
+                      AutomationProperties.Name="{Binding Label}">
+                <Grid RowDefinitions="*,Auto">
+                  <Border Classes="face large" IsVisible="{Binding ShowFace}" HorizontalAlignment="Center"
+                          Background="{Binding Name, Converter={x:Static v:FaceBrush.Instance}}" />
+                  <Path Classes="icon lg" Data="{StaticResource Icon.Eye}" IsVisible="{Binding CameraOn}" HorizontalAlignment="Center" />
+                  <TextBlock Grid.Row="1" Text="{Binding Label}" FontSize="12" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <TextBlock x:Name="MicOffNote" Classes="hint" Text="{l:T call.mic_off_note}" IsVisible="{Binding !MicOn}" TextWrapping="Wrap" />
+
+      <!-- Control asks every time: a locked confirmation, focus on [Don't allow]. -->
+      <safety:SafetyPanel x:Name="ControlConfirm" Title="{l:T call.control}" IsVisible="{Binding ConfirmingControl}">
+        <safety:SafetyPanel.Body>
+          <StackPanel Spacing="8">
+            <TextBlock Text="{Binding ControlQuestion}" TextWrapping="Wrap" />
+            <WrapPanel ItemSpacing="8" LineSpacing="6">
+              <safety:SafetyButton x:Name="ControlRefuse" Kind="Safe" Content="{l:T call.control.refuse}" Command="{Binding RefuseControlCommand}" />
+              <safety:SafetyButton x:Name="ControlAllow" Kind="Confirm" Content="{l:T call.control.allow}" Command="{Binding AllowControlOnceCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </safety:SafetyPanel.Body>
+      </safety:SafetyPanel>
+
+      <!-- The bar: each switch says its state with a square light and words. -->
+      <WrapPanel x:Name="CallBar" ItemSpacing="8" LineSpacing="6">
+        <ToggleButton x:Name="MicButton" Classes="secondary" IsChecked="{Binding MicOn, Mode=OneWay}" Command="{Binding ToggleMicCommand}"
+                      AutomationProperties.Name="{l:T call.mic}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Border Classes="led" Classes.online="{Binding MicOn}" Classes.off="{Binding !MicOn}" />
+            <TextBlock Text="{l:T call.mic}" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton x:Name="CameraButton" Classes="secondary" IsChecked="{Binding CameraOn, Mode=OneWay}" Command="{Binding ToggleCameraCommand}"
+                      IsVisible="{Binding OffersVideo}" AutomationProperties.Name="{l:T call.camera}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Border Classes="led" Classes.online="{Binding CameraOn}" Classes.off="{Binding !CameraOn}" />
+            <TextBlock Text="{l:T call.camera}" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton x:Name="ShareButton" Classes="secondary" IsChecked="{Binding Sharing, Mode=OneWay}" Command="{Binding ToggleShareCommand}"
+                      AutomationProperties.Name="{l:T call.share}">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Path Classes="icon sm" Data="{StaticResource Icon.Monitor}" />
+            <TextBlock Text="{l:T call.share}" />
+          </StackPanel>
+        </ToggleButton>
+        <Button x:Name="LetControlButton" Classes="secondary" Content="{l:T call.control}" Command="{Binding AskControlCommand}"
+                IsVisible="{Binding OffersControl}" IsEnabled="{Binding CanLetControl}" ToolTip.Tip="{l:T call.control_needs_share}" />
+        <Button x:Name="PopOutButton" Classes="ghost" Content="{l:T call.popout}" Command="{Binding PopOutCommand}" />
+        <Button x:Name="HangUpButton" Classes="danger" Content="{l:T call.hangup}" Command="{Binding HangUpCommand}" />
+      </WrapPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

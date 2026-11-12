@@ -222,6 +222,13 @@ public partial class MainWindow
         if (DataContext is not MainViewModel { Shell: var shell } main) return;
         // §8.5: while an input method composes, no shortcut fires; the keys belong to the composition.
         if (KeyboardScope.Of(e).Composing) return;
+        // Control during a call stops at once, wherever the focus is (the red bar says so).
+        if (e.Key == Key.F12 && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && main.Call.IsControlled)
+        {
+            main.Call.StopControl();
+            e.Handled = true;
+            return;
+        }
         if (main.Palette.IsOpen)
         {
             HandlePaletteKey(main.Palette, e);
