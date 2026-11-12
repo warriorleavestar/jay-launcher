@@ -174,6 +174,7 @@ public sealed class ImageThemeTests : IDisposable
         // Readable text on the new pages.
         Assert.True(ThemeColor.Contrast(pack.DarkColors["TextPrimary"], pack.DarkColors["PageBg"]) >= 4.5);
         Assert.True(ThemeColor.Contrast(pack.LightColors["TextPrimary"], pack.LightColors["PageBg"]) >= 4.5);
+        Assert.Empty(pack.Problems);
         Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
     }
 

@@ -246,13 +246,8 @@ public sealed partial class ImageThemeViewModel : ObservableObject
     {
         var dark = Avalonia.Application.Current?.ActualThemeVariant != Avalonia.Styling.ThemeVariant.Light;
         var (darkColors, lightColors) = ImageTheme.Colors(Palette);
-        var colors = dark ? darkColors : lightColors;
+        var set = dark ? darkColors : lightColors;
         var defaults = dark ? ThemeDefaults.Dark : ThemeDefaults.Light;
-        // The same contrast fixes the theme gets when it is read.
-        var probe = new ThemePack { Id = "preview", Name = "preview" };
-        foreach (var (k, v) in colors) (dark ? probe.DarkColors : probe.LightColors)[k] = v;
-        ThemeContrast.Enforce(probe);
-        var set = dark ? probe.DarkColors : probe.LightColors;
         IBrush brush(string key) => new SolidColorBrush(Color.FromUInt32(set.TryGetValue(key, out var c) ? c : defaults[key]));
         PreviewPage = brush("PageBg");
         PreviewSidebar = brush("SidebarBg");

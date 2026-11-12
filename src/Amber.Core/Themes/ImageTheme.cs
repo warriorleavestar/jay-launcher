@@ -97,10 +97,18 @@ public static class ImageTheme
         return FromHsl(h, Math.Max(s, 0.45), Math.Clamp(l, 0.42, 0.62));
     }
 
-    /// <summary>The colour tokens of both variants for a palette (anything not set falls back to Jay's own colours).</summary>
-    public static (Dictionary<string, uint> Dark, Dictionary<string, uint> Light) Colors(ImagePalette palette) =>
-        (ThemeColor.Derive(palette.Accent, palette.DarkBackground, dark: true),
-         ThemeColor.Derive(palette.Accent, palette.LightBackground, dark: false));
+    /// <summary>
+    /// The colour tokens of both variants for a palette (anything not set falls back to Jay's own colours), with the same
+    /// contrast fixes a pack gets when it is read already applied, so the pack it writes reads without remarks.
+    /// </summary>
+    public static (Dictionary<string, uint> Dark, Dictionary<string, uint> Light) Colors(ImagePalette palette)
+    {
+        var probe = new ThemePack { Id = "image-theme", Name = "image-theme" };
+        foreach (var (k, v) in ThemeColor.Derive(palette.Accent, palette.DarkBackground, dark: true)) probe.DarkColors[k] = v;
+        foreach (var (k, v) in ThemeColor.Derive(palette.Accent, palette.LightBackground, dark: false)) probe.LightColors[k] = v;
+        ThemeContrast.Enforce(probe);
+        return (probe.DarkColors, probe.LightColors);
+    }
 
     /// <summary>Makes a valid theme id from a name: lower-case letters and digits, with a short random tail so two packs don't clash.</summary>
     public static string IdFor(string name)
