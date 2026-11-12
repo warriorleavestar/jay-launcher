@@ -115,6 +115,15 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Sealed mail posts the whole directory takes per minute.</summary>
     public const int MaxMailPostsPerMinute = 240;
 
+    /// <summary>Sealed mail posts one source address may make per <see cref="MailPostWindow"/>.</summary>
+    public const int MaxMailPostsPerSource = 20;
+
+    /// <summary>The window for <see cref="MaxMailPostsPerSource"/>.</summary>
+    public static readonly TimeSpan MailPostWindow = TimeSpan.FromMinutes(10);
+
+    /// <summary>Mail posts per source address in the current window.</summary>
+    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _mailPosts = new(StringComparer.Ordinal);
+
     private readonly RateLimiter _rendezvousBudget;
     private readonly RateLimiter _recordBudget;
     private readonly RateLimiter _mailBudget;
@@ -321,7 +330,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "list" => List(),
                 "lookup" => Lookup(request),
                 "find" => Find(request),
-                "post" => Post(request),
+                "post" => Post(request, source),
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
                 "rv.put" => RendezvousPut(request, source),
@@ -590,7 +599,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     private static bool IsHex(string? text, int length) => text is not null && text.Length == length && text.All(char.IsAsciiHexDigit);
 
-    private JsonObject Post(JsonObject request)
+    private JsonObject Post(JsonObject request, string? source)
     {
         var box = request["box"]?.GetValue<string>()?.ToLowerInvariant();
         var blob = request["blob"]?.GetValue<string>();
@@ -601,19 +610,18 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         lock (_gate)
         {
             PruneMail();
-            if (!_mailboxes.TryGetValue(box!, out var items))
-            {
-                if (_sealedCount >= MaxSealedMail) return Error("full");
-                _mailboxes[box!] = items = [];
-            }
-            if (items.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
-            if (items.Count >= RoomDirectoryProtocol.MaxMailPerBox || _sealedCount >= MaxSealedMail) return Error("full");
-            if (!_mailBudget.TryAcquire())
-            {
-                if (items.Count == 0) _mailboxes.Remove(box!);
-                return Error("rate");
-            }
-            items.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl));
+            var now = _now();
+            var existing = _mailboxes.TryGetValue(box!, out var items);
+            if (existing && items!.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
+            if (_sealedCount >= MaxSealedMail || (existing && items!.Count >= RoomDirectoryProtocol.MaxMailPerBox)) return Error("full");
+            // Every check first; allowances are only used up by a post that is taken.
+            var (count, until) = source is not null && _mailPosts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + MailPostWindow);
+            if (source is not null && count >= MaxMailPostsPerSource) return Error("rate");
+            if (!_mailBudget.CanAcquire()) return Error("rate");
+            if (source is not null) _mailPosts[source] = (count + 1, until);
+            _mailBudget.TryAcquire();
+            if (!existing) _mailboxes[box!] = items = [];
+            items!.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl));
             _sealedCount++;
             return new JsonObject { ["ok"] = true };
         }
@@ -713,7 +721,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         lock (_gate)
         {
             PruneRecords();
-            if (_records.TryGetValue(lookup, out var have))
+            var renewal = _records.TryGetValue(lookup, out var have);
+            if (renewal)
             {
                 // First signer owns the lookup until its record expires; nobody else can replace or shadow it.
                 if (!CryptographicOperations.FixedTimeEquals(have.Signer, record.Signer)) return Error("owner");
@@ -729,10 +738,12 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (signed >= MaxRecordPutsPerSigner) return Error("rate");
             // The signer table is bounded like the records: a full table takes no new signers until entries expire.
             if (signed == 0 && !_signerPuts.ContainsKey(signer) && _signerPuts.Count >= MaxRecords) return Error("rate");
-            if (!_recordBudget.CanAcquire()) return Error("rate");
+            // Renewing a record already held adds nothing to the store, so it doesn't draw on the directory-wide budget
+            // (its signer and source are still limited above).
+            if (!renewal && !_recordBudget.CanAcquire()) return Error("rate");
             if (source is not null) _recordPuts[source] = (count + 1, until);
             _signerPuts[signer] = (signed + 1, signedUntil);
-            _recordBudget.TryAcquire();
+            if (!renewal) _recordBudget.TryAcquire();
             _records[lookup] = record;
             return new JsonObject { ["ok"] = true };
         }
@@ -772,6 +783,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             _sealedCount -= items.RemoveAll(i => i.Expires <= now);
             if (items.Count == 0) _mailboxes.Remove(box);
         }
+        foreach (var (source, used) in _mailPosts.Where(p => p.Value.Until <= now).ToList()) _mailPosts.Remove(source);
     }
 
     private void Prune()

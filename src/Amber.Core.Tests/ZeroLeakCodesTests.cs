@@ -355,6 +355,24 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public void MailPostsAreLimitedPerSource()
+    {
+        var server = StartDirectory();
+        System.Text.Json.Nodes.JsonObject Post(int i) => new()
+        {
+            ["op"] = "post", ["box"] = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
+            ["blob"] = Convert.ToBase64String([(byte)i, 2]), ["drop"] = SealedMail.DropHash(new byte[16]),
+        };
+        for (var i = 0; i < RoomDirectoryServer.MaxMailPostsPerSource; i++)
+            Assert.True(server.Handle(Post(i), "127.0.9.1")["ok"]?.GetValue<bool>());
+        Assert.Equal("rate", server.Handle(Post(99), "127.0.9.1")["error"]?.GetValue<string>());
+        // Another source isn't held back by the first one.
+        Assert.True(server.Handle(Post(100), "127.0.9.2")["ok"]?.GetValue<bool>());
+        _now += RoomDirectoryServer.MailPostWindow + TimeSpan.FromSeconds(1);
+        Assert.True(server.Handle(Post(101), "127.0.9.1")["ok"]?.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task FetchPagesThroughAFullMailbox()
     {
         var server = StartDirectory();
