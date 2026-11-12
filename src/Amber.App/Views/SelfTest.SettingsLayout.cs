@@ -122,6 +122,16 @@ internal sealed partial class SelfTest
                 && Dispatcher.UIThread.Invoke(() => page.JunkCleanButton.IsVisible == settings.Tools.HasJunk), settings.Tools.JunkStatus);
             await ShotAsync("settings-storage-junk-1440");
             Check("关于 › 检查更新用的是同一个更新检查", Dispatcher.UIThread.Invoke(() => ReferenceEquals(page.CheckUpdateBox.Command, settings.Tools.CheckUpdateCommand)));
+            // About › daily update check: the checkbox shows the setting and writes it back.
+            main.Shell.Navigate("settings#AutoUpdate");
+            var autoShown = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "AutoUpdateBox" && window.RevealedField.IsEffectivelyVisible), 3);
+            var autoBefore = settings.AutoUpdate;
+            Dispatcher.UIThread.Invoke(() => page.AutoUpdateBox.IsChecked = !autoBefore);
+            var autoSaved = Page<HomeViewModel>().Service.Settings.AutoUpdateCheck == !autoBefore;
+            Dispatcher.UIThread.Invoke(() => page.AutoUpdateBox.IsChecked = autoBefore);
+            Check("关于 › 每天自动检查：勾选框看得见，改了就存进设置", autoShown && autoSaved && settings.SelectedGroupId == SettingsCatalog.About
+                && Page<HomeViewModel>().Service.Settings.AutoUpdateCheck == autoBefore);
+            await ShotAsync("settings-about-1440");
             Check("设置里没有“工具”分组", settings.Groups.All(g => g.Id != "tools"));
 
             // Medium: the group picker.
@@ -148,6 +158,11 @@ internal sealed partial class SelfTest
             await ShotAsync("settings-600-storage");
             settings.BackToGroupsCommand.Execute(null);
             await Task.Delay(300);
+            settings.OpenGroupCommand.Execute(settings.Groups.First(g => g.Id == SettingsCatalog.About));
+            await Task.Delay(400);
+            await ShotAsync("settings-600-about");
+            settings.BackToGroupsCommand.Execute(null);
+            await Task.Delay(300);
             Check("紧凑：返回分组列表", Dispatcher.UIThread.Invoke(() => page.GroupIndex.IsEffectivelyVisible) && settings.HeaderTitle == L.T("instance.settings.title"));
             L.SetLanguage("en");
             await Task.Delay(400);
@@ -157,6 +172,9 @@ internal sealed partial class SelfTest
             settings.SelectedGroupIndex = 2;
             await Task.Delay(600);
             await ShotAsync("settings-1440-en");
+            main.Shell.Navigate("settings#AutoUpdate");
+            await Task.Delay(600);
+            await ShotAsync("settings-about-1440-en");
         }
         finally
         {
