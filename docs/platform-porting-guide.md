@@ -357,7 +357,7 @@ public interface IInputSink : IDisposable
 - **节点**（`Gate/GateRelay.cs`）：把 TCP 原样转给网关，不持有密钥。
 
 main 上 v0.7.0 之后新增【未发布】：
-- 隐私+：客户端经两个不同节点各开一条腿，用 2-of-2 异或拆分（`Gate/SplitStream.cs`），只拿到一条腿什么也还原不出来。
+- 隐私+：客户端经两个不同节点各开一条腿，用 2-of-2 异或拆分（`Transport/SplitStream.cs`，房间里的多路拆分也用它），只拿到一条腿什么也还原不出来。
 - 隐私++：节点和网关保持心跳通道（`JAYR1-` 节点码，`Gate/GateRelayCode.cs`），能用的节点不够两个时熔断。
 - 入口端口轮换（`Gate/EntryRotation.cs`）：端口按 HMAC(种子, 时间窗) 计算，扫描器扫不到固定端口。
 
