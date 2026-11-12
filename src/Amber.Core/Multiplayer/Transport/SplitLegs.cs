@@ -34,8 +34,17 @@ public static class SplitLegs
     /// Member side: opens every leg in parallel (<paramref name="openLeg"/> gives the raw connection for leg i), runs the handshakes,
     /// sends the hellos and returns the joined stream. Any leg failing drops the others.
     /// </summary>
-    public static async Task<SplitStream> ConnectAsync(Func<int, CancellationToken, Task<Stream>> openLeg, int count, int epoch, MemberKey key,
-        TransportProfile profile, string purpose, byte[] payload, CancellationToken ct = default)
+    public static Task<SplitStream> ConnectAsync(Func<int, CancellationToken, Task<Stream>> openLeg, int count, int epoch, MemberKey key,
+        TransportProfile profile, string purpose, byte[] payload, CancellationToken ct = default) =>
+        ConnectAsync(openLeg, count, epoch, (raw, leg, c) => MemberChannel.ConnectAsync(raw, key, profile, purpose, payload, c, leg), ct);
+
+    /// <summary>
+    /// Same, with the per-leg handshake supplied by the caller (the room tunnel uses <see cref="TunnelHandshake.ConnectAsync"/>,
+    /// which also covers the Minecraft disguise). The handshake must bind the <see cref="SplitLeg"/> it is given; on failure it
+    /// leaves the raw stream to the caller.
+    /// </summary>
+    public static async Task<SplitStream> ConnectAsync(Func<int, CancellationToken, Task<Stream>> openLeg, int count, int epoch,
+        Func<Stream, SplitLeg, CancellationToken, Task<SecureStream>> handshake, CancellationToken ct = default)
     {
         if (count is < SplitStream.MinLegs or > SplitStream.MaxLegs) throw new ArgumentOutOfRangeException(nameof(count));
         var pairId = RandomNumberGenerator.GetBytes(PairIdLength);
@@ -67,7 +76,7 @@ public static class SplitLegs
             SecureStream? secure = null;
             try
             {
-                secure = await MemberChannel.ConnectAsync(raw, key, profile, purpose, payload, linked.Token, new SplitLeg(index, count, epoch));
+                secure = await handshake(raw, new SplitLeg(index, count, epoch), linked.Token);
                 await secure.WriteAsync((byte[])[HelloVersion, .. pairId], linked.Token);
                 return secure;
             }

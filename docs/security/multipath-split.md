@@ -1,6 +1,6 @@
 # Multi-path split for room connections
 
-Status: stage 1 of 4 (transport only). Rooms don't use it yet; stage 2 wires it into tunnels and chat.
+Status: stage 2 of 4. The transport (stage 1) and the room wiring (stage 2) are in. Nothing splits yet in practice: hosts don't turn it on, and members don't have the extra paths until stage 3 adds the EasyTier instances.
 
 ## What it is for
 
@@ -22,6 +22,18 @@ The split adds no MAC of its own, because each leg is already authenticated end 
 - After the handshake, the member sends a hello inside the encrypted leg: `[u8 version = 1][32-byte pairing id]`. The pairing id is random and identical on every leg of one connection.
 - `SplitRegistry` (host) joins legs only when all of these hold: they authenticated as the same member entry, they carry the same leg count and service, and they fill distinct indexes. A leg that breaks any rule drops the whole set; the registry never picks a winner. A set waits at most 10 s. Each member may have at most 4 sets waiting, and the room at most 64. Used pairing ids are remembered for 10 s, so a replayed or late leg is dropped at once. A kick drops a member's waiting legs.
 
+## Rooms
+
+- **Settings.** The host decides per service: game and chat are each Off, Auto or Strict, over 2 or 3 paths. Remote control and the "game only" exit proxy are never split. Splitting needs the wrapped tunnel, so general mode never splits, and full-LAN (TUN) mode doesn't split in this version.
+- **Credentials.** The room credentials carry `"split": {"game", "chat", "paths", "nets": [{"net", "secret"}]}`, one extra EasyTier network per extra path, random like the room's own network. They hold no address: which nodes a path uses is up to each member's own node list. A version that doesn't understand the field, or finds it malformed, connects on one path.
+- **Rekey.** After a kick the host replaces every extra network along with the room's own (`"split": {"nets": [...]}` in the rekey message). A rekey without them turns splitting off, because the old networks are known to whoever was just kicked.
+- **Host.** Leg *i* listens on port 47657 + *i* (47657, 47658, 47659). The handshake payload names the service, as on the single-path port 47656. A Strict service is not served on 47656 at all.
+- **Member.** Each game or chat connection is opened by `SplitConnector`:
+  - Auto splits when every leg opens. Otherwise it uses one path and records why.
+  - After 3 failed split attempts in a row, Auto stops trying for the rest of the session instead of retrying forever.
+  - Strict splits or fails with the reason.
+  - A device attestation failure never leads to a fallback.
+
 ## Ending
 
 The joined stream ends cleanly only when every leg delivers its authenticated close record at the same chunk boundary. The following all drop every leg, and none of them is a clean end:
@@ -33,6 +45,13 @@ The joined stream ends cleanly only when every leg delivers its authenticated cl
 There is never a quiet fallback to fewer legs in the middle of a connection.
 
 ## Tests
+
+`src/Amber.Core.Tests/SplitRoomTests.cs` covers the room side:
+
+- settings, credentials and rekey round trips, and anything not understood meaning no split;
+- game and chat end to end with 2 and 3 paths, and with the Minecraft disguise;
+- Off, Auto and Strict with and without paths, a dead path, and Auto giving up after repeated failures;
+- a kick dropping a joined connection, remote control legs refused, and legs from an older epoch failing.
 
 `src/Amber.Core.Tests/SplitTransportTests.cs` covers:
 

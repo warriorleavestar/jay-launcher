@@ -37,6 +37,11 @@ public sealed class RoomTransport : IAsyncDisposable
     private readonly Action<string>? _log;
 
     public TunnelServer? Server { get; private set; }
+    /// <summary>Host of a room that splits: the per-leg listeners.</summary>
+    public SplitTunnelServer? SplitServer { get; private set; }
+    /// <summary>Member: how game and chat connections are opened (split or one path, and why).</summary>
+    public SplitConnector? GameSplit { get; private set; }
+    public SplitConnector? ChatSplit { get; private set; }
     public TunnelClient? Game { get; private set; }
     public TunnelClient? Chat { get; private set; }
     public TunnelClient? Remote { get; private set; }
@@ -79,12 +84,14 @@ public sealed class RoomTransport : IAsyncDisposable
             _exitPolicy = new ExitPolicy();
             _exitPolicy.Start(log: _log);
         }
+        // Strict split: game and chat are only served over the split listeners, never on the single-path port.
+        bool SinglePathAllowed(TunnelService service) => room.Split.For(service) != SplitPolicy.Strict;
         if (o.IsHost && settings.Wraps || allowProxy)
         {
             Server = Add(new TunnelServer(room, settings, settings.Wraps ? TunnelSettings.Port : TunnelSettings.PlainSocksPort, service => service switch
             {
-                TunnelService.Game when o.IsHost && settings.Wraps => TunnelServer.ToLocalPort(room.Port),
-                TunnelService.Chat when o.IsHost && settings.Wraps => TunnelServer.ToLocalPort(RoomChat.Port),
+                TunnelService.Game when o.IsHost && settings.Wraps && SinglePathAllowed(TunnelService.Game) => TunnelServer.ToLocalPort(room.Port),
+                TunnelService.Chat when o.IsHost && settings.Wraps && SinglePathAllowed(TunnelService.Chat) => TunnelServer.ToLocalPort(RoomChat.Port),
                 TunnelService.Remote when o.IsHost && settings.Wraps && room.FromInvite => TunnelServer.ToLocalPort(RemoteControl.RemoteHub.Port),
                 TunnelService.Socks when allowProxy => async (stream, ct) =>
                 {
@@ -98,11 +105,34 @@ public sealed class RoomTransport : IAsyncDisposable
             }, _log, listen));
         }
 
+        // Split listeners: wrapped invite rooms whose host turned splitting on. Not in full-LAN (TUN) mode in this version.
+        if (o.IsHost && settings.Wraps && room.FromInvite && room.Split.Enabled && !o.Tun)
+        {
+            SplitServer = Add(new SplitTunnelServer(room, service => service switch
+            {
+                TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
+                TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
+                _ => null,
+            }, _log, listen));
+        }
+
         if (!o.IsHost && settings.Wraps)
         {
             var (host, port) = o.Tun ? (EasyTierArgs.HostIp, TunnelSettings.Port) : ("127.0.0.1", o.LocalTunnelPort ?? throw new ArgumentException(L.T("core.mp.transport.join_port_required")));
-            if (o.LocalForwardPort is { } game) Game = Add(new TunnelClient(game, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Game), _log));
-            if (o.LocalChatPort is { } chat) Chat = Add(new TunnelClient(chat, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Chat), _log));
+            // Each leg's local port forwards over its own EasyTier network to the host's leg port. None in TUN mode.
+            IReadOnlyList<Func<CancellationToken, Task<Stream>>>? legs = !o.Tun && o.LocalSplitPorts is { } splitPorts
+                ? [.. splitPorts.Select(p => (Func<CancellationToken, Task<Stream>>)(ct => TunnelClient.Raw("127.0.0.1", p, ct)))]
+                : null;
+            if (o.LocalForwardPort is { } game)
+            {
+                GameSplit = new SplitConnector(room, TunnelService.Game, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Game), legs, _log);
+                Game = Add(new TunnelClient(game, GameSplit.OpenAsync, _log));
+            }
+            if (o.LocalChatPort is { } chat)
+            {
+                ChatSplit = new SplitConnector(room, TunnelService.Chat, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Chat), legs, _log);
+                Chat = Add(new TunnelClient(chat, ChatSplit.OpenAsync, _log));
+            }
             if (o.LocalRemotePort is { } remote && room.FromInvite) Remote = Add(new TunnelClient(remote, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Remote), _log));
         }
 

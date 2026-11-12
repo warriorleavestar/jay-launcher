@@ -22,6 +22,9 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     /// <summary>这个成员要用的设备验证方案（房主开了验证、对方也支持时才有；只走加密的敲门回复）。</summary>
     public AttestationScheme? Scheme { get; init; }
 
+    /// <summary>Multi-path split settings (wrapped invite rooms only). <see cref="SplitSettings.None"/> when the room doesn't split.</summary>
+    public SplitSettings Split { get; init; } = SplitSettings.None;
+
     public static RoomCredentials Create(byte[] hostPublicKey, int gamePort, TunnelSettings tunnel) =>
         new(NewNetwork(), NewSecret(), 1, (byte[])hostPublicKey.Clone(), gamePort, RoomChat.Port, tunnel);
 
@@ -29,13 +32,13 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     private static string NewSecret() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
     /// <summary>踢人之后换网络：新的随机网络名和 256 位密钥，版本加一。其余不变。</summary>
-    public RoomCredentials Rotate() => this with { Network = NewNetwork(), Secret = NewSecret(), Epoch = Epoch + 1, Member = null };
+    public RoomCredentials Rotate() => this with { Network = NewNetwork(), Secret = NewSecret(), Epoch = Epoch + 1, Member = null, Split = Split.Rotate() };
 
     /// <summary>发给留下来的成员的那部分（经他们各自的成员通道）。</summary>
-    public RoomRekey ToRekey() => new(Network, Secret, Epoch);
+    public RoomRekey ToRekey() => new(Network, Secret, Epoch) { SplitNets = Split.Nets };
 
     /// <summary>加入方：按凭据建出内部的房间对象。</summary>
-    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch);
+    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch) with { Split = UsableSplit };
 
     /// <summary>房主：建房间对象，带上成员表，并给自己（本机的聊天客户端）发一把钥匙。</summary>
     public RoomCode ToHostRoom(MemberTable members, string hostName)
@@ -43,8 +46,15 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         // 已经有房主自己的那把就接着用：再发一把会让房主本机正在用的聊天钥匙作废。
         var self = members.Host ?? members.Issue(HostPublicKey, hostName, isHost: true);
         if (!self.PublicKey.AsSpan().SequenceEqual(HostPublicKey)) throw new InvalidOperationException("member table belongs to another host");
-        return RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, self.Key, members, Epoch);
+        return RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, self.Key, members, Epoch) with { Split = UsableSplit };
     }
+
+    /// <summary>An extra network must differ from the room's own one; otherwise the split is ignored.</summary>
+    private static SplitSettings SplitFor(SplitSettings split, string network) =>
+        split.Nets.Any(n => n.Network == network) ? SplitSettings.None : split;
+
+    /// <summary>Splitting needs the wrapped tunnel (each leg is a member channel handshake); general mode never splits.</summary>
+    private SplitSettings UsableSplit => Tunnel.Wraps ? Split : SplitSettings.None;
 
     public override string ToString() => "RoomCredentials";
 
@@ -60,6 +70,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         ["memberId"] = Member?.IdHex ?? throw new InvalidOperationException("no member key"),
         ["memberPsk"] = Member.PskBase64,
         ["attest"] = Scheme?.ToJson(),
+        ["split"] = UsableSplit.Enabled ? UsableSplit.ToJson() : null,
     };
 
     internal static RoomCredentials FromJson(JsonNode json)
@@ -86,6 +97,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
             {
                 Member = new MemberKey(Convert.FromHexString(memberId), psk),
                 Scheme = json["attest"] is JsonObject attest ? AttestationScheme.FromJson(attest) : null,
+                Split = tunnel.Wraps ? SplitFor(SplitSettings.FromJson(json["split"]), net) : SplitSettings.None,
             };
         }
         finally
@@ -100,9 +112,17 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
 /// </summary>
 public sealed record RoomRekey(string Network, string Secret, int Epoch)
 {
+    /// <summary>The new networks for the extra split paths (empty when the room doesn't split).</summary>
+    public IReadOnlyList<SplitNet> SplitNets { get; init; } = [];
+
     public override string ToString() => "RoomRekey";
 
-    internal JsonObject ToJson() => new() { ["ctl"] = "rekey", ["net"] = Network, ["secret"] = Secret, ["epoch"] = Epoch };
+    internal JsonObject ToJson()
+    {
+        var json = new JsonObject { ["ctl"] = "rekey", ["net"] = Network, ["secret"] = Secret, ["epoch"] = Epoch };
+        if (SplitNets.Count > 0) json["split"] = new JsonObject { ["nets"] = SplitSettings.NetsToJson(SplitNets) };
+        return json;
+    }
 
     /// <summary>格式不对返回 null。</summary>
     internal static RoomRekey? FromJson(JsonNode json)
@@ -114,7 +134,10 @@ public sealed record RoomRekey(string Network, string Secret, int Epoch)
             var epoch = json["epoch"]?.GetValue<int>();
             if (net is null || secret is null || epoch is not { } e || e < 2) return null;
             if (!KnockProtocol.NetworkPattern().IsMatch(net) || !KnockProtocol.SecretPattern().IsMatch(secret)) return null;
-            return new RoomRekey(net, secret, e);
+            // Extra split networks: a malformed list just means none (the room then stops splitting, see SplitSettings.WithNets).
+            IReadOnlyList<SplitNet> nets = json["split"]?["nets"] is { } list ? SplitSettings.NetsFromJson(list) ?? [] : [];
+            if (nets.Any(n => n.Network == net || n.Secret == secret)) nets = [];
+            return new RoomRekey(net, secret, e) { SplitNets = nets };
         }
         catch (Exception x) when (x is InvalidOperationException or FormatException)
         {
