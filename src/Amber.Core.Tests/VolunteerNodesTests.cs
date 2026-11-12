@@ -123,12 +123,14 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         // One host can't make the directory dial many of its ports.
         for (var port = 11010; port < 11010 + VolunteerRegistry.MaxPerHost; port++)
         {
-            Assert.True(Ok(registry.Register($"tcp://8.8.8.8:{port}")));
+            Assert.True(Ok(registry.Register($"tcp://host.example.org:{port}")));
             await registry.LastProbe;
         }
-        Assert.Equal("rate", registry.Register("tcp://8.8.8.8:12000")["error"]!.GetValue<string>());
+        var refused = registry.Register("tcp://host.example.org:12000");
+        Assert.Equal("host", refused["error"]!.GetValue<string>());
+        Assert.False(string.IsNullOrEmpty(refused["reason"]?.GetValue<string>()));
         // Renewing a known address is never limited.
-        Assert.True(Ok(registry.Register("tcp://8.8.8.8:11010")));
+        Assert.True(Ok(registry.Register("tcp://host.example.org:11010")));
         // A burst of new hosts is cut off at the per-minute budget, then let through again a minute later.
         var accepted = VolunteerRegistry.MaxPerHost;
         for (var i = 0; accepted < VolunteerRegistry.RegistrationsPerMinute; i++, accepted++)
@@ -236,7 +238,7 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     [Fact]
     public void DirectoryNodeArgsCarryRelayLimitsOnlyWhenSet()
     {
-        var profile = PublicNetworkProfile.Jay(["tcp://8.8.4.4:11010"]);
+        var profile = PublicNetworkProfile.Jay(["tcp://seed.example.org:11010"]);
         var listeners = new[] { "tcp://0.0.0.0:11010", "udp://0.0.0.0:11010" };
         var plain = PublicNetworkArgs.Build(new PublicNetworkOptions(profile, 15000, 15001, Directory: true, Listeners: listeners));
         Assert.DoesNotContain("--foreign-relay-bps-limit", plain);
