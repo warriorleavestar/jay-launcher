@@ -42,6 +42,8 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         var server = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => _now)
         {
             Identity = identity, NetworkSecret = Secret, Certificate = certificate,
+            // Every person in these tests calls from 127.0.0.1; per-source limits have their own tests.
+            ExemptLoopbackForTest = true,
         };
         _cleanup.Add(server);
         return server;

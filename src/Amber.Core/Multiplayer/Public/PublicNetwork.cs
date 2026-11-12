@@ -145,8 +145,9 @@ public static class PublicNetworkArgs
 {
     /// <summary>
     /// Jay's EasyTier build (JAY.md, item 8): with this set to "1", a connection handed to a local service comes from
-    /// 127.b.c.d for a caller at virtual address a.b.c.d instead of 127.0.0.1. Set for the directory node only, so the
-    /// directory can apply its per-source limits. Builds without the patch ignore it.
+    /// 127.235.c.d for a caller at room-network address 10.235.c.d, and from one shared address outside 127.235.0.0/16
+    /// for any other caller, instead of 127.0.0.1. Set for the directory node only, so the directory can apply its
+    /// per-source limits. The node must run that build: without it every caller shares one source.
     /// </summary>
     public const string LoopbackSourceVariable = "JAY_ET_LOOPBACK_SOURCE";
 

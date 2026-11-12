@@ -272,23 +272,45 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// The caller's address for per-source limits, or null when there is none to go by (this machine itself). A caller the
-    /// local EasyTier hands over comes from 127.b.c.d standing for its virtual address a.b.c.d (see
-    /// <see cref="PublicNetworkArgs.LoopbackSourceVariable"/>), and is told apart by that.
+    /// The caller's source for per-source limits. A caller the local EasyTier hands over comes from 127.235.c.d standing
+    /// for its room-network address 10.235.c.d (see <see cref="PublicNetworkArgs.LoopbackSourceVariable"/>) and is counted
+    /// under that address. Every other loopback address (this machine, or anything EasyTier couldn't map) shares the one
+    /// source <see cref="SharedLoopbackSource"/>, so no caller over a network goes uncounted. Other addresses (a directory
+    /// reached directly on a LAN) count by address. Null only for no address at all (calls made in-process).
     /// </summary>
     internal static string? Source(IPAddress? address)
     {
         if (address is null) return null;
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
-        if (address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback)) return null;
+        if (IPAddress.IsLoopback(address))
+        {
+            var b = address.GetAddressBytes();
+            return b.Length == 4 && b[1] == MappedSecondOctet ? $"{PublicNetworkProfile.Subnet}{b[2]}.{b[3]}" : SharedLoopbackSource;
+        }
         return address.ToString();
     }
 
-    private static string? Source(TcpClient client) => Source((client.Client.RemoteEndPoint as IPEndPoint)?.Address);
+    /// <summary>The one source every loopback caller outside the mapped range shares.</summary>
+    public const string SharedLoopbackSource = "loopback";
 
-    /// <summary>Connections one source address may have open at once (only for callers with a source address).</summary>
+    /// <summary>Second octet of the room network (10.235.0.0/16), which EasyTier keeps when it maps a caller to 127.235.c.d.</summary>
+    private const byte MappedSecondOctet = 235;
+
+    private string? Source(TcpClient client) =>
+        Source((client.Client.RemoteEndPoint as IPEndPoint)?.Address) is var source && ExemptLoopbackForTest && source == SharedLoopbackSource ? null : source;
+
+    /// <summary>Tests that make many calls from 127.0.0.1 through the real client: don't count them as one source.</summary>
+    internal bool ExemptLoopbackForTest { get; init; }
+
+    /// <summary>Connections one source may have open at once.</summary>
     public const int MaxConnectionsPerSource = 8;
     private readonly Dictionary<string, int> _openBySource = new(StringComparer.Ordinal);
+
+    /// <summary>Connections open from <paramref name="source"/> right now (tests).</summary>
+    internal int OpenFrom(string source)
+    {
+        lock (_openBySource) return _openBySource.GetValueOrDefault(source);
+    }
 
     private bool TryOpen(string? source)
     {
