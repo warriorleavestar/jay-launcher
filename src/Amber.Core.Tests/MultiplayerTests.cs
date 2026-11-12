@@ -387,8 +387,8 @@ public class AsciiPathTests
 {
     [Theory]
     [InlineData(@"D:\Games\.minecraft", 1252, true)]
-    [InlineData(@"D:\Claude\自制启动器\测试游戏目录", 936, true)]
-    [InlineData(@"D:\Claude\自制启动器\测试游戏目录", 1252, false)]
+    [InlineData(@"D:\游戏\我的启动器\测试游戏目录", 936, true)]
+    [InlineData(@"D:\游戏\我的启动器\测试游戏目录", 1252, false)]
     [InlineData(@"C:\Users\Zoë\.minecraft", 1252, true)]
     [InlineData(@"C:\Users\Zoë\.minecraft", 936, false)]
     [InlineData(@"D:\任何\路径", 65001, true)]
