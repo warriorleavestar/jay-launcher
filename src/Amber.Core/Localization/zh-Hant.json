@@ -1364,6 +1364,7 @@
   "multiplayer.trusted.empty": "還沒有信任的人",
   "multiplayer.trusted.remove": "移除",
   "core.mp.identity.unreadable": "暫時讀不到這台裝置的身分檔案（可能被其他程式佔用或權限不對），這次先用臨時身分，原檔案沒有改動，下次啟動會再讀。",
+  "core.mp.identity.locked": "Windows 暫時打不開這台裝置的身分（比如沒輸密碼就登入了，像透過 SSH 登入時），這次先用臨時身分，原檔案沒有改動，下次啟動會再讀。",
   "core.mp.identity.unsaved": "這台裝置的身分無法儲存（資料夾無法寫入，或系統不提供加密）。這次先用暫時身分；認識你的房主會把你當成新成員。",
   "instance.launch": "▶ 啟動",
   "instance.more": "⋯ 更多",
