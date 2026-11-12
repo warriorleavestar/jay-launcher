@@ -151,13 +151,12 @@ public class SignedRecordTests
     }
 
     [Fact]
-    public async Task LoopbackCallersShareNoSourceAllowanceButTheDirectoryHasABudget()
+    public async Task RecordPutsHaveADirectoryWideBudget()
     {
         var now = DateTimeOffset.UtcNow;
         using var key = X25519KeyPair.Generate();
         await using var server = Server(key, () => now);
-        // Connections handed over by EasyTier come from loopback: they arrive with no source, so one caller can't use up
-        // a shared per-source allowance. The directory-wide budget still caps how fast records come in.
+        // Calls with no source address still meet the directory-wide budget.
         var accepted = 0;
         for (var i = 0; i < RoomDirectoryServer.MaxRecordPutsPerMinute; i++)
         {

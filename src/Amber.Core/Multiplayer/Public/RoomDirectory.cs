@@ -101,9 +101,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Record puts (new or renewed) one source address may make per hour.</summary>
     public const int MaxRecordPutsPerSource = 60;
 
-    // Budgets for the whole directory. The directory normally sits behind the public network's EasyTier, which hands every
-    // connection over from loopback, so the per-source limits above only apply when the caller's real address is known.
-    // These caps bound how fast anyone can fill the stores, whoever they claim to be.
+    // Budgets for the whole directory, alongside the per-source limits above: they bound how fast the stores can fill.
 
     /// <summary>Rendezvous puts the whole directory takes per minute.</summary>
     public const int MaxRendezvousPutsPerMinute = 300;
@@ -260,11 +258,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
     }
 
-    /// <summary>
-    /// The caller's address for per-source limits, or null when it says nothing about the caller: a connection handed
-    /// over by the local EasyTier comes from loopback, and counting all of those as one source would let one caller use
-    /// up everyone's allowance.
-    /// </summary>
+    /// <summary>The caller's address for per-source limits, or null for a loopback address.</summary>
     private static string? Source(TcpClient client) =>
         client.Client.RemoteEndPoint is IPEndPoint { Address: var address } && !IPAddress.IsLoopback(address) ? address.ToString() : null;
 
