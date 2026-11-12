@@ -206,7 +206,7 @@ public sealed class GateServer : IAsyncDisposable
                             other.Stream.Abort();
                             throw new CryptographicException(L.T("core.gate.split.mismatch"));
                         }
-                        session = leg.Index == 0 ? new SplitStream(secure, other.Stream) : new SplitStream(other.Stream, secure);
+                        session = leg.Index == 0 ? new SplitStream(secure, other.Stream) { Wording = SplitWording.Gate } : new SplitStream(other.Stream, secure) { Wording = SplitWording.Gate };
                         secure = null;
                     }
                     else

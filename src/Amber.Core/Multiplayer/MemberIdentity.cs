@@ -71,6 +71,12 @@ public sealed class MemberIdentity : IDisposable
                     CryptographicOperations.ZeroMemory(raw);
                 }
             }
+            catch (KeyProtectionUnavailableException)
+            {
+                // Windows can't open the user's key protection right now (e.g. an SSH logon without a password). The file is
+                // probably fine: don't replace it, use a temporary identity and read it again next start.
+                return new MemberIdentity(directory, X25519KeyPair.Generate(), L.T("core.mp.identity.locked"), persisted: false);
+            }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 return new MemberIdentity(directory, X25519KeyPair.Generate(), L.T("core.mp.identity.unreadable"), persisted: false);
@@ -80,7 +86,15 @@ public sealed class MemberIdentity : IDisposable
                 try { File.Copy(path, path + ".broken", true); }
                 catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
                 var fresh = new MemberIdentity(directory, X25519KeyPair.Generate(), L.T("core.mp.identity.corrupt"));
-                fresh.Save();
+                try
+                {
+                    fresh.Save();
+                }
+                catch (Exception save) when (save is IOException or UnauthorizedAccessException or CryptographicException)
+                {
+                    fresh.IsPersisted = false;
+                    fresh.Warning = L.T("core.mp.identity.unsaved");
+                }
                 return fresh;
             }
         }
@@ -179,6 +193,26 @@ public sealed class MemberIdentity : IDisposable
     /// <summary>Set once DPAPI has refused on this machine (or by tests); later saves go straight to the wrap-key file.</summary>
     internal static bool DpapiUnavailable { get; set; }
 
+    /// <summary>Test hook: replaces the DPAPI self-check.</summary>
+    internal static Func<bool>? DpapiProbe { get; set; }
+
+    /// <summary>Whether DPAPI can protect and unprotect anything at all for the current logon.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static bool DpapiWorks()
+    {
+        if (DpapiProbe is { } probe) return probe();
+        try
+        {
+            byte[] sample = [1, 2, 3, 4];
+            return ProtectedData.Unprotect(ProtectedData.Protect(sample, Entropy, DataProtectionScope.CurrentUser), Entropy, DataProtectionScope.CurrentUser)
+                .AsSpan().SequenceEqual(sample);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
     internal static byte[] Protect(string directory, byte[] raw)
     {
         if (OperatingSystem.IsWindows() && !DpapiUnavailable)
@@ -218,7 +252,16 @@ public sealed class MemberIdentity : IDisposable
         if (stored.AsSpan().StartsWith(MagicDpapi))
         {
             if (!OperatingSystem.IsWindows()) throw new CryptographicException(L.T("core.mp.identity.otherplatform"));
-            var raw = ProtectedData.Unprotect(stored[MagicDpapi.Length..], Entropy, DataProtectionScope.CurrentUser);
+            byte[] raw;
+            try
+            {
+                raw = ProtectedData.Unprotect(stored[MagicDpapi.Length..], Entropy, DataProtectionScope.CurrentUser);
+            }
+            catch (CryptographicException e) when (!DpapiWorks())
+            {
+                // DPAPI itself is unavailable for this logon, so this says nothing about the file.
+                throw new KeyProtectionUnavailableException(e);
+            }
             if (raw.Length != length) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
             return raw;
         }
@@ -285,3 +328,11 @@ public sealed class MemberIdentity : IDisposable
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 }
+
+/// <summary>
+/// The operating system's key protection (DPAPI) can't be used for this logon right now, so a protected file could not be
+/// opened. The file itself is not known to be damaged. An <see cref="IOException"/> so callers that treat read errors as
+/// "try again later" do the same here.
+/// </summary>
+public sealed class KeyProtectionUnavailableException(Exception inner)
+    : IOException(L.T("core.mp.identity.locked"), inner);
