@@ -184,6 +184,35 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         Assert.Equal("rate", (await registry.CheckAsync("tcp://q.one.example.org:11011"))["error"]!.GetValue<string>());
     }
 
+    [Fact]
+    public async Task AddressesThatArentListedDontTakeAHostsPlaces()
+    {
+        // Two ports of the host that never answer: still being probed, then dropped. Neither keeps the real one out.
+        var hold = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registry = new VolunteerRegistry((url, _) => url.EndsWith(":11010") ? Task.FromResult(true) : hold.Task, () => _now);
+        Assert.True(Ok(registry.Register("tcp://host.example.org:1")));
+        Assert.True(Ok(registry.Register("tcp://host.example.org:2")));
+        // While both are being probed, a third waits its turn ("rate", not "host").
+        Assert.Equal("rate", registry.Register("tcp://host.example.org:11010")["error"]!.GetValue<string>());
+        hold.SetResult(false);
+        await Task.WhenAll(registry.LastProbe, Task.Delay(50));
+        Assert.True(Ok(registry.Register("tcp://host.example.org:11010")));
+        await registry.LastProbe;
+        Assert.Equal(["tcp://host.example.org:11010"], registry.Listed());
+        // The same for many names of one machine.
+        var hold2 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var byMachine = new VolunteerRegistry((url, _) => url.Contains("real.") ? Task.FromResult(true) : hold2.Task, () => _now,
+            (_, _) => Task.FromResult<IPAddress?>(IPAddress.Parse("10.40.0.1")));
+        foreach (var name in new[] { "x1", "x2" }) byMachine.Register($"tcp://{name}.example.org:11010");
+        await Task.Delay(50);
+        hold2.SetResult(false);
+        await byMachine.LastProbe;
+        Assert.Empty(byMachine.Listed());
+        Assert.True(Ok(byMachine.Register("tcp://real.example.org:11010")));
+        await byMachine.LastProbe;
+        Assert.Equal(["tcp://real.example.org:11010"], byMachine.Listed());
+    }
+
     [Theory]
     [InlineData("10.1.2.3", "10.1.2.3")]
     [InlineData("::ffff:10.1.2.3", "10.1.2.3")]

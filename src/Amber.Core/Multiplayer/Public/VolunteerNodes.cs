@@ -238,6 +238,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             catch (Exception e) when (e is not OutOfMemoryException) { ip = null; }
             if (ip is null) return new JsonObject { ["ok"] = true, ["reachable"] = false };
             // Also one check per machine at a time, so many names or ports of one machine can't be swept either.
+            // A check refused here still used its place in the directory-wide budget on purpose: the name was already
+            // looked up, and otherwise endless names for one machine would be free lookups.
             var machine = "machine:" + VolunteerNodes.MachineOf(ip);
             lock (_gate)
             {
@@ -271,8 +273,11 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 while (_registrations.Count > 0 && now - _registrations.Peek() > TimeSpan.FromMinutes(1)) _registrations.Dequeue();
                 if (_registrations.Count >= RegistrationsPerMinute) return Error("rate");
                 var host = HostOf(address);
-                if (_entries.Keys.Count(k => HostOf(k) == host) >= MaxPerHost)
+                // Listed entries hold a host's places; entries still being probed are capped on their own and can't
+                // keep a host's real node off the list (a failed probe drops its entry at once).
+                if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is not null) >= MaxPerHost)
                     return new JsonObject { ["ok"] = false, ["error"] = "host", ["reason"] = $"one host may register at most {MaxPerHost} addresses" };
+                if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is null) >= MaxPerHost) return Error("rate");
                 _registrations.Enqueue(now);
                 _entries[address] = entry = new Entry();
             }
@@ -309,7 +314,10 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 lock (_gate)
                 {
                     // Many names for one machine count as that machine: over the cap, the entry goes without being dialled.
-                    crowded = _entries.Count(p => p.Key != address && p.Value.Machine == machine) >= MaxPerHost;
+                    // As for names, listed entries and entries still being probed are counted apart.
+                    var others = _entries.Where(p => p.Key != address && p.Value.Machine == machine).ToList();
+                    crowded = others.Count(p => p.Value.VerifiedAt is not null) >= MaxPerHost
+                              || others.Count(p => p.Value.VerifiedAt is null) >= MaxPerHost;
                     if (!crowded && _entries.TryGetValue(address, out var mine)) mine.Machine = machine;
                 }
             }
