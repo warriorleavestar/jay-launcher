@@ -1,0 +1,179 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:c="using:Amber.App.Views.Controls"
+             x:Class="Amber.App.Views.ImageThemeEditor"
+             x:DataType="vm:ImageThemeViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.slot-row">
+      <Setter Property="Padding" Value="10" />
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Grid.knob > TextBlock">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="FontSize" Value="{DynamicResource FontBodySmall}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="Button.swatch">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="Height" Value="32" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusSm}" />
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.swatch.selected">
+      <Setter Property="BorderBrush" Value="{DynamicResource TextPrimary}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid x:Name="EditorGrid" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="12">
+    <StackPanel x:Name="EditorColumn" Spacing="10">
+      <ItemsControl x:Name="SlotList" ItemsSource="{Binding Slots}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate DataType="vm:ImageSlotItem">
+            <Border Classes="slot-row" AutomationProperties.Name="{Binding Title}">
+              <Grid ColumnDefinitions="80,*" ColumnSpacing="12">
+                <Border Width="80" Height="54" VerticalAlignment="Top" CornerRadius="{DynamicResource RadiusSm}" ClipToBounds="True" Background="{DynamicResource Sunken}">
+                  <Image Source="{Binding Preview}" Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Grid.Column="1" Spacing="6">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                      <TextBlock Classes="hint" Text="{Binding Hint}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                      <Button Classes="secondary small" Content="{l:T theme.image.pick}" Click="Pick_Click" AutomationProperties.Name="{Binding Title}" />
+                      <Button Classes="ghost small" Content="{l:T theme.image.clear}" Command="{Binding ClearCommand}" IsVisible="{Binding HasPicture}" />
+                    </StackPanel>
+                  </Grid>
+                  <TextBlock Classes="hint" Text="{l:T theme.image.drop}" IsVisible="{Binding !HasPicture}" />
+                  <TextBlock Classes="hint" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" IsVisible="{Binding HasPicture}" />
+                  <StackPanel Spacing="4" IsVisible="{Binding HasPicture}">
+                    <Grid Classes="knob" ColumnDefinitions="128,*" ColumnSpacing="8" IsVisible="{Binding ShowsDim}">
+                      <TextBlock Text="{l:T theme.image.dim}" />
+                      <Slider Grid.Column="1" Minimum="0" Maximum="{Binding MaxDim}" Value="{Binding Dim}" SmallChange="0.05" LargeChange="0.1" />
+                    </Grid>
+                    <Grid Classes="knob" ColumnDefinitions="128,*" ColumnSpacing="8" IsVisible="{Binding ShowsBlur}">
+                      <TextBlock Text="{l:T theme.image.blur}" />
+                      <Slider Grid.Column="1" Minimum="0" Maximum="{Binding MaxBlur}" Value="{Binding Blur}" SmallChange="1" LargeChange="5" />
+                    </Grid>
+                    <Grid Classes="knob" ColumnDefinitions="128,*" ColumnSpacing="8" IsVisible="{Binding ShowsFocus}">
+                      <TextBlock Text="{l:T theme.image.focus_x}" />
+                      <Slider Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding FocusX}" SmallChange="0.05" LargeChange="0.1" />
+                    </Grid>
+                    <Grid Classes="knob" ColumnDefinitions="128,*" ColumnSpacing="8" IsVisible="{Binding ShowsFocus}">
+                      <TextBlock Text="{l:T theme.image.focus_y}" />
+                      <Slider Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding FocusY}" SmallChange="0.05" LargeChange="0.1" />
+                    </Grid>
+                    <Grid Classes="knob" ColumnDefinitions="128,*" ColumnSpacing="8" IsVisible="{Binding IsMascot}">
+                      <TextBlock Text="{l:T theme.image.size}" />
+                      <Slider Grid.Column="1" Minimum="{Binding MinSize}" Maximum="{Binding MaxSize}" Value="{Binding Size}" SmallChange="0.05" LargeChange="0.1" />
+                    </Grid>
+                    <Grid Classes="knob" ColumnDefinitions="128,*" ColumnSpacing="8" IsVisible="{Binding IsMascot}">
+                      <TextBlock Text="{l:T theme.image.opacity}" />
+                      <Slider Grid.Column="1" Minimum="{Binding MinOpacity}" Maximum="1" Value="{Binding Opacity}" SmallChange="0.05" LargeChange="0.1" />
+                    </Grid>
+                    <CheckBox IsVisible="{Binding IsMascot}" IsChecked="{Binding OnLeft}" Content="{l:T theme.image.on_left}" />
+                  </StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <StackPanel Spacing="6">
+        <TextBlock Text="{l:T theme.image.colors}" FontWeight="SemiBold" />
+        <TextBlock Classes="hint" Text="{l:T theme.image.colors_hint}" TextWrapping="Wrap" />
+        <ItemsControl x:Name="SwatchList" ItemsSource="{Binding Swatches}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="8" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:SwatchItem">
+              <Button Classes="swatch" Classes.selected="{Binding IsSelected}" Background="{Binding Brush}" Command="{Binding PickCommand}"
+                      ToolTip.Tip="{Binding Name}" AutomationProperties.Name="{Binding Name}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+        <TextBlock Text="{l:T theme.image.name}" VerticalAlignment="Center" />
+        <TextBox x:Name="ImageThemeName" Grid.Column="1" Text="{Binding Name}" MaxLength="64" MaxWidth="360" HorizontalAlignment="Stretch"
+                 AutomationProperties.Name="{l:T theme.image.name}" />
+      </Grid>
+
+      <WrapPanel ItemSpacing="8" LineSpacing="8">
+        <Button x:Name="ApplyImageThemeButton" Classes="primary" Content="{l:T theme.image.apply}" Command="{Binding ApplyCommand}" IsEnabled="{Binding CanFinish}" />
+        <Button x:Name="SaveImageThemeButton" Classes="secondary" Content="{l:T theme.image.save}" Click="Save_Click" IsEnabled="{Binding CanFinish}" />
+        <Button Classes="ghost" Content="{l:T theme.image.close}" Command="{Binding CloseCommand}" />
+      </WrapPanel>
+      <TextBlock x:Name="ImageThemeStatus" Classes="hint" Text="{Binding Status}" TextWrapping="Wrap"
+                 IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" AutomationProperties.LiveSetting="Polite" />
+    </StackPanel>
+
+    <!-- Live preview: a small window with the pictures and the colours picked from them. -->
+    <StackPanel x:Name="PreviewColumn" Grid.Column="1" Spacing="6">
+      <TextBlock Classes="hint" Text="{l:T theme.image.preview}" />
+      <Border x:Name="ImageThemePreview" Width="360" Height="224" CornerRadius="{DynamicResource RadiusMd}" ClipToBounds="True"
+              Background="{Binding PreviewPage}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1">
+        <Grid ColumnDefinitions="64,*">
+          <c:SlotImage x:Name="PreviewBackground" Grid.ColumnSpan="2" Slot="background" UseTheme="False" Picture="{Binding Background.Preview}"
+                       Settings="{Binding Background.Settings}" Cover="{Binding PreviewPage}">
+            <c:SlotImage.Effect>
+              <BlurEffect Radius="{Binding Background.PreviewBlur}" />
+            </c:SlotImage.Effect>
+          </c:SlotImage>
+          <Panel Background="{Binding PreviewSidebar}">
+            <c:SlotImage Slot="sidebar" UseTheme="False" Picture="{Binding Sidebar.Preview}" Settings="{Binding Sidebar.Settings}" Cover="{Binding PreviewSidebar}" />
+            <StackPanel Margin="12,14" Spacing="10">
+              <Border Height="8" CornerRadius="2" Background="{Binding PreviewAccent}" />
+              <Border Height="8" CornerRadius="2" Background="{Binding PreviewSidebarText}" Opacity="0.6" />
+              <Border Height="8" CornerRadius="2" Background="{Binding PreviewSidebarText}" Opacity="0.6" />
+              <Border Height="8" CornerRadius="2" Background="{Binding PreviewSidebarText}" Opacity="0.6" />
+            </StackPanel>
+          </Panel>
+          <Panel Grid.Column="1">
+            <c:SlotImage x:Name="PreviewMascot" Slot="mascot" UseTheme="False" Picture="{Binding Mascot.Preview}" Settings="{Binding Mascot.Settings}" />
+            <StackPanel Margin="12" Spacing="8">
+              <TextBlock Text="{Binding Name}" Foreground="{Binding PreviewText}" FontWeight="Bold" TextTrimming="CharacterEllipsis" />
+              <Border Height="64" CornerRadius="{DynamicResource RadiusSm}" ClipToBounds="True" Background="#33000000">
+                <Panel>
+                  <c:SlotImage Slot="banner" UseTheme="False" Picture="{Binding Banner.Preview}" Settings="{Binding Banner.Settings}" />
+                  <Border>
+                    <Border.Background>
+                      <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                        <GradientStop Color="#00000000" Offset="0" />
+                        <GradientStop Color="#99000000" Offset="1" />
+                      </LinearGradientBrush>
+                    </Border.Background>
+                  </Border>
+                  <TextBlock Text="{l:T library.continue}" Foreground="#F5F2EA" FontWeight="SemiBold" Margin="10,0,0,8" VerticalAlignment="Bottom" />
+                </Panel>
+              </Border>
+              <Border Background="{Binding PreviewSurface}" CornerRadius="{DynamicResource RadiusSm}" Padding="10" Width="170" HorizontalAlignment="Left">
+                <StackPanel Spacing="6">
+                  <Border Height="6" Width="120" HorizontalAlignment="Left" CornerRadius="2" Background="{Binding PreviewText}" Opacity="0.85" />
+                  <Border Height="6" Width="80" HorizontalAlignment="Left" CornerRadius="2" Background="{Binding PreviewMuted}" />
+                  <Border Height="22" Width="72" HorizontalAlignment="Left" CornerRadius="4" Background="{Binding PreviewAccent}" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </Panel>
+        </Grid>
+      </Border>
+    </StackPanel>
+  </Grid>
+</UserControl>
