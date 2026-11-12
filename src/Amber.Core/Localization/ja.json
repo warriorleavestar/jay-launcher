@@ -1358,7 +1358,7 @@
   "multiplayer.invite.cancel": "参加をキャンセル",
   "multiplayer.identity.title": "このデバイスの身元",
   "multiplayer.identity.reset": "身元をリセット",
-  "multiplayer.identity.reset_hint": "リセットすると、あなたを信頼していたホストからは新しいメンバーとして扱われます。ルームを開いておらず、参加もしていないときだけリセットできます。",
+  "multiplayer.identity.reset_hint": "リセットすると、あなたを信頼していたホストからは新しいメンバーとして扱われます。ルームを開いておらず、参加もしていないときだけリセットできます。このパソコンの古い Jay は以前の身元（データフォルダーの identity.key）を使い続けるので、使わないならそのファイルを削除してください。",
   "multiplayer.trusted.title": "信頼している人",
   "multiplayer.trusted.hint": "この人たちのノックは、有効な招待であれば自動で承認されます。保存するのは公開鍵と名前だけです。",
   "multiplayer.trusted.empty": "信頼している人はまだいません",

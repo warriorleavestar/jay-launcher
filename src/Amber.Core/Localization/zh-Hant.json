@@ -1358,7 +1358,7 @@
   "multiplayer.invite.cancel": "取消加入",
   "multiplayer.identity.title": "這台裝置的身分",
   "multiplayer.identity.reset": "重設身分",
-  "multiplayer.identity.reset_hint": "換一個新身分後，之前信任你的房主會把你當成新成員。只能在沒開房間、沒加入房間時重設。",
+  "multiplayer.identity.reset_hint": "換一個新身分後，之前信任你的房主會把你當成新成員。只能在沒開房間、沒加入房間時重設。這台電腦上的舊版 Jay 還會用舊身分（資料目錄裡的 identity.key），不用舊版就可以刪掉這個檔案。",
   "multiplayer.trusted.title": "信任的人",
   "multiplayer.trusted.hint": "這些人用任何一張有效邀請敲門都會直接批准。清單只存公鑰和名字。",
   "multiplayer.trusted.empty": "還沒有信任的人",

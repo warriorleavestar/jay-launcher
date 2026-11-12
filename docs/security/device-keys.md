@@ -14,13 +14,13 @@ HKDF-SHA256 over the seed gives three keys, one per job (`DeviceKeys`):
 | `jay-device-sig-ed-v1` | Ed25519 | Device signatures |
 | `jay-device-sig-mldsa-v1` | ML-DSA-65 seed | Device signatures |
 
-A device signature (`HybridSignature`) is both signatures over the same bytes. It counts only when both verify. Every use has its own domain string.
+A device signature (`HybridSignature`) is both signatures over the same bytes. It counts only when both verify. Every use has its own domain string. With BouncyCastle (no system ML-DSA), the seed copies Jay makes are zeroed after use, but the keys BouncyCastle expands from them live in managed memory it doesn't let Jay clear.
 
 Versions before device seeds keep a bare X25519 key in `identity.key`. When `device.key` doesn't exist yet, that key is kept as the handshake key, so hosts and friends still know the device, and a seed is added for the two signing keys. `device.key` then stores `0x03` ‖ the X25519 private key ‖ the seed. Resetting the identity gives a seed-only device like any new one.
 
 If `device.key` is damaged and `identity.key` is still there, the handshake key is taken from `identity.key` again with new signing keys, so hosts and friends keep knowing the device.
 
-`identity.key` is only read, never written or moved. An older version that shares the data folder, or that the user goes back to, still finds its own identity and can't overwrite the new file. This also means that after resetting the identity, the old X25519 key stays in `identity.key`, and an older version would use it again. To retire it everywhere, delete `identity.key` by hand after the reset; Jay doesn't, because older versions may still need it.
+`identity.key` is only read, never written or moved. An older version that shares the data folder, or that the user goes back to, still finds its own identity and can't overwrite the new file. This also means that after resetting the identity, the old X25519 key stays in `identity.key`, and an older version would use it again. To retire it everywhere, delete `identity.key` by hand after the reset; Jay doesn't, because older versions may still need it. A reset also writes `identity.retired`, so this version never takes the old key back from `identity.key`, even when `device.key` is damaged or missing; the reset hint in the app says the same.
 
 The device code (`JAYF1-`, `DeviceFingerprint`) stays a separate key because the user must be able to rotate it on its own.
 

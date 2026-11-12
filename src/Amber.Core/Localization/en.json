@@ -1389,7 +1389,7 @@
   "multiplayer.invite.cancel": "Cancel join",
   "multiplayer.identity.title": "This device's identity",
   "multiplayer.identity.reset": "Reset identity",
-  "multiplayer.identity.reset_hint": "After a reset, hosts who trusted you will treat you as a new member. You can only reset while not hosting or in a room.",
+  "multiplayer.identity.reset_hint": "After a reset, hosts who trusted you will treat you as a new member. You can only reset while not hosting or in a room. An older Jay version on this computer still uses the old identity (identity.key in the data folder); delete that file if you don't use one.",
   "multiplayer.trusted.title": "Trusted people",
   "multiplayer.trusted.hint": "Knocks from these people are approved automatically with any valid invite. Only their public key and name are stored.",
   "multiplayer.trusted.empty": "No trusted people yet",
