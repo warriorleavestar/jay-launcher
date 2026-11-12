@@ -45,6 +45,8 @@ public sealed class SplitPathTests
         Assert.Equal("tcp://127.0.0.1:40002/10.236.2.1:47659", guest[guest.IndexOf("--port-forward") + 1]);
         Assert.StartsWith("10.236.2.", guest[guest.IndexOf("--ipv4") + 1]);
         Assert.NotEqual(SplitPathArgs.HostIp(2), guest[guest.IndexOf("--ipv4") + 1]);
+        // Not drawn at random: the same address every time it is built.
+        Assert.Equal(guest[guest.IndexOf("--ipv4") + 1], SplitPathArgs.Build(new SplitPathOptions(2, net, false, [Community], 15002, LocalLegPort: 40002))[guest.IndexOf("--ipv4") + 1]);
         Assert.Contains("--disable-p2p", guest);
     }
 
@@ -75,13 +77,35 @@ public sealed class SplitPathTests
         Assert.False(EasyTierArgs.SplitsOnThisInstance(host with { Tun = true }));
     }
 
+    /// <summary>
+    /// A member's address on an extra network has the same last part as on the room's own network, so members that don't
+    /// clash there don't clash on the extra paths either.
+    /// </summary>
+    [Fact]
+    public void AMembersExtraAddressFollowsItsRoomAddress()
+    {
+        var net = SplitNet.Create();
+        var (_, memberRoom) = Rooms(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto, 3));
+        var seen = new Dictionary<int, string>();
+        foreach (var machine in Enumerable.Range(0, 40).Select(i => $"machine-{i}"))
+        {
+            var main = EasyTierArgs.VirtualIp(new EasyTierOptions(memberRoom, false, [Community], 15000) { MachineId = machine });
+            var host = EasyTierArgs.JoinerHost(machine);
+            Assert.EndsWith("." + host, main);
+            for (var i = 1; i <= 2; i++)
+                Assert.Equal($"10.236.{i}.{host}", SplitPathArgs.MemberIp(new SplitPathOptions(i, net, false, [Community], 15001, 40001, MemberHost: host)));
+            seen.TryAdd(host, machine);
+        }
+        Assert.True(seen.Count > 1);
+    }
+
     // ---- operator groups and planning ----
 
     [Theory]
     [InlineData("tcp://a.relay.example.com:11010", "tcp://b.relay.example.com:11010", true)]
     [InlineData("tcp://relay.example.co.uk:11010", "udp://other.example.co.uk:11011", true)]
     [InlineData("tcp://relay.example.co.uk:11010", "tcp://relay.another.co.uk:11010", false)]
-    [InlineData("tcp://203.0.113.5:11010", "tcp://203.0.200.9:11010", true)]
+    [InlineData("tcp://198.18.1.5:11010", "tcp://198.18.200.9:11010", true)]
     [InlineData("tcp://203.0.113.5:11010", "tcp://198.51.100.9:11010", false)]
     [InlineData("tcp://relay.example.com:11010", "tcp://relay.example.net:11010", false)]
     public void NodesGroupByDomainOrAddressRange(string a, string b, bool same) =>
@@ -178,6 +202,107 @@ public sealed class SplitPathTests
         Assert.NotNull(SplitPathPlanner.Check(relayed, [extra]));
         Assert.NotNull(SplitPathPlanner.Check(direct, [null]));
         Assert.NotNull(SplitPathPlanner.Check(direct, [extra, null]));
+    }
+
+    // ---- the watch ----
+
+    private static readonly PeerInfo DirectHost = new("amber-host", EasyTierArgs.HostIp, "p2p", 20, "udp");
+
+    private static IReadOnlyList<SplitPathOptions> TwoExtraPaths()
+    {
+        var split = SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto, 3);
+        return [.. Enumerable.Range(1, 2).Select(i => new SplitPathOptions(i, split.Nets[i - 1], false, [Community], 15000 + i, 40000 + i, MemberHost: 7))];
+    }
+
+    private static async Task<bool> Eventually(Func<bool> condition)
+    {
+        for (var i = 0; i < 200 && !condition(); i++) await Task.Delay(25);
+        return condition();
+    }
+
+    /// <summary>
+    /// A check that throws (a peer query failing, bad output, an instance going away) must not leave an earlier "ready"
+    /// in place: the paths count as not ready, Auto uses one path and Strict refuses.
+    /// </summary>
+    [Fact]
+    public async Task AFailingCheckFailsClosed()
+    {
+        var failing = 0;
+        Task<List<PeerInfo>> Extra(SplitPathOptions o, CancellationToken _) => Volatile.Read(ref failing) != 0
+            ? throw new InvalidOperationException("query broke")
+            : Task.FromResult<List<PeerInfo>>([new("jay-path-host", SplitPathArgs.HostIp(o.Index), "relay(2)", 90, "tcp")]);
+        var logged = new List<string>();
+        using var group = SplitPathGroup.ForTest(TwoExtraPaths(), _ => Task.FromResult<List<PeerInfo>>([DirectHost]), Extra,
+            TimeSpan.FromMilliseconds(20), line => { lock (logged) logged.Add(line); });
+        Assert.True(await Eventually(() => group.Problem is null));
+
+        Volatile.Write(ref failing, 1);
+        Assert.True(await Eventually(() => group.Problem is not null));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.split.check_failed"), group.Problem);
+        lock (logged) Assert.Contains(logged, l => l.Contains(nameof(InvalidOperationException)));
+        // It keeps checking: once the query works again the paths are ready again.
+        Volatile.Write(ref failing, 0);
+        Assert.True(await Eventually(() => group.Problem is null));
+        Volatile.Write(ref failing, 1);
+        Assert.True(await Eventually(() => group.Problem is not null));
+
+        var (_, member) = Rooms(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Strict));
+        var singles = 0;
+        Func<CancellationToken, Task<Stream>> single = _ =>
+        {
+            Interlocked.Increment(ref singles);
+            return Task.FromResult<Stream>(new MemoryStream());
+        };
+        IReadOnlyList<Func<CancellationToken, Task<Stream>>> legs = [.. Enumerable.Range(0, 2).Select(_ => (Func<CancellationToken, Task<Stream>>)(_ =>
+            Task.FromException<Stream>(new IOException())))];
+        var game = new SplitConnector(member, TunnelService.Game, single, legs, pathProblem: () => group.Problem);
+        await using (await game.OpenAsync(CancellationToken.None)) { }
+        Assert.Equal(1, singles);
+        var chat = new SplitConnector(member, TunnelService.Chat, single, legs, pathProblem: () => group.Problem);
+        await Assert.ThrowsAsync<IOException>(() => chat.OpenAsync(CancellationToken.None));
+        Assert.Equal(1, singles);
+    }
+
+    [Fact]
+    public async Task AMainPeerQueryThatThrowsAlsoFailsClosed()
+    {
+        using var group = SplitPathGroup.ForTest(TwoExtraPaths(), _ => throw new System.Text.Json.JsonException(),
+            (o, _) => Task.FromResult<List<PeerInfo>>([new("jay-path-host", SplitPathArgs.HostIp(o.Index), "relay(2)", 90, "tcp")]),
+            TimeSpan.FromMilliseconds(20));
+        Assert.True(await Eventually(() => group.Problem == Amber.Core.Localization.L.T("core.mp.split.check_failed")));
+    }
+
+    [Fact]
+    public async Task AStoppedWatchMeansNotReady()
+    {
+        var group = SplitPathGroup.ForTest(TwoExtraPaths(), _ => Task.FromResult<List<PeerInfo>>([DirectHost]),
+            (o, _) => Task.FromResult<List<PeerInfo>>([new("jay-path-host", SplitPathArgs.HostIp(o.Index), "relay(2)", 90, "tcp")]),
+            TimeSpan.FromMilliseconds(20));
+        Assert.True(await Eventually(() => group.Problem is null));
+        group.Dispose();
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.split.stopped"), group.Problem);
+        group.Dispose();
+    }
+
+    [Fact]
+    public void StartOnlySplitsWhenTheRoomAndSessionDo()
+    {
+        var work = Path.Combine(Path.GetTempPath(), "jay-split-" + Guid.NewGuid().ToString("N"));
+        Task<List<PeerInfo>> NoPeers(CancellationToken _) => Task.FromResult<List<PeerInfo>>([]);
+        var (plainHost, _) = Rooms(SplitSettings.None);
+        Assert.Null(SplitPathGroup.Start("missing-core", "missing-cli", new EasyTierOptions(plainHost, true, [Community], 15000), work, NoPeers));
+        var (hostRoom, memberRoom) = Rooms(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto, 3));
+        Assert.Null(SplitPathGroup.Start("missing-core", "missing-cli", new EasyTierOptions(hostRoom, true, [Community], 15000) { Tun = true }, work, NoPeers));
+        // A member needs one local port per leg.
+        Assert.Null(SplitPathGroup.Start("missing-core", "missing-cli",
+            new EasyTierOptions(memberRoom, false, [Community], 15000) { LocalSplitPorts = [40010, 40011] }, work, NoPeers));
+        // Three paths and one group of nodes: no instance is started and the reason is kept.
+        using var noPlan = SplitPathGroup.Start("missing-core", "missing-cli",
+            new EasyTierOptions(memberRoom, false, [Community], 15000) { LocalSplitPorts = [40010, 40011, 40012] }, work, NoPeers);
+        Assert.NotNull(noPlan);
+        Assert.Empty(noPlan.Instances);
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.split.no_independent_path"), noPlan.Problem);
+        Assert.False(Directory.Exists(work));
     }
 
     [Fact]

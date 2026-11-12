@@ -17,7 +17,10 @@ namespace Amber.Core.Multiplayer;
 /// </summary>
 /// <param name="Peers">Nodes this instance connects to. The host uses all its nodes; a member uses the one group the planner chose.</param>
 /// <param name="LocalLegPort">Member: the local port forwarded to the host's leg port over this network.</param>
-public sealed record SplitPathOptions(int Index, SplitNet Net, bool IsHost, IReadOnlyList<string> Peers, int RpcPort, int? LocalLegPort = null, bool QuicProxy = true)
+/// <param name="MemberHost">Member: the last part of its address on this network. The room's own instance uses the same one
+/// (<see cref="EasyTierArgs.JoinerHost"/>), so the extra networks add no address clash the room's own network doesn't have.</param>
+public sealed record SplitPathOptions(int Index, SplitNet Net, bool IsHost, IReadOnlyList<string> Peers, int RpcPort, int? LocalLegPort = null, bool QuicProxy = true,
+    int? MemberHost = null)
 {
     public override string ToString() => "SplitPathOptions";
 }
@@ -26,6 +29,9 @@ public sealed record SplitPathOptions(int Index, SplitNet Net, bool IsHost, IRea
 public static class SplitPathArgs
 {
     public static string HostIp(int index) => $"10.236.{index}.1";
+
+    public static string MemberIp(SplitPathOptions o) =>
+        $"10.236.{o.Index}.{(o.MemberHost ?? EasyTierArgs.JoinerHost(null)).ToString(CultureInfo.InvariantCulture)}";
 
     public static Dictionary<string, string> Environment(SplitPathOptions o) => new() { [EasyTierArgs.SecretVariable] = o.Net.Secret };
 
@@ -36,7 +42,7 @@ public static class SplitPathArgs
         var args = new List<string>
         {
             "--network-name", o.Net.Network,
-            "--ipv4", o.IsHost ? HostIp(o.Index) : $"10.236.{o.Index}.{RandomNumberGenerator.GetInt32(2, 255)}",
+            "--ipv4", o.IsHost ? HostIp(o.Index) : MemberIp(o),
             "--rpc-portal", $"127.0.0.1:{o.RpcPort}",
             "--hostname", o.IsHost ? "jay-path-host" : "jay-path-guest",
             "--instance-name", $"jay-path{o.Index}-{(o.IsHost ? "host" : "guest")}-{o.RpcPort}",
@@ -71,7 +77,7 @@ public static class SplitPathArgs
 public static class RelayOperators
 {
     /// <summary>Operator labels by node host, from a signed list. Empty until one exists.</summary>
-    public static IReadOnlyDictionary<string, string> Labels { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public static IReadOnlyDictionary<string, string> Labels { get; internal set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     private static readonly HashSet<string> SecondLevel = ["co", "com", "net", "org", "ac", "gov", "edu", "or", "ne", "go"];
 
@@ -145,24 +151,37 @@ public static class SplitPathPlanner
 /// <summary>
 /// The extra EasyTier instances of one room session, started with the room's own instance and ended with it.
 /// A member's group also watches whether the paths are ready (<see cref="Problem"/>); the split connector asks it before
-/// every connection. The host's instances join every node and serve only their leg port.
+/// every connection. The watch fails closed: when a check can't be completed, or the watch has stopped, the paths count as
+/// not ready. The host's instances join every node and serve only their leg port.
 /// </summary>
 public sealed class SplitPathGroup : IDisposable
 {
-    private readonly List<(SplitPathOptions Options, Process Process, IDisposable? Job)> _instances = [];
-    private readonly string _cliPath;
+    private readonly record struct PathInstance(SplitPathOptions Options, Process? Process, IDisposable? Job);
+
+    private readonly List<PathInstance> _instances = [];
+    private readonly bool _isHost;
     private readonly Func<CancellationToken, Task<List<PeerInfo>>>? _mainPeers;
+    private readonly Func<SplitPathOptions, CancellationToken, Task<List<PeerInfo>>> _extraPeers;
+    private readonly Action<string>? _log;
     private readonly CancellationTokenSource _cts = new();
+    private Task? _watch;
     private volatile string? _problem;
+    private int _disposed;
+
+    /// <summary>How often a member checks its paths.</summary>
+    internal TimeSpan Interval { get; init; } = TimeSpan.FromSeconds(3);
 
     /// <summary>Member: why the paths aren't usable right now (null when they are). Always null on the host.</summary>
-    public string? Problem => _problem;
+    public string? Problem => _isHost ? null : Volatile.Read(ref _disposed) != 0 ? L.T("core.mp.split.stopped") : _problem;
     public IReadOnlyList<SplitPathOptions> Instances => [.. _instances.Select(i => i.Options)];
 
-    private SplitPathGroup(string cliPath, Func<CancellationToken, Task<List<PeerInfo>>>? mainPeers, string? problem)
+    private SplitPathGroup(bool isHost, Func<CancellationToken, Task<List<PeerInfo>>>? mainPeers,
+        Func<SplitPathOptions, CancellationToken, Task<List<PeerInfo>>> extraPeers, Action<string>? log, string? problem)
     {
-        _cliPath = cliPath;
+        _isHost = isHost;
         _mainPeers = mainPeers;
+        _extraPeers = extraPeers;
+        _log = log;
         _problem = problem;
     }
 
@@ -171,7 +190,13 @@ public sealed class SplitPathGroup : IDisposable
     /// (no split settings, full-LAN mode, no leg ports).
     /// </summary>
     /// <param name="mainPeers">The room's own instance's peer list (member only, for the readiness check).</param>
-    public static SplitPathGroup? Start(EasyTierInstaller installer, EasyTierOptions o, string workDir, Func<CancellationToken, Task<List<PeerInfo>>> mainPeers)
+    /// <param name="log">Gets each extra instance's output (prefixed with its path) and a line when one stops.</param>
+    public static SplitPathGroup? Start(EasyTierInstaller installer, EasyTierOptions o, string workDir,
+        Func<CancellationToken, Task<List<PeerInfo>>> mainPeers, Action<string>? log = null) =>
+        Start(installer.CorePath, installer.CliPath, o, workDir, mainPeers, log);
+
+    internal static SplitPathGroup? Start(string corePath, string cliPath, EasyTierOptions o, string workDir,
+        Func<CancellationToken, Task<List<PeerInfo>>> mainPeers, Action<string>? log = null)
     {
         var split = o.Room.Split;
         if (!split.Enabled || o.Tun || !o.Room.FromInvite || !o.Room.Tunnel.Wraps) return null;
@@ -179,21 +204,27 @@ public sealed class SplitPathGroup : IDisposable
         SplitPathPlan plan;
         if (o.IsHost) plan = new SplitPathPlan([.. Enumerable.Repeat(o.Peers, split.Paths - 1)], null);
         else plan = SplitPathPlanner.Plan(split.Paths, o.Peers, o.Room.Member?.Id ?? []);
-        var group = new SplitPathGroup(installer.CliPath, o.IsHost ? null : mainPeers, o.IsHost ? null : plan.Problem ?? L.T("core.mp.split.starting"));
+        var group = new SplitPathGroup(o.IsHost, o.IsHost ? null : mainPeers,
+            (path, ct) => EasyTierSession.QueryPeersAsync(cliPath, path.RpcPort, ct), log,
+            o.IsHost ? null : plan.Problem ?? L.T("core.mp.split.starting"));
         if (!plan.Ready) return group;
         try
         {
             for (var i = 1; i < split.Paths; i++)
             {
                 var options = new SplitPathOptions(i, split.Nets[i - 1], o.IsHost, plan.ExtraPeers[i - 1], EasyTierArgs.FreeTcpPort(),
-                    o.IsHost ? null : o.LocalSplitPorts![i], o.QuicProxy);
-                var (process, job) = EasyTierSession.Launch(installer.CorePath, SplitPathArgs.Build(options), SplitPathArgs.Environment(options),
+                    o.IsHost ? null : o.LocalSplitPorts![i], o.QuicProxy, o.IsHost ? null : EasyTierArgs.JoinerHost(o.MachineId));
+                var (process, job) = EasyTierSession.Launch(corePath, SplitPathArgs.Build(options), SplitPathArgs.Environment(options),
                     Path.Combine(workDir, $"path{i}"));
-                process.OutputDataReceived += (_, _) => { };
-                process.ErrorDataReceived += (_, _) => { };
+                var prefix = $"path{i}: ";
+                var index = i;
+                process.OutputDataReceived += (_, e) => { if (e.Data is { } line) log?.Invoke(prefix + line); };
+                process.ErrorDataReceived += (_, e) => { if (e.Data is { } line) log?.Invoke(prefix + line); };
+                process.EnableRaisingEvents = true;
+                process.Exited += (_, _) => { if (Volatile.Read(ref group._disposed) == 0) log?.Invoke(L.F("core.mp.split.path_exited", index)); };
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
-                group._instances.Add((options, process, job));
+                group._instances.Add(new PathInstance(options, process, job));
             }
         }
         catch
@@ -201,43 +232,87 @@ public sealed class SplitPathGroup : IDisposable
             group.Dispose();
             throw;
         }
-        if (!o.IsHost) _ = Task.Run(() => group.WatchAsync(group._cts.Token));
+        if (!o.IsHost) group.StartWatch();
         return group;
     }
 
-    private async Task WatchAsync(CancellationToken ct)
+    /// <summary>Tests: a member group over the given paths with no processes behind them.</summary>
+    internal static SplitPathGroup ForTest(IReadOnlyList<SplitPathOptions> paths, Func<CancellationToken, Task<List<PeerInfo>>> mainPeers,
+        Func<SplitPathOptions, CancellationToken, Task<List<PeerInfo>>> extraPeers, TimeSpan interval, Action<string>? log = null)
+    {
+        var group = new SplitPathGroup(false, mainPeers, extraPeers, log, L.T("core.mp.split.starting")) { Interval = interval };
+        group._instances.AddRange(paths.Select(p => new PathInstance(p, null, null)));
+        group.StartWatch();
+        return group;
+    }
+
+    private void StartWatch()
+    {
+        // The list doesn't change after this point; the watch still works on its own copy.
+        var instances = _instances.ToArray();
+        _watch = Task.Run(() => WatchAsync(instances, _cts.Token));
+    }
+
+    private async Task WatchAsync(PathInstance[] instances, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                var main = (await _mainPeers!(ct)).FirstOrDefault(p => p.Ip == EasyTierArgs.HostIp && p.Cost != "Local");
-                var extra = new List<PeerInfo?>();
-                foreach (var (options, process, _) in _instances)
-                {
-                    if (process.HasExited)
-                    {
-                        extra.Add(null);
-                        continue;
-                    }
-                    var peers = await EasyTierSession.QueryPeersAsync(_cliPath, options.RpcPort, ct);
-                    extra.Add(peers.FirstOrDefault(p => p.Ip == SplitPathArgs.HostIp(options.Index) && p.Cost != "Local"));
-                }
-                _problem = SplitPathPlanner.Check(main, extra);
-                await Task.Delay(TimeSpan.FromSeconds(3), ct);
+                _problem = await CheckAsync(instances, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception e)
+            {
+                // Fail closed: a check that didn't finish never leaves an earlier "ready" in place.
+                _problem = L.T("core.mp.split.check_failed");
+                _log?.Invoke(L.T("core.mp.split.check_failed") + " (" + e.GetType().Name + ")");
+            }
+            try
+            {
+                await Task.Delay(Interval, ct);
             }
             catch (OperationCanceledException)
             {
-                return;
+                break;
             }
         }
+        _problem = L.T("core.mp.split.stopped");
+    }
+
+    private async Task<string?> CheckAsync(PathInstance[] instances, CancellationToken ct)
+    {
+        var main = (await _mainPeers!(ct)).FirstOrDefault(p => p.Ip == EasyTierArgs.HostIp && p.Cost != "Local");
+        var extra = new List<PeerInfo?>();
+        foreach (var path in instances)
+        {
+            if (path.Process is { HasExited: true })
+            {
+                extra.Add(null);
+                continue;
+            }
+            var peers = await _extraPeers(path.Options, ct);
+            extra.Add(peers.FirstOrDefault(p => p.Ip == SplitPathArgs.HostIp(path.Options.Index) && p.Cost != "Local"));
+        }
+        return SplitPathPlanner.Check(main, extra);
     }
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _cts.Cancel();
+        var watchEnded = true;
+        if (_watch is { } watch)
+        {
+            try { watchEnded = watch.Wait(TimeSpan.FromSeconds(5)); }
+            catch (AggregateException) { }
+        }
         foreach (var (_, process, job) in _instances)
         {
+            if (process is null) continue;
             try
             {
                 if (!process.HasExited) process.Kill(true);
@@ -248,6 +323,7 @@ public sealed class SplitPathGroup : IDisposable
             job?.Dispose();
         }
         _instances.Clear();
-        _cts.Dispose();
+        // A watch that didn't end in time may still touch the token; leave the source to the finalizer then.
+        if (watchEnded) _cts.Dispose();
     }
 }

@@ -208,7 +208,7 @@ public sealed class SplitConnector
                 (raw, leg, c) => TunnelHandshake.ConnectAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, _service, c, leg), ct);
             Interlocked.Exchange(ref _failures, 0);
             Interlocked.Increment(ref SplitConnections);
-            _log?.Invoke(L.F("core.mp.split.connected", _service, stream.LegCount));
+            _log?.Invoke(L.F(_service == TunnelService.Game ? "core.mp.split.connected_game" : "core.mp.split.connected_chat", stream.LegCount));
             LastReason = null;
             return stream;
         }

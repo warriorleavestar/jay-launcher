@@ -618,7 +618,7 @@ public sealed class EasyTierSession : IEasyTierSession
         process.BeginErrorReadLine();
         try
         {
-            session.SplitPaths = SplitPathGroup.Start(installer, options, workDir, session.PeersAsync);
+            session.SplitPaths = SplitPathGroup.Start(installer, options, workDir, session.PeersAsync, session.OnLine);
         }
         catch
         {

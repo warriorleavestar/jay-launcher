@@ -37,10 +37,11 @@ The split adds no MAC of its own, because each leg is already authenticated end 
 ## Paths
 
 - **Instances.** Path 0 is the room's own EasyTier instance; it also carries leg 0, on its own host port. Path *i* (1 or 2) is an extra instance:
-  - it joins `Split.Nets[i - 1]` on 10.236.*i*.0/24, with the host always at .1;
+  - it joins `Split.Nets[i - 1]` on 10.236.*i*.0/24, with the host always at .1 and a member at the same last address part it has on the room's own network (so the extra networks add no clash the room's network doesn't have);
   - it has no TUN device and no listener, and runs with `--disable-p2p`;
   - on the host it serves only port 47657 + *i*; on a member it serves nothing and forwards one local port to the host's leg port.
   - The host's extra instances join every node it knows.
+  - Their output goes to the room's log, prefixed with the path, and a stopped instance is logged.
 - **Choice.** A member's extra path *i* uses the nodes of one operator group, a different group per path.
   - **Groups.** A signed operator label wins when there is one. Otherwise nodes are grouped by registered domain, or by IPv4 /16 or IPv6 /32. This is a guess, and the interface doesn't claim the groups are different operators.
   - **Order.** Groups are ordered by HMAC-SHA256 keyed with the member's id. The same member always lands on the same groups, including after a rekey, and doesn't draw new relays per connection.
@@ -48,6 +49,7 @@ The split adds no MAC of its own, because each leg is already authenticated end 
   - the room's own instance reaches the host peer to peer (relayed, path 0 could go through the same node as an extra path);
   - every extra instance sees the host through its relay.
   - This is checked every 3 seconds. Until it holds, Auto uses one path and Strict refuses, both with the reason.
+  - The check fails closed: when it can't finish (a peer query failing, unreadable output, an instance gone) or has stopped, the paths count as not ready until a later check succeeds.
 - **Not in this version.**
   - Two relays of different groups when path 0 can't go direct. That needs path 0's own nodes restricted, which can cut a member off from the host.
   - Direct rooms (the direct bridge as path 0).
@@ -69,7 +71,8 @@ There is never a quiet fallback to fewer legs in the middle of a connection.
 
 - the extra instances' arguments, and leg 0 on the room's own instance;
 - operator groups, the plan (one group per path, fixed per member);
-- the readiness check, and Auto and Strict while paths aren't ready.
+- the readiness check, and Auto and Strict while paths aren't ready;
+- the watch failing closed when a check throws or has stopped, and when the extra instances start at all.
 
 `src/Amber.Core.Tests/SplitRoomTests.cs` covers the room side:
 
