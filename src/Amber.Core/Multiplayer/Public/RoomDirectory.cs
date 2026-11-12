@@ -215,24 +215,32 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             TcpClient client;
             try { client = await _listener.AcceptTcpClientAsync(_cts.Token); }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { break; }
+            var source = Source(client);
+            if (!TryOpen(source))
+            {
+                client.Dispose();
+                continue;
+            }
             if (!_slots.Wait(0))
             {
+                Close(source);
                 client.Dispose();
                 continue;
             }
             _ = Task.Run(async () =>
             {
-                try { await HandleAsync(client); }
+                try { await HandleAsync(client, source); }
                 finally
                 {
                     client.Dispose();
                     _slots.Release();
+                    Close(source);
                 }
             });
         }
     }
 
-    private async Task HandleAsync(TcpClient client)
+    private async Task HandleAsync(TcpClient client, string? source)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
@@ -253,14 +261,51 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             using var handshake = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
             handshake.CancelAfter(RoomDirectoryProtocol.HandshakeTimeout);
             if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, handshake.Token, Certificate) is not { } secure) return;
-            await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
+            await secure.Reply(Handle(secure.Request, source), deadline.Token);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
     }
 
-    /// <summary>The caller's address for per-source limits, or null for a loopback address.</summary>
-    private static string? Source(TcpClient client) =>
-        client.Client.RemoteEndPoint is IPEndPoint { Address: var address } && !IPAddress.IsLoopback(address) ? address.ToString() : null;
+    /// <summary>
+    /// The caller's address for per-source limits, or null when there is none to go by (this machine itself). A caller the
+    /// local EasyTier hands over comes from 127.b.c.d standing for its virtual address a.b.c.d (see
+    /// <see cref="PublicNetworkArgs.LoopbackSourceVariable"/>), and is told apart by that.
+    /// </summary>
+    internal static string? Source(IPAddress? address)
+    {
+        if (address is null) return null;
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback)) return null;
+        return address.ToString();
+    }
+
+    private static string? Source(TcpClient client) => Source((client.Client.RemoteEndPoint as IPEndPoint)?.Address);
+
+    /// <summary>Connections one source address may have open at once (only for callers with a source address).</summary>
+    public const int MaxConnectionsPerSource = 8;
+    private readonly Dictionary<string, int> _openBySource = new(StringComparer.Ordinal);
+
+    private bool TryOpen(string? source)
+    {
+        if (source is null) return true;
+        lock (_openBySource)
+        {
+            var open = _openBySource.GetValueOrDefault(source);
+            if (open >= MaxConnectionsPerSource) return false;
+            _openBySource[source] = open + 1;
+            return true;
+        }
+    }
+
+    private void Close(string? source)
+    {
+        if (source is null) return;
+        lock (_openBySource)
+        {
+            if (_openBySource.TryGetValue(source, out var open) && open > 1) _openBySource[source] = open - 1;
+            else _openBySource.Remove(source);
+        }
+    }
 
     /// <summary>处理一个请求（测试和框架的宿主直接调）。</summary>
     public JsonObject Handle(JsonObject request) => Handle(request, source: null);

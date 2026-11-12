@@ -143,7 +143,19 @@ public sealed record RelayLimits(int KBpsPerNetwork = 0, string? Networks = null
 
 public static class PublicNetworkArgs
 {
-    public static Dictionary<string, string> Environment(PublicNetworkOptions o) => new() { [EasyTierArgs.SecretVariable] = o.Profile.Secret };
+    /// <summary>
+    /// Jay's EasyTier build (JAY.md, item 8): with this set to "1", a connection handed to a local service comes from
+    /// 127.b.c.d for a caller at virtual address a.b.c.d instead of 127.0.0.1. Set for the directory node only, so the
+    /// directory can apply its per-source limits. Builds without the patch ignore it.
+    /// </summary>
+    public const string LoopbackSourceVariable = "JAY_ET_LOOPBACK_SOURCE";
+
+    public static Dictionary<string, string> Environment(PublicNetworkOptions o)
+    {
+        var env = new Dictionary<string, string> { [EasyTierArgs.SecretVariable] = o.Profile.Secret };
+        if (o.Directory) env[LoopbackSourceVariable] = "1";
+        return env;
+    }
 
     public static List<string> Build(PublicNetworkOptions o)
     {

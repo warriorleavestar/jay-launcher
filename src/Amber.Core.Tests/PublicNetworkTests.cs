@@ -314,6 +314,9 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         // 密钥只经环境变量传。
         Assert.DoesNotContain(PublicNetworkProfile.JaySecret, member);
         Assert.Equal(PublicNetworkProfile.JaySecret, PublicNetworkArgs.Environment(new PublicNetworkOptions(profile, 1, 2))[EasyTierArgs.SecretVariable]);
+        // Only the directory node asks EasyTier to hand callers over from their own loopback address.
+        Assert.False(PublicNetworkArgs.Environment(new PublicNetworkOptions(profile, 1, 2)).ContainsKey(PublicNetworkArgs.LoopbackSourceVariable));
+        Assert.Equal("1", PublicNetworkArgs.Environment(new PublicNetworkOptions(profile, 1, 2, Directory: true))[PublicNetworkArgs.LoopbackSourceVariable]);
 
         var directory = PublicNetworkArgs.Build(new PublicNetworkOptions(profile, 15000, 15001, Directory: true, Listeners: ["tcp://0.0.0.0:11010"]));
         Assert.Equal(PublicNetworkArgs.DirectoryIpWithMask, directory[directory.IndexOf("--ipv4") + 1]);
