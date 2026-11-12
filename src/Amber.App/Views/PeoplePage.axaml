@@ -133,9 +133,10 @@
             <Panel>
               <Border Classes="wing-edge" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="16,10,10,10">
-                <StackPanel Spacing="2" VerticalAlignment="Center">
+                <StackPanel Spacing="2" VerticalAlignment="Center" ToolTip.Tip="{l:T multiplayer.contacts.my_code_hint}">
                   <TextBlock Text="{l:T multiplayer.contacts.my_code}" FontWeight="SemiBold" />
-                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.my_code_hint}" />
+                  <!-- Left out in a short window (the tooltip still has it), so the box for their code stays in sight. -->
+                  <TextBlock x:Name="MyCodeHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.my_code_hint}" />
                 </StackPanel>
                 <Button x:Name="CopyMyCodeButton" Grid.Column="1" Classes="small" Content="{l:T common.copy}" Command="{Binding CopyMyCodeCommand}"
                         VerticalAlignment="Center" />
@@ -326,7 +327,15 @@
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
-                  <Button x:Name="RemoveFriendButton" Classes="small" Content="{l:T people.safety.remove}" Command="{Binding RemoveFriendCommand}" HorizontalAlignment="Left" />
+                  <Button x:Name="RemoveFriendButton" Classes="small" Content="{l:T people.safety.remove}" Command="{Binding RemoveFriendCommand}" HorizontalAlignment="Left"
+                          IsVisible="{Binding !IsConfirmingRemove}" />
+                  <StackPanel x:Name="RemoveFriendConfirm" Spacing="6" IsVisible="{Binding IsConfirmingRemove}">
+                    <TextBlock TextWrapping="Wrap" Text="{Binding RemoveQuestion}" />
+                    <WrapPanel ItemSpacing="8" LineSpacing="6">
+                      <safety:SafetyButton x:Name="KeepFriendButton" Kind="Safe" Content="{l:T people.safety.remove_keep}" Command="{Binding KeepFriendCommand}" />
+                      <safety:SafetyButton x:Name="ConfirmRemoveFriendButton" Kind="Confirm" Content="{l:T people.safety.remove_yes}" Command="{Binding ConfirmRemoveFriendCommand}" />
+                    </WrapPanel>
+                  </StackPanel>
                 </StackPanel>
               </Border>
 

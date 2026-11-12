@@ -271,6 +271,12 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Warning("multiplayer.contacts.bad_code"));
             return;
         }
+        await AddContactKeyAsync(key, fromInput: true);
+    }
+
+    /// <summary>Mails a hello to this device key. <paramref name="fromInput"/>: the key came from the code box, which is emptied once sent.</summary>
+    private async Task AddContactKeyAsync(byte[] key, bool fromInput)
+    {
         if (key.AsSpan().SequenceEqual(Identity.PublicKey))
         {
             SetStatus(StatusMessage.Warning("multiplayer.contacts.is_me"));
@@ -290,7 +296,7 @@ public sealed partial class MultiplayerViewModel
         {
             if (await post.AddAsync(key, ChatName, default))
             {
-                ContactCodeInput = "";
+                if (fromInput) ContactCodeInput = "";
                 SetStatus(StatusMessage.Success("multiplayer.contacts.hello_sent"));
             }
         }
@@ -347,6 +353,8 @@ public sealed partial class MultiplayerViewModel
     {
         if (item is null) return;
         Contacts.RemovePerson(item.Contact.PublicKey);
+        // Nobody I removed is let straight in any more: none of their devices, nor anything trusted under their account.
+        SetAutoAdmit(item, false);
         SetStatus(StatusMessage.Info("multiplayer.contacts.removed", item.Name));
     }
 
@@ -356,7 +364,19 @@ public sealed partial class MultiplayerViewModel
     {
         if (item is null) return;
         Contacts.Remove(item.Device.PublicKey);
+        ForgetRemovedDevice(item.Device.PublicKey, item.Person);
         SetStatus(StatusMessage.Info("multiplayer.contacts.device_removed", item.Person.Name));
+    }
+
+    /// <summary>
+    /// A removed device is no longer let straight in. The person's other devices keep their place, unless this was the last
+    /// one: then everything trusted under their account goes too.
+    /// </summary>
+    private void ForgetRemovedDevice(byte[] device, ContactItem? person)
+    {
+        if (person is null || person.Devices.Count <= 1) Trusted.Remove(device);
+        else Trusted.RemoveDevice(device);
+        RefreshTrusted();
     }
 
     // ---- mail pick-up ----
@@ -442,10 +462,12 @@ public sealed partial class MultiplayerViewModel
                 var device = Convert.FromHexString(key["contact-new-device:".Length..]);
                 if (handle.Choice == "remove")
                 {
+                    var person = FriendOf(device, null);
                     Contacts.Remove(device);
+                    ForgetRemovedDevice(device, person);
                     SetStatus(StatusMessage.Info("multiplayer.contacts.new_device_removed"));
                 }
-                else if (handle.Choice == "ok") Contacts.AcknowledgeDevice(device);
+                else if (handle.Choice == "ok") AcknowledgeDevice(device);
                 break;
             }
         }

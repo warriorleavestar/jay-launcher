@@ -139,7 +139,7 @@ public sealed partial class MultiplayerViewModel
         }
     }
 
-    private TrustedMembers Trusted => _trusted ??= CreateTrusted();
+    internal TrustedMembers Trusted => _trusted ??= CreateTrusted();
 
     private TrustedMembers CreateTrusted()
     {
@@ -235,7 +235,7 @@ public sealed partial class MultiplayerViewModel
             Identity.KeyPair, () => _credentials ?? throw new InvalidOperationException(), pub => !Child.AlwaysAskKnock && Trusted.IsTrusted(pub), AskApprovalAsync, members,
             line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line), book, listenUdpPort, () => HostDevicePolicy, () => HostAccountPolicy,
             () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)),
-            account => !Child.AlwaysAskKnock && Trusted.IsTrustedJayAccount(account), () => jayCertificate, () => Child.AlwaysAskKnock,
+            AccountMayAutoAdmit, () => jayCertificate, () => Child.AlwaysAskKnock,
             direct is null ? null : direct.Offer,
             name => Dispatcher.UIThread.Post(() => OnRelayOnlyRefused(name)));
         if (direct is not null)
@@ -494,10 +494,7 @@ public sealed partial class MultiplayerViewModel
         if (card is null || card.Decision.Task.IsCompleted) return;
         // "Let them in automatically next time": add to friends before answering.
         if (card.TrustAfter && card.CanTrustAfter && !Trusted.IsTrusted(card.Request.PublicKey))
-        {
-            Trusted.Add(card.Request.PublicKey, card.Request.Name, card.Request.JayAccount);
-            RefreshTrusted();
-        }
+            TrustKnocker(card.Request.PublicKey, card.Request.Name, card.Request.JayAccount);
         card.Decision.TrySetResult(true);
     }
 
@@ -620,8 +617,7 @@ public sealed partial class MultiplayerViewModel
     private void TrustMember(MemberItem? member)
     {
         if (member is null || member.Trusted) return;
-        Trusted.Add(member.PublicKey, member.Name, member.JayAccount);
-        RefreshTrusted();
+        TrustKnocker(member.PublicKey, member.Name, member.JayAccount);
         var index = Members.IndexOf(member);
         if (index >= 0) Members[index] = member with { Trusted = true };
         SetStatus(StatusMessage.Success("multiplayer.invite.trusted", member.Name, member.Fingerprint));

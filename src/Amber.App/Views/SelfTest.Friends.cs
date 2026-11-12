@@ -163,6 +163,9 @@ internal sealed partial class SelfTest
         window.Width = 600;
         window.Height = 420;
         await Task.Delay(500);
+        Check("矮窗口：我的码下面那行说明收起（悬停还看得到），【添加】不用滚就整个在窗口里", !Shown("MyCodeHint") && Dispatcher.UIThread.Invoke(() =>
+            page.FindControl<Button>("AddFriendCodeButton") is { IsEffectivelyVisible: true } add && add.TranslatePoint(new Point(0, 0), window) is { } at
+            && at.Y >= 0 && at.Y + add.Bounds.Height <= window.Bounds.Height + 0.5));
         Check("矮窗口（600×420）里对表情：面板不超出窗口，× 还在，里面能滚到【一样，加为朋友】", Dispatcher.UIThread.Invoke(() =>
         {
             var card = page.AddFriendCard;
@@ -180,6 +183,7 @@ internal sealed partial class SelfTest
         window.Width = 1440;
         window.Height = 900;
         await Task.Delay(400);
+        Check("窗口高了，我的码下面那行说明回来", Shown("MyCodeHint"));
         Press(same);
         await Task.Delay(400);
         Check("点【一样，加为朋友】：Robin 进了朋友列表，请求没了", people.Friends.SingleOrDefault()?.Name == "Robin" && !mp.HasContactRequests && people.Badge == 0
@@ -379,6 +383,16 @@ internal sealed partial class SelfTest
         });
         await Task.Delay(300);
         Press(Named<Button>("RemoveFriendButton"));
+        await Task.Delay(400);
+        Check("【从朋友里移除】先问一句，写 TA 的名字，焦点在【留着】", people.IsConfirmingRemove && Shown("RemoveFriendConfirm") && !Shown("RemoveFriendButton")
+            && people.RemoveQuestion.Contains("Robin") && Named<Control>("KeepFriendButton") is { } keep && Dispatcher.UIThread.Invoke(() => keep.IsFocused)
+            && people.Friends.Any(f => f.Name == "Robin"));
+        Press(Named<Button>("KeepFriendButton"));
+        await Task.Delay(300);
+        Check("【留着】：TA 还在，问题收起", !people.IsConfirmingRemove && Shown("RemoveFriendButton") && people.Friends.Any(f => f.Name == "Robin"));
+        Press(Named<Button>("RemoveFriendButton"));
+        await Task.Delay(400);
+        Press(Named<Button>("ConfirmRemoveFriendButton"));
         await Task.Delay(400);
         Check("【从朋友里移除】：人没了，TA 邀请我的房间和请求条里的邀请也跟着没了", people.Friends.All(f => f.Name != "Robin") && people.Selected is null && mp.FriendRooms.Count == 0
             && main.Service.Requests.Pending.All(r => r.Spec.Kind != "contact-invite"), string.Join(",", people.Friends.Select(f => f.Name)));

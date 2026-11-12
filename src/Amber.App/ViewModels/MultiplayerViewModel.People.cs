@@ -123,6 +123,9 @@ public sealed partial class MultiplayerViewModel
     /// <summary>The most lines kept per friend.</summary>
     internal const int MaxFriendLines = 300;
 
+    /// <summary>Invite notes still waiting for a receipt (tests).</summary>
+    internal int InviteNotesWaiting => _inviteLines.Count;
+
     public ObservableCollection<MetPersonItem> MetPeople { get; } = [];
 
     /// <summary>Something the Friends page shows about people changed (who is in the room, who is let straight in, rooms I was invited to).</summary>
@@ -210,19 +213,23 @@ public sealed partial class MultiplayerViewModel
     /// <summary>"For a child" asks about every knock, whatever this switch says.</summary>
     internal bool KnocksAlwaysAsk => Child.AlwaysAskKnock;
 
-    /// <summary>The friend's knock is approved without asking me: one of their devices, or their Jay account, is on the list.</summary>
+    /// <summary>
+    /// The friend's knock is approved without asking me: one of their devices is on the list, or a device trusted under
+    /// their Jay account (one that knocked before we were friends). The account alone lets no other device of a friend in:
+    /// a device I have not confirmed yet always asks.
+    /// </summary>
     internal bool IsAutoAdmitted(ContactItem friend) =>
         friend.Devices.Any(d => Trusted.IsTrusted(d.PublicKey)) || Trusted.IsTrustedJayAccount(friend.JayAccount);
 
     /// <summary>
-    /// Turns "let them straight in" on or off for a friend: every device I have looked at goes on the list (a new device
-    /// waits until I confirm it), or every one of theirs comes off.
+    /// Turns "let them straight in" on or off for a friend: every device I have looked at goes on the list by its key alone
+    /// (a new device waits until I confirm it), or every one of theirs comes off.
     /// </summary>
     internal void SetAutoAdmit(ContactItem friend, bool on)
     {
         if (on)
         {
-            foreach (var d in friend.Devices.Where(d => d.MayBeAutoAdmitted)) Trusted.Add(d.PublicKey, friend.Contact.Name, d.JayAccount);
+            foreach (var d in friend.Devices.Where(d => d.MayBeAutoAdmitted)) Trusted.AddDevice(d.PublicKey, friend.Contact.Name);
         }
         else
         {
@@ -237,7 +244,8 @@ public sealed partial class MultiplayerViewModel
 
     internal void SetAutoAdmit(MetPersonItem person, bool on)
     {
-        if (on) Trusted.Add(person.PublicKey, person.Name, person.JayAccount);
+        // Only this device, as the switch says: someone I met is not a friend whose other devices I have checked.
+        if (on) Trusted.AddDevice(person.PublicKey, person.Name);
         else Trusted.Remove(person.PublicKey);
         RefreshTrusted();
         // The host's member list carries the same fact for the room console.
@@ -248,16 +256,54 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>
     /// Asks someone I have met to be friends. Their friend code is their device's public key, which the room already
-    /// showed me, so there is nothing to paste; the emoji check still follows.
+    /// showed me, so there is nothing to paste; the emoji check still follows. A code I pasted in the add panel stays there.
     /// </summary>
-    internal Task AddMetPersonAsync(MetPersonItem person)
-    {
-        ContactCodeInput = ContactCode.Format(person.PublicKey);
-        return AddContactCommand.ExecuteAsync(null);
-    }
+    internal Task AddMetPersonAsync(MetPersonItem person) => AddContactKeyAsync(person.PublicKey, fromInput: false);
 
     /// <summary>I looked at a friend's new device and it is theirs.</summary>
-    internal void AcknowledgeDevice(ContactDeviceItem device) => Contacts.AcknowledgeDevice(device.Device.PublicKey);
+    internal void AcknowledgeDevice(ContactDeviceItem device) => AcknowledgeDevice(device.Device.PublicKey);
+
+    /// <summary>
+    /// Confirms a friend's new device. When I let that friend straight in, the confirmed device joins their others on the
+    /// list; until now it had to knock.
+    /// </summary>
+    internal void AcknowledgeDevice(byte[] device)
+    {
+        var friend = FriendOf(device, null);
+        Contacts.AcknowledgeDevice(device);
+        if (friend is null || !IsAutoAdmitted(friend)) return;
+        Trusted.AddDevice(device, friend.Contact.Name);
+        RefreshTrusted();
+    }
+
+    /// <summary>The friend this device or Jay account belongs to (a verified contact), if any.</summary>
+    internal ContactItem? FriendOf(byte[]? device, string? jayAccount) => ContactList.FirstOrDefault(f =>
+        (device is not null && f.Devices.Any(d => d.PublicKey.AsSpan().SequenceEqual(device)))
+        || (jayAccount is not null && string.Equals(f.JayAccount, jayAccount, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// "Let them in from now on" on a knock or a room member: this device, kept with the Jay account it showed so that
+    /// removing the person later finds it. For a friend it is also their switch. A friend's account lets no other device in
+    /// (see <see cref="AccountMayAutoAdmit"/>); for anyone else it does.
+    /// </summary>
+    internal void TrustKnocker(byte[] device, string name, string? jayAccount)
+    {
+        if (FriendOf(device, jayAccount) is { } friend) SetAutoAdmit(friend, true);
+        Trusted.Add(device, name, jayAccount);
+        RefreshTrusted();
+    }
+
+    /// <summary>
+    /// A Jay account counts for a knock only for someone who is not my friend: a friend's devices are trusted one by one,
+    /// so a friend's new device asks until I confirm it. Runs on the knock thread, so it reads the contact book itself.
+    /// </summary>
+    internal bool AccountMayAutoAdmit(string? account)
+    {
+        if (Child.AlwaysAskKnock || !Trusted.IsTrustedJayAccount(account)) return false;
+        // Can't tell who is a friend: ask.
+        if (Contacts.Unreadable) return false;
+        return !Contacts.All.Any(c => c.Verified && string.Equals(c.JayAccount, account, StringComparison.OrdinalIgnoreCase));
+    }
 
     // ---- what is known about a friend ----
 
@@ -294,7 +340,14 @@ public sealed partial class MultiplayerViewModel
     {
         var lines = Conversation(PersonKey(friend));
         lines.Add(line);
-        while (lines.Count > MaxFriendLines) lines.RemoveAt(0);
+        while (lines.Count > MaxFriendLines)
+        {
+            var dropped = lines[0];
+            lines.RemoveAt(0);
+            // An invite note that scrolled out no longer waits for its receipt.
+            if (dropped.Delivery != DeliveryState.None)
+                foreach (var key in _inviteLines.Where(p => ReferenceEquals(p.Value, dropped)).Select(p => p.Key).ToList()) _inviteLines.Remove(key);
+        }
         return line;
     }
 

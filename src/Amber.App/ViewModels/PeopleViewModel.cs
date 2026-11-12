@@ -106,8 +106,9 @@ public sealed partial class PeopleViewModel : PageViewModel
     // The multiplayer page rebuilds its lists from scratch on every change (and a bound list box drops its selection
     // when its list is cleared): remember who was selected, a friend by safety code and someone I've met by key, and
     // select the same person again. The keys are forgotten only when the player picks someone else or goes back, or
-    // when the person is gone after a rebuild.
-    private string? _selectedKey;
+    // when the person is gone after a rebuild. A friend is remembered by every device's safety code, so removing one of
+    // their devices (even the one their name comes from) keeps them selected.
+    private HashSet<string>? _selectedKey;
     private string? _selectedMetKey;
 
     /// <summary>"For a child": friends are reached through public networks, and those are off.</summary>
@@ -130,15 +131,17 @@ public sealed partial class PeopleViewModel : PageViewModel
 
     partial void OnSelectedChanged(FriendRow? value)
     {
+        // A question about removing someone is about that person only.
+        IsConfirmingRemove = false;
         if (value is not null)
         {
             // Someone else than before: their safety codes start folded and the draft is not carried over.
-            if (_selectedKey is null || value.Friend.Devices.All(d => d.Fingerprint != _selectedKey))
+            if (_selectedKey is null || !value.Friend.Devices.Any(d => _selectedKey.Contains(d.Fingerprint)))
             {
                 ShowSafety = false;
                 Draft = "";
             }
-            _selectedKey = value.Friend.Fingerprint;
+            _selectedKey = [.. value.Friend.Devices.Select(d => d.Fingerprint)];
             _selectedMetKey = null;
             SelectedMet = null;
         }
@@ -162,7 +165,8 @@ public sealed partial class PeopleViewModel : PageViewModel
         Friends.Clear();
         foreach (var friend in _multiplayer.ContactList) Friends.Add(new FriendRow(friend));
         RefreshStates();
-        Selected = _selectedKey is null ? null : Friends.FirstOrDefault(f => f.Friend.Devices.Any(d => d.Fingerprint == _selectedKey));
+        var keys = _selectedKey;
+        Selected = keys is null ? null : Friends.FirstOrDefault(f => f.Friend.Devices.Any(d => keys.Contains(d.Fingerprint)));
         if (Selected is null) _selectedKey = null;
         NotifyList();
         NotifyFriend();
@@ -380,11 +384,32 @@ public sealed partial class PeopleViewModel : PageViewModel
     [RelayCommand]
     private void RemoveDevice(ContactDeviceItem? device) => _multiplayer.RemoveContactDeviceCommand.Execute(device);
 
+    /// <summary>
+    /// [Remove from friends] asks first: adding them back means comparing the emoji again, and the button sits right under
+    /// their devices. [Keep] is the safe default.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsConfirmingRemove { get; set; }
+
+    public string RemoveQuestion => Selected is { } row ? L.F("people.safety.remove_confirm", row.Name) : "";
+
     [RelayCommand]
     private void RemoveFriend()
     {
+        if (Selected is null) return;
+        OnPropertyChanged(nameof(RemoveQuestion));
+        IsConfirmingRemove = true;
+    }
+
+    [RelayCommand]
+    private void ConfirmRemoveFriend()
+    {
+        IsConfirmingRemove = false;
         if (Selected is { } row) _multiplayer.RemoveContactCommand.Execute(row.Friend);
     }
+
+    [RelayCommand]
+    private void KeepFriend() => IsConfirmingRemove = false;
 
     /// <summary>Narrow windows: back from the person to the list.</summary>
     [RelayCommand]

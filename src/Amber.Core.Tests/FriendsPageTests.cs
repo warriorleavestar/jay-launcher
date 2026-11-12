@@ -174,8 +174,23 @@ public sealed class FriendsPageTests
         Assert.False(people.ShowSafety);
         Assert.Equal("", people.Draft);
 
+        // Removing the friend asks first; [Keep] keeps them.
+        people.RemoveFriendCommand.Execute(null);
+        Assert.True(people.IsConfirmingRemove);
+        Assert.Contains("Robin", people.RemoveQuestion);
+        Assert.Equal(2, people.Friends.Count);
+        people.KeepFriendCommand.Execute(null);
+        Assert.False(people.IsConfirmingRemove);
+        Assert.Equal(2, people.Friends.Count);
+        // A question left open is not carried to someone else.
+        people.RemoveFriendCommand.Execute(null);
+        people.Selected = people.Friends.First(f => f.Name == "Sam");
+        Assert.False(people.IsConfirmingRemove);
+        people.Selected = people.Friends.First(f => f.Name == "Robin");
+
         // Removing the friend leaves nobody selected.
         people.RemoveFriendCommand.Execute(null);
+        people.ConfirmRemoveFriendCommand.Execute(null);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal("Sam", Assert.Single(people.Friends).Name);
         Assert.Null(people.Selected);
@@ -197,10 +212,10 @@ public sealed class FriendsPageTests
         people.AutoAdmit = true;
         Assert.True(people.AutoAdmit);
         Assert.True(raised > 0);
-        // Both of their computers, under their account; nobody else.
+        // Both of their computers, each by its own key and not under their account; nobody else.
         var list = StraightIn(root);
         Assert.Equal(2, list.Count);
-        Assert.All(list, m => Assert.Equal(bob.Address, m.JayAccount));
+        Assert.All(list, m => Assert.Null(m.JayAccount));
         Assert.Equal(2, mp.TrustedPeople.Count);
         people.Selected = people.Friends.First(f => f.Name == "Sam");
         Assert.False(people.AutoAdmit);
@@ -224,6 +239,69 @@ public sealed class FriendsPageTests
         Assert.Empty(StraightIn(root));
     });
 
+    /// <summary>
+    /// "Let them straight in" trusts a friend's devices one by one: a new device signed by their Jay account still knocks
+    /// and asks until I confirm it, and removing the device or the friend takes them off the list.
+    /// </summary>
+    [Fact]
+    public void AFriendsNewDeviceAsksUntilIConfirmItEvenWhenTheyAreLetStraightIn() => WithMain((_, main, people, root) =>
+    {
+        var mp = main.Multiplayer;
+        var me = mp.Identity.PublicKey;
+        using var bob = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        using var stranger = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        AddFriends(mp, Friend(1, "Bob", bob.Address));
+        people.Selected = people.Friends.Single();
+        people.AutoAdmit = true;
+        Assert.Null(Assert.Single(StraightIn(root)).JayAccount);
+
+        // Someone who is not my friend, trusted with their account from a knock: their other devices are let in.
+        mp.Trusted.Add(Key(9), "Sam", stranger.Address);
+        Assert.True(mp.AccountMayAutoAdmit(stranger.Address));
+
+        // Bob's new phone, signed by his account. Even with his account on the list (he knocked from another computer before
+        // we were friends), the account doesn't let the phone in: only the devices I confirmed are on the list.
+        mp.Trusted.Add(Key(8), "Bob", bob.Address);
+        Assert.False(mp.AccountMayAutoAdmit(bob.Address));
+        using var phone = X25519KeyPair.Generate();
+        var phoneBook = new ContactBook(Path.Combine(root, "bob-phone.json"))
+            { Me = phone.PublicKey, MyCertificate = bob.CertifyDevice(phone.PublicKey, "Phone", 0, DateTimeOffset.UtcNow) };
+        var reply = mp.Contacts.Receive(phone.PublicKey, phoneBook.StartAdd(phone.PublicKey, me, "Bob")!, "Me");
+        if (reply is not null && phoneBook.Receive(me, reply, "Bob") is { } nonce) mp.Contacts.Receive(phone.PublicKey, nonce, "Me");
+        Dispatcher.UIThread.RunJobs();
+        var row = people.Selected!;
+        Assert.True(row.DeviceItems.Single(d => d.Device.PublicKey.AsSpan().SequenceEqual(phone.PublicKey)).IsNew);
+        Assert.False(mp.Trusted.IsTrusted(phone.PublicKey));
+        Assert.False(mp.AccountMayAutoAdmit(bob.Address));
+
+        // I look at it and it is his: the switch is on, so it joins his other computer.
+        people.ConfirmDeviceCommand.Execute(row.DeviceItems.Single(d => d.IsNew));
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(mp.Trusted.IsTrusted(phone.PublicKey));
+        Assert.True(mp.Trusted.IsTrusted(Key(1)));
+
+        // Removing the phone takes only the phone off.
+        row = people.Selected!;
+        mp.RemoveContactDeviceCommand.Execute(row.DeviceItems.Single(d => d.Device.PublicKey.AsSpan().SequenceEqual(phone.PublicKey)));
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(mp.Trusted.IsTrusted(phone.PublicKey));
+        Assert.True(mp.Trusted.IsTrusted(Key(1)));
+        // The newest device gave the row its name; Bob stays open all the same.
+        Assert.Equal("Bob", people.Selected?.Name);
+
+        // "Let them in from now on" on a knock from a friend's device: that device. Their account is kept with it so that
+        // removing them finds it, and still lets no other device of theirs in.
+        mp.TrustKnocker(Key(7), "Bob", bob.Address);
+        Assert.True(mp.Trusted.IsTrusted(Key(7)));
+        Assert.False(mp.AccountMayAutoAdmit(bob.Address));
+
+        // Removing the friend takes everything of theirs off the list; Sam stays.
+        people.RemoveFriendCommand.Execute(null);
+        people.ConfirmRemoveFriendCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Sam", Assert.Single(StraightIn(root)).Name);
+    });
+
     [Fact]
     public void LetThemStraightInWorksForSomeoneIveMetAndAChildCanOnlyTurnItOff() => WithMain((service, main, people, root) =>
     {
@@ -240,7 +318,8 @@ public sealed class FriendsPageTests
         people.MetAutoAdmit = true;
         Dispatcher.UIThread.RunJobs();
         Assert.True(people.MetAutoAdmit);
-        Assert.Equal("Eve", Assert.Single(StraightIn(root)).Name);
+        // Only this device of theirs: no Jay account is kept with it.
+        Assert.Null(Assert.Single(StraightIn(root), m => m.Name == "Eve").JayAccount);
         // The room console shows the same fact on the member.
         Assert.True(mp.Members.Single(m => m.Name == "Eve").Trusted);
         Assert.Equal("Eve", people.SelectedMet?.Name);
@@ -408,10 +487,13 @@ public sealed class FriendsPageTests
         people.BackToListCommand.Execute(null);
         Assert.Null(people.Lines);
 
-        // Old lines fall off the top.
+        // Old lines fall off the top, and an invite note that falls off stops waiting for its receipt.
+        mp.SentInviteForTest("mail-2", mp.ContactList.First(f => f.Name == "Robin"));
+        Assert.Equal(1, mp.InviteNotesWaiting);
         for (var i = 0; i < MultiplayerViewModel.MaxFriendLines + 5; i++) mp.FriendMessageForTest(robin, "line " + i, mine: true);
         Assert.Equal(MultiplayerViewModel.MaxFriendLines, lines.Count);
         Assert.Equal("line " + (MultiplayerViewModel.MaxFriendLines + 4), lines[^1].Text);
+        Assert.Equal(0, mp.InviteNotesWaiting);
     });
 
     [Fact]
@@ -497,6 +579,12 @@ public sealed class FriendsPageTests
         Assert.Equal("play", main.Shell.Router.Current.ToString());
         Assert.False(main.PasteCode("hello"));
         Assert.Equal("play", main.Shell.Router.Current.ToString());
+
+        // The old friends card in multiplayer settings (saved in help links or history) opens the add panel too.
+        main.Shell.Navigate("play/settings#ContactsCard");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("people/add", main.Shell.Router.Current.ToString());
+        Assert.True(people.ShowAddPanel);
     });
 
     [Fact]
@@ -507,9 +595,13 @@ public sealed class FriendsPageTests
         mp.EnterTestRoom(HostRoom(mp), host: true);
         Enter(mp, "Eve", Key(5));
         people.SelectedMet = people.MetPeople.Single();
+        // A code I pasted for someone else waits in the add panel.
+        var pasted = ContactCode.Format(Key(6));
+        mp.ContactCodeInput = pasted;
         Wait(people.AddMetCommand.ExecuteAsync(null));
-        // Their friend code is the key the room already showed me. No public network here, so nothing was mailed.
-        Assert.Equal(ContactCode.Format(Key(5)), people.CodeInput);
+        // Their friend code is the key the room already showed me, so the code box is left alone. No public network here,
+        // so nothing was mailed.
+        Assert.Equal(pasted, mp.ContactCodeInput);
         Assert.Empty(mp.ContactRequests);
         Assert.False(people.IsAdding);
         mp.LeaveTestRoom();
