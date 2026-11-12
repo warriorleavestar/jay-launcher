@@ -623,4 +623,21 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.Null(await client.LookupAsync(lobby, default));
         Assert.Equal(["10.235.0.66", "10.235.0.7"], (await client.LookupAllAsync(lobby, default, _host.PublicKey)).Select(h => h.Ip).Order());
     }
+    [Fact]
+    public async Task ForgedListingsDoNotCrowdOutTheHiddenEntry()
+    {
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        // A hidden room, and someone holding its invite listing it in the open under the real (public) host key at
+        // more addresses than are ever tried.
+        var invite = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
+        for (var i = 0; i < DirectorySnapshots.MaxAddressesToTry + 2; i++)
+            await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Public) with { Invite = invite.ToString(), Ip = $"10.235.0.{60 + i}" }, _now), true, [], default);
+        await HideAsync(new RoomSigner(), invite.LobbyKey);
+        await client.Snapshots.RefreshAsync(client, default);
+        var hits = await client.LookupAllAsync(invite.LobbyKey, default, _host.PublicKey);
+        // The host's own entry is tried first; only a few of the listed addresses come after it.
+        Assert.Equal("10.235.0.7", hits[0].Ip);
+        Assert.Equal(1 + DirectorySnapshots.MaxAddressesToTry, hits.Count);
+        Assert.Equal(hits.Count, hits.DistinctBy(h => h.Ip).Count());
+    }
 }

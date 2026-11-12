@@ -288,9 +288,7 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   still gets a full snapshot. A bucket start is taken only after a slot is free, and both before anything is serialized. A delta bigger than
   a quarter of the full snapshot (and than a small reply) is answered with the full snapshot, which is serialized once
   per version; cached deltas are capped at 512 KB together.
-  6 requests per source address per minute (`rate`). Behind the EasyTier forward every request comes from loopback,
-  so the per-source limit (and the same limit on `rv.put` / `rec.put`) does not apply there; the slot and budget limits
-  do.
+  6 requests per source address per minute (`rate`).
 - **Reader side**: the first refresh is awaited only until it has been tried; if it failed (`busy`, `version`,
   unreachable) the reader gets that error at once, and the poller tries again after 2, 5 and 10 s before going back to
   every 60 s. Every wait is spread ±20% so readers don't come back all at once. A reader whose copies have all gone stale gets an error, not an empty answer.

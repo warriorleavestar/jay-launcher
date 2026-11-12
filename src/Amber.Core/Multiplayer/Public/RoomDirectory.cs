@@ -144,8 +144,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// </summary>
     public const int MinSnapshotRate = 128 * 1024;
     /// <summary>
-    /// Snapshots one source address may ask for per minute (readers poll once a minute). Only counted for real
-    /// addresses: behind the usual local forward every reader is loopback, and the slots and bucket above are the limit.
+    /// Snapshots one source address may ask for per minute (readers poll once a minute).
     /// </summary>
     public const int MaxSnapshotsPerSourcePerMinute = 6;
     private readonly SemaphoreSlim _snapshotSlots = new(MaxConcurrentSnapshots, MaxConcurrentSnapshots);
@@ -338,7 +337,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             await secure.Reply(old, quick.Token);
             return;
         }
-        // Behind a local port forward every reader looks like loopback; only real addresses are counted.
         if (source is not null && !(IPAddress.TryParse(source, out var address) && IPAddress.IsLoopback(address)))
         {
             bool limited;

@@ -444,15 +444,15 @@ public sealed class DirectorySnapshots
     /// <list type="bullet">
     /// <item>Without <paramref name="expectedHost"/>: one answer only when every entry gives the same host key and
     /// address; anything else is a conflict and gives nothing.</item>
-    /// <item>With it: every distinct address given for that host, for the caller to try in turn (the knock handshake
-    /// proves the host; a wrong address just fails).</item>
+    /// <item>With it: the distinct addresses given for that host, for the caller to try in turn (the knock handshake
+    /// proves the host; a wrong address just fails): every hidden-entry address, then a few listed ones.</item>
     /// </list>
     /// </summary>
     public IReadOnlyList<DirectoryHit> FindAll(ReadOnlySpan<byte> lobbyKey, byte[]? expectedHost = null)
     {
         var prefix = Convert.ToHexStringLower(HiddenEntry.Index(lobbyKey)) + ":";
         List<byte[]> candidates;
-        List<DirectoryHit> listed;
+        List<(DirectoryHit Hit, int Copy)> listed;
         var keyHex = Convert.ToHexStringLower(lobbyKey);
         var key = lobbyKey.ToArray();
         lock (_gate)
@@ -461,18 +461,34 @@ public sealed class DirectorySnapshots
             candidates = [.. _copies.Values.SelectMany(c => c.Hidden).Where(p => p.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(p => p.Value)];
             // A room listed with this invite in the open (public, direct or password rooms carry it) has no hidden entry;
             // its listing says where it is.
-            listed = [.. _copies.Values.SelectMany(c => c.Rooms.Values)
+            listed = [.. _copies.Values.SelectMany((c, i) => c.Rooms.Values
                 .Where(r => r.Lobby == keyHex || (JayInvite.TryParse(r.Invite, out var invite) && invite.LobbyKey.AsSpan().SequenceEqual(key)))
-                .Select(r => new DirectoryHit(r.Id, r.Ip, r.HostKey))];
+                .Select(r => (new DirectoryHit(r.Id, r.Ip, r.HostKey), i)))];
         }
-        var hits = candidates.Select(blob => HiddenEntry.Open(key, blob)).OfType<DirectoryHit>().Concat(listed)
-            .DistinctBy(h => (Convert.ToHexStringLower(h.HostKey), h.Ip, h.Id)).ToList();
+        var hidden = candidates.Select(blob => HiddenEntry.Open(key, blob)).OfType<DirectoryHit>().ToList();
         if (expectedHost is not null)
-            return [.. hits.Where(h => h.HostKey.AsSpan().SequenceEqual(expectedHost)).DistinctBy(h => h.Ip).Take(MaxAddressesToTry)];
-        var places = hits.DistinctBy(h => (Convert.ToHexStringLower(h.HostKey), h.Ip)).ToList();
+        {
+            bool Ours(DirectoryHit h) => h.HostKey.AsSpan().SequenceEqual(expectedHost);
+            // Hidden entries come first, all of them: only invite holders can write them, at most a few per invite.
+            var first = hidden.Where(Ours).DistinctBy(h => h.Ip).ToList();
+            // Then listed addresses, at most a few: those more directories give first, ties in random order so the
+            // same entries can't always come first.
+            var rest = listed.Where(l => Ours(l.Hit) && !first.Any(f => f.Ip == l.Hit.Ip))
+                .GroupBy(l => l.Hit.Ip)
+                .Select(g => (g.First().Hit, Copies: g.Select(l => l.Copy).Distinct().Count(), Order: Random.Shared.Next()))
+                .OrderByDescending(x => x.Copies).ThenBy(x => x.Order)
+                .Take(MaxAddressesToTry)
+                .Select(x => x.Hit);
+            return [.. first.Concat(rest)];
+        }
+        var places = hidden.Concat(listed.Select(l => l.Hit))
+            .DistinctBy(h => (Convert.ToHexStringLower(h.HostKey), h.Ip)).ToList();
         return places.Count == 1 ? places : [];
     }
 
-    /// <summary>At most this many addresses are tried for one host (each one that isn't the host learns of the attempt).</summary>
+    /// <summary>
+    /// At most this many listed addresses are tried for one host, after every hidden-entry address (each one that isn't
+    /// the host learns of the attempt).
+    /// </summary>
     public const int MaxAddressesToTry = 4;
 }
