@@ -80,7 +80,7 @@ The CI release job publishes the packages and `SHA256SUMS.txt` as a **draft** re
 ```bash
 # Anyone (no key needed): make the unsigned signature file. --seq is one more than the last release.
 gh release download v0.9.0 --pattern 'SHA256SUMS.txt' --dir rel
-jay-server release prepare --tag v0.9.0 --seq 12 --commit 9407746b1ce1dc4d977441c47dfdcb303363a62a --sums rel/SHA256SUMS.txt
+jay-server release prepare --tag v0.9.0 --seq 12 --commit <full commit id> --sums rel/SHA256SUMS.txt
 
 # Each of two trustees, on their own offline machine:
 jay-server release cosign --key jay-release.key --sums rel/SHA256SUMS.txt
@@ -123,7 +123,7 @@ When the fork's release job has published the zips, `SHA256SUMS.txt` and `SIZES.
 
 ```bash
 gh release download jay-v2.6.4-3 --repo Yumao-Feather/jay-easytier --pattern 'SHA256SUMS.txt' --dir et
-jay-server release prepare --component easytier --tag jay-v2.6.4-3 --seq 3 --commit <full commit id> --sums et/SHA256SUMS.txt
+jay-server release prepare --component easytier --tag jay-v2.6.4-3 --seq 3 --commit 9407746b1ce1dc4d977441c47dfdcb303363a62a --sums et/SHA256SUMS.txt
 
 # Each of two trustees, on their own offline machine (the review says it is an EasyTier build):
 jay-server release cosign --key jay-release.key --sums et/SHA256SUMS.txt

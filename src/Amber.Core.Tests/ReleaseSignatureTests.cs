@@ -8,7 +8,7 @@ using Amber.Server;
 
 namespace Amber.Core.Tests;
 
-/// <summary>Privacy plan items 2 and 3: releases need 2 of 3 trustees with both algorithms; list changes are signed by the old list.</summary>
+/// <summary>Privacy plan items 2 and 3: releases need ReleaseNeed of the trustees' release keys with both algorithms; list changes are signed by the old list.</summary>
 public sealed class ReleaseSignatureTests : IDisposable
 {
     private static readonly byte[][] Seeds = [.. Enumerable.Range(0, 5).Select(_ => RandomNumberGenerator.GetBytes(32))];

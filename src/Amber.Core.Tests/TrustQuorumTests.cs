@@ -159,6 +159,8 @@ public sealed class TrustQuorumTests
             memory.Remember(jay.NetworkName, "10.235.0.1", identity.PublicKey);
             var trust = new DirectoryTrust { Network = jay.NetworkName, Roots = jay.DirectoryRoots, RootsNeed = jay.DirectoryRootsNeed, Memory = memory };
 
+            // Control: without roots the same memory still accepts the remembered key, so the refusals below come from strict mode.
+            Assert.True(new DirectoryTrust { Network = jay.NetworkName, Memory = memory }.Accepts("10.235.0.1", identity.PublicKey, []));
             Assert.True(trust.IsStrict);
             Assert.False(trust.Accepts("10.235.0.1", identity.PublicKey, []));
             Assert.False(trust.Accepts("10.235.0.2", identity.PublicKey, []));
