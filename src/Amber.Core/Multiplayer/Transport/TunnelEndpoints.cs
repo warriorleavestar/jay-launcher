@@ -130,6 +130,12 @@ public sealed class TunnelServer : IAsyncDisposable
     /// <summary>Connections in their handshake right now.</summary>
     public int PendingHandshakes => Volatile.Read(ref _pending);
 
+    /// <summary>How long one connection may take to finish its handshake.</summary>
+    internal TimeSpan HandshakeTimeout { get; init; } = TunnelHandshake.Timeout;
+
+    /// <summary>Tests: runs on each accepted socket before anything else (to make that step fail).</summary>
+    internal Action<TcpClient>? BeforeServeForTest { get; init; }
+
     /// <param name="route">每种服务怎么处理；返回 null 表示不提供这个服务（连接会被关掉）。</param>
     public TunnelServer(RoomCode room, TunnelSettings settings, int port, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null, IPAddress? address = null)
     {
@@ -187,15 +193,23 @@ public sealed class TunnelServer : IAsyncDisposable
         }
         using (client)
         {
-            Pump.Tune(client);
-            Stream stream = client.GetStream();
+            Stream? stream = null;
             CancellationTokenRegistration revocation = default;
             try
             {
+                BeforeServeForTest?.Invoke(client);
+                Pump.Tune(client);
+                stream = client.GetStream();
                 TunnelService service;
                 if (_settings.Wraps)
                 {
-                    var accepted = await TunnelHandshake.AcceptWithMemberAsync(stream, _room, _settings.Mode, _settings.Disguise, ct);
+                    (SecureStream Stream, TunnelService Service, MemberEntry? Member)? accepted;
+                    using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                    {
+                        // Each connection has its own deadline to finish the handshake, whatever the handshake itself waits for.
+                        deadline.CancelAfter(HandshakeTimeout);
+                        accepted = await TunnelHandshake.AcceptWithMemberAsync(stream, _room, _settings.Mode, _settings.Disguise, deadline.Token);
+                    }
                     HandshakeDone();
                     if (accepted is null) return;
                     (stream, service, var member) = accepted.Value;
@@ -220,7 +234,8 @@ public sealed class TunnelServer : IAsyncDisposable
                 Interlocked.Increment(ref Accepted);
                 await handler(stream, ct);
             }
-            catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or PlatformNotSupportedException or InvalidDataException or ArgumentException)
+            catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or PlatformNotSupportedException
+                                       or InvalidDataException or ArgumentException or ObjectDisposedException or InvalidOperationException)
             {
                 // 出错断开：不给对面发“正常结束”。
                 (stream as IAuthenticatedStream)?.Abort();
@@ -231,7 +246,11 @@ public sealed class TunnelServer : IAsyncDisposable
             {
                 HandshakeDone();
                 await revocation.DisposeAsync();
-                await stream.DisposeAsync();
+                if (stream is not null)
+                {
+                    try { await stream.DisposeAsync(); }
+                    catch (Exception e) when (e is IOException or ObjectDisposedException or SocketException) { }
+                }
             }
         }
     }

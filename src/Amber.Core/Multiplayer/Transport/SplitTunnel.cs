@@ -38,6 +38,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     /// </summary>
     public const int MaxPendingHandshakes = 64;
 
+    /// <summary>How long one leg may take to finish its handshake.</summary>
+    internal TimeSpan HandshakeTimeout { get; init; } = TunnelHandshake.Timeout;
+
     /// <summary>Joined split connections handed to a handler.</summary>
     public int Accepted => Volatile.Read(ref _accepted);
     /// <summary>Legs refused before pairing (bad handshake, a service that isn't split, an unexpected failure).</summary>
@@ -108,10 +111,22 @@ public sealed class SplitTunnelServer : IAsyncDisposable
 
     private async Task HandleLegAsync(TcpClient client, int index, CancellationToken ct)
     {
-        Pump.Tune(client);
-        // The leg's stream owns the socket: once the leg is handed to the registry, the joined stream closes it.
-        Stream raw = new OwnedStream(client);
-        var leg = new SplitLeg(index, _room.Split.Paths, _room.Epoch);
+        Stream raw;
+        SplitLeg leg;
+        try
+        {
+            Pump.Tune(client);
+            // The leg's stream owns the socket: once the leg is handed to the registry, the joined stream closes it.
+            raw = new OwnedStream(client);
+            leg = new SplitLeg(index, _room.Split.Paths, _room.Epoch);
+        }
+        catch (Exception e) when (e is SocketException or ObjectDisposedException or IOException or InvalidOperationException or ArgumentException)
+        {
+            Interlocked.Decrement(ref _pending);
+            Interlocked.Increment(ref _rejected);
+            client.Dispose();
+            return;
+        }
         // Who has to close what: the raw socket until the handshake wraps it, then the secure leg until the registry takes it,
         // then the joined stream (only on the call that completes the set).
         var rawOwned = true;
@@ -126,7 +141,13 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         }
         try
         {
-            var accepted = await TunnelHandshake.AcceptWithMemberAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, ct, leg);
+            (SecureStream Stream, TunnelService Service, MemberEntry? Member)? accepted;
+            using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                // Each leg has its own deadline to finish the handshake, whatever the handshake itself waits for.
+                deadline.CancelAfter(HandshakeTimeout);
+                accepted = await TunnelHandshake.AcceptWithMemberAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, deadline.Token, leg);
+            }
             HandshakeDone();
             if (accepted is null) return;
             rawOwned = false;
