@@ -125,14 +125,14 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         };
         var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port));
         Assert.Empty(await client.NodesAsync(default));
-        Assert.False(await client.VolunteerAsync("tcp://node1.example.org:11010", default));
+        Assert.False(await client.VolunteerAsync("tcp://node1.example.org:11010", null, default));
         await directory.Volunteers.LastProbe;
-        Assert.True(await client.VolunteerAsync("tcp://node1.example.org:11010", default));
+        Assert.True(await client.VolunteerAsync("tcp://node1.example.org:11010", null, default));
         Assert.Equal(["tcp://node1.example.org:11010"], await client.NodesAsync(default));
-        await Assert.ThrowsAsync<ArgumentException>(() => client.VolunteerAsync("tcp://192.168.1.2:11010", default));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.VolunteerAsync("tcp://192.168.1.2:11010", null, default));
 
         directory.Volunteers = null;
-        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.VolunteerAsync("tcp://node1.example.org:11010", default));
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.VolunteerAsync("tcp://node1.example.org:11010", null, default));
         Assert.Equal("off", e.Code);
         Assert.Empty(await client.NodesAsync(default));
     }

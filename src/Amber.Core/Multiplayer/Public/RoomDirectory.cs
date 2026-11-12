@@ -765,8 +765,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>The network's EasyTier secret, for the channel's psk. Defaults to the network's.</summary>
     public string NetworkSecret { get; init; } = network.Profile?.Secret ?? "";
 
-    /// <summary>The network's id, which signed volunteer registrations name. Defaults to the network's.</summary>
-    public string NetworkId { get; init; } = network.Profile?.Id ?? "";
+    /// <summary>The network signed volunteer registrations name (<see cref="VolunteerOperator.NetworkTag"/>). Defaults to the network's.</summary>
+    public string NetworkId { get; init; } = VolunteerOperator.NetworkTag(network.Profile);
 
     private DirectoryTrust Trust => new()
     {
@@ -969,7 +969,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// </summary>
     /// <param name="signer">This device's Jay account certificate and keys: the directory then knows which person runs
     /// the node (<see cref="VolunteerOperator"/>). Null registers without saying.</param>
-    public async Task<bool> VolunteerAsync(string url, CancellationToken ct, Amber.Core.Identity.JayProof? signer = null)
+    public async Task<bool> VolunteerAsync(string url, Amber.Core.Identity.JayProof? signer, CancellationToken ct)
     {
         var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
         var request = new JsonObject { ["op"] = "volunteer", ["url"] = address };

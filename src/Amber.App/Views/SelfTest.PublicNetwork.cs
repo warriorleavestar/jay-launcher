@@ -81,7 +81,9 @@ internal sealed partial class SelfTest
             // Signing with the Jay account is its own switch, off by default (installs that volunteered before stay unsigned);
             // what it tells the network's operator shows once it is turned on.
             var signText = L.T("multiplayer.volunteer.sign_privacy");
-            Check("Volunteer relay: signing is off by default", !service.Settings.VolunteerSigned && !host.VolunteerSigned);
+            Check("Volunteer relay: signing is off by default", !new Amber.App.Services.AppSettings().VolunteerSigned);
+            var signedBefore = service.Settings.VolunteerSigned;
+            Dispatcher.UIThread.Invoke(() => host.VolunteerSigned = false);
             Check("Volunteer relay: signing switch shown", await FindAsync<CheckBox>(c => c.Content is TextBlock { Text: var t } && t == L.T("multiplayer.volunteer.sign")) is not null);
             Check("Volunteer relay: signing privacy text hidden while off", await FindAsync<TextBlock>(t => t.Text == signText && t.IsEffectivelyVisible) is null);
             Dispatcher.UIThread.Invoke(() => { host.VolunteerEnabled = true; host.VolunteerSigned = true; });
@@ -121,6 +123,9 @@ internal sealed partial class SelfTest
             Dispatcher.UIThread.Invoke(() => { host.VolunteerSigned = false; host.VolunteerEnabled = false; });
             host.SaveVolunteerCommand.Execute(null);
             Check("Volunteer relay: signing turned off again", !service.Settings.VolunteerSigned && !service.Settings.VolunteerNode, host.Status);
+            // Leave the setting as it was found.
+            Dispatcher.UIThread.Invoke(() => host.VolunteerSigned = signedBefore);
+            host.SaveVolunteerCommand.Execute(null);
             await host.DetectVolunteerAddressCommand.ExecuteAsync(null);
             Check("Volunteer relay: Detect asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && host.VolunteerAddress == "jay.example.org", host.Status);
             await host.TestVolunteerPortCommand.ExecuteAsync(null);

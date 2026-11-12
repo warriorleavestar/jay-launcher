@@ -167,16 +167,16 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         var server = await StartAsync();
         var mallory = Person();
         var victim = Person();
-        Assert.True(Ok(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(mallory, server.Profile.Id, "tcp://v.example.org:11010", _now))));
-        Assert.True(Ok(Volunteer(server, "tcp://m.example.org:11010", VolunteerOperator.Sign(mallory, server.Profile.Id, "tcp://m.example.org:11010", _now))));
-        Assert.Equal("owner", ErrorOf(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(victim, server.Profile.Id, "tcp://v.example.org:11010", _now))));
+        Assert.True(Ok(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(mallory, VolunteerOperator.NetworkTag(server.Profile), "tcp://v.example.org:11010", _now))));
+        Assert.True(Ok(Volunteer(server, "tcp://m.example.org:11010", VolunteerOperator.Sign(mallory, VolunteerOperator.NetworkTag(server.Profile), "tcp://m.example.org:11010", _now))));
+        Assert.Equal("owner", ErrorOf(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(victim, VolunteerOperator.NetworkTag(server.Profile), "tcp://v.example.org:11010", _now))));
         await server.Volunteers!.LastProbe;
         Assert.Equal(2, server.Ban("operator", mallory.Certificate.Account, "abuse", TimeSpan.FromDays(7)));
         // Mallory's own address is banned with them; the one the victim also claimed is only dropped, and is the victim's now.
         Assert.Contains(server.Bans!.List(), b => b.Kind == "node" && b.Value == "tcp://m.example.org:11010");
         Assert.DoesNotContain(server.Bans.List(), b => b.Kind == "node" && b.Value == "tcp://v.example.org:11010");
         _now += TimeSpan.FromSeconds(1);
-        Assert.True(Ok(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(victim, server.Profile.Id, "tcp://v.example.org:11010", _now))));
+        Assert.True(Ok(Volunteer(server, "tcp://v.example.org:11010", VolunteerOperator.Sign(victim, VolunteerOperator.NetworkTag(server.Profile), "tcp://v.example.org:11010", _now))));
     }
 
     [Fact]
@@ -186,7 +186,7 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         var mallory = Person();
         var other = Person();
         string Url(string name) => $"tcp://{name}.example.org:11010";
-        JsonObject As(JayProof who, string url) => VolunteerOperator.Sign(who, server.Profile.Id, url, _now);
+        JsonObject As(JayProof who, string url) => VolunteerOperator.Sign(who, VolunteerOperator.NetworkTag(server.Profile), url, _now);
         foreach (var name in new[] { "a", "b", "c" }) Assert.True(Ok(Volunteer(server, Url(name), As(mallory, Url(name)))));
         // An unsigned registration of a signed address is turned away without counting as a claim, but it is counted.
         Assert.Equal("owner", ErrorOf(Volunteer(server, Url("a"), null)));
@@ -221,7 +221,7 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         var victim = "tcp://v.example.org:11010";
         // The victim's entry lapsed; someone signs for the address before the victim (who never signs) renews.
         var hijacker = Person();
-        Assert.True(Ok(Volunteer(server, victim, VolunteerOperator.Sign(hijacker, server.Profile.Id, victim, _now))));
+        Assert.True(Ok(Volunteer(server, victim, VolunteerOperator.Sign(hijacker, VolunteerOperator.NetworkTag(server.Profile), victim, _now))));
         Assert.Equal("owner", ErrorOf(Volunteer(server, victim, null)));
         await server.Volunteers!.LastProbe;
         var result = server.BanOperator(hijacker.Certificate.Account, "hijack");
@@ -335,6 +335,19 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AnOperatorBanHoldsWhateverTheAccountsSpelling()
+    {
+        // The account comes from the certificate's keys, always in canonical form; a ban written another way still matches.
+        var server = await StartAsync();
+        var alice = Person();
+        var url = "tcp://x.example.org:11010";
+        Assert.Equal(alice.Certificate.Account, JayAddress.Canonical(alice.Certificate.Account));
+        Assert.Equal(alice.Certificate.Account, VolunteerOperator.Verify(VolunteerOperator.Sign(alice, Net, url, _now), Net, url, _now)!.Value.Account);
+        server.Ban("operator", alice.Certificate.Account.ToUpperInvariant(), "spam");
+        Assert.Equal("banned", ErrorOf(Volunteer(server, url, VolunteerOperator.Sign(alice, VolunteerOperator.NetworkTag(server.Profile), url, _now))));
+    }
+
+    [Fact]
     public void BrokenCertificatesAndSignaturesAreRefused()
     {
         var signed = VolunteerOperator.Sign(Person(), Net, "tcp://x.example.org:11010", _now);
@@ -424,9 +437,9 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net };
         var alice = Person();
         var bob = Person();
-        await client.VolunteerAsync("tcp://x.example.org:11010", default, alice);
-        await client.VolunteerAsync("tcp://y.example.org:11010", default, alice);
-        await client.VolunteerAsync("tcp://z.example.org:11010", default, bob);
+        await client.VolunteerAsync("tcp://x.example.org:11010", alice, default);
+        await client.VolunteerAsync("tcp://y.example.org:11010", alice, default);
+        await client.VolunteerAsync("tcp://z.example.org:11010", bob, default);
         await directory.Volunteers.LastProbe;
         Assert.Equal(alice.Certificate.Account, directory.Volunteers.Operators().Single(n => n.Url == "tcp://x.example.org:11010").Operator);
         // Members get the addresses, one per operator first, and nothing about who runs them.
@@ -438,7 +451,7 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
             Assert.Contains("tcp://z.example.org:11010", first);
         }
         // Someone else's account on Alice's address: told why.
-        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.VolunteerAsync("tcp://x.example.org:11010", default, Person()));
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.VolunteerAsync("tcp://x.example.org:11010", Person(), default));
         Assert.Equal("owner", e.Code);
     }
 
@@ -481,10 +494,10 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net, Clock = () => _now };
         var alice = Person();
         // Renewals right after each other (same second) are all accepted.
-        for (var i = 0; i < 3; i++) await client.VolunteerAsync("tcp://x.example.org:11010", default, alice);
+        for (var i = 0; i < 3; i++) await client.VolunteerAsync("tcp://x.example.org:11010", alice, default);
         // A directory that already has a newer one (clock went back) says so with its own code.
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
-            new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net, Clock = () => _now }.VolunteerAsync("tcp://x.example.org:11010", default, alice));
+            new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net, Clock = () => _now }.VolunteerAsync("tcp://x.example.org:11010", alice, default));
         Assert.Equal("stale", e.Code);
     }
 
@@ -512,7 +525,8 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         // The built-in network: the app's profile and the node's.
         var jay = await StartAsync();
         var client = new RoomDirectoryClient(new ProfiledNetwork(new PublicNetworkList(null).Current(null, null)));
-        Assert.Equal(jay.Profile.Id, client.NetworkId);
+        Assert.Equal(VolunteerOperator.NetworkTag(jay.Profile), client.NetworkId);
+        Assert.StartsWith("jay:", client.NetworkId);
         var alice = Person();
         Assert.True(Ok(Volunteer(jay, "tcp://x.example.org:11010", VolunteerOperator.Sign(alice, client.NetworkId, "tcp://x.example.org:11010", _now))));
         await jay.DisposeAsync();
@@ -524,11 +538,14 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         var text = NetworkString.Create(new NetworkInfo("mynet", "My net", "jay-net-mynet", "s", ["tcp://node.example.net:11010"]), owner);
         var own = await StartAsync(b => b.UseNetwork(NetworkString.Parse(text, [])));
         client = new RoomDirectoryClient(new ProfiledNetwork(NetworkString.Parse(text, []).ToProfile()));
-        Assert.Equal("mynet", client.NetworkId);
-        Assert.Equal(own.Profile.Id, client.NetworkId);
+        Assert.StartsWith("mynet:", client.NetworkId);
+        Assert.Equal(VolunteerOperator.NetworkTag(own.Profile), client.NetworkId);
         Assert.True(Ok(Volunteer(own, "tcp://y.example.org:11010", VolunteerOperator.Sign(alice, client.NetworkId, "tcp://y.example.org:11010", _now))));
-        // A registration signed for another network isn't taken.
+        // A registration signed for another network isn't taken, not even for another network that took the same id.
         Assert.Equal("operator", ErrorOf(Volunteer(own, "tcp://z.example.org:11010", VolunteerOperator.Sign(alice, "jay", "tcp://z.example.org:11010", _now))));
+        var twin = NetworkString.Parse(NetworkString.Create(new NetworkInfo("mynet", "My net", "jay-net-other", "t", ["tcp://node.example.net:11010"]), owner), []).ToProfile();
+        Assert.Equal("operator", ErrorOf(Volunteer(own, "tcp://z.example.org:11010",
+            VolunteerOperator.Sign(alice, VolunteerOperator.NetworkTag(twin), "tcp://z.example.org:11010", _now))));
     }
 
     private static JsonObject Volunteer(JayNetworkServer server, string url, JsonObject? signed) =>
@@ -540,8 +557,8 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         var alice = Person();
         var server = await StartAsync(b => b.RequireSignedVolunteers());
         Assert.Equal("operator", ErrorOf(Volunteer(server, "tcp://x.example.org:11010", null)));
-        Assert.True(Ok(Volunteer(server, "tcp://x.example.org:11010", VolunteerOperator.Sign(alice, server.Profile.Id, "tcp://x.example.org:11010", _now))));
-        Assert.True(Ok(Volunteer(server, "tcp://y.example.org:11010", VolunteerOperator.Sign(alice, server.Profile.Id, "tcp://y.example.org:11010", _now))));
+        Assert.True(Ok(Volunteer(server, "tcp://x.example.org:11010", VolunteerOperator.Sign(alice, VolunteerOperator.NetworkTag(server.Profile), "tcp://x.example.org:11010", _now))));
+        Assert.True(Ok(Volunteer(server, "tcp://y.example.org:11010", VolunteerOperator.Sign(alice, VolunteerOperator.NetworkTag(server.Profile), "tcp://y.example.org:11010", _now))));
         await server.Volunteers!.LastProbe;
 
         // The admin API shows who runs each node.
@@ -555,13 +572,13 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         Assert.Equal(2, server.Ban("operator", alice.Certificate.Account, "abuse"));
         Assert.Contains(server.Bans!.List(), b => b.Kind == "node" && b.Value == "tcp://x.example.org:11010");
         Assert.Empty(server.Volunteers.Listed());
-        Assert.Equal("banned", ErrorOf(Volunteer(server, "tcp://z.example.org:11010", VolunteerOperator.Sign(alice, server.Profile.Id, "tcp://z.example.org:11010", _now))));
+        Assert.Equal("banned", ErrorOf(Volunteer(server, "tcp://z.example.org:11010", VolunteerOperator.Sign(alice, VolunteerOperator.NetworkTag(server.Profile), "tcp://z.example.org:11010", _now))));
         Assert.Throws<ArgumentException>(() => server.Ban("operator", "not-an-address", null));
         // Unbanning the person lifts the address bans that came with it.
         Assert.True(server.Unban("operator", alice.Certificate.Account));
         Assert.DoesNotContain(server.Bans!.List(), b => b.Kind == "node");
         _now += TimeSpan.FromSeconds(1);
-        Assert.True(Ok(Volunteer(server, "tcp://z.example.org:11010", VolunteerOperator.Sign(alice, server.Profile.Id, "tcp://z.example.org:11010", _now))));
+        Assert.True(Ok(Volunteer(server, "tcp://z.example.org:11010", VolunteerOperator.Sign(alice, VolunteerOperator.NetworkTag(server.Profile), "tcp://z.example.org:11010", _now))));
 
         // The CLI switch turns the same requirement on, and leaves the other switches alone.
         var builder = Program.DirectoryBuilder(Path.Combine(_dir, "cli"), Options.Parse(["directory", "--signed-volunteers", "--rate-limit", "3,10,100", "--no-admin"]), new StringWriter(), _ => { });

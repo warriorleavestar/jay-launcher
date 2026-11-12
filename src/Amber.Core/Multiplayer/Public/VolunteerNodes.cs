@@ -149,11 +149,24 @@ public static class VolunteerOperator
     public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(3);
     /// <summary>...and this far ahead of it.</summary>
     public static readonly TimeSpan MaxClockAhead = TimeSpan.FromSeconds(60);
-    private static ReadOnlySpan<byte> Domain => "jay-volunteer-v2\n"u8;
+    private static ReadOnlySpan<byte> Domain => "jay-volunteer-v3\n"u8;
 
     /// <summary>
-    /// The bytes signed: the network id, a newline, the normalized address, a newline and the time in Unix seconds
-    /// (big-endian). The network id keeps a registration for one network from being used on another.
+    /// What a registration names its network by (<see cref="Sign"/>): the network's id plus a hash of its EasyTier network
+    /// name and secret. Ids of self-made networks are picked by their makers and can repeat; two networks with the same
+    /// name and secret are one network. Only members and the directory know the secret, so the tag says nothing new.
+    /// </summary>
+    public static string NetworkTag(PublicNetworkProfile? profile)
+    {
+        if (profile is null) return "";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes("jay-volunteer-net-v1\n" + profile.NetworkName + "\n" + profile.Secret));
+        return profile.Id + ":" + Convert.ToHexStringLower(hash.AsSpan(0, 16));
+    }
+
+    /// <summary>
+    /// The bytes signed: the network tag (<see cref="NetworkTag"/>), a newline, the normalized address, a newline and the
+    /// time in Unix seconds (big-endian). The tag keeps a registration for one network from being used on another, even
+    /// one that took the same id.
     /// </summary>
     private static byte[] Message(string network, string address, long at)
     {
@@ -166,7 +179,7 @@ public static class VolunteerOperator
 
     /// <summary>
     /// The "operator" part of a volunteer registration for <paramref name="address"/> (already normalized) on the network
-    /// <paramref name="network"/> (<see cref="PublicNetworkProfile.Id"/>).
+    /// <paramref name="network"/> (<see cref="NetworkTag"/>).
     /// </summary>
     public static JsonObject Sign(JayProof proof, string network, string address, DateTimeOffset now)
     {
@@ -192,6 +205,8 @@ public static class VolunteerOperator
             var n = now.ToUnixTimeSeconds();
             if (at < n - (long)MaxClockSkew.TotalSeconds || at > n + (long)MaxClockAhead.TotalSeconds) return null;
             if (DeviceCertificate.FromJson(o["cert"]) is not { } cert || !cert.Verify(cert.DeviceKey)) return null;
+            // The account is derived from the certificate's account keys (DeviceCertificate.Account encodes their id), so
+            // it is always the canonical address bans and limits compare against; there's no other spelling to send.
             var sig = HybridSignature.Decode(Convert.FromBase64String(o["sig"]?.GetValue<string>() ?? ""));
             return HybridSignature.Verify(cert.DeviceEd, cert.DeviceMlDsa, Domain, Message(network, address, at), sig) ? (cert.Account, at) : null;
         }
@@ -282,7 +297,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// <summary>Only list volunteers that signed their registration with a Jay account (error "operator" otherwise).</summary>
     public bool RequireOperator { get; set; }
 
-    /// <summary>The network this directory serves (<see cref="PublicNetworkProfile.Id"/>); signed registrations must name it.</summary>
+    /// <summary>The network this directory serves (<see cref="VolunteerOperator.NetworkTag"/>); signed registrations must name it.</summary>
     public string NetworkId { get; init; } = "";
 
     /// <summary>Conflicting claims kept per address.</summary>

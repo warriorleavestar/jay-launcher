@@ -233,27 +233,55 @@ public partial class MultiplayerViewModel
     private async Task VolunteerLoopAsync(PublicNetworkSession network, string url, CancellationToken ct)
     {
         var client = DirectoryClient(network);
+        // Whether the last registration the directory took was signed: after the person switches signing, the directory
+        // keeps the old registration until it lapses, and asking again meanwhile only adds claims to the address.
+        bool? lastSigned = null;
         while (!ct.IsCancellationRequested)
         {
-            try
+            var wantSigned = _service.Settings.VolunteerSigned;
+            var signer = wantSigned ? JayCertificate : null;
+            var wait = TimeSpan.FromSeconds(20);
+            if (wantSigned && signer is null)
             {
-                // Only with the person's say-so: signing tells the network's operator which Jay account runs this relay.
-                var listed = await client.VolunteerAsync(url, ct, _service.Settings.VolunteerSigned ? JayCertificate : null);
-                VolunteerStatus = listed ? L.F("multiplayer.volunteer.status_listed", url) : L.F("multiplayer.volunteer.status_checking", url);
+                // Signing asked for, but no Jay account is bound to the Minecraft account: don't fall back to unsigned.
+                VolunteerStatus = L.T("multiplayer.volunteer.sign_no_account");
+                wait = VolunteerNodes.RenewEvery;
             }
-            catch (DirectoryRejectedException e)
+            else
             {
-                // A network that only takes signed relays: say how, rather than repeat the directory's code.
-                VolunteerStatus = e.Code == "operator" && !_service.Settings.VolunteerSigned ? L.T("multiplayer.volunteer.needs_signing") : e.Message;
-                if (e.Code is "off" or "banned" or "bad") return;
+                try
+                {
+                    // Only with the person's say-so: signing tells the network's operator which Jay account runs this relay.
+                    var listed = await client.VolunteerAsync(url, signer, ct);
+                    lastSigned = signer is not null;
+                    VolunteerStatus = listed ? L.F("multiplayer.volunteer.status_listed", url) : L.F("multiplayer.volunteer.status_checking", url);
+                    // Shortly after the first registration the directory has probed us; renew then so we show up sooner.
+                    if (listed) wait = VolunteerNodes.RenewEvery;
+                }
+                catch (DirectoryRejectedException e)
+                {
+                    if (e.Code is "off" or "banned" or "bad")
+                    {
+                        VolunteerStatus = e.Message;
+                        return;
+                    }
+                    if (e.Code == "operator" && !wantSigned)
+                    {
+                        // A network that only takes signed relays waits for the person.
+                        VolunteerStatus = L.T("multiplayer.volunteer.needs_signing");
+                        wait = VolunteerNodes.RenewEvery;
+                    }
+                    else if (e.Code == "owner" && lastSigned is { } was && was != (signer is not null))
+                    {
+                        // Signing was switched: wait for the old registration to lapse instead of asking again and again.
+                        VolunteerStatus = L.T("multiplayer.volunteer.switch_wait");
+                        wait = VolunteerNodes.Ttl;
+                    }
+                    else VolunteerStatus = e.Message;
+                }
+                catch (Exception e) when (e is IOException or InvalidDataException) { VolunteerStatus = L.T("multiplayer.volunteer.status_retry"); }
+                catch (OperationCanceledException) { return; }
             }
-            catch (Exception e) when (e is IOException or InvalidDataException) { VolunteerStatus = L.T("multiplayer.volunteer.status_retry"); }
-            catch (OperationCanceledException) { return; }
-            // Shortly after the first registration the directory has probed us; renew then so we show up sooner.
-            // A network that wants a signature waits for the person: ask again only at the usual renewal.
-            var wait = VolunteerStatus.Length > 0 && !VolunteerStatus.Equals(L.F("multiplayer.volunteer.status_listed", url), StringComparison.Ordinal)
-                && !VolunteerStatus.Equals(L.T("multiplayer.volunteer.needs_signing"), StringComparison.Ordinal)
-                ? TimeSpan.FromSeconds(20) : VolunteerNodes.RenewEvery;
             try { await Task.Delay(wait, ct); }
             catch (OperationCanceledException) { return; }
         }
