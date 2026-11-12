@@ -78,6 +78,10 @@ internal sealed partial class SelfTest
             var forge = download.LoaderChoices.First(c => c.Kind == LoaderKind.Forge);
             Check("加载器：1.12.2 的 Fabric、NeoForge 置灰并写原因，Forge 可选",
                 !fabric.IsAvailable && fabric.BlockReason.Contains("1.14") && !neo.IsAvailable && forge.IsAvailable, $"{fabric.BlockReason} / {neo.BlockReason}");
+            var jayLoader = download.LoaderChoices.Single(c => c.IsJay);
+            Check("Jay loader: its own choice after the others; greyed on 1.12.2 (pinned release) with the versions it does run",
+                ReferenceEquals(download.LoaderChoices[^1], jayLoader) && jayLoader.Label == L.T("newinstance.loader.jay")
+                && (jayLoader.IsAvailable == (jayLoader.Kind is not null)) && (jayLoader.IsAvailable || jayLoader.BlockReason.Length > 0), jayLoader.BlockReason);
             await Task.Delay(300);
             var fabricItem = Dispatcher.UIThread.Invoke(() => page.LoaderSegment.ContainerFromItem(fabric) as ListBoxItem);
             Check("加载器：置灰的项点不了", Dispatcher.UIThread.Invoke(() => fabricItem is { IsEffectivelyEnabled: false }),
@@ -112,6 +116,19 @@ internal sealed partial class SelfTest
                     && page.NewInstanceUniversalLoaderBox.IsEffectivelyEnabled == (service.UniversalLoaderCapabilities is not null)) && !download.UseUniversalLoader,
                 download.UniversalLoaderUnavailable);
             await ShotAsync("new-universal-loader");
+            if (jayLoader.IsAvailable)
+            {
+                Dispatcher.UIThread.Invoke(() => page.LoaderSegment.SelectedItem = jayLoader);
+                await WaitAsync(() => download.SelectedLoaderVersion is not null, 30);
+                Check("Jay loader on 1.21.1: builds on NeoForge, name 1.21.1-Jay, no separate tick box",
+                    jayLoader.Kind == LoaderKind.NeoForge && download.SelectedLoaderVersion?.Kind == LoaderKind.NeoForge && download.CustomName == "1.21.1-Jay"
+                    && download.LoaderDescription.Contains("NeoForge", StringComparison.Ordinal) && !download.ShowUniversalLoaderOption
+                    && Dispatcher.UIThread.Invoke(() => !page.NewInstanceUniversalLoaderBox.IsVisible) && download.InstallCommand.CanExecute(null),
+                    $"{download.CustomName} {download.LoaderHint}");
+                await ShotAsync("new-jay-loader");
+                Dispatcher.UIThread.Invoke(() => page.LoaderSegment.SelectedItem = fabric);
+                await WaitAsync(() => download.SelectedLoaderVersion?.Kind == LoaderKind.Fabric, 30);
+            }
             foreach (var (name, expect) in new[] { ("CON", "保留"), ("a/b", "不能有"), ("fabric-iso", "同名"), ("", "起个名字") })
             {
                 Dispatcher.UIThread.Invoke(() => page.NameBox.Text = name);

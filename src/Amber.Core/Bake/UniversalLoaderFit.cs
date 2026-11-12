@@ -25,6 +25,21 @@ public static class UniversalLoaderFit
         return null;
     }
 
+    /// <summary>
+    /// The loader a "Jay loader" instance is built on for this game version: NeoForge where the universal loader runs
+    /// NeoForge on it, else Forge; null when it runs neither (or nothing is known about the loader yet).
+    /// </summary>
+    public static Install.LoaderKind? BaseLoaderFor(CrossLoader.Capabilities? caps, string? mcVersion)
+    {
+        if (caps is null || string.IsNullOrEmpty(mcVersion)) return null;
+        bool Runs(string platform) => caps.Platforms.GetValueOrDefault(platform) is { } versions && versions.Contains(mcVersion);
+        return Runs(BakePlatform.NeoForge) ? Install.LoaderKind.NeoForge : Runs(BakePlatform.Forge) ? Install.LoaderKind.Forge : null;
+    }
+
+    /// <summary>A base loader build the universal loader starts on: on 1.12.2 only Forge 14.23.5.x, elsewhere any.</summary>
+    public static bool AcceptsBase(string mcVersion, Install.LoaderKind kind, string loaderVersion) =>
+        mcVersion != "1.12.2" || kind == Install.LoaderKind.Forge && loaderVersion.StartsWith("14.23.5.", StringComparison.Ordinal);
+
     /// <summary>The enabled mods that run here only through the universal loader (a Fabric mod on NeoForge, say).</summary>
     public static int CrossMods(IEnumerable<LocalMod> mods, string? instanceLoader, IReadOnlyList<string> extras) =>
         extras.Count == 0 ? 0 : mods.Count(m => m.Enabled && m.Requirements is { Loaders.Count: > 0 } r && CrossLoader.IsCross(instanceLoader, r.Loaders, extras));

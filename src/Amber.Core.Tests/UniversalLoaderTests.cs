@@ -78,6 +78,52 @@ public sealed class UniversalLoaderTests : IDisposable
     }
 
     [Fact]
+    public void TheJayLoaderBuildsOnWhatTheUniversalLoaderRuns()
+    {
+        Assert.Equal(Amber.Core.Install.LoaderKind.NeoForge, UniversalLoaderFit.BaseLoaderFor(Pinned, "1.21.1"));
+        Assert.Equal(Amber.Core.Install.LoaderKind.Forge, UniversalLoaderFit.BaseLoaderFor(Pinned, "1.20.1"));
+        Assert.Null(UniversalLoaderFit.BaseLoaderFor(Pinned, "1.20.4"));
+        Assert.Null(UniversalLoaderFit.BaseLoaderFor(null, "1.21.1"));
+        Assert.Null(UniversalLoaderFit.BaseLoaderFor(Pinned, null));
+        var legacy = new CrossLoader.Capabilities(new Dictionary<string, IReadOnlyList<string>> { [BakePlatform.Forge] = ["1.12.2"] }, []);
+        Assert.Equal(Amber.Core.Install.LoaderKind.Forge, UniversalLoaderFit.BaseLoaderFor(legacy, "1.12.2"));
+        // 1.12.2 starts only on Forge 14.23.5.x; other versions take any build.
+        Assert.True(UniversalLoaderFit.AcceptsBase("1.12.2", Amber.Core.Install.LoaderKind.Forge, "14.23.5.2860"));
+        Assert.False(UniversalLoaderFit.AcceptsBase("1.12.2", Amber.Core.Install.LoaderKind.Forge, "14.23.4.2759"));
+        Assert.True(UniversalLoaderFit.AcceptsBase("1.21.1", Amber.Core.Install.LoaderKind.NeoForge, "21.1.77"));
+        Assert.Equal("1.21.1-Jay", Amber.Core.GameLibrary.NewInstanceNames.WithSuffix("1.21.1", "Jay", []));
+        Assert.Equal("1.21.1-Jay-2", Amber.Core.GameLibrary.NewInstanceNames.WithSuffix("1.21.1", "Jay", ["1.21.1-jay"]));
+    }
+
+    [Fact]
+    public void TheJayLoaderIsItsOwnChoiceInTheNewInstancePanel()
+    {
+        UiTestThread.Run(() =>
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = _root, PlayerName = "" });
+            var vm = new DownloadViewModel(service);
+            var jay = vm.LoaderChoices.Single(c => c.IsJay);
+            Assert.Equal(L.T("newinstance.loader.jay"), jay.Label);
+            Assert.Same(jay, vm.LoaderChoices[^1]);
+            var caps = service.UniversalLoaderCapabilities;
+            RemoteVersionItem Item(string id) => new(new Amber.Core.Game.ManifestEntry { Id = id, Type = "release" }, false);
+
+            vm.Target = Item("1.21.1");
+            Assert.Equal(caps is null ? null : UniversalLoaderFit.BaseLoaderFor(caps, "1.21.1"), jay.Kind);
+            Assert.Equal(jay.Kind is not null, jay.IsAvailable);
+            if (jay.Kind is { } kind) Assert.Contains(kind.ToString(), jay.Description);
+            // The real NeoForge choice is still found first by kind.
+            Assert.False(vm.LoaderChoices.First(c => c.Kind == Amber.Core.Install.LoaderKind.NeoForge).IsJay);
+
+            vm.Target = Item("1.20.4");
+            Assert.Null(jay.Kind);
+            Assert.False(jay.IsAvailable);
+            Assert.Equal(Amber.Core.GameLibrary.LoaderBlock.NotRunByJay, jay.Block);
+            Assert.Equal(caps is null ? L.T("core.bake.fit.unavailable") : L.F("newinstance.loader.block.jay", "1.20.4", UniversalLoaderFit.Supported(caps)), jay.BlockReason);
+        });
+    }
+
+    [Fact]
     public void AnInstancesOwnChoiceBeatsTheDefault()
     {
         Assert.True(new InstanceSettings().Over(new InstanceSettings { UniversalLoader = true }).UniversalLoader);

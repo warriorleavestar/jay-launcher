@@ -28,10 +28,14 @@ public static class NewInstanceNames
     };
 
     /// <summary>"{version}-{loader}", or the bare version for vanilla; a taken name gets "-2", "-3"… (case-insensitive, as on Windows).</summary>
-    public static string Default(string mcVersion, LoaderKind? loader, IEnumerable<string> taken)
+    public static string Default(string mcVersion, LoaderKind? loader, IEnumerable<string> taken) =>
+        WithSuffix(mcVersion, loader?.ToString(), taken);
+
+    /// <summary>"1.21.1-Jay" and the like: the game version with a suffix, numbered when taken.</summary>
+    public static string WithSuffix(string mcVersion, string? suffix, IEnumerable<string> taken)
     {
         var used = taken.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var name = loader is { } kind ? $"{mcVersion}-{kind}" : mcVersion;
+        var name = suffix is { Length: > 0 } ? $"{mcVersion}-{suffix}" : mcVersion;
         if (!used.Contains(name)) return name;
         for (var n = 2; ; n++)
             if (!used.Contains($"{name}-{n}")) return $"{name}-{n}";
@@ -78,6 +82,8 @@ public enum LoaderBlock
     Snapshot,
     /// <summary>The loader starts at a later version (Fabric and Quilt 1.14, NeoForge 1.20.1).</summary>
     TooOld,
+    /// <summary>The Jay loader (the universal loader) doesn't run this game version, or isn't available yet.</summary>
+    NotRunByJay,
 }
 
 /// <summary>
