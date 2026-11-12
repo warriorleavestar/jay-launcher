@@ -80,6 +80,9 @@ public static partial class BakePlatform
             ? v : throw new BakeException(L.F("core.bake.platform_unknown_version", DisplayName(kind)), []);
         // Forge 1.12.2's own version reads "1.12.2-14.23.5.2860"; an instance may know only the build number.
         if (kind == ForgeLegacy && !version.StartsWith(ForgeLegacyMc + "-", StringComparison.Ordinal)) version = ForgeLegacyMc + "-" + version;
+        // The loader runs Forge 1.12.2 14.23.5.x only (the last line, which every 1.12.2 modpack uses): say so before downloading.
+        if (kind == ForgeLegacy && !version.StartsWith(ForgeLegacyMc + "-14.23.5.", StringComparison.Ordinal))
+            throw new BakeException(L.F("core.bake.legacy_forge_version", version[(ForgeLegacyMc.Length + 1)..]), [], "bad_platform");
 
         var platforms = Path.Combine(dataRoot, "platforms");
         var installer = Path.Combine(platforms, "installers", $"{kind}-{version}-installer.jar");
@@ -165,6 +168,9 @@ public static partial class BakePlatform
                    ?? throw new BakeException(L.F("core.bake.platform_incomplete", DisplayName(ForgeLegacy), "versionInfo"), []);
         }
         info = (JsonObject)info.DeepClone();
+        // The loader checks the profile is for 1.12.2 (inheritsFrom or id); the installer's versionInfo says so, made sure here.
+        if (info["inheritsFrom"] is null && !(info["id"]?.GetValue<string>() ?? "").StartsWith(ForgeLegacyMc + "-", StringComparison.Ordinal))
+            info["inheritsFrom"] = ForgeLegacyMc;
         if (info["libraries"] is JsonArray libs)
             for (var i = libs.Count - 1; i >= 0; i--)
                 if (libs[i]?["clientreq"] is JsonValue v && v.TryGetValue<bool>(out var client) && !client) libs.RemoveAt(i);

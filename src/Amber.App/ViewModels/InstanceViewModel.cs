@@ -178,11 +178,14 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     public partial string? SelectedId { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasInstance), nameof(SupportsQuickPlay), nameof(IsSharedDir), nameof(IsVanilla))]
+    [NotifyPropertyChangedFor(nameof(HasInstance), nameof(SupportsQuickPlay), nameof(IsSharedDir), nameof(IsVanilla), nameof(IsForgeLegacy))]
     public partial GameInstance? Current { get; set; }
 
     /// <summary>版本隔离关闭：模组、资源包、光影都在 .minecraft 下，所有实例共用（改版规格 2.3）。</summary>
     public bool IsSharedDir => Current is { } c && _service.UsesSharedDir(c.Id);
+
+    /// <summary>Forge on Minecraft 1.12.2: the universal loader's transformer cache switch applies.</summary>
+    public bool IsForgeLegacy => Current is { } c && Amber.Core.Bake.BakePlatform.KindOf(c) == Amber.Core.Bake.BakePlatform.ForgeLegacy;
 
     /// <summary>共享目录提示上的【去开启】：切到设置 Tab。</summary>
     [RelayCommand]
@@ -626,6 +629,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     [ObservableProperty] public partial string PreLaunch { get; set; } = "";
     [ObservableProperty] public partial string PostExit { get; set; } = "";
     [ObservableProperty] public partial string JoinServer { get; set; } = "";
+    /// <summary>Forge 1.12.2 on the universal loader: the transformer cache (on unless switched off).</summary>
+    [ObservableProperty] public partial bool TransformerCache { get; set; } = true;
 
     /// <summary>正在把实例设置填进界面：这期间的改动不保存。</summary>
     private bool _loadingSettings;
@@ -650,6 +655,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
     partial void OnPreLaunchChanged(string value) => AutoSave();
     partial void OnPostExitChanged(string value) => AutoSave();
     partial void OnJoinServerChanged(string value) => AutoSave();
+    partial void OnTransformerCacheChanged(bool value) => AutoSave();
 
     private void AutoSave()
     {
@@ -684,6 +690,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         PreLaunch = s.PreLaunchCommand ?? "";
         PostExit = s.PostExitCommand ?? "";
         JoinServer = s.JoinServer ?? "";
+        TransformerCache = s.LegacyTransformerCache != false;
         _ = LoadJavaChoicesAsync(s.JavaPath);
     }
 
@@ -736,6 +743,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             PreLaunchCommand = NullIfBlank(PreLaunch),
             PostExitCommand = NullIfBlank(PostExit),
             JoinServer = NullIfBlank(JoinServer),
+            // Only written when switched off; on is the default.
+            LegacyTransformerCache = TransformerCache ? null : false,
         };
         s.Save(_service.Directory, c.Id);
         var id = c.Id;

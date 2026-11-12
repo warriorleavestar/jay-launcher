@@ -556,6 +556,8 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         {
             if (installDir is null) throw new ArgumentNullException(nameof(installDir));
             request["platform"] = new JsonObject { ["kind"] = kind, ["installDir"] = installDir };
+            // forge-1.12.2 (v1.3.2): the instance can switch the transformer cache off (stock LaunchWrapper).
+            if (kind == BakePlatform.ForgeLegacy && !TransformerCacheOn(dir, instance)) request["transformerCache"] = false;
         }
         return request;
     }
@@ -676,7 +678,9 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         {
             JavaMin = Int(launch["javaMin"]),
             JavaMax = Int(launch["javaMax"]),
-            WritableCache = result["cache"]?["transformerCache"] is JsonValue tc && tc.TryGetValue<string>(out var cache) && cache.Length > 0 ? cache : null,
+            // No folder when the launch runs without the cache (launch.cache.enabled false, v1.3.2).
+            WritableCache = launch["cache"]?["enabled"] is JsonValue on && on.TryGetValue<bool>(out var enabled) && !enabled ? null
+                : result["cache"]?["transformerCache"] is JsonValue tc && tc.TryGetValue<string>(out var cache) && cache.Length > 0 ? cache : null,
         };
     }
 
@@ -719,11 +723,17 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// mods, Java major version, the loader build (by content) and the downloaded mapping tables. Game files use size
     /// and modification time; the loader's own files use content, so a rebuild in the same folder invalidates.
     /// </summary>
+    /// <summary>Whether forge-1.12.2's transformer cache is on for this instance (its setting; on unless switched off).</summary>
+    internal static bool TransformerCacheOn(GameDirectory dir, GameInstance instance) =>
+        InstanceSettings.Load(dir, instance.Id).LegacyTransformerCache != false;
+
     public string InputKey(GameDirectory dir, GameInstance instance, int javaMajor)
     {
         var (gameJar, libraries) = GameInputs(dir, instance);
         var text = new StringBuilder("bake-input-v4|").Append(instance.McVersion).Append('|').Append(javaMajor).Append('|').Append(toolkit.Root)
             .Append("|platform:").Append(BakePlatform.KindOf(instance)).Append(':').Append(instance.Loader).Append(':').Append(instance.LoaderVersion);
+        // Switching forge-1.12.2's transformer cache changes the launch block: bake again.
+        if (BakePlatform.KindOf(instance) == BakePlatform.ForgeLegacy) text.Append("|transformerCache:").Append(TransformerCacheOn(dir, instance));
         AppendStamp(text, dir.VersionJsonPath(instance.Id));
         AppendStamp(text, gameJar);
         foreach (var library in libraries) AppendStamp(text, library);

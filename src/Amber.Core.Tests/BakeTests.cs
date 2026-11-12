@@ -1097,6 +1097,8 @@ public sealed class BakeTests : IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(state)!);
             File.WriteAllText(state, new JsonObject { ["schema"] = "amber-ul/state@1", ["platform"] = new JsonObject { ["kind"] = "forge-1.12.2" } }.ToJsonString());
             var cache = transformerCache ?? Path.Combine(request["instanceDir"]!.GetValue<string>(), BakeService.StateFolder, "legacy-1.12.2", "0123456789abcdef");
+            // Like the loader: transformerCache false leaves the cache out of the launch (stock LaunchWrapper).
+            var cacheOn = request["transformerCache"] is not JsonValue off || off.GetValue<bool>();
             var result = new JsonObject
             {
                 ["type"] = "result",
@@ -1105,11 +1107,12 @@ public sealed class BakeTests : IDisposable
                 {
                     ["mainClass"] = "amber.ul.legacy.LegacyLaunch",
                     ["classpath"] = new JsonArray("fmlbridge-1.12.2.jar"),
-                    ["jvmArgs"] = new JsonArray("-Damber.ul.legacy.cache=" + cache),
+                    ["jvmArgs"] = cacheOn ? new JsonArray("-Damber.ul.legacy.cache=" + cache) : new JsonArray(),
                     ["gameArgsPrefix"] = new JsonArray(),
                     ["javaMin"] = 8,
                     ["javaMax"] = 8,
                     ["modsDir"] = "mods",
+                    ["cache"] = new JsonObject { ["enabled"] = cacheOn, ["transformerCache"] = cache },
                     ["stateFile"] = state,
                 },
                 ["cache"] = new JsonObject { ["state"] = "new", ["warm"] = false, ["transformerCache"] = cache },
@@ -1321,6 +1324,89 @@ public sealed class BakeTests : IDisposable
         Assert.True(BakeService.IsKnownProblem("platform_unavailable"));
         var bad = JsonNode.Parse("""{"type":"problem","code":"bad_metadata","severity":"error","file":"broken.jar"}""")!.AsObject();
         Assert.Equal("broken.jar: " + L.T("core.bake.problem.bad_metadata"), BakeService.DescribeProblem(bad));
+    }
+
+    [Fact]
+    public async Task Forge1122TransformerCacheCanBeSwitchedOffPerInstance()
+    {
+        LegacyInstall();
+        var loader = LegacyLoader();
+        var bake = Service(loader);
+        var dir = new GameDirectory(Game);
+        var instance = Instance("forge", "1.12.2", LegacyForge, "f1122");
+        Directory.CreateDirectory(dir.VersionDir(instance.Id));
+        var on = await bake.PrepareAsync(new BakeJava("java21", 21, 8), dir, instance, false, null, CancellationToken.None);
+        Assert.NotNull(on.Launch!.WritableCache);
+        Assert.Null(loader.Last("bake-instance")["transformerCache"]);
+
+        // Off in the instance's settings: the loader is asked for the stock LaunchWrapper, and the switch counts as a changed input.
+        new InstanceSettings { LegacyTransformerCache = false }.Save(dir, instance.Id);
+        var off = await bake.PrepareAsync(new BakeJava("java21", 21, 8), dir, instance, false, null, CancellationToken.None);
+        Assert.False(off.Reused);
+        Assert.Equal(2, loader.Count("bake-instance"));
+        Assert.False(loader.Last("bake-instance")["transformerCache"]!.GetValue<bool>());
+        Assert.Null(off.Launch!.WritableCache);
+        Assert.DoesNotContain(off.Launch.JvmArgs, a => a.StartsWith("-Damber.ul.legacy.cache=", StringComparison.Ordinal));
+
+        // Other platforms never send the switch.
+        Version("1.21.1");
+        Assert.Null(bake.InstanceRequest(dir, Instance(), 21, null)["transformerCache"]);
+    }
+
+    [Theory]
+    [InlineData("14.23.4.2768")]
+    [InlineData("1.12.2-14.21.1.2387")]
+    public async Task Forge1122OtherThan14235IsNamedBeforeAnyDownload(string version)
+    {
+        var downloaded = false;
+        var e = await Assert.ThrowsAsync<BakeException>(() => BakePlatform.PrepareAsync(new GameDirectory(Game),
+            Instance("forge", "1.12.2", version, "f1122"), Data, (_, _) => { downloaded = true; return Task.CompletedTask; }, null, CancellationToken.None));
+        Assert.False(downloaded);
+        Assert.Equal("bad_platform", e.Code);
+        var build = version.StartsWith("1.12.2-", StringComparison.Ordinal) ? version["1.12.2-".Length..] : version;
+        Assert.Equal(L.F("core.bake.legacy_forge_version", build), e.Message);
+    }
+
+    [Fact]
+    public void Forge1122PlatformProfileSaysItIsFor1122()
+    {
+        // The loader checks inheritsFrom or id: an installer profile with neither still gets inheritsFrom 1.12.2.
+        LegacyInstall();
+        var installer = Path.Combine(_root, "forge-1.12.2-installer.jar");
+        using (var zip = ZipFile.Open(installer, ZipArchiveMode.Update))
+        {
+            var entry = zip.GetEntry("install_profile.json")!;
+            JsonObject profile;
+            using (var r = new StreamReader(entry.Open())) profile = JsonNode.Parse(r.ReadToEnd())!.AsObject();
+            profile["versionInfo"]!.AsObject().Remove("id");
+            entry.Delete();
+            using var w = new StreamWriter(zip.CreateEntry("install_profile.json").Open());
+            w.Write(profile.ToJsonString());
+        }
+        Func<IReadOnlyCollection<DownloadItem>, CancellationToken, Task> download = (items, _) =>
+        {
+            foreach (var item in items) { Directory.CreateDirectory(Path.GetDirectoryName(item.LocalPath)!); File.Copy(FakeFiles[item.Url], item.LocalPath, true); }
+            return Task.CompletedTask;
+        };
+        var root = BakePlatform.PrepareAsync(new GameDirectory(Game), Instance("forge", "1.12.2", LegacyForge, "f1122"), Data, download, null, CancellationToken.None).GetAwaiter().GetResult()!;
+        var versionJson = JsonNode.Parse(File.ReadAllText(Path.Combine(root, "version.json")))!.AsObject();
+        Assert.Equal("1.12.2", versionJson["inheritsFrom"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void Forge1122ProblemLinesAreAsciiWithEscapes()
+    {
+        // Java 8 writes stdout in the platform code page, so the loader escapes everything outside printable ASCII.
+        var line = "[12:00:00] @amber-ul/problem {\"type\":\"problem\",\"code\":\"legacy_launch_failed\",\"severity\":\"error\",\"exception\":\"java.lang.RuntimeException\",\"rootCause\":\"java.io.FileNotFoundException: C:\\\\Users\\\\\\u5f20\\u4e09\\\\mods\\\\caf\\u00e9.jar\"}";
+        var problem = BakeRuntimeProblem.Parse(line);
+        Assert.NotNull(problem);
+        Assert.Equal("java.io.FileNotFoundException: C:\\Users\\张三\\mods\\café.jar", problem!.Detail);
+        Assert.Contains("café.jar", problem.Describe());
+
+        var off = BakeRuntimeProblem.Parse("@amber-ul/problem {\"type\":\"problem\",\"code\":\"legacy_cache_disabled\",\"severity\":\"warning\",\"cacheDir\":\"x\"}");
+        Assert.False(off!.IsError);
+        Assert.True(off.IsNotable);
+        Assert.Equal(L.T("core.bake.runtime.legacy_cache_off"), off.Describe());
     }
 
     [Fact]

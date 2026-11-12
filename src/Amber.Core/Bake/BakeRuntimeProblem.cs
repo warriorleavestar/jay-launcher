@@ -65,6 +65,7 @@ public sealed partial record BakeRuntimeProblem(string Code, string Severity, st
             // forge-1.12.2 (v1.3.2): what fails before the game takes over.
             "legacy_java_unsupported" => Str(o, "javaVersion") ?? Num(o, "javaVersion") ?? "",
             "legacy_launch_failed" => Str(o, "rootCause") ?? Str(o, "exception") ?? "",
+            "legacy_cache_disabled" => Str(o, "cacheDir") ?? "",
             _ => "",
         };
         return new BakeRuntimeProblem(code, Str(o, "severity") ?? "warning", Str(o, "modId") ?? Str(o, "file") ?? "", mixin,
@@ -107,6 +108,7 @@ public sealed partial record BakeRuntimeProblem(string Code, string Severity, st
         "legacy_java_unsupported" => L.F("core.bake.runtime.legacy_java", Detail.Length > 0 ? Detail : "?"),
         "legacy_launchwrapper_missing" => L.T("core.bake.runtime.legacy_launchwrapper"),
         "legacy_launch_failed" => L.F("core.bake.runtime.legacy_failed", Detail.Length > 0 ? Detail : "?"),
+        "legacy_cache_disabled" => L.T("core.bake.runtime.legacy_cache_off"),
         // Dependency codes, and unknown codes that are errors (read like unsupported_feature); unknown notes keep the loader's words.
         _ when Raw is not null && (IsError || BakeService.IsKnownProblem(Code)) => BakeService.DescribeProblem(Raw),
         _ => Mod.Length > 0 ? $"{Mod}: {(Message.Length > 0 ? Message : Code)}" : (Message.Length > 0 ? Message : Code),
