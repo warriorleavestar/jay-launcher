@@ -94,6 +94,7 @@ public static class SettingsCatalog
 
         new("Version", About, "settings.about.version"),
         new("CheckUpdate", About, "settings.about.check_update", "tools.update.hint"),
+        new("AutoUpdate", About, "settings.update.auto", "settings.update.auto_hint"),
         new("AboutPage", About, "about.title", "about.promise"),
     ];
 

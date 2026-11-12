@@ -163,7 +163,7 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
 ### 3.7 崩溃分析、工具箱、更新检查 ✅
 
 - `Diagnostics/CrashAnalyzer.cs`：分析崩溃日志，列出疑似模组，导出报告。
-- `Launch/Toolbox.cs`：清理日志、崩溃报告、natives 和下载残留；提前下载 Java；更新检查只在用户填了更新地址时联网，只提示不下载。
+- `Launch/Toolbox.cs`：清理日志、崩溃报告、natives 和下载残留；提前下载 Java；更新检查默认每天一次查官方发布页（可关、可换地址），只提示签过名的新版本，不下载。
 
 ### 3.8 界面 ✅
 

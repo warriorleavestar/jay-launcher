@@ -204,12 +204,8 @@ public sealed partial class ToolsViewModel : PageViewModel
     private async Task CheckUpdateAsync()
     {
         UpdateUrl = null;
-        var feed = service.Settings.UpdateFeedUrl;
-        if (string.IsNullOrWhiteSpace(feed))
-        {
-            UpdateStatus = L.F("tools.update.no_feed", UpdateChecker.CurrentVersion);
-            return;
-        }
+        // A blank update address means the official Jay releases.
+        var feed = AutoUpdateCheck.FeedFor(service.Settings.UpdateFeedUrl);
         try
         {
             // Privacy plan item 2: a newer release is offered only when 2 of the 3 Jay trustees signed it.

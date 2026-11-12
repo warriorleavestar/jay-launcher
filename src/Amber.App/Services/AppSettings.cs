@@ -75,8 +75,17 @@ public sealed class AppSettings
     /// <summary>CurseForge 接口地址。留空用官方。可以指向用户信任的代理或镜像。</summary>
     public string? CurseForgeApiRoot { get; set; }
 
-    /// <summary>更新检查地址。留空就不检查，启动器不会为此联网。</summary>
+    /// <summary>Update feed. Blank means the official Jay releases (<see cref="Amber.Core.Launch.AutoUpdateCheck.OfficialFeed"/>).</summary>
     public string? UpdateFeedUrl { get; set; }
+
+    /// <summary>Check the update feed once a day and tell the user about a signed newer version. Jay never downloads it.</summary>
+    public bool AutoUpdateCheck { get; set; } = true;
+
+    /// <summary>When the automatic update check last ran (successfully or not).</summary>
+    public DateTimeOffset? LastUpdateCheck { get; set; }
+
+    /// <summary>The version the user chose to skip: the automatic check doesn't mention it again.</summary>
+    public string? SkippedUpdateVersion { get; set; }
 
     /// <summary>system / light / dark</summary>
     public string Theme { get; set; } = "system";

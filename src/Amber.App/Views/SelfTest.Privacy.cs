@@ -39,25 +39,24 @@ internal sealed partial class SelfTest
             Check("整页是锁定的安全外观，开头是“Jay 安全提示”", Dispatcher.UIThread.Invoke(() => page.Surface is SafetySurface
                 && page.Promise.BadgeText == L.T("safety.title") && page.Surface.Bounds.Width <= 641), Dispatcher.UIThread.Invoke(() => page.Surface.Bounds.Width.ToString("0")));
             Check("联网清单正好 5 类，编号 1–5", about.List.Rows.Select(r => r.Number).SequenceEqual(["1", "2", "3", "4", "5"]));
-            Check("现在的状态：没登录、没填更新地址、没在联机", about.List.Rows[1].Status == L.T("about.net.login.none")
-                && about.List.Rows[3].Status == L.T("about.net.update.no_feed") && about.List.Rows[4].Status == L.T("about.net.play.idle"),
+            Check("现在的状态：没登录、每天自动检查更新、没在联机", about.List.Rows[1].Status == L.T("about.net.login.none")
+                && about.List.Rows[3].Status == L.T("about.net.update.auto") && about.List.Rows[4].Status == L.T("about.net.play.idle"),
                 string.Join(" | ", about.List.Rows.Select(r => r.Status)));
             Check("宽窗口：状态在右边一栏", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide) && !about.List.IsCompact);
             Check("存在本机的写明凭据怎么加密", about.StoredText.Contains(NetworkList.CredentialMethod, StringComparison.Ordinal));
             await ShotAsync("about-1440");
             await VerifyDownloadAsync(about);
 
-            // Status follows the settings: an update address makes it "only when you click".
-            var feed = AppSettingsFeed;
-            AppSettingsFeed = "https://example.invalid/jay/latest.json";
+            // Status follows the settings: with the daily check off it is "only when you click".
+            AppSettingsAutoUpdate = false;
             about.Refresh();
-            Check("填了更新地址：第 4 项写“只在你点检查更新时”", about.List.Rows[3].Status == L.T("about.net.update.manual"));
-            AppSettingsFeed = feed;
+            Check("关掉每天检查：第 4 项写“只在你点检查更新时”", about.List.Rows[3].Status == L.T("about.net.update.manual"));
+            AppSettingsAutoUpdate = true;
 
             // "Change ›" goes to the setting.
             about.List.ChangeCommand.Execute(about.List.Rows[3]);
-            var revealed = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "UpdateFeedBox" && window.RevealedField.IsEffectivelyVisible), 3);
-            Check("“改 ›”跳到 设置 › 下载 › 更新地址", revealed && main.CurrentPage is SettingsViewModel);
+            var revealed = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.RevealedField?.Name == "AutoUpdateBox" && window.RevealedField.IsEffectivelyVisible), 3);
+            Check("“改 ›”跳到 设置 › 关于 › 每天自动检查", revealed && main.CurrentPage is SettingsViewModel);
 
             // Settings › Privacy shows the same list.
             settings.SelectGroup("privacy");
@@ -160,9 +159,9 @@ internal sealed partial class SelfTest
         about.VerifyText = null;
     }
 
-    private string? AppSettingsFeed
+    private bool AppSettingsAutoUpdate
     {
-        get => Page<HomeViewModel>().Service.Settings.UpdateFeedUrl;
-        set => Page<HomeViewModel>().Service.Settings.UpdateFeedUrl = value;
+        get => Page<HomeViewModel>().Service.Settings.AutoUpdateCheck;
+        set => Page<HomeViewModel>().Service.Settings.AutoUpdateCheck = value;
     }
 }

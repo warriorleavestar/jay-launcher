@@ -28,7 +28,7 @@ public static class NetworkList
         var microsoft = service.Accounts.Store.Accounts.Count(a => a.Kind == AccountKind.Microsoft);
         var external = service.Accounts.Store.Accounts.Count(a => a.Kind == AccountKind.External);
         var login = microsoft == 0 && external == 0 ? L.T("about.net.login.none") : L.F("about.net.login.count", microsoft + external);
-        var update = string.IsNullOrWhiteSpace(settings.UpdateFeedUrl) ? L.T("about.net.update.no_feed") : L.T("about.net.update.manual");
+        var update = settings.AutoUpdateCheck ? L.T("about.net.update.auto") : L.T("about.net.update.manual");
         var play = multiplayer is null || multiplayer.IsIdle ? L.T("about.net.play.idle")
             : multiplayer.IsHosting ? L.T("about.net.play.hosting") : L.T("about.net.play.joined");
         return
@@ -36,7 +36,7 @@ public static class NetworkList
             Row(NetworkCategory.Download, "about.net.download", "about.net.download.when", L.T("about.net.download.status"), "settings#Source"),
             Row(NetworkCategory.Login, "about.net.login", "about.net.login.when", login, "me"),
             Row(NetworkCategory.ContentApi, "about.net.content", "about.net.content.when", L.T("about.net.content.status"), "settings#CurseForgeKey"),
-            Row(NetworkCategory.UpdateCheck, "about.net.update", "about.net.update.when", update, "settings#UpdateFeed"),
+            Row(NetworkCategory.UpdateCheck, "about.net.update", "about.net.update.when", update, "settings#AutoUpdate"),
             Row(NetworkCategory.Multiplayer, "about.net.play", "about.net.play.when", play, "play"),
         ];
     }

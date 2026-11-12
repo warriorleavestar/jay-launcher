@@ -1915,7 +1915,8 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         await tools.ScanJunkCommand.ExecuteAsync(null);
         Check("扫描垃圾", tools.Junk.Count == 4, tools.JunkStatus);
         await tools.CheckUpdateCommand.ExecuteAsync(null);
-        Check("未配置更新地址时不联网", tools.UpdateStatus.Contains("不会联网"), tools.UpdateStatus);
+        // No update address: the official releases are asked, and the answer (or the failure) is shown.
+        Check("没填更新地址时查官方版本并给出结果", !string.IsNullOrWhiteSpace(tools.UpdateStatus), tools.UpdateStatus);
         tools.DownloadUrl = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
         tools.DownloadFolder = reportDir;
         await tools.DownloadFileCommand.ExecuteAsync(null);

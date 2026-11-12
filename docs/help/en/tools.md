@@ -16,4 +16,4 @@ The old toolbox is gone; each of its tools now sits where you would look for it.
 - Try a download: open "Connection problems?" in Multiplayer and unfold **Download file**.
 
 ## If something goes wrong
-- Check for updates does nothing: set an update address in [Settings › Downloads and services](jay:settings#UpdateFeed) first; without one, Jay never goes online for this.
+- Check for updates asks the official Jay releases unless you set your own address in [Settings › Downloads and services](jay:settings#UpdateFeed). Jay also checks once a day by itself; turn that off in [Settings › About](jay:settings#AutoUpdate). It only tells you about a new version that the trustees signed and never downloads it.
