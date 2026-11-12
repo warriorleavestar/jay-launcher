@@ -17,8 +17,10 @@ public static class CurseForgeBuiltInKey
         && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
 
     /// <summary>先用用户在设置里填的 Key，再用环境变量 AMBER_CF_KEY，最后用内置 Key。</summary>
-    public static string? Resolve(string? userKey, string? environmentKey) =>
+    public static string? Resolve(string? userKey, string? environmentKey) => Resolve(userKey, environmentKey, Value);
+
+    internal static string? Resolve(string? userKey, string? environmentKey, string? builtInKey) =>
         !string.IsNullOrWhiteSpace(userKey) ? userKey
         : !string.IsNullOrWhiteSpace(environmentKey) ? environmentKey
-        : Value;
+        : builtInKey;
 }
