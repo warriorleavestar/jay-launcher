@@ -86,11 +86,14 @@ public sealed class JayNetworkServerBuilder
     /// <summary>
     /// Limits relaying other EasyTier networks (rooms) through this node: at most <paramref name="kbpsPerNetwork"/> KB/s
     /// for any one network (0 = no limit), and only networks matching <paramref name="networks"/> (EasyTier's relay
-    /// whitelist; null = all). This node's own public network is never limited.
+    /// whitelist; null = all; blank is refused, since EasyTier reads it as "relay nothing"). This node's own public
+    /// network is never limited.
     /// </summary>
     public JayNetworkServerBuilder UseRelayLimits(int kbpsPerNetwork, string? networks = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(kbpsPerNetwork);
+        if (networks is not null && string.IsNullOrWhiteSpace(networks))
+            throw new ArgumentException("networks is blank: pass network names (space separated, * allowed), or null for all", nameof(networks));
         Relay = new RelayLimits(kbpsPerNetwork, networks);
         return this;
     }

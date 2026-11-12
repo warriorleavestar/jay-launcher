@@ -367,7 +367,10 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         };
         for (var i = 0; i < RoomDirectoryServer.MaxMailPostsPerSource; i++)
             Assert.True(server.Handle(Post(i), "127.0.9.1")["ok"]?.GetValue<bool>());
-        Assert.Equal("rate", server.Handle(Post(99), "127.0.9.1")["error"]?.GetValue<string>());
+        var refused = server.Handle(Post(99), "127.0.9.1");
+        Assert.Equal("rate", refused["error"]?.GetValue<string>());
+        // Older Jay reads plain "rate"; newer Jay also learns that it is about mail.
+        Assert.Equal("mail", refused["what"]?.GetValue<string>());
         // Another source isn't held back by the first one.
         Assert.True(server.Handle(Post(100), "127.0.9.2")["ok"]?.GetValue<bool>());
         _now += RoomDirectoryServer.MailPostWindow + TimeSpan.FromSeconds(1);

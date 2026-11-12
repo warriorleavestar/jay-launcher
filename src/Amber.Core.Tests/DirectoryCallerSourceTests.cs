@@ -45,6 +45,66 @@ public sealed class DirectoryCallerSourceTests
     }
 
     [Fact]
+    public async Task LocalCallersArentLimitedPerSourceUntilAMappedCallerIsSeen()
+    {
+        // Without the loopback-source patch every caller arrives from 127.0.0.1. One caller must not use up everyone's
+        // allowance, so these get only the directory-wide limits.
+        await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0);
+        var held = new List<TcpClient>();
+        try
+        {
+            for (var i = 0; i < RoomDirectoryServer.MaxConnectionsPerSource + 4; i++)
+            {
+                var c = new TcpClient();
+                await c.ConnectAsync(IPAddress.Loopback, server.Port);
+                held.Add(c);
+            }
+            await Task.Delay(300);
+            Assert.False(server.MappingSeen);
+            Assert.Equal(0, server.OpenFrom(RoomDirectoryServer.SharedLoopbackSource));
+            foreach (var c in held)
+            {
+                using var timeout = new CancellationTokenSource(100);
+                try { Assert.NotEqual(0, await c.GetStream().ReadAsync(new byte[1], timeout.Token)); }
+                catch (OperationCanceledException) { }
+            }
+        }
+        finally
+        {
+            foreach (var c in held) c.Dispose();
+        }
+    }
+
+    [NotOnMacFact]
+    public async Task LocalCallersShareOneLimitOnceAMappedCallerIsSeen()
+    {
+        await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0);
+        var held = new List<TcpClient>();
+        try
+        {
+            var mapped = new TcpClient(new IPEndPoint(IPAddress.Parse("127.235.4.9"), 0));
+            await mapped.ConnectAsync(IPAddress.Loopback, server.Port);
+            held.Add(mapped);
+            for (var i = 0; i < 200 && !server.MappingSeen; i++) await Task.Delay(20);
+            Assert.True(server.MappingSeen);
+            for (var i = 0; i < RoomDirectoryServer.MaxConnectionsPerSource + 4; i++)
+            {
+                var c = new TcpClient();
+                await c.ConnectAsync(IPAddress.Loopback, server.Port);
+                held.Add(c);
+            }
+            for (var i = 0; i < 200 && server.OpenFrom(RoomDirectoryServer.SharedLoopbackSource) < RoomDirectoryServer.MaxConnectionsPerSource; i++)
+                await Task.Delay(20);
+            await Task.Delay(200);
+            Assert.Equal(RoomDirectoryServer.MaxConnectionsPerSource, server.OpenFrom(RoomDirectoryServer.SharedLoopbackSource));
+        }
+        finally
+        {
+            foreach (var c in held) c.Dispose();
+        }
+    }
+
+    [Fact]
     public void NoAddressIsOnlyForCallsInProcess() => Assert.Null(RoomDirectoryServer.Source(null));
 
     [NotOnMacFact]

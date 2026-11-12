@@ -224,6 +224,8 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     [Fact]
     public async Task ExtensionsAnswerTheirOwnOpsOnly()
     {
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().UseRelayLimits(0, " "));
+        Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().UseRelayLimits(0, ""));
         Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().AddExtension(new LambdaExtension("motd")));
         Assert.Throws<ArgumentException>(() => new JayNetworkServerBuilder().AddExtension(new Motd()).AddExtension(new Motd()));
         var server = await StartAsync(b => b.AddExtension(new Motd()).AddExtension(new Broken()));

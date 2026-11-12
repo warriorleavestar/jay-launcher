@@ -244,7 +244,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             TcpClient client;
             try { client = await _listener.AcceptTcpClientAsync(_cts.Token); }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { break; }
-            var source = Source(client);
+            var source = Limited(Source(client));
             NoteMapping(client, source);
             if (!TryOpen(source))
             {
@@ -340,11 +340,26 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     private void NoteMapping(TcpClient client, string? source)
     {
         if (Volatile.Read(ref _mappingSeen)) return;
-        if (source is not null && source != SharedLoopbackSource) { Volatile.Write(ref _mappingSeen, true); return; }
+        if (source is not null && source != SharedLoopbackSource && IsMapped(source)) { Volatile.Write(ref _mappingSeen, true); return; }
         if ((client.Client.RemoteEndPoint as IPEndPoint)?.Address is { } a && IPAddress.IsLoopback(a)
             && Interlocked.Increment(ref _unmappedCallers) == UnmappedCallersBeforeWarning)
             _log?.Invoke(L.T("core.mp.public.callers_unmapped"));
     }
+
+    private static bool IsMapped(string source) => source.StartsWith(PublicNetworkProfile.Subnet, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The source the per-source limits use. Until the first caller arrives mapped (127.235.c.d), the node's EasyTier is
+    /// taken to lack the loopback-source patch: then every caller over the network arrives from a local address, and
+    /// counting them as one source would let one caller use up everyone's allowance. So until then local callers get no
+    /// per-source limits (null) and only the directory-wide budgets and <see cref="MaxConcurrent"/> hold. Once a mapped
+    /// caller was seen, the shared local source is limited like any other.
+    /// </summary>
+    private string? Limited(string? source) =>
+        source == SharedLoopbackSource && !Volatile.Read(ref _mappingSeen) ? null : source;
+
+    /// <summary>Has a mapped caller been seen (per-source limits apply to local callers too)? Tests.</summary>
+    internal bool MappingSeen => Volatile.Read(ref _mappingSeen);
 
     /// <summary>Callers from 127.0.0.1 in a row, with none mapped, before the node warns.</summary>
     internal const int UnmappedCallersBeforeWarning = 50;
@@ -402,7 +417,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "rv.take" => RendezvousTake(request),
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
-                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
+                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), source) : Error("off"),
                 // Blocks this connection's task for at most a few seconds while the directory dials the address.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
                 "nodes" => Volunteers is { } v ? new JsonObject { ["ok"] = true, ["nodes"] = new JsonArray([.. v.Pick().Select(u => (JsonNode)u)]) } : Error("off"),
@@ -681,7 +696,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (_sealedCount >= MaxSealedMail || (existing && items!.Count >= RoomDirectoryProtocol.MaxMailPerBox)) return Error("full");
             // Every check first; allowances are only used up by a post that is taken.
             var (count, until) = source is not null && _mailPosts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + MailPostWindow);
-            if (source is not null && count >= MaxMailPostsPerSource) return Error("rate");
+            // "rate" so older Jay still shows a sensible text; "what" lets newer Jay say it is about mail.
+            if (source is not null && count >= MaxMailPostsPerSource) return new JsonObject { ["ok"] = false, ["error"] = "rate", ["what"] = "mail" };
             if (!_mailBudget.CanAcquire()) return BudgetFull("post");
             if (source is not null) _mailPosts[source] = (count + 1, until);
             _mailBudget.TryAcquire();
@@ -1009,6 +1025,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             "owner" or "lookup" or "stale" => L.T("core.mp.public.err_owner"),
             "full" => L.T("core.mp.public.err_full"),
             "gone" => L.T("core.mp.public.err_gone"),
+            "rate" when reply["what"] is JsonValue what && what.TryGetValue<string>(out var w) && w == "mail" => L.T("core.mp.public.err_mail_rate"),
             "rate" => L.T("core.mp.public.err_rate"),
             "version" => L.F("core.mp.public.err_version", reply["min"]?.GetValue<string>() is { Length: <= 32 } min ? min : "?"),
             "login" => L.T("core.mp.public.err_login"),

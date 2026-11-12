@@ -142,6 +142,56 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task OneCallerMayOnlyAddAFewAddresses()
+    {
+        var registry = new VolunteerRegistry((_, _) => Task.FromResult(true), () => _now);
+        for (var i = 0; i < VolunteerRegistry.NewPerSource; i++)
+        {
+            Assert.True(Ok(registry.Register($"tcp://v{i}.example.org:11010", "10.235.3.4")));
+            await registry.LastProbe;
+        }
+        Assert.Equal("rate", registry.Register("tcp://more.example.org:11010", "10.235.3.4")["error"]!.GetValue<string>());
+        // Renewing its own addresses is still fine, and other callers aren't held back.
+        Assert.True(Ok(registry.Register("tcp://v0.example.org:11010", "10.235.3.4")));
+        Assert.True(Ok(registry.Register("tcp://other.example.org:11010", "10.235.3.5")));
+        await registry.LastProbe;
+        _now += VolunteerRegistry.SourceWindow + TimeSpan.FromSeconds(1);
+        Assert.True(Ok(registry.Register("tcp://more.example.org:11010", "10.235.3.4")));
+        await registry.LastProbe;
+    }
+
+    [Fact]
+    public async Task AFailedAddressIsntDialledAgainRightAway()
+    {
+        var dialled = new List<string>();
+        var up = false;
+        var registry = new VolunteerRegistry((url, _) =>
+        {
+            lock (dialled) dialled.Add(url);
+            return Task.FromResult(up || url.EndsWith(":11011"));
+        }, () => _now, (_, _) => Task.FromResult<IPAddress?>(IPAddress.Parse("10.50.0.1")));
+        registry.Register("tcp://a.example.org:11010");
+        await registry.LastProbe;
+        Assert.Single(dialled);
+        // The failed entry is gone, but registering it again (or another name for that machine and port) dials nothing.
+        Assert.Equal("rate", registry.Register("tcp://a.example.org:11010")["error"]!.GetValue<string>());
+        registry.Register("tcp://b.example.org:11010");
+        await registry.LastProbe;
+        Assert.Single(dialled);
+        Assert.Empty(registry.Listed());
+        // Another port of the same machine isn't held back by the failing one.
+        Assert.True(Ok(registry.Register("tcp://a.example.org:11011")));
+        await registry.LastProbe;
+        Assert.Equal(["tcp://a.example.org:11011"], registry.Listed());
+        // After the cool-down it is dialled again.
+        up = true;
+        _now += VolunteerRegistry.FailedCooldown + TimeSpan.FromSeconds(1);
+        Assert.True(Ok(registry.Register("tcp://a.example.org:11010")));
+        await registry.LastProbe;
+        Assert.Contains("tcp://a.example.org:11010", registry.Listed());
+    }
+
+    [Fact]
     public async Task ManyNamesForOneMachineCountAsThatMachine()
     {
         // Fake resolver: every name under one.example.org is the same machine; the v6 names share one /64.
@@ -211,9 +261,10 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         hold2.SetResult(false);
         await byMachine.LastProbe;
         Assert.Empty(byMachine.Listed());
-        Assert.True(Ok(byMachine.Register("tcp://real.example.org:11010")));
+        // (Another port: the same machine and port that just failed is cooling down, and would fail for the real node too.)
+        Assert.True(Ok(byMachine.Register("tcp://real.example.org:11012")));
         await byMachine.LastProbe;
-        Assert.Equal(["tcp://real.example.org:11010"], byMachine.Listed());
+        Assert.Equal(["tcp://real.example.org:11012"], byMachine.Listed());
     }
 
     [Theory]

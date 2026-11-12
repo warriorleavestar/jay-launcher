@@ -210,7 +210,23 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     private readonly Queue<DateTimeOffset> _registrations = new();
 
+    /// <summary>New addresses one caller (source address) may register per <see cref="SourceWindow"/>.</summary>
+    public const int NewPerSource = 4;
+    public static readonly TimeSpan SourceWindow = TimeSpan.FromMinutes(10);
+    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _bySource = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// After a probe fails, that address, and that port on the machine it resolved to, aren't dialled again for this long.
+    /// The failed entry is dropped at once, so without this a caller could register the same target again and again
+    /// (under one name or many). Keyed by port, so failing ports of a host can't keep its real node off the list.
+    /// </summary>
+    public static readonly TimeSpan FailedCooldown = TimeSpan.FromMinutes(2);
+    private readonly Dictionary<string, DateTimeOffset> _failedAt = new(StringComparer.Ordinal);
+
+    private bool CoolingDown(string key, DateTimeOffset now) => _failedAt.TryGetValue(key, out var at) && now - at < FailedCooldown;
+
     private static string HostOf(string normalized) => new Uri(normalized).Host;
+    private static string DialKey(string machine, string address) => $"dial:{machine}:{new Uri(address).Port}";
     private readonly Dictionary<string, DateTimeOffset> _lastCheck = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -253,8 +269,11 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         return new JsonObject { ["ok"] = true, ["reachable"] = reachable };
     }
 
-    /// <summary>Handles a "volunteer" request. Returns the reply: <c>{ok, listed}</c> or an error code.</summary>
-    public JsonObject Register(string? url)
+    /// <summary>
+    /// Handles a "volunteer" request from <paramref name="source"/> (the caller's address as the directory counts it;
+    /// null for calls in-process, which aren't limited per source). Returns the reply: <c>{ok, listed}</c> or an error code.
+    /// </summary>
+    public JsonObject Register(string? url, string? source = null)
     {
         if (VolunteerNodes.Normalize(url) is not { } address) return Error("bad");
         if (Blocked?.Invoke(address) == true) return Error("banned");
@@ -273,12 +292,16 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 while (_registrations.Count > 0 && now - _registrations.Peek() > TimeSpan.FromMinutes(1)) _registrations.Dequeue();
                 if (_registrations.Count >= RegistrationsPerMinute) return Error("rate");
                 var host = HostOf(address);
+                if (CoolingDown("addr:" + address, now)) return Error("rate");
+                var (count, until) = source is not null && _bySource.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + SourceWindow);
+                if (source is not null && count >= NewPerSource) return Error("rate");
                 // Listed entries hold a host's places; entries still being probed are capped on their own and can't
                 // keep a host's real node off the list (a failed probe drops its entry at once).
                 if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is not null) >= MaxPerHost)
                     return new JsonObject { ["ok"] = false, ["error"] = "host", ["reason"] = $"one host may register at most {MaxPerHost} addresses" };
                 if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is null) >= MaxPerHost) return Error("rate");
                 _registrations.Enqueue(now);
+                if (source is not null) _bySource[source] = (count + 1, until);
                 _entries[address] = entry = new Entry();
             }
             entry.Seen = now;
@@ -317,7 +340,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                     // As for names, listed entries and entries still being probed are counted apart.
                     var others = _entries.Where(p => p.Key != address && p.Value.Machine == machine).ToList();
                     crowded = others.Count(p => p.Value.VerifiedAt is not null) >= MaxPerHost
-                              || others.Count(p => p.Value.VerifiedAt is null) >= MaxPerHost;
+                              || others.Count(p => p.Value.VerifiedAt is null) >= MaxPerHost
+                              || CoolingDown(DialKey(machine, address), _now());
                     if (!crowded && _entries.TryGetValue(address, out var mine)) mine.Machine = machine;
                 }
             }
@@ -335,6 +359,14 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 entry.Probing = false;
                 if (ok) entry.VerifiedAt = _now();
                 else _entries.Remove(address);
+            }
+            if (!ok && !crowded)
+            {
+                // Dialled (or looked up) and failed: cool down the address and that port of the machine, whatever happens
+                // to the entry.
+                var at = _now();
+                _failedAt["addr:" + address] = at;
+                if (ip is not null) _failedAt[DialKey(VolunteerNodes.MachineOf(ip), address)] = at;
             }
         }
         Probed?.Invoke(address, ok);
@@ -369,6 +401,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     {
         foreach (var key in _entries.Where(p => now - p.Value.Seen > VolunteerNodes.Ttl && !p.Value.Probing).Select(p => p.Key).ToList())
             _entries.Remove(key);
+        foreach (var key in _failedAt.Where(p => now - p.Value >= FailedCooldown).Select(p => p.Key).ToList()) _failedAt.Remove(key);
+        foreach (var key in _bySource.Where(p => p.Value.Until <= now).Select(p => p.Key).ToList()) _bySource.Remove(key);
     }
 
     private static JsonObject Error(string code) => new() { ["ok"] = false, ["error"] = code };
