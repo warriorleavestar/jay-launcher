@@ -319,13 +319,7 @@ public partial class MultiplayerPage : UserControl
 
     private async void ImportComponent_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is not MultiplayerViewModel vm || TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return;
-        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = L.F("multiplayer.component.import_picker", vm.ComponentFileName),
-            FileTypeFilter = [new FilePickerFileType(L.T("multiplayer.component.import_filetype")) { Patterns = ["*.zip"] }],
-        });
-        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path) await vm.ImportComponentAsync(path);
+        if (DataContext is MultiplayerViewModel vm) await MultiplayerSettingsView.ImportComponentAsync(this, vm);
     }
 
     private async void BrowseDownloadFolder_Click(object? sender, RoutedEventArgs e)

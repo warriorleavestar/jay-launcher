@@ -282,6 +282,7 @@ public sealed partial class MainViewModel : ObservableObject
         var download = new DownloadViewModel(service);
         var settings = new SettingsViewModel(service);
         multiplayer.Tools = settings.Tools;
+        settings.Multiplayer = multiplayer;
         Pages =
         [
             home,

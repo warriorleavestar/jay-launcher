@@ -1,0 +1,130 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="using:Amber.App.Localization"
+             xmlns:vm="using:Amber.App.ViewModels"
+             xmlns:c="using:Amber.App.Views.Controls"
+             x:Class="Amber.App.Views.MultiplayerSettingsView"
+             x:DataType="vm:MultiplayerViewModel">
+  <!-- Settings › Multiplayer (redesign batch 7): what used to be the lobby's settings tab, minus the networks (Settings ›
+       Network), this computer's identity (Me › My devices) and the checks (the "Connection problems?" drawer).
+       Each control's x:Name is its settings#Field. -->
+  <StackPanel Spacing="14">
+    <!-- Invites and alerts -->
+    <Border x:Name="InvitesCard" Classes="card" Margin="0">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h2" Text="{l:T multiplayer.settings.invites}" Margin="0" />
+        <CheckBox x:Name="InviteAutoCopyBox" IsChecked="{Binding AutoCopyInvite}">
+          <TextBlock Text="{l:T multiplayer.lobby.auto_copy}" TextWrapping="Wrap" />
+        </CheckBox>
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.clipboard.autoclear_hint}" />
+        <TextBlock Text="{l:T multiplayer.settings.knock_wait}" TextWrapping="Wrap" />
+        <ComboBox x:Name="DefaultKnockWaitBox" ItemsSource="{Binding KnockWaitChoices}" SelectedItem="{Binding SelectedDefaultKnockWait}" MinWidth="160">
+          <ComboBox.ItemTemplate>
+            <DataTemplate DataType="vm:KnockWaitChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <CheckBox x:Name="RequestPopupBox" IsChecked="{Binding RequestPopup}">
+          <TextBlock Text="{l:T multiplayer.settings.request_popup}" TextWrapping="Wrap" />
+        </CheckBox>
+        <!-- Thirty-day invites are made in a room's invite panel; they outlive the room, so they can be copied and revoked here. -->
+        <TextBlock x:Name="LongInviteTitle" Text="{l:T multiplayer.longinvite.list_title}" FontWeight="SemiBold" Margin="0,6,0,0" IsVisible="{Binding HasLongInvites}" />
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.longinvite.hint}" IsVisible="{Binding HasLongInvites}" />
+        <ItemsControl x:Name="LongInviteList" ItemsSource="{Binding LongInviteItems}" IsVisible="{Binding HasLongInvites}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="vm:LongInviteItem">
+              <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                <StackPanel Spacing="2">
+                  <TextBlock TextWrapping="Wrap"><Run Text="{Binding Label}" FontWeight="SemiBold" /><Run Text=" · " /><Run Text="{Binding Left}" /></TextBlock>
+                  <SelectableTextBlock Text="{Binding CodeDisplay}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
+                <WrapPanel Grid.Column="1" ItemSpacing="6" VerticalAlignment="Center" Margin="8,0,0,0">
+                  <Button Classes="small" Content="{l:T multiplayer.invite.show}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).ToggleLongInviteShownCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small" Content="{l:T common.copy}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).CopyLongInviteCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small long-revoke" Content="{l:T multiplayer.longinvite.revoke}" Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).RevokeLongInviteCommand}" CommandParameter="{Binding}" />
+                </WrapPanel>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+
+    <!-- What a new room starts with: "relays only", the full LAN, what members may route through me, and the
+         transport. The lobby's four choices pick from these; a room that is open keeps what it opened with. -->
+    <Border x:Name="RoomDefaultsCard" Classes="card" Margin="0">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h2" Text="{l:T settings.mp.room_defaults}" Margin="0" />
+        <TextBlock x:Name="RoomDefaultsBusyText" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.room_defaults_busy}" IsVisible="{Binding !IsIdle}" />
+        <CheckBox x:Name="DefaultRelayOnlyBox" IsChecked="{Binding DefaultRelayOnly}">
+          <TextBlock Text="{l:T multiplayer.settings.relay_only}" TextWrapping="Wrap" />
+        </CheckBox>
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.settings.relay_only_hint}" />
+        <StackPanel Spacing="14" IsEnabled="{Binding IsIdle}">
+          <StackPanel Spacing="4">
+            <CheckBox x:Name="FullLanModeBox" Content="{l:T multiplayer.lan.full_mode}" IsChecked="{Binding FullLanMode}" IsEnabled="{Binding CanUseFullLan}" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap"
+                       Text="{l:T multiplayer.lan.full_mode_hint}" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource WarningText}"
+                       Text="{Binding FullLanUnavailableText}" IsVisible="{Binding !CanUseFullLan}" />
+            <CheckBox Content="{l:T multiplayer.exit.allow}" IsChecked="{Binding AllowExitNode}" IsEnabled="{Binding FullLanMode}" IsVisible="{Binding ShowNetworkExit}" Margin="0,6,0,0" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding AllowExitNode}" Foreground="{DynamicResource WarningText}"
+                       Text="{l:T multiplayer.exit.warning}" />
+            <CheckBox x:Name="AllowGameProxyBox" Content="{l:T multiplayer.proxy.allow}" IsChecked="{Binding AllowGameProxy}" Margin="0,6,0,0" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding AllowGameProxy}" Foreground="{DynamicResource WarningText}"
+                       Text="{l:T multiplayer.proxy.allow_warning}" />
+          </StackPanel>
+
+          <!-- 数据封装（开房间时选；加入时按房间码） -->
+          <StackPanel Spacing="4">
+            <!-- 窄窗口、长译文时自动换行。 -->
+            <WrapPanel ItemSpacing="8" LineSpacing="4">
+              <TextBlock Text="{l:T multiplayer.transport.label}" VerticalAlignment="Center" FontWeight="SemiBold" />
+              <ComboBox x:Name="TransportBox" ItemsSource="{Binding TransportChoices}" SelectedItem="{Binding SelectedTransport}" MinWidth="140">
+                <!-- 下拉里每种模式带一句说明；选中后框里只显示名字 -->
+                <ComboBox.ItemTemplate>
+                  <DataTemplate DataType="vm:TransportChoice">
+                    <StackPanel MaxWidth="420">
+                      <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding Privacy}" FontSize="12" TextWrapping="Wrap" Opacity="0.75" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+                <ComboBox.SelectionBoxItemTemplate>
+                  <DataTemplate DataType="vm:TransportChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                </ComboBox.SelectionBoxItemTemplate>
+              </ComboBox>
+              <CheckBox Content="{l:T multiplayer.transport.disguise}" IsChecked="{Binding DisguiseAsMinecraft}" IsEnabled="{Binding CanDisguise}" />
+            </WrapPanel>
+            <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding SelectedTransport.Privacy}" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding SelectedTransport.Detail}" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap"
+                       Text="{l:T multiplayer.transport.hint}" />
+          </StackPanel>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- The multiplayer component: version, download, import from a file -->
+    <Border x:Name="MultiplayerComponentCard" Classes="card" Margin="0">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="h2" Text="{l:T multiplayer.settings.component}" Margin="0" />
+        <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
+          <TextBlock Text="{Binding ComponentText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          <WrapPanel Grid.Row="1" ItemSpacing="6" LineSpacing="6" IsVisible="{Binding !IsComponentReady}">
+            <Button Classes="primary" Content="{l:T multiplayer.component.download}" Command="{Binding DownloadComponentCommand}" IsVisible="{Binding !IsDownloading}" />
+            <Button Content="{l:T multiplayer.component.import}" Click="ImportComponent_Click" IsVisible="{Binding !IsDownloading}" />
+          </WrapPanel>
+        </Grid>
+        <c:ProgressLine x:Name="ComponentLineSettings" IsVisible="{Binding IsDownloading}" Step="{Binding Status}"
+                        Percent="{Binding ComponentWork.Percent}" IsIndeterminate="{Binding ComponentWork.IsIndeterminate}"
+                        BytesPerSecond="{Binding ComponentWork.BytesPerSecond}" Remaining="{Binding ComponentWork.Remaining}"
+                        CancelCommand="{Binding CancelDownloadCommand}" />
+        <SelectableTextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding ManualHintText}" IsVisible="{Binding !IsComponentReady}" />
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding LicenseText}" />
+      </StackPanel>
+    </Border>
+
+    <!-- 手机通过当前网络出口上网。共享状态由提权守护确认。 -->
+    <c:HotspotSharingPanel DataContext="{Binding Hotspot}" />
+  </StackPanel>
+</UserControl>

@@ -64,10 +64,6 @@ public sealed partial class AccountsViewModel
     [RelayCommand]
     private void OpenPeople() => Navigate?.Invoke("people");
 
-    /// <summary>The safety code and "reset identity" live in the multiplayer settings.</summary>
-    [RelayCommand]
-    private void OpenDeviceSettings() => Navigate?.Invoke("play/settings#IdentityCard");
-
     [RelayCommand]
     private void OpenThemes() => Navigate?.Invoke("settings#ThemePack");
 

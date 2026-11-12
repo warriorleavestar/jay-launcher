@@ -186,13 +186,13 @@ public sealed partial class NetworkStatusViewModel : ObservableObject
     private void AddNetwork()
     {
         Done?.Invoke();
-        _navigate("play/settings#NetworksCard");
+        _navigate(Amber.Core.Navigation.LegacyRoutes.PublicNetworks);
     }
 
     [RelayCommand]
     private void OpenSettings()
     {
         Done?.Invoke();
-        _navigate("play/settings");
+        _navigate(Amber.Core.Navigation.LegacyRoutes.NetworkSettings);
     }
 }

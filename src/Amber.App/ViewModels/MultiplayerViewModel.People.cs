@@ -140,9 +140,6 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Go to the Friends page with the add panel open.</summary>
     internal void OpenAddFriend() => Navigate?.Invoke("people/add");
 
-    /// <summary>Multiplayer settings: friends moved to their own page.</summary>
-    [RelayCommand]
-    private void OpenFriends() => Navigate?.Invoke("people");
 
     private void InitPeople()
     {

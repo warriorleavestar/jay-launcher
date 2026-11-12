@@ -224,7 +224,7 @@ Pages and their regions (every region except a title is required):
 | `instances.json` | `instances.header` (the hero) `instances.lastrun` `instances.details` `instances.status` |
 | `downloads.json` | `downloads.title` `downloads.search` `downloads.filters` `downloads.body` `downloads.status` |
 | `content.json` | `content.header` `content.filters` `content.body` `content.status` |
-| `multiplayer.json` | `multiplayer.title` `multiplayer.tabs` (the row with Back and the name of a sub-view: the public network, my server, multiplayer settings; empty on the lobby and in a room, which have no tabs any more) `multiplayer.room` (the room banner with its cover, connection mark and faces, and the knock panel) `multiplayer.body` `multiplayer.status` |
+| `multiplayer.json` | `multiplayer.title` `multiplayer.tabs` (the row with Back and the name of a sub-view: the public network or my server; empty on the lobby and in a room, which have no tabs any more) `multiplayer.room` (the room banner with its cover, connection mark and faces, and the knock panel) `multiplayer.body` `multiplayer.status` |
 
 `home.json`, `tools.json` and `log.json` laid out the launch page, the toolbox and the standalone log page. Those pages are
 gone (starting a game happens on each instance, the toolbox moved into Settings, the live log is a dock: Ctrl+`). A pack

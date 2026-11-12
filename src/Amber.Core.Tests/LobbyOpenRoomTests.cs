@@ -3,6 +3,7 @@ using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
+using Amber.Core.Navigation;
 using Amber.Core.Multiplayer.Contacts;
 using Amber.Core.Multiplayer.Transport;
 using Avalonia.Threading;
@@ -546,12 +547,31 @@ public sealed class LobbyOpenRoomTests
         Assert.Contains(nameof(MultiplayerViewModel.IsSubView), changed);
         Assert.Contains(nameof(MultiplayerViewModel.SubViewTitle), changed);
 
-        vm.OpenMultiplayerSettingsCommand.Execute(null);
-        Assert.Equal(L.T("multiplayer.tab.settings"), vm.SubViewTitle);
+        // The settings tab is gone: an old play/settings route leaves the view as it was (the shell sends it to Settings).
+        vm.ShowRoute("settings");
+        Assert.True(vm.IsServersTab);
         vm.ShowRoute("public");
         Assert.Equal(L.T("multiplayer.subview.network"), vm.SubViewTitle);
 
         vm.ShowTabCommand.Execute("play");
         Assert.False(vm.IsSubView);
+    });
+
+    [Fact]
+    public void MultiplayerSettingsOpenInSettings() => UiTestThread.Run(() =>
+    {
+        // Redesign batch 7: no settings tab; the room menu, [Advanced settings] and "Try another relay" go to Settings.
+        var (service, vm, _) = Create();
+        using var s = service;
+        List<string> went = [];
+        vm.Navigate = went.Add;
+        vm.OpenMultiplayerSettingsCommand.Execute(null);
+        vm.OpenRoomDefaultsCommand.Execute(null);
+        vm.DiagnosticsOpen = true;
+        vm.SwitchRelayCommand.Execute(null);
+        Assert.Equal([LegacyRoutes.MultiplayerSettings, LegacyRoutes.RoomDefaults, LegacyRoutes.RelaySettings], went);
+        Assert.False(vm.DiagnosticsOpen);
+        Assert.False(vm.IsSubView);
+        Assert.Null(MultiplayerViewModel.ParseTab("settings"));
     });
 }

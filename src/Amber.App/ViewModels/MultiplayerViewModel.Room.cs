@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
+using Amber.Core.Navigation;
 using Amber.App.Localization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -426,17 +427,13 @@ public sealed partial class MultiplayerViewModel
 
     public bool HasNetworkVerdict => NetworkCheckText.Length > 0;
 
-    /// <summary>"Try another relay server": multiplayer settings › relay servers.</summary>
+    /// <summary>"Try another relay server": Settings › Network › relay servers.</summary>
     [RelayCommand]
     private void SwitchRelay()
     {
         DiagnosticsOpen = false;
-        Tab = MultiplayerTab.Settings;
-        Navigate?.Invoke("play/settings");
+        Navigate?.Invoke(LegacyRoutes.RelaySettings);
     }
-
-    [RelayCommand]
-    private void TurnOnDebugMode() => DebugMode = true;
 
     [RelayCommand]
     private async Task CopyRoomInfoAsync()

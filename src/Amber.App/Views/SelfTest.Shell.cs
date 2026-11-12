@@ -392,9 +392,12 @@ internal sealed partial class SelfTest
         window.Height = 700;
         await Task.Delay(400);
 
-        Dispatcher.UIThread.Invoke(() => page.DeviceSettingsButton.Command?.Execute(null));
+        // The safety code, "reset identity" and device verification moved here from the lobby's settings tab (batch 7).
+        Check("我的设备：安全码、【重置联机身份】、设备认证都在这页", Dispatcher.UIThread.Invoke(() =>
+            page.IdentityCard.IsEffectivelyVisible && page.ResetIdentityButton.IsEffectivelyVisible && page.DeviceCheckCard.IsEffectivelyVisible));
+        shell.Navigate("play/settings#IdentityCard");
         var identity = await WaitAsync(() => window.RevealedField?.Name == "IdentityCard", 3);
-        Check("【安全码和重置】去联机设置里的那张卡", identity && main.CurrentPage is MultiplayerViewModel { Tab: MultiplayerTab.Settings }, $"{shell.Router.Current} {window.RevealedField?.Name}");
+        Check("旧路由 play/settings#IdentityCard 去“我”页的我的设备", identity && main.CurrentPage is AccountsViewModel, $"{shell.Router.Current} {window.RevealedField?.Name}");
         // Leaving a page drops its view: look the page up again after every return.
         async Task<AccountsPage> BackToMeAsync()
         {
@@ -592,11 +595,12 @@ internal sealed partial class SelfTest
             await WaitAsync(() => Dispatcher.UIThread.Invoke(() => window.NetworkFlyout.IsOpen && window.NetworkAdd.IsEffectivelyVisible), 3);
             Dispatcher.UIThread.Invoke(() => window.NetworkAdd.Command?.Execute(null));
             var card = await WaitAsync(() => window.RevealedField?.Name == "NetworksCard", 3);
-            Check("【添加网络…】去联机设置里的公共网络卡，面板收起", card && Dispatcher.UIThread.Invoke(() =>
-                main.CurrentPage is MultiplayerViewModel { Tab: MultiplayerTab.Settings } && !window.NetworkFlyout.IsOpen), $"{shell.Router.Current} {window.RevealedField?.Name}");
+            Check("【添加网络…】去设置 › 网络的公共网络卡，面板收起", card && Dispatcher.UIThread.Invoke(() =>
+                main.CurrentPage is SettingsViewModel { SelectedGroupId: Amber.Core.Navigation.SettingsCatalog.Network } && !window.NetworkFlyout.IsOpen), $"{shell.Router.Current} {window.RevealedField?.Name}");
             Dispatcher.UIThread.Invoke(() => network.OpenSettingsCommand.Execute(null));
             await Task.Delay(250);
-            Check("【网络设置】去联机设置", shell.Router.Current.ToString() == "play/settings");
+            Check("【网络设置】去设置 › 网络", shell.Router.Current.ToString() == Amber.Core.Navigation.LegacyRoutes.NetworkSettings
+                && main.CurrentPage is SettingsViewModel { SelectedGroupId: Amber.Core.Navigation.SettingsCatalog.Network }, shell.Router.Current.ToString());
         }
         finally
         {

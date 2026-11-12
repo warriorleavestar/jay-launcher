@@ -35,14 +35,25 @@ internal sealed partial class SelfTest
             settings.SelectedGroupIndex = 0;
             await Task.Delay(200);
             string[] Shown() => Dispatcher.UIThread.Invoke(() => page.Form.Children.Where(c => c.IsVisible).Select(c => c.Name ?? "").ToArray());
-            Check("宽窗口：左边 9 个分组、右边说明栏、没有下拉", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide && page.GroupList.IsEffectivelyVisible
-                && page.NotePane.IsEffectivelyVisible && !page.GroupPicker.IsVisible) && settings.Groups.Count == 9);
+            Check("宽窗口：左边 10 个分组、右边说明栏、没有下拉", Dispatcher.UIThread.Invoke(() => page.Tier == WidthTier.Wide && page.GroupList.IsEffectivelyVisible
+                && page.NotePane.IsEffectivelyVisible && !page.GroupPicker.IsVisible) && settings.Groups.Count == 10);
             Check("一次只显示一组（常规）", Shown() is ["Group_general"], string.Join(",", Shown()));
             await ShotAsync("settings-1440");
             settings.SelectedGroupIndex = 1;
             await Task.Delay(200);
             Check("点“外观”：只显示外观，说明栏跟着换", Shown() is ["Group_appearance"] && settings.SelectedGroupNote.Contains("主题包"), settings.SelectedGroupNote);
             await ShotAsync("settings-appearance-1440");
+            // Redesign batch 7: the lobby's settings tab became two groups, each with its own route.
+            main.Shell.Navigate("settings/network");
+            await Task.Delay(300);
+            Check("settings/network：只显示网络（公共网络、中转、STUN）", Shown() is ["Group_network"] && settings.SelectedGroupId == SettingsCatalog.Network, string.Join(",", Shown()));
+            await ShotAsync("settings-network-1440");
+            main.Shell.Navigate("settings/multiplayer");
+            await Task.Delay(300);
+            Check("settings/multiplayer：只显示联机（邀请、新房间默认、联机组件、紧急断开）", Shown() is ["Group_multiplayer"] && settings.SelectedGroupId == SettingsCatalog.Multiplayer, string.Join(",", Shown()));
+            await ShotAsync("settings-multiplayer-1440");
+            settings.SelectedGroupIndex = 1;
+            await Task.Delay(200);
 
             // Every setting has a home: settings#Field opens its group and reveals the control.
             var missing = new List<string>();
