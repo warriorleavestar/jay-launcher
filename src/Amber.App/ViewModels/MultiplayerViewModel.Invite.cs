@@ -214,7 +214,9 @@ public sealed partial class MultiplayerViewModel
     // ---- 房主 ----
 
     /// <summary>开房间时调用：生成这个房间的随机凭据。</summary>
-    private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) => RoomCredentials.Create(Identity.PublicKey, port, tunnel);
+    /// <remarks>The whole-LAN scope doesn't split in this version, so a room opened with it carries no split settings.</remarks>
+    private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) =>
+        RoomCredentials.Create(Identity.PublicKey, port, tunnel) with { Split = SplitSettings.ForNewRoom(tunnel.Wraps, FullLanMode, SplitSettings.Requested) };
 
     private IReadOnlyList<string> LobbyPeers(bool host) =>
         [.. (host ? TestListeners ?? [] : []), .. TestPeers ?? _service.MultiplayerPeers];
@@ -395,7 +397,7 @@ public sealed partial class MultiplayerViewModel
             return false;
         }
         _service.ActiveMultiplayer = _session;
-        if (!TryStartTransport(options))
+        if (!TryStartTransport(_session?.Options ?? options))
         {
             StopSession();
             return false;

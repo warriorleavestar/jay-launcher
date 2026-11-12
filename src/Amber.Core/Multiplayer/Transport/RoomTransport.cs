@@ -54,12 +54,13 @@ public sealed class RoomTransport : IAsyncDisposable
 
     private RoomTransport(Action<string>? log) => _log = log;
 
-    public static RoomTransport Start(EasyTierOptions o, Action<string>? log = null)
+    /// <param name="splitProblem">Member of a room that splits: why the extra paths can't be used right now (null: they can).</param>
+    public static RoomTransport Start(EasyTierOptions o, Action<string>? log = null, Func<string?>? splitProblem = null)
     {
         var t = new RoomTransport(log);
         try
         {
-            t.StartCore(o);
+            t.StartCore(o, splitProblem);
             return t;
         }
         catch
@@ -69,7 +70,7 @@ public sealed class RoomTransport : IAsyncDisposable
         }
     }
 
-    private void StartCore(EasyTierOptions o)
+    private void StartCore(EasyTierOptions o, Func<string?>? splitProblem)
     {
         // Strict means split or nothing, and a full-LAN host can't split in this version: refuse to start rather than
         // run a room whose Strict service nobody can reach.
@@ -95,22 +96,24 @@ public sealed class RoomTransport : IAsyncDisposable
         // Opened before the single-path port, so a Strict room with a busy leg port fails before it listens anywhere.
         if (o.IsHost && HostSplits(o))
         {
-            try
+            // The session bound the leg ports before EasyTier started (EasyTier only lets members reach them then). Without
+            // a session, or when the transport starts again in the same session, they are bound here.
+            var legs = o.HostSplitLegs?.TryTake() ?? SplitLegReservation.TryReserve(room.Split.Paths, listen)?.TryTake();
+            if (legs is null)
+            {
+                // A leg port is taken by another program. Auto rooms carry on without splitting; a Strict service would be
+                // unreachable, so then the room doesn't start.
+                if (SplitLegReservation.NeedsLegs(room.Split)) throw SplitLegReservation.Busy(room.Split);
+                _log?.Invoke(L.T("core.mp.split.ports_busy"));
+            }
+            else
             {
                 SplitServer = Add(new SplitTunnelServer(room, service => service switch
                 {
                     TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
                     TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
                     _ => null,
-                }, _log, listen));
-            }
-            catch (SocketException e)
-            {
-                // A leg port is taken by another program. Auto rooms carry on without splitting; a Strict service would be
-                // unreachable, so then the room doesn't start.
-                if (room.Split.For(TunnelService.Game) == SplitPolicy.Strict || room.Split.For(TunnelService.Chat) == SplitPolicy.Strict)
-                    throw new IOException(L.T("core.mp.split.ports_busy_strict"), e);
-                _log?.Invoke(L.T("core.mp.split.ports_busy"));
+                }, _log, listeners: legs));
             }
         }
 
@@ -144,13 +147,13 @@ public sealed class RoomTransport : IAsyncDisposable
             var noLegs = o.Tun ? L.T("core.mp.split.full_lan") : null;
             if (o.LocalForwardPort is { } game)
             {
-                GameSplit = new SplitConnector(room, TunnelService.Game, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Game), legs, _log,
+                GameSplit = new SplitConnector(room, TunnelService.Game, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Game), legs, _log, splitProblem,
                     noLegsReason: noLegs);
                 Game = Add(new TunnelClient(game, GameSplit.OpenAsync, _log));
             }
             if (o.LocalChatPort is { } chat)
             {
-                ChatSplit = new SplitConnector(room, TunnelService.Chat, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Chat), legs, _log,
+                ChatSplit = new SplitConnector(room, TunnelService.Chat, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Chat), legs, _log, splitProblem,
                     noLegsReason: noLegs);
                 Chat = Add(new TunnelClient(chat, ChatSplit.OpenAsync, _log));
             }
