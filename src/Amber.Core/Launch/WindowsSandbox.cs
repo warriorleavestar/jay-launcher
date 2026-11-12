@@ -348,9 +348,10 @@ public static unsafe class WindowsSandbox
 
     /// <summary>
     /// True when Jay's game container may use loopback both ways (the exemption and the inbound filters the one admin
-    /// prompt adds). Reading both needs no admin. False when the container does not exist yet.
+    /// prompt adds). Reading both needs no admin. False when the container does not exist yet. An unknown filter state
+    /// counts as ready only when this Jay recorded a successful loopback setup (<paramref name="setupRecorded"/>).
     /// </summary>
-    public static bool LoopbackExempt() => LoopbackExempt(ContainerName) && WindowsLoopbackInbound.Present();
+    public static bool LoopbackReady(bool setupRecorded) => LoopbackSetupRules.Ready(IsExempt(), WindowsLoopbackInbound.Check(), setupRecorded);
 
     /// <summary>Only the exemption (the game may connect out to loopback), without the inbound filters.</summary>
     public static bool IsExempt() => LoopbackExempt(ContainerName);
@@ -361,8 +362,7 @@ public static unsafe class WindowsSandbox
     /// (<paramref name="setupRecorded"/>): then leaving filters behind is the risk; otherwise a machine whose filter
     /// engine never answers would offer to undo something that was never done.
     /// </summary>
-    public static bool HasLoopbackSetup(bool setupRecorded) =>
-        LoopbackExempt(ContainerName) || WindowsLoopbackInbound.Check() is true || setupRecorded && WindowsLoopbackInbound.Check() is null;
+    public static bool HasLoopbackSetup(bool setupRecorded) => LoopbackSetupRules.HasSetup(IsExempt(), WindowsLoopbackInbound.Check(), setupRecorded);
 
     internal static bool LoopbackExempt(string name)
     {

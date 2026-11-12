@@ -71,12 +71,34 @@ public static unsafe class WindowsLoopbackInbound
     /// (the filter engine is not running, an RPC error, a tightened engine). Needs no admin: any user may open the
     /// engine and look objects up by key; once the admin step added them the lookup answers "access denied", which
     /// means they exist. Settings and the launch read this often, so the answer is kept for a few seconds (the lookups
-    /// are local RPCs to the filter engine; <see cref="Invalidate"/> after the admin step).
+    /// are local RPCs to the filter engine; <see cref="Invalidate"/> after the admin step, <see cref="WarmUp"/> at start).
     /// </summary>
     public static bool? Check()
     {
         lock (CacheLock)
-            if (_cache.Valid && Environment.TickCount64 - _cache.At < CacheMilliseconds) return _cache.Value;
+        {
+            if (_cache.Valid)
+            {
+                // A stale answer is still returned at once (settings read this from the UI thread); a fresh one is
+                // fetched in the background for the next caller.
+                if (Environment.TickCount64 - _cache.At >= CacheMilliseconds) WarmUp();
+                return _cache.Value;
+            }
+        }
+        return Refresh();
+    }
+
+    /// <summary>Fetches a fresh answer in the background (call at startup so the first read does not wait on the engine).</summary>
+    public static void WarmUp()
+    {
+        if (Interlocked.Exchange(ref _refreshing, 1) == 1) return;
+        _ = Task.Run(() => { try { Refresh(); } finally { Volatile.Write(ref _refreshing, 0); } });
+    }
+
+    private static int _refreshing;
+
+    private static bool? Refresh()
+    {
         // The lookups run outside the lock: two callers may both query, which is harmless.
         using var identity = WindowsIdentity.GetCurrent();
         var value = identity.User is { } user ? Query(user) : null;

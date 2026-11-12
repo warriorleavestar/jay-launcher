@@ -132,6 +132,8 @@ public sealed class LauncherService : IDisposable
         if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
             Accounts.AddOffline(settings.PlayerName);
+        // Settings read the strong sandbox's filter state from the UI thread; have it ready before they do.
+        if (OperatingSystem.IsWindows()) WindowsLoopbackInbound.WarmUp();
         Reload();
     }
 
@@ -494,7 +496,7 @@ public sealed class LauncherService : IDisposable
             }
             else
             {
-                var error = await RunSandboxSetupAsync(undo: false, !WindowsSandbox.LoopbackExempt(), WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)), ct);
+                var error = await RunSandboxSetupAsync(undo: false, !WindowsSandbox.LoopbackReady(Settings.StrongSandboxLoopbackSetUp), WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)), ct);
                 if (error is null && StrongSandboxReady(javaPath)) return options with { WindowsLevel = WindowsSandboxLevel.Strong };
                 if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).FirstOrDefault()
                     ?? (WindowsSandbox.IsExempt() ? "WFP loopback filters" : "CheckNetIsolation"));
@@ -515,7 +517,7 @@ public sealed class LauncherService : IDisposable
     /// <summary>Strong mode needs no admin step for this Java: the loopback exemption is there and every parent folder is open.</summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private bool StrongSandboxReady(string javaPath) =>
-        WindowsSandbox.LoopbackExempt() && WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).Count == 0;
+        WindowsSandbox.LoopbackReady(Settings.StrongSandboxLoopbackSetUp) && WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).Count == 0;
 
     /// <summary>
     /// The folders a launch grants whose parents the container must be able to list: inside the game folder (so the game
@@ -540,14 +542,11 @@ public sealed class LauncherService : IDisposable
             if (process is null) return Failed("no process");
             await process.WaitForExitAsync(ct);
             WindowsLoopbackInbound.Invalidate();
-            if (!undo)
-            {
-                Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
-                if (loopback && process.ExitCode == 0) Settings.StrongSandboxLoopbackSetUp = true;
-                Settings.Save();
-            }
-            // A negative exit code is the filter engine's HRESULT (inbound loopback filters).
-            return process.ExitCode == 0 ? null : Failed(process.ExitCode < 0 ? $"WFP 0x{process.ExitCode:X8}" : $"exit {process.ExitCode}");
+            Settings.StrongSandboxLoopbackSetUp = LoopbackSetupRules.RecordedAfter(Settings.StrongSandboxLoopbackSetUp, undo, loopback, process.ExitCode);
+            if (!undo) Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
+            Settings.Save();
+            if (undo && process.ExitCode == LoopbackSetupRules.ExitFiltersNotConfirmed) return FiltersNotConfirmed;
+            return process.ExitCode == 0 ? null : Failed(LoopbackSetupRules.DescribeExit(process.ExitCode));
         }
         catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223)
         {
@@ -579,14 +578,18 @@ public sealed class LauncherService : IDisposable
         if (!OperatingSystem.IsWindows()) return null;
         var folders = Settings.StrongSandboxFolders.Where(System.IO.Directory.Exists).ToList();
         var error = await RunSandboxSetupAsync(undo: true, WindowsSandbox.HasLoopbackSetup(Settings.StrongSandboxLoopbackSetUp), folders, ct);
-        if (error is not null) return error;
+        // Exemption and folders were undone, the filters could not be confirmed removed: the record of the loopback
+        // setup stays (so "remove" stays offered), the rest is cleared, and the player is told.
+        if (error is not null && !ReferenceEquals(error, FiltersNotConfirmed)) return error;
         Settings.StrongSandboxFolders = [];
-        Settings.StrongSandboxLoopbackSetUp = false;
         Settings.StrongSandbox = false;
         Settings.Save();
         SandboxStateChanged?.Invoke();
-        return null;
+        return error is null ? null : L.T("settings.sandbox.undo_filters_unconfirmed");
     }
+
+    /// <summary>Marker result of an undo whose inbound filters could not be confirmed removed (compared by reference).</summary>
+    private static readonly string FiltersNotConfirmed = new('?', 1);
 
     private void RememberSandboxFallback(string reason, string? detail)
     {
@@ -624,7 +627,7 @@ public sealed class LauncherService : IDisposable
             if (!Settings.StrongSandbox) return L.T("settings.sandbox.status.standard");
             if (Settings.StrongSandboxFallback is { } fallback)
                 return L.F("settings.sandbox.status.standard_because", WindowsSandboxPolicy.Describe(fallback, Settings.StrongSandboxFallbackDetail));
-            return WindowsSandbox.LoopbackExempt() ? L.T("settings.sandbox.status.strong") : L.T("settings.sandbox.status.strong_pending");
+            return WindowsSandbox.LoopbackReady(Settings.StrongSandboxLoopbackSetUp) ? L.T("settings.sandbox.status.strong") : L.T("settings.sandbox.status.strong_pending");
         }
     }
 

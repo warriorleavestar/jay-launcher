@@ -3187,6 +3187,7 @@
   "settings.sandbox.status.off": "現在：オフ。ゲームはサンドボックスなしで動きます。",
   "settings.sandbox.status.strong": "現在：強いサンドボックス（AppContainer）。",
   "settings.sandbox.status.strong_pending": "現在：強いサンドボックス。次の起動時に一度だけ管理者の確認を求めます。",
+  "settings.sandbox.undo_filters_unconfirmed": "サンドボックスの許可は取り消しましたが、Windows のフィルター サービスが応答せず、ループバックのルールが消えたか確認できませんでした。しばらくしてからもう一度「サンドボックスの許可を取り消す」を押してください。",
   "settings.sandbox.status.standard": "現在：標準サンドボックス（低い整合性レベル）。",
   "settings.sandbox.status.standard_because": "現在：標準サンドボックス（低い整合性レベル）。理由：{0}",
   "settings.sandbox.status.unix": "現在：{0} のサンドボックスで動きます。",

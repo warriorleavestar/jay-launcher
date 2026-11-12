@@ -3187,6 +3187,7 @@
   "settings.sandbox.status.off": "現在：已關閉，遊戲不在沙盒裡執行。",
   "settings.sandbox.status.strong": "現在：強沙盒（AppContainer）。",
   "settings.sandbox.status.strong_pending": "現在：強沙盒。下次啟動時會請你確認一次系統管理員權限。",
+  "settings.sandbox.undo_filters_unconfirmed": "沙盒權限已撤掉，但 Windows 的篩選服務沒有回應，Jay 無法確認回環規則也刪掉了。稍後再按一次「撤掉沙盒權限」。",
   "settings.sandbox.status.standard": "現在：標準沙盒（低完整性）。",
   "settings.sandbox.status.standard_because": "現在：標準沙盒（低完整性），因為{0}",
   "settings.sandbox.status.unix": "現在：用 {0} 沙盒執行。",

@@ -105,8 +105,9 @@ public sealed partial class SettingsViewModel
     [RelayCommand]
     private async Task RemoveSandboxPermissions()
     {
+        // The "filters not confirmed removed" note is already a full sentence; other errors get the failure frame.
         SandboxPermissionsError = await _service.RemoveSandboxPermissionsAsync() is { } error
-            ? L.F("settings.sandbox.remove_failed", error)
+            ? error == L.T("settings.sandbox.undo_filters_unconfirmed") ? error : L.F("settings.sandbox.remove_failed", error)
             : null;
         SandboxChanged();
     }

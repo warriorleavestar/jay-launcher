@@ -118,9 +118,17 @@ public static class WindowsSandboxSetup
     /// <summary>
     /// The elevated helper: the loopback exemption and inbound filters (when asked) and the parent folders. 0 when
     /// everything was done, 2 for a command line Jay would not write, the filter engine's HRESULT (negative) when the
-    /// inbound filters failed, else 1 when a step failed.
+    /// inbound filters failed, 1 when another step failed, and <see cref="LoopbackSetupRules.ExitUnexpected"/> /
+    /// <see cref="LoopbackSetupRules.ExitFiltersNotConfirmed"/> as described there.
     /// </summary>
     public static int Run(string[] args)
+    {
+        try { return RunSteps(args); }
+        // An unexpected failure must still give Jay a code it can explain (not the runtime's 0xE0434352).
+        catch (Exception) { return LoopbackSetupRules.ExitUnexpected; }
+    }
+
+    private static int RunSteps(string[] args)
     {
         if (!IsInvocation(args) || args.Length < 2 || args[1] is not (LoopbackOption or NoLoopbackOption)) return 2;
         var undo = args[0] == UndoArgument;
@@ -139,7 +147,8 @@ public static class WindowsSandboxSetup
         if (folders.Any(f => !Path.IsPathFullyQualified(f) || !Directory.Exists(f))) return 2;
         var ok = true;
         uint wfp = 0;
-        if (loopback) ok = Loopback(undo, user, out wfp);
+        var filtersUnconfirmed = false;
+        if (loopback) ok = Loopback(undo, user, out wfp, out filtersUnconfirmed);
         foreach (var folder in folders)
         {
             try
@@ -153,19 +162,22 @@ public static class WindowsSandboxSetup
             }
         }
         // A filter-engine error is passed on as the exit code itself (an HRESULT, so negative), so Jay can show it.
-        return wfp != 0 ? unchecked((int)wfp) : ok ? 0 : 1;
+        if (wfp != 0) return unchecked((int)LoopbackSetupRules.AsHResult(wfp));
+        if (!ok) return 1;
+        return undo && loopback && filtersUnconfirmed ? LoopbackSetupRules.ExitFiltersNotConfirmed : 0;
     }
 
     /// <summary>
     /// The loopback exemption (the game may connect out to Jay) plus Jay's inbound filters (Jay may connect into the
     /// game, e.g. a world opened to LAN); see <see cref="WindowsLoopbackInbound"/>.
     /// </summary>
-    private static bool Loopback(bool remove, SecurityIdentifier? user, out uint wfpError)
+    private static bool Loopback(bool remove, SecurityIdentifier? user, out uint wfpError, out bool filtersUnconfirmed)
     {
         // Undo with the filter engine unreachable cannot remove (or even see) the filters; that must not keep the
         // exemption and the folders from being undone, or "remove sandbox permissions" could never finish.
         var inbound = remove ? WindowsLoopbackInbound.Remove(user!) : WindowsLoopbackInbound.Add(WindowsSandbox.ContainerSid(), user!);
-        var inboundOk = inbound == 0 || remove && inbound == WindowsLoopbackInbound.EngineUnavailable;
+        filtersUnconfirmed = remove && inbound == WindowsLoopbackInbound.EngineUnavailable;
+        var inboundOk = inbound == 0 || filtersUnconfirmed;
         wfpError = inboundOk ? 0 : inbound;
         return Exempt(remove) && inboundOk;
     }

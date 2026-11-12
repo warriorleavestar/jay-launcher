@@ -3262,6 +3262,7 @@
   "settings.sandbox.status.off": "Now: off. The game runs without a sandbox.",
   "settings.sandbox.status.strong": "Now: strong sandbox (AppContainer).",
   "settings.sandbox.status.strong_pending": "Now: strong sandbox. The next launch asks once for an admin confirmation.",
+  "settings.sandbox.undo_filters_unconfirmed": "The sandbox permissions were removed, but Windows' filter service did not answer, so Jay could not confirm that its loopback rules are gone. Try “Remove sandbox permissions” again later.",
   "settings.sandbox.status.standard": "Now: standard sandbox (low integrity).",
   "settings.sandbox.status.standard_because": "Now: standard sandbox (low integrity), because {0}",
   "settings.sandbox.status.unix": "Now: sandboxed with {0}.",
