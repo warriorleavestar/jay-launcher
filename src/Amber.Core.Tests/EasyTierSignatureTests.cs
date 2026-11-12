@@ -90,11 +90,11 @@ public sealed class EasyTierSignatureTests
     public void OnlyThisExactBuildPasses()
     {
         var sums = EmbeddedSums();
-        Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, tag: "jay-v2.6.4-2"), T[0], T[1])));
-        Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, seq: 2), T[0], T[1])));
+        Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, tag: EasyTierRelease.ReleaseTag + "0"), T[0], T[1])));
+        Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, seq: EasyTierRelease.Seq + 1), T[0], T[1])));
         Assert.Equal(ReleaseVerdict.WrongTag, Check(Signed(Statement(sums, commit: new string('c', 40)), T[0], T[1])));
         // The signature is for a different SHA256SUMS.txt.
-        var other = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(sums).Replace("15a21e30", "25a21e30", StringComparison.Ordinal));
+        var other = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(sums).Replace("98dbf4c9", "08dbf4c9", StringComparison.Ordinal));
         Assert.Equal(ReleaseVerdict.SumsMismatch, Check(Signed(Statement(other), T[0], T[1])));
     }
 

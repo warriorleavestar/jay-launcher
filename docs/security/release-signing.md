@@ -103,7 +103,7 @@ Jay's hardened EasyTier ([Yumao-Feather/jay-easytier](https://github.com/Yumao-F
 is signed the same way: 2 of the 3 trustees' **release keys**, both algorithms (never the network trust keys). Its signature names the component, so the
 signed bytes start with `jay-component-v1` and `easytier` instead of `jay-release-v2`, and the JSON has
 `"component": "easytier"`. A Jay release signature can never pass as an EasyTier one, or the other way round.
-The tag is the fork's own (`jay-v2.6.4-1`) and the seq counts EasyTier builds (1, 2, …), separately from Jay.
+The tag is the fork's own (`jay-v2.6.4-2`) and the seq counts EasyTier builds (1, 2, …), separately from Jay.
 
 Jay doesn't download this signature. It ships it: `src/Amber.Core/Multiplayer/EasyTierSigned/` holds the
 release's `SHA256SUMS.txt` and `SHA256SUMS.txt.sigs`, and `EasyTierRelease` pins the tag, seq, full commit
@@ -118,15 +118,15 @@ a different EasyTier. Someone also needs two trustees to sign that EasyTier buil
 When the fork's release job has published the zips, `SHA256SUMS.txt` and `SIZES.txt` as a draft:
 
 ```bash
-gh release download jay-v2.6.4-1 --repo Yumao-Feather/jay-easytier --pattern 'SHA256SUMS.txt' --dir et
-jay-server release prepare --component easytier --tag jay-v2.6.4-1 --seq 1 --commit <full commit id> --sums et/SHA256SUMS.txt
+gh release download jay-v2.6.4-2 --repo Yumao-Feather/jay-easytier --pattern 'SHA256SUMS.txt' --dir et
+jay-server release prepare --component easytier --tag jay-v2.6.4-2 --seq 2 --commit <full commit id> --sums et/SHA256SUMS.txt
 
 # Each of two trustees, on their own offline machine (the review says it is an EasyTier build):
 jay-server release cosign --key jay-release.key --sums et/SHA256SUMS.txt
 
-gh release upload jay-v2.6.4-1 --repo Yumao-Feather/jay-easytier et/SHA256SUMS.txt.sigs
-jay-server release verify et/<one package>.zip --component easytier --tag jay-v2.6.4-1
-gh release edit jay-v2.6.4-1 --repo Yumao-Feather/jay-easytier --draft=false
+gh release upload jay-v2.6.4-2 --repo Yumao-Feather/jay-easytier et/SHA256SUMS.txt.sigs
+jay-server release verify et/<one package>.zip --component easytier --tag jay-v2.6.4-2
+gh release edit jay-v2.6.4-2 --repo Yumao-Feather/jay-easytier --draft=false
 ```
 
 Then copy `SHA256SUMS.txt` and `SHA256SUMS.txt.sigs` into `src/Amber.Core/Multiplayer/EasyTierSigned/`, and
