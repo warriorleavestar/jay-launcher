@@ -63,13 +63,21 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
     /// GUI self-check only: the built-in network also accepts this one directory key, for the directory the self-check
     /// runs on this computer (it can't have a certificate from the Jay trustees). Works only in a process started with
     /// AMBER_SELFTEST, set from code only (never from settings, files or other environment variables), and nothing is saved.
+    /// The pin lasts until the returned handle is disposed, so later self-check scopes see the built-in network as shipped.
     /// </summary>
-    public static void PinSelfTestDirectory(byte[] key)
+    public static IDisposable PinSelfTestDirectory(byte[] key)
     {
         if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is not { Length: > 0 })
             throw new InvalidOperationException("Only the GUI self-check can pin a directory key for the built-in network.");
         if (key.Length != DirectoryChannel.KeyLength) throw new ArgumentException("Not a directory key.", nameof(key));
-        _selfTestDirectoryKey = (byte[])key.Clone();
+        var pinned = (byte[])key.Clone();
+        _selfTestDirectoryKey = pinned;
+        return new SelfTestPin(pinned);
+    }
+
+    private sealed class SelfTestPin(byte[] pinned) : IDisposable
+    {
+        public void Dispose() => Interlocked.CompareExchange(ref _selfTestDirectoryKey, null, pinned);
     }
 
     public bool IsUsable => Nodes.Count > 0;
@@ -85,7 +93,7 @@ public sealed record PublicNetworkProfile(string Id, string Name, string Network
 
     /// <summary>
     /// The directory nodes' pinned X25519 public keys, from the signed connection string. Empty means the network doesn't
-    /// pin its directory (the built-in network until its nodes are deployed, and older strings): Jay then uses the legacy
+    /// pin its directory (the built-in network, except for the GUI self-check's own local directory while it runs, and older strings): Jay then uses the legacy
     /// unauthenticated protocol. Non-empty means Jay never sends a request to a directory that can't prove it holds one.
     /// </summary>
     public IReadOnlyList<byte[]> DirectoryKeys { get; init; } = [];

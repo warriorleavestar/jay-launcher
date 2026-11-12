@@ -46,10 +46,9 @@ the command line.
   macOS Gatekeeper warnings; those need real code signing, which Jay doesn't have yet.
 - **For now there are two release keys, and both belong to one trustee** (their own key and an offline cold
   backup), with both needed. Until a third trustee joins, this guards against one stolen key, not against that one
-  person. Each key has a checked paper backup. If a key and its paper are both lost, old installs can't follow a
-  trust-chain step, so they have to reinstall from a fresh download.
-- Losing more keys than a trust-chain step can spare (today: either of the two) can't be repaired by a
-  trust-chain step; old installs then have to reinstall from a fresh download.
+  person. Each key has a checked paper backup.
+- Losing more keys (and their paper backups) than a trust-chain step can spare, today either of the two, can't be
+  repaired by a trust-chain step; old installs then have to reinstall from a fresh download.
 - A self-signed Authenticode certificate is not a substitute. Windows doesn't trust it, and asking
   users to install it as a trusted root would weaken their whole system.
 
@@ -82,7 +81,7 @@ The CI release job publishes the packages and `SHA256SUMS.txt` as a **draft** re
 gh release download v0.9.0 --pattern 'SHA256SUMS.txt' --dir rel
 jay-server release prepare --tag v0.9.0 --seq 12 --commit <full commit id> --sums rel/SHA256SUMS.txt
 
-# Each of two trustees, on their own offline machine:
+# Each release key holder (today: Trustee 1's key and the cold backup), on an offline machine:
 jay-server release cosign --key jay-release.key --sums rel/SHA256SUMS.txt
 ```
 
@@ -117,7 +116,7 @@ pinned hashes are checked. Once they are, a build without a valid EasyTier signa
 EasyTier, and `EasyTierSignatureTests` fails, so such a build can't pass CI.
 
 What this adds over the pinned hashes alone: changing the pins in a Jay pull request is not enough to ship
-a different EasyTier. Someone also needs two trustees to sign that EasyTier build.
+a different EasyTier. Someone also needs `JayTrust.ReleaseNeed` release keys to sign that EasyTier build.
 
 When the fork's release job has published the zips, `SHA256SUMS.txt` and `SIZES.txt` as a draft:
 
@@ -125,7 +124,7 @@ When the fork's release job has published the zips, `SHA256SUMS.txt` and `SIZES.
 gh release download jay-v2.6.4-3 --repo Yumao-Feather/jay-easytier --pattern 'SHA256SUMS.txt' --dir et
 jay-server release prepare --component easytier --tag jay-v2.6.4-3 --seq 3 --commit 9407746b1ce1dc4d977441c47dfdcb303363a62a --sums et/SHA256SUMS.txt
 
-# Each of two trustees, on their own offline machine (the review says it is an EasyTier build):
+# Each release key holder (today: Trustee 1's key and the cold backup), on an offline machine (the review says it is an EasyTier build):
 jay-server release cosign --key jay-release.key --sums et/SHA256SUMS.txt
 
 gh release upload jay-v2.6.4-3 --repo Yumao-Feather/jay-easytier et/SHA256SUMS.txt.sigs

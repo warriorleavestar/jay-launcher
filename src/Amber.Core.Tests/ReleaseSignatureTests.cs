@@ -157,6 +157,7 @@ public sealed class ReleaseSignatureTests : IDisposable
         Assert.Equal(["9D47BBDA24BF2956AF370F64F4DF2B6FE9A1F89DB71E79A0747D9E616D94E6ED", "75CD82DBE5DF8E4D4856BCE20C662B588CC8AE8441208A79C5FB1CE8BBD8E2D9"], Ids(JayTrust.Keys));
         Assert.Equal(["08039FD2126DE71913B6BC5D9B4A622986A9282B935BE6AEE03590D8B667C034", "73FA5202C401F163C04DDC240089EEE763639A92B34F785A02C84561283FD5CE"], Ids(JayTrust.ReleaseKeys));
         Assert.Equal(["9D47 BBDA 24BF 2956", "75CD 82DB E5DF 8E4D"], JayTrust.Keys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
+        Assert.Equal(["0803 9FD2 126D E719", "73FA 5202 C401 F163"], JayTrust.ReleaseKeys.Select(k => TrustCommands.Fingerprint(TrustSigner.IdOfPublicKey(Convert.FromBase64String(k)))));
 
         // Changing what Quorum hands out doesn't change the built-in list.
         var quorum = JayTrust.Quorum;
