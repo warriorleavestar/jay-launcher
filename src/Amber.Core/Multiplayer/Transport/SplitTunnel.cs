@@ -41,6 +41,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     /// <summary>Legs in their handshake right now, across all ports.</summary>
     public int PendingHandshakes => Volatile.Read(ref _pending);
 
+    /// <summary>Tests: runs on each accepted socket before anything else (to make that step fail).</summary>
+    internal Action<TcpClient>? BeforeServeForTest { get; init; }
+
     /// <summary>How long one leg may take to finish its handshake.</summary>
     internal TimeSpan HandshakeTimeout { get; init; } = TunnelHandshake.Timeout;
 
@@ -118,13 +121,16 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         SplitLeg leg;
         try
         {
+            BeforeServeForTest?.Invoke(client);
             Pump.Tune(client);
             // The leg's stream owns the socket: once the leg is handed to the registry, the joined stream closes it.
             raw = new OwnedStream(client);
             leg = new SplitLeg(index, _room.Split.Paths, _room.Epoch);
         }
-        catch (Exception e) when (e is SocketException or ObjectDisposedException or IOException or InvalidOperationException or ArgumentException)
+        catch (Exception e)
         {
+            // Whatever failed, the leg gives its place back.
+            if (e is not (SocketException or ObjectDisposedException or IOException)) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             Interlocked.Decrement(ref _pending);
             Interlocked.Increment(ref _rejected);
             client.Dispose();

@@ -195,6 +195,7 @@ public sealed class TunnelServer : IAsyncDisposable
         {
             Stream? stream = null;
             CancellationTokenRegistration revocation = default;
+            var served = false;
             try
             {
                 BeforeServeForTest?.Invoke(client);
@@ -232,6 +233,7 @@ public sealed class TunnelServer : IAsyncDisposable
                     return;
                 }
                 Interlocked.Increment(ref Accepted);
+                served = true;
                 await handler(stream, ct);
             }
             catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or PlatformNotSupportedException
@@ -239,8 +241,17 @@ public sealed class TunnelServer : IAsyncDisposable
             {
                 // 出错断开：不给对面发“正常结束”。
                 (stream as IAuthenticatedStream)?.Abort();
-                Interlocked.Increment(ref Rejected);
+                // Only a connection that never got served counts as refused; a forwarding that ended is not.
+                if (!served) Interlocked.Increment(ref Rejected);
                 if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
+                else if (e is InvalidOperationException or ArgumentException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+            }
+            catch (Exception e)
+            {
+                // Anything else still ends this connection quietly and is logged by type only (no member details).
+                (stream as IAuthenticatedStream)?.Abort();
+                if (!served) Interlocked.Increment(ref Rejected);
+                _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             }
             finally
             {

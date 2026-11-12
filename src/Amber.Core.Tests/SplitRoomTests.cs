@@ -262,6 +262,34 @@ public sealed class SplitRoomTests
         Assert.Equal(5, back[0]);
     }
 
+    /// <summary>Legs that fail before their handshake starts give their place back, whatever the failure.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegsThatFailBeforeTheHandshakeFreeTheirPlace(bool unexpected)
+    {
+        const int failing = SplitTunnelServer.MaxPendingHandshakes + 8;
+        var seen = 0;
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped, beforeServe: _ =>
+        {
+            if (Interlocked.Increment(ref seen) > failing) return;
+            if (unexpected) throw new NotSupportedException("test");
+            throw new SocketException((int)SocketError.ConnectionReset);
+        });
+        var ports = rig.Server.Ports;
+        for (var i = 0; i < failing; i++)
+        {
+            using var c = new TcpClient();
+            try { await c.ConnectAsync(IPAddress.Loopback, ports[i % ports.Count]); }
+            catch (SocketException) { }
+            Assert.True(await WaitAsync(() => Volatile.Read(ref seen) > i && rig.Server.PendingHandshakes == 0, 10));
+        }
+        Assert.Equal(failing, rig.Server.Rejected);
+        var connector = rig.Connector(TunnelService.Game);
+        await using var stream = await connector.OpenAsync(CancellationToken.None);
+        Assert.IsType<SplitStream>(stream);
+    }
+
     private static async Task<bool> WaitAsync(Func<bool> condition, int seconds = 5)
     {
         for (var i = 0; i < seconds * 20; i++)
@@ -561,12 +589,12 @@ public sealed class SplitRoomTests
         public int LegOpens => Volatile.Read(ref _legOpens);
         public IReadOnlyList<TunnelService> Served { get { lock (_served) return [.. _served]; } }
 
-        public static Task<Rig> StartAsync(SplitSettings split, TunnelSettings tunnel, bool hostEpochBump = false)
+        public static Task<Rig> StartAsync(SplitSettings split, TunnelSettings tunnel, bool hostEpochBump = false, Action<TcpClient>? beforeServe = null)
         {
             var (credentials, table, host, guest) = NewRoom(split, tunnel);
             var rig = new Rig { Table = table, GuestEntry = guest, Member = credentials.ToRoom() };
             if (hostEpochBump) host = host with { Epoch = host.Epoch + 1 };
-            rig.Server = new SplitTunnelServer(host, service => Echo(rig, service), ports: [.. Enumerable.Repeat(0, split.Paths)]);
+            rig.Server = new SplitTunnelServer(host, service => Echo(rig, service), ports: [.. Enumerable.Repeat(0, split.Paths)]) { BeforeServeForTest = beforeServe };
             rig._single.Start();
             rig._singleLoop = Task.Run(rig.SingleLoopAsync);
             return Task.FromResult(rig);
