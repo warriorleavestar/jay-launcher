@@ -114,7 +114,8 @@ internal sealed partial class SelfTest
         var code = ContactCode.Format(robin.PublicKey);
         shell.Navigate("play");
         await Task.Delay(300);
-        Dispatcher.UIThread.Invoke(() => mp.PasteCode(code));
+        // Through the window's own Ctrl+V handler, the way a real paste arrives.
+        Dispatcher.UIThread.Invoke(() => main.PasteCode(code));
         await Task.Delay(400);
         page = await FindAsync<PeoplePage>(p => p.IsEffectivelyVisible) ?? page;
         Check("在联机页贴好友码：转到朋友页，码已填进面板，什么都没发", shell.Router.Current.ToString() == "people/add" && people.IsAdding

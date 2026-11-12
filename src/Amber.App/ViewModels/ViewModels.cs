@@ -180,20 +180,15 @@ public sealed partial class MainViewModel : ObservableObject
     public LogViewModel Log => Pages.OfType<LogViewModel>().First();
 
     /// <summary>
-    /// Ctrl+V outside a text box (§6.14): a code on the clipboard opens multiplayer with it filled in, nothing more.
+    /// Ctrl+V outside a text box (§6.14): a code on the clipboard opens the place it belongs with it filled in (the
+    /// lobby, the public rooms, or the Friends page's add panel for a friend code), nothing more.
     /// Returns false when the text is not a code (the key press is then left alone).
     /// </summary>
     public bool PasteCode(string? text)
     {
         if (FirstRun.IsOpen || Pages.OfType<MultiplayerViewModel>().FirstOrDefault() is not { IsIdle: true } multiplayer) return false;
-        if (!multiplayer.PasteCode(text)) return false;
-        Shell.Navigate(multiplayer.Tab switch
-        {
-            MultiplayerTab.Public => "play/public",
-            MultiplayerTab.Servers => "play/servers",
-            MultiplayerTab.Settings => "play/settings",
-            _ => "play",
-        });
+        if (multiplayer.PlacePastedCode(text) is not { } route) return false;
+        Shell.Navigate(route);
         return true;
     }
 

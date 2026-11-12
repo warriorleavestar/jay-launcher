@@ -477,6 +477,29 @@ public sealed class FriendsPageTests
     });
 
     [Fact]
+    public void AFriendCodePastedAnywhereOpensTheAddPanelAndStaysThere() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        main.FirstRun.IsOpen = false;
+        var code = ContactCode.Format(Key(4));
+        main.Shell.Navigate("library");
+        Assert.True(main.PasteCode(code));
+        Dispatcher.UIThread.RunJobs();
+        // Not the lobby: the code belongs on the Friends page, in the add panel, and nothing was sent.
+        Assert.Equal("people/add", main.Shell.Router.Current.ToString());
+        Assert.IsType<PeopleViewModel>(main.CurrentPage);
+        Assert.True(people.ShowAddPanel);
+        Assert.Equal(code, people.CodeInput);
+        Assert.Empty(mp.ContactRequests);
+
+        // An invite code still goes to the lobby's paste box; other text is left alone.
+        Assert.True(main.PasteCode("JAYS2-0123456789ABCDEFGHJK"));
+        Assert.Equal("play", main.Shell.Router.Current.ToString());
+        Assert.False(main.PasteCode("hello"));
+        Assert.Equal("play", main.Shell.Router.Current.ToString());
+    });
+
+    [Fact]
     public void AskingSomeoneIveMetToBeFriendsNeedsNoPastedCode() => WithMain((_, main, people, _) =>
     {
         var mp = main.Multiplayer;

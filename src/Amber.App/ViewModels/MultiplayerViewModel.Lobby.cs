@@ -131,28 +131,39 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>
-    /// Ctrl+V anywhere outside a text box (§6.14 keyboard): a code on the clipboard opens the lobby with it in the
-    /// paste box. Nothing is joined until the player clicks. Returns false for text that is not a code.
+    /// Ctrl+V anywhere outside a text box (§6.14 keyboard): a code on the clipboard is put where it belongs, and the
+    /// route of that place is returned. Nothing is joined or sent until the player clicks. Null for text that is not
+    /// a code.
     /// </summary>
-    public bool PasteCode(string? text)
+    internal string? PlacePastedCode(string? text)
     {
         var kind = PastedCode.Detect(text);
-        if (kind == PastedCodeKind.Unknown || text is null) return false;
+        if (kind == PastedCodeKind.Unknown || text is null) return null;
         if (kind == PastedCodeKind.FriendCode && ShowPublicNetworks)
         {
             Tab = MultiplayerTab.Public;
             FindCodeInput = text.Trim();
-            return true;
+            return "play/public";
         }
         if (kind == PastedCodeKind.ContactCode && ShowPublicNetworks)
         {
             // A friend code: into the add panel of the Friends page, added only when the player clicks [Add].
             ContactCodeInput = text.Trim();
-            OpenAddFriend();
-            return true;
+            return "people/add";
         }
         Tab = MultiplayerTab.Play;
         JoinCode = text.Trim();
+        return "play";
+    }
+
+    /// <summary>
+    /// The same from inside the multiplayer page: the lobby and its sub-pages follow <see cref="Tab"/>; a friend code
+    /// asks for the Friends page. Returns false for text that is not a code.
+    /// </summary>
+    public bool PasteCode(string? text)
+    {
+        if (PlacePastedCode(text) is not { } route) return false;
+        if (route == "people/add") OpenAddFriend();
         return true;
     }
 
