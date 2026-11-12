@@ -50,8 +50,8 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     }
 
     /// <summary>An extra network must differ from the room's own one; otherwise the split is ignored.</summary>
-    private static SplitSettings SplitFor(SplitSettings split, string network) =>
-        split.Nets.Any(n => n.Network == network) ? SplitSettings.None : split;
+    private static SplitSettings SplitFor(SplitSettings split, string network, string secret) =>
+        split.Nets.Any(n => n.Network == network || n.Secret == secret) ? SplitSettings.None : split;
 
     /// <summary>Splitting needs the wrapped tunnel (each leg is a member channel handshake); general mode never splits.</summary>
     private SplitSettings UsableSplit => Tunnel.Wraps ? Split : SplitSettings.None;
@@ -97,7 +97,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
             {
                 Member = new MemberKey(Convert.FromHexString(memberId), psk),
                 Scheme = json["attest"] is JsonObject attest ? AttestationScheme.FromJson(attest) : null,
-                Split = tunnel.Wraps ? SplitFor(SplitSettings.FromJson(json["split"]), net) : SplitSettings.None,
+                Split = tunnel.Wraps ? SplitFor(SplitSettings.FromJson(json["split"]), net, secret) : SplitSettings.None,
             };
         }
         finally
@@ -135,7 +135,7 @@ public sealed record RoomRekey(string Network, string Secret, int Epoch)
             if (net is null || secret is null || epoch is not { } e || e < 2) return null;
             if (!KnockProtocol.NetworkPattern().IsMatch(net) || !KnockProtocol.SecretPattern().IsMatch(secret)) return null;
             // Extra split networks: a malformed list just means none (the room then stops splitting, see SplitSettings.WithNets).
-            IReadOnlyList<SplitNet> nets = json["split"]?["nets"] is { } list ? SplitSettings.NetsFromJson(list) ?? [] : [];
+            IReadOnlyList<SplitNet> nets = json["split"] is JsonObject split && split["nets"] is { } list ? SplitSettings.NetsFromJson(list) ?? [] : [];
             if (nets.Any(n => n.Network == net || n.Secret == secret)) nets = [];
             return new RoomRekey(net, secret, e) { SplitNets = nets };
         }

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Transport;
 
@@ -128,6 +129,77 @@ public sealed class SplitRoomTests
         Assert.Empty(bare.SplitNets);
         // The old extra networks are known to whoever was kicked: they must not stay in use.
         Assert.False(room.Rekeyed(bare).Split.Enabled);
+    }
+
+    [Fact]
+    public void AnExtraNetworkSharingTheRoomSecretIsIgnored()
+    {
+        var (credentials, _, _, _) = NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+        var json = credentials.ToJson();
+        json["split"]!["nets"]![0]!["secret"] = credentials.Secret;
+        Assert.Same(SplitSettings.None, RoomCredentials.FromJson(JsonNode.Parse(json.ToJsonString())!).Split);
+    }
+
+    /// <summary>A later version may change the shape of the field: the rekey still works, it just carries no extra networks.</summary>
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"split\"")]
+    [InlineData("{\"nets\":5}")]
+    public void ARekeyWithAnUnknownSplitShapeStillRekeys(string split)
+    {
+        var (credentials, _, _, _) = NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+        var room = credentials.ToRoom();
+        var next = credentials.Rotate();
+        var json = next.ToRekey().ToJson();
+        json["split"] = JsonNode.Parse(split);
+        var rekey = RoomRekey.FromJson(JsonNode.Parse(json.ToJsonString())!);
+        Assert.NotNull(rekey);
+        Assert.Empty(rekey.SplitNets);
+        var moved = room.Rekeyed(rekey);
+        Assert.Equal(next.Epoch, moved.Epoch);
+        Assert.False(moved.Split.Enabled);
+    }
+
+    /// <summary>
+    /// A full-LAN (TUN) host doesn't run the split listeners in this version, so a Strict service must stay on the
+    /// single-path port there; otherwise nobody could reach it at all.
+    /// </summary>
+    [Fact]
+    public void AFullLanHostServesStrictServicesOnOnePath()
+    {
+        var (_, _, host, _) = NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
+        var wrapped = new EasyTierOptions(host, true, [], 15000);
+        Assert.True(RoomTransport.HostSplits(wrapped));
+        Assert.False(RoomTransport.ServesSinglePath(wrapped, TunnelService.Game));
+        Assert.True(RoomTransport.ServesSinglePath(wrapped, TunnelService.Chat));
+        Assert.True(RoomTransport.ServesSinglePath(wrapped, TunnelService.Remote));
+
+        var fullLan = wrapped with { Tun = true };
+        Assert.False(RoomTransport.HostSplits(fullLan));
+        Assert.True(RoomTransport.ServesSinglePath(fullLan, TunnelService.Game));
+        Assert.True(RoomTransport.ServesSinglePath(fullLan, TunnelService.Chat));
+    }
+
+    [Fact]
+    public async Task AFullLanMemberIsToldWhyItCantSplit()
+    {
+        var (credentials, _, _, _) = NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
+        var member = credentials.ToRoom();
+        var reason = L.T("core.mp.split.full_lan");
+        var singles = 0;
+        Func<CancellationToken, Task<Stream>> single = _ =>
+        {
+            Interlocked.Increment(ref singles);
+            return Task.FromResult<Stream>(new MemoryStream());
+        };
+        var game = new SplitConnector(member, TunnelService.Game, single, null, noLegsReason: reason);
+        var e = await Assert.ThrowsAsync<IOException>(() => game.OpenAsync(CancellationToken.None));
+        Assert.Equal(L.F("core.mp.split.strict_unavailable", reason), e.Message);
+        Assert.DoesNotContain("。 ", L.F("core.mp.split.strict_unavailable", reason));
+        var chat = new SplitConnector(member, TunnelService.Chat, single, null, noLegsReason: reason);
+        await using (await chat.OpenAsync(CancellationToken.None)) { }
+        Assert.Equal(reason, chat.LastReason);
+        Assert.Equal(1, singles);
     }
 
     // ---- host listeners and member connector over loopback ----

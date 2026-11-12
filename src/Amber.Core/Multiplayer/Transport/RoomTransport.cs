@@ -85,7 +85,8 @@ public sealed class RoomTransport : IAsyncDisposable
             _exitPolicy.Start(log: _log);
         }
         // Strict split: game and chat are only served over the split listeners, never on the single-path port.
-        bool SinglePathAllowed(TunnelService service) => room.Split.For(service) != SplitPolicy.Strict;
+        // Only when those listeners run: a full-LAN (TUN) host doesn't split in this version and serves one path.
+        bool SinglePathAllowed(TunnelService service) => ServesSinglePath(o, service);
         if (o.IsHost && settings.Wraps || allowProxy)
         {
             Server = Add(new TunnelServer(room, settings, settings.Wraps ? TunnelSettings.Port : TunnelSettings.PlainSocksPort, service => service switch
@@ -106,7 +107,7 @@ public sealed class RoomTransport : IAsyncDisposable
         }
 
         // Split listeners: wrapped invite rooms whose host turned splitting on. Not in full-LAN (TUN) mode in this version.
-        if (o.IsHost && settings.Wraps && room.FromInvite && room.Split.Enabled && !o.Tun)
+        if (o.IsHost && HostSplits(o))
         {
             SplitServer = Add(new SplitTunnelServer(room, service => service switch
             {
@@ -123,14 +124,18 @@ public sealed class RoomTransport : IAsyncDisposable
             IReadOnlyList<Func<CancellationToken, Task<Stream>>>? legs = !o.Tun && o.LocalSplitPorts is { } splitPorts
                 ? [.. splitPorts.Select(p => (Func<CancellationToken, Task<Stream>>)(ct => TunnelClient.Raw("127.0.0.1", p, ct)))]
                 : null;
+            // In full-LAN mode this member can't split; a Strict host then refuses it, and the reason says why.
+            var noLegs = o.Tun ? L.T("core.mp.split.full_lan") : null;
             if (o.LocalForwardPort is { } game)
             {
-                GameSplit = new SplitConnector(room, TunnelService.Game, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Game), legs, _log);
+                GameSplit = new SplitConnector(room, TunnelService.Game, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Game), legs, _log,
+                    noLegsReason: noLegs);
                 Game = Add(new TunnelClient(game, GameSplit.OpenAsync, _log));
             }
             if (o.LocalChatPort is { } chat)
             {
-                ChatSplit = new SplitConnector(room, TunnelService.Chat, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Chat), legs, _log);
+                ChatSplit = new SplitConnector(room, TunnelService.Chat, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Chat), legs, _log,
+                    noLegsReason: noLegs);
                 Chat = Add(new TunnelClient(chat, ChatSplit.OpenAsync, _log));
             }
             if (o.LocalRemotePort is { } remote && room.FromInvite) Remote = Add(new TunnelClient(remote, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Remote), _log));
@@ -146,6 +151,14 @@ public sealed class RoomTransport : IAsyncDisposable
             Proxy = new GameProxy(Socks.Port, exit, open);
         }
     }
+
+    /// <summary>This host runs the split listeners: a wrapped invite room that splits, not in full-LAN (TUN) mode.</summary>
+    internal static bool HostSplits(EasyTierOptions o) =>
+        o.Room.Tunnel.Wraps && o.Room.FromInvite && o.Room.Split.Enabled && !o.Tun;
+
+    /// <summary>Whether the host serves this service on the single-path port: always, unless it is Strict and split listeners run.</summary>
+    internal static bool ServesSinglePath(EasyTierOptions o, TunnelService service) =>
+        !(HostSplits(o) && o.Room.Split.For(service) == SplitPolicy.Strict);
 
     private T Add<T>(T part) where T : IAsyncDisposable
     {
