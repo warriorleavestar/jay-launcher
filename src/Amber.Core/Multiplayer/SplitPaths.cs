@@ -315,8 +315,8 @@ public sealed class SplitPathGroup : IDisposable
             catch (Exception e)
             {
                 // Fail closed: a check that didn't finish never leaves an earlier "ready" in place.
-                _problem = L.T("core.mp.split.check_failed");
                 _log?.Invoke(L.T("core.mp.split.check_failed") + " (" + e.GetType().Name + ")");
+                _problem = L.T("core.mp.split.check_failed");
             }
             try
             {

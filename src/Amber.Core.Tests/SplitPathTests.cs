@@ -243,7 +243,8 @@ public sealed class SplitPathTests
         Volatile.Write(ref failing, 1);
         Assert.True(await Eventually(() => group.Problem is not null));
         Assert.Equal(Amber.Core.Localization.L.T("core.mp.split.check_failed"), group.Problem);
-        lock (logged) Assert.Contains(logged, l => l.Contains(nameof(InvalidOperationException)));
+        // The reason can show before the failure is logged (an unconfirmed ready also expires), so wait for the line.
+        Assert.True(await Eventually(() => { lock (logged) return logged.Any(l => l.Contains(nameof(InvalidOperationException))); }));
         // It keeps checking: once the query works again the paths are ready again.
         Volatile.Write(ref failing, 0);
         Assert.True(await Eventually(() => group.Problem is null));
