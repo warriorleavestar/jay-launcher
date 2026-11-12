@@ -1,6 +1,6 @@
 # Release signatures
 
-A Jay release counts only when **2 of the 3 Jay trustees** have signed it, each with both **Ed25519 and
+A Jay release counts only when **enough Jay trustee release keys** (`JayTrust.ReleaseNeed`; the goal is 2 of 3 trustees, today both of the two keys below) have signed it, each with both **Ed25519 and
 ML-DSA-65** (privacy plan, items 2 and 3). Every trustee holds **two separate keys**: a trust key for
 networks, directory certificates and hardware certificates (`JayTrust.Keys`), and a **release key** used only
 for releases and trustee list changes (`JayTrust.ReleaseKeys`, both in
@@ -48,8 +48,8 @@ the command line.
   backup), with both needed. Until a third trustee joins, this guards against one stolen key, not against that one
   person. Each key has a checked paper backup. If a key and its paper are both lost, old installs can't follow a
   trust-chain step, so they have to reinstall from a fresh download.
-- Losing two of the three keys can't be repaired by a trust-chain step; old installs then have to
-  reinstall from a fresh download.
+- Losing more keys than a trust-chain step can spare (today: either of the two) can't be repaired by a
+  trust-chain step; old installs then have to reinstall from a fresh download.
 - A self-signed Authenticode certificate is not a substitute. Windows doesn't trust it, and asking
   users to install it as a trusted root would weaken their whole system.
 
@@ -80,7 +80,7 @@ The CI release job publishes the packages and `SHA256SUMS.txt` as a **draft** re
 ```bash
 # Anyone (no key needed): make the unsigned signature file. --seq is one more than the last release.
 gh release download v0.9.0 --pattern 'SHA256SUMS.txt' --dir rel
-jay-server release prepare --tag v0.9.0 --seq 12 --commit <full commit id> --sums rel/SHA256SUMS.txt
+jay-server release prepare --tag v0.9.0 --seq 12 --commit 9407746b1ce1dc4d977441c47dfdcb303363a62a --sums rel/SHA256SUMS.txt
 
 # Each of two trustees, on their own offline machine:
 jay-server release cosign --key jay-release.key --sums rel/SHA256SUMS.txt
@@ -104,7 +104,7 @@ gh release edit v0.9.0 --draft=false
 ## EasyTier builds
 
 Jay's hardened EasyTier ([Yumao-Feather/jay-easytier](https://github.com/Yumao-Feather/jay-easytier))
-is signed the same way: 2 of the 3 trustees' **release keys**, both algorithms (never the network trust keys). Its signature names the component, so the
+is signed the same way: the trustees' **release keys** (as many as `JayTrust.ReleaseNeed`; today both of the two), both algorithms (never the network trust keys). Its signature names the component, so the
 signed bytes start with `jay-component-v1` and `easytier` instead of `jay-release-v2`, and the JSON has
 `"component": "easytier"`. A Jay release signature can never pass as an EasyTier one, or the other way round.
 The tag is the fork's own (`jay-v2.6.4-3`) and the seq counts EasyTier builds (1, 2, …), separately from Jay.

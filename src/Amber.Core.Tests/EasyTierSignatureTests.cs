@@ -6,7 +6,7 @@ using Amber.Core.Multiplayer.Public;
 
 namespace Amber.Core.Tests;
 
-/// <summary>EasyTier builds from Jay's fork are signed by 2 of the 3 Jay trustees, like Jay releases, but can't be swapped with them.</summary>
+/// <summary>EasyTier builds from Jay's fork are signed by the Jay trustees' release keys, like Jay releases, but can't be swapped with them.</summary>
 public sealed class EasyTierSignatureTests
 {
     private static readonly TrustSigner[] T = [.. Enumerable.Range(0, 4).Select(_ => TrustSigner.FromSeed(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))))];

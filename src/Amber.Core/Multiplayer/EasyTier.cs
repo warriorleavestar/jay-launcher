@@ -76,7 +76,7 @@ public static class EasyTierRelease
 
     /// <summary>
     /// The trustees' signature over this build (embedded SHA256SUMS.txt and SHA256SUMS.txt.sigs from the release):
-    /// valid when 2 of the 3 Jay trustees signed exactly this tag, seq and commit as an EasyTier build, and every
+    /// valid when enough Jay release keys (JayTrust.ReleaseNeed) signed exactly this tag, seq and commit as an EasyTier build, and every
     /// pinned package hash above is in the signed list. Checked once per run.
     /// </summary>
     public static ReleaseCheck Signature => SignatureCheck.Value;
@@ -283,7 +283,7 @@ public sealed class EasyTierInstaller
             if (hash != Asset.Sha256)
                 throw new InvalidDataException(L.F("core.mp.component.hashfailed", hash));
         }
-        // Once release keys are built in, the pinned build must also carry 2 of 3 trustee release signatures.
+        // Once release keys are built in, the pinned build must also carry enough trustee release signatures (JayTrust.ReleaseNeed).
         if (!EasyTierRelease.SignatureAllowsInstall)
             throw new InvalidDataException(L.F("core.mp.component.unsigned", UpdateCheck.Explain(EasyTierRelease.Signature.Verdict)));
         Extract(zip, InstallDir, Asset);
