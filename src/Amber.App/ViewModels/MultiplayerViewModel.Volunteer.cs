@@ -232,7 +232,7 @@ public partial class MultiplayerViewModel
         {
             try
             {
-                var listed = await client.VolunteerAsync(url, ct);
+                var listed = await client.VolunteerAsync(url, ct, JayCertificate);
                 VolunteerStatus = listed ? L.F("multiplayer.volunteer.status_listed", url) : L.F("multiplayer.volunteer.status_checking", url);
             }
             catch (DirectoryRejectedException e)

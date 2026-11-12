@@ -42,6 +42,7 @@ public sealed class JayNetworkServerBuilder
     internal bool BanListOn = true;
     internal bool VolunteersOn = true;
     internal Func<string, CancellationToken, Task<bool>>? VolunteerProbe;
+    internal bool VolunteersSigned;
     internal RateLimitGate? RateLimit = new();
     internal int? AdminPort = JayNetworkServer.DefaultAdminPort;
     internal Action<string> Log = _ => { };
@@ -143,6 +144,12 @@ public sealed class JayNetworkServerBuilder
     /// "volunteers": false.
     /// </summary>
     public JayNetworkServerBuilder WithoutVolunteers() { VolunteersOn = false; return this; }
+
+    /// <summary>
+    /// Only list volunteer nodes whose registration is signed with a Jay account, so every node has a known operator
+    /// (members then get nodes from different people, and bans can name a person: ban kind "operator").
+    /// </summary>
+    public JayNetworkServerBuilder RequireSignedVolunteers() { VolunteersSigned = true; return this; }
 
     /// <summary>Replaces the reachability check run before a volunteer is listed (tests, or your own checks).</summary>
     public JayNetworkServerBuilder UseVolunteerProbe(Func<string, CancellationToken, Task<bool>> probe) { VolunteerProbe = probe; return this; }
@@ -269,7 +276,12 @@ public sealed class JayNetworkServer : IAsyncDisposable
         {
             if (_b.VolunteersOn && _b.Config?.Policy.Volunteers != false)
             {
-                Volunteers = new VolunteerRegistry(_b.VolunteerProbe, _b.Clock) { Blocked = Bans is { } b ? b.IsNodeBanned : null };
+                Volunteers = new VolunteerRegistry(_b.VolunteerProbe, _b.Clock)
+                {
+                    Blocked = Bans is { } b ? b.IsNodeBanned : null,
+                    BlockedOperator = Bans is { } o ? o.IsOperatorBanned : null,
+                    RequireOperator = _b.VolunteersSigned,
+                };
                 Volunteers.Probed += (url, ok) => _b.Log(ok ? $"Volunteer node listed: {url}" : $"Volunteer node not reachable, not listed: {url}");
             }
             var gates = new List<IRoomGate>();
@@ -399,6 +411,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             "host" => d.RemoveHost(ban.Value),
             "account" => d.RemoveAccount(ban.Value),
             "node" => Volunteers?.Remove(ban.Value) == true ? 1 : 0,
+            "operator" => Volunteers?.RemoveOperator(ban.Value) ?? 0,
             _ => d.Remove(ban.Value) ? 1 : 0,
         };
     }

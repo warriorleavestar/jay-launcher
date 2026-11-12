@@ -208,7 +208,7 @@ docker compose -f server/docker/docker-compose.yml exec jay-network /opt/jay-ser
 - 目录先自己连一次这个地址，连得上才列出来，之后每小时重新确认；10 分钟没登记就拿掉。只收公网地址（局域网、本机、运营商内网、文档用的地址都不收），域名解析出内网地址也不收，防止有人拿目录去探别人家里的网络。
 - 每个 Jay 连上公共网络后向目录要几个志愿中转，另外连上其中最多 3 个，并记住最近 16 个；下次官方节点连不上时，先试记住的这些。
 - 经过志愿中转的只有公共网络的流量（房间列表、敲门、目录请求），和经过任何节点一样；游戏、聊天、文件都在房间自己的加密子网里。志愿者的公网地址会给向目录要中转的人，界面上写明了。
-- 网络运营者：配置文件里 `"policy": { "volunteers": false }` 就不收（Jay 也不显示这个开关），或者节点加 `--no-volunteers`。`jay-server node nodes` 看列出的志愿中转，`jay-server node ban node tcp://<地址>:<端口>` 封掉。
+- 网络运营者：配置文件里 `"policy": { "volunteers": false }` 就不收（Jay 也不显示这个开关），或者节点加 `--no-volunteers`。`jay-server node nodes` 看列出的志愿中转，`jay-server node ban node tcp://<地址>:<端口>` 封掉。志愿者的 MC 账号绑定了 Jay 账户时，登记会带设备签名，`node nodes` 也会写出是哪个 Jay 账户在运行；`jay-server node ban operator jay1...` 把这个人的中转一起封掉。节点加 `--signed-volunteers` 就只收签名登记的志愿中转。Jay 要中转时同一个人的只先给一个，为以后“入口和出口不是同一个运营者”打底。
 
 ## 以后
 

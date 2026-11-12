@@ -75,7 +75,7 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         Assert.True(Ok(first));
         Assert.False(first["listed"]!.GetValue<bool>());
         await registry.LastProbe;
-        Assert.Equal(["tcp://8.8.8.8:11010"], registry.Pick());
+        Assert.Equal(["tcp://8.8.8.8:11010"], registry.Pick().Select(n => n.Url));
         Assert.True(registry.Register("8.8.8.8:11010")["listed"]!.GetValue<bool>());
         Assert.Equal(1, probes);
 

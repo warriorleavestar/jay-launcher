@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -252,10 +253,10 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "rv.take" => RendezvousTake(request),
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
-                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
+                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"]) : Error("off"),
                 // Blocks this connection's task for at most a few seconds while the directory dials the address.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
-                "nodes" => Volunteers is { } v ? new JsonObject { ["ok"] = true, ["nodes"] = new JsonArray([.. v.Pick().Select(u => (JsonNode)u)]) } : Error("off"),
+                "nodes" => Volunteers is { } v ? NodesReply(v.Pick()) : Error("off"),
                 "login" when Login is { } login => LoginRequest(login, request),
                 _ when DirectoryExtensions.IsValidOp(op) && Extensions.FirstOrDefault(x => x.Op == op) is { } extension => Extend(extension, request),
                 _ => Error("op"),
@@ -393,6 +394,14 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         if (verdict.Reason is { Length: > 0 } reason) reply["reason"] = reason;
         return reply;
     }
+
+    /// <summary>"nodes" reply: the addresses (as before) and, in the same order, each one's operator tag ("" = unsigned).</summary>
+    private static JsonObject NodesReply(IReadOnlyList<VolunteerNode> nodes) => new()
+    {
+        ["ok"] = true,
+        ["nodes"] = new JsonArray([.. nodes.Select(n => (JsonNode)n.Url)]),
+        ["ops"] = new JsonArray([.. nodes.Select(n => (JsonNode)n.Operator)]),
+    };
 
     private JsonObject Announce(JsonObject request)
     {
@@ -848,6 +857,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             "version" => L.F("core.mp.public.err_version", reply["min"]?.GetValue<string>() is { Length: <= 32 } min ? min : "?"),
             "login" => L.T("core.mp.public.err_login"),
             "off" => L.T("core.mp.public.volunteer_off"),
+            "operator" => L.T("core.mp.public.volunteer_operator"),
             _ when !string.IsNullOrWhiteSpace(reason) => L.F("core.mp.public.err_policy", reason),
             _ => L.F("core.mp.public.err_other", code),
         });
@@ -956,11 +966,16 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// Registers (or renews) this computer as a volunteer node with every online directory. Returns whether at least
     /// one directory lists it already (the first registration is probed first, so it lists on the next renewal).
     /// </summary>
-    public async Task<bool> VolunteerAsync(string url, CancellationToken ct)
+    /// <param name="signer">This device's Jay account certificate and keys: the directory then knows which person runs
+    /// the node (<see cref="VolunteerOperator"/>). Null registers without saying.</param>
+    public async Task<bool> VolunteerAsync(string url, CancellationToken ct, Amber.Core.Identity.JayProof? signer = null)
     {
         var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
+        var request = new JsonObject { ["op"] = "volunteer", ["url"] = address };
+        if (signer is not null) request["operator"] = VolunteerOperator.Sign(signer, address, DateTimeOffset.UtcNow);
         List<JsonObject> replies;
-        try { replies = NeedOne(await FanOutAsync(new JsonObject { ["op"] = "volunteer", ["url"] = address }, ct)); }
+        try { replies = NeedOne(await FanOutAsync(request, ct)); }
+        catch (DirectoryRejectedException e) when (e.Code == "owner") { throw new DirectoryRejectedException("owner", L.T("core.mp.public.volunteer_owner")); }
         catch (DirectoryRejectedException e) when (e.Code == "op")
         {
             // Directories from before volunteer nodes existed.
@@ -983,12 +998,35 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         return reply["reachable"]?.GetValue<bool>() == true;
     }
 
-    public async Task<IReadOnlyList<string>> NodesAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<string>> NodesAsync(CancellationToken ct) => [.. (await VolunteerNodesAsync(ct)).Select(n => n.Url)];
+
+    /// <summary>
+    /// Volunteer nodes with operator tags, one per operator first (<see cref="VolunteerNode.SpreadOperators"/>). Tags are
+    /// prefixed with the directory that gave them, since each directory keys its own.
+    /// </summary>
+    public async Task<IReadOnlyList<VolunteerNode>> VolunteerNodesAsync(CancellationToken ct)
     {
         var results = await FanOutAsync(new JsonObject { ["op"] = "nodes" }, ct);
-        return [.. results.Select(r => r.Reply).OfType<JsonObject>().Where(IsOk)
-            .SelectMany(r => (r["nodes"] as JsonArray ?? []).Select(n => n?.GetValue<string>()))
-            .Select(VolunteerNodes.Normalize).OfType<string>().Distinct().Take(VolunteerNodes.PerRequest * 2)];
+        var nodes = new List<VolunteerNode>();
+        foreach (var (from, (reply, _)) in results.Index())
+        {
+            if (reply is null || !IsOk(reply)) continue;
+            var urls = reply["nodes"] as JsonArray ?? [];
+            var ops = reply["ops"] as JsonArray;
+            for (var i = 0; i < urls.Count; i++)
+            {
+                string? url, op;
+                try
+                {
+                    url = VolunteerNodes.Normalize(urls[i]?.GetValue<string>());
+                    op = ops is not null && i < ops.Count ? ops[i]?.GetValue<string>() : null;
+                }
+                catch (InvalidOperationException) { continue; }
+                if (url is null) continue;
+                nodes.Add(new VolunteerNode(url, op is { Length: > 0 and <= 64 } ? from.ToString(CultureInfo.InvariantCulture) + "/" + op : ""));
+            }
+        }
+        return [.. VolunteerNode.SpreadOperators(nodes.DistinctBy(n => n.Url)).Take(VolunteerNodes.PerRequest * 2)];
     }
 
     public async Task WithdrawAsync(RoomSigner signer, CancellationToken ct)
