@@ -857,18 +857,22 @@
                       <TextBlock Classes="h2" Text="{l:T multiplayer.sees.title}" Margin="0" VerticalAlignment="Center" />
                       <Button x:Name="WhoSeesCloseButton" Grid.Column="1" Classes="ghost small" Content="✕" Command="{Binding ToggleWhoSeesCommand}" ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}" />
                     </Grid>
-                    <Grid x:Name="WhoSeesHead" ColumnDefinitions="*,72,92" Margin="8,0">
+                    <Grid x:Name="WhoSeesHead" ColumnDefinitions="*,84,92" Margin="8,0">
                       <TextBlock Grid.Column="1" Classes="caption" Text="{l:T multiplayer.sees.col.ip}" TextWrapping="Wrap" />
                       <TextBlock Grid.Column="2" Classes="caption" Text="{l:T multiplayer.sees.col.content}" TextWrapping="Wrap" />
                     </Grid>
                     <ItemsControl x:Name="WhoSeesRows" ItemsSource="{Binding WhoSeesLines}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="vm:WhoSeesLine">
-                          <Border Classes="sees-row" Classes.now="{Binding Now}">
-                            <Grid ColumnDefinitions="*,72,92">
-                              <TextBlock Text="{Binding Who}" FontSize="12" TextWrapping="Wrap" Margin="0,0,6,0" />
-                              <TextBlock Grid.Column="1" Text="{Binding Ip}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
-                              <TextBlock Grid.Column="2" Text="{Binding Content}" FontSize="12" TextWrapping="Wrap" />
+                          <!-- The row that applies now carries the word "Now" (not only the tint), and says so to a screen reader. -->
+                          <Border Classes="sees-row" Classes.now="{Binding Now}" AutomationProperties.Name="{Binding SpokenName}">
+                            <Grid ColumnDefinitions="*,84,92" RowDefinitions="Auto,Auto">
+                              <Border Classes="tag accent sees-now" Grid.ColumnSpan="3" HorizontalAlignment="Left" Margin="0,0,0,3" IsVisible="{Binding Now}">
+                                <TextBlock Text="{l:T multiplayer.sees.now}" />
+                              </Border>
+                              <TextBlock Grid.Row="1" Text="{Binding Who}" FontSize="12" TextWrapping="Wrap" Margin="0,0,6,0" />
+                              <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Ip}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,6,0" />
+                              <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding Content}" FontSize="12" TextWrapping="Wrap" />
                             </Grid>
                           </Border>
                         </DataTemplate>
@@ -961,9 +965,11 @@
                     <TextBlock x:Name="InviteMonthNote" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.month_note}" IsVisible="{Binding ShowInviteMonthNote}" />
                     <TextBox x:Name="LongInviteLabelBox" Text="{Binding LongInviteLabel}" PlaceholderText="{l:T multiplayer.longinvite.label_placeholder}" MaxLength="40"
                              IsVisible="{Binding ShowInviteMonthNote}" />
-                    <CheckBox x:Name="InviteAutoBox" IsChecked="{Binding InviteAutoApprove}" IsVisible="{Binding ShowInviteAutoApprove}">
+                    <!-- Only an invite for one person can skip my yes; an unlimited one says so where the box would be. -->
+                    <CheckBox x:Name="InviteAutoBox" IsChecked="{Binding InviteAutoApprove}" IsVisible="{Binding CanInviteAutoApprove}">
                       <TextBlock Text="{l:T multiplayer.invite.auto_approve}" TextWrapping="Wrap" />
                     </CheckBox>
+                    <TextBlock x:Name="InviteAlwaysAsksNote" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.always_asks}" IsVisible="{Binding ShowInviteAlwaysAsksNote}" />
                     <Button x:Name="CreateFirstInviteButton" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" HorizontalAlignment="Left"
                             Classes.primary="{Binding !HasInvite}" />
 

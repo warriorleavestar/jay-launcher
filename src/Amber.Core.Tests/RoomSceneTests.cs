@@ -35,6 +35,12 @@ public sealed class RoomSceneTests : IDisposable
         Assert.False(RoomLinks.IsPlayer(Peer("", "p2p")));
         Assert.True(RoomLinks.IsPlayer(Peer("amber-guest", "p2p")));
         Assert.Equal(RoomLink.None, RoomLinks.Room([Peer("me", "Local"), Peer("", "relay(1)", 40)]));
+        // A relay that tells its name is still not a person: it has no address in the room.
+        var namedRelay = new PeerInfo("relay-one", "", "p2p", 12, "tcp");
+        Assert.False(RoomLinks.IsPlayer(namedRelay));
+        Assert.Equal(RoomLink.None, RoomLinks.Room([Peer("me", "Local"), namedRelay]));
+        Assert.Equal(new RoomLink(LinkKind.Relay, 82), RoomLinks.Room([namedRelay, Peer("amber-guest", "relay(2)", 82)]));
+        Assert.Equal(RoomLink.None, RoomLinks.ToGuest([namedRelay]));
     }
 
     [Fact]
@@ -80,17 +86,28 @@ public sealed class RoomSceneTests : IDisposable
         {
             L.SetLanguage(language);
         }
-        // A code carries no address; a direct link shows it; a relay hides it from the room and sees it itself.
+        // A code carries no address; without "relays only" the room can see mine; with it, not in normal use (never
+        // a plain "no": a modified program can still ask); a relay sees it itself.
         Assert.Equal("multiplayer.sees.no", WhoSeesWhat.Rows[0].IpKey);
         Assert.Equal("multiplayer.sees.yes", WhoSeesWhat.Rows[1].IpKey);
-        Assert.Equal("multiplayer.sees.no", WhoSeesWhat.Rows[2].IpKey);
+        Assert.Equal("multiplayer.sees.not_normally", WhoSeesWhat.Rows[2].IpKey);
         Assert.Equal("multiplayer.sees.yes", WhoSeesWhat.Rows[3].IpKey);
         Assert.Equal("multiplayer.sees.no", WhoSeesWhat.Rows[3].ContentKey);
+    }
 
-        Assert.Equal(["direct"], WhoSeesWhat.AppliesNow(LinkKind.Direct));
-        Assert.Equal(["relayed"], WhoSeesWhat.AppliesNow(LinkKind.Relay));
-        Assert.Equal(["direct", "relayed"], WhoSeesWhat.AppliesNow(LinkKind.Mixed));
-        Assert.Empty(WhoSeesWhat.AppliesNow(LinkKind.None));
+    [Fact]
+    public void TheRowThatAppliesNowFollowsMySwitchNotJustTheLinkOfTheMoment()
+    {
+        Assert.Empty(WhoSeesWhat.AppliesNow(LinkKind.None, relayOnly: false));
+        Assert.Empty(WhoSeesWhat.AppliesNow(LinkKind.None, relayOnly: true));
+        Assert.Equal(["direct"], WhoSeesWhat.AppliesNow(LinkKind.Direct, relayOnly: false));
+        // Through a relay at the moment, but Jay keeps trying to connect directly: still the row that says "yes".
+        Assert.Equal(["direct"], WhoSeesWhat.AppliesNow(LinkKind.Relay, relayOnly: false));
+        Assert.Equal(["direct"], WhoSeesWhat.AppliesNow(LinkKind.Mixed, relayOnly: false));
+        Assert.Equal(["relayed"], WhoSeesWhat.AppliesNow(LinkKind.Relay, relayOnly: true));
+        // A direct link in spite of the switch is reported as what it is.
+        Assert.Equal(["direct"], WhoSeesWhat.AppliesNow(LinkKind.Direct, relayOnly: true));
+        Assert.Equal(["direct"], WhoSeesWhat.AppliesNow(LinkKind.Mixed, relayOnly: true));
     }
 
     [Fact]
@@ -107,12 +124,37 @@ public sealed class RoomSceneTests : IDisposable
         Assert.Equal(InviteUse.Once, InviteOffer.Normalize(InviteLife.OneDay, InviteUse.Once));
         Assert.Equal(1, InviteOffer.Uses(InviteUse.Once));
         Assert.Equal(InviteBook.UnlimitedUses, InviteOffer.Uses(InviteUse.Unlimited));
-        // What an older version remembered.
+        // Only an invite for one person can skip the host's yes.
+        Assert.True(InviteOffer.CanAutoApprove(InviteLife.TenMinutes, InviteUse.Once));
+        Assert.True(InviteOffer.CanAutoApprove(InviteLife.OneDay, InviteUse.Once));
+        Assert.False(InviteOffer.CanAutoApprove(InviteLife.OneDay, InviteUse.Unlimited));
+        Assert.False(InviteOffer.CanAutoApprove(InviteLife.ThirtyDays, InviteUse.Once));
+    }
+
+    [Fact]
+    public void RememberedTermsNeverMapOntoAWiderChoice()
+    {
         Assert.Equal(InviteLife.TenMinutes, InviteOffer.LifeFromMinutes(10));
-        Assert.Equal(InviteLife.OneDay, InviteOffer.LifeFromMinutes(60));
+        // An hour is not on the panel: ten minutes, not a day.
+        Assert.Equal(InviteLife.TenMinutes, InviteOffer.LifeFromMinutes(60));
+        Assert.Equal(InviteLife.TenMinutes, InviteOffer.LifeFromMinutes(24 * 60 - 1));
+        Assert.Equal(InviteLife.OneDay, InviteOffer.LifeFromMinutes(24 * 60));
+        // "While the room is open" and thirty days: a day, never a long-lived invite.
         Assert.Equal(InviteLife.OneDay, InviteOffer.LifeFromMinutes(null));
+        Assert.Equal(InviteLife.OneDay, InviteOffer.LifeFromMinutes(30 * 24 * 60));
         Assert.Equal(InviteUse.Once, InviteOffer.UseFromCount(1));
-        Assert.Equal(InviteUse.Unlimited, InviteOffer.UseFromCount(5));
+        // Five uses is not on the panel: once, not unlimited.
+        Assert.Equal(InviteUse.Once, InviteOffer.UseFromCount(5));
+        Assert.Equal(InviteUse.Once, InviteOffer.UseFromCount(20));
+        Assert.Equal(InviteUse.Unlimited, InviteOffer.UseFromCount(InviteBook.UnlimitedUses));
+
+        // "Open like last time": the first invite is one of the panel's own, and unlimited never comes with auto-approve.
+        Assert.Equal((InviteLife.TenMinutes, InviteUse.Once, true),
+            MultiplayerViewModel.LastInviteTerms(new LastRoom { Uses = 5, LifetimeMinutes = 60, AutoApprove = true }));
+        Assert.Equal((InviteLife.OneDay, InviteUse.Unlimited, false),
+            MultiplayerViewModel.LastInviteTerms(new LastRoom { Uses = InviteBook.UnlimitedUses, LifetimeMinutes = 24 * 60, AutoApprove = true }));
+        Assert.Equal((InviteLife.OneDay, InviteUse.Once, false),
+            MultiplayerViewModel.LastInviteTerms(new LastRoom { Uses = 1, LifetimeMinutes = null, AutoApprove = false }));
     }
 
     [Fact]
@@ -132,14 +174,14 @@ public sealed class RoomSceneTests : IDisposable
     }
 
     [Fact]
-    public void TheLobbyKeyInUseIsNeverMadeJustByAsking()
+    public void AnUnlimitedInviteAlwaysAsksTheHost()
     {
         var book = new InviteBook();
-        Assert.Null(book.CurrentLobbyKey());
-        var invite = book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default);
-        Assert.Equal(invite.Invite.LobbyKey, book.CurrentLobbyKey());
-        book.Revoke(invite);
-        Assert.Null(book.CurrentLobbyKey());
+        Assert.Throws<ArgumentException>(() => book.Create(InviteBook.UnlimitedUses, TimeSpan.FromDays(1), true, TunnelSettings.Default));
+        Assert.False(book.HasPending);
+        // A counted invite can still let its people in unasked.
+        Assert.True(book.Create(1, TimeSpan.FromMinutes(10), true, TunnelSettings.Default).AutoApprove);
+        Assert.True(book.Create(20, TimeSpan.FromMinutes(10), true, TunnelSettings.Default).AutoApprove);
     }
 
     // ---- the view model ----
@@ -191,6 +233,12 @@ public sealed class RoomSceneTests : IDisposable
         Dispatcher.UIThread.RunJobs();
     }
 
+    private static T Wait<T>(Task<T> task)
+    {
+        Wait((Task)task);
+        return task.Result;
+    }
+
     [Fact]
     public void TheConnectionMarkAndTheLinesFollowThePeerList() => UiTestThread.Run(() =>
     {
@@ -221,7 +269,21 @@ public sealed class RoomSceneTests : IDisposable
         Assert.True(vm.IsMarkRelayed);
         Assert.Equal(L.T("multiplayer.room.relayed") + " · 82 ms", vm.ConnectionMarkText);
         Assert.True(vm.People.Single(p => p.Name == "Alex").IsRelayed);
-        Assert.Equal(["relayed"], vm.WhoSeesLines.Where(l => l.Now).Select(l => l.Row.Id));
+        // Relayed at the moment, with "relays only" off: Jay keeps trying direct, so the row that applies says so.
+        Assert.Equal(["direct"], vm.WhoSeesLines.Where(l => l.Now).Select(l => l.Row.Id));
+        var now = vm.WhoSeesLines.Single(l => l.Now);
+        Assert.Equal(L.F("multiplayer.sees.row_name_now", now.Who, now.Ip, now.Content), now.SpokenName);
+        var other = vm.WhoSeesLines.First(l => !l.Now);
+        Assert.Equal(L.F("multiplayer.sees.row_name", other.Who, other.Ip, other.Content), other.SpokenName);
+
+        // A relay that tells its name is nobody: the mark waits, and "connected to others" agrees with it.
+        SetPeers(vm, new PeerInfo("relay-one", "", "p2p", 12, "tcp"));
+        Assert.True(vm.IsMarkWaiting);
+        Assert.False(vm.IsConnectedToOthers);
+        Assert.DoesNotContain(vm.WhoSeesLines, l => l.Now);
+        SetPeers(vm, new PeerInfo("relay-one", "", "p2p", 12, "tcp"), Peer("amber-guest", "relay(2)", 82));
+        Assert.True(vm.IsMarkRelayed);
+        Assert.True(vm.IsConnectedToOthers);
 
         // One of each: the mark counts them, and no line is drawn because a peer cannot be matched to a person.
         AddGuest(vm, "Bo", Key(2));
@@ -229,7 +291,7 @@ public sealed class RoomSceneTests : IDisposable
         Assert.True(vm.IsMarkMixed);
         Assert.Equal(L.F("multiplayer.room.mark_mixed", 1, 1), vm.ConnectionMarkText);
         Assert.All(vm.People, p => Assert.False(p.HasLink));
-        Assert.Equal(["direct", "relayed"], vm.WhoSeesLines.Where(l => l.Now).Select(l => l.Row.Id));
+        Assert.Equal(["direct"], vm.WhoSeesLines.Where(l => l.Now).Select(l => l.Row.Id));
         vm.LeaveTestRoom();
     });
 
@@ -281,16 +343,114 @@ public sealed class RoomSceneTests : IDisposable
         Assert.True(vm.CanChangeRelayOnly);
         Assert.Equal(L.T("multiplayer.sees.relay_only.turned_on"), vm.Status);
         Assert.Contains(vm.RoomFacts, f => f.Value == L.T("multiplayer.open.route.relay"));
+        // With the switch on and the link through a relay, the "relays only" row is the one that applies.
+        AddGuest(vm, "Alex", Key(1));
+        SetPeers(vm, Peer("amber-guest", "relay(2)", 82));
+        Assert.Equal(["relayed"], vm.WhoSeesLines.Where(l => l.Now).Select(l => l.Row.Id));
 
-        // The component would not restart: the switch stays where it really is.
+        // The component would not restart: the switch stays where it really is, and says it did not take.
         vm.TestSwitchNetwork = _ => false;
         Wait(vm.SetRelayOnlyAsync(false));
         Assert.True(vm.MyRelayOnly);
+        Assert.True(vm.CanChangeRelayOnly);
+        Assert.Equal(L.T("multiplayer.sees.relay_only.failed"), vm.Status);
+
+        // A restart that throws is reported, and the switch is usable again.
+        vm.TestSwitchNetwork = _ => throw new IOException("no component");
+        Wait(vm.SetRelayOnlyAsync(false));
+        Assert.True(vm.MyRelayOnly);
+        Assert.True(vm.CanChangeRelayOnly);
+        Assert.Contains("no component", vm.Status);
 
         vm.TestSwitchNetwork = _ => true;
         Wait(vm.SetRelayOnlyAsync(false));
         Assert.False(vm.MyRelayOnly);
         Assert.Equal(L.T("multiplayer.sees.relay_only.turned_off"), vm.Status);
+        // Off again while the link is still relayed: back to the row that says the room can see my address.
+        Assert.Equal(["direct"], vm.WhoSeesLines.Where(l => l.Now).Select(l => l.Row.Id));
+        vm.LeaveTestRoom();
+    });
+
+    [Fact]
+    public void TheTwoSwitchesThatRestartTheComponentNeverRunTogether() => UiTestThread.Run(() =>
+    {
+        var (service, vm, room) = Create();
+        using var s = service;
+        var confirm = new TaskCompletionSource<bool>();
+        vm.Confirm = (_, _, _) => confirm.Task;
+        vm.EnterTestRoom(room, host: true);
+        AddGuest(vm, "Alex", Key(1));
+        Dispatcher.UIThread.RunJobs();
+        vm.SelectedPerson = vm.People.Single(p => p.Name == "Alex");
+        vm.UseTestOptions(new EasyTierOptions(room, true, [], 0));
+        Assert.True(vm.CanShareGameProxy);
+        var relaySwitches = 0;
+        bool? proxyFreeDuringRelaySwitch = null;
+        vm.TestSwitchNetwork = _ =>
+        {
+            relaySwitches++;
+            proxyFreeDuringRelaySwitch = vm.CanShareGameProxy;
+            return true;
+        };
+        EasyTierOptions? restarted = null;
+        vm.TestRestartForProxy = next =>
+        {
+            restarted = next;
+            return true;
+        };
+
+        // Forwarding is waiting at its confirmation: "relays only" cannot start a restart of its own.
+        var proxy = vm.SetGameProxySharingAsync(true);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(proxy.IsCompleted);
+        Assert.False(vm.CanChangeRelayOnly);
+        Assert.False(vm.CanShareGameProxy);
+        Wait(vm.SetRelayOnlyAsync(true));
+        Assert.Equal(0, relaySwitches);
+        Assert.False(vm.MyRelayOnly);
+
+        confirm.SetResult(true);
+        Wait(proxy);
+        Assert.True(restarted is { AllowProxy: true });
+        Assert.True(vm.SharingGameProxy);
+        Assert.True(vm.CanChangeRelayOnly);
+        Assert.True(vm.CanShareGameProxy);
+
+        // And the other way round: while "relays only" restarts, forwarding cannot be switched.
+        Wait(vm.SetRelayOnlyAsync(true));
+        Assert.Equal(1, relaySwitches);
+        Assert.False(proxyFreeDuringRelaySwitch);
+        Assert.True(vm.CanShareGameProxy);
+        vm.UseTestOptions(null);
+        vm.LeaveTestRoom();
+    });
+
+    [Fact]
+    public void ForwardingThatDoesNotTakeSaysSoAndFreesTheSwitches() => UiTestThread.Run(() =>
+    {
+        var (service, vm, room) = Create();
+        using var s = service;
+        vm.Confirm = (_, _, _) => Task.FromResult(true);
+        vm.EnterTestRoom(room, host: true);
+        AddGuest(vm, "Alex", Key(1));
+        Dispatcher.UIThread.RunJobs();
+        vm.SelectedPerson = vm.People.Single(p => p.Name == "Alex");
+        vm.UseTestOptions(new EasyTierOptions(room, true, [], 0));
+
+        vm.TestRestartForProxy = _ => false;
+        Wait(vm.SetGameProxySharingAsync(true));
+        Assert.False(vm.SharingGameProxy);
+        Assert.Equal(L.T("multiplayer.share.proxy.failed"), vm.Status);
+        Assert.True(vm.CanShareGameProxy);
+        Assert.True(vm.CanChangeRelayOnly);
+
+        vm.TestRestartForProxy = _ => throw new InvalidOperationException("no component");
+        Wait(vm.SetGameProxySharingAsync(true));
+        Assert.False(vm.SharingGameProxy);
+        Assert.Contains("no component", vm.Status);
+        Assert.True(vm.CanShareGameProxy);
+        Assert.True(vm.CanChangeRelayOnly);
+        vm.UseTestOptions(null);
         vm.LeaveTestRoom();
     });
 
@@ -400,17 +560,63 @@ public sealed class RoomSceneTests : IDisposable
     });
 
     [Fact]
-    public void ThirtyDaysIsTheLongLivedInviteAndTheOpenRoomAcceptsItAtOnce() => UiTestThread.Run(() =>
+    public void OnlyAnInviteForOnePersonCanSkipMyYes() => UiTestThread.Run(() =>
+    {
+        var (service, vm, room) = Create();
+        using var s = service;
+        vm.EnterTestRoom(room, host: true, lobby: true);
+        vm.PickInviteChoices(InviteLife.TenMinutes, InviteUse.Once);
+        Assert.True(vm.CanInviteAutoApprove);
+        Assert.False(vm.ShowInviteAlwaysAsksNote);
+        vm.InviteAutoApprove = true;
+        Assert.Equal(L.T("multiplayer.invite.fact.auto"), vm.InviteKnockFact);
+
+        // Unlimited: the box is gone, a line says why, and the tick left over from before does not count.
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        vm.PickInviteChoices(InviteLife.OneDay, InviteUse.Unlimited);
+        Assert.Contains(nameof(vm.CanInviteAutoApprove), changed);
+        Assert.Contains(nameof(vm.InviteKnockFact), changed);
+        Assert.False(vm.CanInviteAutoApprove);
+        Assert.True(vm.ShowInviteAlwaysAsksNote);
+        Assert.Equal(L.T("multiplayer.invite.fact.knock"), vm.InviteKnockFact);
+        Wait(vm.CreateInviteCommand.ExecuteAsync(null));
+        var unlimited = Assert.Single(vm.PendingInvites);
+        Assert.True(unlimited.Invite.Unlimited);
+        Assert.False(unlimited.Invite.AutoApprove);
+        Assert.Contains(L.T("multiplayer.invite.terms_ask"), vm.InviteTerms);
+        // Whatever a caller remembered, the room never makes an unlimited invite that lets people in unasked.
+        Assert.True(Wait(vm.CreateInviteForTestAsync(InviteBook.UnlimitedUses, TimeSpan.FromDays(1), true)));
+        Assert.All(vm.PendingInvites, i => Assert.False(i.Invite.AutoApprove));
+
+        // Thirty days has no use count either; its own note already says every knock still asks.
+        vm.PickInviteChoices(InviteLife.ThirtyDays, InviteUse.Once);
+        Assert.False(vm.CanInviteAutoApprove);
+        Assert.False(vm.ShowInviteAlwaysAsksNote);
+        Assert.Equal(L.T("multiplayer.invite.fact.knock"), vm.InviteKnockFact);
+
+        // Back to one person: the tick counts again.
+        vm.PickInviteChoices(InviteLife.TenMinutes, InviteUse.Once);
+        Assert.True(vm.CanInviteAutoApprove);
+        Assert.Equal(L.T("multiplayer.invite.fact.auto"), vm.InviteKnockFact);
+        Wait(vm.CreateInviteCommand.ExecuteAsync(null));
+        Assert.Contains(vm.PendingInvites, i => i.Invite.AutoApprove && i.Invite.Uses == 1);
+
+        // "For a child": no box and no line where it would be.
+        service.Settings.ChildMode.SetEnabled(true, DateTimeOffset.UtcNow);
+        vm.ApplyChildMode();
+        Assert.False(vm.CanInviteAutoApprove);
+        Assert.False(vm.ShowInviteAlwaysAsksNote);
+        vm.LeaveTestRoom();
+    });
+
+    [Fact]
+    public void ThirtyDaysIsTheLongLivedInviteAndARoomWithNoOtherInviteAcceptsItAtOnce() => UiTestThread.Run(() =>
     {
         var (service, vm, room) = Create();
         using var s = service;
         vm.EnterTestRoom(room, host: true, lobby: true);
         Assert.False(vm.HasLongInvites);
-
-        // An ordinary invite first: the room already has a lobby key.
-        vm.PickInviteChoices(InviteLife.TenMinutes, InviteUse.Once);
-        Wait(vm.CreateInviteCommand.ExecuteAsync(null));
-        var roomKey = vm.PendingInvites.Single().Invite.Invite.LobbyKey;
 
         vm.PickInviteChoices(InviteLife.ThirtyDays, InviteUse.Once);
         Assert.False(vm.InviteUsesEnabled);
@@ -423,14 +629,14 @@ public sealed class RoomSceneTests : IDisposable
         Assert.Equal("Bob", item.Label);
         Assert.Equal("", vm.LongInviteLabel);
         Assert.True(File.Exists(vm.LongInvitesFile));
-        // It took over the room's key, so this room answers it too, and says so.
+        // The room had no invite out, so it runs on the thirty-day invite's own key and answers it, and says so.
         Assert.False(vm.ShowInviteNextRoomNote);
         Assert.Equal(L.T("multiplayer.longinvite.created"), vm.Status);
         Assert.True(JayInvite.TryParse(vm.TestInviteText ?? "", out var monthCode));
-        Assert.Equal(roomKey, monthCode.LobbyKey);
         Assert.Equal(item.Invite.Token, monthCode.Token);
         Assert.Equal(L.F("multiplayer.invite.summary", item.Left, L.T("multiplayer.invite.use.unlimited")), vm.InviteSummary);
         Assert.Contains(L.P("multiplayer.invite.days", 30, 30), vm.InviteTerms);
+        Assert.Contains(L.T("multiplayer.invite.terms_ask"), vm.InviteTerms);
 
         // Revoking it takes it off the card and out of the open room.
         vm.RevokeLongInviteCommand.Execute(item);
@@ -438,6 +644,35 @@ public sealed class RoomSceneTests : IDisposable
         Assert.False(vm.HasLongInvites);
         Assert.False(vm.HasInvite);
         Assert.False(File.Exists(vm.LongInvitesFile));
+
+        // Made again after the last one was revoked: a new key, not the one the revoked code carries.
+        Wait(vm.CreateInviteCommand.ExecuteAsync(null));
+        Assert.True(JayInvite.TryParse(vm.TestInviteText ?? "", out var secondCode));
+        Assert.NotEqual(monthCode.LobbyKey, secondCode.LobbyKey);
+        Assert.NotEqual(monthCode.Token, secondCode.Token);
+        vm.LeaveTestRoom();
+    });
+
+    [Fact]
+    public void AThirtyDayInviteNeverTakesTheKeyOfARoomThatHasInvitesOut() => UiTestThread.Run(() =>
+    {
+        var (service, vm, room) = Create();
+        using var s = service;
+        vm.EnterTestRoom(room, host: true, lobby: true);
+        // An ordinary invite first: the room has a lobby key, and whoever holds that invite knows it.
+        vm.PickInviteChoices(InviteLife.TenMinutes, InviteUse.Once);
+        Wait(vm.CreateInviteCommand.ExecuteAsync(null));
+        var roomKey = vm.PendingInvites.Single().Invite.Invite.LobbyKey;
+
+        vm.PickInviteChoices(InviteLife.ThirtyDays, InviteUse.Unlimited);
+        Wait(vm.CreateInviteCommand.ExecuteAsync(null));
+        Assert.Single(vm.LongInviteItems);
+        Assert.True(JayInvite.TryParse(vm.TestInviteText ?? "", out var monthCode));
+        Assert.NotEqual(roomKey, monthCode.LobbyKey);
+        // So this room cannot answer it, and the card says from when it works.
+        Assert.True(vm.ShowInviteNextRoomNote);
+        Assert.Equal(L.T("multiplayer.longinvite.created_next_room"), vm.Status);
+        Assert.Equal(roomKey, vm.PendingInvites.Single().Invite.Invite.LobbyKey);
         vm.LeaveTestRoom();
     });
 

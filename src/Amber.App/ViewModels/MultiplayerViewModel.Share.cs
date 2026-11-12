@@ -60,9 +60,8 @@ public sealed partial class MultiplayerViewModel
     /// <summary>In an invite room whose protection wraps traffic, members only hold a key with the host: only the host can forward.</summary>
     private bool GameProxyFits => _currentOptions is { } o && (o.IsHost || !(o.Room.FromInvite && o.Room.Tunnel.Wraps));
 
-    private bool _proxySwitching;
-
-    public bool CanShareGameProxy => ShowShareNetwork && GameProxyFits && !_proxySwitching && !IsRekeying;
+    /// <summary>Not while another switch is restarting the component (see <see cref="_componentRestarting"/>).</summary>
+    public bool CanShareGameProxy => ShowShareNetwork && GameProxyFits && !_componentRestarting && !IsRekeying;
 
     public string GameProxyShareNote => ShowShareNetwork && _currentOptions is not null && !GameProxyFits ? L.T("multiplayer.proxy.host_only") : "";
 
@@ -89,12 +88,12 @@ public sealed partial class MultiplayerViewModel
             NotifyShare();
             return;
         }
-        _proxySwitching = true;
-        NotifyShare();
+        SetComponentRestarting(true);
         try
         {
             if (on && !await Confirm(L.T("multiplayer.share.proxy.confirm_title"), L.T("multiplayer.proxy.allow_warning"), L.T("multiplayer.share.proxy.confirm"))) return;
             if (_currentOptions != current) return;
+            var room = _room;
             var next = current with { AllowProxy = on };
             bool done;
             if (TestRestartForProxy is { } stand)
@@ -103,14 +102,23 @@ public sealed partial class MultiplayerViewModel
                 if (done) _currentOptions = next;
             }
             else done = await RestartForProxyAsync(next);
-            if (!done) return;
+            if (!done)
+            {
+                // Still in the same room, so nothing changed: say so. (A restart that failed has closed the room
+                // and left its own message.)
+                if (ReferenceEquals(_room, room)) SetStatus(StatusMessage.Warning("multiplayer.share.proxy.failed"));
+                return;
+            }
             AllowGameProxy = on;
             SetStatus(StatusMessage.Info(on ? "multiplayer.share.proxy.turned_on" : "multiplayer.share.proxy.turned_off"));
         }
+        catch (Exception e) when (e is IOException or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or OperationCanceledException)
+        {
+            SetStatus(StatusMessage.Failure("multiplayer.room.start_failed", e, ErrorText.Of(e)));
+        }
         finally
         {
-            _proxySwitching = false;
-            NotifyShare();
+            SetComponentRestarting(false);
         }
     }
 

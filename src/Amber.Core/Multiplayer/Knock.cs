@@ -446,16 +446,6 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         lock (_gate) return (byte[])(_lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength)).Clone();
     }
 
-    /// <summary>The lobby key in use right now (a copy), or null when no invite is open. Never makes one.</summary>
-    public byte[]? CurrentLobbyKey()
-    {
-        lock (_gate)
-        {
-            PruneLocked();
-            return (byte[]?)_lobbyKey?.Clone();
-        }
-    }
-
     /// <summary>The host's game, written into new invites (invite v3) so the joiner can pick a matching instance.</summary>
     public InviteGame? Game { get; set; }
 
@@ -463,10 +453,16 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
     public const int UnlimitedUses = int.MaxValue;
 
     /// <param name="uses">1 to 20, or <see cref="UnlimitedUses"/>.</param>
+    /// <param name="autoApprove">
+    /// Whoever uses the invite comes in without the host being asked. Not with <see cref="UnlimitedUses"/>: one code
+    /// that lets any number of people in unasked is a room without a door (a public room says so openly and goes
+    /// through <see cref="CreateStanding"/>).
+    /// </param>
     /// <param name="boundTo">Only this identity key may use the invite (see <see cref="PendingInvite.BoundTo"/>).</param>
     public PendingInvite Create(int uses, TimeSpan? lifetime, bool autoApprove, TunnelSettings tunnel, byte[]? boundTo = null)
     {
         if (uses is < 1 or > 20 and not UnlimitedUses) throw new ArgumentOutOfRangeException(nameof(uses));
+        if (uses == UnlimitedUses && autoApprove) throw new ArgumentException("an invite without a use limit always asks the host", nameof(autoApprove));
         if (boundTo is { Length: not X25519KeyPair.Length }) throw new ArgumentException(null, nameof(boundTo));
         PendingInvite invite;
         lock (_gate)

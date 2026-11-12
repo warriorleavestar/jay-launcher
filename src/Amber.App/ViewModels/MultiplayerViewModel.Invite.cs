@@ -528,7 +528,7 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         var uses = InviteOffer.Uses(InviteOffer.Normalize(life, SelectedInviteUse.Use));
-        if (await IssueInviteAsync(uses, InviteOffer.Lifetime(life), InviteAutoApprove) is not null)
+        if (await IssueInviteAsync(uses, InviteOffer.Lifetime(life), InviteAutoApproveNow) is not null)
             SetStatus(StatusMessage.Success(IsDirect ? "multiplayer.direct.invite_created" : "multiplayer.invite.created"));
     }
 
@@ -543,14 +543,16 @@ public sealed partial class MultiplayerViewModel
     private async Task<PendingInvite?> IssueInviteAsync(int uses, TimeSpan? lifetime, bool autoApprove)
     {
         if (_lobby is not { } lobby || _credentials is not { } credentials) return null;
+        // An invite without a use limit always asks me first, whatever the caller remembered.
+        autoApprove = Child.MayAutoAdmit(autoApprove) && uses != InviteBook.UnlimitedUses;
         lobby.Book.Game = await HostGameAsync();
         if (_lobby != lobby) return null;
-        var invite = lobby.Book.Create(uses, lifetime, Child.MayAutoAdmit(autoApprove), credentials.Tunnel);
+        var invite = lobby.Book.Create(uses, lifetime, autoApprove, credentials.Tunnel);
         _lastInvite = invite.Invite;
         _lastPending = invite;
         _lastLongInvite = null;
         _longInviteWaits = false;
-        RememberInviteTerms(uses, lifetime, Child.MayAutoAdmit(autoApprove));
+        RememberInviteTerms(uses, lifetime, autoApprove);
         InviteShown = false;
         OnPropertyChanged(nameof(InviteDisplay));
         OnPropertyChanged(nameof(HasInvite));
