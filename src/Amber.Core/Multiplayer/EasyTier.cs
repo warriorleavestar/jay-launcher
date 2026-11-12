@@ -358,6 +358,12 @@ public sealed record EasyTierOptions(
 {
     /// <summary>封装模式下加入方：本机这个端口经 EasyTier 转发到房主的封装端口（游戏和聊天都走它）。</summary>
     public int? LocalTunnelPort { get; init; }
+    /// <summary>
+    /// Member of a room that splits: one local port per leg, in leg order, each forwarded over that leg's own EasyTier
+    /// network to the host's leg port (<see cref="Transport.SplitSettings.LegPort"/>). Null when the paths aren't set up;
+    /// game and chat then use one path (or fail in a Strict room).
+    /// </summary>
+    public IReadOnlyList<int>? LocalSplitPorts { get; init; }
     /// <summary>邀请房间的加入方：远程控制连房主用的本机端口（不建网卡时经 EasyTier 或封装通道转到房主的 47662）。</summary>
     public int? LocalRemotePort { get; init; }
     /// <summary>允许房间里的人经自己“仅游戏”转发（只开 SOCKS5，不用建网卡）。</summary>
