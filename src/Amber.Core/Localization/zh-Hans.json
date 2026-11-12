@@ -3530,5 +3530,6 @@
   "settings.ul.used_by_none": "还没有实例用它",
   "settings.ul.cache": "缓存：{0}",
   "settings.ul.developers": "给开发者",
+  "settings.ul.upgrade_note": "装了新版本的加载器以后，每个实例第一次开始时都会重新准备一遍模组，这一次会比平时久。这是正常的。",
   "instance.ul.downloading": "正在下载通用加载器……"
 }

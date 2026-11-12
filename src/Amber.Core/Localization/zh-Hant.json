@@ -3530,5 +3530,6 @@
   "settings.ul.used_by_none": "還沒有實例用它",
   "settings.ul.cache": "快取：{0}",
   "settings.ul.developers": "給開發者",
+  "settings.ul.upgrade_note": "裝了新版本的載入器以後，每個實例第一次開始時都會重新準備一遍模組，這一次會比平時久。這是正常的。",
   "instance.ul.downloading": "正在下載通用載入器……"
 }
