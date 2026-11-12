@@ -143,7 +143,19 @@ public sealed class MobilePortTests
         Assert.Equal(-0.06, sink.LastLook.Y, 6);
         Assert.True(router.Release(20));
         Assert.Empty(sink.Actions);
-        Assert.Equal((0.60, 0.39, true), sink.LastPointer);
+        Assert.Equal((0.60, 0.39, false), sink.LastPointer);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
+    }
+
+    [Fact]
+    public void TouchInputRouterTurnsGameplayTapsIntoOneClick()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(23, 0.52, 0.45));
+        Assert.True(router.Release(23));
+        Assert.Single(sink.Pointers, pointer => pointer.Click);
     }
 
     [Fact]
@@ -380,11 +392,16 @@ public sealed class MobilePortTests
         public (double X, double Y) LastMovement { get; private set; }
         public (double X, double Y) LastLook { get; private set; }
         public (double X, double Y, bool Click) LastPointer { get; private set; }
+        public List<(double X, double Y, bool Click)> Pointers { get; } = [];
 
         public void SetAction(TouchControlAction action, bool pressed) => Actions.Add((action, pressed));
         public void SetMovement(double x, double y) => LastMovement = (x, y);
         public void AddLook(double x, double y) => LastLook = (x, y);
-        public void SetPointer(double x, double y, bool click) => LastPointer = (x, y, click);
+        public void SetPointer(double x, double y, bool click)
+        {
+            LastPointer = (x, y, click);
+            Pointers.Add((x, y, click));
+        }
     }
 
 }

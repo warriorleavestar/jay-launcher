@@ -11,6 +11,7 @@ public interface ITouchInputSink
 /// <summary>Maps independent Android pointer IDs to Jay controls without coupling input to a View.</summary>
 public sealed class TouchInputRouter(ITouchInputSink sink)
 {
+    private const double DragThreshold = 0.015;
     private readonly Dictionary<int, PointerState> _pointers = [];
 
     public bool Press(int pointerId, double x, double y, bool controlsEnabled = true)
@@ -45,7 +46,11 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         {
             sink.AddLook(x - pointer.X, y - pointer.Y);
             sink.SetPointer(x, y, false);
-            _pointers[pointerId] = pointer with { X = x, Y = y };
+            var totalX = x - pointer.StartX;
+            var totalY = y - pointer.StartY;
+            var dragged = pointer.HasDragged ||
+                totalX * totalX + totalY * totalY >= DragThreshold * DragThreshold;
+            _pointers[pointerId] = pointer with { X = x, Y = y, HasDragged = dragged };
         }
         return true;
     }
@@ -57,7 +62,8 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
             sink.SetMovement(0, 0);
         else if (pointer.Action is null)
         {
-            if (pointer.ClickOnRelease) sink.SetPointer(pointer.X, pointer.Y, true);
+            if (pointer.ClickOnRelease && !pointer.HasDragged)
+                sink.SetPointer(pointer.X, pointer.Y, true);
         }
         else if (pointer.Action is { } action)
             sink.SetAction(action, false);
@@ -73,5 +79,12 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         TouchControlAction? Action,
         double X,
         double Y,
-        bool ClickOnRelease = true);
+        bool ClickOnRelease,
+        double StartX,
+        double StartY,
+        bool HasDragged)
+    {
+        public PointerState(TouchControlAction? action, double x, double y, bool clickOnRelease = true)
+            : this(action, x, y, clickOnRelease, x, y, false) { }
+    }
 }

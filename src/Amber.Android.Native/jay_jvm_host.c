@@ -209,25 +209,30 @@ int jay_jvm_run_main(JNIEnv *env, const char *class_name, int argc, const char *
         return JNI_ERR;
     }
     g_input_bridge_class = (jclass)(*env)->NewGlobalRef(env, main_class);
-    if (g_input_bridge_class == NULL || jay_capture_exception(env, "NewGlobalRef(input bridge)") != 0)
-        return JNI_ERR;
-    g_dispatch_pointer = (*env)->GetStaticMethodID(env, g_input_bridge_class,
-        "dispatchPointer", "(FFI)V");
-    g_dispatch_mouse_button = (*env)->GetStaticMethodID(env, g_input_bridge_class,
-        "dispatchMouseButton", "(II)V");
-    g_dispatch_key = (*env)->GetStaticMethodID(env, g_input_bridge_class,
-        "dispatchKey", "(II)V");
-    g_dispatch_scroll = (*env)->GetStaticMethodID(env, g_input_bridge_class,
-        "dispatchScroll", "(DD)V");
-    g_dispatch_char = (*env)->GetStaticMethodID(env, g_input_bridge_class,
-        "dispatchChar", "(I)V");
-    g_dispatch_look = (*env)->GetStaticMethodID(env, g_input_bridge_class,
-        "dispatchLook", "(FF)V");
-    if (jay_capture_exception(env, "GetStaticMethodID(input bridge)") != 0 ||
-        g_dispatch_pointer == NULL || g_dispatch_mouse_button == NULL ||
-        g_dispatch_key == NULL || g_dispatch_scroll == NULL ||
-        g_dispatch_char == NULL || g_dispatch_look == NULL)
-        return JNI_ERR;
+    if ((*env)->ExceptionCheck(env)) {
+        if (!atomic_exchange(&g_input_bridge_error_logged, 1))
+            (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        g_input_bridge_class = NULL;
+    }
+    if (g_input_bridge_class != NULL) {
+#define JAY_INPUT_METHOD(target, name, signature) do { \
+        target = (*env)->GetStaticMethodID(env, g_input_bridge_class, name, signature); \
+        if ((*env)->ExceptionCheck(env)) { \
+            if (!atomic_exchange(&g_input_bridge_error_logged, 1)) \
+                (*env)->ExceptionDescribe(env); \
+            (*env)->ExceptionClear(env); \
+            target = NULL; \
+        } \
+    } while (0)
+        JAY_INPUT_METHOD(g_dispatch_pointer, "dispatchPointer", "(FFI)Z");
+        JAY_INPUT_METHOD(g_dispatch_mouse_button, "dispatchMouseButton", "(II)Z");
+        JAY_INPUT_METHOD(g_dispatch_key, "dispatchKey", "(II)Z");
+        JAY_INPUT_METHOD(g_dispatch_scroll, "dispatchScroll", "(DD)Z");
+        JAY_INPUT_METHOD(g_dispatch_char, "dispatchChar", "(I)Z");
+        JAY_INPUT_METHOD(g_dispatch_look, "dispatchLook", "(FF)Z");
+#undef JAY_INPUT_METHOD
+    }
     jclass string_class = (*env)->FindClass(env, "java/lang/String");
     if (string_class == NULL) {
         jay_capture_exception(env, "FindClass(String)");
@@ -259,72 +264,76 @@ static JNIEnv *jay_input_environment(int *attached) {
     return env;
 }
 
-static void jay_finish_input_call(JNIEnv *env, int attached) {
+static int jay_finish_input_call(JNIEnv *env, int attached, jboolean delivered) {
+    int success = delivered == JNI_TRUE;
     if (env != NULL && (*env)->ExceptionCheck(env)) {
+        success = 0;
         if (!atomic_exchange(&g_input_bridge_error_logged, 1))
             (*env)->ExceptionDescribe(env);
         (*env)->ExceptionClear(env);
     }
     if (attached && g_vm != NULL) (*g_vm)->DetachCurrentThread(g_vm);
+    return success;
 }
 
 __attribute__((visibility("default")))
-void jay_java_pointer(float x, float y, uint32_t clicks) {
+int jay_java_pointer(float x, float y, uint32_t clicks) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
-    if (env == NULL || g_dispatch_pointer == NULL) return;
-    (*env)->CallStaticVoidMethod(env, g_input_bridge_class, g_dispatch_pointer,
-                                (jfloat)x, (jfloat)y, (jint)clicks);
-    jay_finish_input_call(env, attached);
+    if (env == NULL || g_dispatch_pointer == NULL) return 0;
+    jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_dispatch_pointer, (jfloat)x, (jfloat)y, (jint)clicks);
+    return jay_finish_input_call(env, attached, delivered);
 }
 
 __attribute__((visibility("default")))
-void jay_java_mouse_button(int button, int action) {
+int jay_java_mouse_button(int button, int action) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
-    if (env == NULL || g_dispatch_mouse_button == NULL) return;
-    (*env)->CallStaticVoidMethod(env, g_input_bridge_class, g_dispatch_mouse_button,
-                                (jint)button, (jint)action);
-    jay_finish_input_call(env, attached);
+    if (env == NULL || g_dispatch_mouse_button == NULL) return 0;
+    jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_dispatch_mouse_button, (jint)button, (jint)action);
+    return jay_finish_input_call(env, attached, delivered);
 }
 
 __attribute__((visibility("default")))
-void jay_java_key(int key, int action) {
+int jay_java_key(int key, int action) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
-    if (env == NULL || g_dispatch_key == NULL) return;
-    (*env)->CallStaticVoidMethod(env, g_input_bridge_class, g_dispatch_key,
-                                (jint)key, (jint)action);
-    jay_finish_input_call(env, attached);
+    if (env == NULL || g_dispatch_key == NULL) return 0;
+    jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_dispatch_key, (jint)key, (jint)action);
+    return jay_finish_input_call(env, attached, delivered);
 }
 
 __attribute__((visibility("default")))
-void jay_java_scroll(double x, double y) {
+int jay_java_scroll(double x, double y) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
-    if (env == NULL || g_dispatch_scroll == NULL) return;
-    (*env)->CallStaticVoidMethod(env, g_input_bridge_class, g_dispatch_scroll,
-                                (jdouble)x, (jdouble)y);
-    jay_finish_input_call(env, attached);
+    if (env == NULL || g_dispatch_scroll == NULL) return 0;
+    jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_dispatch_scroll, (jdouble)x, (jdouble)y);
+    return jay_finish_input_call(env, attached, delivered);
 }
 
 __attribute__((visibility("default")))
-void jay_java_char(uint32_t codepoint) {
+int jay_java_char(uint32_t codepoint) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
-    if (env == NULL || g_dispatch_char == NULL) return;
-    (*env)->CallStaticVoidMethod(env, g_input_bridge_class, g_dispatch_char, (jint)codepoint);
-    jay_finish_input_call(env, attached);
+    if (env == NULL || g_dispatch_char == NULL) return 0;
+    jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_dispatch_char, (jint)codepoint);
+    return jay_finish_input_call(env, attached, delivered);
 }
 
 __attribute__((visibility("default")))
-void jay_java_look(float x, float y) {
+int jay_java_look(float x, float y) {
     int attached;
     JNIEnv *env = jay_input_environment(&attached);
-    if (env == NULL || g_dispatch_look == NULL) return;
-    (*env)->CallStaticVoidMethod(env, g_input_bridge_class, g_dispatch_look,
-                                (jfloat)x, (jfloat)y);
-    jay_finish_input_call(env, attached);
+    if (env == NULL || g_dispatch_look == NULL) return 0;
+    jboolean delivered = (*env)->CallStaticBooleanMethod(env, g_input_bridge_class,
+        g_dispatch_look, (jfloat)x, (jfloat)y);
+    return jay_finish_input_call(env, attached, delivered);
 }
 
 __attribute__((visibility("default")))
