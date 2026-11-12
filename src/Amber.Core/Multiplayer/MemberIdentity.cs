@@ -76,10 +76,12 @@ public sealed class MemberIdentity : IDisposable
     /// 读取身份；没有就新建并保存。文件内容坏了或解不开（密码学或格式错误）：原文件留一份 .broken，换一把新的，Warning 说明原因。
     /// 读写出错（文件被占用、权限一时不对）：不动原文件，这次用内存里的临时身份，Warning 说明，下次启动再读。
     /// </summary>
-    public static MemberIdentity LoadOrCreate(string directory)
+    public static MemberIdentity LoadOrCreate(string directory) => LoadOrCreate(directory, fromLegacy: false);
+
+    private static MemberIdentity LoadOrCreate(string directory, bool fromLegacy)
     {
         var path = Path.Combine(directory, FileName);
-        var legacy = !File.Exists(path) && File.Exists(Path.Combine(directory, LegacyFileName));
+        var legacy = (fromLegacy || !File.Exists(path)) && File.Exists(Path.Combine(directory, LegacyFileName));
         if (legacy) path = Path.Combine(directory, LegacyFileName);
         if (File.Exists(path))
         {
@@ -140,6 +142,9 @@ public sealed class MemberIdentity : IDisposable
                 {
                     try { File.Copy(path, path + ".broken", true); }
                     catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
+                    // A damaged new file on a device that came from an older version: its handshake key is still in the old
+                    // file, so take it from there again (hosts and friends keep knowing the device) with new signing keys.
+                    if (File.Exists(Path.Combine(directory, LegacyFileName))) return LoadOrCreate(directory, fromLegacy: true);
                 }
                 var fresh = new MemberIdentity(directory, DeviceKeys.Generate(), L.T("core.mp.identity.corrupt"));
                 try

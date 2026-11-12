@@ -364,6 +364,43 @@ public sealed class JayAccountTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The "Me" page and the "is this their account?" request both show <see cref="JayAddress.CheckWordsText"/>: the words
+    /// come from the account id in the address, so the owner and the friend see the same four.
+    /// </summary>
+    [Fact]
+    public void CheckWordsTextMatchesTheAccountsCheckWords()
+    {
+        using var account = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        Assert.True(JayAddress.TryDecode(account.Address, out var id));
+        foreach (var (ui, list) in new[] { ("en", MnemonicLanguage.English), ("ja", MnemonicLanguage.English), ("zh-Hans", MnemonicLanguage.ChineseSimplified), ("zh-Hant", MnemonicLanguage.ChineseSimplified), ("lzh", MnemonicLanguage.ChineseSimplified) })
+            Assert.Equal(string.Join(" · ", JayAddress.CheckWords(id, list)), JayAddress.CheckWordsText(account.Address, ui));
+        Assert.Equal(4, JayAddress.CheckWordsText(account.Address, "en").Split(" · ").Length);
+        Assert.Equal("", JayAddress.CheckWordsText(JayAddress.EncodeVersion0(account.PublicKey), "en"));
+        Assert.Equal("", JayAddress.CheckWordsText(null, "en"));
+    }
+
+    /// <summary>An entry left in the new file because it couldn't be moved before is moved, and saved, once it can be.</summary>
+    [Fact]
+    public void EntryThatCouldNotMoveBeforeIsSavedOnceMoved()
+    {
+        using var keys = DeviceKeys.Generate();
+        using var account = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        var store = new JayAccountStore(_dir);
+        store.Add(account, "A", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        var path = Path.Combine(_dir, JayAccountStore.FileName);
+        var old = JayAddress.EncodeVersion0(account.PublicKey);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        json["accounts"]![0]!["address"] = old;
+        File.WriteAllText(path, json.ToJsonString());
+
+        var moved = new JayAccountStore(_dir);
+        moved.Load();
+        Assert.Equal(account.Address, Assert.Single(moved.Accounts).Address);
+        var written = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!["accounts"]![0]!;
+        Assert.Equal((account.Address, old), ((string?)written["address"], (string?)written["was"]));
+    }
+
     /// <summary>A "was" that isn't a version 0 address is ignored, so two entries with the same junk can't break startup.</summary>
     [Fact]
     public void JunkFormerAddressesAreIgnored()

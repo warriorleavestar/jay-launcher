@@ -209,6 +209,27 @@ public sealed class MemberIdentityTests : IDisposable
         Assert.Equal(oldBytes, File.ReadAllBytes(oldPath));
     }
 
+    /// <summary>A damaged new file on a device that came from an older version takes the handshake key from the old file again.</summary>
+    [Fact]
+    public void DamagedNewFileFallsBackToTheOldKey()
+    {
+        Directory.CreateDirectory(_dir);
+        using var legacy = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.LegacyFileName), MemberIdentity.Protect(_dir, legacy.ExportPrivateKey()));
+        using (var first = MemberIdentity.LoadOrCreate(_dir)) Assert.Equal(legacy.PublicKey, first.PublicKey);
+        var path = Path.Combine(_dir, MemberIdentity.FileName);
+        File.WriteAllText(path, "garbage");
+
+        using var again = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Equal(legacy.PublicKey, again.PublicKey);
+        Assert.True(again.IsPersisted);
+        Assert.True(File.Exists(path + ".broken"));
+        using var next = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Null(next.Warning);
+        Assert.Equal(legacy.PublicKey, next.PublicKey);
+        Assert.Equal(again.Device.EdPublicKey, next.Device.EdPublicKey);
+    }
+
     /// <summary>
     /// What an older version finds: it reads only the old file, as a bare key. A new device never writes that file, and a
     /// damaged old file is neither copied nor replaced.

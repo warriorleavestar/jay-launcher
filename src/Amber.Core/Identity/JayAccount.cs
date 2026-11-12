@@ -185,6 +185,18 @@ public static class JayAddress
     public static string Short(string address) => address.Length <= 14 ? address : $"{address[..8]}\u2026{address[^4..]}";
 
     /// <summary>
+    /// The check words for an address, in the word list for a UI language (Chinese word list for zh-* and lzh, English
+    /// otherwise), joined with " · ". Every place that shows check words uses this, so both sides always see the same four
+    /// words. Empty for an address that isn't valid.
+    /// </summary>
+    public static string CheckWordsText(string? address, string uiLanguage)
+    {
+        if (!TryDecode(address, out var id)) return "";
+        var language = uiLanguage.StartsWith("zh", StringComparison.Ordinal) || uiLanguage == "lzh" ? MnemonicLanguage.ChineseSimplified : MnemonicLanguage.English;
+        return string.Join(" · ", CheckWords(id, language));
+    }
+
+    /// <summary>
     /// Four words from the account id (first 44 bits of a SHA-256 over it) that people can read out to each other to confirm
     /// they see the same account. Not secret, and not part of the recovery phrase.
     /// </summary>

@@ -99,6 +99,7 @@ public sealed class JayAccountStore(string directory)
             _items.Clear();
             _unmoved.Clear();
             var legacy = !File.Exists(PathOnDisk);
+            var moved = false;
             var path = legacy ? Path.Combine(directory, LegacyFileName) : PathOnDisk;
             if (!File.Exists(path)) return;
             try
@@ -125,6 +126,7 @@ public sealed class JayAccountStore(string directory)
                         }
                         former = address;
                         address = renamed;
+                        moved = true;
                     }
                     if (_items.Any(i => i.Entry.Address == address)) continue;
                     var entry = new JayAccountEntry(address!, DeviceCertificate.CleanName((string?)o["label"]), (bool?)o["backedUp"] ?? false,
@@ -132,9 +134,10 @@ public sealed class JayAccountStore(string directory)
                         DeviceCertificate.FromJson(o["device"])) { FormerAddress = former };
                     _items.Add((entry, seed));
                 }
-                if (legacy && (_items.Count > 0 || _unmoved.Count > 0))
+                if (moved || (legacy && (_items.Count > 0 || _unmoved.Count > 0)))
                 {
-                    // The first start of this version: the accounts go to the new file, the old one stays as it is.
+                    // The first start of this version, or an entry that couldn't be moved before and could now: the accounts
+                    // go to the new file, so this happens once. The old file stays as it is.
                     try { SaveLocked(); }
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 }

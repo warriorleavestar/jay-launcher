@@ -18,6 +18,8 @@ A device signature (`HybridSignature`) is both signatures over the same bytes. I
 
 Versions before device seeds keep a bare X25519 key in `identity.key`. When `device.key` doesn't exist yet, that key is kept as the handshake key, so hosts and friends still know the device, and a seed is added for the two signing keys. `device.key` then stores `0x03` ‖ the X25519 private key ‖ the seed. Resetting the identity gives a seed-only device like any new one.
 
+If `device.key` is damaged and `identity.key` is still there, the handshake key is taken from `identity.key` again with new signing keys, so hosts and friends keep knowing the device.
+
 `identity.key` is only read, never written or moved. An older version that shares the data folder, or that the user goes back to, still finds its own identity and can't overwrite the new file. This also means that after resetting the identity, the old X25519 key stays in `identity.key`, and an older version would use it again. To retire it everywhere, delete `identity.key` by hand after the reset; Jay doesn't, because older versions may still need it.
 
 The device code (`JAYF1-`, `DeviceFingerprint`) stays a separate key because the user must be able to rotate it on its own.
