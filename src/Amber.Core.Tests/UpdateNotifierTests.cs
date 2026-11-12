@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -28,7 +27,7 @@ public sealed class UpdateNotifierTests : IDisposable
     }
 
     /// <summary>A release feed for v99.0.0 with a package, its SHA-256 list and the list signed by <paramref name="signers"/>.</summary>
-    private static FakeHttp Release(params TrustSigner[] signers)
+    private static FakeHttp Release(TrustSigner[] signers, string page = Page)
     {
         var http = new FakeHttp();
         var sums = $"{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("package")))}  Jay-win-x64.zip\n";
@@ -41,16 +40,23 @@ public sealed class UpdateNotifierTests : IDisposable
             http.On(url, body);
             assets.Add(new JsonObject { ["name"] = name, ["browser_download_url"] = url });
         }
-        http.On(Feed, new JsonObject { ["tag_name"] = "v99.0.0", ["html_url"] = Page, ["body"] = "notes", ["assets"] = assets }.ToJsonString());
+        http.On(Feed, new JsonObject { ["tag_name"] = "v99.0.0", ["html_url"] = page, ["body"] = "notes", ["assets"] = assets }.ToJsonString());
         return http;
     }
 
+    private readonly List<string> _opened = [];
+
     private (LauncherService Service, UpdateNotifier Notifier) Make(FakeHttp http, Action<AppSettings>? setup = null)
     {
+        // Settings.Save() goes to AppSettings.FilePath, which TestDataDir points at a temporary folder for the whole test run.
         var settings = new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "", UpdateFeedUrl = Feed };
         setup?.Invoke(settings);
         var service = new LauncherService(settings);
-        return (service, new UpdateNotifier(service, () => _now, new HttpClient(http), Path.Combine(_dir, "data"), Own));
+        return (service, new UpdateNotifier(service, () => _now, new HttpClient(http), Path.Combine(_dir, "data"), Own, url =>
+        {
+            _opened.Add(url);
+            return null;
+        }));
     }
 
     private static RequestHandle? Notice(LauncherService service) => service.Requests.Pending.SingleOrDefault(r => r.Spec.Kind == UpdateNotifier.RequestKind);
@@ -58,7 +64,7 @@ public sealed class UpdateNotifierTests : IDisposable
     [Fact]
     public async Task ASignedNewerReleaseIsShownAndOnlyOpensThePage()
     {
-        var http = Release(T[0], T[2]);
+        var http = Release([T[0], T[2]]);
         var (service, notifier) = Make(http);
         using var _ = service;
         Assert.True(await notifier.CheckIfDueAsync());
@@ -69,18 +75,30 @@ public sealed class UpdateNotifierTests : IDisposable
         // Only the feed and the signature files were fetched: the package itself is never downloaded.
         Assert.DoesNotContain(http.Requests, r => r.Url.EndsWith("Jay-win-x64.zip", StringComparison.Ordinal));
 
-        var opened = new List<string>();
-        var original = ShellOpen.Start;
-        ShellOpen.Start = info => opened.Add(info.FileName);
-        try { service.Requests.Resolve(notice, "open", RequestSource.Bar); }
-        finally { ShellOpen.Start = original; }
-        Assert.Equal([Page], opened);
+        service.Requests.Resolve(notice, "open", RequestSource.Bar);
+        Assert.Equal([Page], _opened);
+    }
+
+    [Theory]
+    [InlineData("https://phishing.example.test/jay-v99")]
+    [InlineData("http://releases.example.test/v99.0.0")]
+    public async Task APageTheSignaturesDontCoverIsNeverOpened(string page)
+    {
+        // The signatures cover the tag, not html_url: a swapped page on another host (or plain HTTP) gets no open button.
+        var (service, notifier) = Make(Release([T[0], T[2]], page));
+        using var _ = service;
+        Assert.True(await notifier.CheckIfDueAsync());
+        var notice = Notice(service)!;
+        Assert.DoesNotContain(notice.Spec.Choices, c => c.Id == "open");
+        Assert.Contains(notice.Spec.Choices, c => c.Id == "later" && c.IsDefault);
+        service.Requests.Resolve(notice, "later", RequestSource.Bar);
+        Assert.Empty(_opened);
     }
 
     [Fact]
     public async Task AnUnsignedOrHalfSignedReleaseStaysQuiet()
     {
-        var (service, notifier) = Make(Release(T[1]));
+        var (service, notifier) = Make(Release([T[1]]));
         using var _ = service;
         Assert.False(await notifier.CheckIfDueAsync());
         Assert.Null(Notice(service));
@@ -113,10 +131,23 @@ public sealed class UpdateNotifierTests : IDisposable
         Assert.Single(down.Requests);
     }
 
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("ftp://releases.example.test/latest")]
+    [InlineData("https://")]
+    public async Task AWrongAddressIsQuietAndWaitsADay(string feed)
+    {
+        var (service, notifier) = Make(new FakeHttp(), s => s.UpdateFeedUrl = feed);
+        using var _ = service;
+        Assert.False(await notifier.CheckIfDueAsync());
+        Assert.Null(Notice(service));
+        Assert.Equal(_now, service.Settings.LastUpdateCheck);
+    }
+
     [Fact]
     public async Task ASkippedVersionIsNotShownAgain()
     {
-        var (service, notifier) = Make(Release(T[0], T[1]));
+        var (service, notifier) = Make(Release([T[0], T[1]]));
         using var _ = service;
         Assert.True(await notifier.CheckIfDueAsync());
         service.Requests.Resolve(Notice(service)!, "skip", RequestSource.Bar);

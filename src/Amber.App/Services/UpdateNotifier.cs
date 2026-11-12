@@ -15,7 +15,6 @@ namespace Amber.App.Services;
 internal sealed class UpdateNotifier
 {
     internal const string RequestKind = "update";
-    private const string DedupeKey = "jay-update";
     private static readonly TimeSpan FirstDelay = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan Tick = TimeSpan.FromHours(1);
 
@@ -24,14 +23,18 @@ internal sealed class UpdateNotifier
     private readonly HttpClient _http;
     private readonly string _dataDir;
     private readonly TrustList? _trust;
+    private readonly Func<string, Exception?> _open;
     private bool _running;
     private string? _offeredUrl;
     private string? _offeredVersion;
 
     /// <param name="http">Tests pass a fake feed; Jay uses the service's API client.</param>
     /// <param name="trust">Tests pass their own trustees; Jay uses the built-in list.</param>
-    internal UpdateNotifier(LauncherService service, Func<DateTimeOffset>? now = null, HttpClient? http = null, string? dataDir = null, TrustList? trust = null)
+    /// <param name="open">Opens the release page and returns the error, or null; tests record it instead.</param>
+    internal UpdateNotifier(LauncherService service, Func<DateTimeOffset>? now = null, HttpClient? http = null, string? dataDir = null, TrustList? trust = null,
+        Func<string, Exception?>? open = null)
     {
+        _open = open ?? (url => ShellOpen.TryOpen(url, createFolder: false));
         _service = service;
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _http = http ?? service.Http;
@@ -47,12 +50,19 @@ internal sealed class UpdateNotifier
         var notifier = new UpdateNotifier(service);
         DispatcherTimer.RunOnce(() =>
         {
-            _ = notifier.CheckIfDueAsync();
+            _ = notifier.RunAsync();
             var timer = new DispatcherTimer { Interval = Tick };
-            timer.Tick += (_, _) => _ = notifier.CheckIfDueAsync();
+            timer.Tick += (_, _) => _ = notifier.RunAsync();
             timer.Start();
         }, FirstDelay);
         return notifier;
+    }
+
+    /// <summary>The timer's entry: nothing a check throws may go unobserved or reach the UI thread.</summary>
+    private async Task RunAsync()
+    {
+        try { await CheckIfDueAsync(); }
+        catch (Exception e) { System.Diagnostics.Trace.WriteLine($"update check: {e.GetType().Name}: {e.Message}"); }
     }
 
     /// <summary>Runs the check when it is on and a day has passed. Returns whether a notice was posted.</summary>
@@ -61,21 +71,28 @@ internal sealed class UpdateNotifier
         var settings = _service.Settings;
         if (_running || !settings.AutoUpdateCheck || !AutoUpdateCheck.IsDue(settings.LastUpdateCheck, _now())) return false;
         _running = true;
+        var feed = AutoUpdateCheck.FeedFor(settings.UpdateFeedUrl);
         try
         {
             VerifiedUpdate? update = null;
             try
             {
-                update = await new UpdateCheck(_http, _dataDir, _trust)
-                    .CheckAsync(AutoUpdateCheck.FeedFor(settings.UpdateFeedUrl), UpdateChecker.CurrentVersion, ct);
+                update = await new UpdateCheck(_http, _dataDir, _trust).CheckAsync(feed, UpdateChecker.CurrentVersion, ct);
             }
-            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException) { }
-            // Count failed checks too, so an offline computer doesn't retry every hour.
-            settings.LastUpdateCheck = _now();
-            Save();
-            if (update is not { IsVerified: true } || update.Info.Url is null) return false;
+            catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // Offline, a wrong address (abc, ftp://…), a broken feed: stay quiet. Settings › About › Check for updates says why.
+                System.Diagnostics.Trace.WriteLine($"update check: {e.GetType().Name}: {e.Message}");
+            }
+            finally
+            {
+                // Count failed checks too, so an offline computer or a bad address isn't retried every hour.
+                settings.LastUpdateCheck = _now();
+                Save();
+            }
+            if (update is not { IsVerified: true }) return false;
             if (!AutoUpdateCheck.ShouldNotify(update.Info.Version, settings.SkippedUpdateVersion)) return false;
-            Offer(update.Info.Version, update.Info.Url);
+            Offer(update.Info.Version, AutoUpdateCheck.ReleasePage(feed, update));
             return true;
         }
         finally
@@ -84,17 +101,16 @@ internal sealed class UpdateNotifier
         }
     }
 
-    private void Offer(string version, string url)
+    /// <param name="page">A page Jay can vouch for (<see cref="AutoUpdateCheck.ReleasePage"/>); without one there is no open button.</param>
+    private void Offer(string version, string? page)
     {
         _offeredVersion = version;
-        _offeredUrl = url;
+        _offeredUrl = page;
+        List<RequestChoice> choices = page is null ? [] : [new("open", L.T("tools.update.open_page"), IsDefault: true)];
+        choices.Add(new("later", L.T("update.notice.later"), IsDefault: page is null));
+        choices.Add(new("skip", L.T("update.notice.skip")));
         _service.Requests.Post(new RequestSpec(RequestKind, L.F("update.notice.title", version),
-            L.F("update.notice.body", UpdateChecker.CurrentVersion),
-            [
-                new("open", L.T("tools.update.open_page"), IsDefault: true),
-                new("later", L.T("update.notice.later")),
-                new("skip", L.T("update.notice.skip")),
-            ], DedupeKey: DedupeKey));
+            L.F("update.notice.body", UpdateChecker.CurrentVersion), choices, DedupeKey: "jay-update-" + version));
     }
 
     private void OnResolved(RequestHandle request)
@@ -103,7 +119,7 @@ internal sealed class UpdateNotifier
         switch (request.Choice)
         {
             case "open" when _offeredUrl is { } url && UpdateChecker.TryGetSafeUpdateUrl(url, out var uri):
-                if (ShellOpen.TryOpen(uri!.AbsoluteUri, createFolder: false) is { } error)
+                if (_open(uri!.AbsoluteUri) is { } error)
                     Toasts.Show(L.F("update.notice.open_failed", error.Message), Avalonia.Controls.Notifications.NotificationType.Error);
                 break;
             case "skip" when _offeredVersion is { } version:

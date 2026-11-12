@@ -184,7 +184,7 @@ Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-
 
 ## Privacy
 
-Jay is built on a simple promise: **it only goes online to do what you asked.**
+Jay is built on a simple promise: **it only goes online to do what you asked**, plus one update check a day that you can turn off.
 
 - **No telemetry.** Jay collects no usage data and creates no device ID.
 - **No remote control.** No remote switch or cloud config can change what Jay does.

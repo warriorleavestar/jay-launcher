@@ -217,7 +217,8 @@ public sealed partial class ToolsViewModel : PageViewModel
             else if (update.IsVerified)
             {
                 UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion);
-                UpdateUrl = update.Info.Url;
+                // Only a page Jay can vouch for: the feed's html_url is not covered by the signatures.
+                UpdateUrl = AutoUpdateCheck.ReleasePage(feed, update);
             }
             else
             {

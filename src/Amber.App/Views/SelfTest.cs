@@ -1914,9 +1914,14 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         main.CurrentPage = tools;
         await tools.ScanJunkCommand.ExecuteAsync(null);
         Check("扫描垃圾", tools.Junk.Count == 4, tools.JunkStatus);
+        // A local address that can't answer: no request leaves for GitHub, and the failure is shown.
+        var appSettings = Page<HomeViewModel>().Service.Settings;
+        var feed = appSettings.UpdateFeedUrl;
+        appSettings.UpdateFeedUrl = "http://127.0.0.1:9/jay-selftest/latest.json";
         await tools.CheckUpdateCommand.ExecuteAsync(null);
-        // No update address: the official releases are asked, and the answer (or the failure) is shown.
-        Check("没填更新地址时查官方版本并给出结果", !string.IsNullOrWhiteSpace(tools.UpdateStatus), tools.UpdateStatus);
+        appSettings.UpdateFeedUrl = feed;
+        var failedPrefix = L.F("tools.update.failed", "");
+        Check("更新地址连不上时写明检查失败", tools.UpdateStatus.StartsWith(failedPrefix, StringComparison.Ordinal), tools.UpdateStatus);
         tools.DownloadUrl = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
         tools.DownloadFolder = reportDir;
         await tools.DownloadFileCommand.ExecuteAsync(null);

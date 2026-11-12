@@ -14,6 +14,29 @@ public sealed class AutoUpdateCheckTests
         Assert.StartsWith("https://", AutoUpdateCheck.OfficialFeed);
     }
 
+    private static VerifiedUpdate Signed(string? page, string tag = "v1.2.3", ReleaseVerdict verdict = ReleaseVerdict.Valid) =>
+        new(new UpdateInfo(tag.TrimStart('v'), page, null), new ReleaseCheck(verdict, tag, 5), new Dictionary<string, string>(), new Dictionary<string, Uri>());
+
+    [Fact]
+    public void TheOfficialPageComesFromTheVerifiedTagNotTheFeed()
+    {
+        Assert.Equal(AutoUpdateCheck.OfficialReleasePages + "v1.2.3",
+            AutoUpdateCheck.ReleasePage(AutoUpdateCheck.OfficialFeed, Signed("https://phishing.example.test/jay")));
+        Assert.Equal(AutoUpdateCheck.OfficialReleasePages + "v1.2.3", AutoUpdateCheck.ReleasePage(AutoUpdateCheck.OfficialFeed, Signed(null)));
+        Assert.Null(AutoUpdateCheck.ReleasePage(AutoUpdateCheck.OfficialFeed, Signed(null, verdict: ReleaseVerdict.NotEnoughSignatures)));
+    }
+
+    [Fact]
+    public void AnOwnFeedsPageMustBeHttpsOnTheFeedsHost()
+    {
+        const string feed = "https://mirror.example.test/jay/latest.json";
+        Assert.Equal("https://mirror.example.test/jay/v1.2.3", AutoUpdateCheck.ReleasePage(feed, Signed("https://mirror.example.test/jay/v1.2.3")));
+        Assert.Null(AutoUpdateCheck.ReleasePage(feed, Signed("https://other.example.test/jay/v1.2.3")));
+        Assert.Null(AutoUpdateCheck.ReleasePage(feed, Signed("http://mirror.example.test/jay/v1.2.3")));
+        Assert.Null(AutoUpdateCheck.ReleasePage(feed, Signed("https://mirror.example.test.evil.test/jay")));
+        Assert.Null(AutoUpdateCheck.ReleasePage(feed, Signed(null)));
+    }
+
     [Fact]
     public void ChecksOnceADay()
     {
