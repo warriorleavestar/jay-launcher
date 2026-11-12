@@ -1096,7 +1096,7 @@ public sealed class BakeTests : IDisposable
             var state = Path.Combine(request!["instanceDir"]!.GetValue<string>(), BakeService.StateFolder, "state.json");
             Directory.CreateDirectory(Path.GetDirectoryName(state)!);
             File.WriteAllText(state, new JsonObject { ["schema"] = "amber-ul/state@1", ["platform"] = new JsonObject { ["kind"] = "forge-1.12.2" } }.ToJsonString());
-            var cache = transformerCache ?? Path.Combine(request["cacheRoot"]!.GetValue<string>(), "legacy-1.12.2", "0123456789abcdef");
+            var cache = transformerCache ?? Path.Combine(request["instanceDir"]!.GetValue<string>(), BakeService.StateFolder, "legacy-1.12.2", "0123456789abcdef");
             var result = new JsonObject
             {
                 ["type"] = "result",
@@ -1197,10 +1197,10 @@ public sealed class BakeTests : IDisposable
         Assert.NotNull(new DirectoryInfo(Path.Combine(installDir, "libraries")).LinkTarget);
         Assert.True(File.Exists(Path.Combine(installDir, "libraries", "net", "minecraft", "launchwrapper", "1.12", "launchwrapper-1.12.jar")));
 
-        // The launch block: Java 8 exactly, and the transformer cache is the one cache folder the game may write.
+        // The launch block: Java 8 exactly, and the transformer cache is inside the instance (the shared cache stays read-only).
         Assert.Equal(8, launch.JavaMin);
         Assert.Equal(8, launch.JavaMax);
-        Assert.Equal(Path.Combine(Cache, "legacy-1.12.2", "0123456789abcdef"), launch.WritableCache);
+        Assert.Equal(Path.Combine(instance.WorkDir, BakeService.StateFolder, "legacy-1.12.2", "0123456789abcdef"), launch.WritableCache);
         // Forge 1.12.2's update check is off.
         Assert.Contains("B:Global=false", File.ReadAllText(Path.Combine(instance.WorkDir, "config", "forge.cfg")));
 
@@ -1211,7 +1211,7 @@ public sealed class BakeTests : IDisposable
         Assert.Equal(launch.WritableCache, again.Launch.WritableCache);
         Assert.Equal(1, loader.Count("bake-instance"));
 
-        // The record is in the instance folder, which the game may write: a widened writable cache is not granted.
+        // The record is in the instance folder, which the game may write: a cache path outside the instance is dropped.
         var recordPath = BakeRecord.PathFor(instance.WorkDir);
         var record = JsonNode.Parse(File.ReadAllText(recordPath))!.AsObject();
         record["writableCache"] = Path.Combine(Cache, "baked");
@@ -1265,44 +1265,30 @@ public sealed class BakeTests : IDisposable
     }
 
     [Fact]
-    public async Task AWritableCacheOutsideTheCacheIsNotGranted()
+    public async Task ATransformerCacheOutsideTheInstanceIsDropped()
     {
         LegacyInstall();
-        var loader = LegacyLoader(transformerCache: Path.Combine(_root, "elsewhere"));
+        // A loader that still points at the shared cache: not kept, so nothing outside the instance is created or written.
+        var loader = LegacyLoader(transformerCache: Path.Combine(Cache, "legacy-1.12.2", "0123456789abcdef"));
         var done = await Service(loader).PrepareAsync(new BakeJava("java21", 21, 8), new GameDirectory(Game),
             Instance("forge", "1.12.2", LegacyForge, "f1122"), false, null, CancellationToken.None);
         Assert.Null(done.Launch!.WritableCache);
 
-        // Only one transformer cache folder: not the cache root, not the shared baked jars, not the transformer area
-        // itself; relative or escaping paths are refused.
-        var bake = Service();
+        // Only a folder inside <instance>/.amber-ul/: not the shared cache, not .amber-ul itself, not another
+        // instance; relative or escaping paths are refused.
+        var work = Path.Combine(Game, "versions", "f1122");
+        var other = Path.Combine(Game, "versions", "other");
         var launch = new BakedLaunch("m", [], [], [], "s", "k");
-        Assert.Null(bake.Checked(launch with { WritableCache = Cache }).WritableCache);
-        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine(Cache, "baked") }).WritableCache);
-        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine(Cache, "legacy-1.12.2") }).WritableCache);
-        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine(Cache, "legacy-1.12.2", "..", "baked") }).WritableCache);
-        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine("legacy-1.12.2", "x") }).WritableCache);
-        Assert.Null(bake.Checked(launch with { WritableCache = Path.Combine(Cache, "..", "x") }).WritableCache);
-        Assert.Equal(Path.Combine(Cache, "legacy-1.12.2", "x"), bake.Checked(launch with { WritableCache = Path.Combine(Cache, "legacy-1.12.2", "x") }).WritableCache);
-    }
-
-    [Fact]
-    public void TheSandboxGrantsTheTransformerCacheReadWrite()
-    {
-        var cache = Path.Combine(Cache, "legacy-1.12.2", "x");
-        var options = new LaunchOptions
-        {
-            VersionId = "1.12.2",
-            JavaPath = "java",
-            Session = OfflineAccount.Create("Tester"),
-            Sandbox = new SandboxOptions { Enabled = true, ExtraReadOnly = [Cache] },
-        };
-        Assert.Same(options.Sandbox, GameLauncher.SandboxFor(options));
-        var baked = options with { Baked = new BakedLaunch("m", [], [], [], "s", "k") { WritableCache = cache } };
-        var sandbox = GameLauncher.SandboxFor(baked);
-        Assert.Contains(cache, sandbox.ExtraReadWrite);
-        Assert.Contains(Cache, sandbox.ExtraReadOnly);
-        Assert.DoesNotContain(Cache, sandbox.ExtraReadWrite);
+        string? Check(string path) => BakeService.Checked(launch with { WritableCache = path }, work).WritableCache;
+        Assert.Null(Check(Cache));
+        Assert.Null(Check(Path.Combine(Cache, "legacy-1.12.2", "x")));
+        Assert.Null(Check(Path.Combine(work, BakeService.StateFolder)));
+        Assert.Null(Check(work));
+        Assert.Null(Check(Path.Combine(other, BakeService.StateFolder, "legacy-1.12.2", "x")));
+        Assert.Null(Check(Path.Combine(work, BakeService.StateFolder, "..", "..", "other")));
+        Assert.Null(Check(Path.Combine(BakeService.StateFolder, "legacy-1.12.2", "x")));
+        var inside = Path.Combine(work, BakeService.StateFolder, "legacy-1.12.2", "x");
+        Assert.Equal(inside, Check(inside));
     }
 
     [Fact]
@@ -1315,7 +1301,7 @@ public sealed class BakeTests : IDisposable
         var bake = Service(loader);
         var instance = Instance("forge", "1.12.2", LegacyForge, "f1122");
         var state = (await bake.PrepareAsync(new BakeJava("java21", 21, 8), new GameDirectory(Game), instance, false, null, CancellationToken.None)).Launch!.StateFile;
-        Directory.CreateDirectory(Path.Combine(Cache, "legacy-1.12.2", "0123456789abcdef"));
+        Directory.CreateDirectory(Path.Combine(Cache, "baked"));
 
         var result = await bake.CollectGarbageAsync("java21", apply: false, null, CancellationToken.None);
         Assert.NotNull(result);

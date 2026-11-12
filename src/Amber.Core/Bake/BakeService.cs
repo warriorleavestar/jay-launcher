@@ -155,9 +155,9 @@ public sealed record BakedLaunch(string MainClass, IReadOnlyList<string> Classpa
     public int? JavaMax { get; init; }
 
     /// <summary>
-    /// A folder inside the loader's cache that the game itself writes while it runs (forge-1.12.2's transformer
-    /// cache, <c>cache.transformerCache</c>). The sandbox grants it read-write even when the rest of the cache is
-    /// read-only. Null for platforms that write only inside the instance.
+    /// The folder forge-1.12.2's transformer cache fills while the game runs (<c>cache.transformerCache</c>), kept only
+    /// when it is inside the instance's <c>.amber-ul/</c> (see <see cref="BakeService.Checked"/>): the instance folder
+    /// is already writable for the game, so the shared bake cache stays read-only. Jay creates it before launch.
     /// </summary>
     public string? WritableCache { get; init; }
 }
@@ -526,7 +526,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     {
         var request = InstanceRequest(dir, instance, javaMajor, installDir);
         var result = await RunAsync(javaPath, "bake-instance", request, progress, ct);
-        var launch = Checked(ParseLaunch(result));
+        var launch = Checked(ParseLaunch(result), instance.WorkDir);
         BakeRecord.Write(instance.WorkDir, new BakeRecord(InputKey(dir, instance, javaMajor), launch));
         Remember(launch.StateFile);
         return (launch, BakeCacheInfo.Parse(result["cache"]));
@@ -577,7 +577,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// </summary>
     public async Task<BakeGcResult?> CollectGarbageAsync(string javaPath, bool apply, IProgress<BakeEvent>? progress, CancellationToken ct)
     {
-        if (!Directory.Exists(cacheRoot) || !new[] { "baked", "nested", "mappings", "legacy-1.12.2" }.Any(d => Directory.Exists(Path.Combine(cacheRoot, d))))
+        if (!Directory.Exists(cacheRoot) || !new[] { "baked", "nested", "mappings" }.Any(d => Directory.Exists(Path.Combine(cacheRoot, d))))
             return null;
         toolkit.Verify();
         var live = new List<string>();
@@ -680,23 +680,26 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         };
     }
 
-    /// <summary>Where forge-1.12.2 keeps its run-time transformer caches, one folder per mod set: <c>&lt;cacheRoot&gt;/legacy-1.12.2/&lt;key&gt;</c>.</summary>
+    /// <summary>Where forge-1.12.2 keeps its run-time transformer caches, one folder per mod set: <c>&lt;instance&gt;/.amber-ul/legacy-1.12.2/&lt;key&gt;</c>.</summary>
     public const string LegacyTransformerFolder = "legacy-1.12.2";
 
     /// <summary>
-    /// Keeps a launch's writable cache folder only when it is one transformer cache folder, below
-    /// <c>&lt;cacheRoot&gt;/legacy-1.12.2/</c>. The path comes from the loader or from the instance's bake record (which
-    /// the game itself can write), and the sandbox grants it read-write: anything wider (the cache root, the baked
-    /// jars other instances share) would let one game change what another one runs.
+    /// Keeps a launch's transformer cache folder only when it is inside the instance's own <c>.amber-ul/</c> folder
+    /// (<paramref name="workDir"/>). The path comes from the loader or from the instance's bake record (which the game
+    /// itself can write), and Jay creates the folder before launch: a path anywhere else (the shared bake cache, another
+    /// instance) is dropped, so the shared cache stays read-only and nothing outside the instance is touched.
     /// </summary>
-    internal BakedLaunch Checked(BakedLaunch launch)
+    internal static BakedLaunch Checked(BakedLaunch launch, string workDir)
     {
         if (launch.WritableCache is not { } folder) return launch;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        string full;
-        try { full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)); }
+        string full, area;
+        try
+        {
+            full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+            area = Path.Combine(Path.TrimEndingDirectorySeparator(Path.GetFullPath(workDir)), StateFolder);
+        }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return launch with { WritableCache = null }; }
-        var area = Path.Combine(Path.TrimEndingDirectorySeparator(Path.GetFullPath(cacheRoot)), LegacyTransformerFolder);
         var inside = Path.IsPathFullyQualified(folder) && !GameDirectoryPaths.IsWithin(area, full, comparison) && GameDirectoryPaths.IsWithin(full, area, comparison);
         return inside ? launch with { WritableCache = full } : launch with { WritableCache = null };
     }
@@ -773,8 +776,8 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         var record = BakeRecord.Read(instance.WorkDir);
         if (record is null || !File.Exists(record.Launch.StateFile)) return null;
         if (record.Key != InputKey(dir, instance, javaMajor)) return null;
-        // A writable cache folder from the record is granted read-write by the sandbox: only inside the cache root.
-        return CacheFilesPresent(record.Launch.StateFile) ? Checked(record.Launch) : null;
+        // The transformer cache folder from the record is created before launch: only inside the instance's .amber-ul/.
+        return CacheFilesPresent(record.Launch.StateFile) ? Checked(record.Launch, instance.WorkDir) : null;
     }
 
     internal static bool CacheFilesPresent(string stateFile)
