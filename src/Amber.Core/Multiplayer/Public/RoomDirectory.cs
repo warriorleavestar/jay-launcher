@@ -767,6 +767,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>The network's EasyTier secret, for the channel's psk. Defaults to the network's.</summary>
     public string NetworkSecret { get; init; } = network.Profile?.Secret ?? "";
 
+    /// <summary>The network's id, which signed volunteer registrations name. Defaults to the network's.</summary>
+    public string NetworkId { get; init; } = network.Profile?.Id ?? "";
+
     private DirectoryTrust Trust => new()
     {
         Network = network.Profile?.NetworkName ?? "",
@@ -972,7 +975,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     {
         var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
         var request = new JsonObject { ["op"] = "volunteer", ["url"] = address };
-        if (signer is not null) request["operator"] = VolunteerOperator.Sign(signer, address, DateTimeOffset.UtcNow);
+        if (signer is not null) request["operator"] = VolunteerOperator.Sign(signer, NetworkId, address, DateTimeOffset.UtcNow);
         List<JsonObject> replies;
         try { replies = NeedOne(await FanOutAsync(request, ct)); }
         catch (DirectoryRejectedException e) when (e.Code == "owner") { throw new DirectoryRejectedException("owner", L.T("core.mp.public.volunteer_owner")); }

@@ -103,8 +103,8 @@ await server.RunAsync(CancellationToken.None);
 | `lookup` | `{key}`：邀请码大厅名的查找键 | `{ok, ip?, key?, id?}` |
 | `find` | `{code: "JAYF1-..."}` | `{ok, room?}`：用登记的指纹密钥算标签，见 `FingerprintCode.Matches` |
 | `login` | 见 `NetworkLoginClient.Request` / `LoginAuthority.Handle` | 加密的凭证或 `factor` 提示 |
-| `volunteer` | `{url: "tcp://<公网地址>:<端口>", operator?: {cert, at, sig}}`：登记或续期志愿中转（每 3 分钟）。`operator` 是志愿者的 Jay 账户给这台设备签的证书（`DeviceCertificate`）、Unix 秒和设备混合签名（`"jay-volunteer-v1\n" ‖ url ‖ "\n" ‖ at`，64 位大端），见 `VolunteerOperator` | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad`；签名或证书不对、时间差超过 10 分钟、或网络要求签名（`RequireSignedVolunteers`）而没带时回 `operator`；地址已由别的账户（或签过名后又不带签名）登记、还没过期时回 `owner` |
-| `nodes` | `{}` | `{ok, nodes: ["tcp://...", ...最多 8 个，随机], ops: ["<16 位十六进制>" 或 "", ...]}`：探测过、还在续期的志愿中转，同一个运营者的先只给一个。`ops` 和 `nodes` 一一对应：同一个标签 = 同一个人在运行，空 = 没签名（各算一个人）。标签是目录每次启动随机的密钥对账户做的 HMAC，看不出是谁，换个目录或重启后也对不上 |
+| `volunteer` | `{url: "tcp://<公网地址>:<端口>", operator?: {cert, at, sig}}`：登记或续期志愿中转（每 3 分钟）。`operator` 是志愿者的 Jay 账户给这台设备签的证书（`DeviceCertificate`）、Unix 秒和设备混合签名（`"jay-volunteer-v2\n" ‖ 网络编号 ‖ "\n" ‖ url ‖ "\n" ‖ at`，64 位大端；网络编号是 `PublicNetworkProfile.Id`），见 `VolunteerOperator` | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad`；签名或证书不对、不是这个网络的、时间差超过 3 分钟、同一账户给同一地址的签名时间没有比上次新、或网络要求签名（`RequireSignedVolunteers`）而没带时回 `operator`；地址已由别的运营者登记（别的账户、没签名换成签名、或签过名换成不签）、还没过期时回 `owner`，这个地址在过期前不再写是谁在运行（`ops` 给空） |
+| `nodes` | `{}` | `{ok, nodes: ["tcp://...", ...最多 8 个，随机], ops: ["<16 位十六进制>" 或 "", ...]}`：探测过、还在续期的志愿中转，同一个运营者的先只给一个。`ops` 和 `nodes` 一一对应：同一个标签 = 同一个账户在运行，空 = 没签名或有争议（各算一个）。这只用来分散负载，不是安全保证：一个人可以有好几个 Jay 账户。标签是目录每次启动随机的密钥对账户做的 HMAC，看不出是谁，换个目录或重启后也对不上 |
 | `probe` | `{url: "tcp://<公网地址>:<端口>"}`：想当志愿中转的人先测端口 | `{ok, reachable}`：目录从外网连一次，不列出。不收志愿中转时回 `off`，被封回 `banned`，地址不是公网回 `bad`，测得太频繁回 `rate` |
 | `x-*` | 你自己的 | 你自己的 |
 

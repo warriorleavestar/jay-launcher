@@ -142,42 +142,49 @@ public static class VolunteerNodes
 public static class VolunteerOperator
 {
     /// <summary>A registration's time may be this far from the directory's clock.</summary>
-    public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(10);
-    private static ReadOnlySpan<byte> Domain => "jay-volunteer-v1\n"u8;
+    public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(3);
+    private static ReadOnlySpan<byte> Domain => "jay-volunteer-v2\n"u8;
 
-    /// <summary>The bytes signed: the normalized address, a newline and the time in Unix seconds (big-endian).</summary>
-    private static byte[] Message(string address, long at)
+    /// <summary>
+    /// The bytes signed: the network id, a newline, the normalized address, a newline and the time in Unix seconds
+    /// (big-endian). The network id keeps a registration for one network from being used on another.
+    /// </summary>
+    private static byte[] Message(string network, string address, long at)
     {
-        var text = Encoding.UTF8.GetBytes(address + "\n");
+        var text = Encoding.UTF8.GetBytes(network + "\n" + address + "\n");
         var message = new byte[text.Length + 8];
         text.CopyTo(message, 0);
         BinaryPrimitives.WriteInt64BigEndian(message.AsSpan(text.Length), at);
         return message;
     }
 
-    /// <summary>The "operator" part of a volunteer registration for <paramref name="address"/> (already normalized).</summary>
-    public static JsonObject Sign(JayProof proof, string address, DateTimeOffset now)
+    /// <summary>
+    /// The "operator" part of a volunteer registration for <paramref name="address"/> (already normalized) on the network
+    /// <paramref name="network"/> (<see cref="PublicNetworkProfile.Id"/>).
+    /// </summary>
+    public static JsonObject Sign(JayProof proof, string network, string address, DateTimeOffset now)
     {
         var at = now.ToUnixTimeSeconds();
         return new JsonObject
         {
             ["cert"] = proof.Certificate.ToJson(),
             ["at"] = at,
-            ["sig"] = Convert.ToBase64String(proof.Keys.Sign(Domain, Message(address, at)).Encode()),
+            ["sig"] = Convert.ToBase64String(proof.Keys.Sign(Domain, Message(network, address, at)).Encode()),
         };
     }
 
     /// <summary>
-    /// The Jay account that signed for this registration, or null when the signature, certificate or time doesn't check out.
+    /// The Jay account that signed for this registration, with the time it signed at, or null when the signature,
+    /// certificate, network or time doesn't check out.
     /// </summary>
-    public static string? Verify(JsonNode? node, string address, DateTimeOffset now)
+    public static (string Account, long At)? Verify(JsonNode? node, string network, string address, DateTimeOffset now)
     {
         try
         {
             if (node is not JsonObject o || DeviceCertificate.FromJson(o["cert"]) is not { } cert || !cert.Verify(cert.DeviceKey)) return null;
             if (o["at"]?.GetValue<long>() is not { } at || Math.Abs(at - now.ToUnixTimeSeconds()) > (long)MaxClockSkew.TotalSeconds) return null;
             var sig = HybridSignature.Decode(Convert.FromBase64String(o["sig"]?.GetValue<string>() ?? ""));
-            return HybridSignature.Verify(cert.DeviceEd, cert.DeviceMlDsa, Domain, Message(address, at), sig) ? cert.Account : null;
+            return HybridSignature.Verify(cert.DeviceEd, cert.DeviceMlDsa, Domain, Message(network, address, at), sig) ? (cert.Account, at) : null;
         }
         catch (Exception e) when (e is FormatException or InvalidOperationException or ArgumentException) { return null; }
     }
@@ -187,7 +194,11 @@ public static class VolunteerOperator
 /// <remarks>Tags only compare between nodes from the same directory reply; <see cref="RoomDirectoryClient.VolunteerNodesAsync"/> scopes them.</remarks>
 public sealed record VolunteerNode(string Url, string Operator)
 {
-    /// <summary>Nodes in order, taking one per operator first (unknown operators each count as their own), then the rest.</summary>
+    /// <summary>
+    /// Nodes in order, taking one per operator first (unknown operators each count as their own), then the rest. This
+    /// spreads load and avoids the obvious "both ends run by the same person"; it is not a security property, because
+    /// one person can hold any number of Jay accounts.
+    /// </summary>
     public static IReadOnlyList<VolunteerNode> SpreadOperators(IEnumerable<VolunteerNode> nodes)
     {
         var list = nodes.ToList();
@@ -214,6 +225,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     {
         /// <summary>The Jay account that runs it (from a signed registration), or null.</summary>
         public string? Operator;
+        /// <summary>Someone else (or nobody) tried to register it under another operator: shown as unsigned until it lapses.</summary>
+        public bool Disputed;
         public DateTimeOffset Seen;
         public DateTimeOffset? VerifiedAt;
         public bool Probing;
@@ -232,6 +245,12 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     /// <summary>Only list volunteers that signed their registration with a Jay account (error "operator" otherwise).</summary>
     public bool RequireOperator { get; set; }
+
+    /// <summary>The network this directory serves (<see cref="PublicNetworkProfile.Id"/>); signed registrations must name it.</summary>
+    public string NetworkId { get; init; } = "";
+
+    // The last signing time accepted per (account, address): a signed registration is good once, and only newer ones count.
+    private readonly Dictionary<string, long> _lastSigned = new(StringComparer.Ordinal);
 
     // Operator tags are keyed per directory run, so they can't be matched across directories or restarts.
     private readonly byte[] _tagKey = RandomNumberGenerator.GetBytes(32);
@@ -276,8 +295,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// <summary>
     /// Handles a "volunteer" request. <paramref name="signedBy"/> is the request's "operator" part
     /// (<see cref="VolunteerOperator.Sign"/>), if any. Returns the reply: <c>{ok, listed}</c> or an error code:
-    /// "operator" when the signature doesn't check out (or is missing and required), "owner" when another account
-    /// (or nobody, after an account) registered this address and hasn't let it lapse.
+    /// "operator" when the signature doesn't check out, was used before (or is missing and required), "owner" when the
+    /// address is registered under another operator (another account, or none) that hasn't let it lapse.
     /// </summary>
     public JsonObject Register(string? url, JsonNode? signedBy = null)
     {
@@ -285,7 +304,12 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         if (Blocked?.Invoke(address) == true) return Error("banned");
         var now = _now();
         string? account = null;
-        if (signedBy is not null && (account = VolunteerOperator.Verify(signedBy, address, now)) is null) return Error("operator");
+        long signedAt = 0;
+        if (signedBy is not null)
+        {
+            if (VolunteerOperator.Verify(signedBy, NetworkId, address, now) is not { } signed) return Error("operator");
+            (account, signedAt) = signed;
+        }
         if (account is null && RequireOperator) return Error("operator");
         if (account is not null && BlockedOperator?.Invoke(account) == true) return Error("banned");
         bool startProbe;
@@ -293,15 +317,25 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         lock (_gate)
         {
             Prune(now);
+            if (account is not null)
+            {
+                var key = account + "\n" + address;
+                if (_lastSigned.TryGetValue(key, out var last) && signedAt <= last) return Error("operator");
+                _lastSigned[key] = signedAt;
+            }
             if (!_entries.TryGetValue(address, out var entry))
             {
                 if (_entries.Count >= MaxEntries) return Error("full");
                 _entries[address] = entry = new Entry { Operator = account };
             }
-            // An address keeps its operator until it lapses: someone else can't take it over, or strip the signature,
-            // to make two people's nodes look like one person's (or the other way round).
-            else if (entry.Operator is not null && entry.Operator != account) return Error("owner");
-            else entry.Operator = account;
+            // An address keeps its operator (or having none) until it lapses: nobody can take it over, add a signature
+            // to it or strip one. A conflicting claim can't be settled here (whoever registered first needn't be who runs
+            // the node), so the entry stops saying who runs it until it lapses.
+            else if (entry.Operator != account)
+            {
+                entry.Disputed = true;
+                return Error("owner");
+            }
             entry.Seen = now;
             listed = entry.VerifiedAt is { } at && now - at < ReprobeEvery;
             startProbe = !listed && !entry.Probing;
@@ -352,7 +386,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             Prune(now);
             return [.. _entries.Where(p => p.Value.VerifiedAt is not null && Blocked?.Invoke(p.Key) != true
                     && (p.Value.Operator is not { } op || BlockedOperator?.Invoke(op) != true))
-                .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => (p.Key, p.Value.Operator))];
+                .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => (p.Key, p.Value.Disputed ? null : p.Value.Operator))];
         }
     }
 
@@ -379,6 +413,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     private void Prune(DateTimeOffset now)
     {
+        var oldest = (now - VolunteerOperator.MaxClockSkew).ToUnixTimeSeconds();
+        foreach (var key in _lastSigned.Where(p => p.Value < oldest).Select(p => p.Key).ToList()) _lastSigned.Remove(key);
         foreach (var key in _entries.Where(p => now - p.Value.Seen > VolunteerNodes.Ttl && !p.Value.Probing).Select(p => p.Key).ToList())
             _entries.Remove(key);
     }
