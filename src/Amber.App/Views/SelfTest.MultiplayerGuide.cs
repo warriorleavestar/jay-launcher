@@ -764,7 +764,13 @@ internal sealed partial class SelfTest
         await Task.Delay(300);
         Check("Contacts: Ctrl+V of a contact code goes to the Friends page's add panel with the code filled in, nothing sent", went == "people/add" && vm.ContactCodeInput == code
             && !vm.HasContactRequests, went ?? "");
-        Dispatcher.UIThread.Invoke(() => vm.ContactCodeInput = "");
+        // Back to multiplayer settings, where the checks after this one continue.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.ContactCodeInput = "";
+            vm.ShowTabCommand.Execute("settings");
+        });
+        await Task.Delay(200);
 
         // They add me: request in the card and in the activity centre; I accept, they send their nonce, the emoji appear.
         var peerBook = new Amber.Core.Multiplayer.Contacts.ContactBook(Path.Combine(dir, "peer.json")) { Me = peer.PublicKey };
