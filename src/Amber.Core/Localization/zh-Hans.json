@@ -1680,6 +1680,7 @@
   "core.mp.split.connected_game": "游戏经 {0} 路连上了",
   "core.mp.split.connected_chat": "聊天经 {0} 路连上了",
   "core.mp.split.ports_busy": "拆分连接要用的端口被别的程序占用了，这个房间这次不拆分",
+  "core.mp.split.ports_lent": "上一次的连接还没放开拆分用的端口，这个房间这次不拆分",
   "core.mp.split.ports_busy_strict": "拆分连接要用的端口被别的程序占用了，只允许拆分连接的房间开不了。关掉占用 {0} 到 {1} 端口的程序再试",
   "core.mp.split.forward_failed": "拆分的连接出错断开了：",
   "core.gate.split.need_two": "两路连接需要两个能连上的中转，现在凑不齐（不会退回直连）。中转都在线的话，可能是服主改了设置，请找服主要一张新邀请",

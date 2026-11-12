@@ -174,9 +174,13 @@ public static class SplitPathPlanner
     internal static bool OneRelayAtMost(string cost)
     {
         if (string.Equals(cost, "p2p", StringComparison.OrdinalIgnoreCase)) return true;
-        var m = System.Text.RegularExpressions.Regex.Match(cost, @"^relay\((\d{1,3})\)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-        return m.Success && int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) <= 2;
+        var m = RelayCost.Match(cost);
+        return m.Success && int.TryParse(m.Groups[1].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var hops) && hops <= 2;
     }
+
+    // ASCII digits only and no trailing newline: \d and $ would let other scripts' digits and "relay(2)\n" through.
+    private static readonly System.Text.RegularExpressions.Regex RelayCost = new(@"^relay\(([0-9]{1,3})\)\z",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 }
 
 /// <summary>
