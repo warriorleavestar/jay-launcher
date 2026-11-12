@@ -4,6 +4,16 @@ using Amber.Core.Localization;
 
 namespace Amber.Core.Multiplayer.Transport;
 
+/// <summary>Which localized messages a <see cref="SplitStream"/> raises (keys into the language files).</summary>
+public sealed record SplitWording(string PathLost, string Mismatch, string Stalled)
+{
+    /// <summary>Split invite-room connections.</summary>
+    public static readonly SplitWording Room = new("core.mp.split.path_lost", "core.mp.split.mismatch", "core.mp.split.stalled");
+
+    /// <summary>The Jay server's privacy+ split over two relays (its original wording).</summary>
+    public static readonly SplitWording Gate = new("core.gate.split.leg_lost", "core.gate.split.mismatch", "core.gate.split.leg_lost");
+}
+
 /// <summary>
 /// n-of-n XOR split over 2 or 3 legs. Every chunk d is cut into n shares: legs 0..n-2 each carry a fresh random pad r_i,
 /// the last leg carries d ⊕ r_0 ⊕ … ⊕ r_(n-2). Anyone holding fewer than all n shares learns nothing about d.
@@ -41,6 +51,9 @@ public sealed class SplitStream : Stream, IAuthenticatedStream
 
     /// <summary>When one leg ends, how long the others get to end too (close records arrive at about the same time).</summary>
     internal TimeSpan EndGrace { get; init; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>The messages this stream's errors carry.</summary>
+    public SplitWording Wording { get; init; } = SplitWording.Room;
 
     /// <param name="legs">Legs in index order. The last one carries the masked data.</param>
     public SplitStream(params SecureStream[] legs)
@@ -87,6 +100,13 @@ public sealed class SplitStream : Stream, IAuthenticatedStream
                 try
                 {
                     await Task.WhenAll(_legs.Select((leg, i) => leg.WriteAsync(shares[i], ct).AsTask()));
+                }
+                catch
+                {
+                    // Some legs may hold this chunk and others not: the legs are out of step for good, so end the stream
+                    // instead of letting a later write look like tampering to the other side.
+                    Abort();
+                    throw;
                 }
                 finally
                 {
@@ -152,16 +172,16 @@ public sealed class SplitStream : Stream, IAuthenticatedStream
         var got = await ReadAllAsync(headers, ct);
         if (got.All(g => !g)) return null;
         // Only some legs ended: never a clean end (another leg may have been cut on purpose).
-        if (got.Any(g => !g)) throw Fail(new IOException(L.T("core.mp.split.path_lost")), tampered: false);
+        if (got.Any(g => !g)) throw Fail(new IOException(L.T(Wording.PathLost)), tampered: false);
         for (var i = 1; i < headers.Length; i++)
-            if (!headers[i].AsSpan().SequenceEqual(headers[0])) throw Fail(new CryptographicException(L.T("core.mp.split.mismatch")), tampered: true);
-        if (BinaryPrimitives.ReadUInt32BigEndian(headers[0]) != _receiveSeq) throw Fail(new CryptographicException(L.T("core.mp.split.mismatch")), tampered: true);
+            if (!headers[i].AsSpan().SequenceEqual(headers[0])) throw Fail(new CryptographicException(L.T(Wording.Mismatch)), tampered: true);
+        if (BinaryPrimitives.ReadUInt32BigEndian(headers[0]) != _receiveSeq) throw Fail(new CryptographicException(L.T(Wording.Mismatch)), tampered: true);
         var length = BinaryPrimitives.ReadUInt16BigEndian(headers[0].AsSpan(4));
-        if (length is 0 or > MaxChunk) throw Fail(new CryptographicException(L.T("core.mp.split.mismatch")), tampered: true);
+        if (length is 0 or > MaxChunk) throw Fail(new CryptographicException(L.T(Wording.Mismatch)), tampered: true);
         _receiveSeq++;
         var bodies = _legs.Select(_ => new byte[length]).ToArray();
         got = await ReadAllAsync(bodies, ct);
-        if (got.Any(g => !g)) throw Fail(new IOException(L.T("core.mp.split.path_lost")), tampered: false);
+        if (got.Any(g => !g)) throw Fail(new IOException(L.T(Wording.PathLost)), tampered: false);
         var data = bodies[^1];
         for (var i = 0; i < bodies.Length - 1; i++)
         {
@@ -181,6 +201,10 @@ public sealed class SplitStream : Stream, IAuthenticatedStream
         var reads = _legs.Select((leg, i) => SecureStream.ReadExactAsync(leg, buffers[i], ct)).ToArray();
         var pending = reads.ToList();
         Task<bool>? first = null;
+        // One timer per call, started when the first leg finishes and cancelled on the way out, so a busy stream
+        // doesn't leave a pending delay and token registration behind for every chunk.
+        CancellationTokenSource? timerSource = null;
+        Task? timer = null;
         try
         {
             while (pending.Count > 0)
@@ -189,13 +213,16 @@ public sealed class SplitStream : Stream, IAuthenticatedStream
                 if (first is null) done = await Task.WhenAny(pending);
                 else
                 {
-                    var wait = first.IsCompletedSuccessfully && first.Result ? StallTimeout : EndGrace;
-                    var timer = Task.Delay(wait, ct);
+                    if (timer is null)
+                    {
+                        timerSource = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        timer = Task.Delay(first.IsCompletedSuccessfully && first.Result ? StallTimeout : EndGrace, timerSource.Token);
+                    }
                     var next = await Task.WhenAny(pending.Cast<Task>().Append(timer));
                     if (next == timer)
                     {
                         ct.ThrowIfCancellationRequested();
-                        throw new IOException(L.T("core.mp.split.stalled"));
+                        throw new IOException(L.T(Wording.Stalled));
                     }
                     done = (Task<bool>)next;
                 }
@@ -217,6 +244,11 @@ public sealed class SplitStream : Stream, IAuthenticatedStream
         }
         finally
         {
+            if (timerSource is not null)
+            {
+                await timerSource.CancelAsync();
+                timerSource.Dispose();
+            }
             if (Volatile.Read(ref _aborted) != 0) await DrainAsync(pending);
         }
     }

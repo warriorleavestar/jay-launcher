@@ -32,7 +32,8 @@ public static class SplitLegs
 
     /// <summary>
     /// Member side: opens every leg in parallel (<paramref name="openLeg"/> gives the raw connection for leg i), runs the handshakes,
-    /// sends the hellos and returns the joined stream. Any leg failing drops the others.
+    /// sends the hellos and returns the joined stream. The first leg to fail cancels the others at once, and every leg that
+    /// did connect is aborted, so the host's waiting set times out instead of being completed.
     /// </summary>
     public static async Task<SplitStream> ConnectAsync(Func<int, CancellationToken, Task<Stream>> openLeg, int count, int epoch, MemberKey key,
         TransportProfile profile, string purpose, byte[] payload, CancellationToken ct = default)
@@ -43,16 +44,25 @@ public static class SplitLegs
         var legs = Enumerable.Range(0, count).Select(i => OpenLegAsync(i)).ToArray();
         try
         {
-            await Task.WhenAll(legs);
+            var pending = legs.ToList();
+            while (pending.Count > 0)
+            {
+                var done = await Task.WhenAny(pending);
+                pending.Remove(done);
+                // Rethrows the first failure as it is; the catch below cleans up the rest.
+                if (!done.IsCompletedSuccessfully) await done;
+            }
             return new SplitStream([.. legs.Select(l => l.Result)]);
         }
         catch
         {
-            linked.Cancel();
+            await linked.CancelAsync();
             foreach (var leg in legs)
             {
-                try { (await leg).Abort(); }
-                catch (Exception e) when (e is IOException or CryptographicException or OperationCanceledException or ObjectDisposedException or System.Net.Sockets.SocketException or DeviceAttestationException) { }
+                // Wait for every leg so none is left connected; their own failures don't matter here, the first one is rethrown.
+                try { await leg; }
+                catch { }
+                if (leg.IsCompletedSuccessfully) leg.Result.Abort();
             }
             throw;
         }
@@ -105,6 +115,8 @@ public sealed class SplitRegistry
 {
     public const int MaxPending = 64;
     public const int MaxPendingPerMember = 4;
+    /// <summary>The room-wide limit actually applied (<see cref="MaxPending"/>; tests lower it).</summary>
+    internal int PendingLimit { get; init; } = MaxPending;
     /// <summary>How long a set waits for its other legs (shorter than the 15-second handshake timeout).</summary>
     public TimeSpan PairTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan TombstoneFor { get; init; } = TimeSpan.FromSeconds(10);
@@ -141,6 +153,10 @@ public sealed class SplitRegistry
     /// <see cref="SplitStream"/>; the other legs' calls return null (their leg now lives inside that stream; don't dispose it).
     /// On any refusal or timeout the registry aborts every leg of the set and the call throws.
     /// </para>
+    /// <para>
+    /// A kick drops legs that are still waiting. Once a set is joined the registry lets go of it: the caller must tie the joined
+    /// stream to <c>member.Revocation</c> itself so a kick also ends it.
+    /// </para>
     /// </summary>
     /// <param name="context">What the connection is for (the tunnel service byte; 0 for chat). Must match on every leg.</param>
     public async Task<SplitStream?> AcceptAsync(SecureStream secure, MemberEntry member, SplitLeg leg, byte context, CancellationToken ct = default)
@@ -173,13 +189,13 @@ public sealed class SplitRegistry
                 {
                     // Legs that don't belong together: drop all of them, never pick a winner.
                     DropSet(key, existing);
-                    return RefuseLeg(secure);
+                    return RefuseLeg(secure, counted: true);
                 }
                 set = existing;
             }
             else
             {
-                if (_pending.Count >= MaxPending || _pending.Values.Count(p => ReferenceEquals(p.Member, member)) >= MaxPendingPerMember) return RefuseLeg(secure);
+                if (_pending.Count >= PendingLimit || _pending.Values.Count(p => ReferenceEquals(p.Member, member)) >= MaxPendingPerMember) return RefuseLeg(secure);
                 set = new PendingSet(member, leg.Count, context);
                 _pending[key] = set;
                 var captured = set;
@@ -192,7 +208,9 @@ public sealed class SplitRegistry
             {
                 _pending.Remove(key);
                 _tombstones[key] = Stopwatch.GetTimestamp();
-                set.Revocation.Dispose();
+                // Unregister, not Dispose: Dispose waits for a callback that is running right now, and that callback
+                // (a kick on another thread) is waiting for this lock.
+                set.Revocation.Unregister();
                 joined = new SplitStream([.. set.Legs.Select(l => l!)]) { StallTimeout = StallTimeout, EndGrace = EndGrace };
                 set.Done.TrySetResult(null);
             }
@@ -222,10 +240,11 @@ public sealed class SplitRegistry
         return await set.Done.Task;
     }
 
-    private SplitStream? RefuseLeg(SecureStream secure)
+    /// <param name="counted">The refusal was already counted when its set was dropped.</param>
+    private SplitStream? RefuseLeg(SecureStream secure, bool counted = false)
     {
         secure.Abort();
-        Interlocked.Increment(ref _rejected);
+        if (!counted) Interlocked.Increment(ref _rejected);
         throw Refused(null);
     }
 
@@ -236,7 +255,8 @@ public sealed class SplitRegistry
     {
         _pending.Remove(key);
         if (tombstone) _tombstones[key] = Stopwatch.GetTimestamp();
-        set.Revocation.Dispose();
+        // Unregister, not Dispose (see AcceptAsync): this may run while the revocation callback waits for the lock.
+        set.Revocation.Unregister();
         foreach (var leg in set.Legs) leg?.Abort();
         Interlocked.Increment(ref _rejected);
         set.Done.TrySetException(Refused(null));
