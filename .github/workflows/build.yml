@@ -309,11 +309,11 @@ jobs:
           test -s Jay-android-experimental.apk
           sha256sum Jay-android-experimental.apk > SHA256SUMS.txt
           cat > release-notes.md <<'NOTES'
-          直接下载 Jay-android-experimental.apk。支持 Android 6.0 及以上的 ARM64 和 x86_64 设备。
+          直接下载 Jay-android-experimental.apk。支持 Android 8.0 及以上的 ARM64 和 x86_64 设备。
 
-          手机和窄分屏采用单栏，宽屏平板采用双栏，旋转或调整窗口时自动重排。按钮和邀请码输入框已针对触控调整。
+          Jay 内置独立 JVM、MobileGlues 图形桥和 Minecraft 1.21.11 安装流程，不需要 FCL 或其他启动器。已经可以创建并进入世界。
 
-          这是 Jay 的 Android 实验版。通过邀请码登记并开启网关后，可以进入 Jay 自己的全屏游戏画面和触屏控制层，不再跳转或依赖 FCL。独立 JVM、图形桥、账号与游戏下载仍在开发，当前预览版还不能真正启动 Minecraft。
+          支持摇杆移动、滑动转向、攻击、使用、跳跃、疾跑、潜行、背包、丢弃、聊天键盘和快捷栏切换。游戏菜单使用直接触摸，操作按钮会自动隐藏，只保留 Esc。
 
           此发布从本版起使用固定的预览版签名，以后可覆盖升级并保留语言、设备身份和已保存的服务器。若此前安装过其他签名的测试包，Android 仍会拒绝首次覆盖安装。
           NOTES

@@ -103,6 +103,22 @@ public sealed class AdminPanelTests : IAsyncDisposable
     }
 
     [Fact]
+    public void GuestDownloadsUseDirectGitHubReleaseAssetsWithoutAnAdminToken()
+    {
+        var html = Encoding.UTF8.GetString(AdminPanel.Find("/")!.Bytes);
+        var js = Encoding.UTF8.GetString(AdminPanel.Find("/panel.js")!.Bytes);
+        var css = Encoding.UTF8.GetString(AdminPanel.Find("/panel.css")!.Bytes);
+
+        Assert.Contains("id=\"guest-downloads\"", html);
+        Assert.Contains("data-download=\"android\"", html);
+        Assert.Contains("github.com/warriorleavestar/jay-launcher/releases", js);
+        Assert.Contains("/download/android-preview/Jay-android-experimental.apk", js);
+        Assert.Contains("/latest/download/Jay-win-x64.zip", js);
+        Assert.DoesNotContain("Authorization", html);
+        Assert.Contains("[hidden] { display: none !important; }", css);
+    }
+
+    [Fact]
     public async Task NodePanelCommandPrintsALoginLink()
     {
         var port = await StartAsync();

@@ -25,6 +25,15 @@ const STRINGS = {
     confirm_ban_host: "Ban the host of \"{0}\" (their identity and account) for: {1}?",
     confirm_unban: "Lift this ban?", done_ban: "Banned. {0} room(s) taken down.", done: "Done.",
     mode_public: "public", mode_password: "password", mode_hidden: "hidden", mode_direct: "direct",
+    guest_downloads: "Guest downloads",
+    guest_downloads_hint: "No admin password or GitHub account is needed. Choose your device and download the installer directly from the GitHub release mirror.",
+    download_android: "Android phone / tablet", download_android_hint: "Experimental · Minecraft with touch controls",
+    download_windows: "Windows", download_windows_hint: "64-bit Intel / AMD",
+    download_mac_arm: "Mac · Apple chip", download_mac_arm_hint: "M1, M2, M3, M4 and newer",
+    download_mac_intel: "Mac · Intel", download_mac_intel_hint: "Older Intel-based Macs",
+    download_linux_x64: "Linux · Intel / AMD", download_linux_x64_hint: "64-bit x86 computers",
+    download_linux_arm: "Linux · ARM64", download_linux_arm_hint: "ARM64 computers and servers",
+    download_source: "Download source: GitHub Releases",
   },
   "zh-Hans": {
     title: "Jay 节点", refresh: "刷新", logout: "退出", login_title: "登录",
@@ -48,6 +57,15 @@ const STRINGS = {
     confirm_ban_host: "封禁“{0}”的房主（联机身份和账号），时长：{1}？",
     confirm_unban: "解除这条封禁？", done_ban: "已封禁，拿掉了 {0} 个房间。", done: "好了。",
     mode_public: "公开", mode_password: "密码", mode_hidden: "隐藏", mode_direct: "直连",
+    guest_downloads: "访客下载",
+    guest_downloads_hint: "不需要管理员口令，也不需要 GitHub 账号。选择设备后直接从 GitHub Release 镜像下载。",
+    download_android: "Android 手机 / 平板", download_android_hint: "实验版 · 支持 Minecraft 触屏游玩",
+    download_windows: "Windows", download_windows_hint: "64 位 Intel / AMD 电脑",
+    download_mac_arm: "Mac · Apple 芯片", download_mac_arm_hint: "M1、M2、M3、M4 及更新型号",
+    download_mac_intel: "Mac · Intel", download_mac_intel_hint: "较早的 Intel 芯片 Mac",
+    download_linux_x64: "Linux · Intel / AMD", download_linux_x64_hint: "64 位 x86 电脑",
+    download_linux_arm: "Linux · ARM64", download_linux_arm_hint: "ARM64 电脑和服务器",
+    download_source: "下载源：GitHub Releases",
   },
   "zh-Hant": {
     title: "Jay 節點", refresh: "重新整理", logout: "登出", login_title: "登入",
@@ -71,6 +89,15 @@ const STRINGS = {
     confirm_ban_host: "封鎖「{0}」的房主（連線身分和帳號），時長：{1}？",
     confirm_unban: "解除這條封鎖？", done_ban: "已封鎖，拿掉了 {0} 個房間。", done: "好了。",
     mode_public: "公開", mode_password: "密碼", mode_hidden: "隱藏", mode_direct: "直連",
+    guest_downloads: "訪客下載",
+    guest_downloads_hint: "不需要管理員口令，也不需要 GitHub 帳號。選擇裝置後直接從 GitHub Release 鏡像下載。",
+    download_android: "Android 手機 / 平板", download_android_hint: "實驗版 · 支援 Minecraft 觸控遊玩",
+    download_windows: "Windows", download_windows_hint: "64 位元 Intel / AMD 電腦",
+    download_mac_arm: "Mac · Apple 晶片", download_mac_arm_hint: "M1、M2、M3、M4 及更新型號",
+    download_mac_intel: "Mac · Intel", download_mac_intel_hint: "較早的 Intel 晶片 Mac",
+    download_linux_x64: "Linux · Intel / AMD", download_linux_x64_hint: "64 位元 x86 電腦",
+    download_linux_arm: "Linux · ARM64", download_linux_arm_hint: "ARM64 電腦和伺服器",
+    download_source: "下載來源：GitHub Releases",
   },
   ja: {
     title: "Jay ノード", refresh: "更新", logout: "サインアウト", login_title: "サインイン",
@@ -94,6 +121,15 @@ const STRINGS = {
     confirm_ban_host: "「{0}」のホスト（ID とアカウント）を BAN しますか？ 期間：{1}",
     confirm_unban: "この BAN を解除しますか？", done_ban: "BAN しました。{0} ルームを外しました。", done: "完了しました。",
     mode_public: "公開", mode_password: "パスワード", mode_hidden: "非公開", mode_direct: "直結",
+    guest_downloads: "ゲストダウンロード",
+    guest_downloads_hint: "管理者トークンも GitHub アカウントも不要です。端末を選ぶと GitHub Release ミラーから直接ダウンロードします。",
+    download_android: "Android スマートフォン / タブレット", download_android_hint: "実験版 · Minecraft タッチ操作対応",
+    download_windows: "Windows", download_windows_hint: "64 ビット Intel / AMD",
+    download_mac_arm: "Mac · Apple チップ", download_mac_arm_hint: "M1、M2、M3、M4 以降",
+    download_mac_intel: "Mac · Intel", download_mac_intel_hint: "旧型の Intel Mac",
+    download_linux_x64: "Linux · Intel / AMD", download_linux_x64_hint: "64 ビット x86 コンピューター",
+    download_linux_arm: "Linux · ARM64", download_linux_arm_hint: "ARM64 コンピューター / サーバー",
+    download_source: "ダウンロード元：GitHub Releases",
   },
 };
 
@@ -110,6 +146,15 @@ const T = (key, ...args) => (STRINGS[lang][key] ?? STRINGS.en[key] ?? key).repla
 const $ = (id) => document.getElementById(id);
 const DURATIONS = [["forever", null], ["h1", 3600], ["d1", 86400], ["d7", 604800], ["d30", 2592000]];
 const TOKEN_KEY = "jay-node-token";
+const RELEASE_ROOT = "https://github.com/warriorleavestar/jay-launcher/releases";
+const DOWNLOADS = {
+  android: `${RELEASE_ROOT}/download/android-preview/Jay-android-experimental.apk`,
+  windows: `${RELEASE_ROOT}/latest/download/Jay-win-x64.zip`,
+  mac_arm: `${RELEASE_ROOT}/latest/download/Jay-osx-arm64.tar.gz`,
+  mac_intel: `${RELEASE_ROOT}/latest/download/Jay-osx-x64.tar.gz`,
+  linux_x64: `${RELEASE_ROOT}/latest/download/Jay-linux-x64.tar.gz`,
+  linux_arm: `${RELEASE_ROOT}/latest/download/Jay-linux-arm64.tar.gz`,
+};
 
 let token = null;
 
@@ -331,6 +376,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.documentElement.lang = lang;
   document.title = T("title");
   for (const e of document.querySelectorAll("[data-t]")) e.textContent = T(e.dataset.t);
+  for (const e of document.querySelectorAll("[data-download]")) {
+    e.href = DOWNLOADS[e.dataset.download];
+    e.rel = "noreferrer";
+  }
   $("ban-reason").placeholder = T("reason_placeholder");
   $("ban-value").placeholder = T("value_placeholder");
   durationSelect($("ban-for"));
