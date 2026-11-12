@@ -12,13 +12,20 @@ namespace Amber.Core.Multiplayer;
 /// from it. An identity file from before device seeds (a bare X25519 key) keeps that key: a seed is added for the
 /// signing keys only, so hosts and friends still know the device.
 /// 这台电脑上 Amber 的联机身份：一把长期的 X25519 密钥（每次安装一把），房主靠它认出“还是那个人”。
-/// 保存在数据目录的 identity.key，和账号一样加密：Windows 用 DPAPI（当前用户），macOS/Linux 用仅当前用户可读（0600）的本机密钥文件 + AES-GCM。
+/// 保存在数据目录的 device.key（旧版本的 identity.key 只读不改），和账号一样加密：Windows 用 DPAPI（当前用户），macOS/Linux 用仅当前用户可读（0600）的本机密钥文件 + AES-GCM。
 /// DPAPI 拒绝时（比如 SSH 密钥登录、没有密码），Windows 也退回本机密钥文件。
 /// 私钥绝不写进日志；ToString 只给指纹。文件坏了不会崩：换一把新的并给出提示（之前认识你的房主会把你当新成员）。
 /// </summary>
 public sealed class MemberIdentity : IDisposable
 {
-    public const string FileName = "identity.key";
+    /// <summary>The device seed (format 0x02 or 0x03). A separate file from <see cref="LegacyFileName"/>, so older Jay versions never see it.</summary>
+    public const string FileName = "device.key";
+
+    /// <summary>
+    /// The bare X25519 key that versions before device seeds keep. It is only read, never written: an older version that
+    /// shares or goes back to this data folder still finds its own identity, and can't overwrite the new one.
+    /// </summary>
+    public const string LegacyFileName = "identity.key";
     private const string WrapKeyFileName = "identity.wrap";
     private static readonly byte[] Entropy = "Amber.Launcher.Identity"u8.ToArray();
     private static readonly byte[] MagicDpapi = "AMBID1"u8.ToArray();
@@ -72,30 +79,38 @@ public sealed class MemberIdentity : IDisposable
     public static MemberIdentity LoadOrCreate(string directory)
     {
         var path = Path.Combine(directory, FileName);
+        var legacy = !File.Exists(path) && File.Exists(Path.Combine(directory, LegacyFileName));
+        if (legacy) path = Path.Combine(directory, LegacyFileName);
         if (File.Exists(path))
         {
             try
             {
-                var raw = Unprotect(directory, File.ReadAllBytes(path), l => l is StoredLength or KeptKeyLength or X25519KeyPair.Length);
+                var raw = Unprotect(directory, File.ReadAllBytes(path), l => l is StoredLength or KeptKeyLength || (legacy && l == X25519KeyPair.Length));
                 try
                 {
+                    MemberIdentity? stored = null;
                     if (raw.Length == StoredLength)
                     {
                         if (raw[0] != SeedFormat) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
-                        return new MemberIdentity(directory, DeviceKeys.FromSeed(raw.AsSpan(1)), null);
+                        stored = new MemberIdentity(directory, DeviceKeys.FromSeed(raw.AsSpan(1)), null);
                     }
-                    if (raw.Length == KeptKeyLength)
+                    else if (raw.Length == KeptKeyLength)
                     {
                         if (raw[0] != KeptKeyFormat) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
-                        return new MemberIdentity(directory, DeviceKeys.FromSeed(raw.AsSpan(1 + X25519KeyPair.Length), raw.AsSpan(1, X25519KeyPair.Length)), null);
+                        stored = new MemberIdentity(directory, DeviceKeys.FromSeed(raw.AsSpan(1 + X25519KeyPair.Length), raw.AsSpan(1, X25519KeyPair.Length)), null);
                     }
+                    if (stored is not null && !legacy) return stored;
                     // A bare X25519 key from before device seeds: keep it (hosts and friends know this device by it) and
-                    // add a seed for the two signing keys. If the upgraded file can't be written, the old one stays and
-                    // the signing keys are only temporary this time.
-                    var seed = RandomNumberGenerator.GetBytes(DeviceKeys.SeedLength);
+                    // add a seed for the two signing keys, saved in the new file. The old file stays as it is. If the new
+                    // file can't be written, the signing keys are only temporary this time.
                     MemberIdentity upgraded;
-                    try { upgraded = new MemberIdentity(directory, DeviceKeys.FromSeed(seed, raw), null); }
-                    finally { CryptographicOperations.ZeroMemory(seed); }
+                    if (stored is not null) upgraded = stored;
+                    else
+                    {
+                        var seed = RandomNumberGenerator.GetBytes(DeviceKeys.SeedLength);
+                        try { upgraded = new MemberIdentity(directory, DeviceKeys.FromSeed(seed, raw), null); }
+                        finally { CryptographicOperations.ZeroMemory(seed); }
+                    }
                     try { upgraded.Save(); }
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException)
                     {
@@ -114,8 +129,12 @@ public sealed class MemberIdentity : IDisposable
             }
             catch (Exception e) when (e is CryptographicException or FormatException)
             {
-                try { File.Copy(path, path + ".broken", true); }
-                catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
+                // The old file is never touched: it belongs to older versions.
+                if (!legacy)
+                {
+                    try { File.Copy(path, path + ".broken", true); }
+                    catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
+                }
                 var fresh = new MemberIdentity(directory, DeviceKeys.Generate(), L.T("core.mp.identity.corrupt"));
                 fresh.Save();
                 return fresh;

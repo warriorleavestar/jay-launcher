@@ -15,14 +15,20 @@ public sealed record JayAccountEntry(string Address, string Label, bool BackedUp
 }
 
 /// <summary>
-/// The Jay accounts saved on this computer, in jay-accounts.json in the data directory. Each seed is encrypted like the
+/// The Jay accounts saved on this computer, in jay-accounts-2.json in the data directory. Each seed is encrypted like the
 /// multiplayer identity (Windows: DPAPI for the current user; macOS/Linux: a 0600 local key + AES-GCM). The recovery phrase
 /// itself is never stored: only the seed derived from it (and the optional extra password), so the words are only ever on paper.
 /// A damaged file is kept as .broken and treated as empty, never crashing the app.
+/// Accounts saved by versions before version 1 addresses (in jay-accounts.json) are read once, when the new file doesn't
+/// exist yet, and that file is never written: an older version sharing or going back to this data folder keeps its accounts,
+/// and can't erase the new ones it doesn't understand.
 /// </summary>
 public sealed class JayAccountStore(string directory)
 {
-    public const string FileName = "jay-accounts.json";
+    public const string FileName = "jay-accounts-2.json";
+
+    /// <summary>The file older versions keep their accounts in (version 0 addresses). Only read, never written.</summary>
+    public const string LegacyFileName = "jay-accounts.json";
 
     /// <summary>What other people see as this device's name: only the operating system, never the computer or user name.</summary>
     public static string ThisDeviceName() =>
@@ -56,7 +62,12 @@ public sealed class JayAccountStore(string directory)
         get
         {
             lock (_gate)
-                return _items.Where(i => i.Entry.FormerAddress is not null).ToDictionary(i => i.Entry.FormerAddress!, i => i.Entry.Address);
+            {
+                var map = new Dictionary<string, string>();
+                foreach (var (entry, _) in _items)
+                    if (entry.FormerAddress is { } former) map.TryAdd(former, entry.Address);
+                return map;
+            }
         }
     }
 
@@ -87,31 +98,33 @@ public sealed class JayAccountStore(string directory)
         {
             _items.Clear();
             _unmoved.Clear();
-            var moved = false;
-            if (!File.Exists(PathOnDisk)) return;
+            var legacy = !File.Exists(PathOnDisk);
+            var path = legacy ? Path.Combine(directory, LegacyFileName) : PathOnDisk;
+            if (!File.Exists(path)) return;
             try
             {
-                var root = JsonNode.Parse(File.ReadAllText(PathOnDisk)) as JsonObject;
+                var root = JsonNode.Parse(File.ReadAllText(path)) as JsonObject;
                 foreach (var node in root?["accounts"] as JsonArray ?? [])
                 {
                     if (node is not JsonObject o) continue;
                     var address = (string?)o["address"];
                     var seed = (string?)o["seed"];
                     if (string.IsNullOrEmpty(seed)) continue;
-                    var former = JayAddress.IsValid((string?)o["was"]) ? null : (string?)o["was"];
+                    var former = JayAddress.TryDecodeVersion0((string?)o["was"], out _) ? (string?)o["was"] : null;
                     if (!JayAddress.IsValid(address))
                     {
                         // An account saved before addresses became a hash of both account keys (version 0, the bare
                         // Ed25519 key): work out its new address from the seed, and remember the old one so the bindings
-                        // that point at it can follow. If that can't be done now, keep the entry exactly as it is.
-                        if (!JayAddress.TryDecodeVersion0(address, out _) || NewAddressFor(address, seed) is not { } renamed)
+                        // that point at it can follow. If that can't be done now, keep the entry exactly as it is, to try
+                        // again next time. An address that is neither version is dropped.
+                        if (!JayAddress.TryDecodeVersion0(address, out _)) continue;
+                        if (NewAddressFor(address, seed) is not { } renamed)
                         {
                             _unmoved.Add(o.DeepClone());
                             continue;
                         }
                         former = address;
                         address = renamed;
-                        moved = true;
                     }
                     if (_items.Any(i => i.Entry.Address == address)) continue;
                     var entry = new JayAccountEntry(address!, DeviceCertificate.CleanName((string?)o["label"]), (bool?)o["backedUp"] ?? false,
@@ -119,24 +132,20 @@ public sealed class JayAccountStore(string directory)
                         DeviceCertificate.FromJson(o["device"])) { FormerAddress = former };
                     _items.Add((entry, seed));
                 }
-                if (moved)
+                if (legacy && (_items.Count > 0 || _unmoved.Count > 0))
                 {
-                    try
-                    {
-                        // A copy of the file as it was, before the first rewrite with new addresses.
-                        var backup = PathOnDisk + ".v0.bak";
-                        if (!File.Exists(backup)) File.Copy(PathOnDisk, backup);
-                        SaveLocked();
-                    }
+                    // The first start of this version: the accounts go to the new file, the old one stays as it is.
+                    try { SaveLocked(); }
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 }
             }
             catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException)
             {
                 _unmoved.Clear();
+                _items.Clear();
+                if (legacy) return;
                 try { File.Copy(PathOnDisk, PathOnDisk + ".broken", true); }
                 catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
-                _items.Clear();
             }
         }
     }
@@ -159,6 +168,9 @@ public sealed class JayAccountStore(string directory)
                 epoch, created, account.CertifyDevice(device, deviceName, epoch, now)) { FormerAddress = existing >= 0 ? _items[existing].Entry.FormerAddress : null };
             if (existing >= 0) _items[existing] = (entry, protectedSeed);
             else _items.Add((entry, protectedSeed));
+            // Saved again from the recovery phrase: an old copy that couldn't be moved isn't needed any more.
+            var v0 = JayAddress.EncodeVersion0(account.PublicKey);
+            _unmoved.RemoveAll(n => (string?)n["address"] == v0);
             SaveLocked();
             return entry;
         }
@@ -208,13 +220,40 @@ public sealed class JayAccountStore(string directory)
 
     public void Rename(string address, string label) => Update(address, e => e with { Label = DeviceCertificate.CleanName(label) });
 
-    /// <summary>Forgets the account on this computer. It still exists: the recovery phrase restores it.</summary>
+    /// <summary>
+    /// Forgets the account on this computer. It still exists: the recovery phrase restores it. Its encrypted seed goes from
+    /// every file here, including the file older versions keep (where it is under its version 0 address).
+    /// </summary>
     public void Remove(string address)
     {
         lock (_gate)
         {
-            if (_items.RemoveAll(i => i.Entry.Address == address) > 0) SaveLocked();
+            var gone = _items.Where(i => i.Entry.Address == address).Select(i => i.Entry).ToList();
+            if (gone.Count == 0) return;
+            _items.RemoveAll(i => i.Entry.Address == address);
+            var old = gone.SelectMany(e => new[] { e.Address, e.FormerAddress, e.Device is { } d ? JayAddress.EncodeVersion0(d.AccountEd) : null })
+                .OfType<string>().ToHashSet();
+            _unmoved.RemoveAll(n => old.Contains((string?)n["address"] ?? ""));
+            SaveLocked();
+            PurgeLegacyLocked(old);
         }
+    }
+
+    /// <summary>Takes these addresses out of the older versions' file. The rest of that file stays as it is.</summary>
+    private void PurgeLegacyLocked(IReadOnlySet<string> addresses)
+    {
+        var path = Path.Combine(directory, LegacyFileName);
+        try
+        {
+            if (!File.Exists(path) || JsonNode.Parse(File.ReadAllText(path)) is not JsonObject root || root["accounts"] is not JsonArray accounts) return;
+            var drop = accounts.Where(n => n is JsonObject o && addresses.Contains((string?)o["address"] ?? "")).ToList();
+            if (drop.Count == 0) return;
+            foreach (var n in drop) accounts.Remove(n);
+            var temp = path + ".tmp";
+            MemberIdentity.WritePrivate(temp, System.Text.Encoding.UTF8.GetBytes(root.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+            File.Move(temp, path, true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException) { }
     }
 
     private void Update(string address, Func<JayAccountEntry, JayAccountEntry> change)

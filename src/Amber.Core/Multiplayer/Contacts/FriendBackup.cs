@@ -45,6 +45,10 @@ public static class FriendBackup
             if (c.JayAccount is not null) item["jay"] = c.JayAccount;
             if (c.DeviceName.Length > 0) item["device"] = c.DeviceName;
             if (c.Epoch > 0) item["epoch"] = c.Epoch;
+            // What I haven't confirmed yet stays unconfirmed after a restore, and what I refused stays refused.
+            if (c.AccountPending) item["acctPending"] = true;
+            if (c.RefusedAccount is not null) item["refused"] = c.RefusedAccount;
+            if (c.NewDevice) item["new"] = true;
             list.Add((JsonNode)item);
         }
         var gone = new JsonArray();
@@ -124,6 +128,9 @@ public static class FriendBackup
                     JayAccount = JayAddress.TryDecode(jay, out var k) ? JayAddress.Encode(k) : null,
                     DeviceName = DeviceCertificate.CleanName((string?)o["device"]),
                     Epoch = Math.Max(0, (int?)o["epoch"] ?? 0),
+                    AccountPending = (bool?)o["acctPending"] == true,
+                    RefusedAccount = JayAddress.Canonical((string?)o["refused"]),
+                    NewDevice = (bool?)o["new"] == true,
                 });
             }
             var removed = new List<RemovedDevice>();

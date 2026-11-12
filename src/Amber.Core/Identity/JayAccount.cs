@@ -108,7 +108,7 @@ public sealed class JayAccount : IDisposable
         return HybridSignature.Sign(_edPrivate, _mlDsaSeed, domain, message);
     }
 
-    /// <summary>Signs a certificate for one device's keys (<see cref="DeviceKeys"/>, kept in identity.key).</summary>
+    /// <summary>Signs a certificate for one device's keys (<see cref="DeviceKeys"/>, kept in device.key).</summary>
     public DeviceCertificate CertifyDevice(DeviceKeys device, string deviceName, int epoch, DateTimeOffset now)
     {
         var unsigned = new DeviceCertificate(PublicKey, MlDsaPublicKey, device.Dh.PublicKey.ToArray(), device.EdPublicKey, device.MlDsaPublicKey,

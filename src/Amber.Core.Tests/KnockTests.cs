@@ -595,6 +595,11 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.Equal(32 * 1024, KnockProtocol.MaxFrame);
         using var big = new MemoryStream([0x80, 0x01, .. new byte[KnockProtocol.MaxFrame + 1]]);
         await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.ReadFrameAsync(big, default));
+        // Frames before anyone has proven anything keep the old 8 KB limit.
+        using var early = new MemoryStream([0x20, 0x01, .. new byte[KnockProtocol.MaxEarlyFrame + 1]]);
+        await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.ReadFrameAsync(early, default, KnockProtocol.MaxEarlyFrame));
+        using var proof = new MemoryStream([0x20, 0x01, .. new byte[KnockProtocol.MaxEarlyFrame + 1]]);
+        Assert.Equal(KnockProtocol.MaxEarlyFrame + 1, (await KnockProtocol.ReadFrameAsync(proof, default)).Length);
         await Assert.ThrowsAsync<InvalidDataException>(() => KnockProtocol.WriteFrameAsync(new MemoryStream(), new byte[KnockProtocol.MaxFrame + 1], default));
     }
 

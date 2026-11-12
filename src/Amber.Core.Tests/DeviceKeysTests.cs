@@ -1,4 +1,4 @@
-﻿using Amber.Core.Identity;
+using Amber.Core.Identity;
 
 namespace Amber.Core.Tests;
 

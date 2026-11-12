@@ -245,7 +245,7 @@ public sealed partial class MultiplayerViewModel
             wanted.Add(dedupe);
             var who = new ContactItem(d).Name;
             _service.Requests.Post(new RequestSpec("contact-account", L.F("multiplayer.contacts.account_link", who),
-                L.F("multiplayer.contacts.account_link_body", d.Fingerprint, JayAddress.Short(d.JayAccount!)),
+                L.F("multiplayer.contacts.account_link_body", d.Fingerprint, JayAddress.Short(d.JayAccount!), AccountCheckWords(d.JayAccount!)),
                 [new("ok", L.T("multiplayer.contacts.account_link_ok")), new("no", L.T("multiplayer.contacts.account_link_no"), IsDefault: true)],
                 IsSafety: true, DedupeKey: dedupe));
         }
@@ -527,5 +527,13 @@ public sealed partial class MultiplayerViewModel
     {
         HeldBackText = "";
         InviteFriendsCommand.Execute(null);
+    }
+
+    /// <summary>The four words both sides read out to confirm they mean the same Jay account (the same words the "Me" page shows).</summary>
+    private static string AccountCheckWords(string address)
+    {
+        if (!JayAddress.TryDecode(address, out var id)) return "";
+        var language = L.Language.StartsWith("zh", StringComparison.Ordinal) || L.Language == "lzh" ? MnemonicLanguage.ChineseSimplified : MnemonicLanguage.English;
+        return string.Join(" · ", JayAddress.CheckWords(id, language));
     }
 }

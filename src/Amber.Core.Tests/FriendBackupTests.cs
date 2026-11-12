@@ -1,4 +1,4 @@
-﻿using Amber.Core.Identity;
+using Amber.Core.Identity;
 using Amber.Core.Multiplayer.Contacts;
 using Amber.Core.Multiplayer.Transport;
 
@@ -115,6 +115,35 @@ public sealed class FriendBackupTests : IDisposable
         Assert.NotNull(b.SeenLive(phone.Dh.PublicKey, _alice.CertifyDevice(phone, "Phone", phoneEpoch, Now)));
         Assert.True(b.IsVerified(phone.Dh.PublicKey));
         return (b, bobKey, laptop, phone);
+    }
+
+    /// <summary>An account link I haven't confirmed, or one I refused, is the same after a backup and restore.</summary>
+    [Fact]
+    public void PendingAndRefusedAccountLinksSurviveABackup()
+    {
+        using var pending = DeviceKeys.Generate();
+        using var refused = DeviceKeys.Generate();
+        using var bobKey = X25519KeyPair.Generate();
+        using var bob = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        var b = Book("bob", bobKey);
+        b.Import([new Contact(pending.Dh.PublicKey.ToArray(), "P", true, Now), new Contact(refused.Dh.PublicKey.ToArray(), "R", true, Now)]);
+        b.SeenLive(pending.Dh.PublicKey, _alice.CertifyDevice(pending, "Laptop", 0, Now));
+        b.SeenLive(refused.Dh.PublicKey, bob.CertifyDevice(refused, "PC", 0, Now));
+        b.ConfirmAccount(refused.Dh.PublicKey, isTheirs: false);
+
+        var contents = FriendBackup.Import(_alice, FriendBackup.Export(_alice, b.All, Now)!)!;
+        using var otherKey = X25519KeyPair.Generate();
+        var restored = Book("restored", otherKey);
+        Assert.Equal(2, restored.Import(contents.Contacts, contents.Removed));
+        Assert.True(restored.Find(pending.Dh.PublicKey)!.AccountPending);
+        Assert.Null(restored.FindVerifiedByJayAccount(_alice.Address));
+        Assert.Equal(bob.Address, restored.Find(refused.Dh.PublicKey)!.RefusedAccount);
+        // A device signed by the pending account still can't join that friend.
+        using var phone = DeviceKeys.Generate();
+        Assert.Null(restored.SeenLive(phone.Dh.PublicKey, _alice.CertifyDevice(phone, "Phone", 0, Now)));
+        // And the refused account isn't offered again.
+        Assert.Null(restored.SeenLive(refused.Dh.PublicKey, bob.CertifyDevice(refused, "PC", 1, Now)));
+        Assert.Null(restored.Find(refused.Dh.PublicKey)!.JayAccount);
     }
 
     [Fact]

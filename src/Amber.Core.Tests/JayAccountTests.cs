@@ -232,11 +232,14 @@ public sealed class JayAccountTests : IDisposable
         var store = new JayAccountStore(_dir);
         store.Add(account, "Main", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
         var path = Path.Combine(_dir, JayAccountStore.FileName);
+        var legacyPath = Path.Combine(_dir, JayAccountStore.LegacyFileName);
         var old = JayAddress.EncodeVersion0(account.PublicKey);
         var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
         json["accounts"]![0]!["address"] = old;
         json["accounts"]![0]!["device"] = null;
-        File.WriteAllText(path, json.ToJsonString());
+        File.Delete(path);
+        File.WriteAllText(legacyPath, json.ToJsonString());
+        var legacyText = File.ReadAllText(legacyPath);
 
         var again = new JayAccountStore(_dir);
         again.Load();
@@ -245,7 +248,8 @@ public sealed class JayAccountTests : IDisposable
         Assert.Equal(account.Address, again.Readdressed[old]);
         var written = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!["accounts"]![0]!;
         Assert.Equal((account.Address, old), ((string?)written["address"], (string?)written["was"]));
-        Assert.True(File.Exists(path + ".v0.bak"));
+        // The old file stays exactly as it was, for older versions using this folder.
+        Assert.Equal(legacyText, File.ReadAllText(legacyPath));
         // Later starts still know where the old address went, so bindings missed the first time can still follow.
         var later = new JayAccountStore(_dir);
         later.Load();
@@ -256,14 +260,27 @@ public sealed class JayAccountTests : IDisposable
         Assert.Same(first, again.EnsureDeviceCertificate(account.Address, keys, "PC", DateTimeOffset.UtcNow));
         Assert.Single(again.Accounts);
 
+        // Once the new file exists, the old one isn't read again: an account removed here doesn't come back from it.
+        again.Remove(account.Address);
+        var removed = new JayAccountStore(_dir);
+        removed.Load();
+        Assert.Empty(removed.Accounts);
+
         // An old address that the saved seed doesn't match isn't moved. The entry is kept as it is, through later saves,
-        // so its seed is never lost.
+        // so its seed is never lost. An address that is neither version, and a "was" that isn't a version 0 address,
+        // are dropped.
         using var other = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
-        json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
         var otherOld = JayAddress.EncodeVersion0(other.PublicKey);
-        json["accounts"]![0]!["address"] = otherOld;
-        json["accounts"]![0]!.AsObject().Remove("was");
-        File.WriteAllText(path, json.ToJsonString());
+        var seed = (string?)json["accounts"]![0]!["seed"];
+        File.WriteAllText(path, new System.Text.Json.Nodes.JsonObject
+        {
+            ["version"] = 1,
+            ["accounts"] = new System.Text.Json.Nodes.JsonArray
+            {
+                new System.Text.Json.Nodes.JsonObject { ["address"] = otherOld, ["seed"] = seed },
+                new System.Text.Json.Nodes.JsonObject { ["address"] = "jay1nonsense", ["seed"] = seed },
+            },
+        }.ToJsonString());
         var wrong = new JayAccountStore(_dir);
         wrong.Load();
         Assert.Empty(wrong.Accounts);
@@ -273,6 +290,67 @@ public sealed class JayAccountTests : IDisposable
         var kept = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!["accounts"]!.AsArray();
         Assert.Equal(2, kept.Count);
         Assert.Contains(kept, n => (string?)n!["address"] == otherOld && !string.IsNullOrEmpty((string?)n["seed"]));
+    }
+
+    /// <summary>
+    /// Removing an account takes its encrypted seed out of every file here: the new file, the copy that couldn't be moved,
+    /// and the older versions' file. Saving it again from the phrase drops an old copy that couldn't be moved.
+    /// </summary>
+    [Fact]
+    public void RemovingAnAccountLeavesNoSeedBehind()
+    {
+        using var keys = DeviceKeys.Generate();
+        using var account = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        using var keep = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        using var stuck = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        var store = new JayAccountStore(_dir);
+        store.Add(account, "A", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        store.Add(keep, "K", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        var path = Path.Combine(_dir, JayAccountStore.FileName);
+        var legacyPath = Path.Combine(_dir, JayAccountStore.LegacyFileName);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        var seedOfA = (string?)json["accounts"]![0]!["seed"];
+        json["accounts"]![0]!["address"] = JayAddress.EncodeVersion0(account.PublicKey);
+        json["accounts"]![1]!["address"] = JayAddress.EncodeVersion0(keep.PublicKey);
+        // An entry whose seed doesn't match its old address: it can't be moved, so it is kept as it is.
+        json["accounts"]!.AsArray().Add(new System.Text.Json.Nodes.JsonObject { ["address"] = JayAddress.EncodeVersion0(stuck.PublicKey), ["seed"] = seedOfA });
+        File.Delete(path);
+        File.WriteAllText(legacyPath, json.ToJsonString());
+
+        var moved = new JayAccountStore(_dir);
+        moved.Load();
+        Assert.Equal(2, moved.Accounts.Count);
+        moved.Remove(account.Address);
+        Assert.DoesNotContain(JayAddress.EncodeVersion0(account.PublicKey), File.ReadAllText(legacyPath));
+        Assert.Contains(JayAddress.EncodeVersion0(keep.PublicKey), File.ReadAllText(legacyPath));
+        Assert.DoesNotContain(account.Address, File.ReadAllText(path));
+        Assert.Contains(JayAddress.EncodeVersion0(stuck.PublicKey), File.ReadAllText(path));
+
+        moved.Add(stuck, "S", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        var entries = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!["accounts"]!.AsArray();
+        Assert.Equal(2, entries.Count);
+        Assert.DoesNotContain(JayAddress.EncodeVersion0(stuck.PublicKey), File.ReadAllText(path));
+    }
+
+    /// <summary>A "was" that isn't a version 0 address is ignored, so two entries with the same junk can't break startup.</summary>
+    [Fact]
+    public void JunkFormerAddressesAreIgnored()
+    {
+        using var keys = DeviceKeys.Generate();
+        using var a = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        using var b = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        var store = new JayAccountStore(_dir);
+        store.Add(a, "A", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        store.Add(b, "B", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        var path = Path.Combine(_dir, JayAccountStore.FileName);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        foreach (var entry in json["accounts"]!.AsArray()) entry!["was"] = "";
+        File.WriteAllText(path, json.ToJsonString());
+        var again = new JayAccountStore(_dir);
+        again.Load();
+        Assert.Equal(2, again.Accounts.Count);
+        Assert.Empty(again.Readdressed);
+        Assert.All(again.Accounts, e => Assert.Null(e.FormerAddress));
     }
 
     [Fact]

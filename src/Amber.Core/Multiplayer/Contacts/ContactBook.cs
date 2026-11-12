@@ -394,7 +394,14 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             {
                 if (c.PublicKey.Length != X25519KeyPair.Length || c.PublicKey.AsSpan().SequenceEqual(Me) || list.Any(x => x.PublicKey.AsSpan().SequenceEqual(c.PublicKey))
                     || _removed.ContainsKey(Convert.ToHexStringLower(c.PublicKey))) continue;
-                list.Add(c with { Name = KnockProtocol.SanitizeName(c.Name), DeviceName = Identity.DeviceCertificate.CleanName(c.DeviceName), NewDevice = false });
+                // An account link I hadn't confirmed, or a new device I hadn't acknowledged, comes back still waiting for me.
+                list.Add(c with
+                {
+                    Name = KnockProtocol.SanitizeName(c.Name),
+                    DeviceName = Identity.DeviceCertificate.CleanName(c.DeviceName),
+                    AccountPending = c.JayAccount is not null && c.AccountPending,
+                    NewDevice = c.Verified && c.JayAccount is not null && c.NewDevice,
+                });
                 added++;
             }
             if (added > 0 || removedAny) Save(list);

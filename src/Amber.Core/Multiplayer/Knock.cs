@@ -133,6 +133,12 @@ public static partial class KnockProtocol
     /// Older versions read at most 8 KB, so proofs are only sent to a side that said it reads them (<see cref="JayProofField"/>).
     /// </summary>
     public const int MaxFrame = 32 * 1024;
+
+    /// <summary>
+    /// The limit before the other side has proven anything: the invite id, the guest's first handshake message and the
+    /// host's hello. None of them carries a proof, so they keep the old 8 KB limit.
+    /// </summary>
+    public const int MaxEarlyFrame = 8 * 1024;
     public const int MaxNameLength = 32;
     public const int IdLength = 8;
 
@@ -190,12 +196,12 @@ public static partial class KnockProtocol
         await stream.FlushAsync(ct);
     }
 
-    public static async Task<byte[]> ReadFrameAsync(Stream stream, CancellationToken ct)
+    public static async Task<byte[]> ReadFrameAsync(Stream stream, CancellationToken ct, int max = MaxFrame)
     {
         var header = new byte[2];
         await stream.ReadExactlyAsync(header, ct);
         var length = BinaryPrimitives.ReadUInt16BigEndian(header);
-        if (length > MaxFrame) throw new InvalidDataException(L.T("core.mp.knock.toolarge"));
+        if (length > Math.Min(max, MaxFrame)) throw new InvalidDataException(L.T("core.mp.knock.toolarge"));
         var payload = new byte[length];
         await stream.ReadExactlyAsync(payload, ct);
         return payload;
@@ -300,7 +306,7 @@ public static class KnockClient
             timeout.CancelAfter(handshakeTimeout ?? HandshakeTimeout);
             await KnockProtocol.WriteFrameAsync(stream, inviteId, timeout.Token);
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), timeout.Token);
-            var hello = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token)));
+            var hello = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token, KnockProtocol.MaxEarlyFrame)));
             if (hello["v"]?.GetValue<int>() != 1) throw new InvalidDataException(L.T("core.mp.knock.badreply"));
             // An invite that came by sealed mail names its host: someone else holding the same invite can't pose as the host.
             // Checked before this side says anything about itself.
@@ -844,7 +850,7 @@ public sealed class KnockServer : IAsyncDisposable
             timeout.CancelAfter(_limits.HandshakeTimeout);
             try
             {
-                var id = await KnockProtocol.ReadFrameAsync(stream, timeout.Token);
+                var id = await KnockProtocol.ReadFrameAsync(stream, timeout.Token, KnockProtocol.MaxEarlyFrame);
                 invite = id.Length == KnockProtocol.IdLength ? _book.Find(id) : null;
                 // A password invite while password guessing is suspected: answer exactly as for an unknown id.
                 if (invite is { FromPassword: true } && IsPasswordPaused) invite = null;
@@ -859,7 +865,7 @@ public sealed class KnockServer : IAsyncDisposable
                 var psk = LobbyKeys.KnockPsk(invite.Invite.Token);
                 handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, false, KnockProtocol.Prologue(lobby.Name, invite.Id), psk, _identity);
                 CryptographicOperations.ZeroMemory(psk);
-                handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token));
+                handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token, KnockProtocol.MaxEarlyFrame));
                 var hello = new JsonObject { ["v"] = 1 };
                 if (policy.IsActive) hello["device"] = KnockProtocol.WriteChallenges(policy.Allowed);
                 if (accountPolicy is not null) hello["account"] = true;

@@ -179,7 +179,9 @@ public sealed class MemberIdentityTests : IDisposable
         Directory.CreateDirectory(_dir);
         using var legacy = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
         var raw = legacy.ExportPrivateKey();
-        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.FileName), MemberIdentity.Protect(_dir, raw));
+        var oldPath = Path.Combine(_dir, MemberIdentity.LegacyFileName);
+        File.WriteAllBytes(oldPath, MemberIdentity.Protect(_dir, raw));
+        var oldBytes = File.ReadAllBytes(oldPath);
 
         byte[] ed, mlDsa;
         using (var identity = MemberIdentity.LoadOrCreate(_dir))
@@ -190,7 +192,10 @@ public sealed class MemberIdentityTests : IDisposable
             ed = identity.Device.EdPublicKey;
             mlDsa = identity.Device.MlDsaPublicKey;
         }
-        Assert.False(File.Exists(Path.Combine(_dir, MemberIdentity.FileName + ".broken")));
+        Assert.False(File.Exists(oldPath + ".broken"));
+        // The old file is left exactly as it was, so an older version using this folder still finds its identity.
+        Assert.Equal(oldBytes, File.ReadAllBytes(oldPath));
+        Assert.True(File.Exists(Path.Combine(_dir, MemberIdentity.FileName)));
         using var again = MemberIdentity.LoadOrCreate(_dir);
         Assert.Null(again.Warning);
         Assert.Equal(legacy.PublicKey, again.PublicKey);
@@ -201,6 +206,32 @@ public sealed class MemberIdentityTests : IDisposable
         Assert.NotEqual(legacy.PublicKey, again.PublicKey);
         using var reset = MemberIdentity.LoadOrCreate(_dir);
         Assert.Equal(again.PublicKey, reset.PublicKey);
+        Assert.Equal(oldBytes, File.ReadAllBytes(oldPath));
+    }
+
+    /// <summary>
+    /// What an older version finds: it reads only the old file, as a bare key. A new device never writes that file, and a
+    /// damaged old file is neither copied nor replaced.
+    /// </summary>
+    [Fact]
+    public void OlderVersionsNeverSeeTheNewFile()
+    {
+        using (MemberIdentity.LoadOrCreate(_dir)) { }
+        Assert.False(File.Exists(Path.Combine(_dir, MemberIdentity.LegacyFileName)));
+
+        var oldPath = Path.Combine(_dir, MemberIdentity.LegacyFileName);
+        File.Delete(Path.Combine(_dir, MemberIdentity.FileName));
+        File.WriteAllText(oldPath, "garbage");
+        using var fresh = MemberIdentity.LoadOrCreate(_dir);
+        Assert.NotNull(fresh.Warning);
+        Assert.Equal("garbage", File.ReadAllText(oldPath));
+        Assert.False(File.Exists(oldPath + ".broken"));
+        // The new file only holds the new formats: a bare key in it is damage, not an old identity.
+        using var bare = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.FileName), MemberIdentity.Protect(_dir, bare.ExportPrivateKey()));
+        using var again = MemberIdentity.LoadOrCreate(_dir);
+        Assert.NotNull(again.Warning);
+        Assert.NotEqual(bare.PublicKey, again.PublicKey);
     }
 
     /// <summary>A seed-sized plaintext with an unknown format byte is treated as damaged, not as a seed.</summary>

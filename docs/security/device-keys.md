@@ -4,7 +4,7 @@ This is privacy plan item 7. Each device has its own keys, and a Jay account vou
 
 ## Device keys
 
-`identity.key` stores a format byte (`0x02`) followed by a 32-byte random seed. The file is encrypted as before: DPAPI on Windows, and `identity.wrap` with AES-GCM elsewhere. The seed is never derived from the recovery phrase. Restoring an account on another computer therefore never recreates this device's keys.
+`device.key` stores a format byte (`0x02`) followed by a 32-byte random seed. The file is encrypted as before: DPAPI on Windows, and `identity.wrap` with AES-GCM elsewhere. The seed is never derived from the recovery phrase. Restoring an account on another computer therefore never recreates this device's keys.
 
 HKDF-SHA256 over the seed gives three keys, one per job (`DeviceKeys`):
 
@@ -16,7 +16,9 @@ HKDF-SHA256 over the seed gives three keys, one per job (`DeviceKeys`):
 
 A device signature (`HybridSignature`) is both signatures over the same bytes. It counts only when both verify. Every use has its own domain string.
 
-An `identity.key` from before device seeds holds a bare X25519 key. That key is kept as the handshake key, so hosts and friends still know the device, and a seed is added for the two signing keys. The file then stores `0x03` ‖ the X25519 private key ‖ the seed. Resetting the identity gives a seed-only device like any new one.
+Versions before device seeds keep a bare X25519 key in `identity.key`. When `device.key` doesn't exist yet, that key is kept as the handshake key, so hosts and friends still know the device, and a seed is added for the two signing keys. `device.key` then stores `0x03` ‖ the X25519 private key ‖ the seed. Resetting the identity gives a seed-only device like any new one.
+
+`identity.key` is only read, never written or moved. An older version that shares the data folder, or that the user goes back to, still finds its own identity and can't overwrite the new file.
 
 The device code (`JAYF1-`, `DeviceFingerprint`) stays a separate key because the user must be able to rotate it on its own.
 
@@ -33,7 +35,8 @@ The account id is `SHA-256("jay-account-id-v1\n" ‖ Ed25519 public key ‖ ML-D
 
 Version 0 addresses (the bare Ed25519 key) are no longer valid. Migration works like this:
 
-- Saved accounts move to their new address when the store loads (the seed is checked against the old address). The old address is kept with the entry, so Minecraft account bindings follow on any later start too. A copy of the file from before the move is kept as `.v0.bak`. An entry whose seed can't be opened yet is kept unchanged and tried again next time.
+- Saved accounts move from `jay-accounts.json` to `jay-accounts-2.json` the first time the store loads without the new file. Each moves to its new address when its seed matches the old address. The old address is kept with the entry (`was`), so Minecraft account bindings follow on any later start too. An entry whose seed can't be opened yet is kept unchanged in the new file and tried again next time.
+- `jay-accounts.json` stays for older versions and isn't read again. The only change made to it: removing an account takes its entry out of that file too, so no copy of the seed stays behind.
 - Other people's version 0 addresses in contacts and trust lists are dropped, and learned again from their next knock.
 - Friend backups from before this change still open: the old AAD binding and old address are accepted for the same account.
 
