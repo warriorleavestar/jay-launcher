@@ -21,8 +21,8 @@ public class MalformedInputTests
 
     private static IEnumerable<string> ValidCodes()
     {
-        yield return JayInvite.Create(RandomNumberGenerator.GetBytes(16), TunnelSettings.Default).ToString();
-        yield return JayInvite.Create(RandomNumberGenerator.GetBytes(16), new TunnelSettings(TransportMode.High, true)).ToString();
+        yield return JayInvite.Create(Enumerable.Range(1, 16).Select(i => (byte)i).ToArray(), TunnelSettings.Default).ToString();
+        yield return JayInvite.Create(Enumerable.Range(17, 16).Select(i => (byte)i).ToArray(), new TunnelSettings(TransportMode.High, true)).ToString();
         yield return RoomCode.Create(25565).ToString();
         var host = new DirectAddresses("0123456789abcdef", NatKind.Cone, [new(PathKind.Punch, IPEndPoint.Parse("203.0.113.5:51234"))]);
         using var offer = SealedDirect.Seal(host, DirectTestKeys.Invite, Now);
@@ -35,10 +35,10 @@ public class MalformedInputTests
     private static IEnumerable<string> Mutants(int seed, int perCode)
     {
         var rnd = new Random(seed);
-        string[] odd = ["", " ", "-", "JAY2-", "JAYDS1-", "JAYC1-", "JAYF1-", "JAYNET", "AMB-", "JAYS2-", "\0", "‮", "😀😀",
+        string[] odd = ["", " ", "-", "JAY2-", "JAYDS1-", "JAYC1-", "JAYF1-", "JAYNET", "AMB-", "JAYS2-", "\0", "\u202E", "\U0001F600\U0001F600",
             new string('A', 100_000), "JAY2-" + new string('=', 5000), "JAY2-" + new string('9', 70_000)];
         foreach (var s in odd) yield return s;
-        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=+/:.@[] \t\né中\U0001F600\0";
+        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=+/:.@[] \t\n\u00E9\u4E2D\U0001F600\0";
         foreach (var code in ValidCodes())
         {
             for (var i = 0; i < perCode; i++)

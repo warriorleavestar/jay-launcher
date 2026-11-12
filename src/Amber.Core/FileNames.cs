@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace Amber.Core;
 
@@ -10,7 +11,12 @@ namespace Amber.Core;
 /// </summary>
 public static class FileNames
 {
+    /// <summary>Longest name kept, in characters; also kept under <see cref="MaxUtf8Bytes"/> (Linux and macOS allow 255 bytes).</summary>
     public const int MaxLength = 120;
+
+    public const int MaxUtf8Bytes = 200;
+
+    private const int MaxExtension = 16;
 
     private static readonly HashSet<char> Refused =
         [.. Path.GetInvalidFileNameChars(), '<', '>', ':', '"', '|', '?', '*', '/', '\\'];
@@ -24,9 +30,29 @@ public static class FileNames
         var last = (name ?? "").Replace('\\', '/').Split('/').LastOrDefault() ?? "";
         var clean = new string([.. last.Where(c => !Refused.Contains(c) && !char.IsControl(c)
             && char.GetUnicodeCategory(c) != UnicodeCategory.Format)]).Trim().TrimEnd('.', ' ');
-        if (clean.Length > MaxLength) clean = clean[..MaxLength].TrimEnd('.', ' ');
+        clean = Shorten(clean);
         if (clean.Length == 0 || clean is "." or "..") return null;
         return IsDeviceName(clean) ? "_" + clean : clean;
+    }
+
+    /// <summary>Cuts a long name in its stem so the extension (".jar") survives, without splitting a surrogate pair.</summary>
+    private static string Shorten(string name)
+    {
+        if (name.Length <= MaxLength && Encoding.UTF8.GetByteCount(name) <= MaxUtf8Bytes) return name;
+        var ext = Path.GetExtension(name);
+        if (ext.Length > MaxExtension || ext.Length == name.Length) ext = "";
+        var stem = name[..^ext.Length];
+        var budgetChars = MaxLength - ext.Length;
+        var budgetBytes = MaxUtf8Bytes - Encoding.UTF8.GetByteCount(ext);
+        var cut = 0;
+        var bytes = 0;
+        foreach (var rune in stem.EnumerateRunes())
+        {
+            if (cut + rune.Utf16SequenceLength > budgetChars || bytes + rune.Utf8SequenceLength > budgetBytes) break;
+            cut += rune.Utf16SequenceLength;
+            bytes += rune.Utf8SequenceLength;
+        }
+        return stem[..cut].TrimEnd('.', ' ') + ext;
     }
 
     /// <summary>True for names Windows maps to a device whatever the extension ("con", "NUL.txt", "lpt9.jar").</summary>

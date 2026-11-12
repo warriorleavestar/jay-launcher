@@ -63,6 +63,22 @@ public class HostileFileNameTests
     }
 
     [Theory]
+    [InlineData(400, "a")]
+    [InlineData(150, "\u4E2D")]
+    [InlineData(100, "\U0001F600")]
+    public void LongNamesKeepTheirExtensionAndFitEveryFileSystem(int repeat, string unit)
+    {
+        var name = string.Concat(Enumerable.Repeat(unit, repeat)) + ".jar";
+        foreach (var result in new[] { PrivateMessenger.SafeName(name), ModSyncRunner.SafeFileName(name), ContentInstaller.SafeFileName(name) })
+        {
+            Assert.EndsWith(".jar", result);
+            Assert.True(result.Length <= FileNames.MaxLength);
+            Assert.True(System.Text.Encoding.UTF8.GetByteCount(result) <= FileNames.MaxUtf8Bytes);
+            Assert.False(char.IsHighSurrogate(result[^5]), "a surrogate pair was split");
+        }
+    }
+
+    [Theory]
     [MemberData(nameof(Names))]
     public void ArchivePathsStayInsideTheTarget(string relative)
     {

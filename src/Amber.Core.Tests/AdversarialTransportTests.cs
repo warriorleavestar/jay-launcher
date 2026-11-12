@@ -171,19 +171,26 @@ public class AdversarialTransportTests
 
         private readonly List<byte> _replay = [];
         private readonly List<byte> _held = [];
+        private readonly List<byte> _second = [];
         private bool _cut;
 
         public void Feed(int pos, byte b, List<byte> output)
         {
             Wire.WriteByte(b);
-            if (pos == FlipAt || pos == CutAt || pos == DropAt + Length - 1 && DropAt >= 0 ||
-                pos == SwapAt + 2 * Length - 1 && SwapAt >= 0 || pos == ReplayAt + Length - 1 && ReplayAt >= 0) Applied = true;
+            if (pos == FlipAt || pos == CutAt || pos == DropAt + Length - 1 && DropAt >= 0 || pos == ReplayAt + Length - 1 && ReplayAt >= 0) Applied = true;
             if (_cut || pos == CutAt) { _cut = true; return; }
             if (pos == FlipAt) b ^= (byte)(1 << (pos % 8));
             if (DropAt >= 0 && pos >= DropAt && pos < DropAt + Length) return;
             if (SwapAt >= 0 && pos >= SwapAt && pos < SwapAt + Length) { _held.Add(b); return; }
             output.Add(b);
-            if (SwapAt >= 0 && pos == SwapAt + 2 * Length - 1) { output.AddRange(_held); _held.Clear(); }
+            if (SwapAt >= 0 && pos >= SwapAt + Length && pos < SwapAt + 2 * Length) _second.Add(b);
+            if (SwapAt >= 0 && pos == SwapAt + 2 * Length - 1)
+            {
+                // Swapping two identical slices changes nothing on the wire, so it doesn't count as an attack.
+                Applied = !_held.SequenceEqual(_second);
+                output.AddRange(_held);
+                _held.Clear();
+            }
             if (ReplayAt >= 0 && pos >= ReplayAt && pos < ReplayAt + Length)
             {
                 _replay.Add(b);
