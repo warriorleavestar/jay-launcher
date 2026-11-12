@@ -106,7 +106,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Rendezvous puts the whole directory takes per minute.</summary>
     public const int MaxRendezvousPutsPerMinute = 300;
 
-    /// <summary>Record puts (new or renewed) the whole directory takes per minute.</summary>
+    /// <summary>New record puts the whole directory takes per minute (renewals of a record already held don't count).</summary>
     public const int MaxRecordPutsPerMinute = 120;
 
     /// <summary>Record puts (new or renewed) one signing key may make per hour.</summary>
@@ -123,6 +123,26 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>Mail posts per source address in the current window.</summary>
     private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _mailPosts = new(StringComparer.Ordinal);
+
+    /// <summary>When each directory-wide budget last ran out and was logged (at most once a minute each).</summary>
+    private readonly Dictionary<string, DateTimeOffset> _budgetLogged = new(StringComparer.Ordinal);
+
+    /// <summary>Requests refused because a directory-wide budget ran out (shown in the node status).</summary>
+    public int BudgetRefusals => Volatile.Read(ref _budgetRefusals);
+    private int _budgetRefusals;
+
+    /// <summary>A directory-wide budget ran out: counts it, logs it at most once a minute per op, replies "rate". Called under the gate.</summary>
+    private JsonObject BudgetFull(string op)
+    {
+        Interlocked.Increment(ref _budgetRefusals);
+        var now = _now();
+        if (!_budgetLogged.TryGetValue(op, out var last) || now - last >= TimeSpan.FromMinutes(1))
+        {
+            _budgetLogged[op] = now;
+            _log?.Invoke(L.F("core.mp.public.budget_full", op));
+        }
+        return Error("rate");
+    }
 
     private readonly RateLimiter _rendezvousBudget;
     private readonly RateLimiter _recordBudget;
@@ -572,7 +592,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             // Every check first; allowances are only used up by a post that is taken.
             var (count, until) = source is not null && _mailPosts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + MailPostWindow);
             if (source is not null && count >= MaxMailPostsPerSource) return Error("rate");
-            if (!_mailBudget.CanAcquire()) return Error("rate");
+            if (!_mailBudget.CanAcquire()) return BudgetFull("post");
             if (source is not null) _mailPosts[source] = (count + 1, until);
             _mailBudget.TryAcquire();
             if (!existing) _mailboxes[box!] = items = [];
@@ -646,7 +666,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             // Never overwrite: whoever put first keeps the id until it is taken or expires.
             if (_rendezvous.ContainsKey(id!)) return Error("exists");
             if (_rendezvous.Count >= MaxRendezvous) return Error("full");
-            if (!_rendezvousBudget.CanAcquire()) return Error("rate");
+            if (!_rendezvousBudget.CanAcquire()) return BudgetFull("rv.put");
             if (source is not null) _rendezvousPuts[source] = (count + 1, until);
             _rendezvousBudget.TryAcquire();
             _rendezvous[id!] = (blob, now + TimeSpan.FromSeconds(ttl));
@@ -695,7 +715,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (signed == 0 && !_signerPuts.ContainsKey(signer) && _signerPuts.Count >= MaxRecords) return Error("rate");
             // Renewing a record already held adds nothing to the store, so it doesn't draw on the directory-wide budget
             // (its signer and source are still limited above).
-            if (!renewal && !_recordBudget.CanAcquire()) return Error("rate");
+            if (!renewal && !_recordBudget.CanAcquire()) return BudgetFull("rec.put");
             if (source is not null) _recordPuts[source] = (count + 1, until);
             _signerPuts[signer] = (signed + 1, signedUntil);
             if (!renewal) _recordBudget.TryAcquire();

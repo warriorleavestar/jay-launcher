@@ -182,6 +182,9 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         _now += TimeSpan.FromMinutes(1);
         Assert.True((await registry.CheckAsync("tcp://p.one.example.org:11010"))["ok"]!.GetValue<bool>());
         Assert.Equal("rate", (await registry.CheckAsync("tcp://q.one.example.org:11011"))["error"]!.GetValue<string>());
+        // Once the wait is over, another name of that machine can be checked.
+        _now += VolunteerRegistry.CheckSameAddressEvery + TimeSpan.FromSeconds(1);
+        Assert.True((await registry.CheckAsync("tcp://r.one.example.org:11012"))["reachable"]!.GetValue<bool>());
     }
 
     [Fact]

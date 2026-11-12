@@ -824,8 +824,12 @@ public static class Program
         {
             var kbps = options.GetInt("relay-limit-kbps", 0);
             if (kbps < 0) throw new ArgumentException("--relay-limit-kbps 不能是负数");
-            builder.UseRelayLimits(kbps, options.Get("relay-networks"));
-            log($"给别的网络转发：{(kbps > 0 ? $"每个网络最多 {kbps} KB/s" : "不限带宽")}，{options.Get("relay-networks") ?? "所有网络"}");
+            var networks = options.Get("relay-networks");
+            // EasyTier reads an empty whitelist as "relay nothing", which is easy to set by accident; ask for names instead.
+            if (networks is not null && string.IsNullOrWhiteSpace(networks))
+                throw new ArgumentException("--relay-networks 不能是空的：填要转发的网络名（空格分开，可用 *），不想限制就不要给这个选项");
+            builder.UseRelayLimits(kbps, networks);
+            log($"给别的网络转发：{(kbps > 0 ? $"每个网络最多 {kbps} KB/s" : "不限带宽")}，{networks ?? "所有网络"}");
         }
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
