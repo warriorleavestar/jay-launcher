@@ -184,8 +184,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             HandshakeDone();
             if (accepted is null) return;
             rawOwned = false;
-            authenticated = true;
             (secure, var service, var member) = accepted.Value;
+            // Only a member with its own key counts as authenticated (its failures are then logged in full).
+            authenticated = member is not null;
             var handler = member is null || _room.Split.For(service) == SplitPolicy.Off ? null : _route(service);
             if (handler is null)
             {
@@ -233,7 +234,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             secure?.Abort();
             joined?.Abort();
             if (!served) Interlocked.Increment(ref _rejected);
-            var what = served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+            // Once the leg's handshake succeeded, a failure is a connection that ended, not a failed handshake.
+            var what = served || !rawOwned ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
             if ((e is CryptographicException or PlatformNotSupportedException) && (authenticated || TunnelServer.OncePerMinute(ref _handshakeFailedLogged)))
                 _log?.Invoke(L.T(what) + e.Message);
         }
@@ -244,7 +246,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             joined?.Abort();
             if (!served) Interlocked.Increment(ref _rejected);
             if (authenticated || TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
-                _log?.Invoke(L.T(served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+                _log?.Invoke(L.T(served || !rawOwned ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
         }
         finally
         {
