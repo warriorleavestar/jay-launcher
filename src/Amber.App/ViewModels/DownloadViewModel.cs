@@ -210,6 +210,29 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         foreach (var choice in LoaderChoices)
             choice.Block = value is null || choice.Kind is not { } kind ? LoaderBlock.None : LoaderSupport.Check(value.Id, value.Entry.Type, kind);
         OnModsContextChanged();
+        UpdateUniversalLoaderOption();
+    }
+
+    // ---- "Use the universal loader to mix in mods from other loaders" (redesign batch 10) ----
+
+    /// <summary>Ticked: the new instance launches through the universal loader. Starts as the default in Settings › Game.</summary>
+    [ObservableProperty] public partial bool UseUniversalLoader { get; set; }
+
+    /// <summary>Why the universal loader cannot run this game version and loader; empty when it can.</summary>
+    [ObservableProperty] public partial string UniversalLoaderUnavailable { get; set; } = "";
+
+    /// <summary>The tick box shows once a loader is picked (a vanilla instance has nothing to run other mods on).</summary>
+    public bool ShowUniversalLoaderOption => SelectedLoader.Kind is not null && Target is not null;
+
+    public bool CanUseUniversalLoader => ShowUniversalLoaderOption && UniversalLoaderUnavailable.Length == 0;
+
+    private void UpdateUniversalLoaderOption()
+    {
+        UniversalLoaderUnavailable = !ShowUniversalLoaderOption ? ""
+            : Amber.Core.Bake.UniversalLoaderFit.Unsupported(_service.UniversalLoaderCapabilities, Amber.Core.Content.NewInstanceMods.LoaderId(SelectedLoader.Kind), Target!.Id) ?? "";
+        UseUniversalLoader = CanUseUniversalLoader && _service.Settings.ExperimentalBake;
+        OnPropertyChanged(nameof(ShowUniversalLoaderOption));
+        OnPropertyChanged(nameof(CanUseUniversalLoader));
     }
 
     public bool IsConfiguring => Target is not null;
@@ -378,6 +401,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
             return;
         }
         OnModsContextChanged();
+        UpdateUniversalLoaderOption();
         _ = LoadLoaderVersionsAsync();
     }
     partial void OnShowUnstableLoadersChanged(bool value) => _ = LoadLoaderVersionsAsync();
@@ -527,6 +551,8 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         StartWaitTimer();
         // "Add mods while you're at it": what was ticked when [Install] was pressed.
         var picks = loader is null ? [] : PickedMods.ToList();
+        // Written only when it differs from the default, so an untouched instance keeps following Settings › Game.
+        bool? universalLoader = loader is not null && CanUseUniversalLoader && UseUniversalLoader != _service.Settings.ExperimentalBake ? UseUniversalLoader : null;
         _modProblems = [];
         _modsInstalled = 0;
         // §6.11: the panel closes and the install carries on as a task in the activity centre.
@@ -581,6 +607,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
                 }), ct);
                 item.Installed = true;
             }
+            if (universalLoader is { } useUniversalLoader) _service.SetUniversalLoader(ctx, id, useUniversalLoader);
             if (picks.Count > 0) await InstallPickedModsAsync(picks, ctx, id, task, ct);
             await Ui.FlushAsync();
             acceptingProgress = false;

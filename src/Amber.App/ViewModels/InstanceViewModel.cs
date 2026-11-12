@@ -238,6 +238,10 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             if (Current?.Id == id) UpdateInfoText();
         });
         service.ContentChanged += () => Dispatcher.UIThread.Post(() => { _loadedTabs.Clear(); LoadTab(TabIndex); });
+        service.UniversalLoaderChanged += id => Dispatcher.UIThread.Post(() =>
+        {
+            if (Current?.Id == id) RefreshUniversalLoader();
+        });
     }
 
     private bool _active;
@@ -291,6 +295,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         {
             Current = _service.GetInstance(value);
             UpdateInfoText();
+            RefreshUniversalLoader();
             var tab = _lastTab.TryGetValue(value, out var last) ? last : (int)DefaultTab(Current);
             if (TabIndex != tab) TabIndex = tab; // OnTabIndexChanged 会加载这个 Tab
             LoadTab(TabIndex);
@@ -321,7 +326,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         switch ((InstanceTab)tab)
         {
             case InstanceTab.Overview: LoadOverview(); break;
-            case InstanceTab.Settings: LoadSettings(); break;
+            case InstanceTab.Settings: LoadSettings(); RefreshUniversalLoader(); break;
             case InstanceTab.Mods: LoadMods(); break;
             case InstanceTab.Worlds: LoadWorlds(); break;
             case InstanceTab.Screenshots: LoadScreenshots(); break;
@@ -512,9 +517,6 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         });
         RecheckCompat();
     }
-
-    /// <summary>实验功能“烘焙”开着时显示“立即烘焙”。</summary>
-    public bool BakeEnabled => _service.Settings.ExperimentalBake;
 
     /// <summary>立即烘焙：不启动游戏，只把模组和实例预先处理好，下次启动直接用。</summary>
     [RelayCommand]
@@ -736,6 +738,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             PreLaunchCommand = NullIfBlank(PreLaunch),
             PostExitCommand = NullIfBlank(PostExit),
             JoinServer = NullIfBlank(JoinServer),
+            // Changed on its own card (and from Discover), never by this form.
+            UniversalLoader = old.UniversalLoader,
         };
         s.Save(_service.Directory, c.Id);
         var id = c.Id;

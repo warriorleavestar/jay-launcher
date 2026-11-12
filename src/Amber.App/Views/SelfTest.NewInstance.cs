@@ -82,8 +82,16 @@ internal sealed partial class SelfTest
             var fabricItem = Dispatcher.UIThread.Invoke(() => page.LoaderSegment.ContainerFromItem(fabric) as ListBoxItem);
             Check("加载器：置灰的项点不了", Dispatcher.UIThread.Invoke(() => fabricItem is { IsEffectivelyEnabled: false }),
                 Dispatcher.UIThread.Invoke(() => $"{fabricItem is null} {fabricItem?.IsEnabled} {fabricItem?.DataContext} {page.LoaderSegment.IsEffectivelyVisible}"));
+            // Universal loader tick box (batch 10): Forge 1.12.2 is out of its range, so the box is off with the reason under it.
+            download.SelectedLoader = forge;
+            await Task.Delay(200);
+            Check("Forge 1.12.2: the universal loader box shows, is off and says why",
+                Dispatcher.UIThread.Invoke(() => page.NewInstanceUniversalLoaderBox.IsEffectivelyVisible && !page.NewInstanceUniversalLoaderBox.IsEffectivelyEnabled
+                    && page.NewInstanceUniversalLoaderReason.IsEffectivelyVisible) && !download.UseUniversalLoader && download.UniversalLoaderUnavailable.Length > 0,
+                download.UniversalLoaderUnavailable);
             download.SelectedLoader = fabric;
             Check("加载器：代码里选了不支持的也会退回原版", download.SelectedLoader.Kind is null);
+            Check("Vanilla: no universal loader box", Dispatcher.UIThread.Invoke(() => !page.NewInstanceUniversalLoaderBox.IsVisible));
             download.ConfigureCommand.Execute(snapshot);
             Check("加载器：快照的 Forge 置灰、Fabric 可选", !forge.IsAvailable && forge.BlockReason.Length > 0 && fabric.IsAvailable, forge.BlockReason);
             Check("原版：名字就是版本号，不能改；可以直接装", download.CustomName == snapshot.Id && !download.CanRename && download.InstallCommand.CanExecute(null));
@@ -99,6 +107,11 @@ internal sealed partial class SelfTest
                 download.SelectedLoaderVersion is not null && download.CustomName == "1.21.1-Fabric" && download.LoaderDescription.StartsWith("Fabric", StringComparison.Ordinal),
                 $"{download.CustomName} {download.LoaderHint}");
             Check("名字合格时【安装】可用", download.InstallCommand.CanExecute(null));
+            Check("Fabric 1.21.1: the universal loader box can be ticked where the loader runs it, unticked by default",
+                Dispatcher.UIThread.Invoke(() => page.NewInstanceUniversalLoaderBox.IsEffectivelyVisible
+                    && page.NewInstanceUniversalLoaderBox.IsEffectivelyEnabled == (service.UniversalLoaderCapabilities is not null)) && !download.UseUniversalLoader,
+                download.UniversalLoaderUnavailable);
+            await ShotAsync("new-universal-loader");
             foreach (var (name, expect) in new[] { ("CON", "保留"), ("a/b", "不能有"), ("fabric-iso", "同名"), ("", "起个名字") })
             {
                 Dispatcher.UIThread.Invoke(() => page.NameBox.Text = name);

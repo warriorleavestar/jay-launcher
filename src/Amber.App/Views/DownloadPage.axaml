@@ -151,7 +151,16 @@
                     <DataTemplate DataType="vm:LoaderChoice"><TextBlock Text="{Binding Label}" /></DataTemplate>
                   </ListBox.ItemTemplate>
                 </ListBox>
-                <TextBlock Grid.Row="1" Grid.Column="1" Classes="hint" Text="{Binding LoaderDescription}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4" Margin="0,4,0,0">
+                  <TextBlock Classes="hint" Text="{Binding LoaderDescription}" TextWrapping="Wrap" />
+                  <!-- Mix in mods from other loaders (redesign batch 10): only where the universal loader runs this version. -->
+                  <CheckBox x:Name="NewInstanceUniversalLoaderBox" IsChecked="{Binding UseUniversalLoader}" IsEnabled="{Binding CanUseUniversalLoader}"
+                            IsVisible="{Binding ShowUniversalLoaderOption}" ToolTip.Tip="{Binding UniversalLoaderUnavailable}" ToolTip.ShowOnDisabled="True">
+                    <TextBlock Text="{l:T newinstance.ul.toggle}" TextWrapping="Wrap" />
+                  </CheckBox>
+                  <TextBlock x:Name="NewInstanceUniversalLoaderReason" Classes="hint" FontSize="12" Text="{Binding UniversalLoaderUnavailable}" TextWrapping="Wrap"
+                             IsVisible="{Binding !!UniversalLoaderUnavailable.Length}" />
+                </StackPanel>
 
                 <TextBlock Grid.Row="2" Text="{l:T download.loader.version}" VerticalAlignment="Center" Margin="0,8,12,0" IsVisible="{Binding NeedsLoaderVersion}" />
                 <WrapPanel Grid.Row="2" Grid.Column="1" ItemSpacing="10" LineSpacing="6" Margin="0,8,0,0" IsVisible="{Binding NeedsLoaderVersion}">

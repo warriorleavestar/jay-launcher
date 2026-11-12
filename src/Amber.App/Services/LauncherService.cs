@@ -627,11 +627,11 @@ public sealed class LauncherService : IDisposable
 
     public GameInstance GetInstance(GameContext ctx, string id) => GameInstance.Detect(ctx.Directory, id, WorkDirFor(ctx, id));
 
-    /// <summary>Experimental baking: the service when it is on and a loader build was found, else null. Caches live in the data directory and are shared by every instance.</summary>
+    /// <summary>The universal loader's service when a loader build was found, else null. Whether an instance uses it is <see cref="UsesUniversalLoader(GameContext, string)"/>. Caches live in the data directory and are shared by every instance.</summary>
     public Amber.Core.Bake.BakeService? Bake => BakeFor(Context);
 
     public Amber.Core.Bake.BakeService? BakeFor(GameContext ctx) =>
-        Settings.ExperimentalBake && Amber.Core.Bake.BakeToolkit.Find(Settings.BakeLoaderPath) is { } toolkit
+        Amber.Core.Bake.BakeToolkit.Find(Settings.BakeLoaderPath) is { } toolkit
             ? new Amber.Core.Bake.BakeService(toolkit, BakeRuntime.CacheRoot, BakeRuntime.DataRoot,
                 (items, ct) => ctx.Downloader.DownloadAllAsync(items, null, ct))
             : null;
@@ -662,16 +662,36 @@ public sealed class LauncherService : IDisposable
         if (instance is null) return ([], false, false);
         var installed = InstalledBakeCapabilities;
         var caps = installed ?? (Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished ? Amber.Core.Bake.CrossLoader.Capabilities.PinnedRelease : null);
-        return (Amber.Core.Bake.CrossLoader.Extras(caps, instance.Loader, instance.McVersion), Settings.ExperimentalBake && installed is not null, installed is not null);
+        return (Amber.Core.Bake.CrossLoader.Extras(caps, instance.Loader, instance.McVersion), UsesUniversalLoader(instance.Id) && installed is not null, installed is not null);
     }
 
-    /// <summary>Turns experimental baking on (the prompt next to a mod from another ecosystem) and tells the other pages.</summary>
-    public void EnableBake()
+    /// <summary>What the universal loader would run (the installed package, else the pinned release once it is published).</summary>
+    public Amber.Core.Bake.CrossLoader.Capabilities? UniversalLoaderCapabilities =>
+        InstalledBakeCapabilities ?? (Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished ? Amber.Core.Bake.CrossLoader.Capabilities.PinnedRelease : null);
+
+    /// <summary>This instance launches through the universal loader (its own choice, else the default in Settings › Game).</summary>
+    public bool UsesUniversalLoader(string id) => UsesUniversalLoader(Context, id);
+
+    public bool UsesUniversalLoader(GameContext ctx, string id) => EffectiveSettings(ctx, id).UniversalLoader == true;
+
+    /// <summary>Turns the universal loader on or off for one instance and tells the pages.</summary>
+    public void SetUniversalLoader(string id, bool on) => SetUniversalLoader(Context, id, on);
+
+    /// <summary>The same in a given game directory (an install that started before the directory was switched).</summary>
+    public void SetUniversalLoader(GameContext ctx, string id, bool on)
     {
-        if (Settings.ExperimentalBake) return;
-        Settings.ExperimentalBake = true;
-        SaveAndReload();
+        var own = InstanceSettings.Load(ctx.Directory, id);
+        if (own.UniversalLoader == on) return;
+        own.UniversalLoader = on;
+        own.Save(ctx.Directory, id);
+        UniversalLoaderChanged?.Invoke(id);
     }
+
+    /// <summary>An instance's universal loader switch changed (the instance id).</summary>
+    public event Action<string>? UniversalLoaderChanged;
+
+    /// <summary>The prompt next to a mod from another ecosystem: turns the universal loader on for that instance.</summary>
+    public void EnableUniversalLoader(string id) => SetUniversalLoader(id, true);
 
     /// <summary>One bake, warm or cleanup at a time: gc must never run while an instance using the cache is baking.</summary>
     private readonly SemaphoreSlim _bakeLock = new(1, 1);
@@ -693,7 +713,8 @@ public sealed class LauncherService : IDisposable
     /// </remarks>
     public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false)
     {
-        if (BakeFor(ctx) is not { } bake) return (null, Settings.ExperimentalBake ? Amber.Core.Localization.L.T("core.bake.loader_missing") : "", javaPath);
+        if (!UsesUniversalLoader(ctx, id)) return (null, "", javaPath);
+        if (BakeFor(ctx) is not { } bake) return (null, Amber.Core.Localization.L.T("core.bake.loader_missing"), javaPath);
         await _bakeLock.WaitAsync(ct);
         try
         {
@@ -743,7 +764,7 @@ public sealed class LauncherService : IDisposable
     /// </summary>
     public void WarmBakeInBackground(GameContext ctx, string id)
     {
-        if (!Settings.ExperimentalBake) return;
+        if (!UsesUniversalLoader(ctx, id)) return;
         _ = Task.Run(async () =>
         {
             try
@@ -812,7 +833,7 @@ public sealed class LauncherService : IDisposable
     /// <summary>After an instance is deleted or the recycle bin is emptied: drop bake cache files nothing uses any more.</summary>
     public void CleanBakeCacheInBackground()
     {
-        if (!Settings.ExperimentalBake) return;
+        if (InstalledBakeCapabilities is null) return;
         _ = Task.Run(async () =>
         {
             try { await CleanBakeCacheAsync(apply: true, CancellationToken.None); }

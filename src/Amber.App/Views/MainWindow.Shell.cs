@@ -374,8 +374,15 @@ public partial class MainWindow
             settings.ShowField(field);
             PageHost.UpdateLayout();
         }
-        var target = PageHost.GetVisualDescendants().OfType<Control>().FirstOrDefault(c =>
-            c.Name is { } n && (n.Equals(field, StringComparison.OrdinalIgnoreCase) || n.Equals(field + "Box", StringComparison.OrdinalIgnoreCase)));
+        bool named(Control c) => c.Name is { } n && (n.Equals(field, StringComparison.OrdinalIgnoreCase) || n.Equals(field + "Box", StringComparison.OrdinalIgnoreCase));
+        var target = PageHost.GetVisualDescendants().OfType<Control>().FirstOrDefault(named);
+        // A field inside a closed expander ("For developers") is only in the logical tree: open its expanders first.
+        if (target is null && Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(PageHost).OfType<Control>().FirstOrDefault(named) is { } hidden)
+        {
+            foreach (var expander in Avalonia.LogicalTree.LogicalExtensions.GetLogicalAncestors(hidden).OfType<Expander>()) expander.IsExpanded = true;
+            PageHost.UpdateLayout();
+            target = PageHost.GetVisualDescendants().OfType<Control>().FirstOrDefault(named);
+        }
         if (target is null) return;
         RevealedField = target;
         target.BringIntoView(new Rect(0, -target.Bounds.Height * 2, target.Bounds.Width, target.Bounds.Height * 5));

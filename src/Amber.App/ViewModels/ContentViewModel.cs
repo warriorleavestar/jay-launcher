@@ -566,7 +566,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             // With experimental baking on, mods the universal loader runs on this instance are searched too (and get a
             // badge); picking one before the loader is installed shows the download prompt. With baking off, nothing changes.
             var cross = CurrentType == ContentType.Mod ? _service.CrossLoaderFor(instance) : ([], false, false);
-            var extras = cross.Ready || _service.Settings.ExperimentalBake ? cross.Extras : [];
+            var extras = cross.Ready || (instance is not null && _service.UsesUniversalLoader(instance.Id)) ? cross.Extras : [];
             var result = await Provider.SearchAsync(new SearchQuery(CurrentType, Query.Trim(), instance?.McVersion, instance?.Loader, Page * PageSize, PageSize) { ExtraLoaders = extras }, cts.Token);
             if (cts.IsCancellationRequested) return;
             _total = result.Total;
@@ -753,7 +753,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     [RelayCommand]
     private async Task TurnOnBakeAsync()
     {
-        _service.EnableBake();
+        if (CurrentInstance() is not { } instance) return;
+        _service.EnableUniversalLoader(instance.Id);
         await LoadFilesAsync();
     }
 
@@ -1077,14 +1078,17 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException(L.T("content.modpack.name_required"));
         var skipped = new List<string>();
+        var mixed = false;
         var id = await _service.Modpacks.ImportAsync(path, name, _service.Directory.VersionDir, new Progress<LoaderProgress>(p =>
         {
             Status = p.Stage;
             if (p.Percent is { } percent) Progress = percent;
             _importTask?.Report(p.Percent / 100.0, p.Stage);
-        }), ct, onSkip: file => { lock (skipped) skipped.Add(file); }, mixedRefusal: MixedRefusal);
+        }), ct, onSkip: file => { lock (skipped) skipped.Add(file); }, mixedRefusal: info => { mixed = true; return MixedRefusal(info); });
         await Ui.FlushAsync();
         _service.ForceIsolated(id);
+        // A mixed pack only runs through the universal loader, so the new instance starts with it on.
+        if (mixed) _service.SetUniversalLoader(id, true);
         // 跳过的文件在进度里一闪而过，完成时用可随语言切换的状态再汇总一次。
         lock (skipped)
             SetStatus(skipped.Count == 0
@@ -1096,13 +1100,13 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         return id;
     }
 
-    /// <summary>A mixed pack imports only when the universal loader runs its mix on the base loader and baking is ready.</summary>
+    /// <summary>A mixed pack imports only when the universal loader runs its mix on the base loader and is installed (the new instance then uses it).</summary>
     private string? MixedRefusal(ModpackInfo info)
     {
         var loader = NewInstanceMods.LoaderId(info.Loader);
         var installed = _service.InstalledBakeCapabilities;
         var caps = installed ?? (Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished ? Amber.Core.Bake.CrossLoader.Capabilities.PinnedRelease : null);
-        return ModpackService.MixedRefusal(info, Amber.Core.Bake.CrossLoader.Extras(caps, loader, info.McVersion), _service.Settings.ExperimentalBake && installed is not null);
+        return ModpackService.MixedRefusal(info, Amber.Core.Bake.CrossLoader.Extras(caps, loader, info.McVersion), installed is not null);
     }
 
     [RelayCommand]

@@ -65,6 +65,11 @@ public static class SettingsCatalog
         new("PreLaunch", Game, "instance.settings.pre_launch"),
         new("PostExit", Game, "instance.settings.post_exit"),
         new("JavaDownload", Game, "tools.java.title", "tools.java.hint"),
+        // The universal loader (redesign batch 10): moved from Experimental. Each instance turns it on in its own settings.
+        new("Bake", Game, "settings.bake.title", "settings.bake.hint"),
+        new("BakeLoaderInstall", Game, "settings.bake.install", "settings.bake.install_hint"),
+        new("BakeCleanup", Game, "settings.bake.gc", "settings.bake.gc_hint"),
+        new("BakeLoader", Game, "settings.bake.loader_hint"),
 
         new("Source", Downloads, "settings.source.label"),
         new("Concurrency", Downloads, "settings.download.concurrency"),
@@ -103,10 +108,6 @@ public static class SettingsCatalog
         new("RelayGroup", Network, "settings.network.relays", "multiplayer.nodes.hint"),
         new("Stun", Network, "multiplayer.direct.stun_heading"),
 
-        new("Bake", Experimental, "settings.bake.title", "settings.bake.hint"),
-        new("BakeLoader", Experimental, "settings.bake.loader_hint"),
-        new("BakeLoaderInstall", Experimental, "settings.bake.install", "settings.bake.install_hint"),
-        new("BakeCleanup", Experimental, "settings.bake.gc", "settings.bake.gc_hint"),
         new("ThemeDev", Experimental, "settings.themedev.label", "settings.themedev.hint"),
 
         new("Version", About, "settings.about.version"),
