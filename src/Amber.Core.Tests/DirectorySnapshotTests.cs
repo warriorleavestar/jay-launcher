@@ -597,4 +597,30 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
             .AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Public), _now), true, [lobby], default).GetAwaiter().GetResult();
         Assert.Empty(Assert.Single(sent)["hidden"]!.AsArray());
     }
+
+    [Fact]
+    public async Task AnotherAddressForTheSameHostKeyIsAConflict()
+    {
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        // A public room, and someone listing its invite with the real (public) host key but their own address.
+        var standing = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
+        var real = new RoomSigner();
+        await client.AnnounceAsync(real.Sign(Listing(RoomVisibility.Public) with { Invite = standing.ToString() }, _now), true, [], default);
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Public) with { Invite = standing.ToString(), Ip = "10.235.0.66" }, _now), true, [], default);
+        Assert.Null(await client.LookupAsync(standing.LobbyKey, default));
+        Assert.Empty(await client.LookupAllAsync(standing.LobbyKey, default));
+        // Knowing the host key doesn't pick one: both addresses come back, for the knock handshake to tell apart.
+        var both = await client.LookupAllAsync(standing.LobbyKey, default, _host.PublicKey);
+        Assert.Equal(["10.235.0.66", "10.235.0.7"], both.Select(h => h.Ip).Order());
+
+        // A hidden room, and someone who once held one of its invites publishing an entry for its host at another address.
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        await HideAsync(new RoomSigner(), lobby);
+        Assert.Single(await client.LookupAllAsync(lobby, default));
+        var other = new RoomSigner().Sign(Listing(RoomVisibility.Hidden) with { Ip = "10.235.0.66" }, _now);
+        await client.AnnounceAsync(other, false, [lobby], default);
+        await client.Snapshots.RefreshAsync(client, default);
+        Assert.Null(await client.LookupAsync(lobby, default));
+        Assert.Equal(["10.235.0.66", "10.235.0.7"], (await client.LookupAllAsync(lobby, default, _host.PublicKey)).Select(h => h.Ip).Order());
+    }
 }

@@ -262,8 +262,10 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   random slot tag. Holding the invite is what it takes to fill those places, and holding the invite doesn't make you
   the host. So a full index only costs a publish that entry: the room is still registered (the reply carries
   `warn: "lookup"`), and a hidden room with nothing else to register gets `lookup`. A reader tries every entry under
-  the index. When the reader knows the host's key (a contact's invite, a listing), the entry for that host is the
-  answer; otherwise, when entries that open point at different hosts, the reader trusts none of them.
+  the index. An entry counts as the whole (host key, address, room): the host key is public, so it proves nothing on
+  its own. Without the host's key, the reader takes an answer only when every entry gives the same host key and address.
+  With it (a contact's invite), the reader knocks at each address given for that host in turn, up to 4, and the knock
+  handshake decides; a wrong address only fails.
 - **Rooms listed with their invite**: public, direct and password rooms carry the invite (or its lobby key) in their
   listing, so anyone on the network could sign entries for its index. Jay publishes no hidden entries for them; an
   invite code for such a room is matched against the listings in the snapshot instead (same rule: one host, or the

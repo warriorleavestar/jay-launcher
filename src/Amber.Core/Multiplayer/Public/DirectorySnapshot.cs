@@ -431,12 +431,24 @@ public sealed class DirectorySnapshots
     }
 
     /// <summary>
-    /// Where to knock for the room behind an invite's lobby key, from the local copy only. Every entry under the invite's
-    /// index is tried. Only holders of the invite can publish there, but several may: with <paramref name="expectedHost"/>
-    /// (a mailed invite names its host) the entry for that host wins; without it, entries that point at different hosts
-    /// cancel out (null), since there is no telling which is real.
+    /// The one place this invite points at, or null when there is none or the entries disagree. With
+    /// <paramref name="expectedHost"/> it is the first of <see cref="FindAll"/>; prefer that and try each.
     /// </summary>
-    public DirectoryHit? Find(ReadOnlySpan<byte> lobbyKey, byte[]? expectedHost = null)
+    public DirectoryHit? Find(ReadOnlySpan<byte> lobbyKey, byte[]? expectedHost = null) =>
+        FindAll(lobbyKey, expectedHost) is [var one, ..] ? one : null;
+
+    /// <summary>
+    /// Where this invite says the host is, from the hidden entries and the listings that carry it. Holding an invite (or
+    /// seeing a public one) doesn't make anyone the host, so entries may disagree, and a host key alone proves nothing
+    /// (it is public): an entry is the whole (host key, address, room).
+    /// <list type="bullet">
+    /// <item>Without <paramref name="expectedHost"/>: one answer only when every entry gives the same host key and
+    /// address; anything else is a conflict and gives nothing.</item>
+    /// <item>With it: every distinct address given for that host, for the caller to try in turn (the knock handshake
+    /// proves the host; a wrong address just fails).</item>
+    /// </list>
+    /// </summary>
+    public IReadOnlyList<DirectoryHit> FindAll(ReadOnlySpan<byte> lobbyKey, byte[]? expectedHost = null)
     {
         var prefix = Convert.ToHexStringLower(HiddenEntry.Index(lobbyKey)) + ":";
         List<byte[]> candidates;
@@ -453,17 +465,14 @@ public sealed class DirectorySnapshots
                 .Where(r => r.Lobby == keyHex || (JayInvite.TryParse(r.Invite, out var invite) && invite.LobbyKey.AsSpan().SequenceEqual(key)))
                 .Select(r => new DirectoryHit(r.Id, r.Ip, r.HostKey))];
         }
-        DirectoryHit? found = null;
-        foreach (var hit in candidates.Select(blob => HiddenEntry.Open(key, blob)).OfType<DirectoryHit>().Concat(listed))
-        {
-            if (expectedHost is not null)
-            {
-                if (hit.HostKey.AsSpan().SequenceEqual(expectedHost)) return hit;
-                continue;
-            }
-            if (found is null) found = hit;
-            else if (!found.HostKey.AsSpan().SequenceEqual(hit.HostKey)) return null;
-        }
-        return found;
+        var hits = candidates.Select(blob => HiddenEntry.Open(key, blob)).OfType<DirectoryHit>().Concat(listed)
+            .DistinctBy(h => (Convert.ToHexStringLower(h.HostKey), h.Ip, h.Id)).ToList();
+        if (expectedHost is not null)
+            return [.. hits.Where(h => h.HostKey.AsSpan().SequenceEqual(expectedHost)).DistinctBy(h => h.Ip).Take(MaxAddressesToTry)];
+        var places = hits.DistinctBy(h => (Convert.ToHexStringLower(h.HostKey), h.Ip)).ToList();
+        return places.Count == 1 ? places : [];
     }
+
+    /// <summary>At most this many addresses are tried for one host (each one that isn't the host learns of the attempt).</summary>
+    public const int MaxAddressesToTry = 4;
 }

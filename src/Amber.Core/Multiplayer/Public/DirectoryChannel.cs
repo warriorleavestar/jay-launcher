@@ -192,6 +192,8 @@ public static class DirectoryChannel
                 // Each frame must go out within the stall time: a reader that stops reading is dropped.
                 async Task Stalled(byte[] frame)
                 {
+                    // Out of time between frames (or shutting down): stop before touching a stream that may be closed.
+                    token.ThrowIfCancellationRequested();
                     using var frameDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
                     frameDeadline.CancelAfter(stall);
                     // Not every stream honours cancellation of a pending write; closing it always ends the write.

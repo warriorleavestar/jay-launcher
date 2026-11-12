@@ -320,7 +320,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             }
             await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
         }
-        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
+        catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException or ObjectDisposedException) { }
     }
 
     /// <summary>
@@ -1422,6 +1422,13 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     {
         await Snapshots.ReadyAsync(this, ct);
         return Snapshots.Find(lobbyKey.Span, expectedHost);
+    }
+
+    /// <summary>Every address the directory copies give for this invite (see <see cref="DirectorySnapshots.FindAll"/>).</summary>
+    public async Task<IReadOnlyList<DirectoryHit>> LookupAllAsync(ReadOnlyMemory<byte> lobbyKey, CancellationToken ct, byte[]? expectedHost = null)
+    {
+        await Snapshots.ReadyAsync(this, ct);
+        return Snapshots.FindAll(lobbyKey.Span, expectedHost);
     }
 
     /// <summary>按设备指纹码找房间；没找到返回 null。</summary>

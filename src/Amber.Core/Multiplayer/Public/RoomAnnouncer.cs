@@ -194,9 +194,20 @@ public static class PublicJoin
         CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
         byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
-        var hit = await (client ?? new RoomDirectoryClient(network)).LookupAsync(invite.LobbyKey, ct, expectedHost);
-        if (hit is null) return null;
-        if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) return null;
-        return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);
+        var hits = await (client ?? new RoomDirectoryClient(network)).LookupAllAsync(invite.LobbyKey, ct, expectedHost);
+        KnockOutcome? last = null;
+        foreach (var hit in hits)
+        {
+            if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) continue;
+            try
+            {
+                last = await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);
+                // Someone else (or nobody we can talk to) at that address: the next address may be the host's.
+                if (last.Reason is not ("mismatch" or "invalid")) return last;
+            }
+            catch (IOException) when (!ct.IsCancellationRequested) { }
+            catch (SocketException) when (!ct.IsCancellationRequested) { }
+        }
+        return last is { Reason: "invalid" } ? last : null;
     }
 }

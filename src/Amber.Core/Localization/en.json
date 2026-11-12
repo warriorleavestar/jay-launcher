@@ -1864,7 +1864,7 @@
   "core.mp.public.err_rate": "Publishing too often. This network asks you to wait a moment",
   "core.mp.public.err_busy": "The directory is busy right now. Jay will try again shortly.",
   "core.mp.public.err_clock": "This computer's clock is too far off from the directory's. Set the system time and try again.",
-  "core.mp.public.warn_lookup": "Too many other rooms already use this invite in the directory, so it can't find your room by this invite right now. Make a new invite",
+  "core.mp.public.warn_lookup": "Too many other rooms already use this room's invites in the directory, so others can't find it by invite right now. Closing and reopening the room gives it new invites",
   "core.mp.public.published_warning": "Published, but others can't find the room by invite for now: {0}",
   "core.mp.public.err_policy": "This network won't accept the room: {0}",
   "core.mp.public.no_address": "No address on the public network yet",

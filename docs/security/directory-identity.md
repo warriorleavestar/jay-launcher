@@ -12,7 +12,7 @@ A public network is an EasyTier network whose name and secret are public, so any
 
 The 2026-11-10 real-device test (finding 8) showed that EasyTier's DHCP handed the address `10.235.0.1` to an ordinary member while the directory was offline. Any member can also take the address on purpose with `--ipv4 10.235.0.1`. A machine holding the address can:
 
-- read every announce: room names, host fingerprints and knock addresses of public rooms. Hidden rooms only publish sealed entries (see zero-leak-codes.md, "Directory snapshot");
+- read every announce: room names, host fingerprints and knock addresses of every room, hidden rooms included (a hidden room's announce carries its signed listing, and says which index its sealed entries go under). Only readers of the snapshot see hidden rooms as sealed entries alone (see zero-leak-codes.md, "Directory snapshot");
 - answer `snap` and `find` with rooms it made up, which sends players to a knock port of the impostor's choosing (the knock handshake and the room's signed listing still stop impersonation of a specific host, but not phishing with fake rooms);
 - see login requests (the password is sealed to the network's login key, so it isn't exposed) and mail;
 - drop everything (denial of service).
