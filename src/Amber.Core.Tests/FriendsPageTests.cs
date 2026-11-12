@@ -329,25 +329,28 @@ public sealed class FriendsPageTests
         Assert.True(mp.Members.Single(m => m.Name == "Eve").Trusted);
         Assert.Equal("Eve", people.SelectedMet?.Name);
 
-        // "For a child" asks about every knock: the switch can still be turned off, and says why it does nothing.
+        // "For a child" lists nobody, people I've met included (every knock asks then anyway).
         service.Settings.ChildMode.SetEnabled(true, DateTimeOffset.UtcNow);
         mp.ApplyChildMode();
         Dispatcher.UIThread.RunJobs();
-        Assert.True(people.ShowKnocksAlwaysAsk);
-        Assert.True(people.CanChangeMetAutoAdmit);
+        Assert.False(people.HasMet);
+        Assert.False(people.HasList);
+        Assert.False(people.HasSelectedMet);
+        Assert.Null(people.SelectedMet);
         Assert.False(people.CanAddMet);
-        people.MetAutoAdmit = false;
-        Dispatcher.UIThread.RunJobs();
-        Assert.Empty(StraightIn(root));
-        Assert.False(mp.Members.Single(m => m.Name == "Eve").Trusted);
-        Assert.Equal("Eve", people.SelectedMet?.Name);
-        Assert.False(people.MetAutoAdmit);
-        Assert.False(people.CanChangeMetAutoAdmit);
+        Assert.True(people.ShowChildNote);
 
         service.Settings.ChildMode.SetEnabled(false, DateTimeOffset.UtcNow);
         mp.ApplyChildMode();
         Dispatcher.UIThread.RunJobs();
+        Assert.True(people.HasMet);
+        people.SelectedMet = people.MetPeople.Single();
         Assert.True(people.CanChangeMetAutoAdmit);
+        people.MetAutoAdmit = false;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(StraightIn(root));
+        Assert.False(mp.Members.Single(m => m.Name == "Eve").Trusted);
+        Assert.False(people.MetAutoAdmit);
         mp.LeaveTestRoom();
     });
 
@@ -565,6 +568,78 @@ public sealed class FriendsPageTests
         Assert.True(people.CanMessage);
         mp.OnlinePeers.Clear();
         Dispatcher.UIThread.RunJobs();
+    });
+
+    [Fact]
+    public void RemovingAFriendDeviceByDeviceLeavesNothingOfTheirAccountTrusted() => WithMain((service, main, people, root) =>
+    {
+        var mp = main.Multiplayer;
+        var me = mp.Identity.PublicKey;
+        using var bob = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        AddFriends(mp, Friend(1, "Bob", bob.Address));
+        people.Selected = people.Friends.Single();
+        people.AutoAdmit = true;
+        // His account went on the list before we were friends (he knocked from another computer).
+        mp.Trusted.Add(Key(7), "Bob", bob.Address);
+        Assert.False(mp.AccountMayAutoAdmit(bob.Address));
+
+        // A phone signed by his account, waiting for me to look at it.
+        using var phone = X25519KeyPair.Generate();
+        var phoneBook = new ContactBook(Path.Combine(root, "bob-phone.json"))
+            { Me = phone.PublicKey, MyCertificate = bob.CertifyDevice(phone.PublicKey, "Phone", 0, DateTimeOffset.UtcNow) };
+        var reply = mp.Contacts.Receive(phone.PublicKey, phoneBook.StartAdd(phone.PublicKey, me, "Bob")!, "Me");
+        if (reply is not null && phoneBook.Receive(me, reply, "Bob") is { } nonce) mp.Contacts.Receive(phone.PublicKey, nonce, "Me");
+        Dispatcher.UIThread.RunJobs();
+        var row = people.Selected!;
+        Assert.Equal(2, row.DeviceItems.Count);
+
+        // I remove his computer, then say the phone is not him.
+        mp.RemoveContactDeviceCommand.Execute(row.DeviceItems.Single(d => d.Device.PublicKey.AsSpan().SequenceEqual(Key(1))));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Single(people.Friends.Single().DeviceItems);
+        // The last device can't be removed on its own: that is removing the friend, which asks first.
+        mp.RemoveContactDeviceCommand.Execute(people.Friends.Single().DeviceItems.Single());
+        Assert.Single(people.Friends);
+        service.Requests.Resolve(service.Requests.Pending.Single(r => r.Spec.Kind == "contact-new-device"), "remove", RequestSource.Bar);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(people.Friends);
+
+        // Nothing under his account lets anyone in, the rejected phone least of all.
+        Assert.False(mp.AccountMayAutoAdmit(bob.Address));
+        Assert.DoesNotContain(StraightIn(root), m => string.Equals(m.JayAccount, bob.Address, StringComparison.OrdinalIgnoreCase));
+        Assert.False(mp.Trusted.IsTrusted(phone.PublicKey));
+    });
+
+    [Fact]
+    public void InSomeoneElsesRoomTheHostsListIsOnlyTheHostsWord() => WithMain((_, main, people, root) =>
+    {
+        var mp = main.Multiplayer;
+        main.Shell.Navigate("people");
+        AddFriends(mp, Friend(1, "Robin"));
+        mp.EnterTestRoom(HostRoom(mp), host: false);
+        mp.OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(MemberIdentity.FingerprintOf(Key(1)), Key(1), "Robin")));
+        mp.OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(MemberIdentity.FingerprintOf(Key(9)), Key(9), "Dana")));
+        Dispatcher.UIThread.RunJobs();
+
+        // My friend is there by the host's word: messages can go (to their key alone), and the row says whose word it is.
+        var row = people.Friends.Single();
+        Assert.Equal(FriendState.ListedInRoom, row.State);
+        Assert.True(row.IsHere);
+        Assert.Equal(L.T("people.state.listed_in_room"), row.StateText);
+        people.Selected = row;
+        Assert.True(people.CanMessage);
+
+        // Someone only the host lists can't be let straight in from here.
+        people.SelectedMet = people.MetPeople.Single();
+        Assert.False(people.SelectedMet!.Checked);
+        Assert.False(people.CanChangeMetAutoAdmit);
+        Assert.True(people.ShowMetUnchecked);
+        people.MetAutoAdmit = true;
+        mp.SetAutoAdmit(people.SelectedMet!, true);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(StraightIn(root));
+        mp.OnlinePeers.Clear();
+        mp.LeaveTestRoom();
     });
 
     [Fact]
