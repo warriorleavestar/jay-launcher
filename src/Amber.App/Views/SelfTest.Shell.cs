@@ -96,7 +96,8 @@ internal sealed partial class SelfTest
                         || !(char.IsAsciiLetter(text[i - 1]) && char.IsAsciiLetter(text[i]))), $"{text} 断在 {string.Join(",", breaks)}");
                     if (!window.SidebarHost.Classes.Contains("horizontal")) RailFooterCentered(tag, privacy, items);
                 }
-                Check($"外壳（{tag}）：返回按钮可点区域 ≥ 32", window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32);
+                Check($"外壳（{tag}）：返回按钮只在有地方可回时出现，出现时可点区域 ≥ 32", window.BackButton.IsEffectivelyVisible == shell.CanGoBack
+                    && (!shell.CanGoBack || window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32));
                 await ShotAsync($"shell-{lang}-{w}x{h}");
             }
         }
@@ -205,10 +206,11 @@ internal sealed partial class SelfTest
         // 切到发现再切回：回到离开时的位置。
         shell.GoSectionCommand.Execute("discover");
         await Task.Delay(300);
-        Check("切到发现时返回按钮不能点（发现还没有历史）", !window.BackButton.IsEnabled);
+        Check("切到发现时不显示返回按钮（发现还没有历史）", !window.BackButton.IsEffectivelyVisible);
         shell.GoSectionCommand.Execute("library");
         await Task.Delay(300);
         Check("切回游戏库，回到离开时的实例详情", main.CurrentPage is InstanceViewModel);
+        Check("有历史时显示返回按钮，可点区域 ≥ 32", window.BackButton.IsEffectivelyVisible && window.BackButton.Bounds.Width >= 32 && window.BackButton.Bounds.Height >= 32);
         window.BackButton.Command?.Execute(null);
         await Task.Delay(300);
         Check("顶栏 ← 按钮返回", main.CurrentPage is DownloadViewModel);
