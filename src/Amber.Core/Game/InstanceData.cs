@@ -237,8 +237,11 @@ public static class ServerList
             linked.CancelAfter(timeout ?? TimeSpan.FromSeconds(5));
             var (host, port) = ParseAddress(address);
             using var tcp = new TcpClient();
-            await tcp.ConnectAsync(host, port, linked.Token).ConfigureAwait(false);
-            using var stream = tcp.GetStream();
+            // A world on this computer may be a game in the strong sandbox, reached through its LAN bridge.
+            using var stream = host == "127.0.0.1"
+                ? new NetworkStream(await Multiplayer.GameLanBridge.ConnectAsync(port, Timeout.InfiniteTimeSpan, linked.Token).ConfigureAwait(false)
+                    ?? throw new SocketException((int)SocketError.ConnectionRefused), ownsSocket: true)
+                : await ConnectAsync(tcp, host, port, linked.Token).ConfigureAwait(false);
 
             var handshake = new MemoryStream();
             WriteVarInt(handshake, 0x00);
@@ -279,6 +282,12 @@ public static class ServerList
         {
             if (acquired) PingSlots.Release();
         }
+    }
+
+    private static async Task<NetworkStream> ConnectAsync(TcpClient tcp, string host, int port, CancellationToken ct)
+    {
+        await tcp.ConnectAsync(host, port, ct).ConfigureAwait(false);
+        return tcp.GetStream();
     }
 
     // 状态包很小；先限制完整帧，再在帧内验证 ID 和字符串长度，绝不按内层声明另行分配。

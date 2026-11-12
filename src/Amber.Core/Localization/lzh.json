@@ -3073,6 +3073,7 @@
   "core.launch.sandbox.win.container_failed": "Jay 未能建戲之器（{0}）。戲未啟。",
   "core.launch.sandbox.win.adopt_failed": "此 .NET 之版不容 Jay 啟沙盒之戲。戲未啟，請報之。",
   "core.launch.sandbox.win.no_dns": "Java {0} 於固沙盒不得查名，此番用常沙盒。",
+  "core.launch.sandbox.win.no_lan_bridge": "此版無局域之橋：固沙盒中所開之界，房中人不得入。",
   "core.launch.sandbox.win.parents_closed": "固沙盒須為「{0}」復行管者之步（新戲夾或 Java），此番用常沙盒。可於 設 › 私與安 › 復試固沙盒。",
   "core.launch.sandbox.win.reason.refused": "汝未許管者之確。",
   "core.launch.sandbox.win.reason.no_admin": "此 Windows 之籍無管者之權。",

@@ -3208,6 +3208,7 @@
   "core.launch.sandbox.win.container_failed": "Jay 没能建好游戏容器（{0}）。游戏没有启动。",
   "core.launch.sandbox.win.adopt_failed": "这个 .NET 版本不让 Jay 启动沙盒里的游戏。游戏没有启动，请反馈这个问题。",
   "core.launch.sandbox.win.no_dns": "Java {0} 在强沙盒里查不了域名，这次用标准沙盒。",
+  "core.launch.sandbox.win.no_lan_bridge": "这个版本没有带局域网中转：强沙盒里对局域网开放的世界，房间里的人连不进来。",
   "core.launch.sandbox.win.parents_closed": "强沙盒需要为“{0}”再做一次管理员步骤（新的游戏文件夹或 Java），这次用标准沙盒。可在 设置 › 隐私与安全 › 重试强沙盒。",
   "core.launch.sandbox.win.reason.refused": "你没有同意管理员确认。",
   "core.launch.sandbox.win.reason.no_admin": "这个 Windows 账户没有管理员权限。",

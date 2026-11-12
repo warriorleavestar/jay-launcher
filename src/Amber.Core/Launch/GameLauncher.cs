@@ -466,6 +466,17 @@ public sealed class GameLauncher(GameDirectory dir)
                         for (var i = 0; i < dns.Count; i++) psi.ArgumentList.Insert(i, dns[i]);
                     if (jar is not null) extraReadOnly.Add(jar);
                 }
+                // Windows drops loopback connections into the container, so a room cannot reach the world opened to
+                // LAN; the bridge agent connects out to Jay instead (see GameLanBridge).
+                if (windowsLevel == WindowsSandboxLevel.Strong)
+                {
+                    if (WindowsSandbox.LanBridgeJar(Path.Combine(dir.Root, "libraries", "jay", "jay-lan")) is { } lan)
+                    {
+                        psi.ArgumentList.Insert(0, Multiplayer.GameLanBridge.AgentArgument(lan));
+                        extraReadOnly.Add(lan);
+                    }
+                    else onOutput?.Invoke(L.T("core.launch.sandbox.win.no_lan_bridge"));
+                }
             }
             if (windowsLevel == WindowsSandboxLevel.Standard && WindowsSandbox.SocketFolder(workDir) is { } sockets)
                 psi.ArgumentList.Insert(0, "-Djdk.net.unixdomain.tmpdir=" + sockets);

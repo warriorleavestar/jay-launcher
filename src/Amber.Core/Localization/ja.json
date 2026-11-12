@@ -3208,6 +3208,7 @@
   "core.launch.sandbox.win.container_failed": "Jay はゲーム用コンテナーを準備できませんでした（{0}）。ゲームは起動していません。",
   "core.launch.sandbox.win.adopt_failed": "この .NET のバージョンでは Jay がサンドボックス内のゲームを起動できません。ゲームは起動していません。この問題を報告してください。",
   "core.launch.sandbox.win.no_dns": "Java {0} は強いサンドボックス内で名前解決ができないため、今回は標準サンドボックスを使います。",
+  "core.launch.sandbox.win.no_lan_bridge": "このビルドには LAN ブリッジがないため、強いサンドボックス内で LAN に公開したワールドにはルームから接続できません。",
   "core.launch.sandbox.win.parents_closed": "強いサンドボックスには「{0}」のためにもう一度管理者の手順が必要です（新しいゲームフォルダーまたは Java）。今回は標準サンドボックスを使います。設定 › プライバシーとセキュリティ › 強いサンドボックスをもう一度試す。",
   "core.launch.sandbox.win.reason.refused": "管理者の確認を許可しませんでした。",
   "core.launch.sandbox.win.reason.no_admin": "この Windows アカウントには管理者権限がありません。",

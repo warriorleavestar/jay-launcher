@@ -1184,17 +1184,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private static async Task<bool> CanConnectAsync(int port)
     {
-        using var client = new TcpClient();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        try
-        {
-            await client.ConnectAsync("127.0.0.1", port, timeout.Token);
-            return true;
-        }
-        catch (Exception e) when (e is SocketException or OperationCanceledException)
-        {
-            return false;
-        }
+        // Through the game's LAN bridge when the port is a game in the strong sandbox's, else directly.
+        using var socket = await GameLanBridge.ConnectAsync(port, TimeSpan.FromSeconds(2));
+        return socket is not null;
     }
 
     /// <summary>复制房间码、邀请码、直连码用的剪贴板：5 分钟后自动清掉（换台电脑粘贴也来得及）（自检里换成短一点的）。</summary>
