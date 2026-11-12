@@ -120,6 +120,27 @@ public sealed class UpdateNotifierTests : IDisposable
     }
 
     [Fact]
+    public void OnForANewInstallKeptOffWhenUpgrading()
+    {
+        Assert.True(new AppSettings().AutoUpdateCheck);
+        Assert.True(AppSettings.Load(Path.Combine(_dir, "none.json"), File.ReadAllText).AutoUpdateCheck);
+
+        // A settings file written by a Jay without the switch: that Jay never checked by itself, so neither does this one.
+        var old = Path.Combine(_dir, "old.json");
+        File.WriteAllText(old, """{"GameDirectory":"x"}""");
+        Assert.False(AppSettings.Load(old, File.ReadAllText).AutoUpdateCheck);
+
+        // Once the user sets it, it is kept either way.
+        foreach (var on in new[] { true, false })
+        {
+            var saved = new AppSettings { AutoUpdateCheck = on, SavePathForTest = Path.Combine(_dir, $"saved-{on}.json") };
+            saved.Save();
+            Assert.Contains("\"AutoUpdateCheck\"", File.ReadAllText(saved.SavePathForTest));
+            Assert.Equal(on, AppSettings.Load(saved.SavePathForTest, File.ReadAllText).AutoUpdateCheck);
+        }
+    }
+
+    [Fact]
     public async Task AFailedCheckWaitsADayToo()
     {
         var down = new FakeHttp(); // every address answers 404

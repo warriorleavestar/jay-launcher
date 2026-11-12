@@ -38,6 +38,9 @@ internal sealed partial class SelfTest
             Check("“关于和隐私”有自己的页，路由 about", main.CurrentPage is AboutViewModel && main.Shell.Title == L.T("about.title"));
             Check("整页是锁定的安全外观，开头是“Jay 安全提示”", Dispatcher.UIThread.Invoke(() => page.Surface is SafetySurface
                 && page.Promise.BadgeText == L.T("safety.title") && page.Surface.Bounds.Width <= 641), Dispatcher.UIThread.Invoke(() => page.Surface.Bounds.Width.ToString("0")));
+            // The test profile may be an upgraded one (daily check kept off): start from a new install's default.
+            AppSettingsAutoUpdate = true;
+            about.Refresh();
             Check("联网清单正好 5 类，编号 1–5", about.List.Rows.Select(r => r.Number).SequenceEqual(["1", "2", "3", "4", "5"]));
             Check("现在的状态：没登录、每天自动检查更新、没在联机", about.List.Rows[1].Status == L.T("about.net.login.none")
                 && about.List.Rows[3].Status == L.T("about.net.update.auto") && about.List.Rows[4].Status == L.T("about.net.play.idle"),

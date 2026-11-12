@@ -78,8 +78,20 @@ public sealed class AppSettings
     /// <summary>Update feed. Blank means the official Jay releases (<see cref="Amber.Core.Launch.AutoUpdateCheck.OfficialFeed"/>).</summary>
     public string? UpdateFeedUrl { get; set; }
 
-    /// <summary>Check the update feed once a day and tell the user about a signed newer version. Jay never downloads it.</summary>
-    public bool AutoUpdateCheck { get; set; } = true;
+    /// <summary>
+    /// Check the update feed once a day and tell the user about a signed newer version. Jay never downloads it.
+    /// On for a new install; a settings file from before this switch existed keeps the old behaviour (off).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool AutoUpdateCheck
+    {
+        get => AutoUpdateCheckSaved ?? true;
+        set => AutoUpdateCheckSaved = value;
+    }
+
+    /// <summary>The saved switch; null in a fresh install and in settings files written before it existed.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("AutoUpdateCheck")]
+    public bool? AutoUpdateCheckSaved { get; set; }
 
     /// <summary>When the automatic update check last ran (successfully or not).</summary>
     public DateTimeOffset? LastUpdateCheck { get; set; }
@@ -260,7 +272,12 @@ public sealed class AppSettings
             try
             {
                 if (File.Exists(path))
-                    return JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
+                {
+                    var loaded = JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
+                    // Upgraded from a Jay without the daily update check: keep it off, as that Jay never checked by itself.
+                    loaded.AutoUpdateCheckSaved ??= false;
+                    return loaded;
+                }
                 return new AppSettings { IsFresh = true };
             }
             catch (JsonException)
@@ -275,7 +292,7 @@ public sealed class AppSettings
                 // Locked by a sync client or antivirus: retry briefly, then run on defaults without
                 // ever saving over the real file (ReadOnly), so nothing the user set is lost.
                 if (attempt < 3) { Thread.Sleep(200); continue; }
-                return new AppSettings { ReadOnly = true };
+                return new AppSettings { ReadOnly = true, AutoUpdateCheckSaved = false };
             }
         }
     }

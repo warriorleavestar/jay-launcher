@@ -188,7 +188,7 @@ Jay is built on a simple promise: **it only goes online to do what you asked**, 
 
 - **No telemetry.** Jay collects no usage data and creates no device ID.
 - **No remote control.** No remote switch or cloud config can change what Jay does.
-- **Updates are up to you.** Once a day Jay asks the official releases for a new version and tells you only when 2 of the 3 trustees signed it. It never downloads or installs anything by itself, and you can turn the check off in Settings › About.
+- **Updates are up to you.** Once a day Jay asks the official releases for a new version (new installs; an upgraded Jay keeps it off until you turn it on) and tells you only when 2 of the 3 trustees signed it. It never downloads or installs anything by itself, and you can turn the check off in Settings › About.
 - **No Jay servers in the middle.** Room codes are generated on your computer. Multiplayer connects only to the relay nodes listed on the Multiplayer page (you can turn the built-in ones off or add your own) and to the players in your room.
 
 <details>
