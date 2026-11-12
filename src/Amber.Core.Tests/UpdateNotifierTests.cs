@@ -21,8 +21,12 @@ public sealed class UpdateNotifierTests : IDisposable
 
     public UpdateNotifierTests() => Directory.CreateDirectory(_dir);
 
+    /// <summary>Every notifier a test made: they listen to a static event, so each one is let go after its test.</summary>
+    private readonly List<UpdateNotifier> _notifiers = [];
+
     public void Dispose()
     {
+        foreach (var notifier in _notifiers) notifier.Dispose();
         try { Directory.Delete(_dir, true); } catch (IOException) { }
     }
 
@@ -46,17 +50,19 @@ public sealed class UpdateNotifierTests : IDisposable
 
     private readonly List<string> _opened = [];
 
-    private (LauncherService Service, UpdateNotifier Notifier) Make(FakeHttp http, Action<AppSettings>? setup = null)
+    private (LauncherService Service, UpdateNotifier Notifier) Make(HttpMessageHandler http, Action<AppSettings>? setup = null)
     {
         // Settings.Save() goes to AppSettings.FilePath, which TestDataDir points at a temporary folder for the whole test run.
         var settings = new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "", UpdateFeedUrl = Feed };
         setup?.Invoke(settings);
         var service = new LauncherService(settings);
-        return (service, new UpdateNotifier(service, () => _now, new HttpClient(http), Path.Combine(_dir, "data"), Own, url =>
+        var notifier = new UpdateNotifier(service, () => _now, new HttpClient(http), Path.Combine(_dir, "data"), Own, url =>
         {
             _opened.Add(url);
             return null;
-        }));
+        });
+        _notifiers.Add(notifier);
+        return (service, notifier);
     }
 
     private static RequestHandle? Notice(LauncherService service) => service.Requests.Pending.SingleOrDefault(r => r.Spec.Kind == UpdateNotifier.RequestKind);
@@ -158,7 +164,7 @@ public sealed class UpdateNotifierTests : IDisposable
         var feed = new SwitchingHttp(Release([T[0], T[1]]));
         var settings = new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "", UpdateFeedUrl = Feed };
         using var service = new LauncherService(settings);
-        var notifier = new UpdateNotifier(service, () => now, new HttpClient(feed), Path.Combine(_dir, "data"), Own, url =>
+        using var notifier = new UpdateNotifier(service, () => now, new HttpClient(feed), Path.Combine(_dir, "data"), Own, url =>
         {
             _opened.Add(url);
             return null;
@@ -195,6 +201,30 @@ public sealed class UpdateNotifierTests : IDisposable
         UpdateNotifier.RaiseSwitched(false);
         Assert.True(notice.IsResolved);
         Assert.Null(Notice(service));
+    }
+
+    [Fact]
+    public async Task TurningTheCheckOffWhileTheFeedAnswersPostsNothing()
+    {
+        var gate = new TaskCompletionSource();
+        var (service, notifier) = Make(new SlowHttp(Release([T[0], T[2]]), gate.Task));
+        using var _ = service;
+        var check = notifier.CheckIfDueAsync();
+        service.Settings.AutoUpdateCheck = false;
+        UpdateNotifier.RaiseSwitched(false);
+        gate.SetResult();
+        Assert.False(await check);
+        Assert.Null(Notice(service));
+    }
+
+    /// <summary>A feed that holds every answer until <paramref name="gate"/> opens.</summary>
+    private sealed class SlowHttp(FakeHttp inner, Task gate) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            await gate.WaitAsync(ct);
+            return await new HttpMessageInvoker(inner, disposeHandler: false).SendAsync(request, ct);
+        }
     }
 
     [Fact]

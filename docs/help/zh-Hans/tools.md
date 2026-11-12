@@ -16,4 +16,4 @@ related: settings
 - 试着下载一个文件：在联机页打开“连接有问题？”，展开**下载文件**。
 
 ## 出问题了
-- 检查更新默认查 Jay 官方发布页，也可以在 [设置 › 下载与服务](jay:settings#UpdateFeed) 换成自己的地址。Jay 每天也会自己查一次，可以在 [设置 › 关于](jay:settings#AutoUpdate) 关掉。只提示信任人签过名的新版本，从不自动下载。
+- 检查更新默认查 Jay 官方发布页，也可以在 [设置 › 下载与服务](jay:settings#UpdateFeed) 换成自己的地址。新装的 Jay 每天也会自己查一次（从旧版升级的保持关闭，要自己打开），可以在 [设置 › 关于](jay:settings#AutoUpdate) 开关。只提示信任人签过名的新版本，从不自动下载。

@@ -48,6 +48,30 @@ public sealed class AutoUpdateCheckTests
     }
 
     [Fact]
+    public void AGitHubForkFeedGetsItsPageFromTheVerifiedTag()
+    {
+        const string fork = "https://api.github.com/repos/some-one/jay.fork_1/releases/latest";
+        Assert.Equal("https://github.com/some-one/jay.fork_1/releases/tag/v1.2.3",
+            AutoUpdateCheck.ReleasePage(fork, Signed("https://phishing.example.test/jay")));
+        Assert.Equal("https://github.com/some-one/jay.fork_1/releases/tag/v1%2F..%2Fx", AutoUpdateCheck.ReleasePage(fork, Signed(null, "v1/../x")));
+        Assert.Null(AutoUpdateCheck.ReleasePage(fork, Signed(null, verdict: ReleaseVerdict.NotEnoughSignatures)));
+    }
+
+    [Theory]
+    [InlineData("https://api.github.com/repos/o/r/releases/latest", "https://github.com/o/r/releases/tag/")]
+    [InlineData("https://api.github.com/repos/o/r/releases/latest/", "https://github.com/o/r/releases/tag/")]
+    [InlineData("http://api.github.com/repos/o/r/releases/latest", null)]
+    [InlineData("https://api.github.com:8443/repos/o/r/releases/latest", null)]
+    [InlineData("https://api.github.com/repos/o/r/releases/latest?x=1", null)]
+    [InlineData("https://api.github.com/repos/o/r/releases", null)]
+    [InlineData("https://api.github.com/repos/o/r/releases/tags/v1", null)]
+    [InlineData("https://api.github.com/repos/o/%2E%2E/releases/latest", null)]
+    [InlineData("https://api.github.com/repos/o/r%40x/releases/latest", null)]
+    [InlineData("https://api.github.com.evil.test/repos/o/r/releases/latest", null)]
+    [InlineData("https://mirror.example.test/repos/o/r/releases/latest", null)]
+    public void RecognisesGitHubReleaseFeeds(string feed, string? pages) => Assert.Equal(pages, AutoUpdateCheck.GitHubReleasePages(feed));
+
+    [Fact]
     public void ChecksOnceADay()
     {
         var now = DateTimeOffset.UtcNow;

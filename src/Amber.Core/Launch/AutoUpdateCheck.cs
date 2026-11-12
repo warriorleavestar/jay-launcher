@@ -26,12 +26,14 @@ public static class AutoUpdateCheck
     /// <summary>
     /// The download page to offer for a verified release, or null when there is none Jay can vouch for. The signatures
     /// cover the tag but not the feed's <c>html_url</c>, so for the official feed the page is built from the verified tag
-    /// alone; for the user's own feed its page is used only when it is HTTPS on the feed's own host.
+    /// alone, and so is it for another GitHub repository's <c>releases/latest</c> feed (a fork). For any other feed of
+    /// the user's own its page is used only when it is HTTPS on the feed's own host.
     /// </summary>
     public static string? ReleasePage(string feed, VerifiedUpdate update)
     {
         if (!update.IsVerified || update.Check.Tag is not { Length: > 0 } tag) return null;
         if (IsOfficial(feed)) return OfficialReleasePages + Uri.EscapeDataString(tag);
+        if (GitHubReleasePages(feed) is { } pages) return pages + Uri.EscapeDataString(tag);
         if (update.Info.Url is null || !Uri.TryCreate(feed, UriKind.Absolute, out var feedUri)
             || !UpdateChecker.TryGetSafeUpdateUrl(update.Info.Url, out var page)) return null;
         return page!.Scheme == Uri.UriSchemeHttps && string.Equals(page.IdnHost, feedUri.IdnHost, StringComparison.OrdinalIgnoreCase)
@@ -43,6 +45,25 @@ public static class AutoUpdateCheck
         Uri.TryCreate(feed.Trim(), UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.Query.Length == 0 && uri.Fragment.Length == 0
         && string.Equals(uri.IdnHost, new Uri(OfficialFeed).IdnHost, StringComparison.OrdinalIgnoreCase)
         && string.Equals(uri.AbsolutePath.TrimEnd('/'), new Uri(OfficialFeed).AbsolutePath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// For a GitHub API feed <c>https://api.github.com/repos/{owner}/{repo}/releases/latest</c>, that repository's release
+    /// pages (<c>https://github.com/{owner}/{repo}/releases/tag/</c>); otherwise null.
+    /// </summary>
+    public static string? GitHubReleasePages(string feed)
+    {
+        if (!Uri.TryCreate(feed.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort
+            || uri.Query.Length != 0 || uri.Fragment.Length != 0 || uri.UserInfo.Length != 0
+            || !string.Equals(uri.IdnHost, "api.github.com", StringComparison.OrdinalIgnoreCase)) return null;
+        var parts = uri.AbsolutePath.Trim('/').Split('/');
+        if (parts.Length != 5 || !string.Equals(parts[0], "repos", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(parts[3], "releases", StringComparison.OrdinalIgnoreCase) || !string.Equals(parts[4], "latest", StringComparison.OrdinalIgnoreCase)
+            || !IsGitHubName(parts[1]) || !IsGitHubName(parts[2])) return null;
+        return $"https://github.com/{parts[1]}/{parts[2]}/releases/tag/";
+    }
+
+    private static bool IsGitHubName(string name) =>
+        name.Length is > 0 and <= 100 && name is not "." and not ".." && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
 
     /// <summary>Whether a newer version should be shown again: not when the user already dismissed this version.</summary>
     public static bool ShouldNotify(string version, string? dismissedVersion) =>

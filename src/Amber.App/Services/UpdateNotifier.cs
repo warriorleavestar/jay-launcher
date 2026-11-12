@@ -12,7 +12,7 @@ namespace Amber.App.Services;
 /// signed it; unsigned or failed checks stay silent (Settings › About › Check for updates says why). The notice only
 /// opens the release page: Jay never downloads or installs an update by itself.
 /// </summary>
-internal sealed class UpdateNotifier
+internal sealed class UpdateNotifier : IDisposable
 {
     internal const string RequestKind = "update";
     private static readonly TimeSpan FirstDelay = TimeSpan.FromMinutes(1);
@@ -42,6 +42,13 @@ internal sealed class UpdateNotifier
         _trust = trust;
         service.Requests.Resolved += OnResolved;
         Switched += OnSwitched;
+    }
+
+    /// <summary>Stops listening to the request bar and the settings switch (Jay keeps its one notifier for the whole run).</summary>
+    public void Dispose()
+    {
+        _service.Requests.Resolved -= OnResolved;
+        Switched -= OnSwitched;
     }
 
     /// <summary>Settings › About's checkbox changed (raised by the settings page).</summary>
@@ -111,6 +118,8 @@ internal sealed class UpdateNotifier
             }
             if (update is not { IsVerified: true }) return false;
             if (!AutoUpdateCheck.ShouldNotify(update.Info.Version, settings.SkippedUpdateVersion)) return false;
+            // The switch may have been turned off while the feed was answering.
+            if (!settings.AutoUpdateCheck) return false;
             Offer(update.Info.Version, AutoUpdateCheck.ReleasePage(feed, update));
             return true;
         }
