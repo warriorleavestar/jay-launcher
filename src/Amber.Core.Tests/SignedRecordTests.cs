@@ -144,7 +144,32 @@ public class SignedRecordTests
             server.Handle(PutOp(signer.Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now)), source);
         for (var i = 0; i < RoomDirectoryServer.MaxRecordPutsPerSource; i++) Assert.True(PutFrom("10.235.0.9")["ok"]?.GetValue<bool>());
         Assert.Equal("rate", PutFrom("10.235.0.9")["error"]?.GetValue<string>());
+        // Another source gets its own allowance, but the signer has used up its hour.
+        Assert.Equal("rate", PutFrom("10.235.0.10")["error"]?.GetValue<string>());
+        signer = new RecordSigner();
         Assert.True(PutFrom("10.235.0.10")["ok"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task LoopbackCallersShareNoSourceAllowanceButTheDirectoryHasABudget()
+    {
+        var now = DateTimeOffset.UtcNow;
+        using var key = X25519KeyPair.Generate();
+        await using var server = Server(key, () => now);
+        // Connections handed over by EasyTier come from loopback: they arrive with no source, so one caller can't use up
+        // a shared per-source allowance. The directory-wide budget still caps how fast records come in.
+        var accepted = 0;
+        for (var i = 0; i < RoomDirectoryServer.MaxRecordPutsPerMinute; i++)
+        {
+            var record = new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now);
+            if (server.Handle(PutOp(record), source: null)["ok"]?.GetValue<bool>() == true) accepted++;
+        }
+        Assert.Equal(RoomDirectoryServer.MaxRecordPutsPerMinute, accepted);
+        var late = new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now);
+        Assert.Equal("rate", server.Handle(PutOp(late), source: null)["error"]?.GetValue<string>());
+        now += TimeSpan.FromMinutes(1.1);
+        late = new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now);
+        Assert.True(server.Handle(PutOp(late), source: null)["ok"]?.GetValue<bool>());
     }
 
     [Fact]

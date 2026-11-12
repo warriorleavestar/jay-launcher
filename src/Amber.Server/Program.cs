@@ -71,6 +71,8 @@ public static class Program
               --admin-port 47669 / --no-admin 本机管理接口（只听 127.0.0.1，口令在数据目录的 admin.token；/health 不用口令）
               --seed-only                     只当种子节点帮忙转发（分地区多开几台），不跑目录
               --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
+              --relay-limit-kbps 2048         经这台节点转发别的网络（房间）时，每个网络最多多少 KB/s（默认不限；公共网络本身不受限）
+              --relay-networks "<名字> ..."   只给这些 EasyTier 网络转发（空格分开，可用 * 通配；默认全部）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
           jay-server node status|rooms|bans|nodes  看运行中节点的计数、公开房间、封禁名单、志愿中转
@@ -808,13 +810,20 @@ public static class Program
         if (options.Has("secure-directory-only")) log("--secure-directory-only is the default now and can be removed");
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
         if (options.Has("no-volunteers")) builder.WithoutVolunteers();
-        else if (options.Get("rate-limit") is { } rate)
+        if (options.Get("rate-limit") is { } rate)
         {
             var parts = rate.Split(',', StringSplitOptions.TrimEntries);
             if (parts.Length != 3 || !parts.All(p => int.TryParse(p, out var n) && n > 0))
                 throw new ArgumentException("--rate-limit 格式是 <每人同时几个房间>,<每人每分钟新发布几次>,<整个目录每分钟几个新房间>，比如 3,6,600");
             var n = parts.Select(int.Parse).ToArray();
             builder.UseRateLimit(n[0], n[1], n[2]);
+        }
+        if (options.Get("relay-limit-kbps") is not null || options.Get("relay-networks") is not null)
+        {
+            var kbps = options.GetInt("relay-limit-kbps", 0);
+            if (kbps < 0) throw new ArgumentException("--relay-limit-kbps must be 0 or more");
+            builder.UseRelayLimits(kbps, options.Get("relay-networks"));
+            log($"relaying other networks: {(kbps > 0 ? $"at most {kbps} KB/s each" : "no bandwidth limit")}, {options.Get("relay-networks") ?? "all networks"}");
         }
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));

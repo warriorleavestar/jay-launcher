@@ -333,6 +333,28 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task MailPostsHaveADirectoryWideBudget()
+    {
+        var server = StartDirectory();
+        var accepted = 0;
+        for (var i = 0; i < RoomDirectoryServer.MaxMailPostsPerMinute; i++)
+        {
+            var post = new System.Text.Json.Nodes.JsonObject
+            {
+                ["op"] = "post", ["box"] = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
+                ["blob"] = Convert.ToBase64String([(byte)i, 1]), ["drop"] = SealedMail.DropHash(new byte[16]),
+            };
+            if (server.Handle(post)["ok"]?.GetValue<bool>() == true) accepted++;
+        }
+        Assert.Equal(RoomDirectoryServer.MaxMailPostsPerMinute, accepted);
+        var client = new RoomDirectoryClient(new Loopback(server.Port));
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.PostMailAsync(new string('d', 32), [9, 9], SealedMail.DropHash(new byte[16]), default));
+        Assert.Equal("rate", e.Code);
+        _now += TimeSpan.FromMinutes(1.1);
+        await client.PostMailAsync(new string('d', 32), [9, 9], SealedMail.DropHash(new byte[16]), default);
+    }
+
+    [Fact]
     public async Task FetchPagesThroughAFullMailbox()
     {
         var server = StartDirectory();

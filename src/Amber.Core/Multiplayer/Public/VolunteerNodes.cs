@@ -163,6 +163,16 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     public static readonly TimeSpan CheckSameAddressEvery = TimeSpan.FromSeconds(10);
 
     private readonly Queue<DateTimeOffset> _checks = new();
+
+    /// <summary>New addresses the whole directory takes per minute ("volunteer" op; renewals of known ones don't count).</summary>
+    public const int RegistrationsPerMinute = 60;
+
+    /// <summary>Entries one host (IP or domain name) may have, whatever the port.</summary>
+    public const int MaxPerHost = 2;
+
+    private readonly Queue<DateTimeOffset> _registrations = new();
+
+    private static string HostOf(string normalized) => new Uri(normalized).Host;
     private readonly Dictionary<string, DateTimeOffset> _lastCheck = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -203,6 +213,14 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             if (!_entries.TryGetValue(address, out var entry))
             {
                 if (_entries.Count >= MaxEntries) return Error("full");
+                // Each new address costs the directory an outgoing connection, so new addresses are rate limited for
+                // the whole directory and capped per host: registering can't be used to make the directory dial
+                // many ports of one machine, or many machines in a burst.
+                while (_registrations.Count > 0 && now - _registrations.Peek() > TimeSpan.FromMinutes(1)) _registrations.Dequeue();
+                if (_registrations.Count >= RegistrationsPerMinute) return Error("rate");
+                var host = HostOf(address);
+                if (_entries.Keys.Count(k => HostOf(k) == host) >= MaxPerHost) return Error("rate");
+                _registrations.Enqueue(now);
                 _entries[address] = entry = new Entry();
             }
             entry.Seen = now;

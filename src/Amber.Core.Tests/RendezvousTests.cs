@@ -119,6 +119,19 @@ public class RendezvousTests
     }
 
     [Fact]
+    public async Task PutsHaveADirectoryWideBudget()
+    {
+        var now = DateTimeOffset.UtcNow;
+        using var key = X25519KeyPair.Generate();
+        await using var server = Server(key, () => now);
+        JsonObject PutOne() => server.Handle(Put(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)), "AAAA"), source: null);
+        for (var i = 0; i < RoomDirectoryServer.MaxRendezvousPutsPerMinute; i++) Assert.True(PutOne()["ok"]?.GetValue<bool>());
+        Assert.Equal("rate", PutOne()["error"]?.GetValue<string>());
+        now += TimeSpan.FromMinutes(1.1);
+        Assert.True(PutOne()["ok"]?.GetValue<bool>());
+    }
+
+    [Fact]
     public void SealOpensOnlyWithTheSameToken()
     {
         var token = RandomNumberGenerator.GetBytes(16);

@@ -81,6 +81,20 @@ public sealed class JayNetworkServerBuilder
     /// <summary>只当种子节点（帮忙转发、分担地区流量），不跑房间目录。一个网络里只能有一个目录节点（它占着 10.235.0.1）。</summary>
     public JayNetworkServerBuilder SeedOnly() { SeedOnlyMode = true; return this; }
 
+    internal RelayLimits? Relay;
+
+    /// <summary>
+    /// Limits relaying other EasyTier networks (rooms) through this node: at most <paramref name="kbpsPerNetwork"/> KB/s
+    /// for any one network (0 = no limit), and only networks matching <paramref name="networks"/> (EasyTier's relay
+    /// whitelist; null = all). This node's own public network is never limited.
+    /// </summary>
+    public JayNetworkServerBuilder UseRelayLimits(int kbpsPerNetwork, string? networks = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(kbpsPerNetwork);
+        Relay = new RelayLimits(kbpsPerNetwork, networks);
+        return this;
+    }
+
     /// <summary>
     /// 第几个目录节点：1 是主目录（10.235.0.1），2–4 是备用（10.235.0.2–4）。Jay 把房间发给每个在线的目录、合并列表，
     /// 所以一台挂了别的照常。备用节点要和主节点用同样的网络配置、屏蔽词，开账号登录时用同一份 login.key 和账号表（或同一个 IAccountStore）。
@@ -322,7 +336,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             (core, cli) = (installer.CorePath, installer.CliPath);
         }
         var options = new PublicNetworkOptions(Profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: !_b.SeedOnlyMode,
-            Listeners: [$"tcp://0.0.0.0:{_b.ListenPort}", $"udp://0.0.0.0:{_b.ListenPort}"], DirectoryIndex: _b.DirectoryIndex);
+            Listeners: [$"tcp://0.0.0.0:{_b.ListenPort}", $"udp://0.0.0.0:{_b.ListenPort}"], DirectoryIndex: _b.DirectoryIndex, Relay: _b.Relay);
         _network = PublicNetworkSession.Start(core, cli, options, Path.Combine(_b.DataDir, "public-node"));
     }
 

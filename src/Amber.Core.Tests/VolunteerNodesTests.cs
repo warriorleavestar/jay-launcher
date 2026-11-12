@@ -104,6 +104,8 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         var registry = new VolunteerRegistry((_, _) => Task.FromResult(true), () => _now);
         for (var i = 0; i < VolunteerRegistry.MaxEntries; i++)
         {
+            // New addresses are rate limited for the whole directory.
+            _now += TimeSpan.FromSeconds(1.1);
             Assert.True(Ok(registry.Register($"tcp://node{i}.example.org:11010")));
             await registry.LastProbe;
         }
@@ -112,6 +114,29 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         Assert.Equal(VolunteerRegistry.MaxEntries, registry.Listed().Count);
         Assert.True(registry.Remove("tcp://node0.example.org:11010"));
         Assert.True(Ok(registry.Register("tcp://one-more.example.org:11010")));
+    }
+
+    [Fact]
+    public async Task NewAddressesAreRateLimitedAndCappedPerHost()
+    {
+        var registry = new VolunteerRegistry((_, _) => Task.FromResult(true), () => _now);
+        // One host can't make the directory dial many of its ports.
+        for (var port = 11010; port < 11010 + VolunteerRegistry.MaxPerHost; port++)
+        {
+            Assert.True(Ok(registry.Register($"tcp://8.8.8.8:{port}")));
+            await registry.LastProbe;
+        }
+        Assert.Equal("rate", registry.Register("tcp://8.8.8.8:12000")["error"]!.GetValue<string>());
+        // Renewing a known address is never limited.
+        Assert.True(Ok(registry.Register("tcp://8.8.8.8:11010")));
+        // A burst of new hosts is cut off at the per-minute budget, then let through again a minute later.
+        var accepted = VolunteerRegistry.MaxPerHost;
+        for (var i = 0; accepted < VolunteerRegistry.RegistrationsPerMinute; i++, accepted++)
+            Assert.True(Ok(registry.Register($"tcp://burst{i}.example.org:11010")));
+        Assert.Equal("rate", registry.Register("tcp://late.example.org:11010")["error"]!.GetValue<string>());
+        _now += TimeSpan.FromMinutes(1.1);
+        Assert.True(Ok(registry.Register("tcp://late.example.org:11010")));
+        await registry.LastProbe;
     }
 
     [Fact]
@@ -206,6 +231,23 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         Assert.Contains("--no-listener", plain);
         Assert.DoesNotContain("--mapped-listeners", plain);
         Assert.Throws<ArgumentException>(() => new VolunteerSettings("192.168.1.10").Url);
+    }
+
+    [Fact]
+    public void DirectoryNodeArgsCarryRelayLimitsOnlyWhenSet()
+    {
+        var profile = PublicNetworkProfile.Jay(["tcp://8.8.4.4:11010"]);
+        var listeners = new[] { "tcp://0.0.0.0:11010", "udp://0.0.0.0:11010" };
+        var plain = PublicNetworkArgs.Build(new PublicNetworkOptions(profile, 15000, 15001, Directory: true, Listeners: listeners));
+        Assert.DoesNotContain("--foreign-relay-bps-limit", plain);
+        Assert.DoesNotContain("--relay-network-whitelist", plain);
+        var limited = PublicNetworkArgs.Build(new PublicNetworkOptions(profile, 15000, 15001, Directory: true, Listeners: listeners,
+            Relay: new RelayLimits(2048, "jay-* amber-*")));
+        string After(string flag) => limited[limited.IndexOf(flag) + 1];
+        Assert.Equal("2097152", After("--foreign-relay-bps-limit"));
+        Assert.Equal("jay-* amber-*", After("--relay-network-whitelist"));
+        // The node's own network is never capped as a whole.
+        Assert.DoesNotContain("--instance-recv-bps-limit", limited);
     }
 
     [Fact]

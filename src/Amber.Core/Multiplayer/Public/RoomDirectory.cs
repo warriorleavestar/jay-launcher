@@ -34,6 +34,8 @@ public static class RoomDirectoryProtocol
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan RenewEvery = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>How long the directory waits for a caller to finish the handshake and send its request.</summary>
+    public static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>邀请码的大厅名 → 目录里的查找键（不直接存大厅名，免得目录拿它去进大厅）。</summary>
     public static string LookupKey(ReadOnlySpan<byte> lobbyKey) =>
@@ -44,7 +46,7 @@ public static class RoomDirectoryProtocol
 public sealed class RoomDirectoryServer : IAsyncDisposable
 {
     public const int MaxRooms = 5000;
-    public const int MaxConcurrent = 64;
+    public const int MaxConcurrent = 128;
     public const int MaxListed = 300;
 
     private sealed class Entry
@@ -98,6 +100,28 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>Record puts (new or renewed) one source address may make per hour.</summary>
     public const int MaxRecordPutsPerSource = 60;
+
+    // Budgets for the whole directory. The directory normally sits behind the public network's EasyTier, which hands every
+    // connection over from loopback, so the per-source limits above only apply when the caller's real address is known.
+    // These caps bound how fast anyone can fill the stores, whoever they claim to be.
+
+    /// <summary>Rendezvous puts the whole directory takes per minute.</summary>
+    public const int MaxRendezvousPutsPerMinute = 300;
+
+    /// <summary>Record puts (new or renewed) the whole directory takes per minute.</summary>
+    public const int MaxRecordPutsPerMinute = 120;
+
+    /// <summary>Record puts (new or renewed) one signing key may make per hour.</summary>
+    public const int MaxRecordPutsPerSigner = 60;
+
+    /// <summary>Sealed mail posts the whole directory takes per minute.</summary>
+    public const int MaxMailPostsPerMinute = 240;
+
+    private readonly RateLimiter _rendezvousBudget;
+    private readonly RateLimiter _recordBudget;
+    private readonly RateLimiter _mailBudget;
+    /// <summary>Record puts per signing key (hex) in the current hour.</summary>
+    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _signerPuts = new(StringComparer.Ordinal);
 
     /// <summary>How far ahead of this directory's clock a record's expiry may be beyond <see cref="SignedRecord.MaxLifetime"/>.</summary>
     private static readonly TimeSpan RecordClockSkew = TimeSpan.FromMinutes(10);
@@ -156,6 +180,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     {
         _now = clock ?? (() => DateTimeOffset.UtcNow);
         _log = log;
+        _rendezvousBudget = new RateLimiter(MaxRendezvousPutsPerMinute, TimeSpan.FromMinutes(1), _now);
+        _recordBudget = new RateLimiter(MaxRecordPutsPerMinute, TimeSpan.FromMinutes(1), _now);
+        _mailBudget = new RateLimiter(MaxMailPostsPerMinute, TimeSpan.FromMinutes(1), _now);
         _listener = new TcpListener(address, port);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -215,17 +242,31 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         {
             var stream = client.GetStream();
             var first = new byte[1];
-            if (!await SecureStream.ReadExactAsync(stream, first, deadline.Token)) return;
+            using (var opening = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token))
+            {
+                opening.CancelAfter(RoomDirectoryProtocol.HandshakeTimeout);
+                if (!await SecureStream.ReadExactAsync(stream, first, opening.Token)) return;
+            }
             // Only the authenticated channel is spoken. An old plaintext JSON request is dropped at once; anything else
             // fails the handshake's first-message check and is dropped without a reply too.
             if (first[0] == DirectoryChannel.LegacyFirstByte) return;
-            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, deadline.Token, Certificate) is not { } secure) return;
+            // The handshake and the request have a shorter deadline than the whole exchange: a caller that opens
+            // connections and then stalls holds a slot for seconds, not for the full request timeout.
+            using var handshake = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+            handshake.CancelAfter(RoomDirectoryProtocol.HandshakeTimeout);
+            if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, handshake.Token, Certificate) is not { } secure) return;
             await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or SocketException or EndOfStreamException) { }
     }
 
-    private static string? Source(TcpClient client) => (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString();
+    /// <summary>
+    /// The caller's address for per-source limits, or null when it says nothing about the caller: a connection handed
+    /// over by the local EasyTier comes from loopback, and counting all of those as one source would let one caller use
+    /// up everyone's allowance.
+    /// </summary>
+    private static string? Source(TcpClient client) =>
+        client.Client.RemoteEndPoint is IPEndPoint { Address: var address } && !IPAddress.IsLoopback(address) ? address.ToString() : null;
 
     /// <summary>处理一个请求（测试和框架的宿主直接调）。</summary>
     public JsonObject Handle(JsonObject request) => Handle(request, source: null);
@@ -532,6 +573,11 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             }
             if (items.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
             if (items.Count >= RoomDirectoryProtocol.MaxMailPerBox || _sealedCount >= MaxSealedMail) return Error("full");
+            if (!_mailBudget.TryAcquire())
+            {
+                if (items.Count == 0) _mailboxes.Remove(box!);
+                return Error("rate");
+            }
             items.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl));
             _sealedCount++;
             return new JsonObject { ["ok"] = true };
@@ -605,6 +651,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             // Never overwrite: whoever put first keeps the id until it is taken or expires.
             if (_rendezvous.ContainsKey(id!)) return Error("exists");
             if (_rendezvous.Count >= MaxRendezvous) return Error("full");
+            if (!_rendezvousBudget.TryAcquire()) return Error("rate");
             _rendezvous[id!] = (blob, now + TimeSpan.FromSeconds(ttl));
             return new JsonObject { ["ok"] = true };
         }
@@ -646,6 +693,13 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 if (count >= MaxRecordPutsPerSource) return Error("rate");
                 _recordPuts[source] = (count + 1, until);
             }
+            var signer = Convert.ToHexStringLower(record.Signer);
+            var (signed, signedUntil) = _signerPuts.TryGetValue(signer, out var bySigner) && bySigner.Until > now ? bySigner : (0, now + TimeSpan.FromHours(1));
+            if (signed >= MaxRecordPutsPerSigner) return Error("rate");
+            // The signer table is bounded like the records: a full table takes no new signers until entries expire.
+            if (signed == 0 && !_signerPuts.ContainsKey(signer) && _signerPuts.Count >= MaxRecords) return Error("rate");
+            if (!_recordBudget.TryAcquire()) return Error("rate");
+            _signerPuts[signer] = (signed + 1, signedUntil);
             _records[lookup] = record;
             return new JsonObject { ["ok"] = true };
         }
@@ -667,6 +721,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         var now = _now();
         foreach (var (lookup, record) in _records.Where(p => p.Value.Expires <= now).ToList()) _records.Remove(lookup);
         foreach (var (source, used) in _recordPuts.Where(p => p.Value.Until <= now).ToList()) _recordPuts.Remove(source);
+        foreach (var (signer, used) in _signerPuts.Where(p => p.Value.Until <= now).ToList()) _signerPuts.Remove(signer);
     }
 
     private void PruneRendezvous()
