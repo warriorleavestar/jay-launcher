@@ -291,9 +291,11 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
 internal sealed class TouchControlOverlay : View, ITouchInputSink
 {
-    private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(110, 25, 29, 36) };
-    private readonly Paint _stroke = new() { AntiAlias = true, Color = Color.Argb(210, 238, 174, 78), StrokeWidth = 3, StrokeCap = Paint.Cap.Round };
-    private readonly Paint _text = new() { AntiAlias = true, Color = Color.White, TextAlign = Paint.Align.Center, TextSize = 24 };
+    private readonly Paint _fill = new() { AntiAlias = true, Color = Color.Argb(145, 20, 24, 31) };
+    private readonly Paint _activeFill = new() { AntiAlias = true, Color = Color.Argb(205, 180, 112, 28) };
+    private readonly Paint _stroke = new() { AntiAlias = true, Color = Color.Argb(225, 238, 174, 78), StrokeWidth = 3, StrokeCap = Paint.Cap.Round };
+    private readonly Paint _text = new() { AntiAlias = true, Color = Color.White, TextAlign = Paint.Align.Center, FakeBoldText = true };
+    private readonly Paint _hint = new() { AntiAlias = true, Color = Color.Argb(230, 255, 255, 255), TextAlign = Paint.Align.Center };
     private readonly TouchInputRouter _router;
 
     public TouchControlOverlay(Context context) : base(context)
@@ -321,16 +323,59 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         _stroke.SetStyle(Paint.Style.Stroke);
         foreach (var control in TouchControlLayout.Default)
         {
-            if (!gameplayControlsActive && control.Action != TouchControlAction.Menu) continue;
+            if (!gameplayControlsActive &&
+                control.Action is not (TouchControlAction.Menu or TouchControlAction.Keyboard or TouchControlAction.SecondaryAction)) continue;
             var x = (float)(control.CenterX * Width);
             var y = (float)(control.CenterY * Height);
             var radius = (float)(control.Radius * Math.Min(Width, Height));
-            canvas.DrawCircle(x, y, radius, _fill);
-            canvas.DrawCircle(x, y, radius, _stroke);
-            if (control.Label.Length > 0)
-                canvas.DrawText(control.Label, x, y - (_text.Ascent() + _text.Descent()) / 2, _text);
+            if (control.Action == TouchControlAction.Move)
+                DrawMovementPad(canvas, x, y, radius);
+            else
+                DrawActionButton(canvas, control, x, y, radius,
+                    !gameplayControlsActive && control.Action == TouchControlAction.SecondaryAction
+                        ? "拆分"
+                        : control.Label);
+        }
+        if (!gameplayControlsActive)
+        {
+            _hint.TextSize = Math.Max(22, Math.Min(Width, Height) * 0.026f);
+            canvas.DrawText("按住「拆分」再点击或拖过物品格", Width * 0.5f, Height * 0.93f, _hint);
         }
         PostInvalidateDelayed(100);
+    }
+
+    private void DrawMovementPad(Canvas canvas, float x, float y, float radius)
+    {
+        var arm = radius * 0.42f;
+        var corner = radius * 0.22f;
+        var fill = _router.IsPressed(TouchControlAction.Move) ? _activeFill : _fill;
+        canvas.DrawRoundRect(new RectF(x - radius, y - arm, x + radius, y + arm), corner, corner, fill);
+        canvas.DrawRoundRect(new RectF(x - arm, y - radius, x + arm, y + radius), corner, corner, fill);
+        canvas.DrawRoundRect(new RectF(x - radius, y - arm, x + radius, y + arm), corner, corner, _stroke);
+        canvas.DrawRoundRect(new RectF(x - arm, y - radius, x + arm, y + radius), corner, corner, _stroke);
+
+        var (moveX, moveY) = _router.Movement;
+        var knobX = x + (float)moveX * radius * 0.48f;
+        var knobY = y + (float)moveY * radius * 0.48f;
+        var knobRadius = radius * 0.27f;
+        canvas.DrawCircle(knobX, knobY, knobRadius, _stroke);
+        _text.TextSize = Math.Max(20, radius * 0.23f);
+        canvas.DrawText("移动", x, y - radius * 1.13f, _text);
+    }
+
+    private void DrawActionButton(Canvas canvas, TouchControlDefinition control,
+        float x, float y, float radius, string label)
+    {
+        var compact = control.Action is TouchControlAction.PreviousSlot or TouchControlAction.NextSlot;
+        var halfWidth = radius * (compact ? 0.78f : 1.18f);
+        var halfHeight = radius * (compact ? 0.78f : 0.72f);
+        var corner = halfHeight * 0.55f;
+        var bounds = new RectF(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight);
+        canvas.DrawRoundRect(bounds, corner, corner,
+            _router.IsPressed(control.Action) ? _activeFill : _fill);
+        canvas.DrawRoundRect(bounds, corner, corner, _stroke);
+        _text.TextSize = Math.Max(18, Math.Min(radius * 0.48f, halfHeight * 0.82f));
+        canvas.DrawText(label, x, y - (_text.Ascent() + _text.Descent()) / 2, _text);
     }
 
     protected override void OnSizeChanged(int width, int height, int oldWidth, int oldHeight)
