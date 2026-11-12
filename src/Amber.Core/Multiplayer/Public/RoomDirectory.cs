@@ -327,6 +327,13 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     /// <summary>Connections one source may have open at once.</summary>
     public const int MaxConnectionsPerSource = 8;
+
+    /// <summary>
+    /// Connections the shared local source may have open at once, once mapped callers are seen. It holds the callers
+    /// EasyTier couldn't confirm: members whose route hasn't arrived yet (just joined), addresses two members claim,
+    /// and scripts on this machine. Wider than one member's, so one of them reconnecting can't shut the rest out.
+    /// </summary>
+    public const int MaxConnectionsShared = 32;
     private readonly Dictionary<string, int> _openBySource = new(StringComparer.Ordinal);
 
     /// <summary>Callers seen from 127.0.0.1 before any mapped caller (127.235.c.d); see <see cref="NoteMapping"/>.</summary>
@@ -376,7 +383,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         lock (_openBySource)
         {
             var open = _openBySource.GetValueOrDefault(source);
-            if (open >= MaxConnectionsPerSource) return false;
+            if (open >= (source == SharedLoopbackSource ? MaxConnectionsShared : MaxConnectionsPerSource)) return false;
             _openBySource[source] = open + 1;
             return true;
         }
@@ -418,7 +425,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
                 "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), source) : Error("off"),
-                // Blocks this connection's task for at most a few seconds while the directory dials the address.
+                // Blocks this connection's task for at most VolunteerNodes.CheckTimeout (lookup and dial together).
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
                 "nodes" => Volunteers is { } v ? new JsonObject { ["ok"] = true, ["nodes"] = new JsonArray([.. v.Pick().Select(u => (JsonNode)u)]) } : Error("off"),
                 "login" when Login is { } login => LoginRequest(login, request),
@@ -818,7 +825,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             var (signed, signedUntil) = _signerPuts.TryGetValue(signer, out var bySigner) && bySigner.Until > now ? bySigner : (0, now + TimeSpan.FromHours(1));
             if (signed >= MaxRecordPutsPerSigner) return Error("rate");
             // The signer table is bounded like the records: a full table takes no new signers until entries expire.
-            if (signed == 0 && !_signerPuts.ContainsKey(signer) && _signerPuts.Count >= MaxRecords) return Error("rate");
+            if (signed == 0 && !_signerPuts.ContainsKey(signer) && _signerPuts.Count >= MaxRecords) return BudgetFull("rec.signer");
             // Renewing a record already held adds nothing to the store, so it doesn't draw on the directory-wide budget
             // (its signer and source are still limited above).
             if (!renewal && !_recordBudget.CanAcquire()) return BudgetFull("rec.put");

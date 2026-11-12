@@ -87,16 +87,16 @@ public sealed class DirectoryCallerSourceTests
             held.Add(mapped);
             for (var i = 0; i < 200 && !server.MappingSeen; i++) await Task.Delay(20);
             Assert.True(server.MappingSeen);
-            for (var i = 0; i < RoomDirectoryServer.MaxConnectionsPerSource + 4; i++)
+            for (var i = 0; i < RoomDirectoryServer.MaxConnectionsShared + 4; i++)
             {
                 var c = new TcpClient();
                 await c.ConnectAsync(IPAddress.Loopback, server.Port);
                 held.Add(c);
             }
-            for (var i = 0; i < 200 && server.OpenFrom(RoomDirectoryServer.SharedLoopbackSource) < RoomDirectoryServer.MaxConnectionsPerSource; i++)
+            for (var i = 0; i < 200 && server.OpenFrom(RoomDirectoryServer.SharedLoopbackSource) < RoomDirectoryServer.MaxConnectionsShared; i++)
                 await Task.Delay(20);
             await Task.Delay(200);
-            Assert.Equal(RoomDirectoryServer.MaxConnectionsPerSource, server.OpenFrom(RoomDirectoryServer.SharedLoopbackSource));
+            Assert.Equal(RoomDirectoryServer.MaxConnectionsShared, server.OpenFrom(RoomDirectoryServer.SharedLoopbackSource));
         }
         finally
         {

@@ -107,13 +107,23 @@ public static class VolunteerNodes
 
     /// <summary>
     /// Default reachability check the directory runs before listing a volunteer: resolve the host, refuse it if any
-    /// address is not public, then open (and close) a TCP connection within 5 seconds.
+    /// address is not public, then open (and close) a TCP connection, all within <see cref="CheckTimeout"/>.
     /// </summary>
-    public static async Task<bool> ProbeAsync(string url, CancellationToken ct) =>
-        await ResolveAsync(url, ct) is { } address && await ConnectAsync(address, new Uri(Normalize(url)!).Port, ct);
+    public static async Task<bool> ProbeAsync(string url, CancellationToken ct)
+    {
+        using var total = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        total.CancelAfter(CheckTimeout);
+        return await ResolveAsync(url, total.Token) is { } address && await ConnectAsync(address, new Uri(Normalize(url)!).Port, total.Token);
+    }
 
     /// <summary>
-    /// The one address the directory will dial for <paramref name="url"/>: the host resolved once (within 5 seconds), or
+    /// Lookup and connection together, for one check: short enough that a "probe" reply still fits the request's
+    /// deadline after a slow handshake (<see cref="RoomDirectoryProtocol.HandshakeTimeout"/> of the 10 s exchange).
+    /// </summary>
+    public static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(4);
+
+    /// <summary>
+    /// The one address the directory will dial for <paramref name="url"/>: the host resolved once (within 5 seconds, less when <paramref name="ct"/> says so), or
     /// null when it doesn't resolve or any of its addresses is not public.
     /// </summary>
     public static async Task<IPAddress?> ResolveAsync(string url, CancellationToken ct)
@@ -130,7 +140,7 @@ public static class VolunteerNodes
         catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException) { return null; }
     }
 
-    /// <summary>Opens (and closes) a TCP connection to an address already resolved, within 5 seconds.</summary>
+    /// <summary>Opens (and closes) a TCP connection to an address already resolved, within 5 seconds (less when <paramref name="ct"/> says so).</summary>
     public static async Task<bool> ConnectAsync(IPAddress address, int port, CancellationToken ct)
     {
         if (!IsPublic(address)) return false;
@@ -247,6 +257,10 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             _checks.Enqueue(now);
             _lastCheck[address] = now;
         }
+        // One deadline for the lookup and the connection together, so the reply still fits the request's deadline.
+        using var total = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        total.CancelAfter(VolunteerNodes.CheckTimeout);
+        ct = total.Token;
         IPAddress? ip = null;
         if (_resolve is not null)
         {
@@ -324,12 +338,13 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     private async Task ProbeAsync(string address)
     {
+        using var total = new CancellationTokenSource(VolunteerNodes.CheckTimeout);
         bool ok;
         IPAddress? ip = null;
         var crowded = false;
         if (_resolve is not null)
         {
-            try { ip = await _resolve(address, CancellationToken.None); }
+            try { ip = await _resolve(address, total.Token); }
             catch (Exception e) when (e is not OutOfMemoryException) { ip = null; }
             if (ip is not null)
             {
@@ -349,7 +364,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         if (crowded || (_resolve is not null && ip is null)) ok = false;
         else
         {
-            try { ok = await Dial(address, ip, CancellationToken.None); }
+            try { ok = await Dial(address, ip, total.Token); }
             catch (Exception e) when (e is not OutOfMemoryException) { ok = false; }
         }
         lock (_gate)
