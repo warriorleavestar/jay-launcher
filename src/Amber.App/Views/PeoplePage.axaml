@@ -260,7 +260,9 @@
           <TextBlock Classes="hint" Text="{l:T people.child}" />
         </StackPanel>
 
-        <StackPanel x:Name="PeopleEmpty" Classes="empty-state" IsVisible="{Binding ShowEmpty}">
+        <!-- In a short window (or a long translation) the two buttons wrap under the text: it scrolls instead of being cut. -->
+        <ScrollViewer x:Name="PeopleEmptyScroll" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding ShowEmpty}">
+        <StackPanel x:Name="PeopleEmpty" Classes="empty-state">
           <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
           <TextBlock Classes="title" Text="{l:T people.empty.title}" />
           <TextBlock Classes="hint" Text="{l:T people.empty.body}" />
@@ -269,6 +271,7 @@
             <Button x:Name="EmptyAddButton" Content="{l:T people.empty.paste}" Command="{Binding OpenAddCommand}" />
           </WrapPanel>
         </StackPanel>
+        </ScrollViewer>
 
         <StackPanel x:Name="PeoplePickHint" Classes="empty-state" IsVisible="{Binding ShowPickHint}">
           <Path Classes="icon" Data="{StaticResource Icon.Chat}" />

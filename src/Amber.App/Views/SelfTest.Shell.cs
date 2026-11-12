@@ -460,7 +460,7 @@ internal sealed partial class SelfTest
         ]));
         var listed = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => page.FriendListCard.IsEffectivelyVisible && people.Friends.Count == 2), 3);
         Check("朋友页：一个人一行（同一 Jay 账户的两台设备算一个人）", listed && Dispatcher.UIThread.Invoke(() =>
-            !page.PeopleEmpty.IsVisible && page.PeoplePickHint.IsEffectivelyVisible), string.Join(",", people.Friends.Select(f => f.Name)));
+            !page.PeopleEmpty.IsEffectivelyVisible && page.PeoplePickHint.IsEffectivelyVisible), string.Join(",", people.Friends.Select(f => f.Name)));
         Dispatcher.UIThread.Invoke(() => page.FriendList.SelectedItem = people.Friends.First(f => f.Name == "Bob"));
         await Task.Delay(300);
         Check("朋友页：选中后右边是和 TA 的对话，顶上常驻“端到端加密 · 已核对”", Dispatcher.UIThread.Invoke(() =>
