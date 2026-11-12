@@ -194,7 +194,7 @@ public sealed partial class MultiplayerViewModel
         bool IsFriend(byte[] key, string? account) => friendKeys.Contains(Convert.ToHexString(key)) || (account is not null && friendAccounts.Contains(account));
 
         var me = Identity.PublicKey;
-        var online = OnlinePeers.Select(p => p.Entry.Fingerprint).ToHashSet();
+        var online = OnlinePeers.Where(p => KeyMatches(p.Entry)).Select(p => p.Entry.Fingerprint).ToHashSet();
         var met = new Dictionary<string, MetPersonItem>();
         foreach (var t in Trusted.All)
             if (!IsFriend(t.PublicKey, t.JayAccount))
@@ -208,6 +208,7 @@ public sealed partial class MultiplayerViewModel
         }
         foreach (var p in OnlinePeers)
         {
+            if (!KeyMatches(p.Entry)) continue;
             var key = p.Entry.PublicKey;
             if (key.AsSpan().SequenceEqual(me) || IsFriend(key, null)) continue;
             var hex = Convert.ToHexString(key);
@@ -335,7 +336,13 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>The friend as a member of the room I am in, when they are in it.</summary>
     internal OnlinePeerItem? PeerOf(ContactItem friend) =>
-        OnlinePeers.FirstOrDefault(p => friend.Devices.Any(d => d.PublicKey.AsSpan().SequenceEqual(p.Entry.PublicKey)));
+        OnlinePeers.FirstOrDefault(p => KeyMatches(p.Entry) && friend.Devices.Any(d => d.PublicKey.AsSpan().SequenceEqual(p.Entry.PublicKey)));
+
+    /// <summary>
+    /// A roster entry can be talked to only when its fingerprint is the one of its own key: messages are addressed by
+    /// fingerprint, so an entry that pairs someone's key with another fingerprint must never stand for that person.
+    /// </summary>
+    internal static bool KeyMatches(RosterEntry entry) => MemberIdentity.FingerprintOf(entry.PublicKey) == entry.Fingerprint;
 
     /// <summary>The newest room this friend invited me to that I can still join.</summary>
     internal FriendRoomItem? RoomOf(ContactItem friend)
@@ -440,7 +447,7 @@ public sealed partial class MultiplayerViewModel
         set
         {
             _trustedFile = value;
-            _trusted = null;
+            Volatile.Write(ref _trusted, null);
             RefreshTrusted();
         }
     }

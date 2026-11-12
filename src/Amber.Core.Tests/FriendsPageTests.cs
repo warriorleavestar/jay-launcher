@@ -542,6 +542,48 @@ public sealed class FriendsPageTests
     });
 
     [Fact]
+    public void ARosterEntryWithAFriendsKeyButAnotherFingerprintCannotBeMessaged() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        AddFriends(mp, Friend(1, "Robin"));
+        people.Selected = people.Friends.Single();
+        // The friend's key, with someone else's fingerprint (the one messages would be addressed to).
+        var forged = new OnlinePeerItem(new RosterEntry(MemberIdentity.FingerprintOf(Key(7)), Key(1), "Robin"));
+        mp.OnlinePeers.Add(forged);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(MultiplayerViewModel.KeyMatches(forged.Entry));
+        Assert.Null(mp.PeerOf(people.Selected!.Friend));
+        Assert.False(people.CanMessage);
+        Assert.False(mp.SendPrivateToAsync(forged, "hello").GetAwaiter().GetResult());
+        Assert.Empty(people.Lines!);
+        Assert.DoesNotContain(mp.MetPeople, p => p.PublicKey.AsSpan().SequenceEqual(Key(1)));
+
+        // The real entry for the same friend can be.
+        mp.OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(MemberIdentity.FingerprintOf(Key(1)), Key(1), "Robin")));
+        Dispatcher.UIThread.RunJobs();
+        Assert.NotNull(mp.PeerOf(people.Selected!.Friend));
+        Assert.True(people.CanMessage);
+        mp.OnlinePeers.Clear();
+        Dispatcher.UIThread.RunJobs();
+    });
+
+    [Fact]
+    public void ARefreshKeepsTheRemoveQuestionOpen() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        AddFriends(mp, Friend(1, "Robin"), Friend(2, "Sam"));
+        people.Selected = people.Friends.First(f => f.Name == "Robin");
+        people.RemoveFriendCommand.Execute(null);
+        Assert.True(people.IsConfirmingRemove);
+        // Something else about the contacts changes and the list is rebuilt in the background.
+        mp.RefreshContacts();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Robin", people.Selected!.Name);
+        Assert.True(people.IsConfirmingRemove);
+        people.KeepFriendCommand.Execute(null);
+    });
+
+    [Fact]
     public void RequestsShowOnTheEntryInOneLineAndTheEmojiOpenTheAddPanel() => WithMain((service, main, people, root) =>
     {
         var mp = main.Multiplayer;

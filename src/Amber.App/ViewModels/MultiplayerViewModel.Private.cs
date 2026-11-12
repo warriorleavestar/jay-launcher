@@ -195,6 +195,12 @@ public sealed partial class MultiplayerViewModel
     internal async Task<bool> SendPrivateToAsync(OnlinePeerItem peer, string text)
     {
         if (_messenger is not { } messenger || string.IsNullOrWhiteSpace(text)) return false;
+        // Checked before anything is sealed: the message goes to the fingerprint, so it must belong to the key shown.
+        if (!KeyMatches(peer.Entry))
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.private.offline"));
+            return false;
+        }
         bool sent;
         try { sent = await messenger.SendTextAsync(peer.Entry.Fingerprint, text); }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or ObjectDisposedException or InvalidOperationException) { sent = false; }
@@ -206,8 +212,7 @@ public sealed partial class MultiplayerViewModel
         var clean = RoomChat.Clean(text, PrivateMessenger.MaxTextLength);
         var now = DateTimeOffset.Now;
         PrivateLines.Add(new PrivateLine(peer.Entry.Fingerprint, L.F("multiplayer.private.to", peer.Entry.Name), clean, now, true));
-        // Only when the roster entry's key really is the one behind its fingerprint (the key the message was sealed for).
-        if (MemberIdentity.FingerprintOf(peer.Entry.PublicKey) == peer.Entry.Fingerprint) NoteFriendMessage(peer.Entry.PublicKey, clean, now, mine: true);
+        NoteFriendMessage(peer.Entry.PublicKey, clean, now, mine: true);
         return true;
     }
 
@@ -221,7 +226,7 @@ public sealed partial class MultiplayerViewModel
 
     internal async Task<bool> SendFileToAsync(OnlinePeerItem peer, string path)
     {
-        if (_messenger is not { } messenger) return false;
+        if (_messenger is not { } messenger || !KeyMatches(peer.Entry)) return false;
         try
         {
             return await Task.Run(() => messenger.SendFileAsync(peer.Entry.Fingerprint, path));
