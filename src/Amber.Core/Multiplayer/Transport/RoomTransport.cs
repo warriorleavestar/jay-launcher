@@ -53,12 +53,13 @@ public sealed class RoomTransport : IAsyncDisposable
 
     private RoomTransport(Action<string>? log) => _log = log;
 
-    public static RoomTransport Start(EasyTierOptions o, Action<string>? log = null)
+    /// <param name="splitProblem">Member of a room that splits: why the extra paths can't be used right now (null: they can).</param>
+    public static RoomTransport Start(EasyTierOptions o, Action<string>? log = null, Func<string?>? splitProblem = null)
     {
         var t = new RoomTransport(log);
         try
         {
-            t.StartCore(o);
+            t.StartCore(o, splitProblem);
             return t;
         }
         catch
@@ -68,7 +69,7 @@ public sealed class RoomTransport : IAsyncDisposable
         }
     }
 
-    private void StartCore(EasyTierOptions o)
+    private void StartCore(EasyTierOptions o, Func<string?>? splitProblem)
     {
         var room = o.Room;
         var settings = room.Tunnel;
@@ -125,12 +126,12 @@ public sealed class RoomTransport : IAsyncDisposable
                 : null;
             if (o.LocalForwardPort is { } game)
             {
-                GameSplit = new SplitConnector(room, TunnelService.Game, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Game), legs, _log);
+                GameSplit = new SplitConnector(room, TunnelService.Game, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Game), legs, _log, splitProblem);
                 Game = Add(new TunnelClient(game, GameSplit.OpenAsync, _log));
             }
             if (o.LocalChatPort is { } chat)
             {
-                ChatSplit = new SplitConnector(room, TunnelService.Chat, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Chat), legs, _log);
+                ChatSplit = new SplitConnector(room, TunnelService.Chat, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Chat), legs, _log, splitProblem);
                 Chat = Add(new TunnelClient(chat, ChatSplit.OpenAsync, _log));
             }
             if (o.LocalRemotePort is { } remote && room.FromInvite) Remote = Add(new TunnelClient(remote, TunnelClient.Wrapped(host, port, room, settings, TunnelService.Remote), _log));

@@ -490,6 +490,9 @@ public static class EasyTierArgs
             // 封装模式：游戏和聊天都由 Amber 先封装，再经这一个转发连到房主的封装端口。
             var tunnel = o.LocalTunnelPort ?? throw new ArgumentException(L.T("core.mp.transport.join_port_required"));
             args.AddRange(["--port-forward", $"tcp://127.0.0.1:{tunnel}/{HostIp}:{Transport.TunnelSettings.Port}"]);
+            // Split rooms: leg 0 runs over this network too, to its own host port. The other legs use the extra instances.
+            if (SplitsOnThisInstance(o) && o.LocalSplitPorts is { Count: > 0 } legs)
+                args.AddRange(["--port-forward", $"tcp://127.0.0.1:{legs[0]}/{HostIp}:{Transport.SplitSettings.LegPort(0)}"]);
         }
         else if (!o.IsHost && !o.Tun)
         {
@@ -530,12 +533,17 @@ public static class EasyTierArgs
                 ports.Add(RoomChat.Port);
                 if (o.Room.FromInvite) ports.Add(RemoteControl.RemoteHub.Port);
             }
+            // Split rooms: leg 0 of each split connection arrives over this network on its own port.
+            if (SplitsOnThisInstance(o)) ports.Add(Transport.SplitSettings.LegPort(0));
             if (o.ServesSpeedTest) ports.Add(SpeedTestServer.Port);
         }
         if (o.AllowProxy) ports.Add(o.Room.Tunnel.Wraps ? Transport.TunnelSettings.Port : Transport.TunnelSettings.PlainSocksPort);
         if (ports.Count == 0) ports.Add(1);
         return [.. ports];
     }
+
+    /// <summary>The room splits and this session takes part (wrapped invite room, not full-LAN mode).</summary>
+    internal static bool SplitsOnThisInstance(EasyTierOptions o) => o.Room.FromInvite && o.Room.Tunnel.Wraps && o.Room.Split.Enabled && !o.Tun;
 
     /// <summary>这次会话里本机的虚拟 IP。</summary>
     public static string VirtualIp(EasyTierOptions o) => o.IsHost ? HostIp : Subnet + JoinerHost(o.MachineId);
@@ -586,6 +594,9 @@ public sealed class EasyTierSession : IEasyTierSession
     public bool HasExited => _process.HasExited;
     public event Action<string>? Output;
 
+    /// <summary>The extra instances of a room that splits (null when this session doesn't split).</summary>
+    public SplitPathGroup? SplitPaths { get; private set; }
+
     private EasyTierSession(Process process, string cliPath, EasyTierOptions options, ProcessJob? job)
     {
         _process = process;
@@ -605,6 +616,15 @@ public sealed class EasyTierSession : IEasyTierSession
         process.ErrorDataReceived += (_, e) => session.OnLine(e.Data);
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+        try
+        {
+            session.SplitPaths = SplitPathGroup.Start(installer, options, workDir, session.PeersAsync);
+        }
+        catch
+        {
+            session.Dispose();
+            throw;
+        }
         return session;
     }
 
@@ -741,6 +761,8 @@ public sealed class EasyTierSession : IEasyTierSession
 
     public void Dispose()
     {
+        SplitPaths?.Dispose();
+        SplitPaths = null;
         try
         {
             if (!_process.HasExited) _process.Kill(true);

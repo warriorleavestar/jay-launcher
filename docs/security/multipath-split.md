@@ -1,6 +1,6 @@
 # Multi-path split for room connections
 
-Status: stage 2 of 4. The transport (stage 1) and the room wiring (stage 2) are in. Nothing splits yet in practice: hosts don't turn it on, and members don't have the extra paths until stage 3 adds the EasyTier instances.
+Status: stage 3 of 4. The transport (stage 1), the room wiring (stage 2) and the extra EasyTier instances with path planning (stage 3) are in. Hosts don't turn splitting on yet; stage 4 adds the setting, the status line and the default.
 
 ## What it is for
 
@@ -34,6 +34,25 @@ The split adds no MAC of its own, because each leg is already authenticated end 
   - Strict splits or fails with the reason.
   - A device attestation failure never leads to a fallback.
 
+## Paths
+
+- **Instances.** Path 0 is the room's own EasyTier instance; it also carries leg 0, on its own host port. Path *i* (1 or 2) is an extra instance:
+  - it joins `Split.Nets[i - 1]` on 10.236.*i*.0/24, with the host always at .1;
+  - it has no TUN device and no listener, and runs with `--disable-p2p`;
+  - on the host it serves only port 47657 + *i*; on a member it serves nothing and forwards one local port to the host's leg port.
+  - The host's extra instances join every node it knows.
+- **Choice.** A member's extra path *i* uses the nodes of one operator group, a different group per path.
+  - **Groups.** A signed operator label wins when there is one. Otherwise nodes are grouped by registered domain, or by IPv4 /16 or IPv6 /32. This is a guess, and the interface doesn't claim the groups are different operators.
+  - **Order.** Groups are ordered by HMAC-SHA256 keyed with the member's id. The same member always lands on the same groups, including after a rekey, and doesn't draw new relays per connection.
+- **Ready.** A member splits only while:
+  - the room's own instance reaches the host peer to peer (relayed, path 0 could go through the same node as an extra path);
+  - every extra instance sees the host through its relay.
+  - This is checked every 3 seconds. Until it holds, Auto uses one path and Strict refuses, both with the reason.
+- **Not in this version.**
+  - Two relays of different groups when path 0 can't go direct. That needs path 0's own nodes restricted, which can cut a member off from the host.
+  - Direct rooms (the direct bridge as path 0).
+  - Full-LAN mode.
+
 ## Ending
 
 The joined stream ends cleanly only when every leg delivers its authenticated close record at the same chunk boundary. The following all drop every leg, and none of them is a clean end:
@@ -45,6 +64,12 @@ The joined stream ends cleanly only when every leg delivers its authenticated cl
 There is never a quiet fallback to fewer legs in the middle of a connection.
 
 ## Tests
+
+`src/Amber.Core.Tests/SplitPathTests.cs` covers:
+
+- the extra instances' arguments, and leg 0 on the room's own instance;
+- operator groups, the plan (one group per path, fixed per member);
+- the readiness check, and Auto and Strict while paths aren't ready.
 
 `src/Amber.Core.Tests/SplitRoomTests.cs` covers the room side:
 
