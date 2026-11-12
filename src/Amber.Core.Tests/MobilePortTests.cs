@@ -28,7 +28,7 @@ public sealed class MobilePortTests
             var version = typeof(MobileMainViewModel).Assembly
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
             Assert.Contains(version, viewModel.VersionText);
-            Assert.True(File.Exists(Path.Combine(root, "identity.key")));
+            Assert.True(File.Exists(Path.Combine(root, Amber.Core.Multiplayer.MemberIdentity.FileName)));
         }
         finally
         {

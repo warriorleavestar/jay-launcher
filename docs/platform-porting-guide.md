@@ -49,7 +49,7 @@
 | 启动器数据目录 | `SpecialFolder.ApplicationData/Amber`：Windows `%APPDATA%\Amber`，macOS `~/Library/Application Support/Amber`，Linux `~/.config/Amber`。环境变量 `AMBER_DATA_DIR` 可以改（测试必须用它） |
 | 设置 | `<数据目录>/settings.json` |
 | 账号 | `<数据目录>/accounts.json`，非 Windows 另有 `accounts.json.key` |
-| 联机身份 | `<数据目录>/identity.key`，非 Windows 另有 `identity.wrap` |
+| 联机身份 | `<数据目录>/device.key`（旧版本的 `identity.key` 只读），非 Windows 另有 `identity.wrap` |
 | 信任的成员 | `<数据目录>/trusted.json` |
 | 加入过的 Jay 服务器 | `<数据目录>/jay-servers.json` |
 | EasyTier | `<数据目录>/easytier/2.6.4/<平台>/`，运行目录 `easytier/run`、`run-lan`、`lobby`、`lobby-join` |
