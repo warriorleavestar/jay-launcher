@@ -37,6 +37,12 @@ public sealed partial class DropViewModel(LauncherService service) : ObservableO
     /// <summary>Opens Settings › Appearance › Make a theme from pictures with this picture in this slot.</summary>
     public Action<string, string>? PictureForTheme { get; set; }
 
+    /// <summary>
+    /// A friend's conversation is open: the one zone sends what is dropped to them (any kind of file or folder). Null when
+    /// no conversation is open, so the import zones show as usual.
+    /// </summary>
+    public Func<(string Name, Func<IReadOnlyList<string>, Task> Send)?>? SendTarget { get; set; }
+
     /// <summary>Something dragged is over the window.</summary>
     [ObservableProperty]
     public partial bool IsActive { get; set; }
@@ -54,6 +60,14 @@ public sealed partial class DropViewModel(LauncherService service) : ObservableO
     public void Begin(IReadOnlyList<string> paths)
     {
         Targets.Clear();
+        if (paths.Count > 0 && SendTarget?.Invoke() is { } send)
+        {
+            var all = paths.ToList();
+            Targets.Add(new DropTarget(DropKind.Send, L.F("drop.send", send.Name), L.T("drop.send.hint"), () => send.Send(all)));
+            Note = "";
+            IsActive = true;
+            return;
+        }
         var notes = new List<string>();
         foreach (var group in DropClassifier.Group(paths))
         {

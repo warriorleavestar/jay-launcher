@@ -216,6 +216,18 @@ public sealed class AppSettings
     /// <summary>Friends may ask to control my shared screen; each time still needs my "just this once".</summary>
     public bool CallsAllowControlRequests { get; set; } = true;
 
+    // Files (redesign batch 12): Settings › Multiplayer › Files.
+    /// <summary>Where received files go; empty means "Downloads/Jay".</summary>
+    public string FilesSaveFolder { get; set; } = "";
+    /// <summary>Files from friends whose emoji I compared are taken without asking. Programs still ask every time; off by default.</summary>
+    public bool FilesAutoAcceptFriends { get; set; }
+    /// <summary>A file for a friend who is not online waits on this computer and starts when we both are.</summary>
+    public bool FilesQueueOffline { get; set; } = true;
+    /// <summary>"unlimited", "give-way" (slow while a game runs) or "save-data" (always slow).</summary>
+    public string FilesSpeed { get; set; } = Amber.Core.Multiplayer.Files.TransferPace.Unlimited;
+    /// <summary>Say so when a file has finished arriving.</summary>
+    public bool FilesNotifyDone { get; set; } = true;
+
     /// <summary>打开启动器时检查一次更新（只在设置导航上显示提示，不自动下载）。</summary>
     public bool CheckUpdatesOnStart { get; set; } = true;
 

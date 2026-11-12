@@ -280,6 +280,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitInvitePanel();
         InitShare();
         InitRequests();
+        InitFiles();
         InitPublic();
         InitContacts();
         InitPeople();

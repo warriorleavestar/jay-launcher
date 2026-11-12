@@ -409,6 +409,79 @@
         </Template>
       </c:LazyHost>
 
+      <!-- "Send a file" (batch 12): what and to whom, a drawer over the content like Activity. Esc closes. -->
+      <c:LazyHost x:Name="SendFileHost" Grid.RowSpan="7" IsOpen="{Binding Multiplayer.SendPanel.IsOpen}" IsVisible="{Binding Multiplayer.SendPanel.IsOpen}">
+        <Template x:DataType="vm:MainViewModel">
+            <Panel x:Name="SendFileLayerPart" DataContext="{Binding Multiplayer.SendPanel}" x:DataType="vm:SendFileViewModel">
+              <Border Background="{DynamicResource Scrim}" Opacity="0.4" PointerPressed="SendFileScrim_Pressed" />
+              <Border x:Name="SendFileDrawerPart" Width="440" HorizontalAlignment="Right" Background="{DynamicResource Overlay}"
+                      BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1,0,0,0" BoxShadow="{DynamicResource Elevation3}" KeyDown="SendFile_KeyDown">
+                <DockPanel Margin="16,12,16,16">
+                  <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+                    <TextBlock Text="{l:T files.panel.title}" FontSize="{DynamicResource FontSubtitle}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Button x:Name="SendFileClosePart" Grid.Column="1" Classes="ghost icon-only" Command="{Binding CloseCommand}"
+                            ToolTip.Tip="{l:T common.close}" AutomationProperties.Name="{l:T common.close}">
+                      <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="18" Height="18" />
+                    </Button>
+                  </Grid>
+                  <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
+                    <Button Classes="secondary" Content="{l:T common.cancel}" Command="{Binding CloseCommand}" />
+                    <Button x:Name="SendFileSendPart" Classes="primary" Command="{Binding SendCommand}" IsEnabled="{Binding CanSend}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Path Classes="icon sm" Data="{StaticResource Icon.Send}" />
+                        <TextBlock Text="{l:T files.panel.send}" />
+                      </StackPanel>
+                    </Button>
+                  </StackPanel>
+                  <ScrollViewer>
+                    <StackPanel Spacing="10">
+                      <TextBlock Text="{l:T files.panel.what}" FontWeight="SemiBold" />
+                      <ComboBox x:Name="SendFileKindPart" ItemsSource="{Binding KindOptions}" SelectedIndex="{Binding KindIndex}" HorizontalAlignment="Stretch"
+                                AutomationProperties.Name="{l:T files.panel.what}">
+                        <ComboBox.ItemTemplate>
+                          <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                        </ComboBox.ItemTemplate>
+                      </ComboBox>
+                      <Button x:Name="SendFilePickPart" Classes="secondary" Command="{Binding PickCommand}" IsVisible="{Binding UsesPicker}" HorizontalAlignment="Stretch">
+                        <TextBlock Text="{Binding PickText}" TextTrimming="CharacterEllipsis" />
+                      </Button>
+                      <ListBox x:Name="SendFileCandidatesPart" ItemsSource="{Binding Candidates}" SelectedItem="{Binding Candidate}" IsVisible="{Binding UsesList}"
+                               MaxHeight="220" AutomationProperties.Name="{l:T files.panel.what}">
+                        <ListBox.ItemTemplate>
+                          <DataTemplate DataType="vm:SendCandidate">
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Classes="caption" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                      <TextBlock Classes="hint" FontSize="12" Text="{l:T files.panel.none}" IsVisible="{Binding HasNoCandidates}" TextWrapping="Wrap" />
+                      <TextBlock x:Name="SendFileNotePart" Classes="hint" FontSize="12" Text="{Binding Note}" IsVisible="{Binding HasNote}" TextWrapping="Wrap" />
+
+                      <TextBlock Text="{l:T files.panel.whom}" FontWeight="SemiBold" Margin="0,6,0,0" />
+                      <ListBox x:Name="SendFileRecipientsPart" ItemsSource="{Binding Recipients}" SelectedItem="{Binding Recipient}" MaxHeight="220"
+                               AutomationProperties.Name="{l:T files.panel.whom}">
+                        <ListBox.ItemTemplate>
+                          <DataTemplate DataType="vm:SendRecipientItem">
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Classes="caption" Text="{Binding Status}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                      <TextBlock Classes="hint" FontSize="12" Text="{l:T files.panel.nobody}" IsVisible="{Binding HasNoRecipients}" TextWrapping="Wrap" />
+                      <TextBlock x:Name="SendFileLimitPart" Classes="hint" FontSize="12" Text="{Binding LimitNote}" IsVisible="{Binding HasLimitNote}" TextWrapping="Wrap" />
+                      <TextBlock Classes="hint" FontSize="12" Text="{l:T files.panel.privacy}" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+            </Panel>
+        </Template>
+      </c:LazyHost>
+
       <!-- 活动中心（§6.22）：盖在内容区右侧的抽屉 400，紧凑档全宽。Esc 或点外面关 -->
       <c:LazyHost x:Name="ActivityHost" Grid.RowSpan="7" IsOpen="{Binding Activity.IsOpen}" IsVisible="{Binding Activity.IsOpen}">
         <Template x:DataType="vm:MainViewModel">

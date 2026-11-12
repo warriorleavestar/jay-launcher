@@ -717,6 +717,7 @@
                                          TextWrapping="Wrap" IsVisible="{Binding SelectedPerson.HasJayAccount}" />
                     <WrapPanel ItemSpacing="6" LineSpacing="6">
                       <Button x:Name="PersonChatButton" Classes="small" Content="{l:T multiplayer.people.chat}" Command="{Binding ChatWithCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanPrivate}" />
+                      <Button x:Name="PersonSendFileButton" Classes="small" Content="{l:T files.send}" Command="{Binding SendFileToPersonCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanPrivate}" />
                       <Button x:Name="PersonTrustButton" Classes="small" Content="{l:T multiplayer.invite.trust}" Command="{Binding TrustPersonCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanTrust}" />
                       <TextBlock Classes="hint" Text="{l:T multiplayer.invite.trusted_badge}" VerticalAlignment="Center" IsVisible="{Binding SelectedPerson.IsTrusted}" />
                       <Button x:Name="PersonRemoveButton" Classes="small" Content="{l:T multiplayer.kick.button}" Command="{Binding RemovePersonCommand}" CommandParameter="{Binding SelectedPerson}" IsVisible="{Binding SelectedPerson.CanRemove}" />
@@ -810,16 +811,12 @@
                     </Grid>
                   </StackPanel>
                   <TextBlock x:Name="FileOfferPointer" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.file.see_above}" IsVisible="{Binding HasFileOffers}" />
-                  <ItemsControl ItemsSource="{Binding Transfers}">
+                  <!-- Files in this room: the same cards as in a conversation (batch 12). -->
+                  <ItemsControl x:Name="RoomTransfers" ItemsSource="{Binding Transfers}">
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate DataType="vm:TransferItem">
-                        <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2">
-                          <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center" />
-                          <Button Grid.Column="1" Content="{l:T common.cancel}" Margin="8,0,0,0" IsVisible="{Binding IsActive}"
-                                  Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).CancelTransferCommand}" CommandParameter="{Binding}" />
-                          <Button Grid.Column="2" Content="{l:T multiplayer.private.open_folder}" Margin="6,0,0,0" IsVisible="{Binding CanOpen}"
-                                  Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).OpenTransferFolderCommand}" CommandParameter="{Binding}" />
-                        </Grid>
+                        <c:FileCard />
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>

@@ -38,6 +38,12 @@
       <Setter Property="HorizontalAlignment" Value="Left" />
       <Setter Property="Background" Value="{DynamicResource Sunken}" />
     </Style>
+    <Style Selector="Panel.line-file > c|FileCard">
+      <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style Selector="Panel.line-file.mine > c|FileCard">
+      <Setter Property="HorizontalAlignment" Value="Right" />
+    </Style>
     <Style Selector="Border.bubble.mine">
       <Setter Property="HorizontalAlignment" Value="Right" />
       <Setter Property="Background" Value="{DynamicResource AccentTint}" />
@@ -386,7 +392,11 @@
                         <TextBlock Classes="line-delivery" FontSize="12" FontWeight="SemiBold" Text="{Binding DeliveryText}" IsVisible="{Binding HasDelivery}"
                                    Classes.warn="{Binding IsHeld}" />
                       </WrapPanel>
-                      <Border Classes="bubble" Classes.mine="{Binding IsMine}" IsVisible="{Binding !IsNote}">
+                      <!-- A file: its card, on my side when I sent it. -->
+                      <Panel Classes="line-file" Classes.mine="{Binding IsFileMine}" IsVisible="{Binding IsFile}">
+                        <c:FileCard DataContext="{Binding File}" />
+                      </Panel>
+                      <Border Classes="bubble" Classes.mine="{Binding IsMine}" IsVisible="{Binding IsBubble}">
                         <StackPanel Spacing="2">
                           <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" />
                           <TextBlock Classes="caption" Text="{Binding TimeText}" HorizontalAlignment="Right" />
@@ -400,10 +410,26 @@
           </ScrollViewer>
 
           <StackPanel Grid.Row="2" Spacing="4">
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-              <TextBox x:Name="DraftBox" Text="{Binding Draft}" PlaceholderText="{Binding DraftPlaceholder}" MaxLength="2000" IsEnabled="{Binding CanMessage}"
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+              <!-- The paperclip (batch 12): a file, a world, a mod list, a screenshot, a log or a folder. Works when they're
+                   not here too: the file waits until you're both online. Dropping files on the conversation sends them. -->
+              <Button x:Name="AttachButton" Classes="secondary icon-only" IsEnabled="{Binding CanAttach}"
+                      ToolTip.Tip="{l:T files.attach}" AutomationProperties.Name="{l:T files.attach}">
+                <Path Classes="icon sm" Data="{StaticResource Icon.Paperclip}" />
+                <Button.Flyout>
+                  <MenuFlyout Placement="TopEdgeAlignedLeft">
+                    <MenuItem x:Name="AttachFileItem" Header="{l:T files.menu.file_pick}" Command="{Binding AttachCommand}" CommandParameter="file" />
+                    <MenuItem x:Name="AttachWorldItem" Header="{l:T files.menu.world}" Command="{Binding AttachCommand}" CommandParameter="world" />
+                    <MenuItem x:Name="AttachModsItem" Header="{l:T files.menu.mods}" Command="{Binding AttachCommand}" CommandParameter="mods" />
+                    <MenuItem x:Name="AttachShotItem" Header="{l:T files.menu.screenshot}" Command="{Binding AttachCommand}" CommandParameter="screenshot" />
+                    <MenuItem x:Name="AttachLogItem" Header="{l:T files.menu.log}" Command="{Binding AttachCommand}" CommandParameter="log" />
+                    <MenuItem x:Name="AttachFolderItem" Header="{l:T files.menu.folder_pick}" Command="{Binding AttachCommand}" CommandParameter="folder" />
+                  </MenuFlyout>
+                </Button.Flyout>
+              </Button>
+              <TextBox x:Name="DraftBox" Grid.Column="1" Text="{Binding Draft}" PlaceholderText="{Binding DraftPlaceholder}" MaxLength="2000" IsEnabled="{Binding CanMessage}"
                        c:EnterSubmit.Command="{Binding SendCommand}" />
-              <Button x:Name="SendDraftButton" Grid.Column="1" Classes="primary" Command="{Binding SendCommand}" IsEnabled="{Binding CanMessage}"
+              <Button x:Name="SendDraftButton" Grid.Column="2" Classes="primary" Command="{Binding SendCommand}" IsEnabled="{Binding CanMessage}"
                       ToolTip.Tip="{l:T common.send}" AutomationProperties.Name="{l:T common.send}">
                 <Path Classes="icon sm" Data="{StaticResource Icon.Send}" />
               </Button>
