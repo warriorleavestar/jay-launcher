@@ -413,9 +413,21 @@ public sealed class JayNetworkServer : IAsyncDisposable
             "host" => d.RemoveHost(ban.Value),
             "account" => d.RemoveAccount(ban.Value),
             "node" => Volunteers?.Remove(ban.Value) == true ? 1 : 0,
-            "operator" => Volunteers?.RemoveOperator(ban.Value) ?? 0,
+            "operator" => BanOperatorNodes(ban),
             _ => d.Remove(ban.Value) ? 1 : 0,
         };
+    }
+
+    /// <summary>
+    /// Drops an operator's nodes and bans their addresses for as long as the operator, so coming back unsigned (or under
+    /// a new account) from the same addresses doesn't work either.
+    /// </summary>
+    private int BanOperatorNodes(BanList.Ban ban)
+    {
+        var removed = Volunteers?.RemoveOperator(ban.Value) ?? [];
+        foreach (var url in removed)
+            Bans!.Add("node", url, ban.Reason ?? $"operator {ban.Value}", Now, ban.Until is { } until ? until - Now : null);
+        return removed.Count;
     }
 
     /// <summary>

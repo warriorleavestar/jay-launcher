@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -974,16 +973,31 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     {
         var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
         var request = new JsonObject { ["op"] = "volunteer", ["url"] = address };
-        if (signer is not null) request["operator"] = VolunteerOperator.Sign(signer, NetworkId, address, DateTimeOffset.UtcNow);
+        if (signer is not null) request["operator"] = VolunteerOperator.Sign(signer, NetworkId, address, NextSigningTime(address));
         List<JsonObject> replies;
         try { replies = NeedOne(await FanOutAsync(request, ct)); }
         catch (DirectoryRejectedException e) when (e.Code == "owner") { throw new DirectoryRejectedException("owner", L.T("core.mp.public.volunteer_owner")); }
+        catch (DirectoryRejectedException e) when (e.Code == "stale") { throw new DirectoryRejectedException("stale", L.T("core.mp.public.volunteer_stale")); }
         catch (DirectoryRejectedException e) when (e.Code == "op")
         {
             // Directories from before volunteer nodes existed.
             throw new DirectoryRejectedException("off", L.T("core.mp.public.volunteer_off"));
         }
         return replies.Any(r => r["listed"]?.GetValue<bool>() == true);
+    }
+
+    // Each signed registration of an address must carry a later time than the last (seconds): never the same twice.
+    private readonly Dictionary<string, long> _lastVolunteerAt = new(StringComparer.Ordinal);
+
+    private DateTimeOffset NextSigningTime(string address)
+    {
+        lock (_lastVolunteerAt)
+        {
+            var at = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (_lastVolunteerAt.TryGetValue(address, out var last) && at <= last) at = last + 1;
+            _lastVolunteerAt[address] = at;
+            return DateTimeOffset.FromUnixTimeSeconds(at);
+        }
     }
 
     /// <summary>

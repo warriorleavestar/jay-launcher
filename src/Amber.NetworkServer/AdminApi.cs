@@ -206,10 +206,10 @@ public sealed class AdminApi : IAsyncDisposable
                         ["enabled"] = _server.Volunteers is not null,
                         ["nodes"] = new JsonArray([.. (_server.Volunteers?.Listed() ?? []).Select(n => (JsonNode)n)]),
                         // Who runs each node, for operator bans; null when the volunteer didn't sign with a Jay account.
-                        // "disputed": someone claimed the address under another operator ("claimedBy", "" = unsigned).
+                        // "disputed": someone claimed the address under another operator ("claimedBy": the first few, "" = unsigned).
                         ["operators"] = new JsonArray([.. (_server.Volunteers?.Operators() ?? []).Select(n => (JsonNode)new JsonObject
                         {
-                            ["url"] = n.Url, ["operator"] = n.Operator, ["disputed"] = n.Disputed, ["claimedBy"] = n.ClaimedBy,
+                            ["url"] = n.Url, ["operator"] = n.Operator, ["disputed"] = n.Disputed, ["claimedBy"] = n.ClaimedBy is { } claims ? new JsonArray([.. claims.Select(c => (JsonNode)c)]) : null,
                         })]),
                     });
                 case ("GET", "/bans"):

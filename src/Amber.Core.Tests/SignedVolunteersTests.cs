@@ -11,8 +11,8 @@ namespace Amber.Core.Tests;
 
 /// <summary>
 /// Volunteer registrations signed with a Jay account: the directory checks the device signature and certificate, keeps
-/// the account as the node's operator, hands out one node per operator first, gives members only per-directory tags,
-/// and lets the network's operator require signatures and ban an operator. Loopback only.
+/// the account as the node's operator, hands out one node per operator first, gives members only the addresses, and
+/// lets the network's operator require signatures and ban an operator. Loopback only.
 /// </summary>
 public sealed class SignedVolunteersTests : IAsyncDisposable
 {
@@ -105,7 +105,9 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         Assert.Equal("owner", ErrorOf(await RegisterAsync(registry, "tcp://x.example.org:11010", bob)));
         Assert.Equal("owner", ErrorOf(await RegisterAsync(registry, "tcp://x.example.org:11010", null)));
         Assert.True(Ok(await RegisterAsync(registry, "tcp://x.example.org:11010", alice)));
-        Assert.Equal(new VolunteerEntry("tcp://x.example.org:11010", alice.Certificate.Account, true, ""), registry.Operators().Single());
+        var x = registry.Operators().Single();
+        Assert.Equal((alice.Certificate.Account, true), (x.Operator, x.Disputed));
+        Assert.Equal([bob.Certificate.Account, ""], x.ClaimedBy!);
         Assert.Equal(["tcp://x.example.org:11010"], disputed);
         Assert.Equal("", registry.Pick().Single().Operator);
         // A broken signature is refused outright.
@@ -119,8 +121,9 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         Assert.True(Ok(await RegisterAsync(registry, "tcp://z.example.org:11010", null)));
         Assert.Equal("owner", ErrorOf(await RegisterAsync(registry, "tcp://z.example.org:11010", alice)));
         Assert.True(Ok(await RegisterAsync(registry, "tcp://z.example.org:11010", null)));
-        Assert.Equal(new VolunteerEntry("tcp://z.example.org:11010", null, true, alice.Certificate.Account),
-            registry.Operators().Single(n => n.Url == "tcp://z.example.org:11010"));
+        var z = registry.Operators().Single(n => n.Url == "tcp://z.example.org:11010");
+        Assert.Null(z.Operator);
+        Assert.Equal([alice.Certificate.Account], z.ClaimedBy!);
     }
 
     [Fact]
@@ -139,10 +142,16 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         Assert.True(Ok(await RegisterAsync(registry, "tcp://b.example.org:11010", mallory)));
         Assert.Equal("owner", ErrorOf(await RegisterAsync(registry, "tcp://b.example.org:11010", bob)));
         var entry = registry.Operators().Single(n => n.Url == "tcp://b.example.org:11010");
-        Assert.Equal((mallory.Certificate.Account, true, bob.Certificate.Account), (entry.Operator, entry.Disputed, entry.ClaimedBy));
+        Assert.Equal((mallory.Certificate.Account, true), (entry.Operator, entry.Disputed));
+        // Later claims can't push Bob's out: the first few are kept.
+        for (var i = 0; i < 10; i++) await RegisterAsync(registry, "tcp://b.example.org:11010", Person());
+        entry = registry.Operators().Single(n => n.Url == "tcp://b.example.org:11010");
+        Assert.Equal(VolunteerRegistry.MaxClaims, entry.ClaimedBy!.Count);
+        Assert.Equal(bob.Certificate.Account, entry.ClaimedBy[0]);
         Assert.True(registry.Remove("tcp://b.example.org:11010"));
         Assert.True(Ok(await RegisterAsync(registry, "tcp://b.example.org:11010", bob)));
-        Assert.Equal(new VolunteerEntry("tcp://b.example.org:11010", bob.Certificate.Account), registry.Operators().Single(n => n.Url == "tcp://b.example.org:11010"));
+        var mine = registry.Operators().Single(n => n.Url == "tcp://b.example.org:11010");
+        Assert.Equal((bob.Certificate.Account, false), (mine.Operator, mine.Disputed));
     }
 
     [Theory]
@@ -168,12 +177,12 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         Assert.True(Ok(registry.Register(address, first)));
         await registry.LastProbe;
         // The same registration again, or an older one, is refused; a newer one renews.
-        Assert.Equal("operator", ErrorOf(registry.Register(address, first)));
-        Assert.Equal("operator", ErrorOf(registry.Register(address, VolunteerOperator.Sign(alice, Net, address, _now - TimeSpan.FromSeconds(5)))));
+        Assert.Equal("stale", ErrorOf(registry.Register(address, first)));
+        Assert.Equal("stale", ErrorOf(registry.Register(address, VolunteerOperator.Sign(alice, Net, address, _now - TimeSpan.FromSeconds(5)))));
         Assert.True(Ok(registry.Register(address, VolunteerOperator.Sign(alice, Net, address, _now + TimeSpan.FromSeconds(1)))));
         // Even after the address dropped out, an old registration can't bring it back.
         Assert.True(registry.Remove(address));
-        Assert.Equal("operator", ErrorOf(registry.Register(address, first)));
+        Assert.Equal("stale", ErrorOf(registry.Register(address, first)));
         // A registration for another network is refused.
         Assert.Equal("operator", ErrorOf(registry.Register("tcp://z.example.org:11010", VolunteerOperator.Sign(alice, "other-net", "tcp://z.example.org:11010", _now))));
     }
@@ -200,13 +209,7 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         }
         var all = registry.Pick(9);
         Assert.Equal(9, all.Count);
-        // Tags show "same operator" without showing who.
-        Assert.Single(all.Where(n => n.Operator.Length > 0).Select(n => n.Operator).Distinct().Where(t => all.Count(n => n.Operator == t) == 6));
-        Assert.DoesNotContain(all, n => n.Operator.Contains("jay1", StringComparison.Ordinal));
-        // Another directory (or a restart) keys its tags differently.
-        var other = Registry();
-        await RegisterAsync(other, "tcp://b.example.org:11010", bob);
-        Assert.NotEqual(all.Single(n => n.Url == "tcp://b.example.org:11010").Operator, other.Pick().Single().Operator);
+        Assert.Equal(6, all.Count(n => n.Operator == alice.Certificate.Account));
     }
 
     [Fact]
@@ -232,6 +235,48 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         // Someone else's account on Alice's address: told why.
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.VolunteerAsync("tcp://x.example.org:11010", default, Person()));
         Assert.Equal("owner", e.Code);
+    }
+
+    [Fact]
+    public void SigningTimesStayBounded()
+    {
+        // Many accounts signing for many addresses, each accepted once and probed away: the remembered signing times
+        // stay bounded, refused registrations leave nothing behind, and the work per request doesn't grow with them.
+        var registry = new VolunteerRegistry((_, _) => Task.FromResult(false), () => _now) { NetworkId = Net };
+        var people = Enumerable.Range(0, 4).Select(_ => Person()).ToList();
+        var refused = registry.Register("tcp://r.example.org:11010", VolunteerOperator.Sign(people[0], "other-net", "tcp://r.example.org:11010", _now));
+        Assert.Equal("operator", ErrorOf(refused));
+        Assert.Equal(0, registry.SignedRecords);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var full = 0;
+        for (var i = 0; i < VolunteerRegistry.MaxSignedRecords + 200; i++)
+        {
+            var url = $"tcp://n{i}.example.org:11010";
+            var reply = registry.Register(url, VolunteerOperator.Sign(people[i % people.Count], Net, url, _now));
+            if (ErrorOf(reply) == "full") full++;
+            registry.LastProbe.GetAwaiter().GetResult();
+        }
+        Assert.True(registry.SignedRecords <= VolunteerRegistry.MaxSignedRecords);
+        Assert.True(full >= 200);
+        // Once the clock window has passed, they are dropped and signing works again.
+        _now += VolunteerOperator.MaxClockSkew + TimeSpan.FromSeconds(1);
+        Assert.True(Ok(registry.Register("tcp://later.example.org:11010", VolunteerOperator.Sign(people[0], Net, "tcp://later.example.org:11010", _now))));
+        Assert.Equal(1, registry.SignedRecords);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60));
+    }
+
+    [Fact]
+    public async Task TheClientNeverSignsTheSameSecondTwice()
+    {
+        await using var directory = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => DateTimeOffset.UtcNow) { Volunteers = new VolunteerRegistry((_, _) => Task.FromResult(true)) { NetworkId = Net } };
+        var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net };
+        var alice = Person();
+        // Renewals right after each other (same second) are all accepted.
+        for (var i = 0; i < 3; i++) await client.VolunteerAsync("tcp://x.example.org:11010", default, alice);
+        // A directory that already has a newer one (clock went back) says so with its own code.
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
+            new RoomDirectoryClient(new LoopbackNetwork(directory.Port)) { NetworkId = Net }.VolunteerAsync("tcp://x.example.org:11010", default, alice));
+        Assert.Equal("stale", e.Code);
     }
 
     private async Task<JayNetworkServer> StartAsync(Action<JayNetworkServerBuilder>? configure = null)
@@ -264,8 +309,10 @@ public sealed class SignedVolunteersTests : IAsyncDisposable
         var nodes = JsonNode.Parse(await http.GetStringAsync($"http://127.0.0.1:{server.AdminPort}/nodes"))!;
         Assert.All(nodes["operators"]!.AsArray(), n => Assert.Equal(alice.Certificate.Account, n!["operator"]!.GetValue<string>()));
 
-        // Banning the person drops all their nodes and keeps them out, whatever address they come back with.
+        // Banning the person drops all their nodes and keeps them out, whatever address they come back with; their
+        // addresses are banned too, so coming back from them unsigned doesn't work either.
         Assert.Equal(2, server.Ban("operator", alice.Certificate.Account, "abuse"));
+        Assert.Contains(server.Bans!.List(), b => b.Kind == "node" && b.Value == "tcp://x.example.org:11010");
         Assert.Empty(server.Volunteers.Listed());
         Assert.Equal("banned", ErrorOf(Volunteer(server, "tcp://z.example.org:11010", VolunteerOperator.Sign(alice, server.Profile.Id, "tcp://z.example.org:11010", _now))));
         Assert.Throws<ArgumentException>(() => server.Ban("operator", "not-an-address", null));
