@@ -23,6 +23,15 @@ public sealed class SettingsCatalogTests
     }
 
     [Fact]
+    public void WindowsOnlySettingsAreListedOnlyOnWindows()
+    {
+        // Strong sandbox has no control off Windows, so settings#StrongSandbox and the palette must not offer it there.
+        Assert.True(SettingsCatalog.All.Single(f => f.Field == "StrongSandbox").WindowsOnly);
+        Assert.Equal(OperatingSystem.IsWindows(), SettingsCatalog.Find("StrongSandbox") is not null);
+        Assert.Equal(SettingsCatalog.All.Count(f => !f.WindowsOnly || OperatingSystem.IsWindows()), SettingsCatalog.Fields.Count);
+    }
+
+    [Fact]
     public void FieldsAreUniqueAndBelongToAGroup()
     {
         Assert.Equal(SettingsCatalog.Fields.Count, SettingsCatalog.Fields.Select(f => f.Field.ToLowerInvariant()).Distinct().Count());
@@ -53,7 +62,7 @@ public sealed class SettingsCatalogTests
     {
         var en = L.Load(L.Source);
         var keys = SettingsCatalog.Groups.SelectMany(g => new[] { g.TitleKey, g.SummaryKey, g.NoteKey })
-            .Concat(SettingsCatalog.Fields.SelectMany(f => new[] { f.LabelKey, f.HintKey }).OfType<string>());
+            .Concat(SettingsCatalog.All.SelectMany(f => new[] { f.LabelKey, f.HintKey }).OfType<string>());
         Assert.All(keys, k => Assert.True(en.ContainsKey(k), k));
     }
 }

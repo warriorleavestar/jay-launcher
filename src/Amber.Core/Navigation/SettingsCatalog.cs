@@ -5,9 +5,10 @@ public sealed record SettingsGroup(string Id, string TitleKey, string SummaryKey
 
 /// <summary>
 /// One setting on the settings page. <paramref name="Field"/> is the route fragment (<c>settings#Field</c>) and the name
-/// of the control (<c>Field</c> or <c>FieldBox</c>); <paramref name="HintKey"/> is searched too.
+/// of the control (<c>Field</c> or <c>FieldBox</c>); <paramref name="HintKey"/> is searched too. A <paramref name="WindowsOnly"/>
+/// setting has no control on other systems, so it is left out of <see cref="SettingsCatalog.Fields"/> there.
 /// </summary>
-public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null);
+public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null, bool WindowsOnly = false);
 
 /// <summary>
 /// The nine settings groups and every setting with a control, in page order. The settings search and the command
@@ -38,7 +39,8 @@ public static class SettingsCatalog
         new(About, "settings.group.about", "settings.group.about.summary", "settings.group.about.note"),
     ];
 
-    public static readonly IReadOnlyList<SettingsField> Fields =
+    /// <summary>Every setting on every system.</summary>
+    public static readonly IReadOnlyList<SettingsField> All =
     [
         new("Language", General, "settings.language.label"),
         new("AfterLaunch", General, "settings.after_launch.label", "settings.after_launch.hint"),
@@ -72,7 +74,7 @@ public static class SettingsCatalog
         new("RecycleKeep", Storage, "recycle.keep.label", "recycle.title"),
 
         new("NoTrace", Privacy, "settings.notrace.label", "settings.notrace.hint"),
-        new("StrongSandbox", Privacy, "settings.sandbox.strong", "settings.sandbox.strong.hint"),
+        new("StrongSandbox", Privacy, "settings.sandbox.strong", "settings.sandbox.strong.hint", WindowsOnly: true),
         new("LaunchWithoutSandbox", Privacy, "settings.sandbox.without", "settings.sandbox.without.hint"),
         new("Attestation", Privacy, "settings.security.attest.label", "settings.security.hint"),
         new("Breaker", Privacy, "settings.security.breaker.label", "settings.security.breaker.toggle"),
@@ -95,6 +97,9 @@ public static class SettingsCatalog
         new("AboutPage", About, "about.title", "about.promise"),
     ];
 
+    /// <summary>The settings this system shows (Windows-only ones are dropped elsewhere).</summary>
+    public static readonly IReadOnlyList<SettingsField> Fields = [.. All.Where(f => !f.WindowsOnly || OperatingSystem.IsWindows())];
+
     public static SettingsGroup? Group(string? id) =>
         Groups.FirstOrDefault(g => string.Equals(g.Id, id, StringComparison.OrdinalIgnoreCase));
 
@@ -102,7 +107,10 @@ public static class SettingsCatalog
     public static SettingsField? Find(string? field)
     {
         if (string.IsNullOrWhiteSpace(field)) return null;
-        var name = field.EndsWith("Box", StringComparison.OrdinalIgnoreCase) ? field[..^3] : field;
-        return Fields.FirstOrDefault(f => string.Equals(f.Field, name, StringComparison.OrdinalIgnoreCase));
+        // Exact name first: a field may itself end in "Box" (StrongSandbox).
+        return Fields.FirstOrDefault(f => string.Equals(f.Field, field, StringComparison.OrdinalIgnoreCase))
+            ?? (field.EndsWith("Box", StringComparison.OrdinalIgnoreCase)
+                ? Fields.FirstOrDefault(f => string.Equals(f.Field, field[..^3], StringComparison.OrdinalIgnoreCase))
+                : null);
     }
 }

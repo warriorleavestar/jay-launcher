@@ -575,6 +575,8 @@ public sealed class GameSandboxTests : IDisposable
     [Fact]
     public void Windows_ProcessAdoption_PrivateMembersStillExist()
     {
+        // These are private members of the Windows build of System.Diagnostics.Process.
+        if (!OperatingSystem.IsWindows()) return;
         // WindowsSandbox.Start wraps the process it creates in a System.Diagnostics.Process through these. A .NET
         // update that renames them must fail here, not at a player's launch.
         Assert.NotNull(WindowsSandbox.SetProcessHandle);
