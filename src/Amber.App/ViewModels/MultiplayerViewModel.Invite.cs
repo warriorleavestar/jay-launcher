@@ -124,6 +124,7 @@ public sealed partial class MultiplayerViewModel
 {
     private MemberIdentity? _identity;
     private TrustedMembers? _trusted;
+    private readonly Lock _identityGate = new();
     private HostLobby? _lobby;
     private RoomCredentials? _credentials;
     private MemberTable? _members;
@@ -135,20 +136,31 @@ public sealed partial class MultiplayerViewModel
     {
         get
         {
-            if (_identity is not null) return _identity;
-            _identity = MemberIdentity.LoadOrCreate(AppSettings.DataDir);
-            if (_identity.Warning is { } warning) SetStatus(new StatusMessage("common.raw", [warning], StatusKind.Warning));
-            return _identity;
+            if (Volatile.Read(ref _identity) is { } known) return known;
+            MemberIdentity identity;
+            // Loading may create the key file the first time, so only one caller may do it.
+            lock (_identityGate)
+            {
+                if (_identity is { } loaded) return loaded;
+                identity = MemberIdentity.LoadOrCreate(AppSettings.DataDir);
+                Volatile.Write(ref _identity, identity);
+            }
+            if (identity.Warning is { } warning) Dispatcher.UIThread.Post(() => SetStatus(new StatusMessage("common.raw", [warning], StatusKind.Warning)));
+            return identity;
         }
     }
 
-    internal TrustedMembers Trusted => _trusted ??= CreateTrusted();
-
-    private TrustedMembers CreateTrusted()
+    internal TrustedMembers Trusted
     {
-        var trusted = new TrustedMembers(TrustedFile);
-        trusted.Changed += () => Dispatcher.UIThread.Post(RefreshTrusted);
-        return trusted;
+        get
+        {
+            if (Volatile.Read(ref _trusted) is { } list) return list;
+            var created = new TrustedMembers(TrustedFile);
+            // Two first callers on different threads: one list wins, and only it reports changes.
+            if (Interlocked.CompareExchange(ref _trusted, created, null) is { } other) return other;
+            created.Changed += () => Dispatcher.UIThread.Post(RefreshTrusted);
+            return created;
+        }
     }
 
     public string MyFingerprint => L.F("multiplayer.identity.mine", Identity.Fingerprint);
@@ -166,7 +178,7 @@ public sealed partial class MultiplayerViewModel
     internal int RoomEpoch => _room?.Epoch ?? 0;
 
     /// <summary>测试用：换一个联机身份（自检里同一个进程开好几个成员，要各自不同的身份）。</summary>
-    internal void UseTestIdentity(string directory) => _identity = MemberIdentity.LoadOrCreate(directory);
+    internal void UseTestIdentity(string directory) => Volatile.Write(ref _identity, MemberIdentity.LoadOrCreate(directory));
 
     [ObservableProperty] public partial bool InviteDialogOpen { get; set; }
     [ObservableProperty] public partial bool InviteAutoApprove { get; set; }
