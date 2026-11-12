@@ -227,6 +227,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             _loadedTabs.Remove((int)InstanceTab.Servers);
         };
         service.InstalledVersionsChanged += () => Dispatcher.UIThread.Post(RefreshInstances);
+        service.RoomGameAddressChanged += () => Dispatcher.UIThread.Post(OnRoomGameAddressChanged);
         // 别处（启动页、后台装完的安装）换了当前实例：这一页正在用、或者正在做事（导出、导入世界、改设置）时不跟着换，
         // 免得操作落到别的实例上；下次打开这一页再跟上。
         service.CurrentInstanceChanged += () => Dispatcher.UIThread.Post(() =>
@@ -686,6 +687,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         PreLaunch = s.PreLaunchCommand ?? "";
         PostExit = s.PostExitCommand ?? "";
         JoinServer = s.JoinServer ?? "";
+        LoadStartInto(s);
         _ = LoadJavaChoicesAsync(s.JavaPath);
     }
 
@@ -738,6 +740,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             PreLaunchCommand = NullIfBlank(PreLaunch),
             PostExitCommand = NullIfBlank(PostExit),
             JoinServer = NullIfBlank(JoinServer),
+            StartInto = StartIntoKey,
+            StartWorld = SelectedStartWorld?.Folder ?? old.StartWorld,
             // Changed on its own card (and from Discover), never by this form.
             UniversalLoader = old.UniversalLoader,
         };

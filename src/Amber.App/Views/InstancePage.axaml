@@ -9,6 +9,20 @@
              xmlns:v="using:Amber.App.Views"
              x:Class="Amber.App.Views.InstancePage"
              x:DataType="vm:InstanceViewModel">
+  <UserControl.Resources>
+    <!-- A row of the start button's ▾ menu (submenus use the same theme for their rows). -->
+    <ControlTheme x:Key="StartMenuItem" TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}" x:DataType="vm:StartMenuEntry">
+      <Setter Property="Header" Value="{Binding Header}" />
+      <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+      <Setter Property="ToggleType" Value="Radio" />
+      <Setter Property="IsChecked" Value="{Binding IsChecked, Mode=OneWay}" />
+      <Setter Property="Command" Value="{Binding Go}" />
+      <Setter Property="CommandParameter" Value="{Binding Target}" />
+      <Setter Property="ItemsSource" Value="{Binding Children}" />
+      <Setter Property="ItemContainerTheme" Value="{DynamicResource StartMenuItem}" />
+      <Setter Property="AutomationProperties.Name" Value="{Binding Header}" />
+    </ControlTheme>
+  </UserControl.Resources>
   <UserControl.Styles>
     <Style Selector="Border.hero">
       <Setter Property="CornerRadius" Value="{DynamicResource RadiusLg}" />
@@ -125,6 +139,14 @@
                   <ProgressBar IsIndeterminate="True" Width="22" MinWidth="22" Height="4" VerticalAlignment="Center" IsVisible="{Binding StartBusy}" />
                   <TextBlock Text="{Binding StartLabel}" VerticalAlignment="Center" />
                 </StackPanel>
+              </Button>
+              <!-- ▾ next to start: "Start and go to…" (title, a world, a server, the joined room); the choice is remembered. -->
+              <Button x:Name="StartIntoButton" Classes="secondary" MinHeight="44" MinWidth="36" Padding="10,8" IsVisible="{Binding !StartBusy}"
+                      ToolTip.Tip="{Binding StartIntoLabel}" AutomationProperties.Name="{Binding StartIntoLabel}">
+                <Path Classes="icon" Data="{StaticResource Icon.ChevronDown}" Width="14" Height="14" />
+                <Button.Flyout>
+                  <MenuFlyout Placement="BottomEdgeAlignedLeft" Opening="StartIntoMenu_Opening" ItemsSource="{Binding StartMenuEntries}" ItemContainerTheme="{StaticResource StartMenuItem}" />
+                </Button.Flyout>
               </Button>
               <Button x:Name="SideButton" Classes="secondary" Content="{Binding SideLabel}" Command="{Binding SideActionCommand}" MinHeight="44"
                       IsVisible="{Binding ShowSideButton}" />
@@ -1035,8 +1057,23 @@
               <TextBlock Grid.Row="8" Classes="label" Text="{l:T instance.settings.post_exit}" />
               <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" />
 
-              <TextBlock Grid.Row="9" Classes="label" Text="{l:T instance.settings.join_server}" />
-              <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding JoinServer, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.join_server_hint}" />
+              <!-- "Start and go to": skip the title screen (also the start button's ▾ menu). -->
+              <TextBlock Grid.Row="9" Classes="label" Text="{l:T quickplay.setting}" VerticalAlignment="Top" Margin="0,14,0,0" />
+              <StackPanel x:Name="StartIntoRow" Grid.Row="9" Grid.Column="1" Margin="0,8,0,0" Spacing="6">
+                <WrapPanel ItemSpacing="8" LineSpacing="4">
+                  <ComboBox x:Name="StartIntoBox" ItemsSource="{Binding StartIntoChoices}" SelectedIndex="{Binding StartIntoIndex}" MinWidth="200"
+                            AutomationProperties.Name="{l:T quickplay.setting}" />
+                  <ComboBox x:Name="StartWorldBox" ItemsSource="{Binding StartWorldChoices}" SelectedItem="{Binding SelectedStartWorld}" MinWidth="220" MaxWidth="360"
+                            IsVisible="{Binding ShowStartWorld}" IsEnabled="{Binding !HasNoStartWorlds}" AutomationProperties.Name="{l:T quickplay.world}">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate DataType="vm:StartWorldChoice"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Label}" /></DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <TextBox x:Name="StartServerBox" Text="{Binding JoinServer, UpdateSourceTrigger=LostFocus}" MinWidth="240" IsVisible="{Binding ShowStartServer}"
+                           PlaceholderText="{l:T instance.settings.join_server_hint}" AutomationProperties.Name="{l:T quickplay.server}" />
+                </WrapPanel>
+                <TextBlock x:Name="StartIntoHint" Classes="hint" Text="{Binding StartIntoHint}" TextWrapping="Wrap" />
+              </StackPanel>
 
               <TextBlock Grid.Row="10" Grid.Column="1" Classes="hint" Margin="0,12,0,4" Text="{l:T instance.settings.autosave_hint}" TextWrapping="Wrap" />
             </Grid>

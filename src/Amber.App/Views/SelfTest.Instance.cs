@@ -7,6 +7,7 @@ using Amber.Core.Layout;
 using Amber.Core.Localization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.Interactivity;
@@ -224,6 +225,9 @@ internal sealed partial class SelfTest
             window.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Tab, KeyModifiers = KeyModifiers.Control, Source = window });
             Check("键盘：Ctrl+Tab 到下一个页签", instance.TabIndex == (int)InstanceTab.Mods);
 
+            // ---- Start and go to (quick play) ----
+            await QuickPlayAsync(instance, page, id);
+
             // ---- English ----
             L.SetLanguage("en");
             instance.TabIndex = (int)InstanceTab.Overview;
@@ -243,6 +247,7 @@ internal sealed partial class SelfTest
         }
         finally
         {
+            service.SetRoomGameAddress(null);
             L.SetLanguage("zh-Hans");
             home.Crash = null;
             if (removeAccount && service.Accounts.Store.Accounts.FirstOrDefault(a => a.Name == "Steve") is { } steve)
@@ -255,5 +260,143 @@ internal sealed partial class SelfTest
             service.Settings.GameDirectory = originalDir;
             service.SaveAndReload();
         }
+    }
+
+    /// <summary>
+    /// "Start and go to…": the Settings tab's dropdown (title, a world, a server, the current Jay room), and the ▾ menu
+    /// next to the start button (worlds and servers as submenus, the room only while in one). Choosing remembers it for
+    /// this instance. Nothing is launched: the menu's choice is remembered through the same call the menu uses.
+    /// </summary>
+    private async Task QuickPlayAsync(InstanceViewModel instance, InstancePage? page, string id)
+    {
+        var service = main.Service;
+        var workDir = service.WorkDirFor(id);
+        var world = Path.Combine(workDir, "saves", "Survival");
+        Directory.CreateDirectory(world);
+        Amber.Core.Game.Nbt.WriteFile(Path.Combine(world, "level.dat"), new Dictionary<string, object>
+        {
+            ["Data"] = new Dictionary<string, object> { ["LevelName"] = "生存世界", ["GameType"] = 0, ["LastPlayed"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
+        });
+        Amber.Core.Game.ServerList.Add(workDir, new Amber.Core.Game.ServerEntry("朋友的服", "friends.example.invalid:25565"));
+
+        window.Height = 900;
+        instance.TabIndex = (int)InstanceTab.Settings;
+        await Task.Delay(500);
+        Check("启动后直接进：设置页签里一个下拉，四项（标题页、存档、服务器、当前 Jay 房间），默认标题页",
+            instance.StartIntoChoices.Length == 4 && instance.StartIntoIndex == (int)StartInto.Title
+            && Dispatcher.UIThread.Invoke(() => page?.StartIntoBox.IsEffectivelyVisible == true && page.StartWorldBox.IsVisible == false && page.StartServerBox.IsVisible == false),
+            $"{instance.StartIntoIndex}");
+        Check("启动后直接进：没有“烘焙”这个词", instance.StartIntoChoices.All(c => !c.Label.Contains("烘焙")) && !instance.StartIntoHint.Contains("烘焙"));
+
+        instance.StartIntoIndex = (int)StartInto.World;
+        await Task.Delay(200);
+        var saved = InstanceSettings.Load(service.Directory, id);
+        Check("选“存档”：出现存档下拉，默认最近玩的那个，马上存进这个实例的设置",
+            Dispatcher.UIThread.Invoke(() => page?.StartWorldBox.IsEffectivelyVisible == true) && instance.SelectedStartWorld?.Folder == "Survival"
+            && saved.StartInto == "world" && saved.StartWorld == "Survival", $"{saved.StartInto} {saved.StartWorld}");
+        Check("选“存档”：下面一行写会直接进这个存档", instance.StartIntoHint == L.T("quickplay.hint.world"), instance.StartIntoHint);
+        Dispatcher.UIThread.Invoke(() => page?.StartIntoHint.BringIntoView());
+        await ShotAsync("instance-quickplay-world");
+
+        instance.StartIntoIndex = (int)StartInto.Server;
+        instance.JoinServer = "mc.example.invalid:25566";
+        await Task.Delay(200);
+        saved = InstanceSettings.Load(service.Directory, id);
+        Check("选“服务器”：出现地址框，存下地址", Dispatcher.UIThread.Invoke(() => page?.StartServerBox.IsEffectivelyVisible == true)
+            && saved.StartInto == "server" && saved.JoinServer == "mc.example.invalid:25566", $"{saved.StartInto} {saved.JoinServer}");
+
+        instance.StartIntoIndex = (int)StartInto.Room;
+        await Task.Delay(200);
+        Check("选“当前 Jay 房间”：不在房间时写明会停在标题页", instance.StartIntoHint == L.T("quickplay.hint.room_none"), instance.StartIntoHint);
+        Dispatcher.UIThread.Invoke(() => page?.StartIntoHint.BringIntoView());
+        await ShotAsync("instance-quickplay-room-setting");
+        instance.StartIntoIndex = (int)StartInto.Title;
+        await Task.Delay(200);
+
+        // The ▾ menu.
+        var (title, worlds, servers, room) = instance.StartMenu();
+        Check("▾ 菜单：标题页（现在选的）、存档 › Survival、服务器 › 设置里的和游戏里存的两个，不在房间时没有房间这一项",
+            title.Chosen && worlds.Count == 1 && worlds[0].Value == "Survival" && servers.Count == 2
+            && servers.Any(t => t.Value == "friends.example.invalid:25565") && servers.Any(t => t.Value == "mc.example.invalid:25566") && room is null,
+            $"{worlds.Count} {servers.Count} {room is null}");
+        Check("▾ 按钮挨着开始按钮，读屏名字写下一次去哪", Dispatcher.UIThread.Invoke(() => page?.StartIntoButton.IsEffectivelyVisible == true)
+            && instance.StartIntoLabel == L.F("quickplay.menu.name", L.T("quickplay.title")), instance.StartIntoLabel);
+        await MenuShotAsync(page, "instance-quickplay-menu", openWorlds: true);
+
+        service.SetRoomGameAddress("127.0.0.1:52011");
+        await Task.Delay(200);
+        Check("▾ 菜单：在 Jay 房间里时多一项“当前 Jay 房间”", instance.InRoom && instance.StartMenu().Room is not null);
+        await MenuShotAsync(page, "instance-quickplay-menu-room", openWorlds: false);
+        instance.RememberStartInto(instance.StartMenu().Room!);
+        saved = InstanceSettings.Load(service.Directory, id);
+        Check("▾ 菜单：选了就记住（这个实例下次也这样进）", saved.StartInto == "room" && instance.StartMenu().Room?.Chosen == true
+            && instance.StartIntoLabel == L.F("quickplay.menu.name", L.T("quickplay.room")), saved.StartInto ?? "");
+        var (target, note) = QuickPlay.Choose(null, null, service.EffectiveSettings(id), service.RoomGameAddress, Path.Combine(workDir, "saves"));
+        Check("启动时：记住的房间变成进这个房间的地址", target?.Server == "127.0.0.1:52011" && note is null, target?.Server ?? note ?? "");
+        service.SetRoomGameAddress(null);
+        await Task.Delay(100);
+        Check("离开房间后：菜单里没有房间这一项，启动时停在标题页并说一句", instance.StartMenu().Room is null
+            && QuickPlay.Choose(null, null, service.EffectiveSettings(id), null, Path.Combine(workDir, "saves")).Note == "quickplay.note.no_room");
+        instance.RememberStartInto(instance.StartMenu().Title);
+        window.Height = 720;
+        instance.TabIndex = (int)InstanceTab.Overview;
+        await Task.Delay(200);
+    }
+
+    private async Task MenuShotAsync(InstancePage? page, string name, bool openWorlds)
+    {
+        if (page is null) return;
+        Dispatcher.UIThread.Invoke(() => page.StartIntoButton.Flyout!.ShowAt(page.StartIntoButton));
+        await Task.Delay(500);
+        var rows = Dispatcher.UIThread.Invoke(() => page.Vm is { } vm ? vm.StartMenuEntries.Count : 0);
+        Check($"▾ 菜单打开（{name}）：标题、标题页、存档 ›、服务器 ›（在房间里再加一行）", rows >= 4, $"{rows}");
+        if (openWorlds)
+        {
+            var worlds = Dispatcher.UIThread.Invoke(() => PopupOf(page.StartIntoButton.Flyout!)?.Child?.GetVisualDescendants().OfType<MenuItem>()
+                .FirstOrDefault(m => m.Header as string == L.T("quickplay.world_menu")));
+            if (worlds is not null)
+            {
+                Dispatcher.UIThread.Invoke(() => worlds.IsSubMenuOpen = true);
+                await Task.Delay(400);
+            }
+        }
+        await FlyoutShotAsync(page.StartIntoButton.Flyout!, name);
+        Dispatcher.UIThread.Invoke(() => page.StartIntoButton.Flyout!.Hide());
+        await Task.Delay(200);
+    }
+
+    /// <summary>A flyout's own popup (and an open submenu's), rendered on its own.</summary>
+    private async Task FlyoutShotAsync(FlyoutBase flyout, string name) => await Dispatcher.UIThread.InvokeAsync(() =>
+    {
+        var hosts = new List<Visual>();
+        // The flyout's popup is not public: read it the way a test may. Its child is the menu's presenter.
+        var popup = PopupOf(flyout);
+        if (popup?.Child is Visual host) hosts.Add(host);
+        foreach (var root in hosts.ToList())
+            foreach (var sub in root.GetVisualDescendants().OfType<MenuItem>().Where(m => m.IsSubMenuOpen))
+                if (sub.GetVisualDescendants().OfType<Popup>().FirstOrDefault()?.Child is Visual subHost) hosts.Add(subHost);
+        Check($"▾ 菜单是单独的弹出层（{name}）", hosts.Count > 0 && hosts[0].Bounds.Width > 40, $"{hosts.Count} {(hosts.Count > 0 ? hosts[0].Bounds.ToString() : "")}");
+        var i = 0;
+        foreach (var visual in hosts)
+        {
+            if (visual.Bounds.Width < 1) continue;
+            using var bitmap = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)visual.Bounds.Width, (int)visual.Bounds.Height));
+            bitmap.Render(visual);
+            bitmap.Save(Path.Combine(reportDir, $"{++_shot:D2}-{name}{(i++ == 0 ? "" : "-sub")}.png"));
+        }
+    });
+
+    /// <summary>A flyout's popup is not public: found the way a test may (the first Popup it holds).</summary>
+    private static Popup? PopupOf(FlyoutBase flyout)
+    {
+        const System.Reflection.BindingFlags any = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+        for (var type = flyout.GetType(); type is not null; type = type.BaseType)
+        {
+            if (type.GetProperties(any).Where(p => typeof(Popup).IsAssignableFrom(p.PropertyType) && p.GetIndexParameters().Length == 0)
+                    .Select(p => p.GetValue(flyout)).OfType<Popup>().FirstOrDefault() is { } byProperty) return byProperty;
+            if (type.GetFields(any).Where(f => typeof(Popup).IsAssignableFrom(f.FieldType)).Select(f => f.GetValue(flyout)).OfType<Popup>().FirstOrDefault() is { } byField)
+                return byField;
+        }
+        return null;
     }
 }

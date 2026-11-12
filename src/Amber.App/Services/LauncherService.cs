@@ -711,7 +711,8 @@ public sealed class LauncherService : IDisposable
     /// manifest's <c>javaMin</c>, 21 today), so for a version that asks for less (Forge 1.20.1 asks for 17) the bake
     /// switches to that Java and the launch must use it too.
     /// </remarks>
-    public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false)
+    public async Task<(Amber.Core.Bake.BakedLaunch? Launch, string Reason, string JavaPath)> PrepareBakeAsync(GameContext ctx, string id, string javaPath, IProgress<Amber.Core.Bake.BakeEvent>? progress, CancellationToken ct, bool warm = false,
+        Amber.Core.Launch.QuickPlay? quickPlay = null)
     {
         if (!UsesUniversalLoader(ctx, id)) return (null, "", javaPath);
         if (BakeFor(ctx) is not { } bake) return (null, Amber.Core.Localization.L.T("core.bake.loader_missing"), javaPath);
@@ -722,7 +723,7 @@ public sealed class LauncherService : IDisposable
             var versionMajor = ctx.Directory.ResolveVersion(id).JavaVersion?.MajorVersion ?? Amber.Core.Bake.BakeService.DefaultJavaMin;
             var major = bake.JavaMajorFor(instance, versionMajor);
             if (major != versionMajor) javaPath = await ctx.Java.ForMajorAsync(major, ct);
-            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct);
+            var done = await bake.PrepareAsync(javaPath, major, ctx.Directory, instance, warm, progress, ct, quickPlay);
             return (done.Launch, done.Reason, javaPath);
         }
         finally
@@ -851,6 +852,22 @@ public sealed class LauncherService : IDisposable
 
     /// <summary>进行中的联机会话，退出时一起结束。</summary>
     public IDisposable? ActiveMultiplayer { get; set; }
+
+    /// <summary>
+    /// The game address of the Jay room this player has joined (a local forward), else null. "Start and go to ›
+    /// Current Jay room" joins it; the menu item is there only while this is set.
+    /// </summary>
+    public string? RoomGameAddress { get; private set; }
+
+    public event Action? RoomGameAddressChanged;
+
+    public void SetRoomGameAddress(string? address)
+    {
+        address = string.IsNullOrWhiteSpace(address) ? null : address;
+        if (address == RoomGameAddress) return;
+        RoomGameAddress = address;
+        RoomGameAddressChanged?.Invoke();
+    }
 
     /// <summary>联机页开着“仅游戏”转发时，启动游戏要用的转发（否则为 null）。</summary>
     public Amber.Core.Multiplayer.Transport.GameProxy? ActiveGameProxy { get; set; }

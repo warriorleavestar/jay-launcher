@@ -82,7 +82,12 @@ public sealed record BakeLoaderInfo(string LoaderVersion, int Protocol, Version 
     public static readonly Version MinimumInterface = new(1, 1);
     public static readonly Version WarmInterface = new(1, 2);
 
+    /// <summary>Interface 1.3.3: bake-instance takes <c>quickPlay</c> (straight into a world or server).</summary>
+    public static readonly Version QuickPlayInterface = new(1, 3, 3);
+
     public bool CanWarm => Interface >= WarmInterface;
+
+    public bool CanQuickPlay => Interface >= QuickPlayInterface;
 
     internal static BakeLoaderInfo Parse(JsonObject result)
     {
@@ -124,7 +129,14 @@ public sealed record BakeEvent(string Stage, string Message, bool IsProblem, boo
 /// (interface 1.3) is where the launch writes its runtime problems; null from older loaders.
 /// </summary>
 public sealed record BakedLaunch(string MainClass, IReadOnlyList<string> Classpath, IReadOnlyList<string> JvmArgs, IReadOnlyList<string> GameArgsPrefix, string StateFile, string StateKey,
-    string? ProblemsFile = null);
+    string? ProblemsFile = null)
+{
+    /// <summary>
+    /// The quick play the loader put into these arguments (interface 1.3.3), else null. When set, the launch passes no
+    /// quick play arguments of its own: the loader's are already in <see cref="GameArgsPrefix"/> / <see cref="JvmArgs"/>.
+    /// </summary>
+    public Amber.Core.Launch.QuickPlay? QuickPlay { get; init; }
+}
 
 /// <summary>
 /// What bake-instance did with the loader's cache (interface 1.3): State is <c>new</c>, <c>rebuilt</c> or <c>reused</c>;
@@ -258,7 +270,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// loader has it. Launch is null when the instance cannot be baked (Reason says why).
     /// </summary>
     public async Task<BakePreparation> PrepareAsync(string javaPath, int javaMajor, GameDirectory dir, GameInstance instance, bool warm,
-        IProgress<BakeEvent>? progress, CancellationToken ct)
+        IProgress<BakeEvent>? progress, CancellationToken ct, Amber.Core.Launch.QuickPlay? quickPlay = null)
     {
         // A package is checked file by file before any of it runs, and its Java minimum before the first process:
         // a JVM older than the loader cannot even print an error line.
@@ -270,7 +282,12 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         if (!Supports(instance, loader, out var reason)) return new BakePreparation(null, reason, false, null);
         EnsureJava(javaMajor, loader.JavaMinFor(kind));
         if (kind == BakePlatform.Forge) BakePlatform.DisableForgeUpdateCheck(instance.WorkDir);
-        if (Current(dir, instance, javaMajor) is { } current) return new BakePreparation(current, L.T("core.bake.reused"), true, null);
+        // Quick play goes only to a loader that knows it (else the launch passes the game's own arguments). It is not
+        // part of the state key, so a previous bake is reused only when it was for the same target: otherwise
+        // bake-instance runs again, which reuses every cached file and just writes the new arguments.
+        var sent = loader.CanQuickPlay ? quickPlay : null;
+        if (Current(dir, instance, javaMajor) is { } current && SameQuickPlay(current.QuickPlay, sent))
+            return new BakePreparation(current, L.T("core.bake.reused"), true, null);
         await EnsureRequirementsAsync(javaPath, dir, instance, progress, ct);
         var installDir = await BakePlatform.PrepareAsync(dir, instance, dataRoot, download, progress, ct);
         progress?.Report(new BakeEvent("bake-instance", L.F("core.bake.instance_progress", BakePlatform.DisplayName(kind)), false, false));
@@ -278,7 +295,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         BakeCacheInfo? cache;
         try
         {
-            (launch, cache) = await BakeInstanceAsync(javaPath, javaMajor, dir, instance, installDir, progress, ct);
+            (launch, cache) = await BakeInstanceAsync(javaPath, javaMajor, dir, instance, installDir, progress, ct, sent);
         }
         catch (BakeException e) when (e.Code == "java_too_old")
         {
@@ -385,9 +402,9 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     /// <c>&lt;instance&gt;/.amber-ul/state.json</c>. <paramref name="installDir"/> is the prepared NeoForge/Forge install (null for vanilla).
     /// </summary>
     public async Task<(BakedLaunch Launch, BakeCacheInfo? Cache)> BakeInstanceAsync(string javaPath, int javaMajor, GameDirectory dir, GameInstance instance, string? installDir,
-        IProgress<BakeEvent>? progress, CancellationToken ct)
+        IProgress<BakeEvent>? progress, CancellationToken ct, Amber.Core.Launch.QuickPlay? quickPlay = null)
     {
-        var request = InstanceRequest(dir, instance, javaMajor, installDir);
+        var request = InstanceRequest(dir, instance, javaMajor, installDir, quickPlay);
         var result = await RunAsync(javaPath, "bake-instance", request, progress, ct);
         var launch = ParseLaunch(result);
         BakeRecord.Write(instance.WorkDir, new BakeRecord(InputKey(dir, instance, javaMajor), launch));
@@ -395,7 +412,10 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         return (launch, BakeCacheInfo.Parse(result["cache"]));
     }
 
-    internal JsonObject InstanceRequest(GameDirectory dir, GameInstance instance, int javaMajor, string? installDir)
+    /// <summary>Same quick play target (both none counts as the same).</summary>
+    internal static bool SameQuickPlay(Amber.Core.Launch.QuickPlay? a, Amber.Core.Launch.QuickPlay? b) => a is null ? b is null : a.SameTarget(b);
+
+    internal JsonObject InstanceRequest(GameDirectory dir, GameInstance instance, int javaMajor, string? installDir, Amber.Core.Launch.QuickPlay? quickPlay = null)
     {
         var (gameJar, libraries) = GameInputs(dir, instance);
         var kind = BakePlatform.KindOf(instance) ?? BakePlatform.Vanilla;
@@ -420,6 +440,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
             if (installDir is null) throw new ArgumentNullException(nameof(installDir));
             request["platform"] = new JsonObject { ["kind"] = kind, ["installDir"] = installDir };
         }
+        if (quickPlay is not null) request["quickPlay"] = quickPlay.ToRequest();
         return request;
     }
 
@@ -527,7 +548,10 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
             Strings(launch["gameArgsPrefix"]),
             launch["stateFile"]?.GetValue<string>() ?? "",
             result["stateKey"]?.GetValue<string>() ?? "",
-            launch["problemsFile"] is JsonValue pf && pf.TryGetValue<string>(out var problems) && problems.Length > 0 ? problems : null);
+            launch["problemsFile"] is JsonValue pf && pf.TryGetValue<string>(out var problems) && problems.Length > 0 ? problems : null)
+        {
+            QuickPlay = Amber.Core.Launch.QuickPlay.FromLaunch(launch["quickPlay"]),
+        };
     }
 
     /// <summary>
@@ -764,6 +788,12 @@ public sealed record BakeRecord(string Key, BakedLaunch Launch)
             ["stateKey"] = record.Launch.StateKey,
         };
         if (record.Launch.ProblemsFile is { } problems) json["problemsFile"] = problems;
+        if (record.Launch.QuickPlay is { } quickPlay)
+        {
+            var echo = quickPlay.ToRequest();
+            if (quickPlay.Via is { } via) echo["via"] = via;
+            json["quickPlay"] = echo;
+        }
         var temp = path + ".tmp";
         File.WriteAllText(temp, json.ToJsonString(), new UTF8Encoding(false));
         File.Move(temp, path, true);
@@ -779,7 +809,10 @@ public sealed record BakeRecord(string Key, BakedLaunch Launch)
             static List<string> Strings(JsonNode? node) => node?.AsArray().Select(n => n!.GetValue<string>()).ToList() ?? [];
             var launch = new BakedLaunch(o["mainClass"]?.GetValue<string>() ?? "", Strings(o["classpath"]), Strings(o["jvmArgs"]),
                 Strings(o["gameArgsPrefix"]), o["stateFile"]?.GetValue<string>() ?? "", o["stateKey"]?.GetValue<string>() ?? "",
-                o["problemsFile"]?.GetValue<string>());
+                o["problemsFile"]?.GetValue<string>())
+            {
+                QuickPlay = Amber.Core.Launch.QuickPlay.FromLaunch(o["quickPlay"]),
+            };
             return launch.MainClass.Length == 0 ? null : new BakeRecord(o["key"]?.GetValue<string>() ?? "", launch);
         }
         catch (Exception e) when (e is IOException or JsonException or InvalidOperationException) { return null; }
