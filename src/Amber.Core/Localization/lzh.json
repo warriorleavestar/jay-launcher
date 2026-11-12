@@ -2658,7 +2658,7 @@
   "core.bake.runtime.legacy_launchwrapper": "闕 Forge 1.12.2 之 LaunchWrapper 庫。請為此實例重裝 Forge。",
   "core.bake.runtime.legacy_failed": "Forge 1.12.2 未能啟（{0}）。詳見戲之誌。",
   "core.bake.runtime.legacy_cache_off": "此行未能用 Forge 1.12.2 之啟存，戲以常法啟之（稍緩）。若屢然，可於實例設中閉此存。",
-  "core.bake.legacy_forge_version": "通用載器唯支 Forge 1.12.2 之 14.23.5.x，此實例所裝乃 Forge {0}。易為 Forge 14.23.5.2860（1.12.2 之末版）則可用；或為此實例閉烘焙。",
+  "core.bake.legacy_forge_version": "通用載器唯支 Forge 1.12.2 之 14.23.5.x，此實例所裝乃 Forge {0}。易為 Forge 14.23.5.2860（1.12.2 之末版）則可用；或為此實例閉通用載器。",
   "core.bake.loader_missing_short": "未得通用載入器",
   "core.bake.download_failed": "不能下載 {0}：\n{1}",
   "core.bake.download_unpublished": "通用載入器尚未發布以供下載；今且自壓縮檔裝之。",
@@ -3194,5 +3194,14 @@
   "core.bake.java_too_new": "此戲須 Java {0} 或更舊者（此番將用 Java {1}）。Forge 1.12.2 及其多數模組唯行於 Java 8。Jay 自為之用 Java 8；若此實例用君自擇之 Java，請於其設定易以 Java 8。",
   "core.bake.bad_platform": "為通用載入器所備之 Forge 未全：{0}。請重裝此實例，復烘之。",
   "core.bake.problem.bad_metadata": "其模組之訊（mcmod.info 或 @Mod）不可讀",
-  "core.bake.problem.platform_unavailable": "此版載入器尚不能行此平臺"
+  "core.bake.problem.platform_unavailable": "此版載入器尚不能行此平臺",
+  "instance.lastrun.legacy.java": "Forge 1.12.2 未以 Java 8 啟",
+  "instance.lastrun.legacy.launchwrapper": "闕 Forge 1.12.2 之啟庫",
+  "instance.lastrun.legacy.failed": "Forge 1.12.2 未入戲而止",
+  "instance.lastrun.legacy.cache": "啟緩未能用",
+  "instance.lastrun.legacy.quickplay": "未能徑入存檔",
+  "instance.lastrun.fix.cache_off": "閉啟緩",
+  "instance.lastrun.fix.without_loader": "此番不以 Jay 載器啟",
+  "instance.lastrun.cache_off_done": "此例之啟緩已閉。",
+  "core.bake.runtime.legacy_quickplay": "戲未能徑入存檔，止於主單。"
 }

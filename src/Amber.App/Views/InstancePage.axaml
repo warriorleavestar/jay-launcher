@@ -1000,17 +1000,24 @@
                 <TextBlock Classes="field-error" Text="{Binding MemoryError}" IsVisible="{Binding HasMemoryError}" />
               </StackPanel>
 
-              <TextBlock Grid.Row="3" Classes="label" Text="{l:T instance.settings.jvm_args}" />
-              <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,8,0,0" Spacing="4">
+              <!-- Forge 1.12.2 through the universal loader only: the start cache, under Java and memory. -->
+              <TextBlock Grid.Row="3" Classes="label" Text="{l:T instance.settings.transformer_cache}" IsVisible="{Binding ShowTransformerCache}" />
+              <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,8,0,0" Spacing="4" IsVisible="{Binding ShowTransformerCache}">
+                <CheckBox x:Name="TransformerCacheBox" IsChecked="{Binding TransformerCache}" Content="{l:T instance.settings.transformer_cache.on}" />
+                <TextBlock Classes="hint" Text="{l:T instance.settings.transformer_cache.hint}" TextWrapping="Wrap" />
+              </StackPanel>
+
+              <TextBlock Grid.Row="4" Classes="label" Text="{l:T instance.settings.jvm_args}" />
+              <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,8,0,0" Spacing="4">
                 <TextBox x:Name="InstanceJvmArgsBox" Text="{Binding JvmArgs, UpdateSourceTrigger=LostFocus}" PlaceholderText="{l:T instance.settings.jvm_hint}" />
                 <TextBlock Classes="field-error" Text="{Binding ArgsError}" IsVisible="{Binding HasArgsError}" />
               </StackPanel>
 
-              <TextBlock Grid.Row="4" Classes="label" Text="{l:T instance.settings.game_args}" />
-              <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding GameArgs, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.inherit_hint}" />
+              <TextBlock Grid.Row="5" Classes="label" Text="{l:T instance.settings.game_args}" />
+              <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding GameArgs, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.inherit_hint}" />
 
-              <TextBlock Grid.Row="5" Classes="label" Text="{l:T instance.settings.window_size}" />
-              <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,8,0,0" Spacing="4">
+              <TextBlock Grid.Row="6" Classes="label" Text="{l:T instance.settings.window_size}" />
+              <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,8,0,0" Spacing="4">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBox Text="{Binding WidthText, UpdateSourceTrigger=LostFocus}" Width="90" PlaceholderText="{l:T instance.settings.width}" />
                 <TextBlock Text="×" VerticalAlignment="Center" />
@@ -1019,23 +1026,18 @@
               <TextBlock Classes="field-error" Text="{Binding SizeError}" IsVisible="{Binding HasSizeError}" />
               </StackPanel>
 
-              <TextBlock Grid.Row="6" Classes="label" Text="{l:T instance.settings.fullscreen}" />
-              <ComboBox Grid.Row="6" Grid.Column="1" ItemsSource="{Binding FullscreenChoices}" SelectedIndex="{Binding FullscreenIndex}" MinWidth="200" Margin="0,8,0,0" />
+              <TextBlock Grid.Row="7" Classes="label" Text="{l:T instance.settings.fullscreen}" />
+              <ComboBox Grid.Row="7" Grid.Column="1" ItemsSource="{Binding FullscreenChoices}" SelectedIndex="{Binding FullscreenIndex}" MinWidth="200" Margin="0,8,0,0" />
 
-              <TextBlock Grid.Row="7" Classes="label" Text="{l:T instance.settings.pre_launch}" />
-              <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding PreLaunch, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.pre_launch_hint}" />
+              <TextBlock Grid.Row="8" Classes="label" Text="{l:T instance.settings.pre_launch}" />
+              <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding PreLaunch, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.pre_launch_hint}" />
 
-              <TextBlock Grid.Row="8" Classes="label" Text="{l:T instance.settings.post_exit}" />
-              <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" />
+              <TextBlock Grid.Row="9" Classes="label" Text="{l:T instance.settings.post_exit}" />
+              <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding PostExit, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" />
 
-              <TextBlock Grid.Row="9" Classes="label" Text="{l:T instance.settings.join_server}" />
-              <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding JoinServer, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.join_server_hint}" />
+              <TextBlock Grid.Row="10" Classes="label" Text="{l:T instance.settings.join_server}" />
+              <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding JoinServer, UpdateSourceTrigger=LostFocus}" Margin="0,8,0,0" PlaceholderText="{l:T instance.settings.join_server_hint}" />
 
-              <TextBlock Grid.Row="10" Classes="label" Text="{l:T instance.settings.transformer_cache}" IsVisible="{Binding IsForgeLegacy}" />
-              <StackPanel Grid.Row="10" Grid.Column="1" Margin="0,8,0,0" Spacing="4" IsVisible="{Binding IsForgeLegacy}">
-                <CheckBox IsChecked="{Binding TransformerCache}" Content="{l:T instance.settings.transformer_cache.on}" />
-                <TextBlock Classes="hint" Text="{l:T instance.settings.transformer_cache.hint}" TextWrapping="Wrap" />
-              </StackPanel>
 
               <TextBlock Grid.Row="11" Grid.Column="1" Classes="hint" Margin="0,12,0,4" Text="{l:T instance.settings.autosave_hint}" TextWrapping="Wrap" />
             </Grid>

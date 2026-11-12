@@ -2764,7 +2764,7 @@
   "core.bake.runtime.legacy_launchwrapper": "缺少 Forge 1.12.2 的 LaunchWrapper 库。给这个实例重新装一次 Forge。",
   "core.bake.runtime.legacy_failed": "Forge 1.12.2 没能启动（{0}）。详情看游戏日志。",
   "core.bake.runtime.legacy_cache_off": "这次没能用上 Forge 1.12.2 的启动缓存，游戏按普通方式启动（会慢一些）。如果一直这样，可以在实例设置里关掉这个缓存。",
-  "core.bake.legacy_forge_version": "通用加载器只支持 Forge 1.12.2 的 14.23.5.x，这个实例装的是 Forge {0}。换成 Forge 14.23.5.2860（1.12.2 的最后一版）就能用；或者给这个实例关掉烘焙。",
+  "core.bake.legacy_forge_version": "通用加载器只支持 Forge 1.12.2 的 14.23.5.x，这个实例装的是 Forge {0}。换成 Forge 14.23.5.2860（1.12.2 的最后一版）就能用；或者给这个实例关掉通用加载器。",
   "core.bake.loader_missing_short": "没找到通用加载器",
   "core.bake.download_failed": "无法下载 {0}：\n{1}",
   "core.bake.download_unpublished": "通用加载器还没有发布可供下载，目前请从压缩包安装。",
@@ -3329,5 +3329,14 @@
   "core.bake.java_too_new": "这个游戏需要 Java {0} 或更旧的版本（这次会用 Java {1}）。Forge 1.12.2 和它的大多数模组只能在 Java 8 上运行。Jay 会自动给它用 Java 8；如果这个实例用的是你自己选的 Java，请在实例设置里换成 Java 8。",
   "core.bake.bad_platform": "给通用加载器准备的 Forge 安装不完整：{0}。请重新安装这个实例，再烘焙一次。",
   "core.bake.problem.bad_metadata": "读不出它的模组信息（mcmod.info 或 @Mod）",
-  "core.bake.problem.platform_unavailable": "这个版本的加载器还跑不了这个平台"
+  "core.bake.problem.platform_unavailable": "这个版本的加载器还跑不了这个平台",
+  "instance.lastrun.legacy.java": "Forge 1.12.2 没有用 Java 8 启动",
+  "instance.lastrun.legacy.launchwrapper": "缺少 Forge 1.12.2 的启动库",
+  "instance.lastrun.legacy.failed": "Forge 1.12.2 在进游戏前停下了",
+  "instance.lastrun.legacy.cache": "启动缓存没能用上",
+  "instance.lastrun.legacy.quickplay": "没能直接进存档",
+  "instance.lastrun.fix.cache_off": "关掉启动缓存",
+  "instance.lastrun.fix.without_loader": "这次不用 Jay 加载器启动",
+  "instance.lastrun.cache_off_done": "这个实例的启动缓存关掉了。",
+  "core.bake.runtime.legacy_quickplay": "游戏没能直接进存档，停在了主菜单。"
 }

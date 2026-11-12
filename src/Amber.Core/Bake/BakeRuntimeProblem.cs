@@ -109,6 +109,7 @@ public sealed partial record BakeRuntimeProblem(string Code, string Severity, st
         "legacy_launchwrapper_missing" => L.T("core.bake.runtime.legacy_launchwrapper"),
         "legacy_launch_failed" => L.F("core.bake.runtime.legacy_failed", Detail.Length > 0 ? Detail : "?"),
         "legacy_cache_disabled" => L.T("core.bake.runtime.legacy_cache_off"),
+        "legacy_quickplay_failed" => L.T("core.bake.runtime.legacy_quickplay"),
         // Dependency codes, and unknown codes that are errors (read like unsupported_feature); unknown notes keep the loader's words.
         _ when Raw is not null && (IsError || BakeService.IsKnownProblem(Code)) => BakeService.DescribeProblem(Raw),
         _ => Mod.Length > 0 ? $"{Mod}: {(Message.Length > 0 ? Message : Code)}" : (Message.Length > 0 ? Message : Code),

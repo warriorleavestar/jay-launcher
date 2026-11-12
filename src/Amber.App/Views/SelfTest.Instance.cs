@@ -224,6 +224,9 @@ internal sealed partial class SelfTest
             window.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Tab, KeyModifiers = KeyModifiers.Control, Source = window });
             Check("键盘：Ctrl+Tab 到下一个页签", instance.TabIndex == (int)InstanceTab.Mods);
 
+            // ---- Forge 1.12.2 start cache ----
+            await ForgeLegacyCacheAsync(instance, home, game);
+
             // ---- English ----
             L.SetLanguage("en");
             instance.TabIndex = (int)InstanceTab.Overview;
@@ -254,6 +257,111 @@ internal sealed partial class SelfTest
             service.Settings.Instances = originalMeta;
             service.Settings.GameDirectory = originalDir;
             service.SaveAndReload();
+        }
+    }
+
+    /// <summary>
+    /// Forge 1.12.2 through the universal loader: the start cache checkbox sits under Java and memory (only for that
+    /// instance, only while the loader is on), and what the loader reported for a start that ended early is in the
+    /// "last session" panel with a fix button next to it (no dialogs). Nothing is launched.
+    /// </summary>
+    private async Task ForgeLegacyCacheAsync(InstanceViewModel instance, HomeViewModel home, string game)
+    {
+        var service = main.Service;
+        const string legacy = "1.12.2-forge-14.23.5.2860";
+        var bakeBefore = service.Settings.ExperimentalBake;
+        var shownBefore = instance.Current?.Id;
+        try
+        {
+            var vanilla = Path.Combine(game, "versions", "1.12.2");
+            Directory.CreateDirectory(vanilla);
+            File.WriteAllText(Path.Combine(vanilla, "1.12.2.json"), """{"id":"1.12.2","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":[]}""");
+            var forge = Path.Combine(game, "versions", legacy);
+            Directory.CreateDirectory(forge);
+            File.WriteAllText(Path.Combine(forge, legacy + ".json"),
+                $$"""{"id":"{{legacy}}","inheritsFrom":"1.12.2","type":"release","mainClass":"net.minecraft.launchwrapper.Launch","libraries":[{"name":"net.minecraftforge:forge:1.12.2-14.23.5.2860"}]}""");
+            service.Settings.ExperimentalBake = true;
+            service.Settings.Instances[legacy] = new() { DisplayName = "老 Forge" };
+            service.SaveAndReload();
+            service.NotifyInstalledChanged();
+            await WaitAsync(() => instance.Instances.Contains(legacy), 10);
+            instance.SelectedId = legacy;
+            main.Shell.Navigate("library/" + legacy);
+            await WaitAsync(() => instance.Current?.Id == legacy, 10);
+            Check("Forge 1.12.2：切到这个实例", instance.Current?.Id == legacy && instance.ShowTransformerCache,
+                $"current={instance.Current?.Id} loader={instance.Current?.Loader} mc={instance.Current?.McVersion} show={instance.ShowTransformerCache}");
+            instance.TabIndex = (int)InstanceTab.Settings;
+            await Task.Delay(500);
+            var page = window.PageHost.GetVisualDescendants().OfType<InstancePage>().FirstOrDefault();
+            var rows = Dispatcher.UIThread.Invoke(() =>
+            {
+                var box = page?.GetVisualDescendants().OfType<CheckBox>().FirstOrDefault(c => c.Name == "TransformerCacheBox");
+                var memory = box?.FindAncestorOfType<Grid>()?.Children.OfType<Control>().FirstOrDefault(c => c.GetVisualDescendants().OfType<TextBox>().Any(t => t.Name == "InstanceMemoryBox"));
+                var jvm = box?.FindAncestorOfType<Grid>()?.Children.OfType<Control>().FirstOrDefault(c => c.GetVisualDescendants().OfType<TextBox>().Any(t => t.Name == "InstanceJvmArgsBox"));
+                int Row(Control? c) => c is null ? -1 : Grid.GetRow(c);
+                return (Visible: box?.IsEffectivelyVisible == true, Box: box?.Parent is Control p ? Grid.GetRow(p) : -1, Memory: Row(memory), Jvm: Row(jvm));
+            });
+            Check("Forge 1.12.2（Jay 加载器）：设置页签里“启动缓存”勾选在 Java 和内存下面、JVM 参数上面",
+                rows.Visible && rows.Memory >= 0 && rows.Box == rows.Memory + 1 && rows.Jvm == rows.Box + 1, $"行 {rows.Memory} / {rows.Box} / {rows.Jvm}");
+            Dispatcher.UIThread.Invoke(() => page?.GetVisualDescendants().OfType<CheckBox>().First(c => c.Name == "TransformerCacheBox").BringIntoView());
+            await Task.Delay(Toasts.UndoDuration + TimeSpan.FromSeconds(1)); // the fixes above left undo toasts over the page
+            await ShotAsync("instance-forge1122-cache");
+
+            // Turned off in Settings, then back to this page.
+            service.Settings.ExperimentalBake = false;
+            main.CurrentPage = home;
+            await Task.Delay(200);
+            main.CurrentPage = instance;
+            await Task.Delay(400);
+            page = window.PageHost.GetVisualDescendants().OfType<InstancePage>().FirstOrDefault();
+            Check("Jay 加载器关着时不显示启动缓存", !instance.ShowTransformerCache
+                && Dispatcher.UIThread.Invoke(() => page?.GetVisualDescendants().OfType<CheckBox>().FirstOrDefault(c => c.Name == "TransformerCacheBox")?.IsEffectivelyVisible != true));
+            service.Settings.ExperimentalBake = true;
+            main.CurrentPage = home;
+            await Task.Delay(200);
+            main.CurrentPage = instance;
+            await Task.Delay(300);
+
+            // A start that ended before the game took over: the loader's lines become causes with their fixes.
+            Amber.Core.Bake.BakeRuntimeProblem Problem(string json) => Amber.Core.Bake.BakeRuntimeProblem.FromJson((System.Text.Json.Nodes.JsonObject)System.Text.Json.Nodes.JsonNode.Parse(json)!)!;
+            home.CrashBakeProblems =
+            [
+                Problem("""{"type":"problem","code":"legacy_cache_disabled","severity":"warning","cacheDir":"cache"}"""),
+                Problem("""{"type":"problem","code":"legacy_launch_failed","severity":"error","rootCause":"java.lang.NoClassDefFoundError: some/Coremod"}"""),
+            ];
+            home.ShowCrashForTest(legacy, new Amber.Core.Diagnostics.CrashAnalysis([], [], []));
+            instance.TabIndex = (int)InstanceTab.Overview;
+            await WaitAsync(() => instance.LastRunCauses.Count >= 2, 3);
+            var causes = instance.LastRunCauses.ToList();
+            if (causes.Count < 2)
+            {
+                Check("上一局：Jay 加载器报的问题显示出来", false, $"current={instance.Current?.Id} crash={home.CrashInstance} show={instance.ShowLastRun} n={causes.Count}");
+                return;
+            }
+            Check("上一局：Jay 加载器报的问题排在最前，错误在警告前面，各带修复按钮",
+                causes.Count >= 2 && causes[0].Title == L.T("instance.lastrun.legacy.failed") && causes[1].Title == L.T("instance.lastrun.legacy.cache")
+                && causes[0].Fixes.Any(f => f.Fix.Kind == Amber.Core.Diagnostics.CrashFixKind.LaunchWithoutLoader)
+                && causes[1].Fixes.Single().Fix.Kind == Amber.Core.Diagnostics.CrashFixKind.TransformerCacheOff
+                && causes[0].Evidence?.Contains("NoClassDefFoundError") == true,
+                string.Join(" | ", causes.Select(c => c.Title + ":" + string.Join(",", c.Fixes.Select(f => f.Label)))));
+            Check("上一局：没有“烘焙”这个词", causes.All(c => !c.Title.Contains("烘焙") && !c.Advice.Contains("烘焙") && c.Fixes.All(f => !f.Label.Contains("烘焙"))));
+            await ShotAsync("instance-forge1122-lastrun");
+            var cacheFix = causes[1].Fixes.Single();
+            await instance.ApplyFixCommand.ExecuteAsync(cacheFix);
+            Check("修复：【关掉启动缓存】就地写进这个实例的设置，按钮打勾，不弹窗",
+                cacheFix.Done && InstanceSettings.Load(service.Directory, legacy).LegacyTransformerCache == false && window.OwnedWindows.Count == 0);
+        }
+        finally
+        {
+            home.Crash = null;
+            home.CrashBakeProblems = [];
+            service.Settings.ExperimentalBake = bakeBefore;
+            service.SaveAndReload();
+            if (shownBefore is not null)
+            {
+                instance.SelectedId = shownBefore;
+                await WaitAsync(() => instance.Current?.Id == shownBefore, 10);
+            }
         }
     }
 }

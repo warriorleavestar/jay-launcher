@@ -3404,5 +3404,14 @@
   "core.bake.java_too_new": "This game needs Java {0} or older (this launch would use Java {1}). Forge 1.12.2 and most of its mods only work on Java 8. Jay picks Java 8 for it; if this instance uses a Java you chose yourself, choose Java 8 in its settings.",
   "core.bake.bad_platform": "The Forge install prepared for the universal loader is incomplete: {0}. Reinstall the instance, then bake again.",
   "core.bake.problem.bad_metadata": "its mod information (mcmod.info or @Mod) cannot be read",
-  "core.bake.problem.platform_unavailable": "this loader build cannot run this platform yet"
+  "core.bake.problem.platform_unavailable": "this loader build cannot run this platform yet",
+  "instance.lastrun.legacy.java": "Forge 1.12.2 was not started with Java 8",
+  "instance.lastrun.legacy.launchwrapper": "Forge 1.12.2's launch library is missing",
+  "instance.lastrun.legacy.failed": "Forge 1.12.2 stopped before the game took over",
+  "instance.lastrun.legacy.cache": "The start cache could not be used",
+  "instance.lastrun.legacy.quickplay": "The game could not open the world straight away",
+  "instance.lastrun.fix.cache_off": "Turn the start cache off",
+  "instance.lastrun.fix.without_loader": "Start once without the Jay loader",
+  "instance.lastrun.cache_off_done": "Start cache off for this instance.",
+  "core.bake.runtime.legacy_quickplay": "The game could not open the world straight away and stayed on the menu."
 }
