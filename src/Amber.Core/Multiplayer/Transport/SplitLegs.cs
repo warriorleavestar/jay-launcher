@@ -32,8 +32,9 @@ public static class SplitLegs
     /// <summary>
     /// Member side: opens every leg in parallel (<paramref name="openLeg"/> gives the raw connection for leg i), runs the handshakes,
     /// sends the hellos and returns the joined stream. The first leg to fail cancels the others at once, and every leg that
-    /// did connect is aborted. The hellos go out only once every handshake has succeeded, so a failed attempt never leaves
-    /// a waiting set on the host that would count against the member's limit while it times out.
+    /// did connect is aborted. The hellos go out only once every handshake has succeeded, so a failed handshake never leaves
+    /// a waiting set on the host that would count against the member's limit while it times out. If writing a hello
+    /// fails after that, the other legs are aborted too; a set the host already started then waits out its 10 s.
     /// </summary>
     public static Task<SplitStream> ConnectAsync(Func<int, CancellationToken, Task<Stream>> openLeg, int count, int epoch, MemberKey key,
         TransportProfile profile, string purpose, byte[] payload, CancellationToken ct = default) =>
