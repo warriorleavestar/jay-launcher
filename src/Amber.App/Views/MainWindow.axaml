@@ -182,7 +182,8 @@
     <Grid x:Name="ContentColumn" Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
       <!-- 顶栏（§3.1）：← 返回 + 标题或面包屑；带上下文跳过来时有【完成，返回】 -->
       <Grid x:Name="TopBar" Height="48" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto,Auto" Margin="8,0,16,0">
-        <Button x:Name="BackButton" Classes="ghost icon-only" Command="{Binding Shell.BackCommand}" IsEnabled="{Binding Shell.CanGoBack}"
+        <!-- Shown only when there is somewhere to go back to: on a section's first page it would be a button that does nothing. -->
+        <Button x:Name="BackButton" Classes="ghost icon-only" Command="{Binding Shell.BackCommand}" IsVisible="{Binding Shell.CanGoBack}"
                 ToolTip.Tip="{l:T shell.back_tip}" AutomationProperties.Name="{l:T shell.back}" VerticalAlignment="Center">
           <Path Classes="icon" Data="{StaticResource Icon.ChevronLeft}" Width="20" Height="20" />
         </Button>

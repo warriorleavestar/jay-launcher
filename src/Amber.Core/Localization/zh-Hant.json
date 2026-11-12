@@ -2772,6 +2772,7 @@
   "multiplayer.knock.verify": "問一下 {0}：TA 看到的安全碼和這裡一樣嗎？一樣再讓 TA 進來。",
   "multiplayer.knock.trust_after": "以後 {0} 敲門直接進（在朋友頁能關掉）",
   "multiplayer.knock.jay_hint": "TA 的 Jay 帳戶驗證通過。信任 TA 後，TA 用這個帳戶的其他裝置也會直接進來。",
+  "multiplayer.knock.jay_hint_friend": "TA 的 Jay 帳戶驗證通過。TA 是你的朋友，TA 還沒經你確認的裝置仍然會先問你。",
   "multiplayer.knock.remaining": "還剩 {0}，沒回答就算拒絕",
   "multiplayer.knock.waiting_forever": "會一直等你回答",
   "multiplayer.knock.timed_out": "{0} 敲門等了 {1} 沒有回答，已拒絕。",

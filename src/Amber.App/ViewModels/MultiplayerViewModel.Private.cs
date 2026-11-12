@@ -107,7 +107,7 @@ public sealed partial class MultiplayerViewModel
             if (_messenger != messenger) return;
             PrivateLines.Add(new PrivateLine(m.FromFingerprint, m.FromName, m.Text, m.Time, false));
             while (PrivateLines.Count > 500) PrivateLines.RemoveAt(0);
-            NoteFriendMessage(m.FromFingerprint, m.Text, m.Time, mine: false);
+            NoteFriendMessage(m.FromPublicKey, m.Text, m.Time, mine: false);
             if (!IsCurrent) Badge++;
         });
         messenger.FileOffered += offer => Dispatcher.UIThread.Post(() =>
@@ -206,7 +206,8 @@ public sealed partial class MultiplayerViewModel
         var clean = RoomChat.Clean(text, PrivateMessenger.MaxTextLength);
         var now = DateTimeOffset.Now;
         PrivateLines.Add(new PrivateLine(peer.Entry.Fingerprint, L.F("multiplayer.private.to", peer.Entry.Name), clean, now, true));
-        NoteFriendMessage(peer.Entry.Fingerprint, clean, now, mine: true);
+        // Only when the roster entry's key really is the one behind its fingerprint (the key the message was sealed for).
+        if (MemberIdentity.FingerprintOf(peer.Entry.PublicKey) == peer.Entry.Fingerprint) NoteFriendMessage(peer.Entry.PublicKey, clean, now, mine: true);
         return true;
     }
 
