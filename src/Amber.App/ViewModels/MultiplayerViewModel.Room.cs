@@ -76,8 +76,8 @@ public sealed partial class MultiplayerViewModel
 
     public string RoomTitle => IsHosting ? L.T("multiplayer.room.my_room") : IsDirect ? L.T("multiplayer.direct.title") : L.T("multiplayer.room.friend_room");
 
-    /// <summary>Peers other than me and relay servers: the people actually connected.</summary>
-    private IEnumerable<PeerItem> OtherPlayers => Peers.Where(p => p.Peer.Cost != "Local" && p.Peer.Hostname.Length > 0);
+    /// <summary>Peers other than me and relay servers: the people actually connected (the same test as the connection mark).</summary>
+    private IEnumerable<PeerItem> OtherPlayers => Peers.Where(p => RoomLinks.IsPlayer(p.Peer));
 
     public int PeopleCount => Math.Max(1, People.Count(p => p.IsOnline));
 

@@ -463,13 +463,15 @@ public static class EasyTierArgs
         }
         if (o.MachineId is { } id) args.AddRange(["--machine-id", id]);
         foreach (var peer in o.Peers.Where(p => !string.IsNullOrWhiteSpace(p))) args.AddRange(["--peers", peer.Trim()]);
-        if (o.Listeners is { Count: > 0 } listeners) foreach (var l in listeners) args.AddRange(["--listeners", l]);
+        // "Relays only" never listens for other computers: nobody can connect to this one directly.
+        var listeners = o.Room.RelayOnly ? [.. (o.Listeners ?? []).Where(IsLoopback)] : o.Listeners;
+        if (listeners is { Count: > 0 }) foreach (var l in listeners) args.AddRange(["--listeners", l]);
         else args.Add("--no-listener");
         // EasyTier 默认把出站连接绑到物理网卡上，连本机回环地址会报 10049；节点在本机时（自测、或者节点和游戏在同一台电脑）关掉绑定。
         if (o.Peers.Concat(o.Listeners ?? []).Any(IsLoopback)) args.AddRange(["--bind-device", "false"]);
         else if (o.ExitNode is not null) args.AddRange(["--bind-device", "true"]);
         if (o.ExtraArgs is { } extra) args.AddRange(extra);
-        // "Relays only": this member neither opens nor accepts direct connections, so nobody in the room sees its address.
+        // "Relays only": this member opens no direct connection, and unmodified EasyTier opens none to it.
         if (o.Room.RelayOnly && !args.Contains("--disable-p2p")) args.Add("--disable-p2p");
         // 不建网卡时，EasyTier 会把别的成员发到本机虚拟地址的连接交给本机同一端口——不限制的话，
         // 房间里的人（自己改 EasyTier 参数就行）能连到本机回环上的任何服务，包括 EasyTier 自己的管理端口。
@@ -779,6 +781,9 @@ public static class LobbyArgs
             "--machine-id", Guid.NewGuid().ToString(),
             "--no-tun",
             "--latency-first",
+            // A knock is a short exchange that works fine through the node. Nobody in a lobby needs a direct link,
+            // and the knocker can't know yet whether the room is "relays only".
+            "--disable-p2p",
         };
         // 直连房间的房主：只在本机回环上监听，给直连桥用；其他情况不监听。
         if (o.IsHost && o.ListenUdpPort is { } listen) args.AddRange(["--listeners", $"udp://127.0.0.1:{listen.ToString(System.Globalization.CultureInfo.InvariantCulture)}"]);

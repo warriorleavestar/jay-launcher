@@ -7,7 +7,10 @@ public enum LinkKind
     None,
     /// <summary>Straight to their computer: each side sees the other's IP address.</summary>
     Direct,
-    /// <summary>Through a relay: neither side sees the other's IP address.</summary>
+    /// <summary>
+    /// Through a relay right now. Whether the two sides can learn each other's IP address depends on "relays only":
+    /// without it Jay keeps trying to connect directly (see <see cref="WhoSeesWhat.AppliesNow"/>).
+    /// </summary>
     Relay,
     /// <summary>The room as a whole: some people direct, some through a relay.</summary>
     Mixed,
@@ -30,8 +33,12 @@ public static class RoomLinks
 {
     public const string HostName = "amber-host";
 
-    /// <summary>The people actually connected: not me, not relay servers.</summary>
-    public static bool IsPlayer(PeerInfo peer) => peer.Cost != "Local" && peer.Hostname.Length > 0;
+    /// <summary>
+    /// The people actually connected: not me, not relay servers. A relay forwards for a room it is not a member of,
+    /// so it has no address in the room, whether or not it tells its name. The one test for "is this a person":
+    /// the connection mark, the legend and "connected to others" all use it.
+    /// </summary>
+    public static bool IsPlayer(PeerInfo peer) => peer.Cost != "Local" && peer.Hostname.Length > 0 && peer.Ip.Length > 0;
 
     public static LinkKind KindOf(PeerInfo peer) => peer.Cost.Contains("p2p", StringComparison.OrdinalIgnoreCase) ? LinkKind.Direct : LinkKind.Relay;
 

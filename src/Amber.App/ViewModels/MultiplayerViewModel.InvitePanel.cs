@@ -62,6 +62,7 @@ public sealed partial class MultiplayerViewModel
             OnPropertyChanged(nameof(SelectedInviteUse));
             OnPropertyChanged(nameof(InviteUsesEnabled));
             OnPropertyChanged(nameof(ShowInviteMonthNote));
+            NotifyInviteAutoApprove();
         }
     }
 
@@ -74,6 +75,7 @@ public sealed partial class MultiplayerViewModel
             if (value is null || !InviteUsesEnabled || ReferenceEquals(value, _inviteUse)) return;
             _inviteUse = value;
             OnPropertyChanged();
+            NotifyInviteAutoApprove();
         }
     }
 
@@ -81,6 +83,27 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>Thirty days is picked: one line on what that invite is.</summary>
     public bool ShowInviteMonthNote => InviteOffer.IsLongLived(SelectedInviteLife.Life);
+
+    /// <summary>
+    /// "Auto-approve" can be ticked: outside "For a child", and only for an invite that lets one person in. An invite
+    /// without a use limit (thirty days included) always asks me first, so the box is not there for it.
+    /// </summary>
+    public bool CanInviteAutoApprove => ShowInviteAutoApprove && InviteOffer.CanAutoApprove(SelectedInviteLife.Life, SelectedInviteUse.Use);
+
+    /// <summary>The tick counts for the invite about to be made.</summary>
+    private bool InviteAutoApproveNow => InviteAutoApprove && CanInviteAutoApprove;
+
+    /// <summary>
+    /// One line where the box would be: an unlimited invite always asks first. (Thirty days says so in its own note.)
+    /// </summary>
+    public bool ShowInviteAlwaysAsksNote => ShowInviteAutoApprove && !CanInviteAutoApprove && !ShowInviteMonthNote;
+
+    private void NotifyInviteAutoApprove()
+    {
+        OnPropertyChanged(nameof(CanInviteAutoApprove));
+        OnPropertyChanged(nameof(ShowInviteAlwaysAsksNote));
+        OnPropertyChanged(nameof(InviteKnockFact));
+    }
 
     internal void PickInviteChoices(InviteLife life, InviteUse use)
     {
@@ -115,7 +138,7 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>The second of the three lines: with "let in without asking" on, an invite is more than a knock.</summary>
-    public string InviteKnockFact => L.T(InviteAutoApprove && ShowInviteAutoApprove ? "multiplayer.invite.fact.auto" : "multiplayer.invite.fact.knock");
+    public string InviteKnockFact => L.T(InviteAutoApproveNow ? "multiplayer.invite.fact.auto" : "multiplayer.invite.fact.knock");
 
     /// <summary>The third line: this invite's own terms, or how invites end when there is none yet.</summary>
     public string InviteTermsFact => HasInvite && InviteTerms.Length > 0 ? InviteTerms : L.T("multiplayer.invite.fact.ends");
@@ -125,8 +148,8 @@ public sealed partial class MultiplayerViewModel
     private bool _longInviteWaits;
 
     /// <summary>
-    /// The thirty-day invite on the card cannot open this room (the room keeps the key it started with, and older
-    /// thirty-day invites have another): it works from the next room on. Said on the card, not hidden.
+    /// The thirty-day invite on the card cannot open this room (the room keeps the key its other invites use, and
+    /// thirty-day invites have one of their own): it works from the next room on. Said on the card, not hidden.
     /// </summary>
     public bool ShowInviteNextRoomNote => HasInvite && _lastLongInvite is not null && _longInviteWaits;
 
@@ -145,11 +168,11 @@ public sealed partial class MultiplayerViewModel
     private void NotifyInvitePanel()
     {
         foreach (var name in (string[])[nameof(InviteSummary), nameof(InviteKnockFact), nameof(InviteTerms), nameof(InviteTermsFact), nameof(InviteFriendsNote), nameof(HasInviteFriendsNote),
-                     nameof(CanMailInvites), nameof(ShowInviteFriends), nameof(ShowInviteNextRoomNote)])
+                     nameof(CanMailInvites), nameof(ShowInviteFriends), nameof(ShowInviteNextRoomNote), nameof(CanInviteAutoApprove), nameof(ShowInviteAlwaysAsksNote)])
             OnPropertyChanged(name);
     }
 
-    /// <summary>Thirty days: a long-lived invite. With a room open it goes on the card and the room accepts it at once.</summary>
+    /// <summary>Thirty days: a long-lived invite. With a room open it goes on the card, with whether this room accepts it.</summary>
     private void ShowLongInvite(LongLivedInvite invite, bool worksNow)
     {
         _lastLongInvite = LongInviteItems.FirstOrDefault(i => i.Invite.Id == invite.Id);

@@ -252,7 +252,7 @@ public sealed partial class MultiplayerViewModel
     /// "My friends can knock": every verified friend gets an invite bound to their own key through the connected
     /// network (sealed, only they can open it). They still knock and the host says yes. Returns how many were mailed.
     /// </summary>
-    private async Task<int> InviteFriendsToKnockAsync()
+    internal async Task<int> InviteFriendsToKnockAsync()
     {
         var sent = 0;
         foreach (var friend in ContactList.ToList())
@@ -274,6 +274,7 @@ public sealed partial class MultiplayerViewModel
 
     protected override void OnLanguageChanged()
     {
+        base.OnLanguageChanged();
         foreach (var choice in WhoChoices.Concat(RouteChoices).Concat(ProtectionChoices).Concat(ScopeChoices)) choice.Relabel();
         RefreshOpenChoices();
         RefreshRoomFacts();

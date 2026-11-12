@@ -57,6 +57,7 @@ internal sealed partial class SelfTest
         var answer = false;
         var savedConfirm = vm.Confirm;
         var savedTarget = vm.TargetInstance;
+        var savedContactsDir = vm.ContactsDir;
         Dispatcher.UIThread.Invoke(() =>
         {
             // Alex is a friend I compared emoji with: the tick on the face comes from the contact book (a test one).
@@ -135,13 +136,21 @@ internal sealed partial class SelfTest
         Check("谁能看到什么：点连接标记打开", Press(Named<Button>("ConnectionMarkButton")) && vm.WhoSeesOpen);
         await Task.Delay(400);
         var seesRows = Named<ItemsControl>("WhoSeesRows");
+        bool Now(string row) => vm.WhoSeesLines.Single(l => l.Row.Id == row).Now;
+        int NowTags() => seesRows!.GetVisualDescendants().OfType<Border>().Count(b => b.Classes.Contains("sees-now") && b.IsEffectivelyVisible);
         Check("谁能看到什么：固定的五行，写是 / 否，不写保证", Named<Border>("WhoSeesCard")?.IsEffectivelyVisible == true && vm.WhoSeesLines.Count == 5
             && seesRows!.GetVisualDescendants().OfType<Border>().Count(b => b.Classes.Contains("sees-row") && b.IsEffectivelyVisible) == 5
             && HasText(L.T("multiplayer.sees.row.operator")) && HasText(L.T("multiplayer.sees.only_them"))
             && vm.WhoSeesLines.All(l => !(l.Who + l.Ip + l.Content).Contains("安全") && !(l.Who + l.Ip + l.Content).Contains("放心")));
-        Check("谁能看到什么：标出现在的情况（直连那一行）", vm.WhoSeesLines.Single(l => l.Row.Id == "direct").Now && !vm.WhoSeesLines.Single(l => l.Row.Id == "relayed").Now
-            && seesRows!.GetVisualDescendants().OfType<Border>().Count(b => b.Classes.Contains("sees-row") && b.Classes.Contains("now")) >= 1
+        Check("谁能看到什么：标出现在的情况（没开只走中转的那一行）", Now("direct") && !Now("relayed")
+            && seesRows!.GetVisualDescendants().OfType<Border>().Count(b => b.Classes.Contains("sees-row") && b.Classes.Contains("now")) == 1
             && Named<TextBlock>("WhoSeesNowHint")?.IsEffectivelyVisible == true);
+        var nowLine = vm.WhoSeesLines.Single(l => l.Now);
+        Check("谁能看到什么：“现在”写成字（不只靠底色），读屏也读得到", NowTags() == 1 && HasText(L.T("multiplayer.sees.now"))
+            && nowLine.SpokenName == L.F("multiplayer.sees.row_name_now", nowLine.Who, nowLine.Ip, nowLine.Content)
+            && seesRows!.GetVisualDescendants().OfType<Border>().Where(b => b.Classes.Contains("sees-row")).All(b => !string.IsNullOrEmpty(Avalonia.Automation.AutomationProperties.GetName(b))), nowLine.SpokenName);
+        Check("谁能看到什么：开了只走中转那一行不写“否”，写“正常使用时”", vm.WhoSeesLines.Single(l => l.Row.Id == "relayed").Ip == L.T("multiplayer.sees.not_normally")
+            && vm.WhoSeesLines.Single(l => l.Row.Id == "relayed").Ip != L.T("multiplayer.sees.no"));
         var relayBox = Named<CheckBox>("RelayOnlyBox");
         Check("只走中转：表下面的开关，默认关，写清楚换来什么", relayBox is { IsEffectivelyVisible: true, IsEffectivelyEnabled: true, IsChecked: false }
             && HasText(L.T("multiplayer.sees.relay_only")) && !vm.MyRelayOnly);
@@ -156,13 +165,21 @@ internal sealed partial class SelfTest
         Check("只走中转：打开后我这边改成不直连（联机组件按新设置重启）", await WaitAsync(() => vm.MyRelayOnly && vm.CanChangeRelayOnly, 3) && switchedTo is { RelayOnly: true }
             && relayBox!.IsChecked == true && vm.Status == L.T("multiplayer.sees.relay_only.turned_on")
             && vm.RoomFacts.Any(f => f.Value == L.T("multiplayer.open.route.relay")), vm.Status);
+        Check("只走中转：写的是 Jay 做什么（请别人不直连我），不写别人一定看不到", !L.T("multiplayer.sees.relay_only").Contains("看不到") && !L.T("multiplayer.sees.relay_only.turned_on").Contains("看不到你的 IP。")
+            && HasText(L.T("multiplayer.sees.relay_only")));
+        SetPeers(new PeerInfo("amber-guest", "10.144.144.2", "relay(2)", 82, "tcp"));
+        await Task.Delay(300);
+        Check("谁能看到什么：开着只走中转、连接也确实经中转时，“现在”换到那一行", Now("relayed") && !Now("direct") && NowTags() == 1);
         vm.TestSwitchNetwork = _ => false;
         Click(relayBox, false);
         await Task.Delay(400);
-        Check("只走中转：没换成时开关回到真实状态", vm.MyRelayOnly && relayBox!.IsChecked == true);
+        Check("只走中转：没换成时开关回到真实状态，并说一句没换成", vm.MyRelayOnly && relayBox!.IsChecked == true && vm.Status == L.T("multiplayer.sees.relay_only.failed"), vm.Status);
         vm.TestSwitchNetwork = _ => true;
         Click(relayBox, false);
         Check("只走中转：能关掉", await WaitAsync(() => !vm.MyRelayOnly && vm.CanChangeRelayOnly, 3) && relayBox!.IsChecked == false);
+        Check("谁能看到什么：关掉后就算这会儿还经中转，“现在”也回到没开只走中转的那一行（Jay 会接着试直连）", vm.IsMarkRelayed && Now("direct") && !Now("relayed"));
+        SetPeers(new PeerInfo("amber-guest", "10.144.144.2", "p2p", 18, "udp"));
+        await Task.Delay(300);
         Check("谁能看到什么：✕ 收起", Press(Named<Button>("WhoSeesCloseButton")) && !vm.WhoSeesOpen);
         await Task.Delay(200);
 
@@ -256,16 +273,26 @@ internal sealed partial class SelfTest
         {
             lifeBox!.SelectedItem = vm.InviteLifeChoices[1];
             useBox!.SelectedItem = vm.InviteUseChoices[1];
+            vm.InviteAutoApprove = true;
         });
+        await Task.Delay(300);
+        Check("邀请：不限次数时没有“自动批准”，原处写每次都先问你", autoBox?.IsEffectivelyVisible == false && !vm.CanInviteAutoApprove
+            && Named<TextBlock>("InviteAlwaysAsksNote") is { IsEffectivelyVisible: true } asks && asks.Text == L.T("multiplayer.invite.always_asks")
+            && Named<TextBlock>("InviteFactKnock")?.Text == L.T("multiplayer.invite.fact.knock"));
         Check("邀请：1 天、不限次数的一张", Press(createButton) && await WaitAsync(() => vm.PendingInvites.Count == 2, 5)
             && vm.InviteSummary == L.F("multiplayer.invite.summary", L.F("multiplayer.invite.left", L.P("multiplayer.invite.hours", 24, 24)), L.T("multiplayer.invite.use.unlimited"))
             && vm.PendingInvites.Any(i => i.Invite.Unlimited && i.Label.Contains(L.F("multiplayer.invite.pending_item_unlimited", "", "", "").Split(" · ")[1])), vm.InviteSummary);
 
-        // Thirty days is the long-lived invite: no use count, a name to recognise it by, and it works in this room at once.
+        Check("邀请：就算之前勾过，不限次数的这张也照样先问你", vm.PendingInvites.All(i => !i.Invite.AutoApprove) && vm.InviteTerms.Contains(L.T("multiplayer.invite.terms_ask")), vm.InviteTerms);
+
+        // Thirty days is the long-lived invite: no use count, a name to recognise it by, and a lobby key of its own.
         Dispatcher.UIThread.Invoke(() => lifeBox!.SelectedItem = vm.InviteLifeChoices[2]);
         await Task.Delay(300);
         Check("30 天邀请：次数固定成不限，多一行说明和“给谁的”", useBox is { IsEffectivelyEnabled: false, SelectedItem: InviteUseChoice { Use: InviteUse.Unlimited } }
             && Named<TextBlock>("InviteMonthNote")?.IsEffectivelyVisible == true && Named<TextBox>("LongInviteLabelBox")?.IsEffectivelyVisible == true);
+        Check("30 天邀请：没有“自动批准”（说明里已经写每次敲门仍要你同意）", autoBox?.IsEffectivelyVisible == false && Named<TextBlock>("InviteAlwaysAsksNote")?.IsEffectivelyVisible == false
+            && Named<TextBlock>("InviteFactKnock")?.Text == L.T("multiplayer.invite.fact.knock"));
+        Dispatcher.UIThread.Invoke(() => vm.InviteAutoApprove = false);
         Check("30 天邀请：开始时没有", !vm.HasLongInvites);
         Dispatcher.UIThread.Invoke(() => vm.LongInviteLabel = "Bob");
         Press(createButton);
@@ -275,16 +302,31 @@ internal sealed partial class SelfTest
         Check("30 天邀请：做好一张给 Bob 的，卡片写还剩 30 天、不限", longItem is { Label: "Bob" } && longItem.Left == L.P("multiplayer.longinvite.days_left", 30, 30)
             && JayInvite.TryParse(longItem.Code, out _) && vm.LongInviteLabel.Length == 0
             && vm.InviteSummary == L.F("multiplayer.invite.summary", longItem.Left, L.T("multiplayer.invite.use.unlimited")), vm.InviteSummary);
-        Check("30 天邀请：这个房间马上认它（用的是房间现在的大厅钥匙）", !vm.ShowInviteNextRoomNote && vm.Status == L.T("multiplayer.longinvite.created")
+        Check("30 天邀请：不借用房间现在的大厅钥匙；房间里已有别的邀请时，卡片写明下次开房间起才能用", vm.ShowInviteNextRoomNote && vm.Status == L.T("multiplayer.longinvite.created_next_room")
+            && Named<TextBlock>("InviteNextRoomNote")?.IsEffectivelyVisible == true
             && JayInvite.TryParse(vm.TestInviteText ?? "", out var monthCode) && vm.PendingInvites.Count == 2
-            && JayInvite.TryParse(vm.PendingInvites[0].Invite.Invite.ToString(), out var roomCode) && monthCode.LobbyKey.AsSpan().SequenceEqual(roomCode.LobbyKey), vm.Status);
+            && JayInvite.TryParse(vm.PendingInvites[0].Invite.Invite.ToString(), out var roomCode) && !monthCode.LobbyKey.AsSpan().SequenceEqual(roomCode.LobbyKey), vm.Status);
         Check("30 天邀请：在卡片下面单独列着，能复制、作废", Named<ItemsControl>("RoomLongInviteList")?.IsEffectivelyVisible == true);
         await ShotAsync("房间-30天邀请-1440");
         Dispatcher.UIThread.Invoke(() => vm.RevokeLongInviteCommand.Execute(longItem));
         await Task.Delay(300);
         Check("30 天邀请：作废后列表清空，卡片也收起", !vm.HasLongInvites && !vm.HasInvite && Named<StackPanel>("RoomLongInvites")?.IsEffectivelyVisible == false);
+        // With no other invite out, the room takes the thirty-day invite's own key and accepts it at once.
         Dispatcher.UIThread.Invoke(() =>
         {
+            foreach (var item in vm.PendingInvites.ToList()) vm.RevokeInviteCommand.Execute(item);
+        });
+        await Task.Delay(300);
+        Press(createButton);
+        await WaitAsync(() => vm.HasLongInvites, 5);
+        await Task.Delay(300);
+        var secondLong = vm.LongInviteItems.FirstOrDefault();
+        Check("30 天邀请：房间里没有别的邀请时马上能用；作废再做的这张换了新钥匙", secondLong is not null && !vm.ShowInviteNextRoomNote && vm.Status == L.T("multiplayer.longinvite.created")
+            && JayInvite.TryParse(secondLong.Code, out var secondCode) && JayInvite.TryParse(longItem!.Code, out var firstCode)
+            && !secondCode.LobbyKey.AsSpan().SequenceEqual(firstCode.LobbyKey), vm.Status);
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            if (secondLong is not null) vm.RevokeLongInviteCommand.Execute(secondLong);
             lifeBox!.SelectedItem = vm.InviteLifeChoices[0];
             useBox!.SelectedItem = vm.InviteUseChoices[0];
             foreach (var item in vm.PendingInvites.ToList()) vm.RevokeInviteCommand.Execute(item);
@@ -469,7 +511,8 @@ internal sealed partial class SelfTest
             vm.TestRestartForProxy = null;
             vm.Confirm = savedConfirm;
             foreach (var friend in vm.ContactList.ToList()) foreach (var device in friend.Devices) vm.Contacts.Remove(device.PublicKey);
-            vm.RefreshContacts();
+            // Back to the contact book the scope started with: later scopes must not read this test one.
+            vm.ContactsDir = savedContactsDir;
         });
         await Task.Delay(300);
         Check("房间：回到大厅", vm.IsIdle && !vm.ShowRoomHeader && Named<Grid>("LobbyGrid")?.IsEffectivelyVisible == true);

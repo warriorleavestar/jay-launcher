@@ -7,7 +7,10 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Amber.App.ViewModels;
 
-/// <summary>One row of the "who can see what" table, in the current language; <see cref="Now"/> marks the rows that describe my links right now.</summary>
+/// <summary>
+/// One row of the "who can see what" table, in the current language. <see cref="Now"/> marks the row that describes
+/// me right now: with the word "Now" next to it (not by colour alone), and in the name a screen reader gets.
+/// </summary>
 public sealed record WhoSeesLine(WhoSeesRow Row) : LocalizedRecord
 {
     private bool _now;
@@ -24,8 +27,12 @@ public sealed record WhoSeesLine(WhoSeesRow Row) : LocalizedRecord
             if (_now == value) return;
             _now = value;
             OnPropertyChanged(nameof(Now));
+            OnPropertyChanged(nameof(SpokenName));
         }
     }
+
+    /// <summary>The whole row as one sentence, starting with "Now" when it is the row that applies.</summary>
+    public string SpokenName => L.F(Now ? "multiplayer.sees.row_name_now" : "multiplayer.sees.row_name", Who, Ip, Content);
 }
 
 /// <summary>One line of the room's facts card ("Who can come in · Only people I invite").</summary>
@@ -103,8 +110,7 @@ public sealed partial class MultiplayerViewModel
         var guest = RoomLinks.ToGuest(peers);
         foreach (var person in People)
             person.Link = person.IsMe || !person.IsOnline ? RoomLink.None : person.IsHost ? host : guest;
-        var now = WhoSeesWhat.AppliesNow(RoomLinkNow.Kind);
-        foreach (var line in WhoSeesLines) line.Now = now.Contains(line.Row.Id);
+        RefreshWhoSeesNow();
         foreach (var name in (string[])[nameof(RoomLinkNow), nameof(IsMarkDirect), nameof(IsMarkRelayed), nameof(IsMarkMixed), nameof(IsMarkWaiting), nameof(ConnectionMarkText)])
             OnPropertyChanged(name);
     }
@@ -113,6 +119,13 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>The fixed table: the same five rows here and on a network's card.</summary>
     public IReadOnlyList<WhoSeesLine> WhoSeesLines { get; } = [.. WhoSeesWhat.Rows.Select(r => new WhoSeesLine(r))];
+
+    /// <summary>The row that describes me right now: it follows my links and my "relays only" switch.</summary>
+    private void RefreshWhoSeesNow()
+    {
+        var now = WhoSeesWhat.AppliesNow(RoomLinkNow.Kind, MyRelayOnly);
+        foreach (var line in WhoSeesLines) line.Now = now.Contains(line.Row.Id);
+    }
 
     /// <summary>The table and the "relays only" switch are open (the connection mark toggles them).</summary>
     [ObservableProperty] public partial bool WhoSeesOpen { get; set; }
@@ -132,7 +145,20 @@ public sealed partial class MultiplayerViewModel
     // ---- relays only ----
 
     private bool _joinedRelayRule;
-    private bool _relaySwitching;
+
+    /// <summary>
+    /// The multiplayer component is being restarted by one of the room's switches ("relays only", forwarding their
+    /// game). Both are start-up settings of the same component, so only one restart runs at a time: the second
+    /// would start from options the first is about to replace.
+    /// </summary>
+    private bool _componentRestarting;
+
+    private void SetComponentRestarting(bool value)
+    {
+        _componentRestarting = value;
+        NotifyRelayOnly();
+        NotifyShare();
+    }
 
     /// <summary>The room was opened as "relays only": the rule came with the room and holds for everyone in it.</summary>
     public bool RoomRuleRelayOnly => IsHosting ? _credentials?.RelayOnly == true : IsJoined && _joinedRelayRule;
@@ -145,7 +171,7 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>The switch can be flipped: in a room that is not a sealed direct one, and whose rule does not already decide it.</summary>
-    public bool CanChangeRelayOnly => _room is not null && !IsDirect && !RoomRuleRelayOnly && !_relaySwitching && !IsRekeying;
+    public bool CanChangeRelayOnly => _room is not null && !IsDirect && !RoomRuleRelayOnly && !_componentRestarting && !IsRekeying;
 
     /// <summary>Why the switch is fixed (empty when it can be flipped).</summary>
     public string RelayOnlyNote => _room is null ? ""
@@ -173,8 +199,9 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>
     /// Turns direct connections of this computer off or on. EasyTier takes it as a start-up flag, so the component
-    /// restarts on the same room (a few seconds; chat reconnects). Other members never start a direct link to a
-    /// computer that has them off, so nobody in the room learns this computer's IP address.
+    /// restarts on the same room (a few seconds; chat reconnects). Other members' Jay then does not start a direct
+    /// link to this computer, so in normal use nobody in the room learns its IP address (a modified program could
+    /// still ask for it, which the wording on screen says).
     /// </summary>
     internal async Task SetRelayOnlyAsync(bool on)
     {
@@ -184,8 +211,7 @@ public sealed partial class MultiplayerViewModel
             NotifyRelayOnly();
             return;
         }
-        _relaySwitching = true;
-        NotifyRelayOnly();
+        SetComponentRestarting(true);
         try
         {
             // Let the switch show its new position before the component restarts.
@@ -199,11 +225,18 @@ public sealed partial class MultiplayerViewModel
             }
             else switched = ReferenceEquals(_room, room) && SwitchNetwork(next);
             if (switched) SetStatus(StatusMessage.Info(on ? "multiplayer.sees.relay_only.turned_on" : "multiplayer.sees.relay_only.turned_off"));
+            // Still in the room, so nothing was restarted: say the switch did not take. (When the restart itself
+            // failed, the room is gone and its own message stands.)
+            else if (_room is not null) SetStatus(StatusMessage.Warning("multiplayer.sees.relay_only.failed"));
+        }
+        catch (Exception e) when (e is IOException or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or OperationCanceledException)
+        {
+            SetStatus(StatusMessage.Failure("multiplayer.room.start_failed", e, ErrorText.Of(e)));
         }
         finally
         {
-            _relaySwitching = false;
-            NotifyRelayOnly();
+            SetComponentRestarting(false);
+            RefreshWhoSeesNow();
             RefreshRoomFacts();
         }
     }

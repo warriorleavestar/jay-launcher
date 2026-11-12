@@ -856,7 +856,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task UseGameProxyAsync()
     {
-        if (Child.HideNetworkExit || SelectedExitPeer is not { } peer || _session is null || _currentOptions is not { } current) return;
+        if (Child.HideNetworkExit || _componentRestarting || SelectedExitPeer is not { } peer || _session is null || _currentOptions is not { } current) return;
         // 邀请房间的封装通道只在成员和房主之间有钥匙：只能经房主转发。
         if (current.Room.FromInvite && current.Room.Tunnel.Wraps && peer.Peer.Ip != EasyTierArgs.HostIp)
         {
@@ -876,7 +876,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task StopGameProxyAsync()
     {
-        if (_currentOptions is not { } current || !UsingGameProxy) return;
+        if (_componentRestarting || _currentOptions is not { } current || !UsingGameProxy) return;
         if (await RestartForProxyAsync(current with { ProxyExit = null, LocalSocksPort = null, LocalExitPort = null }))
             SetStatus(StatusMessage.Info("multiplayer.proxy.stopped"));
     }

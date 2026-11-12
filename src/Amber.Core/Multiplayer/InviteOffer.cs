@@ -40,9 +40,16 @@ public static class InviteOffer
 
     public static int Uses(InviteUse use) => use == InviteUse.Once ? 1 : InviteBook.UnlimitedUses;
 
-    /// <summary>The choice closest to a lifetime remembered from an older version (minutes; null was "while the room is open").</summary>
-    public static InviteLife LifeFromMinutes(int? minutes) => minutes is { } m && m <= 10 ? InviteLife.TenMinutes : InviteLife.OneDay;
+    /// <summary>Only an invite for one person can let that person in without asking the host.</summary>
+    public static bool CanAutoApprove(InviteLife life, InviteUse use) => Normalize(life, use) == InviteUse.Once;
 
-    /// <summary>The choice closest to a remembered use count.</summary>
-    public static InviteUse UseFromCount(int uses) => uses <= 1 ? InviteUse.Once : InviteUse.Unlimited;
+    /// <summary>
+    /// The panel's choice for a lifetime remembered from an earlier room (minutes; null was "while the room is open").
+    /// Never longer than what was remembered: anything under a day becomes ten minutes. "Open like last time" never
+    /// makes a thirty-day invite either; that one is made on purpose.
+    /// </summary>
+    public static InviteLife LifeFromMinutes(int? minutes) => minutes is { } m && m < 24 * 60 ? InviteLife.TenMinutes : InviteLife.OneDay;
+
+    /// <summary>The panel's choice for a remembered use count. Never more: only "unlimited" stays unlimited.</summary>
+    public static InviteUse UseFromCount(int uses) => uses == InviteBook.UnlimitedUses ? InviteUse.Unlimited : InviteUse.Once;
 }

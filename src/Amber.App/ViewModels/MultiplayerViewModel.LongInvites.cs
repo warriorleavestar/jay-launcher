@@ -69,15 +69,17 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>
     /// Make one (30 days) from the room's invite panel: it goes on the invite card like any other invite, and into the
-    /// list of thirty-day invites under it, where it can be revoked.
+    /// list of thirty-day invites under it, where it can be revoked. When this room cannot accept it (its other
+    /// invites use another lobby key), the card says it works from the next room on.
     /// </summary>
     private async Task CreateLongInviteAsync()
     {
         LongLivedInvite invite;
         try
         {
-            // The first thirty-day invite takes over the open room's lobby key, so it works in this room too.
-            invite = LongInvites.Create(LongInviteLabel, lobbyKey: _lobby?.Book.CurrentLobbyKey());
+            // Thirty-day invites keep a lobby key of their own, never the open room's: this room accepts the new
+            // invite at once only when it has no other invite out (or already runs on that key).
+            invite = LongInvites.Create(LongInviteLabel);
         }
         catch (InvalidOperationException)
         {

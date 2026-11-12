@@ -118,6 +118,13 @@ public sealed class RoomOpeningTests
             var options = new EasyTierOptions(room, asHost, ["tcp://relay.example:11010"], 15999, LocalForwardPort: asHost ? null : 40000) { LocalTunnelPort = asHost ? null : 40001 };
             Assert.Single(EasyTierArgs.Build(options), a => a == "--disable-p2p");
             Assert.DoesNotContain("--disable-p2p", EasyTierArgs.Build(options with { Room = room with { RelayOnly = false } }));
+
+            // Relays only never listens for other computers, even when a listener was asked for.
+            var listening = options with { Listeners = ["tcp://0.0.0.0:11010", "udp://0.0.0.0:11010"] };
+            var args = EasyTierArgs.Build(listening);
+            Assert.Contains("--no-listener", args);
+            Assert.DoesNotContain("--listeners", args);
+            Assert.Contains("--listeners", EasyTierArgs.Build(listening with { Room = room with { RelayOnly = false } }));
         }
     }
 }

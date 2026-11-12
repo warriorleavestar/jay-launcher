@@ -16,6 +16,9 @@ public sealed record LongLivedInvite(string Id, string Label, byte[] Token, Date
 /// any time, and the host still approves each knock and checks the safety code. They share one lobby key kept on this
 /// computer (in a file only this user can read), so the same code works for every room opened while it is valid.
 /// When the last one is revoked or expires, the key is thrown away: old codes then lead nowhere.
+///
+/// That key is always made here, at random. It is never taken from a room: a room's lobby key is known to everyone
+/// who ever held one of that room's short invites, and it would stay valid for as long as the long-lived invites do.
 /// </summary>
 public sealed class LongLivedInvites
 {
@@ -48,18 +51,17 @@ public sealed class LongLivedInvites
         }
     }
 
-    /// <param name="lobbyKey">
-    /// The lobby key of the room that is open right now. It is taken over only when there is no long-lived invite yet
-    /// (so no key of our own): the new invite then works in that room at once instead of from the next room on.
-    /// </param>
-    public LongLivedInvite Create(string label, TimeSpan? lifetime = null, byte[]? lobbyKey = null)
+    /// <summary>
+    /// A new invite. The first one (and the first after the last was revoked or ran out) starts a fresh random lobby
+    /// key, so a code that was revoked never shares a key with a new one.
+    /// </summary>
+    public LongLivedInvite Create(string label, TimeSpan? lifetime = null)
     {
-        if (lobbyKey is { Length: not JayInvite.KeyLength }) throw new ArgumentException(null, nameof(lobbyKey));
         Prune();
         if (_items.Count >= MaxInvites) throw new InvalidOperationException("too many long-lived invites");
         var life = lifetime ?? DefaultLifetime;
         if (life <= TimeSpan.Zero || life > MaxLifetime) throw new ArgumentOutOfRangeException(nameof(lifetime));
-        _lobbyKey ??= lobbyKey is null ? RandomNumberGenerator.GetBytes(JayInvite.KeyLength) : (byte[])lobbyKey.Clone();
+        _lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength);
         var clean = new string([.. (label ?? "").Where(c => !char.IsControl(c)).Take(MaxLabel)]).Trim();
         var now = _now();
         var invite = new LongLivedInvite(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)), clean, RandomNumberGenerator.GetBytes(JayInvite.KeyLength), now, now + life);
