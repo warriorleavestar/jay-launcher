@@ -248,7 +248,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 | 项目 | 在哪里 | 环境变量 | 说明 |
 |---|---|---|---|
 | 微软 Client ID | 账号 | `AMBER_MS_CLIENT_ID` | 留空使用内置默认值 |
-| CurseForge API Key | 设置 | `AMBER_CF_KEY` | 到 [console.curseforge.com](https://console.curseforge.com) 免费申请。没有时不能用 CurseForge，其他功能不受影响 |
+| CurseForge API Key | 设置 | `AMBER_CF_KEY` | 官方桌面版已内置，可以不填。其他版本（自己编译的、Android 版）要用自己的 Key，到 [console.curseforge.com](https://console.curseforge.com) 免费申请；没有时不能用 CurseForge，其他功能不受影响 |
 
 设置保存在系统应用数据目录的 `Amber/settings.json`（`%APPDATA%\Amber`、`~/Library/Application Support/Amber` 或 `~/.config/Amber`）。
 
@@ -287,7 +287,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 <details>
 <summary><b>为什么搜不到 CurseForge 的内容？</b></summary>
 
-CurseForge 的接口需要 API Key，见上面的[配置](#配置)。Modrinth 不需要。
+CurseForge 的接口需要 API Key。官方桌面版已内置；其他版本见上面的[配置](#配置)。Modrinth 不需要。
 </details>
 
 <details>
