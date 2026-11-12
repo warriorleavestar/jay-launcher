@@ -28,17 +28,21 @@ SCENARIOS=${*:-$ALL}
 
 if [ "${INSIDE_NS:-}" != 1 ]; then
   mkdir -p "$WORK/matrix"
+  for s in $SCENARIOS; do
+    case " $ALL " in *" $s "*) ;; *) echo "unknown scenario $s (known: $ALL)"; exit 1 ;; esac
+  done
   printf 'scenario\thost NAT\tjoin NAT\tresult\tpath\tjoin ms\n' > "$WORK/matrix/results.tsv"
   for s in $SCENARIOS; do
     echo "== $s =="
-    env INSIDE_NS=1 SCENARIO="$s" unshare -rn --mount --propagation private "$0" "$CLI" "$WORK" || echo "$s: setup failed"
+    # A PID namespace with the scenario as its init: when the scenario ends, the kernel stops everything it started.
+    env INSIDE_NS=1 SCENARIO="$s" unshare -rn --mount --propagation private --pid --fork --kill-child "$0" "$CLI" "$WORK" \
+      || echo "$s: setup failed (see above)"
   done
   echo; cat "$WORK/matrix/results.tsv"
   exit 0
 fi
 
 S=$SCENARIO
-OUT="$WORK/matrix/$S"; rm -rf "$OUT"; mkdir -p "$OUT"
 case $S in
   cone-cone)           HNAT=cone;       JNAT=cone;      LAN=two;  IDLE=5 ;;
   portchange-cone)     HNAT=portchange; JNAT=cone;      LAN=two;  IDLE=5 ;;
@@ -50,9 +54,19 @@ case $S in
   expiry)              HNAT=portchange; JNAT=cone;      LAN=two;  IDLE=$(( ${NAT_TIMEOUT:-30} + 15 )) ;;
   *) echo "unknown scenario $S"; exit 1 ;;
 esac
+OUT="$WORK/matrix/$S"; rm -rf "$OUT"; mkdir -p "$OUT"
+JOIN_SECONDS=${JOIN_SECONDS:-180}
+
+# Every setup step must work: a missing firewall rule would turn a strict NAT into an open one and the results
+# would look fine but be wrong. Any failure ends the scenario with "setup-failed" in results.tsv.
+set -eE
+trap 'echo "$S: setup failed at line $LINENO: $BASH_COMMAND" >&2
+      printf "%s\t-\t-\tsetup-failed\tline %s\t-\n" "$S" "$LINENO" >> "$WORK/matrix/results.tsv"; exit 2' ERR
 
 mount -t tmpfs none /run && mkdir -p /run/netns
-mount -t tmpfs none /sys 2>/dev/null; mount -t sysfs sysfs /sys 2>/dev/null || true
+# A /proc for this PID namespace: .NET looks up its child processes there.
+mount -t proc proc /proc
+mount -t tmpfs none /sys 2>/dev/null || true; mount -t sysfs sysfs /sys 2>/dev/null || true
 X() { local ns=$1; shift; nsenter --net=/run/netns/$ns "$@"; }
 ip link set lo up
 ip link add name br0 type bridge && ip link set br0 up
@@ -75,6 +89,7 @@ nat_router() {
   X "$ns" ip addr add "$wanip" dev "$wan"; X "$ns" ip addr add "$lanip" dev "$lan"
   X "$ns" sysctl -qw net.ipv4.ip_forward=1
   X "$ns" sysctl -qw net.netfilter.nf_conntrack_udp_timeout=${NAT_TIMEOUT:-30} net.netfilter.nf_conntrack_udp_timeout_stream=${NAT_TIMEOUT:-30}
+  [ "$(X "$ns" sysctl -n net.netfilter.nf_conntrack_udp_timeout)" = "${NAT_TIMEOUT:-30}" ]
   X "$ns" nft add table ip nat
   X "$ns" nft "add chain ip nat post { type nat hook postrouting priority 100 ; }"
   case $kind in
@@ -88,8 +103,7 @@ nat_router() {
   X "$ns" nft add rule ip filter input iifname "$wan" ct state new drop
   X "$ns" nft "add chain ip filter wanfw { type filter hook forward priority 0 ; }"
   X "$ns" nft add rule ip filter wanfw iifname "$wan" ct state new drop
-  [ "$kind" = noudp ] && X "$ns" nft add rule ip filter wanfw oifname "$wan" meta l4proto udp drop
-  return 0
+  if [ "$kind" = noudp ]; then X "$ns" nft add rule ip filter wanfw oifname "$wan" meta l4proto udp drop; fi
 }
 
 # home <side> <id> <nat kind> <lan prefix> <public ip>: a machine "<side>pc" behind router "<side>r".
@@ -137,16 +151,21 @@ fi
 ip netns add node
 veth node neth - neth-br
 up node neth; X node ip addr add 203.0.113.20/24 dev neth; X node ip route add default via 203.0.113.254
-ET_DIR=$(ls -d "$WORK"/Amber/easytier/*/linux-x86_64 | head -1)
-X node "$ET_DIR/easytier-core" --no-tun --listeners tcp://0.0.0.0:11010 udp://0.0.0.0:11010 \
-  --network-name jay-lab-node --network-secret jay-lab-node --ipv4 10.200.0.1 > "$OUT/node.log" 2>&1 & NODE=$!
+# ET_DIR: the EasyTier folder to use; default is the newest version that `lan-setup` installed for this machine.
+ET_DIR=${ET_DIR:-$(ls -d "$WORK"/Amber/easytier/*/linux-"$(uname -m)" 2>/dev/null | sort -V | tail -1)}
+[ -x "$ET_DIR/easytier-core" ]
+# Background jobs go through a subshell that execs, so $! is the real process and kill reaches it.
+(exec nsenter --net=/run/netns/node "$ET_DIR/easytier-core" --no-tun --listeners tcp://0.0.0.0:11010 udp://0.0.0.0:11010 \
+  --network-name jay-lab-node --network-secret jay-lab-node --ipv4 10.200.0.1) > "$OUT/node.log" 2>&1 & NODE=$!
 
 python3 "$HERE/stun.py" 203.0.113.10:3478 203.0.113.11:3478 & STUN=$!
 COMMON="--stun 203.0.113.10:3478 --stun 203.0.113.11:3478 --node tcp://203.0.113.20:11010"
 for d in host join; do mkdir -p "$OUT/$d/.config"; cp -r "$WORK/Amber" "$OUT/$d/.config/"; cp -r "$WORK/Amber" "$OUT/$d/"; done
 sleep 2
+set +eE; trap - ERR
 
-cd "$OUT/host" && HOME="$OUT/host" XDG_CONFIG_HOME="$OUT/host/.config" X hpc "$CLI" lan-direct-host 25565 $COMMON --sealed --reply-file "$OUT/reply.txt" --seconds $((IDLE + ${JOIN_SECONDS:-180} + 60)) > "$OUT/host.log" 2>&1 & HOST=$!
+(cd "$OUT/host" && HOME="$OUT/host" XDG_CONFIG_HOME="$OUT/host/.config" exec nsenter --net=/run/netns/hpc "$CLI" lan-direct-host 25565 \
+  $COMMON --sealed --reply-file "$OUT/reply.txt" --seconds $((IDLE + JOIN_SECONDS + 60))) > "$OUT/host.log" 2>&1 & HOST=$!
 for i in $(seq 60); do grep -q '^SEALED ' "$OUT/host.log" && break; sleep 1; done
 INVITE=$(grep -m1 '^SEALED ' "$OUT/host.log" | cut -d' ' -f2)
 PASSPHRASE=$(grep -m1 '^PASSPHRASE ' "$OUT/host.log" | cut -d' ' -f2)
@@ -154,10 +173,14 @@ RESULT=fail; PATHLINE=-; MS=-
 if [ -n "$INVITE" ]; then
   sleep "$IDLE"
   START=$(date +%s%3N)
-  cd "$OUT/join" && HOME="$OUT/join" XDG_CONFIG_HOME="$OUT/join/.config" X jpc "$CLI" lan-direct-join "$INVITE" --passphrase "$PASSPHRASE" $COMMON --seconds ${JOIN_SECONDS:-180} > "$OUT/join.log" 2>&1 & JOIN=$!
+  (cd "$OUT/join" && HOME="$OUT/join" XDG_CONFIG_HOME="$OUT/join/.config" exec nsenter --net=/run/netns/jpc "$CLI" lan-direct-join "$INVITE" \
+    --passphrase "$PASSPHRASE" $COMMON --seconds $JOIN_SECONDS) > "$OUT/join.log" 2>&1 & JOIN=$!
   for i in $(seq 60); do grep -q '^REPLY ' "$OUT/join.log" && break; sleep 1; done
-  grep -m1 '^REPLY ' "$OUT/join.log" | cut -d' ' -f2 > "$OUT/reply.txt"
-  for i in $(seq ${JOIN_SECONDS:-180}); do grep -qE '^(DIRECT|RELAY)$' "$OUT/join.log" && break; kill -0 $JOIN 2>/dev/null || break; sleep 1; done
+  # The host polls --reply-file: write it whole (temp file + rename), and only when there is a reply.
+  REPLY_CODE=$(grep -m1 '^REPLY ' "$OUT/join.log" | cut -d' ' -f2)
+  if [ -n "$REPLY_CODE" ]; then echo "$REPLY_CODE" > "$OUT/reply.tmp" && mv "$OUT/reply.tmp" "$OUT/reply.txt"; fi
+  # Poll every 0.1 s so "join ms" is accurate to about 0.1 s.
+  for i in $(seq $((JOIN_SECONDS * 10))); do grep -qE '^(DIRECT|RELAY)$' "$OUT/join.log" && break; kill -0 $JOIN 2>/dev/null || break; sleep 0.1; done
   if grep -qE '^(DIRECT|RELAY)$' "$OUT/join.log"; then
     MS=$(( $(date +%s%3N) - START ))
     RESULT=$(grep -m1 -E '^(DIRECT|RELAY)$' "$OUT/join.log")
