@@ -99,7 +99,7 @@ public sealed class RekeyTests : IDisposable
         Assert.Throws<CryptographicException>(() => alice.Key.CopyPsk());
     }
 
-    /// <summary>Connections that never finish the handshake are capped; past the cap new ones are closed at once, and a member still gets in once they go.</summary>
+    /// <summary>Connections that never finish the handshake are capped; past the cap the oldest makes room, so a member still gets in.</summary>
     [Fact]
     public async Task StalledHandshakesAreCapped()
     {
@@ -145,6 +145,63 @@ public sealed class RekeyTests : IDisposable
             foreach (var c in idle) c.Dispose();
         }
         Assert.True(await WaitAsync(() => server.PendingHandshakes == 0, 20));
+    }
+
+    /// <summary>
+    /// A steady flood of empty connections, far faster than it took to keep members out when new ones were turned
+    /// away, while a member keeps connecting: the member gets in every time.
+    /// </summary>
+    [Fact]
+    public async Task MembersGetInDuringAFloodOfEmptyConnections()
+    {
+        var settings = new TunnelSettings(TransportMode.High, false);
+        var room = HostRoom(settings);
+        var alice = room.Table.Issue(_alice.PublicKey, "Alice");
+        await using var server = new TunnelServer(room.Host, settings, 0, _ => async (stream, ct) => await stream.CopyToAsync(stream, ct));
+        using var stop = new CancellationTokenSource();
+        var flood = Task.Run(async () =>
+        {
+            var open = new Queue<TcpClient>();
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    // About 200 a second, each held open until the server closes it or 2 000 are open.
+                    for (var i = 0; i < 10; i++)
+                    {
+                        var c = new TcpClient();
+                        try { await c.ConnectAsync(IPAddress.Loopback, server.Port); }
+                        catch (SocketException) { }
+                        open.Enqueue(c);
+                        if (open.Count > 2000) open.Dequeue().Dispose();
+                    }
+                    await Task.Delay(50);
+                }
+            }
+            finally
+            {
+                while (open.Count > 0) open.Dequeue().Dispose();
+            }
+        });
+        try
+        {
+            Assert.True(await WaitAsync(() => server.PendingHandshakes >= TunnelServer.MaxPendingHandshakes, 60));
+            for (var round = 0; round < 5; round++)
+            {
+                await using var tunnel = await TunnelClient.Wrapped("127.0.0.1", server.Port, GuestRoom(room, alice), settings, TunnelService.Game)(default);
+                await tunnel.WriteAsync(new byte[] { (byte)round });
+                await tunnel.FlushAsync();
+                var echo = new byte[1];
+                Assert.Equal(1, await tunnel.ReadAsync(echo));
+                Assert.Equal(round, echo[0]);
+            }
+            Assert.True(server.Evicted > 0);
+        }
+        finally
+        {
+            stop.Cancel();
+            await flood;
+        }
     }
 
     /// <summary>A connection that fails before its handshake starts still gives its place back.</summary>

@@ -121,12 +121,15 @@ public sealed class TunnelServer : IAsyncDisposable
     public int Rejected;
 
     /// <summary>
-    /// Connections still in their handshake at most. Past that the oldest one still in its handshake is closed to make
-    /// room (<see cref="HandshakeSlots"/>), so unauthenticated connections can only tie up so much, and stalling them
-    /// can't keep new members out.
+    /// Connections still in their handshake at most. Past that one still in its handshake is closed to make room
+    /// (<see cref="HandshakeSlots"/>), so unauthenticated connections can only tie up so much, and keeping new members
+    /// out takes refilling every place faster than a member's handshake.
     /// </summary>
-    public const int MaxPendingHandshakes = 64;
-    private readonly HandshakeSlots _slots = new(MaxPendingHandshakes);
+    public const int MaxPendingHandshakes = 256;
+
+    /// <summary>Places one caller with its own address may hold.</summary>
+    public const int MaxPendingPerCaller = 16;
+    private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, MaxPendingPerCaller);
     private long _slotsFullLogged;
 
     /// <summary>Connections in their handshake right now.</summary>
@@ -176,7 +179,7 @@ public sealed class TunnelServer : IAsyncDisposable
             {
                 return;
             }
-            var slot = _slots.TryTake(() => { Pump.Abort(client); client.Dispose(); }, out var evicted);
+            var slot = _slots.TryTake(CallerOf(client), () => { Pump.Abort(client); client.Dispose(); }, out var evicted);
             if (evicted) LogSlotsFull(_log, ref _slotsFullLogged);
             if (slot is null)
             {
@@ -187,6 +190,17 @@ public sealed class TunnelServer : IAsyncDisposable
             }
             _ = HandleAsync(client, slot, ct);
         }
+    }
+
+    /// <summary>The caller's address for handshake places, or null for loopback (callers handed over there can't be told apart).</summary>
+    internal static string? CallerOf(TcpClient client)
+    {
+        try
+        {
+            return (client.Client.RemoteEndPoint as IPEndPoint)?.Address is { } a && !IPAddress.IsLoopback(a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a)
+                ? (a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a).ToString() : null;
+        }
+        catch (Exception e) when (e is SocketException or ObjectDisposedException) { return null; }
     }
 
     /// <summary>Logs that the handshake places are full, at most once a minute.</summary>
@@ -253,15 +267,16 @@ public sealed class TunnelServer : IAsyncDisposable
                 (stream as IAuthenticatedStream)?.Abort();
                 // Only a connection that never got served counts as refused; a forwarding that ended is not.
                 if (!served) Interlocked.Increment(ref Rejected);
-                if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
-                else if (e is InvalidOperationException or ArgumentException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+                var what = served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+                if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T(what) + e.Message);
+                else if (e is InvalidOperationException or ArgumentException) _log?.Invoke(L.T(what) + e.GetType().Name);
             }
             catch (Exception e)
             {
                 // Anything else still ends this connection quietly and is logged by type only (no member details).
                 (stream as IAuthenticatedStream)?.Abort();
                 if (!served) Interlocked.Increment(ref Rejected);
-                _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+                _log?.Invoke(L.T(served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             }
             finally
             {

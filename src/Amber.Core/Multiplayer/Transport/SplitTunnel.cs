@@ -30,14 +30,14 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private int _accepted;
     private int _rejected;
     private int _tampered;
-    private readonly HandshakeSlots _slots = new(MaxPendingHandshakes);
+    private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, TunnelServer.MaxPendingPerCaller);
     private long _slotsFullLogged;
 
     /// <summary>
-    /// Legs still in their handshake at most, across all ports. More are closed at once,
-    /// so unauthenticated connections can only tie up so much.
+    /// Legs still in their handshake at most, across all ports. Past that one still in its handshake is closed to make
+    /// room (<see cref="HandshakeSlots"/>), as for <see cref="TunnelServer.MaxPendingHandshakes"/>.
     /// </summary>
-    public const int MaxPendingHandshakes = 64;
+    public const int MaxPendingHandshakes = 256;
 
     /// <summary>Legs in their handshake right now, across all ports.</summary>
     public int PendingHandshakes => _slots.Held;
@@ -99,7 +99,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             {
                 return;
             }
-            var slot = _slots.TryTake(() => { Pump.Abort(client); client.Dispose(); }, out var evicted);
+            var slot = _slots.TryTake(TunnelServer.CallerOf(client), () => { Pump.Abort(client); client.Dispose(); }, out var evicted);
             if (evicted) TunnelServer.LogSlotsFull(_log, ref _slotsFullLogged);
             if (slot is null)
             {
