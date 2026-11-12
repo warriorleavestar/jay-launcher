@@ -1846,7 +1846,7 @@
   "core.mp.public.observer_error": "目录事件处理出错：{0}",
   "core.mp.public.err_rate": "请求太频繁了，这个网络让你等几分钟再试",
   "core.mp.public.budget_full": "目录：“{0}”这一分钟的全目录额度用完了，请求会收到 rate。如果一直这样，可能有人在刷目录。",
-  "core.mp.public.callers_unmapped": "目录：到现在为止所有调用方都从 127.0.0.1 进来，大家挤在同一个来源、共用一份上限。这台节点的 EasyTier 没有按各自地址把调用方交过来，请用随 Jay 发布的 EasyTier。",
+  "core.mp.public.callers_unmapped": "目录：到现在为止所有调用方都从 127.0.0.1 进来，大家挤在同一个来源、共用一份上限。这里运行的 EasyTier 没有按各自地址把调用方交过来，请用随 Jay 发布的 EasyTier。",
   "core.mp.public.err_policy": "这个网络不收这个房间：{0}",
   "core.mp.public.no_address": "还没在公共网络里分到地址",
   "core.mp.public.announce_failed": "房间发布到公共网络失败：{0}",
