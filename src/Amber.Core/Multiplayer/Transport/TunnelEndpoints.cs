@@ -121,8 +121,8 @@ public sealed class TunnelServer : IAsyncDisposable
     public int Rejected;
 
     /// <summary>
-    /// Connections still in their handshake at most. More are closed at once: every caller looks the same here (the
-    /// local EasyTier hands them over from loopback), so this caps what unauthenticated connections can tie up.
+    /// Connections still in their handshake at most. More are closed at once, so
+    /// unauthenticated connections can only tie up so much.
     /// </summary>
     public const int MaxPendingHandshakes = 64;
     private int _pending;

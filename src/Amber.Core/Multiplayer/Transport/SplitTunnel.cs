@@ -33,8 +33,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private int _pending;
 
     /// <summary>
-    /// Legs still in their handshake at most, across all ports. More are closed at once: every caller looks the same here
-    /// (the local EasyTier hands them over from loopback), so this caps what unauthenticated connections can tie up.
+    /// Legs still in their handshake at most, across all ports. More are closed at once,
+    /// so unauthenticated connections can only tie up so much.
     /// </summary>
     public const int MaxPendingHandshakes = 64;
 
