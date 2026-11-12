@@ -143,7 +143,7 @@ public sealed partial class MultiplayerViewModel
 
     private TrustedMembers CreateTrusted()
     {
-        var trusted = new TrustedMembers(Path.Combine(AppSettings.DataDir, "trusted.json"));
+        var trusted = new TrustedMembers(TrustedFile);
         trusted.Changed += () => Dispatcher.UIThread.Post(RefreshTrusted);
         return trusted;
     }

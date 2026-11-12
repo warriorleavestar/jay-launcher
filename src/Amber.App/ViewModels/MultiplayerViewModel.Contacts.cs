@@ -44,6 +44,9 @@ public sealed class ContactDeviceItem(Contact device, ContactItem person)
 {
     public Contact Device { get; } = device;
     public ContactItem Person { get; } = person;
+
+    /// <summary>Their account vouched for this device and I have not looked at it yet.</summary>
+    public bool IsNew => Device.NewDevice;
     public string Fingerprint => (Device.DeviceName.Length > 0 ? Device.DeviceName + " · " : "") + Device.Fingerprint
         + (Device.NewDevice ? " · " + L.T("multiplayer.contacts.new_device_tag") : "");
 }
@@ -243,6 +246,9 @@ public sealed partial class MultiplayerViewModel
         foreach (var r in _service.Requests.Pending)
             if (r.Spec.Kind is "contact" or "contact-compare" or "contact-new-device" && r.Spec.DedupeKey is { } key && !wanted.Contains(key))
                 _service.Requests.Withdraw(key);
+        // Both lists are whole again: the Friends page rebuilds its rows once, not once per row added.
+        FriendsRebuilt?.Invoke();
+        RefreshMetPeople();
     }
 
     [RelayCommand]
@@ -397,6 +403,7 @@ public sealed partial class MultiplayerViewModel
             var who = new ContactItem(m.From).Name;
             var room = m.Room.Length > 0 ? m.Room : L.T("multiplayer.room.friend_room");
             ListFriendRoom(key, m, who, room);
+            NoteInvitedBy(m, key, room);
             _service.Requests.Post(new RequestSpec("contact-invite", L.F("multiplayer.contacts.invite.title", who, room),
                 L.F("multiplayer.contacts.invite.body", m.From.Fingerprint),
                 [new("ignore", L.T("multiplayer.contacts.ignore"), IsDefault: true), new("join", L.T("multiplayer.contacts.invite.join"))],
@@ -417,8 +424,8 @@ public sealed partial class MultiplayerViewModel
                 break;
             }
             case "contact-compare":
-                Tab = MultiplayerTab.Settings;
-                Navigate?.Invoke("play/settings");
+                // The emoji are on the Friends page, in the add panel.
+                OpenAddFriend();
                 break;
             case "contact-invite":
                 // "Ignore" only closes the request: the room stays under "where to play" until the invite runs out.
@@ -491,7 +498,9 @@ public sealed partial class MultiplayerViewModel
             {
                 var id = await post.SendInviteAsync(device, pending.Invite, Identity.PublicKey, room, DateTimeOffset.UtcNow + lifetime, default);
                 // Only the newest device's receipt counts: an older computer that's switched off shouldn't raise "held back".
-                if (!quiet && ReferenceEquals(device, devices[0])) _sentInvites[id] = item.Name;
+                if (!ReferenceEquals(device, devices[0])) continue;
+                if (!quiet) _sentInvites[id] = item.Name;
+                NoteInviteSent(item, id);
             }
             if (!quiet) SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
             return true;
@@ -507,6 +516,7 @@ public sealed partial class MultiplayerViewModel
 
     private void OnInviteReceipt(SentMail sent)
     {
+        NoteInviteDelivered(sent.Id);
         if (!_sentInvites.Remove(sent.Id, out var name)) return;
         if (_heldBackShown.Remove(sent.Id)) HeldBackText = "";
         SetStatus(StatusMessage.Success("multiplayer.contacts.invite.received", name));
@@ -516,12 +526,22 @@ public sealed partial class MultiplayerViewModel
     internal void ShowHeldBack(IEnumerable<SentMail> unconfirmed)
     {
         foreach (var sent in unconfirmed)
+        {
+            NoteInviteHeld(sent.Id);
             if (_sentInvites.TryGetValue(sent.Id, out var name) && _heldBackShown.Add(sent.Id))
                 HeldBackText = L.F("multiplayer.contacts.held_back", name);
+        }
     }
 
     /// <summary>Test seam: as if a contact invite with this id had been sent to <paramref name="name"/>.</summary>
     internal void SentInviteForTest(string id, string name) => _sentInvites[id] = name;
+
+    /// <summary>Test seam: as if an invite with this mail id had been mailed to a friend in the list.</summary>
+    internal void SentInviteForTest(string id, ContactItem friend)
+    {
+        _sentInvites[id] = friend.Name;
+        NoteInviteSent(friend, id);
+    }
 
     [RelayCommand]
     private void DismissHeldBack() => HeldBackText = "";

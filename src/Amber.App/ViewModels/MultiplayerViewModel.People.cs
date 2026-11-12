@@ -1,0 +1,369 @@
+using System.Collections.ObjectModel;
+using Amber.App.Localization;
+using Amber.App.Services;
+using Amber.Core.Localization;
+using Amber.Core.Multiplayer;
+using Amber.Core.Multiplayer.Contacts;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace Amber.App.ViewModels;
+
+/// <summary>
+/// What this computer knows about a friend right now. Jay has no presence service, so there is no "online" or
+/// "offline": only what the room I am in, the mail I received and the contact file say.
+/// </summary>
+public enum FriendState
+{
+    /// <summary>Emoji compared; nothing else is known.</summary>
+    Verified,
+    /// <summary>In the room I am in right now.</summary>
+    SameRoom,
+    /// <summary>They mailed me an invite to their room and it still works.</summary>
+    InTheirRoom,
+    /// <summary>A device their Jay account vouched for that I have not looked at yet.</summary>
+    NewDevice,
+}
+
+/// <summary>Where something I mailed to a friend is, as far as the receipts say.</summary>
+public enum DeliveryState
+{
+    None,
+    /// <summary>Handed to the network; no receipt yet.</summary>
+    Sent,
+    /// <summary>Their Jay picked it up and said so.</summary>
+    Delivered,
+    /// <summary>No receipt after a few minutes: it may have been held back.</summary>
+    Held,
+}
+
+public enum FriendLineKind
+{
+    /// <summary>Something that happened ("You invited Alex to your room").</summary>
+    Note,
+    Mine,
+    Theirs,
+}
+
+/// <summary>
+/// One line of the conversation with a friend. Notes are written from their key when read, so they follow the language.
+/// Lines live in memory for this run of Jay only: nothing of a conversation is written to disk.
+/// </summary>
+public sealed partial class FriendLine : ObservableObject
+{
+    private readonly Func<string> _text;
+
+    internal FriendLine(FriendLineKind kind, Func<string> text, DateTimeOffset time)
+    {
+        Kind = kind;
+        _text = text;
+        Time = time;
+        LanguageListeners.Add(this, static o => ((FriendLine)o).OnPropertyChanged(string.Empty));
+    }
+
+    public FriendLineKind Kind { get; }
+    public DateTimeOffset Time { get; }
+    public bool IsNote => Kind == FriendLineKind.Note;
+    public bool IsMine => Kind == FriendLineKind.Mine;
+    public bool IsTheirs => Kind == FriendLineKind.Theirs;
+    public string Text => _text();
+    public string TimeText => Time.ToLocalTime().ToString("HH:mm");
+
+    /// <summary>The row under "where to play" this note is about (their invite): one note per invite.</summary>
+    public string? RoomKey { get; init; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDelivery), nameof(DeliveryText), nameof(IsDelivered), nameof(IsHeld), nameof(Spoken))]
+    public partial DeliveryState Delivery { get; set; }
+
+    public bool HasDelivery => Delivery != DeliveryState.None;
+    public bool IsDelivered => Delivery == DeliveryState.Delivered;
+    public bool IsHeld => Delivery == DeliveryState.Held;
+
+    public string DeliveryText => Delivery switch
+    {
+        DeliveryState.Sent => L.T("people.line.sent"),
+        DeliveryState.Delivered => L.T("people.line.delivered"),
+        DeliveryState.Held => L.T("people.line.held"),
+        _ => "",
+    };
+
+    /// <summary>For screen readers: the time, the text and where it is.</summary>
+    public string Spoken => string.Join(" · ", new[] { TimeText, Text, DeliveryText }.Where(s => s.Length > 0));
+}
+
+/// <summary>
+/// Someone who is or was in a room with me and has not compared emoji with me ("someone I've met"): the people in the
+/// room now, and the people I told Jay to let straight in. Only the second kind is remembered after the room closes.
+/// </summary>
+public sealed record MetPersonItem(byte[] PublicKey, string Name, string? JayAccount, bool AutoAdmit, bool InRoom) : LocalizedRecord
+{
+    public string DisplayName => Name.Length > 0 ? Name : L.T("multiplayer.peers.player");
+    public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
+    public string StateText => L.T(InRoom ? "people.met.in_room" : "people.met.before");
+    public bool HasJay => JayAccount is not null;
+    public string JayText => MultiplayerViewModel.JayLine(JayAccount) ?? "";
+    public string Summary => DisplayName + " · " + StateText;
+}
+
+/// <summary>
+/// What the Friends page needs from multiplayer: the people I have met, the "let them straight in" switch (the old
+/// trusted list, now one switch per person), what is known about a friend right now, and the conversation with a friend.
+/// </summary>
+/// <remarks>
+/// Messages reach a friend only while both are in the same room (the room's private channel, end to end). Mail between
+/// friends carries invites and their receipts, nothing else; offline messages are not built yet.
+/// </remarks>
+public sealed partial class MultiplayerViewModel
+{
+    private readonly Dictionary<string, ObservableCollection<FriendLine>> _conversations = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, FriendLine> _inviteLines = new(StringComparer.Ordinal);
+    private bool _metPeopleWanted;
+
+    /// <summary>The most lines kept per friend.</summary>
+    internal const int MaxFriendLines = 300;
+
+    public ObservableCollection<MetPersonItem> MetPeople { get; } = [];
+
+    /// <summary>Something the Friends page shows about people changed (who is in the room, who is let straight in, rooms I was invited to).</summary>
+    internal event Action? PeopleFactsChanged;
+
+    /// <summary>
+    /// The friend list was rebuilt from the contact file and is whole again. (The list is cleared and refilled row by
+    /// row; a page that followed every step would see it empty in between and forget who was selected.)
+    /// </summary>
+    internal event Action? FriendsRebuilt;
+
+    /// <summary>Go to the Friends page with the add panel open.</summary>
+    internal void OpenAddFriend() => Navigate?.Invoke("people/add");
+
+    /// <summary>Multiplayer settings: friends moved to their own page.</summary>
+    [RelayCommand]
+    private void OpenFriends() => Navigate?.Invoke("people");
+
+    private void InitPeople()
+    {
+        Members.CollectionChanged += (_, _) => RefreshMetPeople();
+        OnlinePeers.CollectionChanged += (_, _) => RefreshMetPeople();
+        TrustedPeople.CollectionChanged += (_, _) => RefreshMetPeople();
+        FriendRooms.CollectionChanged += (_, _) => PeopleFactsChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// The Friends page is open: start listing the people I have met. Not before, so starting Jay does not read the
+    /// trusted list.
+    /// </summary>
+    internal void ShowMetPeople()
+    {
+        _metPeopleWanted = true;
+        RefreshMetPeople();
+    }
+
+    internal void RefreshMetPeople()
+    {
+        if (!_metPeopleWanted)
+        {
+            PeopleFactsChanged?.Invoke();
+            return;
+        }
+        var verified = Contacts.All.Where(c => c.Verified).ToList();
+        var friendKeys = verified.Select(c => Convert.ToHexString(c.PublicKey)).ToHashSet();
+        var friendAccounts = verified.Where(c => c.JayAccount is not null).Select(c => c.JayAccount!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        bool IsFriend(byte[] key, string? account) => friendKeys.Contains(Convert.ToHexString(key)) || (account is not null && friendAccounts.Contains(account));
+
+        var me = Identity.PublicKey;
+        var online = OnlinePeers.Select(p => p.Entry.Fingerprint).ToHashSet();
+        var met = new Dictionary<string, MetPersonItem>();
+        foreach (var t in Trusted.All)
+            if (!IsFriend(t.PublicKey, t.JayAccount))
+                met[Convert.ToHexString(t.PublicKey)] = new MetPersonItem(t.PublicKey, t.Name, t.JayAccount, true, online.Contains(t.Fingerprint));
+        foreach (var m in Members)
+        {
+            if (IsFriend(m.PublicKey, m.JayAccount)) continue;
+            var hex = Convert.ToHexString(m.PublicKey);
+            var on = m.Trusted || Trusted.IsTrusted(m.PublicKey) || Trusted.IsTrustedJayAccount(m.JayAccount);
+            met[hex] = new MetPersonItem(m.PublicKey, m.Name, m.JayAccount, on, online.Contains(m.Fingerprint));
+        }
+        foreach (var p in OnlinePeers)
+        {
+            var key = p.Entry.PublicKey;
+            if (key.AsSpan().SequenceEqual(me) || IsFriend(key, null)) continue;
+            var hex = Convert.ToHexString(key);
+            if (met.TryGetValue(hex, out var known)) met[hex] = known with { InRoom = true };
+            else met[hex] = new MetPersonItem(key, p.Entry.Name, null, Trusted.IsTrusted(key), true);
+        }
+
+        var rows = met.Values.OrderByDescending(p => p.InRoom).ThenBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var same = rows.Count == MetPeople.Count && rows.Zip(MetPeople).All(pair =>
+            pair.First.PublicKey.AsSpan().SequenceEqual(pair.Second.PublicKey) && pair.First.Name == pair.Second.Name && pair.First.JayAccount == pair.Second.JayAccount
+            && pair.First.AutoAdmit == pair.Second.AutoAdmit && pair.First.InRoom == pair.Second.InRoom);
+        if (!same)
+        {
+            MetPeople.Clear();
+            foreach (var row in rows) MetPeople.Add(row);
+        }
+        PeopleFactsChanged?.Invoke();
+    }
+
+    // ---- "let them straight in" ----
+
+    /// <summary>"For a child" asks about every knock, whatever this switch says.</summary>
+    internal bool KnocksAlwaysAsk => Child.AlwaysAskKnock;
+
+    /// <summary>The friend's knock is approved without asking me: one of their devices, or their Jay account, is on the list.</summary>
+    internal bool IsAutoAdmitted(ContactItem friend) =>
+        friend.Devices.Any(d => Trusted.IsTrusted(d.PublicKey)) || Trusted.IsTrustedJayAccount(friend.JayAccount);
+
+    /// <summary>
+    /// Turns "let them straight in" on or off for a friend: every device I have looked at goes on the list (a new device
+    /// waits until I confirm it), or every one of theirs comes off.
+    /// </summary>
+    internal void SetAutoAdmit(ContactItem friend, bool on)
+    {
+        if (on)
+        {
+            foreach (var d in friend.Devices.Where(d => d.MayBeAutoAdmitted)) Trusted.Add(d.PublicKey, friend.Contact.Name, d.JayAccount);
+        }
+        else
+        {
+            foreach (var d in friend.Devices) Trusted.Remove(d.PublicKey);
+            // Trusted under their account from a device that is not in my friend list (it knocked before we were friends).
+            if (friend.JayAccount is { } account)
+                foreach (var t in Trusted.All.Where(t => string.Equals(t.JayAccount, account, StringComparison.OrdinalIgnoreCase)))
+                    Trusted.Remove(t.PublicKey);
+        }
+        RefreshTrusted();
+    }
+
+    internal void SetAutoAdmit(MetPersonItem person, bool on)
+    {
+        if (on) Trusted.Add(person.PublicKey, person.Name, person.JayAccount);
+        else Trusted.Remove(person.PublicKey);
+        RefreshTrusted();
+        // The host's member list carries the same fact for the room console.
+        for (var i = 0; i < Members.Count; i++)
+            if (Members[i].PublicKey.AsSpan().SequenceEqual(person.PublicKey) && Members[i].Trusted != on)
+                Members[i] = Members[i] with { Trusted = on };
+    }
+
+    /// <summary>
+    /// Asks someone I have met to be friends. Their friend code is their device's public key, which the room already
+    /// showed me, so there is nothing to paste; the emoji check still follows.
+    /// </summary>
+    internal Task AddMetPersonAsync(MetPersonItem person)
+    {
+        ContactCodeInput = ContactCode.Format(person.PublicKey);
+        return AddContactCommand.ExecuteAsync(null);
+    }
+
+    /// <summary>I looked at a friend's new device and it is theirs.</summary>
+    internal void AcknowledgeDevice(ContactDeviceItem device) => Contacts.AcknowledgeDevice(device.Device.PublicKey);
+
+    // ---- what is known about a friend ----
+
+    /// <summary>The friend as a member of the room I am in, when they are in it.</summary>
+    internal OnlinePeerItem? PeerOf(ContactItem friend) =>
+        OnlinePeers.FirstOrDefault(p => friend.Devices.Any(d => d.PublicKey.AsSpan().SequenceEqual(p.Entry.PublicKey)));
+
+    /// <summary>The newest room this friend invited me to that I can still join.</summary>
+    internal FriendRoomItem? RoomOf(ContactItem friend)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return FriendRooms.FirstOrDefault(r => !r.IsExpired(now) && friend.Devices.Any(d => d.PublicKey.AsSpan().SequenceEqual(r.Invite.From.PublicKey)));
+    }
+
+    internal FriendState StateOf(ContactItem friend) =>
+        friend.Devices.Any(d => d.NewDevice) ? FriendState.NewDevice
+        : PeerOf(friend) is not null ? FriendState.SameRoom
+        : RoomOf(friend) is not null ? FriendState.InTheirRoom
+        : FriendState.Verified;
+
+    // ---- the conversation with a friend ----
+
+    private static string PersonKey(Contact contact) => contact.JayAccount ?? Convert.ToHexStringLower(contact.PublicKey);
+
+    internal ObservableCollection<FriendLine> ConversationWith(ContactItem friend) => Conversation(PersonKey(friend.Contact));
+
+    private ObservableCollection<FriendLine> Conversation(string person)
+    {
+        if (!_conversations.TryGetValue(person, out var lines)) _conversations[person] = lines = [];
+        return lines;
+    }
+
+    private FriendLine AddFriendLine(Contact friend, FriendLine line)
+    {
+        var lines = Conversation(PersonKey(friend));
+        lines.Add(line);
+        while (lines.Count > MaxFriendLines) lines.RemoveAt(0);
+        return line;
+    }
+
+    /// <summary>The verified friend who owns this device key, if any.</summary>
+    private Contact? FriendByKey(ReadOnlySpan<byte> publicKey) => Contacts.Find(publicKey) is { Verified: true } contact ? contact : null;
+
+    private Contact? FriendByFingerprint(string fingerprint) => Contacts.All.FirstOrDefault(c => c.Verified && c.Fingerprint == fingerprint);
+
+    /// <summary>I mailed this friend an invite to my room: a note that shows where the mail is.</summary>
+    private void NoteInviteSent(ContactItem friend, string mailId)
+    {
+        var line = AddFriendLine(friend.Contact, new FriendLine(FriendLineKind.Note, () => L.T("people.line.invited"), DateTimeOffset.Now) { Delivery = DeliveryState.Sent });
+        _inviteLines[mailId] = line;
+    }
+
+    private void NoteInviteDelivered(string mailId)
+    {
+        if (_inviteLines.Remove(mailId, out var line)) line.Delivery = DeliveryState.Delivered;
+    }
+
+    private void NoteInviteHeld(string mailId)
+    {
+        if (_inviteLines.TryGetValue(mailId, out var line) && line.Delivery == DeliveryState.Sent) line.Delivery = DeliveryState.Held;
+    }
+
+    /// <summary>A friend mailed me an invite to their room: a note in the conversation, with [Join] while the invite lasts.</summary>
+    private void NoteInvitedBy(MailedInvite invite, string roomKey, string room)
+    {
+        if (FriendByKey(invite.From.PublicKey) is not { } friend) return;
+        if (Conversation(PersonKey(friend)).Any(l => l.RoomKey == roomKey)) return;
+        AddFriendLine(friend, new FriendLine(FriendLineKind.Note, () => L.F("people.line.invited_me", room), DateTimeOffset.Now) { RoomKey = roomKey });
+    }
+
+    /// <summary>A private message in the room, to or from someone who is a friend: it also belongs to the conversation.</summary>
+    private void NoteFriendMessage(string fingerprint, string text, DateTimeOffset time, bool mine)
+    {
+        if (FriendByFingerprint(fingerprint) is not { } friend) return;
+        AddFriendLine(friend, new FriendLine(mine ? FriendLineKind.Mine : FriendLineKind.Theirs, () => text, time));
+    }
+
+    /// <summary>Sends a message to a friend who is in the room with me. False when they are not, or it could not be sent.</summary>
+    internal async Task<bool> SendToFriendAsync(ContactItem friend, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (PeerOf(friend) is not { } peer)
+        {
+            SetStatus(StatusMessage.Warning("people.chat.needs_room"));
+            return false;
+        }
+        return await SendPrivateToAsync(peer, text);
+    }
+
+    /// <summary>Test seam: as if a private message to or from this device had gone through the room.</summary>
+    internal void FriendMessageForTest(string fingerprint, string text, bool mine) => NoteFriendMessage(fingerprint, text, DateTimeOffset.Now, mine);
+
+    /// <summary>Test seam: the receipt for the mail with this id came back.</summary>
+    internal void InviteReceiptForTest(string id) => OnInviteReceipt(new SentMail([], id, MailKind.Invite, DateTimeOffset.UtcNow));
+
+    /// <summary>Test seam: the trusted list file (tests keep their own).</summary>
+    internal string TrustedFile
+    {
+        get => _trustedFile ?? Path.Combine(AppSettings.DataDir, "trusted.json");
+        set
+        {
+            _trustedFile = value;
+            _trusted = null;
+            RefreshTrusted();
+        }
+    }
+
+    private string? _trustedFile;
+}

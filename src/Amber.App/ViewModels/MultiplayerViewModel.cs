@@ -282,6 +282,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitRequests();
         InitPublic();
         InitContacts();
+        InitPeople();
         InitOpenRoom();
         InitWhere();
         InitPublicList();

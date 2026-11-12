@@ -3,137 +3,423 @@
              xmlns:svc="using:Amber.App.Services"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:v="using:Amber.App.Views"
+             xmlns:c="using:Amber.App.Views.Controls"
+             xmlns:safety="using:Amber.App.Controls.Safety"
              xmlns:l="using:Amber.App.Localization"
              x:Class="Amber.App.Views.PeoplePage"
              x:DataType="vm:PeopleViewModel">
-  <!-- Laid out by the page's own width: the friend list on the left and the selected friend on the right; below 640 the
-       list sits above the detail. Properties the width changes are set in styles (a value on the control would win). -->
+  <!-- People on the left, the conversation with the selected one on the right. Below 640 the list comes first and
+       picking someone replaces it (a back button returns). Which card shows is decided by classes on the cards
+       themselves (haslist, picked), so it keeps working when a theme pack moves the regions around. Properties the
+       width changes are set in styles (a value on the control would win). -->
   <UserControl.Styles>
     <Style Selector="Border#FriendListCard">
-      <Setter Property="Grid.Row" Value="1" />
-      <Setter Property="Grid.RowSpan" Value="2" />
-      <Setter Property="Width" Value="300" />
-      <Setter Property="Margin" Value="0,0,14,14" />
+      <Setter Property="Grid.Row" Value="2" />
+      <Setter Property="Width" Value="280" />
+      <Setter Property="Margin" Value="0,0,14,0" />
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Border#FriendListCard.haslist">
+      <Setter Property="IsVisible" Value="True" />
     </Style>
     <Style Selector="Border#FriendDetailCard">
-      <Setter Property="Grid.Row" Value="1" />
-      <Setter Property="Grid.RowSpan" Value="2" />
+      <Setter Property="Grid.Row" Value="2" />
       <Setter Property="Grid.Column" Value="1" />
-      <Setter Property="Margin" Value="0,0,0,14" />
+      <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="Button.narrow-only, TextBlock.narrow-only">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <!-- A line of the conversation: mine on the right, theirs on the left, what happened in the middle. -->
+    <Style Selector="Border.bubble">
+      <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="MaxWidth" Value="420" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="Background" Value="{DynamicResource Sunken}" />
+    </Style>
+    <Style Selector="Border.bubble.mine">
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="Background" Value="{DynamicResource AccentTint}" />
     </Style>
     <ContainerQuery Name="PeoplePageRoot" Query="max-width:640">
+      <Style Selector="TextBlock#PeopleTitle">
+        <Setter Property="IsVisible" Value="False" />
+      </Style>
       <Style Selector="Border#FriendListCard">
-        <Setter Property="Grid.RowSpan" Value="1" />
         <Setter Property="Grid.ColumnSpan" Value="2" />
         <Setter Property="Width" Value="NaN" />
-        <Setter Property="MaxHeight" Value="200" />
-        <Setter Property="Margin" Value="0,0,0,10" />
+        <Setter Property="Margin" Value="0" />
+      </Style>
+      <Style Selector="Border#FriendListCard.haslist.picked">
+        <Setter Property="IsVisible" Value="False" />
       </Style>
       <Style Selector="Border#FriendDetailCard">
-        <Setter Property="Grid.Row" Value="2" />
-        <Setter Property="Grid.RowSpan" Value="1" />
         <Setter Property="Grid.Column" Value="0" />
         <Setter Property="Grid.ColumnSpan" Value="2" />
-        <Setter Property="Margin" Value="0,0,0,10" />
+      </Style>
+      <Style Selector="Border#FriendDetailCard.haslist:not(.picked)">
+        <Setter Property="IsVisible" Value="False" />
+      </Style>
+      <Style Selector="Button.narrow-only, TextBlock.narrow-only">
+        <Setter Property="IsVisible" Value="True" />
+      </Style>
+      <Style Selector="TextBlock.wide-only">
+        <Setter Property="IsVisible" Value="False" />
       </Style>
     </ContainerQuery>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="Auto,Auto,*,Auto" ColumnDefinitions="Auto,*" Container.Name="PeoplePageRoot" Container.Sizing="Width">
-    <Grid svc:ThemeRegion.Name="people.title" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto">
-      <TextBlock Classes="h1" Text="{l:T shell.nav.people}" TextTrimming="CharacterEllipsis" />
-      <Button x:Name="AddFriendButton" Grid.Column="1" Classes="secondary" Content="{l:T people.add}" Command="{Binding ManageCommand}"
-              IsVisible="{Binding HasFriends}" VerticalAlignment="Center" />
-    </Grid>
+  <Grid RowDefinitions="Auto,Auto,*" ColumnDefinitions="Auto,*" Container.Name="PeoplePageRoot" Container.Sizing="Width">
+    <TextBlock svc:ThemeRegion.Name="people.title" x:Name="PeopleTitle" Grid.ColumnSpan="2" Classes="h1" Text="{l:T shell.nav.people}" TextTrimming="CharacterEllipsis" />
 
-    <!-- The friends: one row per person (their devices are in the detail). -->
-    <Border svc:ThemeRegion.Name="people.list" x:Name="FriendListCard" Classes="card" Padding="6" IsVisible="{Binding HasFriends}">
-      <ListBox x:Name="FriendList" ItemsSource="{Binding Friends}" SelectedItem="{Binding Selected}" Background="Transparent"
-               AutomationProperties.Name="{l:T shell.nav.people}">
-        <ListBox.ItemTemplate>
-          <DataTemplate DataType="vm:ContactItem">
-            <Grid ColumnDefinitions="Auto,*" Margin="2,4">
-              <Border Classes="face" Background="{Binding Name, Converter={x:Static v:FaceBrush.Instance}}" VerticalAlignment="Center" />
-              <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                <TextBlock Classes="hint" FontSize="12" Text="{Binding DevicesText}" IsVisible="{Binding HasSeveralDevices}" TextTrimming="CharacterEllipsis" />
-                <TextBlock Classes="hint" FontSize="12" Text="{Binding Fingerprint}" IsVisible="{Binding HasOneDevice}" TextTrimming="CharacterEllipsis" />
+    <!-- Which network delivers to friends (handled in place), add a friend, backup. Under it, the add panel. -->
+    <StackPanel svc:ThemeRegion.Name="people.status" x:Name="PeopleStatusCard" Grid.Row="1" Grid.ColumnSpan="2" Spacing="10" Margin="0,0,0,12"
+                IsVisible="{Binding ShowTopRow}">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+        <Border x:Name="DeliveryChip" Classes="chip" Classes.ok="{Binding CanDeliver}" HorizontalAlignment="Left" VerticalAlignment="Center"
+                ToolTip.Tip="{Binding DeliveryText}">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+            <Border Classes="led" Classes.online="{Binding CanDeliver}" Classes.off="{Binding !CanDeliver}" />
+            <TextBlock x:Name="DeliveryText" Grid.Column="1" Text="{Binding DeliveryText}" TextTrimming="CharacterEllipsis" />
+          </Grid>
+        </Border>
+        <Button x:Name="ConnectNetworkButton" Grid.Column="1" Classes="small" Content="{l:T people.delivery.connect}" Command="{Binding ConnectCommand}"
+                IsVisible="{Binding ShowConnect}" VerticalAlignment="Center" />
+        <Button x:Name="AddFriendButton" Grid.Column="2" Classes="primary" Command="{Binding OpenAddCommand}" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Path Classes="icon sm" Data="{StaticResource Icon.UserPlus}" />
+            <TextBlock Text="{l:T people.add}" />
+          </StackPanel>
+        </Button>
+        <Button x:Name="PeopleMoreButton" Grid.Column="3" Classes="ghost icon-only" ToolTip.Tip="{l:T people.more}" AutomationProperties.Name="{l:T people.more}"
+                VerticalAlignment="Center">
+          <Path Classes="icon" Data="{StaticResource Icon.More}" Width="16" Height="16" />
+          <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedRight">
+              <!-- The friend list backup is locked with the Jay account: restore it on a new computer and friends reconnect. -->
+              <StackPanel x:Name="PeopleMoreMenu" Spacing="8" MaxWidth="320">
+                <Button x:Name="BackupFriendsButton" Content="{l:T multiplayer.friends.backup}" Command="{Binding BackupCommand}" HorizontalAlignment="Stretch" />
+                <Button x:Name="RestoreFriendsButton" Content="{l:T multiplayer.friends.restore}" Command="{Binding RestoreCommand}" HorizontalAlignment="Stretch" />
+                <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.friends.backup_hint}" />
               </StackPanel>
-            </Grid>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
-    </Border>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+      </Grid>
 
-    <!-- The selected friend, or what to do when there is nobody yet. -->
-    <Border svc:ThemeRegion.Name="people.detail" x:Name="FriendDetailCard" Classes="card">
+      <Grid x:Name="RequestsLine" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding ShowRequestsLine}">
+        <TextBlock x:Name="RequestsText" Text="{Binding RequestsText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+        <Button x:Name="OpenRequestsButton" Grid.Column="1" Classes="small" Content="{l:T people.requests.open}" Command="{Binding OpenAddCommand}"
+                VerticalAlignment="Center" />
+      </Grid>
+
+      <!-- Add a friend, the one way there is: send my code or paste theirs, then compare four emoji. -->
+      <!-- In a short window the panel is as tall as the page allows and its content scrolls (the header with × stays). -->
+      <Border x:Name="AddFriendCard" Classes="card" Margin="0" IsVisible="{Binding ShowAddPanel}">
+        <Grid RowDefinitions="Auto,*" RowSpacing="10">
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+            <Path Classes="icon" Data="{StaticResource Icon.UserPlus}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Classes="h2" Margin="0" Text="{l:T people.add}" VerticalAlignment="Center" />
+            <Button x:Name="CloseAddButton" Grid.Column="2" Classes="ghost icon-only" Command="{Binding CloseAddCommand}" ToolTip.Tip="{l:T common.close}"
+                    AutomationProperties.Name="{l:T common.close}">
+              <Path Classes="icon" Data="{StaticResource Icon.Close}" Width="16" Height="16" />
+            </Button>
+          </Grid>
+
+          <ScrollViewer x:Name="AddFriendScroll" Grid.Row="1">
+          <StackPanel Spacing="10">
+          <Border x:Name="MyCodeCard" Classes="code-card">
+            <Panel>
+              <Border Classes="wing-edge" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="16,10,10,10">
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{l:T multiplayer.contacts.my_code}" FontWeight="SemiBold" />
+                  <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.my_code_hint}" />
+                </StackPanel>
+                <Button x:Name="CopyMyCodeButton" Grid.Column="1" Classes="small" Content="{l:T common.copy}" Command="{Binding CopyMyCodeCommand}"
+                        VerticalAlignment="Center" />
+              </Grid>
+            </Panel>
+          </Border>
+
+          <!-- The box for their code stops at 420: a friend code is short, the box must not run across a wide window. -->
+          <Grid ColumnSpacing="6">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" MaxWidth="420" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="FriendCodeBox" MaxWidth="420" HorizontalAlignment="Stretch" Text="{Binding CodeInput}" PlaceholderText="{l:T multiplayer.contacts.add_placeholder}"
+                     c:EnterSubmit.Command="{Binding AddCommand}" />
+            <Button x:Name="AddFriendCodeButton" Grid.Column="1" Classes="primary" Content="{l:T multiplayer.contacts.add}" Command="{Binding AddCommand}" />
+          </Grid>
+
+          <TextBlock Text="{l:T multiplayer.contacts.requests}" FontWeight="SemiBold" IsVisible="{Binding HasRequests}" />
+          <ItemsControl x:Name="FriendRequestList" ItemsSource="{Binding Multiplayer.ContactRequests}" IsVisible="{Binding HasRequests}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="vm:ContactRequestItem">
+                <StackPanel Margin="0,3">
+                  <!-- The emoji check is a safety decision: Jay's own locked card, which a theme pack cannot restyle. -->
+                  <safety:SafetyPanel Classes="emoji-check" Title="{Binding Title}" IsVisible="{Binding IsComparing}">
+                    <safety:SafetyPanel.Body>
+                      <StackPanel Spacing="8">
+                        <ItemsControl ItemsSource="{Binding Emoji}" AutomationProperties.Name="{Binding EmojiSpoken}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel ItemSpacing="14" LineSpacing="6" /></ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:EmojiItem">
+                              <StackPanel Spacing="2" MinWidth="56" AutomationProperties.Name="{Binding Name}">
+                                <TextBlock Text="{Binding Emoji}" FontSize="34" HorizontalAlignment="Center" />
+                                <TextBlock Text="{Binding Name}" FontSize="12" HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="80" TextAlignment="Center" />
+                              </StackPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.contacts.compare.hint}" />
+                        <WrapPanel ItemSpacing="8" LineSpacing="6">
+                          <safety:SafetyButton Classes="emoji-differ" Kind="Safe" Content="{l:T multiplayer.contacts.compare.no_match}"
+                                               Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).Multiplayer.RejectContactCommand}" CommandParameter="{Binding}" />
+                          <safety:SafetyButton Classes="emoji-same" Kind="Confirm" Content="{l:T multiplayer.contacts.compare.match}"
+                                               Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).Multiplayer.ConfirmContactCommand}" CommandParameter="{Binding}" />
+                        </WrapPanel>
+                      </StackPanel>
+                    </safety:SafetyPanel.Body>
+                  </safety:SafetyPanel>
+                  <Border Classes="callout info" IsVisible="{Binding !IsComparing}">
+                    <StackPanel Spacing="6">
+                      <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                      <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding IsAskingMe}">
+                        <Button Classes="request-accept" Content="{l:T multiplayer.contacts.accept}"
+                                Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).Multiplayer.AcceptContactCommand}" CommandParameter="{Binding}" />
+                        <Button Classes="request-ignore" Content="{l:T multiplayer.contacts.ignore}"
+                                Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).Multiplayer.DismissContactCommand}" CommandParameter="{Binding}" />
+                      </WrapPanel>
+                      <Button Classes="small request-cancel" HorizontalAlignment="Left" Content="{l:T multiplayer.contacts.cancel}" IsVisible="{Binding CanCancel}"
+                              Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).Multiplayer.DismissContactCommand}" CommandParameter="{Binding}" />
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+    </StackPanel>
+
+    <!-- The people: friends (emoji compared), then the ones I have only met in a room. One row per person. -->
+    <Border svc:ThemeRegion.Name="people.list" x:Name="FriendListCard" Classes="card" Classes.haslist="{Binding HasList}" Classes.picked="{Binding HasPicked}" Padding="6">
       <ScrollViewer>
-        <Panel>
-          <StackPanel x:Name="PeopleChildNote" Classes="empty-state" IsVisible="{Binding IsChildMode}">
-            <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
-            <TextBlock Classes="hint" Text="{l:T people.child}" />
-          </StackPanel>
+        <StackPanel Spacing="2">
+          <TextBlock x:Name="FriendsCaption" Classes="caption" Margin="8,6,8,2" Text="{l:T multiplayer.contacts.title}" IsVisible="{Binding HasFriends}" />
+          <ListBox x:Name="FriendList" ItemsSource="{Binding Friends}" SelectedItem="{Binding Selected}" Background="Transparent" IsVisible="{Binding HasFriends}"
+                   ScrollViewer.VerticalScrollBarVisibility="Disabled" AutomationProperties.Name="{l:T multiplayer.contacts.title}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:FriendRow">
+                <Grid ColumnDefinitions="Auto,*" Margin="2,4" AutomationProperties.Name="{Binding Summary}">
+                  <Border Classes="face" Background="{Binding Name, Converter={x:Static v:FaceBrush.Instance}}" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                      <Border Classes="led small" Classes.online="{Binding IsHere}" Classes.busy="{Binding IsInRoom}" Classes.warning="{Binding NeedsLook}" Classes.off="{Binding IsQuiet}" />
+                      <TextBlock Grid.Column="1" Classes="hint" Classes.warn="{Binding NeedsLook}" FontSize="12" Text="{Binding StateText}" TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
 
-          <StackPanel x:Name="PeopleEmpty" Classes="empty-state" IsVisible="{Binding IsEmpty}">
-            <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
-            <TextBlock Classes="title" Text="{l:T people.empty.title}" />
-            <TextBlock Classes="hint" Text="{l:T people.empty.body}" />
-            <WrapPanel HorizontalAlignment="Center" ItemSpacing="8" LineSpacing="8" Margin="0,8,0,0">
-              <Button x:Name="CopyMyCodeButton" Content="{l:T people.empty.copy}" Command="{Binding CopyMyCodeCommand}" />
-              <Button x:Name="EmptyAddButton" Classes="secondary" Content="{l:T people.add}" Command="{Binding ManageCommand}" />
-            </WrapPanel>
-          </StackPanel>
-
-          <StackPanel x:Name="PeoplePickHint" Classes="empty-state" IsVisible="{Binding ShowPickHint}">
-            <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
-            <TextBlock Classes="hint" Text="{l:T people.detail.pick}" />
-          </StackPanel>
-
-          <StackPanel x:Name="FriendDetail" Spacing="10" IsVisible="{Binding HasSelected}">
-            <Grid ColumnDefinitions="Auto,*">
-              <Border Classes="face large" Background="{Binding Selected.Name, Converter={x:Static v:FaceBrush.Instance}}" VerticalAlignment="Center" />
-              <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
-                <TextBlock x:Name="FriendName" Classes="h2" Margin="0" Text="{Binding Selected.Name}" TextTrimming="CharacterEllipsis" />
-                <TextBlock Classes="hint" Text="{Binding Selected.JayText}" IsVisible="{Binding Selected.HasJay}" TextWrapping="Wrap" />
-                <TextBlock Classes="hint" Text="{l:T people.detail.no_jay}" IsVisible="{Binding SelectedHasNoJay}" TextWrapping="Wrap" />
-              </StackPanel>
-            </Grid>
-
-            <TextBlock Text="{l:T people.detail.devices}" FontWeight="SemiBold" />
-            <ItemsControl x:Name="FriendDevices" ItemsSource="{Binding Selected.DeviceItems}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate DataType="vm:ContactDeviceItem">
-                  <SelectableTextBlock Text="{Binding Fingerprint}" TextWrapping="Wrap" Margin="0,2" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-
-            <WrapPanel ItemSpacing="8" LineSpacing="8" Margin="0,4,0,0">
-              <Button x:Name="InviteFriendButton" Content="{l:T people.detail.invite}" Command="{Binding InviteCommand}" IsEnabled="{Binding CanInvite}" />
-              <Button x:Name="ManageFriendsButton" Classes="secondary" Content="{l:T people.manage}" Command="{Binding ManageCommand}" />
-            </WrapPanel>
-            <TextBlock Classes="hint" Text="{l:T people.detail.invite_hint}" IsVisible="{Binding ShowInviteHint}" TextWrapping="Wrap" />
-          </StackPanel>
-        </Panel>
+          <TextBlock x:Name="MetCaption" Classes="caption" Margin="8,8,8,2" Text="{l:T people.met.title}" IsVisible="{Binding HasMet}" />
+          <ListBox x:Name="MetList" ItemsSource="{Binding MetPeople}" SelectedItem="{Binding SelectedMet}" Background="Transparent" IsVisible="{Binding HasMet}"
+                   ScrollViewer.VerticalScrollBarVisibility="Disabled" AutomationProperties.Name="{l:T people.met.title}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:MetPersonItem">
+                <Grid ColumnDefinitions="Auto,*" Margin="2,4" AutomationProperties.Name="{Binding Summary}">
+                  <Border Classes="face" Background="{Binding DisplayName, Converter={x:Static v:FaceBrush.Instance}}" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="hint" FontSize="12" Text="{Binding StateText}" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
       </ScrollViewer>
     </Border>
 
-    <!-- Through which network an invite reaches a friend, and requests still in progress. -->
-    <Border svc:ThemeRegion.Name="people.status" x:Name="PeopleStatusCard" Grid.Row="3" Grid.ColumnSpan="2" Classes="card" Margin="0" Padding="12,8"
-            IsVisible="{Binding !IsChildMode}">
-      <StackPanel Spacing="6">
-        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-          <Border Classes="led" Classes.online="{Binding CanDeliver}" Classes.off="{Binding !CanDeliver}" VerticalAlignment="Center" />
-          <TextBlock x:Name="DeliveryText" Grid.Column="1" Text="{Binding DeliveryText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-          <Button x:Name="ConnectNetworkButton" Grid.Column="2" Classes="secondary small" Content="{l:T people.delivery.connect}" Command="{Binding ConnectCommand}"
-                  IsVisible="{Binding ShowConnect}" VerticalAlignment="Center" />
+    <!-- The selected person, or what to do when there is nobody yet. -->
+    <Border svc:ThemeRegion.Name="people.detail" x:Name="FriendDetailCard" Classes="card" Classes.haslist="{Binding HasList}" Classes.picked="{Binding HasPicked}">
+      <Panel>
+        <StackPanel x:Name="PeopleChildNote" Classes="empty-state" IsVisible="{Binding ShowChildNote}">
+          <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
+          <TextBlock Classes="hint" Text="{l:T people.child}" />
+        </StackPanel>
+
+        <StackPanel x:Name="PeopleEmpty" Classes="empty-state" IsVisible="{Binding ShowEmpty}">
+          <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
+          <TextBlock Classes="title" Text="{l:T people.empty.title}" />
+          <TextBlock Classes="hint" Text="{l:T people.empty.body}" />
+          <WrapPanel HorizontalAlignment="Center" ItemSpacing="8" LineSpacing="8" Margin="0,8,0,0">
+            <Button x:Name="EmptyCopyButton" Content="{l:T people.empty.copy}" Command="{Binding CopyMyCodeCommand}" />
+            <Button x:Name="EmptyAddButton" Content="{l:T people.empty.paste}" Command="{Binding OpenAddCommand}" />
+          </WrapPanel>
+        </StackPanel>
+
+        <StackPanel x:Name="PeoplePickHint" Classes="empty-state" IsVisible="{Binding ShowPickHint}">
+          <Path Classes="icon" Data="{StaticResource Icon.Chat}" />
+          <TextBlock Classes="hint" Text="{l:T people.detail.pick}" />
+        </StackPanel>
+
+        <!-- A friend: who they are and what is known right now, what I can do, the conversation, the composer. -->
+        <Grid x:Name="FriendDetail" RowDefinitions="Auto,*,Auto" RowSpacing="10" IsVisible="{Binding HasSelected}">
+          <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="10">
+            <Button x:Name="BackToListButton" Classes="ghost icon-only narrow-only" Command="{Binding BackToListCommand}" ToolTip.Tip="{l:T people.back}"
+                    AutomationProperties.Name="{l:T people.back}" VerticalAlignment="Center">
+              <Path Classes="icon" Data="{StaticResource Icon.ChevronLeft}" Width="16" Height="16" />
+            </Button>
+            <Border Grid.Column="1" Classes="face large" Background="{Binding Selected.Name, Converter={x:Static v:FaceBrush.Instance}}" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+              <TextBlock x:Name="FriendName" Classes="h2" Margin="0" Text="{Binding Selected.Name}" TextTrimming="CharacterEllipsis" />
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                <Border Classes="led" Classes.online="{Binding Selected.IsHere}" Classes.busy="{Binding Selected.IsInRoom}" Classes.warning="{Binding Selected.NeedsLook}"
+                        Classes.off="{Binding Selected.IsQuiet}" />
+                <TextBlock x:Name="FriendStateText" Grid.Column="1" Classes="hint" FontSize="12" Text="{Binding Selected.StateText}" TextTrimming="CharacterEllipsis" />
+              </Grid>
+            </StackPanel>
+            <!-- Always there: the conversation is end to end and this friend was checked. It opens their safety codes and devices. -->
+            <Button x:Name="SafetyChipButton" Grid.Column="3" Classes="small" Command="{Binding ToggleSafetyCommand}" ToolTip.Tip="{l:T people.detail.devices}"
+                    AutomationProperties.Name="{Binding SafetyText}" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Path Classes="icon sm" Data="{StaticResource Icon.Lock}" IsVisible="{Binding SafetyIsFine}" />
+                <Path Classes="icon sm" Data="{StaticResource Icon.Warning}" IsVisible="{Binding SafetyNeedsLook}" />
+                <TextBlock x:Name="SafetyChipText" Classes="wide-only" Text="{Binding SafetyText}" />
+                <TextBlock Classes="narrow-only" Text="{Binding SafetyShortText}" />
+                <Path Classes="icon sm" Data="{StaticResource Icon.ChevronRight}" />
+              </StackPanel>
+            </Button>
+          </Grid>
+
+          <ScrollViewer x:Name="ConversationScroll" Grid.Row="1">
+            <StackPanel Spacing="10">
+              <Border x:Name="FriendSafetyPanel" Classes="callout info" IsVisible="{Binding ShowSafety}">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{Binding SafetyHint}" TextWrapping="Wrap" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{Binding Selected.JayText}" IsVisible="{Binding Selected.HasJay}" TextWrapping="Wrap" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T people.detail.no_jay}" IsVisible="{Binding Selected.HasNoJay}" TextWrapping="Wrap" />
+                  <TextBlock Text="{l:T people.detail.devices}" FontWeight="SemiBold" />
+                  <ItemsControl x:Name="FriendDevices" ItemsSource="{Binding Selected.DeviceItems}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate DataType="vm:ContactDeviceItem">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,2">
+                          <SelectableTextBlock Text="{Binding Fingerprint}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                          <WrapPanel Grid.Column="1" ItemSpacing="6" LineSpacing="4" VerticalAlignment="Center">
+                            <Button Classes="small device-confirm" Content="{l:T multiplayer.contacts.new_device_ok}" IsVisible="{Binding IsNew}"
+                                    Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).ConfirmDeviceCommand}" CommandParameter="{Binding}" />
+                            <Button Classes="small device-remove" Content="{l:T multiplayer.contacts.remove_device}" IsVisible="{Binding Person.HasSeveralDevices}"
+                                    Command="{Binding $parent[ItemsControl].((vm:PeopleViewModel)DataContext).RemoveDeviceCommand}" CommandParameter="{Binding}" />
+                          </WrapPanel>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Button x:Name="RemoveFriendButton" Classes="small" Content="{l:T people.safety.remove}" Command="{Binding RemoveFriendCommand}" HorizontalAlignment="Left" />
+                </StackPanel>
+              </Border>
+
+              <WrapPanel ItemSpacing="8" LineSpacing="8">
+                <Button x:Name="JoinFriendRoomButton" Classes="play" Command="{Binding JoinRoomCommand}" IsVisible="{Binding CanJoinRoom}">
+                  <TextBlock Text="{Binding JoinRoomText}" TextTrimming="CharacterEllipsis" MaxWidth="260" />
+                </Button>
+                <Button x:Name="InviteFriendButton" Content="{l:T people.detail.invite}" Command="{Binding InviteCommand}" IsEnabled="{Binding CanInvite}" />
+              </WrapPanel>
+              <TextBlock x:Name="InviteHintText" Classes="hint" FontSize="12" Text="{l:T people.detail.invite_hint}" IsVisible="{Binding ShowInviteHint}" TextWrapping="Wrap" />
+
+              <!-- The old trusted list, as one switch on the person. -->
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="{l:T people.auto_admit}" TextWrapping="Wrap" />
+                  <TextBlock Classes="hint" FontSize="12" Text="{l:T people.auto_admit.hint}" TextWrapping="Wrap" />
+                </StackPanel>
+                <ToggleSwitch x:Name="AutoAdmitSwitch" Grid.Column="1" Classes="compact" IsChecked="{Binding AutoAdmit}" OnContent="" OffContent="" MinWidth="0"
+                              AutomationProperties.Name="{l:T people.auto_admit}" VerticalAlignment="Center" />
+              </Grid>
+
+              <TextBlock x:Name="NoLinesText" Classes="hint" FontSize="12" Text="{l:T people.chat.empty}" IsVisible="{Binding HasNoLines}" />
+              <ItemsControl x:Name="ConversationList" ItemsSource="{Binding Lines}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="vm:FriendLine">
+                    <Panel AutomationProperties.Name="{Binding Spoken}">
+                      <!-- Something that happened: an invite and where it is. -->
+                      <WrapPanel HorizontalAlignment="Center" ItemSpacing="6" LineSpacing="2" IsVisible="{Binding IsNote}">
+                        <Path Classes="icon sm" Data="{StaticResource Icon.Lock}" VerticalAlignment="Center" />
+                        <TextBlock Classes="hint" FontSize="12" Text="{Binding TimeText}" />
+                        <TextBlock Classes="hint" FontSize="12" Text="{Binding Text}" TextWrapping="Wrap" />
+                        <TextBlock Classes="line-delivery" FontSize="12" FontWeight="SemiBold" Text="{Binding DeliveryText}" IsVisible="{Binding HasDelivery}"
+                                   Classes.warn="{Binding IsHeld}" />
+                      </WrapPanel>
+                      <Border Classes="bubble" Classes.mine="{Binding IsMine}" IsVisible="{Binding !IsNote}">
+                        <StackPanel Spacing="2">
+                          <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                          <TextBlock Classes="caption" Text="{Binding TimeText}" HorizontalAlignment="Right" />
+                        </StackPanel>
+                      </Border>
+                    </Panel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </ScrollViewer>
+
+          <StackPanel Grid.Row="2" Spacing="4">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+              <TextBox x:Name="DraftBox" Text="{Binding Draft}" PlaceholderText="{Binding DraftPlaceholder}" MaxLength="2000" IsEnabled="{Binding CanMessage}"
+                       c:EnterSubmit.Command="{Binding SendCommand}" />
+              <Button x:Name="SendDraftButton" Grid.Column="1" Classes="primary" Command="{Binding SendCommand}" IsEnabled="{Binding CanMessage}"
+                      ToolTip.Tip="{l:T common.send}" AutomationProperties.Name="{l:T common.send}">
+                <Path Classes="icon sm" Data="{StaticResource Icon.Send}" />
+              </Button>
+            </Grid>
+            <TextBlock x:Name="MessageHintText" Classes="hint" FontSize="12" Text="{l:T people.chat.needs_room}" IsVisible="{Binding ShowMessageHint}" TextWrapping="Wrap" />
+          </StackPanel>
         </Grid>
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding HasRequests}">
-          <TextBlock x:Name="RequestsText" Text="{Binding RequestsText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-          <Button x:Name="OpenRequestsButton" Grid.Column="1" Classes="secondary small" Content="{l:T people.requests.open}" Command="{Binding ManageCommand}"
-                  VerticalAlignment="Center" />
-        </Grid>
-      </StackPanel>
+
+        <!-- Someone I have only met in a room: no conversation, the way to become friends and the same switch. -->
+        <ScrollViewer x:Name="MetDetail" IsVisible="{Binding HasSelectedMet}">
+          <StackPanel Spacing="10">
+            <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="10">
+              <Button x:Name="MetBackButton" Classes="ghost icon-only narrow-only" Command="{Binding BackToListCommand}" ToolTip.Tip="{l:T people.back}"
+                      AutomationProperties.Name="{l:T people.back}" VerticalAlignment="Center">
+                <Path Classes="icon" Data="{StaticResource Icon.ChevronLeft}" Width="16" Height="16" />
+              </Button>
+              <Border Grid.Column="1" Classes="face large" Background="{Binding SelectedMet.DisplayName, Converter={x:Static v:FaceBrush.Instance}}" VerticalAlignment="Center" />
+              <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                <TextBlock x:Name="MetName" Classes="h2" Margin="0" Text="{Binding SelectedMet.DisplayName}" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="MetStateText" Classes="hint" FontSize="12" Text="{Binding SelectedMet.StateText}" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Grid>
+            <TextBlock Text="{l:T people.met.hint}" TextWrapping="Wrap" />
+            <SelectableTextBlock x:Name="MetFingerprint" Text="{Binding SelectedMet.Fingerprint}" FontFamily="Consolas,Menlo,monospace" FontSize="12" TextWrapping="Wrap" />
+            <TextBlock Classes="hint" FontSize="12" Text="{Binding SelectedMet.JayText}" IsVisible="{Binding SelectedMet.HasJay}" TextWrapping="Wrap" />
+            <Button x:Name="AddMetButton" Classes="primary" Content="{l:T people.met.add}" Command="{Binding AddMetCommand}" IsVisible="{Binding CanAddMet}" HorizontalAlignment="Left" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="{l:T people.auto_admit}" TextWrapping="Wrap" />
+                <TextBlock Classes="hint" FontSize="12" Text="{l:T people.auto_admit.met_hint}" TextWrapping="Wrap" />
+                <TextBlock x:Name="KnocksAlwaysAskText" Classes="hint" FontSize="12" Text="{l:T people.auto_admit.child}" IsVisible="{Binding ShowKnocksAlwaysAsk}" TextWrapping="Wrap" />
+              </StackPanel>
+              <ToggleSwitch x:Name="MetAutoAdmitSwitch" Grid.Column="1" Classes="compact" IsChecked="{Binding MetAutoAdmit}" IsEnabled="{Binding CanChangeMetAutoAdmit}"
+                            OnContent="" OffContent="" MinWidth="0" AutomationProperties.Name="{l:T people.auto_admit}" VerticalAlignment="Center" />
+            </Grid>
+          </StackPanel>
+        </ScrollViewer>
+      </Panel>
     </Border>
   </Grid>
 </UserControl>

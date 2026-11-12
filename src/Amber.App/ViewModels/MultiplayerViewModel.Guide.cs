@@ -170,10 +170,10 @@ public sealed partial class MultiplayerViewModel
                 SetStatus(StatusMessage.Info("multiplayer.code.friend_misplaced"));
                 return true;
             case PastedCodeKind.ContactCode when ShowPublicNetworks:
-                // A contact code: into the contacts card, added only when the player clicks [Add].
+                // A friend code: into the add panel of the Friends page, added only when the player clicks [Add].
                 clearSource();
                 ContactCodeInput = text.Trim();
-                Tab = MultiplayerTab.Settings;
+                OpenAddFriend();
                 SetStatus(StatusMessage.Info("multiplayer.code.contact_misplaced"));
                 return true;
             case PastedCodeKind.PublicNetwork:

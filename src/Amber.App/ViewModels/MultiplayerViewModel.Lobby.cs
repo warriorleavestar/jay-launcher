@@ -146,8 +146,9 @@ public sealed partial class MultiplayerViewModel
         }
         if (kind == PastedCodeKind.ContactCode && ShowPublicNetworks)
         {
-            Tab = MultiplayerTab.Settings;
+            // A friend code: into the add panel of the Friends page, added only when the player clicks [Add].
             ContactCodeInput = text.Trim();
+            OpenAddFriend();
             return true;
         }
         Tab = MultiplayerTab.Play;

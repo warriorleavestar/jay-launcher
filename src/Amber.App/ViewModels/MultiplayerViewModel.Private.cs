@@ -107,6 +107,7 @@ public sealed partial class MultiplayerViewModel
             if (_messenger != messenger) return;
             PrivateLines.Add(new PrivateLine(m.FromFingerprint, m.FromName, m.Text, m.Time, false));
             while (PrivateLines.Count > 500) PrivateLines.RemoveAt(0);
+            NoteFriendMessage(m.FromFingerprint, m.Text, m.Time, mine: false);
             if (!IsCurrent) Badge++;
         });
         messenger.FileOffered += offer => Dispatcher.UIThread.Post(() =>
@@ -181,19 +182,32 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task SendPrivateAsync()
     {
-        if (_messenger is not { } messenger || SelectedPeer is not { } peer || string.IsNullOrWhiteSpace(PrivateInput)) return;
+        if (_messenger is null || SelectedPeer is not { } peer || string.IsNullOrWhiteSpace(PrivateInput)) return;
         var text = PrivateInput;
         PrivateInput = "";
+        if (!await SendPrivateToAsync(peer, text)) PrivateInput = text;
+    }
+
+    /// <summary>
+    /// Sends one private message to someone in the room. On success it is in the room's private chat and, when they are
+    /// a friend, in the conversation with them. False (with a status line) when it could not be sent.
+    /// </summary>
+    internal async Task<bool> SendPrivateToAsync(OnlinePeerItem peer, string text)
+    {
+        if (_messenger is not { } messenger || string.IsNullOrWhiteSpace(text)) return false;
         bool sent;
         try { sent = await messenger.SendTextAsync(peer.Entry.Fingerprint, text); }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or ObjectDisposedException or InvalidOperationException) { sent = false; }
         if (!sent)
         {
-            PrivateInput = text;
             SetStatus(StatusMessage.Warning("multiplayer.private.offline"));
-            return;
+            return false;
         }
-        PrivateLines.Add(new PrivateLine(peer.Entry.Fingerprint, L.F("multiplayer.private.to", peer.Entry.Name), RoomChat.Clean(text, PrivateMessenger.MaxTextLength), DateTimeOffset.Now, true));
+        var clean = RoomChat.Clean(text, PrivateMessenger.MaxTextLength);
+        var now = DateTimeOffset.Now;
+        PrivateLines.Add(new PrivateLine(peer.Entry.Fingerprint, L.F("multiplayer.private.to", peer.Entry.Name), clean, now, true));
+        NoteFriendMessage(peer.Entry.Fingerprint, clean, now, mine: true);
+        return true;
     }
 
     /// <summary>选一个文件发给选中的人。</summary>

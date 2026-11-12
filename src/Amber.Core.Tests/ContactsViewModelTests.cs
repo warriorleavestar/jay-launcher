@@ -82,7 +82,7 @@ public sealed class ContactsViewModelTests : IDisposable
     });
 
     [Fact]
-    public void APastedContactCodeGoesToTheContactsCard() => UiTestThread.Run(() =>
+    public void APastedFriendCodeGoesToTheAddPanelOnTheFriendsPage() => UiTestThread.Run(() =>
     {
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
         var vm = NewVm(service);
@@ -91,8 +91,10 @@ public sealed class ContactsViewModelTests : IDisposable
         vm.JoinCode = code;
         Assert.Equal(L.T("multiplayer.lobby.code.contact"), vm.JoinCodeRecognition);
         vm.JoinCode = "";
+        var routes = new List<string>();
+        vm.Navigate = routes.Add;
         Assert.True(vm.PasteCode(code));
-        Assert.Equal(MultiplayerTab.Settings, vm.Tab);
+        Assert.Equal(["people/add"], routes);
         Assert.Equal(code, vm.ContactCodeInput);
 
         // Not connected to a public network: nothing is started, the code stays in the box.
