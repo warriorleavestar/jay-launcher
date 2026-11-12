@@ -50,6 +50,9 @@ public static class RoomDirectoryProtocol
     /// </summary>
     public static TimeSpan SnapshotDeadline(long bytes) => RequestTimeout + TimeSpan.FromSeconds((double)bytes / RoomDirectoryServer.MinSnapshotRate);
 
+    /// <summary><paramref name="bytes"/> rounded up to a whole number of <see cref="SnapshotPad"/>: what is sent.</summary>
+    public static long Padded(long bytes) => (bytes + SnapshotPad - 1) / SnapshotPad * SnapshotPad;
+
 }
 
 /// <summary>目录服务（跑在公共网络节点那台机器上，监听 127.0.0.1:47668，由同一台机器上的公共网络 EasyTier 把 10.235.0.1:47668 交过来）。</summary>
@@ -160,6 +163,8 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// Snapshots one source address may ask for per minute (readers poll once a minute).
     /// </summary>
     public const int MaxSnapshotsPerSourcePerMinute = 6;
+    /// <summary>How often ended per-source snapshot windows are swept out.</summary>
+    internal static readonly TimeSpan SnapshotAsksSweepEvery = TimeSpan.FromSeconds(10);
 
     /// <summary>Don't count loopback sources against <see cref="MaxSnapshotsPerSourcePerMinute"/> (off by default).</summary>
     public bool UncountedLoopback { get; set; }
@@ -169,6 +174,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     private double _largeBytes = 2L * RoomDirectoryProtocol.MaxReply;
     private DateTimeOffset _largeTokensAt = DateTimeOffset.MinValue;
     private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _snapshotAsks = new(StringComparer.Ordinal);
+    private DateTimeOffset _snapshotAsksSwept = DateTimeOffset.MinValue;
     /// <summary>Snapshot changes in order (version, key), for deltas. Trimmed to <see cref="MaxSnapshotLog"/>.</summary>
     private readonly Queue<(long Version, string Key)> _snapshotLog = new();
     private long _snapshotVersion;
@@ -378,9 +384,16 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             {
                 var now = _now();
                 // Windows that ended, or that end further off than one minute (the clock went back), start over.
-                foreach (var (who, _) in _snapshotAsks.Where(p => p.Value.Until <= now || p.Value.Until > now + TimeSpan.FromMinutes(1)).ToList())
-                    _snapshotAsks.Remove(who);
-                var (count, until) = _snapshotAsks.TryGetValue(source, out var used) ? used : (0, now + TimeSpan.FromMinutes(1));
+                bool Over(DateTimeOffset until) => until <= now || until > now + TimeSpan.FromMinutes(1);
+                // Sweeping every source costs time under the lock, so it happens at most every few seconds; the caller's
+                // own window is checked each time.
+                if (now - _snapshotAsksSwept >= SnapshotAsksSweepEvery || now < _snapshotAsksSwept)
+                {
+                    _snapshotAsksSwept = now;
+                    foreach (var (who, _) in _snapshotAsks.Where(p => Over(p.Value.Until)).ToList())
+                        _snapshotAsks.Remove(who);
+                }
+                var (count, until) = _snapshotAsks.TryGetValue(source, out var used) && !Over(used.Until) ? used : (0, now + TimeSpan.FromMinutes(1));
                 limited = count >= MaxSnapshotsPerSourcePerMinute;
                 if (!limited) _snapshotAsks[source] = (count + 1, until);
             }
@@ -400,7 +413,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         SemaphoreSlim? slots = null;
         try
         {
-            if (wanted.Full && wanted.Size > SmallSnapshot) slots = TakeLargeSlot(wanted.Size);
+            if (wanted.Full && wanted.Size > SmallSnapshot) slots = TakeLargeSlot(RoomDirectoryProtocol.Padded(wanted.Size));
             else if (_smallSnapshotSlots.Wait(0)) slots = _smallSnapshotSlots;
             if (slots is null)
             {
@@ -414,7 +427,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             if (plan.Size > SmallSnapshot && slots == _smallSnapshotSlots)
             {
                 slots.Release();
-                slots = TakeLargeSlot(plan.Size);
+                slots = TakeLargeSlot(RoomDirectoryProtocol.Padded(plan.Size));
                 if (slots is null)
                 {
                     await secure.Reply(Error("busy"), quick.Token);
@@ -424,8 +437,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             var reply = BuildSnapshot(plan);
             using var whole = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
             // The reader's deadline is from the length it is told, which is the padded one: use the same here.
-            var padded = (reply.LongLength + RoomDirectoryProtocol.SnapshotPad - 1) / RoomDirectoryProtocol.SnapshotPad * RoomDirectoryProtocol.SnapshotPad;
-            whole.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(padded));
+            whole.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(RoomDirectoryProtocol.Padded(reply.LongLength)));
             await secure.Snapshot(reply, RoomDirectoryProtocol.SnapshotPad, RoomDirectoryProtocol.RequestTimeout, whole.Token);
         }
         finally { slots?.Release(); }

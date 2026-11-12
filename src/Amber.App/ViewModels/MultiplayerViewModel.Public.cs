@@ -297,7 +297,7 @@ public sealed partial class MultiplayerViewModel
                 // A room opened after our copy was taken shows up at the next directory refresh; say we're still looking.
                 searching: () => Dispatcher.UIThread.Post(() =>
                 {
-                    if (!ct.IsCancellationRequested) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+                    if (!ct.IsCancellationRequested) SetStatus(StatusMessage.Info("multiplayer.invite.finding_host"));
                 }));
         }
         // Anything that goes wrong here (the directory, an address) leaves the invite's own lobby to try.

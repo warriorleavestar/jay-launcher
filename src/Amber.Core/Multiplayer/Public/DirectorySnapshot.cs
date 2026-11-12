@@ -500,13 +500,14 @@ public sealed class DirectorySnapshots
     /// <item>Without <paramref name="expectedHost"/>: one answer only when every entry gives the same host key and
     /// address and no directory's index for this invite is full; anything else is a conflict and gives nothing.</item>
     /// <item>With it: the distinct addresses given for that host, for the caller to try in turn (the knock handshake
-    /// proves the host; a wrong address just fails): every hidden-entry address, then a few listed ones.</item>
+    /// proves the host; a wrong address just fails): hidden-entry addresses first, then listed ones, at most
+    /// <see cref="MaxAddressesToTry"/> in all.</item>
     /// </list>
     /// </summary>
     public IReadOnlyList<DirectoryHit> FindAll(ReadOnlySpan<byte> lobbyKey, byte[]? expectedHost = null)
     {
         var prefix = Convert.ToHexStringLower(HiddenEntry.Index(lobbyKey)) + ":";
-        List<byte[]> candidates;
+        List<(byte[] Blob, int Copy)> candidates;
         List<(DirectoryHit Hit, int Copy)> listed;
         bool full;
         var keyHex = Convert.ToHexStringLower(lobbyKey);
@@ -514,7 +515,8 @@ public sealed class DirectorySnapshots
         lock (_gate)
         {
             DropStale(_now());
-            candidates = [.. _copies.Values.SelectMany(c => c.Hidden).Where(p => p.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(p => p.Value)];
+            candidates = [.. _copies.Values.SelectMany((c, i) => c.Hidden
+                .Where(p => p.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(p => (p.Value, i)))];
             // A directory turns entries away once an index holds this many, so the host's own may be among those left out.
             full = _copies.Values.Any(c => c.Hidden.Keys.Count(k => k.StartsWith(prefix, StringComparison.Ordinal)) >= RoomDirectoryServer.MaxEntriesPerIndex);
             // A room listed with this invite in the open (public, direct or password rooms carry it) has no hidden entry;
@@ -523,32 +525,34 @@ public sealed class DirectorySnapshots
                 .Where(r => r.Lobby == keyHex || (JayInvite.TryParse(r.Invite, out var invite) && invite.LobbyKey.AsSpan().SequenceEqual(key)))
                 .Select(r => (new DirectoryHit(r.Id, r.Ip, r.HostKey), i)))];
         }
-        var hidden = candidates.Select(blob => HiddenEntry.Open(key, blob)).OfType<DirectoryHit>().ToList();
+        var hidden = candidates.Select(c => (Hit: HiddenEntry.Open(key, c.Blob), c.Copy))
+            .Where(c => c.Hit is not null).Select(c => (Hit: c.Hit!, c.Copy)).ToList();
         if (expectedHost is not null)
         {
             bool Ours(DirectoryHit h) => h.HostKey.AsSpan().SequenceEqual(expectedHost);
-            // Hidden entries come first, all of them: only invite holders can write them, at most a few per invite.
-            var first = hidden.Where(Ours).DistinctBy(h => h.Ip).ToList();
-            // Then listed addresses, at most a few: those more directories give first, ties in random order so the
-            // same entries can't always come first.
-            var rest = listed.Where(l => Ours(l.Hit) && !first.Any(f => f.Ip == l.Hit.Ip))
+            // Anyone holding the invite can write hidden entries with the host's (public) key and any address, and the
+            // knock tells each address it tries about the attempt, so the whole list is capped. Hidden entries come
+            // before listed ones; within each, addresses more directories give come first, ties in random order so
+            // the same entries can't always come first.
+            static IEnumerable<DirectoryHit> Ranked(IEnumerable<(DirectoryHit Hit, int Copy)> hits) => hits
                 .GroupBy(l => l.Hit.Ip)
                 .Select(g => (g.First().Hit, Copies: g.Select(l => l.Copy).Distinct().Count(), Order: Random.Shared.Next()))
                 .OrderByDescending(x => x.Copies).ThenBy(x => x.Order)
-                .Take(MaxAddressesToTry)
                 .Select(x => x.Hit);
-            return [.. first.Concat(rest)];
+            var first = Ranked(hidden.Where(h => Ours(h.Hit))).ToList();
+            var rest = Ranked(listed.Where(l => Ours(l.Hit) && !first.Any(f => f.Ip == l.Hit.Ip)));
+            return [.. first.Concat(rest).Take(MaxAddressesToTry)];
         }
         // Without a host to check against, a full index can't be trusted: whoever filled it may have kept the host out.
         if (full) return [];
-        var places = hidden.Concat(listed.Select(l => l.Hit))
+        var places = hidden.Select(h => h.Hit).Concat(listed.Select(l => l.Hit))
             .DistinctBy(h => (Convert.ToHexStringLower(h.HostKey), h.Ip)).ToList();
         return places.Count == 1 ? places : [];
     }
 
     /// <summary>
-    /// At most this many listed addresses are tried for one host, after every hidden-entry address (each one that isn't
-    /// the host learns of the attempt).
+    /// At most this many addresses, hidden and listed together, are tried for one host (each one that isn't the host
+    /// learns of the attempt).
     /// </summary>
     public const int MaxAddressesToTry = 4;
 }

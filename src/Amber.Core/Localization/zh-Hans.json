@@ -1338,6 +1338,7 @@
   "multiplayer.invite.trusted": "已信任 {0}（{1}），以后 TA 敲门会直接批准",
   "multiplayer.identity.reset_done": "已换成新身份，安全码 {0}。之前信任你的房主需要重新批准",
   "multiplayer.invite.entering_lobby": "正在找房主…",
+  "multiplayer.invite.finding_host": "还在找房主…",
   "multiplayer.invite.reason.closed": "房主没有回复就断开了。可能是房主关掉了房间；如果你之前被移出过，需要房主先解除",
   "multiplayer.invite.reason.removed": "你已被房主移出这个房间。要再加入，需要房主先在「已踢出」里点「解除」，再给你发新邀请",
   "multiplayer.invite.connecting_relay": "正在连接中转…",

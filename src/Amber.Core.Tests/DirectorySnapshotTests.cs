@@ -366,9 +366,10 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.NotEmpty(signers);
         var full = _directory.Handle(new JsonObject { ["op"] = "snap" });
         Assert.True(System.Text.Encoding.UTF8.GetByteCount(full.ToJsonString()) <= _directory.SnapshotBudget + 512);
-        // The rooms already there keep renewing.
+        // A room already there still renews while the directory is full, even with a hidden key it didn't have before
+        // (as after a new invite).
         _now += TimeSpan.FromSeconds(30);
-        await HideAsync(signers[0], RandomNumberGenerator.GetBytes(16));
+        Assert.Null(await Record.ExceptionAsync(() => HideAsync(signers[0], RandomNumberGenerator.GetBytes(16))));
     }
 
     [Fact]
@@ -384,7 +385,8 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         using var poll = copy.StartPolling(() => client, TimeSpan.FromHours(1));
         var started = System.Diagnostics.Stopwatch.StartNew();
         await Assert.ThrowsAnyAsync<Exception>(() => client.LookupAsync(RandomNumberGenerator.GetBytes(16), default));
-        Assert.True(started.Elapsed < TimeSpan.FromSeconds(10), started.Elapsed.ToString());
+        // Far below the hour-long schedule; loose so a slow test machine doesn't fail it.
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(30), started.Elapsed.ToString());
     }
 
     [Fact]
@@ -511,7 +513,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         var standing = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
         var room = new RoomSigner();
         var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
-        // A public room publishes no hidden entry; the invite in its listing is enough to find it.
+        // Announced without any hidden entry: the invite in its listing is enough to find it.
         await client.AnnounceAsync(room.Sign(Listing(RoomVisibility.Public) with { Invite = standing.ToString() }, _now), true, [], default);
         Assert.Equal(room.RoomId, (await client.LookupAsync(standing.LobbyKey, default))!.Id);
         // Someone else lists the same invite with their own host: without the host's key nothing is trusted, with it
@@ -625,10 +627,56 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         await HideAsync(new RoomSigner(), invite.LobbyKey);
         await client.Snapshots.RefreshAsync(client, default);
         var hits = await client.LookupAllAsync(invite.LobbyKey, default, _host.PublicKey);
-        // The host's own entry is tried first; only a few of the listed addresses come after it.
+        // The host's own entry is tried first; a few of the listed addresses fill the rest, never more in all.
         Assert.Equal("10.235.0.7", hits[0].Ip);
-        Assert.Equal(1 + DirectorySnapshots.MaxAddressesToTry, hits.Count);
+        Assert.Equal(DirectorySnapshots.MaxAddressesToTry, hits.Count);
         Assert.Equal(hits.Count, hits.DistinctBy(h => h.Ip).Count());
+    }
+
+    /// <summary>Directory requests go to the test directory; knocks are counted and refused, or never answered.</summary>
+    private sealed class KnockTrap(int directoryPort, bool hang) : IPublicNetwork
+    {
+        public readonly ConcurrentBag<string> Knocked = [];
+
+        public async Task<Stream> ConnectAsync(string ip, int port, CancellationToken ct)
+        {
+            if (port == KnockProtocol.Port)
+            {
+                Knocked.Add(ip);
+                if (hang) await Task.Delay(Timeout.Infinite, ct);
+                throw new SocketException((int)SocketError.ConnectionRefused);
+            }
+            var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, directoryPort, ct);
+            return client.GetStream();
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.9");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HiddenEntriesForgedForTheHostCostABoundedNumberOfKnocks(bool hang)
+    {
+        // Someone holding the invite fills its index with entries under the host's (public) key, each at another address.
+        var invite = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
+        var writer = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        for (var i = 0; i < RoomDirectoryServer.MaxEntriesPerIndex; i++)
+            await writer.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden) with { Ip = $"10.235.1.{10 + i}" }, _now), false, [invite.LobbyKey], default);
+        var network = new KnockTrap(_directory.Port, hang);
+        var client = new RoomDirectoryClient(network);
+        Assert.Equal(DirectorySnapshots.MaxAddressesToTry, (await client.LookupAllAsync(invite.LobbyKey, default, _host.PublicKey)).Count);
+        var budget = TimeSpan.FromSeconds(1);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var outcome = await PublicJoin.TryKnockByInviteAsync(network, invite, X25519KeyPair.Generate(), "Steve", "0.8.0", default, client: client,
+            expectedHost: _host.PublicKey, budget: budget);
+        // Nobody answered: the caller goes on to the invite's lobby, having knocked at a few addresses at most, quickly.
+        Assert.Null(outcome);
+        Assert.InRange(network.Knocked.Count, 1, DirectorySnapshots.MaxAddressesToTry);
+        Assert.Equal(network.Knocked.Count, network.Knocked.Distinct().Count());
+        if (!hang) Assert.Equal(DirectorySnapshots.MaxAddressesToTry, network.Knocked.Count);
+        Assert.True(watch.Elapsed < budget + TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
     }
     [Fact]
     public async Task AnEarlierGuestIsNotTheAnswerForLaterInvites()
@@ -715,7 +763,9 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
             var watch = System.Diagnostics.Stopwatch.StartNew();
             // The reader goes on once the directory that answers has given its copy.
             Assert.Single(await client.LookupAllAsync(lobby, default));
-            Assert.True(watch.Elapsed < RoomDirectoryProtocol.RequestTimeout, $"took {watch.Elapsed}");
+            // ...while the silent one's connection is still open: the reader didn't wait for that directory to give up.
+            Assert.All(held, c => Assert.False(c.Client.Poll(0, SelectMode.SelectRead) && c.Available == 0, "the reader waited for the silent directory"));
+            Assert.True(watch.Elapsed < RoomDirectoryProtocol.SnapshotTimeout, $"took {watch.Elapsed}");
         }
         finally
         {
@@ -807,7 +857,8 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.False(read.IsCompleted);
         // Stopping the poller cancels its first round: the reader gets an answer now, not after the long backstop.
         poll.Dispose();
-        Assert.Same(read, await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(10))));
+        // Well under the backstop (over two minutes); loose so a slow test machine doesn't fail it.
+        Assert.Same(read, await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(30))));
         await Assert.ThrowsAnyAsync<IOException>(() => read);
     }
 
@@ -845,7 +896,9 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
             if (error is null) served++;
         }
         Assert.Equal("busy", error);
-        Assert.InRange(served * (long)size, _directory.LargeSnapshotByteBurst - 2L * size, _directory.LargeSnapshotByteBurst + 2L * size);
+        // Each is charged what is sent, which is padded.
+        var charged = RoomDirectoryProtocol.Padded(size);
+        Assert.InRange(served * charged, _directory.LargeSnapshotByteBurst - 2L * charged, _directory.LargeSnapshotByteBurst + 2L * charged);
         var delta = await SnapOverChannelAsync(new JsonObject { ["op"] = "snap", ["epoch"] = first["epoch"]!.DeepClone(), ["have"] = first["ver"]!.DeepClone() });
         Assert.False(delta["full"]!.GetValue<bool>());
     }

@@ -267,8 +267,10 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   and no directory's copy holds a full index (whoever filled it may have kept the host's entry out); otherwise it falls
   back to the lobby. Because the host keeps its own entry up for the key's whole life, an earlier invite holder who
   publishes an entry for themselves under it clashes with the host's entry instead of being the only answer.
-  With it (a contact's invite), the reader knocks at each address given for that host in turn, up to 4, and the knock
-  handshake decides; a wrong address only fails.
+  With it (a contact's invite), the reader knocks at the addresses given for that host in turn and the knock handshake
+  decides; a wrong address only fails. At most 4 addresses are tried in all, hidden entries before listed ones, and
+  within each those more directories give first (ties in random order). Addresses that don't answer share one time
+  budget (20 s); once it is spent the reader falls back to the lobby.
 - **Rooms listed with their invite**: public, direct and password rooms carry the invite (or its lobby key) in their
   listing, so anyone on the network could sign entries for its index. Jay publishes its own hidden entry for them too
   (it gives the same place as the listing, so the two agree), and an invite code for such a room is also matched

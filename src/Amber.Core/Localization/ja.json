@@ -1338,6 +1338,7 @@
   "multiplayer.invite.trusted": "{0}（{1}）を信頼しました。今後のノックは自動で承認されます",
   "multiplayer.identity.reset_done": "新しい身元に切り替えました（安全コード {0}）。あなたを信頼していたホストには、もう一度承認してもらう必要があります",
   "multiplayer.invite.entering_lobby": "ホストを探しています…",
+  "multiplayer.invite.finding_host": "まだホストを探しています…",
   "multiplayer.invite.reason.closed": "ホストが応答せずに切断しました。ルームが閉じられた可能性があります。以前に外されたことがある場合は、先にホストが解除する必要があります",
   "multiplayer.invite.reason.removed": "ホストにこのルームから外されました。もう一度参加するには、ホストが「キックした人」で解除してから新しい招待を送る必要があります",
   "multiplayer.invite.connecting_relay": "中継に接続しています…",

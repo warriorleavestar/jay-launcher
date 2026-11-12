@@ -157,7 +157,7 @@ public static class PublicJoin
     /// </summary>
     public static async Task<KnockOutcome> KnockAsync(IPublicNetwork network, string hostIp, JayInvite invite, X25519KeyPair me, string name, string version,
         byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.JayProof? jay = null,
-        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, TimeSpan? connectTimeout = null)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -168,7 +168,7 @@ public static class PublicJoin
                 using (var connect = CancellationTokenSource.CreateLinkedTokenSource(ct))
                 {
                     // An address that never answers costs at most this long, like a handshake that never finishes.
-                    connect.CancelAfter(KnockClient.HandshakeTimeout);
+                    connect.CancelAfter(connectTimeout is { } limit && limit < KnockClient.HandshakeTimeout ? limit : KnockClient.HandshakeTimeout);
                     try { stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, connect.Token); }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
@@ -214,27 +214,42 @@ public static class PublicJoin
     /// needed): for a second try after the room wasn't there. Null: look in the copy as it is, at once.</param>
     /// <param name="searching">Called when nothing was found yet and the lookup waits for the next directory refresh.</param>
     /// <param name="failed">Called for an address that failed (then the next one is tried), for diagnostics.</param>
+    /// <param name="budget">How long reaching an address may take in all, over every address tried (default
+    /// <see cref="DirectoryKnockBudget"/>); once it is spent, null is returned so the caller tries the invite's lobby.</param>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.JayProof? jay = null,
-        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, DateTimeOffset? freshSince = null, Action? searching = null, Action<string, Exception>? failed = null)
+        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, DateTimeOffset? freshSince = null, Action? searching = null, Action<string, Exception>? failed = null,
+        TimeSpan? budget = null)
     {
         var hits = await (client ?? new RoomDirectoryClient(network)).LookupAllAsync(invite.LobbyKey, ct, expectedHost, freshSince, searching);
         // The first "invalid" (the invite is used up or expired) is the answer, even if a later address says "mismatch".
         KnockOutcome? invalid = null;
+        // Addresses that don't answer share one time budget, so a list full of them can't keep the guest from the
+        // invite's lobby for long. Waiting for the host's answer after the handshake isn't counted.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var limit = budget ?? DirectoryKnockBudget;
         foreach (var hit in hits)
         {
             if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) continue;
+            var left = limit - clock.Elapsed;
+            if (left <= TimeSpan.Zero) break;
             try
             {
-                var outcome = await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);
+                var outcome = await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct, left);
                 // Someone else (or nobody we can talk to) at that address: the next address may be the host's.
                 if (outcome.Reason is not ("mismatch" or "invalid")) return outcome;
                 if (outcome.Reason == "invalid") invalid ??= outcome;
             }
             // Whatever goes wrong at one address (no answer within the handshake time, garbage, a broken handshake), the
             // next one is still tried: an address listed by someone else must not stop the real host from being reached.
-            catch (Exception e) when (e is not OutOfMemoryException && !ct.IsCancellationRequested) { failed?.Invoke(hit.Ip, e); }
+            // Errors that can only be our own bugs are not put down to the address.
+            catch (Exception e) when (!IsOurBug(e) && !ct.IsCancellationRequested) { failed?.Invoke(hit.Ip, e); }
         }
         return invalid;
     }
+
+    /// <summary>Default total time for reaching the addresses a directory gives for one invite.</summary>
+    public static readonly TimeSpan DirectoryKnockBudget = KnockClient.HandshakeTimeout * 2;
+
+    private static bool IsOurBug(Exception e) => e is NullReferenceException or ArgumentException or InvalidCastException or OutOfMemoryException;
 }

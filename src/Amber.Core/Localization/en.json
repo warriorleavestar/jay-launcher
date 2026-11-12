@@ -1369,6 +1369,7 @@
   "multiplayer.invite.trusted": "Trusted {0} ({1}). Their knocks will be approved automatically from now on",
   "multiplayer.identity.reset_done": "Switched to a new identity, safety code {0}. Hosts who trusted you will need to approve you again",
   "multiplayer.invite.entering_lobby": "Looking for the host…",
+  "multiplayer.invite.finding_host": "Still looking for the host…",
   "multiplayer.invite.reason.closed": "The host disconnected without answering. The room may have been closed; if you were kicked earlier, the host has to lift the ban first",
   "multiplayer.invite.reason.removed": "The host kicked you from this room. To join again, the host has to lift the ban under Kicked and send you a new invite",
   "multiplayer.invite.connecting_relay": "Connecting to the relay…",
