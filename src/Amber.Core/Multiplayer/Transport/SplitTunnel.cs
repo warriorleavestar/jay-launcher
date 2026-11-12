@@ -38,6 +38,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     /// </summary>
     public const int MaxPendingHandshakes = 64;
 
+    /// <summary>Legs in their handshake right now, across all ports.</summary>
+    public int PendingHandshakes => Volatile.Read(ref _pending);
+
     /// <summary>How long one leg may take to finish its handshake.</summary>
     internal TimeSpan HandshakeTimeout { get; init; } = TunnelHandshake.Timeout;
 

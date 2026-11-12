@@ -214,6 +214,64 @@ public sealed class SplitRoomTests
         Assert.Equal(1, singles);
     }
 
+    /// <summary>
+    /// The cap on legs in their handshake counts across all ports: past it a leg is reset, and once the stalled ones
+    /// are gone a member still gets a split connection.
+    /// </summary>
+    [Fact]
+    public async Task StalledLegsAreCappedAcrossPorts()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var ports = rig.Server.Ports;
+        var idle = new List<TcpClient>();
+        try
+        {
+            for (var i = 0; i < SplitTunnelServer.MaxPendingHandshakes; i++)
+            {
+                var c = new TcpClient();
+                try { await c.ConnectAsync(IPAddress.Loopback, ports[i % ports.Count]); }
+                catch (SocketException) { }
+                idle.Add(c);
+            }
+            Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == SplitTunnelServer.MaxPendingHandshakes, 15));
+            Assert.Equal(0, rig.Server.Rejected);
+            using var extra = new TcpClient();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var closed = false;
+            try
+            {
+                await extra.ConnectAsync(IPAddress.Loopback, ports[^1]);
+                closed = await extra.GetStream().ReadAsync(new byte[1], timeout.Token) == 0;
+            }
+            catch (Exception e) when (e is IOException or SocketException) { closed = true; }
+            Assert.True(closed);
+            Assert.True(await WaitAsync(() => rig.Server.Rejected >= 1));
+        }
+        finally
+        {
+            foreach (var c in idle) c.Dispose();
+        }
+        Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == 0, 20));
+        var connector = rig.Connector(TunnelService.Game);
+        await using var stream = await connector.OpenAsync(CancellationToken.None);
+        Assert.IsType<SplitStream>(stream);
+        await stream.WriteAsync(new byte[] { 5 });
+        await stream.FlushAsync();
+        var back = new byte[1];
+        Assert.True(await SecureStream.ReadExactAsync(stream, back, CancellationToken.None));
+        Assert.Equal(5, back[0]);
+    }
+
+    private static async Task<bool> WaitAsync(Func<bool> condition, int seconds = 5)
+    {
+        for (var i = 0; i < seconds * 20; i++)
+        {
+            if (condition()) return true;
+            await Task.Delay(50);
+        }
+        return condition();
+    }
+
     /// <summary>Answers every read with random bytes and swallows writes.</summary>
     private sealed class GarbageStream : Stream
     {
