@@ -131,6 +131,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      RELEASE_SIGNED_ANDROID: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish_android_preview) }}
     defaults:
       run:
         working-directory: src
@@ -176,7 +178,7 @@ jobs:
             Amber.Android/obj/jay-glfw
 
       - name: Prepare stable preview signing key
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_android_preview
+        if: env.RELEASE_SIGNED_ANDROID == 'true'
         shell: bash
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
@@ -185,7 +187,7 @@ jobs:
           printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "${{ runner.temp }}/jay-android-preview.p12"
 
       - name: Publish CI APK
-        if: github.event_name != 'workflow_dispatch' || !inputs.publish_android_preview
+        if: env.RELEASE_SIGNED_ANDROID != 'true'
         run: >-
           dotnet publish Amber.Android/Amber.Android.csproj -c Release
           -p:AndroidSdkDirectory=${{ runner.temp }}/android-sdk
@@ -193,7 +195,7 @@ jobs:
           -p:AndroidPackageFormats=apk
 
       - name: Publish release-signed preview APK
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_android_preview
+        if: env.RELEASE_SIGNED_ANDROID == 'true'
         env:
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
@@ -223,7 +225,7 @@ jobs:
           [[ "$BADGING" == *"versionName='$DISPLAY_VERSION'"* ]]
           [[ "$BADGING" == *"versionCode='$BUILD_VERSION'"* ]]
           "$APKSIGNER_PATH" verify "$APK_PATH"
-          if [[ "${{ github.event_name }}" == workflow_dispatch && "${{ inputs.publish_android_preview }}" == true ]]; then
+          if [[ "$RELEASE_SIGNED_ANDROID" == true ]]; then
             CERT_SHA256="$("$APKSIGNER_PATH" verify --print-certs "$APK_PATH" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
             test "$CERT_SHA256" = "595779309affcfebd61f591c3127a75c5471fbcd0f192539fbe5f52b951808e0"
           fi
@@ -238,7 +240,9 @@ jobs:
           if-no-files-found: error
 
   android-smoke:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview)
     needs: android
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -289,7 +293,9 @@ jobs:
           if-no-files-found: error
 
   publish-android-preview:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_android_preview)
     needs: [android, android-smoke]
     runs-on: ubuntu-latest
     permissions:
@@ -309,11 +315,11 @@ jobs:
           test -s Jay-android-experimental.apk
           sha256sum Jay-android-experimental.apk > SHA256SUMS.txt
           cat > release-notes.md <<'NOTES'
-          直接下载 Jay-android-experimental.apk。支持 Android 6.0 及以上的 ARM64 和 x86_64 设备。
+          直接下载 Jay-android-experimental.apk。支持 Android 8.0 及以上的 ARM64 和 x86_64 设备。
 
-          手机和窄分屏采用单栏，宽屏平板采用双栏，旋转或调整窗口时自动重排。按钮和邀请码输入框已针对触控调整。
+          Jay 内置独立 JVM、MobileGlues 图形桥和 Minecraft 1.21.11 安装流程，不需要 FCL 或其他启动器。已经可以创建并进入世界。
 
-          这是 Jay 的 Android 实验版。通过邀请码登记并开启网关后，可以进入 Jay 自己的全屏游戏画面和触屏控制层，不再跳转或依赖 FCL。独立 JVM、图形桥、账号与游戏下载仍在开发，当前预览版还不能真正启动 Minecraft。
+          支持摇杆移动、滑动转向、攻击、使用、跳跃、疾跑、潜行、背包、丢弃、聊天键盘和快捷栏切换。游戏菜单使用直接触摸，操作按钮会自动隐藏，只保留 Esc。
 
           此发布从本版起使用固定的预览版签名，以后可覆盖升级并保留语言、设备身份和已保存的服务器。若此前安装过其他签名的测试包，Android 仍会拒绝首次覆盖安装。
           NOTES
