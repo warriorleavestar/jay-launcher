@@ -240,7 +240,7 @@ public sealed partial class MultiplayerViewModel
             () => RoomKnockWait.ToTimeSpan(), request => Dispatcher.UIThread.Post(() => OnKnockTimedOut(request)),
             account => !Child.AlwaysAskKnock && Trusted.IsTrustedJayAccount(account), () => jayCertificate, () => Child.AlwaysAskKnock,
             direct is null ? null : direct.Offer,
-            name => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Warning("multiplayer.room.relay_only_old", name))));
+            name => Dispatcher.UIThread.Post(() => OnRelayOnlyRefused(name)));
         if (direct is not null)
             lobby.DirectAnswered += (request, entry, addresses) => _ = AddDirectGuestAsync(direct, request, addresses);
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
@@ -760,4 +760,22 @@ public sealed partial class MultiplayerViewModel
         "account" => "multiplayer.account.reason",
         _ => "multiplayer.invite.reason.denied",
     };
+
+    private readonly Dictionary<string, DateTimeOffset> _relayOnlyRefusedShown = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// An older Jay was turned away from my "relays only" room. The name is the guest's own, so the line shows at
+    /// most once a minute per name and the list of names stays small.
+    /// </summary>
+    internal void OnRelayOnlyRefused(string name)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_relayOnlyRefusedShown.TryGetValue(name, out var last) && now - last < TimeSpan.FromMinutes(1)) return;
+        if (_relayOnlyRefusedShown.Count >= 32)
+            foreach (var old in _relayOnlyRefusedShown.Where(p => now - p.Value >= TimeSpan.FromMinutes(1)).Select(p => p.Key).ToList())
+                _relayOnlyRefusedShown.Remove(old);
+        if (_relayOnlyRefusedShown.Count >= 32) return;
+        _relayOnlyRefusedShown[name] = now;
+        SetStatus(StatusMessage.Warning("multiplayer.room.relay_only_old", name));
+    }
 }

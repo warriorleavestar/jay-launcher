@@ -94,6 +94,8 @@ public sealed partial class MultiplayerViewModel
     private readonly Dictionary<string, MailedInvite> _mailedInvites = [];
     private readonly Dictionary<string, string> _sentInvites = [];
     private readonly HashSet<string> _heldBackShown = [];
+    /// <summary>Invites I mailed to friends' devices in the room that is open (only these end with the friend).</summary>
+    private readonly HashSet<PendingInvite> _friendInvites = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Where contacts.json and mail-seen.json live. Tests point it at a temporary folder.</summary>
     internal string ContactsDir
@@ -493,6 +495,7 @@ public sealed partial class MultiplayerViewModel
         IReadOnlyList<Contact> devices = askFirst ? [.. item.Devices.Where(d => d.Verified)] : item.Devices;
         if (devices.Count == 0) return false;
         var pendings = devices.Select(d => (Device: d, Invite: lobby.Book.Create(uses, lifetime, !askFirst && Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
+        foreach (var (_, pending) in pendings) _friendInvites.Add(pending);
         RefreshInvites();
         try
         {
@@ -508,7 +511,11 @@ public sealed partial class MultiplayerViewModel
         }
         catch (Exception e) when (IsMailError(e) || e is System.ComponentModel.Win32Exception)
         {
-            foreach (var (_, pending) in pendings) lobby.Book.Revoke(pending);
+            foreach (var (_, pending) in pendings)
+            {
+                lobby.Book.Revoke(pending);
+                _friendInvites.Remove(pending);
+            }
             RefreshInvites();
             if (!quiet) SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
             return false;
