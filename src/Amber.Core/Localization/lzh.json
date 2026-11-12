@@ -1308,7 +1308,7 @@
   "multiplayer.invite.cancel": "罷入",
   "multiplayer.identity.title": "此機之身",
   "multiplayer.identity.reset": "易身",
-  "multiplayer.identity.reset_hint": "易新身之後，前信君之房主將視君為新成員。唯未開房、未入房時可易。",
+  "multiplayer.identity.reset_hint": "易新身之後，前信君之房主將視君為新成員。唯未開房、未入房時可易。此機舊版 Jay 仍用舊身（資料夾中 identity.key），不用則自刪之。",
   "multiplayer.trusted.title": "所信之人",
   "multiplayer.trusted.hint": "此諸人持任一有效之邀叩門，皆逕許之。錄中唯存公鑰與名。",
   "multiplayer.trusted.empty": "尚無所信之人",
