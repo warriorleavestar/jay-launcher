@@ -291,6 +291,9 @@ public sealed class RekeyTests : IDisposable
             catch (Exception e) when (e is IOException or SocketException or CryptographicException or InvalidDataException or EndOfStreamException or OperationCanceledException) { }
         }
         Assert.True(await WaitAsync(() => server.Rejected == 4));
+        // The counter goes up before the line is written: wait for the line itself.
+        Assert.True(await WaitAsync(() => { lock (log) return log.Any(l => l.StartsWith(failed, StringComparison.Ordinal)); }));
+        await Task.Delay(100);
         lock (log)
         {
             // Exactly one line, and it is about the failed handshakes, not the timeout.
