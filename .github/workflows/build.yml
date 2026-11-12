@@ -315,6 +315,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          # The concurrency group runs one publish at a time but does not order them, so a run
+          # for an older commit can start after a newer one. Only ever move the preview forward.
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/android-preview" --jq .object.sha 2>/dev/null || true)
+          if [ -n "$current" ] && [ "$current" != "$GITHUB_SHA" ]; then
+            status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$current...$GITHUB_SHA" --jq .status)
+            case "$status" in
+              ahead) ;;
+              behind)
+                echo "android-preview is already at $current, newer than $GITHUB_SHA. Skipping."
+                exit 0 ;;
+              *)
+                echo "::warning::android-preview ($current) and $GITHUB_SHA have diverged ($status). Skipping."
+                exit 0 ;;
+            esac
+          fi
           cd android-assets
           test -s Jay-android-experimental.apk
           sha256sum Jay-android-experimental.apk > SHA256SUMS.txt
