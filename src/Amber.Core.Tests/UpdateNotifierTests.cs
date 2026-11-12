@@ -186,6 +186,18 @@ public sealed class UpdateNotifierTests : IDisposable
     }
 
     [Fact]
+    public async Task TurningTheCheckOffTakesDownAWaitingNotice()
+    {
+        var (service, notifier) = Make(Release([T[0], T[2]]));
+        using var _ = service;
+        Assert.True(await notifier.CheckIfDueAsync());
+        var notice = Notice(service)!;
+        UpdateNotifier.RaiseSwitched(false);
+        Assert.True(notice.IsResolved);
+        Assert.Null(Notice(service));
+    }
+
+    [Fact]
     public async Task AFailedCheckWaitsADayToo()
     {
         var down = new FakeHttp(); // every address answers 404

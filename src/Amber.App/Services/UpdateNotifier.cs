@@ -41,6 +41,23 @@ internal sealed class UpdateNotifier
         _dataDir = dataDir ?? AppSettings.DataDir;
         _trust = trust;
         service.Requests.Resolved += OnResolved;
+        Switched += OnSwitched;
+    }
+
+    /// <summary>Settings › About's checkbox changed (raised by the settings page).</summary>
+    internal static event Action<bool>? Switched;
+
+    internal static void RaiseSwitched(bool on) => Switched?.Invoke(on);
+
+    /// <summary>Turning the daily check off also takes down a notice that is still waiting.</summary>
+    private void OnSwitched(bool on)
+    {
+        if (on) return;
+        foreach (var key in _offers.Keys.ToList())
+        {
+            _offers.Remove(key);
+            _service.Requests.Withdraw(key);
+        }
     }
 
     /// <summary>Starts the timer. Not on phones and tablets (the stores and the preview channel update those).</summary>

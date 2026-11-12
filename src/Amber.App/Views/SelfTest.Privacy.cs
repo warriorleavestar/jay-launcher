@@ -27,6 +27,7 @@ internal sealed partial class SelfTest
         var unclassifiedBefore = NetworkPolicy.UnclassifiedCount;
         void Seen(NetworkCategory? c, Uri? u) => Log($"NET {c?.ToString() ?? "UNCLASSIFIED"} {u?.Host}{u?.AbsolutePath}");
         NetworkPolicy.Requested += Seen;
+        var autoUpdateAtStart = AppSettingsAutoUpdate;
         try
         {
             window.Width = 1440;
@@ -97,6 +98,19 @@ internal sealed partial class SelfTest
             await Task.Delay(400);
             Check("换英文：清单跟着换", about.List.Rows[0].Title == "Downloads you start", about.List.Rows[0].Title);
             await ShotAsync("about-600-en");
+            // Row 4 (the update check) has the longest text: at 600 wide in English and Japanese it wraps and nothing spills sideways.
+            foreach (var lang in new[] { "en", "ja" })
+            {
+                L.SetLanguage(lang);
+                await Task.Delay(400);
+                Dispatcher.UIThread.Invoke(() => page.Scroll.Offset = new Avalonia.Vector(0, 420));
+                await Task.Delay(300);
+                Check($"紧凑 {lang}：第 4 项（检查更新）换行后不超出页面宽度", Dispatcher.UIThread.Invoke(() => page.Scroll.Extent.Width <= page.Scroll.Viewport.Width + 1),
+                    Dispatcher.UIThread.Invoke(() => $"{page.Scroll.Extent.Width:0} / {page.Scroll.Viewport.Width:0}"));
+                await ShotAsync($"about-600-{lang}-update");
+            }
+            Dispatcher.UIThread.Invoke(() => page.Scroll.Offset = default);
+            L.SetLanguage("en");
             window.Width = 1440;
             window.Height = 900;
             await Task.Delay(600);
@@ -113,6 +127,7 @@ internal sealed partial class SelfTest
         }
         finally
         {
+            AppSettingsAutoUpdate = autoUpdateAtStart;
             NetworkPolicy.Requested -= Seen;
             L.SetLanguage("zh-Hans");
             settings.ChildMode = false;
@@ -162,9 +177,10 @@ internal sealed partial class SelfTest
         about.VerifyText = null;
     }
 
+    /// <summary>Through the settings page, so its checkbox and the saved settings stay the same.</summary>
     private bool AppSettingsAutoUpdate
     {
-        get => Page<HomeViewModel>().Service.Settings.AutoUpdateCheck;
-        set => Page<HomeViewModel>().Service.Settings.AutoUpdateCheck = value;
+        get => Page<SettingsViewModel>().AutoUpdate;
+        set => Dispatcher.UIThread.Invoke(() => Page<SettingsViewModel>().AutoUpdate = value);
     }
 }

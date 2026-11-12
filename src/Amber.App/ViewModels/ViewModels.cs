@@ -1078,7 +1078,11 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnCurseForgeKeyChanged(string value) => Persist();
     partial void OnCurseForgeRootChanged(string value) => Persist();
     partial void OnUpdateFeedChanged(string value) => Persist();
-    partial void OnAutoUpdateChanged(bool value) => Persist();
+    partial void OnAutoUpdateChanged(bool value)
+    {
+        Persist();
+        if (!_loading) Amber.App.Services.UpdateNotifier.RaiseSwitched(value);
+    }
 
     /// <summary>主题选了立即生效。</summary>
     partial void OnSelectedThemeIndexChanged(int value)
