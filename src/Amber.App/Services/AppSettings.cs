@@ -80,7 +80,8 @@ public sealed class AppSettings
 
     /// <summary>
     /// Check the update feed once a day and tell the user about a signed newer version. Jay never downloads it.
-    /// On for a new install; a settings file from before this switch existed keeps the old behaviour (off).
+    /// On for a new install. A settings file from before this switch existed keeps what that Jay did: it checked only
+    /// with an update address set, so on with an address and off without one. The saved choice then carries over.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool AutoUpdateCheck
@@ -274,8 +275,8 @@ public sealed class AppSettings
                 if (File.Exists(path))
                 {
                     var loaded = JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
-                    // Upgraded from a Jay without the daily update check: keep it off, as that Jay never checked by itself.
-                    loaded.AutoUpdateCheckSaved ??= false;
+                    // Upgraded from a Jay without the switch: on if it had an update address (checks were on), off if not.
+                    loaded.AutoUpdateCheckSaved ??= !string.IsNullOrWhiteSpace(loaded.UpdateFeedUrl);
                     return loaded;
                 }
                 return new AppSettings { IsFresh = true };
