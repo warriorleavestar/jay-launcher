@@ -737,7 +737,7 @@ public sealed class EasyTierSession : IEasyTierSession
     {
         try
         {
-            if (!_process.HasExited) _process.Kill(true);
+            EasyTierProcessGuard.Stop(_process);
             _process.WaitForExit(3000);
         }
         catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
@@ -846,7 +846,7 @@ public sealed class EasyTierLobby : IDisposable
     {
         try
         {
-            if (!_process.HasExited) _process.Kill(true);
+            EasyTierProcessGuard.Stop(_process);
             _process.WaitForExit(3000);
         }
         catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
