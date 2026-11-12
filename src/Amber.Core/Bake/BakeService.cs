@@ -104,6 +104,11 @@ public sealed record BakeLoaderInfo(string LoaderVersion, int Protocol, Version 
         }
         var text = result["interface"]?.GetValue<string>();
         var version = Version.TryParse(text, out var parsed) ? parsed : new Version(1, 0);
+        // interface stays "1.3" for additive revisions; interfaceRevision (1.3.1+) says which ("1.3.3"). Every check
+        // below is a minimum, so the revision is what counts when it is there.
+        if (result["interfaceRevision"] is JsonValue rv && rv.TryGetValue<string>(out var revisionText)
+            && Version.TryParse(revisionText, out var revision) && revision > version)
+            version = revision;
         var javaMin = new Dictionary<string, int>(StringComparer.Ordinal);
         if (result["javaMin"] is JsonObject mins)
             foreach (var (kind, value) in mins)

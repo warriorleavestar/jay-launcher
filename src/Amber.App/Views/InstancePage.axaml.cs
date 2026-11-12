@@ -1,4 +1,3 @@
-using Avalonia.Automation;
 using Amber.Core.Navigation;
 using Amber.Core.Layout;
 using Amber.Core.Localization;
