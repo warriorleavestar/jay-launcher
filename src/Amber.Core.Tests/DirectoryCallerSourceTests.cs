@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 using System.Net;
 using System.Net.Sockets;
 using Amber.Core.Multiplayer.Public;
@@ -13,7 +14,10 @@ public sealed class DirectoryCallerSourceTests
     [Theory]
     [InlineData("127.235.4.7", "10.235.4.7")]
     [InlineData("::ffff:127.235.4.7", "10.235.4.7")]
-    [InlineData("127.235.0.1", "10.235.0.1")]
+    [InlineData("127.235.255.254", "10.235.255.254")]
+    [InlineData("127.235.0.0", RoomDirectoryServer.SharedLoopbackSource)]
+    [InlineData("127.235.0.1", RoomDirectoryServer.SharedLoopbackSource)]
+    [InlineData("127.235.255.255", RoomDirectoryServer.SharedLoopbackSource)]
     [InlineData("127.0.0.1", RoomDirectoryServer.SharedLoopbackSource)]
     [InlineData("::1", RoomDirectoryServer.SharedLoopbackSource)]
     [InlineData("127.0.1.1", RoomDirectoryServer.SharedLoopbackSource)]
@@ -23,6 +27,22 @@ public sealed class DirectoryCallerSourceTests
     [InlineData("10.1.2.3", "10.1.2.3")]
     public void SourceOf(string address, string? expected) =>
         Assert.Equal(expected, RoomDirectoryServer.Source(IPAddress.Parse(address)));
+
+    [Fact]
+    public async Task WarnsWhenNoCallerIsEverMapped()
+    {
+        var log = new List<string>();
+        await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0, line => { lock (log) log.Add(line); });
+        for (var i = 0; i < RoomDirectoryServer.UnmappedCallersBeforeWarning + 5; i++)
+        {
+            using var c = new TcpClient();
+            await c.ConnectAsync(IPAddress.Loopback, server.Port);
+        }
+        var warning = L.T("core.mp.public.callers_unmapped");
+        for (var i = 0; i < 100 && !Contains(); i++) await Task.Delay(50);
+        lock (log) Assert.Single(log, l => l == warning);
+        bool Contains() { lock (log) return log.Contains(warning); }
+    }
 
     [Fact]
     public void NoAddressIsOnlyForCallsInProcess() => Assert.Null(RoomDirectoryServer.Source(null));
@@ -61,6 +81,10 @@ public sealed class DirectoryCallerSourceTests
         {
             foreach (var c in held) c.Dispose();
         }
+        // Closed connections give their places back (each waits out the 5 s handshake deadline at most).
+        for (var i = 0; i < 300 && server.OpenFrom("10.235.4.7") + server.OpenFrom("10.235.4.8") > 0; i++) await Task.Delay(50);
+        Assert.Equal(0, server.OpenFrom("10.235.4.7"));
+        Assert.Equal(0, server.OpenFrom("10.235.4.8"));
     }
 }
 

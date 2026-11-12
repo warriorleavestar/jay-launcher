@@ -1846,6 +1846,7 @@
   "core.mp.public.observer_error": "目錄事件處理出錯：{0}",
   "core.mp.public.err_rate": "請求太頻繁了，這個網路讓你等幾分鐘再試",
   "core.mp.public.budget_full": "目錄：「{0}」這一分鐘的全目錄額度用完了，請求會收到 rate。如果一直這樣，可能有人在刷目錄。",
+  "core.mp.public.callers_unmapped": "目錄：到現在為止所有呼叫方都從 127.0.0.1 進來，大家擠在同一個來源、共用一份上限。這台節點的 EasyTier 沒有按各自位址把呼叫方交過來，請用隨 Jay 發佈的 EasyTier。",
   "core.mp.public.err_policy": "這個網路不收這個房間：{0}",
   "core.mp.public.no_address": "還沒在公共網路裡分到位址",
   "core.mp.public.announce_failed": "房間發佈到公共網路失敗：{0}",

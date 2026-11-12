@@ -1877,6 +1877,7 @@
   "core.mp.public.observer_error": "Directory event handler failed: {0}",
   "core.mp.public.err_rate": "Too many requests right now. This network asks you to wait a few minutes and try again",
   "core.mp.public.budget_full": "Directory: the whole directory's budget for \"{0}\" is used up for this minute; requests get \"rate\". If this keeps happening, someone may be flooding the directory.",
+  "core.mp.public.callers_unmapped": "Directory: every caller so far arrives from 127.0.0.1, so they all share one source and one set of limits. This node's EasyTier doesn't hand callers over with their own address: use the EasyTier build that ships with Jay.",
   "core.mp.public.err_policy": "This network won't accept the room: {0}",
   "core.mp.public.no_address": "No address on the public network yet",
   "core.mp.public.announce_failed": "Couldn't publish the room to the public network: {0}",

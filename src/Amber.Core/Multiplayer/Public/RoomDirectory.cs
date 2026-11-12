@@ -245,6 +245,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             try { client = await _listener.AcceptTcpClientAsync(_cts.Token); }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { break; }
             var source = Source(client);
+            NoteMapping(client, source);
             if (!TryOpen(source))
             {
                 client.Dispose();
@@ -305,7 +306,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         if (IPAddress.IsLoopback(address))
         {
             var b = address.GetAddressBytes();
-            return b.Length == 4 && b[1] == MappedSecondOctet ? $"{PublicNetworkProfile.Subnet}{b[2]}.{b[3]}" : SharedLoopbackSource;
+            // The room network's network, directory and broadcast addresses are never a member's own.
+            var reserved = (b[2], b[3]) is (0, 0) or (0, 1) or (255, 255);
+            return b.Length == 4 && b[1] == MappedSecondOctet && !reserved ? $"{PublicNetworkProfile.Subnet}{b[2]}.{b[3]}" : SharedLoopbackSource;
         }
         return address.ToString();
     }
@@ -325,6 +328,26 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Connections one source may have open at once.</summary>
     public const int MaxConnectionsPerSource = 8;
     private readonly Dictionary<string, int> _openBySource = new(StringComparer.Ordinal);
+
+    /// <summary>Callers seen from 127.0.0.1 before any mapped caller (127.235.c.d); see <see cref="NoteMapping"/>.</summary>
+    private int _unmappedCallers;
+    private bool _mappingSeen;
+
+    /// <summary>
+    /// Warns once when callers keep arriving from 127.0.0.1 and none ever from a mapped address: the node's EasyTier then
+    /// lacks the loopback-source patch (or the switch), and every caller shares one source.
+    /// </summary>
+    private void NoteMapping(TcpClient client, string? source)
+    {
+        if (Volatile.Read(ref _mappingSeen)) return;
+        if (source is not null && source != SharedLoopbackSource) { Volatile.Write(ref _mappingSeen, true); return; }
+        if ((client.Client.RemoteEndPoint as IPEndPoint)?.Address is { } a && IPAddress.IsLoopback(a)
+            && Interlocked.Increment(ref _unmappedCallers) == UnmappedCallersBeforeWarning)
+            _log?.Invoke(L.T("core.mp.public.callers_unmapped"));
+    }
+
+    /// <summary>Callers from 127.0.0.1 in a row, with none mapped, before the node warns.</summary>
+    internal const int UnmappedCallersBeforeWarning = 50;
 
     /// <summary>Connections open from <paramref name="source"/> right now (tests).</summary>
     internal int OpenFrom(string source)
