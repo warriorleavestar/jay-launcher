@@ -963,6 +963,8 @@ public static class Program
             return 0;
         }
         output.WriteLine(reply.ToJsonString(pretty));
+        if (sub == "ban" && reply["disputedNotBanned"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } spared)
+            output.WriteLine($"这些地址还有别人认领，只移除、没封：{string.Join("、", spared)}（认领的也可能是同一个人的另一个账户，看看 node nodes）");
         return reply["ok"]?.GetValue<bool>() == true ? 0 : 1;
     }
 

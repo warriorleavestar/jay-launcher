@@ -236,6 +236,17 @@ public sealed class AdminApi : IAsyncDisposable
                         _log($"admin: banned the host of room {value}, removed {hit.Removed} room(s)");
                         return (200, new JsonObject { ["ok"] = true, ["removed"] = hit.Removed, ["host"] = hit.Host, ["account"] = hit.Account });
                     }
+                    if (kind == "operator")
+                    {
+                        var (dropped, spared) = _server.BanOperator(value, reason, duration);
+                        _log($"admin: banned operator {value}, removed {dropped} node(s)");
+                        return (200, new JsonObject
+                        {
+                            ["ok"] = true, ["removed"] = dropped,
+                            // Dropped but not banned: another account also claimed them (possibly the operator's own).
+                            ["disputedNotBanned"] = new JsonArray([.. spared.Select(u => (JsonNode)JsonValue.Create(u))]),
+                        });
+                    }
                     var removed = _server.Ban(kind, value, reason, duration);
                     _log($"admin: banned {kind} {value}, removed {removed} room(s)");
                     return (200, new JsonObject { ["ok"] = true, ["removed"] = removed });

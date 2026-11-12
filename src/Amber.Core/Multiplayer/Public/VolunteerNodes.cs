@@ -40,7 +40,10 @@ public static class VolunteerNodes
     /// Normalizes a volunteer address to <c>tcp://host:port</c>. Returns null for anything else, including literal
     /// private, loopback, link-local and other non-public IPs.
     /// </summary>
-    public static string? Normalize(string? url)
+    public static string? Normalize(string? url) => Normalize(url, IsPublic);
+
+    /// <param name="isPublic">Which IP literals count as public (tests pass their own, so they need no real addresses).</param>
+    internal static string? Normalize(string? url, Func<IPAddress, bool> isPublic)
     {
         if (string.IsNullOrWhiteSpace(url) || url.Length > 300) return null;
         var text = url.Trim();
@@ -50,7 +53,7 @@ public static class VolunteerNodes
         var host = uri.HostNameType == UriHostNameType.IPv6 ? uri.Host : uri.Host.ToLowerInvariant();
         if (IPAddress.TryParse(host.Trim('[', ']'), out var ip))
         {
-            if (!IsPublic(ip)) return null;
+            if (!isPublic(ip)) return null;
         }
         else if (uri.HostNameType != UriHostNameType.Dns || !host.Contains('.') || host.EndsWith(".local", StringComparison.Ordinal)
                  || host.EndsWith(".lan", StringComparison.Ordinal) || host == "localhost") return null;
@@ -89,7 +92,9 @@ public static class VolunteerNodes
     /// (<c>stun_info.public_ip</c>, else <c>ip_list.public_ipv4</c>). Null when there is none (STUN blocked, or not
     /// checked yet). Behind carrier-grade NAT this is the carrier's address, which port forwarding can't reach.
     /// </summary>
-    public static string? PublicAddressFromNodeInfo(string json)
+    public static string? PublicAddressFromNodeInfo(string json) => PublicAddressFromNodeInfo(json, IsPublic);
+
+    internal static string? PublicAddressFromNodeInfo(string json, Func<IPAddress, bool> isPublic)
     {
         try
         {
@@ -104,7 +109,7 @@ public static class VolunteerNodes
             }
             else if (node["ip_list"]?["public_ipv4"]?.GetValueKind() == JsonValueKind.String) candidates.Add(node["ip_list"]!["public_ipv4"]!.GetValue<string>());
             return candidates.Select(c => IPAddress.TryParse(c.Trim(), out var ip) ? ip : null)
-                .FirstOrDefault(ip => ip is { AddressFamily: AddressFamily.InterNetwork } && IsPublic(ip))?.ToString();
+                .FirstOrDefault(ip => ip is { AddressFamily: AddressFamily.InterNetwork } && isPublic(ip))?.ToString();
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or OverflowException) { return null; }
     }
@@ -367,9 +372,14 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             if (known && entry!.Operator != account)
             {
                 conflict = true;
-                newlyDisputed = entry.ClaimedBy is null;
-                entry.ClaimedBy ??= [];
-                if (entry.ClaimedBy.Count < MaxClaims && !entry.ClaimedBy.Contains(account ?? "")) entry.ClaimedBy.Add(account ?? "");
+                // Only a signed claim counts: an unsigned registration of a signed address says nothing about who runs it
+                // (and would let anyone, the operator included, mark their own address as disputed).
+                if (account is not null)
+                {
+                    newlyDisputed = entry.ClaimedBy is null;
+                    entry.ClaimedBy ??= [];
+                    if (entry.ClaimedBy.Count < MaxClaims && !entry.ClaimedBy.Contains(account)) entry.ClaimedBy.Add(account);
+                }
             }
             else if (known && account is not null && signedAt <= entry!.SignedAt) return Error("stale");
             if (!known && !conflict)
