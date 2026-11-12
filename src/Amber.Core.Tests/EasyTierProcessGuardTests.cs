@@ -71,8 +71,8 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         if (OperatingSystem.IsWindows()) return;
         var jay = Start("/bin/sleep", "600");
         var watch = Start("/bin/sh", "-c", EasyTierProcessGuard.WatchScript, "jay-easytier", jay.Id.ToString(), "/bin/sleep", "600");
-        Assert.True(await Until(() => Children(watch.Id).Count > 0), "core started");
-        var core = Children(watch.Id)[0];
+        Assert.True(await Until(() => Core(watch.Id) > 0), "core started");
+        var core = Core(watch.Id);
         await Task.Delay(1200);
         Assert.True(Alive(core), "Jay 还在时 core 一直跑");
         jay.Kill(); // 相当于 kill -9 掉 Jay
@@ -85,8 +85,8 @@ public sealed class EasyTierProcessGuardTests : IDisposable
     {
         if (OperatingSystem.IsWindows()) return;
         var watch = Start("/bin/sh", "-c", EasyTierProcessGuard.WatchScript, "jay-easytier", Environment.ProcessId.ToString(), "/bin/sleep", "600");
-        Assert.True(await Until(() => Children(watch.Id).Count > 0));
-        var core = Children(watch.Id)[0];
+        Assert.True(await Until(() => Core(watch.Id) > 0));
+        var core = Core(watch.Id);
         Process.Start("kill", ["-TERM", watch.Id.ToString()])!.WaitForExit();
         Assert.True(await Until(() => !Alive(core)));
     }
@@ -101,8 +101,8 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         EasyTierProcessGuard.Wrap(info);
         var watch = Process.Start(info)!;
         _started.Add(watch);
-        Assert.True(await Until(() => Children(watch.Id).Count > 0));
-        var core = Children(watch.Id)[0];
+        Assert.True(await Until(() => Core(watch.Id) > 0));
+        var core = Core(watch.Id);
         Assert.NotNull(EasyTierProcessTracker.Track(watch, _dir, EasyTierProcessGuard.TrackedExecutable(info), Environment.ProcessId, ownerStartTicks: 1));
         EasyTierProcessTracker.Cleanup(_dir, "/opt/not-easytier", EasyTierProcessGuard.WatcherExecutable);
         Assert.True(await Until(() => watch.HasExited && !Alive(core)));
@@ -119,8 +119,8 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         EasyTierProcessGuard.Wrap(info);
         var watch = Process.Start(info)!;
         _started.Add(watch);
-        Assert.True(await Until(() => Children(watch.Id).Count > 0));
-        var core = Children(watch.Id)[0];
+        Assert.True(await Until(() => Core(watch.Id) > 0));
+        var core = Core(watch.Id);
         var started = DateTime.UtcNow;
         EasyTierProcessGuard.Stop(watch);
         Assert.True(watch.HasExited, "watcher ended through SIGTERM");
@@ -133,13 +133,59 @@ public sealed class EasyTierProcessGuardTests : IDisposable
     {
         if (OperatingSystem.IsWindows()) return;
         var watch = Start("/bin/sh", "-c", EasyTierProcessGuard.WatchScript, "jay-easytier", Environment.ProcessId.ToString(), "/bin/sleep", "600");
-        Assert.True(await Until(() => Children(watch.Id).Count > 0));
-        var core = Children(watch.Id).First(pid => pid != 0);
+        Assert.True(await Until(() => Core(watch.Id) > 0));
+        var core = Core(watch.Id);
         await Task.Delay(300);
         Process.Start("kill", ["-HUP", watch.Id.ToString(), core.ToString()])!.WaitForExit();
         await Task.Delay(1500);
         Assert.False(watch.HasExited, "watcher survives SIGHUP");
         Assert.True(Alive(core), "core survives SIGHUP");
+    }
+
+    [Fact]
+    public async Task StopIsPromptWhileTheWatcherIsPolling()
+    {
+        // The trap must run at once, not after the watcher's one-second poll.
+        if (OperatingSystem.IsWindows()) return;
+        var watch = Start("/bin/sh", "-c", EasyTierProcessGuard.WatchScript, "jay-easytier", Environment.ProcessId.ToString(), "/bin/sleep", "600");
+        Assert.True(await Until(() => Core(watch.Id) > 0));
+        var core = Core(watch.Id);
+        await Task.Delay(300);
+        var started = DateTime.UtcNow;
+        Process.Start("kill", ["-TERM", watch.Id.ToString()])!.WaitForExit();
+        Assert.True(await Until(() => watch.HasExited && !Alive(core), 5));
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(2), $"took {(DateTime.UtcNow - started).TotalMilliseconds:F0} ms");
+    }
+
+    [Fact]
+    public async Task StopFallbackKillsWithoutStopping()
+    {
+        // A core that ignores TERM: after the timeout both processes go, through plain SIGKILLs.
+        if (OperatingSystem.IsWindows()) return;
+        var info = new ProcessStartInfo("/bin/sh") { UseShellExecute = false };
+        info.ArgumentList.Add("-c");
+        info.ArgumentList.Add("trap '' TERM; exec sleep 600");
+        EasyTierProcessGuard.Wrap(info);
+        var watch = Process.Start(info)!;
+        _started.Add(watch);
+        Assert.True(await Until(() => Core(watch.Id) > 0));
+        var core = Core(watch.Id);
+        EasyTierProcessGuard.Stop(watch, timeout: TimeSpan.FromSeconds(1));
+        Assert.True(await Until(() => watch.HasExited && !Alive(core), 5));
+    }
+
+    /// <summary>The core: the watcher's child running "sleep 600" (the watcher also has short-lived "sleep 1" children).</summary>
+    private static int Core(int watcher) =>
+        Children(watcher).FirstOrDefault(pid => CommandLine(pid).Contains("600", StringComparison.Ordinal));
+
+    private static string CommandLine(int pid)
+    {
+        var info = new ProcessStartInfo("ps") { UseShellExecute = false, RedirectStandardOutput = true };
+        foreach (var a in new[] { "-o", "args=", "-p", pid.ToString() }) info.ArgumentList.Add(a);
+        using var p = Process.Start(info)!;
+        var text = p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+        return text;
     }
 
     /// <summary>直接子进程（Linux 读 /proc，macOS 用 pgrep）。</summary>

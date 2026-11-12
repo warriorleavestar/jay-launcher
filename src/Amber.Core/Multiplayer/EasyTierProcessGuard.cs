@@ -18,8 +18,10 @@ internal static class EasyTierProcessGuard
     /// </summary>
     internal const string WatchScript =
         "trap '' HUP; p=$1; shift; \"$@\" & c=$!; " +
-        "trap 'kill -TERM $c 2>/dev/null' TERM INT; " +
-        "while kill -0 \"$p\" 2>/dev/null && kill -0 \"$c\" 2>/dev/null; do sleep 1; done; " +
+        // On TERM/INT: end the core, wait for it and leave at once (no further polling round).
+        "trap 'kill -TERM $c 2>/dev/null; wait \"$c\"; exit' TERM INT; " +
+        // `sleep 1 & wait` instead of a foreground sleep, so the trap runs as soon as the signal arrives.
+        "while kill -0 \"$p\" 2>/dev/null && kill -0 \"$c\" 2>/dev/null; do sleep 1 & wait $!; done; " +
         "kill -TERM \"$c\" 2>/dev/null; wait \"$c\"";
 
     /// <summary>非 Windows：把要启动的 easytier-core 改成经看门脚本启动。参数原样传，不经过 shell 拼接。</summary>
@@ -70,8 +72,9 @@ internal static class EasyTierProcessGuard
     /// <summary>
     /// Ends an EasyTier process started through <see cref="Wrap"/> (or the core itself on Windows).
     /// On Mac/Linux it asks the watcher with SIGTERM first; its trap ends the core and waits for it.
-    /// <c>Process.Kill(entireProcessTree: true)</c> is only the fallback: on Unix it SIGSTOPs the watcher before killing
-    /// the tree. A stopped process in Jay's process group, which is orphaned when Jay was started from the Dock or Finder,
+    /// If the watcher hasn't ended within the timeout, the fallback SIGKILLs the core and the watcher directly
+    /// (children first), and the exit trail notes it. It never uses <c>Process.Kill(entireProcessTree: true)</c>: on Unix
+    /// that SIGSTOPs the watcher before killing the tree. A stopped process in Jay's process group, which is orphaned when Jay was started from the Dock or Finder,
     /// makes macOS send SIGHUP to the whole group. That SIGHUP closed Jay itself right after the knock lobby ended (#229).
     /// </summary>
     /// <param name="wrapped">Whether <paramref name="process"/> is the watcher. Left out, it is read from the start info,
@@ -86,9 +89,41 @@ internal static class EasyTierProcessGuard
             {
                 return;
             }
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (process.HasExited) return;
+            if (OperatingSystem.IsWindows()) process.Kill(entireProcessTree: true);
+            else
+            {
+                Amber.Core.Diagnostics.ExitTrail.Note("process", $"easytier watcher pid {process.Id} did not stop on SIGTERM, killing it");
+                KillTreeWithoutStopping(process.Id);
+            }
         }
         catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    }
+
+    /// <summary>SIGKILLs <paramref name="pid"/>'s descendants (deepest first) and then the process itself. No SIGSTOP.</summary>
+    private static void KillTreeWithoutStopping(int pid)
+    {
+        foreach (var child in ChildPids(pid)) KillTreeWithoutStopping(child);
+        try { _ = kill(pid, 9); }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
+    }
+
+    /// <summary>Direct children, via pgrep (present on macOS and Linux). Empty when pgrep is missing or finds none.</summary>
+    internal static List<int> ChildPids(int pid)
+    {
+        try
+        {
+            var info = new ProcessStartInfo("pgrep") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            info.ArgumentList.Add("-P");
+            info.ArgumentList.Add(pid.ToString(CultureInfo.InvariantCulture));
+            using var p = Process.Start(info);
+            if (p is null) return [];
+            var text = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(2000);
+            return [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => int.TryParse(s.Trim(), CultureInfo.InvariantCulture, out var n) ? n : 0).Where(n => n > 0)];
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { return []; }
     }
 
     private static bool StartedThroughWatcher(Process process)
