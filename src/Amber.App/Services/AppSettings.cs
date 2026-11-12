@@ -308,6 +308,8 @@ public sealed class AppSettings
     public void Save()
     {
         if (ReadOnly) return;
+        // A new install shows the daily update check on: write that down, or the next start would read it as an upgrade.
+        AutoUpdateCheckSaved ??= true;
         var path = SavePathForTest ?? FilePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";

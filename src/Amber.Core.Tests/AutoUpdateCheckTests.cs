@@ -26,6 +26,16 @@ public sealed class AutoUpdateCheckTests
         Assert.Null(AutoUpdateCheck.ReleasePage(AutoUpdateCheck.OfficialFeed, Signed(null, verdict: ReleaseVerdict.NotEnoughSignatures)));
     }
 
+    [Theory]
+    [InlineData("https://api.github.com/repos/warriorleavestar/jay-launcher/releases/latest", true)]
+    [InlineData("https://API.github.com/repos/warriorleavestar/jay-launcher/releases/latest/", true)]
+    [InlineData(" https://api.github.com/repos/warriorleavestar/jay-launcher/releases/latest ", true)]
+    [InlineData("http://api.github.com/repos/warriorleavestar/jay-launcher/releases/latest", false)]
+    [InlineData("https://api.github.com/repos/someone/jay-launcher/releases/latest", false)]
+    [InlineData("https://api.github.com/repos/warriorleavestar/jay-launcher/releases/latest?x=1", false)]
+    [InlineData("abc", false)]
+    public void RecognisesTheOfficialFeedTypedByHand(string feed, bool official) => Assert.Equal(official, AutoUpdateCheck.IsOfficial(feed));
+
     [Fact]
     public void AnOwnFeedsPageMustBeHttpsOnTheFeedsHost()
     {

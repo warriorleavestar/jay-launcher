@@ -25,8 +25,8 @@ internal sealed class UpdateNotifier
     private readonly TrustList? _trust;
     private readonly Func<string, Exception?> _open;
     private bool _running;
-    private string? _offeredUrl;
-    private string? _offeredVersion;
+    /// <summary>The notices on the request bar, by dedupe key: their version and the page to open (null: none).</summary>
+    private readonly Dictionary<string, (string Version, string? Page)> _offers = [];
 
     /// <param name="http">Tests pass a fake feed; Jay uses the service's API client.</param>
     /// <param name="trust">Tests pass their own trustees; Jay uses the built-in list.</param>
@@ -47,6 +47,8 @@ internal sealed class UpdateNotifier
     public static UpdateNotifier? Start(LauncherService service)
     {
         if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS()) return null;
+        // Self-checks and page snapshots must not reach the network or put a notice on the request bar.
+        if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 } || Environment.GetEnvironmentVariable("AMBER_SNAPSHOT_DIR") is { Length: > 0 }) return null;
         var notifier = new UpdateNotifier(service);
         DispatcherTimer.RunOnce(() =>
         {
@@ -104,26 +106,33 @@ internal sealed class UpdateNotifier
     /// <param name="page">A page Jay can vouch for (<see cref="AutoUpdateCheck.ReleasePage"/>); without one there is no open button.</param>
     private void Offer(string version, string? page)
     {
-        _offeredVersion = version;
-        _offeredUrl = page;
+        // A newer version replaces an older notice that is still waiting.
+        foreach (var older in _offers.Keys.ToList())
+        {
+            _offers.Remove(older);
+            _service.Requests.Withdraw(older);
+        }
+        var key = "jay-update-" + version;
+        _offers[key] = (version, page);
         List<RequestChoice> choices = page is null ? [] : [new("open", L.T("tools.update.open_page"), IsDefault: true)];
         choices.Add(new("later", L.T("update.notice.later"), IsDefault: page is null));
         choices.Add(new("skip", L.T("update.notice.skip")));
         _service.Requests.Post(new RequestSpec(RequestKind, L.F("update.notice.title", version),
-            L.F("update.notice.body", UpdateChecker.CurrentVersion), choices, DedupeKey: "jay-update-" + version));
+            L.F("update.notice.body", UpdateChecker.CurrentVersion), choices, DedupeKey: key));
     }
 
     private void OnResolved(RequestHandle request)
     {
-        if (request.Spec.Kind != RequestKind || request.ResolvedBy == RequestSource.Program) return;
+        if (request.Spec.Kind != RequestKind || request.Spec.DedupeKey is not { } key || !_offers.Remove(key, out var offer)) return;
+        if (request.ResolvedBy == RequestSource.Program) return;
         switch (request.Choice)
         {
-            case "open" when _offeredUrl is { } url && UpdateChecker.TryGetSafeUpdateUrl(url, out var uri):
+            case "open" when offer.Page is { } url && UpdateChecker.TryGetSafeUpdateUrl(url, out var uri):
                 if (_open(uri!.AbsoluteUri) is { } error)
                     Toasts.Show(L.F("update.notice.open_failed", error.Message), Avalonia.Controls.Notifications.NotificationType.Error);
                 break;
-            case "skip" when _offeredVersion is { } version:
-                _service.Settings.SkippedUpdateVersion = version;
+            case "skip":
+                _service.Settings.SkippedUpdateVersion = offer.Version;
                 Save();
                 break;
         }

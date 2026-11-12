@@ -31,12 +31,18 @@ public static class AutoUpdateCheck
     public static string? ReleasePage(string feed, VerifiedUpdate update)
     {
         if (!update.IsVerified || update.Check.Tag is not { Length: > 0 } tag) return null;
-        if (string.Equals(feed, OfficialFeed, StringComparison.Ordinal)) return OfficialReleasePages + Uri.EscapeDataString(tag);
+        if (IsOfficial(feed)) return OfficialReleasePages + Uri.EscapeDataString(tag);
         if (update.Info.Url is null || !Uri.TryCreate(feed, UriKind.Absolute, out var feedUri)
             || !UpdateChecker.TryGetSafeUpdateUrl(update.Info.Url, out var page)) return null;
         return page!.Scheme == Uri.UriSchemeHttps && string.Equals(page.IdnHost, feedUri.IdnHost, StringComparison.OrdinalIgnoreCase)
             ? page.AbsoluteUri : null;
     }
+
+    /// <summary>Whether <paramref name="feed"/> is the official feed, also when typed in by hand (case, a trailing slash).</summary>
+    public static bool IsOfficial(string feed) =>
+        Uri.TryCreate(feed.Trim(), UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.Query.Length == 0 && uri.Fragment.Length == 0
+        && string.Equals(uri.IdnHost, new Uri(OfficialFeed).IdnHost, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(uri.AbsolutePath.TrimEnd('/'), new Uri(OfficialFeed).AbsolutePath, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether a newer version should be shown again: not when the user already dismissed this version.</summary>
     public static bool ShouldNotify(string version, string? dismissedVersion) =>

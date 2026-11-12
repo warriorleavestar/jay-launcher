@@ -27,20 +27,20 @@ public sealed class UpdateNotifierTests : IDisposable
     }
 
     /// <summary>A release feed for v99.0.0 with a package, its SHA-256 list and the list signed by <paramref name="signers"/>.</summary>
-    private static FakeHttp Release(TrustSigner[] signers, string page = Page)
+    private static FakeHttp Release(TrustSigner[] signers, string page = Page, string tag = "v99.0.0", long seq = 5)
     {
         var http = new FakeHttp();
         var sums = $"{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("package")))}  Jay-win-x64.zip\n";
-        var statement = new ReleaseStatement("v99.0.0", 5, new string('c', 40), Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sums))), Own.Hash, ReleaseStatement.NoLog);
+        var statement = new ReleaseStatement(tag, seq, new string('c', 40), Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sums))), Own.Hash, ReleaseStatement.NoLog);
         var sigs = signers.Aggregate(ReleaseSignature.Create(statement), (json, s) => ReleaseSignature.Cosign(json, s));
         var assets = new JsonArray();
         foreach (var (name, body) in new[] { ("Jay-win-x64.zip", "package"), (ReleaseSignature.SumsFileName, sums), (ReleaseSignature.SignatureFileName, sigs) })
         {
-            var url = $"https://releases.example.test/download/v99.0.0/{name}";
+            var url = $"https://releases.example.test/download/{tag}/{name}";
             http.On(url, body);
             assets.Add(new JsonObject { ["name"] = name, ["browser_download_url"] = url });
         }
-        http.On(Feed, new JsonObject { ["tag_name"] = "v99.0.0", ["html_url"] = page, ["body"] = "notes", ["assets"] = assets }.ToJsonString());
+        http.On(Feed, new JsonObject { ["tag_name"] = tag, ["html_url"] = page, ["body"] = "notes", ["assets"] = assets }.ToJsonString());
         return http;
     }
 
@@ -125,6 +125,13 @@ public sealed class UpdateNotifierTests : IDisposable
         Assert.True(new AppSettings().AutoUpdateCheck);
         Assert.True(AppSettings.Load(Path.Combine(_dir, "none.json"), File.ReadAllText).AutoUpdateCheck);
 
+        // A new install that saved anything (the first check's time, the first-run wizard) still has it on after a restart.
+        var fresh = AppSettings.Load(Path.Combine(_dir, "fresh.json"), File.ReadAllText);
+        fresh.SavePathForTest = Path.Combine(_dir, "fresh.json");
+        fresh.LastUpdateCheck = _now;
+        fresh.Save();
+        Assert.True(AppSettings.Load(fresh.SavePathForTest, File.ReadAllText).AutoUpdateCheck);
+
         // A settings file written by a Jay without the switch: checks stay on if it had an update address, off if not.
         var old = Path.Combine(_dir, "old.json");
         File.WriteAllText(old, """{"GameDirectory":"x"}""");
@@ -141,6 +148,41 @@ public sealed class UpdateNotifierTests : IDisposable
             Assert.Contains("\"AutoUpdateCheck\"", File.ReadAllText(saved.SavePathForTest));
             Assert.Equal(on, AppSettings.Load(saved.SavePathForTest, File.ReadAllText).AutoUpdateCheck);
         }
+    }
+
+    [Fact]
+    public async Task ANewerVersionReplacesAnOlderWaitingNotice()
+    {
+        // One notifier, as in Jay: the feed has v99.0.0 today and v99.0.1 tomorrow; today's notice was never answered.
+        var now = _now;
+        var feed = new SwitchingHttp(Release([T[0], T[1]]));
+        var settings = new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "", UpdateFeedUrl = Feed };
+        using var service = new LauncherService(settings);
+        var notifier = new UpdateNotifier(service, () => now, new HttpClient(feed), Path.Combine(_dir, "data"), Own, url =>
+        {
+            _opened.Add(url);
+            return null;
+        });
+        Assert.True(await notifier.CheckIfDueAsync());
+        var older = Notice(service)!;
+
+        feed.Current = Release([T[0], T[1]], "https://releases.example.test/v99.0.1", "v99.0.1", 6);
+        now = now.AddDays(1);
+        Assert.True(await notifier.CheckIfDueAsync());
+        Assert.True(older.IsResolved);
+        var newer = Notice(service)!;
+        Assert.Contains("99.0.1", newer.Spec.Title);
+        service.Requests.Resolve(newer, "open", RequestSource.Bar);
+        Assert.Equal(["https://releases.example.test/v99.0.1"], _opened);
+    }
+
+    /// <summary>A feed whose answers can be swapped between checks.</summary>
+    private sealed class SwitchingHttp(FakeHttp first) : HttpMessageHandler
+    {
+        public FakeHttp Current { get; set; } = first;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            new HttpMessageInvoker(Current, disposeHandler: false).SendAsync(request, ct);
     }
 
     [Fact]
