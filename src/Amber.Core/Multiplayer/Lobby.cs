@@ -61,7 +61,7 @@ public sealed class HostLobby : IAsyncDisposable
         Func<RoomCredentials> credentials, Func<byte[], bool> isTrusted, Func<KnockRequest, CancellationToken, Task<bool>> approve, MemberTable members, Action<string>? log = null,
         InviteBook? book = null, int? listenUdpPort = null, Func<Public.DevicePolicy>? devicePolicy = null,
         Func<Public.AccountPolicy?>? accountPolicy = null, Func<TimeSpan>? decisionWait = null, Action<KnockRequest>? timedOut = null,
-        Func<string, bool>? isTrustedJayAccount = null, Func<Identity.DeviceCertificate?>? jayCertificate = null, Func<bool>? alwaysAsk = null,
+        Func<string, bool>? isTrustedJayAccount = null, Func<Identity.JayProof?>? jayCertificate = null, Func<bool>? alwaysAsk = null,
         Func<DirectAddresses?>? directOffer = null)
     {
         HostLobby? lobby = null;
@@ -178,7 +178,7 @@ public static class LobbyJoin
     /// <param name="relayFound">连上了中继节点（大厅里看到了除自己以外的对端），在找房主。</param>
     public static async Task<KnockOutcome> KnockAsync(EasyTierInstaller installer, string workDir, IReadOnlyList<string> peers, JayInvite invite,
         X25519KeyPair me, string name, string version, Action<string>? log, Action? hostFound, CancellationToken ct, Action? relayFound = null,
-        Public.DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null, byte[]? expectedHost = null,
+        Public.DeviceFingerprint? device = null, string? account = null, Identity.JayProof? jay = null, byte[]? expectedHost = null,
         Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         var localPort = EasyTierArgs.FreeTcpPort();

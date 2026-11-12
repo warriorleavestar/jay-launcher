@@ -22,6 +22,9 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     /// <summary>这个成员要用的设备验证方案（房主开了验证、对方也支持时才有；只走加密的敲门回复）。</summary>
     public AttestationScheme? Scheme { get; init; }
 
+    /// <summary>Multi-path split settings (wrapped invite rooms only). <see cref="SplitSettings.None"/> when the room doesn't split.</summary>
+    public SplitSettings Split { get; init; } = SplitSettings.None;
+
     public static RoomCredentials Create(byte[] hostPublicKey, int gamePort, TunnelSettings tunnel) =>
         new(NewNetwork(), NewSecret(), 1, (byte[])hostPublicKey.Clone(), gamePort, RoomChat.Port, tunnel);
 
@@ -29,13 +32,13 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     private static string NewSecret() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
     /// <summary>踢人之后换网络：新的随机网络名和 256 位密钥，版本加一。其余不变。</summary>
-    public RoomCredentials Rotate() => this with { Network = NewNetwork(), Secret = NewSecret(), Epoch = Epoch + 1, Member = null };
+    public RoomCredentials Rotate() => this with { Network = NewNetwork(), Secret = NewSecret(), Epoch = Epoch + 1, Member = null, Split = Split.Rotate() };
 
     /// <summary>发给留下来的成员的那部分（经他们各自的成员通道）。</summary>
-    public RoomRekey ToRekey() => new(Network, Secret, Epoch);
+    public RoomRekey ToRekey() => new(Network, Secret, Epoch) { SplitNets = UsableSplit.Nets };
 
     /// <summary>加入方：按凭据建出内部的房间对象。</summary>
-    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch);
+    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch) with { Split = UsableSplit };
 
     /// <summary>房主：建房间对象，带上成员表，并给自己（本机的聊天客户端）发一把钥匙。</summary>
     public RoomCode ToHostRoom(MemberTable members, string hostName)
@@ -43,8 +46,15 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         // 已经有房主自己的那把就接着用：再发一把会让房主本机正在用的聊天钥匙作废。
         var self = members.Host ?? members.Issue(HostPublicKey, hostName, isHost: true);
         if (!self.PublicKey.AsSpan().SequenceEqual(HostPublicKey)) throw new InvalidOperationException("member table belongs to another host");
-        return RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, self.Key, members, Epoch);
+        return RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, self.Key, members, Epoch) with { Split = UsableSplit };
     }
+
+    /// <summary>An extra network must differ from the room's own one; otherwise the split is ignored.</summary>
+    private static SplitSettings SplitFor(SplitSettings split, string network, string secret) =>
+        split.Nets.Any(n => n.Network == network || n.Secret == secret) ? SplitSettings.None : split;
+
+    /// <summary>Splitting needs the wrapped tunnel (each leg is a member channel handshake); general mode never splits.</summary>
+    private SplitSettings UsableSplit => Tunnel.Wraps ? Split : SplitSettings.None;
 
     public override string ToString() => "RoomCredentials";
 
@@ -60,6 +70,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         ["memberId"] = Member?.IdHex ?? throw new InvalidOperationException("no member key"),
         ["memberPsk"] = Member.PskBase64,
         ["attest"] = Scheme?.ToJson(),
+        ["split"] = UsableSplit.Enabled ? UsableSplit.ToJson() : null,
     };
 
     internal static RoomCredentials FromJson(JsonNode json)
@@ -86,6 +97,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
             {
                 Member = new MemberKey(Convert.FromHexString(memberId), psk),
                 Scheme = json["attest"] is JsonObject attest ? AttestationScheme.FromJson(attest) : null,
+                Split = tunnel.Wraps ? SplitFor(SplitSettings.FromJson(json["split"]), net, secret) : SplitSettings.None,
             };
         }
         finally
@@ -100,9 +112,17 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
 /// </summary>
 public sealed record RoomRekey(string Network, string Secret, int Epoch)
 {
+    /// <summary>The new networks for the extra split paths (empty when the room doesn't split).</summary>
+    public IReadOnlyList<SplitNet> SplitNets { get; init; } = [];
+
     public override string ToString() => "RoomRekey";
 
-    internal JsonObject ToJson() => new() { ["ctl"] = "rekey", ["net"] = Network, ["secret"] = Secret, ["epoch"] = Epoch };
+    internal JsonObject ToJson()
+    {
+        var json = new JsonObject { ["ctl"] = "rekey", ["net"] = Network, ["secret"] = Secret, ["epoch"] = Epoch };
+        if (SplitNets.Count > 0) json["split"] = new JsonObject { ["nets"] = SplitSettings.NetsToJson(SplitNets) };
+        return json;
+    }
 
     /// <summary>格式不对返回 null。</summary>
     internal static RoomRekey? FromJson(JsonNode json)
@@ -114,7 +134,10 @@ public sealed record RoomRekey(string Network, string Secret, int Epoch)
             var epoch = json["epoch"]?.GetValue<int>();
             if (net is null || secret is null || epoch is not { } e || e < 2) return null;
             if (!KnockProtocol.NetworkPattern().IsMatch(net) || !KnockProtocol.SecretPattern().IsMatch(secret)) return null;
-            return new RoomRekey(net, secret, e);
+            // Extra split networks: a malformed list just means none (the room then stops splitting, see SplitSettings.WithNets).
+            IReadOnlyList<SplitNet> nets = json["split"] is JsonObject split && split["nets"] is { } list ? SplitSettings.NetsFromJson(list) ?? [] : [];
+            if (nets.Any(n => n.Network == net || n.Secret == secret)) nets = [];
+            return new RoomRekey(net, secret, e) { SplitNets = nets };
         }
         catch (Exception x) when (x is InvalidOperationException or FormatException)
         {
@@ -127,9 +150,38 @@ public sealed record RoomRekey(string Network, string Secret, int Epoch)
 public static partial class KnockProtocol
 {
     public const int Port = 47660;
-    public const int MaxFrame = 8192;
+    /// <summary>
+    /// Large enough for a Jay account proof (privacy plan item 7): the device certificate (two ML-DSA-65 public keys and a
+    /// hybrid account signature, about 9.9 KB as JSON) plus a live device signature (about 4.5 KB) is about 14.5 KB.
+    /// Older versions read at most 8 KB, so proofs are only sent to a side that said it reads them (<see cref="JayProofField"/>).
+    /// </summary>
+    public const int MaxFrame = 32 * 1024;
+
+    /// <summary>
+    /// The limit before the other side has proven anything: the invite id, the guest's first handshake message and the
+    /// host's hello. None of them carries a proof, so they keep the old 8 KB limit.
+    /// </summary>
+    public const int MaxEarlyFrame = 8 * 1024;
     public const int MaxNameLength = 32;
     public const int IdLength = 8;
+
+    /// <summary>
+    /// The field both sides set to true to say they read version 2 Jay account proofs: the host in its hello, the guest in
+    /// its about. A proof goes only to a side that set it. Older versions used "jay" for single-signature certificates;
+    /// that field is no longer sent or read, so mixing versions just leaves the account out.
+    /// </summary>
+    public const string JayProofField = "jay2";
+
+    internal static bool Says(JsonNode? node, string field) =>
+        node?[field] is JsonValue value && value.TryGetValue<bool>(out var yes) && yes;
+
+    /// <summary>
+    /// What a Jay account proof signs (<see cref="Identity.JayProof"/>): who is proving, and the handshake hash at that point.
+    /// The guest's proof travels inside the last handshake message, so it covers the hash before that message; the host's
+    /// covers the finished handshake.
+    /// </summary>
+    public static byte[] JayContext(bool guest, ReadOnlySpan<byte> handshakeHash) =>
+        [.. (guest ? "jay-knock-guest\n"u8 : "jay-knock-host\n"u8), .. handshakeHash];
 
     /// <summary>"JAY-KNOCK-2" + 大厅名 + 8 字节邀请编号：握手同时确认了双方说的是同一张邀请。</summary>
     public static byte[] Prologue(string lobbyName, ReadOnlySpan<byte> inviteId) => [.. Encoding.ASCII.GetBytes("JAY-KNOCK-2" + lobbyName), .. inviteId];
@@ -167,12 +219,12 @@ public static partial class KnockProtocol
         await stream.FlushAsync(ct);
     }
 
-    public static async Task<byte[]> ReadFrameAsync(Stream stream, CancellationToken ct)
+    public static async Task<byte[]> ReadFrameAsync(Stream stream, CancellationToken ct, int max = MaxFrame)
     {
         var header = new byte[2];
         await stream.ReadExactlyAsync(header, ct);
         var length = BinaryPrimitives.ReadUInt16BigEndian(header);
-        if (length > MaxFrame) throw new InvalidDataException(L.T("core.mp.knock.toolarge"));
+        if (length > Math.Min(max, MaxFrame)) throw new InvalidDataException(L.T("core.mp.knock.toolarge"));
         var payload = new byte[length];
         await stream.ReadExactlyAsync(payload, ct);
         return payload;
@@ -223,6 +275,9 @@ public sealed record KnockOutcome(RoomCredentials? Credentials, string? Reason, 
     /// <summary>The host's Jay account, when the host sent a certificate for the key it proved in the handshake (only after approving).</summary>
     public string? HostJayAccount { get; init; }
 
+    /// <summary>The host's device certificate behind <see cref="HostJayAccount"/> (checked with a live device signature).</summary>
+    public Identity.DeviceCertificate? HostJayDevice { get; init; }
+
     /// <summary>
     /// The host's direct-link addresses, sent only after approval inside the encrypted reply (direct rooms only).
     /// Never shown and never put into any code.
@@ -261,7 +316,7 @@ public static class KnockClient
     /// </param>
     public static async Task<KnockOutcome> KnockAsync(Stream stream, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct = default, TimeSpan? handshakeTimeout = null, TimeSpan? decisionTimeout = null, Public.DeviceFingerprint? device = null,
-        string? account = null, byte[]? expectedHost = null, Identity.DeviceCertificate? jay = null,
+        string? account = null, byte[]? expectedHost = null, Identity.JayProof? jay = null,
         Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
@@ -274,7 +329,7 @@ public static class KnockClient
             timeout.CancelAfter(handshakeTimeout ?? HandshakeTimeout);
             await KnockProtocol.WriteFrameAsync(stream, inviteId, timeout.Token);
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), timeout.Token);
-            var hello = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token)));
+            var hello = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token, KnockProtocol.MaxEarlyFrame)));
             if (hello["v"]?.GetValue<int>() != 1) throw new InvalidDataException(L.T("core.mp.knock.badreply"));
             // An invite that came by sealed mail names its host: someone else holding the same invite can't pose as the host.
             // Checked before this side says anything about itself.
@@ -285,9 +340,13 @@ public static class KnockClient
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
                 about["device"] = device.Prove(host, me.PublicKey, KnockProtocol.ReadChallenges(ask)).ToJson();
             if (account is not null && hello["account"]?.GetValue<bool>() == true) about["account"] = account;
-            if (jay is not null && jay.DeviceKey.AsSpan().SequenceEqual(me.PublicKey) && hello["jay"]?.GetValue<bool>() == true) about["jay"] = jay.ToJson();
+            // This side reads Jay account proofs: the host may send its own once it lets us in.
+            about[KnockProtocol.JayProofField] = true;
+            if (jay is not null && jay.Certificate.DeviceKey.AsSpan().SequenceEqual(me.PublicKey) && KnockProtocol.Says(hello, KnockProtocol.JayProofField))
+                about["proof"] = jay.ToJson(KnockProtocol.JayContext(guest: true, handshake.HandshakeHash));
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(about)), timeout.Token);
         }
+        var finalHash = handshake.HandshakeHash;
         var hostPub = handshake.RemoteStaticPublicKey ?? throw new CryptographicException();
         var (send, receive) = handshake.Split();
         using (send)
@@ -340,9 +399,11 @@ public static class KnockClient
             using var ack = CancellationTokenSource.CreateLinkedTokenSource(ct);
             ack.CancelAfter(handshakeTimeout ?? HandshakeTimeout);
             await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(ackMessage)), ack.Token);
+            var hostJay = Identity.JayProof.Verified(reply["proof"], hostPub, KnockProtocol.JayContext(guest: false, finalHash));
             return new KnockOutcome(credentials, null, hostPub)
             {
-                HostJayAccount = Identity.DeviceCertificate.VerifiedAccount(reply["jay"], hostPub),
+                HostJayDevice = hostJay,
+                HostJayAccount = hostJay?.Account,
                 HostAddresses = hostAddresses,
             };
         }
@@ -601,6 +662,9 @@ public sealed record KnockRequest(string Name, byte[] PublicKey, string Version,
     /// <summary>The guest's Jay account (jay1…), when they sent a certificate that the account signed for the key they proved.</summary>
     public string? JayAccount { get; init; }
 
+    /// <summary>The guest's device certificate behind <see cref="JayAccount"/> (checked with a live device signature).</summary>
+    public Identity.DeviceCertificate? JayDevice { get; init; }
+
     /// <summary>Let in because the host trusts the Jay account, not this device's key (a trusted friend on a new device).</summary>
     public bool TrustedByAccount { get; init; }
 
@@ -714,8 +778,8 @@ public sealed class KnockServer : IAsyncDisposable
     /// <summary>Whether the host trusts a Jay account (any device the account certified). Null: trust goes by device key only.</summary>
     public Func<string, bool>? IsTrustedJayAccount { get; init; }
 
-    /// <summary>The host's own Jay account certificate, sent to a guest only once they are let in.</summary>
-    public Func<Identity.DeviceCertificate?>? JayCertificate { get; init; }
+    /// <summary>The host's own Jay account certificate and device keys, sent to a guest only once they are let in.</summary>
+    public Func<Identity.JayProof?>? JayCertificate { get; init; }
 
     /// <summary>测试用：包一层连接的流（模拟写失败）。</summary>
     internal Func<Stream, Stream>? StreamForTest { get; init; }
@@ -813,6 +877,7 @@ public sealed class KnockServer : IAsyncDisposable
         NoiseHandshake? handshake = null;
         PendingInvite? invite;
         JsonNode about;
+        byte[] guestContext = [], hostContext = [];
         var policy = DevicePolicy?.Invoke() ?? Public.DevicePolicy.None;
         var accountPolicy = AccountPolicy?.Invoke();
         try
@@ -821,7 +886,7 @@ public sealed class KnockServer : IAsyncDisposable
             timeout.CancelAfter(_limits.HandshakeTimeout);
             try
             {
-                var id = await KnockProtocol.ReadFrameAsync(stream, timeout.Token);
+                var id = await KnockProtocol.ReadFrameAsync(stream, timeout.Token, KnockProtocol.MaxEarlyFrame);
                 invite = id.Length == KnockProtocol.IdLength ? _book.Find(id) : null;
                 // A password invite while password guessing is suspected: answer exactly as for an unknown id.
                 if (invite is { FromPassword: true } && IsPasswordPaused) invite = null;
@@ -836,14 +901,16 @@ public sealed class KnockServer : IAsyncDisposable
                 var psk = LobbyKeys.KnockPsk(invite.Invite.Token);
                 handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, false, KnockProtocol.Prologue(lobby.Name, invite.Id), psk, _identity);
                 CryptographicOperations.ZeroMemory(psk);
-                handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token));
+                handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token, KnockProtocol.MaxEarlyFrame));
                 var hello = new JsonObject { ["v"] = 1 };
                 if (policy.IsActive) hello["device"] = KnockProtocol.WriteChallenges(policy.Allowed);
                 if (accountPolicy is not null) hello["account"] = true;
-                // Ask for a Jay account certificate; older guests ignore the field.
-                hello["jay"] = true;
+                // Ask for a Jay account proof; older guests ignore the field.
+                hello[KnockProtocol.JayProofField] = true;
                 await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(hello)), timeout.Token);
+                guestContext = KnockProtocol.JayContext(guest: true, handshake.HandshakeHash);
                 about = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token)));
+                hostContext = KnockProtocol.JayContext(guest: false, handshake.HandshakeHash);
                 if (about["v"]?.GetValue<int>() != 1) throw new InvalidDataException(L.T("core.mp.knock.badreply"));
             }
             catch (Exception e) when (e is IOException or EndOfStreamException or CryptographicException or InvalidDataException
@@ -913,7 +980,8 @@ public sealed class KnockServer : IAsyncDisposable
                         return;
                     }
                 }
-                var jayAccount = Identity.DeviceCertificate.VerifiedAccount(about["jay"], guestPub);
+                var jayDevice = Identity.JayProof.Verified(about["proof"], guestPub, guestContext);
+                var jayAccount = jayDevice?.Account;
                 var trustedKey = _isTrusted(guestPub);
                 var trustedAccount = !trustedKey && jayAccount is not null && IsTrustedJayAccount?.Invoke(jayAccount) == true;
                 var request = new KnockRequest(name ?? "", (byte[])guestPub.Clone(), version ?? "", trustedKey || trustedAccount, invite)
@@ -921,6 +989,7 @@ public sealed class KnockServer : IAsyncDisposable
                     DeviceId = deviceOk ? proof!.DeviceId : null,
                     Account = account?.User,
                     JayAccount = jayAccount,
+                    JayDevice = jayDevice,
                     TrustedByAccount = trustedAccount,
                 };
                 JsonObject reply;
@@ -934,7 +1003,8 @@ public sealed class KnockServer : IAsyncDisposable
                     var attestation = guestAttests ? _members.Attestation : null;
                     member.Attests = attestation is not null;
                     reply = (_credentials() with { Member = member.Key, Scheme = attestation?.Scheme }).ToJson();
-                    if (JayCertificate?.Invoke() is { } hostCert && hostCert.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["jay"] = hostCert.ToJson();
+                    if (KnockProtocol.Says(about, KnockProtocol.JayProofField) && JayCertificate?.Invoke() is { } hostProof
+                        && hostProof.Certificate.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["proof"] = hostProof.ToJson(hostContext);
                     if (DirectOffer?.Invoke() is { } offered) reply["direct"] = offered.ToJson();
                 }
                 else reply = Reject("denied");

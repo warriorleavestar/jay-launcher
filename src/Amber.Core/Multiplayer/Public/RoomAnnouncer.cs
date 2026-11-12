@@ -156,7 +156,7 @@ public static class PublicJoin
     /// 对不上就当没成功，免得有人在目录里冒用别人的房间。
     /// </summary>
     public static async Task<KnockOutcome> KnockAsync(IPublicNetwork network, string hostIp, JayInvite invite, X25519KeyPair me, string name, string version,
-        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
+        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.JayProof? jay = null,
         Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         for (var attempt = 0; ; attempt++)
@@ -215,7 +215,7 @@ public static class PublicJoin
     /// <param name="searching">Called when nothing was found yet and the lookup waits for the next directory refresh.</param>
     /// <param name="failed">Called for an address that failed (then the next one is tried), for diagnostics.</param>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
-        CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
+        CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.JayProof? jay = null,
         byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, DateTimeOffset? freshSince = null, Action? searching = null, Action<string, Exception>? failed = null)
     {
         var hits = await (client ?? new RoomDirectoryClient(network)).LookupAllAsync(invite.LobbyKey, ct, expectedHost, freshSince, searching);

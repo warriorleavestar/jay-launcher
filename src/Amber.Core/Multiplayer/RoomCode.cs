@@ -31,7 +31,7 @@ public sealed record RoomCode(string Network, string Secret, int Port)
 
     /// <summary>换到房主发来的新网络（成员钥匙、成员表、封装方式都不变）。</summary>
     public RoomCode Rekeyed(RoomRekey next) => FromInvite && next.Epoch > Epoch
-        ? this with { Network = next.Network, Secret = next.Secret, Epoch = next.Epoch }
+        ? this with { Network = next.Network, Secret = next.Secret, Epoch = next.Epoch, Split = Split.WithNets(next.SplitNets) }
         : throw new InvalidOperationException("stale or non-invite rekey");
 
     /// <summary>邀请房间的房主：成员表（编号 → psk），游戏通道和聊天按它认人。加入方是 null。</summary>
@@ -62,7 +62,10 @@ public sealed record RoomCode(string Network, string Secret, int Port)
         : Secret;
 
     /// <summary>要在日志里遮掉的密钥（房间密钥和派生出来的 EasyTier 密钥）。</summary>
-    public IReadOnlyList<string> Secrets => FromInvite ? [Secret, Network] : Tunnel.Wraps ? [Secret, EasyTierSecret] : [Secret];
+    public IReadOnlyList<string> Secrets => FromInvite ? [Secret, Network, .. Split.Nets.SelectMany(n => new[] { n.Secret, n.Network })] : Tunnel.Wraps ? [Secret, EasyTierSecret] : [Secret];
+
+    /// <summary>Multi-path split settings of an invite room (from the credentials; rotated with the network on rekey).</summary>
+    public Transport.SplitSettings Split { get; init; } = Transport.SplitSettings.None;
 
     /// <summary>联机和聊天的封装方式，房间里所有人一样。</summary>
     public Transport.TunnelSettings Tunnel { get; init; } = Transport.TunnelSettings.Default;
