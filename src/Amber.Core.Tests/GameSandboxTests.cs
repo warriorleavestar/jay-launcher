@@ -473,9 +473,7 @@ public sealed class GameSandboxTests : IDisposable
         Assert.Equal("runas", psi.Verb);
         Assert.True(psi.UseShellExecute);
         Assert.Equal(@"C:\Jay\Jay.exe", psi.FileName);
-        // Loopback setup names the current Windows user (read before elevation) for the inbound filters.
-        var user = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
-        Assert.Equal($@"--jay-sandbox-setup --loopback --user={user} D:\ ""D:\My Games\\""", psi.Arguments);
+        Assert.Equal(@"--jay-sandbox-setup --loopback D:\ ""D:\My Games\\""", psi.Arguments);
         Assert.Equal(["--jay-sandbox-undo", "--no-loopback"], WindowsSandboxSetup.Arguments(undo: true, loopback: false, []));
     }
 

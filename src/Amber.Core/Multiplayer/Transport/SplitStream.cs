@@ -287,9 +287,15 @@ public sealed class SplitStream : Stream, IAuthenticatedStream
     {
         if (Volatile.Read(ref _aborted) != 0)
             foreach (var leg in _legs) leg.Abort();
-        await Task.WhenAll(_legs.Select(l => l.DisposeAsync().AsTask()));
-        CryptographicOperations.ZeroMemory(_readBuffer);
-        _writeLock.Dispose();
+        try
+        {
+            await Task.WhenAll(_legs.Select(l => l.DisposeAsync().AsTask()));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(_readBuffer);
+            _writeLock.Dispose();
+        }
     }
 
     protected override void Dispose(bool disposing)

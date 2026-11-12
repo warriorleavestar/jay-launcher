@@ -49,7 +49,7 @@
 | 启动器数据目录 | `SpecialFolder.ApplicationData/Amber`：Windows `%APPDATA%\Amber`，macOS `~/Library/Application Support/Amber`，Linux `~/.config/Amber`。环境变量 `AMBER_DATA_DIR` 可以改（测试必须用它） |
 | 设置 | `<数据目录>/settings.json` |
 | 账号 | `<数据目录>/accounts.json`，非 Windows 另有 `accounts.json.key` |
-| 联机身份 | `<数据目录>/identity.key`，非 Windows 另有 `identity.wrap` |
+| 联机身份 | `<数据目录>/device.key`（旧版本的 `identity.key` 只读），非 Windows 另有 `identity.wrap` |
 | 信任的成员 | `<数据目录>/trusted.json` |
 | 加入过的 Jay 服务器 | `<数据目录>/jay-servers.json` |
 | EasyTier | `<数据目录>/easytier/2.6.4/<平台>/`，运行目录 `easytier/run`、`run-lan`、`lobby`、`lobby-join` |
@@ -145,7 +145,7 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
   - **钥匙串 / Secret Service 暂不做（2026-11-09 评估）**：
     - macOS：现在是临时签名，每次更新签名都变，钥匙串会在每次更新后弹框要密码，拒绝了就得重新登录；等正式签名（SignPath / Apple 开发者账号）后再做，存进钥匙串的只是那把 32 字节包裹密钥，数据格式不变。
     - Linux：Secret Service 没有按程序隔离，同一用户的任何程序都能读已解锁的条目，安全上只比 0600 文件多了“不在数据目录里”；而迁移后钥匙环没解锁或没装（无界面登录、KDE 没开 KWallet）时会读不到身份和登录，代价大于收益。
-- CurseForge API Key 存在 `settings.json`（或 `AMBER_CF_KEY`），是明文；仓库里不放任何 Key。
+- CurseForge API Key：用户自己的存在 `settings.json`（或 `AMBER_CF_KEY`），是明文；官方桌面版另有构建时由 CI secret 注入的第三方 Key（`CurseForgeBuiltInKey.cs`），Android 还没有接入。仓库里不放任何 Key。
 
 ### 3.5 模组、整合包、资源 ✅
 
@@ -163,7 +163,8 @@ Linux 可以补的：SDKMAN（`~/.sdkman/candidates/java`）、`/usr/lib64/jvm`�
 ### 3.7 崩溃分析、工具箱、更新检查 ✅
 
 - `Diagnostics/CrashAnalyzer.cs`：分析崩溃日志，列出疑似模组，导出报告。
-- `Launch/Toolbox.cs`：清理日志、崩溃报告、natives 和下载残留；提前下载 Java；更新检查只在用户填了更新地址时联网，只提示不下载。
+- `Launch/Toolbox.cs`：清理日志、崩溃报告、natives 和下载残留；提前下载 Java。
+- 更新检查：`Launch/UpdateCheck.cs` 验签（3 位信任人里 2 位），`Launch/AutoUpdateCheck.cs` 定官方源、每天一次的间隔和可信的下载页，`Amber.App/Services/UpdateNotifier.cs` 跑定时检查并把新版本放进请求条。新装默认开、从旧版升级保持关，可换地址，只提示不下载。Android/iOS 没有每日检查（`AutoUpdateCheck.IsSupported`），没填地址时手动检查也不查桌面版发布页。
 
 ### 3.8 界面 ✅
 

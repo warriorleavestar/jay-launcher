@@ -51,6 +51,14 @@ public sealed partial class MultiplayerViewModel
                 SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", known));
                 return null;
             }
+            // A game in the strong sandbox can't be reached by EasyTier or the direct bridge over loopback, only
+            // through Jay (GameLanBridge): put the relay in front of the game whenever such a game is running.
+            if (!FullLanMode && GameLanBridge.HasAgents)
+            {
+                var front = new GamePortRelay();
+                front.SetTarget(known);
+                return (front.Port, front);
+            }
             return (known, null);
         }
         // Full-LAN rooms reach the host's virtual address, not loopback, so the relay can't sit in front of the game.
@@ -67,8 +75,11 @@ public sealed partial class MultiplayerViewModel
     {
         if (relay is null) return;
         _gameRelay = relay;
-        _relayGameLabel = null;
-        IsWaitingForGame = true;
+        // A relay put in front of a known game (strong sandbox) is linked already.
+        _relayGameLabel = relay.Target is { } port
+            ? ManualPortValue is not null ? L.F("multiplayer.guide.port_label", port) : SelectedLanGame?.Label ?? L.F("multiplayer.guide.port_label", port)
+            : null;
+        IsWaitingForGame = relay.Target is null;
         OnPropertyChanged(nameof(HasGameRelay));
         OnPropertyChanged(nameof(GameLinkText));
     }

@@ -117,7 +117,7 @@ public sealed class SandboxFindingsTests : IDisposable
     [Fact]
     public async Task StrongSandbox_DeclinedOnce_UsesStandard_AndDoesNotAskAgainUntilRetry()
     {
-        if (!OperatingSystem.IsWindows() || Amber.Core.Launch.WindowsSandbox.LoopbackReady(setupRecorded: false)) return;
+        if (!OperatingSystem.IsWindows() || Amber.Core.Launch.WindowsSandbox.LoopbackExempt()) return;
         var java = Path.Combine(_game, "jdk21", "bin", "java.exe");
         Directory.CreateDirectory(Path.GetDirectoryName(java)!);
         File.WriteAllText(java, "");

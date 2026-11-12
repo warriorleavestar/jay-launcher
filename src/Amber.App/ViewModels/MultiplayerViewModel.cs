@@ -745,6 +745,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (!TryStartSession(new EasyTierOptions(room, false, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), local, TestListeners, Guid.NewGuid().ToString(), FullLanMode, chatPort, FullLanMode && AllowExitNode)
             {
                 LocalTunnelPort = wraps && !FullLanMode ? EasyTierArgs.FreeTcpPort() : null,
+                // One local port per split leg (each forwarded over its own network); none when the room doesn't split.
+                LocalSplitPorts = wraps && !FullLanMode && room.FromInvite && room.Split.Enabled ? [.. Enumerable.Range(0, room.Split.Paths).Select(_ => EasyTierArgs.FreeTcpPort())] : null,
                 LocalRemotePort = remotePort,
                 AllowProxy = AllowGameProxy,
             })) return false;
@@ -779,7 +781,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SetStatus(StatusMessage.Failure("multiplayer.room.start_failed", e, ErrorText.Of(e)));
             return false;
         }
-        if (!TryStartTransport(options)) return false;
+        // The session's options carry the leg ports it bound for a room that splits.
+        if (!TryStartTransport(_session?.Options ?? options)) return false;
         _sessionCts = new CancellationTokenSource();
         var ipIndex = EasyTierArgs.Build(options).IndexOf("--ipv4");
         MyVirtualIp = options.Tun ? EasyTierArgs.Build(options)[ipIndex + 1] : "";
@@ -795,7 +798,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     {
         try
         {
-            _transport = RoomTransport.Start(options, line => _diag.Add(L.T("multiplayer.transport.diagnostics_category"), line));
+            _transport = RoomTransport.Start(options, line => _diag.Add(L.T("multiplayer.transport.diagnostics_category"), line),
+                () => _session is EasyTierSession { SplitPaths: { } paths } ? paths.Problem : L.T("core.mp.split.not_ready"));
             _currentOptions = options;
         }
         catch (System.Net.Sockets.SocketException e)
@@ -881,7 +885,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 return false;
             }
         }
-        if (!TryStartTransport(options))
+        if (!TryStartTransport(_session?.Options ?? options))
         {
             StopSession();
             return false;
@@ -1180,17 +1184,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private static async Task<bool> CanConnectAsync(int port)
     {
-        using var client = new TcpClient();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        try
-        {
-            await client.ConnectAsync("127.0.0.1", port, timeout.Token);
-            return true;
-        }
-        catch (Exception e) when (e is SocketException or OperationCanceledException)
-        {
-            return false;
-        }
+        // Through the game's LAN bridge when the port is a game in the strong sandbox's, else directly.
+        using var socket = await GameLanBridge.ConnectAsync(port, TimeSpan.FromSeconds(2));
+        return socket is not null;
     }
 
     /// <summary>复制房间码、邀请码、直连码用的剪贴板：5 分钟后自动清掉（换台电脑粘贴也来得及）（自检里换成短一点的）。</summary>

@@ -347,22 +347,10 @@ public static unsafe class WindowsSandbox
     }
 
     /// <summary>
-    /// True when Jay's game container may use loopback both ways (the exemption and the inbound filters the one admin
-    /// prompt adds). Reading both needs no admin. False when the container does not exist yet. An unknown filter state
-    /// counts as ready only when this Jay recorded a successful loopback setup (<paramref name="setupRecorded"/>).
+    /// True when Jay's game container may use loopback (the exemption the one admin prompt adds). Reading the list needs
+    /// no admin. False when the container does not exist yet.
     /// </summary>
-    public static bool LoopbackReady(bool setupRecorded) => LoopbackSetupRules.Ready(IsExempt(), WindowsLoopbackInbound.Check(), setupRecorded);
-
-    /// <summary>Only the exemption (the game may connect out to loopback), without the inbound filters.</summary>
-    public static bool IsExempt() => LoopbackExempt(ContainerName);
-
-    /// <summary>
-    /// True when any part of the admin step's loopback setup is there (what "remove sandbox permissions" undoes). An
-    /// unknown filter state counts only when this Jay recorded a successful loopback setup
-    /// (<paramref name="setupRecorded"/>): then leaving filters behind is the risk; otherwise a machine whose filter
-    /// engine never answers would offer to undo something that was never done.
-    /// </summary>
-    public static bool HasLoopbackSetup(bool setupRecorded) => LoopbackSetupRules.HasSetup(IsExempt(), WindowsLoopbackInbound.Check(), setupRecorded);
+    public static bool LoopbackExempt() => LoopbackExempt(ContainerName);
 
     internal static bool LoopbackExempt(string name)
     {
@@ -495,6 +483,14 @@ public static unsafe class WindowsSandbox
 
     /// <summary>Writes the file system jar into <paramref name="folder"/> (once per content) and returns its path, or null when this build has none.</summary>
     public static string? FileSystemJar(string folder) => EmbeddedJar(FileSystemResource, "jay-fs", folder);
+
+    // ---------------------------------------------------------------- rooms reaching a game in the strong sandbox
+
+    /// <summary>The LAN bridge agent's resource (tools/jay-lan, see <see cref="Multiplayer.GameLanBridge"/>); missing when the build had no JDK.</summary>
+    internal const string LanBridgeResource = "Amber.Core.jay-lan.jar";
+
+    /// <summary>Writes the LAN bridge jar into <paramref name="folder"/> (once per content) and returns its path, or null when this build has none.</summary>
+    public static string? LanBridgeJar(string folder) => EmbeddedJar(LanBridgeResource, "jay-lan", folder);
 
     /// <summary>
     /// Java's "may I write this?" (<c>Files.isWritable</c>, used by zip file systems among others) checks a file's

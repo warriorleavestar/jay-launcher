@@ -29,6 +29,15 @@
   </ItemGroup>
 
   <!--
+    CurseForge third-party API key for official builds: CI passes the repository secret CURSEFORGE_API_KEY as the
+    environment variable JAY_CURSEFORGE_API_KEY (push to main and tags only). It is never in the repository; local and
+    PR builds have none and fall back to the user's own key (Content/CurseForgeBuiltInKey.cs).
+  -->
+  <ItemGroup Condition="'$(JAY_CURSEFORGE_API_KEY)' != ''">
+    <AssemblyMetadata Include="Jay.CurseForgeApiKey" Value="$(JAY_CURSEFORGE_API_KEY)" />
+  </ItemGroup>
+
+  <!--
     Jay's DNS fallback for the Windows strong sandbox (tools/jay-dns, Java 18+): compiled from source with a local JDK
     and embedded as Amber.Core.jay-dns.jar. Without a JDK the build goes on without it (a warning) and Java 18+ games
     use the standard sandbox; release builds pass -p:RequireJayDns=true so a missing JDK fails the build instead.
@@ -105,6 +114,41 @@
   <Target Name="EmbedJayFs" AfterTargets="BuildJayFs" BeforeTargets="BeforeBuild" Condition="Exists('$(IntermediateOutputPath)jay-fs.jar')">
     <ItemGroup>
       <EmbeddedResource Include="$(IntermediateOutputPath)jay-fs.jar" LogicalName="Amber.Core.jay-fs.jar" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Jay's LAN bridge for the Windows strong sandbox (tools/jay-lan, Java 8 bytecode): a Java agent that connects out of the
+    game to Jay so room members reach a world opened to LAN (Jay cannot connect into the AppContainer over loopback).
+    Same JDK lookup and RequireJayDns switch as jay-dns.
+  -->
+  <PropertyGroup>
+    <JayLanSource>$(MSBuildThisFileDirectory)..\..\tools\jay-lan\src</JayLanSource>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <JayLanJava Include="$(JayLanSource)\**\*.java" />
+    <JayLanMeta Include="$(JayLanSource)\META-INF\**\*" />
+  </ItemGroup>
+
+  <Target Name="BuildJayLan" BeforeTargets="BeforeBuild" Inputs="@(JayLanJava);@(JayLanMeta)" Outputs="$(IntermediateOutputPath)jay-lan.jar">
+    <PropertyGroup>
+      <JayLanClasses>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)jay-lan</JayLanClasses>
+    </PropertyGroup>
+    <RemoveDir Directories="$(JayLanClasses)" />
+    <MakeDir Directories="$(JayLanClasses)" />
+    <Exec Command="&quot;$(JayJavac)&quot; --release 8 -Xlint:-options -encoding UTF-8 -d &quot;$(JayLanClasses)&quot; @(JayLanJava->'&quot;%(FullPath)&quot;', ' ')" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="JayLanExit" />
+    </Exec>
+    <Copy Condition="'$(JayLanExit)' == '0'" SourceFiles="@(JayLanMeta)" DestinationFiles="@(JayLanMeta->'$(JayLanClasses)/META-INF/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <ZipDirectory Condition="'$(JayLanExit)' == '0'" SourceDirectory="$(JayLanClasses)" DestinationFile="$(IntermediateOutputPath)jay-lan.jar" Overwrite="true" />
+    <Warning Condition="'$(JayLanExit)' != '0' and '$(RequireJayDns)' != 'true'" Text="jay-lan was not built (no JDK found as '$(JayJavac)'): rooms cannot reach a game in the strong sandbox." />
+    <Error Condition="'$(JayLanExit)' != '0' and '$(RequireJayDns)' == 'true'" Text="jay-lan could not be built with '$(JayJavac)' (RequireJayDns=true)." />
+  </Target>
+
+  <Target Name="EmbedJayLan" AfterTargets="BuildJayLan" BeforeTargets="BeforeBuild" Condition="Exists('$(IntermediateOutputPath)jay-lan.jar')">
+    <ItemGroup>
+      <EmbeddedResource Include="$(IntermediateOutputPath)jay-lan.jar" LogicalName="Amber.Core.jay-lan.jar" />
     </ItemGroup>
   </Target>
 

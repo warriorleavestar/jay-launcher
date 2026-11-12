@@ -44,7 +44,7 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `src/Amber.Core/Install/` | Vanilla, Fabric/Quilt, Forge/NeoForge (new and legacy), OptiFine installers. | `VanillaInstaller.cs`, `ForgeInstaller.cs` |
 | `src/Amber.Core/Interop/` | P/Invoke library names for macOS frameworks. | `MacFrameworks.cs` |
 | `src/Amber.Core/Java/` | Find local Java, or download the Mojang runtime / Temurin. | `JavaManager.cs`, `JavaFinder.cs` |
-| `src/Amber.Core/Launch/` | Build the command line and run the game; per-instance settings, logs, no-trace mode, error reports, graceful exit per OS, the update check and release signature checks. | `GameLauncher.cs`, `LaunchSession.cs`, `InstanceSettings.cs`; release signatures (2 of 3 trustees, trust chain) in `ReleaseSignature.cs`, the signed update check in `UpdateCheck.cs` |
+| `src/Amber.Core/Launch/` | Build the command line and run the game; per-instance settings, logs, no-trace mode, error reports, graceful exit per OS, the update check and release signature checks. | `GameLauncher.cs`, `LaunchSession.cs`, `InstanceSettings.cs`; release signatures (2 of 3 trustees, trust chain) in `ReleaseSignature.cs`, the signed update check in `UpdateCheck.cs`, its once-a-day schedule in `AutoUpdateCheck.cs` |
 | `src/Amber.Core/Layout/` | UI-independent layout rules: width tiers, density, motion, window sizing. | `LayoutTiers.cs` |
 | `src/Amber.Core/Localization/` | UI strings (`en.json` is the source, then one JSON per language), error text, number formatting. | `L.cs`, `en.json` |
 | `src/Amber.Core/Multiplayer/` | EasyTier-based rooms: invites, knock, lobby, members, chat, private messages and files, direct link and hole punching, exit (VPN-like) mode helpers. | `Invite.cs`, `Knock.cs`, `Lobby.cs`, `EasyTier.cs`, `DirectLink.cs` |
@@ -118,6 +118,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `tools/FullLanCheck/` | Headless end-to-end check of full-LAN mode on macOS/Linux (needs root), used by the fulllan-e2e workflow. |
 | `tools/jay-dns/` | Java 18+ name resolver for the Windows strong sandbox; built by Amber.Core.csproj and embedded (`WindowsSandbox.ResolverJar`). |
 | `tools/jay-fs/` | Java file system provider for the Windows sandbox (fixes `Files.isWritable` under low integrity / AppContainer); `stub/` is compile-only. Embedded (`WindowsSandbox.FileSystemJar`). |
+| `tools/jay-lan/` | Java agent for the Windows strong sandbox: connects out of the game to Jay so rooms reach a world opened to LAN (Windows drops loopback connections into the AppContainer). Embedded (`WindowsSandbox.LanBridgeJar`); Jay side is `Multiplayer/GameLanBridge.cs`. |
 | `.github/` | CI (`build.yml`), security regression tests, network registry checks, issue templates. |
 
 ## Where to start for common tasks

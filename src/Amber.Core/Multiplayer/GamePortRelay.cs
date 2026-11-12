@@ -7,7 +7,8 @@ namespace Amber.Core.Multiplayer;
 /// A room opened before the game: the room's game port is this loopback listener, and connections are passed on to the
 /// game's real LAN port once it is known (the world was opened to LAN, or the player typed a port). Until then a
 /// connection is closed straight away. Changing the target later (the world was reopened on a new port) only affects
-/// new connections.
+/// new connections. A game in the Windows strong sandbox is reached through its LAN bridge (<see cref="GameLanBridge"/>),
+/// which is why rooms always put this relay in front of such a game.
 /// <para>
 /// It listens on 127.0.0.1 only, the same place EasyTier and the direct bridge hand room traffic to, so it is not
 /// reachable from the network. The caller decides which ports are trusted as targets (see the view model's port check).
@@ -19,7 +20,7 @@ public sealed class GamePortRelay : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _acceptLoop;
     private readonly object _gate = new();
-    private readonly HashSet<TcpClient> _open = [];
+    private readonly HashSet<IDisposable> _open = [];
     private readonly TimeSpan _connectTimeout;
     private int _target;
 
@@ -88,14 +89,12 @@ public sealed class GamePortRelay : IAsyncDisposable
             // No game yet: close at once so the player's game shows a connection error instead of hanging.
             return;
         }
-        using var outbound = new TcpClient();
+        Socket? outbound = null;
         try
         {
-            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token))
-            {
-                timeout.CancelAfter(_connectTimeout);
-                await outbound.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
-            }
+            // Through the game's LAN bridge when the game is in the strong sandbox (see GameLanBridge), else directly.
+            outbound = await GameLanBridge.ConnectAsync(port, _connectTimeout, _cts.Token);
+            if (outbound is null) return;
             inbound.NoDelay = true;
             outbound.NoDelay = true;
             lock (_gate)
@@ -105,7 +104,7 @@ public sealed class GamePortRelay : IAsyncDisposable
                 _open.Add(outbound);
             }
             var a = inbound.GetStream();
-            var b = outbound.GetStream();
+            var b = new NetworkStream(outbound, ownsSocket: false);
             var up = PumpAsync(a, b);
             var down = PumpAsync(b, a);
             await Task.WhenAny(up, down);
@@ -118,8 +117,9 @@ public sealed class GamePortRelay : IAsyncDisposable
             lock (_gate)
             {
                 _open.Remove(inbound);
-                _open.Remove(outbound);
+                if (outbound is not null) _open.Remove(outbound);
             }
+            outbound?.Dispose();
         }
     }
 
@@ -139,7 +139,7 @@ public sealed class GamePortRelay : IAsyncDisposable
         if (_cts.IsCancellationRequested) return;
         _cts.Cancel();
         _listener.Stop();
-        TcpClient[] open;
+        IDisposable[] open;
         lock (_gate) open = [.. _open];
         foreach (var c in open) c.Dispose();
         try { await _acceptLoop; } catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { }

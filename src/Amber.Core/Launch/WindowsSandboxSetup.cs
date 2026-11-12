@@ -30,7 +30,6 @@ public static class WindowsSandboxSetup
     public const string UndoArgument = "--jay-sandbox-undo";
     private const string LoopbackOption = "--loopback";
     private const string NoLoopbackOption = "--no-loopback";
-    private const string UserOption = "--user=";
 
     /// <summary>ALL APPLICATION PACKAGES.</summary>
     internal static readonly SecurityIdentifier AllPackages = new("S-1-15-2-1");
@@ -87,68 +86,20 @@ public static class WindowsSandboxSetup
             WindowStyle = ProcessWindowStyle.Hidden,
         };
 
-    /// <summary>
-    /// The helper's arguments. Loopback setup and undo also name the Windows user Jay runs as (taken here, before
-    /// elevation: with "over the shoulder" elevation the admin step runs as another account), because the inbound
-    /// filters are per user: they only let that user's processes connect into the game, and undo removes only theirs.
-    /// </summary>
-    internal static IReadOnlyList<string> Arguments(bool undo, bool loopback, IReadOnlyList<string> folders)
-    {
-        if (!loopback) return Arguments(undo, loopback, folders, null);
-        using var identity = WindowsIdentity.GetCurrent();
-        return Arguments(undo, loopback, folders, identity.User);
-    }
-
-    internal static IReadOnlyList<string> Arguments(bool undo, bool loopback, IReadOnlyList<string> folders, SecurityIdentifier? user) =>
-        [undo ? UndoArgument : SetupArgument, loopback ? LoopbackOption : NoLoopbackOption,
-            .. loopback && user is not null ? [UserOption + user.Value] : Array.Empty<string>(), .. folders];
-
-    /// <summary>A user account SID from the helper's command line: a real account (S-1-5-21-…), nothing else.</summary>
-    internal static SecurityIdentifier? ParseUser(string arg)
-    {
-        if (!arg.StartsWith(UserOption, StringComparison.Ordinal)) return null;
-        try
-        {
-            var sid = new SecurityIdentifier(arg[UserOption.Length..]);
-            return sid.IsAccountSid() && sid.Value.StartsWith("S-1-5-21-", StringComparison.Ordinal) ? sid : null;
-        }
-        catch (ArgumentException) { return null; }
-    }
+    internal static IReadOnlyList<string> Arguments(bool undo, bool loopback, IReadOnlyList<string> folders) =>
+        [undo ? UndoArgument : SetupArgument, loopback ? LoopbackOption : NoLoopbackOption, .. folders];
 
     /// <summary>
-    /// The elevated helper: the loopback exemption and inbound filters (when asked) and the parent folders. 0 when
-    /// everything was done, 2 for a command line Jay would not write, the filter engine's HRESULT (negative) when the
-    /// inbound filters failed, 1 when another step failed, and <see cref="LoopbackSetupRules.ExitUnexpected"/> /
-    /// <see cref="LoopbackSetupRules.ExitFiltersNotConfirmed"/> as described there.
+    /// The elevated helper: the loopback exemption (when asked) and the parent folders. 0 when everything was done,
+    /// 2 for a command line Jay would not write, 1 when a step failed.
     /// </summary>
     public static int Run(string[] args)
     {
-        try { return RunSteps(args); }
-        // An unexpected failure must still give Jay a code it can explain (not the runtime's 0xE0434352).
-        catch (Exception) { return LoopbackSetupRules.ExitUnexpected; }
-    }
-
-    private static int RunSteps(string[] args)
-    {
         if (!IsInvocation(args) || args.Length < 2 || args[1] is not (LoopbackOption or NoLoopbackOption)) return 2;
         var undo = args[0] == UndoArgument;
-        var loopback = args[1] == LoopbackOption;
-        SecurityIdentifier? user = null;
-        var rest = args.Skip(2).ToList();
-        if (rest.Count > 0 && rest[0].StartsWith(UserOption, StringComparison.Ordinal))
-        {
-            user = ParseUser(rest[0]);
-            if (user is null || !loopback) return 2;
-            rest.RemoveAt(0);
-        }
-        // The inbound filters are per user: setting them up or removing them needs the user.
-        if (loopback && user is null) return 2;
-        var folders = rest;
+        var folders = args.Skip(2).ToList();
         if (folders.Any(f => !Path.IsPathFullyQualified(f) || !Directory.Exists(f))) return 2;
-        var ok = true;
-        uint wfp = 0;
-        var filtersUnconfirmed = false;
-        if (loopback) ok = Loopback(undo, user, out wfp, out filtersUnconfirmed);
+        var ok = args[1] != LoopbackOption || Loopback(undo);
         foreach (var folder in folders)
         {
             try
@@ -161,31 +112,11 @@ public static class WindowsSandboxSetup
                 ok = false;
             }
         }
-        // A filter-engine error is passed on as the exit code itself (an HRESULT, so negative), so Jay can show it.
-        if (wfp != 0) return unchecked((int)LoopbackSetupRules.AsHResult(wfp));
-        if (!ok) return 1;
-        return undo && loopback && filtersUnconfirmed ? LoopbackSetupRules.ExitFiltersNotConfirmed : 0;
+        return ok ? 0 : 1;
     }
 
-    /// <summary>
-    /// The loopback exemption (the game may connect out to Jay) plus Jay's inbound filters (Jay may connect into the
-    /// game, e.g. a world opened to LAN); see <see cref="WindowsLoopbackInbound"/>.
-    /// </summary>
-    private static bool Loopback(bool remove, SecurityIdentifier? user, out uint wfpError, out bool filtersUnconfirmed)
+    private static bool Loopback(bool remove)
     {
-        // Undo with the filter engine unreachable cannot remove (or even see) the filters; that must not keep the
-        // exemption and the folders from being undone, or "remove sandbox permissions" could never finish.
-        var inbound = remove ? WindowsLoopbackInbound.Remove(user!) : WindowsLoopbackInbound.Add(WindowsSandbox.ContainerSid(), user!);
-        filtersUnconfirmed = remove && inbound == WindowsLoopbackInbound.EngineUnavailable;
-        var inboundOk = inbound == 0 || filtersUnconfirmed;
-        wfpError = inboundOk ? 0 : inbound;
-        return Exempt(remove) && inboundOk;
-    }
-
-    /// <summary>Adds or removes the exemption, skipping CheckNetIsolation when it is already that way (its exit code then is not documented).</summary>
-    private static bool Exempt(bool remove)
-    {
-        if (WindowsSandbox.IsExempt() != remove) return true;
         var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "CheckNetIsolation.exe"),
             $"LoopbackExempt {(remove ? "-d" : "-a")} -p={WindowsSandbox.ContainerSid().Value}")
         { UseShellExecute = false, CreateNoWindow = true };

@@ -128,12 +128,24 @@ public sealed class LauncherService : IDisposable
         Accounts = new AccountService(_http, store, AppSettings.DataDir, () => Settings.MicrosoftClientId);
         JayAccounts = new Amber.Core.Identity.JayAccountStore(AppSettings.DataDir);
         JayAccounts.Load();
+        // Jay accounts saved before addresses covered both account keys got new addresses: move the bindings along.
+        // The old addresses stay in the Jay account file, so this runs on every start until the bindings are saved.
+        var moved = JayAccounts.Readdressed;
+        if (store.Accounts.Any(a => a.JayAddress is { } old && moved.ContainsKey(old)))
+        {
+            foreach (var account in store.Accounts)
+                if (account.JayAddress is { } old && moved.TryGetValue(old, out var renamed)) account.JayAddress = renamed;
+            try { store.Save(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Bound correctly in memory for this run; the next start tries to save again.
+                System.Diagnostics.Trace.WriteLine("Jay: saving moved Jay account bindings failed: " + e.Message);
+            }
+        }
         MigrateBakeRuntime(settings);
         if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))
             Accounts.AddOffline(settings.PlayerName);
-        // Settings read the strong sandbox's filter state from the UI thread; have it ready before they do.
-        if (OperatingSystem.IsWindows()) WindowsLoopbackInbound.WarmUp();
         Reload();
     }
 
@@ -225,7 +237,7 @@ public sealed class LauncherService : IDisposable
     }
 
     private string? CurseForgeKey() =>
-        string.IsNullOrWhiteSpace(Settings.CurseForgeApiKey) ? Environment.GetEnvironmentVariable("AMBER_CF_KEY") : Settings.CurseForgeApiKey;
+        CurseForgeBuiltInKey.Resolve(Settings.CurseForgeApiKey, Environment.GetEnvironmentVariable("AMBER_CF_KEY"));
 
     /// <summary>有 Key 或自定义接口地址时才用 CurseForge 查更新。</summary>
     public CurseForgeProvider? CurseForgeIfConfigured =>
@@ -496,10 +508,9 @@ public sealed class LauncherService : IDisposable
             }
             else
             {
-                var error = await RunSandboxSetupAsync(undo: false, !WindowsSandbox.LoopbackReady(Settings.StrongSandboxLoopbackSetUp), WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)), ct);
+                var error = await RunSandboxSetupAsync(undo: false, !WindowsSandbox.LoopbackExempt(), WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)), ct);
                 if (error is null && StrongSandboxReady(javaPath)) return options with { WindowsLevel = WindowsSandboxLevel.Strong };
-                if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).FirstOrDefault()
-                    ?? (WindowsSandbox.IsExempt() ? "WFP loopback filters" : "CheckNetIsolation"));
+                if (error is null) RememberSandboxFallback(WindowsSandboxPolicy.Failed, WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).FirstOrDefault() ?? "CheckNetIsolation");
             }
             decision = DecideWindowsSandbox(javaPath);
         }
@@ -517,7 +528,7 @@ public sealed class LauncherService : IDisposable
     /// <summary>Strong mode needs no admin step for this Java: the loopback exemption is there and every parent folder is open.</summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private bool StrongSandboxReady(string javaPath) =>
-        WindowsSandbox.LoopbackReady(Settings.StrongSandboxLoopbackSetUp) && WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).Count == 0;
+        WindowsSandbox.LoopbackExempt() && WindowsSandboxSetup.FoldersToOpen(SandboxSetupPaths(javaPath)).Count == 0;
 
     /// <summary>
     /// The folders a launch grants whose parents the container must be able to list: inside the game folder (so the game
@@ -541,12 +552,12 @@ public sealed class LauncherService : IDisposable
             using var process = System.Diagnostics.Process.Start(WindowsSandboxSetup.Command(jay, undo, loopback, folders));
             if (process is null) return Failed("no process");
             await process.WaitForExitAsync(ct);
-            WindowsLoopbackInbound.Invalidate();
-            Settings.StrongSandboxLoopbackSetUp = LoopbackSetupRules.RecordedAfter(Settings.StrongSandboxLoopbackSetUp, undo, loopback, process.ExitCode);
-            if (!undo) Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
-            Settings.Save();
-            if (undo && process.ExitCode == LoopbackSetupRules.ExitFiltersNotConfirmed) return FiltersNotConfirmed;
-            return process.ExitCode == 0 ? null : Failed(LoopbackSetupRules.DescribeExit(process.ExitCode));
+            if (!undo)
+            {
+                Settings.StrongSandboxFolders = [.. Settings.StrongSandboxFolders.Concat(folders).Distinct(StringComparer.OrdinalIgnoreCase)];
+                Settings.Save();
+            }
+            return process.ExitCode == 0 ? null : Failed($"exit {process.ExitCode}");
         }
         catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223)
         {
@@ -565,11 +576,11 @@ public sealed class LauncherService : IDisposable
         }
     }
 
-    /// <summary>Whether Jay's admin step left anything to take away (the loopback exemption, the inbound loopback filters or opened parent folders).</summary>
-    public bool HasSandboxPermissions => OperatingSystem.IsWindows() && (Settings.StrongSandboxFolders.Count > 0 || WindowsSandbox.HasLoopbackSetup(Settings.StrongSandboxLoopbackSetUp));
+    /// <summary>Whether Jay's admin step left anything to take away (the loopback exemption or opened parent folders).</summary>
+    public bool HasSandboxPermissions => OperatingSystem.IsWindows() && (Settings.StrongSandboxFolders.Count > 0 || WindowsSandbox.LoopbackExempt());
 
     /// <summary>
-    /// "Remove sandbox permissions": one admin prompt takes the loopback exemption, the inbound loopback filters and Jay's entries on the recorded
+    /// "Remove sandbox permissions": one admin prompt takes the loopback exemption and Jay's entries on the recorded
     /// parent folders away again, and strong mode is switched off so the next launch does not ask straight away.
     /// Returns null when done, else why not.
     /// </summary>
@@ -577,19 +588,14 @@ public sealed class LauncherService : IDisposable
     {
         if (!OperatingSystem.IsWindows()) return null;
         var folders = Settings.StrongSandboxFolders.Where(System.IO.Directory.Exists).ToList();
-        var error = await RunSandboxSetupAsync(undo: true, WindowsSandbox.HasLoopbackSetup(Settings.StrongSandboxLoopbackSetUp), folders, ct);
-        // Exemption and folders were undone, the filters could not be confirmed removed: the record of the loopback
-        // setup stays (so "remove" stays offered), the rest is cleared, and the player is told.
-        if (error is not null && !ReferenceEquals(error, FiltersNotConfirmed)) return error;
+        var error = await RunSandboxSetupAsync(undo: true, WindowsSandbox.LoopbackExempt(), folders, ct);
+        if (error is not null) return error;
         Settings.StrongSandboxFolders = [];
         Settings.StrongSandbox = false;
         Settings.Save();
         SandboxStateChanged?.Invoke();
-        return error is null ? null : L.T("settings.sandbox.undo_filters_unconfirmed");
+        return null;
     }
-
-    /// <summary>Marker result of an undo whose inbound filters could not be confirmed removed (compared by reference).</summary>
-    private static readonly string FiltersNotConfirmed = new('?', 1);
 
     private void RememberSandboxFallback(string reason, string? detail)
     {
@@ -627,7 +633,7 @@ public sealed class LauncherService : IDisposable
             if (!Settings.StrongSandbox) return L.T("settings.sandbox.status.standard");
             if (Settings.StrongSandboxFallback is { } fallback)
                 return L.F("settings.sandbox.status.standard_because", WindowsSandboxPolicy.Describe(fallback, Settings.StrongSandboxFallbackDetail));
-            return WindowsSandbox.LoopbackReady(Settings.StrongSandboxLoopbackSetUp) ? L.T("settings.sandbox.status.strong") : L.T("settings.sandbox.status.strong_pending");
+            return WindowsSandbox.LoopbackExempt() ? L.T("settings.sandbox.status.strong") : L.T("settings.sandbox.status.strong_pending");
         }
     }
 
