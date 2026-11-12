@@ -808,6 +808,8 @@ public static class Program
         }
         // The directory only speaks the authenticated channel now; the old flag is accepted so existing scripts keep running.
         if (options.Has("secure-directory-only")) log("--secure-directory-only is the default now and can be removed");
+        if (options.Has("no-rate-limit") && options.Has("rate-limit"))
+            throw new ArgumentException("--no-rate-limit 和 --rate-limit 不能同时用");
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
         if (options.Has("no-volunteers")) builder.WithoutVolunteers();
         if (options.Get("rate-limit") is { } rate)
@@ -821,9 +823,9 @@ public static class Program
         if (options.Get("relay-limit-kbps") is not null || options.Get("relay-networks") is not null)
         {
             var kbps = options.GetInt("relay-limit-kbps", 0);
-            if (kbps < 0) throw new ArgumentException("--relay-limit-kbps must be 0 or more");
+            if (kbps < 0) throw new ArgumentException("--relay-limit-kbps 不能是负数");
             builder.UseRelayLimits(kbps, options.Get("relay-networks"));
-            log($"relaying other networks: {(kbps > 0 ? $"at most {kbps} KB/s each" : "no bandwidth limit")}, {options.Get("relay-networks") ?? "all networks"}");
+            log($"给别的网络转发：{(kbps > 0 ? $"每个网络最多 {kbps} KB/s" : "不限带宽")}，{options.Get("relay-networks") ?? "所有网络"}");
         }
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));

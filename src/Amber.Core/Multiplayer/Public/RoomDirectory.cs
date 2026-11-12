@@ -239,19 +239,15 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         try
         {
             var stream = client.GetStream();
+            // The first byte, the handshake and the request share one deadline, shorter than the whole exchange: a caller
+            // that opens connections and then stalls holds a slot for seconds, not for the full request timeout.
+            using var handshake = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+            handshake.CancelAfter(RoomDirectoryProtocol.HandshakeTimeout);
             var first = new byte[1];
-            using (var opening = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token))
-            {
-                opening.CancelAfter(RoomDirectoryProtocol.HandshakeTimeout);
-                if (!await SecureStream.ReadExactAsync(stream, first, opening.Token)) return;
-            }
+            if (!await SecureStream.ReadExactAsync(stream, first, handshake.Token)) return;
             // Only the authenticated channel is spoken. An old plaintext JSON request is dropped at once; anything else
             // fails the handshake's first-message check and is dropped without a reply too.
             if (first[0] == DirectoryChannel.LegacyFirstByte) return;
-            // The handshake and the request have a shorter deadline than the whole exchange: a caller that opens
-            // connections and then stalls holds a slot for seconds, not for the full request timeout.
-            using var handshake = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
-            handshake.CancelAfter(RoomDirectoryProtocol.HandshakeTimeout);
             if (await DirectoryChannel.AcceptAsync(stream, first[0], Identity ?? _ephemeralIdentity.Value, NetworkSecret, handshake.Token, Certificate) is not { } secure) return;
             await secure.Reply(Handle(secure.Request, Source(client)), deadline.Token);
         }
@@ -636,16 +632,15 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         {
             PruneRendezvous();
             var now = _now();
-            if (source is not null)
-            {
-                var (count, until) = _rendezvousPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + Rendezvous.MaxTtl);
-                if (count >= MaxRendezvousPutsPerSource) return Error("rate");
-                _rendezvousPuts[source] = (count + 1, until);
-            }
+            // Every check first; allowances are only used up by a put that is taken.
+            var (count, until) = source is not null && _rendezvousPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + Rendezvous.MaxTtl);
+            if (source is not null && count >= MaxRendezvousPutsPerSource) return Error("rate");
             // Never overwrite: whoever put first keeps the id until it is taken or expires.
             if (_rendezvous.ContainsKey(id!)) return Error("exists");
             if (_rendezvous.Count >= MaxRendezvous) return Error("full");
-            if (!_rendezvousBudget.TryAcquire()) return Error("rate");
+            if (!_rendezvousBudget.CanAcquire()) return Error("rate");
+            if (source is not null) _rendezvousPuts[source] = (count + 1, until);
+            _rendezvousBudget.TryAcquire();
             _rendezvous[id!] = (blob, now + TimeSpan.FromSeconds(ttl));
             return new JsonObject { ["ok"] = true };
         }
@@ -681,19 +676,18 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 if (record.Seq <= have.Seq) return Error("stale");
             }
             else if (_records.Count >= MaxRecords) return Error("full");
-            if (source is not null)
-            {
-                var (count, until) = _recordPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + TimeSpan.FromHours(1));
-                if (count >= MaxRecordPutsPerSource) return Error("rate");
-                _recordPuts[source] = (count + 1, until);
-            }
+            // Every check first; allowances are only used up by a put that is taken.
+            var (count, until) = source is not null && _recordPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + TimeSpan.FromHours(1));
+            if (source is not null && count >= MaxRecordPutsPerSource) return Error("rate");
             var signer = Convert.ToHexStringLower(record.Signer);
             var (signed, signedUntil) = _signerPuts.TryGetValue(signer, out var bySigner) && bySigner.Until > now ? bySigner : (0, now + TimeSpan.FromHours(1));
             if (signed >= MaxRecordPutsPerSigner) return Error("rate");
             // The signer table is bounded like the records: a full table takes no new signers until entries expire.
             if (signed == 0 && !_signerPuts.ContainsKey(signer) && _signerPuts.Count >= MaxRecords) return Error("rate");
-            if (!_recordBudget.TryAcquire()) return Error("rate");
+            if (!_recordBudget.CanAcquire()) return Error("rate");
+            if (source is not null) _recordPuts[source] = (count + 1, until);
             _signerPuts[signer] = (signed + 1, signedUntil);
+            _recordBudget.TryAcquire();
             _records[lookup] = record;
             return new JsonObject { ["ok"] = true };
         }

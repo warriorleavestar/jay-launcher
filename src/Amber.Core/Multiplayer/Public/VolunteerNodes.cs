@@ -219,7 +219,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 while (_registrations.Count > 0 && now - _registrations.Peek() > TimeSpan.FromMinutes(1)) _registrations.Dequeue();
                 if (_registrations.Count >= RegistrationsPerMinute) return Error("rate");
                 var host = HostOf(address);
-                if (_entries.Keys.Count(k => HostOf(k) == host) >= MaxPerHost) return Error("rate");
+                if (_entries.Keys.Count(k => HostOf(k) == host) >= MaxPerHost)
+                    return new JsonObject { ["ok"] = false, ["error"] = "host", ["reason"] = $"one host may register at most {MaxPerHost} addresses" };
                 _registrations.Enqueue(now);
                 _entries[address] = entry = new Entry();
             }
