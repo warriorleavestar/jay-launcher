@@ -117,7 +117,8 @@ public sealed record BakeLoaderInfo(string LoaderVersion, int Protocol, Version 
 }
 
 /// <summary>A progress or problem line from the loader.</summary>
-public sealed record BakeEvent(string Stage, string Message, bool IsProblem, bool IsError, string? Code = null);
+/// <remarks>Done/Total: a count when the step has one (mod 12 of 40), from the loader's progress line or Jay's own loop.</remarks>
+public sealed record BakeEvent(string Stage, string Message, bool IsProblem, bool IsError, string? Code = null, int? Done = null, int? Total = null);
 
 /// <summary>
 /// The result of bake-instance: launch with this instead of the vanilla main class and class path. ProblemsFile
@@ -363,7 +364,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         for (var i = 0; i < mods.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            progress?.Report(new BakeEvent("bake-mod", L.F("core.bake.mod_progress", i + 1, mods.Count, Path.GetFileName(mods[i])), false, false));
+            progress?.Report(new BakeEvent("bake-mod", L.F("core.bake.mod_progress", i + 1, mods.Count, Path.GetFileName(mods[i])), false, false, Done: i + 1, Total: mods.Count));
             var request = new JsonObject
             {
                 ["schema"] = "amber-ul/bake-mod-request@1",
@@ -634,7 +635,7 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
                 {
                     case "progress":
                         if (Str(item, "step") != "log")
-                            progress?.Report(new BakeEvent(stage, Str(item, "message") ?? "", false, false));
+                            progress?.Report(new BakeEvent(stage, Str(item, "message") ?? "", false, false, Done: Int(item, "done"), Total: Int(item, "total")));
                         break;
                     case "problem":
                         var text = DescribeProblem(item);
@@ -679,6 +680,8 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
     }
 
     private static string? Str(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    private static int? Int(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<int>(out var i) ? i : null;
 
     internal static JsonObject? ParseLine(string line)
     {

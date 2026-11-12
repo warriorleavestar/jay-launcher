@@ -59,6 +59,8 @@ public sealed partial class RunItem(LaunchSession session) : ObservableObject
 
     public string StateText => Session.State switch
     {
+        // While starting: the step running now ("Prepare mods with the Jay loader 12/87", and when it is slow, what it waits on).
+        LaunchState.Preparing or LaunchState.Entering when Session.Steps.Current is { } step => step.StatusLine(),
         LaunchState.Preparing => L.T("activity.run.preparing"),
         LaunchState.Entering => L.T("activity.run.entering"),
         LaunchState.Playing => L.F("activity.run.playing", (int)Session.PlayTime(DateTimeOffset.Now).TotalMinutes),
@@ -303,6 +305,7 @@ public sealed partial class ActivityViewModel : ObservableObject
             Runs.FirstOrDefault(r => r.Session == session)?.Refresh();
             RaisePill();
         });
+        session.Steps.Changed += () => Dispatcher.UIThread.Post(() => Runs.FirstOrDefault(r => r.Session == session)?.Refresh());
         _pill = null;
         OnPropertyChanged(nameof(HasRuns));
         RaisePill();
