@@ -149,9 +149,10 @@ public sealed class TrustSigner
 }
 
 /// <summary>
-/// The Jay project's trust keys: per trustee, one hybrid Ed25519 + ML-DSA-65 key for networks, directories and hardware
-/// (<see cref="Keys"/>) and a separate one for releases (<see cref="ReleaseKeys"/>) (<see cref="TrustSigner"/>), each generated offline on that person's own machine. Any
-/// <see cref="Need"/> of them together can review a network, certify a directory node or bind a node to its hardware.
+/// The Jay project's trust keys. Each key set has one hybrid Ed25519 + ML-DSA-65 key for networks, directories and hardware
+/// (<see cref="Keys"/>) and a separate one for releases (<see cref="ReleaseKeys"/>) (<see cref="TrustSigner"/>), each
+/// generated offline by its holder. Any <see cref="Need"/> of the keys together can review a network, certify a directory
+/// node or bind a node to its hardware.
 /// The private keys never go into the repository, CI, a server or a chat. For now there are two trust keys (one trustee and
 /// an offline cold backup), so both must sign; a third trustee is added later. The same goes for <see cref="ReleaseKeys"/>.
 /// With release keys set, EasyTier installs only when the embedded build carries their valid signature.
@@ -170,7 +171,7 @@ public static class JayTrust
         "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",
     ];
 
-    /// <summary>How many trustees must sign.</summary>
+    /// <summary>How many of <see cref="Keys"/> must sign.</summary>
     public const int Need = 2;
 
     /// <summary>
