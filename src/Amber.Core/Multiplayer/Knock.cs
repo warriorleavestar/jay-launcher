@@ -128,14 +128,24 @@ public static partial class KnockProtocol
 {
     public const int Port = 47660;
     /// <summary>
-    /// Large enough for a Jay account proof (privacy plan item 7): a device certificate with two ML-DSA-65 public keys and
-    /// an account signature, plus a live device signature, is about 10 KB as JSON.
+    /// Large enough for a Jay account proof (privacy plan item 7): the device certificate (two ML-DSA-65 public keys and a
+    /// hybrid account signature, about 9.9 KB as JSON) plus a live device signature (about 4.5 KB) is about 14.5 KB.
+    /// Older versions read at most 8 KB, so proofs are only sent to a side that said it reads them (<see cref="JayProofField"/>).
     /// </summary>
     public const int MaxFrame = 32 * 1024;
     public const int MaxNameLength = 32;
     public const int IdLength = 8;
 
-    /// <summary>"JAY-KNOCK-2" + 大厅名 + 8 字节邀请编号：握手同时确认了双方说的是同一张邀请。</summary>
+    /// <summary>
+    /// The field both sides set to true to say they read version 2 Jay account proofs: the host in its hello, the guest in
+    /// its about. A proof goes only to a side that set it. Older versions used "jay" for single-signature certificates;
+    /// that field is no longer sent or read, so mixing versions just leaves the account out.
+    /// </summary>
+    public const string JayProofField = "jay2";
+
+    internal static bool Says(JsonNode? node, string field) =>
+        node?[field] is JsonValue value && value.TryGetValue<bool>(out var yes) && yes;
+
     /// <summary>
     /// What a Jay account proof signs (<see cref="Identity.JayProof"/>): who is proving, and the handshake hash at that point.
     /// The guest's proof travels inside the last handshake message, so it covers the hash before that message; the host's
@@ -144,6 +154,7 @@ public static partial class KnockProtocol
     public static byte[] JayContext(bool guest, ReadOnlySpan<byte> handshakeHash) =>
         [.. (guest ? "jay-knock-guest\n"u8 : "jay-knock-host\n"u8), .. handshakeHash];
 
+    /// <summary>"JAY-KNOCK-2" + 大厅名 + 8 字节邀请编号：握手同时确认了双方说的是同一张邀请。</summary>
     public static byte[] Prologue(string lobbyName, ReadOnlySpan<byte> inviteId) => [.. Encoding.ASCII.GetBytes("JAY-KNOCK-2" + lobbyName), .. inviteId];
 
     /// <summary>房主要设备证明时在握手第二条消息里带的东西：名单里每个指纹码的版本和随机数（标签不发，留着自己比）。</summary>
@@ -300,8 +311,10 @@ public static class KnockClient
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
                 about["device"] = device.Prove(host, me.PublicKey, KnockProtocol.ReadChallenges(ask)).ToJson();
             if (account is not null && hello["account"]?.GetValue<bool>() == true) about["account"] = account;
-            if (jay is not null && jay.Certificate.DeviceKey.AsSpan().SequenceEqual(me.PublicKey) && hello["jay"]?.GetValue<bool>() == true)
-                about["jay"] = jay.ToJson(KnockProtocol.JayContext(guest: true, handshake.HandshakeHash));
+            // This side reads Jay account proofs: the host may send its own once it lets us in.
+            about[KnockProtocol.JayProofField] = true;
+            if (jay is not null && jay.Certificate.DeviceKey.AsSpan().SequenceEqual(me.PublicKey) && KnockProtocol.Says(hello, KnockProtocol.JayProofField))
+                about["proof"] = jay.ToJson(KnockProtocol.JayContext(guest: true, handshake.HandshakeHash));
             await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(about)), timeout.Token);
         }
         var finalHash = handshake.HandshakeHash;
@@ -357,7 +370,7 @@ public static class KnockClient
             using var ack = CancellationTokenSource.CreateLinkedTokenSource(ct);
             ack.CancelAfter(handshakeTimeout ?? HandshakeTimeout);
             await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(ackMessage)), ack.Token);
-            var hostJay = Identity.JayProof.Verified(reply["jay"], hostPub, KnockProtocol.JayContext(guest: false, finalHash));
+            var hostJay = Identity.JayProof.Verified(reply["proof"], hostPub, KnockProtocol.JayContext(guest: false, finalHash));
             return new KnockOutcome(credentials, null, hostPub)
             {
                 HostJayDevice = hostJay,
@@ -850,8 +863,8 @@ public sealed class KnockServer : IAsyncDisposable
                 var hello = new JsonObject { ["v"] = 1 };
                 if (policy.IsActive) hello["device"] = KnockProtocol.WriteChallenges(policy.Allowed);
                 if (accountPolicy is not null) hello["account"] = true;
-                // Ask for a Jay account certificate; older guests ignore the field.
-                hello["jay"] = true;
+                // Ask for a Jay account proof; older guests ignore the field.
+                hello[KnockProtocol.JayProofField] = true;
                 await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(hello)), timeout.Token);
                 guestContext = KnockProtocol.JayContext(guest: true, handshake.HandshakeHash);
                 about = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, timeout.Token)));
@@ -925,7 +938,7 @@ public sealed class KnockServer : IAsyncDisposable
                         return;
                     }
                 }
-                var jayDevice = Identity.JayProof.Verified(about["jay"], guestPub, guestContext);
+                var jayDevice = Identity.JayProof.Verified(about["proof"], guestPub, guestContext);
                 var jayAccount = jayDevice?.Account;
                 var trustedKey = _isTrusted(guestPub);
                 var trustedAccount = !trustedKey && jayAccount is not null && IsTrustedJayAccount?.Invoke(jayAccount) == true;
@@ -948,7 +961,8 @@ public sealed class KnockServer : IAsyncDisposable
                     var attestation = guestAttests ? _members.Attestation : null;
                     member.Attests = attestation is not null;
                     reply = (_credentials() with { Member = member.Key, Scheme = attestation?.Scheme }).ToJson();
-                    if (JayCertificate?.Invoke() is { } hostProof && hostProof.Certificate.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["jay"] = hostProof.ToJson(hostContext);
+                    if (KnockProtocol.Says(about, KnockProtocol.JayProofField) && JayCertificate?.Invoke() is { } hostProof
+                        && hostProof.Certificate.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["proof"] = hostProof.ToJson(hostContext);
                     if (DirectOffer?.Invoke() is { } offered) reply["direct"] = offered.ToJson();
                 }
                 else reply = Reject("denied");

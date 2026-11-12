@@ -223,6 +223,44 @@ public sealed class JayAccountTests : IDisposable
         Assert.Empty(empty.Accounts);
     }
 
+    /// <summary>An account saved with a version 0 address moves to its version 1 address, and says so for the bindings.</summary>
+    [Fact]
+    public void SavedVersion0AddressMovesToTheNewAddress()
+    {
+        using var keys = DeviceKeys.Generate();
+        using var account = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        var store = new JayAccountStore(_dir);
+        store.Add(account, "Main", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        var path = Path.Combine(_dir, JayAccountStore.FileName);
+        var old = JayAddress.EncodeVersion0(account.PublicKey);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        json["accounts"]![0]!["address"] = old;
+        json["accounts"]![0]!["device"] = null;
+        File.WriteAllText(path, json.ToJsonString());
+
+        var again = new JayAccountStore(_dir);
+        again.Load();
+        var moved = Assert.Single(again.Accounts);
+        Assert.Equal((account.Address, "Main", true), (moved.Address, moved.Label, moved.BackedUp));
+        Assert.Equal(account.Address, again.Readdressed[old]);
+        Assert.DoesNotContain(old, File.ReadAllText(path));
+        using (var opened = again.Open(account.Address)) Assert.NotNull(opened);
+        // The certificate is made once and then reused, not re-signed every time it is asked for.
+        var first = again.EnsureDeviceCertificate(account.Address, keys, "PC", DateTimeOffset.UtcNow);
+        Assert.Same(first, again.EnsureDeviceCertificate(account.Address, keys, "PC", DateTimeOffset.UtcNow));
+        Assert.Single(again.Accounts);
+
+        // An old address that the saved seed doesn't match is dropped, not moved.
+        using var other = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        json["accounts"]![0]!["address"] = JayAddress.EncodeVersion0(other.PublicKey);
+        File.WriteAllText(path, json.ToJsonString());
+        var wrong = new JayAccountStore(_dir);
+        wrong.Load();
+        Assert.Empty(wrong.Accounts);
+        Assert.Empty(wrong.Readdressed);
+    }
+
     [Fact]
     public void DamagedStoreIsKeptAndTreatedAsEmpty()
     {

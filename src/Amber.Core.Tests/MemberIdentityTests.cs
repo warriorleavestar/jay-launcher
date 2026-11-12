@@ -169,27 +169,38 @@ public sealed class MemberIdentityTests : IDisposable
         Assert.True(Amber.Core.Identity.DeviceKeys.Verify(ed, mlDsa, "test"u8, "hello"u8, signature));
     }
 
-    /// <summary>An identity file from before device seeds (a bare X25519 key) is replaced by a seed, once, with a warning.</summary>
+    /// <summary>
+    /// An identity file from before device seeds (a bare X25519 key) keeps that key, so hosts and friends still know the
+    /// device; a seed is added for the signing keys, and both survive the next start.
+    /// </summary>
     [Fact]
-    public void OldBareKeyIsUpgradedToASeed()
+    public void OldBareKeyIsKeptAndGainsSigningKeys()
     {
         Directory.CreateDirectory(_dir);
         using var legacy = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
         var raw = legacy.ExportPrivateKey();
         File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.FileName), MemberIdentity.Protect(_dir, raw));
 
-        byte[] upgraded;
+        byte[] ed, mlDsa;
         using (var identity = MemberIdentity.LoadOrCreate(_dir))
         {
-            Assert.NotNull(identity.Warning);
+            Assert.Null(identity.Warning);
             Assert.True(identity.IsPersisted);
-            Assert.NotEqual(legacy.PublicKey, identity.PublicKey);
-            upgraded = identity.PublicKey;
+            Assert.Equal(legacy.PublicKey, identity.PublicKey);
+            ed = identity.Device.EdPublicKey;
+            mlDsa = identity.Device.MlDsaPublicKey;
         }
         Assert.False(File.Exists(Path.Combine(_dir, MemberIdentity.FileName + ".broken")));
         using var again = MemberIdentity.LoadOrCreate(_dir);
         Assert.Null(again.Warning);
-        Assert.Equal(upgraded, again.PublicKey);
+        Assert.Equal(legacy.PublicKey, again.PublicKey);
+        Assert.Equal(ed, again.Device.EdPublicKey);
+        Assert.Equal(mlDsa, again.Device.MlDsaPublicKey);
+        // Resetting gives a device whose handshake key comes from the seed like any new one.
+        again.Reset();
+        Assert.NotEqual(legacy.PublicKey, again.PublicKey);
+        using var reset = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Equal(again.PublicKey, reset.PublicKey);
     }
 
     /// <summary>A seed-sized plaintext with an unknown format byte is treated as damaged, not as a seed.</summary>

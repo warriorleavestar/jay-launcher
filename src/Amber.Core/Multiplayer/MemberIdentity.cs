@@ -9,7 +9,8 @@ namespace Amber.Core.Multiplayer;
 /// <summary>
 /// This device's multiplayer identity. The file holds the device seed (<see cref="DeviceKeys"/>, privacy plan item 7):
 /// the X25519 handshake key hosts know this device by, plus the Ed25519 and ML-DSA-65 device signing keys, all derived
-/// from it. An identity file from before device seeds (a bare X25519 key) is replaced by a new seed with a warning.
+/// from it. An identity file from before device seeds (a bare X25519 key) keeps that key: a seed is added for the
+/// signing keys only, so hosts and friends still know the device.
 /// 这台电脑上 Amber 的联机身份：一把长期的 X25519 密钥（每次安装一把），房主靠它认出“还是那个人”。
 /// 保存在数据目录的 identity.key，和账号一样加密：Windows 用 DPAPI（当前用户），macOS/Linux 用仅当前用户可读（0600）的本机密钥文件 + AES-GCM。
 /// DPAPI 拒绝时（比如 SSH 密钥登录、没有密码），Windows 也退回本机密钥文件。
@@ -33,6 +34,9 @@ public sealed class MemberIdentity : IDisposable
     /// <summary>Stored plaintext: a format byte, then the 32-byte device seed.</summary>
     private const byte SeedFormat = 0x02;
     private const int StoredLength = 1 + DeviceKeys.SeedLength;
+    /// <summary>Stored plaintext for an upgraded identity: a format byte, the kept X25519 private key, then the seed.</summary>
+    private const byte KeptKeyFormat = 0x03;
+    private const int KeptKeyLength = 1 + X25519KeyPair.Length + DeviceKeys.SeedLength;
 
     private MemberIdentity(string directory, DeviceKeys device, string? warning, bool persisted = true)
     {
@@ -72,7 +76,7 @@ public sealed class MemberIdentity : IDisposable
         {
             try
             {
-                var raw = Unprotect(directory, File.ReadAllBytes(path), l => l is StoredLength or X25519KeyPair.Length);
+                var raw = Unprotect(directory, File.ReadAllBytes(path), l => l is StoredLength or KeptKeyLength or X25519KeyPair.Length);
                 try
                 {
                     if (raw.Length == StoredLength)
@@ -80,14 +84,22 @@ public sealed class MemberIdentity : IDisposable
                         if (raw[0] != SeedFormat) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
                         return new MemberIdentity(directory, DeviceKeys.FromSeed(raw.AsSpan(1)), null);
                     }
-                    // A bare X25519 key from before device seeds: it can't give the signing keys, so this device starts
-                    // over with a seed (no backward compatibility, privacy plan item 7). Saving overwrites the old key.
-                    var upgraded = new MemberIdentity(directory, DeviceKeys.Generate(), L.T("core.mp.identity.upgraded"));
+                    if (raw.Length == KeptKeyLength)
+                    {
+                        if (raw[0] != KeptKeyFormat) throw new CryptographicException(L.T("core.mp.identity.corrupt"));
+                        return new MemberIdentity(directory, DeviceKeys.FromSeed(raw.AsSpan(1 + X25519KeyPair.Length), raw.AsSpan(1, X25519KeyPair.Length)), null);
+                    }
+                    // A bare X25519 key from before device seeds: keep it (hosts and friends know this device by it) and
+                    // add a seed for the two signing keys. If the upgraded file can't be written, the old one stays and
+                    // the signing keys are only temporary this time.
+                    var seed = RandomNumberGenerator.GetBytes(DeviceKeys.SeedLength);
+                    MemberIdentity upgraded;
+                    try { upgraded = new MemberIdentity(directory, DeviceKeys.FromSeed(seed, raw), null); }
+                    finally { CryptographicOperations.ZeroMemory(seed); }
                     try { upgraded.Save(); }
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException)
                     {
                         upgraded.IsPersisted = false;
-                        upgraded.Warning = L.T("core.mp.identity.unsaved");
                     }
                     return upgraded;
                 }
@@ -152,8 +164,10 @@ public sealed class MemberIdentity : IDisposable
     {
         Directory.CreateDirectory(_directory);
         var seed = _device.ExportSeed();
-        byte[] raw = [SeedFormat, .. seed];
+        var kept = _device.ExportKeptDh();
+        byte[] raw = kept is null ? [SeedFormat, .. seed] : [KeptKeyFormat, .. kept, .. seed];
         CryptographicOperations.ZeroMemory(seed);
+        if (kept is not null) CryptographicOperations.ZeroMemory(kept);
         try
         {
             var data = Protect(_directory, raw);

@@ -147,6 +147,24 @@ public static class JayAddress
 
     public static bool IsValid(string? text) => TryDecode(text, out _);
 
+    /// <summary>
+    /// Reads a version 0 address (the bare Ed25519 account key, from before addresses covered both account keys). Only
+    /// for moving saved accounts to their new address; version 0 addresses are not valid anywhere else.
+    /// </summary>
+    /// <summary>The version 0 form of an account (for reading things saved before version 1 addresses).</summary>
+    internal static string EncodeVersion0(ReadOnlySpan<byte> edPublicKey) =>
+        Bech32m.Encode(Hrp, [0, .. Bech32m.ConvertBits(edPublicKey, 8, 5, pad: true)!]);
+
+    internal static bool TryDecodeVersion0(string? text, out byte[] edPublicKey)
+    {
+        edPublicKey = [];
+        if (!Bech32m.TryDecode(text?.Trim(), out var hrp, out var data) || hrp != Hrp || data.Length < 2 || data[0] != 0) return false;
+        var key = Bech32m.ConvertBits(data.AsSpan(1), 5, 8, pad: false);
+        if (key is not { Length: 32 }) return false;
+        edPublicKey = key;
+        return true;
+    }
+
     /// <summary>The canonical (lowercase) form of an address, or null when it isn't one.</summary>
     public static string? Canonical(string? text) => TryDecode(text, out var id) ? Encode(id) : null;
 

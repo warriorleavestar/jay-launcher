@@ -162,9 +162,11 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
             if (i >= 0)
             {
                 var known = list[i];
-                if (!known.Verified || (known.JayAccount is not null && known.JayAccount != account)
-                    || (known.JayAccount == account && known.Epoch >= certificate.Epoch && known.DeviceName == certificate.DeviceName)) return null;
-                list[i] = known with { JayAccount = account, DeviceName = certificate.DeviceName, Epoch = Math.Max(known.Epoch, certificate.Epoch) };
+                // Nothing older than the newest certificate seen from this account changes anything, the name included.
+                var newest = list.Where(c => c.Verified && c.JayAccount == account).Select(c => c.Epoch).DefaultIfEmpty(0).Max();
+                if (!known.Verified || (known.JayAccount is not null && known.JayAccount != account) || certificate.Epoch < newest
+                    || (known.JayAccount == account && known.Epoch == certificate.Epoch && known.DeviceName == certificate.DeviceName)) return null;
+                list[i] = known with { JayAccount = account, DeviceName = certificate.DeviceName, Epoch = certificate.Epoch };
                 changed = true;
             }
             else

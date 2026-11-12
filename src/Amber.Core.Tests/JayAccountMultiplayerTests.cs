@@ -129,6 +129,56 @@ public sealed class JayAccountMultiplayerTests : IAsyncDisposable, IDisposable
         Assert.Null(outcome.HostJayAccount);
     }
 
+    /// <summary>
+    /// Mixed versions: a proof only goes to a side that said it reads them ("jay2"), so an older host or guest (which
+    /// reads 8 KB frames at most) never gets one, and the knock still works.
+    /// </summary>
+    [Fact]
+    public async Task ProofsGoOnlyToSidesThatAskForThem()
+    {
+        using var guest = DeviceKeys.Generate();
+        // An older host: its hello asks for the old single-signature certificate, not for proofs.
+        var hello = new JsonObject { ["v"] = 1, ["jay"] = true };
+        Assert.False(KnockProtocol.Says(hello, KnockProtocol.JayProofField));
+        Assert.False(KnockProtocol.Says(new JsonObject { ["jay2"] = 2 }, KnockProtocol.JayProofField));
+        Assert.True(KnockProtocol.Says(new JsonObject { ["jay2"] = true }, KnockProtocol.JayProofField));
+
+        // An older guest (no "jay2" in its about) gets no host proof in the reply.
+        Server(hostProof: Proof(_bob, _host));
+        var invite = _book.Create(1, TimeSpan.FromMinutes(10), false, TunnelSettings.Default);
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, _server!.Port);
+        var outcome = await OldGuestKnockAsync(client.GetStream(), invite.Invite, guest.Dh);
+        Assert.True(outcome.Reply["ok"]!.GetValue<bool>());
+        Assert.Null(outcome.Reply["proof"]);
+        Assert.Null(outcome.Reply["jay"]);
+        Assert.True(outcome.Hello["jay2"]!.GetValue<bool>());
+        Assert.Null(outcome.Hello["jay"]);
+    }
+
+    /// <summary>Knocks the way a version without proofs does: no "jay2" in the about, and it reports the host's messages.</summary>
+    private static async Task<(JsonNode Hello, JsonNode Reply)> OldGuestKnockAsync(Stream stream, JayInvite invite, X25519KeyPair me)
+    {
+        var psk = LobbyKeys.KnockPsk(invite.Token);
+        var inviteId = LobbyKeys.InviteId(invite.Token);
+        var prologue = KnockProtocol.Prologue(LobbyKeys.LobbyName(invite.LobbyKey), inviteId);
+        using var handshake = new NoiseHandshake(NoisePattern.XXhfspsk0, true, prologue, psk, me);
+        await KnockProtocol.WriteFrameAsync(stream, inviteId, default);
+        await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage([]), default);
+        var hello = KnockProtocol.ParseJson(handshake.ReadMessage(await KnockProtocol.ReadFrameAsync(stream, default)));
+        var about = new JsonObject { ["v"] = 1, ["name"] = "Old", ["ver"] = "0.7", ["attest"] = 1 };
+        await KnockProtocol.WriteFrameAsync(stream, handshake.WriteMessage(KnockProtocol.Json(about)), default);
+        var (send, receive) = handshake.Split();
+        using (send)
+        using (receive)
+        {
+            var sealedReply = await KnockProtocol.ReadFrameAsync(stream, default);
+            var reply = KnockProtocol.ParseJson(receive.DecryptWithAd([], sealedReply));
+            await KnockProtocol.WriteFrameAsync(stream, send.EncryptWithAd([], KnockProtocol.Json(new JsonObject { ["ack"] = true })), default);
+            return (hello, reply);
+        }
+    }
+
     [Fact]
     public void LiveProofIsTiedToTheSession()
     {

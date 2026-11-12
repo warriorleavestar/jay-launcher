@@ -6,6 +6,7 @@ namespace Amber.Core.Tests;
 public sealed class DeviceKeysTests
 {
     private static readonly byte[] Seed = Enumerable.Range(1, 32).Select(i => (byte)i).ToArray();
+    private const string PinnedMlDsaKeyHash = "50f97e608623c2c5601f359c4806cf4eb5d9a5bd1b487aed9feaea25037c002b";
 
     [Fact]
     public void FixedSeedGivesFixedKeysInBothImplementations()
@@ -25,6 +26,10 @@ public sealed class DeviceKeysTests
         }
         finally { MlDsa65.ForceBouncyCastle = false; }
         Assert.Equal(MlDsa65.PublicKeySize, a.MlDsaPublicKey.Length);
+        // Pinned (SHA-256 of the ML-DSA-65 public key for this seed): machines without a system ML-DSA compare BouncyCastle
+        // with itself above, so this keeps them honest, and machines with one (Windows, OpenSSL 3.5+) check it against
+        // the system implementation too.
+        Assert.Equal(PinnedMlDsaKeyHash, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(a.MlDsaPublicKey)));
         // The three keys are different keys, not one key reused.
         Assert.NotEqual(a.Dh.PublicKey, a.EdPublicKey);
     }

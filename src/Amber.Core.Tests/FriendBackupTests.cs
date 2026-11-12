@@ -1,4 +1,4 @@
-using Amber.Core.Identity;
+﻿using Amber.Core.Identity;
 using Amber.Core.Multiplayer.Contacts;
 using Amber.Core.Multiplayer.Transport;
 
@@ -230,6 +230,39 @@ public sealed class FriendBackupTests : IDisposable
         Assert.Equal(0, book.Import([new Contact(two, "Bob", true, Now) { JayAccount = _bob.Address }]));
         book.RemovePerson(one);
         Assert.Equal("Sam", Assert.Single(book.All).Name);
+    }
+
+    /// <summary>A backup made before version 1 addresses (bound to the Ed25519 account key, naming the old address) still opens.</summary>
+    [Fact]
+    public void BackupFromBeforeNewAddressesStillOpens()
+    {
+        using var friend = X25519KeyPair.Generate();
+        var plain = System.Text.Encoding.UTF8.GetBytes(new System.Text.Json.Nodes.JsonObject
+        {
+            ["v"] = 1,
+            ["account"] = JayAddress.EncodeVersion0(_alice.PublicKey),
+            ["created"] = Now.ToUnixTimeSeconds(),
+            ["contacts"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+            {
+                ["pub"] = Convert.ToHexStringLower(friend.PublicKey),
+                ["name"] = "Bob",
+                ["added"] = Now.ToUnixTimeSeconds(),
+                ["jay"] = JayAddress.EncodeVersion0(_bob.PublicKey),
+            }),
+        }.ToJsonString());
+        var nonce = new byte[12];
+        var cipher = new byte[plain.Length];
+        var tag = new byte[16];
+        var key = _alice.DeriveFriendBackupKey();
+        using (var aes = new System.Security.Cryptography.AesGcm(key, 16))
+            aes.Encrypt(nonce, plain, cipher, tag, (byte[])[.. "JAYFB1\n"u8, .. _alice.PublicKey]);
+        byte[] old = [.. "JAYFB1\n"u8, .. nonce, .. cipher, .. tag];
+
+        var restored = Assert.Single(FriendBackup.Import(_alice, old)!.Contacts);
+        Assert.Equal("Bob", restored.Name);
+        // Someone else's old address can't be turned into a new one: it is learned again from their next knock.
+        Assert.Null(restored.JayAccount);
+        Assert.Null(FriendBackup.Import(_bob, old));
     }
 
     private static byte[] SeedOf(JayAccount account) => account.ExportSeed();

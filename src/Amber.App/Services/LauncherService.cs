@@ -128,6 +128,14 @@ public sealed class LauncherService : IDisposable
         Accounts = new AccountService(_http, store, AppSettings.DataDir, () => Settings.MicrosoftClientId);
         JayAccounts = new Amber.Core.Identity.JayAccountStore(AppSettings.DataDir);
         JayAccounts.Load();
+        // Jay accounts saved before addresses covered both account keys got new addresses: move the bindings along.
+        if (JayAccounts.Readdressed is { Count: > 0 } moved)
+        {
+            foreach (var account in store.Accounts)
+                if (account.JayAddress is { } old && moved.TryGetValue(old, out var renamed)) account.JayAddress = renamed;
+            try { store.Save(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
         MigrateBakeRuntime(settings);
         if (MigratesPlayerName(store.Accounts.Count, settings.PlayerName, settings.IsFresh,
                 Environment.GetEnvironmentVariable("AMBER_SELFTEST"), Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE")))

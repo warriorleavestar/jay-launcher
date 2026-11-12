@@ -97,8 +97,21 @@ public static class FriendBackup
         try
         {
             using var aes = new AesGcm(key, TagLength);
-            aes.Decrypt(data.Slice(Magic.Length, NonceLength), cipher, data[^TagLength..], plain, Aad(account.Id));
-            if (JsonNode.Parse(plain) is not JsonObject root || (int?)root["v"] != 1 || (string?)root["account"] != account.Address) return null;
+            var nonce = data.Slice(Magic.Length, NonceLength);
+            string expected;
+            try
+            {
+                aes.Decrypt(nonce, cipher, data[^TagLength..], plain, Aad(account.Id));
+                expected = account.Address;
+            }
+            catch (AuthenticationTagMismatchException)
+            {
+                // A backup from before addresses covered both account keys: it was bound to the Ed25519 account key and
+                // names the old version 0 address. Same account, same key, so it still opens.
+                aes.Decrypt(nonce, cipher, data[^TagLength..], plain, Aad(account.PublicKey));
+                expected = JayAddress.EncodeVersion0(account.PublicKey);
+            }
+            if (JsonNode.Parse(plain) is not JsonObject root || (int?)root["v"] != 1 || (string?)root["account"] != expected) return null;
             var result = new List<Contact>();
             foreach (var item in root["contacts"] as JsonArray ?? [])
             {

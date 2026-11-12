@@ -14,6 +14,8 @@ namespace Amber.Core.Identity;
 /// <item>jay-device-sig-mldsa-v1: the seed of an ML-DSA-65 signing key.</item>
 /// </list>
 /// A device signature is both signatures over the same bytes, and only counts when both verify.
+/// A device that had a multiplayer identity before device seeds keeps that X25519 key as <see cref="Dh"/> (so hosts and
+/// friends still know it) and takes only the two signing keys from the seed (<see cref="FromSeed(ReadOnlySpan{byte}, ReadOnlySpan{byte})"/>).
 /// </summary>
 public sealed class DeviceKeys : IDisposable
 {
@@ -27,11 +29,14 @@ public sealed class DeviceKeys : IDisposable
     private readonly byte[] _mlDsaSeed;
     private bool _disposed;
 
-    private DeviceKeys(ReadOnlySpan<byte> seed)
+    private readonly byte[]? _keptDh;
+
+    private DeviceKeys(ReadOnlySpan<byte> seed, ReadOnlySpan<byte> keptDh = default)
     {
-        if (seed.Length != SeedLength) throw new CryptographicException("device seed size");
+        if (seed.Length != SeedLength || keptDh.Length is not (0 or X25519KeyPair.Length)) throw new CryptographicException("device seed size");
         _seed = seed.ToArray();
-        var dh = Derive(DhLabel);
+        _keptDh = keptDh.IsEmpty ? null : keptDh.ToArray();
+        var dh = _keptDh is null ? Derive(DhLabel) : (byte[])_keptDh.Clone();
         try { Dh = X25519KeyPair.FromPrivateKey(dh); }
         finally { CryptographicOperations.ZeroMemory(dh); }
         _edPrivate = Derive(EdLabel);
@@ -49,6 +54,16 @@ public sealed class DeviceKeys : IDisposable
     }
 
     public static DeviceKeys FromSeed(ReadOnlySpan<byte> seed) => new(seed);
+
+    /// <summary>A device that keeps its earlier X25519 handshake key; only the signing keys come from <paramref name="seed"/>.</summary>
+    public static DeviceKeys FromSeed(ReadOnlySpan<byte> seed, ReadOnlySpan<byte> keptDhPrivateKey) => new(seed, keptDhPrivateKey);
+
+    /// <summary>The kept earlier X25519 private key, for sealing to disk (null when <see cref="Dh"/> comes from the seed). Zero it after use.</summary>
+    internal byte[]? ExportKeptDh()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _keptDh is null ? null : (byte[])_keptDh.Clone();
+    }
 
     /// <summary>The handshake key; its public half is what hosts and contacts know this device by.</summary>
     public X25519KeyPair Dh { get; }
@@ -87,6 +102,7 @@ public sealed class DeviceKeys : IDisposable
         CryptographicOperations.ZeroMemory(_seed);
         CryptographicOperations.ZeroMemory(_edPrivate);
         CryptographicOperations.ZeroMemory(_mlDsaSeed);
+        if (_keptDh is not null) CryptographicOperations.ZeroMemory(_keptDh);
         Dh.Dispose();
     }
 }

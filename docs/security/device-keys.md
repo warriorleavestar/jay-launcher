@@ -16,7 +16,7 @@ HKDF-SHA256 over the seed gives three keys, one per job (`DeviceKeys`):
 
 A device signature (`HybridSignature`) is both signatures over the same bytes. It counts only when both verify. Every use has its own domain string.
 
-An `identity.key` from before device seeds holds a bare X25519 key. It is replaced by a new seed once, with a warning, and hosts that knew the device see a new member. There is no compatibility path.
+An `identity.key` from before device seeds holds a bare X25519 key. That key is kept as the handshake key, so hosts and friends still know the device, and a seed is added for the two signing keys. The file then stores `0x03` ‖ the X25519 private key ‖ the seed. Resetting the identity gives a seed-only device like any new one.
 
 The device code (`JAYF1-`, `DeviceFingerprint`) stays a separate key because the user must be able to rotate it on its own.
 
@@ -29,7 +29,13 @@ Two account keys come from the phrase (SLIP-0010 with Jay's root key, all harden
 | `m/0'/0'` | Ed25519 account key |
 | `m/9'/0'` | ML-DSA-65 account key (HKDF-SHA256 over the node, info `jay-account-mldsa-v1`, gives the 32-byte seed) |
 
-The account id is `SHA-256("jay-account-id-v1\n" ‖ Ed25519 public key ‖ ML-DSA-65 public key)`. The address is `jay1` + Bech32m(version 1 ‖ id). Version 0 addresses (the bare Ed25519 key) are no longer valid.
+The account id is `SHA-256("jay-account-id-v1\n" ‖ Ed25519 public key ‖ ML-DSA-65 public key)`. The address is `jay1` + Bech32m(version 1 ‖ id).
+
+Version 0 addresses (the bare Ed25519 key) are no longer valid. Migration works like this:
+
+- Saved accounts move to their new address when the store loads (the seed is checked against the old address). Minecraft account bindings follow.
+- Other people's version 0 addresses in contacts and trust lists are dropped, and learned again from their next knock.
+- Friend backups from before this change still open: the old AAD binding and old address are accepted for the same account.
 
 ## Device certificate v2
 
@@ -51,7 +57,13 @@ In a knock, each side sends a `JayProof`: the certificate plus a fresh device si
 - The guest's proof is inside the last handshake message, so it covers the hash before that message.
 - The host's proof is in the encrypted reply, so it covers the finished handshake.
 
-A proof copied into another session doesn't verify. A proof also holds if X25519 alone were broken, because the device's signing keys are named in the certificate. The knock frame limit is 32 KiB.
+A proof copied into another session doesn't verify. A proof also holds if X25519 alone were broken, because the device's signing keys are named in the certificate.
+
+A proof is about 14.5 KB of JSON, and the knock frame limit is 32 KiB. Older versions read at most 8 KB, so proofs are negotiated:
+
+- The host's hello sets `jay2`, and the guest sends its proof only then.
+- The guest's about sets `jay2`, and the host sends its own proof only then.
+- Proofs travel in a `proof` field. The old `jay` field is no longer sent or read, so mixing versions just leaves the account out.
 
 ## Contacts
 
