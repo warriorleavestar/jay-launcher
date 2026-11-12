@@ -131,6 +131,7 @@ public sealed class TunnelServer : IAsyncDisposable
     public const int MaxPendingPerCaller = 16;
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, MaxPendingPerCaller);
     private long _slotsFullLogged;
+    private long _handshakeFailedLogged;
 
     /// <summary>Connections in their handshake right now.</summary>
     public int PendingHandshakes => _slots.Held;
@@ -216,10 +217,17 @@ public sealed class TunnelServer : IAsyncDisposable
     /// <summary>Logs that the handshake places are full, at most once a minute.</summary>
     internal static void LogSlotsFull(Action<string>? log, ref long lastLogged)
     {
+        if (OncePerMinute(ref lastLogged)) log?.Invoke(L.T("core.mp.transport.handshake_slots_full"));
+    }
+
+    /// <summary>True at most once a minute per <paramref name="lastLogged"/>: anything a caller can trigger before it is
+    /// a member is logged this way, so unauthenticated connections can't flood the log.</summary>
+    internal static bool OncePerMinute(ref long lastLogged)
+    {
         var now = Environment.TickCount64;
         var last = Interlocked.Read(ref lastLogged);
-        if (last != 0 && now - last < 60_000) return;
-        if (Interlocked.CompareExchange(ref lastLogged, now, last) == last) log?.Invoke(L.T("core.mp.transport.handshake_slots_full"));
+        if (last != 0 && now - last < 60_000) return false;
+        return Interlocked.CompareExchange(ref lastLogged, now, last) == last;
     }
 
     private async Task HandleAsync(TcpClient client, HandshakeSlots.Slot slot, CancellationToken ct)
@@ -278,7 +286,9 @@ public sealed class TunnelServer : IAsyncDisposable
                 // Only a connection that never got served counts as refused; a forwarding that ended is not.
                 if (!served) Interlocked.Increment(ref Rejected);
                 var what = served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
-                if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T(what) + e.Message);
+                // Before the handshake succeeded anyone can cause this: at most one line a minute.
+                if (!served && !OncePerMinute(ref _handshakeFailedLogged)) { }
+                else if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T(what) + e.Message);
                 else if (e is InvalidOperationException or ArgumentException) _log?.Invoke(L.T(what) + e.GetType().Name);
             }
             catch (Exception e)
@@ -286,7 +296,8 @@ public sealed class TunnelServer : IAsyncDisposable
                 // Anything else still ends this connection quietly and is logged by type only (no member details).
                 (stream as IAuthenticatedStream)?.Abort();
                 if (!served) Interlocked.Increment(ref Rejected);
-                _log?.Invoke(L.T(served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+                if (served || OncePerMinute(ref _handshakeFailedLogged))
+                    _log?.Invoke(L.T(served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             }
             finally
             {

@@ -32,6 +32,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private int _tampered;
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, TunnelServer.MaxPendingPerCaller);
     private long _slotsFullLogged;
+    private long _handshakeFailedLogged;
 
     /// <summary>
     /// Legs still in their handshake at most, across all ports. Past that one still in its handshake is closed to make
@@ -135,7 +136,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         catch (Exception e)
         {
             // Whatever failed, the leg gives its place back.
-            if (e is not (SocketException or ObjectDisposedException or IOException)) _log?.Invoke(L.T("core.mp.transport.endpoint_ended") + e.GetType().Name);
+            if (e is not (SocketException or ObjectDisposedException or IOException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
+                _log?.Invoke(L.T("core.mp.transport.endpoint_ended") + e.GetType().Name);
             _slots.Release(slot);
             Interlocked.Increment(ref _rejected);
             Pump.Abort(client);
@@ -201,7 +203,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             secure?.Abort();
             joined?.Abort();
             Interlocked.Increment(ref _rejected);
-            if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
+            if ((e is CryptographicException or PlatformNotSupportedException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
+                _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
         }
         catch (Exception e)
         {
@@ -209,7 +212,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             secure?.Abort();
             joined?.Abort();
             Interlocked.Increment(ref _rejected);
-            _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+            if (TunnelServer.OncePerMinute(ref _handshakeFailedLogged)) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
         }
         finally
         {

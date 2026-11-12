@@ -5,6 +5,10 @@ namespace Amber.Core.Tests;
 /// <summary>Places for connections in their handshake: who is closed to make room.</summary>
 public sealed class HandshakeSlotsTests
 {
+    private TimeSpan _now = TimeSpan.FromHours(1);
+    private HandshakeSlots New(int max, int perSource) => new(max, perSource, clock: () => _now);
+    private void PastGrace() => _now += HandshakeSlots.DefaultGrace + TimeSpan.FromMilliseconds(1);
+
     private static (HandshakeSlots.Slot Slot, Func<bool> Closed) Take(HandshakeSlots slots, string? source)
     {
         var closed = false;
@@ -15,11 +19,12 @@ public sealed class HandshakeSlotsTests
     [Fact]
     public void FullPlacesCloseTheOldestOfTheBusiestCaller()
     {
-        var slots = new HandshakeSlots(4, 4);
+        var slots = New(4, 4);
         var a1 = Take(slots, "10.1.0.1");
         var b1 = Take(slots, "10.1.0.2");
         var a2 = Take(slots, "10.1.0.1");
         var a3 = Take(slots, "10.1.0.1");
+        PastGrace();
         // Full: the newcomer pushes out the busiest caller's oldest, not the oldest overall.
         var c1 = Take(slots, "10.1.0.3");
         Assert.True(a1.Closed());
@@ -34,7 +39,7 @@ public sealed class HandshakeSlotsTests
     [Fact]
     public void OneCallerOnlyPushesOutItsOwn()
     {
-        var slots = new HandshakeSlots(8, 2);
+        var slots = New(8, 2);
         var other = Take(slots, "10.1.0.9");
         var a1 = Take(slots, "10.1.0.1");
         var a2 = Take(slots, "10.1.0.1");
@@ -46,10 +51,11 @@ public sealed class HandshakeSlotsTests
     [Fact]
     public void CallersThatCantBeToldApartShareOneGroupWithoutTheCallerLimit()
     {
-        var slots = new HandshakeSlots(4, 1);
+        var slots = New(4, 1);
         var loop = Enumerable.Range(0, 3).Select(_ => Take(slots, null)).ToList();
         Assert.All(loop, l => Assert.False(l.Closed()));
         var known = Take(slots, "10.1.0.1");
+        PastGrace();
         // Full now: the loopback group is the busiest.
         Take(slots, "10.1.0.2");
         Assert.True(loop[0].Closed());
@@ -59,7 +65,7 @@ public sealed class HandshakeSlotsTests
     [Fact]
     public void ReleasedPlacesAreNeverClosedAndTooManyClosingRefuses()
     {
-        var slots = new HandshakeSlots(1, 1);
+        var slots = New(1, 1);
         var first = Take(slots, null);
         slots.Release(first.Slot);
         slots.Release(first.Slot);
@@ -76,7 +82,7 @@ public sealed class HandshakeSlotsTests
     public void TiesCloseTheOldestNeverTheNewest()
     {
         // Every caller holds one place: each newcomer must push out the oldest, so a member who just arrived survives.
-        var slots = new HandshakeSlots(8, 4);
+        var slots = New(8, 4);
         var stalled = Enumerable.Range(0, 8).Select(i => Take(slots, $"10.2.0.{i}")).ToList();
         var member = Take(slots, "10.3.0.1");
         Assert.True(stalled[0].Closed());
@@ -84,6 +90,45 @@ public sealed class HandshakeSlotsTests
         Assert.False(member.Closed());
         Assert.All(stalled.Take(6), s => Assert.True(s.Closed()));
         Assert.All(stalled.Skip(6), s => Assert.False(s.Closed()));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AMemberOpeningSeveralLegsIsntPushedOutByManyOneConnectionCallers(bool floodIsOld)
+    {
+        // Every place held by a different caller, one stalled connection each; then a member opens 3 legs at once from
+        // one address, and the flood goes on. The legs are the busiest caller but still in their grace period.
+        var slots = New(256, 16);
+        var flood = Enumerable.Range(0, 256).Select(i => Take(slots, $"fd00:0:0:{i:x}::1")).ToList();
+        if (floodIsOld) PastGrace();
+        var legs = Enumerable.Range(0, 3).Select(_ => Take(slots, "10.5.0.1")).ToList();
+        for (var i = 0; i < 20; i++) Take(slots, $"fd00:1:0:{i:x}::1");
+        Assert.All(legs, l => Assert.False(l.Closed()));
+        Assert.All(flood.Take(23), f => Assert.True(f.Closed()));
+    }
+
+    [Fact]
+    public void ACallerHoldingFarMoreThanItsShareLosesItsOldestOnceOld()
+    {
+        var slots = New(8, 8);
+        var heavy = Enumerable.Range(0, 5).Select(_ => Take(slots, "10.6.0.1")).ToList();
+        var light = Enumerable.Range(0, 3).Select(i => Take(slots, $"10.6.1.{i}")).ToList();
+        PastGrace();
+        Take(slots, "10.6.2.1");
+        Assert.True(heavy[0].Closed());
+        Assert.All(light, l => Assert.False(l.Closed()));
+    }
+
+    [Fact]
+    public void AConnectionThatThrowsWhenClosedStillMakesRoom()
+    {
+        var slots = New(1, 1);
+        slots.TryTake(null, () => throw new InvalidOperationException("boom"), out _);
+        var next = slots.TryTake("10.7.0.1", () => { }, out var evicted);
+        Assert.NotNull(next);
+        Assert.True(evicted);
+        Assert.Equal(1, slots.Evicted);
     }
 
     [Theory]
