@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -169,6 +170,19 @@ public class SignedRecordTests
         now += TimeSpan.FromMinutes(1.1);
         late = new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now);
         Assert.True(server.Handle(PutOp(late), source: null)["ok"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task AnEmptyBudgetIsCountedAndLoggedOnceAMinute()
+    {
+        var now = DateTimeOffset.UtcNow;
+        using var key = X25519KeyPair.Generate();
+        var log = new List<string>();
+        await using var server = new RoomDirectoryServer(IPAddress.Loopback, 0, log.Add, () => now) { Identity = key, NetworkSecret = Secret };
+        for (var i = 0; i < RoomDirectoryServer.MaxRecordPutsPerMinute + 3; i++)
+            server.Handle(PutOp(new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromHours(2), now)), source: null);
+        Assert.Equal(3, server.BudgetRefusals);
+        Assert.Single(log, l => l == L.F("core.mp.public.budget_full", "rec.put"));
     }
 
     [Fact]

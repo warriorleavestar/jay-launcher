@@ -455,6 +455,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--rate-limit", "3,x"]), output, _ => { }));
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-rate-limit", "--rate-limit", "3,6,600"]), output, _ => { }));
         Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--relay-limit-kbps", "-1"]), output, _ => { }));
+        Assert.Throws<ArgumentException>(() => Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--relay-networks", " "]), output, _ => { }));
         // --no-volunteers no longer swallows --rate-limit; relay limits reach the builder.
         var limited = Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--no-volunteers", "--rate-limit", "2,4,50",
             "--relay-limit-kbps", "2048", "--relay-networks", "jay-*"]), output, _ => { });

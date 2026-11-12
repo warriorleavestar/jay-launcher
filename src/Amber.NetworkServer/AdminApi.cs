@@ -181,7 +181,12 @@ public sealed class AdminApi : IAsyncDisposable
             switch (method, path)
             {
                 case ("GET", "/stats"):
-                    return (200, new JsonObject { ["ok"] = true, ["health"] = _server.Health(), ["stats"] = _server.Stats.ToJson() });
+                    return (200, new JsonObject
+                    {
+                        ["ok"] = true, ["health"] = _server.Health(), ["stats"] = _server.Stats.ToJson(),
+                        // Requests refused because a directory-wide budget ran out: a climbing number means someone is flooding the directory.
+                        ["budgetRefusals"] = _server.Directory?.BudgetRefusals ?? 0,
+                    });
                 case ("GET", "/rooms"):
                 {
                     var view = _server.Directory?.View();
