@@ -66,12 +66,14 @@ internal sealed partial class SelfTest
         var nodePort = EasyTierArgs.FreeTcpPort();
         var node = $"tcp://127.0.0.1:{nodePort}";
         // Like jay-server directory: the network's secret for the channel's psk (a mismatch drops every request), and a
-        // directory key kept across runs, since Jay remembers the first key it sees for this network (trust on first use).
+        // directory key kept across runs. The built-in network only trusts directories with a certificate from the Jay
+        // trustees, which this local one can't have, so the self-check pins its key for this run.
         await using var directory = new RoomDirectoryServer(System.Net.IPAddress.Loopback, PublicNetworkProfile.DirectoryPort)
         {
             Identity = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(Amber.App.Services.AppSettings.DataDir, "selftest-directory.key")),
             NetworkSecret = PublicNetworkProfile.JaySecret,
         };
+        using var pin = PublicNetworkProfile.PinSelfTestDirectory(directory.Identity.PublicKey);
         using var seed = PublicNetworkSession.Start(service.EasyTier, new PublicNetworkOptions(PublicNetworkProfile.Jay() with { Nodes = [] },
             EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort(), Directory: true, Listeners: [node]), Path.Combine(reportDir, "public-seed"));
 

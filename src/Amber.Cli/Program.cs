@@ -66,7 +66,7 @@ var installer = new VanillaInstaller(downloader, dir);
 var javaManager = new JavaManager(downloader, dir) { Status = new SyncProgress<string>(Console.WriteLine) };
 var loaderContext = new LoaderContext(downloader, dir, installer, javaManager.ForMajorAsync);
 var modrinth = new ModrinthProvider(http);
-var curseForge = new CurseForgeProvider(http, () => Environment.GetEnvironmentVariable("AMBER_CF_KEY"),
+var curseForge = new CurseForgeProvider(http, () => CurseForgeBuiltInKey.Resolve(null, Environment.GetEnvironmentVariable("AMBER_CF_KEY")),
     Environment.GetEnvironmentVariable("AMBER_CF_ROOT") ?? CurseForgeProvider.DefaultApiRoot);
 var providers = new Dictionary<ContentSource, IContentProvider> { [ContentSource.Modrinth] = modrinth, [ContentSource.CurseForge] = curseForge };
 var contentInstaller = new ContentInstaller(downloader, providers);
@@ -284,7 +284,7 @@ try
         {
             var isolate = argList.Remove("--isolate");
             var instance = Instance(argList[1], isolate);
-            var hasCf = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AMBER_CF_KEY")) || Environment.GetEnvironmentVariable("AMBER_CF_ROOT") is not null;
+            var hasCf = CurseForgeBuiltInKey.Resolve(null, Environment.GetEnvironmentVariable("AMBER_CF_KEY")) is not null || Environment.GetEnvironmentVariable("AMBER_CF_ROOT") is not null;
             var updates = await ModManager.CheckUpdatesAsync(new ModManager(instance.ModsDir).List(), modrinth, hasCf ? curseForge : null, instance.McVersion, instance.Loader, cts.Token);
             Console.WriteLine($"{updates.Count} 个可更新");
             foreach (var u in updates) Console.WriteLine($"  {Path.GetFileName(u.LocalPath)} → {u.Latest.FileName}");
