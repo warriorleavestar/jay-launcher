@@ -36,12 +36,13 @@ public sealed partial class FriendRow : ObservableObject
     public string StateText => State switch
     {
         FriendState.SameRoom => L.T("people.state.same_room"),
+        FriendState.ListedInRoom => L.T("people.state.listed_in_room"),
         FriendState.InTheirRoom => L.F("people.state.in_room", Room),
         FriendState.NewDevice => L.T("people.state.new_device"),
         _ => L.T("people.state.verified"),
     };
 
-    public bool IsHere => State == FriendState.SameRoom;
+    public bool IsHere => State is FriendState.SameRoom or FriendState.ListedInRoom;
     public bool IsInRoom => State == FriendState.InTheirRoom;
     public bool IsQuiet => State == FriendState.Verified;
     public bool NeedsLook => State == FriendState.NewDevice;
@@ -115,12 +116,13 @@ public sealed partial class PeopleViewModel : PageViewModel
     public bool IsChildMode => !_multiplayer.ShowPublicNetworks;
 
     public bool HasFriends => !IsChildMode && Friends.Count > 0;
-    public bool HasMet => MetPeople.Count > 0;
+    // "For a child" lists nobody: people I've met are hidden like friends.
+    public bool HasMet => !IsChildMode && MetPeople.Count > 0;
     public bool HasList => HasFriends || HasMet;
 
     // "For a child" hides the friends, so it hides the selected one too.
     public bool HasSelected => !IsChildMode && Selected is not null;
-    public bool HasSelectedMet => SelectedMet is not null;
+    public bool HasSelectedMet => !IsChildMode && SelectedMet is not null;
 
     /// <summary>Someone is open on the right (narrow windows then show them instead of the list).</summary>
     public bool HasPicked => HasSelected || HasSelectedMet;
@@ -445,15 +447,18 @@ public sealed partial class PeopleViewModel : PageViewModel
     }
 
     /// <summary>"For a child" asks about every knock: the switch can be turned off there, not on.</summary>
-    public bool CanChangeMetAutoAdmit => SelectedMet is { } person && (person.AutoAdmit || !_multiplayer.KnocksAlwaysAsk);
+    public bool CanChangeMetAutoAdmit => SelectedMet is { } person && (person.AutoAdmit || (person.Checked && !_multiplayer.KnocksAlwaysAsk));
     public bool ShowKnocksAlwaysAsk => HasSelectedMet && _multiplayer.KnocksAlwaysAsk;
+
+    /// <summary>Only another host's list vouches for them, so the switch waits until they knock on my own room.</summary>
+    public bool ShowMetUnchecked => HasSelectedMet && SelectedMet is { Checked: false, AutoAdmit: false } && !_multiplayer.KnocksAlwaysAsk;
 
     /// <summary>Asking them to be friends goes by mail, so it needs public networks ("For a child" has none).</summary>
     public bool CanAddMet => HasSelectedMet && !IsChildMode;
 
     private void NotifyMet()
     {
-        foreach (var name in (string[])[nameof(MetAutoAdmit), nameof(CanChangeMetAutoAdmit), nameof(ShowKnocksAlwaysAsk), nameof(CanAddMet)]) OnPropertyChanged(name);
+        foreach (var name in (string[])[nameof(MetAutoAdmit), nameof(CanChangeMetAutoAdmit), nameof(ShowKnocksAlwaysAsk), nameof(ShowMetUnchecked), nameof(CanAddMet)]) OnPropertyChanged(name);
     }
 
     [RelayCommand]
@@ -493,6 +498,8 @@ public sealed partial class PeopleViewModel : PageViewModel
                     IsAdding = false;
                     _selectedKey = null;
                     Selected = null;
+                    _selectedMetKey = null;
+                    SelectedMet = null;
                 }
                 WatchLines();
                 OnPropertyChanged(string.Empty);
