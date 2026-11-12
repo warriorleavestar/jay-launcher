@@ -167,13 +167,57 @@ public sealed class MobilePortTests
 
         Assert.True(router.Press(21, jump.CenterX, jump.CenterY, controlsEnabled: false));
         Assert.DoesNotContain(sink.Actions, action => action.Action == TouchControlAction.Jump);
-        Assert.Equal((jump.CenterX, jump.CenterY, true), sink.LastPointer);
+        Assert.Equal((jump.CenterX, jump.CenterY, false), sink.LastPointer);
+        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
         Assert.True(router.Release(21));
-        Assert.Equal((jump.CenterX, jump.CenterY, true), sink.LastPointer);
+        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.DoesNotContain(sink.Pointers, pointer => pointer.Click);
 
         var menu = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Menu);
         Assert.True(router.Press(22, menu.CenterX, menu.CenterY, controlsEnabled: false));
         Assert.Contains((TouchControlAction.Menu, true), sink.Actions);
+    }
+
+    [Fact]
+    public void TouchInputRouterHoldsMenuPointerForSliders()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(30, 0.35, 0.55, controlsEnabled: false));
+        Assert.Contains((TouchControlAction.PrimaryAction, true), sink.Actions);
+        Assert.True(router.Move(30, 0.70, 0.55));
+        Assert.True(router.Release(30));
+        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.Equal((0.70, 0.55, false), sink.LastPointer);
+    }
+
+    [Fact]
+    public void TouchInputRouterTurnsMenuSwipesIntoScrollEvents()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+
+        Assert.True(router.Press(31, 0.50, 0.70, controlsEnabled: false));
+        Assert.True(router.Move(31, 0.50, 0.55));
+        Assert.True(router.Move(31, 0.50, 0.40));
+        Assert.True(router.Release(31));
+        Assert.Contains((TouchControlAction.PrimaryAction, false), sink.Actions);
+        Assert.Contains((TouchControlAction.NextSlot, true), sink.Actions);
+        Assert.Contains((TouchControlAction.NextSlot, false), sink.Actions);
+    }
+
+    [Fact]
+    public void TouchInputRouterKeepsKeyboardAvailableInMenus()
+    {
+        var sink = new RecordingTouchSink();
+        var router = new TouchInputRouter(sink);
+        var keyboard = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Keyboard);
+
+        Assert.True(router.Press(32, keyboard.CenterX, keyboard.CenterY, controlsEnabled: false));
+        Assert.Contains((TouchControlAction.Keyboard, true), sink.Actions);
+        Assert.True(router.Release(32));
+        Assert.Contains((TouchControlAction.Keyboard, false), sink.Actions);
     }
 
     [Fact]
