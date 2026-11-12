@@ -247,7 +247,7 @@ domain name publishes where it is as a signed record, and its code carries an id
 longer asks a directory "where is the room for this invite?". Every Jay downloads the whole directory and looks it up
 locally, so the directory can't tell who looked for which room, or whether anyone looked at all.
 
-- **Hidden entries**: for each open invite the host seals `{id, ip, key}` (padded to 256 bytes) with ChaCha20-Poly1305 under
+- **Hidden entries**: for the room's lobby key (all of a room's invites share it), for as long as the key lasts, the host seals `{id, ip, key}` (padded to 256 bytes) with ChaCha20-Poly1305 under
   `HKDF-SHA256(lobbyKey, info "jay-dir-seal-v1")`. Every entry is 284 bytes.
 - **Self-certifying index**: the invite also gives an Ed25519 entry key (seed `HKDF-SHA256(lobbyKey, info
   "jay-dir-entry-key-v1")`). The index is `SHA-256("jay-dir-index-v2" || entry public key)` (32 bytes, also the sealing
@@ -263,13 +263,16 @@ locally, so the directory can't tell who looked for which room, or whether anyon
   the host. So a full index only costs a publish that entry: the room is still registered (the reply carries
   `warn: "lookup"`), and a hidden room with nothing else to register gets `lookup`. A reader tries every entry under
   the index. An entry counts as the whole (host key, address, room): the host key is public, so it proves nothing on
-  its own. Without the host's key, the reader takes an answer only when every entry gives the same host key and address.
+  its own. Without the host's key, the reader takes an answer only when every entry gives the same host key and address
+  and no directory's copy holds a full index (whoever filled it may have kept the host's entry out); otherwise it falls
+  back to the lobby. Because the host keeps its own entry up for the key's whole life, an earlier invite holder who
+  publishes an entry for themselves under it clashes with the host's entry instead of being the only answer.
   With it (a contact's invite), the reader knocks at each address given for that host in turn, up to 4, and the knock
   handshake decides; a wrong address only fails.
 - **Rooms listed with their invite**: public, direct and password rooms carry the invite (or its lobby key) in their
-  listing, so anyone on the network could sign entries for its index. Jay publishes no hidden entries for them; an
-  invite code for such a room is matched against the listings in the snapshot instead (same rule: one host, or the
-  expected host).
+  listing, so anyone on the network could sign entries for its index. Jay publishes its own hidden entry for them too
+  (it gives the same place as the listing, so the two agree), and an invite code for such a room is also matched
+  against the listings in the snapshot (same rule: one host, or the expected host).
   Renewals reuse the same sealed bytes while nothing changed, so they don't show up as changes.
 - **Public rooms**: a renewal that only changes the seq, signature and time isn't a snapshot change; readers keep the
   earlier signed version, and expiry shows up as `gone` either way. So a room's `updated` in a snapshot is when it was published or

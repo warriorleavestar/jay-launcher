@@ -78,7 +78,7 @@ public static class DirectoryChannel
     /// </summary>
     /// <param name="snapshotLength">Called with a snapshot reply's length once it is known (to set a deadline that fits it).</param>
     public static async Task<JsonObject> CallAsync(Stream stream, DirectoryTrust trust, string address, string networkSecret, JsonObject request, CancellationToken ct,
-        Action<int>? snapshotLength = null)
+        Action<int>? snapshotLength = null, Action? sent = null)
     {
         var payload = Encoding.UTF8.GetBytes(request.ToJsonString());
         if (payload.Length > RoomDirectoryProtocol.MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
@@ -94,6 +94,7 @@ public static class DirectoryChannel
             if (!trust.Accepts(address, key, certificate))
                 throw remembered ? new DirectoryKeyChangedException() : new DirectoryImpostorException();
             await WriteFrameAsync(stream, hs.WriteMessage(payload), ct);
+            sent?.Invoke();
             var (send, receive) = hs.Split();
             using (send)
             using (receive)

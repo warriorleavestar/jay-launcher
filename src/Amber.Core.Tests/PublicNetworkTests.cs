@@ -305,20 +305,29 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         var garbage = new TcpListener(IPAddress.Loopback, 0);
         silent.Start();
         garbage.Start();
-        try
+        var held = new System.Collections.Concurrent.ConcurrentBag<TcpClient>();
+        using var stop = new CancellationTokenSource();
+        var accepting = Task.Run(async () =>
         {
-            var held = new List<TcpClient>();
-            _ = Task.Run(async () => { while (true) held.Add(await silent.AcceptTcpClientAsync()); });
-            _ = Task.Run(async () =>
+            try { while (true) held.Add(await silent.AcceptTcpClientAsync(stop.Token)); }
+            catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { }
+        });
+        var answering = Task.Run(async () =>
+        {
+            try
             {
                 while (true)
                 {
-                    using var c = await garbage.AcceptTcpClientAsync();
+                    using var c = await garbage.AcceptTcpClientAsync(stop.Token);
                     var junk = new byte[64];
                     Array.Fill(junk, (byte)0x7f);
-                    try { await c.GetStream().WriteAsync(junk); await Task.Delay(200); } catch (IOException) { }
+                    try { await c.GetStream().WriteAsync(junk, stop.Token); await Task.Delay(200, stop.Token); } catch (IOException) { }
                 }
-            });
+            }
+            catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { }
+        });
+        try
+        {
             _net.Map[("10.235.0.66", KnockProtocol.Port)] = ((IPEndPoint)silent.LocalEndpoint).Port;
             _net.Map[("10.235.0.67", KnockProtocol.Port)] = ((IPEndPoint)garbage.LocalEndpoint).Port;
             foreach (var ip in new[] { "10.235.0.66", "10.235.0.67" })
@@ -332,12 +341,14 @@ public sealed class PublicNetworkTests : IAsyncDisposable
             Assert.NotNull(outcome);
             Assert.True(outcome.Approved);
             Assert.DoesNotContain("10.235.0.7", failed);
-            held.ForEach(c => c.Dispose());
         }
         finally
         {
+            stop.Cancel();
             silent.Stop();
             garbage.Stop();
+            await Task.WhenAll(accepting, answering);
+            foreach (var c in held) c.Dispose();
         }
     }
 

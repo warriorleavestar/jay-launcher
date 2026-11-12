@@ -417,6 +417,19 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         lock (_gate) return (byte[])(_lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength)).Clone();
     }
 
+    /// <summary>
+    /// A copy of the room's current lobby key, or null when it has none (no usable invite). Every invite of the room
+    /// shares it while it lasts, so the host publishes its hidden entry for as long as it exists.
+    /// </summary>
+    public byte[]? CurrentLobbyKey()
+    {
+        lock (_gate)
+        {
+            PruneLocked();
+            return _lobbyKey is { } key ? (byte[])key.Clone() : null;
+        }
+    }
+
     /// <summary>The host's game, written into new invites (invite v3) so the joiner can pick a matching instance.</summary>
     public InviteGame? Game { get; set; }
 

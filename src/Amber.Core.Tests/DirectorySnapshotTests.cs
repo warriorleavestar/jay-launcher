@@ -254,7 +254,9 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.Equal("lookup", ErrorOf(Publish(lobby, lobby)));
         _now += TimeSpan.FromSeconds(30);
         await HideAsync(room, lobby);
-        Assert.Equal(room.RoomId, (await reader.LookupAsync(lobby, default))!.Id);
+        Assert.Equal(room.RoomId, (await reader.LookupAsync(lobby, default, _host.PublicKey))!.Id);
+        // A full index isn't trusted by a reader that has no host to check against.
+        Assert.Null(await reader.LookupAsync(lobby, default));
     }
 
     [Fact]
@@ -587,18 +589,6 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
     }
 
     [Fact]
-    public void ListedRoomsSendNoHiddenEntries()
-    {
-        // A listed room's renewal from a public room carries no hidden entries, whatever invites the host has.
-        var lobby = RandomNumberGenerator.GetBytes(16);
-        var sent = new List<JsonObject>();
-        _directory.OnRequest = r => { lock (sent) sent.Add(r); };
-        new RoomDirectoryClient(new CountingNetwork(_directory.Port))
-            .AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Public), _now), true, [lobby], default).GetAwaiter().GetResult();
-        Assert.Empty(Assert.Single(sent)["hidden"]!.AsArray());
-    }
-
-    [Fact]
     public async Task AnotherAddressForTheSameHostKeyIsAConflict()
     {
         var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
@@ -640,6 +630,102 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         Assert.Equal(1 + DirectorySnapshots.MaxAddressesToTry, hits.Count);
         Assert.Equal(hits.Count, hits.DistinctBy(h => h.Ip).Count());
     }
+    [Fact]
+    public async Task AnEarlierGuestIsNotTheAnswerForLaterInvites()
+    {
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        var book = new InviteBook();
+        var first = book.Create(1, null, false, TunnelSettings.Default).Invite;
+        // The host publishes its entry for as long as the room's lobby key lasts.
+        await HideAsync(new RoomSigner(), book.CurrentLobbyKey()!);
+        // Whoever got the first invite publishes an entry of their own under its key, pointing at themselves.
+        var guest = X25519KeyPair.Generate();
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden) with { HostKey = guest.PublicKey, Ip = "10.235.0.66" }, _now),
+            false, [first.LobbyKey], default);
+        var later = book.Create(1, null, false, TunnelSettings.Default).Invite;
+        Assert.Equal(first.LobbyKey, later.LobbyKey);
+        await client.Snapshots.RefreshAsync(client, default);
+        // Without the host to check against, the two entries clash and give nothing (the joiner falls back to the lobby).
+        Assert.Empty(await client.LookupAllAsync(later.LobbyKey, default));
+        // With it, only the host's address is tried.
+        var hits = await client.LookupAllAsync(later.LobbyKey, default, _host.PublicKey);
+        Assert.Equal(["10.235.0.7"], hits.Select(h => h.Ip));
+    }
+
+    [Fact]
+    public async Task AFullIndexIsNotTrustedWithoutTheHost()
+    {
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        // Someone holding the invite fills its index before the host gets there, one entry of it readable.
+        for (var i = 0; i < RoomDirectoryServer.MaxEntriesPerIndex - 1; i++) Assert.True(Publish(lobby, lobby)["ok"]!.GetValue<bool>());
+        var guest = X25519KeyPair.Generate();
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Hidden) with { HostKey = guest.PublicKey, Ip = "10.235.0.66" }, _now),
+            false, [lobby], default);
+        // The host's entry is turned away.
+        await Assert.ThrowsAsync<DirectoryRejectedException>(() => HideAsync(new RoomSigner(), lobby));
+        await client.Snapshots.RefreshAsync(client, default);
+        Assert.Empty(await client.LookupAllAsync(lobby, default));
+    }
+
+    [Fact]
+    public async Task ListedRoomsPublishTheirEntryToo()
+    {
+        var client = new RoomDirectoryClient(new CountingNetwork(_directory.Port));
+        var invite = new InviteBook().CreateStanding(false, TunnelSettings.Default).Invite;
+        await client.AnnounceAsync(new RoomSigner().Sign(Listing(RoomVisibility.Public) with { Invite = invite.ToString() }, _now), true, [invite.LobbyKey], default);
+        var snapshot = _directory.Handle(new JsonObject { ["op"] = "snap" });
+        Assert.NotEmpty(snapshot["hidden"]!.AsArray());
+        await client.Snapshots.RefreshAsync(client, default);
+        // The entry and the listing give the same place, so they agree.
+        Assert.Equal("10.235.0.7", Assert.Single(await client.LookupAllAsync(invite.LobbyKey, default)).Ip);
+    }
+
+    private sealed class TwoDirectories(int directory, int silent) : IPublicNetwork
+    {
+        public async Task<Stream> ConnectAsync(string ip, int p, CancellationToken ct)
+        {
+            var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, ip == "10.235.0.3" ? silent : directory, ct);
+            return client.GetStream();
+        }
+
+        public Task<string?> MyIpAsync(CancellationToken ct) => Task.FromResult<string?>("10.235.0.7");
+    }
+
+    [Fact]
+    public async Task ADirectoryThatNeverAnswersDoesNotHoldReadersUp()
+    {
+        var lobby = RandomNumberGenerator.GetBytes(16);
+        await HideAsync(new RoomSigner(), lobby);
+        // The second directory takes the connection and never says a word.
+        var silent = new TcpListener(IPAddress.Loopback, 0);
+        silent.Start();
+        var held = new ConcurrentBag<TcpClient>();
+        using var stop = new CancellationTokenSource();
+        var accepting = Task.Run(async () =>
+        {
+            try { while (true) held.Add(await silent.AcceptTcpClientAsync(stop.Token)); }
+            catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { }
+        });
+        try
+        {
+            var client = new RoomDirectoryClient(new TwoDirectories(_directory.Port, ((IPEndPoint)silent.LocalEndpoint).Port), ["10.235.0.2", "10.235.0.3"]);
+            using var poll = client.Snapshots.StartPolling(() => client, TimeSpan.FromMinutes(5));
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            // The reader goes on once the directory that answers has given its copy.
+            Assert.Single(await client.LookupAllAsync(lobby, default));
+            Assert.True(watch.Elapsed < RoomDirectoryProtocol.RequestTimeout, $"took {watch.Elapsed}");
+        }
+        finally
+        {
+            stop.Cancel();
+            silent.Stop();
+            await accepting;
+            foreach (var c in held) c.Dispose();
+        }
+    }
+
     [Fact]
     public async Task ARoomOpenedJustNowIsFoundAtTheNextRefresh()
     {

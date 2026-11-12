@@ -1210,12 +1210,15 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         request["jay"] = Version;
         var trust = Trust;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(timeout ?? RoomDirectoryProtocol.RequestTimeout);
+        // Connecting and the handshake get the usual time whatever the request; a longer timeout only starts once the
+        // request is out (a directory that doesn't answer the handshake is given up on as quickly as any other).
+        deadline.CancelAfter(RoomDirectoryProtocol.RequestTimeout);
         try
         {
             await using var stream = await network.ConnectAsync(ip, port, deadline.Token);
             return await DirectoryChannel.CallAsync(stream, trust, ip, NetworkSecret, request, deadline.Token,
-                snapshot ? total => deadline.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(total)) : null);
+                snapshot ? total => deadline.CancelAfter(RoomDirectoryProtocol.SnapshotDeadline(total)) : null,
+                timeout is { } longer ? () => deadline.CancelAfter(longer) : null);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -1366,7 +1369,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// Asks every directory what changed since the version in <paramref name="have"/> (by directory address; missing
     /// means "everything"). Every reader sends the same request, whatever it is looking for.
     /// </summary>
-    internal async Task<List<(string Ip, JsonObject? Reply, Exception? Error)>> SnapshotAsync(IReadOnlyDictionary<string, (string Epoch, long Version)> have, CancellationToken ct)
+    /// <param name="arrived">Called with each directory's answer as soon as it is in, before the slower ones answer.</param>
+    internal async Task<List<(string Ip, JsonObject? Reply, Exception? Error)>> SnapshotAsync(IReadOnlyDictionary<string, (string Epoch, long Version)> have, CancellationToken ct,
+        Action<(string Ip, JsonObject? Reply, Exception? Error)>? arrived = null)
     {
         var targets = await TargetsAsync(ct);
         var tasks = targets.Select(async ip =>
@@ -1377,13 +1382,16 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
                 request["epoch"] = mine.Epoch;
                 request["have"] = mine.Version;
             }
+            (string Ip, JsonObject? Reply, Exception? Error) result;
             try
             {
                 var reply = await CallAsync(ip, request, ct, RoomDirectoryProtocol.SnapshotTimeout, snapshot: true);
                 if (!IsOk(reply)) Check(reply);
-                return (ip, (JsonObject?)reply, (Exception?)null);
+                result = (ip, reply, null);
             }
-            catch (Exception e) when (e is IOException or InvalidDataException or EndOfStreamException) { return (ip, null, e); }
+            catch (Exception e) when (e is IOException or InvalidDataException or EndOfStreamException) { result = (ip, null, e); }
+            arrived?.Invoke(result);
+            return result;
         }).ToList();
         var results = (await Task.WhenAll(tasks)).ToList();
         ct.ThrowIfCancellationRequested();
@@ -1403,13 +1411,14 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <param name="searchKey">本机的指纹密钥：给了就能用这台电脑的指纹码找到这个房间。</param>
     /// <param name="account">This network's login token, if logged in: lets networks that require login accept the room and tie it to the account.</param>
     /// <returns>A warning to show the host (the room is listed but its invites can't be found), or null.</returns>
-    public async Task<string?> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<byte[]> lobbyKeys, CancellationToken ct,
+    public async Task<AnnounceWarning?> AnnounceAsync(RoomListing listing, bool listed, IEnumerable<byte[]> lobbyKeys, CancellationToken ct,
         byte[]? searchKey = null, string? account = null)
     {
         var hit = new DirectoryHit(listing.Id, listing.Ip, listing.HostKey);
         var hidden = new JsonArray();
-        // A room listed with its invite in the open is found from its listing; entries for it would only invite clashes.
-        foreach (var lobby in listing.Mode == RoomVisibility.Hidden ? lobbyKeys.Take(RoomDirectoryProtocol.MaxLookupKeys) : [])
+        // Listed rooms publish them too: the entry gives the same place as the listing, so it agrees with it, and it keeps
+        // anyone else holding the invite from being the only entry under its key.
+        foreach (var lobby in lobbyKeys.Take(RoomDirectoryProtocol.MaxLookupKeys))
         {
             var entry = SealedFor(lobby, hit);
             hidden.Add((JsonNode)new JsonObject
@@ -1431,8 +1440,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         if (searchKey is not null) request["fp"] = Convert.ToHexStringLower(searchKey);
         if (account is not null) request["account"] = account;
         var replies = NeedOne(await FanOutAsync(request, ct));
-        if (replies.Any(r => r["warn"]?.GetValue<string>() == "clock")) return L.T("core.mp.public.err_clock");
-        return replies.Any(r => r["warn"]?.GetValue<string>() == "lookup") ? L.T("core.mp.public.warn_lookup") : null;
+        if (replies.Any(r => r["warn"]?.GetValue<string>() == "clock")) return AnnounceWarning.Clock;
+        return replies.Any(r => r["warn"]?.GetValue<string>() == "lookup") ? AnnounceWarning.Lookup : null;
     }
 
     /// <summary>
@@ -1599,4 +1608,23 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
 public sealed class DirectoryRejectedException(string code, string message) : IOException(message)
 {
     public string Code { get; } = code;
+}
+
+/// <summary>A problem a directory took a room's publish with (see <see cref="RoomDirectoryClient.AnnounceAsync"/>).</summary>
+public enum AnnounceWarning
+{
+    /// <summary>This computer's clock is off: the room's invites can't be found through the directory.</summary>
+    Clock,
+    /// <summary>The directory left the room's invite entry out (its index is full).</summary>
+    Lookup,
+}
+
+public static class AnnounceWarnings
+{
+    /// <summary>The text for a warning, in the current UI language (looked up when shown, not when it happened).</summary>
+    public static string Text(this AnnounceWarning warning) => warning switch
+    {
+        AnnounceWarning.Clock => L.T("core.mp.public.err_clock"),
+        _ => L.T("core.mp.public.warn_lookup"),
+    };
 }

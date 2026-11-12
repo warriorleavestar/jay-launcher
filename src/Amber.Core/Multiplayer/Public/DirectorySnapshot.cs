@@ -298,37 +298,40 @@ public sealed class DirectorySnapshots
         {
             Dictionary<string, (string Epoch, long Version)> have;
             lock (_gate) have = _copies.ToDictionary(p => p.Key, p => (p.Value.Epoch, p.Value.Version), StringComparer.Ordinal);
+            var any = false;
+            Exception? error = null;
+            var now = _now();
+            // Each directory's answer is applied as it comes in: readers waiting for the first refresh can go on as soon as
+            // one copy is usable, without waiting for the slowest directory.
+            void Arrived((string Ip, JsonObject? Reply, Exception? Error) r)
+            {
+                var reply = r.Reply is null ? null : Parse(r.Reply);
+                var applied = false;
+                lock (_gate)
+                {
+                    if (reply is null) error ??= r.Error ?? new InvalidDataException(Localization.L.T("core.mp.public.bad_reply"));
+                    else if (Apply(r.Ip, reply, now))
+                    {
+                        any = applied = true;
+                        _refreshedAt = now;
+                        _lastError = null;
+                    }
+                }
+                if (applied) _firstAttempt.TrySetResult();
+            }
             List<(string Ip, JsonObject? Reply, Exception? Error)> replies;
-            try { replies = await client.SnapshotAsync(have, ct); }
+            try { replies = await client.SnapshotAsync(have, ct, Arrived); }
             catch (Exception e) when (e is not OperationCanceledException)
             {
                 lock (_gate) _lastError = e;
                 _firstAttempt.TrySetResult();
                 throw;
             }
-            var parsed = replies.Select(r => (r.Ip, Parsed: r.Reply is null ? null : Parse(r.Reply), r.Error)).ToList();
-            var any = false;
-            Exception? error = null;
-            var now = _now();
             lock (_gate)
             {
-                foreach (var gone in _copies.Keys.Where(ip => !parsed.Any(r => r.Ip == ip)).ToList()) _copies.Remove(gone);
-                foreach (var (ip, reply, failure) in parsed)
-                {
-                    if (reply is null)
-                    {
-                        error ??= failure ?? new InvalidDataException(Localization.L.T("core.mp.public.bad_reply"));
-                        continue;
-                    }
-                    any |= Apply(ip, reply, now);
-                }
+                foreach (var gone in _copies.Keys.Where(ip => !replies.Any(r => r.Ip == ip)).ToList()) _copies.Remove(gone);
                 DropStale(now);
-                if (any)
-                {
-                    _refreshedAt = now;
-                    _lastError = null;
-                }
-                else _lastError = error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
+                if (!any) _lastError = error ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
             }
             _firstAttempt.TrySetResult();
             // Nobody answered: a reader that asked for fresh data gets the error; a poller keeps the copy it has.
@@ -439,7 +442,8 @@ public sealed class DirectorySnapshots
         {
             DropStale(_now());
             if (_copies.Count > 0) return;
-            throw _lastError ?? new IOException(Localization.L.T("core.mp.public.no_directory"));
+            // A fresh exception each time: the stored one is shared by every reader and must not collect their stacks.
+            throw _lastError is { } last ? new IOException(last.Message, last) : new IOException(Localization.L.T("core.mp.public.no_directory"));
         }
     }
 
@@ -491,7 +495,7 @@ public sealed class DirectorySnapshots
     /// (it is public): an entry is the whole (host key, address, room).
     /// <list type="bullet">
     /// <item>Without <paramref name="expectedHost"/>: one answer only when every entry gives the same host key and
-    /// address; anything else is a conflict and gives nothing.</item>
+    /// address and no directory's index for this invite is full; anything else is a conflict and gives nothing.</item>
     /// <item>With it: the distinct addresses given for that host, for the caller to try in turn (the knock handshake
     /// proves the host; a wrong address just fails): every hidden-entry address, then a few listed ones.</item>
     /// </list>
@@ -501,12 +505,15 @@ public sealed class DirectorySnapshots
         var prefix = Convert.ToHexStringLower(HiddenEntry.Index(lobbyKey)) + ":";
         List<byte[]> candidates;
         List<(DirectoryHit Hit, int Copy)> listed;
+        bool full;
         var keyHex = Convert.ToHexStringLower(lobbyKey);
         var key = lobbyKey.ToArray();
         lock (_gate)
         {
             DropStale(_now());
             candidates = [.. _copies.Values.SelectMany(c => c.Hidden).Where(p => p.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(p => p.Value)];
+            // A directory turns entries away once an index holds this many, so the host's own may be among those left out.
+            full = _copies.Values.Any(c => c.Hidden.Keys.Count(k => k.StartsWith(prefix, StringComparison.Ordinal)) >= RoomDirectoryServer.MaxEntriesPerIndex);
             // A room listed with this invite in the open (public, direct or password rooms carry it) has no hidden entry;
             // its listing says where it is.
             listed = [.. _copies.Values.SelectMany((c, i) => c.Rooms.Values
@@ -529,6 +536,8 @@ public sealed class DirectorySnapshots
                 .Select(x => x.Hit);
             return [.. first.Concat(rest)];
         }
+        // Without a host to check against, a full index can't be trusted: whoever filled it may have kept the host out.
+        if (full) return [];
         var places = hidden.Concat(listed.Select(l => l.Hit))
             .DistinctBy(h => (Convert.ToHexStringLower(h.HostKey), h.Ip)).ToList();
         return places.Count == 1 ? places : [];

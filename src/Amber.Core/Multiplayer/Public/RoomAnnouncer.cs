@@ -28,7 +28,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     public string? LastError { get; private set; }
 
     /// <summary>Published, but with a problem the host should fix (a wrong clock: the room's invites can't be found).</summary>
-    public string? Warning { get; private set; }
+    public AnnounceWarning? Warning { get; private set; }
     public event Action? StateChanged;
 
     public string RoomId => _signer.RoomId;
@@ -83,18 +83,20 @@ public sealed class RoomAnnouncer : IAsyncDisposable
             else
             {
                 var listing = _signer.Sign(_listing() with { Ip = ip }, DateTimeOffset.UtcNow);
-                // Hidden entries only for a hidden room, decided from the listing just signed (not a second look at the room).
-                var keys = listing.Mode == RoomVisibility.Hidden ? _lobbyKeys() : [];
+                // Hidden entries whatever the visibility: for a listed room the entry gives the same place as its listing,
+                // and without it a holder of an old invite could publish the only entry under the lobby key.
+                var keys = _lobbyKeys();
                 var search = _searchKey?.Invoke();
                 // 隐藏房间又没有能用的邀请、也没开指纹查找：目录里没什么可登记的（之前登记的 90 秒后自己过期）。
                 if (listing.Mode == RoomVisibility.Hidden && keys.Count == 0 && search is null)
                 {
                     // 之前在列表里（刚撤下）：马上从目录里撤掉，不等 90 秒过期。
                     if (Published) await _client.WithdrawAsync(_signer, ct);
-                    if (Published || LastError is not null)
+                    if (Published || LastError is not null || Warning is not null)
                     {
                         Published = false;
                         LastError = null;
+                        Warning = null;
                         StateChanged?.Invoke();
                     }
                     return;
@@ -103,7 +105,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
                 if (warning != Warning)
                 {
                     Warning = warning;
-                    if (warning is not null) _log?.Invoke(L.F("core.mp.public.published_warning", warning));
+                    if (warning is { } w) _log?.Invoke(L.F("core.mp.public.published_warning", w.Text()));
                     StateChanged?.Invoke();
                 }
             }
@@ -114,7 +116,10 @@ public sealed class RoomAnnouncer : IAsyncDisposable
             error = e.Message;
         }
         var published = error is null;
-        if (published != Published || error != LastError)
+        // A failed publish has no warning of its own: an old one would only be out of date.
+        var cleared = !published && Warning is not null;
+        if (cleared) Warning = null;
+        if (published != Published || error != LastError || cleared)
         {
             Published = published;
             LastError = error;
