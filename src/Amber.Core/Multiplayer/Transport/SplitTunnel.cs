@@ -31,6 +31,27 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private int _accepted;
     private int _rejected;
     private int _tampered;
+    private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, TunnelServer.MaxPendingPerCaller);
+    private long _slotsFullLogged;
+    private long _handshakeFailedLogged;
+
+    /// <summary>
+    /// Legs still in their handshake at most, across all ports. Past that one still in its handshake is closed to make
+    /// room (<see cref="HandshakeSlots"/>), as for <see cref="TunnelServer.MaxPendingHandshakes"/>.
+    /// </summary>
+    public const int MaxPendingHandshakes = 256;
+
+    /// <summary>Legs in their handshake right now, across all ports.</summary>
+    public int PendingHandshakes => _slots.Held;
+
+    /// <summary>Legs closed in their handshake to make room for newer ones.</summary>
+    public int Evicted => _slots.Evicted;
+
+    /// <summary>Tests: runs on each accepted socket before anything else (to make that step fail).</summary>
+    internal Action<TcpClient>? BeforeServeForTest { get; init; }
+
+    /// <summary>How long one leg may take to finish its handshake.</summary>
+    internal TimeSpan HandshakeTimeout { get; init; } = TunnelHandshake.Timeout;
 
     /// <summary>Joined split connections handed to a handler.</summary>
     public int Accepted => Volatile.Read(ref _accepted);
@@ -95,7 +116,16 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             {
                 return;
             }
-            Track(HandleLegAsync(client, index, ct));
+            var slot = _slots.TryTake(TunnelServer.CallerOf(client), () => { Pump.Abort(client); client.Dispose(); }, out var evicted);
+            if (evicted) TunnelServer.LogSlotsFull(_log, ref _slotsFullLogged);
+            if (slot is null)
+            {
+                Interlocked.Increment(ref _rejected);
+                Pump.Abort(client);
+                client.Dispose();
+                continue;
+            }
+            Track(HandleLegAsync(client, index, slot, ct));
         }
     }
 
@@ -107,21 +137,46 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
-    private async Task HandleLegAsync(TcpClient client, int index, CancellationToken ct)
+    private async Task HandleLegAsync(TcpClient client, int index, HandshakeSlots.Slot slot, CancellationToken ct)
     {
-        Pump.Tune(client);
-        // The leg's stream owns the socket: once the leg is handed to the registry, the joined stream closes it.
-        Stream raw = new OwnedStream(client);
-        var leg = new SplitLeg(index, _room.Split.Paths, _room.Epoch);
+        Stream raw;
+        SplitLeg leg;
+        try
+        {
+            BeforeServeForTest?.Invoke(client);
+            Pump.Tune(client);
+            // The leg's stream owns the socket: once the leg is handed to the registry, the joined stream closes it.
+            raw = new OwnedStream(client);
+            leg = new SplitLeg(index, _room.Split.Paths, _room.Epoch);
+        }
+        catch (Exception e)
+        {
+            // Whatever failed, the leg gives its place back.
+            if (e is not (SocketException or ObjectDisposedException or IOException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
+                _log?.Invoke(L.T("core.mp.transport.endpoint_ended") + e.GetType().Name);
+            _slots.Release(slot);
+            Interlocked.Increment(ref _rejected);
+            Pump.Abort(client);
+            client.Dispose();
+            return;
+        }
         // Who has to close what: the raw socket until the handshake wraps it, then the secure leg until the registry takes it,
         // then the joined stream (only on the call that completes the set).
         var rawOwned = true;
         SecureStream? secure = null;
         SplitStream? joined = null;
         CancellationTokenRegistration revocation = default;
+        void HandshakeDone() => _slots.Release(slot);
         try
         {
-            var accepted = await TunnelHandshake.AcceptWithMemberAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, ct, leg);
+            (SecureStream Stream, TunnelService Service, MemberEntry? Member)? accepted;
+            using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                // Each leg has its own deadline to finish the handshake, whatever the handshake itself waits for.
+                deadline.CancelAfter(HandshakeTimeout);
+                accepted = await TunnelHandshake.AcceptWithMemberAsync(raw, _room, _room.Tunnel.Mode, _room.Tunnel.Disguise, deadline.Token, leg);
+            }
+            HandshakeDone();
             if (accepted is null) return;
             rawOwned = false;
             (secure, var service, var member) = accepted.Value;
@@ -171,7 +226,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             secure?.Abort();
             joined?.Abort();
             Interlocked.Increment(ref _rejected);
-            if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
+            if ((e is CryptographicException or PlatformNotSupportedException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
+                _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
         }
         catch (Exception e)
         {
@@ -179,10 +235,11 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             secure?.Abort();
             joined?.Abort();
             Interlocked.Increment(ref _rejected);
-            _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+            if (TunnelServer.OncePerMinute(ref _handshakeFailedLogged)) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
         }
         finally
         {
+            HandshakeDone();
             await revocation.DisposeAsync();
             if (secure is not null) secure.Abort();
             // Closing a joined connection writes a close record, which fails when the other side is already gone.
