@@ -104,8 +104,9 @@ public sealed partial class RequestItem : ObservableObject
     public bool HasNote => !string.IsNullOrEmpty(Note);
     public string? Details => Handle.Spec.Details;
     public bool HasDetails => !string.IsNullOrEmpty(Details);
-    public string DetailsLabel => Handle.Spec.DetailsLabel ?? L.T("activity.request.details");
-    [ObservableProperty] public partial bool ShowDetails { get; set; }
+    /// <summary>The disclosure's text: what it opens, or 收起 while open.</summary>
+    public string DetailsLabel => ShowDetails ? L.T("activity.request.details_hide") : Handle.Spec.DetailsLabel ?? L.T("activity.request.details");
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(DetailsLabel))] public partial bool ShowDetails { get; set; }
 
     [RelayCommand]
     private void ToggleDetails() => ShowDetails = !ShowDetails;

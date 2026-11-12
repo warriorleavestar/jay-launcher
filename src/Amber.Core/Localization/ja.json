@@ -3203,6 +3203,7 @@
   "home.sandbox.consent.details_label": "何が変わるか",
   "home.sandbox.consent.details": "管理者の確認は 2 つのことだけに使います。ゲームがこのコンピューター上の Jay と通信できるようにすること（マルチプレイ用）と、サンドボックス内のゲームがゲームフォルダーより上のフォルダーの名前を見られるようにすること（名前だけで、中身は見えません）。Java がファイルを見つけるのに必要です。許可しない場合、ゲームは標準サンドボックスを使い、Jay はもう尋ねません。設定でこれらの許可を取り消すこともできます。",
   "activity.request.details": "詳細",
+  "activity.request.details_hide": "閉じる",
   "home.sandbox.consent.confirm": "許可する（管理者の確認 1 回）",
   "home.sandbox.standard_because": "今回は標準サンドボックス：{0}",
   "settings.sandbox.label": "ゲームのサンドボックス",

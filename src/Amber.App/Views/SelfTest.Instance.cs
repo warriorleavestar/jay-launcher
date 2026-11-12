@@ -160,8 +160,9 @@ internal sealed partial class SelfTest
             await ShotAsync("instance-steps-sandbox-request");
             Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<Button>().First(t => t.IsEffectivelyVisible && t.Content as string == L.T("home.sandbox.consent.details_label")).Command?.Execute(null));
             await Task.Delay(200);
-            Check("强沙盒：点“这会改什么”才展开细节", Dispatcher.UIThread.Invoke(() =>
-                window.RequestBar.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == consent?.Spec.Details)));
+            Check("强沙盒：点“这会改什么”才展开细节，按钮变成“收起”", Dispatcher.UIThread.Invoke(() =>
+                window.RequestBar.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == consent?.Spec.Details)
+                && window.RequestBar.GetVisualDescendants().OfType<Button>().Any(b => b.IsEffectivelyVisible && b.Content as string == L.T("activity.request.details_hide"))));
             await ShotAsync("instance-steps-sandbox-details");
             if (consent is not null) service.Requests.Resolve(consent, "later", Amber.Core.Activity.RequestSource.Bar);
             Check("强沙盒：选【这次不用】就按标准沙盒继续", await Task.WhenAny(asked, Task.Delay(2000)) == asked && !asked.Result);

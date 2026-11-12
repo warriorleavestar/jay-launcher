@@ -3203,6 +3203,7 @@
   "home.sandbox.consent.details_label": "這會改什麼",
   "home.sandbox.consent.details": "系統管理員確認只做兩件事：允許遊戲和本機上的 Jay 通訊（連線要用）；允許沙盒裡的遊戲看到遊戲資料夾上面幾層資料夾的名稱（只是名稱，看不到裡面的內容），Java 找檔案要用。不同意的話，遊戲用標準沙盒，Jay 不會再問；在設定裡也能把這些權限撤掉。",
   "activity.request.details": "詳情",
+  "activity.request.details_hide": "收起",
   "home.sandbox.consent.confirm": "允許（一次系統管理員確認）",
   "home.sandbox.standard_because": "這次用標準沙盒：{0}",
   "settings.sandbox.label": "遊戲沙盒",

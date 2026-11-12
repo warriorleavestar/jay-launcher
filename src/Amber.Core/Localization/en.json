@@ -3278,6 +3278,7 @@
   "home.sandbox.consent.details_label": "What this changes",
   "home.sandbox.consent.details": "The admin confirmation does two things: it lets the game talk to Jay on this computer (for multiplayer), and it lets the sandboxed game see the names of the folders above the game folder (only the names, nothing inside them), which Java needs to find its files. If you say no, the game uses the standard sandbox and Jay will not ask again. You can also remove these permissions in Settings.",
   "activity.request.details": "Details",
+  "activity.request.details_hide": "Hide",
   "home.sandbox.consent.confirm": "Allow (one admin prompt)",
   "home.sandbox.standard_because": "Standard sandbox this time: {0}",
   "settings.sandbox.label": "Game sandbox",

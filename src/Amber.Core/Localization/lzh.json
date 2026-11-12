@@ -3068,6 +3068,7 @@
   "home.sandbox.consent.details_label": "此改何事",
   "home.sandbox.consent.details": "管者之確止為二事：許戲與本機之 Jay 相通（聯所需）；許沙盒中之戲見戲夾以上數夾之名（唯名，其內不可見），Java 尋檔所需。若不許，戲用常沙盒，Jay 不復問；於設中亦可撤此諸權。",
   "activity.request.details": "詳",
+  "activity.request.details_hide": "收",
   "home.sandbox.consent.confirm": "許之（管者一確）",
   "home.sandbox.standard_because": "此番用常沙盒：{0}",
   "settings.sandbox.label": "戲之沙盒",
