@@ -322,6 +322,25 @@ internal sealed partial class SelfTest
         Check("关掉开关：这个人不再被记着，右边回到“选一个人”", people.MetPeople.Count == 0 && people.SelectedMet is null && !Shown("MetCaption") && Shown("PeoplePickHint")
             && mp.TrustedPeople.Count == 0, string.Join(",", people.MetPeople.Select(p => p.Name)));
 
+        // ---- someone else's room: their list is only the host's word ----
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            page.FriendList.SelectedItem = people.Friends.First(f => f.Name == "Robin");
+            mp.EnterTestRoom(hostRoom, host: false);
+            mp.OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(robinFingerprint, robin.PublicKey, "Robin")));
+            mp.OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(MemberIdentity.FingerprintOf(danaKey), danaKey, "Dana")));
+        });
+        await Task.Delay(400);
+        Check("在别人的房间里：朋友写“在这个房间里（房主的名单这样写）”，仍然能发消息", Named<TextBlock>("FriendStateText")?.Text == L.T("people.state.listed_in_room")
+            && Named<TextBox>("DraftBox") is { IsEffectivelyEnabled: true }, Named<TextBlock>("FriendStateText")?.Text ?? "");
+        Dispatcher.UIThread.Invoke(() => page.MetList.SelectedItem = people.MetPeople.FirstOrDefault(p => p.Name == "Dana"));
+        await Task.Delay(300);
+        Check("在别人的房间里：只有房主名单上的人，“TA 敲门直接进”灰掉并写原因", Shown("MetDetail") && Shown("MetUncheckedText")
+            && Named<ToggleSwitch>("MetAutoAdmitSwitch") is { IsChecked: false, IsEffectivelyEnabled: false });
+        Dispatcher.UIThread.Invoke(mp.LeaveTestRoom);
+        Dispatcher.UIThread.Invoke(() => mp.OnlinePeers.Clear());
+        await Task.Delay(300);
+
         // ---- a friend's room ----
         using var roomHost = X25519KeyPair.Generate();
         var invite = new InviteBook().Create(1, TimeSpan.FromMinutes(30), true, TunnelSettings.Default, boundTo: me).Invite;
@@ -403,7 +422,8 @@ internal sealed partial class SelfTest
         {
             Dispatcher.UIThread.Invoke(() => settings.ChildMode = true);
             await ReopenAsync();
-            Check("“给孩子用”打开后：只留一句说明，没有朋友、没有顶上那一行、没有红点", Shown("PeopleChildNote") && !Shown("FriendListCard") && !Shown("FriendDetail")
+            Check("“给孩子用”打开后：只留一句说明，没有朋友、没有见过的人、没有顶上那一行、没有红点", Shown("PeopleChildNote") && !Shown("FriendListCard") && !Shown("FriendDetail")
+                && !Shown("MetList") && !Shown("MetDetail") && !people.HasMet
                 && !Dispatcher.UIThread.Invoke(() => page.PeopleStatusCard.IsVisible) && people.Badge == 0 && !people.IsAdding);
             shell.Navigate("people/add");
             await Task.Delay(300);

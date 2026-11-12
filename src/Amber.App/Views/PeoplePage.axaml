@@ -425,6 +425,7 @@
                 <TextBlock Text="{l:T people.auto_admit}" TextWrapping="Wrap" />
                 <TextBlock Classes="hint" FontSize="12" Text="{l:T people.auto_admit.met_hint}" TextWrapping="Wrap" />
                 <TextBlock x:Name="KnocksAlwaysAskText" Classes="hint" FontSize="12" Text="{l:T people.auto_admit.child}" IsVisible="{Binding ShowKnocksAlwaysAsk}" TextWrapping="Wrap" />
+                <TextBlock x:Name="MetUncheckedText" Classes="hint" FontSize="12" Text="{l:T people.auto_admit.unchecked}" IsVisible="{Binding ShowMetUnchecked}" TextWrapping="Wrap" />
               </StackPanel>
               <ToggleSwitch x:Name="MetAutoAdmitSwitch" Grid.Column="1" Classes="compact" IsChecked="{Binding MetAutoAdmit}" IsEnabled="{Binding CanChangeMetAutoAdmit}"
                             OnContent="" OffContent="" MinWidth="0" AutomationProperties.Name="{l:T people.auto_admit}" VerticalAlignment="Center" />

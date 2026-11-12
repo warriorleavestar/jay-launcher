@@ -19,6 +19,10 @@ public enum FriendState
     Verified,
     /// <summary>In the room I am in right now.</summary>
     SameRoom,
+    /// <summary>
+    /// In someone else's room, by the host's list. Only the host vouches for it; messages still go to the friend's key alone.
+    /// </summary>
+    ListedInRoom,
     /// <summary>They mailed me an invite to their room and it still works.</summary>
     InTheirRoom,
     /// <summary>A device their Jay account vouched for that I have not looked at yet.</summary>
@@ -98,6 +102,12 @@ public sealed partial class FriendLine : ObservableObject
 /// </summary>
 public sealed record MetPersonItem(byte[] PublicKey, string Name, string? JayAccount, bool AutoAdmit, bool InRoom) : LocalizedRecord
 {
+    /// <summary>
+    /// This computer checked the key itself (it knocked on my room, or I let it in before). Someone only on another host's
+    /// list is not: that host could have put any key under any name there, so they can't be let straight in from here.
+    /// </summary>
+    public bool Checked { get; init; } = true;
+
     public string DisplayName => Name.Length > 0 ? Name : L.T("multiplayer.peers.player");
     public string Fingerprint => MemberIdentity.FingerprintOf(PublicKey);
     public string StateText => L.T(InRoom ? "people.met.in_room" : "people.met.before");
@@ -213,13 +223,14 @@ public sealed partial class MultiplayerViewModel
             if (key.AsSpan().SequenceEqual(me) || IsFriend(key, null)) continue;
             var hex = Convert.ToHexString(key);
             if (met.TryGetValue(hex, out var known)) met[hex] = known with { InRoom = true };
-            else met[hex] = new MetPersonItem(key, p.Entry.Name, null, Trusted.IsTrusted(key), true);
+            // My own room's list comes from the knocks I checked; another host's list is only that host's word.
+            else met[hex] = new MetPersonItem(key, p.Entry.Name, null, Trusted.IsTrusted(key), true) { Checked = IsHosting };
         }
 
         var rows = met.Values.OrderByDescending(p => p.InRoom).ThenBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToList();
         var same = rows.Count == MetPeople.Count && rows.Zip(MetPeople).All(pair =>
             pair.First.PublicKey.AsSpan().SequenceEqual(pair.Second.PublicKey) && pair.First.Name == pair.Second.Name && pair.First.JayAccount == pair.Second.JayAccount
-            && pair.First.AutoAdmit == pair.Second.AutoAdmit && pair.First.InRoom == pair.Second.InRoom);
+            && pair.First.AutoAdmit == pair.Second.AutoAdmit && pair.First.InRoom == pair.Second.InRoom && pair.First.Checked == pair.Second.Checked);
         if (!same)
         {
             MetPeople.Clear();
@@ -264,7 +275,9 @@ public sealed partial class MultiplayerViewModel
 
     internal void SetAutoAdmit(MetPersonItem person, bool on)
     {
-        // Only this device, as the switch says: someone I met is not a friend whose other devices I have checked.
+        // Only this device, as the switch says: someone I met is not a friend whose other devices I have checked. And only a
+        // key this computer checked itself; turning it off always works.
+        if (on && !person.Checked) return;
         if (on) Trusted.AddDevice(person.PublicKey, person.Name);
         else Trusted.Remove(person.PublicKey);
         RefreshTrusted();
@@ -309,6 +322,8 @@ public sealed partial class MultiplayerViewModel
     internal void TrustKnocker(byte[] device, string name, string? jayAccount)
     {
         if (FriendOf(device, jayAccount) is { } friend) SetAutoAdmit(friend, true);
+        // The account is kept so that removing the friend finds this device. It lets nobody in while they are a friend, and
+        // every way of ending the friendship clears it (see ForgetRemovedDevice and ForgetFormerFriends).
         Trusted.Add(device, name, jayAccount);
         RefreshTrusted();
     }
@@ -353,7 +368,7 @@ public sealed partial class MultiplayerViewModel
 
     internal FriendState StateOf(ContactItem friend) =>
         friend.Devices.Any(d => d.NewDevice) ? FriendState.NewDevice
-        : PeerOf(friend) is not null ? FriendState.SameRoom
+        : PeerOf(friend) is not null ? (IsHosting ? FriendState.SameRoom : FriendState.ListedInRoom)
         : RoomOf(friend) is not null ? FriendState.InTheirRoom
         : FriendState.Verified;
 

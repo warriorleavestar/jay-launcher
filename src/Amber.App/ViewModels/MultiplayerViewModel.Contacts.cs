@@ -197,6 +197,29 @@ public sealed partial class MultiplayerViewModel
         RefreshContacts();
     }
 
+    // Jay accounts of my friends at the last rebuild.
+    private HashSet<string> _friendAccounts = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Someone who stopped being a friend, whichever way that happened, leaves nothing under their Jay account on the
+    /// "straight in" list: a friend's account lets nobody in, but the same entry would let in every device it signs once
+    /// they are not a friend any more.
+    /// </summary>
+    private void ForgetFormerFriends()
+    {
+        var now = ContactList.Where(c => c.JayAccount is not null).Select(c => c.JayAccount!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var gone = _friendAccounts.Where(a => !now.Contains(a)).ToList();
+        _friendAccounts = now;
+        if (gone.Count == 0) return;
+        var removed = false;
+        foreach (var t in Trusted.All.Where(t => t.JayAccount is { } a && gone.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList())
+        {
+            Trusted.Remove(t.PublicKey);
+            removed = true;
+        }
+        if (removed) RefreshTrusted();
+    }
+
     /// <summary>Rebuilds both lists from the book and keeps the activity centre's requests in step with it.</summary>
     internal void RefreshContacts()
     {
@@ -208,6 +231,7 @@ public sealed partial class MultiplayerViewModel
             .Select(g => g.OrderByDescending(c => c.Added).ToList())
             .Select(devices => new ContactItem(devices[0]) { Devices = devices });
         foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
+        ForgetFormerFriends();
         DropRoomsOfRemovedFriends();
         RevokeInvitesOfRemovedFriends();
         ContactRequests.Clear();
@@ -366,7 +390,8 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private void RemoveContactDevice(ContactDeviceItem? item)
     {
-        if (item is null) return;
+        // The last device is the person: that goes through removing the friend, which asks first.
+        if (item is null || item.Person.Devices.Count <= 1) return;
         Contacts.Remove(item.Device.PublicKey);
         ForgetRemovedDevice(item.Device.PublicKey, item.Person);
         SetStatus(StatusMessage.Info("multiplayer.contacts.device_removed", item.Person.Name));
@@ -378,7 +403,14 @@ public sealed partial class MultiplayerViewModel
     /// </summary>
     private void ForgetRemovedDevice(byte[] device, ContactItem? person)
     {
-        if (person is null || person.Devices.Count <= 1) Trusted.Remove(device);
+        if (person is null) Trusted.Remove(device);
+        else if (person.Devices.Count <= 1)
+        {
+            // Their last device: they are no longer a friend, so nothing of theirs may stay on the list. That includes
+            // entries under their Jay account, which would otherwise let in any device the account signs.
+            Trusted.Remove(device);
+            SetAutoAdmit(person, false);
+        }
         else Trusted.RemoveDevice(device);
         RefreshTrusted();
     }
