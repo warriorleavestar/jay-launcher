@@ -115,13 +115,17 @@ public sealed partial class MultiplayerViewModel
 
     private string _contactsDir = AppSettings.DataDir;
 
-    internal ContactBook Contacts => _contacts ??= CreateContacts();
-
-    private ContactBook CreateContacts()
+    /// <summary>The contact book, made on first use. A knock may be the first use, on its own thread, so only one book wins.</summary>
+    internal ContactBook Contacts
     {
-        var book = new ContactBook(Path.Combine(ContactsDir, ContactBook.FileName)) { Me = Identity.PublicKey };
-        book.Changed += () => Dispatcher.UIThread.Post(RefreshContacts);
-        return book;
+        get
+        {
+            if (Volatile.Read(ref _contacts) is { } book) return book;
+            var created = new ContactBook(Path.Combine(ContactsDir, ContactBook.FileName)) { Me = Identity.PublicKey };
+            if (Interlocked.CompareExchange(ref _contacts, created, null) is { } other) return other;
+            created.Changed += () => Dispatcher.UIThread.Post(RefreshContacts);
+            return created;
+        }
     }
 
     /// <summary>Directory keys seen first, for networks that pin none (trust on first use).</summary>

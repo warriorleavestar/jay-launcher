@@ -2729,6 +2729,7 @@
   "multiplayer.knock.verify": "{0} さんに、表示されている安全コードがこれと同じか確認してください。同じなら入れてください。",
   "multiplayer.knock.trust_after": "次から {0} さんをそのまま入れる（フレンドのページでオフにできます）",
   "multiplayer.knock.jay_hint": "この人の Jay アカウントは確認できました。信頼すると、同じアカウントの別のデバイスも自動で入れます。",
+  "multiplayer.knock.jay_hint_friend": "この人の Jay アカウントは確認できました。友だちなので、まだ確認していないデバイスは今後も先に確認します。",
   "multiplayer.knock.remaining": "残り {0}。答えなければ拒否になります",
   "multiplayer.knock.waiting_forever": "あなたの返事を待ち続けます",
   "multiplayer.knock.timed_out": "{0} さんのノックに {1} 返事がなかったので、拒否しました。",

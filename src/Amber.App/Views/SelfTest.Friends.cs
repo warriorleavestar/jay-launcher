@@ -278,8 +278,8 @@ internal sealed partial class SelfTest
         Check("开着房间：【邀请进我的房间】能点了", Named<Button>("InviteFriendButton") is { IsEffectivelyEnabled: true } && !Shown("InviteHintText"));
         Dispatcher.UIThread.Invoke(() =>
         {
-            mp.FriendMessageForTest(robinFingerprint, "hi! ready?", mine: false);
-            mp.FriendMessageForTest(robinFingerprint, "two minutes", mine: true);
+            mp.FriendMessageForTest(robin.PublicKey, "hi! ready?", mine: false);
+            mp.FriendMessageForTest(robin.PublicKey, "two minutes", mine: true);
             mp.SentInviteForTest("mail-1", people.Selected!.Friend);
         });
         await Task.Delay(300);

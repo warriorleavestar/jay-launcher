@@ -69,9 +69,12 @@ public sealed record ApprovalCard(KnockRequest Request, string? Warning) : Local
             MultiplayerViewModel.JayLine(Request.JayAccount) }
         .Where(s => !string.IsNullOrEmpty(s)));
 
-    /// <summary>The guest showed a Jay account: trusting them covers their other devices too.</summary>
+    /// <summary>The Jay account is a friend's: their devices are trusted one by one, so trusting this one lets no other in.</summary>
+    public bool AccountIsFriend { get; init; }
+
+    /// <summary>The guest showed a Jay account: trusting them covers their other devices too (not for a friend).</summary>
     public bool HasJayAccount => Request.JayAccount is not null && CanTrustAfter;
-    public string JayHint => L.T("multiplayer.knock.jay_hint");
+    public string JayHint => L.T(AccountIsFriend ? "multiplayer.knock.jay_hint_friend" : "multiplayer.knock.jay_hint");
     public string VerifyHint => L.F("multiplayer.knock.verify", Who);
     public string TrustLabel => L.F("multiplayer.knock.trust_after", Who);
 
@@ -475,6 +478,7 @@ public sealed partial class MultiplayerViewModel
         {
             Deadline = wait == Timeout.InfiniteTimeSpan ? null : DateTimeOffset.Now + wait,
             CanTrustAfter = !Child.AlwaysAskKnock,
+            AccountIsFriend = IsFriendAccount(request.JayAccount),
         };
         ct.Register(() => card.Decision.TrySetResult(false));
         Dispatcher.UIThread.Post(() =>

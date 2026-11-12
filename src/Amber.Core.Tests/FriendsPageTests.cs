@@ -226,15 +226,20 @@ public sealed class FriendsPageTests
         Assert.Empty(StraightIn(root));
         Assert.Empty(mp.TrustedPeople);
 
-        // Let in under their account from a computer that is not in my friend list (it knocked before we were friends):
-        // the switch shows on, and turning it off takes that one off too.
+        // Let in under their account from a computer that is not in my friend list (it knocked before we were friends, maybe
+        // in an older Jay): the account lets none of a friend's devices in, so the switch shows off, and turning it on works
+        // in one click and puts their devices on the list by key.
         new TrustedMembers(Path.Combine(root, "trusted.json")).Add(Key(8), "Bob", bob.Address);
         mp.TrustedFile = Path.Combine(root, "trusted.json");
-        Assert.True(people.AutoAdmit);
+        Assert.False(people.AutoAdmit);
         main.Shell.Navigate("people");
         Dispatcher.UIThread.RunJobs();
         // Their account is a friend's: that computer is not "someone I've met".
         Assert.Empty(people.MetPeople);
+        people.AutoAdmit = true;
+        Assert.True(people.AutoAdmit);
+        Assert.True(mp.Trusted.IsTrusted(Key(1)) && mp.Trusted.IsTrusted(Key(2)));
+        // Turning it off takes the computer trusted under their account off too.
         people.AutoAdmit = false;
         Assert.Empty(StraightIn(root));
     });
@@ -442,10 +447,10 @@ public sealed class FriendsPageTests
         var added = 0;
         people.LineAdded += () => added++;
 
-        mp.FriendMessageForTest(robin, "ready?", mine: false);
-        mp.FriendMessageForTest(robin, "two minutes", mine: true);
+        mp.FriendMessageForTest(Key(1), "ready?", mine: false);
+        mp.FriendMessageForTest(Key(1), "two minutes", mine: true);
         // A private message with someone who is not a friend stays in the room.
-        mp.FriendMessageForTest(MemberIdentity.FingerprintOf(Key(7)), "psst", mine: false);
+        mp.FriendMessageForTest(Key(7), "psst", mine: false);
         Assert.Equal(2, people.Lines!.Count);
         Assert.Equal(2, added);
         Assert.False(people.HasNoLines);
@@ -490,7 +495,7 @@ public sealed class FriendsPageTests
         // Old lines fall off the top, and an invite note that falls off stops waiting for its receipt.
         mp.SentInviteForTest("mail-2", mp.ContactList.First(f => f.Name == "Robin"));
         Assert.Equal(1, mp.InviteNotesWaiting);
-        for (var i = 0; i < MultiplayerViewModel.MaxFriendLines + 5; i++) mp.FriendMessageForTest(robin, "line " + i, mine: true);
+        for (var i = 0; i < MultiplayerViewModel.MaxFriendLines + 5; i++) mp.FriendMessageForTest(Key(1), "line " + i, mine: true);
         Assert.Equal(MultiplayerViewModel.MaxFriendLines, lines.Count);
         Assert.Equal("line " + (MultiplayerViewModel.MaxFriendLines + 4), lines[^1].Text);
         Assert.Equal(0, mp.InviteNotesWaiting);
@@ -516,6 +521,24 @@ public sealed class FriendsPageTests
         people.Draft = "   ";
         Wait(people.SendCommand.ExecuteAsync(null));
         Assert.Empty(people.Lines!);
+    });
+
+    /// <summary>A friend is known by their device key: a name or a safety code someone else shows doesn't make them the friend.</summary>
+    [Fact]
+    public void OnlyTheFriendsOwnKeyReachesTheirConversation() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        AddFriends(mp, Friend(1, "Robin"));
+        people.Selected = people.Friends.Single();
+        mp.OnlinePeers.Add(new OnlinePeerItem(new RosterEntry(MemberIdentity.FingerprintOf(Key(1)), Key(7), "Robin")));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Null(mp.PeerOf(people.Selected!.Friend));
+        mp.FriendMessageForTest(Key(7), "it's me", mine: false);
+        Assert.Empty(people.Lines!);
+        mp.FriendMessageForTest(Key(1), "the real one", mine: false);
+        Assert.Equal("the real one", Assert.Single(people.Lines!).Text);
+        mp.OnlinePeers.Clear();
+        Dispatcher.UIThread.RunJobs();
     });
 
     [Fact]

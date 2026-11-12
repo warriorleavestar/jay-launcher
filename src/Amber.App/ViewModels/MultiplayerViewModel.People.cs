@@ -146,9 +146,9 @@ public sealed partial class MultiplayerViewModel
 
     private void InitPeople()
     {
-        Members.CollectionChanged += (_, _) => RefreshMetPeople();
-        OnlinePeers.CollectionChanged += (_, _) => RefreshMetPeople();
-        TrustedPeople.CollectionChanged += (_, _) => RefreshMetPeople();
+        Members.CollectionChanged += (_, _) => QueueMetPeopleRefresh();
+        OnlinePeers.CollectionChanged += (_, _) => QueueMetPeopleRefresh();
+        TrustedPeople.CollectionChanged += (_, _) => QueueMetPeopleRefresh();
         FriendRooms.CollectionChanged += (_, _) => PeopleFactsChanged?.Invoke();
     }
 
@@ -160,6 +160,28 @@ public sealed partial class MultiplayerViewModel
     {
         _metPeopleWanted = true;
         RefreshMetPeople();
+    }
+
+    private bool _metPeopleQueued;
+
+    /// <summary>
+    /// A list the met people come from changed. Lists are refilled one row at a time, so the work (which reads the trusted
+    /// list and the contact book) runs once, after the UI thread is done with this round of changes.
+    /// </summary>
+    private void QueueMetPeopleRefresh()
+    {
+        if (!_metPeopleWanted)
+        {
+            PeopleFactsChanged?.Invoke();
+            return;
+        }
+        if (_metPeopleQueued) return;
+        _metPeopleQueued = true;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _metPeopleQueued = false;
+            RefreshMetPeople();
+        });
     }
 
     internal void RefreshMetPeople()
@@ -214,12 +236,12 @@ public sealed partial class MultiplayerViewModel
     internal bool KnocksAlwaysAsk => Child.AlwaysAskKnock;
 
     /// <summary>
-    /// The friend's knock is approved without asking me: one of their devices is on the list, or a device trusted under
-    /// their Jay account (one that knocked before we were friends). The account alone lets no other device of a friend in:
-    /// a device I have not confirmed yet always asks.
+    /// The switch is on when every device of theirs I have confirmed is on the list by its key. A Jay account on the list
+    /// (trusted from a knock, possibly by an older Jay) does not count: it lets no device of a friend in by itself, see
+    /// <see cref="AccountMayAutoAdmit"/>. A device I have not confirmed yet always asks.
     /// </summary>
     internal bool IsAutoAdmitted(ContactItem friend) =>
-        friend.Devices.Any(d => Trusted.IsTrusted(d.PublicKey)) || Trusted.IsTrustedJayAccount(friend.JayAccount);
+        friend.Devices.Where(d => d.MayBeAutoAdmitted).ToList() is { Count: > 0 } confirmed && confirmed.All(d => Trusted.IsTrusted(d.PublicKey));
 
     /// <summary>
     /// Turns "let them straight in" on or off for a friend: every device I have looked at goes on the list by its key alone
@@ -302,8 +324,15 @@ public sealed partial class MultiplayerViewModel
         if (Child.AlwaysAskKnock || !Trusted.IsTrustedJayAccount(account)) return false;
         // Can't tell who is a friend: ask.
         if (Contacts.Unreadable) return false;
-        return !Contacts.All.Any(c => c.Verified && string.Equals(c.JayAccount, account, StringComparison.OrdinalIgnoreCase));
+        return !IsFriendAccount(account);
     }
+
+    /// <summary>
+    /// The Jay account belongs to a verified friend. Called on the knock thread too: <see cref="ContactBook.All"/> reads a
+    /// snapshot of the contact files under the book's own lock, and <see cref="Contacts"/> is created safely from any thread.
+    /// </summary>
+    internal bool IsFriendAccount(string? account) =>
+        account is not null && Contacts.All.Any(c => c.Verified && string.Equals(c.JayAccount, account, StringComparison.OrdinalIgnoreCase));
 
     // ---- what is known about a friend ----
 
@@ -354,8 +383,6 @@ public sealed partial class MultiplayerViewModel
     /// <summary>The verified friend who owns this device key, if any.</summary>
     private Contact? FriendByKey(ReadOnlySpan<byte> publicKey) => Contacts.Find(publicKey) is { Verified: true } contact ? contact : null;
 
-    private Contact? FriendByFingerprint(string fingerprint) => Contacts.All.FirstOrDefault(c => c.Verified && c.Fingerprint == fingerprint);
-
     /// <summary>I mailed this friend an invite to my room: a note that shows where the mail is.</summary>
     private void NoteInviteSent(ContactItem friend, string mailId)
     {
@@ -381,10 +408,13 @@ public sealed partial class MultiplayerViewModel
         AddFriendLine(friend, new FriendLine(FriendLineKind.Note, () => L.F("people.line.invited_me", room), DateTimeOffset.Now) { RoomKey = roomKey });
     }
 
-    /// <summary>A private message in the room, to or from someone who is a friend: it also belongs to the conversation.</summary>
-    private void NoteFriendMessage(string fingerprint, string text, DateTimeOffset time, bool mine)
+    /// <summary>
+    /// A private message in the room, to or from someone who is a friend: it also belongs to the conversation. Filed by the
+    /// device key the message was sealed with (or sent to), never by a name or a fingerprint someone in the room wrote.
+    /// </summary>
+    private void NoteFriendMessage(byte[] publicKey, string text, DateTimeOffset time, bool mine)
     {
-        if (FriendByFingerprint(fingerprint) is not { } friend) return;
+        if (FriendByKey(publicKey) is not { } friend) return;
         AddFriendLine(friend, new FriendLine(mine ? FriendLineKind.Mine : FriendLineKind.Theirs, () => text, time));
     }
 
@@ -401,7 +431,7 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>Test seam: as if a private message to or from this device had gone through the room.</summary>
-    internal void FriendMessageForTest(string fingerprint, string text, bool mine) => NoteFriendMessage(fingerprint, text, DateTimeOffset.Now, mine);
+    internal void FriendMessageForTest(byte[] publicKey, string text, bool mine) => NoteFriendMessage(publicKey, text, DateTimeOffset.Now, mine);
 
     /// <summary>Test seam: the receipt for the mail with this id came back.</summary>
     internal void InviteReceiptForTest(string id) => OnInviteReceipt(new SentMail([], id, MailKind.Invite, DateTimeOffset.UtcNow));
