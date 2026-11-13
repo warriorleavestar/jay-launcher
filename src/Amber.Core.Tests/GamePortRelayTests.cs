@@ -407,6 +407,26 @@ public sealed class GamePortRelayTests
     }
 
     [Fact]
+    public async Task APlayerWhoseConnectionCantEvenBeCreatedIsNotCountedAfterwards()
+    {
+        using var game = new EchoGame(0xD3);
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        var tried = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Out of sockets, for example: creating the connection to the game throws.
+        relay.CreateOutboundForTest = () =>
+        {
+            tried.TrySetResult();
+            throw new SocketException((int)SocketError.TooManyOpenSockets);
+        };
+
+        Assert.Null(await RoundTripAsync(relay.Port, [1]));
+        await tried.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await WaitNoCallersAsync(relay, game.Port);
+        Assert.True(relay.ClearTargetIfIdle(game.Port));
+    }
+
+    [Fact]
     public async Task APlayerStillConnectingWhenTheRelayStopsIsNotCountedAfterwards()
     {
         using var game = new EchoGame(0xD2);

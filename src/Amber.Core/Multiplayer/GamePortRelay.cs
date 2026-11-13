@@ -97,6 +97,9 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// <summary>Tests: runs once a caller is taken on for a port, before the connection to the game is made.</summary>
     internal Func<Task>? BeforeConnectForTest { get; set; }
 
+    /// <summary>Tests: makes the connection to the game in place of <c>new TcpClient()</c> (to make that fail).</summary>
+    internal Func<TcpClient>? CreateOutboundForTest { get; set; }
+
     /// <summary>
     /// Also listen on <paramref name="address"/> (a whole-LAN room's virtual address) at the same port, waiting for the
     /// adapter to get that address. Completes once listening; throws the <see cref="SocketException"/> when it gives up,
@@ -216,7 +219,7 @@ public sealed class GamePortRelay : IAsyncDisposable
         try
         {
             // Created inside the try so a failure here still takes the caller off the connecting count.
-            outbound = new TcpClient();
+            outbound = (CreateOutboundForTest ?? (() => new TcpClient()))();
             if (BeforeConnectForTest is { } before) await before();
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token))
             {
