@@ -221,6 +221,79 @@ public sealed class GamePortRelayTests
         void Check(Task watch) => Pump(() => watch.IsCompleted);
     });
 
+    [Fact]
+    public void DroppingAClosedGameDoesNotStopASwitchInProgress() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x11);
+        using var second = new EchoGame(0x22);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            // The first game no longer answers; the second does.
+            GameTargetProbeForTest = port => Task.FromResult(port != first.Port),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(first.Port, relay.Target);
+
+        // The player types the second game's port; while that switch waits out the typing delay, the first is dropped.
+        vm.RelayTypingDelay = TimeSpan.FromMilliseconds(300);
+        vm.ManualPort = second.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Check(vm.WatchGameTargetAsync());
+        Assert.Null(relay.Target);
+        // The switch still goes through.
+        Pump(() => relay.Target == second.Port);
+        Assert.False(vm.IsWaitingForGame);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch) => Pump(() => watch.IsCompleted);
+    });
+
+    [Fact]
+    public void MissesCountForOneLinkedPortOnly() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x33);
+        using var second = new EchoGame(0x44);
+        var probe = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(false),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        // One miss on the first game, then the player switches to the second.
+        Check(vm.WatchGameTargetAsync());
+        vm.ManualPort = second.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == second.Port);
+        // One miss on the second game is its first: it stays linked.
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(second.Port, relay.Target);
+
+        // A check still running when the next refresh comes neither counts twice nor forgets the misses so far.
+        vm.GameTargetProbeForTest = _ => probe.Task;
+        var slow = vm.WatchGameTargetAsync();
+        Check(vm.WatchGameTargetAsync());
+        probe.SetResult(false);
+        Check(slow);
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch) => Pump(() => watch.IsCompleted);
+    });
+
     [Theory]
     // A world that wasn't listed before (reopened on a new port) wins, even over the linked one still answering.
     [InlineData(new[] { 100, 200 }, new[] { 200 }, 100, 300, 200)]
