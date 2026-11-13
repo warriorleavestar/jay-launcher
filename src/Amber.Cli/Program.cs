@@ -491,7 +491,7 @@ try
             else
             {
                 if (!RoomCode.TryParse(argList[1], out room)) throw new ArgumentException("房间码格式不对");
-                if (room.IsUnjoinableLegacy) throw new ArgumentException("This room code is from an older version and can't be joined: ask the host to update and send a new one.");
+                if (room.IsUnjoinableLegacy) throw new ArgumentException("这个房间码来自旧版本，无法加入：请房主更新后重新发一个");
                 if (room.Tunnel.Mode == Amber.Core.Multiplayer.Transport.TransportMode.Extreme && !Amber.Core.Multiplayer.Transport.NoiseHandshake.HybridSupported)
                     throw new PlatformNotSupportedException("这个房间用的是极端加密，需要系统支持 ML-KEM，这台电脑不支持");
                 local = EasyTierArgs.FreeTcpPort();

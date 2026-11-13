@@ -65,13 +65,16 @@ public sealed record RoomCode(string Network, string Secret, int Port)
     /// secret and network, per mode, so a code whose mode was removed or changed can't even join the EasyTier network,
     /// and neither the code's network nor its secret appears on the wire. Invite rooms use their random values as they are.
     /// </summary>
+    /// <summary>Only a wrapped code carries the disguise (its D mark); a general one never does, whatever was asked.</summary>
+    private bool Disguised => Tunnel.Wraps && Tunnel.Disguise;
+
     public string EasyTierNetworkName => FromInvite ? Network
         : "amber-" + Convert.ToHexStringLower(HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(Secret), 8, Encoding.UTF8.GetBytes(NetworkName),
-            Encoding.UTF8.GetBytes($"amber-et-name-v1|{(int)Tunnel.Mode}|{(Tunnel.Disguise ? 1 : 0)}")));
+            Encoding.UTF8.GetBytes($"amber-et-name-v1|{(int)Tunnel.Mode}|{(Disguised ? 1 : 0)}")));
 
     public string EasyTierSecret => FromInvite ? Secret
         : Convert.ToHexStringLower(HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(Secret), 32, Encoding.UTF8.GetBytes(NetworkName),
-            Encoding.UTF8.GetBytes($"amber-et-v1|{(int)Tunnel.Mode}|{(Tunnel.Disguise ? 1 : 0)}")));
+            Encoding.UTF8.GetBytes($"amber-et-v1|{(int)Tunnel.Mode}|{(Disguised ? 1 : 0)}")));
 
     /// <summary>要在日志里遮掉的密钥（房间密钥和派生出来的 EasyTier 密钥）。</summary>
     public IReadOnlyList<string> Secrets => FromInvite ? [Secret, Network, .. Split.Nets.SelectMany(n => new[] { n.Secret, n.Network })] : [Secret, EasyTierSecret];

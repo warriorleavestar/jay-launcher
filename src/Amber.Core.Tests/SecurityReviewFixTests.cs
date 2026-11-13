@@ -184,6 +184,16 @@ public class SecurityReviewFixTests
     }
 
     [Fact]
+    public void AGeneralCodeAskedToDisguiseStillReachesTheSameNetwork()
+    {
+        // A general code has no D mark, so the guest parses it without disguise: the host must derive the same way.
+        var host = RoomCode.Create(25565) with { Tunnel = new TunnelSettings(TransportMode.General, true) };
+        Assert.True(RoomCode.TryParse(host.ToString(), out var guest));
+        Assert.Equal(host.EasyTierNetworkName, guest.EasyTierNetworkName);
+        Assert.Equal(host.EasyTierSecret, guest.EasyTierSecret);
+    }
+
+    [Fact]
     public void InviteRoomSecretsAre256Bits()
     {
         var credentials = RoomCredentials.Create(new byte[32], 25565, TunnelSettings.Default);
