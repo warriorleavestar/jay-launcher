@@ -24,7 +24,8 @@ public sealed class GamePortRelay : IAsyncDisposable
     private TcpListener? _adapterListener;
     private Task? _adapterLoop;
     private readonly object _gate = new();
-    private readonly HashSet<TcpClient> _open = [];
+    // Each connection being passed on: the caller's side, its side to the game and the game port it reached.
+    private readonly HashSet<(TcpClient In, TcpClient Out, int Port)> _open = [];
     private readonly TimeSpan _connectTimeout;
     private int _target;
 
@@ -64,7 +65,16 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// <summary>Connections being passed on right now (tests).</summary>
     public int OpenConnections
     {
-        get { lock (_gate) return _open.Count / 2; }
+        get { lock (_gate) return _open.Count; }
+    }
+
+    /// <summary>
+    /// Connections passed on to one game port. Connections to a world linked before stay open after a switch, so they
+    /// say nothing about whether the world linked now still answers.
+    /// </summary>
+    public int OpenConnectionsTo(int port)
+    {
+        lock (_gate) return _open.Count(c => c.Port == port);
     }
 
     /// <summary>
@@ -176,6 +186,7 @@ public sealed class GamePortRelay : IAsyncDisposable
             return;
         }
         using var outbound = new TcpClient();
+        (TcpClient, TcpClient, int)? entry = null;
         try
         {
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token))
@@ -185,11 +196,11 @@ public sealed class GamePortRelay : IAsyncDisposable
             }
             inbound.NoDelay = true;
             outbound.NoDelay = true;
+            entry = (inbound, outbound, port);
             lock (_gate)
             {
                 if (_cts.IsCancellationRequested) return;
-                _open.Add(inbound);
-                _open.Add(outbound);
+                _open.Add(entry.Value);
             }
             var a = inbound.GetStream();
             var b = outbound.GetStream();
@@ -202,11 +213,8 @@ public sealed class GamePortRelay : IAsyncDisposable
         }
         finally
         {
-            lock (_gate)
-            {
-                _open.Remove(inbound);
-                _open.Remove(outbound);
-            }
+            if (entry is { } done)
+                lock (_gate) _open.Remove(done);
         }
     }
 
@@ -232,9 +240,13 @@ public sealed class GamePortRelay : IAsyncDisposable
             adapterLoop = _adapterLoop;
         }
         _listener.Stop();
-        TcpClient[] open;
+        (TcpClient In, TcpClient Out, int Port)[] open;
         lock (_gate) open = [.. _open];
-        foreach (var c in open) c.Dispose();
+        foreach (var c in open)
+        {
+            c.In.Dispose();
+            c.Out.Dispose();
+        }
         try { await _acceptLoop; } catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { }
         if (adapterLoop is not null)
             try { await adapterLoop; } catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { }

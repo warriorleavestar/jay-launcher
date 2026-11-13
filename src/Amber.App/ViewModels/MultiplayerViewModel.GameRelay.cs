@@ -191,6 +191,9 @@ public sealed partial class MultiplayerViewModel
     internal TimeSpan GameTargetCheckInterval { get; set; } = TimeSpan.FromSeconds(6);
     internal const int GameTargetMisses = 2;
 
+    /// <summary>Tests: stands in for listening for LAN worlds.</summary>
+    internal Func<Task<List<LanGame>>>? ScanForTest { get; set; }
+
     /// <summary>Tests: whether something still listens on a local port.</summary>
     internal Func<int, Task<bool>>? GameTargetProbeForTest { get; set; }
 
@@ -203,7 +206,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>
     /// Called on the room refresh. A linked game that was closed (or reopened elsewhere) no longer accepts connections:
     /// after <see cref="GameTargetMisses"/> misses the relay drops it and the room waits for the game again, so [Find],
-    /// the game's log or a typed port can link the next one. A game with players connected is in use, so isn't checked.
+    /// the game's log or a typed port can link the next one. A game with players connected to it is in use, so isn't checked.
     /// </summary>
     internal async Task WatchGameTargetAsync()
     {
@@ -216,7 +219,8 @@ public sealed partial class MultiplayerViewModel
             _gameTargetPort = target;
             _gameTargetMisses = 0;
         }
-        if (relay.OpenConnections > 0 || DateTime.UtcNow - _gameTargetCheckedAt < GameTargetCheckInterval) return;
+        // Only connections to the linked port count: ones to a world linked before can outlive a switch.
+        if (relay.OpenConnectionsTo(target) > 0 || DateTime.UtcNow - _gameTargetCheckedAt < GameTargetCheckInterval) return;
         _gameTargetChecking = true;
         _gameTargetCheckedAt = DateTime.UtcNow;
         bool alive;
