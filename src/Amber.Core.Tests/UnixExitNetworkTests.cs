@@ -82,8 +82,9 @@ public sealed class UnixExitNetworkTests
             exit.EnterRoutes();
             // 先清掉上次留下的，再查路由、加主机路由（带固定 proto 号）。
             Assert.Equal("ip -4 route flush proto 201", calls[0]);
-            Assert.Equal("nft delete table inet jay_exit", calls[1]);
-            Assert.Equal("ip -4 route replace 203.0.113.10/32 via 192.168.1.1 dev wlan0 proto 201", calls[3]);
+            Assert.Equal("ip -6 route flush proto 201", calls[1]);
+            Assert.Equal("nft delete table inet jay_exit", calls[2]);
+            Assert.Equal("ip -4 route replace 203.0.113.10/32 via 192.168.1.1 dev wlan0 proto 201", calls[4]);
             calls.Clear();
             exit.EnterTunnel("amberlan-10000");
             Assert.Equal("nft -f -", calls[0]);
@@ -92,6 +93,45 @@ public sealed class UnixExitNetworkTests
             exit.ExitRoutes();
             Assert.Contains("ip -4 route del 203.0.113.10/32 proto 201", calls);
             Assert.Equal("nft delete table inet jay_exit", calls[^1]);
+        }
+        finally { UnixExitNetwork.RunForTest = null; }
+    }
+
+    [Fact]
+    public void Ipv6UnderlayGetsAHostRouteARuleAndNeighborDiscovery()
+    {
+        Assert.Equal(("fe80::1", "wlan0"), UnixExitNetwork.ParseLinuxRoute("2001:db8::10 from :: via fe80::1 dev wlan0 proto ra src 2001:db8::20 metric 1024 pref medium"));
+        Assert.Equal(("fe80::1%en0", "en0"), UnixExitNetwork.ParseMacRoute("   route to: 2001:db8::10\ndestination: default\n    gateway: fe80::1%en0\n  interface: en0\n"));
+        var linux = UnixExitNetwork.LinuxRuleset("amberlan-10000", [("203.0.113.10", "wlan0"), ("2001:db8::10", "wlan0")]);
+        Assert.Contains("ip6 daddr 2001:db8::10 oifname \"wlan0\" accept", linux);
+        Assert.Contains("ip6 daddr { fe80::/10, ff02::/16 } accept", linux);
+        Assert.EndsWith("drop\n  }\n}\n", linux);
+        // IPv4 only: no IPv6 exception at all.
+        Assert.DoesNotContain("ip6", UnixExitNetwork.LinuxRuleset("amberlan-10000", [("203.0.113.10", "wlan0")]));
+        var mac = UnixExitNetwork.MacRuleset("utun7", [("2001:db8::10", "en0")]).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains("pass out quick on en0 inet6 from any to 2001:db8::10", mac);
+        Assert.Contains("pass out quick inet6 from any to { fe80::/10, ff02::/16 }", mac);
+        Assert.Equal("block drop out quick all", mac[^1]);
+        Assert.DoesNotContain("inet6", UnixExitNetwork.MacRuleset("utun7", [("203.0.113.10", "en0")]));
+
+        if (!OperatingSystem.IsLinux()) return;
+        var calls = new List<string>();
+        UnixExitNetwork.RunForTest = (tool, args, _) =>
+        {
+            calls.Add(tool + " " + string.Join(' ', args));
+            return args.Contains("get") ? (0, "2001:db8::10 from :: via fe80::1 dev wlan0 proto ra metric 1024") : (0, "");
+        };
+        try
+        {
+            var exit = new UnixExitNetwork(new ExitNetworkPlan("10.233.144.20", ["2001:db8::10"], "amberlan-10000"));
+            exit.EnterRoutes();
+            Assert.Contains("ip -6 -o route get 2001:db8::10", calls);
+            Assert.Contains("ip -6 route replace 2001:db8::10/128 via fe80::1 dev wlan0 proto 201", calls);
+            calls.Clear();
+            exit.ExitRoutes();
+            Assert.Contains("ip -6 route del 2001:db8::10/128 proto 201", calls);
+            // Addresses the exit can't protect never reach the route commands.
+            Assert.Throws<IOException>(new UnixExitNetwork(new ExitNetworkPlan("10.233.144.20", ["fe80::5"], "amberlan-10000")).EnterRoutes);
         }
         finally { UnixExitNetwork.RunForTest = null; }
     }

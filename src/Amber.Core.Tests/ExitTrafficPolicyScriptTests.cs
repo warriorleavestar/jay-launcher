@@ -69,6 +69,15 @@ public sealed class ExitTrafficPolicyScriptTests
                         $condition = [Runtime.InteropServices.Marshal]::PtrToStructure([IntPtr]::Add($filter.Conditions, $i * $size), [type]$script:ExitWfpTypes.Condition)
                         if ($condition.Value.Type -eq 4) { $value = [Runtime.InteropServices.Marshal]::ReadInt64($condition.Value.Data.Pointer) }
                         elseif ($condition.Value.Type -eq 3) { $value = $condition.Value.Data.UInt32 }
+                        elseif ($condition.Value.Type -eq 11) {
+                            $raw = New-Object byte[] 16
+                            [Runtime.InteropServices.Marshal]::Copy($condition.Value.Data.Pointer, $raw, 0, 16)
+                            $value = (New-Object Net.IPAddress (,$raw)).ToString()
+                        } elseif ($condition.Value.Type -eq 0x101) {
+                            $raw = New-Object byte[] 17
+                            [Runtime.InteropServices.Marshal]::Copy($condition.Value.Data.Pointer, $raw, 0, 17)
+                            $value = (New-Object Net.IPAddress (,[byte[]]$raw[0..15])).ToString() + '/' + $raw[16]
+                        }
                         else { throw 'Unexpected native condition value type' }
                         $conditions += [pscustomobject]@{ Key=$condition.FieldKey.ToString(); Match=$condition.MatchType; Type=$condition.Value.Type; Value=$value }
                     }
@@ -88,6 +97,41 @@ public sealed class ExitTrafficPolicyScriptTests
                 }
                 default { throw ('Unmocked native API ' + $name) }
             }
+        }
+        function Test-InPrefix([string]$address, [string]$prefix) {
+            $parts = $prefix.Split('/')
+            $a = ([Net.IPAddress]::Parse($address)).GetAddressBytes()
+            $p = ([Net.IPAddress]::Parse($parts[0])).GetAddressBytes()
+            $bits = [int]$parts[1]
+            for ($i = 0; $i -lt 16; $i++) {
+                $take = [Math]::Max(0, [Math]::Min(8, $bits - 8 * $i))
+                if ($take -eq 0) { break }
+                $mask = (0xff -shl (8 - $take)) -band 0xff
+                if (($a[$i] -band $mask) -ne ($p[$i] -band $mask)) { return $false }
+            }
+            return $true
+        }
+        # The IPv6 layer with a destination address: like Test-Packet, but the address is text.
+        function Test-Packet6([long]$luid, [string]$address, [uint32]$flags, [int]$index=-1) {
+            if ($index -lt 0) { $index = if ($luid -eq 420042) { 42 } elseif ($luid -eq 700007) { 7 } else { 9 } }
+            foreach ($filter in @($script:Filters | Where-Object { $_.Layer -eq 'a3b3ab6b-3564-488c-9117-f34e82142763' } | Sort-Object Weight -Descending)) {
+                $matched = $true
+                foreach ($condition in $filter.Conditions) {
+                    switch ($condition.Key) {
+                        '4cd62a49-59c3-4969-b7f3-bda5d32890a4' { if ($condition.Value -ne $luid) { $matched = $false } }
+                        'b235ae9a-1d64-49b8-a44c-5ff3d9095045' {
+                            if ($condition.Type -eq 11) { if ($condition.Value -ne $address) { $matched = $false } }
+                            elseif ($condition.Type -eq 0x101) { if (-not (Test-InPrefix $address $condition.Value)) { $matched = $false } }
+                            else { throw 'IPv6 address condition with an IPv4 type' }
+                        }
+                        '632ce23b-5167-435c-86d7-e903684aa80c' { if (($flags -band $condition.Value) -ne $condition.Value) { $matched = $false } }
+                        '667fd755-d695-434a-8af5-d3835a1259bc' { if ($condition.Value -ne $index) { $matched = $false } }
+                        default { throw 'Unexpected packet condition' }
+                    }
+                }
+                if ($matched) { return ($filter.Action -eq 0x1002) }
+            }
+            throw 'Policy has no catch-all rule'
         }
         function Test-Packet([string]$layer, [long]$luid, [uint32]$address, [uint32]$flags, [int]$index=-1) {
             if ($index -lt 0) { $index = if ($luid -eq 420042) { 42 } elseif ($luid -eq 700007) { 7 } else { 9 } }
@@ -192,10 +236,42 @@ public sealed class ExitTrafficPolicyScriptTests
         """);
 
     [Fact]
-    public Task NativeIpv6UnderlayIsRejectedInsteadOfSilentlyBlocked() => RunAsync("""
-        $script:Plan.UnderlayAddresses = @('2001:db8::5')
+    public Task Ipv6UnderlayGetsTheSameExactExceptionAndNeighborDiscovery() => RunAsync("""
+        $script:Plan.UnderlayAddresses = @('203.0.113.10', '2001:db8::5')
+        $script:exitRoutes += [pscustomobject]@{ Prefix='2001:db8::5/128'; Index=7; Guid=$script:PhysicalGuid; Hop='fe80::1'; Metric=1; Owned=$true }
+        Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
+        $v4 = '1e5c9fae-8a84-4135-a331-950b54229ecd'
+        # loopback + virtual adapter + underlay + block on each layer, plus two IPv6 link-scope permits.
+        Assert-That ($script:Filters.Count -eq 10) ('unexpected filter count ' + $script:Filters.Count)
+        Assert-That (Test-Packet6 700007 '2001:db8::5' 0) 'protected IPv6 underlay was blocked'
+        Assert-That (-not (Test-Packet6 900009 '2001:db8::5' 0)) 'IPv6 underlay escaped through another adapter'
+        Assert-That (-not (Test-Packet6 700007 '2001:db8::6' 0)) 'IPv6 exception widened beyond one address'
+        Assert-That (-not (Test-Packet6 700007 '2606:4700::1111' 0)) 'physical IPv6 leaked'
+        Assert-That (Test-Packet6 700007 'fe80::1' 0) 'neighbor discovery to the gateway was blocked'
+        Assert-That (Test-Packet6 700007 'ff02::1:ff00:1' 0) 'solicited-node multicast was blocked'
+        Assert-That (-not (Test-Packet6 700007 'ff05::2' 0)) 'wider multicast leaked'
+        Assert-That (Test-Packet $v4 700007 ([uint32]3405803786) 0) 'IPv4 underlay lost next to IPv6'
+        Assert-That (-not (Test-Packet $v4 700007 0x09090909 0)) 'physical IPv4 leaked'
+        $rules = @($script:Filters | Where-Object { $_.Name -eq 'Amber exit protected underlay' -and $_.Layer -eq 'a3b3ab6b-3564-488c-9117-f34e82142763' })
+        Assert-That ($rules.Count -eq 1 -and $rules[0].Conditions.Count -eq 3) 'IPv6 underlay permit must require LUID, interface index and address'
+        Exit-ExitTrafficPolicy
+        """);
+
+    [Fact]
+    public Task Ipv4OnlyPlansKeepIpv6FullyBlocked() => RunAsync("""
+        Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
+        Assert-That (-not (Test-Packet6 700007 'fe80::1' 0)) 'link-local IPv6 opened without an IPv6 underlay'
+        Exit-ExitTrafficPolicy
+        """);
+
+    [Theory]
+    [InlineData("fe80::5")]
+    [InlineData("ff02::1")]
+    [InlineData("2001:db8::5")]
+    public Task UnsafeOrUnroutedIpv6UnderlayFailsBeforeOpeningEngine(string address) => RunAsync($$"""
+        $script:Plan.UnderlayAddresses = @('{{address}}')
         Expect-Failure { Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan }
-        Assert-That (-not $script:Events.Contains('FwpmEngineOpen0')) 'IPv6 underlay started policy mutation'
+        Assert-That (-not $script:Events.Contains('FwpmEngineOpen0')) 'IPv6 underlay without a protected route started policy mutation'
         """);
 
     [Fact]

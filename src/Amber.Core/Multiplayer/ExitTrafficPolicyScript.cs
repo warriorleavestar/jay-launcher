@@ -2,7 +2,7 @@ namespace Amber.Core.Multiplayer;
 
 /// <summary>
 /// Windows 出口会话的临时 WFP 门禁；仅在守护进程的动态 BFE 会话中存在。
-/// IPPACKET 层按接口 LUID 与地址过滤，不能限制应用或端口，因此承载例外是明确的目标地址例外。
+/// IPPACKET 层按接口 LUID 与地址过滤，不能限制应用或端口，因此承载例外是明确的目标地址例外（IPv4 and IPv6 underlay addresses).
 /// 原生定义依据 Microsoft win32metadata 的 fwpmu.h、fwpmtypes.h、fwptypes.h；不安装驱动或持久防火墙规则。
 /// </summary>
 internal static class ExitTrafficPolicyScript
@@ -164,6 +164,19 @@ internal static class ExitTrafficPolicyScript
                             $data.Pointer = New-ExitWfpMemory 8 $allocations
                             [Runtime.InteropServices.Marshal]::WriteInt64($data.Pointer, [long]$inputCondition.Value)
                         } elseif ($value.Type -eq 3) { $data.UInt32 = [uint32]$inputCondition.Value }
+                        elseif ($value.Type -eq 11) {
+                            # FWP_BYTE_ARRAY16_TYPE: a pointer to the 16 address bytes in network order.
+                            $bytes = [byte[]]$inputCondition.Value
+                            if ($bytes.Length -ne 16) { throw 'IPv6 traffic condition must be 16 bytes' }
+                            $data.Pointer = New-ExitWfpMemory 16 $allocations
+                            [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $data.Pointer, 16)
+                        } elseif ($value.Type -eq 0x101) {
+                            # FWP_V6_ADDR_MASK: a pointer to FWP_V6_ADDR_AND_MASK, 16 address bytes then the prefix length.
+                            $bytes = [byte[]]$inputCondition.Value
+                            if ($bytes.Length -ne 17 -or $bytes[16] -gt 128) { throw 'IPv6 traffic prefix must be 16 bytes and a length' }
+                            $data.Pointer = New-ExitWfpMemory 17 $allocations
+                            [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $data.Pointer, 17)
+                        }
                         else { throw 'Unsupported Windows traffic condition type' }
                         $value.Data = $data
                         $condition.Value = $value
@@ -184,25 +197,45 @@ internal static class ExitTrafficPolicyScript
             $underlay = @()
             $addresses = @($plan.UnderlayAddresses | Select-Object -Unique)
             if ($addresses.Count -gt 128) { throw 'Too many exit underlay addresses' }
+            $layers = @('1e5c9fae-8a84-4135-a331-950b54229ecd', 'a3b3ab6b-3564-488c-9117-f34e82142763')
             foreach ($address in $addresses) {
                 $ip = $null
-                if (-not [Net.IPAddress]::TryParse([string]$address, [ref]$ip) -or $ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $ip.ToString() -ne $address -or [Net.IPAddress]::IsLoopback($ip)) { throw 'Unsupported exit underlay address' }
+                if (-not [Net.IPAddress]::TryParse([string]$address, [ref]$ip) -or $ip.ToString() -ne $address -or [Net.IPAddress]::IsLoopback($ip)) { throw 'Unsupported exit underlay address' }
                 $bytes = $ip.GetAddressBytes()
-                if ($bytes[0] -eq 0 -or $bytes[0] -ge 224 -or $address -eq $plan.VirtualIp) { throw 'Unsafe exit underlay address' }
-                $entries = @($script:exitRoutes | Where-Object { $_.Prefix -eq ($address + '/32') })
+                if ($ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
+                    if ($bytes[0] -eq 0 -or $bytes[0] -ge 224 -or $address -eq $plan.VirtualIp) { throw 'Unsafe exit underlay address' }
+                    $prefix = $address + '/32'
+                } elseif ($ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6) {
+                    # The same rules as ExitNetworkPlan.IsSafeUnderlay: no scope, link-local, site-local, multicast or mapped IPv4.
+                    if ($ip.ScopeId -ne 0 -or $ip.IsIPv4MappedToIPv6 -or $ip.IsIPv6LinkLocal -or $ip.IsIPv6SiteLocal -or $ip.IsIPv6Multicast -or $ip.Equals([Net.IPAddress]::IPv6Any)) { throw 'Unsafe exit underlay address' }
+                    $prefix = $address + '/128'
+                } else { throw 'Unsupported exit underlay address' }
+                $entries = @($script:exitRoutes | Where-Object { $_.Prefix -eq $prefix })
                 if ($entries.Count -ne 1 -or -not (Get-OwnedExitRoute $entries[0])) { throw 'Protected exit underlay route is missing' }
                 $physical = Get-ExitAdapter ([int]$entries[0].Index)
                 if ([string]$physical.InterfaceGuid -ne [string]$entries[0].Guid -or [string]$physical.InterfaceGuid -eq [string]$adapter.InterfaceGuid) { throw 'Exit underlay adapter identity changed' }
                 $luid = Get-ExitPolicyLuid $physical
-                # A WFP IPv4 UINT32 is the address value in host order, not the network bytes read as little-endian.
-                $numeric = [uint32](([uint64]$bytes[0] * 16777216) + ([uint64]$bytes[1] * 65536) + ([uint64]$bytes[2] * 256) + $bytes[3])
-                $underlay += [pscustomobject]@{ Address=$numeric; Luid=$luid; Index=[uint32]$entries[0].Index }
+                if ($bytes.Length -eq 4) {
+                    # A WFP IPv4 UINT32 is the address value in host order, not the network bytes read as little-endian.
+                    $numeric = [uint32](([uint64]$bytes[0] * 16777216) + ([uint64]$bytes[1] * 65536) + ([uint64]$bytes[2] * 256) + $bytes[3])
+                    $underlay += [pscustomobject]@{ Layer=$layers[0]; Type=3; Address=$numeric; Luid=$luid; Index=[uint32]$entries[0].Index }
+                } else {
+                    $underlay += [pscustomobject]@{ Layer=$layers[1]; Type=11; Address=[byte[]]$bytes; Luid=$luid; Index=[uint32]$entries[0].Index }
+                }
+            }
+            # IPv6 needs neighbor discovery to reach its gateway: with an IPv6 underlay, link-local and link-scope multicast
+            # (fe80::/10, ff02::/16) may leave the physical adapters too. Neither is routed beyond the local link.
+            $linkScope = @()
+            if (@($underlay | Where-Object { $_.Type -eq 11 }).Count -gt 0) {
+                $linkScope = @(
+                    [byte[]]@(0xfe, 0x80, 0,0,0,0,0,0,0,0,0,0,0,0,0,0, 10),
+                    [byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0,0,0,0,0,0, 16)
+                )
             }
             $interfaceKey = '4cd62a49-59c3-4969-b7f3-bda5d32890a4'
             $indexKey = '667fd755-d695-434a-8af5-d3835a1259bc'
             $addressKey = 'b235ae9a-1d64-49b8-a44c-5ff3d9095045'
             $flagsKey = '632ce23b-5167-435c-86d7-e903684aa80c'
-            $layers = @('1e5c9fae-8a84-4135-a331-950b54229ecd', 'a3b3ab6b-3564-488c-9117-f34e82142763')
             $transaction = $false
             try {
                 $script:ExitTrafficEngine = Open-ExitWfpEngine
@@ -218,16 +251,21 @@ internal static class ExitTrafficPolicyScript
                         [pscustomobject]@{ Key=$interfaceKey; Match=0; Type=4; Value=$tunLuid },
                         [pscustomobject]@{ Key=$indexKey; Match=0; Type=3; Value=[uint32]$current.ifIndex }
                     ) })
-                    if ($layer -eq $layers[0]) {
-                        foreach ($endpoint in $underlay) {
-                            Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='protected underlay'; Layer=$layer; Permit=$true; Weight=100; Conditions=@(
-                                [pscustomobject]@{ Key=$interfaceKey; Match=0; Type=4; Value=$endpoint.Luid },
-                                [pscustomobject]@{ Key=$addressKey; Match=0; Type=3; Value=$endpoint.Address },
-                                [pscustomobject]@{ Key=$indexKey; Match=0; Type=3; Value=$endpoint.Index }
+                    foreach ($endpoint in @($underlay | Where-Object { $_.Layer -eq $layer })) {
+                        Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='protected underlay'; Layer=$layer; Permit=$true; Weight=100; Conditions=@(
+                            [pscustomobject]@{ Key=$interfaceKey; Match=0; Type=4; Value=$endpoint.Luid },
+                            [pscustomobject]@{ Key=$addressKey; Match=0; Type=$endpoint.Type; Value=$endpoint.Address },
+                            [pscustomobject]@{ Key=$indexKey; Match=0; Type=3; Value=$endpoint.Index }
+                        ) })
+                    }
+                    if ($layer -eq $layers[1]) {
+                        foreach ($scope in $linkScope) {
+                            Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='IPv6 link scope'; Layer=$layer; Permit=$true; Weight=100; Conditions=@(
+                                [pscustomobject]@{ Key=$addressKey; Match=0; Type=0x101; Value=$scope }
                             ) })
                         }
                     }
-                    # IPv6 has no physical underlay exception: the exit is IPv4-only, so IPv6 is blocked and apps fall back to IPv4.
+                    # Everything else is blocked. The exit carries IPv4 only, so other IPv6 traffic is blocked and apps fall back to IPv4.
                     Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='block other egress'; Layer=$layer; Permit=$false; Weight=1; Conditions=@() })
                 }
                 Invoke-ExitWfpApi 'FwpmTransactionCommit0' @($engine)

@@ -171,6 +171,31 @@ public class ExitRoutingScriptTests
         Check ($caught -and $null -ne $script:exitAdapter -and $script:removed -eq 0) 'partial initialization must retain bypass until capture disappears'
         """);
 
+    [Fact]
+    public Task Ipv6UnderlayGetsAShortLeaseHostRouteToo() => RunAsync("""
+        Enter-ExitRoutes (Plan @('198.51.100.1', '2001:db8::10'))
+        Check ($script:created -eq 2 -and $script:exitRoutes.Count -eq 2) 'one host route per family'
+        $v6 = @($script:routes | Where-Object DestinationPrefix -eq '2001:db8::10/128')[0]
+        Check ($v6 -and $v6.NextHop -eq 'fe80::1' -and $v6.InterfaceIndex -eq 12) 'IPv6 bypass pinned to the physical gateway'
+        Check ($v6.ValidLifetime.TotalSeconds -eq 120) 'IPv6 bypass is a short lease'
+        $script:exitRenewed = [DateTime]::UtcNow.AddSeconds(-31)
+        Renew-ExitRoutes
+        Check ($script:renewed -eq 2) 'IPv6 bypass renewed like IPv4'
+        Exit-ExitRoutes
+        Check ($script:removed -eq 2 -and $script:routes.Count -eq 0) 'IPv6 bypass removed'
+        """);
+
+    [Theory]
+    [InlineData("fe80::10")]
+    [InlineData("ff02::1")]
+    [InlineData("::ffff:198.51.100.1")]
+    [InlineData("2001:DB8::10")]
+    public Task UnsafeOrNonCanonicalIpv6UnderlayIsRefused(string address) => RunAsync($$"""
+        $caught = $false
+        try { Enter-ExitRoutes (Plan @('{{address}}')) } catch { $caught = $true }
+        Check ($caught -and $script:created -eq 0) 'refuse before any route change'
+        """);
+
     private const string Mocks = """
         $script:routes = New-Object 'System.Collections.Generic.List[object]'
         $script:adapters = @(
@@ -191,13 +216,18 @@ public class ExitRoutingScriptTests
             $script:adapters | Where-Object { -not $InterfaceIndex -or $_.InterfaceIndex -eq $InterfaceIndex }
         }
         function Find-NetRoute { param($RemoteIPAddress, $ErrorAction)
+            if ($RemoteIPAddress.Contains(':')) {
+                [pscustomobject]@{ IPAddress='2001:db8::20'; InterfaceIndex=$script:underlayIndex }
+                [pscustomobject]@{ DestinationPrefix='::/0'; InterfaceIndex=$script:underlayIndex; NextHop='fe80::1'; RouteMetric=0 }
+                return
+            }
             [pscustomobject]@{ IPAddress='192.168.1.20'; InterfaceIndex=$script:underlayIndex }
             [pscustomobject]@{ DestinationPrefix='0.0.0.0/0'; InterfaceIndex=$script:underlayIndex; NextHop='192.168.1.1'; RouteMetric=0 }
         }
         function Get-NetRoute { param($AddressFamily, $DestinationPrefix, $InterfaceIndex, $PolicyStore, $ErrorAction)
             if ($script:failRead) { throw 'simulated CIM failure' }
-            Check ($PolicyStore -eq 'ActiveStore' -and $AddressFamily -eq 'IPv4') 'only active IPv4 routes'
-            $script:routes | Where-Object { (-not $DestinationPrefix -or $_.DestinationPrefix -eq $DestinationPrefix) -and (-not $InterfaceIndex -or $_.InterfaceIndex -eq $InterfaceIndex) }
+            Check ($PolicyStore -eq 'ActiveStore' -and $AddressFamily -in @('IPv4', 'IPv6')) 'only active routes of one family'
+            $script:routes | Where-Object { $_.DestinationPrefix.Contains(':') -eq ($AddressFamily -eq 'IPv6') } | Where-Object { (-not $DestinationPrefix -or $_.DestinationPrefix -eq $DestinationPrefix) -and (-not $InterfaceIndex -or $_.InterfaceIndex -eq $InterfaceIndex) }
         }
         function New-NetRoute { param($DestinationPrefix, $InterfaceIndex, $NextHop, $RouteMetric, $PolicyStore, $ValidLifetime, $PreferredLifetime, $ErrorAction)
             Check ($PolicyStore -eq 'ActiveStore') 'route must not be persistent'

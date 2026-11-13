@@ -163,9 +163,10 @@ public sealed class ExitLifecycleRegressionTests
     public void UnderlayIncludesChangedPeerAddressesAndNormalizesMappedIpv4()
     {
         var result = DirectSession.CollectDirectUnderlayAddresses(
-            [IPAddress.Parse("198.51.100.20"), IPAddress.Parse("2001:db8::1")],
-            [IPAddress.Parse("::ffff:198.51.100.20"), IPAddress.Parse("203.0.113.30")]);
-        Assert.Equal(["198.51.100.20", "203.0.113.30"], result);
+            [IPAddress.Parse("198.51.100.20"), IPAddress.Parse("2001:db8::1"), IPAddress.Parse("fe80::2")],
+            [IPAddress.Parse("::ffff:198.51.100.20"), IPAddress.Parse("203.0.113.30"), IPAddress.Parse("fe80::3")]);
+        // A link-local candidate the exit can't protect is left out; one actually connected is kept so the plan refuses it.
+        Assert.Equal(["198.51.100.20", "2001:db8::1", "203.0.113.30", "fe80::3"], result);
     }
 
     [Fact]

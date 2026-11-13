@@ -245,7 +245,7 @@ public sealed class DirectSession : IAsyncDisposable
 
     private EasyTierOptions HostOptions(bool tun, bool allowExit, IReadOnlyList<string>? extra = null) =>
         new(Room, true, Options.FallbackNodes, EasyTierArgs.FreeTcpPort(), null, [$"udp://127.0.0.1:{_easyTierUdpPort}"], _machineId, tun, null, allowExit, null,
-            Verbose(extra)) { ServesSpeedTest = true, DirectUnderlayAddresses = UnderlayAddresses(), DirectUnderlayUsesIpv6 = UnderlayUsesIpv6 };
+            Verbose(extra)) { ServesSpeedTest = true, DirectUnderlayAddresses = UnderlayAddresses() };
 
     private EasyTierOptions GuestOptions(bool viaBridge, bool tun, string? exitNode, IReadOnlyList<string>? extra = null, bool nodes = true)
     {
@@ -257,7 +257,6 @@ public sealed class DirectSession : IAsyncDisposable
         {
             LocalRemotePort = tun ? null : LocalRemotePort,
             DirectUnderlayAddresses = UnderlayAddresses(),
-            DirectUnderlayUsesIpv6 = UnderlayUsesIpv6,
         };
     }
 
@@ -265,14 +264,19 @@ public sealed class DirectSession : IAsyncDisposable
         (_remote?.Candidates ?? _guestCandidates).Select(c => c.EndPoint.Address),
         Bridge?.Peers.Select(p => p.Remote.Address) ?? []);
 
-    private bool UnderlayUsesIpv6 => Bridge?.Peers.Any(p => p.Remote.Address.AddressFamily == AddressFamily.InterNetworkV6
-        && !p.Remote.Address.IsIPv4MappedToIPv6) == true;
-
-    /// <summary>出口接管系统流量之前，直连桥的物理对端仍须走原网络；包含打洞后变化的端口对应地址。</summary>
-    internal static IReadOnlyList<string> CollectDirectUnderlayAddresses(IEnumerable<IPAddress> candidates, IEnumerable<IPAddress> connected) =>
-        candidates.Concat(connected).Select(a => a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a)
-            .Where(a => a.AddressFamily == AddressFamily.InterNetwork).Select(a => a.ToString())
-            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    /// <summary>
+    /// 出口接管系统流量之前，直连桥的物理对端仍须走原网络；包含打洞后变化的端口对应地址。IPv4 and IPv6 both: a candidate
+    /// IPv6 address the exit can't protect (link-local, say) is left out, but one the bridge is actually connected over is
+    /// kept, so the plan refuses it with a reason instead of the gate silently cutting the connection.
+    /// </summary>
+    internal static IReadOnlyList<string> CollectDirectUnderlayAddresses(IEnumerable<IPAddress> candidates, IEnumerable<IPAddress> connected)
+    {
+        static IPAddress Normal(IPAddress a) => a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a;
+        return candidates.Select(Normal).Where(a => a.AddressFamily == AddressFamily.InterNetwork
+                || a.AddressFamily == AddressFamily.InterNetworkV6 && ExitNetworkPlan.IsSafeUnderlay(a))
+            .Concat(connected.Select(Normal).Where(a => a.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6))
+            .Select(a => a.ToString()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    }
 
     /// <summary>手动切换出口和矩阵切换共用启动锁，直连会话一直拥有其 EasyTier 子会话。</summary>
     public async Task SetExitNodeAsync(string? exitNode, CancellationToken ct = default)
@@ -284,7 +288,7 @@ public sealed class DirectSession : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             var current = EasyTier?.Options ?? _currentOptions;
             if (current is null || !current.Tun) throw new InvalidOperationException(L.T("core.mp.component.exitrequireslan"));
-            var options = current with { ExitNode = exitNode, DirectUnderlayAddresses = UnderlayAddresses(), DirectUnderlayUsesIpv6 = UnderlayUsesIpv6 };
+            var options = current with { ExitNode = exitNode, DirectUnderlayAddresses = UnderlayAddresses() };
             await StartEasyTierLockedAsync(options, ct);
             ObjectDisposedException.ThrowIf(_disposed, this);
         }
@@ -409,8 +413,7 @@ public sealed class DirectSession : IAsyncDisposable
     private static bool SameConfig(EasyTierOptions a, EasyTierOptions b) =>
         a.Tun == b.Tun && a.AllowExit == b.AllowExit && a.ExitNode == b.ExitNode && (a.ConfiguredPeers ?? a.Peers).SequenceEqual(b.ConfiguredPeers ?? b.Peers)
         && (a.ExtraArgs ?? []).SequenceEqual(b.ExtraArgs ?? [])
-        && (a.ExitNode is null || (a.DirectUnderlayAddresses.SequenceEqual(b.DirectUnderlayAddresses)
-            && a.DirectUnderlayUsesIpv6 == b.DirectUnderlayUsesIpv6));
+        && (a.ExitNode is null || (a.DirectUnderlayAddresses.SequenceEqual(b.DirectUnderlayAddresses)));
 
     /// <summary>
     /// Guest, during the knock: the host approved and sent its addresses inside the encrypted reply. Gathers this side's

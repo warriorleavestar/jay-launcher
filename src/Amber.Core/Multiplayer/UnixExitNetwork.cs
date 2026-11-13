@@ -7,7 +7,7 @@ namespace Amber.Core.Multiplayer;
 
 /// <summary>
 /// Mac/Linux 的“经别人上网”（root 守护里运行），对应 Windows 的 ExitRoutingScript / ExitDnsScript / ExitTrafficPolicyScript：
-/// 1. 启动 easytier-core 之前，给每个承载地址（节点、直连对端）加一条经物理网关的主机路由，免得 EasyTier 的两条 /1 路由把承载本身也吸进隧道；
+/// 1. 启动 easytier-core 之前，给每个承载地址（节点、直连对端，IPv4 或 IPv6）加一条经物理网关的主机路由，免得 EasyTier 的两条 /1 路由把承载本身也吸进隧道；
 /// 2. 虚拟网卡就绪后把 DNS 换成 1.1.1.1 / 8.8.8.8（经隧道）：Linux 用 systemd-resolved，没有的话临时覆盖 /etc/resolv.conf；macOS 改主服务的 DNS；
 /// 3. 防漏：只放行回环、虚拟网卡、发往承载地址的包和 DHCP，其他出站一律丢弃（Linux 用单独的 nftables 表，macOS 用 pf 锚点），
 ///    隧道断了也不会退回直接上网。
@@ -44,6 +44,7 @@ internal sealed class UnixExitNetwork
         if (OperatingSystem.IsLinux())
         {
             Run("ip", ["-4", "route", "flush", "proto", RouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            Run("ip", ["-6", "route", "flush", "proto", RouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
             Run("nft", ["delete", "table", "inet", NftTable]);
         }
         else if (OperatingSystem.IsMacOS())
@@ -58,19 +59,22 @@ internal sealed class UnixExitNetwork
         CleanupStale();
         foreach (var address in _plan.UnderlayAddresses)
         {
-            if (!IPAddress.TryParse(address, out var ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || ip.ToString() != address)
+            if (!IPAddress.TryParse(address, out var ip) || ip.ToString() != address || IPAddress.IsLoopback(ip) || !ExitNetworkPlan.IsSafeUnderlay(ip))
                 throw new IOException("Unsupported exit underlay address");
+            var v6 = IsV6(address);
             var (gateway, device) = LookupRoute(address);
             if (OperatingSystem.IsLinux())
             {
-                var args = new List<string> { "-4", "route", "replace", address + "/32" };
+                var args = new List<string> { v6 ? "-6" : "-4", "route", "replace", address + (v6 ? "/128" : "/32") };
                 if (gateway is not null) args.AddRange(["via", gateway]);
                 args.AddRange(["dev", device, "proto", RouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
                 Check("ip", args);
             }
             else
             {
-                var args = new List<string> { "-n", "add", "-host", address };
+                var args = new List<string> { "-n", "add" };
+                if (v6) args.Add("-inet6");
+                args.AddRange(["-host", address]);
                 if (gateway is not null) args.Add(gateway);
                 else args.AddRange(["-interface", device]);
                 Check("/sbin/route", args);
@@ -84,10 +88,10 @@ internal sealed class UnixExitNetwork
     {
         if (OperatingSystem.IsLinux())
         {
-            var output = Check("ip", ["-4", "-o", "route", "get", address]);
+            var output = Check("ip", [IsV6(address) ? "-6" : "-4", "-o", "route", "get", address]);
             return ParseLinuxRoute(output) ?? throw new IOException("No route to exit underlay " + address);
         }
-        var mac = Check("/sbin/route", ["-n", "get", address]);
+        var mac = Check("/sbin/route", IsV6(address) ? ["-n", "get", "-inet6", address] : ["-n", "get", address]);
         return ParseMacRoute(mac) ?? throw new IOException("No route to exit underlay " + address);
     }
 
@@ -114,8 +118,9 @@ internal sealed class UnixExitNetwork
             else if (line.StartsWith("interface:", StringComparison.Ordinal)) device = line["interface:".Length..].Trim();
         }
         if (device is null || device.StartsWith("lo", StringComparison.Ordinal)) return null;
-        // 直连网段时 gateway 是网卡的链路地址（link#N）或者没有。
-        if (gateway is not null && !IPAddress.TryParse(gateway, out _)) gateway = null;
+        // 直连网段时 gateway 是网卡的链路地址（link#N）或者没有。An IPv6 gateway is usually link-local with its scope
+        // (fe80::1%en0): kept whole, since the route needs the scope.
+        if (gateway is not null && !IPAddress.TryParse(gateway.Split('%')[0], out _)) gateway = null;
         return (gateway, device);
     }
 
@@ -147,7 +152,11 @@ internal sealed class UnixExitNetwork
         sb.Append("    oif \"lo\" accept\n");
         sb.Append("    oifname \"").Append(tun).Append("\" accept\n");
         sb.Append("    udp sport 68 udp dport 67 accept\n");
-        foreach (var (address, device) in underlay) sb.Append("    ip daddr ").Append(address).Append(" oifname \"").Append(device).Append("\" accept\n");
+        var list = underlay.ToList();
+        foreach (var (address, device) in list)
+            sb.Append(IsV6(address) ? "    ip6 daddr " : "    ip daddr ").Append(address).Append(" oifname \"").Append(device).Append("\" accept\n");
+        // IPv6 needs neighbor discovery to reach its gateway; link-local and link-scope multicast never leave the link.
+        if (list.Any(u => IsV6(u.Address))) sb.Append("    ip6 daddr { fe80::/10, ff02::/16 } accept\n");
         sb.Append("    drop\n  }\n}\n");
         return sb.ToString();
     }
@@ -158,7 +167,11 @@ internal sealed class UnixExitNetwork
         sb.Append("pass out quick on lo0 all\n");
         sb.Append("pass out quick on ").Append(tun).Append(" all\n");
         sb.Append("pass out quick inet proto udp from any port 68 to any port 67\n");
-        foreach (var (address, device) in underlay) sb.Append("pass out quick on ").Append(device).Append(" inet from any to ").Append(address).Append('\n');
+        var list = underlay.ToList();
+        foreach (var (address, device) in list)
+            sb.Append("pass out quick on ").Append(device).Append(IsV6(address) ? " inet6 from any to " : " inet from any to ").Append(address).Append('\n');
+        // IPv6 needs neighbor discovery to reach its gateway; link-local and link-scope multicast never leave the link.
+        if (list.Any(u => IsV6(u.Address))) sb.Append("pass out quick inet6 from any to { fe80::/10, ff02::/16 }\n");
         sb.Append("block drop out quick all\n");
         return sb.ToString();
     }
@@ -279,8 +292,9 @@ internal sealed class UnixExitNetwork
     {
         foreach (var (address, _) in _routes)
         {
-            if (OperatingSystem.IsLinux()) Run("ip", ["-4", "route", "del", address + "/32", "proto", RouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
-            else Run("/sbin/route", ["-n", "delete", "-host", address]);
+            if (OperatingSystem.IsLinux())
+                Run("ip", [IsV6(address) ? "-6" : "-4", "route", "del", address + (IsV6(address) ? "/128" : "/32"), "proto", RouteProto.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            else Run("/sbin/route", IsV6(address) ? ["-n", "delete", "-inet6", "-host", address] : ["-n", "delete", "-host", address]);
         }
         _routes.Clear();
         if (_firewall)
@@ -295,6 +309,8 @@ internal sealed class UnixExitNetwork
             _pfToken = null;
         }
     }
+
+    private static bool IsV6(string address) => address.Contains(':', StringComparison.Ordinal);
 
     /// <summary>Linux 上能不能做出口：要 ip 和 nft 两个命令（iproute2、nftables）。</summary>
     public static bool Supported => OperatingSystem.IsMacOS() || OperatingSystem.IsLinux() && Exists("ip") && Exists("nft");
