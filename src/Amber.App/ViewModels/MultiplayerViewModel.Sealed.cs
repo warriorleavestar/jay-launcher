@@ -236,6 +236,7 @@ public sealed partial class MultiplayerViewModel
                 }
                 HostFingerprint = outcome.HostFingerprint;
                 HostJayAccount = outcome.HostJayAccount;
+                SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);
                 SetStatus(StatusMessage.Info("multiplayer.direct.punching"));
                 return (RoomCode?)credentials.ToRoom();
             });
