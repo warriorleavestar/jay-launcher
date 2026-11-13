@@ -175,6 +175,32 @@ public sealed class GamePortRelayTests
         vm.StopCommand.Execute(null);
     });
 
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    public void EveryRoomOpensWithoutAGame(bool fullLan, bool wraps, bool relay) =>
+        // Whole-LAN rooms open without a game as well; only without wrapping do they skip the (loopback) relay.
+        Assert.Equal(relay, MultiplayerViewModel.UsesRelayWithoutGame(fullLan, wraps));
+
+    [Fact]
+    public void AWholeLanRoomOpensWithoutAGame() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = new MultiplayerViewModel(service) { RelayTypingDelay = TimeSpan.Zero };
+        vm.FullLanMode = true;
+        // Only where the whole-LAN scope exists on this platform.
+        if (!vm.FullLanMode) return;
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        Assert.True(prepared.Result);
+        // The default transport wraps: the room waits on a relay like any other.
+        Assert.True(vm.HasGameRelay);
+        Assert.NotEqual("multiplayer.relay.full_lan_no_game", vm.StatusInfo?.Key);
+        vm.StopCommand.Execute(null);
+    });
+
     private static void Pump(Func<bool> done)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);

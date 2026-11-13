@@ -147,7 +147,7 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         // No LAN world yet: the room and its invite are made now, and the game is picked up when it's opened to LAN.
-        if (await HostGamePortAsync(checkManual: false) is not (var gamePort, var relay)) return;
+        if (await HostGamePortAsync(checkManual: false, wraps: TunnelSettings.Default.Wraps) is not (var gamePort, var relay)) return;
         if (!IsIdle)
         {
             if (relay is not null) await relay.DisposeAsync();

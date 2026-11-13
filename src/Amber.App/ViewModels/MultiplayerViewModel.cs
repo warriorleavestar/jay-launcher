@@ -667,7 +667,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             return;
         }
         // No LAN world yet: the room opens on a relay and picks the game up when it's opened to LAN.
-        if (await HostGamePortAsync(checkManual: true) is not (var gamePort, var relay)) return;
+        if (await HostGamePortAsync(checkManual: true, wraps: SelectedTransport.Mode != TransportMode.General) is not (var gamePort, var relay)) return;
         if (!IsIdle)
         {
             if (relay is not null) await relay.DisposeAsync();
@@ -697,6 +697,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
+                + (relay is null && ManualPortValue is null && SelectedLanGame is null ? " " + L.F("multiplayer.relay.full_lan_no_game", EasyTierArgs.HostIp) : "")
             : relay is not null ? L.T("multiplayer.relay.created") : L.T("multiplayer.room.created");
     }
 
@@ -806,7 +807,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             _session?.Dispose();
             _session = null;
-            SetStatus(StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
+            SetStatus(e.SocketErrorCode == System.Net.Sockets.SocketError.AddressNotAvailable
+                ? StatusMessage.Failure("multiplayer.transport.address_not_ready", e, ErrorText.Of(e))
+                : StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
             return false;
         }
         _service.ActiveGameProxy = _transport.Proxy;

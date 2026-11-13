@@ -1,5 +1,6 @@
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
+using Amber.Core.Multiplayer.Transport;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -39,8 +40,15 @@ public sealed partial class MultiplayerViewModel
     /// The game port for a new room. A typed port or a found LAN world is checked as before (<paramref name="checkManual"/>:
     /// the direct room has never checked typed ports). With neither, a relay is started and returned for the caller to
     /// <see cref="AdoptGameRelay"/> once the room is up (or to dispose if it fails). Null: blocked, status already set.
+    /// <para>
+    /// Whole-LAN rooms open without a game too: they are as much for other games, sharing a connection and going online
+    /// through a member. When the room's traffic is wrapped (<paramref name="wraps"/>), guests' game connections still
+    /// arrive on this computer's loopback, so the relay works as for any room. Without wrapping, guests reach this
+    /// computer's network address directly and a loopback relay can't sit in front of the game: the room opens with the
+    /// usual Minecraft port as its game port and no relay, and friends use the game's own port once it is open.
+    /// </para>
     /// </summary>
-    private async Task<(int Port, GamePortRelay? Relay)?> HostGamePortAsync(bool checkManual)
+    private async Task<(int Port, GamePortRelay? Relay)?> HostGamePortAsync(bool checkManual, bool wraps)
     {
         var manual = ManualPortValue;
         var port = manual ?? SelectedLanGame?.Game.Port;
@@ -53,15 +61,19 @@ public sealed partial class MultiplayerViewModel
             }
             return (known, null);
         }
-        // Full-LAN rooms reach the host's virtual address, not loopback, so the relay can't sit in front of the game.
-        if (FullLanMode)
-        {
-            SetStatus(StatusMessage.Warning("multiplayer.relay.full_lan_needs_game"));
-            return null;
-        }
+        if (!UsesRelayWithoutGame(FullLanMode, wraps)) return (FullLanDefaultGamePort, null);
         var relay = new GamePortRelay();
         return (relay.Port, relay);
     }
+
+    /// <summary>
+    /// Whether a room opened before any game sits on a <see cref="GamePortRelay"/>: every room does, except a whole-LAN
+    /// room without wrapping (guests reach this computer's network address there, which a loopback relay can't serve).
+    /// </summary>
+    internal static bool UsesRelayWithoutGame(bool fullLan, bool wraps) => !fullLan || wraps;
+
+    /// <summary>The game port a whole-LAN room without wrapping names when it opens before any game.</summary>
+    internal const int FullLanDefaultGamePort = 25565;
 
     private void AdoptGameRelay(GamePortRelay? relay)
     {
@@ -115,7 +127,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Tests: what a room-opening command does about the game port, without starting a room.</summary>
     internal async Task<bool> PrepareGameRelayForTest()
     {
-        if (await HostGamePortAsync(checkManual: false) is not (_, var relay)) return false;
+        if (await HostGamePortAsync(checkManual: false, wraps: SelectedTransport.Mode != TransportMode.General) is not (_, var relay)) return false;
         AdoptGameRelay(relay);
         return true;
     }
