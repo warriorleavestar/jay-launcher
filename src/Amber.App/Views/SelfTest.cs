@@ -322,6 +322,13 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
                 window.Close();
                 return;
             }
+            if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "host-server-advanced")
+            {
+                await HostServerAdvancedAsync();
+                Log("DONE");
+                window.Close();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") is "host-server" or "host-exit" or "jay-client")
             {
                 var scope = Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE");

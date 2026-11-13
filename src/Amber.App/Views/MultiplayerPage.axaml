@@ -1077,6 +1077,7 @@
                   </Expander>
                 </StackPanel>
 
+                <c:HostServerAdvancedPanel x:Name="HostServerAdvanced" IsVisible="{Binding IsInitialized}" />
                 <SelectableTextBlock Classes="hint" FontSize="11" TextWrapping="Wrap" Text="{Binding DataDirectoryText}" IsVisible="{Binding IsInitialized}" />
                 <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding Status}" IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
               </StackPanel>
