@@ -533,7 +533,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         await client.ConnectAsync(IPAddress.Loopback, _directory.Port);
         await using var stream = client.GetStream();
         request["jay"] = "9.9.9";
-        return await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", request, default);
+        return await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", request, default, snapshotLength: _ => { });
     }
 
     /// <summary>Fills the directory with public rooms until a full snapshot is a large reply.</summary>
@@ -848,7 +848,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
             using var tcp = new TcpClient();
             await tcp.ConnectAsync(IPAddress.Loopback, _directory.Port);
             await using var stream = tcp.GetStream();
-            return await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", request, default);
+            return await DirectoryChannel.CallAsync(stream, new DirectoryTrust { Network = "" }, "", "", request, default, snapshotLength: _ => { });
         }
         Assert.Equal("version", (await CallAsync(new JsonObject { ["op"] = "snap", ["jay"] = 5 }))["error"]!.GetValue<string>());
         Assert.Equal("bad", (await CallAsync(new JsonObject { ["op"] = 5, ["jay"] = "9.9.9" }))["error"]!.GetValue<string>());

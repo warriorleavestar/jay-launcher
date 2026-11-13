@@ -33,7 +33,7 @@ internal sealed partial class SelfTest
                 log.AddRaw("[Render thread/ERROR]: Something broke in a mod");
             });
             await Task.Delay(300);
-            Check("默认不停靠", !main.LogDocked && Dispatcher.UIThread.Invoke(() => !window.LogDock.IsVisible));
+            Check("默认不停靠，日志视图还没建（第一次停靠才建）", !main.LogDocked && Dispatcher.UIThread.Invoke(() => !window.LogDock.IsVisible && window.LogDock.Child is null));
             PressKey(window, Key.OemTilde, KeyModifiers.Control);
             await Task.Delay(400);
             Check("Ctrl+`：日志停靠到内容区底部，高 240", main.LogDocked && Dispatcher.UIThread.Invoke(() => window.LogDock.IsEffectivelyVisible
