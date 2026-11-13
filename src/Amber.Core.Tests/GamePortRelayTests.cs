@@ -294,6 +294,81 @@ public sealed class GamePortRelayTests
         void Check(Task watch) => Pump(() => watch.IsCompleted);
     });
 
+    [Fact]
+    public void APortTypedDuringFindIsNotReplacedByWhatFindFound() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x51);
+        using var typed = new EchoGame(0x52);
+        using var found = new EchoGame(0x53);
+        var scan = new TaskCompletionSource<List<LanGame>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service) { RelayTypingDelay = TimeSpan.Zero, ScanForTest = () => scan.Task };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+
+        // [Find] is listening when the player types another port, which links.
+        vm.FindGameForRoomCommand.Execute(null);
+        Pump(() => vm.IsScanning);
+        var port = typed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        vm.ManualPort = port;
+        Pump(() => relay.Target == typed.Port);
+
+        // The scan then finds a new world: it is listed, but the typed port stays linked.
+        scan.SetResult([new LanGame("World", found.Port)]);
+        Pump(() => !vm.IsScanning);
+        for (var i = 0; i < 20; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
+        Assert.Contains(vm.LanGames, g => g.Game.Port == found.Port);
+        Assert.Equal(typed.Port, relay.Target);
+        Assert.Equal(port, vm.ManualPort);
+        vm.StopCommand.Execute(null);
+    });
+
+    [Fact]
+    public void AConnectionToTheWorldBeforeDoesNotHideThatTheLinkedOneClosed() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x61);
+        using var second = new EchoGame(0x62);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            // The first world still answers; the second was closed.
+            GameTargetProbeForTest = p => Task.FromResult(p == first.Port),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+
+        // A player stays connected to the first world while the host switches to the second.
+        using var player = new TcpClient();
+        player.Connect(IPAddress.Loopback, relay.Port);
+        var stream = player.GetStream();
+        stream.Write([1]);
+        var echo = new byte[2];
+        stream.ReadTimeout = 5000;
+        Assert.Equal(2, stream.ReadAtLeast(echo, 2));
+        Pump(() => relay.OpenConnectionsTo(first.Port) == 1);
+        vm.ManualPort = second.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == second.Port);
+        Assert.Equal(0, relay.OpenConnectionsTo(second.Port));
+
+        // The second world closing is still noticed.
+        Check(vm.WatchGameTargetAsync());
+        Check(vm.WatchGameTargetAsync());
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+        Assert.Equal(1, relay.OpenConnections);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch) => Pump(() => watch.IsCompleted);
+    });
+
     [Theory]
     // A world that wasn't listed before (reopened on a new port) wins, even over the linked one still answering.
     [InlineData(new[] { 100, 200 }, new[] { 200 }, 100, 300, 200)]
