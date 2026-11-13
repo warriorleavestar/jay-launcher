@@ -400,7 +400,7 @@
   "core.mp.exit.toomany": "經 TA 上網時，連線本身用的位址太多。",
   "core.mp.exit.relay_unreadable": "經 TA 上網：有一個中轉位址讀不懂。",
   "core.mp.exit.relay_unresolved": "查不到中轉 {0} 的位址（{1}），經 TA 上網沒有開始。",
-  "core.mp.exit.relay_domain": "「經 TA 上網」目前只能在直連的房間裡用。這個房間是經中轉連上對方的，所以暫時用不了。",
+  "core.mp.exit.relay_domain": "「經 TA 上網」暫時不支援用網域名稱設定的中轉。這個房間正是經這樣的中轉連上對方的。",
   "core.mp.exit.relay_no_address": "它沒有能留在 TA 的連線之外的位址",
   "core.mp.exit.underlay_address": "經 TA 上網時，連線本身用的位址必須是 IP 位址，不能是網域名稱或命令文字。",
   "core.mp.exit.underlayunsafe": "經 TA 上網時，連線本身用的位址不能是未指定位址、多播、IPv6 鏈路本機位址或房間虛擬位址。",

@@ -408,7 +408,7 @@
   "core.mp.exit.toomany": "Going online through a member: the multiplayer connection itself uses too many addresses.",
   "core.mp.exit.relay_unreadable": "Going online through a member: a relay address couldn't be read.",
   "core.mp.exit.relay_unresolved": "Couldn't look up the relay {0} ({1}), so going online through a member didn't start.",
-  "core.mp.exit.relay_domain": "Going online through a member works in rooms with a direct link for now. This room reaches the other player through a relay, so it isn't available here yet.",
+  "core.mp.exit.relay_domain": "Going online through a member doesn't work yet with a relay that is set up by domain name. This room reaches the other player through such a relay.",
   "core.mp.exit.relay_no_address": "it has no address that can be kept outside the member's connection",
   "core.mp.exit.underlay_address": "Going online through a member: the addresses the multiplayer connection itself uses must be IP addresses, not domain names or command text.",
   "core.mp.exit.underlayunsafe": "Going online through a member: the addresses the multiplayer connection itself uses cannot be unspecified, multicast, IPv6 link-local or room virtual addresses.",

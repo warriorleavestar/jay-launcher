@@ -327,6 +327,90 @@ public sealed class GamePortRelayTests
     });
 
     [Fact]
+    public void ATypedGameThatClosesDoesNotFallBackToTheWorldPickedBefore() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var found = new EchoGame(0x71);
+        using var typed = new EchoGame(0x72);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            ScanForTest = () => Task.FromResult(new List<LanGame> { new("World", found.Port) }),
+            // The echo games don't answer a Minecraft status ping: found worlds only have to listen here.
+            GamePortReadyForTest = (_, _) => Task.FromResult(true),
+            // The typed game was closed; the found one still answers.
+            GameTargetProbeForTest = p => Task.FromResult(p == found.Port),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var relay = vm.GameRelayForTest!;
+        // [Find] links the found world, then the player types another port.
+        vm.FindGameForRoomCommand.Execute(null);
+        Pump(() => relay.Target == found.Port && !vm.IsScanning);
+        vm.ManualPort = typed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == typed.Port);
+
+        // The typed game closes: the room waits instead of quietly linking the world picked before.
+        Check(vm.WatchGameTargetAsync());
+        Check(vm.WatchGameTargetAsync());
+        Settle();
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+        Assert.Null(vm.SelectedLanGame);
+
+        // Picking that world again is the player's choice, and links it.
+        vm.SelectedLanGame = vm.LanGames.Single(g => g.Game.Port == found.Port);
+        Pump(() => relay.Target == found.Port);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch) => Pump(() => watch.IsCompleted);
+    });
+
+    [Fact]
+    public void AGameThatClosesDuringFindDoesNotStopFindFromLinkingANewOne() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var closed = new EchoGame(0x81);
+        using var reopened = new EchoGame(0x82);
+        var scan = new TaskCompletionSource<List<LanGame>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            ScanForTest = () => scan.Task,
+            GameTargetProbeForTest = p => Task.FromResult(p != closed.Port),
+            // The echo games don't answer a Minecraft status ping: found worlds only have to listen here.
+            GamePortReadyForTest = (_, _) => Task.FromResult(true),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = closed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+
+        // [Find] is listening when the linked game is found closed and dropped.
+        vm.FindGameForRoomCommand.Execute(null);
+        Pump(() => vm.IsScanning);
+        Check(vm.WatchGameTargetAsync());
+        Check(vm.WatchGameTargetAsync());
+        Assert.Null(relay.Target);
+
+        // The world reopened on a new port is what [Find] then hears: it is linked.
+        scan.SetResult([new LanGame("World", reopened.Port)]);
+        Pump(() => relay.Target == reopened.Port);
+        Assert.False(vm.IsWaitingForGame);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch) => Pump(() => watch.IsCompleted);
+    });
+
+    private static void Settle()
+    {
+        for (var i = 0; i < 20; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
+    }
+
+    [Fact]
     public void AConnectionToTheWorldBeforeDoesNotHideThatTheLinkedOneClosed() => UiTestThread.Run(() =>
     {
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });

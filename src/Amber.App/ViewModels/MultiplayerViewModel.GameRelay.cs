@@ -18,6 +18,9 @@ public sealed partial class MultiplayerViewModel
     private int _relayCheck;
     private string? _relayGameLabel;
     private bool _relayTyped;
+    // Set while the room itself clears the picked world or typed port (a linked game closed): that is not the player
+    // choosing another game, so it must not relink the relay or cancel a switch the player started.
+    private bool _clearingGameChoice;
 
     /// <summary>The delay before a typed port is checked, so every keystroke doesn't report a closed port.</summary>
     internal TimeSpan RelayTypingDelay { get; set; } = TimeSpan.FromMilliseconds(600);
@@ -139,7 +142,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>A LAN world was picked or a port typed while the room waits (or runs) on a relay: point it at the game.</summary>
     private async Task RetargetGameRelayAsync(bool typed)
     {
-        if (_gameRelay is not { } relay) return;
+        if (_gameRelay is not { } relay || _clearingGameChoice) return;
         var version = ++_relayCheck;
         var manual = ManualPortValue;
         var game = SelectedLanGame;
@@ -149,7 +152,7 @@ public sealed partial class MultiplayerViewModel
             await Task.Delay(RelayTypingDelay);
             if (version != _relayCheck || _gameRelay != relay) return;
         }
-        var ok = await GamePortReadyAsync(port, manual: manual is not null);
+        var ok = await (GamePortReadyForTest ?? GamePortReadyAsync)(port, manual is not null);
         if (version != _relayCheck || _gameRelay != relay) return;
         if (!ok)
         {
@@ -190,6 +193,9 @@ public sealed partial class MultiplayerViewModel
     /// <summary>How often the linked game is checked, and how many misses in a row mean it is gone.</summary>
     internal TimeSpan GameTargetCheckInterval { get; set; } = TimeSpan.FromSeconds(6);
     internal const int GameTargetMisses = 2;
+
+    /// <summary>Tests: stands in for the check a port gets before the relay links it (port, typed).</summary>
+    internal Func<int, bool, Task<bool>>? GamePortReadyForTest { get; set; }
 
     /// <summary>Tests: stands in for listening for LAN worlds.</summary>
     internal Func<Task<List<LanGame>>>? ScanForTest { get; set; }
@@ -241,10 +247,19 @@ public sealed partial class MultiplayerViewModel
         relay.ClearTarget();
         var label = _relayGameLabel ?? L.F("multiplayer.guide.port_label", target);
         _relayGameLabel = null;
-        // Forget the closed world, so finding it again on the same port links it again.
-        if (SelectedLanGame?.Game.Port == target) SelectedLanGame = null;
-        foreach (var gone in LanGames.Where(g => g.Game.Port == target).ToList()) LanGames.Remove(gone);
-        if (ManualPortValue == target) ManualPort = "";
+        // Forget the closed world, so finding it again on the same port links it again. A world still picked from
+        // before a typed port is unpicked too, so it isn't relinked behind the player's back and picking it again counts.
+        _clearingGameChoice = true;
+        try
+        {
+            if (SelectedLanGame?.Game.Port == target || ManualPortValue == target) SelectedLanGame = null;
+            foreach (var gone in LanGames.Where(g => g.Game.Port == target).ToList()) LanGames.Remove(gone);
+            if (ManualPortValue == target) ManualPort = "";
+        }
+        finally
+        {
+            _clearingGameChoice = false;
+        }
         IsWaitingForGame = true;
         OnPropertyChanged(nameof(GameLinkText));
         SetStatus(StatusMessage.Info("multiplayer.relay.game_gone", label));
