@@ -1341,6 +1341,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private async Task RefreshPeersAsync()
     {
+        ExpireRoomGames();
         _ = WatchGameTargetAsync();
         if (_session is not { } session || _refreshing) return;
         if (session.HasExited)

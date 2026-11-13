@@ -332,19 +332,55 @@ internal sealed partial class SelfTest
         });
         await Task.Delay(300);
 
-        // Room opened before the game: the invite card says what it waits for and takes a port; nothing is connected yet.
+        // Room opened before the game: the invite card says what it waits for and lists the games in the room. Worlds
+        // opened to LAN show up as they are broadcast (fed here, nothing listens on the network), the first one is used,
+        // a click switches, a closed one drops off; a typed port sits under "Other port…". Nothing is connected.
         Check("先开房间：有游戏时不显示等游戏", Named<Border>("GameLinkPanel")?.IsEffectivelyVisible == false);
         var savedPort = vm.ManualPort;
         var savedGame = vm.SelectedLanGame;
         vm.ManualPort = "";
         vm.SelectedLanGame = null;
+        var clock = DateTime.UtcNow;
+        vm.RoomGameListenForTest = (_, ct) => Task.Delay(Timeout.Infinite, ct);
+        vm.RoomGamesClockForTest = () => clock;
+        vm.GamePortReadyForTest = (_, _) => Task.FromResult(true);
         var relayReady = await vm.PrepareGameRelayForTest();
         await Task.Delay(300);
-        Check("先开房间：邀请卡写在等游戏，给端口框和【查找】", relayReady && vm.IsWaitingForGame && Named<Border>("GameLinkPanel")?.IsEffectivelyVisible == true
-            && Named<TextBox>("GameLinkPortBox")?.IsEffectivelyVisible == true && Named<Button>("GameLinkFindButton")?.IsEffectivelyVisible == true
-            && HasText(L.T("multiplayer.relay.waiting")));
+        Check("先开房间：邀请卡写在等游戏，房间里的游戏还空着，端口框收在“其他端口…”里", relayReady && vm.IsWaitingForGame && Named<Border>("GameLinkPanel")?.IsEffectivelyVisible == true
+            && HasText(L.T("multiplayer.relay.waiting")) && Named<TextBlock>("RoomGamesEmpty")?.IsEffectivelyVisible == true
+            && Named<Button>("RoomOtherPortButton")?.IsEffectivelyVisible == true && Named<TextBox>("GameLinkPortBox")?.IsEffectivelyVisible == false);
         await ShotAsync("房间-先开房间等游戏");
+        vm.RoomGameHeard(new LanGame("生存世界", 25565));
+        var used = await WaitAsync(() => vm.GameRelayForTest?.Target == 25565, 5);
+        await Task.Delay(300);
+        Check("房间里的游戏：对局域网开放的世界出现在列表里并自动用上，标着“正在用”", used && !vm.IsWaitingForGame && vm.RoomGames.Count == 1 && vm.RoomGames[0].IsLinked
+            && Named<ItemsControl>("RoomGameList")?.IsEffectivelyVisible == true && HasText(L.T("multiplayer.roomgames.in_use")) && HasText("生存世界"));
+        clock = clock.AddSeconds(1);
+        vm.RoomGameHeard(new LanGame("创造世界", 25600));
+        await Task.Delay(300);
+        var useButton = page.GetVisualDescendants().OfType<Button>().FirstOrDefault(b => b.DataContext is RoomGameItem { Game.Port: 25600 } && b.IsEffectivelyVisible);
+        Check("房间里的游戏：第二个世界只列出来，房间还用第一个，旁边给【用这个】", vm.GameRelayForTest?.Target == 25565 && vm.RoomGames.Count == 2 && useButton is not null);
+        Named<Border>("GameLinkPanel")?.BringIntoView();
+        await ShotAsync("房间-房间里的游戏");
+        Check("房间里的游戏：点【用这个】换过去", Press(useButton) && await WaitAsync(() => vm.GameRelayForTest?.Target == 25600, 5)
+            && vm.RoomGames.Single(r => r.Game.Port == 25600).IsLinked);
+        clock = clock.AddSeconds(7);
+        vm.RoomGameHeard(new LanGame("创造世界", 25600));
+        vm.ExpireRoomGames();
+        await Task.Delay(200);
+        Check("房间里的游戏：关掉的世界从列表里消失", vm.RoomGames.Count == 1 && vm.RoomGames[0].Game.Port == 25600 && !HasText("生存世界"));
+        Check("房间里的游戏：【其他端口…】展开端口框", Press(Named<Button>("RoomOtherPortButton")) && await WaitAsync(() => Named<TextBox>("GameLinkPortBox")?.IsEffectivelyVisible == true, 3));
+        vm.ManualPort = "25700";
+        await WaitAsync(() => vm.GameRelayForTest?.Target == 25700, 5);
+        await Task.Delay(300);
+        Check("房间里的游戏：填的端口写成“你填的端口”并标着正在用", vm.RoomGames.FirstOrDefault(r => r.Game.Port == 25700) is { IsTyped: true, IsLinked: true }
+            && HasText(L.T("multiplayer.roomgames.typed")));
+        Named<Border>("GameLinkPanel")?.BringIntoView();
+        await ShotAsync("房间-房间里的游戏-其他端口");
         vm.StopGameRelayForTest();
+        vm.GamePortReadyForTest = null;
+        vm.RoomGameListenForTest = null;
+        vm.RoomGamesClockForTest = null;
         vm.ManualPort = savedPort;
         vm.SelectedLanGame = savedGame;
         await Task.Delay(200);
