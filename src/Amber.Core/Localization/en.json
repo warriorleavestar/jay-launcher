@@ -952,6 +952,7 @@
   "multiplayer.relay.switched": "The room now uses {0}",
   "multiplayer.relay.connected": "Game linked to the room: {0}",
   "multiplayer.relay.linked": "✓ Linked to {0} (port {1}). A world started from Jay is followed to a new port by itself; for any other, open it to LAN again and press “Find”, or enter the new port.",
+  "multiplayer.relay.linked_port": "✓ Linked to port {0}. If the game moves to another port, enter it here or press “Find”.",
   "multiplayer.relay.waiting": "Waiting for the game: enter your world, press Esc and choose “Open to LAN”. Jay links it to the room by itself. For another game, enter its port here.",
   "multiplayer.relay.game_gone": "{0} stopped answering, so the room is waiting for the game again. Open the world to LAN, then press “Find” or enter its port. The room and invite stay as they are.",
   "multiplayer.relay.adapter_failed": "The room was closed: game connections on the room's network address stopped working ({0}).",

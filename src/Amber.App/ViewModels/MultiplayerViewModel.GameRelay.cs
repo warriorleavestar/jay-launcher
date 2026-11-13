@@ -17,6 +17,7 @@ public sealed partial class MultiplayerViewModel
     private GamePortRelay? _gameRelay;
     private int _relayCheck;
     private string? _relayGameLabel;
+    private bool _relayTyped;
 
     /// <summary>The delay before a typed port is checked, so every keystroke doesn't report a closed port.</summary>
     internal TimeSpan RelayTypingDelay { get; set; } = TimeSpan.FromMilliseconds(600);
@@ -31,6 +32,8 @@ public sealed partial class MultiplayerViewModel
 
     public string GameLinkText => _gameRelay is null ? ""
         : IsWaitingForGame ? L.T("multiplayer.relay.waiting")
+        // A typed port has no game name: "linked to port N", not "linked to port N (port N)".
+        : _relayTyped ? L.F("multiplayer.relay.linked_port", _gameRelay.Target ?? 0)
         : L.F("multiplayer.relay.linked", _relayGameLabel ?? "", _gameRelay.Target ?? 0);
 
     /// <summary>Tests: the relay's own port (the room's game port) and where it points.</summary>
@@ -155,6 +158,7 @@ public sealed partial class MultiplayerViewModel
         }
         relay.SetTarget(port);
         _relayGameLabel = manual is not null ? L.F("multiplayer.guide.port_label", port) : game?.Label ?? "";
+        _relayTyped = manual is not null;
         var wasWaiting = IsWaitingForGame;
         IsWaitingForGame = false;
         OnPropertyChanged(nameof(GameLinkText));

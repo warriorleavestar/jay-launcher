@@ -926,6 +926,7 @@
   "multiplayer.relay.switched": "房间改用 {0}",
   "multiplayer.relay.connected": "游戏接上房间了：{0}",
   "multiplayer.relay.linked": "✓ 已接上 {0}（端口 {1}）。从 Jay 启动的游戏重新对局域网开放换了端口，Jay 会自己跟上；别的游戏换了端口，点“查找”或填新端口。",
+  "multiplayer.relay.linked_port": "✓ 已接上端口 {0}。游戏换了端口，就在这里填新端口或点“查找”。",
   "multiplayer.relay.waiting": "等游戏：进世界，按 Esc，点“对局域网开放”，Jay 会自己接到房间上。别的游戏在这里填端口。",
   "multiplayer.relay.game_gone": "{0} 没有回应了，房间重新等游戏。对局域网开放后点“查找”或填端口。房间和邀请都不变。",
   "multiplayer.relay.adapter_failed": "房间已关闭：房间网络地址上的游戏连接用不了了（{0}）。",

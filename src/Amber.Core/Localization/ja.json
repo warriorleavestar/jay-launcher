@@ -926,6 +926,7 @@
   "multiplayer.relay.switched": "ルームは {0} を使うようになりました",
   "multiplayer.relay.connected": "ゲームをルームにつなぎました：{0}",
   "multiplayer.relay.linked": "✓ {0} につなぎました（ポート {1}）。Jay から起動したゲームはポートが変わっても Jay が追従します。それ以外のゲームは、もう一度 LAN に公開して「探す」を押すか、新しいポートを入力してください。",
+  "multiplayer.relay.linked_port": "✓ ポート {0} につなぎました。ゲームのポートが変わったら、ここに入力するか「探す」を押してください。",
   "multiplayer.relay.waiting": "ゲーム待ち：ワールドに入り、Esc を押して「LAN に公開」を選ぶと Jay がルームにつなぎます。ほかのゲームはここにポートを入力してください。",
   "multiplayer.relay.game_gone": "{0} が応答しなくなったので、ルームはまたゲームを待っています。LAN に公開してから「探す」を押すか、ポートを入力してください。ルームと招待はそのままです。",
   "multiplayer.relay.adapter_failed": "ルームを閉じました：ルームのネットワークアドレスでゲームの接続を受けられなくなりました（{0}）。",

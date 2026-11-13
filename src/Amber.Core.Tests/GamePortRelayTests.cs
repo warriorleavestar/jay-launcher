@@ -148,7 +148,8 @@ public sealed class GamePortRelayTests
         Pump(() => !vm.IsWaitingForGame);
         Assert.Equal(game.Port, relay.Target);
         Assert.Equal("multiplayer.relay.connected", vm.StatusInfo?.Key);
-        Assert.Contains(game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture), vm.GameLinkText);
+        // A typed port is named once ("linked to port N"), not as "port N (port N)".
+        Assert.Equal(L.F("multiplayer.relay.linked_port", game.Port), vm.GameLinkText);
         var reply = Task.Run(() => RoundTripAsync(relay.Port, [5]));
         Pump(() => reply.IsCompleted);
         Assert.Equal(new byte[] { 0xC3, 5 }, reply.Result);
