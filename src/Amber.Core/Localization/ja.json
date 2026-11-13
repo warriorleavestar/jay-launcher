@@ -921,6 +921,7 @@
   "multiplayer.relay.connected": "ゲームをルームにつなぎました：{0}",
   "multiplayer.relay.linked": "✓ {0} につなぎました（ポート {1}）。もう一度 LAN に公開してポートが変わっても Jay が追従します。",
   "multiplayer.relay.waiting": "ゲーム待ち：ワールドに入り、Esc を押して「LAN に公開」を選ぶと Jay がルームにつなぎます。ほかのゲームはここにポートを入力してください。",
+  "multiplayer.relay.adapter_failed": "ルームを閉じました：ルームのネットワークアドレスでゲームの接続を受けられなくなりました（{0}）。",
   "multiplayer.relay.created": "ルームを開きました。今すぐ招待を送れます。ゲームで「LAN に公開」すると Jay が自動でつなぎます。",
   "multiplayer.guide.port_label": "ポート {0}",
   "multiplayer.join.active": "ルームに参加中",

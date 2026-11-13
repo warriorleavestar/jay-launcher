@@ -190,17 +190,18 @@ public sealed class GamePortRelayTests
         using var game = new EchoGame(0x5A);
         await using var relay = new GamePortRelay();
         relay.SetTarget(game.Port);
-        // The adapter's address shows up on the third try (a loopback listener stands in for it).
-        var tries = 0;
+        // The adapter's address shows up once the test says so (a loopback listener stands in for it).
+        var appears = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         TcpListener? adapter = null;
         var bound = relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), IPAddress.IsLoopback, TimeSpan.FromSeconds(10), (_, _) =>
         {
-            if (++tries < 3) throw new SocketException((int)SocketError.AddressNotAvailable);
+            if (!appears.Task.IsCompleted) throw new SocketException((int)SocketError.AddressNotAvailable);
             adapter = new TcpListener(IPAddress.Loopback, 0);
             adapter.Start();
             return adapter;
         });
         Assert.False(relay.ListensOnAdapter);
+        appears.SetResult();
         await bound.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(relay.ListensOnAdapter);
         using var client = new TcpClient();
@@ -248,21 +249,69 @@ public sealed class GamePortRelayTests
         Assert.Equal(allowed, MultiplayerViewModel.InRoomSubnet(IPAddress.Parse(source)));
 
     [Fact]
-    public async Task AnAdapterThatGoesAwayClearsTheListener()
+    public async Task AnAdapterThatGoesAwayClearsTheListenerAndSaysSo()
     {
         await using var relay = new GamePortRelay();
         TcpListener? adapter = null;
+        var lost = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
         await relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), _ => true, TimeSpan.FromSeconds(5), (_, _) =>
         {
             adapter = new TcpListener(IPAddress.Loopback, 0);
             adapter.Start();
             return adapter;
-        });
+        }, lost: e => lost.TrySetResult(e));
         Assert.True(relay.ListensOnAdapter);
         adapter!.Stop();
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (relay.ListensOnAdapter && DateTime.UtcNow < deadline) await Task.Delay(20);
+        await lost.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(relay.ListensOnAdapter);
+    }
+
+    [Fact]
+    public async Task DisposingTheRelayIsNotALostAdapter()
+    {
+        var relay = new GamePortRelay();
+        var lost = 0;
+        await relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), _ => true, TimeSpan.FromSeconds(5), (_, _) =>
+        {
+            var l = new TcpListener(IPAddress.Loopback, 0);
+            l.Start();
+            return l;
+        }, lost: _ => Interlocked.Increment(ref lost));
+        await relay.DisposeAsync();
+        await Task.Delay(100);
+        Assert.Equal(0, Volatile.Read(ref lost));
+    }
+
+    [Theory]
+    [InlineData(SocketError.ConnectionReset)]
+    [InlineData(SocketError.ConnectionAborted)]
+    public async Task ACallerThatGivesUpBeforeAcceptDoesntStopTheAdapterListener(SocketError error)
+    {
+        using var game = new EchoGame(0x5A);
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        // The first accept fails the way a caller's early reset does; the next caller still gets through.
+        var first = 1;
+        relay.AcceptForTest = (l, ct) => Interlocked.Exchange(ref first, 0) == 1
+            ? ValueTask.FromException<TcpClient>(new SocketException((int)error))
+            : l.AcceptTcpClientAsync(ct);
+        var lost = 0;
+        TcpListener? adapter = null;
+        await relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), IPAddress.IsLoopback, TimeSpan.FromSeconds(5), (_, _) =>
+        {
+            adapter = new TcpListener(IPAddress.Loopback, 0);
+            adapter.Start();
+            return adapter;
+        }, lost: _ => Interlocked.Increment(ref lost));
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)adapter!.LocalEndpoint).Port);
+        var s = client.GetStream();
+        await s.WriteAsync(new byte[] { 7 });
+        var reply = new byte[2];
+        await s.ReadExactlyAsync(reply).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new byte[] { 0x5A, 7 }, reply);
+        Assert.True(relay.ListensOnAdapter);
+        Assert.Equal(0, Volatile.Read(ref lost));
     }
 
     [Fact]
@@ -312,7 +361,7 @@ public sealed class GamePortRelayTests
     });
 
     [Fact]
-    public void AnAdapterPortThatsTakenNamesThatPort() => UiTestThread.Run(() =>
+    public void ARelayThatCantUseItsAdapterPortEndsTheRoom() => UiTestThread.Run(() =>
     {
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
         var vm = new MultiplayerViewModel(service)
@@ -322,9 +371,105 @@ public sealed class GamePortRelayTests
         };
         var prepared = vm.PrepareGameRelayForTest(onAdapter: true);
         Pump(() => prepared.IsCompleted);
-        var port = vm.GameRelayForTest!.Port;
-        Pump(() => vm.StatusInfo?.Key == "multiplayer.transport.adapter_port_failed");
-        Assert.Equal(port, vm.StatusInfo!.Args[0]);
+        // The relay's port is one the system picked: no "is another Jay running?" for it.
+        Pump(() => vm.StatusInfo?.Key == "multiplayer.relay.adapter_failed");
+        Assert.False(vm.HasGameRelay);
+    });
+
+    [Fact]
+    public void ARelayThatFailsOddlyOnTheAdapterStillEndsTheRoom() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            AdapterListenForTest = (_, _) => throw new ArgumentException("odd"),
+        };
+        var prepared = vm.PrepareGameRelayForTest(onAdapter: true);
+        Pump(() => prepared.IsCompleted);
+        Pump(() => vm.StatusInfo?.Key == "multiplayer.relay.adapter_failed");
+        Assert.False(vm.HasGameRelay);
+    });
+
+    [Fact]
+    public void ARelayListensAgainWhenItsAdapterListenerStops() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var listeners = new System.Collections.Concurrent.ConcurrentQueue<TcpListener>();
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            AdapterListenForTest = (_, _) =>
+            {
+                var l = new TcpListener(IPAddress.Loopback, 0);
+                l.Start();
+                listeners.Enqueue(l);
+                return l;
+            },
+        };
+        var prepared = vm.PrepareGameRelayForTest(onAdapter: true);
+        Pump(() => prepared.IsCompleted);
+        Pump(() => vm.GameRelayForTest!.ListensOnAdapter);
+        // The adapter goes away and comes back a few times: the room listens again each time ...
+        for (var i = 1; i <= MultiplayerViewModel.AdapterRelistens; i++)
+        {
+            listeners.Last().Stop();
+            var n = i + 1;
+            Pump(() => listeners.Count == n && vm.GameRelayForTest?.ListensOnAdapter == true);
+            Assert.True(vm.HasGameRelay);
+        }
+        // ... until it gives up, and then the room says so instead of looking open.
+        listeners.Last().Stop();
+        Pump(() => vm.StatusInfo?.Key == "multiplayer.relay.adapter_failed");
+        Assert.False(vm.HasGameRelay);
+    });
+
+    [Fact]
+    public void AProtectedChannelThatCantBindEndsTheRoom() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = new MultiplayerViewModel(service) { RelayTypingDelay = TimeSpan.Zero };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var bound = new TaskCompletionSource();
+        var watch = vm.WatchAdapterBindAsync(bound.Task, () => true, 47999, relay: false);
+        Assert.True(vm.HasGameRelay);
+        bound.SetException(new SocketException((int)SocketError.AddressAlreadyInUse));
+        Pump(() => watch.IsCompleted);
+        Assert.Equal("multiplayer.transport.adapter_port_failed", vm.StatusInfo?.Key);
+        Assert.Equal(47999, vm.StatusInfo!.Args[0]);
+        Assert.False(vm.HasGameRelay);
+    });
+
+    [Fact]
+    public void AListenerFromAnEarlierRoomChangesNothing() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = new MultiplayerViewModel(service) { RelayTypingDelay = TimeSpan.Zero };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var watch = vm.WatchAdapterBindAsync(Task.FromException(new SocketException((int)SocketError.AddressNotAvailable)), () => false, 47999, relay: false);
+        Pump(() => watch.IsCompleted);
+        Assert.True(vm.HasGameRelay);
+        vm.StopCommand.Execute(null);
+    });
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AWholeLanHelperThatDoesntStartEndsTheRoom(bool hangs) => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = new MultiplayerViewModel(service) { RelayTypingDelay = TimeSpan.Zero };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        Func<CancellationToken, Task> ready = hangs
+            ? ct => Task.Delay(Timeout.Infinite, ct)
+            : _ => Task.FromException(new IOException("helper gone"));
+        var watch = vm.WatchSessionStartAsync(ready, () => true, TimeSpan.FromMilliseconds(100));
+        Pump(() => watch.IsCompleted);
+        Assert.Equal("multiplayer.room.full_lan_start_failed", vm.StatusInfo?.Key);
+        if (!hangs) Assert.Contains("helper gone", vm.StatusInfo!.Args[0]?.ToString(), StringComparison.Ordinal);
         Assert.False(vm.HasGameRelay);
     });
 

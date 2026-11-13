@@ -13,6 +13,7 @@ public static class AdapterListener
     /// <summary>
     /// How long a listener waits for its adapter address by default. The view model gives the elevated helper the same
     /// time to report ready, so neither gives up before the other (a first adapter install can be slow).
+    /// <c>multiplayer.room.full_lan_not_ready</c> says "two minutes" in every language: change it with this value.
     /// </summary>
     public static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(120);
 

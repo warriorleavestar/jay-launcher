@@ -43,12 +43,23 @@ public sealed class RekeyTests : IDisposable
         };
     }
 
+    /// <summary>The address is missing until the test opens the gate (no timing assumption).</summary>
+    private static Func<IPAddress, int, TcpListener> MissingUntil(Task gate) => (_, _) =>
+    {
+        if (!gate.IsCompleted) throw new SocketException((int)SocketError.AddressNotAvailable);
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        return l;
+    };
+
     [Fact]
     public async Task AListenerBindsOnceItsAddressAppears()
     {
         // A whole-LAN room's virtual adapter gets its address a moment after the room starts.
-        await using var server = AdapterServer(MissingUntil(3), TimeSpan.FromSeconds(10));
+        var appears = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = AdapterServer(MissingUntil(appears.Task), TimeSpan.FromSeconds(10));
         Assert.False(server.Listening);
+        appears.SetResult();
         await server.Bound.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(server.Listening);
         Assert.NotEqual(47999, server.Port);

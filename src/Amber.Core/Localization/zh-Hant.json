@@ -921,6 +921,7 @@
   "multiplayer.relay.connected": "遊戲接上房間了：{0}",
   "multiplayer.relay.linked": "✓ 已接上 {0}（連接埠 {1}）。重新在區域網路開放換了連接埠，Jay 會跟著換。",
   "multiplayer.relay.waiting": "等遊戲：進世界，按 Esc，點「在區域網路開放」，Jay 會自己接到房間上。其他遊戲在這裡填連接埠。",
+  "multiplayer.relay.adapter_failed": "房間已關閉：房間網路位址上的遊戲連線用不了了（{0}）。",
   "multiplayer.relay.created": "房間開好了，現在就可以傳邀請。在遊戲裡「在區域網路開放」後，Jay 自動接上。",
   "multiplayer.guide.port_label": "連接埠 {0}",
   "multiplayer.join.active": "已加入房間",

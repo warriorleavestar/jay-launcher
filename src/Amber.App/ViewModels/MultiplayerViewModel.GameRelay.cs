@@ -81,18 +81,33 @@ public sealed partial class MultiplayerViewModel
         OnPropertyChanged(nameof(GameLinkText));
     }
 
-    private async Task ListenOnAdapterAsync(GamePortRelay relay)
+    /// <summary>
+    /// How many times a room listens on the adapter again after that listener stops (the adapter went away and came
+    /// back, say) before it gives up and ends the room.
+    /// </summary>
+    internal const int AdapterRelistens = 3;
+
+    private Task ListenOnAdapterAsync(GamePortRelay relay, int relistens = 0) =>
+        WatchAdapterBindAsync(
+            relay.ListenOnAdapterAsync(System.Net.IPAddress.Parse(EasyTierArgs.HostIp), InRoomSubnet, AdapterWaitForTest, AdapterListenForTest,
+                lost: e => _ = AdapterLostAsync(relay, e, relistens)),
+            () => _gameRelay == relay, relay.Port, relay: true);
+
+    /// <summary>The relay's listener on the adapter stopped while the room is open: listen again, or end the room.</summary>
+    private async Task AdapterLostAsync(GamePortRelay relay, Exception e, int relistens)
     {
-        try { await relay.ListenOnAdapterAsync(System.Net.IPAddress.Parse(EasyTierArgs.HostIp), InRoomSubnet, AdapterWaitForTest, AdapterListenForTest); }
-        catch (OperationCanceledException) { }
-        catch (System.Net.Sockets.SocketException e)
+        var again = false;
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            if (_gameRelay != relay) return;
+            if (relistens >= AdapterRelistens) FailRoomOnAdapter(e, relay.Port, relay: true);
+            else
             {
-                if (_gameRelay != relay) return;
-                FailRoomOnAdapter(e, relay.Port);
-            });
-        }
+                _diag.Add(L.T("multiplayer.transport.diagnostics_category"), $"{e.Message} ({e.GetType().Name})");
+                again = true;
+            }
+        });
+        if (again) await ListenOnAdapterAsync(relay, relistens + 1);
     }
 
     /// <summary>A caller on the room's virtual network (the host's /24), not one that reached the address another way.</summary>

@@ -74,7 +74,10 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// </summary>
     /// <param name="allowSource">Which callers' addresses are passed on there (the room's virtual subnet); others are
     /// closed at once, before anything is forwarded.</param>
-    public async Task ListenOnAdapterAsync(IPAddress address, Func<IPAddress, bool> allowSource, TimeSpan? wait = null, Func<IPAddress, int, TcpListener>? listen = null)
+    /// <param name="lost">Called (on a pool thread) with the reason if that listener stops while the relay is still
+    /// running, for example because the adapter went away; the caller can listen again or end the room.</param>
+    public async Task ListenOnAdapterAsync(IPAddress address, Func<IPAddress, bool> allowSource, TimeSpan? wait = null,
+        Func<IPAddress, int, TcpListener>? listen = null, Action<Exception>? lost = null)
     {
         var listener = await AdapterListener.BindAsync(address, Port, wait ?? AdapterListener.DefaultWait, _cts.Token, listen);
         lock (_gate)
@@ -86,7 +89,7 @@ public sealed class GamePortRelay : IAsyncDisposable
                 return;
             }
             _adapterListener = listener;
-            _adapterLoop = Task.Run(() => AdapterLoopAsync(listener, allowSource));
+            _adapterLoop = Task.Run(() => AdapterLoopAsync(listener, allowSource, lost));
         }
     }
 
@@ -96,17 +99,30 @@ public sealed class GamePortRelay : IAsyncDisposable
         get { lock (_gate) return _adapterListener is not null; }
     }
 
-    private async Task AdapterLoopAsync(TcpListener listener, Func<IPAddress, bool> allowSource)
+    /// <summary>Accepts the next connection (tests replace it to throw).</summary>
+    internal Func<TcpListener, CancellationToken, ValueTask<TcpClient>> AcceptForTest { get; set; } = (l, ct) => l.AcceptTcpClientAsync(ct);
+
+    /// <summary>A caller that gave up before its connection was accepted: only that connection is gone.</summary>
+    internal static bool IsTransientAccept(SocketException e) =>
+        e.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionAborted;
+
+    private async Task AdapterLoopAsync(TcpListener listener, Func<IPAddress, bool> allowSource, Action<Exception>? lost)
     {
+        Exception? reason = null;
         try
         {
             while (!_cts.IsCancellationRequested)
             {
                 TcpClient client;
+                try { client = await AcceptForTest(listener, _cts.Token); }
+                catch (SocketException e) when (IsTransientAccept(e)) { continue; }
                 // The adapter went away (or the relay stopped): this listener is done. A listener
                 // stopped before the accept starts throws InvalidOperationException ("not listening").
-                try { client = await listener.AcceptTcpClientAsync(_cts.Token); }
-                catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException or InvalidOperationException) { return; }
+                catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException or InvalidOperationException)
+                {
+                    reason = e;
+                    return;
+                }
                 IPAddress? source;
                 try { source = (client.Client.RemoteEndPoint as IPEndPoint)?.Address; }
                 catch (Exception e) when (e is SocketException or ObjectDisposedException) { source = null; }
@@ -120,11 +136,16 @@ public sealed class GamePortRelay : IAsyncDisposable
         }
         finally
         {
+            bool stillRunning;
             lock (_gate)
             {
                 if (_adapterListener == listener) _adapterListener = null;
+                stillRunning = !_cts.IsCancellationRequested;
             }
             listener.Stop();
+            // Nobody would notice otherwise: the room would look open but take no new guests.
+            if (stillRunning && lost is not null)
+                _ = Task.Run(() => lost(reason ?? new SocketException((int)SocketError.NotSocket)));
         }
     }
 

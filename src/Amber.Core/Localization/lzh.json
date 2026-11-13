@@ -904,6 +904,7 @@
   "multiplayer.relay.connected": "戲已接於房：{0}",
   "multiplayer.relay.linked": "✓ 已接 {0}（埠 {1}）。復開於區域網而易其埠，Jay 隨之。",
   "multiplayer.relay.waiting": "待戲：入界，按 Esc，擇「於區域網開放」，Jay 自接於房。他戲則書其埠於此。",
+  "multiplayer.relay.adapter_failed": "房已閉：房網址之戲連不可用矣（{0}）。",
   "multiplayer.relay.created": "房已立，今可遣邀。戲中「於區域網開放」，Jay 自接之。",
   "multiplayer.guide.port_label": "埠 {0}",
   "multiplayer.join.active": "已入房",
