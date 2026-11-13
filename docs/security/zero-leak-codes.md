@@ -240,3 +240,69 @@ domain name publishes where it is as a signed record, and its code carries an id
 - **Encrypted channel**: like every directory op, only over `DirectoryChannel`.
 - **Limits**: 4 KB per blob, 20000 records per directory, 60 puts per source address per hour, memory only. `/metrics`
   shows the total (`jay_signed_records`).
+
+## Directory snapshot (privacy plan item 12)
+
+`Public/DirectorySnapshot.cs` (`HiddenEntry`, `DirectorySnapshots`), directory op `snap` in `Public/RoomDirectory.cs`. Jay no
+longer asks a directory "where is the room for this invite?". Every Jay downloads the whole directory and looks it up
+locally, so the directory can't tell who looked for which room, or whether anyone looked at all.
+
+- **Hidden entries**: for the room's lobby key (all of a room's invites share it), for as long as the key lasts, the host seals `{id, ip, key}` (padded to 256 bytes) with ChaCha20-Poly1305 under
+  `HKDF-SHA256(lobbyKey, info "jay-dir-seal-v1")`. Every entry is 284 bytes.
+- **Self-certifying index**: the invite also gives an Ed25519 entry key (seed `HKDF-SHA256(lobbyKey, info
+  "jay-dir-entry-key-v1")`). The index is `SHA-256("jay-dir-index-v2" || entry public key)` (32 bytes, also the sealing
+  associated data). A publish carries the entry public key `p` and a signature `s` over
+  `"jay-dir-entry-v1\n" || index || sealed entry || room id || seq (int64 BE)`. The directory checks that the key hashes
+  to the index and that the signature holds, so only holders of the invite can publish under its index: someone who
+  only saw the index (say in an old snapshot, or after a directory restart) gets `lookup`. The signature covers the room
+  and the listing version, and the version is the listing's time in milliseconds, which must be within 10 minutes of
+  the directory's clock (otherwise its hidden entries are left out: a listed room is still listed and the reply carries `warn: "clock"`; a room with nothing else to list gets `clock`), so a captured entry can't be replayed for another room or much later. The
+  directory still never sees the lobby key, so it can't open an entry or tell which invite it belongs to.
+- **Sharing an index**: up to 8 rooms (`MaxEntriesPerIndex`) may have an entry under the same index, each under a
+  random slot tag. Holding the invite is what it takes to fill those places, and holding the invite doesn't make you
+  the host. So a full index only costs a publish that entry: the room is still registered (the reply carries
+  `warn: "lookup"`), and a hidden room with nothing else to register gets `lookup`. A reader tries every entry under
+  the index. An entry counts as the whole (host key, address, room): the host key is public, so it proves nothing on
+  its own. Without the host's key, the reader takes an answer only when every entry gives the same host key and address
+  and no directory's copy holds a full index (whoever filled it may have kept the host's entry out); otherwise it falls
+  back to the lobby. Because the host keeps its own entry up for the key's whole life, an earlier invite holder who
+  publishes an entry for themselves under it clashes with the host's entry instead of being the only answer.
+  With it (a contact's invite), the reader knocks at the addresses given for that host in turn and the knock handshake
+  decides; a wrong address only fails. At most 4 addresses are tried in all, hidden entries before listed ones, and
+  within each those more directories give first (ties in random order). Addresses that don't answer share one time
+  budget (20 s); once it is spent the reader falls back to the lobby.
+- **Rooms listed with their invite**: public, direct and password rooms carry the invite (or its lobby key) in their
+  listing, so anyone on the network could sign entries for its index. Jay publishes its own hidden entry for them too
+  (it gives the same place as the listing, so the two agree), and an invite code for such a room is also matched
+  against the listings in the snapshot (same rule: one host, or the expected host).
+  Renewals reuse the same sealed bytes while nothing changed, so they don't show up as changes.
+- **Public rooms**: a renewal that only changes the seq, signature and time isn't a snapshot change; readers keep the
+  earlier signed version, and expiry shows up as `gone` either way. So a room's `updated` in a snapshot is when it was published or
+  last visibly changed, not its last renewal; the "newest" sort means most recently opened or changed.
+- **One request**: `snap` with the version of the copy Jay already has. The reply holds what changed since then (or
+  everything, for a new copy or one from before the directory restarted), padded to a multiple of 64 KB.
+- **Fixed schedule**: while the public network is connected, the app refreshes every 60 seconds whatever the user does.
+  Lookups and the public list read the local copy and make no request. Without a poller (CLI, tests) a read refreshes
+  first. A reply is checked through before any of it is applied. A directory's copy that hasn't been refreshed for
+  2 × 60 s + the 90 s room lifetime (the directory went away) is dropped.
+- **Directory limits**: the snapshot is capped below the 16 MB reply limit (new publishes that would pass it get
+  `full`); replies are serialized once per version. Small replies (up to 256 KB, the usual delta) have 32 slots of
+  their own; large ones have 8 slots, a start budget of 32 at once refilling at 4 per second, and a byte budget of
+  32 MB at once refilling at 4 MB per second (`busy` otherwise). The slot is chosen from what the request says (a copy
+  from another run or too old needs the full snapshot) before the directory plans or serializes anything.
+  A large reply must go out at no less than 256 KB/s (10 s plus size over that rate), and each frame within 10 s.
+  The reader uses the same rule: once the reply's length arrives it waits that long for the rest, so a slow link
+  still gets a full snapshot. A bucket start is taken only after a slot is free, and both before anything is serialized. A delta bigger than
+  a quarter of the full snapshot (and than a small reply) is answered with the full snapshot, which is serialized once
+  per version; cached deltas are capped at 512 KB together.
+  Where the directory sees each reader's own address, 6 requests per source address per minute (`rate`); where it
+  doesn't, the slots and budgets above are the limit.
+- **Reader side**: the first refresh is awaited only until it has been tried; if it failed (`busy`, `version`,
+  unreachable) the reader gets that error at once, and the poller tries again after 2, 5 and 10 s before going back to
+  every 60 s. Every wait is spread ±20% so readers don't come back all at once. A reader whose copies have all gone stale gets an error, not an empty answer. When an invite finds nothing in the copy, the reader waits for the next scheduled refresh and looks once more, so a room opened a moment ago is found without an extra request.
+- **Not signed by the directory**: the copy comes over the authenticated `DirectoryChannel`, which already proves it is
+  this network's directory. The plan's separate snapshot signature only matters once snapshots are mirrored by others.
+- **Still on the wire**: `find` (fingerprint codes). A fingerprint code can only be matched with the host's search key,
+  so it moves to the local copy only when friend codes carry an account hash instead (plan items 7 and 14).
+- **Removed**: ops `list` and `lookup`, and the `lookup` field of `announce` (now `hidden`).
+

@@ -694,6 +694,11 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial string CurseForgeKey { get; set; }
     [ObservableProperty] public partial string CurseForgeRoot { get; set; }
     [ObservableProperty] public partial string UpdateFeed { get; set; }
+    /// <summary>Check for a signed newer Jay once a day (only a notice; never a download).</summary>
+    [ObservableProperty] public partial bool AutoUpdate { get; set; }
+
+    /// <summary>The daily check exists only on desktops; phones and tablets hide the switch.</summary>
+    public bool AutoUpdateSupported => AutoUpdateCheck.IsSupported;
 
     public string SettingsPath => AppSettings.FilePath;
     public string SettingsPathLabel => L.F("settings.file_path", SettingsPath);
@@ -758,6 +763,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         CurseForgeKey = s.CurseForgeApiKey ?? "";
         CurseForgeRoot = s.CurseForgeApiRoot ?? "";
         UpdateFeed = s.UpdateFeedUrl ?? "";
+        AutoUpdate = s.AutoUpdateCheck;
         SelectedThemeIndex = Math.Max(0, Array.IndexOf(ThemeKeys, s.Theme));
         SelectedMotionIndex = Math.Max(0, Array.IndexOf(Amber.Core.Layout.MotionPreference.Modes, Amber.Core.Layout.MotionPreference.Normalize(s.ReduceMotionMode)));
         SelectedSidebarIndex = (int)Amber.Core.Layout.ShellRules.ParseMode(s.SidebarMode ?? (s.SidebarCollapsed ? "collapsed" : null));
@@ -1096,6 +1102,11 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnCurseForgeKeyChanged(string value) => Persist();
     partial void OnCurseForgeRootChanged(string value) => Persist();
     partial void OnUpdateFeedChanged(string value) => Persist();
+    partial void OnAutoUpdateChanged(bool value)
+    {
+        Persist();
+        if (!_loading) Amber.App.Services.UpdateNotifier.RaiseSwitched(value);
+    }
 
     /// <summary>主题选了立即生效。</summary>
     partial void OnSelectedThemeIndexChanged(int value)
@@ -1190,6 +1201,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         s.CurseForgeApiKey = Blank(CurseForgeKey);
         s.CurseForgeApiRoot = Blank(CurseForgeRoot);
         s.UpdateFeedUrl = Blank(UpdateFeed);
+        s.AutoUpdateCheck = AutoUpdate;
         try
         {
             s.Save();

@@ -61,7 +61,7 @@ public sealed class HostLobby : IAsyncDisposable
         Func<RoomCredentials> credentials, Func<byte[], bool> isTrusted, Func<KnockRequest, CancellationToken, Task<bool>> approve, MemberTable members, Action<string>? log = null,
         InviteBook? book = null, int? listenUdpPort = null, Func<Public.DevicePolicy>? devicePolicy = null,
         Func<Public.AccountPolicy?>? accountPolicy = null, Func<TimeSpan>? decisionWait = null, Action<KnockRequest>? timedOut = null,
-        Func<string, bool>? isTrustedJayAccount = null, Func<Identity.DeviceCertificate?>? jayCertificate = null, Func<bool>? alwaysAsk = null,
+        Func<string, bool>? isTrustedJayAccount = null, Func<Identity.JayProof?>? jayCertificate = null, Func<bool>? alwaysAsk = null,
         Func<DirectAddresses?>? directOffer = null, Action<string>? relayOnlyRefused = null)
     {
         HostLobby? lobby = null;
@@ -168,6 +168,9 @@ public sealed class HostLobby : IAsyncDisposable
 /// <summary>连不上任何中继节点（也没在局域网里找到房主）：根本没进大厅，跟邀请码本身无关。</summary>
 public sealed class LobbyUnreachableException(string message) : TimeoutException(message);
 
+/// <summary>Reached the invite's lobby but no host showed up there in time (the knock itself was never sent).</summary>
+public sealed class LobbyNoHostException(string message) : TimeoutException(message);
+
 /// <summary>加入方：进大厅、等看到房主、敲门，拿到结果后马上离开大厅。</summary>
 public static class LobbyJoin
 {
@@ -179,7 +182,7 @@ public static class LobbyJoin
     /// <param name="relayFound">连上了中继节点（大厅里看到了除自己以外的对端），在找房主。</param>
     public static async Task<KnockOutcome> KnockAsync(EasyTierInstaller installer, string workDir, IReadOnlyList<string> peers, JayInvite invite,
         X25519KeyPair me, string name, string version, Action<string>? log, Action? hostFound, CancellationToken ct, Action? relayFound = null,
-        Public.DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null, byte[]? expectedHost = null,
+        Public.DeviceFingerprint? device = null, string? account = null, Identity.JayProof? jay = null, byte[]? expectedHost = null,
         Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
     {
         var localPort = EasyTierArgs.FreeTcpPort();
@@ -249,7 +252,7 @@ public static class LobbyJoin
     }
 
     private static TimeoutException Timeout(bool sawRemote, IReadOnlyList<string> nodes) =>
-        sawRemote ? new TimeoutException(L.T("core.mp.lobby.nohost"))
+        sawRemote ? new LobbyNoHostException(L.T("core.mp.lobby.nohost"))
         : nodes.Count == 0 ? new LobbyUnreachableException(L.T("core.mp.lobby.nonodes"))
         : new LobbyUnreachableException(L.F("core.mp.lobby.norelay", string.Join(", ", nodes.Take(3))));
 }

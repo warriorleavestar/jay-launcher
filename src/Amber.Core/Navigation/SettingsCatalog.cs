@@ -6,9 +6,10 @@ public sealed record SettingsGroup(string Id, string TitleKey, string SummaryKey
 /// <summary>
 /// One setting on the settings page. <paramref name="Field"/> is the route fragment (<c>settings#Field</c>) and the name
 /// of the control (<c>Field</c> or <c>FieldBox</c>); <paramref name="HintKey"/> is searched too. A <paramref name="WindowsOnly"/>
-/// setting has no control on other systems, so it is left out of <see cref="SettingsCatalog.Fields"/> there.
+/// setting has no control on other systems, and a <paramref name="DesktopOnly"/> one none on phones and tablets, so they
+/// are left out of <see cref="SettingsCatalog.Fields"/> there.
 /// </summary>
-public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null, bool WindowsOnly = false);
+public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null, bool WindowsOnly = false, bool DesktopOnly = false);
 
 /// <summary>
 /// The ten settings groups and every setting with a control, in page order. The settings search and the command
@@ -111,11 +112,12 @@ public static class SettingsCatalog
 
         new("Version", About, "settings.about.version"),
         new("CheckUpdate", About, "settings.about.check_update", "tools.update.hint"),
+        new("AutoUpdate", About, "settings.update.auto", "settings.update.auto_hint", DesktopOnly: true),
         new("AboutPage", About, "about.title", "about.promise"),
     ];
 
-    /// <summary>The settings this system shows (Windows-only ones are dropped elsewhere).</summary>
-    public static readonly IReadOnlyList<SettingsField> Fields = [.. All.Where(f => !f.WindowsOnly || OperatingSystem.IsWindows())];
+    /// <summary>The settings this system shows (Windows-only ones elsewhere, desktop-only ones on phones and tablets are dropped).</summary>
+    public static readonly IReadOnlyList<SettingsField> Fields = [.. All.Where(f => (!f.WindowsOnly || OperatingSystem.IsWindows()) && (!f.DesktopOnly || PlatformFeatures.IsDesktop))];
 
     public static SettingsGroup? Group(string? id) =>
         Groups.FirstOrDefault(g => string.Equals(g.Id, id, StringComparison.OrdinalIgnoreCase));

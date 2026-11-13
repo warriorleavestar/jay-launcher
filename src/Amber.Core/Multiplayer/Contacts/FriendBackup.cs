@@ -45,6 +45,10 @@ public static class FriendBackup
             if (c.JayAccount is not null) item["jay"] = c.JayAccount;
             if (c.DeviceName.Length > 0) item["device"] = c.DeviceName;
             if (c.Epoch > 0) item["epoch"] = c.Epoch;
+            // What I haven't confirmed yet stays unconfirmed after a restore, and what I refused stays refused.
+            if (c.AccountPending) item["acctPending"] = true;
+            if (c.RefusedAccount is not null) item["refused"] = c.RefusedAccount;
+            if (c.NewDevice) item["new"] = true;
             list.Add((JsonNode)item);
         }
         var gone = new JsonArray();
@@ -71,7 +75,7 @@ public static class FriendBackup
             var nonce = output.AsSpan(Magic.Length, NonceLength);
             RandomNumberGenerator.Fill(nonce);
             using var aes = new AesGcm(key, TagLength);
-            aes.Encrypt(nonce, plain, output.AsSpan(Magic.Length + NonceLength, plain.Length), output.AsSpan(output.Length - TagLength), Aad(account.PublicKey));
+            aes.Encrypt(nonce, plain, output.AsSpan(Magic.Length + NonceLength, plain.Length), output.AsSpan(output.Length - TagLength), Aad(account.Id));
             return output;
         }
         finally
@@ -97,8 +101,21 @@ public static class FriendBackup
         try
         {
             using var aes = new AesGcm(key, TagLength);
-            aes.Decrypt(data.Slice(Magic.Length, NonceLength), cipher, data[^TagLength..], plain, Aad(account.PublicKey));
-            if (JsonNode.Parse(plain) is not JsonObject root || (int?)root["v"] != 1 || (string?)root["account"] != account.Address) return null;
+            var nonce = data.Slice(Magic.Length, NonceLength);
+            string expected;
+            try
+            {
+                aes.Decrypt(nonce, cipher, data[^TagLength..], plain, Aad(account.Id));
+                expected = account.Address;
+            }
+            catch (AuthenticationTagMismatchException)
+            {
+                // A backup from before addresses covered both account keys: it was bound to the Ed25519 account key and
+                // names the old version 0 address. Same account, same key, so it still opens.
+                aes.Decrypt(nonce, cipher, data[^TagLength..], plain, Aad(account.PublicKey));
+                expected = JayAddress.EncodeVersion0(account.PublicKey);
+            }
+            if (JsonNode.Parse(plain) is not JsonObject root || (int?)root["v"] != 1 || (string?)root["account"] != expected) return null;
             var result = new List<Contact>();
             foreach (var item in root["contacts"] as JsonArray ?? [])
             {
@@ -111,6 +128,9 @@ public static class FriendBackup
                     JayAccount = JayAddress.TryDecode(jay, out var k) ? JayAddress.Encode(k) : null,
                     DeviceName = DeviceCertificate.CleanName((string?)o["device"]),
                     Epoch = Math.Max(0, (int?)o["epoch"] ?? 0),
+                    AccountPending = (bool?)o["acctPending"] == true,
+                    RefusedAccount = JayAddress.Canonical((string?)o["refused"]),
+                    NewDevice = (bool?)o["new"] == true,
                 });
             }
             var removed = new List<RemovedDevice>();
@@ -134,7 +154,7 @@ public static class FriendBackup
         }
     }
 
-    private static byte[] Aad(ReadOnlySpan<byte> accountKey) => [.. Magic, .. accountKey];
+    private static byte[] Aad(ReadOnlySpan<byte> accountId) => [.. Magic, .. accountId];
 }
 
 /// <summary>What a friend list backup holds: the verified contacts, the devices I had removed, and when it was made.</summary>
