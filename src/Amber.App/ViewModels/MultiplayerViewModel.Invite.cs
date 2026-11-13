@@ -226,7 +226,9 @@ public sealed partial class MultiplayerViewModel
     // ---- 房主 ----
 
     /// <summary>开房间时调用：生成这个房间的随机凭据。</summary>
-    private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) => RoomCredentials.Create(Identity.PublicKey, port, tunnel);
+    /// <remarks>The whole-LAN scope doesn't split in this version, so a room opened with it carries no split settings.</remarks>
+    private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) =>
+        RoomCredentials.Create(Identity.PublicKey, port, tunnel) with { Split = SplitSettings.ForNewRoom(tunnel.Wraps, FullLanMode, SplitSettings.Requested) };
 
     private IReadOnlyList<string> LobbyPeers(bool host) =>
         [.. (host ? TestListeners ?? [] : []), .. TestPeers ?? _service.MultiplayerPeers];
@@ -265,6 +267,7 @@ public sealed partial class MultiplayerViewModel
             for (var i = Members.Count - 1; i >= 0; i--)
                 if (Members[i].PublicKey.AsSpan().SequenceEqual(request.PublicKey)) Members.RemoveAt(i);
             Members.Insert(0, new MemberItem(request.Name, request.PublicKey, request.Trusted) { JayAccount = request.JayAccount });
+            SeenJayDevice(request.PublicKey, request.JayDevice);
             // A trusted friend on a new device: remember this device too, so the list shows it.
             if (request.TrustedByAccount)
             {
@@ -427,7 +430,7 @@ public sealed partial class MultiplayerViewModel
             return false;
         }
         _service.ActiveMultiplayer = _session;
-        if (!TryStartTransport(options))
+        if (!TryStartTransport(_session?.Options ?? options))
         {
             StopSession();
             return false;
@@ -683,21 +686,37 @@ public sealed partial class MultiplayerViewModel
             Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>> answerDirect =
                 (host, ct) => AnswerDirectOfferAsync(invite, host, made => guestDirect = made, ct);
             KnockOutcome? viaPublic = null;
+            var lookedAt = DateTimeOffset.UtcNow;
             if (knock is not null || _public is not null)
             {
                 SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
                 viaPublic = knock is not null ? await knock(me, name, answerDirect, cts.Token) : await TryPublicKnockAsync(invite, me, name, cts.Token, expectedHost, answerDirect);
                 if (viaPublic is null && _knockCts == cts) SetStatus(StatusMessage.Info(peers.Count > 0 ? "multiplayer.invite.connecting_relay" : "multiplayer.invite.entering_lobby"));
             }
-            var outcome = viaPublic ?? await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
-                me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
-                () => Dispatcher.UIThread.Post(() =>
-                {
-                    if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
-                }), cts.Token, () => Dispatcher.UIThread.Post(() =>
-                {
-                    if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
-                }), device, AccountToken, jay, expectedHost, answerDirect));
+            KnockOutcome outcome;
+            try
+            {
+                outcome = viaPublic ?? await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
+                    me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
+                    () => Dispatcher.UIThread.Post(() =>
+                    {
+                        if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
+                    }), cts.Token, () => Dispatcher.UIThread.Post(() =>
+                    {
+                        if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+                    }), device, AccountToken, jay, expectedHost, answerDirect));
+            }
+            // Only "the lobby was reached but no host was there" looks again: not "no relay reachable", and never a timeout
+            // after the knock was sent (such as waiting for approval).
+            catch (LobbyNoHostException e) when (knock is null && viaPublic is null && _public is not null && !cts.IsCancellationRequested)
+            {
+                // No host in the invite's lobby. A room opened after our copy of the directory was taken isn't in it yet:
+                // look once more in a copy refreshed since (by then there usually is one, so this rarely waits).
+                if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.finding_host"));
+                var again = await TryPublicKnockAsync(invite, me, name, cts.Token, expectedHost, answerDirect, lookedAt);
+                if (again is null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(e);
+                outcome = again;
+            }
             if (_knockCts != cts)
             {
                 if (guestDirect is not null) await guestDirect.DisposeAsync();
@@ -724,6 +743,7 @@ public sealed partial class MultiplayerViewModel
             if (!StartJoin(credentials.ToRoom())) return KnockEnd.NotAnswered;
             HostFingerprint = outcome.HostFingerprint;
             HostJayAccount = outcome.HostJayAccount;
+            SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);
             return KnockEnd.Joined;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)

@@ -69,14 +69,36 @@ public sealed class AppSettings
     /// <summary>可选：覆盖微软应用 ID。留空时读环境变量 AMBER_MS_CLIENT_ID，再没有就用内置默认值。</summary>
     public string? MicrosoftClientId { get; set; }
 
-    /// <summary>用户自己申请的 CurseForge API Key，留空时读环境变量 AMBER_CF_KEY。</summary>
+    /// <summary>用户自己申请的 CurseForge API Key；留空时读环境变量 AMBER_CF_KEY，再用官方版内置的 Key。</summary>
     public string? CurseForgeApiKey { get; set; }
 
     /// <summary>CurseForge 接口地址。留空用官方。可以指向用户信任的代理或镜像。</summary>
     public string? CurseForgeApiRoot { get; set; }
 
-    /// <summary>更新检查地址。留空就不检查，启动器不会为此联网。</summary>
+    /// <summary>Update feed. Blank means the official Jay releases (<see cref="Amber.Core.Launch.AutoUpdateCheck.OfficialFeed"/>).</summary>
     public string? UpdateFeedUrl { get; set; }
+
+    /// <summary>
+    /// Check the update feed once a day and tell the user about a signed newer version. Jay never downloads it.
+    /// On for a new install. A settings file from before this switch existed keeps what that Jay did: it never checked
+    /// by itself (even with an update address it only checked on click), so it stays off. The saved choice then carries over.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool AutoUpdateCheck
+    {
+        get => AutoUpdateCheckSaved ?? true;
+        set => AutoUpdateCheckSaved = value;
+    }
+
+    /// <summary>The saved switch; null in a fresh install and in settings files written before it existed.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("AutoUpdateCheck")]
+    public bool? AutoUpdateCheckSaved { get; set; }
+
+    /// <summary>When the automatic update check last ran (successfully or not).</summary>
+    public DateTimeOffset? LastUpdateCheck { get; set; }
+
+    /// <summary>The version the user chose to skip: the automatic check doesn't mention it again.</summary>
+    public string? SkippedUpdateVersion { get; set; }
 
     /// <summary>system / light / dark</summary>
     public string Theme { get; set; } = "system";
@@ -260,7 +282,12 @@ public sealed class AppSettings
             try
             {
                 if (File.Exists(path))
-                    return JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
+                {
+                    var loaded = JsonSerializer.Deserialize(read(path), AppJsonContext.Default.AppSettings) ?? new AppSettings();
+                    // Upgraded from a Jay without the switch: that Jay never checked by itself, so neither does this one.
+                    loaded.AutoUpdateCheckSaved ??= false;
+                    return loaded;
+                }
                 return new AppSettings { IsFresh = true };
             }
             catch (JsonException)
@@ -268,14 +295,15 @@ public sealed class AppSettings
                 // 设置文件损坏时回到默认值，原文件保留一份方便排查。
                 try { File.Copy(path, path + ".broken", true); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-                return new AppSettings();
+                // Only a real new install gets the daily check by default; a file that exists but can't be read keeps it off.
+                return new AppSettings { AutoUpdateCheckSaved = false };
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 // Locked by a sync client or antivirus: retry briefly, then run on defaults without
                 // ever saving over the real file (ReadOnly), so nothing the user set is lost.
                 if (attempt < 3) { Thread.Sleep(200); continue; }
-                return new AppSettings { ReadOnly = true };
+                return new AppSettings { ReadOnly = true, AutoUpdateCheckSaved = false };
             }
         }
     }
@@ -290,6 +318,8 @@ public sealed class AppSettings
     public void Save()
     {
         if (ReadOnly) return;
+        // A new install shows the daily update check on: write that down, or the next start would read it as an upgrade.
+        AutoUpdateCheckSaved ??= true;
         var path = SavePathForTest ?? FilePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";

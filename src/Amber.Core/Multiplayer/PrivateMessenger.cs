@@ -540,21 +540,7 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     }
 
     /// <summary>对方给的文件名只留最后一段、去掉不能用的字符；空的叫 file。</summary>
-    public static string SafeName(string name)
-    {
-        var last = name.Replace('\\', '/').Split('/').LastOrDefault() ?? "";
-        var invalid = Path.GetInvalidFileNameChars().Concat(['<', '>', ':', '"', '|', '?', '*']).ToHashSet();
-        // Format characters (U+202E RIGHT-TO-LEFT OVERRIDE and friends, zero-width joiners) go too: "photo\u202Egnp.exe"
-        // would otherwise show as "photoexe.png".
-        var clean = new string(last.Where(c => !invalid.Contains(c) && !char.IsControl(c)
-            && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format).ToArray()).Trim().TrimEnd('.');
-        if (clean.Length > 120) clean = clean[..120];
-        if (clean.Length == 0 || clean is "." or "..") clean = "file";
-        // Windows 的保留名（CON、NUL……）前面加个下划线。
-        var stem = Path.GetFileNameWithoutExtension(clean).ToUpperInvariant();
-        if (stem is "CON" or "PRN" or "AUX" or "NUL" || stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && char.IsAsciiDigit(stem[3])) clean = "_" + clean;
-        return clean;
-    }
+    public static string SafeName(string name) => FileNames.Bare(name, "file");
 
     /// <summary>没收完的文件放这里：同名同内容（哈希一样）的文件再发来时找得到，接着收。</summary>
     internal static string PartPath(string dir, string name, byte[] hash) =>

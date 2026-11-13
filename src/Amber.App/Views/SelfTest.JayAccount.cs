@@ -98,8 +98,10 @@ internal sealed partial class SelfTest
     {
         var vm = Page<MultiplayerViewModel>();
         var cert = Dispatcher.UIThread.Invoke(() => vm.JayCertificate);
-        Check("Jay 账户联机：敲门带的证书是这个账户签给本机联机密钥的",
-            cert is not null && cert.Account == address && Dispatcher.UIThread.Invoke(() => cert.Verify(vm.Identity.PublicKey)), cert?.Account ?? "none");
+        Check("Jay 账户联机：敲门带的证书是这个账户签给本机设备钥匙的",
+            cert is not null && cert.Certificate.Account == address
+            && Dispatcher.UIThread.Invoke(() => cert.Certificate.Verify(vm.Identity.PublicKey) && cert.Certificate.Names(vm.Identity.Device)),
+            cert?.Certificate.Account ?? "none");
 
         main.Shell.Navigate("play");
         await Task.Delay(400);
@@ -232,17 +234,17 @@ internal sealed partial class SelfTest
         Check("好友：【恢复联系人】把人带回来，并记下要从这台设备打招呼",
             await WaitAsync(() => vm.ContactList.Count == 2, 3) && File.Exists(Path.Combine(dir, MultiplayerViewModel.RelinkFileName)), vm.Status);
 
-        // Bob shows up from a computer I've never seen: his account signed it, so it's added without the emoji, and I'm told.
-        using (var bobNew = X25519KeyPair.Generate())
+        // Bob knocks from a computer I've never seen: the knock proved his account live (both account signatures and a fresh
+        // device signature), so the device is added without the emoji, and I'm told.
+        using (var bobDevice = DeviceKeys.Generate())
         {
+            var bobNew = bobDevice.Dh;
             var me = Dispatcher.UIThread.Invoke(() => vm.Contacts.Me);
-            var bobBook = new Amber.Core.Multiplayer.Contacts.ContactBook(Path.Combine(dir, "bob-new.json"))
-                { Me = bobNew.PublicKey, MyCertificate = bob.CertifyDevice(bobNew.PublicKey, "Linux", 0, DateTimeOffset.UtcNow) };
-            var reply = vm.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me");
-            if (reply is not null && bobBook.Receive(me, reply, "Bob") is { } nonce) vm.Contacts.Receive(bobNew.PublicKey, nonce, "Me");
+            var bobBook = new Amber.Core.Multiplayer.Contacts.ContactBook(Path.Combine(dir, "bob-new.json")) { Me = bobNew.PublicKey };
+            Dispatcher.UIThread.Invoke(() => vm.Contacts.SeenLive(bobNew.PublicKey, bob.CertifyDevice(bobDevice, "Linux", 0, DateTimeOffset.UtcNow)));
             var notice = L.F("multiplayer.contacts.new_device", "Bob");
             RequestHandle? Notice() => main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-new-device");
-            Check("好友：认识的人换了新设备，不对表情就加上，并在请求条里留一条安全提示",
+            Check("好友：认识的人换了新设备，敲门时账户验过就加上，并在请求条里留一条安全提示",
                 await WaitAsync(() => Notice() is { Spec.IsSafety: true, Spec.Timeout: null } n && n.Spec.Title == notice
                     && n.Spec.Body?.Contains("Linux") == true && vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: true }, 3),
                 string.Join(", ", main.Service.Requests.Pending.Select(r => r.Spec.Kind + ":" + r.Spec.Title)));
@@ -254,8 +256,31 @@ internal sealed partial class SelfTest
                 await WaitAsync(() => vm.ContactList.FirstOrDefault(c => c.Name == "Bob") is { HasSeveralDevices: false }, 3)
                 && vm.Contacts.RemovedDevices.Any(r => r.PublicKey.AsSpan().SequenceEqual(bobNew.PublicKey))
                 && vm.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me") is null
-                && vm.Contacts.Pending.Any(p => p.PublicKey.AsSpan().SequenceEqual(bobNew.PublicKey) && !p.KnownFriend), vm.Status);
+                && vm.Contacts.SeenLive(bobNew.PublicKey, bob.CertifyDevice(bobDevice, "Linux", 0, DateTimeOffset.UtcNow)) is null
+                && vm.Contacts.Pending.Any(p => p.PublicKey.AsSpan().SequenceEqual(bobNew.PublicKey)), vm.Status);
             vm.Contacts.Dismiss(bobNew.PublicKey);
+        }
+
+        // A verified friend without an account knocks with one: the link waits for my OK in a safety request (the safe
+        // answer is the default), and only after "yes" does the account count.
+        using (var annDevice = DeviceKeys.Generate())
+        using (var annAccount = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null))
+        {
+            var ann = annDevice.Dh.PublicKey.ToArray();
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                vm.Contacts.Import([new Amber.Core.Multiplayer.Contacts.Contact(ann, "Ann", true, DateTimeOffset.UtcNow)]);
+                vm.Contacts.SeenLive(ann, annAccount.CertifyDevice(annDevice, "macOS", 0, DateTimeOffset.UtcNow));
+            });
+            RequestHandle? Link() => main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-account");
+            Check("好友：敲门把朋友的设备连到一个 Jay 账户时，先在请求条里问我（安全类，默认“不是”）",
+                await WaitAsync(() => Link() is { Spec.IsSafety: true } n && n.Spec.Title == L.F("multiplayer.contacts.account_link", "Ann")
+                    && n.Spec.Choices.Single(c => c.IsDefault).Id == "no" && vm.Contacts.FindVerifiedByJayAccount(annAccount.Address) is null, 3),
+                string.Join(", ", main.Service.Requests.Pending.Select(r => r.Spec.Kind + ":" + r.Spec.Title)));
+            await ShotAsync("Jay账户-确认朋友的账户");
+            Dispatcher.UIThread.Invoke(() => main.Service.Requests.Resolve(Link()!, "ok", RequestSource.Bar));
+            Check("好友：点“是 TA”后这个账户才算数，请求收起",
+                await WaitAsync(() => vm.Contacts.FindVerifiedByJayAccount(annAccount.Address) is not null && Link() is null, 3), vm.Status);
         }
 
         var tampered = File.ReadAllBytes(backup);

@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Read [COMMERCIAL-EXCEPTION.md](https://github.com/warriorleavestar/jay-launcher/blob/main/COMMERCIAL-EXCEPTION.md) first. **This issue is public**: don't post anything you want to keep private.
-        Permission starts only when the Jay development team agrees in writing in this issue.
+        Permission starts only when every member of the Jay development team (today, both warriorleavestar and Frison-Krison) agrees in writing in this issue.
   - type: input
     id: who
     attributes:

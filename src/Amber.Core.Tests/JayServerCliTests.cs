@@ -1,11 +1,39 @@
 using Amber.Core.Multiplayer.Gate;
 using Amber.Server;
+using System.Diagnostics;
 
 namespace Amber.Core.Tests;
 
 /// <summary>jay-server 的参数解析：--help 放在哪里都显示用法，不会因为“后面没有值”而崩。</summary>
 public sealed class JayServerCliTests
 {
+    [Fact]
+    public async Task RecordsOnUsesBuiltInNetworkEvenWhenWorkingDirectoryContainsJayFile()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "jay-records-collision-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "jay"), "not a network configuration");
+            GateStore.Initialize(Path.Combine(root, "gate"), "203.0.113.10", 47670, 47670);
+            var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
+            {
+                WorkingDirectory = root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "jay-server.dll"));
+            foreach (var arg in new[] { "records", "on", "--dir", root }) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start)!;
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException) { process.Kill(); throw; }
+            Assert.True(process.ExitCode == 0, $"{await output}\n{await error}");
+            Assert.Equal("jay", new GateStore(Path.Combine(root, "gate")).Read().RecordNetwork);
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+    }
+
     [Theory]
     [InlineData("--help")]
     [InlineData("-h")]
