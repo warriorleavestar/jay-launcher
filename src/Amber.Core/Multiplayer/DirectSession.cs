@@ -171,7 +171,6 @@ public sealed class DirectSession : IAsyncDisposable
             Bridge = new DirectBridge(socket, key, true, _easyTierUdpPort, Log, LobbyUdpPort) { AcceptingNewPeers = () => AcceptNewPeers?.Invoke() != false || ExpectingGuest };
             Bridge.Connected += OnConnected;
             Bridge.ControlReceived += OnControl;
-            Bridge.Removed += OnPeerRemoved;
             _speed = new SpeedTestServer(SpeedTestPortForTest);
             await StartEasyTierAsync(HostOptions(Options.FullLan, Options.AllowExit), ct);
         }
@@ -180,7 +179,6 @@ public sealed class DirectSession : IAsyncDisposable
             Bridge = new DirectBridge(socket, key, false, null, Log);
             Bridge.Connected += OnConnected;
             Bridge.ControlReceived += OnControl;
-            Bridge.Removed += OnPeerRemoved;
         }
         if (!Options.Simulated) await StartNatKeepAliveAsync(ct);
         var session = IsHost ? Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8)) : _remote?.Session ?? "";
@@ -271,6 +269,12 @@ public sealed class DirectSession : IAsyncDisposable
     /// membership on this bridge) and have answered a fresh random ping from that very address
     /// (<see cref="DirectPeer.Verified"/>): a probe or probe answer replayed from a forged source address, or one that
     /// never came back, gets no exception. IPv4 peers are kept as before.
+    /// <para>
+    /// The exceptions are fixed while the exit runs: a peer that leaves keeps its address exception until the exit is
+    /// changed or stopped. That peer proved it holds the room's bridge key from that address and already sees this
+    /// computer's physical address, so the exception tells it nothing new; starting the exit again by itself would
+    /// instead leave a moment without the traffic gate, which a member could then trigger at will by going quiet.
+    /// </para>
     /// </summary>
     internal static IEnumerable<IPAddress> TrustedPeerAddresses(IEnumerable<DirectPeer> peers) =>
         peers.Where(p => Normal(p.Remote.Address).AddressFamily == AddressFamily.InterNetwork || (p.Admitted && p.Verified))
@@ -278,41 +282,6 @@ public sealed class DirectSession : IAsyncDisposable
 
     private static IPAddress Normal(IPAddress a) => a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a;
 
-    /// <summary>
-    /// A peer is gone for good (timed out, kicked, its membership revoked): if the running exit trusts its IPv6 address,
-    /// start the exit again without it, so the traffic gate stops making an exception for an address nobody vouches for.
-    /// </summary>
-    private void OnPeerRemoved(DirectPeer peer)
-    {
-        var address = Normal(peer.Remote.Address);
-        if (address.AddressFamily != AddressFamily.InterNetworkV6) return;
-        if (EasyTier?.Options is not { ExitNode: not null } current || !current.DirectUnderlayAddresses.Contains(address.ToString())) return;
-        _ = Task.Run(ReplanExitAsync);
-    }
-
-    private async Task ReplanExitAsync()
-    {
-        await _startLock.WaitAsync();
-        try
-        {
-            if (_disposed || EasyTier?.Options is not { ExitNode: not null } current) return;
-            var addresses = UnderlayAddresses();
-            if (addresses.SequenceEqual(current.DirectUnderlayAddresses, StringComparer.Ordinal)) return;
-            await StartEasyTierLockedAsync(current with { DirectUnderlayAddresses = addresses }, CancellationToken.None);
-        }
-        catch (Exception e) when (e is not OutOfMemoryException)
-        {
-            Log(L.F("core.mp.exit.replan_failed", ErrorText.Of(e)));
-        }
-        finally
-        {
-            _startLock.Release();
-            StateChanged?.Invoke();
-        }
-    }
-
-    /// <summary>Tests: what the exit would trust right now.</summary>
-    internal IReadOnlyList<string> UnderlayAddressesForTest() => UnderlayAddresses();
 
     /// <summary>
     /// 出口接管系统流量之前，直连桥的物理对端仍须走原网络；包含打洞后变化的端口对应地址。IPv6 is taken only from peers the

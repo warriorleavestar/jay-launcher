@@ -108,8 +108,9 @@ public sealed class UnixExitNetworkTests
         // (the gateway, or an on-link peer asking from its link-local address), on that device.
         Assert.Contains("oifname \"wlan0\" ip6 daddr ff02::1:ff00:0/104 ip6 hoplimit 255 icmpv6 type nd-neighbor-solicit accept", linux);
         Assert.Contains("oifname \"wlan0\" ip6 daddr fe80::/10 ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept", linux);
-        // DHCPv6 renewals keep the device's address.
+        // DHCPv6 renewals keep the device's address; defending it in duplicate address detection answers all nodes.
         Assert.Contains("oifname \"wlan0\" ip6 daddr ff02::1:2 udp sport 546 udp dport 547 accept", linux);
+        Assert.Contains("oifname \"wlan0\" ip6 daddr ff02::1 ip6 hoplimit 255 icmpv6 type nd-neighbor-advert accept", linux);
         Assert.Single(linux.Split('\n'), l => l.Contains("ff02::1:ff00:0/104", StringComparison.Ordinal));
         Assert.Single(linux.Split('\n'), l => l.Contains("fe80::/10", StringComparison.Ordinal));
         // Every link-local or multicast permit names its device and the ND or DHCPv6 message: no plain fe80::/10 or
@@ -128,6 +129,7 @@ public sealed class UnixExitNetworkTests
         Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to ff02::1:ff00:0/104 icmp6-type neighbrsol", mac);
         Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to fe80::/10 icmp6-type { neighbrsol, neighbradv }", mac);
         Assert.Contains("pass out quick on en0 inet6 proto udp from any port 546 to ff02::1:2 port 547", mac);
+        Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to ff02::1 icmp6-type neighbradv", mac);
         Assert.All(mac.Where(l => l.Contains("fe80", StringComparison.Ordinal) || l.Contains("ff02", StringComparison.Ordinal)),
             l => Assert.True(l.StartsWith("pass out quick on en0 inet6 proto ", StringComparison.Ordinal) && (l.Contains("icmp6-type", StringComparison.Ordinal) || l.Contains("port 546 to ff02::1:2 port 547", StringComparison.Ordinal)), l));
         Assert.DoesNotContain(mac, l => l.Contains("ff02::/16", StringComparison.Ordinal));

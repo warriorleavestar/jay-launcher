@@ -98,18 +98,27 @@ public sealed class ExitPeerTrustTests
     }
 
     [Fact]
-    public async Task KickingAPeerSaysItIsGone()
+    public async Task ShortOrWrongPingAnswersLeaveNothingBehind()
     {
         await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
-        await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
-        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2), limit.Token));
-        var removed = new List<DirectPeer>();
-        host.Removed += removed.Add;
-        var peer = host.Peers.Single();
-        host.Kick(peer);
-        Assert.Equal([peer], removed);
-        host.DropPeers();
-        Assert.Single(removed);
+        using var forged = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var target = new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await forged.SendAsync(host.Seal(Probe, [0]), target, limit.Token);
+        DirectPeer? peer = null;
+        while ((peer = host.Peers.SingleOrDefault()) is null) await Task.Delay(20, limit.Token);
+        // Answer every ping with its sequence number only, or with a few bytes of it: each answered ping is forgotten
+        // whole (its time and its random value), so nothing piles up.
+        for (var answered = 0; answered < 6;)
+        {
+            var ping = await forged.ReceiveAsync(limit.Token);
+            if (ping.Buffer[0] != Ping) continue;
+            var length = answered % 2 == 0 ? 4 : 4 + answered;
+            await forged.SendAsync(host.Seal(Pong, ping.Buffer.AsSpan(1, length)), target, limit.Token);
+            answered++;
+            await Task.Delay(50, limit.Token);
+            Assert.True(peer.PendingPings.Count <= 1, $"{peer.PendingPings.Count} pings still pending");
+        }
+        Assert.False(peer.Verified);
     }
 }

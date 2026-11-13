@@ -230,11 +230,13 @@ internal static class ExitTrafficPolicyScript
                     # Reaching this underlay over IPv6 needs neighbor discovery with the gateway (or, on-link, the peer
                     # itself, which may ask from its link-local address) and DHCPv6 to keep the adapter's address, all
                     # on that physical adapter: link-local unicast (fe80::/10), the solicited-node group
-                    # (ff02::1:ff00:0/104) and the DHCPv6 servers group (ff02::1:2). A gateway outside fe80::/10 is
+                    # (ff02::1:ff00:0/104), all nodes (ff02::1, for advertisements) and the DHCPv6 servers group (ff02::1:2). A gateway outside fe80::/10 is
                     # added by itself. The ALE rules below limit these addresses to the ND and DHCPv6 messages.
                     $link = [pscustomobject]@{ Luid=$luid; Index=[uint32]$entries[0].Index }
                     $neighbors += [pscustomobject]@{ Kind='unicast'; Type=0x101; Address=[byte[]]@(0xfe, 0x80, 0,0,0,0,0,0,0,0,0,0,0,0,0,0, 10); Link=$link }
                     $neighbors += [pscustomobject]@{ Kind='solicited'; Type=0x101; Address=[byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0, 0x01, 0xff, 0,0,0, 104); Link=$link }
+                    # Duplicate address detection: another host defending its address answers to all nodes (ff02::1).
+                    $neighbors += [pscustomobject]@{ Kind='allnodes'; Type=11; Address=[byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0,0,0,0,0, 0x01); Link=$link }
                     $neighbors += [pscustomobject]@{ Kind='dhcp'; Type=11; Address=[byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0,0, 0x00, 0x01, 0x00, 0x02); Link=$link }
                     $hop = $null
                     if ([Net.IPAddress]::TryParse([string]$entries[0].Hop, [ref]$hop) -and $hop.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6 -and -not $hop.Equals([Net.IPAddress]::IPv6Any)) {
@@ -302,7 +304,7 @@ internal static class ExitTrafficPolicyScript
                     $to = [pscustomobject]@{ Key=$addressKey; Match=0; Type=$neighbor.Type; Value=$neighbor.Address }
                     $icmp = [pscustomobject]@{ Key=$protocolKey; Match=0; Type=1; Value=58 }
                     $udp = [pscustomobject]@{ Key=$protocolKey; Match=0; Type=1; Value=17 }
-                    $types = if ($neighbor.Kind -eq 'unicast') { @(135, 136) } elseif ($neighbor.Kind -eq 'solicited') { @(135) } else { @() }
+                    $types = if ($neighbor.Kind -eq 'unicast') { @(135, 136) } elseif ($neighbor.Kind -eq 'solicited') { @(135) } elseif ($neighbor.Kind -eq 'allnodes') { @(136) } else { @() }
                     foreach ($type in $types) {
                         Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='IPv6 neighbor discovery'; Layer=$connectV6; Permit=$true; Weight=30; Conditions=@(
                             $on, $to, $icmp, [pscustomobject]@{ Key=$localPortKey; Match=0; Type=2; Value=$type }) })
