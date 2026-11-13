@@ -11,6 +11,7 @@ public interface ITouchInputSink
 /// <summary>Maps independent Android pointer IDs to Jay controls without coupling input to a View.</summary>
 public sealed class TouchInputRouter(ITouchInputSink sink)
 {
+    private const double DragThreshold = 0.015;
     private readonly Dictionary<int, PointerState> _pointers = [];
 
     public bool Press(int pointerId, double x, double y, bool controlsEnabled = true)
@@ -20,8 +21,9 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         if (!controlsEnabled && control?.Action != TouchControlAction.Menu) control = null;
         if (control is null)
         {
-            _pointers[pointerId] = new(null, x, y);
-            sink.SetPointer(x, y, false);
+            var clickOnRelease = controlsEnabled;
+            _pointers[pointerId] = new(null, x, y, clickOnRelease);
+            sink.SetPointer(x, y, !clickOnRelease);
             return true;
         }
         _pointers[pointerId] = new(control.Action, x, y);
@@ -44,7 +46,11 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         {
             sink.AddLook(x - pointer.X, y - pointer.Y);
             sink.SetPointer(x, y, false);
-            _pointers[pointerId] = pointer with { X = x, Y = y };
+            var totalX = x - pointer.StartX;
+            var totalY = y - pointer.StartY;
+            var dragged = pointer.HasDragged ||
+                totalX * totalX + totalY * totalY >= DragThreshold * DragThreshold;
+            _pointers[pointerId] = pointer with { X = x, Y = y, HasDragged = dragged };
         }
         return true;
     }
@@ -55,7 +61,10 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         if (pointer.Action == TouchControlAction.Move)
             sink.SetMovement(0, 0);
         else if (pointer.Action is null)
-            sink.SetPointer(pointer.X, pointer.Y, true);
+        {
+            if (pointer.ClickOnRelease && !pointer.HasDragged)
+                sink.SetPointer(pointer.X, pointer.Y, true);
+        }
         else if (pointer.Action is { } action)
             sink.SetAction(action, false);
         return true;
@@ -66,5 +75,16 @@ public sealed class TouchInputRouter(ITouchInputSink sink)
         foreach (var pointerId in _pointers.Keys.ToArray()) Release(pointerId);
     }
 
-    private readonly record struct PointerState(TouchControlAction? Action, double X, double Y);
+    private readonly record struct PointerState(
+        TouchControlAction? Action,
+        double X,
+        double Y,
+        bool ClickOnRelease,
+        double StartX,
+        double StartY,
+        bool HasDragged)
+    {
+        public PointerState(TouchControlAction? action, double x, double y, bool clickOnRelease = true)
+            : this(action, x, y, clickOnRelease, x, y, false) { }
+    }
 }

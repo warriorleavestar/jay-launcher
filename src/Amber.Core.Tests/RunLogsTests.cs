@@ -112,14 +112,14 @@ public sealed class RunLogsTests : IDisposable
         var log = new List<StoredLogLine>
         {
             new(T0, GameLogLevel.Info, @"Launching with --username Steve --accessToken eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijk --uuid 0123456789abcdef", false),
-            new(T0, GameLogLevel.Info, @"Loading C:\Users\haoyu\AppData\Roaming\.minecraft\mods\iris.jar", false),
-            new(T0, GameLogLevel.Info, "Reading /home/haoyu/.jay/games/x and /Users/haoyu/Library", false),
+            new(T0, GameLogLevel.Info, @"Loading C:\Users\alexplayer\AppData\Roaming\.minecraft\mods\iris.jar", false),
+            new(T0, GameLogLevel.Info, "Reading /home/alexplayer/.jay/games/x and /Users/alexplayer/Library", false),
             new(T0, GameLogLevel.Info, "Signed in as someone@example.com, Authorization: Bearer abc.def-ghi_jkl123", false),
             new(T0, GameLogLevel.Info, "Session: token:abcdefgh12345678:0123456789abcdef", false),
         };
         var text = ErrorReport.Build(new ErrorReportInput("Survival", "1.20.1", "fabric 0.16.9", ["iris-1.7.0.jar"], log, "17.0.9", "Steve"),
-            userName: "haoyu", homeDir: @"C:\Users\haoyu");
-        Assert.DoesNotContain("haoyu", text);
+            userName: "alexplayer", homeDir: @"C:\Users\alexplayer");
+        Assert.DoesNotContain("alexplayer", text);
         Assert.DoesNotContain("eyJ", text);
         Assert.DoesNotContain("0123456789abcdef", text);
         Assert.DoesNotContain("someone@example.com", text);

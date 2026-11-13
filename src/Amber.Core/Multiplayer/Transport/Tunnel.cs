@@ -40,12 +40,14 @@ public static class TunnelHandshake
          new LengthMask(HKDF.DeriveKey(HashAlgorithmName.SHA256, handshakeHash, 32, [], "amber-length-r2i"u8.ToArray())));
 
     /// <summary>客户端（加入方）：连上之后调用。</summary>
-    public static async Task<SecureStream> ConnectAsync(Stream stream, RoomCode room, TransportMode mode, bool disguise, TunnelService service, CancellationToken ct = default)
+    /// <param name="leg">Set when this connection is one leg of a split connection (invite rooms only).</param>
+    public static async Task<SecureStream> ConnectAsync(Stream stream, RoomCode room, TransportMode mode, bool disguise, TunnelService service, CancellationToken ct = default, SplitLeg? leg = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(Timeout);
         var profile = TransportProfile.For(mode);
-        if (room.FromInvite) return await ConnectMemberAsync(stream, room.Member ?? throw new InvalidOperationException("no member key"), profile, disguise, service, timeout.Token);
+        if (room.FromInvite) return await ConnectMemberAsync(stream, room.Member ?? throw new InvalidOperationException("no member key"), profile, disguise, service, timeout.Token, leg);
+        if (leg is not null) throw new InvalidOperationException("split legs need an invite room");
         if (!disguise)
         {
             using var hs = new NoiseHandshake(profile.Pattern, initiator: true, Prologue(mode, false), Psk(room));
@@ -73,12 +75,14 @@ public static class TunnelHandshake
         await AcceptWithMemberAsync(stream, room, mode, disguise, ct) is { } a ? (a.Stream, a.Service) : null;
 
     /// <summary>同 AcceptAsync，邀请房间时另外给出是哪个成员（AMB- 房间是 null）。</summary>
-    public static async Task<(SecureStream Stream, TunnelService Service, MemberEntry? Member)?> AcceptWithMemberAsync(Stream stream, RoomCode room, TransportMode mode, bool disguise, CancellationToken ct = default)
+    /// <param name="leg">Set on a listener for one leg of split connections (invite rooms only).</param>
+    public static async Task<(SecureStream Stream, TunnelService Service, MemberEntry? Member)?> AcceptWithMemberAsync(Stream stream, RoomCode room, TransportMode mode, bool disguise, CancellationToken ct = default, SplitLeg? leg = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(Timeout);
         var profile = TransportProfile.For(mode);
-        if (room.FromInvite) return await AcceptMemberAsync(stream, room.Members ?? throw new CryptographicException(L.T("core.mp.member.unknown")), profile, disguise, timeout.Token);
+        if (room.FromInvite) return await AcceptMemberAsync(stream, room.Members ?? throw new CryptographicException(L.T("core.mp.member.unknown")), profile, disguise, timeout.Token, leg);
+        if (leg is not null) throw new InvalidOperationException("split legs need an invite room");
         if (!disguise)
         {
             using var hs = new NoiseHandshake(profile.Pattern, initiator: false, Prologue(mode, false), Psk(room));
@@ -106,13 +110,13 @@ public static class TunnelHandshake
     /// 邀请房间的成员连房主：不伪装时就是 MemberChannel（明文编号 + 成员 psk 的 NN 握手）。
     /// 伪装时编号放在 Login Start 的 UUID 前 8 字节里（后 8 字节随机），房主读到后查表再发 Encryption Request。
     /// </summary>
-    private static async Task<SecureStream> ConnectMemberAsync(Stream stream, MemberKey key, TransportProfile profile, bool disguise, TunnelService service, CancellationToken ct)
+    private static async Task<SecureStream> ConnectMemberAsync(Stream stream, MemberKey key, TransportProfile profile, bool disguise, TunnelService service, CancellationToken ct, SplitLeg? leg)
     {
-        if (!disguise) return await MemberChannel.ConnectAsync(stream, key, profile, "tunnel", [(byte)service], ct);
-        var psk = key.CopyPsk();
+        if (!disguise) return await MemberChannel.ConnectAsync(stream, key, profile, "tunnel", [(byte)service], ct, leg);
+        var psk = MemberChannel.PskFor(key, leg);
         try
         {
-            using var hs = new NoiseHandshake(profile.Pattern, initiator: false, MemberChannel.Prologue("tunnel", profile.Mode, true, key.Id), psk);
+            using var hs = new NoiseHandshake(profile.Pattern, initiator: false, MemberChannel.Prologue("tunnel", profile.Mode, true, key.Id, leg), psk);
             await McDisguise.WriteLoginAsync(stream, ct, key.Id);
             hs.ReadMessage(await McDisguise.ReadEncryptionRequestAsync(stream, ct));
             await McDisguise.WriteEncryptionResponseAsync(stream, hs.WriteMessage([(byte)service]), ct);
@@ -129,21 +133,21 @@ public static class TunnelHandshake
         }
     }
 
-    private static async Task<(SecureStream Stream, TunnelService Service, MemberEntry? Member)?> AcceptMemberAsync(Stream stream, MemberTable members, TransportProfile profile, bool disguise, CancellationToken ct)
+    private static async Task<(SecureStream Stream, TunnelService Service, MemberEntry? Member)?> AcceptMemberAsync(Stream stream, MemberTable members, TransportProfile profile, bool disguise, CancellationToken ct, SplitLeg? leg)
     {
         if (!disguise)
         {
             var (secure, entry, payload) = await MemberChannel.AcceptAsync(stream, members, profile, "tunnel",
-                p => p is [var b] && Enum.IsDefined((TunnelService)b), ct);
+                p => p is [var b] && Enum.IsDefined((TunnelService)b), ct, leg);
             return (secure, (TunnelService)payload[0], entry);
         }
         var uuid = await McDisguise.ReadLoginUuidAsync(stream, ct);
         if (uuid is null) return null;
         var member = MemberChannel.Lookup(members, uuid.AsSpan(0, MemberKey.IdLength));
-        var psk = member.Key.CopyPsk();
+        var psk = MemberChannel.PskFor(member.Key, leg);
         try
         {
-            using var hs = new NoiseHandshake(profile.Pattern, initiator: true, MemberChannel.Prologue("tunnel", profile.Mode, true, member.Key.Id), psk);
+            using var hs = new NoiseHandshake(profile.Pattern, initiator: true, MemberChannel.Prologue("tunnel", profile.Mode, true, member.Key.Id, leg), psk);
             await McDisguise.WriteEncryptionRequestAsync(stream, hs.WriteMessage([]), ct);
             var service = ParseService(hs.ReadMessage(await McDisguise.ReadEncryptionResponseAsync(stream, ct)));
             var binding = hs.HandshakeHash;

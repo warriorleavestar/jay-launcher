@@ -13,7 +13,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     private readonly IPublicNetwork _network;
     private readonly RoomDirectoryClient _client;
     private readonly Func<RoomListing> _listing;
-    private readonly Func<IReadOnlyList<string>> _lookupKeys;
+    private readonly Func<IReadOnlyList<byte[]>> _lobbyKeys;
     private readonly Func<byte[]?>? _searchKey;
     private readonly Func<string?>? _account;
     private readonly Action<string>? _log;
@@ -26,13 +26,16 @@ public sealed class RoomAnnouncer : IAsyncDisposable
     /// <summary>上一次发布成功了没有（界面显示“已发布” / 失败原因）。</summary>
     public bool Published { get; private set; }
     public string? LastError { get; private set; }
+
+    /// <summary>Published, but with a problem the host should fix (a wrong clock: the room's invites can't be found).</summary>
+    public AnnounceWarning? Warning { get; private set; }
     public event Action? StateChanged;
 
     public string RoomId => _signer.RoomId;
 
     /// <param name="listing">当前的房间信息（每次续期时取，地址由这里填）。</param>
-    /// <param name="lookupKeys">现在还能用的邀请码对应的查找键（<see cref="RoomDirectoryProtocol.LookupKey"/>）。</param>
-    public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<string>> lookupKeys,
+    /// <param name="lobbyKeys">Lobby keys of the invites still open; each gets a sealed hidden entry (<see cref="HiddenEntry"/>).</param>
+    public RoomAnnouncer(IPublicNetwork network, Func<RoomListing> listing, Func<IReadOnlyList<byte[]>> lobbyKeys,
         Action<string>? log = null, TimeSpan? every = null, RoomDirectoryClient? client = null, Func<byte[]?>? searchKey = null, Func<string?>? account = null)
     {
         _account = account;
@@ -40,7 +43,7 @@ public sealed class RoomAnnouncer : IAsyncDisposable
         _network = network;
         _client = client ?? new RoomDirectoryClient(network);
         _listing = listing;
-        _lookupKeys = lookupKeys;
+        _lobbyKeys = lobbyKeys;
         _log = log;
         _every = every ?? RoomDirectoryProtocol.RenewEvery;
         _loop = Task.Run(LoopAsync);
@@ -80,22 +83,34 @@ public sealed class RoomAnnouncer : IAsyncDisposable
             else
             {
                 var listing = _signer.Sign(_listing() with { Ip = ip }, DateTimeOffset.UtcNow);
-                var keys = _lookupKeys();
+                // Hidden entries whatever the visibility: for a listed room the entry gives the same place as its listing,
+                // and without it a holder of an old invite could publish the only entry under the lobby key.
+                var keys = _lobbyKeys();
                 var search = _searchKey?.Invoke();
                 // 隐藏房间又没有能用的邀请、也没开指纹查找：目录里没什么可登记的（之前登记的 90 秒后自己过期）。
                 if (listing.Mode == RoomVisibility.Hidden && keys.Count == 0 && search is null)
                 {
                     // 之前在列表里（刚撤下）：马上从目录里撤掉，不等 90 秒过期。
                     if (Published) await _client.WithdrawAsync(_signer, ct);
-                    if (Published || LastError is not null)
+                    if (Published || LastError is not null || Warning is not null)
                     {
                         Published = false;
                         LastError = null;
+                        Warning = null;
                         StateChanged?.Invoke();
                     }
                     return;
                 }
-                await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
+                var warning = await _client.AnnounceAsync(listing, listing.Mode != RoomVisibility.Hidden, keys, ct, search, _account?.Invoke());
+                // A listed room carries its invite in its listing, so invites still find it without the hidden entry:
+                // nothing for the host to fix.
+                if (listing.Mode != RoomVisibility.Hidden) warning = null;
+                if (warning != Warning)
+                {
+                    Warning = warning;
+                    if (warning is { } w) _log?.Invoke(L.F("core.mp.public.hidden_warning", w.Text()));
+                    StateChanged?.Invoke();
+                }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
@@ -104,7 +119,10 @@ public sealed class RoomAnnouncer : IAsyncDisposable
             error = e.Message;
         }
         var published = error is null;
-        if (published != Published || error != LastError)
+        // A failed publish has no warning of its own: an old one would only be out of date.
+        var cleared = !published && Warning is not null;
+        if (cleared) Warning = null;
+        if (published != Published || error != LastError || cleared)
         {
             Published = published;
             LastError = error;
@@ -137,34 +155,64 @@ public static class PublicJoin
     /// 经公共网络连到房主的敲门端口敲门。<paramref name="expectedHostKey"/> 给了时核对握手里房主的公钥（房间列表 / 目录里登记的那把）：
     /// 对不上就当没成功，免得有人在目录里冒用别人的房间。
     /// </summary>
+    /// <param name="reachTimeout">Longest time for reaching the host: connecting, retries and the handshake, until the
+    /// host is verified (then <see cref="KnockClient"/>'s own limits apply). Null: the usual per-step limits only.</param>
+    /// <param name="hostVerified">Called once the host at this address answered the handshake with the expected key.</param>
     public static async Task<KnockOutcome> KnockAsync(IPublicNetwork network, string hostIp, JayInvite invite, X25519KeyPair me, string name, string version,
-        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
-        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
+        byte[]? expectedHostKey, CancellationToken ct, DeviceFingerprint? device = null, string? account = null, Identity.JayProof? jay = null,
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, TimeSpan? reachTimeout = null, Action? hostVerified = null)
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         for (var attempt = 0; ; attempt++)
         {
             var connected = false;
+            var verified = false;
+            var left = reachTimeout is { } limit ? limit - clock.Elapsed : Timeout.InfiniteTimeSpan;
+            if (reachTimeout is not null && left <= TimeSpan.Zero) throw new TimeoutException(L.T("core.mp.public.host_unreachable"));
+            // Until the host is verified, everything shares the time that is left; afterwards only the person cancelling
+            // (or the knock's own limits) ends it.
+            using var reach = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            reach.CancelAfter(left);
             try
             {
-                await using var stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, ct);
+                Stream stream;
+                using (var connect = CancellationTokenSource.CreateLinkedTokenSource(reach.Token))
+                {
+                    // An address that never answers costs at most this long, like a handshake that never finishes.
+                    connect.CancelAfter(KnockClient.HandshakeTimeout);
+                    stream = await network.ConnectAsync(hostIp, KnockProtocol.Port, connect.Token);
+                }
+                await using var _ = stream;
                 connected = true;
-                var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, ct, device: device, account: account, expectedHost: expectedHostKey, jay: jay, direct: direct);
+                var outcome = await KnockClient.KnockAsync(stream, invite, me, name, version, reach.Token, device: device, account: account,
+                    expectedHost: expectedHostKey, jay: jay, direct: direct, hostVerified: () =>
+                    {
+                        verified = true;
+                        reach.CancelAfter(Timeout.InfiniteTimeSpan);
+                        hostVerified?.Invoke();
+                    });
                 if (expectedHostKey is not null && !outcome.HostPublicKey.AsSpan().SequenceEqual(expectedHostKey))
                     return new KnockOutcome(null, "mismatch", outcome.HostPublicKey);
                 return outcome;
+            }
+            catch (OperationCanceledException) when (!verified && !ct.IsCancellationRequested)
+            {
+                // Our own time limit, not the person cancelling: say the host didn't answer.
+                throw new TimeoutException(L.T("core.mp.public.host_unreachable"));
             }
             catch (WrongHostException)
             {
                 // Someone else answered at this address: stop before saying anything about myself.
                 return new KnockOutcome(null, "mismatch", []);
             }
-            catch (Exception e) when (connected && IsRejected(e) && !ct.IsCancellationRequested)
+            catch (Exception e) when (connected && !verified && IsRejected(e) && !ct.IsCancellationRequested)
             {
                 // 握手前就被断开：房主不认这张邀请（密码不对、邀请已撤销），或者这个地址上已经不是这个房主。
                 return new KnockOutcome(null, "invalid", []);
             }
-            catch (IOException) when (attempt < 2 && !ct.IsCancellationRequested)
+            catch (IOException) when (!verified && attempt < 2 && !ct.IsCancellationRequested)
             {
+                // Once the host is verified a retry would knock a second time; before that, the address may just be slow.
                 await Task.Delay(1500, ct);
             }
         }
@@ -180,13 +228,61 @@ public static class PublicJoin
 
     /// <summary>拿着邀请码：先在目录里找房主；找到就经公共网络敲门，找不到返回 null（调用方改走邀请码自己的大厅）。</summary>
     /// <param name="expectedHost">A mailed invite names its host: a directory entry with another key is ignored (null).</param>
+    /// <param name="freshSince">Look in a copy of the directory refreshed after this time (waiting for the next refresh if
+    /// needed): for a second try after the room wasn't there. Null: look in the copy as it is, at once.</param>
+    /// <param name="searching">Called when nothing was found yet and the lookup waits for the next directory refresh.</param>
+    /// <param name="failed">Called for an address that failed (then the next one is tried), for diagnostics.</param>
+    /// <param name="budget">How long reaching the host may take in all, over every address tried, until an address proves
+    /// to be the host (default <see cref="DirectoryKnockBudget"/>); once it is spent, null is returned so the caller tries
+    /// the invite's lobby.</param>
+    /// <exception cref="HostReachedException">The host was reached and verified, then the knock failed (for example the
+    /// connection dropped while waiting for the answer). No other address or the lobby should be tried: the host already
+    /// has this request.</exception>
     public static async Task<KnockOutcome?> TryKnockByInviteAsync(IPublicNetwork network, JayInvite invite, X25519KeyPair me, string name, string version,
-        CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.DeviceCertificate? jay = null,
-        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
+        CancellationToken ct, RoomDirectoryClient? client = null, DeviceFingerprint? device = null, string? account = null, Identity.JayProof? jay = null,
+        byte[]? expectedHost = null, Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, DateTimeOffset? freshSince = null, Action? searching = null, Action<string, Exception>? failed = null,
+        TimeSpan? budget = null)
     {
-        var hit = await (client ?? new RoomDirectoryClient(network)).LookupAsync(invite.LobbyKey, ct);
-        if (hit is null) return null;
-        if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) return null;
-        return await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct);
+        var hits = await (client ?? new RoomDirectoryClient(network)).LookupAllAsync(invite.LobbyKey, ct, expectedHost, freshSince, searching);
+        // The first "invalid" (the invite is used up or expired) is the answer, even if a later address says "mismatch".
+        KnockOutcome? invalid = null;
+        // Addresses that don't answer (connecting, retrying, a handshake that never finishes) share one time budget, so a
+        // list full of them can't keep the guest from the invite's lobby for long. Once an address proves to be the host
+        // the loop ends whatever happens, so waiting for the host's answer never counts against it.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var limit = budget ?? DirectoryKnockBudget;
+        foreach (var hit in hits)
+        {
+            if (expectedHost is not null && !hit.HostKey.AsSpan().SequenceEqual(expectedHost)) continue;
+            var left = limit - clock.Elapsed;
+            if (left <= TimeSpan.Zero) break;
+            var reached = false;
+            try
+            {
+                var outcome = await KnockAsync(network, hit.Ip, invite, me, name, version, hit.HostKey, ct, device, account, jay, direct, left,
+                    () => reached = true);
+                // Someone else (or nobody we can talk to) at that address: the next address may be the host's.
+                if (outcome.Reason is not ("mismatch" or "invalid")) return outcome;
+                if (outcome.Reason == "invalid") invalid ??= outcome;
+            }
+            // Whatever goes wrong at one address (no answer within the handshake time, garbage, a broken handshake), the
+            // next one is still tried: an address listed by someone else must not stop the real host from being reached.
+            // The host has the request: whatever went wrong is the answer, not a reason to knock again elsewhere.
+            catch (Exception e) when (reached && e is not OperationCanceledException && !IsOurBug(e)) { throw new HostReachedException(e); }
+            // Errors that can only be our own bugs are not put down to the address.
+            catch (Exception e) when (!IsOurBug(e) && !ct.IsCancellationRequested) { failed?.Invoke(hit.Ip, e); }
+        }
+        return invalid;
     }
+
+    /// <summary>Default total time for reaching the addresses a directory gives for one invite.</summary>
+    public static readonly TimeSpan DirectoryKnockBudget = KnockClient.HandshakeTimeout * 2;
+
+    private static bool IsOurBug(Exception e) => e is NullReferenceException or ArgumentException or InvalidCastException or OutOfMemoryException;
 }
+
+/// <summary>
+/// The host was reached through the directory and proved its key, then the knock failed. Carries what went wrong as
+/// <see cref="Exception.InnerException"/>.
+/// </summary>
+public sealed class HostReachedException(Exception inner) : Exception(inner.Message, inner);

@@ -10,21 +10,38 @@ namespace Amber.App.ViewModels;
 /// </summary>
 public sealed partial class MultiplayerViewModel
 {
-    /// <summary>This device's certificate from the selected Minecraft account's Jay account, re-signed if the multiplayer key changed.</summary>
-    internal DeviceCertificate? JayCertificate
+    /// <summary>
+    /// This device's certificate from the selected Minecraft account's Jay account (re-signed if the device keys changed),
+    /// with the device keys that sign each live proof.
+    /// </summary>
+    internal JayProof? JayCertificate
     {
         get
         {
             if (_service.Accounts.Store.Selected?.JayAddress is not { } address) return null;
             try
             {
-                return _service.JayAccounts.EnsureDeviceCertificate(address, Identity.PublicKey, JayAccountStore.ThisDeviceName(), DateTimeOffset.UtcNow)?.Device;
+                var device = Identity.Device;
+                return _service.JayAccounts.EnsureDeviceCertificate(address, device, JayAccountStore.ThisDeviceName(), DateTimeOffset.UtcNow)?.Device is { } cert
+                    ? new JayProof(cert, device)
+                    : null;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or CryptographicException)
             {
                 return null;
             }
         }
+    }
+
+    /// <summary>
+    /// A knock either way proved someone's Jay account live: tell the friends list, which groups the device under the
+    /// person or adds it as a known person's new device waiting for my OK.
+    /// </summary>
+    private void SeenJayDevice(byte[] deviceKey, DeviceCertificate? certificate)
+    {
+        if (certificate is null) return;
+        try { Contacts.SeenLive(deviceKey, certificate); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { _diag.Add(Amber.Core.Localization.L.T("multiplayer.invite.diagnostics_category"), e.Message); }
     }
 
     /// <summary>"Jay account jay1qj0v…xdag", or null.</summary>
