@@ -55,6 +55,11 @@
             <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.privacy}" />
             <CheckBox IsChecked="{Binding VolunteerEnabled}" Content="{l:T multiplayer.volunteer.enable}" />
             <StackPanel Spacing="6" IsEnabled="{Binding VolunteerEnabled}">
+              <CheckBox IsChecked="{Binding VolunteerSigned}">
+                <TextBlock TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.sign}" />
+              </CheckBox>
+              <!-- What signing tells the network's operator: shown once the person turns it on, before they save. -->
+              <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Margin="28,0,0,0" Text="{l:T multiplayer.volunteer.sign_privacy}" IsVisible="{Binding VolunteerSigned}" />
               <TextBlock FontSize="12" Text="{l:T multiplayer.volunteer.address}" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                 <TextBox Text="{Binding VolunteerAddress}" FontFamily="Consolas,monospace" MaxLength="253" PlaceholderText="203.0.113.5 / jay.example.org" />

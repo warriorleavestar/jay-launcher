@@ -62,11 +62,24 @@ public sealed partial class MobileMainViewModel : ObservableObject, IAsyncDispos
     public ObservableCollection<MobileServerItem> Servers { get; } = [];
 
     public string Title => "Jay";
+    public string HomeText => L.T("home.title");
+    public string LibraryText => L.T("shell.nav.library");
+    public string MultiplayerText => L.T("shell.nav.multiplayer");
+    public string SettingsText => L.T("shell.settings");
+    public string MeText => L.T("me.title");
+    public string WelcomeTitle => $"{HomeText} Minecraft";
+    public string LibraryOpenText => L.T("common.open");
+    public string MultiplayerOpenText => L.T("common.open");
+    public string AppearanceTitle => L.T("settings.group.appearance");
+    public string AppearanceHint => L.T("settings.group.appearance.note");
+    public string LanguageTitle => L.T("settings.language.label");
+    public string LanguageValue => L.T("settings.language.system");
     private static string PlatformName => OperatingSystem.IsIOS()
         ? L.T("mobile.platform.ios")
         : OperatingSystem.IsAndroid()
             ? L.T("mobile.platform.android")
             : L.T("mobile.platform.mobile");
+    public string PlatformNameText => PlatformName;
 
     private static string PlatformString(string key) =>
         L.T(OperatingSystem.IsIOS() ? key + ".ios" : OperatingSystem.IsAndroid() ? key + ".android" : key + ".mobile");
