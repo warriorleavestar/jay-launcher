@@ -83,7 +83,7 @@ Other developer switches are environment variables:
 | `AMBER_STARTUP_LOG` | Write startup timing |
 | `AMBER_ET_VERBOSE` | Verbose EasyTier output |
 | `AMBER_ET_QUIC` | `0`: turn off EasyTier's QUIC proxy for room traffic without a TUN device (on by default; much faster single connections at high latency) |
-| `AMBER_SPLIT` | Host: split new wrapped invite rooms over several paths, `game,chat[,paths]` with `off`, `auto` or `strict` (for example `auto,auto,2`); until the setting is in the app |
+| `AMBER_SPLIT` | Host: split new wrapped invite rooms over several paths, `game,chat[,paths]` with `off`, `auto` or `strict` (for example `auto,auto,2`; without a path count the room uses 2–3 paths, one per independent relay group plus the direct one); until the setting is in the app |
 | `AMBER_THEME_DEV` | Use an unpacked theme folder and reload it on every save (same as `--theme-dev <dir>`) |
 
 ## Rules
