@@ -816,6 +816,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         string? problem = null;
         try { await waitForReady(wait.Token); }
         catch (OperationCanceledException) when (wait.IsCancellationRequested) { problem = L.T("multiplayer.room.full_lan_not_ready"); }
+        // Cancelled by the helper itself, not by our wait: "a task was canceled" tells the player nothing.
+        catch (OperationCanceledException) { problem = L.T("multiplayer.room.full_lan_helper_stopped"); }
         // Whatever the helper fails with, the room can't work: say so rather than leave it waiting.
         catch (Exception e) when (e is not OutOfMemoryException)
         {

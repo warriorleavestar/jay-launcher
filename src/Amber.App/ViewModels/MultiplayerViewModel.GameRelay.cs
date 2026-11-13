@@ -112,11 +112,13 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>A caller on the room's virtual network (the host's /24), not one that reached the address another way.</summary>
+    private static readonly byte[] HostAddressBytes = System.Net.IPAddress.Parse(EasyTierArgs.HostIp).GetAddressBytes();
+
     internal static bool InRoomSubnet(System.Net.IPAddress source)
     {
         if (source.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
         var bytes = source.GetAddressBytes();
-        var host = System.Net.IPAddress.Parse(EasyTierArgs.HostIp).GetAddressBytes();
+        var host = HostAddressBytes;
         return bytes.AsSpan(0, 3).SequenceEqual(host.AsSpan(0, 3)) && !bytes.AsSpan().SequenceEqual(host);
     }
 

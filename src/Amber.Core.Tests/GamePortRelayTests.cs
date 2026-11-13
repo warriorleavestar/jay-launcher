@@ -465,7 +465,7 @@ public sealed class GamePortRelayTests
         var watch = vm.WatchSessionStartAsync(_ => Task.FromCanceled(new CancellationToken(true)), () => true, TimeSpan.FromMinutes(10));
         Pump(() => watch.IsCompleted);
         Assert.Equal("multiplayer.room.full_lan_start_failed", vm.StatusInfo?.Key);
-        Assert.DoesNotContain(L.T("multiplayer.room.full_lan_not_ready"), vm.StatusInfo!.Args[0]?.ToString(), StringComparison.Ordinal);
+        Assert.Equal(L.T("multiplayer.room.full_lan_helper_stopped"), vm.StatusInfo!.Args[0]?.ToString());
         Assert.False(vm.HasGameRelay);
     });
 
