@@ -218,18 +218,30 @@ public sealed partial class MultiplayerViewModel
         if (removed) RefreshTrusted();
     }
 
+    /// <summary>The contact list is being rebuilt: <see cref="RefreshOpenChoices"/> waits until it's done.</summary>
+    private bool _rebuildingContacts;
+
     /// <summary>Rebuilds both lists from the book and keeps the activity centre's requests in step with it.</summary>
     internal void RefreshContacts()
     {
         var book = Contacts;
-        ContactList.Clear();
-        // One row per person: devices sharing a Jay account are grouped, the newest one names the person.
-        var people = book.All.Where(c => c.Verified)
-            .GroupBy(c => c.JayAccount ?? Convert.ToHexStringLower(c.PublicKey))
-            .Select(g => g.OrderByDescending(c => c.Added).ToList())
-            .Select(devices => new ContactItem(devices[0]) { Devices = devices });
-        foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
+        _rebuildingContacts = true;
+        try
+        {
+            ContactList.Clear();
+            // One row per person: devices sharing a Jay account are grouped, the newest one names the person.
+            var people = book.All.Where(c => c.Verified)
+                .GroupBy(c => c.JayAccount ?? Convert.ToHexStringLower(c.PublicKey))
+                .Select(g => g.OrderByDescending(c => c.Added).ToList())
+                .Select(devices => new ContactItem(devices[0]) { Devices = devices });
+            foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
+        }
+        finally
+        {
+            _rebuildingContacts = false;
+        }
         ForgetFormerFriends();
+        RefreshOpenChoices();
         DropRoomsOfRemovedFriends();
         RevokeInvitesOfRemovedFriends();
         ContactRequests.Clear();
