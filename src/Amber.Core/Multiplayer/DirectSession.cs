@@ -265,15 +265,15 @@ public sealed class DirectSession : IAsyncDisposable
         Bridge?.Peers.Select(p => p.Remote.Address) ?? []);
 
     /// <summary>
-    /// 出口接管系统流量之前，直连桥的物理对端仍须走原网络；包含打洞后变化的端口对应地址。IPv4 and IPv6 both: a candidate
-    /// IPv6 address the exit can't protect (link-local, say) is left out, but one the bridge is actually connected over is
-    /// kept, so the plan refuses it with a reason instead of the gate silently cutting the connection.
+    /// 出口接管系统流量之前，直连桥的物理对端仍须走原网络；包含打洞后变化的端口对应地址。IPv6 is taken only from peers the
+    /// bridge is actually connected over (they answered the room's own handshake), never from candidates the other side
+    /// merely listed: an address that never answered would otherwise get a direct exception. A connected link-local peer
+    /// is kept, so the plan refuses it with a reason instead of the gate silently cutting the connection.
     /// </summary>
     internal static IReadOnlyList<string> CollectDirectUnderlayAddresses(IEnumerable<IPAddress> candidates, IEnumerable<IPAddress> connected)
     {
         static IPAddress Normal(IPAddress a) => a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a;
-        return candidates.Select(Normal).Where(a => a.AddressFamily == AddressFamily.InterNetwork
-                || a.AddressFamily == AddressFamily.InterNetworkV6 && ExitNetworkPlan.IsSafeUnderlay(a))
+        return candidates.Select(Normal).Where(a => a.AddressFamily == AddressFamily.InterNetwork)
             .Concat(connected.Select(Normal).Where(a => a.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6))
             .Select(a => a.ToString()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
     }
