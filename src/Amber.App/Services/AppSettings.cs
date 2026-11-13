@@ -140,6 +140,12 @@ public sealed class AppSettings
     /// <summary>Volunteer node: let other players reach the public network through this computer (off by default).</summary>
     public bool VolunteerNode { get; set; }
 
+    /// <summary>
+    /// Sign volunteer registrations with the Jay account bound to the Minecraft account, so the network's operator knows
+    /// who runs the relay. Off by default, also for installs that volunteered before this setting existed.
+    /// </summary>
+    public bool VolunteerSigned { get; set; }
+
     /// <summary>This computer's public address (IP or domain) for volunteering.</summary>
     public string? VolunteerAddress { get; set; }
 
