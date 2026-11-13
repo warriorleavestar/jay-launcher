@@ -142,6 +142,24 @@ public sealed class ExitLifecycleRegressionTests
     }
 
     [Fact]
+    public async Task LeavingDuringARelayLookupStartsNothing()
+    {
+        var looking = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource<IPAddress[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var starts = 0;
+        var session = NewSession((o, _) => { Interlocked.Increment(ref starts); return Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)); });
+        session.LookupForTest = (_, _) => { looking.TrySetResult(); return answer.Task; };
+        var start = session.StartEasyTierAsync(Original with { Peers = ["tcp://relay.example.org:11010"], ExitNode = EasyTierArgs.HostIp }, default);
+        await looking.Task.WaitAsync(Deadline);
+        // The room is left while the name is being looked up; the answer comes in afterwards.
+        var dispose = session.DisposeAsync().AsTask();
+        answer.SetResult([IPAddress.Parse("203.0.113.20")]);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => start.WaitAsync(Deadline));
+        await dispose.WaitAsync(Deadline);
+        Assert.Equal(0, starts);
+    }
+
+    [Fact]
     public void UnderlayIncludesChangedPeerAddressesAndNormalizesMappedIpv4()
     {
         var result = DirectSession.CollectDirectUnderlayAddresses(

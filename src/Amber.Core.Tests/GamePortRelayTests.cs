@@ -175,6 +175,65 @@ public sealed class GamePortRelayTests
         vm.StopCommand.Execute(null);
     });
 
+    [Fact]
+    public void ALinkedGameThatStopsAnsweringPutsTheRoomBackToWaiting() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var game = new EchoGame(0x7E);
+        var answers = true;
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(answers),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var typed = game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        vm.ManualPort = typed;
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+
+        // Still answering: the link stays.
+        Check(vm.WatchGameTargetAsync());
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(game.Port, relay.Target);
+
+        // One miss could be a hiccup; the second drops the game and the room waits again, with the typed port cleared.
+        answers = false;
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(game.Port, relay.Target);
+        Check(vm.WatchGameTargetAsync());
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+        Assert.Equal(L.T("multiplayer.relay.waiting"), vm.GameLinkText);
+        Assert.Equal("multiplayer.relay.game_gone", vm.StatusInfo?.Key);
+        Assert.Equal("", vm.ManualPort);
+
+        // The same port again (the game came back) links again.
+        answers = true;
+        vm.ManualPort = typed;
+        Pump(() => !vm.IsWaitingForGame);
+        Assert.Equal(game.Port, relay.Target);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch) => Pump(() => watch.IsCompleted);
+    });
+
+    [Theory]
+    // A world that wasn't listed before (reopened on a new port) wins, even over the linked one still answering.
+    [InlineData(new[] { 100, 200 }, new[] { 200 }, 100, 300, 200)]
+    // Nothing new and the linked world still answers: keep it.
+    [InlineData(new[] { 100, 150 }, new int[0], 100, 300, null)]
+    // The linked world is gone: take another found one.
+    [InlineData(new[] { 150 }, new int[0], 100, 300, 150)]
+    // Waiting for the game: the first found world.
+    [InlineData(new[] { 150, 160 }, new int[0], null, 300, 150)]
+    // The relay's own port is never a game.
+    [InlineData(new[] { 300 }, new[] { 300 }, null, 300, null)]
+    public void FindWhileLinkedPicksTheReopenedWorld(int[] found, int[] fresh, int? target, int relayPort, int? expected) =>
+        Assert.Equal(expected, MultiplayerViewModel.RelayPickAfterScan(found, fresh, target, relayPort));
+
     [Theory]
     [InlineData(false, false, false)]
     [InlineData(false, true, false)]

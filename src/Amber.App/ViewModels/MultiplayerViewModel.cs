@@ -254,6 +254,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial string RoomCodeText { get; set; } = "";
     [ObservableProperty] public partial string JoinAddress { get; set; } = "";
 
+    /// <summary>
+    /// Whole-LAN guest whose game goes through the forwarded local port: the host's own address in the room too, for
+    /// other games and tools (the forwarded address only carries the Minecraft world). Empty otherwise.
+    /// </summary>
+    [ObservableProperty] public partial string RoomHostAddressText { get; set; } = "";
+
     public string ComponentText => IsComponentReady
         ? L.F("multiplayer.component.ready", EasyTierRelease.Version)
         : L.F("multiplayer.component.required", EasyTierRelease.Version, EasyTierRelease.Current.Size / 1024 / 1024);
@@ -346,12 +352,20 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         try
         {
             var found = await Amber.Core.Multiplayer.LanGames.ListenAsync(TimeSpan.FromSeconds(3));
+            var fresh = new List<int>();
             foreach (var game in found)
             {
                 if (LanGames.Any(g => g.Game.Port == game.Port)) continue;
                 LanGames.Add(new LanGameItem(game, L.T("multiplayer.lan.broadcast_source")));
+                fresh.Add(game.Port);
             }
-            SelectedLanGame ??= LanGames.FirstOrDefault();
+            if (_gameRelay is { } relay)
+            {
+                if (found.Count == 0) SetStatus(StatusMessage.Error("multiplayer.lan.not_found"));
+                else if (RelayPickAfterScan(found.Select(g => g.Port).ToList(), fresh, relay.Target, relay.Port) is { } port)
+                    LinkFoundGame(port);
+            }
+            else SelectedLanGame ??= LanGames.FirstOrDefault();
             if (IsIdle && LanGames.Count == 0) SetStatus(StatusMessage.Error("multiplayer.lan.not_found"));
         }
         catch (SocketException e)
@@ -759,6 +773,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         Mode = "join";
         // 完整局域网模式下直接连房主的虚拟 IP；普通模式连本机转发端口。
         JoinAddress = local is { } l ? $"127.0.0.1:{l}" : $"{EasyTierArgs.HostIp}:{room.Port}";
+        RoomHostAddressText = FullLanMode && local is not null ? L.F("multiplayer.join.full_lan_host", EasyTierArgs.HostIp) : "";
         RoomCodeText = "";
         // 游戏的“多人游戏”列表里也会出现这个房间。
         if (local is { } port) _ = Amber.Core.Multiplayer.LanGames.AnnounceAsync(L.T("multiplayer.room.server_name"), port, _sessionCts!.Token);
@@ -1126,6 +1141,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (_session is not { } old || !old.Options.Tun) return false;
             // Relays named by domain are resolved now, so the route plan can protect them (and leaving restores them).
             var options = direct is null ? await ExitRelays.PinAsync(old.Options with { ExitNode = exitIp }, ExitLookupForTest, lifetime.Token) : old.Options with { ExitNode = exitIp };
+            // The lookup can outlast leaving the room: then nothing is restarted (or asks for admin rights).
+            if (_sessionCts != lifetime || _direct != direct || _session != old || lifetime.IsCancellationRequested) return false;
             if (direct is not null)
             {
                 await direct.SetExitNodeAsync(exitIp, lifetime.Token);
@@ -1216,6 +1233,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private async Task RefreshPeersAsync()
     {
+        _ = WatchGameTargetAsync();
         if (_session is not { } session || _refreshing) return;
         if (session.HasExited)
         {
@@ -1443,6 +1461,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         Mode = "";
         RoomCodeText = "";
         JoinAddress = "";
+        RoomHostAddressText = "";
         MyVirtualIp = "";
         ExitNodeIp = "";
         ExitCandidates.Clear();
