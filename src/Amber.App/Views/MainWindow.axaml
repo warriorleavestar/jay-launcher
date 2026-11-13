@@ -34,6 +34,10 @@
             <StackPanel VerticalAlignment="Center" Spacing="2">
               <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Body}" IsVisible="{Binding HasBody}" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Note}" IsVisible="{Binding HasNote}" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
+              <Button Classes="ghost small" IsVisible="{Binding HasDetails}" Command="{Binding ToggleDetailsCommand}" Padding="0,2" HorizontalAlignment="Left"
+                      Content="{Binding DetailsLabel}" />
+              <TextBlock Text="{Binding Details}" IsVisible="{Binding ShowDetails}" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="{Binding RemainingText}" IsVisible="{Binding HasRemaining}" FontSize="12" />
             </StackPanel>
             <ItemsControl Grid.Column="1" ItemsSource="{Binding Buttons}" VerticalAlignment="Center">
@@ -52,6 +56,10 @@
             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
               <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Body}" IsVisible="{Binding HasBody}" Classes="hint" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Note}" IsVisible="{Binding HasNote}" Classes="hint" FontSize="12" TextWrapping="Wrap" />
+              <Button Classes="ghost small" IsVisible="{Binding HasDetails}" Command="{Binding ToggleDetailsCommand}" Padding="0,2" HorizontalAlignment="Left"
+                      Content="{Binding DetailsLabel}" />
+              <TextBlock Text="{Binding Details}" IsVisible="{Binding ShowDetails}" Classes="hint" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="{Binding RemainingText}" IsVisible="{Binding HasRemaining}" Classes="hint" />
             </StackPanel>
             <ItemsControl Grid.Column="2" ItemsSource="{Binding Buttons}" VerticalAlignment="Center">

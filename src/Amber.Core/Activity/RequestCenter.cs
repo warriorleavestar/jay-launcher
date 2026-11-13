@@ -7,9 +7,15 @@ public sealed record RequestChoice(string Id, string Label, bool IsDefault = fal
 /// 要你处理、有时限的事（敲门、收文件、远程控制、全面连接测试、多开确认、联机网络想换外观）。
 /// IsSafety 的用锁定样式、排在前面。Timeout 到了自动按 TimeoutChoice 处理（没写就是 "timeout"）。
 /// 同一个 DedupeKey 只有一条：再发返回原来那条。
+/// Note 是正文下面一行淡字；Details 收在一个不显眼的展开按钮（DetailsLabel）后面，点了才显示。
 /// </summary>
 public sealed record RequestSpec(string Kind, string Title, string? Body, IReadOnlyList<RequestChoice> Choices,
-    bool IsSafety = false, TimeSpan? Timeout = null, string? DedupeKey = null, string? TimeoutChoice = null);
+    bool IsSafety = false, TimeSpan? Timeout = null, string? DedupeKey = null, string? TimeoutChoice = null)
+{
+    public string? Note { get; init; }
+    public string? Details { get; init; }
+    public string? DetailsLabel { get; init; }
+}
 
 /// <summary>请求是在哪处理的：请求条、房间卡、置顶小窗、系统通知、超时、程序自己（对方撤回之类）。</summary>
 public enum RequestSource { Bar, Panel, Popup, SystemNotification, Timeout, Program }

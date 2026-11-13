@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
 using Amber.App.Services;
+using Amber.Core.Activity;
 using Amber.Core.Auth;
 using Amber.Core.Content;
 using Amber.Core.Diagnostics;
@@ -106,6 +107,9 @@ public sealed partial class HomeViewModel : PageViewModel
                 return true;
             }
         }
+        /// <summary>Steps already written to the run log, and the step the status line shows.</summary>
+        public HashSet<LaunchStepId> LoggedSteps { get; } = [];
+        public LaunchStepId? ShownStep { get; set; }
         /// <summary>这一局的状态机（正在玩胶囊、活动中心“运行记录”看它）。</summary>
         public LaunchSession Session { get; } = new(id, DateTimeOffset.Now);
     }
@@ -325,6 +329,7 @@ public sealed partial class HomeViewModel : PageViewModel
             if (id == SelectedVersion) OnSelectedVersionChanged(SelectedVersion);
         });
         _clock.Tick += (_, _) => Tick();
+        _stepClock.Tick += (_, _) => TickSteps();
         RefreshVersions();
         RefreshAccounts();
         UpdateRunState();
@@ -511,12 +516,36 @@ public sealed partial class HomeViewModel : PageViewModel
     /// Before the first strong-sandbox launch: explain and ask whether to show Windows' admin prompt for the loopback
     /// exemption. Replaced in the self-check and tests.
     /// </summary>
-    internal Func<Task<bool>> AskSandboxConsent { get; set; } = DefaultSandboxConsentAsync;
+    internal Func<Task<bool>>? AskSandboxConsent { get; set; }
 
-    private static Task<bool> DefaultSandboxConsentAsync() =>
-        Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime { MainWindow: { } owner }
-            ? Views.ConfirmDialog.AskAsync(owner, L.T("home.sandbox.consent.title"), L.T("home.sandbox.consent.body"), L.T("home.sandbox.consent.confirm"))
-            : Task.FromResult(false);
+    internal const string SandboxConsentKey = "sandbox-consent";
+
+    /// <summary>
+    /// The question goes to the request bar (a safety request, "Not now" by default), not a modal: it says why Windows
+    /// is about to ask before the admin prompt. Yes runs the admin step; anything else starts in the standard sandbox.
+    /// </summary>
+    private Task<bool> AskSandboxByRequestAsync()
+    {
+        var answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        RequestHandle? handle = null;
+        void OnResolved(RequestHandle r)
+        {
+            if (r != handle) return;
+            _service.Requests.Resolved -= OnResolved;
+            answer.TrySetResult(r.Choice == "allow");
+        }
+        _service.Requests.Resolved += OnResolved;
+        handle = _service.Requests.Post(new RequestSpec("sandbox", L.T("home.sandbox.consent.title"), L.T("home.sandbox.consent.body"),
+            [new("allow", L.T("home.sandbox.consent.confirm")), new("later", L.T("launch.step.sandbox.not_now"), IsDefault: true)],
+            IsSafety: true, DedupeKey: SandboxConsentKey)
+        {
+            Note = L.T("home.sandbox.consent.note"),
+            Details = L.T("home.sandbox.consent.details"),
+            DetailsLabel = L.T("home.sandbox.consent.details_label"),
+        });
+        if (handle.IsResolved) OnResolved(handle);
+        return answer.Task;
+    }
 
     private async Task RunAsync(LaunchRequest request, bool allowSecond = false)
     {
@@ -567,8 +596,11 @@ public sealed partial class HomeViewModel : PageViewModel
         RunStarted?.Invoke(id);
         _runs.Add(run);
         _sessions[id] = run.Session;
+        var steps = run.Session.Steps = new LaunchSteps(timings: _stepTimings, instance: id);
+        steps.Changed += () => OnStepsChanged(run);
         _lastRequest = request;
         SessionStarted?.Invoke(run.Session);
+        _stepClock.Start();
         Crash = null;
         Failure = null;
         Progress = 0;
@@ -579,6 +611,7 @@ public sealed partial class HomeViewModel : PageViewModel
         try
         {
             var settings = _service.EffectiveSettings(ctx, id);
+            steps.Begin(LaunchStepId.Files);
             try { await RepairIfBrokenAsync(ctx, id, ct); }
             finally { if (_service.IsCurrentDirectory(ctx)) _service.NotifyInstanceStateChanged(id); }
             SetStatus(StatusMessage.Info("home.status.checking_game_files"));
@@ -588,27 +621,32 @@ public sealed partial class HomeViewModel : PageViewModel
                 {
                     _launchMeter.Add(DateTimeOffset.Now, (double)p.Files.CompletedFiles / p.Files.TotalFiles, p.Files.BytesDownloaded);
                     Progress = 100.0 * p.Files.CompletedFiles / p.Files.TotalFiles;
-                    Status = p.Files.BytesDownloaded > 0
-                        ? L.F("home.status.completing_files", p.Files.CompletedFiles, p.Files.TotalFiles)
-                        : L.F("home.status.checking_files", p.Files.CompletedFiles, p.Files.TotalFiles);
+                    steps.Count(p.Files.BytesDownloaded > 0 ? LaunchStepId.Download : LaunchStepId.Files, p.Files.CompletedFiles, p.Files.TotalFiles);
                 }
             }), ct);
+            if (steps[LaunchStepId.Download].State == LaunchStepState.Pending) steps.Skip(LaunchStepId.Download, L.T("launch.step.download.none"));
+            else steps.Done(LaunchStepId.Download);
             // 文件补齐了：上次没装完的实例到这里也算装完了。
             try { _service.MarkInstallFinished(ctx, id); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
 
             var version = ctx.Directory.ResolveVersion(id);
             var javaPath = settings.JavaPath;
+            steps.Begin(LaunchStepId.Java);
             if (string.IsNullOrEmpty(javaPath) || !File.Exists(javaPath))
             {
                 Progress = 0;
-                ctx.Java.Status = new Progress<string>(text => Status = text);
+                ctx.Java.Status = new Progress<string>(text => steps.Detail(LaunchStepId.Java, text));
                 javaPath = await ctx.Java.ForVersionAsync(version, ct);
+                steps.Done(LaunchStepId.Java, L.T("launch.step.java.found"));
             }
+            else steps.Done(LaunchStepId.Java, L.T("launch.step.java.settings"));
 
             Progress = 0;
             SetStatus(StatusMessage.Info("home.status.verifying_account"));
+            steps.Begin(LaunchStepId.Account, account.Name);
             var session = await _service.Accounts.ResolveAsync(account, ct);
+            steps.Done(LaunchStepId.Account);
 
             var options = _service.BaseLaunchOptions(ctx, id, javaPath, session.Session, session.ExtraJvmArgs) with
             {
@@ -621,17 +659,25 @@ public sealed partial class HomeViewModel : PageViewModel
             await using var relay = relayClient;
             var memory = options.MaxMemoryMb;
 
+            if (!_service.Settings.ExperimentalBake) steps.Skip(LaunchStepId.Loader, L.T("launch.step.loader.off"));
+            else if (request.SkipBake) steps.Skip(LaunchStepId.Loader, L.T("launch.step.loader.this_time"));
             if (_service.Settings.ExperimentalBake && !request.SkipBake)
             {
                 SetStatus(StatusMessage.Info("home.status.baking"));
+                steps.Begin(LaunchStepId.Loader);
                 try
                 {
                     var (baked, reason, bakeJava) = await _service.PrepareBakeAsync(ctx, id, javaPath, new Progress<Amber.Core.Bake.BakeEvent>(e =>
                     {
-                        Status = e.Message;
+                        // The status line follows the steps (never the loader's own wording); problems go to the log.
                         if (e.IsProblem) _log.AddRaw(run.Log, "[Bake] " + e.Message);
+                        else if (e.Total is > 0 && e.Done is { } done) steps.Count(LaunchStepId.Loader, done, e.Total.Value, LoaderStageText(e.Stage));
+                        else steps.Detail(LaunchStepId.Loader, LoaderStageText(e.Stage));
                     }), ct);
                     if (reason.Length > 0) _log.AddRaw(run.Log, "[Bake] " + reason);
+                    if (baked is null) steps.Skip(LaunchStepId.Loader, reason == L.T("core.bake.loader_missing") ? L.T("launch.step.loader.missing") : reason);
+                    else if (reason == L.T("core.bake.reused")) steps.Skip(LaunchStepId.Loader, L.T("launch.step.loader.unchanged"));
+                    else steps.Done(LaunchStepId.Loader);
                     // Baking is on but no loader is installed: offer the download right where the launch status is.
                     // Before the loader is published there is nothing to download: the notice just says why baking was skipped.
                     if (baked is null && reason == L.T("core.bake.loader_missing"))
@@ -655,6 +701,7 @@ public sealed partial class HomeViewModel : PageViewModel
                 {
                     // 实验功能失败时不挡住游戏：记下原因，按普通方式启动。
                     _log.AddRaw(run.Log, "[Bake] " + L.F("home.bake.fallback", e.Message));
+                    steps.Skip(LaunchStepId.Loader, L.T("launch.step.loader.fallback"));
                     Toasts.Show(L.T("home.bake.fallback_toast"));
                     // The reason (a missing dependency, an unsupported platform, a loader that is too old) in the launch status box too.
                     Toasts.BakeProblem(L.F("home.bake.fallback", e.Message));
@@ -663,20 +710,29 @@ public sealed partial class HomeViewModel : PageViewModel
             if (!string.IsNullOrWhiteSpace(settings.PreLaunchCommand))
             {
                 SetStatus(StatusMessage.Info("home.status.pre_launch_command"));
+                steps.Begin(LaunchStepId.Command);
                 await RunUserCommandAsync(settings.PreLaunchCommand, id, workDir, run.Log, ct);
             }
 
             // The game sandbox (privacy plan item 15): on Windows this picks standard or strong, and the first strong
             // launch explains the one admin prompt. A fallback is said once as a toast and on every launch in the log.
             var fallbackBefore = _service.Settings.StrongSandboxFallback;
+            steps.Begin(LaunchStepId.Sandbox);
             options = options with
             {
-                Sandbox = await _service.SandboxForLaunchAsync(javaPath, AskSandboxConsent, note => _log.AddRaw(run.Log, "[Sandbox] " + note), ct),
+                Sandbox = await _service.SandboxForLaunchAsync(javaPath, AskSandboxConsent ?? AskSandboxByRequestAsync, note => _log.AddRaw(run.Log, "[Sandbox] " + note), ct),
             };
+            string? fellBack = null;
             if (_service.Settings.StrongSandboxFallback is { } fallback && fallback != fallbackBefore)
-                Toasts.Show(L.F("home.sandbox.standard_because", WindowsSandboxPolicy.Describe(fallback, _service.Settings.StrongSandboxFallbackDetail)));
+            {
+                fellBack = L.F("home.sandbox.standard_because", WindowsSandboxPolicy.Describe(fallback, _service.Settings.StrongSandboxFallbackDetail));
+                Toasts.Show(fellBack);
+            }
+            if (!options.Sandbox.Enabled) steps.Skip(LaunchStepId.Sandbox, L.T("launch.step.sandbox.off"));
+            else steps.Done(LaunchStepId.Sandbox, fellBack ?? SandboxLevelText(options.Sandbox));
 
             SetOwnedStatus(StatusMessage.Info("home.status.launching"));
+            steps.Begin(LaunchStepId.Start);
             run.Output.Begin(options);
             _log.AddRaw(run.Log, L.F("home.log.launch", id, javaPath, memory));
             foreach (var note in _proxyNotes) _log.AddRaw(run.Log, note);
@@ -699,6 +755,7 @@ public sealed partial class HomeViewModel : PageViewModel
             run.Started = DateTime.UtcNow;
             run.Game = game;
             run.Session.ProcessUp(DateTimeOffset.Now);
+            if (!run.InGame) steps.Begin(LaunchStepId.Window);
             // 同一个游戏目录里同时开着两局：两局的崩溃报告、latest.log 分不清，崩溃分析只用各自的输出。
             foreach (var sibling in _runs.Where(r => r != run && r.Game is not null && string.Equals(r.WorkDir, workDir, StringComparison.OrdinalIgnoreCase)))
                 sibling.SharedWorkDir = run.SharedWorkDir = true;
@@ -709,6 +766,11 @@ public sealed partial class HomeViewModel : PageViewModel
             await game.WaitForExitAsync();
 
             var code = game.ExitCode;
+            if (steps[LaunchStepId.Window].State == LaunchStepState.Running)
+            {
+                if (run.StoppedByUser) steps.Cancel(L.T("launch.step.stopped"));
+                else steps.Fail(L.T("launch.step.window.exited"));
+            }
             if (run.Baked) MergeBakeProblemsFile(run);
             // 退出码 0 但没进主界面：比如没有 OpenGL 时游戏弹个框就“正常”退出了，也要看一眼日志。
             CrashInput? input = null;
@@ -780,12 +842,14 @@ public sealed partial class HomeViewModel : PageViewModel
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             run.Session.Cancel(DateTimeOffset.Now);
+            steps.Cancel(L.T("launch.step.cancelled"));
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
         // 其他的取消异常不是玩家点的：多半是连接超时（HttpClient 的 ConnectTimeout 也抛 TaskCanceledException），按失败显示原因。
         catch (Exception e)
         {
             run.Session.Fail(DateTimeOffset.Now, ErrorText.Describe(e));
+            if (!gameStarted) steps.Fail(ShortReason(ErrorText.Describe(e)));
             SetStatus(StatusMessage.Failure("home.status.launch_failed", e, ErrorText.Of(e)));
             _log.AddRaw(run.Log, "[Jay] " + e);
             // 游戏没起来才给修复卡；进程起来以后的异常（比如退出后的命令出错）不算启动失败。
@@ -795,11 +859,67 @@ public sealed partial class HomeViewModel : PageViewModel
         {
             FinishStore(run, crashed);
             _runs.Remove(run);
+            if (_runs.Count == 0) _stepClock.Stop();
             run.Cts.Dispose();
             Progress = 0;
             UpdateRunState();
             if (gameStarted && _runs.Count == 0) GameExited?.Invoke(crashed);
         }
+    }
+
+    private readonly LaunchStepTimings _stepTimings = new();
+
+    /// <summary>Once a second while a start runs: marks a step slow when it runs well past its usual time.</summary>
+    private readonly DispatcherTimer _stepClock = new() { Interval = TimeSpan.FromSeconds(1) };
+
+    private void TickSteps()
+    {
+        foreach (var run in _runs) run.Session.Steps.Tick();
+    }
+
+    /// <summary>
+    /// A step changed: the status line (the instance's progress row and the activity drawer read it) says the running
+    /// step and its count, the bar shows that step's own progress, and every step that ended goes into the run log.
+    /// </summary>
+    private void OnStepsChanged(GameRun run)
+    {
+        var steps = run.Session.Steps;
+        foreach (var ended in steps.Steps.Where(s => s.State is not (LaunchStepState.Pending or LaunchStepState.Running) && s.Visible))
+            if (run.LoggedSteps.Add(ended.Id)) _log.AddRaw(run.Log, "[Jay] " + ended.LogLine());
+        if (run != Latest || steps.Current is not { } step) return;
+        if (step.Id != run.ShownStep)
+        {
+            run.ShownStep = step.Id;
+            // Speed and time left are the game files' (checking runs straight into downloading); other steps start afresh.
+            if (step.Id != LaunchStepId.Download) _launchMeter.Reset();
+            Progress = 0;
+        }
+        if (step.HasCount) Progress = 100.0 * step.Done!.Value / step.Total!.Value;
+        // The window step's line carries the seconds waited: the clock writes it.
+        if (step.Id == LaunchStepId.Window) Tick();
+        else SetOwnedStatus(StatusMessage.Plain(step.StatusLine()));
+    }
+
+    /// <summary>What the universal loader is doing, in the launch steps' words (never the loader's internal stage names).</summary>
+    internal static string? LoaderStageText(string stage) => stage switch
+    {
+        "requirements" => L.T("launch.step.loader.stage.requirements"),
+        "platform" => L.T("launch.step.loader.stage.platform"),
+        "bake-mod" => L.T("launch.step.loader.stage.mods"),
+        "bake-instance" => L.T("launch.step.loader.stage.instance"),
+        "warm" => L.T("launch.step.loader.stage.warm"),
+        _ => null,
+    };
+
+    internal static string SandboxLevelText(SandboxOptions sandbox) =>
+        !OperatingSystem.IsWindows() ? L.T("launch.step.sandbox.on")
+        : sandbox.WindowsLevel == WindowsSandboxLevel.Strong ? L.T("launch.step.sandbox.strong") : L.T("launch.step.sandbox.standard");
+
+    /// <summary>The first line of an error, cut to one short sentence for a failed step (the fixes stay on the failure card).</summary>
+    internal static string ShortReason(string text)
+    {
+        var line = text.Split('\n', 2)[0].Trim();
+        return line.Length <= 120 ? line : line[..119] + "…";
     }
 
     /// <summary>A run began (its saved log exists from now on): the Logs tab lists it.</summary>
@@ -884,6 +1004,7 @@ public sealed partial class HomeViewModel : PageViewModel
         run.InGame = true;
         run.Session.EnteredGame(DateTimeOffset.Now);
         run.InGameGuessed = guessed;
+        run.Session.Steps.Done(LaunchStepId.Window, guessed ? L.T("launch.step.window.guessed") : null);
         UpdateRunState();
         Tick();
     }
@@ -909,7 +1030,12 @@ public sealed partial class HomeViewModel : PageViewModel
             return;
         }
         if (!run.InGame)
-            SetOwnedStatus(StatusMessage.Info("home.status.loading_game", (int)elapsed.TotalSeconds));
+        {
+            var step = run.Session.Steps[LaunchStepId.Window];
+            SetOwnedStatus(step.State == LaunchStepState.Running
+                ? StatusMessage.Plain(step.StatusLine(L.F("launch.step.elapsed", (int)elapsed.TotalSeconds)))
+                : StatusMessage.Info("home.status.loading_game", (int)elapsed.TotalSeconds));
+        }
         else if (run.InGameGuessed)
             SetOwnedStatus(StatusMessage.Info("home.status.maybe_in_game", run.Id, (int)elapsed.TotalMinutes));
         else
@@ -1037,9 +1163,14 @@ public sealed partial class HomeViewModel : PageViewModel
     internal object AddPreparingRunForTest(string id)
     {
         var run = new GameRun(id);
+        run.Session.Steps = new LaunchSteps(timings: _stepTimings, instance: id);
+        run.Session.Steps.Changed += () => OnStepsChanged(run);
         _runs.Add(run);
+        // As a real start does: the instance's start button shows this run as preparing.
+        _sessions[id] = run.Session;
         LastRunInstance = id;
         _launchMeter.Reset();
+        SessionStarted?.Invoke(run.Session);
         UpdateRunState();
         return run;
     }
@@ -1048,14 +1179,23 @@ public sealed partial class HomeViewModel : PageViewModel
     internal void ReportFilesForTest(int done, int total, long bytes, DateTimeOffset at)
     {
         _launchMeter.Add(at, (double)done / total, bytes);
+        Latest?.Session.Steps.Count(LaunchStepId.Download, done, total);
         Progress = 100.0 * done / total;
-        Status = L.F("home.status.completing_files", done, total);
     }
+
+    /// <summary>Self-check: the steps of a run made by <see cref="AddPreparingRunForTest"/>.</summary>
+    internal static LaunchSteps StepsForTest(object run) => ((GameRun)run).Session.Steps;
+
+    /// <summary>Self-check: the strong-sandbox question as a launch would ask it (on the request bar).</summary>
+    internal Task<bool> AskSandboxForTest() => AskSandboxByRequestAsync();
 
     internal void RemoveRunForTest(object run)
     {
-        _runs.Remove((GameRun)run);
+        var r = (GameRun)run;
+        _runs.Remove(r);
+        if (_sessions.TryGetValue(r.Id, out var s) && s == r.Session) _sessions.Remove(r.Id);
         UpdateRunState();
+        RunStateChanged?.Invoke();
     }
 
     internal void ExitGameForTest(object run) => ExitGame((GameRun)run);

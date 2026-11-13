@@ -7,6 +7,7 @@ using Amber.Core.Layout;
 using Amber.Core.Localization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.Interactivity;
@@ -106,11 +107,71 @@ internal sealed partial class SelfTest
             await WaitAsync(() => instance.ShowLaunchLine, 3);
             await Task.Delay(200);
             var facts = Dispatcher.UIThread.Invoke(() => page?.LaunchLine.Facts ?? "");
-            Check("开始游戏：进度行就在开始按钮下面，写步骤、百分比、速度和大约还要多久",
-                Dispatcher.UIThread.Invoke(() => page?.LaunchLineCard.IsEffectivelyVisible == true && page.LaunchLine.Step == L.F("home.status.completing_files", 312, 480))
+            Check("开始游戏：进度行就在开始按钮下面，写这一步的名字和数、百分比、速度和大约还要多久",
+                Dispatcher.UIThread.Invoke(() => page?.LaunchLineCard.IsEffectivelyVisible == true
+                    && page.LaunchLine.Step == L.F("launch.step.count", L.T("launch.step.download"), 312, 480))
                 && facts.Split(" · ") is [var percent, var speed, var left] && percent == "65%" && speed == Fmt.Speed(4_400_000) && left == Fmt.Remaining(home.LaunchRemaining ?? default),
                 $"{instance.LaunchStep} | {facts}");
             await ShotAsync("instance-launch-line");
+
+            // ---- Launch steps: the progress line and the activity drawer say the step running now ----
+            var steps = HomeViewModel.StepsForTest(fetching);
+            steps.Skip(LaunchStepId.Java, L.T("launch.step.java.settings"));
+            steps.Count(LaunchStepId.Loader, 12, 87, L.T("launch.step.loader.stage.mods"));
+            await Task.Delay(200);
+            Check("启动步骤：进度行写“用 Jay 加载器准备模组 12/87”，进度条跟着这一步走",
+                instance.LaunchStep == L.F("launch.step.count", L.T("launch.step.loader"), 12, 87) && Math.Abs(home.Progress - 100.0 * 12 / 87) < 0.01,
+                $"{instance.LaunchStep} {home.Progress:F1}");
+            Check("启动步骤：界面上没有“烘焙”", !instance.LaunchStep.Contains("烘焙"), instance.LaunchStep);
+            Check("启动步骤：跑着的时候开始按钮是“正在准备”，不是琥珀色的“启动游戏”",
+                instance.Start?.Kind == StartKind.Preparing && instance.StartBusy && instance.StartLabel != L.T("home.launch"), instance.StartLabel);
+            await ShotAsync("instance-steps-mid");
+            steps.Count(LaunchStepId.Loader, 13, 87);
+            Check("启动步骤：比平时久时写“这一步比平时久”和在等什么",
+                new LaunchStep(LaunchStepId.Loader, LaunchStepState.Running, Done: 13, Total: 87, Slow: true).StatusLine() is var slowLine
+                && slowLine.Contains(L.T("launch.step.slow")) && slowLine.Contains(L.T("launch.step.loader.waiting")), slowLine);
+            home.SetOwnedStatusForTest(StatusMessage.Plain(new LaunchStep(LaunchStepId.Loader, LaunchStepState.Running, Done: 13, Total: 87, Slow: true).StatusLine()));
+            await Task.Delay(200);
+            await ShotAsync("instance-steps-slow");
+            steps.Count(LaunchStepId.Loader, 14, 87);
+            main.Activity.IsOpen = true;
+            main.Activity.Tab = 2;
+            await Task.Delay(400);
+            var runRow = main.Activity.Runs.FirstOrDefault(r => r.Session == HomeViewModel.SessionForTest(fetching));
+            Check("启动步骤：活动抽屉里这一局写的也是这一步", runRow?.StateText == L.F("launch.step.count", L.T("launch.step.loader"), 14, 87),
+                runRow?.StateText ?? "(not tracked)");
+            await ShotAsync("instance-steps-activity");
+            main.Activity.Tab = 0;
+            main.Activity.IsOpen = false;
+
+            // The strong sandbox's admin step: asked on the request bar (safety kind, "Not now" by default), not a modal.
+            var asked = home.AskSandboxForTest();
+            await Task.Delay(400);
+            var consent = service.Requests.Pending.FirstOrDefault(r => r.Spec.DedupeKey == HomeViewModel.SandboxConsentKey);
+            Check("强沙盒：开始前在请求条上说 Windows 会问、为什么，默认【这次不用】",
+                consent is { Spec.IsSafety: true } && consent.Spec.Choices.Single(c => c.IsDefault).Id == "later" && window.RequestBar.IsEffectivelyVisible
+                && Dispatcher.UIThread.Invoke(() => window.GetVisualDescendants().OfType<Window>().Count(w => w != window) == 0),
+                consent?.Spec.Title ?? "(none)");
+            Check("强沙盒：卡片只有一句正文和一行淡字，不写 AppContainer，细节收在“这会改什么”后面",
+                consent is { Spec.Body: { } body, Spec.Note: { Length: > 0 }, Spec.Details: { Length: > 0 } } && !body.Contains("AppContainer") && !body.Contains('\n')
+                && Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).All(t => t.Text != consent.Spec.Details)
+                    && window.RequestBar.GetVisualDescendants().OfType<Button>().Any(t => t.IsEffectivelyVisible && t.Classes.Contains("ghost") && t.Content as string == L.T("home.sandbox.consent.details_label"))),
+                consent?.Spec.Body ?? "(none)");
+            await ShotAsync("instance-steps-sandbox-request");
+            Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<Button>().First(t => t.IsEffectivelyVisible && t.Content as string == L.T("home.sandbox.consent.details_label")).Command?.Execute(null));
+            await Task.Delay(200);
+            Check("强沙盒：点“这会改什么”才展开细节，按钮变成“收起”", Dispatcher.UIThread.Invoke(() =>
+                window.RequestBar.GetVisualDescendants().OfType<TextBlock>().Any(t => t.IsEffectivelyVisible && t.Text == consent?.Spec.Details)
+                && window.RequestBar.GetVisualDescendants().OfType<Button>().Any(b => b.IsEffectivelyVisible && b.Content as string == L.T("activity.request.details_hide"))));
+            await ShotAsync("instance-steps-sandbox-details");
+            if (consent is not null) service.Requests.Resolve(consent, "later", Amber.Core.Activity.RequestSource.Bar);
+            Check("强沙盒：选【这次不用】就按标准沙盒继续", await Task.WhenAny(asked, Task.Delay(2000)) == asked && !asked.Result);
+
+            // A start that failed on a step: the line says which, the run log has every step.
+            steps.Fail("No Java 21 found");
+            await Task.Delay(200);
+            Check("启动步骤：失败落在当时在跑的那一步", steps[LaunchStepId.Loader].State == LaunchStepState.Failed && steps.Failed);
+            await ShotAsync("instance-steps-failed");
             home.RemoveRunForTest(fetching);
             home.Status = "";
             await Task.Delay(200);
