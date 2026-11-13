@@ -276,8 +276,10 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         _cts.Cancel();
         // Lent listeners stay bound: the accept loops end on the cancellation and the ports go back to the session.
         if (_giveBack is null) foreach (var l in _listeners) l.Stop();
-        try { await Task.WhenAll(_loops); } catch (OperationCanceledException) { }
-        _giveBack?.Invoke();
+        // Given back even when a loop ended badly: the session still holds the ports, and the next transport needs them.
+        try { await Task.WhenAll(_loops); }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException or InvalidOperationException) { }
+        finally { _giveBack?.Invoke(); }
         // Open connections see the cancellation and end; wait a little for them so nothing is still forwarding afterwards.
         Task[] running;
         lock (_running) running = [.. _running];
@@ -329,7 +331,13 @@ public sealed class SplitConnector
     public string? LastReason { get; private set; }
 
     /// <summary>Auto: the longest a split attempt may take before the connection goes on one path instead.</summary>
-    public TimeSpan AutoBudget { get; init; } = TimeSpan.FromSeconds(3);
+    public TimeSpan AutoBudget
+    {
+        get => _autoBudget;
+        init => _autoBudget = value > TimeSpan.Zero || value == Timeout.InfiniteTimeSpan
+            ? value : throw new ArgumentOutOfRangeException(nameof(AutoBudget), value, "Must be positive or infinite.");
+    }
+    private readonly TimeSpan _autoBudget = TimeSpan.FromSeconds(3);
 
     /// <param name="single">Opens a single-path tunnel connection (the existing way).</param>
     /// <param name="legs">Opens the raw connection for each leg, in leg order; null when the paths aren't set up (for example in TUN mode).</param>
@@ -348,6 +356,17 @@ public sealed class SplitConnector
         Policy = room.FromInvite && room.Tunnel.Wraps ? room.Split.For(service) : SplitPolicy.Off;
         _legs = legs is not null && legs.Count == room.Split.Paths ? legs : null;
     }
+
+    /// <summary>Whether the last connection this connector opened was split.</summary>
+    public bool LastWasSplit => Volatile.Read(ref _lastSplit) == 1;
+
+    /// <summary>
+    /// Auto, and the last connection went on one path, but a new one would split now (the paths are ready and Auto isn't
+    /// pausing): a long-lived connection such as chat can be opened again to move onto the split paths.
+    /// </summary>
+    public bool CouldSplitNow =>
+        Policy == SplitPolicy.Auto && _legs is not null && !LastWasSplit && _pathProblem?.Invoke() is null
+        && !(Volatile.Read(ref _failures) >= MaxFailures && System.Diagnostics.Stopwatch.GetTimestamp() < Interlocked.Read(ref _pausedUntil));
 
     public async Task<Stream> OpenAsync(CancellationToken ct)
     {
@@ -385,7 +404,9 @@ public sealed class SplitConnector
         {
             if (Interlocked.Increment(ref _failures) >= MaxFailures)
                 Interlocked.Exchange(ref _pausedUntil, System.Diagnostics.Stopwatch.GetTimestamp() + (long)(RetryAfter.TotalSeconds * System.Diagnostics.Stopwatch.Frequency));
-            var reason = e is OperationCanceledException ? L.T("core.mp.split.too_slow") : L.T("core.mp.split.failed") + e.Message;
+            // Too slow only when the budget ran out; a leg's own cancellation is an ordinary failure.
+            var reason = budget.IsCancellationRequested && e is OperationCanceledException
+                ? L.T("core.mp.split.too_slow") : L.T("core.mp.split.failed") + e.Message;
             _log?.Invoke(reason);
             return await NotSplitAsync(reason, ct, e);
         }

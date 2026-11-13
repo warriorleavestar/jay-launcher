@@ -76,7 +76,9 @@ public static class DirectoryChannel
     /// payload of its handshake message. Throws <see cref="DirectoryImpostorException"/> before writing the request when
     /// the key isn't accepted, or <see cref="DirectoryKeyChangedException"/> when it differs from the remembered one.
     /// </summary>
-    /// <param name="snapshotLength">Called with a snapshot reply's length once it is known (to set a deadline that fits it).</param>
+    /// <param name="snapshotLength">Called with a snapshot reply's length once it is known (to set a deadline that fits it).
+    /// Only a call that passes it accepts a snapshot reply (a length frame followed by chunks); for any other request a
+    /// length frame is a bad reply.</param>
     public static async Task<JsonObject> CallAsync(Stream stream, DirectoryTrust trust, string address, string networkSecret, JsonObject request, CancellationToken ct,
         Action<int>? snapshotLength = null, Action? sent = null)
     {
@@ -102,19 +104,21 @@ public static class DirectoryChannel
                 var firstFrame = await ReadFrameAsync(stream, ct);
                 var first = receive.DecryptWithAd(Prologue, firstFrame);
                 if (first.Length != 4 || first[0] != 0) return Parse(first);
+                // A length frame: only a snapshot request gets one.
+                if (snapshotLength is null) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
                 var total = BinaryPrimitives.ReadInt32BigEndian(first);
                 if (total is <= 0 or > RoomDirectoryProtocol.MaxReply) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
-                snapshotLength?.Invoke(total);
-                var reply = new byte[total];
-                for (var at = 0; at < total;)
+                snapshotLength(total);
+                // The buffer grows with what actually arrives, not with what the length frame claims.
+                using var reply = new MemoryStream(Math.Min(total, InitialSnapshotBuffer));
+                while (reply.Length < total)
                 {
                     var frame = await ReadFrameAsync(stream, ct);
                     var chunk = receive.DecryptWithAd(Prologue, frame);
-                    if (chunk.Length == 0 || chunk.Length > total - at) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
-                    chunk.CopyTo(reply, at);
-                    at += chunk.Length;
+                    if (chunk.Length == 0 || chunk.Length > total - reply.Length) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
+                    reply.Write(chunk);
                 }
-                return Parse(reply);
+                return Parse(reply.GetBuffer().AsSpan(0, (int)reply.Length));
             }
         }
         catch (CryptographicException e)
@@ -127,7 +131,10 @@ public static class DirectoryChannel
         }
     }
 
-    private static JsonObject Parse(byte[] reply)
+    /// <summary>What a snapshot reply's buffer starts at; it grows as chunks arrive.</summary>
+    internal const int InitialSnapshotBuffer = 64 * 1024;
+
+    private static JsonObject Parse(ReadOnlySpan<byte> reply)
     {
         try
         {

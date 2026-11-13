@@ -70,9 +70,9 @@ await server.RunAsync(CancellationToken.None);
 | `GET /stats` | `{ok, health, stats: {published, renewed, withdrawn, expired, removed, rejected: {code: n}, loginOk, loginFail}}` |
 | `GET /metrics` | Prometheus 文本（`text/plain; version=0.0.4`）：`jay_node_up`、`jay_node_info{network,role,easytier,login}`、`jay_node_uptime_seconds`、`jay_directory_rooms`、`jay_directory_rooms_listed`、`jay_volunteer_relays`、`jay_bans`、`jay_rendezvous_records`、`jay_signed_records`、`jay_directory_rooms_published_total`、`jay_directory_rooms_renewed_total`、`jay_directory_rooms_ended_total{reason}`、`jay_directory_rooms_rejected_total{reason}`、`jay_logins_total{result}`。只有总数，要口令 |
 | `GET /rooms` | `{ok, total, hidden, rooms: [{id, name, host, hostFingerprint, mode, players, game, account, updated}]}`（只有公开房间） |
-| `GET /nodes` | `{ok, enabled, nodes: ["tcp://...", ...]}`：列出的志愿中转 |
+| `GET /nodes` | `{ok, enabled, nodes: ["tcp://...", ...], operators: [{url, operator, disputed, claimedBy, unsignedAttempts, lastUnsigned, claims, claimants}]}`：列出的志愿中转；`operator` 是签名登记的志愿者的 Jay 账户（`jay1...`），没签名是 null；`disputed` 为真表示有别的 Jay 账户签名认领过这个地址（对签名地址的不签名登记只会被拒，不算认领），`claimedBy` 是最近还在认领的最多 4 个账户（满了时最久没再认领的让位，但一直在续期的最早认领者保留，所以一大批新账户也挤不掉真正的运行者）；`claims` / `claimants` 是签名认领的总次数和不同账户数（账户数最多数到 256），很多账户说明有人在刷；`unsignedAttempts` / `lastUnsigned` 是这个签名地址被拒的不签名登记次数和最近时间（可能是从没签名、被人抢先登记的志愿者）；`operator` 不变 |
 | `GET /bans` | `{ok, bans: [{kind, value, reason, at, until}]}`（`until` 为 null 是永久） |
-| `POST /ban` `{kind: host\|room\|account\|node, value, reason?, for?}` | `{ok, removed}`；`for` 是秒数，`node` 的值是志愿中转地址 |
+| `POST /ban` `{kind: host\|room\|account\|node\|operator, value, reason?, for?}` | `{ok, removed}`（`operator` 另有 `bannedNodes: [地址, ...]` 和 `disputedNotBanned: [地址, ...]`）；`for` 是秒数，`node` 的值是志愿中转地址，`operator` 的值是志愿者的 Jay 账户（他登记的所有中转一起拿掉，这些地址也按 `node` 封同样的时间，原因写 `with operator <账户>`；有没被封的别的账户签名认领过、或有被拒的不签名登记的地址只拿掉不封，列在 `disputedNotBanned` 里；一起封掉的列在 `bannedNodes` 里，两者都写进日志：认领的也可能是同一个人的另一个账户，要运营者自己看；再封一次这个账户时，已有的这些地址封禁也改成新的结束时间；`/unban` 这个账户时一起解封）。封运营者总是挡得住这个账户的签名登记；没开 `RequireSignedVolunteers` 时不签名的登记挡不住，换一个新账户也挡不住 |
 | `POST /ban` `{kind: room-host, value: <房间编号>, reason?, for?}` | `{ok, removed, host, account}`：封这个房间房主的指纹和账号；房间不在回 404 |
 | `POST /unban` `{kind, value}` | `{ok}` 或 404 |
 | `POST /remove` `{id}` | `{ok}` 或 404 |
@@ -104,8 +104,8 @@ await server.RunAsync(CancellationToken.None);
 | `snap` | `{epoch?, have?}`：本机那份快照来自哪次启动、到第几版；第一次不带 | `{ok, epoch, ver, full, from?, rooms: [<房间>, ...], hidden: [{k, t, b}, ...], gone: ["r:<id>" 或 "h:<k>:<t>", ...]}`。`t` 是随机的槽位标记：同一个索引 `k` 下最多 8 个房间各有一条。公开房间只改了 `seq`、签名和时间的续期不算变化。整份快照有上限，再发布会超过时回 `full`。`epoch` 对得上、`have` 还在变更记录里时只给之后变了的（`full` 为假，`from` = `have`），否则给全部。`rooms` 是 `listed` 为真且不是隐藏房间的。每个请求者都发一样的请求，目录看不出谁在找哪个房间 |
 | `find` | `{code: "JAYF1-..."}` | `{ok, room?}`：用登记的指纹密钥算标签，见 `FingerprintCode.Matches` |
 | `login` | 见 `NetworkLoginClient.Request` / `LoginAuthority.Handle` | 加密的凭证或 `factor` 提示 |
-| `volunteer` | `{url: "tcp://<公网地址>:<端口>"}`：登记或续期志愿中转（每 3 分钟） | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad` |
-| `nodes` | `{}` | `{ok, nodes: ["tcp://...", ...最多 8 个，随机]}`：探测过、还在续期的志愿中转 |
+| `volunteer` | `{url: "tcp://<公网地址>:<端口>", operator?: {cert, at, sig}}`：登记或续期志愿中转（每 3 分钟）。`operator` 是志愿者的 Jay 账户给这台设备签的证书（`DeviceCertificate`）、Unix 秒和设备混合签名（`"jay-volunteer-v3\n" ‖ 网络标记 ‖ "\n" ‖ url ‖ "\n" ‖ at`，64 位大端；网络标记是 `VolunteerOperator.NetworkTag`：网络编号 + ":" + SHA-256("jay-volunteer-net-v1\n" ‖ EasyTier 网络名 ‖ "\n" ‖ 网络密钥) 的前 16 字节十六进制，编号撞了的两个网络也互相用不了对方的签名），见 `VolunteerOperator` | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。新地址每分钟不签名的最多收 60 个、签名的另外 60 个，每个 Jay 账户 8 个，每个来源地址 10 个（经本机转发进来的不分来源）；续期不算，同一账户回到刚才列出过（探测通过过）的地址也不算；探测没通过的地址 10 秒内谁登记都不收；对已有地址的签名认领也按账户每分钟 8 次、按来源每分钟 10 次算；多了回 `rate`（不签名和按来源的上限在验签之前就查）。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad`；签名或证书不对、不是这个网络的、时间比目录慢 3 分钟以上或快 1 分钟以上、或网络要求签名（`RequireSignedVolunteers`）而没带时回 `operator`；同一账户给同一地址的签名时间没有比上次接受的新时回 `stale`（Jay 每次至少比上次晚 1 秒）；地址已由别的运营者登记（别的账户、没签名换成签名、或签过名换成不签）、还没过期时回 `owner`，运营者不变，管理接口的 `/nodes` 记下这次认领（签名的记账户，不签名的只计数） |
+| `nodes` | `{}` | `{ok, nodes: ["tcp://...", ...最多 8 个，随机]}`：探测过、还在续期的志愿中转，同一个运营者的先只给一个（目录按签名登记的账户分散，只用来分散负载，不是安全保证：一个人可以有好几个 Jay 账户）。谁运行哪个中转只留在目录里，不发给成员 |
 | `probe` | `{url: "tcp://<公网地址>:<端口>"}`：想当志愿中转的人先测端口 | `{ok, reachable}`：目录从外网连一次，不列出。不收志愿中转时回 `off`，被封回 `banned`，地址不是公网回 `bad`，测得太频繁回 `rate` |
 | `x-*` | 你自己的 | 你自己的 |
 

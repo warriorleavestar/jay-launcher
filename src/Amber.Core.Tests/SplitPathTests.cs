@@ -193,6 +193,35 @@ public sealed class SplitPathTests
     [InlineData("auto,auto,2,extra")]
     public void AnythingElseMeansNoSplit(string? value) => Assert.False(SplitSettings.FromSwitch(value).Enabled);
 
+    [Fact]
+    public void AnOpenSwitchLetsTheRelaysPickTheNumberOfPaths()
+    {
+        var open = SplitSettings.FromSwitch("auto,auto");
+        Assert.True(open.PathsOpen);
+        Assert.False(SplitSettings.FromSwitch("auto,auto,2").PathsOpen);
+        string[] three = ["tcp://a.one.example:1", "tcp://b.one.example:1", "tcp://two.example:1", "tcp://three.example:1"];
+        // One more path than independent groups, between two and three.
+        Assert.Equal(2, open.FitTo([]).Paths);
+        Assert.Equal(2, open.FitTo([Community]).Paths);
+        Assert.Equal(3, open.FitTo(three[..3]).Paths);
+        Assert.Equal(3, open.FitTo(three).Paths);
+        var fitted = open.FitTo(three[..3]);
+        Assert.False(fitted.PathsOpen);
+        Assert.Equal((SplitPolicy.Auto, SplitPolicy.Auto, 2), (fitted.Game, fitted.Chat, fitted.Nets.Count));
+        // A fixed count, and no split, stay as they are.
+        var fixedTwo = SplitSettings.FromSwitch("auto,auto,2");
+        Assert.Same(fixedTwo, fixedTwo.FitTo(three));
+        Assert.Same(SplitSettings.None, SplitSettings.None.FitTo(three));
+    }
+
+    [Fact]
+    public void IndependentGroupsCountsOneGroupPerOperator()
+    {
+        Assert.Equal(0, SplitPathPlanner.IndependentGroups([]));
+        Assert.Equal(0, SplitPathPlanner.IndependentGroups(["not a node"]));
+        Assert.Equal(2, SplitPathPlanner.IndependentGroups(["tcp://a.one.example:1", "tcp://b.one.example:1", " tcp://two.example:1 ", "tcp://two.example:1"]));
+    }
+
     // ---- readiness ----
 
     [Fact]
@@ -468,6 +497,9 @@ public sealed class SplitPathTests
     [InlineData("relay(12)", false)]
     [InlineData("relay", false)]
     [InlineData("", false)]
+    [InlineData("relay(2)\n", false)]
+    [InlineData("relay(\u0662)", false)]
+    [InlineData("relay(+2)", false)]
     public void AnExtraPathCrossesOneRelayAtMost(string cost, bool ok)
     {
         Assert.Equal(ok, SplitPathPlanner.OneRelayAtMost(cost));
