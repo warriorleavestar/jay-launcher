@@ -72,6 +72,7 @@ internal sealed partial class SelfTest
         {
             Identity = DirectoryChannel.LoadOrCreateIdentity(Path.Combine(Amber.App.Services.AppSettings.DataDir, "selftest-directory.key")),
             NetworkSecret = PublicNetworkProfile.JaySecret,
+            UncountedLoopback = true,
         };
         using var pin = PublicNetworkProfile.PinSelfTestDirectory(directory.Identity.PublicKey);
         using var seed = PublicNetworkSession.Start(service.EasyTier, new PublicNetworkOptions(PublicNetworkProfile.Jay() with { Nodes = [] },

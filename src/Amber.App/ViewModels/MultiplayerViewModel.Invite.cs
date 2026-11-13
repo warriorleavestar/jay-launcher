@@ -643,21 +643,37 @@ public sealed partial class MultiplayerViewModel
             Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>> answerDirect =
                 (host, ct) => AnswerDirectOfferAsync(invite, host, made => guestDirect = made, ct);
             KnockOutcome? viaPublic = null;
+            var lookedAt = DateTimeOffset.UtcNow;
             if (knock is not null || _public is not null)
             {
                 SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
                 viaPublic = knock is not null ? await knock(me, name, answerDirect, cts.Token) : await TryPublicKnockAsync(invite, me, name, cts.Token, expectedHost, answerDirect);
                 if (viaPublic is null && _knockCts == cts) SetStatus(StatusMessage.Info(peers.Count > 0 ? "multiplayer.invite.connecting_relay" : "multiplayer.invite.entering_lobby"));
             }
-            var outcome = viaPublic ?? await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
-                me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
-                () => Dispatcher.UIThread.Post(() =>
-                {
-                    if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
-                }), cts.Token, () => Dispatcher.UIThread.Post(() =>
-                {
-                    if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
-                }), device, AccountToken, jay, expectedHost, answerDirect));
+            KnockOutcome outcome;
+            try
+            {
+                outcome = viaPublic ?? await Task.Run(() => LobbyJoin.KnockAsync(_service.EasyTier, Path.Combine(EasyTierWorkRoot, "lobby-join"), peers, invite,
+                    me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, line => _diag.Add(L.T("multiplayer.invite.diagnostics_category"), line),
+                    () => Dispatcher.UIThread.Post(() =>
+                    {
+                        if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.waiting_approval"));
+                    }), cts.Token, () => Dispatcher.UIThread.Post(() =>
+                    {
+                        if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.entering_lobby"));
+                    }), device, AccountToken, jay, expectedHost, answerDirect));
+            }
+            // Only "the lobby was reached but no host was there" looks again: not "no relay reachable", and never a timeout
+            // after the knock was sent (such as waiting for approval).
+            catch (LobbyNoHostException e) when (knock is null && viaPublic is null && _public is not null && !cts.IsCancellationRequested)
+            {
+                // No host in the invite's lobby. A room opened after our copy of the directory was taken isn't in it yet:
+                // look once more in a copy refreshed since (by then there usually is one, so this rarely waits).
+                if (_knockCts == cts) SetStatus(StatusMessage.Info("multiplayer.invite.finding_host"));
+                var again = await TryPublicKnockAsync(invite, me, name, cts.Token, expectedHost, answerDirect, lookedAt);
+                if (again is null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(e);
+                outcome = again;
+            }
             if (_knockCts != cts)
             {
                 if (guestDirect is not null) await guestDirect.DisposeAsync();
