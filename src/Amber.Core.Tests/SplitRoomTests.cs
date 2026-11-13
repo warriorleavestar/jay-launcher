@@ -281,12 +281,13 @@ public sealed class SplitRoomTests
     {
         const int failing = SplitTunnelServer.MaxPendingHandshakes + 8;
         var seen = 0;
+        var log = new List<string>();
         await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped, beforeServe: _ =>
         {
             if (Interlocked.Increment(ref seen) > failing) return;
             if (unexpected) throw new NotSupportedException("test");
             throw new SocketException((int)SocketError.ConnectionReset);
-        });
+        }, log: line => { lock (log) log.Add(line); });
         var ports = rig.Server.Ports;
         for (var i = 0; i < failing; i++)
         {
@@ -296,6 +297,17 @@ public sealed class SplitRoomTests
             Assert.True(await WaitAsync(() => Volatile.Read(ref seen) > i && rig.Server.PendingHandshakes == 0, 10));
         }
         Assert.Equal(failing, rig.Server.Rejected);
+        // The line is written before the leg is counted. Unexpected failures are failed handshakes, limited to one line a
+        // minute; a dropped connection writes nothing.
+        var failed = L.T("core.mp.transport.endpoint_handshake_failed");
+        lock (log)
+        {
+            if (unexpected)
+                Assert.Single(log, l => l.StartsWith(failed, StringComparison.Ordinal) && l.EndsWith(nameof(NotSupportedException), StringComparison.Ordinal));
+            else
+                Assert.DoesNotContain(log, l => l.StartsWith(failed, StringComparison.Ordinal));
+            Assert.DoesNotContain(log, l => l.StartsWith(L.T("core.mp.transport.endpoint_ended"), StringComparison.Ordinal));
+        }
         var connector = rig.Connector(TunnelService.Game);
         await using var stream = await connector.OpenAsync(CancellationToken.None);
         Assert.IsType<SplitStream>(stream);
@@ -421,7 +433,9 @@ public sealed class SplitRoomTests
         var ended = L.T("core.mp.transport.endpoint_ended");
         Assert.True(await WaitAsync(() => { lock (log) return log.Any(l => l.StartsWith(ended, StringComparison.Ordinal)); }));
         // One refusal per leg, each counted once.
-        await WaitUntilAsync(() => rig.Server.Rejected == 2);
+        await WaitUntilAsync(() => rig.Server.Rejected >= 2);
+        await Task.Delay(100);
+        Assert.Equal(2, rig.Server.Rejected);
         Assert.Equal(0, rig.Server.Accepted);
         lock (log)
         {
