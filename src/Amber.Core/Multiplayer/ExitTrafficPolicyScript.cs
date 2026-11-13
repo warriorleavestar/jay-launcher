@@ -200,7 +200,7 @@ internal static class ExitTrafficPolicyScript
             $layers = @('1e5c9fae-8a84-4135-a331-950b54229ecd', 'a3b3ab6b-3564-488c-9117-f34e82142763')
             foreach ($address in $addresses) {
                 $ip = $null
-                if (-not [Net.IPAddress]::TryParse([string]$address, [ref]$ip) -or $ip.ToString() -ne $address -or [Net.IPAddress]::IsLoopback($ip)) { throw 'Unsupported exit underlay address' }
+                if (-not [Net.IPAddress]::TryParse([string]$address, [ref]$ip) -or $ip.ToString() -cne $address -or [Net.IPAddress]::IsLoopback($ip)) { throw 'Unsupported exit underlay address' }
                 $bytes = $ip.GetAddressBytes()
                 if ($ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
                     if ($bytes[0] -eq 0 -or $bytes[0] -ge 224 -or $address -eq $plan.VirtualIp) { throw 'Unsafe exit underlay address' }

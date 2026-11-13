@@ -54,7 +54,7 @@ internal static class ExitRoutingScript
         # host route prefix (/32 or /128); throws for anything else.
         function Get-ExitUnderlayPrefix([string]$address, [string]$virtualIp) {
             $parsed = $null
-            if (-not [Net.IPAddress]::TryParse($address, [ref]$parsed) -or $parsed.ToString() -ne $address -or [Net.IPAddress]::IsLoopback($parsed)) { throw 'Invalid underlay address' }
+            if (-not [Net.IPAddress]::TryParse($address, [ref]$parsed) -or $parsed.ToString() -cne $address -or [Net.IPAddress]::IsLoopback($parsed)) { throw 'Invalid underlay address' }
             if ($parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
                 $bytes = $parsed.GetAddressBytes()
                 if ($bytes[0] -eq 0 -or $bytes[0] -ge 224 -or $address -eq $virtualIp) { throw 'Unsafe underlay IPv4 address' }
