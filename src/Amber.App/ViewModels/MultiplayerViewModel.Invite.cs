@@ -737,8 +737,8 @@ public sealed partial class MultiplayerViewModel
             IsKnocking = false;
             if (guestDirect is not null)
             {
-                await CompleteDirectJoinAsync(guestDirect, credentials.ToRoom(), outcome);
-                return KnockEnd.Joined;
+                // A failed punch leaves the room: the invite may still work (a friend's has more uses), so it stays.
+                return await CompleteDirectJoinAsync(guestDirect, credentials.ToRoom(), outcome) ? KnockEnd.Joined : KnockEnd.NotAnswered;
             }
             if (!StartJoin(credentials.ToRoom())) return KnockEnd.NotAnswered;
             HostFingerprint = outcome.HostFingerprint;
