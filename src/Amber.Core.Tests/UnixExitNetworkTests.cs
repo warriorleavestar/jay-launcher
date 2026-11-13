@@ -102,17 +102,28 @@ public sealed class UnixExitNetworkTests
     {
         Assert.Equal(("fe80::1", "wlan0"), UnixExitNetwork.ParseLinuxRoute("2001:db8::10 from :: via fe80::1 dev wlan0 proto ra src 2001:db8::20 metric 1024 pref medium"));
         Assert.Equal(("fe80::1%en0", "en0"), UnixExitNetwork.ParseMacRoute("   route to: 2001:db8::10\ndestination: default\n    gateway: fe80::1%en0\n  interface: en0\n"));
-        var linux = UnixExitNetwork.LinuxRuleset("amberlan-10000", [("203.0.113.10", "wlan0"), ("2001:db8::10", "wlan0")]);
+        var linux = UnixExitNetwork.LinuxRuleset("amberlan-10000", [("203.0.113.10", "wlan0"), ("2001:db8::10", "wlan0")], [("wlan0", "fe80::1"), ("wlan0", "fe80::1")]);
         Assert.Contains("ip6 daddr 2001:db8::10 oifname \"wlan0\" accept", linux);
-        Assert.Contains("ip6 daddr { fe80::/10, ff02::/16 } accept", linux);
+        // Neighbor discovery only: ICMPv6 with hop limit 255, to the solicited-node group and the gateway, on that device.
+        Assert.Contains("oifname \"wlan0\" ip6 daddr ff02::1:ff00:0/104 ip6 hoplimit 255 icmpv6 type nd-neighbor-solicit accept", linux);
+        Assert.Contains("oifname \"wlan0\" ip6 daddr fe80::1 ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept", linux);
+        Assert.Single(linux.Split('\n'), l => l.Contains("ff02::1:ff00:0/104", StringComparison.Ordinal));
+        // No blanket link-local or multicast permit (mDNS ff02::fb, LLMNR ff02::1:3, other fe80:: hosts stay blocked).
+        Assert.DoesNotContain("fe80::/10", linux);
+        Assert.DoesNotContain("ff02::/16", linux);
         Assert.EndsWith("drop\n  }\n}\n", linux);
         // IPv4 only: no IPv6 exception at all.
         Assert.DoesNotContain("ip6", UnixExitNetwork.LinuxRuleset("amberlan-10000", [("203.0.113.10", "wlan0")]));
-        var mac = UnixExitNetwork.MacRuleset("utun7", [("2001:db8::10", "en0")]).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var mac = UnixExitNetwork.MacRuleset("utun7", [("2001:db8::10", "en0")], [("en0", UnixExitNetwork.NeighborAddress("fe80::1%en0"))]).Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Contains("pass out quick on en0 inet6 from any to 2001:db8::10", mac);
-        Assert.Contains("pass out quick inet6 from any to { fe80::/10, ff02::/16 }", mac);
+        Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to ff02::1:ff00:0/104 icmp6-type neighbrsol", mac);
+        Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to fe80::1 icmp6-type { neighbrsol, neighbradv }", mac);
+        Assert.DoesNotContain(mac, l => l.Contains("fe80::/10", StringComparison.Ordinal) || l.Contains("ff02::/16", StringComparison.Ordinal));
         Assert.Equal("block drop out quick all", mac[^1]);
         Assert.DoesNotContain("inet6", UnixExitNetwork.MacRuleset("utun7", [("203.0.113.10", "en0")]));
+        // An on-link underlay (no gateway) still gets the solicited-node rule; a gateway that isn't an address gets none.
+        Assert.Null(UnixExitNetwork.NeighborAddress("link#6"));
+        Assert.DoesNotContain("daddr fe80", UnixExitNetwork.LinuxRuleset("amberlan-10000", [("2001:db8::10", "wlan0")], [("wlan0", null)]));
 
         if (!OperatingSystem.IsLinux()) return;
         var calls = new List<string>();
@@ -127,6 +138,12 @@ public sealed class UnixExitNetworkTests
             exit.EnterRoutes();
             Assert.Contains("ip -6 -o route get 2001:db8::10", calls);
             Assert.Contains("ip -6 route replace 2001:db8::10/128 via fe80::1 dev wlan0 proto 201", calls);
+            calls.Clear();
+            var rules = "";
+            UnixExitNetwork.RunForTest = (tool, args, input) => { if (tool == "nft" && input is not null) rules = input; calls.Add(tool + " " + string.Join(' ', args)); return (0, ""); };
+            exit.EnterTunnel("amberlan-10000");
+            Assert.Contains("ip6 daddr fe80::1 ip6 hoplimit 255", rules);
+            exit.ExitDns();
             calls.Clear();
             exit.ExitRoutes();
             Assert.Contains("ip -6 route del 2001:db8::10/128 proto 201", calls);

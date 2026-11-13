@@ -195,6 +195,7 @@ internal static class ExitTrafficPolicyScript
             if ([string]$current.InterfaceGuid -ne [string]$adapter.InterfaceGuid) { throw 'Exit adapter identity changed' }
             $tunLuid = Get-ExitPolicyLuid $current
             $underlay = @()
+            $neighbors = @()
             $addresses = @($plan.UnderlayAddresses | Select-Object -Unique)
             if ($addresses.Count -gt 128) { throw 'Too many exit underlay addresses' }
             $layers = @('1e5c9fae-8a84-4135-a331-950b54229ecd', 'a3b3ab6b-3564-488c-9117-f34e82142763')
@@ -221,16 +222,18 @@ internal static class ExitTrafficPolicyScript
                     $underlay += [pscustomobject]@{ Layer=$layers[0]; Type=3; Address=$numeric; Luid=$luid; Index=[uint32]$entries[0].Index }
                 } else {
                     $underlay += [pscustomobject]@{ Layer=$layers[1]; Type=11; Address=[byte[]]$bytes; Luid=$luid; Index=[uint32]$entries[0].Index }
+                    # Neighbor discovery to reach this underlay: the solicited-node multicast group (ff02::1:ff00:0/104)
+                    # and the IPv6 gateway the route goes through, each only on that physical adapter. An on-link
+                    # underlay address is itself the neighbor and already permitted. The packet layer can't match
+                    # ICMPv6 types, so the permit is as narrow as addresses allow: mDNS, LLMNR and other link-local
+                    # hosts stay blocked.
+                    $neighbors += [pscustomobject]@{ Type=0x101; Address=[byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0, 0x01, 0xff, 0,0,0, 104); Luid=$luid; Index=[uint32]$entries[0].Index }
+                    $hop = $null
+                    if ([Net.IPAddress]::TryParse([string]$entries[0].Hop, [ref]$hop) -and $hop.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6 -and -not $hop.Equals([Net.IPAddress]::IPv6Any)) {
+                        if ($hop.IsIPv6Multicast) { throw 'Unexpected IPv6 underlay gateway' }
+                        $neighbors += [pscustomobject]@{ Type=11; Address=[byte[]]$hop.GetAddressBytes(); Luid=$luid; Index=[uint32]$entries[0].Index }
+                    }
                 }
-            }
-            # IPv6 needs neighbor discovery to reach its gateway: with an IPv6 underlay, link-local and link-scope multicast
-            # (fe80::/10, ff02::/16) may leave the physical adapters too. Neither is routed beyond the local link.
-            $linkScope = @()
-            if (@($underlay | Where-Object { $_.Type -eq 11 }).Count -gt 0) {
-                $linkScope = @(
-                    [byte[]]@(0xfe, 0x80, 0,0,0,0,0,0,0,0,0,0,0,0,0,0, 10),
-                    [byte[]]@(0xff, 0x02, 0,0,0,0,0,0,0,0,0,0,0,0,0,0, 16)
-                )
             }
             $interfaceKey = '4cd62a49-59c3-4969-b7f3-bda5d32890a4'
             $indexKey = '667fd755-d695-434a-8af5-d3835a1259bc'
@@ -259,9 +262,15 @@ internal static class ExitTrafficPolicyScript
                         ) })
                     }
                     if ($layer -eq $layers[1]) {
-                        foreach ($scope in $linkScope) {
-                            Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='IPv6 link scope'; Layer=$layer; Permit=$true; Weight=100; Conditions=@(
-                                [pscustomobject]@{ Key=$addressKey; Match=0; Type=0x101; Value=$scope }
+                        $seen = @{}
+                        foreach ($neighbor in $neighbors) {
+                            $id = [string]$neighbor.Luid + '|' + [string]$neighbor.Index + '|' + [BitConverter]::ToString($neighbor.Address)
+                            if ($seen.ContainsKey($id)) { continue }
+                            $seen[$id] = $true
+                            Add-ExitWfpFilter $engine $subLayer ([pscustomobject]@{ Name='IPv6 neighbor discovery'; Layer=$layer; Permit=$true; Weight=100; Conditions=@(
+                                [pscustomobject]@{ Key=$interfaceKey; Match=0; Type=4; Value=$neighbor.Luid },
+                                [pscustomobject]@{ Key=$addressKey; Match=0; Type=$neighbor.Type; Value=$neighbor.Address },
+                                [pscustomobject]@{ Key=$indexKey; Match=0; Type=3; Value=$neighbor.Index }
                             ) })
                         }
                     }

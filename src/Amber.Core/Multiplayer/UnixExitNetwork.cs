@@ -29,6 +29,8 @@ internal sealed class UnixExitNetwork
 
     private readonly ExitNetworkPlan _plan;
     private readonly List<(string Address, string Device)> _routes = [];
+    /// <summary>IPv6 underlay: the gateway each one is reached through (none when on-link), for neighbor discovery.</summary>
+    private readonly List<(string Device, string? Gateway)> _neighbors = [];
     private string? _tun;
     private bool _firewall;
     private string? _pfToken;
@@ -80,6 +82,7 @@ internal sealed class UnixExitNetwork
                 Check("/sbin/route", args);
             }
             _routes.Add((address, device));
+            if (v6) _neighbors.Add((device, NeighborAddress(gateway)));
         }
     }
 
@@ -130,13 +133,13 @@ internal sealed class UnixExitNetwork
         _tun = tun;
         if (OperatingSystem.IsLinux())
         {
-            Check("nft", ["-f", "-"], LinuxRuleset(tun, _routes));
+            Check("nft", ["-f", "-"], LinuxRuleset(tun, _routes, _neighbors));
             _firewall = true;
             EnterLinuxDns(tun);
         }
         else
         {
-            Check("/sbin/pfctl", ["-a", PfAnchor, "-f", "-"], MacRuleset(tun, _routes));
+            Check("/sbin/pfctl", ["-a", PfAnchor, "-f", "-"], MacRuleset(tun, _routes, _neighbors));
             _firewall = true;
             // pf 默认可能没开：-E 打开并拿一个引用令牌，结束时只放掉自己的令牌，不影响别的程序开着的 pf。
             var enable = Run("/sbin/pfctl", ["-E"]);
@@ -145,7 +148,22 @@ internal sealed class UnixExitNetwork
         }
     }
 
-    internal static string LinuxRuleset(string tun, IEnumerable<(string Address, string Device)> underlay)
+    /// <summary>An IPv6 gateway as a plain address for a firewall rule (its %scope dropped: the rule names the device).</summary>
+    internal static string? NeighborAddress(string? gateway) =>
+        gateway is not null && IPAddress.TryParse(gateway.Split('%')[0], out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+            ? new IPAddress(ip.GetAddressBytes()).ToString() : null;
+
+    /// <summary>
+    /// What IPv6 neighbor discovery needs to reach the gateway of an IPv6 underlay, and nothing more: neighbor
+    /// solicitations to the solicited-node multicast group (ff02::1:ff00:0/104) and solicitations and advertisements to
+    /// the gateway itself, as ICMPv6 with hop limit 255 on that device. mDNS, LLMNR and other link-local traffic stay
+    /// blocked. An on-link underlay address is already permitted as a destination.
+    /// </summary>
+    private static IEnumerable<(string Device, string? Gateway)> Neighbors(IEnumerable<(string Device, string? Gateway)>? neighbors) =>
+        (neighbors ?? []).Distinct();
+
+    internal static string LinuxRuleset(string tun, IEnumerable<(string Address, string Device)> underlay,
+        IEnumerable<(string Device, string? Gateway)>? neighbors = null)
     {
         var sb = new StringBuilder();
         sb.Append("table inet ").Append(NftTable).Append(" {\n  chain out {\n    type filter hook output priority -10; policy accept;\n");
@@ -155,13 +173,20 @@ internal sealed class UnixExitNetwork
         var list = underlay.ToList();
         foreach (var (address, device) in list)
             sb.Append(IsV6(address) ? "    ip6 daddr " : "    ip daddr ").Append(address).Append(" oifname \"").Append(device).Append("\" accept\n");
-        // IPv6 needs neighbor discovery to reach its gateway; link-local and link-scope multicast never leave the link.
-        if (list.Any(u => IsV6(u.Address))) sb.Append("    ip6 daddr { fe80::/10, ff02::/16 } accept\n");
+        var devices = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (device, gateway) in Neighbors(neighbors))
+        {
+            if (devices.Add(device))
+                sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ff02::1:ff00:0/104 ip6 hoplimit 255 icmpv6 type nd-neighbor-solicit accept\n");
+            if (gateway is not null)
+                sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ").Append(gateway).Append(" ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept\n");
+        }
         sb.Append("    drop\n  }\n}\n");
         return sb.ToString();
     }
 
-    internal static string MacRuleset(string tun, IEnumerable<(string Address, string Device)> underlay)
+    internal static string MacRuleset(string tun, IEnumerable<(string Address, string Device)> underlay,
+        IEnumerable<(string Device, string? Gateway)>? neighbors = null)
     {
         var sb = new StringBuilder();
         sb.Append("pass out quick on lo0 all\n");
@@ -170,8 +195,15 @@ internal sealed class UnixExitNetwork
         var list = underlay.ToList();
         foreach (var (address, device) in list)
             sb.Append("pass out quick on ").Append(device).Append(IsV6(address) ? " inet6 from any to " : " inet from any to ").Append(address).Append('\n');
-        // IPv6 needs neighbor discovery to reach its gateway; link-local and link-scope multicast never leave the link.
-        if (list.Any(u => IsV6(u.Address))) sb.Append("pass out quick inet6 from any to { fe80::/10, ff02::/16 }\n");
+        // Neighbor discovery only, as on Linux (pf has no hop-limit match; the kernel sends ND with 255).
+        var devices = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (device, gateway) in Neighbors(neighbors))
+        {
+            if (devices.Add(device))
+                sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ff02::1:ff00:0/104 icmp6-type neighbrsol\n");
+            if (gateway is not null)
+                sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ").Append(gateway).Append(" icmp6-type { neighbrsol, neighbradv }\n");
+        }
         sb.Append("block drop out quick all\n");
         return sb.ToString();
     }
@@ -297,6 +329,7 @@ internal sealed class UnixExitNetwork
             else Run("/sbin/route", IsV6(address) ? ["-n", "delete", "-inet6", "-host", address] : ["-n", "delete", "-host", address]);
         }
         _routes.Clear();
+        _neighbors.Clear();
         if (_firewall)
         {
             if (OperatingSystem.IsLinux()) Run("nft", ["delete", "table", "inet", NftTable]);

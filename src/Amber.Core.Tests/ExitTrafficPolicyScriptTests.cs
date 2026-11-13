@@ -237,23 +237,41 @@ public sealed class ExitTrafficPolicyScriptTests
 
     [Fact]
     public Task Ipv6UnderlayGetsTheSameExactExceptionAndNeighborDiscovery() => RunAsync("""
-        $script:Plan.UnderlayAddresses = @('203.0.113.10', '2001:db8::5')
+        $script:Plan.UnderlayAddresses = @('203.0.113.10', '2001:db8::5', '2001:db8::6')
         $script:exitRoutes += [pscustomobject]@{ Prefix='2001:db8::5/128'; Index=7; Guid=$script:PhysicalGuid; Hop='fe80::1'; Metric=1; Owned=$true }
+        $script:exitRoutes += [pscustomobject]@{ Prefix='2001:db8::6/128'; Index=7; Guid=$script:PhysicalGuid; Hop='fe80::1'; Metric=1; Owned=$true }
         Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
         $v4 = '1e5c9fae-8a84-4135-a331-950b54229ecd'
-        # loopback + virtual adapter + underlay + block on each layer, plus two IPv6 link-scope permits.
-        Assert-That ($script:Filters.Count -eq 10) ('unexpected filter count ' + $script:Filters.Count)
+        # loopback + virtual adapter + block on each layer, three underlay permits, and two neighbor permits (not repeated per address).
+        Assert-That ($script:Filters.Count -eq 11) ('unexpected filter count ' + $script:Filters.Count)
         Assert-That (Test-Packet6 700007 '2001:db8::5' 0) 'protected IPv6 underlay was blocked'
         Assert-That (-not (Test-Packet6 900009 '2001:db8::5' 0)) 'IPv6 underlay escaped through another adapter'
-        Assert-That (-not (Test-Packet6 700007 '2001:db8::6' 0)) 'IPv6 exception widened beyond one address'
-        Assert-That (-not (Test-Packet6 700007 '2606:4700::1111' 0)) 'physical IPv6 leaked'
+        Assert-That (-not (Test-Packet6 700007 '2001:db8::7' 0)) 'IPv6 exception widened beyond its addresses'
+        Assert-That (-not (Test-Packet6 700007 '2001:db8:ffff::1' 0)) 'physical IPv6 leaked'
         Assert-That (Test-Packet6 700007 'fe80::1' 0) 'neighbor discovery to the gateway was blocked'
         Assert-That (Test-Packet6 700007 'ff02::1:ff00:1' 0) 'solicited-node multicast was blocked'
+        Assert-That (-not (Test-Packet6 900009 'fe80::1' 0)) 'gateway permit escaped through another adapter'
+        Assert-That (-not (Test-Packet6 900009 'ff02::1:ff00:1' 0)) 'solicited-node permit escaped through another adapter'
+        Assert-That (-not (Test-Packet6 700007 'fe80::2' 0)) 'other link-local hosts leaked'
+        Assert-That (-not (Test-Packet6 700007 'ff02::fb' 0)) 'mDNS leaked'
+        Assert-That (-not (Test-Packet6 700007 'ff02::1:3' 0)) 'LLMNR leaked'
         Assert-That (-not (Test-Packet6 700007 'ff05::2' 0)) 'wider multicast leaked'
         Assert-That (Test-Packet $v4 700007 ([uint32]3405803786) 0) 'IPv4 underlay lost next to IPv6'
         Assert-That (-not (Test-Packet $v4 700007 0x09090909 0)) 'physical IPv4 leaked'
         $rules = @($script:Filters | Where-Object { $_.Name -eq 'Amber exit protected underlay' -and $_.Layer -eq 'a3b3ab6b-3564-488c-9117-f34e82142763' })
-        Assert-That ($rules.Count -eq 1 -and $rules[0].Conditions.Count -eq 3) 'IPv6 underlay permit must require LUID, interface index and address'
+        Assert-That ($rules.Count -eq 2 -and @($rules | Where-Object { $_.Conditions.Count -ne 3 }).Count -eq 0) 'IPv6 underlay permit must require LUID, interface index and address'
+        $nd = @($script:Filters | Where-Object { $_.Name -eq 'Amber exit IPv6 neighbor discovery' })
+        Assert-That ($nd.Count -eq 2 -and @($nd | Where-Object { $_.Conditions.Count -ne 3 }).Count -eq 0) 'neighbor permits must require LUID, interface index and address'
+        Exit-ExitTrafficPolicy
+        """);
+
+    [Fact]
+    public Task OnLinkIpv6UnderlayOnlyAddsTheSolicitedNodeGroup() => RunAsync("""
+        $script:Plan.UnderlayAddresses = @('2001:db8::5')
+        $script:exitRoutes = @([pscustomobject]@{ Prefix='2001:db8::5/128'; Index=7; Guid=$script:PhysicalGuid; Hop='::'; Metric=1; Owned=$true })
+        Enter-ExitTrafficPolicy $script:Adapters[0] $script:Plan
+        Assert-That (Test-Packet6 700007 'ff02::1:ff00:5' 0) 'solicited-node multicast was blocked'
+        Assert-That (-not (Test-Packet6 700007 'fe80::1' 0)) 'link-local opened without a gateway'
         Exit-ExitTrafficPolicy
         """);
 
