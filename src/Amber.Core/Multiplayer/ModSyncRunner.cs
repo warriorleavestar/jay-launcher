@@ -104,12 +104,7 @@ public sealed class ModSyncRunner
     }
 
     /// <summary>A bare file name: no folders, no characters Windows refuses.</summary>
-    internal static string SafeFileName(string name)
-    {
-        var bare = Path.GetFileName(name.Replace('\\', '/'));
-        var clean = new string([.. bare.Where(c => !char.IsControl(c) && c is not ('<' or '>' or ':' or '"' or '|' or '?' or '*'))]).Trim(' ', '.');
-        return clean.Length == 0 ? "mod.jar" : clean;
-    }
+    internal static string SafeFileName(string name) => FileNames.Bare(name, "mod.jar");
 
     private static bool Sha1Matches(string path, string sha1)
     {
