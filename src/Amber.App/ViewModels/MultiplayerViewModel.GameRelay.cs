@@ -90,7 +90,7 @@ public sealed partial class MultiplayerViewModel
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (_gameRelay != relay) return;
-                FailRoomOnAdapter(e);
+                FailRoomOnAdapter(e, relay.Port);
             });
         }
     }

@@ -172,8 +172,9 @@ public sealed partial class MultiplayerViewModel
         {
             var addresses = await direct.PrepareAsync();
             AttachDirect(direct, room);
-            // Direct rooms never wrap (TunnelSettings.Default): in whole-LAN mode guests reach the virtual address.
-            AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, TunnelSettings.Default.Wraps));
+            // Direct rooms never wrap (their credentials use TunnelSettings.Default, General): in whole-LAN mode guests
+            // reach the virtual address.
+            AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
             relay = null;
             Mode = "host";
             RoomCodeText = "";

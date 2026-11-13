@@ -190,20 +190,21 @@ public sealed class GamePortRelayTests
         using var game = new EchoGame(0x5A);
         await using var relay = new GamePortRelay();
         relay.SetTarget(game.Port);
-        // The adapter's address shows up on the third try (here it stands in as a second loopback address).
+        // The adapter's address shows up on the third try (a loopback listener stands in for it).
         var tries = 0;
-        var bound = relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), TimeSpan.FromSeconds(10), (_, port) =>
+        TcpListener? adapter = null;
+        var bound = relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), TimeSpan.FromSeconds(10), (_, _) =>
         {
             if (++tries < 3) throw new SocketException((int)SocketError.AddressNotAvailable);
-            var l = new TcpListener(IPAddress.Parse("127.0.0.2"), port);
-            l.Start();
-            return l;
+            adapter = new TcpListener(IPAddress.Loopback, 0);
+            adapter.Start();
+            return adapter;
         });
         Assert.False(relay.ListensOnAdapter);
         await bound.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(relay.ListensOnAdapter);
         using var client = new TcpClient();
-        await client.ConnectAsync(IPAddress.Parse("127.0.0.2"), relay.Port);
+        await client.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)adapter!.LocalEndpoint).Port);
         var s = client.GetStream();
         await s.WriteAsync(new byte[] { 7 });
         var reply = new byte[2];
@@ -227,14 +228,15 @@ public sealed class GamePortRelayTests
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
         var vm = new MultiplayerViewModel(service) { RelayTypingDelay = TimeSpan.Zero };
         vm.FullLanMode = true;
-        // Only where the whole-LAN scope exists on this platform.
+        // Where this platform has no whole-LAN scope the switch stays off; the rest needs it.
+        Assert.Equal(vm.CanUseFullLan, vm.FullLanMode);
         if (!vm.FullLanMode) return;
         var prepared = vm.PrepareGameRelayForTest();
         Pump(() => prepared.IsCompleted);
+        // No "needs the game first": the room waits on a relay like any other.
         Assert.True(prepared.Result);
-        // The default transport wraps: the room waits on a relay like any other.
         Assert.True(vm.HasGameRelay);
-        Assert.NotEqual("multiplayer.relay.full_lan_no_game", vm.StatusInfo?.Key);
+        Assert.True(vm.IsWaitingForGame);
         vm.StopCommand.Execute(null);
     });
 

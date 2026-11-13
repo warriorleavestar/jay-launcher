@@ -797,7 +797,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     }
 
     /// <summary>How long a whole-LAN session may take to report that EasyTier and its adapter are up.</summary>
-    internal static readonly TimeSpan ElevatedStartWait = TimeSpan.FromSeconds(60);
+    /// Counted from after the permission prompt (starting the session waits for it); generous for a first adapter install.
+    internal static readonly TimeSpan ElevatedStartWait = TimeSpan.FromSeconds(120);
 
     /// <summary>
     /// The elevated helper starts EasyTier in the background after the room is set up. If it doesn't report ready in
@@ -865,18 +866,19 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (_transport != transport) return;
-                FailRoomOnAdapter(e);
+                FailRoomOnAdapter(e, server.Port);
             });
         }
     }
 
     /// <summary>A listener on the virtual adapter never came up: end the room with the reason.</summary>
-    private void FailRoomOnAdapter(System.Net.Sockets.SocketException e)
+    /// <param name="port">The port that listener wanted, for the message.</param>
+    private void FailRoomOnAdapter(System.Net.Sockets.SocketException e, int port)
     {
         StopCommand.Execute(null);
         SetStatus(e.SocketErrorCode == System.Net.Sockets.SocketError.AddressNotAvailable
             ? StatusMessage.Failure("multiplayer.transport.address_not_ready", e, ErrorText.Of(e))
-            : StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
+            : StatusMessage.Failure("multiplayer.transport.adapter_port_failed", e, port, ErrorText.Of(e)));
     }
 
     private void StopTransport()
