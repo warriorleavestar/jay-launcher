@@ -396,6 +396,7 @@
   "core.mp.exit.relay_unreadable": "經彼上網：有轉驛之址不可讀。",
   "core.mp.exit.relay_unresolved": "不能查轉驛 {0} 之址（{1}），經彼上網未始。",
   "core.mp.exit.relay_domain": "經彼上網，今唯直連之房可用。此房經轉驛連彼，故暫不可用。",
+  "core.mp.exit.replan_failed": "經彼上網：去已離者之址而重啟，未成：{0}",
   "core.mp.exit.relay_no_address": "彼無可留於彼連之外之址",
   "core.mp.exit.underlay_address": "出口承載之址須為 IP 址，不可用網域或命令之文。",
   "core.mp.exit.underlayunsafe": "出口承載之址不可為未指之址、多播、IPv6 鏈路本地之址或房之虛址。",

@@ -154,11 +154,14 @@ internal sealed class UnixExitNetwork
             ? new IPAddress(ip.GetAddressBytes()).ToString() : null;
 
     /// <summary>
-    /// What IPv6 neighbor discovery needs to reach the gateway of an IPv6 underlay, and nothing more: neighbor
-    /// solicitations to the solicited-node multicast group (ff02::1:ff00:0/104) and solicitations and advertisements to
-    /// the gateway itself, as ICMPv6 with hop limit 255 on that device. mDNS, LLMNR and other link-local traffic stay
-    /// blocked. An on-link underlay address is already permitted as a destination.
+    /// What an IPv6 underlay needs on its device, and nothing more: neighbor solicitations to the solicited-node
+    /// multicast group (ff02::1:ff00:0/104); solicitations and advertisements to link-local neighbors (the gateway, or an
+    /// on-link peer asking from its link-local address) and to a gateway outside fe80::/10, as ICMPv6 with hop limit 255;
+    /// and DHCPv6 from port 546 to the servers group ff02::1:2 port 547, so the device keeps its address. mDNS, LLMNR
+    /// and other link-local traffic stay blocked. An on-link underlay address is already permitted as a destination.
     /// </summary>
+    private static bool IsLinkLocal(string address) => IPAddress.TryParse(address, out var ip) && ip.IsIPv6LinkLocal;
+
     private static IEnumerable<(string Device, string? Gateway)> Neighbors(IEnumerable<(string Device, string? Gateway)>? neighbors) =>
         (neighbors ?? []).Distinct();
 
@@ -177,8 +180,12 @@ internal sealed class UnixExitNetwork
         foreach (var (device, gateway) in Neighbors(neighbors))
         {
             if (devices.Add(device))
+            {
                 sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ff02::1:ff00:0/104 ip6 hoplimit 255 icmpv6 type nd-neighbor-solicit accept\n");
-            if (gateway is not null)
+                sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr fe80::/10 ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept\n");
+                sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ff02::1:2 udp sport 546 udp dport 547 accept\n");
+            }
+            if (gateway is not null && !IsLinkLocal(gateway))
                 sb.Append("    oifname \"").Append(device).Append("\" ip6 daddr ").Append(gateway).Append(" ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept\n");
         }
         sb.Append("    drop\n  }\n}\n");
@@ -200,8 +207,12 @@ internal sealed class UnixExitNetwork
         foreach (var (device, gateway) in Neighbors(neighbors))
         {
             if (devices.Add(device))
+            {
                 sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ff02::1:ff00:0/104 icmp6-type neighbrsol\n");
-            if (gateway is not null)
+                sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to fe80::/10 icmp6-type { neighbrsol, neighbradv }\n");
+                sb.Append("pass out quick on ").Append(device).Append(" inet6 proto udp from any port 546 to ff02::1:2 port 547\n");
+            }
+            if (gateway is not null && !IsLinkLocal(gateway))
                 sb.Append("pass out quick on ").Append(device).Append(" inet6 proto ipv6-icmp from any to ").Append(gateway).Append(" icmp6-type { neighbrsol, neighbradv }\n");
         }
         sb.Append("block drop out quick all\n");

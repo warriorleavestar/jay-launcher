@@ -104,26 +104,42 @@ public sealed class UnixExitNetworkTests
         Assert.Equal(("fe80::1%en0", "en0"), UnixExitNetwork.ParseMacRoute("   route to: 2001:db8::10\ndestination: default\n    gateway: fe80::1%en0\n  interface: en0\n"));
         var linux = UnixExitNetwork.LinuxRuleset("amberlan-10000", [("203.0.113.10", "wlan0"), ("2001:db8::10", "wlan0")], [("wlan0", "fe80::1"), ("wlan0", "fe80::1")]);
         Assert.Contains("ip6 daddr 2001:db8::10 oifname \"wlan0\" accept", linux);
-        // Neighbor discovery only: ICMPv6 with hop limit 255, to the solicited-node group and the gateway, on that device.
+        // Neighbor discovery only: ICMPv6 with hop limit 255, to the solicited-node group and link-local neighbors
+        // (the gateway, or an on-link peer asking from its link-local address), on that device.
         Assert.Contains("oifname \"wlan0\" ip6 daddr ff02::1:ff00:0/104 ip6 hoplimit 255 icmpv6 type nd-neighbor-solicit accept", linux);
-        Assert.Contains("oifname \"wlan0\" ip6 daddr fe80::1 ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept", linux);
+        Assert.Contains("oifname \"wlan0\" ip6 daddr fe80::/10 ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept", linux);
+        // DHCPv6 renewals keep the device's address.
+        Assert.Contains("oifname \"wlan0\" ip6 daddr ff02::1:2 udp sport 546 udp dport 547 accept", linux);
         Assert.Single(linux.Split('\n'), l => l.Contains("ff02::1:ff00:0/104", StringComparison.Ordinal));
-        // No blanket link-local or multicast permit (mDNS ff02::fb, LLMNR ff02::1:3, other fe80:: hosts stay blocked).
-        Assert.DoesNotContain("fe80::/10", linux);
+        Assert.Single(linux.Split('\n'), l => l.Contains("fe80::/10", StringComparison.Ordinal));
+        // Every link-local or multicast permit names its device and the ND or DHCPv6 message: no plain fe80::/10 or
+        // ff02::/16 permit (mDNS ff02::fb, LLMNR ff02::1:3, DNS or TCP to the gateway stay blocked).
+        Assert.All(linux.Split('\n').Where(l => l.Contains("fe80", StringComparison.Ordinal) || l.Contains("ff02", StringComparison.Ordinal)),
+            l => Assert.True(l.Contains("oifname \"wlan0\"", StringComparison.Ordinal) && (l.Contains("icmpv6 type", StringComparison.Ordinal) || l.Contains("udp sport 546 udp dport 547", StringComparison.Ordinal)), l));
         Assert.DoesNotContain("ff02::/16", linux);
+        // A gateway outside fe80::/10 gets its own rule, also ND only.
+        Assert.Contains("oifname \"wlan0\" ip6 daddr 2001:db8:1::1 ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept",
+            UnixExitNetwork.LinuxRuleset("amberlan-10000", [("2001:db8::10", "wlan0")], [("wlan0", "2001:db8:1::1")]));
         Assert.EndsWith("drop\n  }\n}\n", linux);
         // IPv4 only: no IPv6 exception at all.
         Assert.DoesNotContain("ip6", UnixExitNetwork.LinuxRuleset("amberlan-10000", [("203.0.113.10", "wlan0")]));
         var mac = UnixExitNetwork.MacRuleset("utun7", [("2001:db8::10", "en0")], [("en0", UnixExitNetwork.NeighborAddress("fe80::1%en0"))]).Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Contains("pass out quick on en0 inet6 from any to 2001:db8::10", mac);
         Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to ff02::1:ff00:0/104 icmp6-type neighbrsol", mac);
-        Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to fe80::1 icmp6-type { neighbrsol, neighbradv }", mac);
-        Assert.DoesNotContain(mac, l => l.Contains("fe80::/10", StringComparison.Ordinal) || l.Contains("ff02::/16", StringComparison.Ordinal));
+        Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to fe80::/10 icmp6-type { neighbrsol, neighbradv }", mac);
+        Assert.Contains("pass out quick on en0 inet6 proto udp from any port 546 to ff02::1:2 port 547", mac);
+        Assert.All(mac.Where(l => l.Contains("fe80", StringComparison.Ordinal) || l.Contains("ff02", StringComparison.Ordinal)),
+            l => Assert.True(l.StartsWith("pass out quick on en0 inet6 proto ", StringComparison.Ordinal) && (l.Contains("icmp6-type", StringComparison.Ordinal) || l.Contains("port 546 to ff02::1:2 port 547", StringComparison.Ordinal)), l));
+        Assert.DoesNotContain(mac, l => l.Contains("ff02::/16", StringComparison.Ordinal));
+        Assert.Contains("pass out quick on en0 inet6 proto ipv6-icmp from any to 2001:db8:1::1 icmp6-type { neighbrsol, neighbradv }",
+            UnixExitNetwork.MacRuleset("utun7", [("2001:db8::10", "en0")], [("en0", "2001:db8:1::1")]));
         Assert.Equal("block drop out quick all", mac[^1]);
         Assert.DoesNotContain("inet6", UnixExitNetwork.MacRuleset("utun7", [("203.0.113.10", "en0")]));
-        // An on-link underlay (no gateway) still gets the solicited-node rule; a gateway that isn't an address gets none.
+        // An on-link underlay (no gateway) still answers its neighbors, which may ask from link-local addresses.
         Assert.Null(UnixExitNetwork.NeighborAddress("link#6"));
-        Assert.DoesNotContain("daddr fe80", UnixExitNetwork.LinuxRuleset("amberlan-10000", [("2001:db8::10", "wlan0")], [("wlan0", null)]));
+        var onLink = UnixExitNetwork.LinuxRuleset("amberlan-10000", [("2001:db8::10", "wlan0")], [("wlan0", null)]);
+        Assert.Contains("oifname \"wlan0\" ip6 daddr fe80::/10 ip6 hoplimit 255 icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert } accept", onLink);
+        Assert.Contains("ip6 daddr ff02::1:ff00:0/104", onLink);
 
         if (!OperatingSystem.IsLinux()) return;
         var calls = new List<string>();
@@ -142,7 +158,7 @@ public sealed class UnixExitNetworkTests
             var rules = "";
             UnixExitNetwork.RunForTest = (tool, args, input) => { if (tool == "nft" && input is not null) rules = input; calls.Add(tool + " " + string.Join(' ', args)); return (0, ""); };
             exit.EnterTunnel("amberlan-10000");
-            Assert.Contains("ip6 daddr fe80::1 ip6 hoplimit 255", rules);
+            Assert.Contains("oifname \"wlan0\" ip6 daddr fe80::/10 ip6 hoplimit 255", rules);
             exit.ExitDns();
             calls.Clear();
             exit.ExitRoutes();

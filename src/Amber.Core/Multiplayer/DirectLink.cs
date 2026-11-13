@@ -222,6 +222,15 @@ public sealed class DirectPeer
     internal Socket? Local { get; set; }
     internal IPEndPoint? LocalClient { get; set; }
     internal readonly ConcurrentDictionary<uint, long> PendingPings = new();
+    /// <summary>The random part of each ping still waiting for its answer, by sequence number.</summary>
+    internal readonly ConcurrentDictionary<uint, byte[]> PingNonces = new();
+    /// <summary>
+    /// This address answered a ping carrying a fresh random value sent to it on this bridge, so traffic really goes both
+    /// ways with whoever holds the bridge key there. A replayed probe or probe answer from a forged source address never
+    /// gets that far. Only such peers may get an exception from the member exit's traffic gate.
+    /// </summary>
+    public bool Verified => Volatile.Read(ref _verified);
+    internal bool _verified;
     /// <summary>房主：这条桥的数据转发到本机哪个 EasyTier（批准前是大厅，批准后是房间）。</summary>
     internal int TargetPort;
     /// <summary>Host: cached loopback endpoint for <see cref="TargetPort"/>, so forwarding doesn't allocate one per packet.</summary>
@@ -295,6 +304,17 @@ public sealed class DirectBridge : IAsyncDisposable
 
     public event Action<DirectPeer>? Connected;
     public event Action<DirectPeer, JsonObject>? ControlReceived;
+    /// <summary>A peer was dropped for good (timed out, kicked, or every path dropped), so nothing may keep trusting its address.</summary>
+    public event Action<DirectPeer>? Removed;
+
+    private void RaiseRemoved(IEnumerable<DirectPeer> peers)
+    {
+        foreach (var peer in peers)
+        {
+            try { Removed?.Invoke(peer); }
+            catch (Exception e) when (e is not OperationCanceledException) { _log(L.F("core.mp.punch.controlerror", e.GetType().Name)); }
+        }
+    }
 
     /// <summary>
     /// One UDP socket for every path: dual-stack IPv6 when the OS has IPv6, otherwise plain IPv4
@@ -617,6 +637,10 @@ public sealed class DirectBridge : IAsyncDisposable
             case Pong when _peers.TryGetValue(from, out var p2) && payload.Length >= 4:
                 p2.LastSeen = DateTime.UtcNow;
                 var seq = BinaryPrimitives.ReadUInt32BigEndian(payload);
+                // The answer to this address's own fresh ping, from this address: the path works both ways.
+                if (payload.Length >= 4 + PingNonceLength && p2.PingNonces.TryRemove(seq, out var nonce)
+                    && CryptographicOperations.FixedTimeEquals(nonce, payload.AsSpan(4, PingNonceLength)))
+                    Volatile.Write(ref p2._verified, true);
                 if (p2.PendingPings.TryRemove(seq, out var sentAt))
                 {
                     Interlocked.Increment(ref p2.PongsReceived);
@@ -630,6 +654,8 @@ public sealed class DirectBridge : IAsyncDisposable
                 break;
         }
     }
+
+    internal const int PingNonceLength = 16;
 
     /// <summary>房主最多同时接这么多个加入方（每个一个本机套接字和一个转发循环）。</summary>
     public const int MaxHostPeers = 32;
@@ -731,6 +757,7 @@ public sealed class DirectBridge : IAsyncDisposable
     /// <summary>房主：移除超过 PeerTimeout 没有任何回应的加入方（离开了、换了地址、掉线了）。</summary>
     private void EvictStale()
     {
+        var evicted = new List<DirectPeer>();
         lock (_peerGate)
         {
             var now = DateTime.UtcNow;
@@ -746,8 +773,10 @@ public sealed class DirectBridge : IAsyncDisposable
                 if (now - peer.LastSeen <= PeerTimeout || !_peers.TryRemove(endpoint, out var removed)) continue;
                 removed.Local?.Dispose();
                 _log(L.F("core.mp.punch.peerevicted", endpoint));
+                evicted.Add(removed);
             }
         }
+        RaiseRemoved(evicted);
     }
 
     private async Task ForwardToLocalAsync(DirectPeer peer, ReadOnlyMemory<byte> data)
@@ -853,11 +882,18 @@ public sealed class DirectBridge : IAsyncDisposable
                 seq++;
                 // 超过 5 秒没回的算丢包。
                 foreach (var (s, at) in peer.PendingPings)
-                    if (_clock.Elapsed.TotalMilliseconds - at / 1000.0 > 5000) peer.PendingPings.TryRemove(s, out _);
+                    if (_clock.Elapsed.TotalMilliseconds - at / 1000.0 > 5000)
+                    {
+                        peer.PendingPings.TryRemove(s, out _);
+                        peer.PingNonces.TryRemove(s, out _);
+                    }
                 peer.PendingPings[seq] = (long)(_clock.Elapsed.TotalMilliseconds * 1000);
                 Interlocked.Increment(ref peer.PingsSent);
-                var payload = new byte[4];
+                // Sequence number, then a random value the answer must echo (older versions echo the whole payload).
+                var payload = new byte[4 + PingNonceLength];
                 BinaryPrimitives.WriteUInt32BigEndian(payload, seq);
+                RandomNumberGenerator.Fill(payload.AsSpan(4));
+                peer.PingNonces[seq] = payload[4..];
                 await SendRawAsync(Seal(Ping, payload), peer.Remote, _cts.Token);
                 if (DateTime.UtcNow - peer.LastSeen > ReprobeAfter)
                     await SendRawAsync(Seal(Probe, BuildProbePayload(_probeRound)), peer.Remote, _cts.Token);
@@ -917,6 +953,7 @@ public sealed class DirectBridge : IAsyncDisposable
             peer.Local?.Dispose();
         }
         _log(L.F("core.mp.direct.kicked", peer.Remote));
+        RaiseRemoved([peer]);
     }
 
     /// <summary>房主：这条桥的随机挑战（批准后的证明对它做 HMAC）。每条桥一个，第一次要时生成。</summary>
@@ -932,6 +969,7 @@ public sealed class DirectBridge : IAsyncDisposable
     /// <summary>重新验证远端路径；矩阵可保留本地传输端点，避免破坏仍在运行的 EasyTier 会话。</summary>
     public void DropPeers(bool preserveLocalTransport = false)
     {
+        var dropped = new List<DirectPeer>();
         lock (_peerGate)
         {
             if (!preserveLocalTransport)
@@ -955,9 +993,11 @@ public sealed class DirectBridge : IAsyncDisposable
                 {
                     peer.Local?.Dispose();
                     peer.Revocation.Dispose();
+                    dropped.Add(peer);
                 }
             }
         }
+        RaiseRemoved(dropped);
     }
 
     public async ValueTask DisposeAsync()
