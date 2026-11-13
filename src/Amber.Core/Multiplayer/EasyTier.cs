@@ -24,13 +24,13 @@ public static class EasyTierRelease
     /// <summary>The upstream EasyTier version the hardened build is based on.</summary>
     public const string Version = "2.6.4";
     /// <summary>Release tag of Jay's hardened build.</summary>
-    public const string ReleaseTag = "jay-v2.6.4-3";
+    public const string ReleaseTag = "jay-v2.6.4-4";
     /// <summary>First 12 hex digits of the hardened build's commit; part of every package name.</summary>
-    public const string Commit = "9407746b1ce1";
+    public const string Commit = "b26dc3d4756d";
     /// <summary>The hardened build's full commit, as the trustees' signature names it.</summary>
-    public const string FullCommit = "9407746b1ce1dc4d977441c47dfdcb303363a62a";
+    public const string FullCommit = "b26dc3d4756de903d8a06c6574c9f68c6ec3a377";
     /// <summary>Signature seq of this build: one more for every hardened release.</summary>
-    public const long Seq = 3;
+    public const long Seq = 4;
     /// <summary>Component name in the trustees' signature (<see cref="ReleaseStatement.Components"/>).</summary>
     public const string Component = "easytier";
     /// <summary>Install folder name: a new hardened build never reuses files from an older or an upstream install.</summary>
@@ -57,13 +57,13 @@ public static class EasyTierRelease
 
     internal static Asset For(string os, Architecture arch) => (os, arch) switch
     {
-        ("windows", Architecture.X64) => A("windows-x86_64", "cdb113651de1f37244f16d405447806a76cd9012780a4e519ed7eba062306888", 11_621_165, true),
-        ("windows", Architecture.Arm64) => A("windows-arm64", "a5ce68a4a6f0e458e10ff3dbabadedacc6ddcf621bd5c4338efe613cabfceefa", 10_643_891, true),
-        ("windows", Architecture.X86) => A("windows-i686", "32e8d1c6b06ba53614c5581295d317f1bcf1d044398631ab486c616e2e9cfe7b", 11_223_763, true),
-        ("macos", Architecture.X64) => A("macos-x86_64", "74e059185ba6cc32e3464cad66eab0ff8c86c5cbbb12b51ffaa41dda38a3724b", 12_104_239),
-        ("macos", Architecture.Arm64) => A("macos-aarch64", "57063f611183f30804f3104498859166845eaa7b9e93a8a769cedb9eca66bc79", 10_738_210),
-        ("linux", Architecture.X64) => A("linux-x86_64", "6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300", 13_500_986),
-        ("linux", Architecture.Arm64) => A("linux-aarch64", "6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac", 12_087_737),
+        ("windows", Architecture.X64) => A("windows-x86_64", "33d81a62d2fe08d94b0ed07cfd13bdf648bbe46171dae9a3ebaa4be914383ba5", 11_679_904, true),
+        ("windows", Architecture.Arm64) => A("windows-arm64", "0ac9bfb7f1b466c31b54ec514ce8da5dd07419caefd904eb130db780dc079c3b", 10_663_754, true),
+        ("windows", Architecture.X86) => A("windows-i686", "c5e41fc41f2c29e2810a698959c2d302737a03fb975cd4f17121377c9d5742ac", 11_259_092, true),
+        ("macos", Architecture.X64) => A("macos-x86_64", "0db6718e8a8152d4f0afe6521fa9ff3af2798051f0aae803f2aaea4598ae5fdd", 12_165_400),
+        ("macos", Architecture.Arm64) => A("macos-aarch64", "e305be31d9df87fc2c3c2f3ca4fcbabf1931de9f0baef2861f28a166b8441718", 10_749_315),
+        ("linux", Architecture.X64) => A("linux-x86_64", "1ec71827263dd0d25974b430ddcd92d6f6c5a29407e6909c1bed26e19aa083c7", 13_543_673),
+        ("linux", Architecture.Arm64) => A("linux-aarch64", "d0223401dfd4b3614c06b55e5b14f0668be882bda1a31113a6dfd7accac0b7bf", 12_134_165),
         _ => throw new PlatformNotSupportedException(L.F("core.mp.component.unsupportedplatform", os, arch)),
     };
 
