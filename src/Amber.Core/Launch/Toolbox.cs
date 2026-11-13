@@ -186,17 +186,21 @@ public sealed class UpdateChecker(HttpClient http)
         using var scope = Amber.Core.Net.NetworkPolicy.Scope(Amber.Core.Net.NetworkCategory.UpdateCheck);
         using var doc = JsonDocument.Parse(await http.GetStringAsync(feedUrl, ct));
         var root = doc.RootElement;
-        var tag = (root.TryGetProperty("tag_name", out var t) ? t.GetString() : root.TryGetProperty("version", out var v) ? v.GetString() : null)
-                  ?? throw new InvalidDataException(L.T("core.launch.update.missingversion"));
-        var url = root.TryGetProperty("html_url", out var u) ? u.GetString() : root.TryGetProperty("url", out var u2) ? u2.GetString() : null;
+        // A reply of the wrong shape (not an object, a field that is not a string) is a feed without that field.
+        var tag = Text(root, "tag_name") ?? Text(root, "version") ?? throw new InvalidDataException(L.T("core.launch.update.missingversion"));
+        var url = Text(root, "html_url") ?? Text(root, "url");
         if (url is not null)
         {
             if (!TryGetSafeUpdateUrl(url, out var validated)) throw new InvalidDataException(L.T("tools.download.invalid_url"));
             url = validated!.AbsoluteUri;
         }
-        var notes = root.TryGetProperty("body", out var b) ? b.GetString() : null;
+        var notes = Text(root, "body");
         return IsNewer(tag, currentVersion) ? new UpdateInfo(tag.TrimStart('v'), url, notes) : null;
     }
+
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() : null;
 
     public static bool IsNewer(string candidate, string current) =>
         Version.TryParse(Normalize(candidate), out var a) && Version.TryParse(Normalize(current), out var b) && a > b;

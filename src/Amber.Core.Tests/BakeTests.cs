@@ -319,11 +319,28 @@ public sealed class BakeTests : IDisposable
         Assert.Equal(["0.3.0-proto"], Directory.GetDirectories(install).Select(Path.GetFileName));
     }
 
+    [Fact]
+    public void ManifestEntriesOfTheWrongTypeAreABadPackageNotACrash()
+    {
+        // A class path entry that is not a string is no file the manifest vouches for.
+        var bad = Package(Path.Combine(_root, "pkg-cp", "amber-ul-cp"), tweak: m => m["classpath"] = new JsonArray("loader.jar", 1));
+        Assert.Equal("package_bad", Assert.Throws<BakeException>(() => BakePackage.Read(bad)).Code);
+        // A game version that is not a string is skipped.
+        var odd = Package(Path.Combine(_root, "pkg-platforms", "amber-ul-platforms"),
+            tweak: m => m["platforms"] = JsonNode.Parse("""{"neoforge":[1,"1.21.1",null,{}],"forge":"1.20.1"}"""));
+        var package = BakePackage.Read(odd);
+        Assert.Equal(["1.21.1"], package.Platforms["neoforge"]);
+        Assert.Empty(package.Platforms["forge"]);
+    }
+
     [Theory]
     [InlineData("..")]
     [InlineData(".")]
     [InlineData("0.3.0.")]
     [InlineData("-0.3.0")]
+    [InlineData("CON")]
+    [InlineData("nul.1")]
+    [InlineData("com1")]
     public void LoaderVersionThatIsNotAPlainFolderNameIsRefused(string version)
     {
         // The version names the folder that is deleted and replaced: ".." would be the runtime folder itself.

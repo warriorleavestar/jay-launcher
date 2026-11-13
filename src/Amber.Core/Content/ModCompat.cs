@@ -100,7 +100,7 @@ public static partial class ModCompat
             }
             per["fabric"] = new LoaderRequirement(mc, "fabric", deps);
         }
-        if (ReadJson(zip, "quilt.mod.json", budget)?["quilt_loader"] is JsonObject quilt)
+        if (ReadJson(zip, "quilt.mod.json", budget) is JsonObject quiltRoot && quiltRoot["quilt_loader"] is JsonObject quilt)
         {
             loaders.Add("quilt");
             AddId(ids, quilt["id"]);
@@ -137,8 +137,8 @@ public static partial class ModCompat
         {
             // 有 metadata.json 就按它列的；老一点的（比如 1.20.1 的 Connector）没有，就看 META-INF/jarjar/ 下所有 jar。
             // Fabric 的 jars 字段列的内嵌 jar 也一起看。
-            IEnumerable<string> paths = ReadJson(zip, "META-INF/jarjar/metadata.json", budget)?["jars"] is JsonArray listed
-                ? listed.Select(j => Str(j?["path"])).OfType<string>()
+            IEnumerable<string> paths = ReadJson(zip, "META-INF/jarjar/metadata.json", budget) is JsonObject jarjar && jarjar["jars"] is JsonArray listed
+                ? listed.OfType<JsonObject>().Select(j => Str(j["path"])).OfType<string>()
                 : zip.Entries.Where(e => e.FullName.StartsWith("META-INF/jarjar/", StringComparison.Ordinal) && e.FullName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)).Select(e => e.FullName);
             paths = paths.Concat(fabricJars);
             var hadOwn = loaders.Count > 0;

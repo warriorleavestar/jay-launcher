@@ -323,6 +323,16 @@ public class M5Tests : IDisposable
         Assert.Null(await checker.CheckAsync("https://u.example/feed", "1.2.0"));
     }
 
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"v1.2.0\"")]
+    [InlineData("{\"tag_name\":5}")]
+    public async Task UpdateChecker_AFeedOfTheWrongShapeIsAFeedWithoutAVersion(string json)
+    {
+        var fake = new FakeHttp().On("https://u.example/feed", json);
+        await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateChecker(new HttpClient(fake)).CheckAsync("https://u.example/feed", "1.0.0"));
+    }
+
     [Fact]
     public void LaunchScript_NeverContainsRealToken()
     {

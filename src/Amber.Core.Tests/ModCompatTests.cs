@@ -103,6 +103,19 @@ public class ModCompatTests : IDisposable
         Assert.Equal(["fabric"], fabric.Loaders);
     }
 
+    [Theory]
+    [InlineData("quilt.mod.json", "[]")]
+    [InlineData("quilt.mod.json", "\"quilt\"")]
+    [InlineData("META-INF/jarjar/metadata.json", "[]")]
+    [InlineData("META-INF/jarjar/metadata.json", """{"jars":["a.jar",7,{"path":5}]}""")]
+    public void MetadataThatIsNotAnObjectIsReadAsIfItWereAbsent(string entry, string json)
+    {
+        // Indexing a JSON array or string by name throws; a downloaded jar with such a file must still be readable.
+        var mod = ModCompat.Read(Jar("odd.jar", ("fabric.mod.json", """{"id":"f"}"""), (entry, json)))!;
+        Assert.Equal(["fabric"], mod.Loaders);
+        Assert.Equal(["f"], mod.Ids);
+    }
+
     /// <summary>像 Sinytra Connector 的 -full.jar：外壳没有元数据，真正的模组在 META-INF/jarjar 里。</summary>
     [Fact]
     public void ReadsNestedJarJarMods()

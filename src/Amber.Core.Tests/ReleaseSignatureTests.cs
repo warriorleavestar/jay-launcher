@@ -376,25 +376,30 @@ public sealed class ReleaseSignatureTests : IDisposable
     }
 
     [Theory]
-    [InlineData("[]")]
-    [InlineData("\"v9.9.9\"")]
-    [InlineData("{\"tag_name\":5}")]
-    [InlineData("{\"tag_name\":\"v9.9.9\",\"html_url\":7}")]
-    [InlineData("{\"tag_name\":\"v9.9.9\",\"body\":[1],\"assets\":[1,\"x\",{\"name\":3},{\"name\":\"a.zip\",\"browser_download_url\":{}}]}")]
-    public async Task UpdateCheckSurvivesAFeedOfTheWrongShape(string json)
+    [InlineData("[]", false)]
+    [InlineData("\"v9.9.9\"", false)]
+    [InlineData("{\"tag_name\":5}", false)]
+    [InlineData("{\"tag_name\":\"v9.9.9\",\"html_url\":7}", true)]
+    [InlineData("{\"tag_name\":\"v9.9.9\",\"body\":[1],\"assets\":[1,\"x\",{\"name\":3},{\"name\":\"a.zip\",\"browser_download_url\":{}}]}", true)]
+    public async Task UpdateCheckSurvivesAFeedOfTheWrongShape(string json, bool namesAVersion)
     {
-        // A feed address that returns a list, an error page shaped as JSON or wrongly typed fields must end as
-        // "check failed" or "unsigned", never as an InvalidOperationException out of JsonElement.
+        // A feed address that returns a list, an error page shaped as JSON or wrongly typed fields never ends as an
+        // InvalidOperationException out of JsonElement: without a version the check fails, with one the update is
+        // reported as unsigned and the wrongly typed fields are left out.
         var http = new FakeHttp();
         http.On(Feed, json);
         var checker = new UpdateCheck(new HttpClient(http), Path.Combine(_dir, "data-shape"), Own);
-        try
+        if (!namesAVersion)
         {
-            var update = await checker.CheckAsync(Feed, "0.9.0");
-            Assert.NotNull(update);
-            Assert.False(update!.IsVerified);
+            await Assert.ThrowsAsync<InvalidDataException>(() => checker.CheckAsync(Feed, "0.9.0"));
+            return;
         }
-        catch (InvalidDataException) { }
+        var update = await checker.CheckAsync(Feed, "0.9.0");
+        Assert.NotNull(update);
+        Assert.False(update!.IsVerified);
+        Assert.Equal("9.9.9", update.Info.Version);
+        Assert.Null(update.Info.Url);
+        Assert.Null(update.Info.Notes);
     }
 
     [Theory]
