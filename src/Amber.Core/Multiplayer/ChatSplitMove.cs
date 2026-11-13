@@ -44,6 +44,12 @@ public sealed class ChatSplitMove
         return true;
     }
 
+    /// <summary>The move was called off before joining (private work started meanwhile): it doesn't count.</summary>
+    public void NotJoined()
+    {
+        if (_tries > 0) _tries--;
+    }
+
     /// <summary>The new connection is in: split ends the moving for this room.</summary>
     public void Moved(bool split)
     {

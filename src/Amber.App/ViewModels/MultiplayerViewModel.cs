@@ -944,17 +944,21 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         });
         _chatReplacing = replacing;
         _chatReplacedDropped = false;
+        var inPlace = false;
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await client.ConnectAsync(host, port, timeout.Token);
+            // A move asks again right before joining (joining is what makes the hub drop the old connection): private
+            // work that started while this connection was coming up keeps the old one.
+            await client.ConnectAsync(host, port, timeout.Token, replacing is null ? null : () =>
+            {
+                if (!PrivateBusy && _chat == replacing) return true;
+                _chatMove.NotJoined();
+                return false;
+            });
             // Taking over: the old connection may already be gone (null), but not replaced by another one.
             if (_room != room || (replacing is null ? _chat is not null : _chat is not null && _chat != replacing))
-            {
-                await client.CloseQuietlyAsync();
-                if (replacing is not null && _chatReplacedDropped && _chat == replacing) ChatDropped(replacing);
                 return;
-            }
             if (replacing is not null)
             {
                 // Chat is on its own connection: the handshake above went through the transport, so this says how.
@@ -965,6 +969,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 _ = CloseReplacedChatAsync(replacing);
             }
             _chat = client;
+            inPlace = true;
             ChatReady = true;
             ChatStatus = L.T("multiplayer.chat.privacy");
             StartPrivate(client);
@@ -975,18 +980,21 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             await client.DisposeAsync();
             if (_room == room) OnFakeHost();
         }
-        catch (Exception e) when (e is System.Net.Sockets.SocketException or OperationCanceledException or IOException)
+        // The network, or a handshake that didn't go through (the channel's own errors).
+        catch (Exception e) when (e is System.Net.Sockets.SocketException or OperationCanceledException or IOException
+                                   or System.Security.Cryptography.CryptographicException or InvalidDataException)
         {
-            await client.CloseQuietlyAsync();
-            // A failed move leaves the old connection as it was, unless the hub dropped it meanwhile.
-            if (replacing is not null)
-            {
-                if (_chatReplacedDropped && _chat == replacing) ChatDropped(replacing);
-            }
-            else if (_room == room) ChatStatus = L.T("multiplayer.chat.connecting");
+            if (replacing is null && _room == room) ChatStatus = L.T("multiplayer.chat.connecting");
         }
         finally
         {
+            // Whatever ended the attempt (also an unexpected exception): the new connection goes, and a failed move
+            // leaves the old connection as it was, unless the hub dropped it meanwhile.
+            if (!inPlace)
+            {
+                _ = client.CloseQuietlyAsync();
+                if (replacing is not null && _chatReplacedDropped && _chat == replacing) ChatDropped(replacing);
+            }
             _chatConnecting = false;
             _chatReplacing = null;
         }
@@ -1006,7 +1014,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     }
 
     /// <summary>Private work that moving chat would cut off.</summary>
-    private bool PrivateBusy => Transfers.Any(t => t.IsActive) || FileOffers.Count > 0 || ModSyncing || ModCheck == ModCheckState.Checking;
+    private bool PrivateBusy => Transfers.Any(t => t.IsActive) || FileOffers.Count > 0 || ModSyncing || ModCheck == ModCheckState.Checking
+        || _remoteSessions.Count > 0 || Volatile.Read(ref _remotePrompting) != 0;
 
     private void OnChatMessage(ChatClient client, ChatMessage message)
     {

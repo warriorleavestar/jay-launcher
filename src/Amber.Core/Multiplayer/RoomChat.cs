@@ -1081,11 +1081,15 @@ public sealed class ChatClient : IAsyncDisposable, IPrivateLink
 
     private Stream Stream => _stream ?? throw new InvalidOperationException();
 
-    public async Task ConnectAsync(string host, int port, CancellationToken ct = default)
+    /// <param name="beforeJoin">Asked once the connection is up, just before joining: false gives up without joining
+    /// (<see cref="OperationCanceledException"/>), so the hub never takes this member's current connection away. Runs on
+    /// the caller's context (this method doesn't leave it).</param>
+    public async Task ConnectAsync(string host, int port, CancellationToken ct = default, Func<bool>? beforeJoin = null)
     {
         await _client.ConnectAsync(host, port, ct);
         RoomChat.EnableKeepAlive(_client.Client);
         _stream = _key is null ? _client.GetStream() : await MemberChannel.ConnectAsync(_client.GetStream(), _key, _profile!, "chat", [], ct);
+        if (beforeJoin is not null && !beforeJoin()) throw new OperationCanceledException("not joining");
         _readLoop = ReadLoopAsync();
         await SendRawAsync(new ChatMessage(ChatKind.Join, SenderId, Name, "", DateTimeOffset.UtcNow), ct);
     }

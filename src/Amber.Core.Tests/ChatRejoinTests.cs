@@ -53,6 +53,13 @@ public sealed class ChatRejoinTests : IDisposable
         Assert.True(await WaitAsync(() => seen.Any(m => m.Kind == ChatKind.Join && m.SenderId == alice.Id)));
 
         // The second connection takes over: the first is dropped, and nobody hears Alice leave or join again.
+        // A connection that gives up before joining leaves the current one alone.
+        await using (var calledOff = new ChatClient(RoomOf(alice), "Alice"))
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => calledOff.ConnectAsync("127.0.0.1", hub.Port, beforeJoin: () => false));
+        Assert.True(await first.SendAsync("first still here"));
+        Assert.True(await WaitAsync(() => seen.Any(m => m.Text == "first still here")));
+        Assert.False(firstDropped.Task.IsCompleted);
+
         // The name it claims doesn't count: the room keeps showing the name from the host's member table.
         await using var second = new ChatClient(RoomOf(alice), "Host");
         await second.ConnectAsync("127.0.0.1", hub.Port);
@@ -86,6 +93,19 @@ public sealed class ChatSplitMoveTests
         Assert.Equal(0, move.Tries);
         Assert.True(move.ShouldTry(room, T0, couldSplit: true, busy: false));
         Assert.Equal(1, move.Tries);
+    }
+
+    [Fact]
+    public void AMoveCalledOffBeforeJoiningDoesntCount()
+    {
+        var move = new ChatSplitMove();
+        var room = new object();
+        Assert.True(move.ShouldTry(room, T0, true, false));
+        move.NotJoined();
+        Assert.Equal(0, move.Tries);
+        // Still spaced out from the last try.
+        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromSeconds(1), true, false));
+        Assert.True(move.ShouldTry(room, T0 + ChatSplitMove.Spacing, true, false));
     }
 
     [Fact]
