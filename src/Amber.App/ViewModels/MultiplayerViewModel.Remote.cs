@@ -230,7 +230,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>成员：房主请求看/控自己。弹同意窗；同意就连回房主并共享屏幕，不同意就经聊天通道回“拒绝”。</summary>
     private async Task OnRemoteRequestedAsync(ChatClient client, string sessionId)
     {
-        if (_chat != client || !IsJoined || _room is not { FromInvite: true } room) return;
+        if (!IsChatFrom(client) || !IsJoined || _room is not { FromInvite: true } room) return;
         // 已经在被控或者正在问：直接拒绝（不叠弹窗）。
         if (Child.HideRemoteControl || !RemotePlatform.Supported || _remoteSessions.OfType<RemoteSharer>().Any() || Interlocked.Exchange(ref _remotePrompting, 1) != 0)
         {

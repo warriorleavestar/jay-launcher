@@ -951,4 +951,47 @@ public sealed class SplitRoomPortTests(ITestOutputHelper output)
         var e = Assert.Throws<IOException>(() => RoomTransport.Start(new EasyTierOptions(strictHost, true, [], 15000)));
         Assert.Equal(L.F("core.mp.split.ports_busy_strict", SplitSettings.LegPort(0), SplitSettings.LegPort(1)), e.Message);
     }
+
+    /// <summary>
+    /// The session's leg ports still lent to a transport that hasn't stopped: not another program's ports. An Auto room
+    /// starts without splitting and says so; a Strict room doesn't start, with its own message.
+    /// </summary>
+    [Fact]
+    public async Task LegPortsStillLentStopOnlyAStrictRoom()
+    {
+        using var held = SplitLegReservation.TryReserve(2, IPAddress.Loopback, [0, 0]);
+        Assert.NotNull(held);
+        Assert.NotNull(held!.TryBorrow());
+        try
+        {
+            var (_, _, strictHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
+            var e = Assert.Throws<IOException>(() => RoomTransport.Start(new EasyTierOptions(strictHost, true, [], 15000) { HostSplitLegs = held }));
+            Assert.Equal(L.T("core.mp.split.ports_lent_strict"), e.Message);
+
+            try
+            {
+                using var probe = new TcpListener(IPAddress.Loopback, TunnelSettings.Port);
+                probe.Start();
+            }
+            catch (SocketException)
+            {
+                _output.WriteLine($"Auto part skipped: port {TunnelSettings.Port} is in use on this machine.");
+                return;
+            }
+            var (_, _, autoHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
+            var log = new List<string>();
+            await using var transport = RoomTransport.Start(new EasyTierOptions(autoHost, true, [], 15000) { HostSplitLegs = held }, line => { lock (log) log.Add(line); });
+            Assert.Null(transport.SplitServer);
+            Assert.NotNull(transport.Server);
+            lock (log)
+            {
+                Assert.Contains(L.T("core.mp.split.ports_lent"), log);
+                Assert.DoesNotContain(L.T("core.mp.split.ports_busy"), log);
+            }
+        }
+        finally
+        {
+            held.Return();
+        }
+    }
 }

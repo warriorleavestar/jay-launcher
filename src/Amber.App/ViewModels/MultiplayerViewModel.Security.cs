@@ -78,7 +78,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>加入方：房主通知房间熔断。</summary>
     private void OnBreakerFromHost(ChatClient client)
     {
-        if (_chat != client || !IsJoined) return;
+        if (!IsChatFrom(client) || !IsJoined) return;
         TripBreaker(L.T("multiplayer.breaker.reason_host"));
     }
 

@@ -87,11 +87,11 @@ public sealed class ChatSplitMoveTests
     {
         var move = new ChatSplitMove();
         var room = new object();
-        Assert.False(move.ShouldTry(room, T0, couldSplit: false, busy: false));
-        Assert.False(move.ShouldTry(room, T0, couldSplit: true, busy: true));
+        Assert.False(move.ShouldTry(room, T0, couldSplit: () => false, busy: () => false));
+        Assert.False(move.ShouldTry(room, T0, couldSplit: () => true, busy: () => true));
         // Waiting doesn't use up tries.
         Assert.Equal(0, move.Tries);
-        Assert.True(move.ShouldTry(room, T0, couldSplit: true, busy: false));
+        Assert.True(move.ShouldTry(room, T0, couldSplit: () => true, busy: () => false));
         Assert.Equal(1, move.Tries);
     }
 
@@ -100,12 +100,24 @@ public sealed class ChatSplitMoveTests
     {
         var move = new ChatSplitMove();
         var room = new object();
-        Assert.True(move.ShouldTry(room, T0, true, false));
+        Assert.True(move.ShouldTry(room, T0, () => true, () => false));
         move.NotJoined();
         Assert.Equal(0, move.Tries);
         // Still spaced out from the last try.
-        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromSeconds(1), true, false));
-        Assert.True(move.ShouldTry(room, T0 + ChatSplitMove.Spacing, true, false));
+        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromSeconds(1), () => true, () => false));
+        Assert.True(move.ShouldTry(room, T0 + ChatSplitMove.Spacing, () => true, () => false));
+    }
+
+    [Fact]
+    public void NothingIsAskedOnceMovingIsOver()
+    {
+        var move = new ChatSplitMove();
+        var room = new object();
+        Assert.True(move.ShouldTry(room, T0, () => true, () => false));
+        move.Moved(split: true);
+        var asked = 0;
+        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromHours(1), () => { asked++; return true; }, () => { asked++; return false; }));
+        Assert.Equal(0, asked);
     }
 
     [Fact]
@@ -113,9 +125,9 @@ public sealed class ChatSplitMoveTests
     {
         var move = new ChatSplitMove();
         var room = new object();
-        Assert.True(move.ShouldTry(room, T0, true, false));
+        Assert.True(move.ShouldTry(room, T0, () => true, () => false));
         move.Moved(split: true);
-        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromHours(1), true, false));
+        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromHours(1), () => true, () => false));
     }
 
     [Fact]
@@ -123,14 +135,14 @@ public sealed class ChatSplitMoveTests
     {
         var move = new ChatSplitMove();
         var room = new object();
-        Assert.True(move.ShouldTry(room, T0, true, false));
+        Assert.True(move.ShouldTry(room, T0, () => true, () => false));
         move.Moved(split: false);
-        Assert.False(move.ShouldTry(room, T0 + ChatSplitMove.Spacing - TimeSpan.FromSeconds(1), true, false));
-        Assert.True(move.ShouldTry(room, T0 + ChatSplitMove.Spacing, true, false));
+        Assert.False(move.ShouldTry(room, T0 + ChatSplitMove.Spacing - TimeSpan.FromSeconds(1), () => true, () => false));
+        Assert.True(move.ShouldTry(room, T0 + ChatSplitMove.Spacing, () => true, () => false));
         move.Moved(split: false);
-        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromHours(1), true, false));
+        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromHours(1), () => true, () => false));
         Assert.Equal(ChatSplitMove.MaxTries, move.Tries);
         // Another room (or the same one rekeyed) starts again.
-        Assert.True(move.ShouldTry(new object(), T0 + TimeSpan.FromHours(1), true, false));
+        Assert.True(move.ShouldTry(new object(), T0 + TimeSpan.FromHours(1), () => true, () => false));
     }
 }
