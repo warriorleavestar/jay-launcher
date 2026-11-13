@@ -235,15 +235,10 @@ internal sealed partial class SelfTest
         Check("同一个 Jay 账户的两台设备算一个人：一行，设备各有安全码，能单独移除", people.Friends.Count == 2 && people.Selected is { HasJay: true, DeviceItems.Count: 2 }
             && Named<ItemsControl>("FriendDevices") is { } two && Dispatcher.UIThread.Invoke(() => two.GetVisualDescendants().OfType<SelectableTextBlock>().Count()) == 2
             && Dispatcher.UIThread.Invoke(() => page.GetVisualDescendants().OfType<Button>().Count(b => b.Classes.Contains("device-remove") && b.IsEffectivelyVisible)) == 2);
-        using (var bobNew = X25519KeyPair.Generate())
+        using (var bobNew = DeviceKeys.Generate())
         {
-            var bobBook = new ContactBook(Path.Combine(dir, "bob-new.json"))
-                { Me = bobNew.PublicKey, MyCertificate = bob.CertifyDevice(bobNew.PublicKey, "Linux", 0, DateTimeOffset.UtcNow) };
-            Dispatcher.UIThread.Invoke(() =>
-            {
-                var reply = mp.Contacts.Receive(bobNew.PublicKey, bobBook.StartAdd(bobNew.PublicKey, me, "Bob")!, "Me");
-                if (reply is not null && bobBook.Receive(me, reply, "Bob") is { } nonce) mp.Contacts.Receive(bobNew.PublicKey, nonce, "Me");
-            });
+            // Bob's new laptop proves his Jay account in a live handshake (a knock or a room), which is how a new device arrives.
+            Dispatcher.UIThread.Invoke(() => mp.Contacts.SeenLive(bobNew.Dh.PublicKey, bob.CertifyDevice(bobNew, "Linux", 0, DateTimeOffset.UtcNow)));
             var waiting = await WaitAsync(() => people.Friends.FirstOrDefault(f => f.Name == "Bob") is { NeedsLook: true }, 3);
             await Task.Delay(300);
             Check("朋友多了一台没见过的设备：状态写“新设备待确认”，顶上那一行也换成它", waiting && people.Selected is { Name: "Bob", NeedsLook: true }
