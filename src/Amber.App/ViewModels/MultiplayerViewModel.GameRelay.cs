@@ -17,6 +17,10 @@ public sealed partial class MultiplayerViewModel
     private GamePortRelay? _gameRelay;
     private int _relayCheck;
     private string? _relayGameLabel;
+    private bool _relayTyped;
+    // Set while the room itself clears the picked world or typed port (a linked game closed): that is not the player
+    // choosing another game, so it must not relink the relay or cancel a switch the player started.
+    private bool _clearingGameChoice;
 
     /// <summary>The delay before a typed port is checked, so every keystroke doesn't report a closed port.</summary>
     internal TimeSpan RelayTypingDelay { get; set; } = TimeSpan.FromMilliseconds(600);
@@ -31,6 +35,8 @@ public sealed partial class MultiplayerViewModel
 
     public string GameLinkText => _gameRelay is null ? ""
         : IsWaitingForGame ? L.T("multiplayer.relay.waiting")
+        // A typed port has no game name: "linked to port N", not "linked to port N (port N)".
+        : _relayTyped ? L.F("multiplayer.relay.linked_port", _gameRelay.Target ?? 0)
         : L.F("multiplayer.relay.linked", _relayGameLabel ?? "", _gameRelay.Target ?? 0);
 
     /// <summary>Tests: the relay's own port (the room's game port) and where it points.</summary>
@@ -136,7 +142,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>A LAN world was picked or a port typed while the room waits (or runs) on a relay: point it at the game.</summary>
     private async Task RetargetGameRelayAsync(bool typed)
     {
-        if (_gameRelay is not { } relay) return;
+        if (_gameRelay is not { } relay || _clearingGameChoice) return;
         var version = ++_relayCheck;
         var manual = ManualPortValue;
         var game = SelectedLanGame;
@@ -146,7 +152,7 @@ public sealed partial class MultiplayerViewModel
             await Task.Delay(RelayTypingDelay);
             if (version != _relayCheck || _gameRelay != relay) return;
         }
-        var ok = await GamePortReadyAsync(port, manual: manual is not null);
+        var ok = await (GamePortReadyForTest ?? GamePortReadyAsync)(port, manual is not null);
         if (version != _relayCheck || _gameRelay != relay) return;
         if (!ok)
         {
@@ -154,11 +160,119 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         relay.SetTarget(port);
+        // A new link, even back to a port linked before: checks still running are about the old one.
+        _gameLink++;
         _relayGameLabel = manual is not null ? L.F("multiplayer.guide.port_label", port) : game?.Label ?? "";
+        _relayTyped = manual is not null;
         var wasWaiting = IsWaitingForGame;
         IsWaitingForGame = false;
         OnPropertyChanged(nameof(GameLinkText));
         SetStatus(StatusMessage.Success(wasWaiting ? "multiplayer.relay.connected" : "multiplayer.relay.switched", _relayGameLabel));
+    }
+
+    /// <summary>
+    /// What [Find] links while the room runs on a relay. A world that wasn't listed before comes first (the one the
+    /// player just reopened on a new port); with none, the linked world is kept if it still answered, else any found one.
+    /// </summary>
+    internal static int? RelayPickAfterScan(IReadOnlyList<int> found, IReadOnlyList<int> fresh, int? target, int relayPort)
+    {
+        bool Usable(int p) => p != target && p != relayPort;
+        foreach (var p in fresh) if (Usable(p)) return p;
+        if (target is { } t && found.Contains(t)) return null;
+        foreach (var p in found) if (Usable(p)) return p;
+        return null;
+    }
+
+    /// <summary>[Find] found a world for the relay: select it (a typed port would win, so it is cleared) and link it.</summary>
+    private void LinkFoundGame(int port)
+    {
+        if (LanGames.FirstOrDefault(g => g.Game.Port == port) is not { } item) return;
+        if (ManualPortValue is not null) ManualPort = "";
+        if (ReferenceEquals(SelectedLanGame, item)) _ = RetargetGameRelayAsync(typed: false);
+        else SelectedLanGame = item;
+    }
+
+    /// <summary>How often the linked game is checked, and how many misses in a row mean it is gone.</summary>
+    internal TimeSpan GameTargetCheckInterval { get; set; } = TimeSpan.FromSeconds(6);
+    internal const int GameTargetMisses = 2;
+
+    /// <summary>Tests: stands in for the check a port gets before the relay links it (port, typed).</summary>
+    internal Func<int, bool, Task<bool>>? GamePortReadyForTest { get; set; }
+
+    /// <summary>Tests: stands in for listening for LAN worlds.</summary>
+    internal Func<Task<List<LanGame>>>? ScanForTest { get; set; }
+
+    /// <summary>Tests: whether something still listens on a local port.</summary>
+    internal Func<int, Task<bool>>? GameTargetProbeForTest { get; set; }
+
+    private DateTime _gameTargetCheckedAt;
+    private int _gameTargetMisses;
+    // Counts every link the relay makes; misses count for one link only.
+    private int _gameLink;
+    private int _gameTargetLink;
+    private bool _gameTargetChecking;
+
+    /// <summary>
+    /// Called on the room refresh. A linked game that was closed (or reopened elsewhere) no longer accepts connections:
+    /// after <see cref="GameTargetMisses"/> misses the relay drops it and the room waits for the game again, so [Find],
+    /// the game's log or a typed port can link the next one. A game with players connected to it is in use, so isn't checked.
+    /// </summary>
+    internal async Task WatchGameTargetAsync()
+    {
+        if (_gameTargetChecking) return;
+        if (_gameRelay is not { } relay || relay.Target is not { } target) { _gameTargetMisses = 0; return; }
+        // Misses count for one link: a game linked since then (even the same port again) starts again from none.
+        var link = _gameLink;
+        if (link != _gameTargetLink)
+        {
+            _gameTargetLink = link;
+            _gameTargetMisses = 0;
+        }
+        // Only connections to the linked port count: ones to a world linked before can outlive a switch. A game a player
+        // is using answers, so earlier misses no longer count either.
+        if (relay.OpenConnectionsTo(target) > 0)
+        {
+            _gameTargetMisses = 0;
+            return;
+        }
+        if (DateTime.UtcNow - _gameTargetCheckedAt < GameTargetCheckInterval) return;
+        _gameTargetChecking = true;
+        _gameTargetCheckedAt = DateTime.UtcNow;
+        bool alive;
+        try
+        {
+            alive = await (GameTargetProbeForTest ?? CanConnectAsync)(target);
+        }
+        finally
+        {
+            _gameTargetChecking = false;
+        }
+        // Linked again (or the room changed) while checking: the result is about a link that is gone.
+        if (_gameRelay != relay || relay.Target != target || _gameLink != link) return;
+        if (alive) { _gameTargetMisses = 0; return; }
+        if (++_gameTargetMisses < GameTargetMisses) return;
+        _gameTargetMisses = 0;
+        // Only the link is dropped: a switch to another port that is being checked right now carries on. A game that
+        // came back on the same port and took a player while the check ran is in use: keep it and start counting again.
+        if (!relay.ClearTargetIfIdle(target)) return;
+        var label = _relayGameLabel ?? L.F("multiplayer.guide.port_label", target);
+        _relayGameLabel = null;
+        // Forget the closed world, so finding it again on the same port links it again. A world still picked from
+        // before a typed port is unpicked too, so it isn't relinked behind the player's back and picking it again counts.
+        _clearingGameChoice = true;
+        try
+        {
+            if (SelectedLanGame?.Game.Port == target || ManualPortValue == target) SelectedLanGame = null;
+            foreach (var gone in LanGames.Where(g => g.Game.Port == target).ToList()) LanGames.Remove(gone);
+            if (ManualPortValue == target) ManualPort = "";
+        }
+        finally
+        {
+            _clearingGameChoice = false;
+        }
+        IsWaitingForGame = true;
+        OnPropertyChanged(nameof(GameLinkText));
+        SetStatus(StatusMessage.Info("multiplayer.relay.game_gone", label));
     }
 
     /// <summary>Tests: what a room-opening command does about the game port, without starting a room.</summary>

@@ -148,7 +148,8 @@ public sealed class GamePortRelayTests
         Pump(() => !vm.IsWaitingForGame);
         Assert.Equal(game.Port, relay.Target);
         Assert.Equal("multiplayer.relay.connected", vm.StatusInfo?.Key);
-        Assert.Contains(game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture), vm.GameLinkText);
+        // A typed port is named once ("linked to port N"), not as "port N (port N)".
+        Assert.Equal(L.F("multiplayer.relay.linked_port", game.Port), vm.GameLinkText);
         var reply = Task.Run(() => RoundTripAsync(relay.Port, [5]));
         Pump(() => reply.IsCompleted);
         Assert.Equal(new byte[] { 0xC3, 5 }, reply.Result);
@@ -174,6 +175,483 @@ public sealed class GamePortRelayTests
         Assert.Null(vm.GameRelayForTest!.Target);
         vm.StopCommand.Execute(null);
     });
+
+    [Fact]
+    public void ALinkedGameThatStopsAnsweringPutsTheRoomBackToWaiting() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var game = new EchoGame(0x7E);
+        var answers = true;
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(answers),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var typed = game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        vm.ManualPort = typed;
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+
+        // Still answering: the link stays.
+        Check(vm.WatchGameTargetAsync());
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(game.Port, relay.Target);
+
+        // One miss could be a hiccup; the second drops the game and the room waits again, with the typed port cleared.
+        answers = false;
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(game.Port, relay.Target);
+        Check(vm.WatchGameTargetAsync());
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+        Assert.Equal(L.T("multiplayer.relay.waiting"), vm.GameLinkText);
+        Assert.Equal("multiplayer.relay.game_gone", vm.StatusInfo?.Key);
+        Assert.Equal("", vm.ManualPort);
+
+        // The same port again (the game came back) links again.
+        answers = true;
+        vm.ManualPort = typed;
+        Pump(() => !vm.IsWaitingForGame);
+        Assert.Equal(game.Port, relay.Target);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Fact]
+    public void DroppingAClosedGameDoesNotStopASwitchInProgress() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x11);
+        using var second = new EchoGame(0x22);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            // The first game no longer answers; the second does.
+            GameTargetProbeForTest = port => Task.FromResult(port != first.Port),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(first.Port, relay.Target);
+
+        // The player types the second game's port; while that switch waits out the typing delay, the first is dropped.
+        vm.RelayTypingDelay = TimeSpan.FromMilliseconds(300);
+        vm.ManualPort = second.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Check(vm.WatchGameTargetAsync());
+        Assert.Null(relay.Target);
+        // The switch still goes through.
+        Pump(() => relay.Target == second.Port);
+        Assert.False(vm.IsWaitingForGame);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Fact]
+    public void MissesCountForOneLinkedPortOnly() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x33);
+        using var second = new EchoGame(0x44);
+        var probe = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(false),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        // One miss on the first game, then the player switches to the second.
+        Check(vm.WatchGameTargetAsync());
+        vm.ManualPort = second.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == second.Port);
+        // One miss on the second game is its first: it stays linked.
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(second.Port, relay.Target);
+
+        // A check still running when the next refresh comes neither counts twice nor forgets the misses so far.
+        vm.GameTargetProbeForTest = _ => probe.Task;
+        var slow = vm.WatchGameTargetAsync();
+        Check(vm.WatchGameTargetAsync());
+        probe.SetResult(false);
+        Check(slow);
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Fact]
+    public void APortTypedDuringFindIsNotReplacedByWhatFindFound() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x51);
+        using var typed = new EchoGame(0x52);
+        using var found = new EchoGame(0x53);
+        var scan = new TaskCompletionSource<List<LanGame>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service) { RelayTypingDelay = TimeSpan.Zero, ScanForTest = () => scan.Task };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+
+        // [Find] is listening when the player types another port, which links.
+        vm.FindGameForRoomCommand.Execute(null);
+        Pump(() => vm.IsScanning);
+        var port = typed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        vm.ManualPort = port;
+        Pump(() => relay.Target == typed.Port);
+
+        // The scan then finds a new world: it is listed, but the typed port stays linked.
+        scan.SetResult([new LanGame("World", found.Port)]);
+        Pump(() => !vm.IsScanning);
+        for (var i = 0; i < 20; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
+        Assert.Contains(vm.LanGames, g => g.Game.Port == found.Port);
+        Assert.Equal(typed.Port, relay.Target);
+        Assert.Equal(port, vm.ManualPort);
+        vm.StopCommand.Execute(null);
+    });
+
+    [Fact]
+    public async Task APlayerStillConnectingToTheGameKeepsItLinked()
+    {
+        using var game = new EchoGame(0xB6);
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        relay.BeforeConnectForTest = () => { held.TrySetResult(); return release.Task; };
+
+        // A player is taken on, but the relay's own connection to the game isn't up yet.
+        var trip = RoundTripAsync(relay.Port, [3]);
+        await held.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, relay.OpenConnectionsTo(game.Port));
+        Assert.False(relay.ClearTargetIfIdle(game.Port));
+        Assert.Equal(game.Port, relay.Target);
+
+        release.SetResult();
+        Assert.Equal(new byte[] { 0xB6, 3 }, await trip);
+        relay.BeforeConnectForTest = null;
+        // Once the player has left, an idle target can be cleared.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (relay.OpenConnectionsTo(game.Port) > 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.True(relay.ClearTargetIfIdle(game.Port));
+        Assert.Null(relay.Target);
+    }
+
+    [Fact]
+    public void PlayingAGameForgetsTheMissesBefore() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var game = new EchoGame(0xC7);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(false),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        // One miss, then a player plays and leaves.
+        Check(vm.WatchGameTargetAsync());
+        using (var player = new TcpClient())
+        {
+            player.Connect(IPAddress.Loopback, relay.Port);
+            var stream = player.GetStream();
+            stream.ReadTimeout = 5000;
+            stream.Write([1]);
+            Assert.Equal(2, stream.ReadAtLeast(new byte[2], 2));
+            Pump(() => relay.OpenConnectionsTo(game.Port) == 1);
+            Check(vm.WatchGameTargetAsync());
+        }
+        Pump(() => relay.OpenConnectionsTo(game.Port) == 0);
+
+        // The next miss is the first since the game was in use: it stays linked.
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(game.Port, relay.Target);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Fact]
+    public void AGameThatTakesAPlayerDuringAFailingCheckStaysLinked() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var game = new EchoGame(0xA5);
+        var slow = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(false),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        // One miss, then a second check that hasn't answered yet.
+        Check(vm.WatchGameTargetAsync());
+        vm.GameTargetProbeForTest = _ => slow.Task;
+        var late = vm.WatchGameTargetAsync();
+
+        // Meanwhile the game answers again on the same port and a player comes in through the relay.
+        using var player = new TcpClient();
+        player.Connect(IPAddress.Loopback, relay.Port);
+        var stream = player.GetStream();
+        stream.ReadTimeout = 5000;
+        stream.Write([1]);
+        Assert.Equal(2, stream.ReadAtLeast(new byte[2], 2));
+        Pump(() => relay.OpenConnectionsTo(game.Port) == 1);
+
+        // The second miss arrives late: the game is in use, so it stays linked.
+        slow.SetResult(false);
+        Check(late);
+        Assert.Equal(game.Port, relay.Target);
+        Assert.False(vm.IsWaitingForGame);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Fact]
+    public void ACheckFromBeforeASwitchAwayAndBackDoesNotDropTheNewLink() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x91);
+        using var second = new EchoGame(0x92);
+        var slow = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(false),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var a = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        vm.ManualPort = a;
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        // One miss on A, then a second check that hasn't answered yet.
+        Check(vm.WatchGameTargetAsync());
+        vm.GameTargetProbeForTest = _ => slow.Task;
+        var late = vm.WatchGameTargetAsync();
+
+        // Meanwhile the player switches to B and back to A: a new link to A.
+        vm.ManualPort = second.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == second.Port);
+        vm.ManualPort = a;
+        Pump(() => relay.Target == first.Port);
+
+        // The old check now fails: it is about the earlier link, so the new one stays.
+        slow.SetResult(false);
+        Check(late);
+        Assert.Equal(first.Port, relay.Target);
+        Assert.False(vm.IsWaitingForGame);
+        // The new link counts its own misses from none: one miss isn't enough.
+        vm.GameTargetProbeForTest = _ => Task.FromResult(false);
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(first.Port, relay.Target);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Fact]
+    public void ATypedGameThatClosesDoesNotFallBackToTheWorldPickedBefore() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var found = new EchoGame(0x71);
+        using var typed = new EchoGame(0x72);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            ScanForTest = () => Task.FromResult(new List<LanGame> { new("World", found.Port) }),
+            // The echo games don't answer a Minecraft status ping: found worlds only have to listen here.
+            GamePortReadyForTest = (_, _) => Task.FromResult(true),
+            // The typed game was closed; the found one still answers.
+            GameTargetProbeForTest = p => Task.FromResult(p == found.Port),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var relay = vm.GameRelayForTest!;
+        // [Find] links the found world, then the player types another port.
+        vm.FindGameForRoomCommand.Execute(null);
+        Pump(() => relay.Target == found.Port && !vm.IsScanning);
+        vm.ManualPort = typed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == typed.Port);
+
+        // The typed game closes: the room waits instead of quietly linking the world picked before.
+        Check(vm.WatchGameTargetAsync());
+        Check(vm.WatchGameTargetAsync());
+        Settle();
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+        Assert.Null(vm.SelectedLanGame);
+
+        // Picking that world again is the player's choice, and links it.
+        vm.SelectedLanGame = vm.LanGames.Single(g => g.Game.Port == found.Port);
+        Pump(() => relay.Target == found.Port);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Fact]
+    public void AGameThatClosesDuringFindDoesNotStopFindFromLinkingANewOne() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var closed = new EchoGame(0x81);
+        using var reopened = new EchoGame(0x82);
+        var scan = new TaskCompletionSource<List<LanGame>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            ScanForTest = () => scan.Task,
+            GameTargetProbeForTest = p => Task.FromResult(p != closed.Port),
+            // The echo games don't answer a Minecraft status ping: found worlds only have to listen here.
+            GamePortReadyForTest = (_, _) => Task.FromResult(true),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = closed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+
+        // [Find] is listening when the linked game is found closed and dropped.
+        vm.FindGameForRoomCommand.Execute(null);
+        Pump(() => vm.IsScanning);
+        Check(vm.WatchGameTargetAsync());
+        Check(vm.WatchGameTargetAsync());
+        Assert.Null(relay.Target);
+
+        // The world reopened on a new port is what [Find] then hears: it is linked.
+        scan.SetResult([new LanGame("World", reopened.Port)]);
+        Pump(() => relay.Target == reopened.Port);
+        Assert.False(vm.IsWaitingForGame);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    private static void Settle()
+    {
+        for (var i = 0; i < 20; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
+    }
+
+    [Fact]
+    public void AConnectionToTheWorldBeforeDoesNotHideThatTheLinkedOneClosed() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x61);
+        using var second = new EchoGame(0x62);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            // The first world still answers; the second was closed.
+            GameTargetProbeForTest = p => Task.FromResult(p == first.Port),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+
+        // A player stays connected to the first world while the host switches to the second.
+        using var player = new TcpClient();
+        player.Connect(IPAddress.Loopback, relay.Port);
+        var stream = player.GetStream();
+        stream.Write([1]);
+        var echo = new byte[2];
+        stream.ReadTimeout = 5000;
+        Assert.Equal(2, stream.ReadAtLeast(echo, 2));
+        Pump(() => relay.OpenConnectionsTo(first.Port) == 1);
+        vm.ManualPort = second.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == second.Port);
+        Assert.Equal(0, relay.OpenConnectionsTo(second.Port));
+
+        // The second world closing is still noticed.
+        Check(vm.WatchGameTargetAsync());
+        Check(vm.WatchGameTargetAsync());
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+        Assert.Equal(1, relay.OpenConnections);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Theory]
+    // A world that wasn't listed before (reopened on a new port) wins, even over the linked one still answering.
+    [InlineData(new[] { 100, 200 }, new[] { 200 }, 100, 300, 200)]
+    // Nothing new and the linked world still answers: keep it.
+    [InlineData(new[] { 100, 150 }, new int[0], 100, 300, null)]
+    // The linked world is gone: take another found one.
+    [InlineData(new[] { 150 }, new int[0], 100, 300, 150)]
+    // Waiting for the game: the first found world.
+    [InlineData(new[] { 150, 160 }, new int[0], null, 300, 150)]
+    // The relay's own port is never a game.
+    [InlineData(new[] { 300 }, new[] { 300 }, null, 300, null)]
+    public void FindWhileLinkedPicksTheReopenedWorld(int[] found, int[] fresh, int? target, int relayPort, int? expected) =>
+        Assert.Equal(expected, MultiplayerViewModel.RelayPickAfterScan(found, fresh, target, relayPort));
 
     [Theory]
     [InlineData(false, false, false)]

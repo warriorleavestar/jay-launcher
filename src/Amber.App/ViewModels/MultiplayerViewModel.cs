@@ -254,6 +254,21 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial string RoomCodeText { get; set; } = "";
     [ObservableProperty] public partial string JoinAddress { get; set; } = "";
 
+    /// <summary>
+    /// Whole-LAN guest whose game goes through the forwarded local port: the host's own address in the room too, for
+    /// other games and tools (the forwarded address only carries the Minecraft world). Empty otherwise.
+    /// </summary>
+    public string RoomHostAddressText => _showRoomHostAddress ? L.F("multiplayer.join.full_lan_host", EasyTierArgs.HostIp) : "";
+
+    // Kept as a flag, not as text: the line follows a language change like every other computed text.
+    private bool _showRoomHostAddress;
+
+    private void ShowRoomHostAddress(bool show)
+    {
+        _showRoomHostAddress = show;
+        OnPropertyChanged(nameof(RoomHostAddressText));
+    }
+
     public string ComponentText => IsComponentReady
         ? L.F("multiplayer.component.ready", EasyTierRelease.Version)
         : L.F("multiplayer.component.required", EasyTierRelease.Version, EasyTierRelease.Current.Size / 1024 / 1024);
@@ -343,15 +358,27 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     {
         if (IsScanning) return;
         IsScanning = true;
+        // What the room was linked to when the scan started: a world picked or a port typed during the scan wins.
+        var relayAtStart = _gameRelay;
+        var checkAtStart = _relayCheck;
         try
         {
-            var found = await Amber.Core.Multiplayer.LanGames.ListenAsync(TimeSpan.FromSeconds(3));
+            var found = await (ScanForTest ?? (() => Amber.Core.Multiplayer.LanGames.ListenAsync(TimeSpan.FromSeconds(3))))();
+            var fresh = new List<int>();
             foreach (var game in found)
             {
                 if (LanGames.Any(g => g.Game.Port == game.Port)) continue;
                 LanGames.Add(new LanGameItem(game, L.T("multiplayer.lan.broadcast_source")));
+                fresh.Add(game.Port);
             }
-            SelectedLanGame ??= LanGames.FirstOrDefault();
+            if (_gameRelay is { } relay)
+            {
+                if (relay != relayAtStart || checkAtStart != _relayCheck) { }
+                else if (found.Count == 0) SetStatus(StatusMessage.Error("multiplayer.lan.not_found"));
+                else if (RelayPickAfterScan(found.Select(g => g.Port).ToList(), fresh, relay.Target, relay.Port) is { } port)
+                    LinkFoundGame(port);
+            }
+            else SelectedLanGame ??= LanGames.FirstOrDefault();
             if (IsIdle && LanGames.Count == 0) SetStatus(StatusMessage.Error("multiplayer.lan.not_found"));
         }
         catch (SocketException e)
@@ -759,6 +786,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         Mode = "join";
         // 完整局域网模式下直接连房主的虚拟 IP；普通模式连本机转发端口。
         JoinAddress = local is { } l ? $"127.0.0.1:{l}" : $"{EasyTierArgs.HostIp}:{room.Port}";
+        ShowRoomHostAddress(FullLanMode && local is not null);
         RoomCodeText = "";
         // 游戏的“多人游戏”列表里也会出现这个房间。
         if (local is { } port) _ = Amber.Core.Multiplayer.LanGames.AnnounceAsync(L.T("multiplayer.room.server_name"), port, _sessionCts!.Token);
@@ -1046,6 +1074,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private void OnChatMessage(ChatClient client, ChatMessage message)
     {
         if (_chat is not null && _chat != client) return;
+        // Our own client announcing itself (the host's included, when it opens the room): nobody else joined.
+        if (message.Kind == ChatKind.Join && message.SenderId == client.SenderId) return;
         var mine = client.IsMine(message);
         ChatLines.Add(new ChatLine(message, mine));
         while (ChatLines.Count > 500) ChatLines.RemoveAt(0);
@@ -1119,6 +1149,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             if (_sessionCts != lifetime || _direct != direct || lifetime.IsCancellationRequested) return false;
             if (_session is not { } old || !old.Options.Tun) return false;
+            // Relays named by domain are refused by the route plan (ExitRelays explains why), with their own message.
             var options = old.Options with { ExitNode = exitIp };
             if (direct is not null)
             {
@@ -1165,9 +1196,14 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                     _currentOptions = preserved.Options;
                     ExitNodeIp = preserved.Options.ExitNode ?? "";
                     SyncHotspotSharing();
+                    // Nothing was torn down: say the old route is still in use, not that the session ended.
+                    SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed_kept", e, ErrorText.Of(e)));
                 }
-                else StopSession();
-                SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed", e, ErrorText.Of(e)));
+                else
+                {
+                    StopSession();
+                    SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed", e, ErrorText.Of(e)));
+                }
             }
             return false;
         }
@@ -1205,6 +1241,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private async Task RefreshPeersAsync()
     {
+        _ = WatchGameTargetAsync();
         if (_session is not { } session || _refreshing) return;
         if (session.HasExited)
         {
@@ -1226,31 +1263,62 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SyncHotspotSharing();
             Peers.Clear();
             foreach (var p in peers.Where(p => p.Ip.StartsWith(EasyTierArgs.Subnet, StringComparison.Ordinal)).OrderBy(p => p.Ip)) Peers.Add(new PeerItem(p));
-            var others = Peers.Where(p => p.Peer.Cost != "Local").ToList();
-            if (!others.Select(p => p.Peer.Ip).SequenceEqual(ExitCandidates.Select(p => p.Peer.Ip)))
-            {
-                var keep = SelectedExitPeer?.Peer.Ip;
-                ExitCandidates.Clear();
-                foreach (var p in others) ExitCandidates.Add(p);
-                SelectedExitPeer = ExitCandidates.FirstOrDefault(p => p.Peer.Ip == keep) ?? ExitCandidates.FirstOrDefault();
-            }
+            SyncExitCandidates(Peers.Where(p => p.Peer.Cost != "Local").ToList());
             var host = Peers.FirstOrDefault(p => p.Peer.Ip == EasyTierArgs.HostIp && p.Peer.Cost != "Local");
             TickChat(host is not null);
             if (host is not null) _hostSeen = true;
             // 刚显示过远程控制的提示（或正在等对方同意）时先不刷新，免得一两秒就被盖掉。
             if (!RoomStatusMayOverwrite) return;
             if (IsJoined && host is null && !_hostSeen && DateTime.UtcNow - _joinedAt > TimeSpan.FromSeconds(20))
-                SetStatus(StatusMessage.Info("multiplayer.room.not_connected_hint"));
+                SetRoomStatus(StatusMessage.Info("multiplayer.room.not_connected_hint"));
             else if (IsJoined)
-                Status = host is null ? L.T("multiplayer.room.connecting_first_time")
-                    : L.F("multiplayer.room.connected", (host.Peer.LatencyMs is { } ms ? L.F("multiplayer.room.latency", ms) : ""), JoinAddress);
+                // No latency here: it changes every refresh, and the member list shows it.
+                SetRoomStatus(host is null ? StatusMessage.Info("multiplayer.room.connecting_first_time")
+                    : StatusMessage.Info("multiplayer.room.connected", "", JoinAddress));
             else if (IsHosting)
-                Status = Peers.Count(p => p.Peer.Ip != EasyTierArgs.HostIp) is var n and > 0 ? L.P("multiplayer.room.player_count", n, n) : L.T("multiplayer.room.waiting");
+                SetRoomStatus(RoomCountStatus(Peers.Count));
         }
         finally
         {
             _refreshing = false;
         }
+    }
+
+    /// <summary>
+    /// A status the refresh (every two seconds) keeps setting: only a change is shown. Setting the same one again would
+    /// bring back a message the player just closed and note it in diagnostics each time.
+    /// </summary>
+    private void SetRoomStatus(StatusMessage message)
+    {
+        if (StatusInfo is { } current && current.Key == message.Key && current.Kind == message.Kind && current.Count == message.Count
+            && current.Args.SequenceEqual(message.Args)) return;
+        SetStatus(message);
+    }
+
+    /// <summary>Everyone in the room, the host included, like the room header; just the host means still waiting.</summary>
+    internal static StatusMessage RoomCountStatus(int everyone) => everyone > 1
+        ? new StatusMessage("multiplayer.room.player_count", [everyone]) { Count = everyone }
+        : StatusMessage.Info("multiplayer.room.waiting");
+
+    /// <summary>
+    /// The members one can go online through. Rebuilt when who's there changes; otherwise each entry is refreshed in place,
+    /// so its latency and route stay current (not the first ones seen) and the choice is kept.
+    /// </summary>
+    internal void SyncExitCandidates(IReadOnlyList<PeerItem> others)
+    {
+        var keep = SelectedExitPeer?.Peer.Ip;
+        if (!others.Select(p => p.Peer.Ip).SequenceEqual(ExitCandidates.Select(p => p.Peer.Ip)))
+        {
+            ExitCandidates.Clear();
+            foreach (var p in others) ExitCandidates.Add(p);
+        }
+        else
+        {
+            for (var i = 0; i < others.Count; i++)
+                if (ExitCandidates[i].Peer != others[i].Peer) ExitCandidates[i] = others[i];
+        }
+        var selected = ExitCandidates.FirstOrDefault(p => p.Peer.Ip == keep) ?? ExitCandidates.FirstOrDefault();
+        if (!ReferenceEquals(selected, SelectedExitPeer)) SelectedExitPeer = selected;
     }
 
     private const int MaxLogLanGames = 8;
@@ -1401,6 +1469,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         Mode = "";
         RoomCodeText = "";
         JoinAddress = "";
+        ShowRoomHostAddress(false);
         MyVirtualIp = "";
         ExitNodeIp = "";
         ExitCandidates.Clear();

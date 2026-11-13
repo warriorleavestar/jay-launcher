@@ -24,7 +24,10 @@ public sealed class GamePortRelay : IAsyncDisposable
     private TcpListener? _adapterListener;
     private Task? _adapterLoop;
     private readonly object _gate = new();
-    private readonly HashSet<TcpClient> _open = [];
+    // Each connection being passed on: the caller's side, its side to the game and the game port it reached.
+    private readonly HashSet<(TcpClient In, TcpClient Out, int Port)> _open = [];
+    // Callers taken on for a game port whose connection to the game isn't up yet, by port.
+    private readonly Dictionary<int, int> _connecting = [];
     private readonly TimeSpan _connectTimeout;
     private int _target;
 
@@ -61,11 +64,38 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// <summary>Back to waiting: new connections are closed until a port is set again.</summary>
     public void ClearTarget() => Volatile.Write(ref _target, 0);
 
+    /// <summary>
+    /// Back to waiting, but only if the relay still points at <paramref name="port"/> and nobody is connected to it right
+    /// now: a game that answered a player since it was last checked is in use, whatever the check said. Checked and
+    /// cleared together, so a connection being passed on can't slip in between.
+    /// </summary>
+    public bool ClearTargetIfIdle(int port)
+    {
+        lock (_gate)
+        {
+            if (Volatile.Read(ref _target) != port || _open.Any(c => c.Port == port) || _connecting.ContainsKey(port)) return false;
+            Volatile.Write(ref _target, 0);
+            return true;
+        }
+    }
+
     /// <summary>Connections being passed on right now (tests).</summary>
     public int OpenConnections
     {
-        get { lock (_gate) return _open.Count / 2; }
+        get { lock (_gate) return _open.Count; }
     }
+
+    /// <summary>
+    /// Connections passed on to one game port. Connections to a world linked before stay open after a switch, so they
+    /// say nothing about whether the world linked now still answers.
+    /// </summary>
+    public int OpenConnectionsTo(int port)
+    {
+        lock (_gate) return _open.Count(c => c.Port == port) + _connecting.GetValueOrDefault(port);
+    }
+
+    /// <summary>Tests: runs once a caller is taken on for a port, before the connection to the game is made.</summary>
+    internal Func<Task>? BeforeConnectForTest { get; set; }
 
     /// <summary>
     /// Also listen on <paramref name="address"/> (a whole-LAN room's virtual address) at the same port, waiting for the
@@ -170,14 +200,22 @@ public sealed class GamePortRelay : IAsyncDisposable
     private async Task ServeAsync(TcpClient client)
     {
         using var inbound = client;
-        if (Target is not { } port)
+        int port;
+        // The target is read and the caller counted for it under the same lock ClearTargetIfIdle takes, so a game that
+        // is taking a player right now is never dropped between the two.
+        lock (_gate)
         {
             // No game yet: close at once so the player's game shows a connection error instead of hanging.
-            return;
+            if (Target is not { } target || _cts.IsCancellationRequested) return;
+            port = target;
+            _connecting[port] = _connecting.GetValueOrDefault(port) + 1;
         }
+        var connecting = true;
         using var outbound = new TcpClient();
+        (TcpClient, TcpClient, int)? entry = null;
         try
         {
+            if (BeforeConnectForTest is { } before) await before();
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token))
             {
                 timeout.CancelAfter(_connectTimeout);
@@ -185,11 +223,12 @@ public sealed class GamePortRelay : IAsyncDisposable
             }
             inbound.NoDelay = true;
             outbound.NoDelay = true;
+            entry = (inbound, outbound, port);
             lock (_gate)
             {
+                Done();
                 if (_cts.IsCancellationRequested) return;
-                _open.Add(inbound);
-                _open.Add(outbound);
+                _open.Add(entry.Value);
             }
             var a = inbound.GetStream();
             var b = outbound.GetStream();
@@ -204,9 +243,18 @@ public sealed class GamePortRelay : IAsyncDisposable
         {
             lock (_gate)
             {
-                _open.Remove(inbound);
-                _open.Remove(outbound);
+                Done();
+                if (entry is { } done) _open.Remove(done);
             }
+        }
+
+        // No longer connecting (once): the caller is now open, or gone.
+        void Done()
+        {
+            if (!connecting) return;
+            connecting = false;
+            if (_connecting.GetValueOrDefault(port) <= 1) _connecting.Remove(port);
+            else _connecting[port]--;
         }
     }
 
@@ -232,9 +280,13 @@ public sealed class GamePortRelay : IAsyncDisposable
             adapterLoop = _adapterLoop;
         }
         _listener.Stop();
-        TcpClient[] open;
+        (TcpClient In, TcpClient Out, int Port)[] open;
         lock (_gate) open = [.. _open];
-        foreach (var c in open) c.Dispose();
+        foreach (var c in open)
+        {
+            c.In.Dispose();
+            c.Out.Dispose();
+        }
         try { await _acceptLoop; } catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { }
         if (adapterLoop is not null)
             try { await adapterLoop; } catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { }

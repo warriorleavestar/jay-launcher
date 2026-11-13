@@ -389,6 +389,15 @@ public sealed record EasyTierOptions(
     public bool DirectUnderlayUsesIpv6 { get; init; }
 
     /// <summary>
+    /// The IPv4 addresses a relay named by a domain resolved to when the exit was chosen (see <see cref="ExitRelays"/>);
+    /// keyed by host name. The exit's route plan protects these as relay underlay.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> RelayAddresses { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
+
+    /// <summary>The peers as configured, before <see cref="ExitRelays"/> pinned domain relays to addresses.</summary>
+    public IReadOnlyList<string>? ConfiguredPeers { get; init; }
+
+    /// <summary>
     /// Carry this member's forwarded TCP streams (game, chat, tunnel) over EasyTier's QUIC proxy instead of its
     /// user-space TCP stack, whose small window caps one connection at roughly 15 KB per round trip without a TUN device.
     /// On by default since the 2026-11-10 real-device test (Korea to New Zealand: about 0.05 → 0.88 MB/s); setting
