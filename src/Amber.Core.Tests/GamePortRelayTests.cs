@@ -339,6 +339,75 @@ public sealed class GamePortRelayTests
     });
 
     [Fact]
+    public async Task APlayerStillConnectingToTheGameKeepsItLinked()
+    {
+        using var game = new EchoGame(0xB6);
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        relay.BeforeConnectForTest = () => { held.TrySetResult(); return release.Task; };
+
+        // A player is taken on, but the relay's own connection to the game isn't up yet.
+        var trip = RoundTripAsync(relay.Port, [3]);
+        await held.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, relay.OpenConnectionsTo(game.Port));
+        Assert.False(relay.ClearTargetIfIdle(game.Port));
+        Assert.Equal(game.Port, relay.Target);
+
+        release.SetResult();
+        Assert.Equal(new byte[] { 0xB6, 3 }, await trip);
+        relay.BeforeConnectForTest = null;
+        // Once the player has left, an idle target can be cleared.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (relay.OpenConnectionsTo(game.Port) > 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.True(relay.ClearTargetIfIdle(game.Port));
+        Assert.Null(relay.Target);
+    }
+
+    [Fact]
+    public void PlayingAGameForgetsTheMissesBefore() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var game = new EchoGame(0xC7);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(false),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        // One miss, then a player plays and leaves.
+        Check(vm.WatchGameTargetAsync());
+        using (var player = new TcpClient())
+        {
+            player.Connect(IPAddress.Loopback, relay.Port);
+            var stream = player.GetStream();
+            stream.ReadTimeout = 5000;
+            stream.Write([1]);
+            Assert.Equal(2, stream.ReadAtLeast(new byte[2], 2));
+            Pump(() => relay.OpenConnectionsTo(game.Port) == 1);
+            Check(vm.WatchGameTargetAsync());
+        }
+        Pump(() => relay.OpenConnectionsTo(game.Port) == 0);
+
+        // The next miss is the first since the game was in use: it stays linked.
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(game.Port, relay.Target);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
+    });
+
+    [Fact]
     public void AGameThatTakesAPlayerDuringAFailingCheckStaysLinked() => UiTestThread.Run(() =>
     {
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });

@@ -228,8 +228,14 @@ public sealed partial class MultiplayerViewModel
             _gameTargetLink = link;
             _gameTargetMisses = 0;
         }
-        // Only connections to the linked port count: ones to a world linked before can outlive a switch.
-        if (relay.OpenConnectionsTo(target) > 0 || DateTime.UtcNow - _gameTargetCheckedAt < GameTargetCheckInterval) return;
+        // Only connections to the linked port count: ones to a world linked before can outlive a switch. A game a player
+        // is using answers, so earlier misses no longer count either.
+        if (relay.OpenConnectionsTo(target) > 0)
+        {
+            _gameTargetMisses = 0;
+            return;
+        }
+        if (DateTime.UtcNow - _gameTargetCheckedAt < GameTargetCheckInterval) return;
         _gameTargetChecking = true;
         _gameTargetCheckedAt = DateTime.UtcNow;
         bool alive;
