@@ -9,7 +9,7 @@ public class MultiplayerTests
     public void RoomCode_RoundTrip()
     {
         var room = RoomCode.Create(51234);
-        Assert.Matches(@"^AMB-[0-9A-HJKMNP-TV-Z]{8}-[0-9A-HJKMNP-TV-Z]{12}-51234$", room.ToString());
+        Assert.Matches(@"^AMB-[0-9A-HJKMNP-TV-Z]{8}-[0-9A-HJKMNP-TV-Z]{26}-51234$", room.ToString());
         Assert.True(RoomCode.TryParse(room.ToString(), out var parsed));
         Assert.Equal(room, parsed);
         Assert.StartsWith("amber-", parsed.NetworkName);
@@ -75,11 +75,13 @@ public class MultiplayerTests
         var room = new RoomCode("K7Q2M9XD", "4HZP8RW2N6TC", 51234);
         var args = EasyTierArgs.Build(new EasyTierOptions(room, true, ["tcp://public.easytier.top:11010", " "], 15999));
         var text = string.Join(' ', args);
-        Assert.Contains("--network-name amber-k7q2m9xd", text);
+        Assert.Contains("--network-name " + room.EasyTierNetworkName, text);
+        // The code's own network name never goes on the wire.
+        Assert.DoesNotContain("amber-k7q2m9xd", text);
         // 房间密钥不放命令行，经环境变量传。
         Assert.DoesNotContain("--network-secret", args);
         Assert.DoesNotContain(args, a => a.Contains("4HZP8RW2N6TC"));
-        Assert.Equal(new Dictionary<string, string> { ["ET_NETWORK_SECRET"] = "4HZP8RW2N6TC" },
+        Assert.Equal(new Dictionary<string, string> { ["ET_NETWORK_SECRET"] = room.EasyTierSecret },
             EasyTierArgs.Environment(new EasyTierOptions(room, true, [], 15999)));
         Assert.Contains("--ipv4 10.233.144.1", text);
         Assert.Contains("--no-tun", args);
@@ -387,8 +389,8 @@ public class AsciiPathTests
 {
     [Theory]
     [InlineData(@"D:\Games\.minecraft", 1252, true)]
-    [InlineData(@"D:\Claude\自制启动器\测试游戏目录", 936, true)]
-    [InlineData(@"D:\Claude\自制启动器\测试游戏目录", 1252, false)]
+    [InlineData(@"D:\游戏\我的启动器\测试游戏目录", 936, true)]
+    [InlineData(@"D:\游戏\我的启动器\测试游戏目录", 1252, false)]
     [InlineData(@"C:\Users\Zoë\.minecraft", 1252, true)]
     [InlineData(@"C:\Users\Zoë\.minecraft", 936, false)]
     [InlineData(@"D:\任何\路径", 65001, true)]

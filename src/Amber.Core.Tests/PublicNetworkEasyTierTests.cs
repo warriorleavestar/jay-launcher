@@ -42,7 +42,7 @@ public sealed class PublicNetworkEasyTierTests
         await using var announcer = new RoomAnnouncer(host, () => new RoomListing
         {
             Id = "", Name = "e2e", Host = "host", Mode = RoomVisibility.Public, HostKey = hostKey.PublicKey, Invite = standing.Invite.ToString(), Players = 1,
-        }, () => [RoomDirectoryProtocol.LookupKey(standing.Invite.LobbyKey)]);
+        }, () => [standing.Invite.LobbyKey]);
         await announcer.AnnounceOnceAsync(default);
         Assert.True(announcer.Published, announcer.LastError);
 

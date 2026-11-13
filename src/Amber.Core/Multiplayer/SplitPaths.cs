@@ -139,15 +139,20 @@ public static class SplitPathPlanner
     public static SplitPathPlan Plan(int paths, IReadOnlyList<string> nodes, ReadOnlySpan<byte> stickyKey)
     {
         if (paths is < SplitStream.MinLegs or > SplitStream.MaxLegs) throw new ArgumentOutOfRangeException(nameof(paths));
-        var groups = nodes.Select(n => n.Trim()).Where(RelayNodes.IsValid).Distinct()
-            .GroupBy(RelayOperators.GroupOf)
-            .Select(g => (Key: g.Key, Nodes: (IReadOnlyList<string>)[.. g]))
-            .ToList();
+        var groups = Groups(nodes);
         if (groups.Count < paths - 1) return new SplitPathPlan([], L.T("core.mp.split.no_independent_path"));
         var key = stickyKey.ToArray();
         var ordered = groups.OrderBy(g => Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(g.Key))), StringComparer.Ordinal).ToList();
         return new SplitPathPlan([.. ordered.Take(paths - 1).Select(g => g.Nodes)], null);
     }
+
+    /// <summary>How many independent relay groups (one per extra path) there are among these nodes.</summary>
+    public static int IndependentGroups(IReadOnlyList<string> nodes) => Groups(nodes).Count;
+
+    private static List<(string Key, IReadOnlyList<string> Nodes)> Groups(IReadOnlyList<string> nodes) =>
+        [.. nodes.Select(n => n.Trim()).Where(RelayNodes.IsValid).Distinct()
+            .GroupBy(RelayOperators.GroupOf)
+            .Select(g => (g.Key, (IReadOnlyList<string>)[.. g]))];
 
     /// <summary>
     /// Whether the paths are ready right now. <paramref name="main"/> is the host as seen on the room's own instance;
@@ -159,8 +164,23 @@ public static class SplitPathPlanner
         // Path 0 has to be direct: relayed, it may go through the same node as an extra path.
         if (!string.Equals(main.Cost, "p2p", StringComparison.OrdinalIgnoreCase)) return L.T("core.mp.split.main_not_direct");
         if (extra.Any(p => p is null)) return L.T("core.mp.split.relay_unreachable");
+        // One relay per extra path: the instance only knows its own group's nodes, so its first hop is in that group, and
+        // a route of two hops ends at the host. A longer route crosses another relay, which may also carry another path.
+        if (extra.Any(p => !OneRelayAtMost(p!.Cost))) return L.T("core.mp.split.relay_multi_hop");
         return null;
     }
+
+    /// <summary>EasyTier writes a peer's route as "p2p" or "relay(N)" with N hops; anything else counts as unknown.</summary>
+    internal static bool OneRelayAtMost(string cost)
+    {
+        if (string.Equals(cost, "p2p", StringComparison.OrdinalIgnoreCase)) return true;
+        var m = RelayCost.Match(cost);
+        return m.Success && int.TryParse(m.Groups[1].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var hops) && hops <= 2;
+    }
+
+    // ASCII digits only and no trailing newline: \d and $ would let other scripts' digits and "relay(2)\n" through.
+    private static readonly System.Text.RegularExpressions.Regex RelayCost = new(@"^relay\(([0-9]{1,3})\)\z",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 }
 
 /// <summary>
@@ -229,9 +249,12 @@ public sealed class SplitPathGroup : IDisposable
         Func<CancellationToken, Task<List<PeerInfo>>> mainPeers, Action<string>? log = null) =>
         Start(installer.CorePath, installer.CliPath, o, workDir, mainPeers, log);
 
+    /// <param name="launch">Starts one extra instance; tests replace it.</param>
     internal static SplitPathGroup? Start(string corePath, string cliPath, EasyTierOptions o, string workDir,
-        Func<CancellationToken, Task<List<PeerInfo>>> mainPeers, Action<string>? log = null)
+        Func<CancellationToken, Task<List<PeerInfo>>> mainPeers, Action<string>? log = null,
+        Func<string, IEnumerable<string>, IReadOnlyDictionary<string, string>, string, (Process Process, ProcessJob? Job)>? launch = null)
     {
+        launch ??= EasyTierSession.Launch;
         var split = o.Room.Split;
         if (!split.Enabled || o.Tun || !o.Room.FromInvite || !o.Room.Tunnel.Wraps) return null;
         if (!o.IsHost && (o.LocalSplitPorts is not { } ports || ports.Count != split.Paths)) return null;
@@ -250,7 +273,7 @@ public sealed class SplitPathGroup : IDisposable
             {
                 var options = new SplitPathOptions(i, split.Nets[i - 1], o.IsHost, plan.ExtraPeers[i - 1], EasyTierArgs.FreeTcpPort(),
                     o.IsHost ? null : o.LocalSplitPorts![i], o.QuicProxy, o.IsHost ? null : EasyTierArgs.JoinerHost(o.MachineId));
-                var (process, job) = EasyTierSession.Launch(corePath, SplitPathArgs.Build(options), SplitPathArgs.Environment(options),
+                var (process, job) = launch(corePath, SplitPathArgs.Build(options), SplitPathArgs.Environment(options),
                     Path.Combine(workDir, $"path{i}"));
                 // Owned by the group from here on, so a failure below still ends this process.
                 group._instances.Add(new PathInstance(options, process, job));
@@ -263,6 +286,15 @@ public sealed class SplitPathGroup : IDisposable
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
             }
+        }
+        catch (Exception e) when (!SplitLegReservation.NeedsLegs(split))
+        {
+            // Auto: an extra path that can't start means no split, not a room that can't open (a member doesn't choose the
+            // host's settings). Logged by type only.
+            group.Dispose();
+            log?.Invoke(L.T("core.mp.split.start_failed") + e.GetType().Name);
+            if (o.IsHost) return null;
+            return new SplitPathGroup(false, null, (_, _) => Task.FromResult(new List<PeerInfo>()), log, L.T("core.mp.split.start_failed") + e.GetType().Name);
         }
         catch
         {
@@ -297,6 +329,7 @@ public sealed class SplitPathGroup : IDisposable
 
     private async Task WatchAsync(PathInstance[] instances, CancellationToken ct)
     {
+        string? lastFailure = null;
         while (!ct.IsCancellationRequested)
         {
             try
@@ -305,6 +338,7 @@ public sealed class SplitPathGroup : IDisposable
                 using var round = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 round.CancelAfter(Interval * 2 < MinCheckTime ? MinCheckTime : Interval * 2);
                 var problem = await CheckAsync(instances, round.Token);
+                lastFailure = null;
                 _problem = problem;
                 Volatile.Write(ref _checkedAt, Stopwatch.GetTimestamp());
             }
@@ -314,8 +348,11 @@ public sealed class SplitPathGroup : IDisposable
             }
             catch (Exception e)
             {
-                // Fail closed: a check that didn't finish never leaves an earlier "ready" in place.
-                _log?.Invoke(L.T("core.mp.split.check_failed") + " (" + e.GetType().Name + ")");
+                // Fail closed: a check that didn't finish never leaves an earlier "ready" in place. Logged when checks start
+                // failing (or fail differently), not every round.
+                var type = e.GetType().Name;
+                if (type != lastFailure) _log?.Invoke(L.T("core.mp.split.check_failed") + " (" + type + ")");
+                lastFailure = type;
                 _problem = L.T("core.mp.split.check_failed");
             }
             try

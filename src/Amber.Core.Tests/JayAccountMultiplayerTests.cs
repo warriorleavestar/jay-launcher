@@ -302,7 +302,10 @@ public sealed class JayAccountMultiplayerTests : IAsyncDisposable, IDisposable
         var book = new ContactBook(path, () => Now) { Me = new byte[32] };
         book.Import([new Contact(aliceLaptop.Dh.PublicKey.ToArray(), "Alice", true, Now)]);
         book.SeenLive(aliceLaptop.Dh.PublicKey, _alice.CertifyDevice(aliceLaptop, "Windows", 0, Now));
-        book.ConfirmAccount(aliceLaptop.Dh.PublicKey, isTheirs: false);
+        // An answer about another account changes nothing.
+        book.ConfirmAccount(aliceLaptop.Dh.PublicKey, isTheirs: true, _bob.Address);
+        Assert.True(book.Find(aliceLaptop.Dh.PublicKey)!.AccountPending);
+        book.ConfirmAccount(aliceLaptop.Dh.PublicKey, isTheirs: false, _alice.Address);
 
         var saved = new ContactBook(path, () => Now).All.Single();
         Assert.Equal((null, false, _alice.Address), (saved.JayAccount, saved.AccountPending, saved.RefusedAccount));

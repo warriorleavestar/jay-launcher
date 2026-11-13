@@ -160,6 +160,9 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     /// certificate is older (lower epoch) than one I've seen from that account.</item>
     /// </list>
     /// Returns the new device, or null.
+    /// <para>Precondition: <paramref name="certificate"/> comes from <see cref="Identity.JayProof.Verified"/> for this
+    /// handshake. A certificate alone isn't tied to a session and can be replayed, so never pass one from mail, a backup or
+    /// any other stored copy.</para>
     /// </summary>
     public Contact? SeenLive(ReadOnlySpan<byte> deviceKey, Identity.DeviceCertificate certificate)
     {
@@ -496,14 +499,15 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
     /// My answer about the Jay account a knock linked to this device: yes, it's theirs (from now on it vouches for their
     /// other devices), or no (the link is dropped, and the same account doesn't ask again for this device).
     /// </summary>
-    public void ConfirmAccount(ReadOnlySpan<byte> theirs, bool isTheirs)
+    /// <param name="account">The account the question showed. When given, an answer about a different account does nothing.</param>
+    public void ConfirmAccount(ReadOnlySpan<byte> theirs, bool isTheirs, string? account = null)
     {
         lock (_gate)
         {
             var list = Load();
             var key = theirs.ToArray();
             var i = list.FindIndex(c => c.PublicKey.AsSpan().SequenceEqual(key));
-            if (i < 0 || !list[i].AccountPending) return;
+            if (i < 0 || !list[i].AccountPending || (account is not null && list[i].JayAccount != account)) return;
             list[i] = isTheirs
                 ? list[i] with { AccountPending = false }
                 : list[i] with { AccountPending = false, RefusedAccount = list[i].JayAccount, JayAccount = null, DeviceName = "", Epoch = 0 };

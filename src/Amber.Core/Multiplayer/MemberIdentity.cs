@@ -26,6 +26,12 @@ public sealed class MemberIdentity : IDisposable
     /// shares or goes back to this data folder still finds its own identity, and can't overwrite the new one.
     /// </summary>
     public const string LegacyFileName = "identity.key";
+
+    /// <summary>
+    /// Written when the user resets the identity: the key in <see cref="LegacyFileName"/> was given up on purpose, so a
+    /// damaged <see cref="FileName"/> must not bring it back.
+    /// </summary>
+    public const string RetiredFileName = "identity.retired";
     private const string WrapKeyFileName = "identity.wrap";
     private static readonly byte[] Entropy = "Amber.Launcher.Identity"u8.ToArray();
     private static readonly byte[] MagicDpapi = "AMBID1"u8.ToArray();
@@ -81,7 +87,8 @@ public sealed class MemberIdentity : IDisposable
     private static MemberIdentity LoadOrCreate(string directory, bool fromLegacy)
     {
         var path = Path.Combine(directory, FileName);
-        var legacy = (fromLegacy || !File.Exists(path)) && File.Exists(Path.Combine(directory, LegacyFileName));
+        var legacy = (fromLegacy || !File.Exists(path)) && File.Exists(Path.Combine(directory, LegacyFileName))
+            && !File.Exists(Path.Combine(directory, RetiredFileName));
         if (legacy) path = Path.Combine(directory, LegacyFileName);
         if (File.Exists(path))
         {
@@ -144,7 +151,9 @@ public sealed class MemberIdentity : IDisposable
                     catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
                     // A damaged new file on a device that came from an older version: its handshake key is still in the old
                     // file, so take it from there again (hosts and friends keep knowing the device) with new signing keys.
-                    if (File.Exists(Path.Combine(directory, LegacyFileName))) return LoadOrCreate(directory, fromLegacy: true);
+                    // Not after a reset: that key was given up on purpose.
+                    if (File.Exists(Path.Combine(directory, LegacyFileName)) && !File.Exists(Path.Combine(directory, RetiredFileName)))
+                        return LoadOrCreate(directory, fromLegacy: true);
                 }
                 var fresh = new MemberIdentity(directory, DeviceKeys.Generate(), L.T("core.mp.identity.corrupt"));
                 try
@@ -184,6 +193,12 @@ public sealed class MemberIdentity : IDisposable
             _device = fresh;
             try
             {
+                // First, so the old key can't come back from identity.key even if saving the new one goes wrong.
+                if (File.Exists(Path.Combine(_directory, LegacyFileName)))
+                {
+                    Directory.CreateDirectory(_directory);
+                    File.WriteAllBytes(Path.Combine(_directory, RetiredFileName), []);
+                }
                 Save();
             }
             catch

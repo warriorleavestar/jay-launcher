@@ -241,7 +241,8 @@ public sealed partial class MultiplayerViewModel
         // their other devices only after I confirm it.
         foreach (var d in book.All.Where(c => c.Verified && c.AccountPending && c.JayAccount is not null))
         {
-            var dedupe = "contact-account:" + Convert.ToHexStringLower(d.PublicKey);
+            // The key names the account too, so an answer always applies to the account the question showed.
+            var dedupe = "contact-account:" + Convert.ToHexStringLower(d.PublicKey) + ":" + d.JayAccount;
             wanted.Add(dedupe);
             var who = new ContactItem(d).Name;
             _service.Requests.Post(new RequestSpec("contact-account", L.F("multiplayer.contacts.account_link", who),
@@ -432,7 +433,8 @@ public sealed partial class MultiplayerViewModel
                 if (_mailedInvites.Remove(key, out var invite) && handle.Choice == "join") _ = JoinMailedInviteAsync(invite);
                 break;
             case "contact-account" when key.StartsWith("contact-account:", StringComparison.Ordinal):
-                if (handle.Choice is "ok" or "no") Contacts.ConfirmAccount(Convert.FromHexString(key["contact-account:".Length..]), handle.Choice == "ok");
+                if (handle.Choice is "ok" or "no" && key["contact-account:".Length..].Split(':') is [var deviceHex, var account])
+                    Contacts.ConfirmAccount(Convert.FromHexString(deviceHex), handle.Choice == "ok", account);
                 break;
             case "contact-new-device" when key.StartsWith("contact-new-device:", StringComparison.Ordinal):
             {

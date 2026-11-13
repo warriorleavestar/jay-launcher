@@ -314,10 +314,12 @@ public static class KnockClient
     /// side's addresses and returns them; they go back in the encrypted ack. Null, or a null result, sends none (the guest
     /// then stays on the relay). No address ever travels in a code or before approval.
     /// </param>
+    /// <param name="hostVerified">Called once the host has answered the handshake (and, with <paramref name="expectedHost"/>,
+    /// proved that key), before this side says anything about itself. Anything after it is between us and the host.</param>
     public static async Task<KnockOutcome> KnockAsync(Stream stream, JayInvite invite, X25519KeyPair me, string name, string version,
         CancellationToken ct = default, TimeSpan? handshakeTimeout = null, TimeSpan? decisionTimeout = null, Public.DeviceFingerprint? device = null,
         string? account = null, byte[]? expectedHost = null, Identity.JayProof? jay = null,
-        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, Action? hostVerified = null)
     {
         var lobbyName = LobbyKeys.LobbyName(invite.LobbyKey);
         var psk = LobbyKeys.KnockPsk(invite.Token);
@@ -335,6 +337,7 @@ public static class KnockClient
             // Checked before this side says anything about itself.
             if (expectedHost is not null && (handshake.RemoteStaticPublicKey is not { } proven || !CryptographicOperations.FixedTimeEquals(proven, expectedHost)))
                 throw new WrongHostException(L.T("core.mp.knock.wronghost"));
+            hostVerified?.Invoke();
             // attest = 1：这台电脑支持设备验证（旧版房主不认识这个字段，直接忽略）。
             var about = new JsonObject { ["v"] = 1, ["name"] = KnockProtocol.SanitizeName(name), ["ver"] = version, ["attest"] = 1 };
             if (device is not null && hello["device"] is JsonObject ask && handshake.RemoteStaticPublicKey is { } host)
@@ -476,6 +479,19 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
     public byte[] LobbyKeyCopy()
     {
         lock (_gate) return (byte[])(_lobbyKey ??= RandomNumberGenerator.GetBytes(JayInvite.KeyLength)).Clone();
+    }
+
+    /// <summary>
+    /// A copy of the room's current lobby key, or null when it has none (no usable invite). Every invite of the room
+    /// shares it while it lasts, so the host publishes its hidden entry for as long as it exists.
+    /// </summary>
+    public byte[]? CurrentLobbyKey()
+    {
+        lock (_gate)
+        {
+            PruneLocked();
+            return _lobbyKey is { } key ? (byte[])key.Clone() : null;
+        }
     }
 
     /// <summary>The host's game, written into new invites (invite v3) so the joiner can pick a matching instance.</summary>

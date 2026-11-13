@@ -168,6 +168,11 @@ public sealed partial class MultiplayerViewModel
             _public = session;
             session = null;
             IsPublicConnected = true;
+            // Keep this network's directory snapshot fresh on a fixed schedule: lookups and the room list read it locally.
+            var connected = _public;
+            // The same copy every DirectoryClient(connected) reads (one per network), so lookups never ask on their own.
+            _snapshotPolling?.Dispose();
+            _snapshotPolling = DirectoryClient(connected).Snapshots.StartPolling(() => DirectoryClient(connected));
             SetStatus(StatusMessage.Success("multiplayer.public.connected", profile.Name));
             StartAnnouncerIfHosting();
             StartVolunteerWork(_public, profile);
@@ -210,6 +215,8 @@ public sealed partial class MultiplayerViewModel
         StopAnnouncer();
         StopVolunteering();
         if (VolunteerEnabled) VolunteerStatus = L.T("multiplayer.volunteer.status_next_connect");
+        _snapshotPolling?.Dispose();
+        _snapshotPolling = null;
         _public?.Dispose();
         _public = null;
         IsPublicConnected = false;
@@ -274,17 +281,37 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>加入方拿着邀请码、又连着公共网络：先在目录里找房主（隐藏房间也行），找不到再走邀请码自己的大厅。</summary>
+    /// <param name="freshSince">Second try: look in a copy of the directory refreshed after this time.</param>
     private async Task<KnockOutcome?> TryPublicKnockAsync(JayInvite invite, X25519KeyPair me, string name, CancellationToken ct, byte[]? expectedHost = null,
-        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null)
+        Func<DirectAddresses, CancellationToken, Task<DirectAddresses?>>? direct = null, DateTimeOffset? freshSince = null)
     {
         if (_public is not { } network) return null;
         try
         {
-            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct);
+            return await PublicJoin.TryKnockByInviteAsync(network, invite, me, name, Amber.Core.Launch.UpdateChecker.CurrentVersion, ct, client: DirectoryClient(network), device: Device, account: AccountToken, jay: JayCertificate, expectedHost: expectedHost, direct: direct, freshSince: freshSince,
+                failed: (ip, e) =>
+                {
+                    // Anything an address does is caught (it may be someone else's); a bug of ours shows in debug builds.
+                    System.Diagnostics.Debug.Assert(e is not NullReferenceException, e.ToString());
+                    _diag.Add(L.T("multiplayer.public.diagnostics_category"), $"{ip}: {e.GetType().FullName}: {e.Message}");
+                },
+                // A room opened after our copy was taken shows up at the next directory refresh; say we're still looking.
+                searching: () => Dispatcher.UIThread.Post(() =>
+                {
+                    if (!ct.IsCancellationRequested) SetStatus(StatusMessage.Info("multiplayer.invite.finding_host"));
+                }));
         }
-        catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException && !ct.IsCancellationRequested)
+        // The host already has this request: what went wrong is the answer (knocking again in the lobby would ask twice).
+        catch (HostReachedException e) when (e.InnerException is { } inner)
         {
-            _diag.Add(L.T("multiplayer.public.diagnostics_category"), e.Message);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
+            throw;
+        }
+        // Anything else that goes wrong here (the directory, an address) leaves the invite's own lobby to try.
+        catch (Exception e) when (e is not OutOfMemoryException && !ct.IsCancellationRequested)
+        {
+            System.Diagnostics.Debug.Assert(e is not NullReferenceException, e.ToString());
+            _diag.Add(L.T("multiplayer.public.diagnostics_category"), $"{e.GetType().FullName}: {e.Message}");
             return null;
         }
     }
@@ -300,13 +327,15 @@ public sealed partial class MultiplayerViewModel
     private void StartAnnouncerIfHosting()
     {
         if (_public is not { } network || _announcer is not null || !IsHosting || _lobby is null) return;
-        var announcer = new RoomAnnouncer(network, BuildListing, LookupKeys,
+        var announcer = new RoomAnnouncer(network, BuildListing, LobbyKeys,
             line => _diag.Add(L.T("multiplayer.public.diagnostics_category"), line), client: DirectoryClient(network), searchKey: SearchKeyForAnnounce,
             account: () => AccountToken);
         announcer.StateChanged += () => Dispatcher.UIThread.Post(() =>
         {
             if (_announcer != announcer) return;
-            PublishStatus = announcer.Published ? L.T(CurrentVisibility == RoomVisibility.Hidden ? "multiplayer.public.registered_hidden" : "multiplayer.public.published")
+            PublishStatus = announcer.Published
+                ? announcer.Warning is { } warning ? L.F("core.mp.public.hidden_warning", warning.Text())
+                : L.T(CurrentVisibility == RoomVisibility.Hidden ? "multiplayer.public.registered_hidden" : "multiplayer.public.published")
                 : announcer.LastError is { } error ? L.F("core.mp.public.announce_failed", error) : "";
         });
         _announcer = announcer;
@@ -314,8 +343,15 @@ public sealed partial class MultiplayerViewModel
 
     private RoomVisibility CurrentVisibility { get; set; } = RoomVisibility.Hidden;
 
-    private IReadOnlyList<string> LookupKeys() => _lobby?.Book.Pending.Count > 0 && _lobby.Book.Pending[0].Invite.LobbyKey is { } key
-        ? [RoomDirectoryProtocol.LookupKey(key)] : [];
+    /// <summary>Stops the directory snapshot poller started when the public network connected.</summary>
+    private IDisposable? _snapshotPolling;
+
+    /// <summary>
+    /// The lobby key for hidden entries, so invite codes find the room through the directory (all of a room's invites
+    /// share it). Published for as long as the key lasts, whatever the room's visibility: an earlier invite holder who
+    /// publishes an entry of their own under it then clashes with the host's entry instead of being the only answer.
+    /// </summary>
+    private IReadOnlyList<byte[]> LobbyKeys() => _lobby?.Book.CurrentLobbyKey() is { } key ? [key] : [];
 
     private RoomListing BuildListing()
     {
