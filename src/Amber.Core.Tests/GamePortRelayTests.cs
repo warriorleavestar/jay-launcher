@@ -364,6 +364,63 @@ public sealed class GamePortRelayTests
     }
 
     [Fact]
+    public async Task OneGuestFillingItsShareDoesNotKeepAnotherGuestOut()
+    {
+        using var game = new EchoGame(0xE3);
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        // A loopback listener stands in for the virtual address; guests come from 127.0.0.1 and 127.0.0.2.
+        TcpListener? adapter = null;
+        await relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), _ => true, TimeSpan.FromSeconds(5), (_, _) =>
+        {
+            adapter = new TcpListener(IPAddress.Loopback, 0);
+            adapter.Start();
+            return adapter;
+        });
+        var adapterPort = ((IPEndPoint)adapter!.LocalEndpoint).Port;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var taken = 0;
+        relay.BeforeConnectForTest = () => Interlocked.Increment(ref taken) <= GamePortRelay.MaxPerSource ? release.Task : Task.CompletedTask;
+
+        async Task<byte[]?> TripFromAsync(IPAddress from, byte value)
+        {
+            using var client = new TcpClient(new IPEndPoint(from, 0));
+            await client.ConnectAsync(IPAddress.Loopback, adapterPort);
+            var s = client.GetStream();
+            await s.WriteAsync(new[] { value });
+            var reply = new byte[2];
+            var read = 0;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try
+            {
+                while (read < 2)
+                {
+                    var n = await s.ReadAsync(reply.AsMemory(read), timeout.Token);
+                    if (n == 0) return null;
+                    read += n;
+                }
+            }
+            catch (Exception e) when (e is IOException or SocketException) { return null; }
+            return reply;
+        }
+
+        // The first guest takes its whole share (still connecting) ...
+        var first = Enumerable.Range(0, GamePortRelay.MaxPerSource).Select(i => TripFromAsync(IPAddress.Loopback, (byte)i)).ToList();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (relay.OpenConnectionsTo(game.Port) < GamePortRelay.MaxPerSource && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Equal(GamePortRelay.MaxPerSource, relay.OpenConnectionsTo(game.Port));
+        // ... so one more of its own is closed at once, while another guest still gets through to the game.
+        Assert.Null(await TripFromAsync(IPAddress.Loopback, 0xFE));
+        IPAddress other = IPAddress.Parse("127.0.0.2");
+        try { using var probe = new TcpClient(new IPEndPoint(other, 0)); }
+        catch (SocketException) { release.SetResult(); return; } // No second loopback address on this machine.
+        Assert.Equal(new byte[] { 0xE3, 0x42 }, await TripFromAsync(other, 0x42));
+
+        release.SetResult();
+        foreach (var trip in first) Assert.NotNull(await trip);
+    }
+
+    [Fact]
     public void AWholeLanRoomPutsTheRelayInFrontOfAGameInTheStrongSandbox() => UiTestThread.Run(() =>
     {
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });

@@ -289,6 +289,66 @@ public sealed class RekeyTests : IDisposable
         }
     }
 
+    /// <summary>One member holding all its game connections doesn't keep another member out, and gets places back as they close.</summary>
+    [Fact]
+    public async Task OneMembersGameConnectionsAreLimitedWithoutKeepingOthersOut()
+    {
+        var settings = new TunnelSettings(TransportMode.High, false);
+        var room = HostRoom(settings);
+        var alice = room.Table.Issue(_alice.PublicKey, "Alice");
+        var bob = room.Table.Issue(_bob.PublicKey, "Bob");
+        await using var server = new TunnelServer(room.Host, settings, 0, _ => async (stream, ct) => await stream.CopyToAsync(stream, ct));
+
+        async Task<Stream> OpenAsync(MemberEntry member) =>
+            await TunnelClient.Wrapped("127.0.0.1", server.Port, GuestRoom(room, member), settings, TunnelService.Game)(default);
+
+        static async Task<bool> EchoesAsync(Stream tunnel, byte value)
+        {
+            try
+            {
+                await tunnel.WriteAsync(new[] { value });
+                await tunnel.FlushAsync();
+                var echo = new byte[1];
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                return await tunnel.ReadAsync(echo, timeout.Token) == 1 && echo[0] == value;
+            }
+            catch (Exception e) when (e is IOException or CryptographicException or ObjectDisposedException or OperationCanceledException or SocketException)
+            {
+                return false;
+            }
+        }
+
+        var held = new List<Stream>();
+        try
+        {
+            for (var i = 0; i < TunnelServer.MaxGameStreamsPerMember; i++)
+            {
+                held.Add(await OpenAsync(alice));
+                Assert.True(await EchoesAsync(held[^1], (byte)i));
+            }
+            // Alice's share is used up: her next game connection is turned away, Bob's is served.
+            await using (var over = await OpenAsync(alice)) Assert.False(await EchoesAsync(over, 0xAA));
+            await using (var other = await OpenAsync(bob)) Assert.True(await EchoesAsync(other, 0xBB));
+
+            // One of Alice's connections closes: she gets that place back.
+            await held[0].DisposeAsync();
+            held.RemoveAt(0);
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            var again = false;
+            while (!again && DateTime.UtcNow < deadline)
+            {
+                await using var next = await OpenAsync(alice);
+                again = await EchoesAsync(next, 0xCC);
+                if (!again) await Task.Delay(100);
+            }
+            Assert.True(again);
+        }
+        finally
+        {
+            foreach (var s in held) await s.DisposeAsync();
+        }
+    }
+
     /// <summary>A connection that fails before its handshake starts still gives its place back.</summary>
     [Fact]
     public async Task FailuresBeforeTheHandshakeFreeTheirPlace()

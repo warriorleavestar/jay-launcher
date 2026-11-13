@@ -32,6 +32,12 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// <summary>Connections passed on (or being connected) at once; a LAN world takes far fewer players.</summary>
     internal const int MaxConnections = 64;
 
+    /// <summary>Connections one guest whose address is known may have passed on (or being connected) at once.</summary>
+    internal const int MaxPerSource = 16;
+
+    // Connections passed on (or being connected) by guest address, for those whose address is known.
+    private readonly Dictionary<IPAddress, int> _perSource = [];
+
     private readonly TimeSpan _connectTimeout;
     private int _target;
 
@@ -160,12 +166,14 @@ public sealed class GamePortRelay : IAsyncDisposable
                 IPAddress? source;
                 try { source = (client.Client.RemoteEndPoint as IPEndPoint)?.Address; }
                 catch (Exception e) when (e is SocketException or ObjectDisposedException) { source = null; }
-                if (source is null || !allowSource(source.IsIPv4MappedToIPv6 ? source.MapToIPv4() : source))
+                if (source is not null && source.IsIPv4MappedToIPv6) source = source.MapToIPv4();
+                if (source is null || !allowSource(source))
                 {
                     client.Dispose();
                     continue;
                 }
-                _ = Task.Run(() => ServeAsync(client));
+                var guest = source;
+                _ = Task.Run(() => ServeAsync(client, guest));
             }
         }
         finally
@@ -201,7 +209,10 @@ public sealed class GamePortRelay : IAsyncDisposable
         }
     }
 
-    private async Task ServeAsync(TcpClient client)
+    /// <param name="source">The guest's address when it is known (a whole-LAN guest on the virtual address); its
+    /// connections count against <see cref="MaxPerSource"/>. Null on loopback, where callers can't be told apart (the
+    /// wrapped transport limits each member before it hands a connection over).</param>
+    private async Task ServeAsync(TcpClient client, IPAddress? source = null)
     {
         using var inbound = client;
         int port;
@@ -213,6 +224,12 @@ public sealed class GamePortRelay : IAsyncDisposable
             if (Target is not { } target || _cts.IsCancellationRequested) return;
             // Players passed on at once, counted from the moment they are taken on: more are closed straight away.
             if (_open.Count + _connecting.Values.Sum() >= MaxConnections) return;
+            // One guest can't take every place: past its own share only that guest is turned away.
+            if (source is not null)
+            {
+                if (_perSource.GetValueOrDefault(source) >= MaxPerSource) return;
+                _perSource[source] = _perSource.GetValueOrDefault(source) + 1;
+            }
             port = target;
             _connecting[port] = _connecting.GetValueOrDefault(port) + 1;
         }
@@ -249,6 +266,11 @@ public sealed class GamePortRelay : IAsyncDisposable
             {
                 Done();
                 if (entry is { } done) _open.Remove(done);
+                if (source is not null)
+                {
+                    if (_perSource.GetValueOrDefault(source) <= 1) _perSource.Remove(source);
+                    else _perSource[source]--;
+                }
             }
             outbound?.Dispose();
         }
