@@ -79,6 +79,39 @@ public static partial class LanGames
         return found.Values.OrderBy(g => g.Port).ToList();
     }
 
+    /// <summary>
+    /// Listens for this computer's LAN broadcasts until <paramref name="ct"/> is cancelled, reporting each one heard.
+    /// Like <see cref="ListenAsync"/>, broadcasts from other computers are ignored. The local addresses are read again
+    /// every minute, since a room's virtual adapter can come up after listening starts.
+    /// </summary>
+    public static async Task WatchAsync(Action<LanGame> heard, CancellationToken ct)
+    {
+        using var client = new UdpClient(AddressFamily.InterNetwork);
+        client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        client.Client.Bind(new IPEndPoint(IPAddress.Any, MulticastPort));
+        client.JoinMulticastGroup(IPAddress.Parse(MulticastAddress));
+        var local = LocalAddresses();
+        var readAt = DateTime.UtcNow;
+        try
+        {
+            while (true)
+            {
+                var result = await client.ReceiveAsync(ct);
+                if (DateTime.UtcNow - readAt > TimeSpan.FromMinutes(1))
+                {
+                    local = LocalAddresses();
+                    readAt = DateTime.UtcNow;
+                }
+                if (!local.Contains(result.RemoteEndPoint.Address)) continue;
+                if (Parse(Encoding.UTF8.GetString(result.Buffer)) is { } game) heard(game);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The room stopped listening.
+        }
+    }
+
     private static HashSet<IPAddress> LocalAddresses()
     {
         var set = new HashSet<IPAddress> { IPAddress.Loopback };
