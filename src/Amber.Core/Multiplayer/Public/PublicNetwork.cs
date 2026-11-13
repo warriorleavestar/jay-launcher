@@ -144,9 +144,9 @@ public sealed record RelayLimits(int KBpsPerNetwork = 0, string? Networks = null
 public static class PublicNetworkArgs
 {
     /// <summary>
-    /// Jay's EasyTier build (JAY.md, item 8): with this set to "1", a connection handed to a local service comes from
-    /// 127.235.c.d for a caller at public-network address 10.235.c.d (confirmed against the route table), and from one
-    /// shared address outside 127.235.0.0/16 for any other caller, instead of 127.0.0.1. Set for the directory node only,
+    /// Jay's EasyTier build (JAY.md, item 9): with this set to "1", a connection handed to a local service comes from
+    /// 127.235.c.d, an address of the calling peer's own picked by its peer id (not its public-network address), and from
+    /// one shared address outside 127.235.0.0/16 for a peer the route table doesn't know yet, instead of 127.0.0.1. Set for the directory node only,
     /// so the directory can apply its per-source limits. Needs jay-v2.6.4-5 or later; on an older build every caller
     /// arrives from 127.0.0.1 and the directory falls back to directory-wide limits only (RoomDirectoryServer).
     /// </summary>

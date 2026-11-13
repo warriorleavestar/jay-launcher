@@ -1,8 +1,12 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Amber.Core.Identity;
 
 namespace Amber.Core.Multiplayer.Public;
 
@@ -36,7 +40,10 @@ public static class VolunteerNodes
     /// Normalizes a volunteer address to <c>tcp://host:port</c>. Returns null for anything else, including literal
     /// private, loopback, link-local and other non-public IPs.
     /// </summary>
-    public static string? Normalize(string? url)
+    public static string? Normalize(string? url) => Normalize(url, IsPublic);
+
+    /// <param name="isPublic">Which IP literals count as public (tests pass their own, so they need no real addresses).</param>
+    internal static string? Normalize(string? url, Func<IPAddress, bool> isPublic)
     {
         if (string.IsNullOrWhiteSpace(url) || url.Length > 300) return null;
         var text = url.Trim();
@@ -46,7 +53,7 @@ public static class VolunteerNodes
         var host = uri.HostNameType == UriHostNameType.IPv6 ? uri.Host : uri.Host.ToLowerInvariant();
         if (IPAddress.TryParse(host.Trim('[', ']'), out var ip))
         {
-            if (!IsPublic(ip)) return null;
+            if (!isPublic(ip)) return null;
         }
         else if (uri.HostNameType != UriHostNameType.Dns || !host.Contains('.') || host.EndsWith(".local", StringComparison.Ordinal)
                  || host.EndsWith(".lan", StringComparison.Ordinal) || host == "localhost") return null;
@@ -85,7 +92,9 @@ public static class VolunteerNodes
     /// (<c>stun_info.public_ip</c>, else <c>ip_list.public_ipv4</c>). Null when there is none (STUN blocked, or not
     /// checked yet). Behind carrier-grade NAT this is the carrier's address, which port forwarding can't reach.
     /// </summary>
-    public static string? PublicAddressFromNodeInfo(string json)
+    public static string? PublicAddressFromNodeInfo(string json) => PublicAddressFromNodeInfo(json, IsPublic);
+
+    internal static string? PublicAddressFromNodeInfo(string json, Func<IPAddress, bool> isPublic)
     {
         try
         {
@@ -100,7 +109,7 @@ public static class VolunteerNodes
             }
             else if (node["ip_list"]?["public_ipv4"]?.GetValueKind() == JsonValueKind.String) candidates.Add(node["ip_list"]!["public_ipv4"]!.GetValue<string>());
             return candidates.Select(c => IPAddress.TryParse(c.Trim(), out var ip) ? ip : null)
-                .FirstOrDefault(ip => ip is { AddressFamily: AddressFamily.InterNetwork } && IsPublic(ip))?.ToString();
+                .FirstOrDefault(ip => ip is { AddressFamily: AddressFamily.InterNetwork } && isPublic(ip))?.ToString();
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or OverflowException) { return null; }
     }
@@ -167,6 +176,119 @@ public static class VolunteerNodes
 }
 
 /// <summary>
+/// Who runs a volunteer node. A volunteer whose Minecraft account has a Jay account bound signs each registration with
+/// its device keys and sends the certificate its Jay account signed for the device. The directory checks both and
+/// remembers the account as the node's operator, so it can hand out nodes from different people (privacy plan stage 9
+/// wants entry and exit run by different operators) and the network's operator can ban a person rather than one address.
+/// The account address never leaves the directory: members only get the addresses, already spread over operators.
+/// </summary>
+public static class VolunteerOperator
+{
+    /// <summary>A registration's time may be this far behind the directory's clock.</summary>
+    public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(3);
+    /// <summary>...and this far ahead of it.</summary>
+    public static readonly TimeSpan MaxClockAhead = TimeSpan.FromSeconds(60);
+    private static ReadOnlySpan<byte> Domain => "jay-volunteer-v3\n"u8;
+
+    /// <summary>
+    /// What a registration names its network by (<see cref="Sign"/>): the network's id plus a hash of its EasyTier network
+    /// name and secret. Ids of self-made networks are picked by their makers and can repeat; two networks with the same
+    /// name and secret are one network. Only members and the directory know the secret, so the tag says nothing new.
+    /// </summary>
+    public static string NetworkTag(PublicNetworkProfile? profile)
+    {
+        if (profile is null) return "";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes("jay-volunteer-net-v1\n" + profile.NetworkName + "\n" + profile.Secret));
+        return profile.Id + ":" + Convert.ToHexStringLower(hash.AsSpan(0, 16));
+    }
+
+    /// <summary>
+    /// The bytes signed: the network tag (<see cref="NetworkTag"/>), a newline, the normalized address, a newline and the
+    /// time in Unix seconds (big-endian). The tag keeps a registration for one network from being used on another, even
+    /// one that took the same id.
+    /// </summary>
+    private static byte[] Message(string network, string address, long at)
+    {
+        var text = Encoding.UTF8.GetBytes(network + "\n" + address + "\n");
+        var message = new byte[text.Length + 8];
+        text.CopyTo(message, 0);
+        BinaryPrimitives.WriteInt64BigEndian(message.AsSpan(text.Length), at);
+        return message;
+    }
+
+    /// <summary>
+    /// The "operator" part of a volunteer registration for <paramref name="address"/> (already normalized) on the network
+    /// <paramref name="network"/> (<see cref="NetworkTag"/>).
+    /// </summary>
+    public static JsonObject Sign(JayProof proof, string network, string address, DateTimeOffset now)
+    {
+        var at = now.ToUnixTimeSeconds();
+        return new JsonObject
+        {
+            ["cert"] = proof.Certificate.ToJson(),
+            ["at"] = at,
+            ["sig"] = Convert.ToBase64String(proof.Keys.Sign(Domain, Message(network, address, at)).Encode()),
+        };
+    }
+
+    /// <summary>
+    /// The Jay account that signed for this registration, with the time it signed at, or null when the signature,
+    /// certificate, network or time doesn't check out.
+    /// </summary>
+    public static (string Account, long At)? Verify(JsonNode? node, string network, string address, DateTimeOffset now)
+    {
+        try
+        {
+            // The time first (cheap, and compared without overflow), then the certificate and signature.
+            if (node is not JsonObject o || o["at"]?.GetValue<long>() is not { } at) return null;
+            var n = now.ToUnixTimeSeconds();
+            if (at < n - (long)MaxClockSkew.TotalSeconds || at > n + (long)MaxClockAhead.TotalSeconds) return null;
+            if (DeviceCertificate.FromJson(o["cert"]) is not { } cert || !cert.Verify(cert.DeviceKey)) return null;
+            // The account is derived from the certificate's account keys (DeviceCertificate.Account encodes their id), so
+            // it is always the canonical address bans and limits compare against; there's no other spelling to send.
+            var sig = HybridSignature.Decode(Convert.FromBase64String(o["sig"]?.GetValue<string>() ?? ""));
+            return HybridSignature.Verify(cert.DeviceEd, cert.DeviceMlDsa, Domain, Message(network, address, at), sig) ? (cert.Account, at) : null;
+        }
+        catch (Exception e) when (e is FormatException or InvalidOperationException or ArgumentException or CryptographicException) { return null; }
+    }
+}
+
+/// <summary>A volunteer node and its operator (a Jay account, or "" when unknown or disputed), as the directory orders them.</summary>
+/// <remarks>Operators stay in the directory: members only get the addresses, already spread over operators.</remarks>
+public sealed record VolunteerNode(string Url, string Operator)
+{
+    /// <summary>
+    /// Nodes in order, taking one per operator first (unknown operators each count as their own), then the rest. This
+    /// spreads load and avoids the obvious "both ends run by the same person"; it is not a security property, because
+    /// one person can hold any number of Jay accounts.
+    /// </summary>
+    public static IReadOnlyList<VolunteerNode> SpreadOperators(IEnumerable<VolunteerNode> nodes)
+    {
+        var list = nodes.ToList();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var first = new List<VolunteerNode>();
+        var rest = new List<VolunteerNode>();
+        foreach (var node in list)
+            (node.Operator.Length == 0 || seen.Add(node.Operator) ? first : rest).Add(node);
+        return [.. first, .. rest];
+    }
+}
+
+/// <summary>
+/// A listed volunteer as the network's operator sees it: the Jay account it was registered under (null: unsigned), the
+/// other Jay accounts that claimed it with a signed registration since (the few seen most recently, in the order they
+/// first claimed), and how many unsigned registrations of it were turned away while it was signed.
+/// </summary>
+/// <param name="Claims">Signed claims of it so far (renewals included), and <paramref name="Claimants"/> how many different
+/// accounts made them (counted up to <see cref="VolunteerRegistry.MaxClaimantsCounted"/>): many accounts suggest a flood.</param>
+public sealed record VolunteerEntry(string Url, string? Operator, IReadOnlyList<string>? ClaimedBy = null, int UnsignedAttempts = 0,
+    DateTimeOffset? LastUnsigned = null, int Claims = 0, int Claimants = 0)
+{
+    /// <summary>Someone claimed the address under another operator.</summary>
+    public bool Disputed => ClaimedBy is { Count: > 0 };
+}
+
+/// <summary>
 /// The directory's list of volunteer nodes. Entries come in through <see cref="Register"/>, are probed in the background
 /// and only listed once the probe succeeded (re-probed every hour). Unrenewed entries drop out after
 /// <see cref="VolunteerNodes.Ttl"/>.
@@ -184,6 +306,23 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     private sealed class Entry
     {
+        /// <summary>The Jay account that runs it (from a signed registration), or null.</summary>
+        public string? Operator;
+        /// <summary>The signing time of the last accepted signed registration (Unix seconds).</summary>
+        public long SignedAt;
+        /// <summary>
+        /// Other Jay accounts that registered it with a signature, and when each last did. At most <see cref="MaxClaims"/>:
+        /// a new claimant replaces the one not seen for longest, so someone who keeps renewing (the node's real runner)
+        /// can't be kept out by a few one-off claims. The operator stays; the claims are for the network's operator to
+        /// look at, and a disputed node doesn't count as anyone's when spreading.
+        /// </summary>
+        public List<(string Account, DateTimeOffset First, DateTimeOffset Seen)>? ClaimedBy;
+        /// <summary>Signed claims so far, and the different accounts behind them (the set stops growing at a cap).</summary>
+        public int Claims;
+        public HashSet<string>? Claimants;
+        /// <summary>Unsigned registrations turned away while the address was signed (not claims; see <see cref="Register"/>).</summary>
+        public int UnsignedAttempts;
+        public DateTimeOffset? LastUnsigned;
         public DateTimeOffset Seen;
         public DateTimeOffset? VerifiedAt;
         public bool Probing;
@@ -200,8 +339,59 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// <summary>Addresses the operator banned (checked on every register and list).</summary>
     public Func<string, bool>? Blocked { get; set; }
 
+    /// <summary>Jay accounts the network's operator banned from volunteering (checked on every register and list).</summary>
+    public Func<string, bool>? BlockedOperator { get; set; }
+
+    /// <summary>Only list volunteers that signed their registration with a Jay account (error "operator" otherwise).</summary>
+    public bool RequireOperator { get; set; }
+
+    /// <summary>The network this directory serves (<see cref="VolunteerOperator.NetworkTag"/>); signed registrations must name it.</summary>
+    public string NetworkId { get; init; } = "";
+
+    /// <summary>Conflicting claims kept per address.</summary>
+    public const int MaxClaims = 4;
+    /// <summary>Different claimant accounts counted per address.</summary>
+    public const int MaxClaimantsCounted = 256;
+
+    // A signed registration is good once and only newer ones count: the last accepted signing time lives on the entry.
+    // When an entry goes away its time stays a little while (until it falls out of the clock window) so the old
+    // registration can't bring it back; that list is bounded and drops its oldest when full, never refusing anyone.
+    private readonly Dictionary<string, long> _tombstones = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Tombstones of addresses that were listed (passed a probe) when they went away: only their volunteer comes back
+    /// without counting as new. One that failed its probe keeps just its signing time (against replays).
+    /// </summary>
+    private readonly HashSet<string> _mayReturn = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Addresses whose probe just failed, and when: such an address isn't taken (and dialed) again until
+    /// <see cref="CheckSameAddressEvery"/> has passed, whoever registers it.
+    /// </summary>
+    private readonly Dictionary<string, DateTimeOffset> _lastDialed = new(StringComparer.Ordinal);
+    private readonly Queue<(string Key, long At)> _tombstoneOrder = new();
+    /// <summary>Signing times kept for addresses that went away.</summary>
+    public const int MaxTombstones = 2 * MaxEntries;
+    internal int TombstoneCount { get { lock (_gate) return _tombstones.Count; } }
+
+    /// <summary>
+    /// New addresses taken per minute (each one is dialed to probe it), counted apart for unsigned and signed
+    /// registrations so an unsigned flood can't keep signed volunteers out. Renewals of listed addresses don't count, so a
+    /// flood of new registrations can't push out the volunteers already on the list, and neither does a volunteer coming
+    /// back to an address it signed for a moment ago.
+    /// </summary>
+    public const int NewPerMinute = 60;
+    /// <summary>New addresses per minute for one Jay account.</summary>
+    public const int NewPerAccountPerMinute = 8;
+    /// <summary>New addresses per minute from one caller address (callers seen as loopback, behind a forward, aren't told apart).</summary>
+    public const int NewPerSourcePerMinute = 10;
+    private readonly Queue<DateTimeOffset> _newUnsigned = new();
+    private readonly Queue<DateTimeOffset> _newSigned = new();
+    private readonly Dictionary<string, Queue<DateTimeOffset>> _newBy = new(StringComparer.Ordinal);
+
     /// <summary>Raised when an address got listed or failed its probe (for logs and counters).</summary>
     public event Action<string, bool>? Probed;
+
+    /// <summary>Raised the first time an address gets a conflicting claim (for logs).</summary>
+    public event Action<string>? Disputed;
 
     /// <summary>The last probe started by <see cref="Register"/> (tests wait on it).</summary>
     public Task LastProbe { get; private set; } = Task.CompletedTask;
@@ -212,23 +402,13 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     private readonly Queue<DateTimeOffset> _checks = new();
 
-    /// <summary>New addresses the whole directory takes per minute ("volunteer" op; renewals of known ones don't count).</summary>
-    public const int RegistrationsPerMinute = 60;
-
     /// <summary>Entries one host may have, whatever the port: counted by name, and by the machine it resolves to.</summary>
     public const int MaxPerHost = 2;
 
-    private readonly Queue<DateTimeOffset> _registrations = new();
-
-    /// <summary>New addresses one caller (source address) may register per <see cref="SourceWindow"/>.</summary>
-    public const int NewPerSource = 4;
-    public static readonly TimeSpan SourceWindow = TimeSpan.FromMinutes(10);
-    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _bySource = new(StringComparer.Ordinal);
-
     /// <summary>
-    /// After a probe fails, that address, and that port on the machine it resolved to, aren't dialled again for this long.
+    /// After a probe fails, that port on the machine it resolved to isn't dialled again for this long, under any name.
     /// The failed entry is dropped at once, so without this a caller could register the same target again and again
-    /// (under one name or many). Keyed by port, so failing ports of a host can't keep its real node off the list.
+    /// under many names. Keyed by port, so failing ports of a host can't keep its real node off the list.
     /// </summary>
     public static readonly TimeSpan FailedCooldown = TimeSpan.FromMinutes(2);
     private readonly Dictionary<string, DateTimeOffset> _failedAt = new(StringComparer.Ordinal);
@@ -284,44 +464,144 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     }
 
     /// <summary>
-    /// Handles a "volunteer" request from <paramref name="source"/> (the caller's address as the directory counts it;
-    /// null for calls in-process, which aren't limited per source). Returns the reply: <c>{ok, listed}</c> or an error code.
+    /// Handles a "volunteer" request. <paramref name="signedBy"/> is the request's "operator" part
+    /// (<see cref="VolunteerOperator.Sign"/>), if any. Returns the reply: <c>{ok, listed}</c> or an error code:
+    /// "operator" when the signature doesn't check out (or is missing and required), "stale" when this account already
+    /// registered this address with the same or a later time, "owner" when the address is registered under another
+    /// operator (another account, or none) that hasn't let it lapse, "rate" when too many new addresses came this minute.
     /// </summary>
-    public JsonObject Register(string? url, string? source = null)
+    /// <param name="source">The caller's address, for a per-caller limit on new addresses (null or loopback: none).</param>
+    public JsonObject Register(string? url, JsonNode? signedBy = null, string? source = null)
     {
         if (VolunteerNodes.Normalize(url) is not { } address) return Error("bad");
         if (Blocked?.Invoke(address) == true) return Error("banned");
         var now = _now();
-        bool startProbe;
-        bool listed;
+        if (source is not null && System.Net.IPAddress.TryParse(source, out var from) && System.Net.IPAddress.IsLoopback(from)) source = null;
+        // The cheap limits come before the signature is checked: a new address from a caller (or, unsigned, from anyone)
+        // over its limit costs no verification.
+        lock (_gate)
+        {
+            if (!_entries.ContainsKey(address))
+            {
+                if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
+                if (signedBy is null && Full(_newUnsigned, NewPerMinute, now)) return Error("rate");
+            }
+            // Claims on a known address count against their caller too (only conflicting ones are charged, below).
+            else if (signedBy is not null && source is not null && Full(_newBy, "claim-src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
+        }
+        string? account = null;
+        long signedAt = 0;
+        if (signedBy is not null)
+        {
+            if (VolunteerOperator.Verify(signedBy, NetworkId, address, now) is not { } signed) return Error("operator");
+            (account, signedAt) = signed;
+        }
+        if (account is null && RequireOperator) return Error("operator");
+        if (account is not null && BlockedOperator?.Invoke(account) == true) return Error("banned");
+        bool startProbe = false;
+        bool listed = false;
+        var conflict = false;
+        var newlyDisputed = false;
         lock (_gate)
         {
             Prune(now);
-            if (!_entries.TryGetValue(address, out var entry))
+            var known = _entries.TryGetValue(address, out var entry);
+            if (!known)
             {
                 if (_entries.Count >= MaxEntries) return Error("full");
-                // Each new address costs the directory an outgoing connection, so new addresses are rate limited for
-                // the whole directory and capped per host: registering can't be used to make the directory dial
-                // many ports of one machine, or many machines in a burst.
-                while (_registrations.Count > 0 && now - _registrations.Peek() > TimeSpan.FromMinutes(1)) _registrations.Dequeue();
-                if (_registrations.Count >= RegistrationsPerMinute) return Error("rate");
+                var returning = false;
+                if (account is not null && _tombstones.TryGetValue(Key(account, address), out var gone))
+                {
+                    if (signedAt <= gone) return Error("stale");
+                    returning = _mayReturn.Contains(Key(account, address));
+                }
+                // Each new entry is dialed: an address that just failed isn't dialed again sooner than a reachability check allows.
+                foreach (var (dialed, _) in _lastDialed.Where(p => now - p.Value > CheckSameAddressEvery || p.Value > now).ToList()) _lastDialed.Remove(dialed);
+                if (_lastDialed.ContainsKey(address)) return Error("rate");
+                // Each new address costs the directory an outgoing connection, so new addresses are also capped per host:
+                // registering can't be used to make the directory dial many ports of one machine. Listed entries hold a
+                // host's places; entries still being probed are capped on their own and can't keep a host's real node off
+                // the list (a failed probe drops its entry at once).
                 var host = HostOf(address);
-                if (CoolingDown("addr:" + address, now)) return Error("rate");
-                var (count, until) = source is not null && _bySource.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + SourceWindow);
-                if (source is not null && count >= NewPerSource) return Error("rate");
-                // Listed entries hold a host's places; entries still being probed are capped on their own and can't
-                // keep a host's real node off the list (a failed probe drops its entry at once).
                 if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is not null) >= MaxPerHost)
                     return new JsonObject { ["ok"] = false, ["error"] = "host", ["reason"] = $"one host may register at most {MaxPerHost} addresses" };
                 if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is null) >= MaxPerHost) return Error("rate");
-                _registrations.Enqueue(now);
-                if (source is not null) _bySource[source] = (count + 1, until);
-                _entries[address] = entry = new Entry();
+                // The caller's limit holds for everyone.
+                if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
+                // A listed volunteer coming back to its own address isn't new.
+                if (!returning)
+                {
+                    if (account is null ? Full(_newUnsigned, NewPerMinute, now)
+                        : Full(_newSigned, NewPerMinute, now) || Full(_newBy, "acct:" + account, NewPerAccountPerMinute, now)) return Error("rate");
+                    if (account is null) _newUnsigned.Enqueue(now);
+                    else
+                    {
+                        _newSigned.Enqueue(now);
+                        Take(_newBy, "acct:" + account, now);
+                    }
+                }
+                if (source is not null) Take(_newBy, "src:" + source, now);
             }
-            entry.Seen = now;
-            listed = entry.VerifiedAt is { } at && now - at < ReprobeEvery;
-            startProbe = !listed && !entry.Probing;
-            if (startProbe) entry.Probing = true;
+            if (known && entry!.Operator != account)
+            {
+                conflict = true;
+                if (account is null)
+                {
+                    // An unsigned registration of a signed address isn't a claim (it would let anyone, the operator
+                    // included, mark the address as disputed), but it is counted: the address may be someone's who never
+                    // signed and was registered first by somebody else.
+                    entry.UnsignedAttempts++;
+                    entry.LastUnsigned = now;
+                }
+                else
+                {
+                    // Claims have the same per-account and per-caller limits as new addresses.
+                    if (Full(_newBy, "claim:" + account, NewPerAccountPerMinute, now)) return Error("rate");
+                    Take(_newBy, "claim:" + account, now);
+                    if (source is not null) Take(_newBy, "claim-src:" + source, now);
+                    newlyDisputed = entry.ClaimedBy is null;
+                    entry.ClaimedBy ??= [];
+                    entry.Claims++;
+                    entry.Claimants ??= new HashSet<string>(StringComparer.Ordinal);
+                    if (entry.Claimants.Count < MaxClaimantsCounted) entry.Claimants.Add(account);
+                    var mine = entry.ClaimedBy.FindIndex(c => c.Account == account);
+                    if (mine >= 0) entry.ClaimedBy[mine] = (account, entry.ClaimedBy[mine].First, now);
+                    else
+                    {
+                        // Full: the claim not renewed for longest makes room, except the longest-held claim still being
+                        // renewed (a flood of new accounts can't push out whoever has been claiming it all along).
+                        if (entry.ClaimedBy.Count >= MaxClaims)
+                        {
+                            var active = entry.ClaimedBy.Where(c => now - c.Seen <= 2 * VolunteerNodes.RenewEvery).ToList();
+                            var kept = active.Count > 0 ? active.MinBy(c => c.First).Account : null;
+                            var evict = entry.ClaimedBy.Select((c, i) => (c, i)).Where(x => x.c.Account != kept).MinBy(x => x.c.Seen).i;
+                            entry.ClaimedBy.RemoveAt(evict);
+                        }
+                        entry.ClaimedBy.Add((account, now, now));
+                    }
+                }
+            }
+            else if (known && account is not null && signedAt <= entry!.SignedAt) return Error("stale");
+            if (!known && !conflict)
+            {
+                _entries[address] = entry = new Entry { Operator = account };
+            }
+            if (!conflict && account is not null) entry!.SignedAt = signedAt;
+            // An address keeps its operator (or having none) until it lapses: nobody can take it over, add a signature
+            // to it or strip one. Who registered first needn't be who runs the node, so a conflicting claim (above) is
+            // kept for the network's operator to look at; it changes nothing else.
+            if (!conflict)
+            {
+                entry!.Seen = now;
+                listed = entry.VerifiedAt is { } at && now - at < ReprobeEvery;
+                startProbe = !listed && !entry.Probing;
+                if (startProbe) entry.Probing = true;
+            }
+        }
+        if (conflict)
+        {
+            if (newlyDisputed) Disputed?.Invoke(address);
+            return Error("owner");
         }
         if (startProbe) LastProbe = ProbeAsync(address);
         return new JsonObject { ["ok"] = true, ["listed"] = listed };
@@ -373,51 +653,137 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             {
                 entry.Probing = false;
                 if (ok) entry.VerifiedAt = _now();
-                else _entries.Remove(address);
+                else
+                {
+                    _lastDialed[address] = _now();
+                    Drop(address, entry);
+                }
             }
             if (!ok && !crowded)
             {
-                // Dialled (or looked up) and failed: cool down the address and that port of the machine, whatever happens
-                // to the entry.
-                var at = _now();
-                _failedAt["addr:" + address] = at;
-                if (ip is not null) _failedAt[DialKey(VolunteerNodes.MachineOf(ip), address)] = at;
+                // Dialled and failed: cool down that port of the machine, whatever happens to the entry (the address
+                // itself waits as any failed address does).
+                if (ip is not null) _failedAt[DialKey(VolunteerNodes.MachineOf(ip), address)] = _now();
             }
         }
         Probed?.Invoke(address, ok);
     }
 
-    /// <summary>Up to <paramref name="count"/> verified, live volunteers in random order (spreads the load).</summary>
-    public IReadOnlyList<string> Pick(int count = VolunteerNodes.PerRequest)
+    /// <summary>
+    /// Up to <paramref name="count"/> verified, live volunteers in random order (spreads the load), at most one per
+    /// operator while there are others to give. Each comes with its operator tag ("" when unsigned).
+    /// </summary>
+    public IReadOnlyList<VolunteerNode> Pick(int count = VolunteerNodes.PerRequest)
     {
-        var listed = Listed();
-        return [.. listed.OrderBy(_ => Random.Shared.Next()).Take(count)];
+        var shuffled = Live().OrderBy(_ => Random.Shared.Next()).Select(p => new VolunteerNode(p.Url, p.Disputed ? "" : p.Operator ?? ""));
+        return [.. VolunteerNode.SpreadOperators(shuffled).Take(count)];
     }
 
     /// <summary>Every verified, live volunteer (admin API).</summary>
-    public IReadOnlyList<string> Listed()
+    public IReadOnlyList<string> Listed() => [.. Live().Select(p => p.Url)];
+
+    /// <summary>
+    /// Every verified, live volunteer with the Jay account it was registered under (null: unsigned), and whether someone
+    /// claimed it under another operator since (admin API).
+    /// </summary>
+    public IReadOnlyList<VolunteerEntry> Operators() => Live();
+
+    private List<VolunteerEntry> Live()
     {
         var now = _now();
         lock (_gate)
         {
             Prune(now);
-            return [.. _entries.Where(p => p.Value.VerifiedAt is not null && Blocked?.Invoke(p.Key) != true).Select(p => p.Key).Order(StringComparer.Ordinal)];
+            return [.. _entries.Where(p => p.Value.VerifiedAt is not null && Blocked?.Invoke(p.Key) != true
+                    && (p.Value.Operator is not { } op || BlockedOperator?.Invoke(op) != true))
+                .OrderBy(p => p.Key, StringComparer.Ordinal)
+                .Select(p => Public(p.Key, p.Value))];
         }
     }
+
+    private static VolunteerEntry Public(string url, Entry e) =>
+        new(url, e.Operator, e.ClaimedBy?.Select(c => c.Account).ToList(), e.UnsignedAttempts, e.LastUnsigned, e.Claims, e.Claimants?.Count ?? 0);
 
     /// <summary>Drops an address now (it can register again unless it is also banned).</summary>
     public bool Remove(string url)
     {
         if (VolunteerNodes.Normalize(url) is not { } address) return false;
-        lock (_gate) return _entries.Remove(address);
+        lock (_gate) return _entries.TryGetValue(address, out var entry) && Drop(address, entry);
+    }
+
+    /// <summary>Drops every node this Jay account runs. Returns their addresses.</summary>
+    /// <remarks>Each comes back as the operator saw it, with any conflicting claims (someone else may run that address).</remarks>
+    public IReadOnlyList<VolunteerEntry> RemoveOperator(string account)
+    {
+        lock (_gate)
+        {
+            var gone = _entries.Where(p => p.Value.Operator == account).ToList();
+            foreach (var (key, entry) in gone) Drop(key, entry);
+            return [.. gone.Select(p => Public(p.Key, p.Value))];
+        }
+    }
+
+    private static string Key(string account, string address) => account + "\n" + address;
+
+    private static bool Full(Queue<DateTimeOffset> times, int limit, DateTimeOffset now)
+    {
+        // A time ahead of now (the clock went back) is dropped too, so the limit can't stick.
+        while (times.TryPeek(out var at) && (now - at > TimeSpan.FromMinutes(1) || at > now)) times.Dequeue();
+        return times.Count >= limit;
+    }
+
+    private static bool Full(Dictionary<string, Queue<DateTimeOffset>> counts, string key, int limit, DateTimeOffset now)
+    {
+        if (counts.Count > 4096)
+            foreach (var (k, _) in counts.Where(p => !p.Value.TryPeek(out var at) || now - at > TimeSpan.FromMinutes(1)).ToList()) counts.Remove(k);
+        return counts.TryGetValue(key, out var times) && Full(times, limit, now);
+    }
+
+    private static void Take(Dictionary<string, Queue<DateTimeOffset>> counts, string key, DateTimeOffset now)
+    {
+        if (!counts.TryGetValue(key, out var times)) counts[key] = times = new Queue<DateTimeOffset>();
+        times.Enqueue(now);
+    }
+
+    /// <summary>Removes an entry, keeping its signing time for a while (see <see cref="_tombstones"/>). Under the lock.</summary>
+    private bool Drop(string address, Entry entry)
+    {
+        if (!_entries.Remove(address)) return false;
+        if (entry.Operator is not { } account || entry.SignedAt == 0) return true;
+        // A signing time already outside the clock window can't be replayed: nothing to keep.
+        if (entry.SignedAt < (_now() - VolunteerOperator.MaxClockSkew).ToUnixTimeSeconds()) return true;
+        var key = Key(account, address);
+        _tombstones[key] = entry.SignedAt;
+        if (entry.VerifiedAt is not null) _mayReturn.Add(key);
+        else _mayReturn.Remove(key);
+        _tombstoneOrder.Enqueue((key, entry.SignedAt));
+        while (_tombstoneOrder.Count > MaxTombstones)
+        {
+            var (oldKey, oldAt) = _tombstoneOrder.Dequeue();
+            if (_tombstones.TryGetValue(oldKey, out var at) && at == oldAt)
+            {
+                _tombstones.Remove(oldKey);
+                _mayReturn.Remove(oldKey);
+            }
+        }
+        return true;
     }
 
     private void Prune(DateTimeOffset now)
     {
-        foreach (var key in _entries.Where(p => now - p.Value.Seen > VolunteerNodes.Ttl && !p.Value.Probing).Select(p => p.Key).ToList())
-            _entries.Remove(key);
+        // Times older than the clock window can't be replayed anyway. The queue is in the order entries went away, not
+        // by signing time, so the list itself is swept (it is small); the queue only decides who goes first when full,
+        // and skips keys already gone.
+        var oldest = (now - VolunteerOperator.MaxClockSkew).ToUnixTimeSeconds();
+        foreach (var (key, _) in _tombstones.Where(p => p.Value < oldest).ToList())
+        {
+            _tombstones.Remove(key);
+            _mayReturn.Remove(key);
+        }
+        while (_tombstoneOrder.TryPeek(out var head) && !(_tombstones.TryGetValue(head.Key, out var at) && at == head.At)) _tombstoneOrder.Dequeue();
+        foreach (var (key, entry) in _entries.Where(p => now - p.Value.Seen > VolunteerNodes.Ttl && !p.Value.Probing).ToList())
+            Drop(key, entry);
         foreach (var key in _failedAt.Where(p => now - p.Value >= FailedCooldown).Select(p => p.Key).ToList()) _failedAt.Remove(key);
-        foreach (var key in _bySource.Where(p => p.Value.Until <= now).Select(p => p.Key).ToList()) _bySource.Remove(key);
     }
 
     private static JsonObject Error(string code) => new() { ["ok"] = false, ["error"] = code };

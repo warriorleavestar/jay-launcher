@@ -42,6 +42,7 @@ public sealed class JayNetworkServerBuilder
     internal bool BanListOn = true;
     internal bool VolunteersOn = true;
     internal Func<string, CancellationToken, Task<bool>>? VolunteerProbe;
+    internal bool VolunteersSigned;
     internal RateLimitGate? RateLimit = new();
     internal int? AdminPort = JayNetworkServer.DefaultAdminPort;
     internal Action<string> Log = _ => { };
@@ -160,6 +161,12 @@ public sealed class JayNetworkServerBuilder
     /// "volunteers": false.
     /// </summary>
     public JayNetworkServerBuilder WithoutVolunteers() { VolunteersOn = false; return this; }
+
+    /// <summary>
+    /// Only list volunteer nodes whose registration is signed with a Jay account, so every node has a known operator
+    /// (members then get nodes from different people, and bans can name a person: ban kind "operator").
+    /// </summary>
+    public JayNetworkServerBuilder RequireSignedVolunteers() { VolunteersSigned = true; return this; }
 
     /// <summary>Replaces the reachability check run before a volunteer is listed (tests, or your own checks).</summary>
     public JayNetworkServerBuilder UseVolunteerProbe(Func<string, CancellationToken, Task<bool>> probe) { VolunteerProbe = probe; return this; }
@@ -286,8 +293,15 @@ public sealed class JayNetworkServer : IAsyncDisposable
         {
             if (_b.VolunteersOn && _b.Config?.Policy.Volunteers != false)
             {
-                Volunteers = new VolunteerRegistry(_b.VolunteerProbe, _b.Clock) { Blocked = Bans is { } b ? b.IsNodeBanned : null };
+                Volunteers = new VolunteerRegistry(_b.VolunteerProbe, _b.Clock)
+                {
+                    Blocked = Bans is { } b ? b.IsNodeBanned : null,
+                    BlockedOperator = Bans is { } o ? o.IsOperatorBanned : null,
+                    RequireOperator = _b.VolunteersSigned,
+                    NetworkId = VolunteerOperator.NetworkTag(Profile),
+                };
                 Volunteers.Probed += (url, ok) => _b.Log(ok ? $"Volunteer node listed: {url}" : $"Volunteer node not reachable, not listed: {url}");
+                Volunteers.Disputed += url => _b.Log($"Volunteer node claimed under another operator, see node nodes: {url}");
             }
             var gates = new List<IRoomGate>();
             if (Bans is not null) gates.Add(Bans);
@@ -311,6 +325,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
                     ? X25519KeyPair.FromPrivateKey(Convert.FromBase64String(Encoding.ASCII.GetString(sealedDir).Trim()))
                     : DirectoryChannel.LoadOrCreateIdentity(DirectoryKeyPath),
                 NetworkSecret = Profile.Secret,
+                UncountedLoopback = _b.DirectOnly is null,
             };
             if (File.Exists(DirectoryCertificatePath))
             {
@@ -416,8 +431,67 @@ public sealed class JayNetworkServer : IAsyncDisposable
             "host" => d.RemoveHost(ban.Value),
             "account" => d.RemoveAccount(ban.Value),
             "node" => Volunteers?.Remove(ban.Value) == true ? 1 : 0,
+            "operator" => BanOperatorNodes(ban).Removed,
             _ => d.Remove(ban.Value) ? 1 : 0,
         };
+    }
+
+    /// <summary>
+    /// Bans a volunteer operator (see <see cref="BanOperatorNodes"/>): how many of their nodes were dropped, which
+    /// addresses were banned with them, and which were only dropped, for the network's operator to look at.
+    /// </summary>
+    public OperatorBan BanOperator(string account, string? reason, TimeSpan? duration = null)
+    {
+        if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
+        return BanOperatorNodes(Bans.Add("operator", account, reason, Now, duration));
+    }
+
+    /// <summary>
+    /// Drops an operator's nodes and bans their addresses for as long as the operator, so coming back unsigned (or under
+    /// a new account) from the same addresses doesn't work either. An address that may be someone else's is only dropped,
+    /// not banned: another unbanned account claimed it with a signature, or unsigned registrations of it were turned away
+    /// (someone who never signed may run it, registered first by the operator). Both lists are returned and logged, since
+    /// a claim may also come from the operator's own second account. Banning again carries the new end over to the
+    /// address bans the operator already has. Unbanning the operator lifts these address bans too.
+    /// </summary>
+    private OperatorBan BanOperatorNodes(BanList.Ban ban)
+    {
+        var bans = Bans!;
+        var duration = ban.Until is { } until ? until - Now : (TimeSpan?)null;
+        var bannedAccounts = bans.List().Where(b => b.Kind == "operator").Select(b => b.Value).ToHashSet(StringComparer.Ordinal);
+        var removed = Volunteers?.RemoveOperator(ban.Value) ?? [];
+        var banned = new List<string>();
+        var spared = new List<string>();
+        foreach (var node in removed)
+        {
+            if (node.UnsignedAttempts > 0 || node.ClaimedBy?.Any(c => !bannedAccounts.Contains(c)) == true) spared.Add(node.Url);
+            else
+            {
+                bans.Add("node", node.Url, OperatorBanReason(ban.Value), Now, duration);
+                banned.Add(node.Url);
+            }
+        }
+        // Address bans from an earlier ban of the same operator end with this one.
+        foreach (var old in bans.List().Where(b => b.Kind == "node" && b.Reason == OperatorBanReason(ban.Value)).ToList())
+            if (old.Until != ban.Until) bans.Add("node", old.Value, old.Reason, Now, duration);
+        _b.Log($"Operator {ban.Value} banned: {removed.Count} node(s) dropped; addresses banned with them: "
+            + (banned.Count > 0 ? string.Join(", ", banned) : "none")
+            + (spared.Count > 0 ? "; dropped but not banned (may be someone else's): " + string.Join(", ", spared) : ""));
+        return new OperatorBan(removed.Count, banned, spared);
+    }
+
+    /// <summary>The reason on address bans that came with banning an operator (how unbanning finds them).</summary>
+    private static string OperatorBanReason(string account) => "with operator " + account;
+
+    /// <summary>Lifts a ban. Lifting an operator ban also lifts the address bans that came with it.</summary>
+    public bool Unban(string kind, string value)
+    {
+        if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
+        if (!Bans.Remove(kind, value)) return false;
+        if (kind == "operator" && Amber.Core.Identity.JayAddress.Canonical(value.Trim()) is { } account)
+            foreach (var node in Bans.List().Where(b => b.Kind == "node" && b.Reason == OperatorBanReason(account)).ToList())
+                Bans.Remove("node", node.Value);
+        return true;
     }
 
     /// <summary>
@@ -489,3 +563,9 @@ public sealed class DirectoryStats : IDirectoryObserver
         };
     }
 }
+
+/// <summary>What banning a volunteer operator did (see <see cref="JayNetworkServer.BanOperator"/>).</summary>
+/// <param name="Removed">Their nodes dropped from the list.</param>
+/// <param name="BannedNodes">Addresses banned with them.</param>
+/// <param name="DisputedNotBanned">Addresses only dropped: they may be someone else's.</param>
+public sealed record OperatorBan(int Removed, IReadOnlyList<string> BannedNodes, IReadOnlyList<string> DisputedNotBanned);

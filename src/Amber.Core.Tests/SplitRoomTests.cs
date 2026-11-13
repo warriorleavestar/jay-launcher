@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Multiplayer.Transport;
+using Xunit.Abstractions;
 
 namespace Amber.Core.Tests;
 
@@ -214,6 +215,114 @@ public sealed class SplitRoomTests
         Assert.Equal(1, singles);
     }
 
+    /// <summary>
+    /// The places for legs in their handshake are shared across all ports: when stalled legs hold every one, the oldest
+    /// makes room, so a member still gets a split connection.
+    /// </summary>
+    [Fact]
+    public async Task StalledLegsAreCappedAcrossPorts()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var ports = rig.Server.Ports;
+        var idle = new List<TcpClient>();
+        try
+        {
+            for (var i = 0; i < SplitTunnelServer.MaxPendingHandshakes; i++)
+            {
+                var c = new TcpClient();
+                try { await c.ConnectAsync(IPAddress.Loopback, ports[i % ports.Count]); }
+                catch (SocketException) { }
+                idle.Add(c);
+            }
+            Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == SplitTunnelServer.MaxPendingHandshakes, 60));
+            Assert.Equal(0, rig.Server.Evicted);
+            var connector = rig.Connector(TunnelService.Game);
+            await using (var stream = await connector.OpenAsync(CancellationToken.None))
+            {
+                Assert.IsType<SplitStream>(stream);
+                await stream.WriteAsync(new byte[] { 5 });
+                await stream.FlushAsync();
+                var back = new byte[1];
+                Assert.True(await SecureStream.ReadExactAsync(stream, back, CancellationToken.None));
+                Assert.Equal(5, back[0]);
+            }
+            Assert.Equal(ports.Count, rig.Server.Evicted);
+            Assert.True(rig.Server.PendingHandshakes <= SplitTunnelServer.MaxPendingHandshakes);
+        }
+        finally
+        {
+            foreach (var c in idle) c.Dispose();
+        }
+        Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == 0, 20));
+    }
+
+    /// <summary>A leg that says nothing and never closes is let go after the handshake deadline.</summary>
+    [Fact]
+    public async Task StalledLegsAreReleasedAtTheDeadline()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped,
+            handshakeTimeout: TimeSpan.FromMilliseconds(300));
+        using var idle = new TcpClient();
+        await idle.ConnectAsync(IPAddress.Loopback, rig.Server.Ports[1]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var closed = false;
+        try { closed = await idle.GetStream().ReadAsync(new byte[1], timeout.Token) == 0; }
+        catch (Exception e) when (e is IOException or SocketException) { closed = true; }
+        Assert.True(closed);
+        Assert.True(await WaitAsync(() => rig.Server.PendingHandshakes == 0));
+        Assert.Equal(0, rig.Server.Accepted);
+    }
+
+    /// <summary>Legs that fail before their handshake starts give their place back, whatever the failure.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegsThatFailBeforeTheHandshakeFreeTheirPlace(bool unexpected)
+    {
+        const int failing = SplitTunnelServer.MaxPendingHandshakes + 8;
+        var seen = 0;
+        var log = new List<string>();
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped, beforeServe: _ =>
+        {
+            if (Interlocked.Increment(ref seen) > failing) return;
+            if (unexpected) throw new NotSupportedException("test");
+            throw new SocketException((int)SocketError.ConnectionReset);
+        }, log: line => { lock (log) log.Add(line); });
+        var ports = rig.Server.Ports;
+        for (var i = 0; i < failing; i++)
+        {
+            using var c = new TcpClient();
+            try { await c.ConnectAsync(IPAddress.Loopback, ports[i % ports.Count]); }
+            catch (SocketException) { }
+            Assert.True(await WaitAsync(() => Volatile.Read(ref seen) > i && rig.Server.PendingHandshakes == 0, 10));
+        }
+        Assert.Equal(failing, rig.Server.Rejected);
+        // The line is written before the leg is counted. Unexpected failures are failed handshakes, limited to one line a
+        // minute; a dropped connection writes nothing.
+        var failed = L.T("core.mp.transport.endpoint_handshake_failed");
+        lock (log)
+        {
+            if (unexpected)
+                Assert.Single(log, l => l.StartsWith(failed, StringComparison.Ordinal) && l.EndsWith(nameof(NotSupportedException), StringComparison.Ordinal));
+            else
+                Assert.DoesNotContain(log, l => l.StartsWith(failed, StringComparison.Ordinal));
+            Assert.DoesNotContain(log, l => l.StartsWith(L.T("core.mp.transport.endpoint_ended"), StringComparison.Ordinal));
+        }
+        var connector = rig.Connector(TunnelService.Game);
+        await using var stream = await connector.OpenAsync(CancellationToken.None);
+        Assert.IsType<SplitStream>(stream);
+    }
+
+    private static async Task<bool> WaitAsync(Func<bool> condition, int seconds = 5)
+    {
+        for (var i = 0; i < seconds * 20; i++)
+        {
+            if (condition()) return true;
+            await Task.Delay(50);
+        }
+        return condition();
+    }
+
     /// <summary>Answers every read with random bytes and swallows writes.</summary>
     private sealed class GarbageStream : Stream
     {
@@ -285,6 +394,57 @@ public sealed class SplitRoomTests
     }
 
     [Fact]
+    public async Task AHandlerThatFailsAfterPairingIsNotARefusedLeg()
+    {
+        var log = new List<string>();
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped,
+            handler: (_, _) => throw new InvalidDataException("handler"), log: line => { lock (log) log.Add(line); });
+        var connector = rig.Connector(TunnelService.Game);
+        try
+        {
+            await using var stream = await connector.OpenAsync(CancellationToken.None);
+            await stream.ReadAsync(new byte[1]);
+        }
+        catch (Exception e) when (e is IOException or SocketException or CryptographicException or InvalidDataException or EndOfStreamException) { }
+        await WaitUntilAsync(() => rig.Server.Accepted == 1);
+        await Task.Delay(200);
+        Assert.Equal(0, rig.Server.Rejected);
+        lock (log)
+        {
+            Assert.DoesNotContain(log, l => l.StartsWith(L.T("core.mp.transport.endpoint_handshake_failed"), StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>A failure after a leg's handshake (here: picking the service) is a connection that ended, not a failed handshake.</summary>
+    [Fact]
+    public async Task ARouteThatFailsAfterTheHandshakeIsLoggedAsEnded()
+    {
+        var log = new List<string>();
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict), Wrapped,
+            log: line => { lock (log) log.Add(line); }, route: _ => throw new InvalidOperationException("route"));
+        var connector = rig.Connector(TunnelService.Game);
+        try
+        {
+            await using var stream = await connector.OpenAsync(CancellationToken.None);
+            await stream.ReadAsync(new byte[1]);
+        }
+        catch (Exception e) when (e is IOException or SocketException or CryptographicException or InvalidDataException or EndOfStreamException
+                                   or InvalidOperationException or OperationCanceledException) { }
+        var ended = L.T("core.mp.transport.endpoint_ended");
+        Assert.True(await WaitAsync(() => { lock (log) return log.Any(l => l.StartsWith(ended, StringComparison.Ordinal)); }));
+        // One refusal per leg, each counted once.
+        await WaitUntilAsync(() => rig.Server.Rejected >= 2);
+        await Task.Delay(100);
+        Assert.Equal(2, rig.Server.Rejected);
+        Assert.Equal(0, rig.Server.Accepted);
+        lock (log)
+        {
+            Assert.Contains(log, l => l.StartsWith(ended, StringComparison.Ordinal) && l.EndsWith(nameof(InvalidOperationException), StringComparison.Ordinal));
+            Assert.DoesNotContain(log, l => l.StartsWith(L.T("core.mp.transport.endpoint_handshake_failed"), StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
     public async Task StrictWithoutPathsRefusesAndNeverUsesOnePath()
     {
         await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict), Wrapped);
@@ -349,8 +509,15 @@ public sealed class SplitRoomTests
         }
         Assert.Equal(SplitConnector.MaxFailures * 2, rig.LegOpens);
         Volatile.Write(ref dead, 0);
-        await Task.Delay(500);
-        await using (var stream = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(stream);
+        // Keeps connecting until the pause is over (on one path meanwhile), so a slow machine doesn't fail the test.
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            await using var stream = await connector.OpenAsync(CancellationToken.None);
+            if (stream is SplitStream) break;
+            Assert.True(DateTime.UtcNow < until, "Auto never tried again after the pause");
+            await Task.Delay(50);
+        }
         Assert.Equal(1, connector.SplitConnections);
         Assert.Null(connector.LastReason);
     }
@@ -410,6 +577,171 @@ public sealed class SplitRoomTests
         Assert.Equal(0, connector.SplitConnections);
         await WaitUntilAsync(() => rig.Server.Rejected >= 2);
         Assert.Equal(0, rig.Server.Accepted);
+    }
+
+    /// <summary>
+    /// Auto never holds a connection up for long: a leg that never answers falls back to one path within the budget, in
+    /// time for the caller's own deadline (chat gives a connection 5 seconds).
+    /// </summary>
+    [Fact]
+    public async Task AutoDoesntWaitLongForASlowLeg()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        using var silent = new TcpListener(IPAddress.Loopback, 0);
+        silent.Start();
+        var held = new List<TcpClient>();
+        var accepting = Task.Run(async () =>
+        {
+            try { while (true) { var c = await silent.AcceptTcpClientAsync(); lock (held) held.Add(c); } }
+            catch (Exception e) when (e is SocketException or ObjectDisposedException) { }
+        });
+        var silentPort = ((IPEndPoint)silent.LocalEndpoint).Port;
+        var singlePort = rig.SinglePort;
+        IReadOnlyList<Func<CancellationToken, Task<Stream>>> legs =
+        [
+            ct => TunnelClient.Raw("127.0.0.1", rig.Server.Ports[0], ct),
+            ct => TunnelClient.Raw("127.0.0.1", silentPort, ct),
+        ];
+        var connector = new SplitConnector(rig.Member, TunnelService.Chat, ct => TunnelClient.Raw("127.0.0.1", singlePort, ct), legs)
+        {
+            AutoBudget = TimeSpan.FromMilliseconds(300),
+        };
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await using (var stream = await connector.OpenAsync(deadline.Token)) Assert.IsNotType<SplitStream>(stream);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"took {watch.Elapsed}");
+        Assert.Equal(L.T("core.mp.split.too_slow"), connector.LastReason);
+        silent.Stop();
+        await accepting;
+        lock (held) foreach (var c in held) c.Dispose();
+    }
+
+    [Fact]
+    public void TheAutoBudgetIsPositiveOrInfinite()
+    {
+        var room = NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto)).Credentials.ToRoom();
+        Func<CancellationToken, Task<Stream>> single = _ => throw new InvalidOperationException();
+        Assert.Throws<ArgumentOutOfRangeException>(() => new SplitConnector(room, TunnelService.Chat, single, null) { AutoBudget = TimeSpan.Zero });
+        Assert.Throws<ArgumentOutOfRangeException>(() => new SplitConnector(room, TunnelService.Chat, single, null) { AutoBudget = TimeSpan.FromSeconds(-2) });
+        Assert.Equal(Timeout.InfiniteTimeSpan, new SplitConnector(room, TunnelService.Chat, single, null) { AutoBudget = Timeout.InfiniteTimeSpan }.AutoBudget);
+    }
+
+    /// <summary>A leg cancelled for its own reasons is a failure, not "too slow": only the budget running out is.</summary>
+    [Fact]
+    public async Task ALegsOwnCancellationIsNotTooSlow()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var singlePort = rig.SinglePort;
+        IReadOnlyList<Func<CancellationToken, Task<Stream>>> legs =
+        [
+            ct => TunnelClient.Raw("127.0.0.1", rig.Server.Ports[0], ct),
+            _ => Task.FromException<Stream>(new OperationCanceledException()),
+        ];
+        var connector = new SplitConnector(rig.Member, TunnelService.Chat, ct => TunnelClient.Raw("127.0.0.1", singlePort, ct), legs);
+        await using (var stream = await connector.OpenAsync(CancellationToken.None)) Assert.IsNotType<SplitStream>(stream);
+        Assert.NotEqual(L.T("core.mp.split.too_slow"), connector.LastReason);
+        Assert.StartsWith(L.T("core.mp.split.failed"), connector.LastReason);
+    }
+
+    /// <summary>
+    /// Chat asks whether a connection opened now would split, to move a connection made before the paths were ready.
+    /// </summary>
+    [Fact]
+    public async Task ACouldSplitNowOnlyAfterAnAutoConnectionWentOnOnePath()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var dead = 1;
+        var connector = rig.Connector(TunnelService.Chat, () => Volatile.Read(ref dead));
+        await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsNotType<SplitStream>(s);
+        Assert.False(connector.LastWasSplit);
+        Assert.True(connector.CouldSplitNow);
+        Volatile.Write(ref dead, -1);
+        await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(s);
+        Assert.True(connector.LastWasSplit);
+        Assert.False(connector.CouldSplitNow);
+
+        // Not while the paths aren't ready, without legs, or for another policy.
+        string? problem = "not ready";
+        var waiting = new SplitConnector(rig.Member, TunnelService.Chat, _ => throw new InvalidOperationException(),
+            [.. rig.Server.Ports.Select(p => (Func<CancellationToken, Task<Stream>>)(ct => TunnelClient.Raw("127.0.0.1", p, ct)))], pathProblem: () => problem);
+        Assert.False(waiting.CouldSplitNow);
+        problem = null;
+        Assert.True(waiting.CouldSplitNow);
+        Assert.False(rig.Connector(TunnelService.Chat, legs: false).CouldSplitNow);
+        await using var strictRig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict), Wrapped);
+        Assert.False(strictRig.Connector(TunnelService.Chat).CouldSplitNow);
+    }
+
+    /// <summary>While Auto pauses after failing in a row, it doesn't offer to split either.</summary>
+    [Fact]
+    public async Task ACouldSplitNowWaitsOutThePause()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var connector = rig.Connector(TunnelService.Chat, deadLeg: 1);
+        for (var i = 0; i < SplitConnector.MaxFailures; i++)
+            await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsNotType<SplitStream>(s);
+        Assert.False(connector.CouldSplitNow);
+    }
+
+    /// <summary>
+    /// The session's leg ports, lent to one transport after another, take split connections every time (only stopping and
+    /// starting was covered before).
+    /// </summary>
+    [Fact]
+    public async Task BorrowedLegPortsAcceptAgainAfterARestart()
+    {
+        var (credentials, _, host, _) = NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict));
+        var member = credentials.ToRoom();
+        using var reservation = SplitLegReservation.TryReserve(2, IPAddress.Loopback, [0, 0]);
+        Assert.NotNull(reservation);
+        var ports = reservation!.AllForTest.Select(l => ((IPEndPoint)l.LocalEndpoint).Port).ToArray();
+        Func<Stream, CancellationToken, Task> echo = async (stream, ct) =>
+        {
+            var buffer = new byte[64];
+            int n;
+            while ((n = await stream.ReadAsync(buffer, ct)) > 0)
+            {
+                await stream.WriteAsync(buffer.AsMemory(0, n), ct);
+                await stream.FlushAsync(ct);
+            }
+        };
+        IReadOnlyList<Func<CancellationToken, Task<Stream>>> legs =
+            [.. ports.Select(p => (Func<CancellationToken, Task<Stream>>)(ct => TunnelClient.Raw("127.0.0.1", p, ct)))];
+        for (var round = 0; round < 2; round++)
+        {
+            await using var server = new SplitTunnelServer(host, _ => echo, listeners: reservation.TryBorrow(), giveBack: reservation.Return);
+            var connector = new SplitConnector(member, TunnelService.Game, _ => throw new InvalidOperationException("Strict never uses one path"), legs);
+            await using var stream = await connector.OpenAsync(CancellationToken.None);
+            Assert.IsType<SplitStream>(stream);
+            byte[] ping = [(byte)round, 7, 8];
+            await stream.WriteAsync(ping);
+            await stream.FlushAsync();
+            var back = new byte[ping.Length];
+            await stream.ReadExactlyAsync(back);
+            Assert.Equal(ping, back);
+            Assert.Equal(1, server.Accepted);
+        }
+        Assert.NotNull(reservation.TryBorrow());
+        reservation.Return();
+    }
+
+    /// <summary>The "connected over N paths" line is written when a service goes from one path to split, not per connection.</summary>
+    [Fact]
+    public async Task TheSplitLineIsLoggedOnlyWhenSplittingStarts()
+    {
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto), Wrapped);
+        var dead = -1;
+        var log = new List<string>();
+        var connector = rig.Connector(TunnelService.Game, () => Volatile.Read(ref dead), log: line => { lock (log) log.Add(line); });
+        var line = L.F("core.mp.split.connected_game", 2);
+        int Count() { lock (log) return log.Count(l => l == line); }
+        for (var i = 0; i < 3; i++) await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(s);
+        Assert.Equal(1, Count());
+        Volatile.Write(ref dead, 1);
+        await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsNotType<SplitStream>(s);
+        Volatile.Write(ref dead, -1);
+        await using (var s = await connector.OpenAsync(CancellationToken.None)) Assert.IsType<SplitStream>(s);
+        Assert.Equal(2, Count());
     }
 
     /// <summary>
@@ -500,15 +832,18 @@ public sealed class SplitRoomTests
         public MemberEntry GuestEntry { get; private set; } = null!;
         public RoomCode Member { get; private set; } = null!;
         public int SingleCalls => Volatile.Read(ref _singleCalls);
+        public int SinglePort => ((IPEndPoint)_single.LocalEndpoint).Port;
         public int LegOpens => Volatile.Read(ref _legOpens);
         public IReadOnlyList<TunnelService> Served { get { lock (_served) return [.. _served]; } }
 
-        public static Task<Rig> StartAsync(SplitSettings split, TunnelSettings tunnel, bool hostEpochBump = false)
+        public static Task<Rig> StartAsync(SplitSettings split, TunnelSettings tunnel, bool hostEpochBump = false, Action<TcpClient>? beforeServe = null,
+            TimeSpan? handshakeTimeout = null, Func<Stream, CancellationToken, Task>? handler = null, Action<string>? log = null,
+            Func<TunnelService, Func<Stream, CancellationToken, Task>?>? route = null)
         {
             var (credentials, table, host, guest) = NewRoom(split, tunnel);
             var rig = new Rig { Table = table, GuestEntry = guest, Member = credentials.ToRoom() };
             if (hostEpochBump) host = host with { Epoch = host.Epoch + 1 };
-            rig.Server = new SplitTunnelServer(host, service => Echo(rig, service), ports: [.. Enumerable.Repeat(0, split.Paths)]);
+            rig.Server = new SplitTunnelServer(host, route ?? (service => handler ?? Echo(rig, service)), log, ports: [.. Enumerable.Repeat(0, split.Paths)]) { BeforeServeForTest = beforeServe, HandshakeTimeout = handshakeTimeout ?? TunnelHandshake.Timeout };
             rig._single.Start();
             rig._singleLoop = Task.Run(rig.SingleLoopAsync);
             return Task.FromResult(rig);
@@ -540,7 +875,7 @@ public sealed class SplitRoomTests
         public SplitConnector Connector(TunnelService service, bool legs = true, int deadLeg = -1) =>
             Connector(service, () => deadLeg, legs);
 
-        public SplitConnector Connector(TunnelService service, Func<int> deadLeg, bool legs = true, TimeSpan? retryAfter = null)
+        public SplitConnector Connector(TunnelService service, Func<int> deadLeg, bool legs = true, TimeSpan? retryAfter = null, Action<string>? log = null)
         {
             var port = ((IPEndPoint)_single.LocalEndpoint).Port;
             Func<CancellationToken, Task<Stream>> single = ct =>
@@ -555,7 +890,7 @@ public sealed class SplitRoomTests
                     return i == deadLeg() ? Task.FromException<Stream>(new SocketException((int)SocketError.ConnectionRefused)) : TunnelClient.Raw("127.0.0.1", p, ct);
                 }))]
                 : null;
-            return new SplitConnector(Member, service, single, openers) { RetryAfter = retryAfter ?? TimeSpan.FromSeconds(30) };
+            return new SplitConnector(Member, service, single, openers, log) { RetryAfter = retryAfter ?? TimeSpan.FromSeconds(30) };
         }
 
         public async ValueTask DisposeAsync()
@@ -574,8 +909,10 @@ public sealed class RealRoomPorts;
 
 /// <summary>Split room tests that need the real room ports.</summary>
 [Collection(nameof(RealRoomPorts))]
-public sealed class SplitRoomPortTests
+public sealed class SplitRoomPortTests(ITestOutputHelper output)
 {
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// A leg port taken by another program: an Auto room starts without splitting (and says so), a Strict room doesn't start.
     /// Uses the real room ports (it occupies 47657 itself, and the Auto room listens on 47656), so it runs on its own,
@@ -587,6 +924,19 @@ public sealed class SplitRoomPortTests
         using var squatter = new TcpListener(IPAddress.Loopback, SplitSettings.LegPort(0));
         try { squatter.Start(); }
         catch (SocketException) { /* already taken by something else: the same situation for the leg port */ }
+        // The Auto room listens on the real single-path port. When Jay is running a room on this machine it's taken, and
+        // there is nothing to test here.
+        // xunit 2 has no runtime skip, so the test says why it did nothing.
+        try
+        {
+            using var probe = new TcpListener(IPAddress.Loopback, TunnelSettings.Port);
+            probe.Start();
+        }
+        catch (SocketException)
+        {
+            _output.WriteLine($"Skipped: port {TunnelSettings.Port} is in use on this machine.");
+            return;
+        }
 
         var (_, _, autoHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto));
         var log = new List<string>();
@@ -599,6 +949,6 @@ public sealed class SplitRoomPortTests
 
         var (_, _, strictHost, _) = SplitRoomTests.NewRoom(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Auto));
         var e = Assert.Throws<IOException>(() => RoomTransport.Start(new EasyTierOptions(strictHost, true, [], 15000)));
-        Assert.Equal(L.T("core.mp.split.ports_busy_strict"), e.Message);
+        Assert.Equal(L.F("core.mp.split.ports_busy_strict", SplitSettings.LegPort(0), SplitSettings.LegPort(1)), e.Message);
     }
 }

@@ -4,17 +4,30 @@ using System.Text;
 namespace Amber.Core.Multiplayer;
 
 /// <summary>
-/// 联机房间码：AMB-网络名8位-密钥12位-房主端口，例如 AMB-K7Q2M9XD-4HZP8RW2N6TC-25565。
+/// 联机房间码：AMB-网络名8位-密钥26位-房主端口（旧版本是 12 位，例如 AMB-K7Q2M9XD-4HZP8RW2N6TC-25565）。
 /// 字母数字用 Crockford Base32（不含 I L O U），手抄时把 I/L 看成 1、O 看成 0 也能认。
 /// 网络名和密钥都只在房主电脑上随机生成，不经过任何 Amber 的服务器。
-/// 房主选了封装模式时，AMB- 后面先写模式段：T模式号（1–3），伪装成 MC 再加 D，例如 AMB-T2D-K7Q2M9XD-4HZP8RW2N6TC-25565。
+/// 房主选了封装模式时，AMB- 后面先写模式段：T模式号（1–3），伪装成 MC 再加 D，例如 AMB-T2D-K7Q2M9XD-4HZP8RW2N6TC7MQ6KQ4M12KXE9-25565。
 /// 放在这个位置是故意的：不认识封装模式的旧版本（v0.5.6 及以前）会直接说房间码格式不对，而不是悄悄按通用模式去连。
 /// </summary>
 public sealed record RoomCode(string Network, string Secret, int Port)
 {
     private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     public const int NetworkLength = 8;
-    public const int SecretLength = 12;
+    /// <summary>26 characters of a 32-letter alphabet: 130 bits.</summary>
+    public const int SecretLength = 26;
+
+    /// <summary>Codes from older versions (60 bits): still recognised, so the app can say they're old.</summary>
+    public const int LegacySecretLength = 12;
+
+    /// <summary>
+    /// A code from an older version. An unwrapped one can't be joined: older hosts gave EasyTier the code's own values,
+    /// this version derives them. Wrapped ones derive the same way as before and still work.
+    /// </summary>
+    public bool IsLegacy => !FromInvite && Secret.Length == LegacySecretLength;
+
+    /// <summary>An old unwrapped code: joining it would wait for ever, so say it's old instead.</summary>
+    public bool IsUnjoinableLegacy => IsLegacy && !Tunnel.Wraps;
 
     /// <summary>
     /// 邀请加入的房间：网络名（jay- + 16 位十六进制）和 256 位密钥都是房主随机生成、批准后在加密通道里发来的，直接就是 EasyTier 用的值，
@@ -48,21 +61,23 @@ public sealed record RoomCode(string Network, string Secret, int Port)
     public string NetworkName => FromInvite ? Network : "amber-" + Network.ToLowerInvariant();
 
     /// <summary>
-    /// 给 EasyTier 用的网络名和密钥。封装模式的房间用按模式派生的另一套（HKDF），
-    /// 这样房间码末尾的模式被删掉或改掉的人连 EasyTier 网络都进不来，碰不到房主没封装的端口。通用模式和以前一样。
+    /// The EasyTier network name and secret. A room code's own values never go to EasyTier: both are derived (HKDF) from the
+    /// secret and network, per mode, so a code whose mode was removed or changed can't even join the EasyTier network,
+    /// and neither the code's network nor its secret appears on the wire. Invite rooms use their random values as they are.
     /// </summary>
-    public string EasyTierNetworkName => FromInvite ? Network : Tunnel.Wraps
-        ? "amber-" + Convert.ToHexStringLower(HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(Secret), 8, Encoding.UTF8.GetBytes(NetworkName),
-            Encoding.UTF8.GetBytes($"amber-et-name-v1|{(int)Tunnel.Mode}|{(Tunnel.Disguise ? 1 : 0)}")))
-        : NetworkName;
+    public string EasyTierNetworkName => FromInvite ? Network
+        : "amber-" + Convert.ToHexStringLower(HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(Secret), 8, Encoding.UTF8.GetBytes(NetworkName),
+            Encoding.UTF8.GetBytes($"amber-et-name-v1|{(int)Tunnel.Mode}|{(Disguised ? 1 : 0)}")));
 
-    public string EasyTierSecret => FromInvite ? Secret : Tunnel.Wraps
-        ? Convert.ToHexStringLower(HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(Secret), 32, Encoding.UTF8.GetBytes(NetworkName),
-            Encoding.UTF8.GetBytes($"amber-et-v1|{(int)Tunnel.Mode}|{(Tunnel.Disguise ? 1 : 0)}")))
-        : Secret;
+    public string EasyTierSecret => FromInvite ? Secret
+        : Convert.ToHexStringLower(HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(Secret), 32, Encoding.UTF8.GetBytes(NetworkName),
+            Encoding.UTF8.GetBytes($"amber-et-v1|{(int)Tunnel.Mode}|{(Disguised ? 1 : 0)}")));
+
+    /// <summary>Only a wrapped code carries the disguise (its D mark); a general one never does, whatever was asked.</summary>
+    private bool Disguised => Tunnel.Wraps && Tunnel.Disguise;
 
     /// <summary>要在日志里遮掉的密钥（房间密钥和派生出来的 EasyTier 密钥）。</summary>
-    public IReadOnlyList<string> Secrets => FromInvite ? [Secret, Network, .. Split.Nets.SelectMany(n => new[] { n.Secret, n.Network })] : Tunnel.Wraps ? [Secret, EasyTierSecret] : [Secret];
+    public IReadOnlyList<string> Secrets => FromInvite ? [Secret, Network, .. Split.Nets.SelectMany(n => new[] { n.Secret, n.Network })] : [Secret, EasyTierSecret];
 
     /// <summary>Multi-path split settings of an invite room (from the credentials; rotated with the network on rekey).</summary>
     public Transport.SplitSettings Split { get; init; } = Transport.SplitSettings.None;
@@ -111,7 +126,7 @@ public sealed record RoomCode(string Network, string Secret, int Port)
         var network = Normalize(parts[0]);
         var secret = Normalize(parts[1]);
         var digits = new string(parts[2].TakeWhile(char.IsAsciiDigit).ToArray());
-        if (network is not { Length: NetworkLength } || secret is not { Length: SecretLength }) return false;
+        if (network is not { Length: NetworkLength } || secret is not { Length: SecretLength or LegacySecretLength }) return false;
         if (!int.TryParse(digits, out var port) || port is < 1 or > 65535) return false;
         // 端口后面紧跟字母数字（被改坏的码）、或者“-T数字”（旧的把模式写在末尾的写法）算格式不对；
         // 空格、中文、“-thanks”这类粘贴时带上的普通文字可以。

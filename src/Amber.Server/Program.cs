@@ -73,6 +73,7 @@ public static class Program
               --no-volunteers                 不收志愿节点（玩家自愿帮忙转发的电脑；默认收，网络配置 policy.volunteers 为 false 时也不收）
               --relay-limit-kbps 2048         经这台节点转发别的网络（房间）时，每个网络最多多少 KB/s（默认不限；公共网络本身不受限）
               --relay-networks "<名字> ..."   只给这些 EasyTier 网络转发（空格分开，可用 * 通配；默认全部）
+              --signed-volunteers             只收用 Jay 账户签名登记的志愿节点（每个节点都知道是谁在运行，可以按人封禁）
               --directory-index 2             备用目录节点（2–4，主目录是 1）：Jay 把房间发给每个在线的目录，一台挂了别的照常。
                                               备用节点要和主节点用同样的 --config、--blocked-words，开登录时复制 login.key 和 accounts.json
           jay-server node status|rooms|bans|nodes  看运行中节点的计数、公开房间、封禁名单、志愿中转
@@ -81,9 +82,9 @@ public static class Program
               绑定后 directory.key、login.key 只以加密形式存在；硬件对不上时节点删除数据目录里的 Jay 文件，运行环境被动过（调试器、注入、
               文件可被别人改、要求的安全启动关了、TPM 不解封）时拒绝运行。--check 只检查不删除。directory --wipe-dry-run 只列出会删什么。
           jay-server node panel               打印网页管理面板的链接（只能在本机打开；远程服务器用 ssh -L 转发端口）
-          jay-server node ban host|room|account|room-host|node <房主指纹|房间编号|账号|房间编号|志愿节点地址> [--for 7d] [--reason 原因]
+          jay-server node ban host|room|account|room-host|node|operator <房主指纹|房间编号|账号|房间编号|志愿节点地址|志愿节点运营者的 Jay 账户> [--for 7d] [--reason 原因]
               封禁房主（换房间也进不了列表）、房间、网络账号（也不能再登录），或者某个房间的房主（指纹 + 他登录的账号）。
-              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account <...>
+              马上把已经在目录里的房间拿掉；--for 30m/24h/7d 是临时封禁，到点自动解除。node unban host|room|account|node|operator <...>（room-host 封的要分别解封 host 和 account）
           jay-server node remove <房间编号>     只删掉这一个房间（房主续期时会重新审核）
 
         自己的公共网络（连接串 JAYNET2-...）：
@@ -811,8 +812,7 @@ public static class Program
         if (options.Has("no-rate-limit") && options.Has("rate-limit"))
             throw new ArgumentException("--no-rate-limit 和 --rate-limit 不能同时用");
         if (options.Has("no-rate-limit")) builder.WithoutRateLimit();
-        if (options.Has("no-volunteers")) builder.WithoutVolunteers();
-        if (options.Get("rate-limit") is { } rate)
+        else if (options.Get("rate-limit") is { } rate)
         {
             var parts = rate.Split(',', StringSplitOptions.TrimEntries);
             if (parts.Length != 3 || !parts.All(p => int.TryParse(p, out var n) && n > 0))
@@ -820,6 +820,8 @@ public static class Program
             var n = parts.Select(int.Parse).ToArray();
             builder.UseRateLimit(n[0], n[1], n[2]);
         }
+        if (options.Has("no-volunteers")) builder.WithoutVolunteers();
+        if (options.Has("signed-volunteers")) builder.RequireSignedVolunteers();
         if (options.Get("relay-limit-kbps") is not null || options.Get("relay-networks") is not null)
         {
             var kbps = options.GetInt("relay-limit-kbps", 0);
@@ -976,6 +978,10 @@ public static class Program
             return 0;
         }
         output.WriteLine(reply.ToJsonString(pretty));
+        if (sub == "ban" && reply["bannedNodes"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } bannedNodes)
+            output.WriteLine($"一起封掉的地址：{string.Join("、", bannedNodes)}（封错了用 node unban node <地址> 解封）");
+        if (sub == "ban" && reply["disputedNotBanned"] is System.Text.Json.Nodes.JsonArray { Count: > 0 } spared)
+            output.WriteLine($"这些地址可能是别人的，只移除、没封：{string.Join("、", spared)}（也可能是同一个人的另一个账户，看看 node nodes）");
         return reply["ok"]?.GetValue<bool>() == true ? 0 : 1;
     }
 
@@ -1362,7 +1368,7 @@ public static class Program
 /// <summary>最简单的参数解析：第一个词是命令，--name value 是选项，--flag 是开关，其余是位置参数。</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "no-passphrase", "paper", "wipe-dry-run", "check", "secure-boot", "no-tpm"];
+    private static readonly HashSet<string> Flags = ["accept-eula", "no-mc", "console", "new-seed", "verbose", "accounts", "require-2fa", "seed-only", "no-admin", "no-rate-limit", "secure-directory-only", "no-volunteers", "signed-volunteers", "no-passphrase", "paper", "wipe-dry-run", "check", "secure-boot", "no-tpm"];
     private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
     public string? Command { get; private set; }
     public List<string> Positional { get; } = [];
