@@ -53,12 +53,14 @@ public sealed class ChatRejoinTests : IDisposable
         Assert.True(await WaitAsync(() => seen.Any(m => m.Kind == ChatKind.Join && m.SenderId == alice.Id)));
 
         // The second connection takes over: the first is dropped, and nobody hears Alice leave or join again.
-        await using var second = new ChatClient(RoomOf(alice), "Alice");
+        // The name it claims doesn't count: the room keeps showing the name from the host's member table.
+        await using var second = new ChatClient(RoomOf(alice), "Host");
         await second.ConnectAsync("127.0.0.1", hub.Port);
         await firstDropped.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await first.CloseQuietlyAsync();
         Assert.True(await second.SendAsync("still here"));
         Assert.True(await WaitAsync(() => seen.Any(m => m.Text == "still here")));
+        Assert.Equal("Alice", seen.First(m => m.Text == "still here").Name);
         Assert.True(await WaitAsync(() => hub.MemberCount == 2));
         Assert.Single(seen, m => m.Kind == ChatKind.Join && m.SenderId == alice.Id);
         Assert.DoesNotContain(seen, m => m.Kind == ChatKind.Leave);
@@ -66,5 +68,49 @@ public sealed class ChatRejoinTests : IDisposable
         // Leaving for real is still announced.
         await second.DisposeAsync();
         Assert.True(await WaitAsync(() => seen.Any(m => m.Kind == ChatKind.Leave && m.SenderId == alice.Id)));
+    }
+}
+
+public sealed class ChatSplitMoveTests
+{
+    private static readonly DateTime T0 = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void MovesOnlyWhenASplitIsPossibleAndNothingIsGoingOn()
+    {
+        var move = new ChatSplitMove();
+        var room = new object();
+        Assert.False(move.ShouldTry(room, T0, couldSplit: false, busy: false));
+        Assert.False(move.ShouldTry(room, T0, couldSplit: true, busy: true));
+        // Waiting doesn't use up tries.
+        Assert.Equal(0, move.Tries);
+        Assert.True(move.ShouldTry(room, T0, couldSplit: true, busy: false));
+        Assert.Equal(1, move.Tries);
+    }
+
+    [Fact]
+    public void ASplitMoveEndsMovingInThisRoom()
+    {
+        var move = new ChatSplitMove();
+        var room = new object();
+        Assert.True(move.ShouldTry(room, T0, true, false));
+        move.Moved(split: true);
+        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromHours(1), true, false));
+    }
+
+    [Fact]
+    public void FailingMovesStopAfterTwoTriesSpacedOut()
+    {
+        var move = new ChatSplitMove();
+        var room = new object();
+        Assert.True(move.ShouldTry(room, T0, true, false));
+        move.Moved(split: false);
+        Assert.False(move.ShouldTry(room, T0 + ChatSplitMove.Spacing - TimeSpan.FromSeconds(1), true, false));
+        Assert.True(move.ShouldTry(room, T0 + ChatSplitMove.Spacing, true, false));
+        move.Moved(split: false);
+        Assert.False(move.ShouldTry(room, T0 + TimeSpan.FromHours(1), true, false));
+        Assert.Equal(ChatSplitMove.MaxTries, move.Tries);
+        // Another room (or the same one rekeyed) starts again.
+        Assert.True(move.ShouldTry(new object(), T0 + TimeSpan.FromHours(1), true, false));
     }
 }

@@ -926,18 +926,24 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         client.RemoteRequested += sid => Dispatcher.UIThread.Post(() => _ = OnRemoteRequestedAsync(client, sid));
         client.Disconnected += () => Dispatcher.UIThread.Post(() =>
         {
+            // The connection being replaced: the hub drops it as soon as the new one joins, which can come before the new
+            // one is in place here. Not a dropped chat unless the move fails (see below).
+            if (client == _chatReplacing)
+            {
+                _chatReplacedDropped = true;
+                _ = client.CloseQuietlyAsync();
+                return;
+            }
             // A connection that was replaced: it ends quietly.
             if (_chat != client)
             {
                 _ = client.CloseQuietlyAsync();
                 return;
             }
-            _chat = null;
-            StopPrivate();
-            ChatReady = false;
-            ChatStatus = L.T("multiplayer.chat.reconnecting");
-            _ = client.DisposeAsync();
+            ChatDropped(client);
         });
+        _chatReplacing = replacing;
+        _chatReplacedDropped = false;
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -946,11 +952,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (_room != room || (replacing is null ? _chat is not null : _chat is not null && _chat != replacing))
             {
                 await client.CloseQuietlyAsync();
+                if (replacing is not null && _chatReplacedDropped && _chat == replacing) ChatDropped(replacing);
                 return;
             }
             if (replacing is not null)
             {
-                StopPrivate();
+                // Chat is on its own connection: the handshake above went through the transport, so this says how.
+                var split = _transport?.ChatSplit?.LastWasSplit == true;
+                _chatMove.Moved(split);
+                if (!split) _diag.Add(L.T("multiplayer.transport.diagnostics_category"), L.F("multiplayer.chat.move_single", _transport?.ChatSplit?.LastReason ?? ""));
+                StopPrivate(keepPeers: true);
                 _ = CloseReplacedChatAsync(replacing);
             }
             _chat = client;
@@ -966,14 +977,36 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         catch (Exception e) when (e is System.Net.Sockets.SocketException or OperationCanceledException or IOException)
         {
-            await client.DisposeAsync();
-            if (_room == room) ChatStatus = L.T("multiplayer.chat.connecting");
+            await client.CloseQuietlyAsync();
+            // A failed move leaves the old connection as it was, unless the hub dropped it meanwhile.
+            if (replacing is not null)
+            {
+                if (_chatReplacedDropped && _chat == replacing) ChatDropped(replacing);
+            }
+            else if (_room == room) ChatStatus = L.T("multiplayer.chat.connecting");
         }
         finally
         {
             _chatConnecting = false;
+            _chatReplacing = null;
         }
     }
+
+    private ChatClient? _chatReplacing;
+    private bool _chatReplacedDropped;
+    private readonly ChatSplitMove _chatMove = new();
+
+    private void ChatDropped(ChatClient client)
+    {
+        _chat = null;
+        StopPrivate();
+        ChatReady = false;
+        ChatStatus = L.T("multiplayer.chat.reconnecting");
+        _ = client.DisposeAsync();
+    }
+
+    /// <summary>Private work that moving chat would cut off.</summary>
+    private bool PrivateBusy => Transfers.Any(t => t.IsActive) || FileOffers.Count > 0 || ModSyncing || ModCheck == ModCheckState.Checking;
 
     private void OnChatMessage(ChatClient client, ChatMessage message)
     {
@@ -1025,7 +1058,6 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         await old.CloseQuietlyAsync();
     }
 
-    private DateTime _chatSplitTriedAt;
 
     /// <summary>每次刷新时看看聊天要不要连：房主在完整局域网模式下等虚拟网卡就绪后再监听虚拟 IP；加入方看到房主后连。</summary>
     private void TickChat(bool hostVisible)
@@ -1039,11 +1071,10 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             else _ = ConnectChatAsync(EasyTierArgs.HostIp, RoomChat.Port);
         }
         // Chat opens as soon as a member joins, usually before the direct path is up, so under Auto it starts on one path.
-        // Once a new connection would split, chat moves over (at most every 30 seconds, in case splitting keeps failing).
+        // Once a new connection would split, chat moves over (ChatSplitMove says when, and when to stop trying).
         else if (IsJoined && _chat is { } current && ChatReady && !_chatConnecting && _localChatPort is { } local
-                 && _transport?.ChatCouldSplit == true && DateTime.UtcNow - _chatSplitTriedAt > TimeSpan.FromSeconds(30))
+                 && _chatMove.ShouldTry(_room, DateTime.UtcNow, _transport?.ChatCouldSplit == true, PrivateBusy))
         {
-            _chatSplitTriedAt = DateTime.UtcNow;
             _ = ConnectChatAsync("127.0.0.1", local, current);
         }
         // 端口一时被占（比如刚结束的房间还没放开）时，下次刷新再试。

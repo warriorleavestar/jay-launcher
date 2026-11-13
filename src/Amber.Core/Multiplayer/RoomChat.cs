@@ -853,7 +853,9 @@ public sealed class ChatHub : IAsyncDisposable
                         if (holders.Count > 0 && _table is null) break;
                         // The same member taking over from a connection that was already announced (a reconnect, or a member
                         // moving chat onto split paths): nobody sees them leave and join again.
-                        rejoined = holders.Any(h => h.JoinAnnounced);
+                        // Takeovers only happen in invite rooms, where the name comes from the host's member table and
+                        // doesn't change; should it ever differ, the join is announced so everyone sees the new name.
+                        rejoined = holders.Any(h => h.JoinAnnounced) && holders.All(h => h.Name == message.Name);
                         foreach (var old in holders)
                         {
                             old.JoinAnnounced = false;

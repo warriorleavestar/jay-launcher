@@ -109,7 +109,7 @@ public sealed class RoomTransport : IAsyncDisposable
                 legs = held.TryBorrow();
                 if (legs is not null) giveBack = held.Return;
                 // The session's ports are still lent to a transport that hasn't stopped yet: not another program's.
-                else NoLegs(new IOException(L.F("core.mp.split.strict_unavailable", L.T("core.mp.split.ports_lent"))), "core.mp.split.ports_lent");
+                else NoLegs(new IOException(L.T("core.mp.split.ports_lent_strict")), "core.mp.split.ports_lent");
             }
             else if (!o.HostSplitLegsBusy)
             {
