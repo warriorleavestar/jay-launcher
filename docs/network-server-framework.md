@@ -85,22 +85,23 @@ await server.RunAsync(CancellationToken.None);
 
 - 节点跑一个 EasyTier（2.6.x），网络名和密钥用连接串里的 `network` / `secret`，对公网监听 `tcp://0.0.0.0:11010` 和 `udp://0.0.0.0:11010`。
 - 跑目录的那台：`--ipv4 10.235.0.1/16 --no-tun --tcp-whitelist 47668`，目录服务监听本机 `127.0.0.1:47668`，EasyTier 把公共网络里到 10.235.0.1:47668 的连接交过来。参数全貌见 `PublicNetworkArgs.Build`。
-- 备用目录用 10.235.255.254、.253、.252（`PublicNetworkProfile.DirectoryIpOf`）。Jay 的写请求（announce、withdraw）发给每个在线的目录，`list` 合并结果（同一个房间取 `seq` 最大的），`lookup` / `find` / `login` 按编号顺序问，回 `op` 或连不上就问下一个。
+- 备用目录用 10.235.255.254、.253、.252（`PublicNetworkProfile.DirectoryIpOf`）。Jay 的写请求（announce、withdraw）发给每个在线的目录；`snap` 也问每个目录，本机分别留一份，公开列表合并（同一个房间取 `seq` 最大的），按邀请找房间在每份里找；`find` / `login` 按编号顺序问，回 `op` 或连不上就问下一个。
 - Jay 连进来时用 `--dhcp --no-tun --disable-p2p --tcp-whitelist 47660`：成员之间只开敲门端口，不打洞，不暴露公网地址。
 
 ### 目录请求
 
-一条 TCP 连接一个请求，全程走加密的目录通道（`DirectoryChannel`，Noise XXhfspsk0，见 `docs/security/directory-identity.md`）：握手第三条消息里是请求 JSON（UTF-8，最长 16 KB），你回一条加密的 JSON，然后关连接。10 秒内要回。没有明文协议了：以 `{` 开头的旧请求直接断开。
+一条 TCP 连接一个请求，全程走加密的目录通道（`DirectoryChannel`，Noise XXhfspsk0，见 `docs/security/directory-identity.md`）：握手第三条消息里是请求 JSON（UTF-8，最长 16 KB）。回复是一帧加密的 JSON，然后关连接（各版本都读得懂，旧版 Jay 也能看到 `version` 错误）。只有 `snap` 的回复不同：先发一帧加密的 4 字节长度（大端，第一个字节是 0，JSON 不会以它开头），再按每帧最多 16 KB 发加密的 JSON，用空格补到 64 KB 的整数倍，最长 16 MB。10 秒内要回；`snap` 每一帧 10 秒内要发出去，整份按不低于 256 KB/s 算时限（10 秒加上大小除以这个速度，`RoomDirectoryProtocol.SnapshotDeadline`；Jay 读到长度后也按这个等）。不超过 256 KB 的回复（平常的增量）有自己的 32 个名额；更大的同时最多 8 个，开始发送另有一个桶（一次最多 32 个，每秒补 4 个），还有一个字节桶（一次最多 32 MB，每秒补 4 MB）；没有名额回 `busy`；名额按请求本身（`epoch`/`have` 对不上就要整份）先占好，再整理、生成回复。增量比整份的四分之一还大（又超过 256 KB）时直接给整份（每个版本只生成一次）；缓存的增量合计不超过 512 KB。目录看得到每个读者自己的地址时，每个来源地址每分钟最多 6 次（`rate`）；看不到时就只靠上面的名额和桶。没有明文协议了：以 `{` 开头的旧请求直接断开。
 回复都有 `ok`。失败时 `{ok: false, error: "<code>", reason?: "<给房主看的话，最多 120 字>"}`。
 
 每个请求都带 `jay: "<Jay 的版本号>"`（比如 `"0.8.0"`）。网络配置有 `policy.minVersion` 时，版本更低或者没带这个字段就回 `{ok: false, error: "version", min: "<最低版本>"}`，不处理请求。
 
+**升级顺序**：这一版目录去掉了 `list` 和 `lookup` 两个操作，改用 `snap`。先升级目录、Jay 还没升级时，旧版 Jay 看公开房间列表会收到操作错误，按邀请找房间也找不到（会改走邀请自己的大厅）；只靠隐藏条目登记的旧版房主发布时回 `lookup`，房间登记不上。所以随这一版发布 Jay 的同时把网络配置的 `policy.minVersion` 提到这一版，让旧版直接看到“Jay 太旧”的提示，而不是上面这些含糊的失败。
+
 | op | 请求 | 回复 |
 |---|---|---|
-| `announce` | `{room: <房间>, listed: bool, lookup: ["<64 位十六进制>", ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok}` |
+| `announce` | `{room: <房间>, listed: bool, hidden: [{k: "<64 位十六进制>", b: "<284 字节，base64>", p: "<64 位十六进制>", s: "<128 位十六进制>"}, ...最多 4 个], fp?: "<64 位十六进制>", account?: "<登录凭证>"}`。`hidden` 是房主给房间的大厅密钥封好的条目（`HiddenEntry`，大厅密钥在多久就发布多久，公开房间也发），目录原样放进快照，长度不对回 `bad`。`p` 是从邀请算出的条目公钥，`k` 必须是它的哈希；`s` 是这把钥匙对条目、房间编号和 `seq` 的签名（`HiddenEntry.VerifyPublish`），不对回 `lookup`。同一个索引下已经有 8 个别的房间时只丢这一条，房间照常登记，回复带 `warn: "lookup"`（只有隐藏条目的房间回 `lookup`）。房间的 `seq` 是毫秒时间，和目录的时钟差超过 10 分钟时不收 `hidden`：房间还要上公开列表（或有 `fp`）就照常登记，回复带 `warn: "clock"`；别的都没有时回 `clock`。`account` 是这个节点登录服务签的凭证，必须绑定房间的 `key`；网络要求登录时没有有效凭证回 `login` | `{ok, warn?}`（`warn` 是 `"lookup"` 或 `"clock"`，见左边） |
 | `withdraw` | `{id, seq, sig}`：`sig` 是房间签名钥匙对 `"jay-withdraw-v1\n<id>\n<seq>"` 的 Ed25519 签名（十六进制） | `{ok}` |
-| `list` | `{}` | `{ok, rooms: [<房间>, ...]}`：`listed` 为真且不是隐藏房间的，最多 300 个 |
-| `lookup` | `{key}`：邀请码大厅名的查找键 | `{ok, ip?, key?, id?}` |
+| `snap` | `{epoch?, have?}`：本机那份快照来自哪次启动、到第几版；第一次不带 | `{ok, epoch, ver, full, from?, rooms: [<房间>, ...], hidden: [{k, t, b}, ...], gone: ["r:<id>" 或 "h:<k>:<t>", ...]}`。`t` 是随机的槽位标记：同一个索引 `k` 下最多 8 个房间各有一条。公开房间只改了 `seq`、签名和时间的续期不算变化。整份快照有上限，再发布会超过时回 `full`。`epoch` 对得上、`have` 还在变更记录里时只给之后变了的（`full` 为假，`from` = `have`），否则给全部。`rooms` 是 `listed` 为真且不是隐藏房间的。每个请求者都发一样的请求，目录看不出谁在找哪个房间 |
 | `find` | `{code: "JAYF1-..."}` | `{ok, room?}`：用登记的指纹密钥算标签，见 `FingerprintCode.Matches` |
 | `login` | 见 `NetworkLoginClient.Request` / `LoginAuthority.Handle` | 加密的凭证或 `factor` 提示 |
 | `volunteer` | `{url: "tcp://<公网地址>:<端口>"}`：登记或续期志愿中转（每 3 分钟） | `{ok, listed}`：第一次先探测，探测通过后的续期 `listed` 为真。不收时回 `off`，被封回 `banned`，地址不是公网回 `bad` |
@@ -108,7 +109,7 @@ await server.RunAsync(CancellationToken.None);
 | `probe` | `{url: "tcp://<公网地址>:<端口>"}`：想当志愿中转的人先测端口 | `{ok, reachable}`：目录从外网连一次，不列出。不收志愿中转时回 `off`，被封回 `banned`，地址不是公网回 `bad`，测得太频繁回 `rate` |
 | `x-*` | 你自己的 | 你自己的 |
 
-Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别人占着、旧版本）、`full`（满了）、`gone`、`rate`（限流）、`version`（Jay 太旧，带 `min`）、`login`（要先登录），其他码有 `reason` 就显示 `reason`。
+Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别人占着、旧版本）、`full`（满了）、`gone`、`rate`（限流）、`busy`（快照名额满了，稍后再试）、`clock`（房主电脑时间不准）、`version`（Jay 太旧，带 `min`）、`login`（要先登录），其他码有 `reason` 就显示 `reason`。
 
 ### 房间（room）
 
@@ -121,7 +122,7 @@ Jay 认识的错误码：`owner` / `lookup` / `stale`（编号或查找键被别
 
 - `mode`：0 隐藏、1 公开、2 密码、3 直连。
 - 签名：`sig` = Ed25519(`sk` 的私钥, `"jay-room-v1\n"` + 去掉 `sig` 和 `updated` 后按上面字段顺序的 JSON)。具体以 `RoomListing.SignedBytes` 为准。
-- **目录必须**：核对 `id == SHA-256(sk)[..16]` 和签名；同一个 `id` 只收 `seq` 更大的版本；撤下过的 `id` 不收不大于撤下 `seq` 的版本；查找键和指纹密钥先到先得，别的房间占着就回 `lookup`；90 秒没续期就删掉（Jay 每 30 秒续期一次）。
+- **目录必须**：核对 `id == SHA-256(sk)[..16]` 和签名；同一个 `id` 只收 `seq` 更大的版本；撤下过的 `id` 不收不大于撤下 `seq` 的版本；同一个隐藏索引 `k` 最多收 8 个房间的条目，满了只丢这一条并回 `warn: "lookup"`（只有隐藏条目的房间回 `lookup`）；指纹密钥先到先得；90 秒没续期就删掉（Jay 每 30 秒续期一次）。
 - 房间信息不含任何房间钥匙。房主的真实性由加入方敲门时核对 `key` 保证，目录不用信任。
 
 ## 安全边界
