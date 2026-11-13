@@ -892,14 +892,38 @@
                 <Border x:Name="InviteCard" Classes="card" Margin="0" IsVisible="{Binding IsHosting}">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="h2" Text="{l:T multiplayer.room.invite}" Margin="0" />
-                    <!-- Room opened before the game: what it is waiting for or linked to, a port box for other games, and [Find] (also once linked, for a world reopened on a new port). -->
+                    <!-- Room opened before the game: what it waits for or uses, then the games in the room. Worlds this
+                         computer opens to LAN are listed as they are broadcast and drop off when closed; a click points
+                         the room at one, the one in use is marked. A typed port, for games that don't broadcast, sits
+                         under "Other port…". -->
                     <Border x:Name="GameLinkPanel" Background="{DynamicResource AccentTint}" CornerRadius="6" Padding="10" IsVisible="{Binding HasGameRelay}">
                       <StackPanel Spacing="6">
                         <TextBlock x:Name="GameLinkText" Text="{Binding GameLinkText}" TextWrapping="Wrap" />
-                        <Grid ColumnDefinitions="*,Auto">
-                          <TextBox x:Name="GameLinkPortBox" Text="{Binding ManualPort}" PlaceholderText="{l:T multiplayer.lan.port_placeholder}" />
-                          <Button x:Name="GameLinkFindButton" Grid.Column="1" Content="{l:T common.find}" Command="{Binding FindGameForRoomCommand}" Margin="6,0,0,0" ToolTip.Tip="{l:T multiplayer.lan.scan_tooltip}" />
-                        </Grid>
+                        <TextBlock Text="{l:T multiplayer.roomgames.title}" FontWeight="SemiBold" Margin="0,4,0,0" />
+                        <TextBlock x:Name="RoomGamesEmpty" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.roomgames.empty}" IsVisible="{Binding !HasRoomGames}" />
+                        <ItemsControl x:Name="RoomGameList" ItemsSource="{Binding RoomGames}" IsVisible="{Binding HasRoomGames}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:RoomGameItem">
+                              <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                                <StackPanel Spacing="0" VerticalAlignment="Center">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                  <TextBlock Classes="hint" FontSize="12" Text="{Binding PortText}" />
+                                </StackPanel>
+                                <Border Grid.Column="1" Classes="tag accent" VerticalAlignment="Center" Margin="8,0,0,0" IsVisible="{Binding IsLinked}">
+                                  <TextBlock Text="{l:T multiplayer.roomgames.in_use}" />
+                                </Border>
+                                <Button Grid.Column="1" Classes="small" VerticalAlignment="Center" Margin="8,0,0,0" IsVisible="{Binding CanUse}"
+                                        Content="{l:T multiplayer.roomgames.use}"
+                                        Command="{Binding $parent[ItemsControl].((vm:MultiplayerViewModel)DataContext).UseRoomGameItemCommand}" CommandParameter="{Binding}" />
+                              </Grid>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button x:Name="RoomOtherPortButton" Classes="ghost small" Content="{l:T multiplayer.roomgames.other_port}" Command="{Binding ToggleRoomOtherPortCommand}" HorizontalAlignment="Left" Padding="0,2" />
+                        <StackPanel x:Name="RoomOtherPort" Spacing="4" IsVisible="{Binding RoomOtherPortOpen}">
+                          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.roomgames.other_hint}" />
+                          <TextBox x:Name="GameLinkPortBox" Text="{Binding ManualPort}" PlaceholderText="{l:T multiplayer.lan.port_placeholder}" MaxWidth="220" HorizontalAlignment="Left" MinWidth="160" />
+                        </StackPanel>
                       </StackPanel>
                     </Border>
 
