@@ -718,10 +718,11 @@
                       </WrapPanel>
                     </Panel>
                     <Border IsVisible="{Binding UsingGameProxy}" BorderBrush="{DynamicResource Warning}" BorderThickness="1" CornerRadius="6" Padding="8">
-                      <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Text="{Binding GameProxyBanner}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                        <Button Grid.Column="1" Content="{l:T multiplayer.proxy.stop}" Command="{Binding StopGameProxyCommand}" Margin="8,0,0,0" />
-                      </Grid>
+                      <!-- The details column can be narrow: the explanation gets the full width, the button goes under it. -->
+                      <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding GameProxyBanner}" TextWrapping="Wrap" />
+                        <Button Content="{l:T multiplayer.proxy.stop}" Command="{Binding StopGameProxyCommand}" HorizontalAlignment="Right" />
+                      </StackPanel>
                     </Border>
                     <WrapPanel ItemSpacing="6" LineSpacing="6" IsVisible="{Binding CanUseExit}">
                       <TextBlock Text="{l:T multiplayer.exit.peer_label}" VerticalAlignment="Center" />

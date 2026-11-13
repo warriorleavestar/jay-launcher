@@ -1046,6 +1046,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private void OnChatMessage(ChatClient client, ChatMessage message)
     {
         if (_chat is not null && _chat != client) return;
+        // Our own client announcing itself (the host's included, when it opens the room): nobody else joined.
+        if (message.Kind == ChatKind.Join && message.SenderId == client.SenderId) return;
         var mine = client.IsMine(message);
         ChatLines.Add(new ChatLine(message, mine));
         while (ChatLines.Count > 500) ChatLines.RemoveAt(0);
@@ -1102,6 +1104,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private bool _hubOnVirtualIp;
 
+    /// <summary>Name lookups for relays when going online through a member (tests replace it).</summary>
+    internal Func<string, CancellationToken, Task<System.Net.IPAddress[]>>? ExitLookupForTest { get; set; }
+
     /// <summary>
     /// 换出口由会话所有者重启；提权守护确认网卡和出口路由就绪后才更新当前设置。
     /// 停止、核心退出或 Amber 管道断开时，守护撤回它创建的网络设置。
@@ -1119,7 +1124,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             if (_sessionCts != lifetime || _direct != direct || lifetime.IsCancellationRequested) return false;
             if (_session is not { } old || !old.Options.Tun) return false;
-            var options = old.Options with { ExitNode = exitIp };
+            // Relays named by domain are resolved now, so the route plan can protect them (and leaving restores them).
+            var options = direct is null ? await ExitRelays.PinAsync(old.Options with { ExitNode = exitIp }, ExitLookupForTest, lifetime.Token) : old.Options with { ExitNode = exitIp };
             if (direct is not null)
             {
                 await direct.SetExitNodeAsync(exitIp, lifetime.Token);
@@ -1165,9 +1171,14 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                     _currentOptions = preserved.Options;
                     ExitNodeIp = preserved.Options.ExitNode ?? "";
                     SyncHotspotSharing();
+                    // Nothing was torn down: say the old route is still in use, not that the session ended.
+                    SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed_kept", e, ErrorText.Of(e)));
                 }
-                else StopSession();
-                SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed", e, ErrorText.Of(e)));
+                else
+                {
+                    StopSession();
+                    SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed", e, ErrorText.Of(e)));
+                }
             }
             return false;
         }
@@ -1226,31 +1237,62 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SyncHotspotSharing();
             Peers.Clear();
             foreach (var p in peers.Where(p => p.Ip.StartsWith(EasyTierArgs.Subnet, StringComparison.Ordinal)).OrderBy(p => p.Ip)) Peers.Add(new PeerItem(p));
-            var others = Peers.Where(p => p.Peer.Cost != "Local").ToList();
-            if (!others.Select(p => p.Peer.Ip).SequenceEqual(ExitCandidates.Select(p => p.Peer.Ip)))
-            {
-                var keep = SelectedExitPeer?.Peer.Ip;
-                ExitCandidates.Clear();
-                foreach (var p in others) ExitCandidates.Add(p);
-                SelectedExitPeer = ExitCandidates.FirstOrDefault(p => p.Peer.Ip == keep) ?? ExitCandidates.FirstOrDefault();
-            }
+            SyncExitCandidates(Peers.Where(p => p.Peer.Cost != "Local").ToList());
             var host = Peers.FirstOrDefault(p => p.Peer.Ip == EasyTierArgs.HostIp && p.Peer.Cost != "Local");
             TickChat(host is not null);
             if (host is not null) _hostSeen = true;
             // 刚显示过远程控制的提示（或正在等对方同意）时先不刷新，免得一两秒就被盖掉。
             if (!RoomStatusMayOverwrite) return;
             if (IsJoined && host is null && !_hostSeen && DateTime.UtcNow - _joinedAt > TimeSpan.FromSeconds(20))
-                SetStatus(StatusMessage.Info("multiplayer.room.not_connected_hint"));
+                SetRoomStatus(StatusMessage.Info("multiplayer.room.not_connected_hint"));
             else if (IsJoined)
-                Status = host is null ? L.T("multiplayer.room.connecting_first_time")
-                    : L.F("multiplayer.room.connected", (host.Peer.LatencyMs is { } ms ? L.F("multiplayer.room.latency", ms) : ""), JoinAddress);
+                // No latency here: it changes every refresh, and the member list shows it.
+                SetRoomStatus(host is null ? StatusMessage.Info("multiplayer.room.connecting_first_time")
+                    : StatusMessage.Info("multiplayer.room.connected", "", JoinAddress));
             else if (IsHosting)
-                Status = Peers.Count(p => p.Peer.Ip != EasyTierArgs.HostIp) is var n and > 0 ? L.P("multiplayer.room.player_count", n, n) : L.T("multiplayer.room.waiting");
+                SetRoomStatus(RoomCountStatus(Peers.Count));
         }
         finally
         {
             _refreshing = false;
         }
+    }
+
+    /// <summary>
+    /// A status the refresh (every two seconds) keeps setting: only a change is shown. Setting the same one again would
+    /// bring back a message the player just closed and note it in diagnostics each time.
+    /// </summary>
+    private void SetRoomStatus(StatusMessage message)
+    {
+        if (StatusInfo is { } current && current.Key == message.Key && current.Kind == message.Kind && current.Count == message.Count
+            && current.Args.SequenceEqual(message.Args)) return;
+        SetStatus(message);
+    }
+
+    /// <summary>Everyone in the room, the host included, like the room header; just the host means still waiting.</summary>
+    internal static StatusMessage RoomCountStatus(int everyone) => everyone > 1
+        ? new StatusMessage("multiplayer.room.player_count", [everyone]) { Count = everyone }
+        : StatusMessage.Info("multiplayer.room.waiting");
+
+    /// <summary>
+    /// The members one can go online through. Rebuilt when who's there changes; otherwise each entry is refreshed in place,
+    /// so its latency and route stay current (not the first ones seen) and the choice is kept.
+    /// </summary>
+    internal void SyncExitCandidates(IReadOnlyList<PeerItem> others)
+    {
+        var keep = SelectedExitPeer?.Peer.Ip;
+        if (!others.Select(p => p.Peer.Ip).SequenceEqual(ExitCandidates.Select(p => p.Peer.Ip)))
+        {
+            ExitCandidates.Clear();
+            foreach (var p in others) ExitCandidates.Add(p);
+        }
+        else
+        {
+            for (var i = 0; i < others.Count; i++)
+                if (ExitCandidates[i].Peer != others[i].Peer) ExitCandidates[i] = others[i];
+        }
+        var selected = ExitCandidates.FirstOrDefault(p => p.Peer.Ip == keep) ?? ExitCandidates.FirstOrDefault();
+        if (!ReferenceEquals(selected, SelectedExitPeer)) SelectedExitPeer = selected;
     }
 
     private const int MaxLogLanGames = 8;

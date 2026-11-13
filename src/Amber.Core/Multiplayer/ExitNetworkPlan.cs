@@ -33,8 +33,16 @@ public sealed record ExitNetworkPlan(string VirtualIp, IReadOnlyList<string> Und
         // 全局门禁不能只信任进程的网卡绑定；普通节点也须有精确的物理承载地址。
         foreach (var peer in options.Peers.Where(p => !IsLoopback(p)))
         {
-            if (!Uri.TryCreate(peer, UriKind.Absolute, out var uri) || !IPAddress.TryParse(uri.Host, out var address)
-                || address.AddressFamily != AddressFamily.InterNetwork)
+            if (!Uri.TryCreate(peer, UriKind.Absolute, out var uri)) throw new InvalidOperationException(L.T("core.mp.exit.nodeipv4only"));
+            // A relay named by domain: the addresses ExitRelays resolved when the exit was chosen.
+            if (uri.HostNameType == UriHostNameType.Dns)
+            {
+                if (!options.RelayAddresses.TryGetValue(uri.Host, out var resolved) || resolved.Count == 0)
+                    throw new InvalidOperationException(L.T("core.mp.exit.nodeipv4only"));
+                nodeAddresses.AddRange(resolved);
+                continue;
+            }
+            if (!IPAddress.TryParse(uri.Host, out var address) || address.AddressFamily != AddressFamily.InterNetwork)
                 throw new InvalidOperationException(L.T("core.mp.exit.nodeipv4only"));
             nodeAddresses.Add(address.ToString());
         }
