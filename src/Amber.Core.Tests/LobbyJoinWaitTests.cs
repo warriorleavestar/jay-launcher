@@ -45,7 +45,7 @@ public sealed class LobbyJoinWaitTests
     public async Task RelayButNoHostPointsAtTheInvite()
     {
         var found = 0;
-        var e = await Assert.ThrowsAsync<TimeoutException>(() => Wait(() => [Self, Relay], Nodes, () => found++));
+        var e = await Assert.ThrowsAsync<LobbyNoHostException>(() => Wait(() => [Self, Relay], Nodes, () => found++));
         Assert.IsNotType<LobbyUnreachableException>(e);
         Assert.Equal(L.T("core.mp.lobby.nohost"), e.Message);
         Assert.Equal(1, found);
@@ -55,7 +55,7 @@ public sealed class LobbyJoinWaitTests
     [Fact]
     public async Task ReachableNodeCountsAsRelayEvenIfNotListed()
     {
-        var e = await Assert.ThrowsAsync<TimeoutException>(() => Wait(() => [Self], Nodes, reachable: () => true));
+        var e = await Assert.ThrowsAsync<LobbyNoHostException>(() => Wait(() => [Self], Nodes, reachable: () => true));
         Assert.IsNotType<LobbyUnreachableException>(e);
         Assert.Equal(L.T("core.mp.lobby.nohost"), e.Message);
     }

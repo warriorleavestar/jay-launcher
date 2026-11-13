@@ -6,10 +6,12 @@ public sealed record SettingsGroup(string Id, string TitleKey, string SummaryKey
 /// <summary>
 /// One setting on the settings page. <paramref name="Field"/> is the route fragment (<c>settings#Field</c>) and the name
 /// of the control (<c>Field</c> or <c>FieldBox</c>); <paramref name="HintKey"/> is searched too. A <paramref name="WindowsOnly"/>
-/// setting has no control on other systems, so it is left out of <see cref="SettingsCatalog.Fields"/> there; a
-/// <paramref name="CallsOnly"/> setting belongs to the reserved calls group and is listed only while calls are switched on.
+/// setting has no control on other systems, and a <paramref name="DesktopOnly"/> one none on phones and tablets, so they
+/// are left out of <see cref="SettingsCatalog.Fields"/> there; a <paramref name="CallsOnly"/> setting belongs to the
+/// reserved calls group and is listed only while calls are switched on.
 /// </summary>
-public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null, bool WindowsOnly = false, bool CallsOnly = false);
+public sealed record SettingsField(string Field, string Group, string LabelKey, string? HintKey = null, bool WindowsOnly = false, bool DesktopOnly = false,
+    bool CallsOnly = false);
 
 /// <summary>
 /// The ten settings groups and every setting with a control, in page order. The settings search and the command
@@ -135,13 +137,16 @@ public static class SettingsCatalog
 
         new("Version", About, "settings.about.version"),
         new("CheckUpdate", About, "settings.about.check_update", "tools.update.hint"),
+        new("AutoUpdate", About, "settings.update.auto", "settings.update.auto_hint", DesktopOnly: true),
         new("AboutPage", About, "about.title", "about.promise"),
     ];
 
-    private static readonly SettingsField[] OnThisSystem = [.. All.Where(f => !f.WindowsOnly || OperatingSystem.IsWindows())];
+    private static readonly SettingsField[] OnThisSystem =
+        [.. All.Where(f => (!f.WindowsOnly || OperatingSystem.IsWindows()) && (!f.DesktopOnly || PlatformFeatures.IsDesktop))];
     private static readonly SettingsField[] WithoutCalls = [.. OnThisSystem.Where(f => !f.CallsOnly)];
 
-    /// <summary>The settings this system shows (Windows-only ones are dropped elsewhere; the calls group only while calls are on).</summary>
+    /// <summary>The settings this system shows (Windows-only ones elsewhere and desktop-only ones on phones and tablets are
+    /// dropped; the calls group only while calls are on).</summary>
     public static IReadOnlyList<SettingsField> Fields => FieldsFor(Amber.Core.Calls.CallFeature.Enabled);
 
     public static IReadOnlyList<SettingsField> FieldsFor(bool calls) => calls ? OnThisSystem : WithoutCalls;

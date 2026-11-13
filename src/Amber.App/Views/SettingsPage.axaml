@@ -479,7 +479,7 @@
           <!-- About -->
           <StackPanel x:Name="Group_about" Classes="group">
             <Border Classes="card">
-              <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12">
+              <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="12">
                 <SelectableTextBlock x:Name="VersionBox" Text="{Binding VersionText}" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <Button x:Name="CheckUpdateBox" Grid.Column="1" Classes="secondary" Content="{l:T settings.about.check_update}" Command="{Binding Tools.CheckUpdateCommand}" VerticalAlignment="Center" />
                 <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Classes="hint" Text="{l:T tools.update.hint}" TextWrapping="Wrap" Margin="0,8,0,0" />
@@ -487,6 +487,10 @@
                            IsVisible="{Binding Tools.UpdateStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 <Button x:Name="OpenUpdatePageButton" Grid.Row="3" Grid.ColumnSpan="2" Classes="secondary" Content="{l:T tools.update.open_page}" Command="{Binding Tools.OpenUpdateUrlCommand}"
                         IsVisible="{Binding Tools.UpdateUrl, Converter={x:Static ObjectConverters.IsNotNull}}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+                <CheckBox x:Name="AutoUpdateBox" Grid.Row="4" Grid.ColumnSpan="2" IsChecked="{Binding AutoUpdate}" IsVisible="{Binding AutoUpdateSupported}" Margin="0,12,0,0">
+                  <TextBlock Text="{l:T settings.update.auto}" TextWrapping="Wrap" />
+                </CheckBox>
+                <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Classes="hint" Text="{l:T settings.update.auto_hint}" TextWrapping="Wrap" IsVisible="{Binding AutoUpdateSupported}" Margin="0,4,0,0" />
               </Grid>
             </Border>
             <Border Classes="card">

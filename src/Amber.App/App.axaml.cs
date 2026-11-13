@@ -75,6 +75,8 @@ public sealed class App : Application
                 });
                 // 清掉以前留下的无痕模式临时配置（Amber 没等到游戏退出就关了、崩溃了之类）。
                 _ = Task.Run(() => Amber.Core.Launch.GameLauncher.SweepNoTrace());
+                // Once a day: tell the user about a signed newer Jay (a notice only, never a download).
+                UpdateNotifier.Start(service);
             }
         }
         base.OnFrameworkInitializationCompleted();
