@@ -1028,13 +1028,24 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if ((replacing is null ? _chat is not null : _chat != replacing) || _chatConnecting || _room is not { } room) return;
         _chatConnecting = true;
         var client = new ChatClient(room, ChatName);
-        client.Received += m => Dispatcher.UIThread.Post(() => OnChatMessage(client, m));
-        client.Rekeyed += next => Dispatcher.UIThread.Post(() => OnRekey(client, next));
-        client.Kicked += () => Dispatcher.UIThread.Post(() => OnKicked(client));
-        client.Breaker += () => Dispatcher.UIThread.Post(() => OnBreakerFromHost(client));
-        client.RemoteRequested += sid => Dispatcher.UIThread.Post(() => _ = OnRemoteRequestedAsync(client, sid));
+        // Everything this connection reports belongs to this room session: once it is over, it is dropped.
+        var generation = _chatRoute.Generation;
+        void Post(Action handle) => Dispatcher.UIThread.Post(() =>
+        {
+            if (_chatRoute.IsCurrent(generation)) handle();
+        });
+        client.Received += m => Post(() => OnChatMessage(client, m));
+        client.Rekeyed += next => Post(() => OnRekey(client, next));
+        client.Kicked += () => Post(() => OnKicked(client));
+        client.Breaker += () => Post(() => OnBreakerFromHost(client));
+        client.RemoteRequested += sid => Post(() => _ = OnRemoteRequestedAsync(client, sid));
         client.Disconnected += () => Dispatcher.UIThread.Post(() =>
         {
+            if (!_chatRoute.IsCurrent(generation))
+            {
+                _ = client.CloseQuietlyAsync();
+                return;
+            }
             // The connection being replaced: the hub drops it as soon as the new one joins, which can come before the new
             // one is in place here. Not a dropped chat unless the move fails (see below).
             if (client == _chatReplacing)
@@ -1052,7 +1063,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             ChatDropped(client);
         });
         _chatReplacing = replacing;
-        if (replacing is not null) _chatIncoming = client;
+        if (replacing is not null) _chatRoute.Moving(client);
         _chatReplacedDropped = false;
         var inPlace = false;
         try
@@ -1076,7 +1087,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 _chatMove.Moved(split);
                 if (!split) _diag.Add(L.T("multiplayer.transport.diagnostics_category"), L.F("multiplayer.chat.move_single", _transport?.ChatSplit?.LastReason ?? ""));
                 StopPrivate(keepPeers: true);
-                _chatOutgoing = replacing;
+                _chatRoute.Switched(replacing);
                 _ = CloseReplacedChatAsync(replacing);
             }
             _chat = client;
@@ -1108,19 +1119,15 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             }
             _chatConnecting = false;
             _chatReplacing = null;
-            if (_chatIncoming == client) _chatIncoming = null;
+            _chatRoute.MoveEnded(client);
         }
     }
 
     private ChatClient? _chatReplacing;
-    // While chat moves, the hub sends each message to exactly one of the two connections: to the new one once it has
-    // joined (possibly before it is in place here), to the old one before that (possibly handled after the switch).
-    private ChatClient? _chatIncoming;
-    private ChatClient? _chatOutgoing;
+    private readonly ChatRoute<ChatClient> _chatRoute = new();
 
     /// <summary>Whether what this connection receives belongs to the current chat (also either side of a move).</summary>
-    private bool IsChatFrom(ChatClient client) =>
-        client == _chat || client == _chatIncoming || client == _chatOutgoing;
+    private bool IsChatFrom(ChatClient client) => _chatRoute.Accepts(client, _chat);
     private bool _chatReplacedDropped;
     private readonly ChatSplitMove _chatMove = new();
 
@@ -1186,7 +1193,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private async Task CloseReplacedChatAsync(ChatClient old)
     {
         await Task.Delay(TimeSpan.FromSeconds(3));
-        if (_chatOutgoing == old) _chatOutgoing = null;
+        _chatRoute.Closed(old);
         await old.CloseQuietlyAsync();
     }
 
@@ -1535,6 +1542,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StopRemote();
         var chat = _chat;
         var hub = _hub;
+        _chatRoute.Retire();
         _chat = null;
         _hub = null;
         StopPrivate();

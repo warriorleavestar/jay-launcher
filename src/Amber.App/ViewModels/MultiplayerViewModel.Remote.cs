@@ -237,6 +237,7 @@ public sealed partial class MultiplayerViewModel
             await DeclineRemote(client, sessionId);
             return;
         }
+        var generation = _chatRoute.Generation;
         RemoteConsent consent;
         try
         {
@@ -247,17 +248,20 @@ public sealed partial class MultiplayerViewModel
         {
             Volatile.Write(ref _remotePrompting, 0);
         }
-        if (_room != room || _chat != client) return;
+        // Still this room session (chat may have moved to a new connection meanwhile): the answer goes over the chat
+        // connection in use now.
+        if (_room != room || !_chatRoute.IsCurrent(generation)) return;
+        var reply = _chat ?? client;
         if (!consent.Accepted)
         {
-            await DeclineRemote(client, sessionId);
+            await DeclineRemote(reply, sessionId);
             return;
         }
         var screen = RemotePlatform.CreateScreen();
         if (screen is null)
         {
             // macOS 还没授权屏幕录制（系统这时已经弹了授权提示）之类：这次按拒绝回，界面上写原因。
-            await DeclineRemote(client, sessionId);
+            await DeclineRemote(reply, sessionId);
             SetRemoteStatus(new StatusMessage("common.raw", [RemoteUnavailableText.Length > 0 ? RemoteUnavailableText : L.T("multiplayer.remote.unsupported_os")], StatusKind.Warning));
             NotifyRemoteAvailability();
             return;

@@ -425,6 +425,9 @@ public sealed partial class MultiplayerViewModel
     {
         if (IsJoined)
         {
+            // The old network's chat connections (also either side of a move) are not heard any more. (The host's own
+            // chat goes to its hub on this machine and stays.)
+            _chatRoute.Retire();
             var chat = _chat;
             _chat = null;
             StopPrivate();
