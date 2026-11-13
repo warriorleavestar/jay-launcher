@@ -27,32 +27,63 @@ public sealed class RekeyTests : IDisposable
         return new Room(credentials, table, credentials.ToHostRoom(table, "Host"));
     }
 
-    [Fact]
-    public async Task AListenerOnAnAddressNotThereYetWaitsForIt()
+    private TunnelServer AdapterServer(Func<IPAddress, int, TcpListener> listen, TimeSpan wait, List<string>? log = null) =>
+        new(HostRoom(TunnelSettings.Default).Host, TunnelSettings.Default, 47999, _ => null, log is null ? null : line => { lock (log) log.Add(line); },
+            IPAddress.Parse("10.235.255.254"), listen, wait);
+
+    private static Func<IPAddress, int, TcpListener> MissingUntil(int tries)
     {
-        // A full-LAN room's virtual adapter gets its address a moment after the room starts: the listener doesn't fail
-        // (and isn't mistaken for a port in use), it binds once the address shows up, or gives up quietly later.
-        var log = new List<string>();
-        var absent = IPAddress.Parse("10.235.255.254");
-        await using var server = new TunnelServer(HostRoom(TunnelSettings.Default).Host, TunnelSettings.Default, 0,
-            _ => null, line => { lock (log) log.Add(line); }, absent) { AddressWait = TimeSpan.FromSeconds(1) };
-        Assert.False(server.Listening);
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (DateTime.UtcNow < deadline && log.Count == 0) await Task.Delay(50);
-        lock (log) Assert.Contains(log, l => l.Contains("10.235.255.254", StringComparison.Ordinal));
-        Assert.False(server.Listening);
+        var n = 0;
+        return (_, _) =>
+        {
+            if (Interlocked.Increment(ref n) <= tries) throw new SocketException((int)SocketError.AddressNotAvailable);
+            var l = new TcpListener(IPAddress.Loopback, 0);
+            l.Start();
+            return l;
+        };
     }
 
     [Fact]
-    public async Task APortInUseStillFailsAtOnce()
+    public async Task AListenerBindsOnceItsAddressAppears()
     {
-        using var taken = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        // A whole-LAN room's virtual adapter gets its address a moment after the room starts.
+        await using var server = AdapterServer(MissingUntil(3), TimeSpan.FromSeconds(10));
+        Assert.False(server.Listening);
+        await server.Bound.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(server.Listening);
+        Assert.NotEqual(47999, server.Port);
+    }
+
+    [Fact]
+    public async Task AListenerThatGivesUpTellsTheRoom()
+    {
+        var log = new List<string>();
+        await using var server = AdapterServer(MissingUntil(int.MaxValue), TimeSpan.FromMilliseconds(600), log);
+        var e = await Assert.ThrowsAsync<SocketException>(() => server.Bound.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(SocketError.AddressNotAvailable, e.SocketErrorCode);
+        Assert.False(server.Listening);
+        lock (log) Assert.Contains(log, l => l.Contains("10.235.255.254:47999", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DisposingWhileWaitingForTheAddressIsQuick()
+    {
+        var server = AdapterServer(MissingUntil(int.MaxValue), TimeSpan.FromMinutes(10));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await server.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => server.Bound);
+    }
+
+    [Fact]
+    public void APortInUseStillFailsAtOnce()
+    {
+        using var taken = new TcpListener(IPAddress.Loopback, 0);
         taken.Start();
         var port = ((IPEndPoint)taken.LocalEndpoint).Port;
-        var e = Assert.Throws<System.Net.Sockets.SocketException>(() =>
+        var e = Assert.Throws<SocketException>(() =>
             new TunnelServer(HostRoom(TunnelSettings.Default).Host, TunnelSettings.Default, port, _ => null));
-        Assert.Equal(System.Net.Sockets.SocketError.AddressAlreadyInUse, e.SocketErrorCode);
-        await Task.CompletedTask;
+        Assert.Equal(SocketError.AddressAlreadyInUse, e.SocketErrorCode);
     }
 
     private static RoomCode GuestRoom(Room room, MemberEntry entry, int? epoch = null)

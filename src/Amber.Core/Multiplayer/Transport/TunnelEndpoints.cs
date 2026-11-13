@@ -108,7 +108,11 @@ public static class Pump
 /// </summary>
 public sealed class TunnelServer : IAsyncDisposable
 {
-    private volatile TcpListener _listener;
+    // Swapped in once a deferred bind succeeds; both the swap and DisposeAsync's stop happen under _bindGate.
+    private TcpListener? _listener;
+    private volatile bool _bound;
+    private readonly object _bindGate = new();
+    private readonly TaskCompletionSource _boundTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly int _port;
     private readonly RoomCode _room;
     private readonly TunnelSettings _settings;
@@ -117,17 +121,18 @@ public sealed class TunnelServer : IAsyncDisposable
     private readonly Task _loop;
     private readonly Action<string>? _log;
 
-    /// <summary>The listening port (0 until a deferred bind succeeds, when it was asked for an ephemeral port).</summary>
-    public int Port => _listener.Server.IsBound ? ((IPEndPoint)_listener.LocalEndpoint).Port : _port;
-
-    /// <summary>
-    /// How long a listener on a network adapter's address waits for that address to appear. A full-LAN room's virtual
-    /// adapter gets its address a moment after EasyTier starts, while the room's listeners are set up right away.
-    /// </summary>
-    internal TimeSpan AddressWait { get; init; } = TimeSpan.FromSeconds(60);
+    /// <summary>The listening port (the requested one until a deferred bind succeeds).</summary>
+    public int Port => _bound && Volatile.Read(ref _listener) is { } l ? ((IPEndPoint)l.LocalEndpoint).Port : _port;
 
     /// <summary>The listener is bound and accepting (false while it waits for its address).</summary>
-    public bool Listening => _listener.Server.IsBound;
+    public bool Listening => _bound;
+
+    /// <summary>
+    /// Completes once the listener is bound: at once, or when the adapter's address appears (a whole-LAN room's
+    /// virtual adapter gets it a moment after EasyTier starts). Faults with the <see cref="SocketException"/> when it
+    /// gives up (see <see cref="AdapterListener.BindAsync"/>); cancelled when the server is disposed first.
+    /// </summary>
+    public Task Bound => _boundTcs.Task;
     public int Accepted;
     /// <summary>
     /// Connections never handed to a handler: refused for want of a place, handshake failed or timed out, closed to make
@@ -166,17 +171,30 @@ public sealed class TunnelServer : IAsyncDisposable
 
     /// <param name="route">每种服务怎么处理；返回 null 表示不提供这个服务（连接会被关掉）。</param>
     public TunnelServer(RoomCode room, TunnelSettings settings, int port, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null, IPAddress? address = null)
+        : this(room, settings, port, route, log, address, null, null)
+    {
+    }
+
+    /// <param name="listen">How to bind (tests); <see cref="AdapterListener.Listen"/> by default.</param>
+    /// <param name="addressWait">How long to wait for a missing adapter address (default <see cref="AdapterListener.DefaultWait"/>).</param>
+    internal TunnelServer(RoomCode room, TunnelSettings settings, int port, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log,
+        IPAddress? address, Func<IPAddress, int, TcpListener>? listen, TimeSpan? addressWait)
     {
         _room = room;
         _settings = settings;
         _route = route;
         _log = log;
         var bind = address ?? IPAddress.Loopback;
+        listen ??= AdapterListener.Listen;
         _port = port;
-        _listener = new TcpListener(bind, port);
         var waitForAddress = false;
-        try { _listener.Start(); }
-        catch (SocketException e) when (e.SocketErrorCode == SocketError.AddressNotAvailable && !IPAddress.IsLoopback(bind))
+        try
+        {
+            _listener = listen(bind, port);
+            _bound = true;
+            _boundTcs.SetResult();
+        }
+        catch (SocketException e) when (AdapterListener.IsAddressMissing(e, bind))
         {
             // The adapter doesn't have this address yet: bind in the background once it does. A port that's in use
             // still fails here, at once.
@@ -185,39 +203,44 @@ public sealed class TunnelServer : IAsyncDisposable
         // 在线程池上跑：不要带上界面线程的同步上下文（否则每条连接的收尾都要排队等界面线程）。
         _loop = Task.Run(async () =>
         {
-            if (waitForAddress && !await BindWhenAddressAppearsAsync(bind, port, _cts.Token)) return;
-            await AcceptLoopAsync(_cts.Token);
+            if (waitForAddress && !await BindLaterAsync(bind, port, listen, addressWait ?? AdapterListener.DefaultWait)) return;
+            try { await AcceptLoopAsync(_cts.Token); }
+            finally
+            {
+                lock (_bindGate) _listener?.Stop();
+            }
         });
     }
 
-    private async Task<bool> BindWhenAddressAppearsAsync(IPAddress address, int port, CancellationToken ct)
+    private async Task<bool> BindLaterAsync(IPAddress address, int port, Func<IPAddress, int, TcpListener> listen, TimeSpan wait)
     {
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        while (!ct.IsCancellationRequested)
+        TcpListener listener;
+        try { listener = await AdapterListener.BindAsync(address, port, wait, _cts.Token, listen); }
+        catch (OperationCanceledException)
         {
-            try { await Task.Delay(TimeSpan.FromMilliseconds(250), ct); }
-            catch (OperationCanceledException) { return false; }
-            var listener = new TcpListener(address, port);
-            try
+            _boundTcs.TrySetCanceled();
+            return false;
+        }
+        catch (SocketException e)
+        {
+            _log?.Invoke(L.F("core.mp.transport.listen_failed", new IPEndPoint(address, port), e.Message));
+            _boundTcs.TrySetException(e);
+            return false;
+        }
+        lock (_bindGate)
+        {
+            // Disposed while binding: nothing else will stop this one.
+            if (_cts.IsCancellationRequested)
             {
-                listener.Start();
-                _listener = listener;
-                // Disposed while binding: DisposeAsync may have stopped the old listener only.
-                if (ct.IsCancellationRequested)
-                {
-                    listener.Stop();
-                    return false;
-                }
-                return true;
-            }
-            catch (SocketException e) when (e.SocketErrorCode == SocketError.AddressNotAvailable && clock.Elapsed < AddressWait) { }
-            catch (SocketException e)
-            {
-                _log?.Invoke(L.F("core.mp.transport.listen_failed", address, port, e.Message));
+                listener.Stop();
+                _boundTcs.TrySetCanceled();
                 return false;
             }
+            _listener = listener;
+            _bound = true;
         }
-        return false;
+        _boundTcs.TrySetResult();
+        return true;
     }
 
     /// <summary>把服务交给本机的一个 TCP 端口（游戏、聊天）。</summary>
@@ -236,7 +259,7 @@ public sealed class TunnelServer : IAsyncDisposable
             TcpClient client;
             try
             {
-                client = await _listener.AcceptTcpClientAsync(ct);
+                client = await _listener!.AcceptTcpClientAsync(ct);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException)
             {
@@ -386,9 +409,11 @@ public sealed class TunnelServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _cts.Cancel();
-        _listener.Stop();
-        // A bind that finished as this ran is stopped by the background loop itself.
+        lock (_bindGate)
+        {
+            _cts.Cancel();
+            _listener?.Stop();
+        }
         try { await _loop; } catch (OperationCanceledException) { }
         _cts.Dispose();
     }

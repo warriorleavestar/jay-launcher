@@ -176,13 +176,50 @@ public sealed class GamePortRelayTests
     });
 
     [Theory]
-    [InlineData(false, false, true)]
-    [InlineData(false, true, true)]
-    [InlineData(true, true, true)]
-    [InlineData(true, false, false)]
-    public void EveryRoomOpensWithoutAGame(bool fullLan, bool wraps, bool relay) =>
-        // Whole-LAN rooms open without a game as well; only without wrapping do they skip the (loopback) relay.
-        Assert.Equal(relay, MultiplayerViewModel.UsesRelayWithoutGame(fullLan, wraps));
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    public void OnlyUnwrappedWholeLanRoomsListenOnTheAdapter(bool fullLan, bool wraps, bool onAdapter) =>
+        // Every room opens without a game on a relay; guests reach it on loopback except in an unwrapped whole-LAN room.
+        Assert.Equal(onAdapter, MultiplayerViewModel.RelayOnAdapter(fullLan, wraps));
+
+    [Fact]
+    public async Task TheRelayAlsoListensOnTheAdapterOnceItsAddressAppears()
+    {
+        using var game = new EchoGame(0x5A);
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        // The adapter's address shows up on the third try (here it stands in as a second loopback address).
+        var tries = 0;
+        var bound = relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), TimeSpan.FromSeconds(10), (_, port) =>
+        {
+            if (++tries < 3) throw new SocketException((int)SocketError.AddressNotAvailable);
+            var l = new TcpListener(IPAddress.Parse("127.0.0.2"), port);
+            l.Start();
+            return l;
+        });
+        Assert.False(relay.ListensOnAdapter);
+        await bound.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(relay.ListensOnAdapter);
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Parse("127.0.0.2"), relay.Port);
+        var s = client.GetStream();
+        await s.WriteAsync(new byte[] { 7 });
+        var reply = new byte[2];
+        await s.ReadExactlyAsync(reply);
+        Assert.Equal(new byte[] { 0x5A, 7 }, reply);
+    }
+
+    [Fact]
+    public async Task ARelayWhoseAdapterNeverGetsItsAddressSaysSo()
+    {
+        await using var relay = new GamePortRelay();
+        var e = await Assert.ThrowsAsync<SocketException>(() => relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), TimeSpan.FromMilliseconds(600),
+            (_, _) => throw new SocketException((int)SocketError.AddressNotAvailable)));
+        Assert.Equal(SocketError.AddressNotAvailable, e.SocketErrorCode);
+        Assert.False(relay.ListensOnAdapter);
+    }
 
     [Fact]
     public void AWholeLanRoomOpensWithoutAGame() => UiTestThread.Run(() =>

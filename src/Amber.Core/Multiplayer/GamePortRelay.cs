@@ -9,8 +9,10 @@ namespace Amber.Core.Multiplayer;
 /// connection is closed straight away. Changing the target later (the world was reopened on a new port) only affects
 /// new connections.
 /// <para>
-/// It listens on 127.0.0.1 only, the same place EasyTier and the direct bridge hand room traffic to, so it is not
-/// reachable from the network. The caller decides which ports are trusted as targets (see the view model's port check).
+/// It listens on 127.0.0.1, the same place EasyTier and the direct bridge hand room traffic to, so it is not reachable
+/// from the network. A whole-LAN room without wrapping, where guests reach the host's virtual address directly, also
+/// listens on that address (<see cref="ListenOnAdapterAsync"/>), which only the room's members can reach. The caller
+/// decides which ports are trusted as targets (see the view model's port check).
 /// </para>
 /// </summary>
 public sealed class GamePortRelay : IAsyncDisposable
@@ -18,6 +20,8 @@ public sealed class GamePortRelay : IAsyncDisposable
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _acceptLoop;
+    private TcpListener? _adapterListener;
+    private Task? _adapterLoop;
     private readonly object _gate = new();
     private readonly HashSet<TcpClient> _open = [];
     private readonly TimeSpan _connectTimeout;
@@ -29,7 +33,7 @@ public sealed class GamePortRelay : IAsyncDisposable
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
-        _acceptLoop = Task.Run(AcceptLoopAsync);
+        _acceptLoop = Task.Run(() => AcceptLoopAsync(_listener));
     }
 
     /// <summary>The port the room uses as its game port.</summary>
@@ -62,14 +66,41 @@ public sealed class GamePortRelay : IAsyncDisposable
         get { lock (_gate) return _open.Count / 2; }
     }
 
-    private async Task AcceptLoopAsync()
+    /// <summary>
+    /// Also listen on <paramref name="address"/> (a whole-LAN room's virtual address) at the same port, waiting for the
+    /// adapter to get that address. Completes once listening; throws the <see cref="SocketException"/> when it gives up,
+    /// or <see cref="OperationCanceledException"/> when the relay is disposed first.
+    /// </summary>
+    public async Task ListenOnAdapterAsync(IPAddress address, TimeSpan? wait = null, Func<IPAddress, int, TcpListener>? listen = null)
+    {
+        var listener = await AdapterListener.BindAsync(address, Port, wait ?? AdapterListener.DefaultWait, _cts.Token, listen);
+        lock (_gate)
+        {
+            if (_cts.IsCancellationRequested || _adapterListener is not null)
+            {
+                listener.Stop();
+                _cts.Token.ThrowIfCancellationRequested();
+                return;
+            }
+            _adapterListener = listener;
+            _adapterLoop = Task.Run(() => AcceptLoopAsync(listener));
+        }
+    }
+
+    /// <summary>Listening on an adapter address too (see <see cref="ListenOnAdapterAsync"/>).</summary>
+    public bool ListensOnAdapter
+    {
+        get { lock (_gate) return _adapterListener is not null; }
+    }
+
+    private async Task AcceptLoopAsync(TcpListener listener)
     {
         while (!_cts.IsCancellationRequested)
         {
             TcpClient client;
             try
             {
-                client = await _listener.AcceptTcpClientAsync(_cts.Token);
+                client = await listener.AcceptTcpClientAsync(_cts.Token);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException)
             {
@@ -136,13 +167,21 @@ public sealed class GamePortRelay : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_cts.IsCancellationRequested) return;
-        _cts.Cancel();
+        Task? adapterLoop;
+        lock (_gate)
+        {
+            if (_cts.IsCancellationRequested) return;
+            _cts.Cancel();
+            _adapterListener?.Stop();
+            adapterLoop = _adapterLoop;
+        }
         _listener.Stop();
         TcpClient[] open;
         lock (_gate) open = [.. _open];
         foreach (var c in open) c.Dispose();
         try { await _acceptLoop; } catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { }
+        if (adapterLoop is not null)
+            try { await adapterLoop; } catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException) { }
         // _cts is not disposed: connections still finishing read its token.
     }
 }

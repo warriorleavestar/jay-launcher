@@ -667,7 +667,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             return;
         }
         // No LAN world yet: the room opens on a relay and picks the game up when it's opened to LAN.
-        if (await HostGamePortAsync(checkManual: true, wraps: SelectedTransport.Mode != TransportMode.General) is not (var gamePort, var relay)) return;
+        if (await HostGamePortAsync(checkManual: true) is not (var gamePort, var relay)) return;
         if (!IsIdle)
         {
             if (relay is not null) await relay.DisposeAsync();
@@ -686,7 +686,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (relay is not null) await relay.DisposeAsync();
             return;
         }
-        AdoptGameRelay(relay);
+        AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
         Mode = "host";
         RoomCodeText = "";
         _room = room;
@@ -697,7 +697,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
-                + (relay is null && ManualPortValue is null && SelectedLanGame is null ? " " + L.F("multiplayer.relay.full_lan_no_game", EasyTierArgs.HostIp) : "")
+                + (relay is not null ? " " + L.T("multiplayer.relay.waiting") : "")
             : relay is not null ? L.T("multiplayer.relay.created") : L.T("multiplayer.room.created");
     }
 
@@ -792,7 +792,36 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         _timer.Start();
         OnPropertyChanged(nameof(CanUseExit));
         SyncHotspotSharing();
+        if (_session is EasyTierElevatedSession elevated) _ = WatchElevatedStartAsync(elevated);
         return true;
+    }
+
+    /// <summary>How long a whole-LAN session may take to report that EasyTier and its adapter are up.</summary>
+    internal static readonly TimeSpan ElevatedStartWait = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// The elevated helper starts EasyTier in the background after the room is set up. If it doesn't report ready in
+    /// time, or fails, say why and end the room instead of leaving it waiting with no adapter.
+    /// </summary>
+    private async Task WatchElevatedStartAsync(EasyTierElevatedSession session)
+    {
+        using var wait = new CancellationTokenSource(ElevatedStartWait);
+        string? problem = null;
+        try { await session.WaitForReadyAsync(wait.Token); }
+        catch (OperationCanceledException) { problem = L.T("multiplayer.room.full_lan_not_ready"); }
+        catch (Exception e) when (e is IOException or InvalidOperationException or ObjectDisposedException or System.ComponentModel.Win32Exception)
+        {
+            problem = e.Message;
+        }
+        if (problem is null) return;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            // Left the room or started another meanwhile: nothing to report.
+            if (_session != session) return;
+            _diag.Add(L.T("multiplayer.transport.diagnostics_category"), problem);
+            StopCommand.Execute(null);
+            SetStatus(StatusMessage.Error("multiplayer.room.full_lan_start_failed", problem));
+        });
     }
 
     private bool TryStartTransport(EasyTierOptions options)
@@ -812,6 +841,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 : StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
             return false;
         }
+        if (_transport.Server is { Bound.IsCompleted: false } server) _ = WatchTransportBoundAsync(_transport, server);
         _service.ActiveGameProxy = _transport.Proxy;
         GameProxyIp = _transport.Proxy?.ExitIp ?? "";
         var t = options.Room.Tunnel;
@@ -820,6 +850,33 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             : L.T("multiplayer.transport.general_summary");
         OnPropertyChanged(nameof(CanUseGameProxy));
         return true;
+    }
+
+    /// <summary>
+    /// The protected channel's listener on a whole-LAN room's virtual address binds once the adapter has that address.
+    /// If it never does, the room can't be joined: stop it and say why.
+    /// </summary>
+    private async Task WatchTransportBoundAsync(RoomTransport transport, TunnelServer server)
+    {
+        try { await server.Bound; }
+        catch (OperationCanceledException) { }
+        catch (System.Net.Sockets.SocketException e)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_transport != transport) return;
+                FailRoomOnAdapter(e);
+            });
+        }
+    }
+
+    /// <summary>A listener on the virtual adapter never came up: end the room with the reason.</summary>
+    private void FailRoomOnAdapter(System.Net.Sockets.SocketException e)
+    {
+        StopCommand.Execute(null);
+        SetStatus(e.SocketErrorCode == System.Net.Sockets.SocketError.AddressNotAvailable
+            ? StatusMessage.Failure("multiplayer.transport.address_not_ready", e, ErrorText.Of(e))
+            : StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
     }
 
     private void StopTransport()

@@ -42,13 +42,10 @@ public sealed partial class MultiplayerViewModel
     /// <see cref="AdoptGameRelay"/> once the room is up (or to dispose if it fails). Null: blocked, status already set.
     /// <para>
     /// Whole-LAN rooms open without a game too: they are as much for other games, sharing a connection and going online
-    /// through a member. When the room's traffic is wrapped (<paramref name="wraps"/>), guests' game connections still
-    /// arrive on this computer's loopback, so the relay works as for any room. Without wrapping, guests reach this
-    /// computer's network address directly and a loopback relay can't sit in front of the game: the room opens with the
-    /// usual Minecraft port as its game port and no relay, and friends use the game's own port once it is open.
+    /// through a member. See <see cref="AdoptGameRelay"/> for how their guests reach the relay.
     /// </para>
     /// </summary>
-    private async Task<(int Port, GamePortRelay? Relay)?> HostGamePortAsync(bool checkManual, bool wraps)
+    private async Task<(int Port, GamePortRelay? Relay)?> HostGamePortAsync(bool checkManual)
     {
         var manual = ManualPortValue;
         var port = manual ?? SelectedLanGame?.Game.Port;
@@ -61,28 +58,41 @@ public sealed partial class MultiplayerViewModel
             }
             return (known, null);
         }
-        if (!UsesRelayWithoutGame(FullLanMode, wraps)) return (FullLanDefaultGamePort, null);
         var relay = new GamePortRelay();
         return (relay.Port, relay);
     }
 
     /// <summary>
-    /// Whether a room opened before any game sits on a <see cref="GamePortRelay"/>: every room does, except a whole-LAN
-    /// room without wrapping (guests reach this computer's network address there, which a loopback relay can't serve).
+    /// Whether the relay must also listen on this computer's virtual address: a whole-LAN room whose traffic isn't
+    /// wrapped, where guests reach that address directly. Wrapped traffic (and every other room) arrives on loopback.
     /// </summary>
-    internal static bool UsesRelayWithoutGame(bool fullLan, bool wraps) => !fullLan || wraps;
+    internal static bool RelayOnAdapter(bool fullLan, bool wraps) => fullLan && !wraps;
 
-    /// <summary>The game port a whole-LAN room without wrapping names when it opens before any game.</summary>
-    internal const int FullLanDefaultGamePort = 25565;
-
-    private void AdoptGameRelay(GamePortRelay? relay)
+    /// <param name="onAdapter">Also listen on the virtual address (see <see cref="RelayOnAdapter"/>); a relay that can't
+    /// gets the room stopped with the reason.</param>
+    private void AdoptGameRelay(GamePortRelay? relay, bool onAdapter = false)
     {
         if (relay is null) return;
+        if (onAdapter) _ = ListenOnAdapterAsync(relay);
         _gameRelay = relay;
         _relayGameLabel = null;
         IsWaitingForGame = true;
         OnPropertyChanged(nameof(HasGameRelay));
         OnPropertyChanged(nameof(GameLinkText));
+    }
+
+    private async Task ListenOnAdapterAsync(GamePortRelay relay)
+    {
+        try { await relay.ListenOnAdapterAsync(System.Net.IPAddress.Parse(EasyTierArgs.HostIp)); }
+        catch (OperationCanceledException) { }
+        catch (System.Net.Sockets.SocketException e)
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_gameRelay != relay) return;
+                FailRoomOnAdapter(e);
+            });
+        }
     }
 
     private void StopGameRelay()
@@ -127,7 +137,7 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Tests: what a room-opening command does about the game port, without starting a room.</summary>
     internal async Task<bool> PrepareGameRelayForTest()
     {
-        if (await HostGamePortAsync(checkManual: false, wraps: SelectedTransport.Mode != TransportMode.General) is not (_, var relay)) return false;
+        if (await HostGamePortAsync(checkManual: false) is not (_, var relay)) return false;
         AdoptGameRelay(relay);
         return true;
     }
