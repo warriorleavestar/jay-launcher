@@ -294,6 +294,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
                     ? X25519KeyPair.FromPrivateKey(Convert.FromBase64String(Encoding.ASCII.GetString(sealedDir).Trim()))
                     : DirectoryChannel.LoadOrCreateIdentity(DirectoryKeyPath),
                 NetworkSecret = Profile.Secret,
+                UncountedLoopback = _b.DirectOnly is null,
             };
             if (File.Exists(DirectoryCertificatePath))
             {
