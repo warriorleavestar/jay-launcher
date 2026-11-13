@@ -686,7 +686,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (relay is not null) await relay.DisposeAsync();
             return;
         }
-        AdoptGameRelay(relay);
+        AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
         Mode = "host";
         RoomCodeText = "";
         _room = room;
@@ -791,7 +791,46 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         _timer.Start();
         OnPropertyChanged(nameof(CanUseExit));
         SyncHotspotSharing();
+        if (_session is EasyTierElevatedSession elevated) _ = WatchElevatedStartAsync(elevated);
         return true;
+    }
+
+    /// <summary>
+    /// How long a whole-LAN session may take to report that EasyTier and its adapter are up: the same time the room's
+    /// listeners wait for the adapter's address. Counted from after the permission prompt (starting the session waits
+    /// for it, and the listeners start after the session); generous for a first adapter install.
+    /// </summary>
+    internal static TimeSpan ElevatedStartWait => AdapterListener.DefaultWait;
+
+    /// <summary>
+    /// The elevated helper starts EasyTier in the background after the room is set up. If it doesn't report ready in
+    /// time, or fails, say why and end the room instead of leaving it waiting with no adapter.
+    /// </summary>
+    private Task WatchElevatedStartAsync(EasyTierElevatedSession session) =>
+        WatchSessionStartAsync(session.WaitForReadyAsync, () => _session == session, ElevatedStartWait);
+
+    /// <param name="stillCurrent">Whether that session is still this room's (checked on the UI thread).</param>
+    internal async Task WatchSessionStartAsync(Func<CancellationToken, Task> waitForReady, Func<bool> stillCurrent, TimeSpan within)
+    {
+        using var wait = new CancellationTokenSource(within);
+        string? problem = null;
+        try { await waitForReady(wait.Token); }
+        catch (OperationCanceledException) { problem = L.T("multiplayer.room.full_lan_not_ready"); }
+        // Whatever the helper fails with, the room can't work: say so rather than leave it waiting.
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            System.Diagnostics.Debug.Assert(e is not NullReferenceException, e.ToString());
+            problem = $"{e.Message} ({e.GetType().Name})";
+        }
+        if (problem is null) return;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            // Left the room or started another meanwhile: nothing to report.
+            if (!stillCurrent()) return;
+            _diag.Add(L.T("multiplayer.transport.diagnostics_category"), problem);
+            StopCommand.Execute(null);
+            SetStatus(StatusMessage.Error("multiplayer.room.full_lan_start_failed", problem));
+        });
     }
 
     private bool TryStartTransport(EasyTierOptions options)
@@ -806,8 +845,15 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             _session?.Dispose();
             _session = null;
-            SetStatus(StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
+            SetStatus(e.SocketErrorCode == System.Net.Sockets.SocketError.AddressNotAvailable
+                ? StatusMessage.Failure("multiplayer.transport.address_not_ready", e, ErrorText.Of(e))
+                : StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
             return false;
+        }
+        if (_transport.Server is { Bound.IsCompleted: false } server)
+        {
+            var transport = _transport;
+            _ = WatchAdapterBindAsync(server.Bound, () => _transport == transport, server.Port, relay: false);
         }
         _service.ActiveGameProxy = _transport.Proxy;
         GameProxyIp = _transport.Proxy?.ExitIp ?? "";
@@ -817,6 +863,39 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             : L.T("multiplayer.transport.general_summary");
         OnPropertyChanged(nameof(CanUseGameProxy));
         return true;
+    }
+
+    /// <summary>
+    /// A listener on a whole-LAN room's virtual address (the protected channel's, or the game relay's) binds once the
+    /// adapter has that address. If it never does, or fails in another way, the room can't be joined: stop it and say why.
+    /// </summary>
+    /// <param name="stillCurrent">Whether that listener still belongs to this room (checked on the UI thread).</param>
+    /// <param name="relay">The game relay's listener: its port is one the system picked, not one the user can free.</param>
+    internal async Task WatchAdapterBindAsync(Task bound, Func<bool> stillCurrent, int port, bool relay)
+    {
+        try { await bound; }
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!stillCurrent()) return;
+                FailRoomOnAdapter(e, port, relay);
+            });
+        }
+    }
+
+    /// <summary>A listener on the virtual adapter never came up, or stopped: end the room with the reason.</summary>
+    /// <param name="port">The port that listener wanted, for the message.</param>
+    private void FailRoomOnAdapter(Exception e, int port, bool relay)
+    {
+        _diag.Add(L.T("multiplayer.transport.diagnostics_category"), $"{e.Message} ({e.GetType().Name})");
+        StopCommand.Execute(null);
+        SetStatus(e is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.AddressNotAvailable }
+            ? StatusMessage.Failure("multiplayer.transport.address_not_ready", e, ErrorText.Of(e))
+            : relay
+                ? StatusMessage.Failure("multiplayer.relay.adapter_failed", e, ErrorText.Of(e))
+                : StatusMessage.Failure("multiplayer.transport.adapter_port_failed", e, port, ErrorText.Of(e)));
     }
 
     private void StopTransport()
