@@ -221,7 +221,8 @@ public sealed class TunnelServer : IAsyncDisposable
             _boundTcs.TrySetCanceled();
             return false;
         }
-        catch (SocketException e)
+        // A missing address that never came, or anything else the bind fails with: the room must hear of it either way.
+        catch (Exception e) when (e is not OutOfMemoryException)
         {
             _log?.Invoke(L.F("core.mp.transport.listen_failed", new IPEndPoint(address, port), e.Message));
             _boundTcs.TrySetException(e);
