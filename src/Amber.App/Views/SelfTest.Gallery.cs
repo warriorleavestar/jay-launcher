@@ -35,6 +35,9 @@ internal sealed partial class SelfTest
                 // A stretched icon is scaled from its geometry's bounds: an icon that keeps the whole 24×24 box stays centred.
                 var offBox = IconsWithoutFullBox();
                 Check($"Gallery ({variant}): every icon keeps its 24×24 box, so it sits in the middle of its button", offBox.Count == 0, string.Join(", ", offBox.Take(8)));
+                // The sidebar's page icons are parsed from their own path strings, not from the resources.
+                var offPages = main.Pages.Where(p => p.IconGeometry.Bounds != new Rect(0, 0, 24, 24)).Select(p => $"{p.GetType().Name} {p.IconGeometry.Bounds}").ToList();
+                Check($"Gallery ({variant}): every page icon keeps its 24×24 box", main.Pages.Count > 0 && offPages.Count == 0, string.Join(", ", offPages));
                 Check($"Gallery ({variant}): every automatic cover is shown for review", gallery.CoverCount == Amber.Core.GameLibrary.CoverArt.Slots, $"{gallery.CoverCount}");
                 var plays = gallery.GetVisualDescendants().OfType<Button>().Count(b => b.Classes.Contains("play") && b.IsEffectivelyVisible);
                 Check($"控件库（{name}）：琥珀按钮只有一个", plays == 1, $"{plays} 个");
