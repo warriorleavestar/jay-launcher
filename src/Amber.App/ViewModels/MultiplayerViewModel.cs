@@ -815,11 +815,10 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         using var wait = new CancellationTokenSource(within);
         string? problem = null;
         try { await waitForReady(wait.Token); }
-        catch (OperationCanceledException) { problem = L.T("multiplayer.room.full_lan_not_ready"); }
+        catch (OperationCanceledException) when (wait.IsCancellationRequested) { problem = L.T("multiplayer.room.full_lan_not_ready"); }
         // Whatever the helper fails with, the room can't work: say so rather than leave it waiting.
         catch (Exception e) when (e is not OutOfMemoryException)
         {
-            System.Diagnostics.Debug.Assert(e is not NullReferenceException, e.ToString());
             problem = $"{e.Message} ({e.GetType().Name})";
         }
         if (problem is null) return;
@@ -892,10 +891,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         _diag.Add(L.T("multiplayer.transport.diagnostics_category"), $"{e.Message} ({e.GetType().Name})");
         StopCommand.Execute(null);
         SetStatus(e is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.AddressNotAvailable }
-            ? StatusMessage.Failure("multiplayer.transport.address_not_ready", e, ErrorText.Of(e))
+            // The room already showed as open: these say it was closed, not that it didn't start.
+            ? StatusMessage.Failure("multiplayer.room.closed_adapter_not_ready", e, ErrorText.Of(e))
             : relay
                 ? StatusMessage.Failure("multiplayer.relay.adapter_failed", e, ErrorText.Of(e))
-                : StatusMessage.Failure("multiplayer.transport.adapter_port_failed", e, port, ErrorText.Of(e)));
+                : StatusMessage.Failure("multiplayer.room.closed_adapter_port", e, port, ErrorText.Of(e)));
     }
 
     private void StopTransport()

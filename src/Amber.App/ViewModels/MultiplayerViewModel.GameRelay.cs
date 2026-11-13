@@ -83,7 +83,8 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>
     /// How many times a room listens on the adapter again after that listener stops (the adapter went away and came
-    /// back, say) before it gives up and ends the room.
+    /// back, say) before it gives up and ends the room. Counted over the room's whole life, not in a row: a listener that
+    /// binds and is lost again at once would otherwise loop for ever.
     /// </summary>
     internal const int AdapterRelistens = 3;
 
@@ -111,10 +112,13 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>A caller on the room's virtual network (the host's /24), not one that reached the address another way.</summary>
-    internal static bool InRoomSubnet(System.Net.IPAddress source) =>
-        source.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
-        && source.ToString().StartsWith(EasyTierArgs.Subnet, StringComparison.Ordinal)
-        && source.ToString() != EasyTierArgs.HostIp;
+    internal static bool InRoomSubnet(System.Net.IPAddress source)
+    {
+        if (source.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
+        var bytes = source.GetAddressBytes();
+        var host = System.Net.IPAddress.Parse(EasyTierArgs.HostIp).GetAddressBytes();
+        return bytes.AsSpan(0, 3).SequenceEqual(host.AsSpan(0, 3)) && !bytes.AsSpan().SequenceEqual(host);
+    }
 
     private void StopGameRelay()
     {

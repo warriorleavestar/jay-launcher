@@ -356,7 +356,7 @@ public sealed class GamePortRelayTests
         var prepared = vm.PrepareGameRelayForTest(onAdapter: true);
         Pump(() => prepared.IsCompleted);
         Assert.True(vm.HasGameRelay);
-        Pump(() => vm.StatusInfo?.Key == "multiplayer.transport.address_not_ready");
+        Pump(() => vm.StatusInfo?.Key == "multiplayer.room.closed_adapter_not_ready");
         Assert.False(vm.HasGameRelay);
     });
 
@@ -436,7 +436,7 @@ public sealed class GamePortRelayTests
         Assert.True(vm.HasGameRelay);
         bound.SetException(new SocketException((int)SocketError.AddressAlreadyInUse));
         Pump(() => watch.IsCompleted);
-        Assert.Equal("multiplayer.transport.adapter_port_failed", vm.StatusInfo?.Key);
+        Assert.Equal("multiplayer.room.closed_adapter_port", vm.StatusInfo?.Key);
         Assert.Equal(47999, vm.StatusInfo!.Args[0]);
         Assert.False(vm.HasGameRelay);
     });
@@ -452,6 +452,21 @@ public sealed class GamePortRelayTests
         Pump(() => watch.IsCompleted);
         Assert.True(vm.HasGameRelay);
         vm.StopCommand.Execute(null);
+    });
+
+    [Fact]
+    public void AHelperThatGivesUpByItselfIsNotCalledSlow() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var vm = new MultiplayerViewModel(service) { RelayTypingDelay = TimeSpan.Zero };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        // Cancelled for its own reasons, long before the wait is up: the reason is shown, not "after two minutes".
+        var watch = vm.WatchSessionStartAsync(_ => Task.FromCanceled(new CancellationToken(true)), () => true, TimeSpan.FromMinutes(10));
+        Pump(() => watch.IsCompleted);
+        Assert.Equal("multiplayer.room.full_lan_start_failed", vm.StatusInfo?.Key);
+        Assert.DoesNotContain(L.T("multiplayer.room.full_lan_not_ready"), vm.StatusInfo!.Args[0]?.ToString(), StringComparison.Ordinal);
+        Assert.False(vm.HasGameRelay);
     });
 
     [Theory]

@@ -77,6 +77,22 @@ public sealed class RekeyTests : IDisposable
     }
 
     [Fact]
+    public async Task AListenerThatFailsOddlyStillTellsTheRoom()
+    {
+        var log = new List<string>();
+        // The address is missing at first (so binding moves to the background), then the bind fails some other way.
+        var tries = 0;
+        var server = AdapterServer((_, _) => Interlocked.Increment(ref tries) == 1
+            ? throw new SocketException((int)SocketError.AddressNotAvailable)
+            : throw new ArgumentException("odd"), TimeSpan.FromSeconds(10), log);
+        await Assert.ThrowsAsync<ArgumentException>(() => server.Bound.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.False(server.Listening);
+        lock (log) Assert.Contains(log, l => l.Contains("10.235.255.254:47999", StringComparison.Ordinal));
+        // Closing the room afterwards doesn't throw it again.
+        await server.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task DisposingWhileWaitingForTheAddressIsQuick()
     {
         var server = AdapterServer(MissingUntil(int.MaxValue), TimeSpan.FromMinutes(10));
