@@ -35,6 +35,14 @@ public static class GameLanBridge
     /// <summary>Connections still sending their first line; more are closed at once.</summary>
     private const int MaxHandshakes = 32;
 
+    /// <summary>
+    /// Players passed on through agents at once, per game and in all (the agent has its own limit too). A slot is taken
+    /// before Jay asks the agent and held until the connection it got is closed; more are turned away (no connection).
+    /// </summary>
+    internal const int MaxPerGame = 64, MaxActive = 128;
+
+    private static int _active;
+
     private static readonly object Gate = new();
     private static readonly SemaphoreSlim Handshakes = new(MaxHandshakes, MaxHandshakes);
     private static TcpListener? _listener;
@@ -54,6 +62,8 @@ public static class GameLanBridge
         public Socket Control { get; } = control;
         public int Pid { get; } = pid;
         public SemaphoreSlim Write { get; } = new(1, 1);
+        /// <summary>Players passed on through this agent now (under <see cref="Gate"/>).</summary>
+        public int Active { get; set; }
         public TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
@@ -131,6 +141,9 @@ public static class GameLanBridge
     /// <summary>Whether a game with a bridge agent is running: rooms then pass the game port through Jay's relay.</summary>
     public static bool HasAgents => AgentCount > 0;
 
+    /// <summary>Whether <paramref name="port"/> on this computer belongs to a game with a connected bridge agent.</summary>
+    public static bool IsBridged(int port) => AgentFor(port) is not null;
+
     /// <summary>
     /// Something listens on <paramref name="port"/> but can't be reached: most likely a game in the strong sandbox
     /// started without a working agent (or before Jay was restarted, which gives the agent a dead address).
@@ -201,26 +214,78 @@ public static class GameLanBridge
 
     private static async Task<Socket?> ViaAgentAsync(Agent agent, int port, CancellationToken ct)
     {
+        lock (Gate)
+        {
+            if (agent.Active >= MaxPerGame || _active >= MaxActive) return null;
+            agent.Active++;
+            _active++;
+        }
         long id;
         var reply = new TaskCompletionSource<Socket?>(TaskCreationOptions.RunContinuationsAsynchronously);
         // Random ids: knowing one request's id tells nothing about the next.
         do id = BitConverter.ToInt64(RandomNumberGenerator.GetBytes(8)) & long.MaxValue;
         while (!Pending.TryAdd(id, new Request(agent, reply)));
         Socket? result = null;
+        var handed = false;
         try
         {
             if (!await SendAsync(agent, $"open {id} {port}\n", ct).ConfigureAwait(false)) return null;
             var done = await Task.WhenAny(reply.Task, agent.Closed.Task).WaitAsync(ct).ConfigureAwait(false);
             result = done == reply.Task ? await reply.Task.ConfigureAwait(false) : null;
+            if (result is BridgeSocket socket)
+            {
+                // The slot now belongs to the connection: given back when whoever uses it closes it.
+                handed = socket.OnClose(() => GiveBack(agent));
+                if (!handed) result = null;
+            }
             if (result is not null) Interlocked.Increment(ref _viaAgent);
             return result;
         }
         finally
         {
+            if (!handed) GiveBack(agent);
             // Closing the request: a data connection that arrives later can no longer be handed over (and is closed
             // by its handshake); one that arrived after this gave up is closed here.
             Pending.TryRemove(id, out _);
             if (!reply.TrySetResult(null) && reply.Task.Result is { } late && late != result) late.Dispose();
+        }
+    }
+
+    private static void GiveBack(Agent agent)
+    {
+        lock (Gate)
+        {
+            agent.Active--;
+            _active--;
+        }
+    }
+
+    /// <summary>Tests: players passed on through agents now.</summary>
+    internal static int ActiveForTest
+    {
+        get { lock (Gate) return _active; }
+    }
+
+    /// <summary>A connection accepted from an agent; runs <see cref="OnClose"/>'s action once when it is closed.</summary>
+    private sealed class BridgeSocket() : Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
+    {
+        private Action? _closed;
+        private int _disposed;
+
+        /// <summary>Runs <paramref name="closed"/> when this is closed; false (not run) when it is closed already.</summary>
+        public bool OnClose(Action closed)
+        {
+            Volatile.Write(ref _closed, closed);
+            if (Volatile.Read(ref _disposed) == 0) return true;
+            // Closed meanwhile: whoever takes the action back first runs it; here, the caller keeps the slot.
+            return Interlocked.Exchange(ref _closed, null) is null;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            Volatile.Write(ref _disposed, 1);
+            Interlocked.Exchange(ref _closed, null)?.Invoke();
         }
     }
 
@@ -261,17 +326,20 @@ public static class GameLanBridge
     {
         while (true)
         {
-            Socket socket;
+            // Accepted into a BridgeSocket: a data connection handed to a caller gives its slot back when closed.
+            var socket = new BridgeSocket();
             try
             {
-                socket = await listener.AcceptSocketAsync();
+                await listener.Server.AcceptAsync(socket, CancellationToken.None);
             }
             catch (ObjectDisposedException)
             {
+                socket.Dispose();
                 return;
             }
             catch (SocketException)
             {
+                socket.Dispose();
                 continue;
             }
             if (!Handshakes.Wait(0))
@@ -331,23 +399,21 @@ public static class GameLanBridge
 
     private static async Task ServeControlAsync(Agent agent)
     {
-        Agent? replaced;
-        lock (Gate)
-        {
-            // One control connection per launch: a new one replaces the old.
-            if (!Launches.ContainsValue(agent.Launch))
-            {
-                agent.Control.Dispose();
-                return;
-            }
-            replaced = agent.Launch.Agent;
-            agent.Launch.Agent = agent;
-        }
-        replaced?.Control.Dispose();
+        Agent? replaced = null;
         try
         {
-            // Tells the agent it was accepted (it waits for this before it stops backing off).
+            // Tells the agent it was accepted. The agent takes nothing but "ok" first, so it is sent before the agent is
+            // published: no "open" from another thread can get in ahead of it.
+            if (BeforeOkForTest is { } hold) await hold();
             if (!await SendAsync(agent, "ok\n", CancellationToken.None)) return;
+            lock (Gate)
+            {
+                // One control connection per launch: a new one replaces the old.
+                if (!Launches.ContainsValue(agent.Launch)) return;
+                replaced = agent.Launch.Agent;
+                agent.Launch.Agent = agent;
+            }
+            replaced?.Control.Dispose();
             while (await ReadLineAsync(agent.Control, CancellationToken.None) is { } line)
             {
                 // An agent can only turn down its own requests.
@@ -397,11 +463,12 @@ public static class GameLanBridge
 
     private static int _viaAgent;
 
+    /// <summary>Tests: runs on an accepted control connection before "ok" is sent.</summary>
+    internal static Func<Task>? BeforeOkForTest { get; set; }
+
     /// <summary>Tests: connections made through an agent so far.</summary>
     internal static int ViaAgentCount => Volatile.Read(ref _viaAgent);
 
-    /// <summary>Tests: whether a connection to <paramref name="port"/> would go through an agent.</summary>
-    internal static bool HasAgentFor(int port) => AgentFor(port) is not null;
 
     /// <summary>Tests: the listener's port.</summary>
     internal static int PortForTest => Start();

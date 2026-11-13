@@ -339,6 +339,73 @@ public sealed class GamePortRelayTests
     });
 
     [Fact]
+    public async Task PlayersBeyondTheLimitAreClosedAtOnce()
+    {
+        using var game = new EchoGame(0xE1);
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        relay.BeforeConnectForTest = () => release.Task;
+
+        // The limit is taken by players still connecting: one more is closed straight away.
+        var held = Enumerable.Range(0, GamePortRelay.MaxConnections).Select(i => RoundTripAsync(relay.Port, [(byte)i])).ToList();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (relay.OpenConnectionsTo(game.Port) < GamePortRelay.MaxConnections && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Equal(GamePortRelay.MaxConnections, relay.OpenConnectionsTo(game.Port));
+        Assert.Null(await RoundTripAsync(relay.Port, [0xFF]).WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // Once they are through, the slots come back as they leave.
+        release.SetResult();
+        foreach (var trip in held) Assert.NotNull(await trip);
+        relay.BeforeConnectForTest = null;
+        deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (relay.OpenConnectionsTo(game.Port) > 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Equal(new byte[] { 0xE1, 7 }, await RoundTripAsync(relay.Port, [7]));
+    }
+
+    [Fact]
+    public void AWholeLanRoomPutsTheRelayInFrontOfAGameInTheStrongSandbox() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var game = new EchoGame(0xE2);
+        var vm = new MultiplayerViewModel(service)
+        {
+            FullLanMode = true,
+            ManualPort = game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        // A plain game is reached on its own port, whole-LAN or not.
+        vm.BridgedGameRunningForTest = () => false;
+        var plain = vm.HostGamePortForTest();
+        Pump(() => plain.IsCompleted);
+        Assert.Equal((game.Port, (GamePortRelay?)null), plain.Result);
+
+        // A game in the strong sandbox only through Jay: the room gets the relay's port, already linked to the game.
+        vm.BridgedGameRunningForTest = () => true;
+        var bridged = vm.HostGamePortForTest();
+        Pump(() => bridged.IsCompleted);
+        var (port, relay) = bridged.Result!.Value;
+        Assert.NotNull(relay);
+        Assert.Equal(relay!.Port, port);
+        Assert.Equal(game.Port, relay.Target);
+        // Unwrapped whole-LAN guests reach the virtual address, so the room also listens there for them.
+        Assert.True(MultiplayerViewModel.RelayOnAdapter(fullLan: true, wraps: false));
+        var reply = Task.Run(() => RoundTripAsync(relay.Port, [9]));
+        Pump(() => reply.IsCompleted);
+        Assert.Equal(new byte[] { 0xE2, 9 }, reply.Result);
+        var disposed = relay.DisposeAsync().AsTask();
+        Pump(() => disposed.IsCompleted);
+
+        // Adopted by the room, it is linked at once and named by the typed port alone.
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        Assert.True(prepared.Result);
+        Assert.False(vm.IsWaitingForGame);
+        Assert.Equal(L.F("multiplayer.relay.linked_port", game.Port), vm.GameLinkText);
+        vm.StopGameRelayForTest();
+    });
+
+    [Fact]
     public async Task APlayerStillConnectingToTheGameKeepsItLinked()
     {
         using var game = new EchoGame(0xB6);

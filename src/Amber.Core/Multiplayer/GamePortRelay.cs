@@ -29,6 +29,9 @@ public sealed class GamePortRelay : IAsyncDisposable
     private readonly HashSet<(TcpClient In, Socket Out, int Port)> _open = [];
     // Callers taken on for a game port whose connection to the game isn't up yet, by port.
     private readonly Dictionary<int, int> _connecting = [];
+    /// <summary>Connections passed on (or being connected) at once; a LAN world takes far fewer players.</summary>
+    internal const int MaxConnections = 64;
+
     private readonly TimeSpan _connectTimeout;
     private int _target;
 
@@ -208,6 +211,8 @@ public sealed class GamePortRelay : IAsyncDisposable
         {
             // No game yet: close at once so the player's game shows a connection error instead of hanging.
             if (Target is not { } target || _cts.IsCancellationRequested) return;
+            // Players passed on at once, counted from the moment they are taken on: more are closed straight away.
+            if (_open.Count + _connecting.Values.Sum() >= MaxConnections) return;
             port = target;
             _connecting[port] = _connecting.GetValueOrDefault(port) + 1;
         }

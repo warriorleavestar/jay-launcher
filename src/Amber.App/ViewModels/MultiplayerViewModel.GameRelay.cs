@@ -39,6 +39,12 @@ public sealed partial class MultiplayerViewModel
         : _relayTyped ? L.F("multiplayer.relay.linked_port", _gameRelay.Target ?? 0)
         : L.F("multiplayer.relay.linked", _relayGameLabel ?? "", _gameRelay.Target ?? 0);
 
+    /// <summary>Tests: stands in for "a game with a LAN bridge agent is running" (a real one needs the Windows sandbox).</summary>
+    internal Func<bool>? BridgedGameRunningForTest { get; set; }
+
+    /// <summary>Tests: the game port and relay a new room would use.</summary>
+    internal Task<(int Port, GamePortRelay? Relay)?> HostGamePortForTest(bool checkManual = false) => HostGamePortAsync(checkManual);
+
     /// <summary>Tests: the relay's own port (the room's game port) and where it points.</summary>
     internal GamePortRelay? GameRelayForTest => _gameRelay;
 
@@ -62,9 +68,10 @@ public sealed partial class MultiplayerViewModel
                 SetStatus(await PortUnavailableAsync(known));
                 return null;
             }
-            // A game in the strong sandbox can't be reached by EasyTier or the direct bridge over loopback, only
-            // through Jay (GameLanBridge): put the relay in front of the game whenever such a game is running.
-            if (!FullLanMode && GameLanBridge.HasAgents)
+            // A game in the strong sandbox can't be reached by EasyTier, the direct bridge or (in a whole-LAN room) a
+            // guest on the virtual address, only through Jay (GameLanBridge): put the relay in front of the game whenever
+            // such a game is running. The caller decides where it listens (RelayOnAdapter), as for a relay without a game.
+            if ((BridgedGameRunningForTest ?? (() => GameLanBridge.HasAgents))())
             {
                 var front = new GamePortRelay();
                 front.SetTarget(known);
@@ -98,9 +105,11 @@ public sealed partial class MultiplayerViewModel
         if (relay is null) return;
         if (onAdapter) _ = ListenOnAdapterAsync(relay);
         _gameRelay = relay;
-        // A relay put in front of a known game (strong sandbox) is linked already.
-        _relayGameLabel = relay.Target is { } port
-            ? ManualPortValue is not null ? L.F("multiplayer.guide.port_label", port) : SelectedLanGame?.Label ?? L.F("multiplayer.guide.port_label", port)
+        // A relay put in front of a known game (strong sandbox) is linked already: a typed port is named by its number
+        // only, a found world by its name.
+        _relayTyped = relay.Target is not null && ManualPortValue is not null;
+        _relayGameLabel = relay.Target is { } port && !_relayTyped
+            ? SelectedLanGame?.Label ?? L.F("multiplayer.guide.port_label", port)
             : null;
         IsWaitingForGame = relay.Target is null;
         OnPropertyChanged(nameof(HasGameRelay));

@@ -6,7 +6,10 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Jay's LAN bridge for the Windows strong sandbox. A game in an AppContainer cannot be reached from outside it over
@@ -20,9 +23,21 @@ import java.nio.charset.StandardCharsets;
  * Lines are ASCII: the agent sends {@code JAYLAN1 <token> control} or {@code JAYLAN1 <token> data <id>};
  * Jay answers an accepted control connection with {@code ok}, then sends {@code open <id> <port>}; the agent answers a
  * failed open with {@code fail <id>}. Jay accepts both kinds only from the process it started with this token.
+ * <p>
+ * The control connection is made once. When it ends (Jay closed or restarted) the bridge stops for good and the game
+ * has to be restarted to host rooms: reconnecting would hand this launch's token to whatever listens on the old port
+ * by then, which can be another program, and let it ask for connections to the game. At most {@link #MAX_ACTIVE}
+ * players are passed on at once, each with two threads, and a connection quiet in both directions for
+ * {@link #IDLE_MS} is closed (Minecraft sends keep-alives every few seconds).
  */
 public final class LanBridge implements Runnable {
     private static final int MAX_LINE = 128;
+    /** Players passed on at once (the slot is held from the open request until both directions end). */
+    static final int MAX_ACTIVE = 64;
+    /** A connection with no bytes either way for this long is closed. */
+    static final int IDLE_MS = 120000;
+    private final Semaphore active = new Semaphore(MAX_ACTIVE);
+    private volatile boolean stopped;
     private final int jayPort;
     private final String secret;
     private final Object writeLock = new Object();
@@ -55,44 +70,34 @@ public final class LanBridge implements Runnable {
     }
 
     /**
-     * Keeps the control connection up while the game runs: a dropped connection is retried with a growing pause. The
-     * port and token belong to the Jay that started the game, so once that Jay is gone (closed or restarted, which picks
-     * a new port and token) nothing answers again and the game has to be restarted to host rooms; that is said once in
-     * the game's log.
+     * Serves the one control connection to Jay, then stops for good (see the class comment): the game's log says once
+     * that the game has to be restarted to host a room again.
      */
     @Override
     public void run() {
-        long wait = 1000;
-        int failures = 0;
-        boolean told = false;
-        while (true) {
+        try {
+            Socket socket = connectToJay();
             try {
-                Socket socket = connectToJay();
-                try {
-                    // The pause only starts over once Jay accepted this connection, not merely because TCP connected.
-                    if (serve(socket)) {
-                        wait = 1000;
-                        failures = 0;
-                    }
-                } finally {
-                    synchronized (writeLock) {
-                        control = null;
-                    }
-                    closeQuietly(socket);
-                }
-            } catch (IOException ignored) {
-                // Jay is not there: try again later.
+                serve(socket);
+            } finally {
+                stop();
+                closeQuietly(socket);
             }
-            if (++failures >= 5 && !told) {
-                told = true;
-                System.err.println("[Jay LAN bridge] Lost the connection to Jay. Restart the game to host a room from it again.");
-            }
-            try {
-                Thread.sleep(wait);
-            } catch (InterruptedException e) {
-                return;
-            }
-            wait = Math.min(wait * 2, 30000);
+        } catch (IOException ignored) {
+            // Jay is not there (any more).
+        } catch (RuntimeException ignored) {
+        } catch (Error e) {
+            // Out of threads or memory: the bridge stops, the game keeps running.
+        } finally {
+            stop();
+        }
+        System.err.println("[Jay LAN bridge] Lost the connection to Jay. Restart the game to host a room from it again.");
+    }
+
+    private void stop() {
+        stopped = true;
+        synchronized (writeLock) {
+            control = null;
         }
     }
 
@@ -108,17 +113,17 @@ public final class LanBridge implements Runnable {
         }
     }
 
-    /** Serves one control connection; true when Jay accepted it (said "ok"). */
-    private boolean serve(Socket socket) throws IOException {
+    /** Serves the control connection until it ends. */
+    private void serve(Socket socket) throws IOException {
         OutputStream out = socket.getOutputStream();
         out.write(("JAYLAN1 " + secret + " control\n").getBytes(StandardCharsets.US_ASCII));
         out.flush();
+        InputStream in = socket.getInputStream();
+        String first = readLine(in);
+        if (!"ok".equals(first)) return;
         synchronized (writeLock) {
             control = out;
         }
-        InputStream in = socket.getInputStream();
-        String first = readLine(in);
-        if (!"ok".equals(first)) return false;
         String line;
         while ((line = readLine(in)) != null) {
             String[] parts = line.split(" ");
@@ -131,14 +136,28 @@ public final class LanBridge implements Runnable {
                 continue;
             }
             if (!id.matches("[0-9]{1,19}") || port <= 0 || port > 65535) continue;
-            daemon(new Runnable() {
-                @Override
-                public void run() {
-                    open(id, port);
-                }
-            }, "Jay LAN bridge " + id);
+            // The slot is given back when both directions have ended (or the open failed).
+            if (!active.tryAcquire()) {
+                send("fail " + id + "\n");
+                continue;
+            }
+            try {
+                daemon(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            open(id, port);
+                        } finally {
+                            active.release();
+                        }
+                    }
+                }, "Jay LAN bridge " + id);
+            } catch (Throwable e) {
+                // No thread could be started (out of threads or memory): turn this one down and keep serving.
+                active.release();
+                send("fail " + id + "\n");
+            }
         }
-        return true;
     }
 
     private void open(String id, int port) {
@@ -147,10 +166,14 @@ public final class LanBridge implements Runnable {
         try {
             game.connect(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 3000);
             game.setTcpNoDelay(true);
+            // Only while Jay is still there: a data connection carries the token too.
+            if (stopped) throw new IOException("stopped");
             jay = connectToJay();
             OutputStream out = jay.getOutputStream();
             out.write(("JAYLAN1 " + secret + " data " + id + "\n").getBytes(StandardCharsets.US_ASCII));
             out.flush();
+            game.setSoTimeout(IDLE_MS / 4);
+            jay.setSoTimeout(IDLE_MS / 4);
         } catch (IOException e) {
             closeQuietly(game);
             closeQuietly(jay);
@@ -159,13 +182,28 @@ public final class LanBridge implements Runnable {
         }
         final Socket a = game;
         final Socket b = jay;
-        daemon(new Runnable() {
-            @Override
-            public void run() {
-                pump(a, b);
-            }
-        }, "Jay LAN bridge " + id + " up");
-        pump(b, a);
+        final AtomicLong last = new AtomicLong(System.currentTimeMillis());
+        Thread up;
+        try {
+            up = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    pump(a, b, last);
+                }
+            }, "Jay LAN bridge " + id + " up");
+            up.setDaemon(true);
+            up.start();
+        } catch (Throwable e) {
+            closeQuietly(a);
+            closeQuietly(b);
+            return;
+        }
+        pump(b, a, last);
+        // The slot is held until the other direction has ended too.
+        try {
+            up.join();
+        } catch (InterruptedException ignored) {
+        }
     }
 
     private void send(String text) {
@@ -180,14 +218,25 @@ public final class LanBridge implements Runnable {
         }
     }
 
-    /** Copies one direction; when either side ends, both sockets are closed so the other direction ends too. */
-    private static void pump(Socket from, Socket to) {
+    /**
+     * Copies one direction; when either side ends, or nothing has gone either way for {@link #IDLE_MS}, both sockets
+     * are closed so the other direction ends too.
+     */
+    private static void pump(Socket from, Socket to, AtomicLong last) {
         byte[] buffer = new byte[16 * 1024];
         try {
             InputStream in = from.getInputStream();
             OutputStream out = to.getOutputStream();
-            int n;
-            while ((n = in.read(buffer)) >= 0) {
+            while (true) {
+                int n;
+                try {
+                    n = in.read(buffer);
+                } catch (SocketTimeoutException quiet) {
+                    if (System.currentTimeMillis() - last.get() >= IDLE_MS) return;
+                    continue;
+                }
+                if (n < 0) return;
+                last.set(System.currentTimeMillis());
                 out.write(buffer, 0, n);
                 out.flush();
             }

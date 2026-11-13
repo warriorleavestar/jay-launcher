@@ -77,10 +77,87 @@ public sealed class GameLanBridgeTests : IDisposable
     public async Task PortsWithoutAnAgentAreReachedDirectly()
     {
         using var listener = new Listener();
-        Assert.False(GameLanBridge.HasAgentFor(listener.Port));
+        Assert.False(GameLanBridge.IsBridged(listener.Port));
         Assert.False(await GameLanBridge.ListenedButUnreachableAsync(listener.Port));
         using var socket = await GameLanBridge.ConnectAsync(listener.Port, TimeSpan.FromSeconds(5));
         Assert.NotNull(socket);
+    }
+
+    [Fact]
+    public async Task AFirstLineThatIsNotAnAgentsIsClosed()
+    {
+        using var stranger = await DialAsync("GET / HTTP/1.1");
+        Assert.Null(await ReadLineAsync(stranger));
+        using var nobody = await DialAsync($"JAYLAN1 {new string('a', 32)} control");
+        Assert.Null(await ReadLineAsync(nobody));
+    }
+
+    [Fact]
+    public async Task NoRequestReachesAnAgentBeforeItWasAccepted()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var game = new Listener();
+        var token = Launch();
+        var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        GameLanBridge.BeforeOkForTest = () => { holding.TrySetResult(); return release.Task; };
+        try
+        {
+            using var control = await DialAsync($"JAYLAN1 {token} control");
+            _cleanup.Add(control);
+            await holding.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            // Still in the handshake: the game's port isn't routed through this agent yet, so nothing is asked of it.
+            Assert.False(GameLanBridge.IsBridged(game.Port));
+            using (var direct = await GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(5))) Assert.NotNull(direct);
+            release.SetResult();
+            Assert.Equal("ok", await ReadLineAsync(control));
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (!GameLanBridge.IsBridged(game.Port) && DateTime.UtcNow < deadline) await Task.Delay(20);
+            Assert.True(GameLanBridge.IsBridged(game.Port));
+            // The first request comes after "ok".
+            var connecting = GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(10));
+            var parts = (await ReadLineAsync(control))?.Split(' ');
+            Assert.True(parts is ["open", _, _]);
+            await control.SendAsync(Encoding.ASCII.GetBytes($"fail {parts![1]}\n"));
+            Assert.Null(await connecting);
+        }
+        finally { GameLanBridge.BeforeOkForTest = null; }
+    }
+
+    [Fact]
+    public async Task PlayersThroughAGameAreLimitedAndGiveTheirSlotBackWhenClosed()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var game = new Listener();
+        var token = Launch();
+        using var control = await DialAsync($"JAYLAN1 {token} control");
+        _cleanup.Add(control);
+        Assert.Equal("ok", await ReadLineAsync(control));
+        var before = GameLanBridge.ActiveForTest;
+
+        // The agent answers every request with a data connection.
+        var answering = Task.Run(async () =>
+        {
+            while (await ReadLineAsync(control, TimeSpan.FromSeconds(60)) is { } line)
+                if (line.Split(' ') is ["open", var id, _])
+                {
+                    var data = await DialAsync($"JAYLAN1 {token} data {id}");
+                    lock (_cleanup) _cleanup.Add(data);
+                }
+        });
+        var players = new List<Socket>();
+        for (var i = 0; i < GameLanBridge.MaxPerGame; i++)
+            players.Add(Assert.IsAssignableFrom<Socket>(await GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(10))));
+        Assert.Equal(before + GameLanBridge.MaxPerGame, GameLanBridge.ActiveForTest);
+        // One more is turned away without asking the agent.
+        Assert.Null(await GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(10)));
+
+        // A player leaving gives the slot back.
+        players[0].Dispose();
+        Assert.Equal(before + GameLanBridge.MaxPerGame - 1, GameLanBridge.ActiveForTest);
+        players[0] = Assert.IsAssignableFrom<Socket>(await GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(10)));
+        foreach (var p in players) p.Dispose();
+        Assert.Equal(before, GameLanBridge.ActiveForTest);
     }
 
     [Fact]
@@ -303,8 +380,8 @@ public sealed class GameLanBridgeTests : IDisposable
         {
             var port = await portSeen.Task.WaitAsync(TimeSpan.FromSeconds(60));
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-            while (!GameLanBridge.HasAgentFor(port) && DateTime.UtcNow < deadline) await Task.Delay(100);
-            Assert.True(GameLanBridge.HasAgentFor(port), "the agent never connected: " + output);
+            while (!GameLanBridge.IsBridged(port) && DateTime.UtcNow < deadline) await Task.Delay(100);
+            Assert.True(GameLanBridge.IsBridged(port), "the agent never connected: " + output);
 
             var before = GameLanBridge.ViaAgentCount;
             for (var i = 0; i < 2; i++)

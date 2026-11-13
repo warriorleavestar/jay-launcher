@@ -237,8 +237,9 @@ public static class ServerList
             linked.CancelAfter(timeout ?? TimeSpan.FromSeconds(5));
             var (host, port) = ParseAddress(address);
             using var tcp = new TcpClient();
-            // A world on this computer may be a game in the strong sandbox, reached through its LAN bridge.
-            using var stream = IsLoopbackHost(host)
+            // A world on this computer may be a game in the strong sandbox, reached through its LAN bridge. Anything else,
+            // localhost included, is reached by name as before (so "localhost" still tries ::1 and 127.0.0.1).
+            using var stream = IsLoopbackHost(host) && Multiplayer.GameLanBridge.IsBridged(port)
                 ? new NetworkStream(await Multiplayer.GameLanBridge.ConnectAsync(port, Timeout.InfiniteTimeSpan, linked.Token, LoopbackAddress(host)).ConfigureAwait(false)
                     ?? throw new SocketException((int)SocketError.ConnectionRefused), ownsSocket: true)
                 : await ConnectAsync(tcp, host, port, linked.Token).ConfigureAwait(false);
