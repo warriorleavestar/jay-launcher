@@ -151,8 +151,10 @@ public sealed class PrivateMessengerTests : IDisposable
         bob.FileOffered += offer => _ = bob.AcceptAsync(offer.Id);
         var cut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var ended = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var lastChunk = DateTime.UtcNow.Ticks;
         bob.Progress += p =>
         {
+            Interlocked.Exchange(ref lastChunk, DateTime.UtcNow.Ticks);
             if (!p.Finished && p.Done >= PrivateMessenger.ChunkSize * 5)
             {
                 // Alice goes silent mid-transfer.
@@ -163,8 +165,15 @@ public sealed class PrivateMessengerTests : IDisposable
         };
         _ = alice.SendFileAsync(Fp(_bob), source);
         await cut.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        // Let the chunks already on their way land before moving the clock.
-        await Task.Delay(500);
+        // Let the chunks already on their way land before moving the clock: a chunk landing after the clock moves sets
+        // the job's last activity to the moved clock, and the sweep then never sees it as idle. A fixed delay was too
+        // short on a busy Windows runner, so wait until no chunk has arrived for half a second.
+        var settle = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow - new DateTime(Interlocked.Read(ref lastChunk), DateTimeKind.Utc) < TimeSpan.FromMilliseconds(500)
+            && DateTime.UtcNow < settle)
+        {
+            await Task.Delay(100);
+        }
 
         await bob.SweepIdle();
         Assert.False(ended.Task.IsCompleted);
