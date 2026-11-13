@@ -84,11 +84,13 @@ public static class SettingsCatalog
         new("Junk", Storage, "tools.junk.title", "tools.junk.initial"),
         new("RecycleKeep", Storage, "recycle.keep.label", "recycle.title"),
 
-        new("NoTrace", Privacy, "settings.notrace.label", "settings.notrace.hint"),
+        new("NetworkList", Privacy, "settings.privacy.network_list", "about.net.heading"),
+        // The game sandbox card, right after the network list (the multiplayer page links here).
+        new("GameSandbox", Privacy, "settings.sandbox.label", "settings.sandbox.card_hint"),
         new("StrongSandbox", Privacy, "settings.sandbox.strong", "settings.sandbox.strong.hint", WindowsOnly: true),
         new("LaunchWithoutSandbox", Privacy, "settings.sandbox.without", "settings.sandbox.without.hint"),
-        new("NetworkList", Privacy, "settings.privacy.network_list", "about.net.heading"),
         new("ChildMode", Privacy, "settings.child.title", "settings.child.hint"),
+        new("NoTrace", Privacy, "settings.notrace.label", "settings.notrace.hint"),
         new("DataFolder", Privacy, "settings.privacy.data_folder"),
 
         // The multiplayer advanced settings panel (redesign batch 10), group by group.

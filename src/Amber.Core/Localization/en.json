@@ -3513,7 +3513,8 @@
   "settings.sandbox.status.strong_pending": "Now: strong sandbox. The next launch asks once for an admin confirmation.",
   "settings.sandbox.status.standard": "Now: standard sandbox (low integrity).",
   "settings.sandbox.status.standard_because": "Now: standard sandbox (low integrity), because {0}",
-  "settings.sandbox.status.unix": "Now: sandboxed with {0}.",
+  "settings.sandbox.status.unix": "Now: the game runs in a sandbox.",
+  "settings.sandbox.status.unix_tip": "Sandboxed with {0}.",
   "settings.sandbox.java_note": "Instances on Java 9 to 17 always use the standard sandbox: the strong sandbox needs Java 8 or Java 18 and later.",
   "settings.sandbox.retry": "Retry strong mode",
   "settings.sandbox.remove_failed": "Could not remove the sandbox permissions ({0}).",
@@ -3823,5 +3824,8 @@
   "settings.ul.cache": "Cache: {0}",
   "settings.ul.developers": "For developers",
   "settings.ul.upgrade_note": "After you install a new version of the loader, each instance prepares its mods again the first time it starts. That takes longer than usual once and is normal.",
-  "instance.ul.downloading": "Downloading the universal loader…"
+  "instance.ul.downloading": "Downloading the universal loader…",
+  "settings.sandbox.card_hint": "Where the game runs: its own folder only, away from Jay's data and your browser.",
+  "multiplayer.room.no_sandbox": "The game runs without a sandbox.",
+  "multiplayer.room.no_sandbox.link": "Game sandbox ›"
 }

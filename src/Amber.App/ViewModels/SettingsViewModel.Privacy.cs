@@ -85,6 +85,7 @@ public sealed partial class SettingsViewModel
 
     /// <summary>Which sandbox the next launch uses and, after a fallback, why.</summary>
     public string SandboxStatusText => _service.SandboxStatusText;
+    public string? SandboxStatusTip => _service.SandboxStatusTip;
 
     /// <summary>"Retry strong mode" shows after strong mode fell back (declined, no admin, failed).</summary>
     public bool CanRetryStrongSandbox => OperatingSystem.IsWindows() && !LaunchWithoutSandbox && _service.Settings.StrongSandboxFallback is not null;
@@ -114,7 +115,7 @@ public sealed partial class SettingsViewModel
 
     private void SandboxChanged()
     {
-        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(CanRetryStrongSandbox), nameof(CanRemoveSandboxPermissions)])
+        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(SandboxStatusTip), nameof(CanRetryStrongSandbox), nameof(CanRemoveSandboxPermissions)])
             OnPropertyChanged(name);
         _service.NotifySandboxChanged();
     }
@@ -124,7 +125,7 @@ public sealed partial class SettingsViewModel
     {
         NetworkList.Refresh();
         OnPropertyChanged(nameof(ChildModeStatusText));
-        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(CanRetryStrongSandbox), nameof(CanRemoveSandboxPermissions)])
+        foreach (var name in (string[])[nameof(StrongSandbox), nameof(LaunchWithoutSandbox), nameof(SandboxStatusText), nameof(SandboxStatusTip), nameof(CanRetryStrongSandbox), nameof(CanRemoveSandboxPermissions)])
             OnPropertyChanged(name);
     }
 }

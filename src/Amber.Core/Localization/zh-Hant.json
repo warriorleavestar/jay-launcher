@@ -3438,7 +3438,8 @@
   "settings.sandbox.status.strong_pending": "現在：強沙盒。下次啟動時會請你確認一次系統管理員權限。",
   "settings.sandbox.status.standard": "現在：標準沙盒（低完整性）。",
   "settings.sandbox.status.standard_because": "現在：標準沙盒（低完整性），因為{0}",
-  "settings.sandbox.status.unix": "現在：用 {0} 沙盒執行。",
+  "settings.sandbox.status.unix": "現在：遊戲在沙盒裡執行。",
+  "settings.sandbox.status.unix_tip": "用 {0} 隔離。",
   "settings.sandbox.java_note": "用 Java 9 到 17 的實例總是用標準沙盒：強沙盒需要 Java 8 或 Java 18 以上。",
   "settings.sandbox.retry": "重試強沙盒",
   "settings.sandbox.remove_failed": "沒能撤掉沙盒權限（{0}）。",
@@ -3746,5 +3747,8 @@
   "settings.ul.cache": "快取：{0}",
   "settings.ul.developers": "給開發者",
   "settings.ul.upgrade_note": "裝了新版本的載入器以後，每個實例第一次開始時都會重新準備一遍模組，這一次會比平時久。這是正常的。",
-  "instance.ul.downloading": "正在下載通用載入器……"
+  "instance.ul.downloading": "正在下載通用載入器……",
+  "settings.sandbox.card_hint": "遊戲在哪裡執行：只看得到自己的資料夾，碰不到 Jay 的資料和瀏覽器。",
+  "multiplayer.room.no_sandbox": "遊戲沒有在沙盒裡執行。",
+  "multiplayer.room.no_sandbox.link": "遊戲沙盒 ›"
 }

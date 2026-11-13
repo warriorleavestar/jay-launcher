@@ -3438,7 +3438,8 @@
   "settings.sandbox.status.strong_pending": "現在：強いサンドボックス。次の起動時に一度だけ管理者の確認を求めます。",
   "settings.sandbox.status.standard": "現在：標準サンドボックス（低い整合性レベル）。",
   "settings.sandbox.status.standard_because": "現在：標準サンドボックス（低い整合性レベル）。理由：{0}",
-  "settings.sandbox.status.unix": "現在：{0} のサンドボックスで動きます。",
+  "settings.sandbox.status.unix": "現在：ゲームはサンドボックスで動きます。",
+  "settings.sandbox.status.unix_tip": "{0} でサンドボックス化しています。",
   "settings.sandbox.java_note": "Java 9〜17 のインスタンスは常に標準サンドボックスを使います。強いサンドボックスには Java 8 か Java 18 以降が必要です。",
   "settings.sandbox.retry": "強いサンドボックスをもう一度試す",
   "settings.sandbox.remove_failed": "サンドボックスの許可を取り消せませんでした（{0}）。",
@@ -3746,5 +3747,8 @@
   "settings.ul.cache": "キャッシュ：{0}",
   "settings.ul.developers": "開発者向け",
   "settings.ul.upgrade_note": "ローダーの新しいバージョンを入れたあとは、各インスタンスが最初に起動するときに MOD をもう一度準備します。その 1 回は普段より時間がかかりますが、正常です。",
-  "instance.ul.downloading": "汎用ローダーをダウンロード中…"
+  "instance.ul.downloading": "汎用ローダーをダウンロード中…",
+  "settings.sandbox.card_hint": "ゲームの実行場所：自分のフォルダーだけが見え、Jay のデータやブラウザーには触れません。",
+  "multiplayer.room.no_sandbox": "ゲームはサンドボックスなしで動いています。",
+  "multiplayer.room.no_sandbox.link": "ゲームのサンドボックス ›"
 }

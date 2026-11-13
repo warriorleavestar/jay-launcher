@@ -82,7 +82,7 @@
     <StackPanel Spacing="6" Margin="0,0,14,0">
       <TextBlock svc:ThemeRegion.Name="multiplayer.title" Classes="h1" Text="{l:T multiplayer.title}" />
       <!-- Privacy plan item 15: while "Launch without sandbox" is on, this line stays on every tab. -->
-      <Border x:Name="NoSandboxLine" Classes="callout warning" Padding="10,6" Margin="0,0,0,8" IsVisible="{Binding RunsWithoutSandbox}">
+      <Border x:Name="NoSandboxLine" Classes="callout warning" Padding="10,6" Margin="0,0,0,8" IsVisible="{Binding ShowLobbySandboxLine}">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
           <TextBlock Text="{l:T multiplayer.no_sandbox}" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="12" />
           <Button x:Name="NoSandboxFixButton" Grid.Column="1" Classes="ghost small" Content="{l:T multiplayer.no_sandbox.fix}" Command="{Binding OpenSandboxSettingsCommand}" VerticalAlignment="Center" />
@@ -216,6 +216,13 @@
           </Grid>
         </Panel>
       </Border>
+
+      <!-- The game runs without a sandbox: one muted line under the room header, opening the sandbox card. -->
+      <WrapPanel x:Name="RoomNoSandboxLine" ItemSpacing="6" IsVisible="{Binding ShowRoomSandboxLine}">
+        <TextBlock Classes="hint" FontSize="12" Text="{l:T multiplayer.room.no_sandbox}" TextWrapping="Wrap" VerticalAlignment="Center" />
+        <Button x:Name="RoomNoSandboxLink" Classes="ghost small" Padding="0,1" Content="{l:T multiplayer.room.no_sandbox.link}"
+                Command="{Binding OpenSandboxSettingsCommand}" VerticalAlignment="Center" />
+      </WrapPanel>
 
       <!-- Room voice or a share with one member (reserved): the call panel sits under the banner. -->
       <Panel x:Name="RoomCallHost" IsVisible="{Binding Call.ShowInRoom, FallbackValue=False}">

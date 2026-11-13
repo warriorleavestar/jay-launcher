@@ -3295,7 +3295,8 @@
   "settings.sandbox.status.strong_pending": "今：固沙盒。下啟時請汝確管者之權一次。",
   "settings.sandbox.status.standard": "今：常沙盒（低整全）。",
   "settings.sandbox.status.standard_because": "今：常沙盒（低整全），蓋{0}",
-  "settings.sandbox.status.unix": "今：以 {0} 為沙盒。",
+  "settings.sandbox.status.unix": "今：遊戲行於沙盒之中。",
+  "settings.sandbox.status.unix_tip": "以 {0} 為沙盒。",
   "settings.sandbox.java_note": "用 Java 九至十七之例恆用常沙盒：固沙盒須 Java 八或十八以上。",
   "settings.sandbox.retry": "復試固沙盒",
   "settings.sandbox.remove_failed": "未能撤沙盒之權（{0}）。",
@@ -3603,5 +3604,8 @@
   "settings.ul.cache": "緩存：{0}",
   "settings.ul.developers": "為製者",
   "settings.ul.upgrade_note": "既裝載器新版，諸例初啟時當重備模組一遍，此一次較常為久，非誤也。",
-  "instance.ul.downloading": "方下載通用載器……"
+  "instance.ul.downloading": "方下載通用載器……",
+  "settings.sandbox.card_hint": "戲之所行：唯見己之夾，不觸 Jay 之資與覽器。",
+  "multiplayer.room.no_sandbox": "戲不行於沙盒。",
+  "multiplayer.room.no_sandbox.link": "戲之沙盒 ›"
 }

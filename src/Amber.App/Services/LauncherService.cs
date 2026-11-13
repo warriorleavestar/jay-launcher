@@ -627,8 +627,7 @@ public sealed class LauncherService : IDisposable
         get
         {
             if (Settings.LaunchWithoutSandbox) return L.T("settings.sandbox.status.off");
-            if (OperatingSystem.IsLinux()) return L.F("settings.sandbox.status.unix", "bubblewrap");
-            if (OperatingSystem.IsMacOS()) return L.F("settings.sandbox.status.unix", "sandbox-exec");
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()) return L.T("settings.sandbox.status.unix");
             if (!OperatingSystem.IsWindows()) return L.T("settings.sandbox.status.off");
             if (!Settings.StrongSandbox) return L.T("settings.sandbox.status.standard");
             if (Settings.StrongSandboxFallback is { } fallback)
@@ -636,6 +635,12 @@ public sealed class LauncherService : IDisposable
             return WindowsSandbox.LoopbackExempt() ? L.T("settings.sandbox.status.strong") : L.T("settings.sandbox.status.strong_pending");
         }
     }
+
+    /// <summary>The sandbox tool on Linux and macOS, for the status line's tooltip only; null elsewhere.</summary>
+    public string? SandboxStatusTip => Settings.LaunchWithoutSandbox ? null
+        : OperatingSystem.IsLinux() ? L.F("settings.sandbox.status.unix_tip", "bubblewrap")
+        : OperatingSystem.IsMacOS() ? L.F("settings.sandbox.status.unix_tip", "sandbox-exec")
+        : null;
 
     public GameInstance GetInstance(string id) => GetInstance(Context, id);
 
