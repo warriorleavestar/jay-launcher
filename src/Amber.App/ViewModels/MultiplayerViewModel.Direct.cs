@@ -172,7 +172,9 @@ public sealed partial class MultiplayerViewModel
         {
             var addresses = await direct.PrepareAsync();
             AttachDirect(direct, room);
-            AdoptGameRelay(relay);
+            // Direct rooms never wrap (their credentials use TunnelSettings.Default, General): in whole-LAN mode guests
+            // reach the virtual address.
+            AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
             relay = null;
             Mode = "host";
             RoomCodeText = "";
@@ -226,6 +228,7 @@ public sealed partial class MultiplayerViewModel
             RoomCodeText = "";
             HostFingerprint = outcome.HostFingerprint;
             HostJayAccount = outcome.HostJayAccount;
+            SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);
             DirectHint = L.T("multiplayer.direct.guest_hint");
             SetStatus(StatusMessage.Info("multiplayer.direct.punching"));
             await direct.CompleteJoinAsync(room);

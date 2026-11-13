@@ -176,7 +176,8 @@ public class DirectoryIdentityTests
     public async Task ARogueDirectorysWronglyTypedReplyNeverEscapesAsAnUnexpectedException(string replyJson)
     {
         // On a network without pinned directory keys any member can answer as a backup directory. Whatever it sends,
-        // the client's calls end in a result or in the IOException family its callers handle.
+        // the client's calls end in a result or in what its callers handle: the IOException family, or the
+        // InvalidDataException the channel uses for a reply it can't read.
         using var identity = X25519KeyPair.Generate();
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -214,7 +215,7 @@ public class DirectoryIdentityTests
             ("find", () => client.FindAsync("JAYF1-TEST", default)),
             ("nodes", () => client.NodesAsync(default)),
             ("probe", () => client.ProbeAsync("tcp://relay.example.org:11010", default)),
-            ("volunteer", () => client.VolunteerAsync("tcp://relay.example.org:11010", default)),
+            ("volunteer", () => client.VolunteerAsync("tcp://relay.example.org:11010", null, default)),
             ("fetch", () => client.FetchMailAsync(["box"], default)),
             ("take", () => client.TakeRendezvousAsync(new byte[Rendezvous.IdLength], default)),
             ("put", () => client.PutRendezvousAsync(new byte[Rendezvous.IdLength], new byte[8], TimeSpan.FromMinutes(1), default)),
@@ -223,12 +224,49 @@ public class DirectoryIdentityTests
         foreach (var (name, run) in calls)
         {
             try { await run(); }
-            catch (IOException) { }
+            catch (Exception e) when (e is IOException or InvalidDataException) { }
             catch (Exception e) { Assert.Fail($"{name}: {e.GetType().Name}: {e.Message}"); }
         }
         stop.Cancel();
         listener.Stop();
         await rogue;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnlyASnapshotCallTakesASnapshotReply(bool askedForSnapshot)
+    {
+        // A directory answering an ordinary request with a length frame (asking the reader to set aside a big buffer)
+        // gets a bad reply; a snapshot call reads it, chunk by chunk.
+        using var identity = X25519KeyPair.Generate();
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var serverSide = Task.Run(async () =>
+        {
+            using var c = await listener.AcceptTcpClientAsync();
+            var s = c.GetStream();
+            var first = new byte[1];
+            await SecureStream.ReadExactAsync(s, first, default);
+            var accepted = await DirectoryChannel.AcceptAsync(s, first[0], identity, Secret, default) ?? throw new InvalidOperationException();
+            try { await accepted.Snapshot(System.Text.Encoding.UTF8.GetBytes("{\"ok\":true}"), 1024, TimeSpan.FromSeconds(5), default); }
+            catch (IOException) { }
+        });
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync(IPAddress.Loopback, port);
+        var trust = new DirectoryTrust { Network = "", Pinned = [identity.PublicKey] };
+        var lengths = new List<int>();
+        var call = DirectoryChannel.CallAsync(tcp.GetStream(), trust, "", Secret, new JsonObject { ["op"] = "hello" }, default,
+            askedForSnapshot ? lengths.Add : null);
+        if (askedForSnapshot)
+        {
+            Assert.True((await call)["ok"]!.GetValue<bool>());
+            Assert.Equal(1024, Assert.Single(lengths));
+        }
+        else await Assert.ThrowsAsync<InvalidDataException>(() => call);
+        tcp.Dispose();
+        await serverSide;
     }
 
     [Fact]
