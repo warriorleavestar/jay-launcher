@@ -508,6 +508,19 @@ public partial class MainWindow
 
     private void AttachLogDock()
     {
+        LogDockSplitter.DragDelta += (_, e) =>
+        {
+            if (LogDockIsDrawer) return;
+            LogDock.Height = Math.Clamp(LogDock.Height - e.Vector.Y, 120, Math.Max(160, ContentColumn.Bounds.Height - 200));
+        };
+    }
+
+    /// <summary>The docked log's view, built the first time the log is docked (most sessions never dock it).</summary>
+    internal LogDockView LogDockContent => (LogDockView?)LogDock.Child ?? BuildLogDockContent();
+
+    private LogDockView BuildLogDockContent()
+    {
+        var view = new LogDockView { [!DataContextProperty] = new Avalonia.Data.Binding(nameof(MainViewModel.Log)) };
         var popOut = new Button { Content = L.T("log.dock.pop_out"), Classes = { "ghost", "small" } };
         popOut.Click += (_, _) => (DataContext as MainViewModel)?.PopOutLog();
         var close = new Button { Content = L.T("log.dock.close"), Classes = { "ghost", "small" } };
@@ -517,19 +530,17 @@ public partial class MainWindow
             popOut.Content = L.T("log.dock.pop_out");
             close.Content = L.T("log.dock.close");
         });
-        LogDockContent.Buttons.Add(popOut);
-        LogDockContent.Buttons.Add(close);
-        LogDockSplitter.DragDelta += (_, e) =>
-        {
-            if (LogDockIsDrawer) return;
-            LogDock.Height = Math.Clamp(LogDock.Height - e.Vector.Y, 120, Math.Max(160, ContentColumn.Bounds.Height - 200));
-        };
+        view.Buttons.Add(popOut);
+        view.Buttons.Add(close);
+        LogDock.Child = view;
+        return view;
     }
 
     private void ApplyLogDock()
     {
         var docked = DataContext is MainViewModel { LogDocked: true };
         LogDockIsDrawer = ContentColumn.Bounds.Height > 0 && ContentColumn.Bounds.Height < LogDrawerBelow;
+        if (docked && LogDock.Child is null) BuildLogDockContent();
         LogDock.IsVisible = docked;
         LogDockSplitter.IsVisible = docked && !LogDockIsDrawer;
         if (LogDockIsDrawer)
