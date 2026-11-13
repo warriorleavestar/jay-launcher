@@ -915,7 +915,7 @@
   "multiplayer.guide.nodes_missing": "✗ 还没有中转：邀请方式需要中转，直连不需要。可以在 联机设置 › 中转 里导入朋友的中转分享码。",
   "multiplayer.guide.nodes_ready": "✓ 中转：已有 {0} 个，两种方式都能用",
   "multiplayer.guide.port_ready": "✓ 开房间用的端口：{0}（手动填写）",
-  "multiplayer.room.full_lan_not_ready": "两分钟内联机组件和它的网卡都没有启动好",
+  "multiplayer.room.full_lan_not_ready": "过了两分钟，联机组件和它的网卡还没准备好",
   "multiplayer.room.full_lan_start_failed": "“整个局域网”范围没能启动：{0}",
   "multiplayer.relay.switched": "房间改用 {0}",
   "multiplayer.relay.connected": "游戏接上房间了：{0}",

@@ -915,7 +915,7 @@
   "multiplayer.guide.nodes_missing": "✗ 中継がまだありません。招待には中継が必要で、直接接続には不要です。マルチプレイ設定 › 中継でフレンドの中継の共有コードをインポートできます。",
   "multiplayer.guide.nodes_ready": "✓ 中継：{0} 件追加済み、どちらの方法も使えます",
   "multiplayer.guide.port_ready": "✓ ホストするポート：{0}（手動入力）",
-  "multiplayer.room.full_lan_not_ready": "2 分以内にマルチプレイのコンポーネントとネットワークアダプターが起動しませんでした",
+  "multiplayer.room.full_lan_not_ready": "2 分たってもマルチプレイのコンポーネントとネットワークアダプターの準備ができていません",
   "multiplayer.room.full_lan_start_failed": "範囲「LAN 全体」を開始できませんでした：{0}",
   "multiplayer.relay.switched": "ルームは {0} を使うようになりました",
   "multiplayer.relay.connected": "ゲームをルームにつなぎました：{0}",

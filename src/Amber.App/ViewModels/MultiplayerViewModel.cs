@@ -697,7 +697,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StartAnnouncerIfHosting();
         Status = FullLanMode
             ? L.T(OperatingSystem.IsWindows() ? "multiplayer.room.created_full_lan" : "multiplayer.room.created_full_lan_unix")
-                + (relay is not null ? " " + L.T("multiplayer.relay.waiting") : "")
+
             : relay is not null ? L.T("multiplayer.relay.created") : L.T("multiplayer.room.created");
     }
 
@@ -796,9 +796,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         return true;
     }
 
-    /// <summary>How long a whole-LAN session may take to report that EasyTier and its adapter are up.</summary>
-    /// Counted from after the permission prompt (starting the session waits for it); generous for a first adapter install.
-    internal static readonly TimeSpan ElevatedStartWait = TimeSpan.FromSeconds(120);
+    /// <summary>
+    /// How long a whole-LAN session may take to report that EasyTier and its adapter are up: the same time the room's
+    /// listeners wait for the adapter's address. Counted from after the permission prompt (starting the session waits
+    /// for it, and the listeners start after the session); generous for a first adapter install.
+    /// </summary>
+    internal static TimeSpan ElevatedStartWait => AdapterListener.DefaultWait;
 
     /// <summary>
     /// The elevated helper starts EasyTier in the background after the room is set up. If it doesn't report ready in
@@ -810,9 +813,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         string? problem = null;
         try { await session.WaitForReadyAsync(wait.Token); }
         catch (OperationCanceledException) { problem = L.T("multiplayer.room.full_lan_not_ready"); }
-        catch (Exception e) when (e is IOException or InvalidOperationException or ObjectDisposedException or System.ComponentModel.Win32Exception)
+        // Whatever the helper fails with, the room can't work: say so rather than leave it waiting.
+        catch (Exception e) when (e is not OutOfMemoryException)
         {
-            problem = e.Message;
+            System.Diagnostics.Debug.Assert(e is not NullReferenceException, e.ToString());
+            problem = $"{e.Message} ({e.GetType().Name})";
         }
         if (problem is null) return;
         await Dispatcher.UIThread.InvokeAsync(() =>

@@ -10,8 +10,11 @@ namespace Amber.Core.Multiplayer;
 /// </summary>
 public static class AdapterListener
 {
-    /// <summary>How long a listener waits for its adapter address by default.</summary>
-    public static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(60);
+    /// <summary>
+    /// How long a listener waits for its adapter address by default. The view model gives the elevated helper the same
+    /// time to report ready, so neither gives up before the other (a first adapter install can be slow).
+    /// </summary>
+    public static readonly TimeSpan DefaultWait = TimeSpan.FromSeconds(120);
 
     internal static readonly TimeSpan RetryEvery = TimeSpan.FromMilliseconds(250);
 

@@ -11,8 +11,9 @@ namespace Amber.Core.Multiplayer;
 /// <para>
 /// It listens on 127.0.0.1, the same place EasyTier and the direct bridge hand room traffic to, so it is not reachable
 /// from the network. A whole-LAN room without wrapping, where guests reach the host's virtual address directly, also
-/// listens on that address (<see cref="ListenOnAdapterAsync"/>), which only the room's members can reach. The caller
-/// decides which ports are trusted as targets (see the view model's port check).
+/// listens on that address (<see cref="ListenOnAdapterAsync"/>). Packets for that address can also arrive on another
+/// adapter, so connections there are passed on only from the sources the caller allows (the room's virtual subnet)
+/// and closed otherwise. The caller decides which ports are trusted as targets (see the view model's port check).
 /// </para>
 /// </summary>
 public sealed class GamePortRelay : IAsyncDisposable
@@ -71,7 +72,9 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// adapter to get that address. Completes once listening; throws the <see cref="SocketException"/> when it gives up,
     /// or <see cref="OperationCanceledException"/> when the relay is disposed first.
     /// </summary>
-    public async Task ListenOnAdapterAsync(IPAddress address, TimeSpan? wait = null, Func<IPAddress, int, TcpListener>? listen = null)
+    /// <param name="allowSource">Which callers' addresses are passed on there (the room's virtual subnet); others are
+    /// closed at once, before anything is forwarded.</param>
+    public async Task ListenOnAdapterAsync(IPAddress address, Func<IPAddress, bool> allowSource, TimeSpan? wait = null, Func<IPAddress, int, TcpListener>? listen = null)
     {
         var listener = await AdapterListener.BindAsync(address, Port, wait ?? AdapterListener.DefaultWait, _cts.Token, listen);
         lock (_gate)
@@ -83,7 +86,7 @@ public sealed class GamePortRelay : IAsyncDisposable
                 return;
             }
             _adapterListener = listener;
-            _adapterLoop = Task.Run(() => AcceptLoopAsync(listener));
+            _adapterLoop = Task.Run(() => AdapterLoopAsync(listener, allowSource));
         }
     }
 
@@ -91,6 +94,38 @@ public sealed class GamePortRelay : IAsyncDisposable
     public bool ListensOnAdapter
     {
         get { lock (_gate) return _adapterListener is not null; }
+    }
+
+    private async Task AdapterLoopAsync(TcpListener listener, Func<IPAddress, bool> allowSource)
+    {
+        try
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                TcpClient client;
+                // The adapter went away (or the relay stopped): this listener is done. A listener
+                // stopped before the accept starts throws InvalidOperationException ("not listening").
+                try { client = await listener.AcceptTcpClientAsync(_cts.Token); }
+                catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException or InvalidOperationException) { return; }
+                IPAddress? source;
+                try { source = (client.Client.RemoteEndPoint as IPEndPoint)?.Address; }
+                catch (Exception e) when (e is SocketException or ObjectDisposedException) { source = null; }
+                if (source is null || !allowSource(source.IsIPv4MappedToIPv6 ? source.MapToIPv4() : source))
+                {
+                    client.Dispose();
+                    continue;
+                }
+                _ = Task.Run(() => ServeAsync(client));
+            }
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (_adapterListener == listener) _adapterListener = null;
+            }
+            listener.Stop();
+        }
     }
 
     private async Task AcceptLoopAsync(TcpListener listener)

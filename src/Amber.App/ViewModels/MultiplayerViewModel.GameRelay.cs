@@ -83,7 +83,7 @@ public sealed partial class MultiplayerViewModel
 
     private async Task ListenOnAdapterAsync(GamePortRelay relay)
     {
-        try { await relay.ListenOnAdapterAsync(System.Net.IPAddress.Parse(EasyTierArgs.HostIp)); }
+        try { await relay.ListenOnAdapterAsync(System.Net.IPAddress.Parse(EasyTierArgs.HostIp), InRoomSubnet, AdapterWaitForTest, AdapterListenForTest); }
         catch (OperationCanceledException) { }
         catch (System.Net.Sockets.SocketException e)
         {
@@ -94,6 +94,12 @@ public sealed partial class MultiplayerViewModel
             });
         }
     }
+
+    /// <summary>A caller on the room's virtual network (the host's /24), not one that reached the address another way.</summary>
+    internal static bool InRoomSubnet(System.Net.IPAddress source) =>
+        source.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+        && source.ToString().StartsWith(EasyTierArgs.Subnet, StringComparison.Ordinal)
+        && source.ToString() != EasyTierArgs.HostIp;
 
     private void StopGameRelay()
     {
@@ -135,12 +141,16 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>Tests: what a room-opening command does about the game port, without starting a room.</summary>
-    internal async Task<bool> PrepareGameRelayForTest()
+    internal async Task<bool> PrepareGameRelayForTest(bool onAdapter = false)
     {
         if (await HostGamePortAsync(checkManual: false) is not (_, var relay)) return false;
-        AdoptGameRelay(relay);
+        AdoptGameRelay(relay, onAdapter);
         return true;
     }
+
+    /// <summary>Tests: how long the relay waits for the adapter address, and how it binds.</summary>
+    internal TimeSpan? AdapterWaitForTest { get; set; }
+    internal Func<System.Net.IPAddress, int, System.Net.Sockets.TcpListener>? AdapterListenForTest { get; set; }
 
     /// <summary>Self-check: back to a room without a relay.</summary>
     internal void StopGameRelayForTest() => StopGameRelay();
