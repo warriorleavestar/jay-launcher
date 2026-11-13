@@ -193,6 +193,29 @@ public class SecurityReviewFixTests
         Assert.Equal(host.EasyTierSecret, guest.EasyTierSecret);
     }
 
+    [Theory]
+    // Values from the derivation as it was before general codes were derived too: old wrapped codes must still land on
+    // the same EasyTier network.
+    [InlineData("AMB-T2-K7Q2M9XD-4HZP8RW2N6TC-25565", "amber-a5ef62513487863f", "415d030516a5acd3cdf0e452630eecbe27f968f794985ab09ce0443fa3fde4f5")]
+    [InlineData("AMB-T2D-K7Q2M9XD-4HZP8RW2N6TC-25565", "amber-88f5aecec625c3bd", "1e9b2c02a75cda255a07f4f85e2e7c7a85b515a932cb357832320725c2d55fe0")]
+    public void OldWrappedCodesDeriveAsBefore(string code, string name, string secret)
+    {
+        Assert.True(RoomCode.TryParse(code, out var room));
+        Assert.Equal(name, room.EasyTierNetworkName);
+        Assert.Equal(secret, room.EasyTierSecret);
+    }
+
+    [Fact]
+    public void NewRoomCodesAreRedactedFromLogsToo()
+    {
+        // Even when nobody passes the secret along, a code pasted into a log line loses its secret.
+        var room = RoomCode.Create(25565);
+        var wrapped = room with { Tunnel = new TunnelSettings(TransportMode.High, true) };
+        var redacted = NetDiagnostics.Redact($"room {room} and {wrapped}", [], includePublicIps: false);
+        Assert.DoesNotContain(room.Secret, redacted);
+        Assert.Contains(room.Network, redacted);
+    }
+
     [Fact]
     public void InviteRoomSecretsAre256Bits()
     {
