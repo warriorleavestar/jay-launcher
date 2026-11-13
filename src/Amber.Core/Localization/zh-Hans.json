@@ -401,6 +401,7 @@
   "core.mp.exit.toomany": "经 TA 上网时，联机连接自己用的地址太多。",
   "core.mp.exit.nodeipv4only": "经 TA 上网暂时不支持写成 IPv6 地址的中转。",
   "core.mp.exit.relay_unresolved": "查不到中转 {0} 的地址（{1}），经 TA 上网没有开始。",
+  "core.mp.exit.relay_domain": "“经 TA 上网”目前只能在直连的房间里用。这个房间是经中转连上对方的，所以暂时用不了。",
   "core.mp.exit.relay_no_ipv4": "它没有 IPv4 地址",
   "core.mp.exit.underlayipv4": "经 TA 上网时，联机连接自己用的地址必须是 IPv4 地址，不能是域名或命令文本。",
   "core.mp.exit.underlayunsafe": "经 TA 上网时，联机连接自己用的地址不能是未指定地址、组播或房间虚拟地址。",

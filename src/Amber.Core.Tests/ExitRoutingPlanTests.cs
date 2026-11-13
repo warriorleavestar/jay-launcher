@@ -77,8 +77,9 @@ public sealed class ExitRoutingPlanTests
     public void UntrackedIpv6OrHostnameUnderlayIsRejectedBeforeRouteChanges()
     {
         Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { DirectUnderlayUsesIpv6 = true }));
-        // A relay named by domain that wasn't resolved first.
-        Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://relay.example:11010"] }));
+        // A relay named by domain is refused with its own message: its address would get a direct exception for every program.
+        var e = Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://relay.example:11010"] }));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.exit.relay_domain"), e.Message);
         Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://[2001:db8::1]:11010"] }));
     }
 

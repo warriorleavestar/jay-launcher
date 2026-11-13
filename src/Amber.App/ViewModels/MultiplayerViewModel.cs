@@ -1119,9 +1119,6 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private bool _hubOnVirtualIp;
 
-    /// <summary>Name lookups for relays when going online through a member (tests replace it).</summary>
-    internal Func<string, CancellationToken, Task<System.Net.IPAddress[]>>? ExitLookupForTest { get; set; }
-
     /// <summary>
     /// 换出口由会话所有者重启；提权守护确认网卡和出口路由就绪后才更新当前设置。
     /// 停止、核心退出或 Amber 管道断开时，守护撤回它创建的网络设置。
@@ -1139,10 +1136,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             if (_sessionCts != lifetime || _direct != direct || lifetime.IsCancellationRequested) return false;
             if (_session is not { } old || !old.Options.Tun) return false;
-            // Relays named by domain are resolved now, so the route plan can protect them (and leaving restores them).
-            var options = direct is null ? await ExitRelays.PinAsync(old.Options with { ExitNode = exitIp }, ExitLookupForTest, lifetime.Token) : old.Options with { ExitNode = exitIp };
-            // The lookup can outlast leaving the room: then nothing is restarted (or asks for admin rights).
-            if (_sessionCts != lifetime || _direct != direct || _session != old || lifetime.IsCancellationRequested) return false;
+            // Relays named by domain are refused by the route plan (ExitRelays explains why), with their own message.
+            var options = old.Options with { ExitNode = exitIp };
             if (direct is not null)
             {
                 await direct.SetExitNodeAsync(exitIp, lifetime.Token);

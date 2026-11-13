@@ -15,6 +15,12 @@ namespace Amber.Core.Multiplayer;
 /// If the name later resolves elsewhere, the exit's traffic gate blocks that address rather than letting it out.</item>
 /// </list>
 /// Leaving the exit restores the configured peers.
+/// <para>
+/// Not used when choosing an exit yet: the exception a resolved address gets (a host route and a traffic-gate permit on
+/// the physical adapter) applies to every program, not only EasyTier, so whoever controls a relay name's DNS answer could
+/// make other programs skip the member. Until that exception is limited to EasyTier, <see cref="ExitNetworkPlan"/> refuses
+/// relays named by domain (<c>core.mp.exit.relay_domain</c>).
+/// </para>
 /// </summary>
 public static class ExitRelays
 {
