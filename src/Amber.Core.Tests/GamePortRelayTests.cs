@@ -218,7 +218,11 @@ public sealed class GamePortRelayTests
         Assert.Equal(game.Port, relay.Target);
         vm.StopCommand.Execute(null);
 
-        void Check(Task watch) => Pump(() => watch.IsCompleted);
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
     });
 
     [Fact]
@@ -252,7 +256,11 @@ public sealed class GamePortRelayTests
         Assert.False(vm.IsWaitingForGame);
         vm.StopCommand.Execute(null);
 
-        void Check(Task watch) => Pump(() => watch.IsCompleted);
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
     });
 
     [Fact]
@@ -291,7 +299,11 @@ public sealed class GamePortRelayTests
         Assert.True(vm.IsWaitingForGame);
         vm.StopCommand.Execute(null);
 
-        void Check(Task watch) => Pump(() => watch.IsCompleted);
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
     });
 
     [Fact]
@@ -324,6 +336,51 @@ public sealed class GamePortRelayTests
         Assert.Equal(typed.Port, relay.Target);
         Assert.Equal(port, vm.ManualPort);
         vm.StopCommand.Execute(null);
+    });
+
+    [Fact]
+    public void AGameThatTakesAPlayerDuringAFailingCheckStaysLinked() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var game = new EchoGame(0xA5);
+        var slow = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(false),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        vm.ManualPort = game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        // One miss, then a second check that hasn't answered yet.
+        Check(vm.WatchGameTargetAsync());
+        vm.GameTargetProbeForTest = _ => slow.Task;
+        var late = vm.WatchGameTargetAsync();
+
+        // Meanwhile the game answers again on the same port and a player comes in through the relay.
+        using var player = new TcpClient();
+        player.Connect(IPAddress.Loopback, relay.Port);
+        var stream = player.GetStream();
+        stream.ReadTimeout = 5000;
+        stream.Write([1]);
+        Assert.Equal(2, stream.ReadAtLeast(new byte[2], 2));
+        Pump(() => relay.OpenConnectionsTo(game.Port) == 1);
+
+        // The second miss arrives late: the game is in use, so it stays linked.
+        slow.SetResult(false);
+        Check(late);
+        Assert.Equal(game.Port, relay.Target);
+        Assert.False(vm.IsWaitingForGame);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
     });
 
     [Fact]
@@ -367,7 +424,11 @@ public sealed class GamePortRelayTests
         Assert.Equal(first.Port, relay.Target);
         vm.StopCommand.Execute(null);
 
-        void Check(Task watch) => Pump(() => watch.IsCompleted);
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
     });
 
     [Fact]
@@ -408,7 +469,11 @@ public sealed class GamePortRelayTests
         Pump(() => relay.Target == found.Port);
         vm.StopCommand.Execute(null);
 
-        void Check(Task watch) => Pump(() => watch.IsCompleted);
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
     });
 
     [Fact]
@@ -446,7 +511,11 @@ public sealed class GamePortRelayTests
         Assert.False(vm.IsWaitingForGame);
         vm.StopCommand.Execute(null);
 
-        void Check(Task watch) => Pump(() => watch.IsCompleted);
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
     });
 
     private static void Settle()
@@ -494,7 +563,11 @@ public sealed class GamePortRelayTests
         Assert.Equal(1, relay.OpenConnections);
         vm.StopCommand.Execute(null);
 
-        void Check(Task watch) => Pump(() => watch.IsCompleted);
+        void Check(Task watch)
+        {
+            Pump(() => watch.IsCompleted);
+            watch.GetAwaiter().GetResult();
+        }
     });
 
     [Theory]

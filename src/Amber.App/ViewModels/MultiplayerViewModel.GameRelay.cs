@@ -246,8 +246,9 @@ public sealed partial class MultiplayerViewModel
         if (alive) { _gameTargetMisses = 0; return; }
         if (++_gameTargetMisses < GameTargetMisses) return;
         _gameTargetMisses = 0;
-        // Only the link is dropped: a switch to another port that is being checked right now carries on.
-        relay.ClearTarget();
+        // Only the link is dropped: a switch to another port that is being checked right now carries on. A game that
+        // came back on the same port and took a player while the check ran is in use: keep it and start counting again.
+        if (!relay.ClearTargetIfIdle(target)) return;
         var label = _relayGameLabel ?? L.F("multiplayer.guide.port_label", target);
         _relayGameLabel = null;
         // Forget the closed world, so finding it again on the same port links it again. A world still picked from

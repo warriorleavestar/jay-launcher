@@ -62,6 +62,21 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// <summary>Back to waiting: new connections are closed until a port is set again.</summary>
     public void ClearTarget() => Volatile.Write(ref _target, 0);
 
+    /// <summary>
+    /// Back to waiting, but only if the relay still points at <paramref name="port"/> and nobody is connected to it right
+    /// now: a game that answered a player since it was last checked is in use, whatever the check said. Checked and
+    /// cleared together, so a connection being passed on can't slip in between.
+    /// </summary>
+    public bool ClearTargetIfIdle(int port)
+    {
+        lock (_gate)
+        {
+            if (Volatile.Read(ref _target) != port || _open.Any(c => c.Port == port)) return false;
+            Volatile.Write(ref _target, 0);
+            return true;
+        }
+    }
+
     /// <summary>Connections being passed on right now (tests).</summary>
     public int OpenConnections
     {
