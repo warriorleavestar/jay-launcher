@@ -211,10 +211,12 @@ public sealed class GamePortRelay : IAsyncDisposable
             _connecting[port] = _connecting.GetValueOrDefault(port) + 1;
         }
         var connecting = true;
-        using var outbound = new TcpClient();
+        TcpClient? outbound = null;
         (TcpClient, TcpClient, int)? entry = null;
         try
         {
+            // Created inside the try so a failure here still takes the caller off the connecting count.
+            outbound = new TcpClient();
             if (BeforeConnectForTest is { } before) await before();
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token))
             {
@@ -246,6 +248,7 @@ public sealed class GamePortRelay : IAsyncDisposable
                 Done();
                 if (entry is { } done) _open.Remove(done);
             }
+            outbound?.Dispose();
         }
 
         // No longer connecting (once): the caller is now open, or gone.
