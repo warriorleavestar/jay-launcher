@@ -462,7 +462,7 @@ public class ForwardingTests
         Assert.Equal(room, parsed);
         // 通用模式的房间码和以前完全一样，老版本也能用。
         var plain = RoomCode.Create(25565);
-        Assert.Matches("^AMB-[0-9A-Z]{8}-[0-9A-Z]{12}-25565$", plain.ToString());
+        Assert.Matches("^AMB-[0-9A-Z]{8}-[0-9A-Z]{26}-25565$", plain.ToString());
         Assert.True(RoomCode.TryParse(plain.ToString(), out var p2));
         Assert.Equal(TransportMode.General, p2.Tunnel.Mode);
     }

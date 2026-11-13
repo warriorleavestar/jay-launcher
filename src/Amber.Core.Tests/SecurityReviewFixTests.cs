@@ -136,14 +136,48 @@ public class SecurityReviewFixTests
         var plain = new RoomCode("K7Q2M9XD", "4HZP8RW2N6TC", 25565);
         var high = plain with { Tunnel = new TunnelSettings(TransportMode.High, false) };
         var highDisguised = plain with { Tunnel = new TunnelSettings(TransportMode.High, true) };
-        Assert.Equal(plain.NetworkName, plain.EasyTierNetworkName);
-        Assert.Equal(plain.Secret, plain.EasyTierSecret);
+        Assert.NotEqual(plain.NetworkName, plain.EasyTierNetworkName);
+        Assert.NotEqual(plain.Secret, plain.EasyTierSecret);
         Assert.NotEqual(plain.EasyTierNetworkName, high.EasyTierNetworkName);
         Assert.NotEqual(plain.EasyTierSecret, high.EasyTierSecret);
         Assert.NotEqual(high.EasyTierSecret, highDisguised.EasyTierSecret);
         Assert.Contains(high.EasyTierSecret, high.Secrets);
         Assert.True(RoomCode.TryParse(highDisguised + " 快来", out var parsed));
         Assert.Equal(highDisguised, parsed);
+    }
+
+    [Theory]
+    [InlineData(TransportMode.General, false)]
+    [InlineData(TransportMode.Minecraft, false)]
+    [InlineData(TransportMode.High, true)]
+    [InlineData(TransportMode.Extreme, false)]
+    public void RoomCode_NeverHandsItsOwnValuesToEasyTier(TransportMode mode, bool disguise)
+    {
+        var room = RoomCode.Create(25565) with { Tunnel = new TunnelSettings(mode, disguise) };
+        foreach (var value in new[] { room.EasyTierSecret, room.EasyTierNetworkName })
+        {
+            Assert.DoesNotContain(room.Secret, value, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(room.Network, value, StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.Contains(room.EasyTierSecret, room.Secrets);
+    }
+
+    [Fact]
+    public void NewRoomCodesCarryAtLeast128Bits()
+    {
+        var room = RoomCode.Create(25565);
+        // 32-letter alphabet: 5 bits a character.
+        Assert.True(room.Secret.Length * 5 >= 128);
+        Assert.True(RoomCode.TryParse(room.ToString(), out var parsed));
+        Assert.Equal(room, parsed);
+    }
+
+    [Fact]
+    public void InviteRoomSecretsAre256Bits()
+    {
+        var credentials = RoomCredentials.Create(new byte[32], 25565, TunnelSettings.Default);
+        Assert.Equal(32, Convert.FromBase64String(credentials.Secret).Length);
+        Assert.Equal(credentials.Secret, credentials.ToHostRoom(new MemberTable(), "Host").EasyTierSecret);
     }
 
     // 6. 游戏也拿到 Minecraft 自己的代理参数。
