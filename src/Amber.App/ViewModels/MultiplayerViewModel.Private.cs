@@ -163,16 +163,21 @@ public sealed partial class MultiplayerViewModel
         });
     }
 
-    private void StopPrivate()
+    /// <param name="keepPeers">Chat moved to a new connection in the same room: the people and the one selected stay
+    /// (the new connection's roster refreshes them), and so does the mod check.</param>
+    private void StopPrivate(bool keepPeers = false)
     {
         var messenger = _messenger;
         _messenger = null;
         _messengerChat = null;
-        OnlinePeers.Clear();
+        if (!keepPeers)
+        {
+            OnlinePeers.Clear();
+            ResetModCheck();
+            SelectedPeer = null;
+        }
         FileOffers.Clear();
         OnFilesChannelClosed();
-        ResetModCheck();
-        SelectedPeer = null;
         OnPropertyChanged(nameof(HasOnlinePeers));
         if (messenger is not null) _ = messenger.DisposeAsync().AsTask();
     }

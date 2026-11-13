@@ -523,10 +523,10 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "rv.take" => RendezvousTake(request),
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
-                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>()) : Error("off"),
+                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], source) : Error("off"),
                 // Blocks this connection's task for at most a few seconds while the directory dials the address.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
-                "nodes" => Volunteers is { } v ? new JsonObject { ["ok"] = true, ["nodes"] = new JsonArray([.. v.Pick().Select(u => (JsonNode)u)]) } : Error("off"),
+                "nodes" => Volunteers is { } v ? NodesReply(v.Pick()) : Error("off"),
                 "login" when Login is { } login => LoginRequest(login, request),
                 _ when DirectoryExtensions.IsValidOp(op) && Extensions.FirstOrDefault(x => x.Op == op) is { } extension => Extend(extension, request),
                 _ => Error("op"),
@@ -669,6 +669,13 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         if (verdict.Reason is { Length: > 0 } reason) reply["reason"] = reason;
         return reply;
     }
+
+    /// <summary>"nodes" reply: just the addresses, already spread over operators (who runs which stays in the directory).</summary>
+    private static JsonObject NodesReply(IReadOnlyList<VolunteerNode> nodes) => new()
+    {
+        ["ok"] = true,
+        ["nodes"] = new JsonArray([.. nodes.Select(n => (JsonNode)n.Url)]),
+    };
 
     private JsonObject Announce(JsonObject request)
     {
@@ -1211,6 +1218,9 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// <summary>The network's EasyTier secret, for the channel's psk. Defaults to the network's.</summary>
     public string NetworkSecret { get; init; } = network.Profile?.Secret ?? "";
 
+    /// <summary>The network signed volunteer registrations name (<see cref="VolunteerOperator.NetworkTag"/>). Defaults to the network's.</summary>
+    public string NetworkId { get; init; } = VolunteerOperator.NetworkTag(network.Profile);
+
     private DirectoryTrust Trust => new()
     {
         Network = network.Profile?.NetworkName ?? "",
@@ -1309,6 +1319,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             "version" => L.F("core.mp.public.err_version", reply["min"]?.GetValue<string>() is { Length: <= 32 } min ? min : "?"),
             "login" => L.T("core.mp.public.err_login"),
             "off" => L.T("core.mp.public.volunteer_off"),
+            "operator" => L.T("core.mp.public.volunteer_operator"),
             _ when !string.IsNullOrWhiteSpace(reason) => L.F("core.mp.public.err_policy", reason),
             _ => L.F("core.mp.public.err_other", code),
         });
@@ -1466,11 +1477,18 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// Registers (or renews) this computer as a volunteer node with every online directory. Returns whether at least
     /// one directory lists it already (the first registration is probed first, so it lists on the next renewal).
     /// </summary>
-    public async Task<bool> VolunteerAsync(string url, CancellationToken ct)
+    /// <param name="signer">This device's Jay account certificate and keys: the directory then knows which person runs
+    /// the node (<see cref="VolunteerOperator"/>). Null registers without saying.</param>
+    public async Task<bool> VolunteerAsync(string url, Amber.Core.Identity.JayProof? signer, CancellationToken ct)
     {
         var address = VolunteerNodes.Normalize(url) ?? throw new ArgumentException(L.T("core.mp.public.volunteer_bad_address"));
+        var request = new JsonObject { ["op"] = "volunteer", ["url"] = address };
+        if (signer is not null) request["operator"] = VolunteerOperator.Sign(signer, NetworkId, address, NextSigningTime(address));
         List<JsonObject> replies;
-        try { replies = NeedOne(await FanOutAsync(new JsonObject { ["op"] = "volunteer", ["url"] = address }, ct)); }
+        try { replies = NeedOne(await FanOutAsync(request, ct)); }
+        catch (DirectoryRejectedException e) when (e.Code == "owner") { throw new DirectoryRejectedException("owner", L.T("core.mp.public.volunteer_owner")); }
+        catch (DirectoryRejectedException e) when (e.Code == "stale") { throw new DirectoryRejectedException("stale", L.T("core.mp.public.volunteer_stale")); }
+        catch (DirectoryRejectedException e) when (e.Code == "rate") { throw new DirectoryRejectedException("rate", L.T("core.mp.public.volunteer_rate")); }
         catch (DirectoryRejectedException e) when (e.Code == "op")
         {
             // Directories from before volunteer nodes existed.
@@ -1479,7 +1497,23 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         return replies.Any(r => r["listed"]?.GetValue<bool>() == true);
     }
 
-    /// <summary>Volunteer nodes the directories know (merged, public addresses only). Empty when the network takes none.</summary>
+    /// <summary>The clock signed volunteer registrations use (tests replace it).</summary>
+    internal Func<DateTimeOffset> Clock { get; init; } = () => DateTimeOffset.UtcNow;
+
+    // Each signed registration of an address must carry a later time than the last (seconds): never the same twice.
+    private readonly Dictionary<string, long> _lastVolunteerAt = new(StringComparer.Ordinal);
+
+    private DateTimeOffset NextSigningTime(string address)
+    {
+        lock (_lastVolunteerAt)
+        {
+            var at = Clock().ToUnixTimeSeconds();
+            if (_lastVolunteerAt.TryGetValue(address, out var last) && at <= last) at = last + 1;
+            _lastVolunteerAt[address] = at;
+            return DateTimeOffset.FromUnixTimeSeconds(at);
+        }
+    }
+
     /// <summary>
     /// Asks a directory to dial <paramref name="url"/> now: true when it got through. Use it to test port forwarding
     /// before volunteering (something must be listening on the port during the test).
@@ -1493,12 +1527,16 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         return reply["reachable"]?.GetValue<bool>() == true;
     }
 
+    /// <summary>Volunteer nodes the directories know (merged, public addresses only). Empty when the network takes none.</summary>
     public async Task<IReadOnlyList<string>> NodesAsync(CancellationToken ct)
     {
         var results = await FanOutAsync(new JsonObject { ["op"] = "nodes" }, ct);
-        return [.. results.Select(r => r.Reply).OfType<JsonObject>().Where(IsOk)
-            .SelectMany(r => (r["nodes"] as JsonArray ?? []).Select(n => n?.GetValue<string>()))
-            .Select(VolunteerNodes.Normalize).OfType<string>().Distinct().Take(VolunteerNodes.PerRequest * 2)];
+        var nodes = new List<string>();
+        foreach (var reply in results.Select(r => r.Reply).OfType<JsonObject>().Where(IsOk))
+            foreach (var node in reply["nodes"] as JsonArray ?? [])
+                if (node is JsonValue value && value.TryGetValue<string>(out var text) && VolunteerNodes.Normalize(text) is { } url)
+                    nodes.Add(url);
+        return [.. nodes.Distinct().Take(VolunteerNodes.PerRequest * 2)];
     }
 
     public async Task WithdrawAsync(RoomSigner signer, CancellationToken ct)
