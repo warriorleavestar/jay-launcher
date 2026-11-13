@@ -327,6 +327,50 @@ public sealed class GamePortRelayTests
     });
 
     [Fact]
+    public void ACheckFromBeforeASwitchAwayAndBackDoesNotDropTheNewLink() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var first = new EchoGame(0x91);
+        using var second = new EchoGame(0x92);
+        var slow = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GameTargetCheckInterval = TimeSpan.Zero,
+            GameTargetProbeForTest = _ => Task.FromResult(false),
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var a = first.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        vm.ManualPort = a;
+        Pump(() => !vm.IsWaitingForGame);
+        var relay = vm.GameRelayForTest!;
+        // One miss on A, then a second check that hasn't answered yet.
+        Check(vm.WatchGameTargetAsync());
+        vm.GameTargetProbeForTest = _ => slow.Task;
+        var late = vm.WatchGameTargetAsync();
+
+        // Meanwhile the player switches to B and back to A: a new link to A.
+        vm.ManualPort = second.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == second.Port);
+        vm.ManualPort = a;
+        Pump(() => relay.Target == first.Port);
+
+        // The old check now fails: it is about the earlier link, so the new one stays.
+        slow.SetResult(false);
+        Check(late);
+        Assert.Equal(first.Port, relay.Target);
+        Assert.False(vm.IsWaitingForGame);
+        // The new link counts its own misses from none: one miss isn't enough.
+        vm.GameTargetProbeForTest = _ => Task.FromResult(false);
+        Check(vm.WatchGameTargetAsync());
+        Assert.Equal(first.Port, relay.Target);
+        vm.StopCommand.Execute(null);
+
+        void Check(Task watch) => Pump(() => watch.IsCompleted);
+    });
+
+    [Fact]
     public void ATypedGameThatClosesDoesNotFallBackToTheWorldPickedBefore() => UiTestThread.Run(() =>
     {
         using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
