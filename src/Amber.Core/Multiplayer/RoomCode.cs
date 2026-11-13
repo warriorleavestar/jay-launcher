@@ -7,7 +7,7 @@ namespace Amber.Core.Multiplayer;
 /// 联机房间码：AMB-网络名8位-密钥26位-房主端口（旧版本是 12 位，例如 AMB-K7Q2M9XD-4HZP8RW2N6TC-25565）。
 /// 字母数字用 Crockford Base32（不含 I L O U），手抄时把 I/L 看成 1、O 看成 0 也能认。
 /// 网络名和密钥都只在房主电脑上随机生成，不经过任何 Amber 的服务器。
-/// 房主选了封装模式时，AMB- 后面先写模式段：T模式号（1–3），伪装成 MC 再加 D，例如 AMB-T2D-K7Q2M9XD-4HZP8RW2N6TC-25565。
+/// 房主选了封装模式时，AMB- 后面先写模式段：T模式号（1–3），伪装成 MC 再加 D，例如 AMB-T2D-K7Q2M9XD-4HZP8RW2N6TC7MQ6KQ4M12KXE9-25565。
 /// 放在这个位置是故意的：不认识封装模式的旧版本（v0.5.6 及以前）会直接说房间码格式不对，而不是悄悄按通用模式去连。
 /// </summary>
 public sealed record RoomCode(string Network, string Secret, int Port)
@@ -19,6 +19,15 @@ public sealed record RoomCode(string Network, string Secret, int Port)
 
     /// <summary>Codes from older versions (60 bits): still recognised, so the app can say they're old.</summary>
     public const int LegacySecretLength = 12;
+
+    /// <summary>
+    /// A code from an older version. An unwrapped one can't be joined: older hosts gave EasyTier the code's own values,
+    /// this version derives them. Wrapped ones derive the same way as before and still work.
+    /// </summary>
+    public bool IsLegacy => !FromInvite && Secret.Length == LegacySecretLength;
+
+    /// <summary>An old unwrapped code: joining it would wait for ever, so say it's old instead.</summary>
+    public bool IsUnjoinableLegacy => IsLegacy && !Tunnel.Wraps;
 
     /// <summary>
     /// 邀请加入的房间：网络名（jay- + 16 位十六进制）和 256 位密钥都是房主随机生成、批准后在加密通道里发来的，直接就是 EasyTier 用的值，

@@ -172,6 +172,17 @@ public class SecurityReviewFixTests
         Assert.Equal(room, parsed);
     }
 
+    [Theory]
+    [InlineData("AMB-K7Q2M9XD-4HZP8RW2N6TC-25565", true, true)]
+    [InlineData("AMB-T2-K7Q2M9XD-4HZP8RW2N6TC-25565", true, false)]
+    [InlineData("AMB-K7Q2M9XD-4HZP8RW2N6TC7MQ6KQ4M12KXE9-25565", false, false)]
+    public void OldUnwrappedCodesAreRecognisedButNotJoined(string code, bool legacy, bool unjoinable)
+    {
+        Assert.True(RoomCode.TryParse(code, out var room));
+        Assert.Equal(legacy, room.IsLegacy);
+        Assert.Equal(unjoinable, room.IsUnjoinableLegacy);
+    }
+
     [Fact]
     public void InviteRoomSecretsAre256Bits()
     {
