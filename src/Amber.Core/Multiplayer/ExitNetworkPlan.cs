@@ -35,8 +35,9 @@ public sealed record ExitNetworkPlan(string VirtualIp, IReadOnlyList<string> Und
             // A relay named by domain: the addresses ExitRelays resolved when the exit was chosen.
             if (uri.HostNameType == UriHostNameType.Dns)
             {
+                // Not resolved: the room reaches the member through a relay named by domain, which isn't supported yet.
                 if (!options.RelayAddresses.TryGetValue(uri.Host, out var resolved) || resolved.Count == 0)
-                    throw new InvalidOperationException(L.T("core.mp.exit.relay_unreadable"));
+                    throw new InvalidOperationException(L.T("core.mp.exit.relay_domain"));
                 nodeAddresses.AddRange(resolved);
                 continue;
             }

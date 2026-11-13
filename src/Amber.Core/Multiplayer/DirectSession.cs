@@ -327,11 +327,6 @@ public sealed class DirectSession : IAsyncDisposable
         ct.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!force && EasyTier is { HasExited: false } running && SameConfig(running.Options, options)) return;
-        // Going online through a member: relays named by domain get resolved addresses the route plan can protect.
-        options = await ExitRelays.PinAsync(options, LookupForTest, ct);
-        // The lookup can outlast a stop: nothing new starts (or asks for admin rights) after it.
-        ct.ThrowIfCancellationRequested();
-        ObjectDisposedException.ThrowIf(_disposed, this);
         Log(L.T("core.mp.session.start") + string.Join(' ', EasyTierArgs.Build(options).Select(a => options.Room.Secrets.Contains(a) ? L.T("core.mp.diagnostics.secret") : a)));
         try
         {
@@ -407,8 +402,6 @@ public sealed class DirectSession : IAsyncDisposable
     /// <summary>EasyTier 启动或重启过几次（包括已提权会话的原地重启）：界面按它判断要不要重新计时。</summary>
     public int EasyTierStarts { get; private set; }
 
-    /// <summary>Name lookups for relays when going online through a member (tests replace it).</summary>
-    internal Func<string, CancellationToken, Task<System.Net.IPAddress[]>>? LookupForTest { get; set; }
 
     private static bool SameConfig(EasyTierOptions a, EasyTierOptions b) =>
         a.Tun == b.Tun && a.AllowExit == b.AllowExit && a.ExitNode == b.ExitNode && (a.ConfiguredPeers ?? a.Peers).SequenceEqual(b.ConfiguredPeers ?? b.Peers)

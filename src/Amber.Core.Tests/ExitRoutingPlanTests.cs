@@ -79,8 +79,12 @@ public sealed class ExitRoutingPlanTests
     }
 
     [Fact]
-    public void AnUnresolvedRelayNameIsRejectedBeforeRouteChanges() =>
-        Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://relay.example:11010"] }));
+    public void ARelayNamedByDomainIsRefusedWithItsOwnMessage()
+    {
+        // Its address would get a direct exception for every program, not only EasyTier.
+        var e = Assert.Throws<InvalidOperationException>(() => ExitNetworkPlan.Create(Guest with { Peers = ["udp://relay.example:11010"] }));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.exit.relay_domain"), e.Message);
+    }
 
     [Fact]
     public void Ipv6RelaysAndDirectPeersAreProtectedLikeIpv4()
