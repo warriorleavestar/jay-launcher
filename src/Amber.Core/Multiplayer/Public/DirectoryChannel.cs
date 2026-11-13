@@ -25,7 +25,11 @@ namespace Amber.Core.Multiplayer.Public;
 /// different networks apart. The authentication comes from the pinned static key.
 /// </para>
 /// <para>
-/// On the wire every message is a 2-byte big-endian length and the bytes. A legacy request is a JSON line starting with
+/// On the wire every message is a 2-byte big-endian length and the bytes. A reply is one encrypted frame holding the
+/// JSON, as it always was, so every Jay version can read any reply (an old one still sees "please update"). A snapshot
+/// (op <c>snap</c>, which only new versions send) can be megabytes: its reply is one encrypted frame holding the 4-byte
+/// big-endian length (first byte 0, which no JSON starts with), then encrypted frames of at most
+/// <see cref="ReplyChunk"/> bytes each, padded with spaces. A legacy request is a JSON line starting with
 /// '{' (0x7B); a Noise first message is 1248 bytes, so its first length byte is 0x04. The directory tells them apart by that byte.
 /// </para>
 /// </summary>
@@ -41,6 +45,9 @@ public static class DirectoryChannel
     /// (1184 + 16) + payload tag (16).
     /// </summary>
     private const int FirstMessageLength = X25519KeyPair.Length + MlKem768.EncapsulationKeySize + 2 * CipherState.TagLength;
+
+    /// <summary>Plaintext bytes per reply frame.</summary>
+    private const int ReplyChunk = RoomDirectoryProtocol.MaxLine;
 
     /// <summary>Directory keys are X25519 public keys, 32 bytes.</summary>
     public const int KeyLength = X25519KeyPair.Length;
@@ -69,7 +76,9 @@ public static class DirectoryChannel
     /// payload of its handshake message. Throws <see cref="DirectoryImpostorException"/> before writing the request when
     /// the key isn't accepted, or <see cref="DirectoryKeyChangedException"/> when it differs from the remembered one.
     /// </summary>
-    public static async Task<JsonObject> CallAsync(Stream stream, DirectoryTrust trust, string address, string networkSecret, JsonObject request, CancellationToken ct)
+    /// <param name="snapshotLength">Called with a snapshot reply's length once it is known (to set a deadline that fits it).</param>
+    public static async Task<JsonObject> CallAsync(Stream stream, DirectoryTrust trust, string address, string networkSecret, JsonObject request, CancellationToken ct,
+        Action<int>? snapshotLength = null, Action? sent = null)
     {
         var payload = Encoding.UTF8.GetBytes(request.ToJsonString());
         if (payload.Length > RoomDirectoryProtocol.MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
@@ -85,17 +94,27 @@ public static class DirectoryChannel
             if (!trust.Accepts(address, key, certificate))
                 throw remembered ? new DirectoryKeyChangedException() : new DirectoryImpostorException();
             await WriteFrameAsync(stream, hs.WriteMessage(payload), ct);
+            sent?.Invoke();
             var (send, receive) = hs.Split();
             using (send)
             using (receive)
             {
-                var frame = await ReadFrameAsync(stream, ct);
-                var reply = receive.DecryptWithAd(Prologue, frame);
-                try
+                var firstFrame = await ReadFrameAsync(stream, ct);
+                var first = receive.DecryptWithAd(Prologue, firstFrame);
+                if (first.Length != 4 || first[0] != 0) return Parse(first);
+                var total = BinaryPrimitives.ReadInt32BigEndian(first);
+                if (total is <= 0 or > RoomDirectoryProtocol.MaxReply) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
+                snapshotLength?.Invoke(total);
+                var reply = new byte[total];
+                for (var at = 0; at < total;)
                 {
-                    return JsonNode.Parse(reply) as JsonObject ?? throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
+                    var frame = await ReadFrameAsync(stream, ct);
+                    var chunk = receive.DecryptWithAd(Prologue, frame);
+                    if (chunk.Length == 0 || chunk.Length > total - at) throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
+                    chunk.CopyTo(reply, at);
+                    at += chunk.Length;
                 }
-                catch (JsonException) { throw new InvalidDataException(L.T("core.mp.public.bad_reply")); }
+                return Parse(reply);
             }
         }
         catch (CryptographicException e)
@@ -108,11 +127,20 @@ public static class DirectoryChannel
         }
     }
 
+    private static JsonObject Parse(byte[] reply)
+    {
+        try
+        {
+            return JsonNode.Parse(reply) as JsonObject ?? throw new InvalidDataException(L.T("core.mp.public.bad_reply"));
+        }
+        catch (JsonException) { throw new InvalidDataException(L.T("core.mp.public.bad_reply")); }
+    }
+
     /// <summary>
     /// The directory's side, after it read <paramref name="firstByte"/> and found it isn't a legacy request.
     /// Returns the request and a function that sends the reply, or null when the handshake fails (the caller just closes).
     /// </summary>
-    public static async Task<(JsonObject Request, Func<JsonObject, CancellationToken, Task> Reply)?> AcceptAsync(
+    public static async Task<(JsonObject Request, DirectoryReply Reply, DirectorySnapshotReply Snapshot)?> AcceptAsync(
         Stream stream, byte firstByte, X25519KeyPair identity, string networkSecret, CancellationToken ct, byte[]? certificate = null)
     {
         var psk = Psk(networkSecret);
@@ -136,9 +164,45 @@ public static class DirectoryChannel
             {
                 using (send)
                 {
+                    // Every reply but a snapshot is one frame; a bigger one is a bug on this side, not something to send.
                     var bytes = Encoding.UTF8.GetBytes(reply.ToJsonString());
                     if (bytes.Length > RoomDirectoryProtocol.MaxLine) throw new InvalidDataException(L.T("core.mp.public.too_large"));
                     await WriteFrameAsync(stream, send.EncryptWithAd(Prologue, bytes), token);
+                }
+            }, async (json, padTo, stall, token) =>
+            {
+                using (send)
+                {
+                    var total = padTo > 0 ? (json.Length + padTo - 1) / padTo * padTo : json.Length;
+                    if (total > RoomDirectoryProtocol.MaxReply) throw new InvalidDataException(L.T("core.mp.public.too_large"));
+                    var header = new byte[4];
+                    BinaryPrimitives.WriteInt32BigEndian(header, total);
+                    await Stalled(send.EncryptWithAd(Prologue, header));
+                    // Trailing spaces are JSON whitespace: the client parses the padded reply as it is.
+                    var chunk = new byte[ReplyChunk];
+                    for (var at = 0; at < total; at += ReplyChunk)
+                    {
+                        var length = Math.Min(ReplyChunk, total - at);
+                        var fromJson = Math.Clamp(json.Length - at, 0, length);
+                        json.AsSpan(at < json.Length ? at : 0, fromJson).CopyTo(chunk);
+                        chunk.AsSpan(fromJson, length - fromJson).Fill((byte)' ');
+                        await Stalled(send.EncryptWithAd(Prologue, chunk.AsSpan(0, length)));
+                    }
+                }
+
+                // Each frame must go out within the stall time: a reader that stops reading is dropped.
+                async Task Stalled(byte[] frame)
+                {
+                    // Out of time between frames (or shutting down): stop before touching a stream that may be closed.
+                    token.ThrowIfCancellationRequested();
+                    using var frameDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    frameDeadline.CancelAfter(stall);
+                    // Not every stream honours cancellation of a pending write; closing it always ends the write.
+                    var close = frameDeadline.Token.Register(stream.Dispose);
+                    try { await WriteFrameAsync(stream, frame, frameDeadline.Token); }
+                    finally { await close.DisposeAsync(); }
+                    // The deadline may have fired just as the write finished: the stream is closed then, so stop here.
+                    frameDeadline.Token.ThrowIfCancellationRequested();
                 }
             });
         }
@@ -206,6 +270,15 @@ public static class DirectoryChannel
         return message;
     }
 }
+
+/// <summary>Sends the directory's reply (one frame).</summary>
+public delegate Task DirectoryReply(JsonObject reply, CancellationToken ct);
+
+/// <summary>
+/// Sends a snapshot reply (<paramref name="json"/>, UTF-8) in chunks, padded with spaces to a multiple of
+/// <paramref name="padTo"/>; gives up when one chunk takes longer than <paramref name="stall"/> to go out.
+/// </summary>
+public delegate Task DirectorySnapshotReply(byte[] json, int padTo, TimeSpan stall, CancellationToken ct);
 
 /// <summary>
 /// The machine at the directory address doesn't hold any of the network's directory keys. Nothing was sent to it.

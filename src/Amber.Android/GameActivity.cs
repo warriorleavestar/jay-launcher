@@ -299,6 +299,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     public TouchControlOverlay(Context context) : base(context)
     {
         _router = new TouchInputRouter(this);
+        Clickable = true;
         Focusable = true;
         FocusableInTouchMode = true;
     }
