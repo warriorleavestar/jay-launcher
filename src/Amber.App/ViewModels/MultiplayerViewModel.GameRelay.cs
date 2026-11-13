@@ -196,6 +196,8 @@ public sealed partial class MultiplayerViewModel
 
     private DateTime _gameTargetCheckedAt;
     private int _gameTargetMisses;
+    private GamePortRelay? _gameTargetRelay;
+    private int? _gameTargetPort;
     private bool _gameTargetChecking;
 
     /// <summary>
@@ -205,7 +207,15 @@ public sealed partial class MultiplayerViewModel
     /// </summary>
     internal async Task WatchGameTargetAsync()
     {
-        if (_gameTargetChecking || _gameRelay is not { } relay || relay.Target is not { } target) { _gameTargetMisses = 0; return; }
+        if (_gameTargetChecking) return;
+        if (_gameRelay is not { } relay || relay.Target is not { } target) { _gameTargetMisses = 0; return; }
+        // Misses count for one linked port: a game linked since then starts again from none.
+        if (!ReferenceEquals(relay, _gameTargetRelay) || target != _gameTargetPort)
+        {
+            _gameTargetRelay = relay;
+            _gameTargetPort = target;
+            _gameTargetMisses = 0;
+        }
         if (relay.OpenConnections > 0 || DateTime.UtcNow - _gameTargetCheckedAt < GameTargetCheckInterval) return;
         _gameTargetChecking = true;
         _gameTargetCheckedAt = DateTime.UtcNow;
@@ -218,11 +228,12 @@ public sealed partial class MultiplayerViewModel
         {
             _gameTargetChecking = false;
         }
-        if (_gameRelay != relay || relay.Target != target) { _gameTargetMisses = 0; return; }
+        // Switched (or the room changed) while checking: the result is about a game that is no longer linked.
+        if (_gameRelay != relay || relay.Target != target || _gameTargetPort != target) return;
         if (alive) { _gameTargetMisses = 0; return; }
         if (++_gameTargetMisses < GameTargetMisses) return;
         _gameTargetMisses = 0;
-        _relayCheck++;
+        // Only the link is dropped: a switch to another port that is being checked right now carries on.
         relay.ClearTarget();
         var label = _relayGameLabel ?? L.F("multiplayer.guide.port_label", target);
         _relayGameLabel = null;
