@@ -97,7 +97,13 @@ public sealed partial class MultiplayerViewModel
     {
         NotifyRemoteAvailability();
         OnPropertyChanged(nameof(ShowModCheck));
+        PublishRoomGameAddress();
     }
+
+    partial void OnJoinAddressChanged(string value) => PublishRoomGameAddress();
+
+    /// <summary>The joined room's game address, for "Start and go to › Current Jay room" on instance pages.</summary>
+    private void PublishRoomGameAddress() => _service.SetRoomGameAddress(IsJoined ? JoinAddress : null);
 
     private ITileCodec RemoteCodec => new SkiaTileCodec();
 

@@ -610,10 +610,14 @@ public sealed partial class HomeViewModel : PageViewModel
             SetStatus(StatusMessage.Info("home.status.verifying_account"));
             var session = await _service.Accounts.ResolveAsync(account, ct);
 
+            // "Start and go to…": the world or server this start was asked for, else the instance's choice.
+            var (quickPlay, quickPlayNote) = QuickPlay.Choose(request.JoinWorld, request.JoinServer, settings, _service.RoomGameAddress,
+                _service.GetInstance(ctx, id).SavesDir);
+            if (quickPlayNote is not null) SayQuickPlay(run, quickPlayNote);
             var options = _service.BaseLaunchOptions(ctx, id, javaPath, session.Session, session.ExtraJvmArgs) with
             {
-                JoinServer = request.JoinServer ?? settings.JoinServer,
-                JoinWorld = request.JoinWorld,
+                JoinServer = quickPlay?.Server,
+                JoinWorld = quickPlay?.World,
             };
             // 联机页开了“仅游戏”转发：游戏的 HTTP 走本机 SOCKS5，要进的服务器另开一个经出口的转发端口。
             var (proxied, relayClient) = await ApplyGameProxyAsync(options);
@@ -626,11 +630,13 @@ public sealed partial class HomeViewModel : PageViewModel
                 SetStatus(StatusMessage.Info("home.status.baking"));
                 try
                 {
+                    // After the game proxy: a joined server may now be a local forward, and that is what the loader gets.
+                    var bakeQuickPlay = options.JoinWorld is { } world ? QuickPlay.ToWorld(world) : options.JoinServer is { } server ? QuickPlay.ToServer(server) : null;
                     var (baked, reason, bakeJava) = await _service.PrepareBakeAsync(ctx, id, javaPath, new Progress<Amber.Core.Bake.BakeEvent>(e =>
                     {
                         Status = e.Message;
                         if (e.IsProblem) _log.AddRaw(run.Log, "[Bake] " + e.Message);
-                    }), ct);
+                    }), ct, quickPlay: bakeQuickPlay);
                     if (reason.Length > 0) _log.AddRaw(run.Log, "[Bake] " + reason);
                     // Baking is on but no loader is installed: offer the download right where the launch status is.
                     // Before the loader is published there is nothing to download: the notice just says why baking was skipped.
@@ -645,6 +651,8 @@ public sealed partial class HomeViewModel : PageViewModel
                     {
                         // The loader's launcher needs Java 21 even where the version asks for less.
                         options = options with { Baked = baked, JavaPath = bakeJava };
+                        // The loader (interface 1.3.3) put the quick play into its own arguments: pass none of ours.
+                        if (baked.QuickPlay is not null) options = options with { JoinServer = null, JoinWorld = null };
                         javaPath = bakeJava;
                         run.Baked = true;
                         run.BakeProblemsFile = baked.ProblemsFile;
@@ -660,6 +668,14 @@ public sealed partial class HomeViewModel : PageViewModel
                     Toasts.BakeProblem(L.F("home.bake.fallback", e.Message));
                 }
             }
+            // A world needs the game's own quick play (1.20+) or the loader; otherwise this start stops at the title screen.
+            if (options.JoinWorld is not null && options.Baked?.QuickPlay is null && !QuickPlay.GameOpensWorlds(version))
+            {
+                options = options with { JoinWorld = null };
+                SayQuickPlay(run, "quickplay.note.world_unsupported");
+            }
+            if ((options.JoinWorld ?? options.JoinServer ?? options.Baked?.QuickPlay?.World ?? options.Baked?.QuickPlay?.Server) is { } into)
+                _log.AddRaw(run.Log, "[Jay] " + L.F("quickplay.log.into", into));
             if (!string.IsNullOrWhiteSpace(settings.PreLaunchCommand))
             {
                 SetStatus(StatusMessage.Info("home.status.pre_launch_command"));
@@ -877,6 +893,13 @@ public sealed partial class HomeViewModel : PageViewModel
     /// <summary>日志里表示“已经到了游戏主界面”的几行（新版本是声音引擎，老版本是 OpenAL）。</summary>
     internal static bool IsEnterGameLine(string line) =>
         line.Contains("Sound engine started", StringComparison.Ordinal) || line.Contains("OpenAL initialized", StringComparison.Ordinal);
+
+    /// <summary>The start could not go where it was asked to and opens on the title screen: once in the log, once as a toast.</summary>
+    private void SayQuickPlay(GameRun run, string key)
+    {
+        _log.AddRaw(run.Log, "[Jay] " + L.T(key));
+        Toasts.Show(L.T(key));
+    }
 
     private void EnterGame(GameRun run, bool guessed)
     {

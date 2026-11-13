@@ -345,6 +345,9 @@ public partial class InstancePage : UserControl
 
     private void CloseHeroForceKill(object? sender, RoutedEventArgs e) => HeroForceKill.Flyout?.Hide();
 
+    /// <summary>The start button's ▾ menu: worlds, servers and the room change while the page is up, so read them again.</summary>
+    private void StartIntoMenu_Opening(object? sender, EventArgs e) => Vm?.RefreshStartMenu();
+
     private async void ExportLastRun_Click(object? sender, RoutedEventArgs e)
     {
         if (Vm is not { } vm || Storage is not { } storage) return;
@@ -369,7 +372,7 @@ public partial class InstancePage : UserControl
         if (file?.TryGetLocalPath() is { } path) vm.ExportLaunchFailure(path);
     }
 
-    private InstanceViewModel? Vm => DataContext as InstanceViewModel;
+    internal InstanceViewModel? Vm => DataContext as InstanceViewModel;
     private IStorageProvider? Storage => TopLevel.GetTopLevel(this)?.StorageProvider;
 
     private async Task PickAndAddAsync(string title, string filterName, string[] patterns, string? target)
