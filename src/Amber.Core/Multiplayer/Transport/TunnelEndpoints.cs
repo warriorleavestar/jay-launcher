@@ -108,7 +108,12 @@ public static class Pump
 /// </summary>
 public sealed class TunnelServer : IAsyncDisposable
 {
-    private readonly TcpListener _listener;
+    // Swapped in once a deferred bind succeeds; both the swap and DisposeAsync's stop happen under _bindGate.
+    private TcpListener? _listener;
+    private volatile bool _bound;
+    private readonly object _bindGate = new();
+    private readonly TaskCompletionSource _boundTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly int _port;
     private readonly RoomCode _room;
     private readonly TunnelSettings _settings;
     private readonly Func<TunnelService, Func<Stream, CancellationToken, Task>?> _route;
@@ -116,14 +121,31 @@ public sealed class TunnelServer : IAsyncDisposable
     private readonly Task _loop;
     private readonly Action<string>? _log;
 
-    public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+    /// <summary>The listening port (the requested one until a deferred bind succeeds).</summary>
+    public int Port => _bound && Volatile.Read(ref _listener) is { } l ? ((IPEndPoint)l.LocalEndpoint).Port : _port;
+
+    /// <summary>The listener is bound and accepting (false while it waits for its address).</summary>
+    public bool Listening => _bound;
+
+    /// <summary>
+    /// Completes once the listener is bound: at once, or when the adapter's address appears (a whole-LAN room's
+    /// virtual adapter gets it a moment after EasyTier starts). Faults with the <see cref="SocketException"/> when it
+    /// gives up (see <see cref="AdapterListener.BindAsync"/>); cancelled when the server is disposed first.
+    /// </summary>
+    public Task Bound => _boundTcs.Task;
     public int Accepted;
+    /// <summary>
+    /// Connections never handed to a handler: refused for want of a place, handshake failed or timed out, closed to make
+    /// room, failed before the handshake, or a service that isn't offered. A handler that fails later doesn't count.
+    /// </summary>
     public int Rejected;
 
     /// <summary>
     /// Connections still in their handshake at most. Past that one still in its handshake is closed to make room
     /// (<see cref="HandshakeSlots"/>), so unauthenticated connections can only tie up so much, and keeping new members
-    /// out takes refilling every place faster than a member's handshake.
+    /// out takes refilling every place faster than a member's handshake. Connections handed over on loopback (a local
+    /// relay or port forwarder in front of the listener) can't be told apart: they share one group with no per-caller
+    /// limit, so behind such a forwarder the choice of who makes room is by age only and the protection is weaker.
     /// </summary>
     public const int MaxPendingHandshakes = 256;
 
@@ -132,6 +154,8 @@ public sealed class TunnelServer : IAsyncDisposable
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, MaxPendingPerCaller);
     private long _slotsFullLogged;
     private long _handshakeFailedLogged;
+    // Its own limit, so frequent ended lines (a room without members) don't hide the failed handshakes.
+    private long _endedLogged;
 
     /// <summary>Connections in their handshake right now.</summary>
     public int PendingHandshakes => _slots.Held;
@@ -147,15 +171,77 @@ public sealed class TunnelServer : IAsyncDisposable
 
     /// <param name="route">每种服务怎么处理；返回 null 表示不提供这个服务（连接会被关掉）。</param>
     public TunnelServer(RoomCode room, TunnelSettings settings, int port, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null, IPAddress? address = null)
+        : this(room, settings, port, route, log, address, null, null)
+    {
+    }
+
+    /// <param name="listen">How to bind (tests); <see cref="AdapterListener.Listen"/> by default.</param>
+    /// <param name="addressWait">How long to wait for a missing adapter address (default <see cref="AdapterListener.DefaultWait"/>).</param>
+    internal TunnelServer(RoomCode room, TunnelSettings settings, int port, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log,
+        IPAddress? address, Func<IPAddress, int, TcpListener>? listen, TimeSpan? addressWait)
     {
         _room = room;
         _settings = settings;
         _route = route;
         _log = log;
-        _listener = new TcpListener(address ?? IPAddress.Loopback, port);
-        _listener.Start();
+        var bind = address ?? IPAddress.Loopback;
+        listen ??= AdapterListener.Listen;
+        _port = port;
+        var waitForAddress = false;
+        try
+        {
+            _listener = listen(bind, port);
+            _bound = true;
+            _boundTcs.SetResult();
+        }
+        catch (SocketException e) when (AdapterListener.IsAddressMissing(e, bind))
+        {
+            // The adapter doesn't have this address yet: bind in the background once it does. A port that's in use
+            // still fails here, at once.
+            waitForAddress = true;
+        }
         // 在线程池上跑：不要带上界面线程的同步上下文（否则每条连接的收尾都要排队等界面线程）。
-        _loop = Task.Run(() => AcceptLoopAsync(_cts.Token));
+        _loop = Task.Run(async () =>
+        {
+            if (waitForAddress && !await BindLaterAsync(bind, port, listen, addressWait ?? AdapterListener.DefaultWait)) return;
+            try { await AcceptLoopAsync(_cts.Token); }
+            finally
+            {
+                lock (_bindGate) _listener?.Stop();
+            }
+        });
+    }
+
+    private async Task<bool> BindLaterAsync(IPAddress address, int port, Func<IPAddress, int, TcpListener> listen, TimeSpan wait)
+    {
+        TcpListener listener;
+        try { listener = await AdapterListener.BindAsync(address, port, wait, _cts.Token, listen); }
+        catch (OperationCanceledException)
+        {
+            _boundTcs.TrySetCanceled();
+            return false;
+        }
+        // A missing address that never came, or anything else the bind fails with: the room must hear of it either way.
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            _log?.Invoke(L.F("core.mp.transport.listen_failed", new IPEndPoint(address, port), e.Message));
+            _boundTcs.TrySetException(e);
+            return false;
+        }
+        lock (_bindGate)
+        {
+            // Disposed while binding: nothing else will stop this one.
+            if (_cts.IsCancellationRequested)
+            {
+                listener.Stop();
+                _boundTcs.TrySetCanceled();
+                return false;
+            }
+            _listener = listener;
+            _bound = true;
+        }
+        _boundTcs.TrySetResult();
+        return true;
     }
 
     /// <summary>把服务交给本机的一个 TCP 端口（游戏、聊天）。</summary>
@@ -174,7 +260,7 @@ public sealed class TunnelServer : IAsyncDisposable
             TcpClient client;
             try
             {
-                client = await _listener.AcceptTcpClientAsync(ct);
+                client = await _listener!.AcceptTcpClientAsync(ct);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException)
             {
@@ -238,6 +324,10 @@ public sealed class TunnelServer : IAsyncDisposable
             Stream? stream = null;
             CancellationTokenRegistration revocation = default;
             var served = false;
+            // A member (with its own key) passed the handshake: from here its failures are logged in full, not limited.
+            // A room without members (shared room key only) and the unwrapped SOCKS mode stay limited.
+            var authenticated = false;
+            var handshakeOk = false;
             try
             {
                 BeforeServeForTest?.Invoke(client);
@@ -256,6 +346,8 @@ public sealed class TunnelServer : IAsyncDisposable
                     HandshakeDone();
                     if (accepted is null) return;
                     (stream, service, var member) = accepted.Value;
+                    authenticated = member is not null;
+                    handshakeOk = true;
                     // 邀请房间：这个成员的钥匙一作废（踢出、重新批准换了钥匙、房间结束）就断开这条连接。
                     // 握手完之前已经作废的，Register 会立刻调用。
                     if (member is not null)
@@ -285,19 +377,23 @@ public sealed class TunnelServer : IAsyncDisposable
                 (stream as IAuthenticatedStream)?.Abort();
                 // Only a connection that never got served counts as refused; a forwarding that ended is not.
                 if (!served) Interlocked.Increment(ref Rejected);
-                var what = served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
-                // Before the handshake succeeded anyone can cause this: at most one line a minute.
-                if (!served && !OncePerMinute(ref _handshakeFailedLogged)) { }
-                else if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T(what) + e.Message);
-                else if (e is InvalidOperationException or ArgumentException) _log?.Invoke(L.T(what) + e.GetType().Name);
+                // Once the handshake succeeded, a failure is a connection that ended, not a failed handshake.
+                var ended = served || handshakeOk;
+                var what = ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+                var line = e is CryptographicException or PlatformNotSupportedException ? L.T(what) + e.Message
+                    : e is InvalidOperationException or ArgumentException ? L.T(what) + e.GetType().Name : null;
+                // Anyone can cause this before a member's handshake succeeded: then at most one line a minute (only
+                // lines actually written use it up).
+                if (line is not null && (authenticated || OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged))) _log?.Invoke(line);
             }
             catch (Exception e)
             {
                 // Anything else still ends this connection quietly and is logged by type only (no member details).
                 (stream as IAuthenticatedStream)?.Abort();
                 if (!served) Interlocked.Increment(ref Rejected);
-                if (served || OncePerMinute(ref _handshakeFailedLogged))
-                    _log?.Invoke(L.T(served ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+                var ended = served || handshakeOk;
+                if (authenticated || OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged))
+                    _log?.Invoke(L.T(ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             }
             finally
             {
@@ -314,8 +410,11 @@ public sealed class TunnelServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _cts.Cancel();
-        _listener.Stop();
+        lock (_bindGate)
+        {
+            _cts.Cancel();
+            _listener?.Stop();
+        }
         try { await _loop; } catch (OperationCanceledException) { }
         _cts.Dispose();
     }

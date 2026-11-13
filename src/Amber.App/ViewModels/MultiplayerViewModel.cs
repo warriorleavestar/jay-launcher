@@ -254,6 +254,21 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [ObservableProperty] public partial string RoomCodeText { get; set; } = "";
     [ObservableProperty] public partial string JoinAddress { get; set; } = "";
 
+    /// <summary>
+    /// Whole-LAN guest whose game goes through the forwarded local port: the host's own address in the room too, for
+    /// other games and tools (the forwarded address only carries the Minecraft world). Empty otherwise.
+    /// </summary>
+    public string RoomHostAddressText => _showRoomHostAddress ? L.F("multiplayer.join.full_lan_host", EasyTierArgs.HostIp) : "";
+
+    // Kept as a flag, not as text: the line follows a language change like every other computed text.
+    private bool _showRoomHostAddress;
+
+    private void ShowRoomHostAddress(bool show)
+    {
+        _showRoomHostAddress = show;
+        OnPropertyChanged(nameof(RoomHostAddressText));
+    }
+
     public string ComponentText => IsComponentReady
         ? L.F("multiplayer.component.ready", EasyTierRelease.Version)
         : L.F("multiplayer.component.required", EasyTierRelease.Version, EasyTierRelease.Current.Size / 1024 / 1024);
@@ -343,15 +358,27 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     {
         if (IsScanning) return;
         IsScanning = true;
+        // What the room was linked to when the scan started: a world picked or a port typed during the scan wins.
+        var relayAtStart = _gameRelay;
+        var checkAtStart = _relayCheck;
         try
         {
-            var found = await Amber.Core.Multiplayer.LanGames.ListenAsync(TimeSpan.FromSeconds(3));
+            var found = await (ScanForTest ?? (() => Amber.Core.Multiplayer.LanGames.ListenAsync(TimeSpan.FromSeconds(3))))();
+            var fresh = new List<int>();
             foreach (var game in found)
             {
                 if (LanGames.Any(g => g.Game.Port == game.Port)) continue;
                 LanGames.Add(new LanGameItem(game, L.T("multiplayer.lan.broadcast_source")));
+                fresh.Add(game.Port);
             }
-            SelectedLanGame ??= LanGames.FirstOrDefault();
+            if (_gameRelay is { } relay)
+            {
+                if (relay != relayAtStart || checkAtStart != _relayCheck) { }
+                else if (found.Count == 0) SetStatus(StatusMessage.Error("multiplayer.lan.not_found"));
+                else if (RelayPickAfterScan(found.Select(g => g.Port).ToList(), fresh, relay.Target, relay.Port) is { } port)
+                    LinkFoundGame(port);
+            }
+            else SelectedLanGame ??= LanGames.FirstOrDefault();
             if (IsIdle && LanGames.Count == 0) SetStatus(StatusMessage.Error("multiplayer.lan.not_found"));
         }
         catch (SocketException e)
@@ -686,7 +713,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (relay is not null) await relay.DisposeAsync();
             return;
         }
-        AdoptGameRelay(relay);
+        AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
         Mode = "host";
         RoomCodeText = "";
         _room = room;
@@ -759,6 +786,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         Mode = "join";
         // 完整局域网模式下直接连房主的虚拟 IP；普通模式连本机转发端口。
         JoinAddress = local is { } l ? $"127.0.0.1:{l}" : $"{EasyTierArgs.HostIp}:{room.Port}";
+        ShowRoomHostAddress(FullLanMode && local is not null);
         RoomCodeText = "";
         // 游戏的“多人游戏”列表里也会出现这个房间。
         if (local is { } port) _ = Amber.Core.Multiplayer.LanGames.AnnounceAsync(L.T("multiplayer.room.server_name"), port, _sessionCts!.Token);
@@ -791,7 +819,47 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         _timer.Start();
         OnPropertyChanged(nameof(CanUseExit));
         SyncHotspotSharing();
+        if (_session is EasyTierElevatedSession elevated) _ = WatchElevatedStartAsync(elevated);
         return true;
+    }
+
+    /// <summary>
+    /// How long a whole-LAN session may take to report that EasyTier and its adapter are up: the same time the room's
+    /// listeners wait for the adapter's address. Counted from after the permission prompt (starting the session waits
+    /// for it, and the listeners start after the session); generous for a first adapter install.
+    /// </summary>
+    internal static TimeSpan ElevatedStartWait => AdapterListener.DefaultWait;
+
+    /// <summary>
+    /// The elevated helper starts EasyTier in the background after the room is set up. If it doesn't report ready in
+    /// time, or fails, say why and end the room instead of leaving it waiting with no adapter.
+    /// </summary>
+    private Task WatchElevatedStartAsync(EasyTierElevatedSession session) =>
+        WatchSessionStartAsync(session.WaitForReadyAsync, () => _session == session, ElevatedStartWait);
+
+    /// <param name="stillCurrent">Whether that session is still this room's (checked on the UI thread).</param>
+    internal async Task WatchSessionStartAsync(Func<CancellationToken, Task> waitForReady, Func<bool> stillCurrent, TimeSpan within)
+    {
+        using var wait = new CancellationTokenSource(within);
+        string? problem = null;
+        try { await waitForReady(wait.Token); }
+        catch (OperationCanceledException) when (wait.IsCancellationRequested) { problem = L.T("multiplayer.room.full_lan_not_ready"); }
+        // Cancelled by the helper itself, not by our wait: "a task was canceled" tells the player nothing.
+        catch (OperationCanceledException) { problem = L.T("multiplayer.room.full_lan_helper_stopped"); }
+        // Whatever the helper fails with, the room can't work: say so rather than leave it waiting.
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            problem = $"{e.Message} ({e.GetType().Name})";
+        }
+        if (problem is null) return;
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            // Left the room or started another meanwhile: nothing to report.
+            if (!stillCurrent()) return;
+            _diag.Add(L.T("multiplayer.transport.diagnostics_category"), problem);
+            StopCommand.Execute(null);
+            SetStatus(StatusMessage.Error("multiplayer.room.full_lan_start_failed", problem));
+        });
     }
 
     private bool TryStartTransport(EasyTierOptions options)
@@ -806,8 +874,15 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             _session?.Dispose();
             _session = null;
-            SetStatus(StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
+            SetStatus(e.SocketErrorCode == System.Net.Sockets.SocketError.AddressNotAvailable
+                ? StatusMessage.Failure("multiplayer.transport.address_not_ready", e, ErrorText.Of(e))
+                : StatusMessage.Failure("multiplayer.transport.port_in_use", e, TunnelSettings.Port, ErrorText.Of(e)));
             return false;
+        }
+        if (_transport.Server is { Bound.IsCompleted: false } server)
+        {
+            var transport = _transport;
+            _ = WatchAdapterBindAsync(server.Bound, () => _transport == transport, server.Port, relay: false);
         }
         _service.ActiveGameProxy = _transport.Proxy;
         GameProxyIp = _transport.Proxy?.ExitIp ?? "";
@@ -817,6 +892,40 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             : L.T("multiplayer.transport.general_summary");
         OnPropertyChanged(nameof(CanUseGameProxy));
         return true;
+    }
+
+    /// <summary>
+    /// A listener on a whole-LAN room's virtual address (the protected channel's, or the game relay's) binds once the
+    /// adapter has that address. If it never does, or fails in another way, the room can't be joined: stop it and say why.
+    /// </summary>
+    /// <param name="stillCurrent">Whether that listener still belongs to this room (checked on the UI thread).</param>
+    /// <param name="relay">The game relay's listener: its port is one the system picked, not one the user can free.</param>
+    internal async Task WatchAdapterBindAsync(Task bound, Func<bool> stillCurrent, int port, bool relay)
+    {
+        try { await bound; }
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!stillCurrent()) return;
+                FailRoomOnAdapter(e, port, relay);
+            });
+        }
+    }
+
+    /// <summary>A listener on the virtual adapter never came up, or stopped: end the room with the reason.</summary>
+    /// <param name="port">The port that listener wanted, for the message.</param>
+    private void FailRoomOnAdapter(Exception e, int port, bool relay)
+    {
+        _diag.Add(L.T("multiplayer.transport.diagnostics_category"), $"{e.Message} ({e.GetType().Name})");
+        StopCommand.Execute(null);
+        SetStatus(e is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.AddressNotAvailable }
+            // The room already showed as open: these say it was closed, not that it didn't start.
+            ? StatusMessage.Failure("multiplayer.room.closed_adapter_not_ready", e, ErrorText.Of(e))
+            : relay
+                ? StatusMessage.Failure("multiplayer.relay.adapter_failed", e, ErrorText.Of(e))
+                : StatusMessage.Failure("multiplayer.room.closed_adapter_port", e, port, ErrorText.Of(e)));
     }
 
     private void StopTransport()
@@ -912,9 +1021,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
     }
 
-    private async Task ConnectChatAsync(string host, int port)
+    /// <param name="replacing">The current chat connection, when this one takes over from it (moving chat onto the split
+    /// paths). The hub drops the old one without announcing anything.</param>
+    private async Task ConnectChatAsync(string host, int port, ChatClient? replacing = null)
     {
-        if (_chat is not null || _chatConnecting || _room is not { } room) return;
+        if ((replacing is null ? _chat is not null : _chat != replacing) || _chatConnecting || _room is not { } room) return;
         _chatConnecting = true;
         var client = new ChatClient(room, ChatName);
         client.Received += m => Dispatcher.UIThread.Post(() => OnChatMessage(client, m));
@@ -924,23 +1035,50 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         client.RemoteRequested += sid => Dispatcher.UIThread.Post(() => _ = OnRemoteRequestedAsync(client, sid));
         client.Disconnected += () => Dispatcher.UIThread.Post(() =>
         {
-            if (_chat != client) return;
-            _chat = null;
-            StopPrivate();
-            ChatReady = false;
-            ChatStatus = L.T("multiplayer.chat.reconnecting");
-            _ = client.DisposeAsync();
+            // The connection being replaced: the hub drops it as soon as the new one joins, which can come before the new
+            // one is in place here. Not a dropped chat unless the move fails (see below).
+            if (client == _chatReplacing)
+            {
+                _chatReplacedDropped = true;
+                _ = client.CloseQuietlyAsync();
+                return;
+            }
+            // A connection that was replaced: it ends quietly.
+            if (_chat != client)
+            {
+                _ = client.CloseQuietlyAsync();
+                return;
+            }
+            ChatDropped(client);
         });
+        _chatReplacing = replacing;
+        _chatReplacedDropped = false;
+        var inPlace = false;
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await client.ConnectAsync(host, port, timeout.Token);
-            if (_room != room)
+            // A move asks again right before joining (joining is what makes the hub drop the old connection): private
+            // work that started while this connection was coming up keeps the old one.
+            await client.ConnectAsync(host, port, timeout.Token, replacing is null ? null : () =>
             {
-                await client.DisposeAsync();
+                if (!PrivateBusy && _chat == replacing) return true;
+                _chatMove.NotJoined();
+                return false;
+            });
+            // Taking over: the old connection may already be gone (null), but not replaced by another one.
+            if (_room != room || (replacing is null ? _chat is not null : _chat is not null && _chat != replacing))
                 return;
+            if (replacing is not null)
+            {
+                // Chat is on its own connection: the handshake above went through the transport, so this says how.
+                var split = _transport?.ChatSplit?.LastWasSplit == true;
+                _chatMove.Moved(split);
+                if (!split) _diag.Add(L.T("multiplayer.transport.diagnostics_category"), L.F("multiplayer.chat.move_single", _transport?.ChatSplit?.LastReason ?? ""));
+                StopPrivate(keepPeers: true);
+                _ = CloseReplacedChatAsync(replacing);
             }
             _chat = client;
+            inPlace = true;
             ChatReady = true;
             ChatStatus = L.T("multiplayer.chat.privacy");
             StartPrivate(client);
@@ -951,20 +1089,48 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             await client.DisposeAsync();
             if (_room == room) OnFakeHost();
         }
-        catch (Exception e) when (e is System.Net.Sockets.SocketException or OperationCanceledException or IOException)
+        // The network, or a handshake that didn't go through (the channel's own errors).
+        catch (Exception e) when (e is System.Net.Sockets.SocketException or OperationCanceledException or IOException
+                                   or System.Security.Cryptography.CryptographicException or InvalidDataException)
         {
-            await client.DisposeAsync();
-            if (_room == room) ChatStatus = L.T("multiplayer.chat.connecting");
+            if (replacing is null && _room == room) ChatStatus = L.T("multiplayer.chat.connecting");
         }
         finally
         {
+            // Whatever ended the attempt (also an unexpected exception): the new connection goes, and a failed move
+            // leaves the old connection as it was, unless the hub dropped it meanwhile.
+            if (!inPlace)
+            {
+                _ = client.CloseQuietlyAsync();
+                if (replacing is not null && _chatReplacedDropped && _chat == replacing) ChatDropped(replacing);
+            }
             _chatConnecting = false;
+            _chatReplacing = null;
         }
     }
+
+    private ChatClient? _chatReplacing;
+    private bool _chatReplacedDropped;
+    private readonly ChatSplitMove _chatMove = new();
+
+    private void ChatDropped(ChatClient client)
+    {
+        _chat = null;
+        StopPrivate();
+        ChatReady = false;
+        ChatStatus = L.T("multiplayer.chat.reconnecting");
+        _ = client.DisposeAsync();
+    }
+
+    /// <summary>Private work that moving chat would cut off.</summary>
+    private bool PrivateBusy => Transfers.Any(t => t.IsActive) || FileOffers.Count > 0 || ModSyncing || ModCheck == ModCheckState.Checking
+        || _remoteSessions.Count > 0 || Volatile.Read(ref _remotePrompting) != 0;
 
     private void OnChatMessage(ChatClient client, ChatMessage message)
     {
         if (_chat is not null && _chat != client) return;
+        // Our own client announcing itself (the host's included, when it opens the room): nobody else joined.
+        if (message.Kind == ChatKind.Join && message.SenderId == client.SenderId) return;
         var mine = client.IsMine(message);
         ChatLines.Add(new ChatLine(message, mine));
         while (ChatLines.Count > 500) ChatLines.RemoveAt(0);
@@ -1002,6 +1168,17 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         SaveFile(path, () => File.WriteAllLines(path, lines), "multiplayer.chat.exported");
     }
 
+    /// <summary>
+    /// The hub drops a replaced connection once the new one has joined; this only closes it (without a goodbye) in case it
+    /// is still open a little later.
+    /// </summary>
+    private static async Task CloseReplacedChatAsync(ChatClient old)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        await old.CloseQuietlyAsync();
+    }
+
+
     /// <summary>每次刷新时看看聊天要不要连：房主在完整局域网模式下等虚拟网卡就绪后再监听虚拟 IP；加入方看到房主后连。</summary>
     private void TickChat(bool hostVisible)
     {
@@ -1012,6 +1189,13 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             if (_localChatPort is { } port) _ = ConnectChatAsync("127.0.0.1", port);
             else _ = ConnectChatAsync(EasyTierArgs.HostIp, RoomChat.Port);
+        }
+        // Chat opens as soon as a member joins, usually before the direct path is up, so under Auto it starts on one path.
+        // Once a new connection would split, chat moves over (ChatSplitMove says when, and when to stop trying).
+        else if (IsJoined && _chat is { } current && ChatReady && !_chatConnecting && _localChatPort is { } local
+                 && _chatMove.ShouldTry(_room, DateTime.UtcNow, _transport?.ChatCouldSplit == true, PrivateBusy))
+        {
+            _ = ConnectChatAsync("127.0.0.1", local, current);
         }
         // 端口一时被占（比如刚结束的房间还没放开）时，下次刷新再试。
         if (IsHosting && _hub is null && _room is { } room) StartHub(room);
@@ -1038,6 +1222,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             if (_sessionCts != lifetime || _direct != direct || lifetime.IsCancellationRequested) return false;
             if (_session is not { } old || !old.Options.Tun) return false;
+            // Relays named by domain are refused by the route plan (ExitRelays explains why), with their own message.
             var options = old.Options with { ExitNode = exitIp };
             if (direct is not null)
             {
@@ -1084,9 +1269,14 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                     _currentOptions = preserved.Options;
                     ExitNodeIp = preserved.Options.ExitNode ?? "";
                     SyncHotspotSharing();
+                    // Nothing was torn down: say the old route is still in use, not that the session ended.
+                    SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed_kept", e, ErrorText.Of(e)));
                 }
-                else StopSession();
-                SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed", e, ErrorText.Of(e)));
+                else
+                {
+                    StopSession();
+                    SetStatus(StatusMessage.Failure("multiplayer.exit.switch_failed", e, ErrorText.Of(e)));
+                }
             }
             return false;
         }
@@ -1124,6 +1314,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private async Task RefreshPeersAsync()
     {
+        _ = WatchGameTargetAsync();
         if (_session is not { } session || _refreshing) return;
         if (session.HasExited)
         {
@@ -1145,31 +1336,62 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             SyncHotspotSharing();
             Peers.Clear();
             foreach (var p in peers.Where(p => p.Ip.StartsWith(EasyTierArgs.Subnet, StringComparison.Ordinal)).OrderBy(p => p.Ip)) Peers.Add(new PeerItem(p));
-            var others = Peers.Where(p => p.Peer.Cost != "Local").ToList();
-            if (!others.Select(p => p.Peer.Ip).SequenceEqual(ExitCandidates.Select(p => p.Peer.Ip)))
-            {
-                var keep = SelectedExitPeer?.Peer.Ip;
-                ExitCandidates.Clear();
-                foreach (var p in others) ExitCandidates.Add(p);
-                SelectedExitPeer = ExitCandidates.FirstOrDefault(p => p.Peer.Ip == keep) ?? ExitCandidates.FirstOrDefault();
-            }
+            SyncExitCandidates(Peers.Where(p => p.Peer.Cost != "Local").ToList());
             var host = Peers.FirstOrDefault(p => p.Peer.Ip == EasyTierArgs.HostIp && p.Peer.Cost != "Local");
             TickChat(host is not null);
             if (host is not null) _hostSeen = true;
             // 刚显示过远程控制的提示（或正在等对方同意）时先不刷新，免得一两秒就被盖掉。
             if (!RoomStatusMayOverwrite) return;
             if (IsJoined && host is null && !_hostSeen && DateTime.UtcNow - _joinedAt > TimeSpan.FromSeconds(20))
-                SetStatus(StatusMessage.Info("multiplayer.room.not_connected_hint"));
+                SetRoomStatus(StatusMessage.Info("multiplayer.room.not_connected_hint"));
             else if (IsJoined)
-                Status = host is null ? L.T("multiplayer.room.connecting_first_time")
-                    : L.F("multiplayer.room.connected", (host.Peer.LatencyMs is { } ms ? L.F("multiplayer.room.latency", ms) : ""), JoinAddress);
+                // No latency here: it changes every refresh, and the member list shows it.
+                SetRoomStatus(host is null ? StatusMessage.Info("multiplayer.room.connecting_first_time")
+                    : StatusMessage.Info("multiplayer.room.connected", "", JoinAddress));
             else if (IsHosting)
-                Status = Peers.Count(p => p.Peer.Ip != EasyTierArgs.HostIp) is var n and > 0 ? L.P("multiplayer.room.player_count", n, n) : L.T("multiplayer.room.waiting");
+                SetRoomStatus(RoomCountStatus(Peers.Count));
         }
         finally
         {
             _refreshing = false;
         }
+    }
+
+    /// <summary>
+    /// A status the refresh (every two seconds) keeps setting: only a change is shown. Setting the same one again would
+    /// bring back a message the player just closed and note it in diagnostics each time.
+    /// </summary>
+    private void SetRoomStatus(StatusMessage message)
+    {
+        if (StatusInfo is { } current && current.Key == message.Key && current.Kind == message.Kind && current.Count == message.Count
+            && current.Args.SequenceEqual(message.Args)) return;
+        SetStatus(message);
+    }
+
+    /// <summary>Everyone in the room, the host included, like the room header; just the host means still waiting.</summary>
+    internal static StatusMessage RoomCountStatus(int everyone) => everyone > 1
+        ? new StatusMessage("multiplayer.room.player_count", [everyone]) { Count = everyone }
+        : StatusMessage.Info("multiplayer.room.waiting");
+
+    /// <summary>
+    /// The members one can go online through. Rebuilt when who's there changes; otherwise each entry is refreshed in place,
+    /// so its latency and route stay current (not the first ones seen) and the choice is kept.
+    /// </summary>
+    internal void SyncExitCandidates(IReadOnlyList<PeerItem> others)
+    {
+        var keep = SelectedExitPeer?.Peer.Ip;
+        if (!others.Select(p => p.Peer.Ip).SequenceEqual(ExitCandidates.Select(p => p.Peer.Ip)))
+        {
+            ExitCandidates.Clear();
+            foreach (var p in others) ExitCandidates.Add(p);
+        }
+        else
+        {
+            for (var i = 0; i < others.Count; i++)
+                if (ExitCandidates[i].Peer != others[i].Peer) ExitCandidates[i] = others[i];
+        }
+        var selected = ExitCandidates.FirstOrDefault(p => p.Peer.Ip == keep) ?? ExitCandidates.FirstOrDefault();
+        if (!ReferenceEquals(selected, SelectedExitPeer)) SelectedExitPeer = selected;
     }
 
     private const int MaxLogLanGames = 8;
@@ -1312,6 +1534,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         Mode = "";
         RoomCodeText = "";
         JoinAddress = "";
+        ShowRoomHostAddress(false);
         MyVirtualIp = "";
         ExitNodeIp = "";
         ExitCandidates.Clear();

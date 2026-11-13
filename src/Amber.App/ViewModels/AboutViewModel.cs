@@ -29,8 +29,7 @@ public static class NetworkList
         var microsoft = service.Accounts.Store.Accounts.Count(a => a.Kind == AccountKind.Microsoft);
         var external = service.Accounts.Store.Accounts.Count(a => a.Kind == AccountKind.External);
         var login = microsoft == 0 && external == 0 ? L.T("about.net.login.none") : L.F("about.net.login.count", microsoft + external);
-        // Phones and tablets never check by themselves (the stores update them), whatever the saved switch says.
-        var update = settings.AutoUpdateCheck && AutoUpdateCheck.IsSupported ? L.T("about.net.update.auto") : L.T("about.net.update.manual");
+        var update = L.T(UpdateStatusKey(AutoUpdateCheck.IsSupported, settings.AutoUpdateCheck, settings.UpdateFeedUrl));
         var play = multiplayer is null || multiplayer.IsIdle ? L.T("about.net.play.idle")
             : multiplayer.IsHosting ? L.T("about.net.play.hosting") : L.T("about.net.play.joined");
         return
@@ -42,6 +41,14 @@ public static class NetworkList
             Row(NetworkCategory.Multiplayer, "about.net.play", "about.net.play.when", play, "play"),
         ];
     }
+
+    /// <summary>
+    /// Row 4's status: never (a phone or tablet without an own address, where even the manual check asks nobody), once a
+    /// day (a desktop with the switch on) or only on click. Phones and tablets never check by themselves.
+    /// </summary>
+    internal static string UpdateStatusKey(bool supported, bool autoSwitch, string? userFeed) =>
+        AutoUpdateCheck.ManualFeed(userFeed, supported) is null ? "about.net.update.never"
+        : supported && autoSwitch ? "about.net.update.auto" : "about.net.update.manual";
 
     private static NetworkRow Row(NetworkCategory category, string titleKey, string whenKey, string status, string? route) =>
         new(category, L.T(titleKey), L.T(whenKey), status, route,

@@ -49,7 +49,7 @@ public sealed class NameFilterGate : IRoomGate
 /// </summary>
 public sealed class BanList : IRoomGate
 {
-    public static readonly string[] Kinds = ["host", "room", "account", "node"];
+    public static readonly string[] Kinds = ["host", "room", "account", "node", "operator"];
 
     /// <param name="Until">When the ban ends; null = permanent.</param>
     public sealed record Ban(string Kind, string Value, string? Reason, DateTimeOffset At, DateTimeOffset? Until = null)
@@ -120,6 +120,7 @@ public sealed class BanList : IRoomGate
     {
         Validate(kind, value);
         if (kind == "node") value = VolunteerNodes.Normalize(value) ?? throw new ArgumentException("node bans take a volunteer address like tcp://203.0.113.5:11010");
+        if (kind == "operator") value = Amber.Core.Identity.JayAddress.Canonical(value.Trim()) ?? throw new ArgumentException("operator bans take a Jay account address (jay1...)");
         if (duration is { } d && d <= TimeSpan.Zero) throw new ArgumentException("ban duration must be positive");
         var ban = new Ban(kind, value.Trim(), string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(), now, now + duration);
         lock (_gate)
@@ -135,6 +136,7 @@ public sealed class BanList : IRoomGate
     {
         Validate(kind, value);
         if (kind == "node") value = VolunteerNodes.Normalize(value) ?? value;
+        if (kind == "operator") value = Amber.Core.Identity.JayAddress.Canonical(value.Trim()) ?? value;
         lock (_gate)
         {
             Refresh();
@@ -146,7 +148,7 @@ public sealed class BanList : IRoomGate
 
     private static void Validate(string kind, string value)
     {
-        if (!Kinds.Contains(kind)) throw new ArgumentException("ban kind must be host, room, account or node");
+        if (!Kinds.Contains(kind)) throw new ArgumentException("ban kind must be host, room, account, node or operator");
         if (string.IsNullOrWhiteSpace(value) || value.Trim().Length > 300) throw new ArgumentException("missing fingerprint, room id or account");
     }
 
@@ -199,6 +201,16 @@ public sealed class BanList : IRoomGate
         }
     }
 
+    /// <summary>Is this Jay account banned from running volunteer nodes (kind "operator", value = its jay1 address)?</summary>
+    public bool IsOperatorBanned(string jayAccount)
+    {
+        lock (_gate)
+        {
+            Refresh();
+            return _bans.TryGetValue(Key("operator", jayAccount), out var ban) && ban.ActiveAt(_now());
+        }
+    }
+
     /// <summary>Is this volunteer node address banned?</summary>
     public bool IsNodeBanned(string url)
     {
@@ -228,6 +240,9 @@ public sealed class BanList : IRoomGate
 public sealed class RateLimitGate(int maxRoomsPerHost = 3, int newPerHostPerMinute = 6, int newPerMinute = 600, Func<DateTimeOffset>? clock = null)
     : IRoomGate, IDirectoryObserver
 {
+    /// <summary>The limits in force: rooms per host, new rooms per host per minute, new rooms per minute.</summary>
+    internal (int PerHost, int NewPerHost, int New) Limits => (maxRoomsPerHost, newPerHostPerMinute, newPerMinute);
+
     private readonly Lock _gate = new();
     private readonly Dictionary<string, HashSet<string>> _rooms = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _owner = new(StringComparer.Ordinal);

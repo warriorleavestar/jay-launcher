@@ -200,14 +200,25 @@ public sealed partial class ToolsViewModel : PageViewModel
         SetStatus(StatusMessage.Success("tools.java.installed", path));
     }, L.F("tools.java.downloading", SelectedJavaMajor));
 
+    /// <summary>What the manual check shows for an answer from <paramref name="feed"/>: the status line and the page to open (null: no button).</summary>
+    internal static (string Status, string? Page) DescribeUpdate(string feed, VerifiedUpdate? update)
+    {
+        if (update is null) return (L.F("tools.update.latest", UpdateChecker.CurrentVersion), null);
+        // No button for an unverified release: its page is exactly what an attacker would want opened.
+        if (!update.IsVerified) return (L.F("tools.update.unverified", update.Info.Version, UpdateCheck.Explain(update.Check.Verdict)), null);
+        // Only a page Jay can vouch for: the feed's html_url is not covered by the signatures.
+        var page = AutoUpdateCheck.ReleasePage(feed, update);
+        var status = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion);
+        return (page is null ? status + " " + L.T("tools.update.no_page") : status, page);
+    }
+
     [RelayCommand]
     private async Task CheckUpdateAsync()
     {
         UpdateUrl = null;
         // A blank update address means the official Jay releases.
-        var feed = AutoUpdateCheck.FeedFor(service.Settings.UpdateFeedUrl);
         // Phones and tablets update through the stores: without an own address they don't ask the desktop releases.
-        if (!AutoUpdateCheck.IsSupported && string.IsNullOrWhiteSpace(service.Settings.UpdateFeedUrl))
+        if (AutoUpdateCheck.ManualFeed(service.Settings.UpdateFeedUrl, AutoUpdateCheck.IsSupported) is not { } feed)
         {
             UpdateStatus = L.T("tools.update.store");
             return;
@@ -216,22 +227,7 @@ public sealed partial class ToolsViewModel : PageViewModel
         {
             // Privacy plan item 2: a newer release is offered only when 2 of the 3 Jay trustees signed it.
             var update = await new UpdateCheck(service.Http, AppSettings.DataDir).CheckAsync(feed, UpdateChecker.CurrentVersion);
-            if (update is null)
-            {
-                UpdateStatus = L.F("tools.update.latest", UpdateChecker.CurrentVersion);
-            }
-            else if (update.IsVerified)
-            {
-                // Only a page Jay can vouch for: the feed's html_url is not covered by the signatures.
-                UpdateUrl = AutoUpdateCheck.ReleasePage(feed, update);
-                UpdateStatus = L.F("tools.update.available", update.Info.Version, UpdateChecker.CurrentVersion)
-                    + (UpdateUrl is null ? " " + L.T("tools.update.no_page") : "");
-            }
-            else
-            {
-                // No button: the release page of an unverified release is exactly what an attacker would want opened.
-                UpdateStatus = L.F("tools.update.unverified", update.Info.Version, UpdateCheck.Explain(update.Check.Verdict));
-            }
+            (UpdateStatus, UpdateUrl) = DescribeUpdate(feed, update);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidDataException)
         {

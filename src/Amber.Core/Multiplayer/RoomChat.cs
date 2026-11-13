@@ -846,10 +846,16 @@ public sealed class ChatHub : IAsyncDisposable
                     // 第一帧必须是加入。AMB- 房间：别的连接正在用这个 id 就不让进。
                     // 邀请房间：id 是握手认出来的，同一个成员重新连上时顶掉他的旧连接（旧连接不再宣布离开）。
                     if (message.Kind != ChatKind.Join) break;
+                    var rejoined = false;
                     lock (_identityGate)
                     {
                         var holders = _members.Values.Where(m => m != member && m.Authenticated && m.SenderId == message.SenderId).ToList();
                         if (holders.Count > 0 && _table is null) break;
+                        // The same member taking over from a connection that was already announced (a reconnect, or a member
+                        // moving chat onto split paths): nobody sees them leave and join again.
+                        // Takeovers only happen in invite rooms, where the name comes from the host's member table and
+                        // doesn't change; should it ever differ, the join is announced so everyone sees the new name.
+                        rejoined = holders.Any(h => h.JoinAnnounced) && holders.All(h => h.Name == message.Name);
                         foreach (var old in holders)
                         {
                             old.JoinAnnounced = false;
@@ -859,7 +865,8 @@ public sealed class ChatHub : IAsyncDisposable
                         member.Name = message.Name;
                         member.Authenticated = true;
                     }
-                    if (member.IsHost || PresenceLimiter.TryAcquire())
+                    if (rejoined) member.JoinAnnounced = true;
+                    else if (member.IsHost || PresenceLimiter.TryAcquire())
                     {
                         member.JoinAnnounced = true;
                         Broadcast(_cipher is not null ? frame : Seal(message));
@@ -1074,11 +1081,15 @@ public sealed class ChatClient : IAsyncDisposable, IPrivateLink
 
     private Stream Stream => _stream ?? throw new InvalidOperationException();
 
-    public async Task ConnectAsync(string host, int port, CancellationToken ct = default)
+    /// <param name="beforeJoin">Asked once the connection is up, just before joining: false gives up without joining
+    /// (<see cref="OperationCanceledException"/>), so the hub never takes this member's current connection away. Runs on
+    /// the caller's context (this method doesn't leave it).</param>
+    public async Task ConnectAsync(string host, int port, CancellationToken ct = default, Func<bool>? beforeJoin = null)
     {
         await _client.ConnectAsync(host, port, ct);
         RoomChat.EnableKeepAlive(_client.Client);
         _stream = _key is null ? _client.GetStream() : await MemberChannel.ConnectAsync(_client.GetStream(), _key, _profile!, "chat", [], ct);
+        if (beforeJoin is not null && !beforeJoin()) throw new OperationCanceledException("not joining");
         _readLoop = ReadLoopAsync();
         await SendRawAsync(new ChatMessage(ChatKind.Join, SenderId, Name, "", DateTimeOffset.UtcNow), ct);
     }
@@ -1212,9 +1223,24 @@ public sealed class ChatClient : IAsyncDisposable, IPrivateLink
         catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException or InvalidOperationException or SocketException or CryptographicException) { }
     }
 
+    /// <summary>
+    /// Closes this connection without saying goodbye: for a connection the same member has already replaced (the hub then
+    /// drops it without telling anyone).
+    /// </summary>
+    public ValueTask CloseQuietlyAsync()
+    {
+        _quiet = true;
+        return DisposeAsync();
+    }
+
+    private volatile bool _quiet;
+    private int _disposed;
+
+    /// <summary>Safe to call more than once (a replaced connection can be closed from two places).</summary>
     public async ValueTask DisposeAsync()
     {
-        if (_client.Connected && _stream is not null)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (!_quiet && _client.Connected && _stream is not null)
         {
             try
             {

@@ -34,6 +34,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, TunnelServer.MaxPendingPerCaller);
     private long _slotsFullLogged;
     private long _handshakeFailedLogged;
+    // Its own limit, so frequent ended lines don't hide the failed handshakes.
+    private long _endedLogged;
 
     /// <summary>
     /// Legs still in their handshake at most, across all ports. Past that one still in its handshake is closed to make
@@ -55,7 +57,10 @@ public sealed class SplitTunnelServer : IAsyncDisposable
 
     /// <summary>Joined split connections handed to a handler.</summary>
     public int Accepted => Volatile.Read(ref _accepted);
-    /// <summary>Legs refused before pairing (bad handshake, a service that isn't split, an unexpected failure).</summary>
+    /// <summary>
+    /// Legs never handed to a handler (bad or timed-out handshake, closed to make room, a service that isn't split, an
+    /// unexpected failure before pairing). A handler that fails later doesn't count, as for <see cref="TunnelServer.Rejected"/>.
+    /// </summary>
     public int Rejected => Volatile.Read(ref _rejected);
     /// <summary>Joined connections dropped because the legs went out of step.</summary>
     public int Tampered => Volatile.Read(ref _tampered);
@@ -153,7 +158,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         {
             // Whatever failed, the leg gives its place back.
             if (e is not (SocketException or ObjectDisposedException or IOException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
-                _log?.Invoke(L.T("core.mp.transport.endpoint_ended") + e.GetType().Name);
+                _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             _slots.Release(slot);
             Interlocked.Increment(ref _rejected);
             Pump.Abort(client);
@@ -167,6 +172,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         SplitStream? joined = null;
         CancellationTokenRegistration revocation = default;
         void HandshakeDone() => _slots.Release(slot);
+        var authenticated = false;
+        var handshakeOk = false;
+        var served = false;
         try
         {
             (SecureStream Stream, TunnelService Service, MemberEntry? Member)? accepted;
@@ -179,7 +187,10 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             HandshakeDone();
             if (accepted is null) return;
             rawOwned = false;
+            handshakeOk = true;
             (secure, var service, var member) = accepted.Value;
+            // Only a member with its own key counts as authenticated (its failures are then logged in full).
+            authenticated = member is not null;
             var handler = member is null || _room.Split.For(service) == SplitPolicy.Off ? null : _route(service);
             if (handler is null)
             {
@@ -202,6 +213,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             var target = joined;
             revocation = member!.Revocation.Register(target.Abort);
             Interlocked.Increment(ref _accepted);
+            served = true;
             try
             {
                 await handler(joined, ct);
@@ -225,17 +237,22 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             // Failed: no close records, the other side sees a cut connection.
             secure?.Abort();
             joined?.Abort();
-            Interlocked.Increment(ref _rejected);
-            if ((e is CryptographicException or PlatformNotSupportedException) && TunnelServer.OncePerMinute(ref _handshakeFailedLogged))
-                _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
+            if (!served) Interlocked.Increment(ref _rejected);
+            // Once the leg's handshake succeeded, a failure is a connection that ended, not a failed handshake.
+            var ended = served || handshakeOk;
+            var what = ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+            if ((e is CryptographicException or PlatformNotSupportedException) && (authenticated || TunnelServer.OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged)))
+                _log?.Invoke(L.T(what) + e.Message);
         }
         catch (Exception e)
         {
             // Anything else still ends this leg quietly, is counted, and is logged by type only (no member details).
             secure?.Abort();
             joined?.Abort();
-            Interlocked.Increment(ref _rejected);
-            if (TunnelServer.OncePerMinute(ref _handshakeFailedLogged)) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
+            if (!served) Interlocked.Increment(ref _rejected);
+            var ended = served || handshakeOk;
+            if (authenticated || TunnelServer.OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged))
+                _log?.Invoke(L.T(ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
         }
         finally
         {
@@ -259,8 +276,10 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         _cts.Cancel();
         // Lent listeners stay bound: the accept loops end on the cancellation and the ports go back to the session.
         if (_giveBack is null) foreach (var l in _listeners) l.Stop();
-        try { await Task.WhenAll(_loops); } catch (OperationCanceledException) { }
-        _giveBack?.Invoke();
+        // Given back even when a loop ended badly: the session still holds the ports, and the next transport needs them.
+        try { await Task.WhenAll(_loops); }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or SocketException or InvalidOperationException) { }
+        finally { _giveBack?.Invoke(); }
         // Open connections see the cancellation and end; wait a little for them so nothing is still forwarding afterwards.
         Task[] running;
         lock (_running) running = [.. _running];
@@ -312,7 +331,13 @@ public sealed class SplitConnector
     public string? LastReason { get; private set; }
 
     /// <summary>Auto: the longest a split attempt may take before the connection goes on one path instead.</summary>
-    public TimeSpan AutoBudget { get; init; } = TimeSpan.FromSeconds(3);
+    public TimeSpan AutoBudget
+    {
+        get => _autoBudget;
+        init => _autoBudget = value > TimeSpan.Zero || value == Timeout.InfiniteTimeSpan
+            ? value : throw new ArgumentOutOfRangeException(nameof(AutoBudget), value, "Must be positive or infinite.");
+    }
+    private readonly TimeSpan _autoBudget = TimeSpan.FromSeconds(3);
 
     /// <param name="single">Opens a single-path tunnel connection (the existing way).</param>
     /// <param name="legs">Opens the raw connection for each leg, in leg order; null when the paths aren't set up (for example in TUN mode).</param>
@@ -331,6 +356,17 @@ public sealed class SplitConnector
         Policy = room.FromInvite && room.Tunnel.Wraps ? room.Split.For(service) : SplitPolicy.Off;
         _legs = legs is not null && legs.Count == room.Split.Paths ? legs : null;
     }
+
+    /// <summary>Whether the last connection this connector opened was split.</summary>
+    public bool LastWasSplit => Volatile.Read(ref _lastSplit) == 1;
+
+    /// <summary>
+    /// Auto, and the last connection went on one path, but a new one would split now (the paths are ready and Auto isn't
+    /// pausing): a long-lived connection such as chat can be opened again to move onto the split paths.
+    /// </summary>
+    public bool CouldSplitNow =>
+        Policy == SplitPolicy.Auto && _legs is not null && !LastWasSplit && _pathProblem?.Invoke() is null
+        && !(Volatile.Read(ref _failures) >= MaxFailures && System.Diagnostics.Stopwatch.GetTimestamp() < Interlocked.Read(ref _pausedUntil));
 
     public async Task<Stream> OpenAsync(CancellationToken ct)
     {
@@ -368,7 +404,9 @@ public sealed class SplitConnector
         {
             if (Interlocked.Increment(ref _failures) >= MaxFailures)
                 Interlocked.Exchange(ref _pausedUntil, System.Diagnostics.Stopwatch.GetTimestamp() + (long)(RetryAfter.TotalSeconds * System.Diagnostics.Stopwatch.Frequency));
-            var reason = e is OperationCanceledException ? L.T("core.mp.split.too_slow") : L.T("core.mp.split.failed") + e.Message;
+            // Too slow only when the budget ran out; a leg's own cancellation is an ordinary failure.
+            var reason = budget.IsCancellationRequested && e is OperationCanceledException
+                ? L.T("core.mp.split.too_slow") : L.T("core.mp.split.failed") + e.Message;
             _log?.Invoke(reason);
             return await NotSplitAsync(reason, ct, e);
         }
