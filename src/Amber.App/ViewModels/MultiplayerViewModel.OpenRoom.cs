@@ -157,7 +157,9 @@ public sealed partial class MultiplayerViewModel
     private void InitOpenRoom()
     {
         PropertyChanged += OnOpenRoomInputChanged;
-        ContactList.CollectionChanged += (_, _) => RefreshOpenChoices();
+        // RefreshContacts clears the list and fills it again: the choices are checked once it's done, not on the empty
+        // list in between (which would drop "friends can knock" whenever a friend is renamed or added).
+        ContactList.CollectionChanged += (_, _) => { if (!_rebuildingContacts) RefreshOpenChoices(); };
         RefreshOpenChoices();
     }
 

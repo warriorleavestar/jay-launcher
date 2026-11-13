@@ -508,6 +508,58 @@ public sealed class LobbyOpenRoomTests
         }
     });
 
+    [Fact]
+    public void FriendsCanKnockStaysPickedWhenTheContactListIsRebuilt() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var root = Path.Combine(Path.GetTempPath(), "jay-lobby-keep-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            vm.ContactsDir = root;
+            byte[] Key(byte n) { var key = new byte[32]; key[0] = n; return key; }
+            vm.Contacts.Import([new Contact(Key(1), "Robin", true, DateTimeOffset.UtcNow)]);
+            vm.RefreshContacts();
+            vm.IsPublicConnected = true;
+            vm.SelectedWho = vm.WhoChoices[1];
+            Assert.Equal(RoomAccess.Friends, vm.OpenAccess);
+
+            // Adding a friend (or renaming one) rebuilds the list, which is empty for a moment: the choice stays.
+            vm.Contacts.Import([new Contact(Key(2), "Sam", true, DateTimeOffset.UtcNow)]);
+            vm.RefreshContacts();
+            Assert.Equal(RoomAccess.Friends, vm.OpenAccess);
+
+            // With no friends left it can't be kept.
+            vm.Contacts.RemovePerson(Key(1));
+            vm.Contacts.RemovePerson(Key(2));
+            vm.RefreshContacts();
+            Assert.Empty(vm.ContactList);
+            Assert.Equal(RoomAccess.Invited, vm.OpenAccess);
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    });
+
+    [Fact]
+    public void ADirectJoinThatCannotConnectIsNotAJoin() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var dir = Path.Combine(Path.GetTempPath(), "jay-lobby-direct-" + Guid.NewGuid().ToString("N"));
+        // No relays to fall back to ("No server"), and nothing to punch towards: the connection fails.
+        var direct = new DirectSession(null!, dir, null, false, new DirectOptions([], false, [], false, false, false, true), new DiagnosticLog());
+        var room = new RoomCode("K7Q2M9XD", "4HZP8RW2N6TC", 25565);
+        var joined = vm.CompleteDirectJoinAsync(direct, room, new KnockOutcome(null, null, new byte[32]));
+        Wait(joined);
+        Assert.False(joined.Result);
+        Assert.False(vm.IsDirect);
+        Assert.Equal("", vm.Mode);
+        Assert.Equal("multiplayer.direct.connect_failed", vm.StatusInfo?.Key);
+    });
+
     private sealed class NoLobby : IDisposable
     {
         public void Dispose() { }

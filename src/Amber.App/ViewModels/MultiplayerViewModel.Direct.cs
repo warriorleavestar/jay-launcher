@@ -221,7 +221,8 @@ public sealed partial class MultiplayerViewModel
     /// Guest, after the knock: the host approved us and both sides swapped addresses inside the encrypted knock. Punches,
     /// proves membership on the bridge and runs the room over it; falls back to the relays when punching fails.
     /// </summary>
-    private async Task CompleteDirectJoinAsync(DirectSession direct, RoomCode room, KnockOutcome outcome)
+    /// <returns>True when I am in the room; false when the connection failed and the room was left (the reason is shown).</returns>
+    internal async Task<bool> CompleteDirectJoinAsync(DirectSession direct, RoomCode room, KnockOutcome outcome)
     {
         SubscribeGuestDirect(direct);
         try
@@ -237,6 +238,7 @@ public sealed partial class MultiplayerViewModel
             SetStatus(StatusMessage.Info("multiplayer.direct.punching"));
             await direct.CompleteJoinAsync(room);
             FinishDirectJoin(direct, room);
+            return true;
         }
         catch (TimeoutException e)
         {
@@ -249,6 +251,7 @@ public sealed partial class MultiplayerViewModel
             await LeaveFailedDirectAsync(direct);
             SetStatus(StatusMessage.Failure("multiplayer.direct.connect_failed", e, ErrorText.Of(e)));
         }
+        return false;
     }
 
     /// <summary>Guest: subscribe before punching, since the host may send a test request right after. Only this session's events count.</summary>
