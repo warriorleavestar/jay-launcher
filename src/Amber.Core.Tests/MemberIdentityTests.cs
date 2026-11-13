@@ -150,6 +150,194 @@ public sealed class MemberIdentityTests : IDisposable
         Assert.Equal(recovered, again.PublicKey);
     }
 
+    /// <summary>The file holds the device seed: all three device keys come back the same, and signatures still verify.</summary>
+    [Fact]
+    public void DeviceKeysRoundTrip()
+    {
+        byte[] ed, mlDsa;
+        Amber.Core.Identity.HybridSignature signature;
+        using (var identity = MemberIdentity.LoadOrCreate(_dir))
+        {
+            Assert.Same(identity.Device.Dh, identity.KeyPair);
+            ed = identity.Device.EdPublicKey;
+            mlDsa = identity.Device.MlDsaPublicKey;
+            signature = identity.Device.Sign("test"u8, "hello"u8);
+        }
+        using var again = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Equal(ed, again.Device.EdPublicKey);
+        Assert.Equal(mlDsa, again.Device.MlDsaPublicKey);
+        Assert.True(Amber.Core.Identity.DeviceKeys.Verify(ed, mlDsa, "test"u8, "hello"u8, signature));
+    }
+
+    /// <summary>
+    /// An identity file from before device seeds (a bare X25519 key) keeps that key, so hosts and friends still know the
+    /// device; a seed is added for the signing keys, and both survive the next start.
+    /// </summary>
+    [Fact]
+    public void OldBareKeyIsKeptAndGainsSigningKeys()
+    {
+        Directory.CreateDirectory(_dir);
+        using var legacy = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        var raw = legacy.ExportPrivateKey();
+        var oldPath = Path.Combine(_dir, MemberIdentity.LegacyFileName);
+        File.WriteAllBytes(oldPath, MemberIdentity.Protect(_dir, raw));
+        var oldBytes = File.ReadAllBytes(oldPath);
+
+        byte[] ed, mlDsa;
+        using (var identity = MemberIdentity.LoadOrCreate(_dir))
+        {
+            Assert.Null(identity.Warning);
+            Assert.True(identity.IsPersisted);
+            Assert.Equal(legacy.PublicKey, identity.PublicKey);
+            ed = identity.Device.EdPublicKey;
+            mlDsa = identity.Device.MlDsaPublicKey;
+        }
+        Assert.False(File.Exists(oldPath + ".broken"));
+        // The old file is left exactly as it was, so an older version using this folder still finds its identity.
+        Assert.Equal(oldBytes, File.ReadAllBytes(oldPath));
+        Assert.True(File.Exists(Path.Combine(_dir, MemberIdentity.FileName)));
+        using var again = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Null(again.Warning);
+        Assert.Equal(legacy.PublicKey, again.PublicKey);
+        Assert.Equal(ed, again.Device.EdPublicKey);
+        Assert.Equal(mlDsa, again.Device.MlDsaPublicKey);
+        // Resetting gives a device whose handshake key comes from the seed like any new one.
+        again.Reset();
+        Assert.NotEqual(legacy.PublicKey, again.PublicKey);
+        using var reset = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Equal(again.PublicKey, reset.PublicKey);
+        Assert.Equal(oldBytes, File.ReadAllBytes(oldPath));
+    }
+
+    /// <summary>A damaged new file on a device that came from an older version takes the handshake key from the old file again.</summary>
+    [Fact]
+    public void DamagedNewFileFallsBackToTheOldKey()
+    {
+        Directory.CreateDirectory(_dir);
+        using var legacy = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.LegacyFileName), MemberIdentity.Protect(_dir, legacy.ExportPrivateKey()));
+        using (var first = MemberIdentity.LoadOrCreate(_dir)) Assert.Equal(legacy.PublicKey, first.PublicKey);
+        var path = Path.Combine(_dir, MemberIdentity.FileName);
+        File.WriteAllText(path, "garbage");
+
+        using var again = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Equal(legacy.PublicKey, again.PublicKey);
+        Assert.True(again.IsPersisted);
+        Assert.True(File.Exists(path + ".broken"));
+        using var next = MemberIdentity.LoadOrCreate(_dir);
+        Assert.Null(next.Warning);
+        Assert.Equal(legacy.PublicKey, next.PublicKey);
+        Assert.Equal(again.Device.EdPublicKey, next.Device.EdPublicKey);
+    }
+
+    /// <summary>After a reset, the old key was given up on purpose: a damaged new file gets a fresh identity, not the old key.</summary>
+    [Fact]
+    public void AfterAResetTheOldKeyNeverComesBack()
+    {
+        Directory.CreateDirectory(_dir);
+        using var legacy = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.LegacyFileName), MemberIdentity.Protect(_dir, legacy.ExportPrivateKey()));
+        using (var first = MemberIdentity.LoadOrCreate(_dir))
+        {
+            Assert.Equal(legacy.PublicKey, first.PublicKey);
+            first.Reset();
+        }
+        Assert.True(File.Exists(Path.Combine(_dir, MemberIdentity.RetiredFileName)));
+        var path = Path.Combine(_dir, MemberIdentity.FileName);
+        File.WriteAllText(path, "garbage");
+        using (var damaged = MemberIdentity.LoadOrCreate(_dir))
+        {
+            Assert.NotEqual(legacy.PublicKey, damaged.PublicKey);
+            Assert.NotNull(damaged.Warning);
+        }
+        File.Delete(path);
+        using var missing = MemberIdentity.LoadOrCreate(_dir);
+        Assert.NotEqual(legacy.PublicKey, missing.PublicKey);
+    }
+
+    /// <summary>
+    /// What an older version finds: it reads only the old file, as a bare key. A new device never writes that file, and a
+    /// damaged old file is neither copied nor replaced.
+    /// </summary>
+    [Fact]
+    public void OlderVersionsNeverSeeTheNewFile()
+    {
+        using (MemberIdentity.LoadOrCreate(_dir)) { }
+        Assert.False(File.Exists(Path.Combine(_dir, MemberIdentity.LegacyFileName)));
+
+        var oldPath = Path.Combine(_dir, MemberIdentity.LegacyFileName);
+        File.Delete(Path.Combine(_dir, MemberIdentity.FileName));
+        File.WriteAllText(oldPath, "garbage");
+        using var fresh = MemberIdentity.LoadOrCreate(_dir);
+        Assert.NotNull(fresh.Warning);
+        Assert.Equal("garbage", File.ReadAllText(oldPath));
+        Assert.False(File.Exists(oldPath + ".broken"));
+        // The new file only holds the new formats: a bare key in it is damage, not an old identity.
+        using var bare = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.FileName), MemberIdentity.Protect(_dir, bare.ExportPrivateKey()));
+        using var again = MemberIdentity.LoadOrCreate(_dir);
+        Assert.NotNull(again.Warning);
+        Assert.NotEqual(bare.PublicKey, again.PublicKey);
+    }
+
+    /// <summary>A seed-sized plaintext with an unknown format byte is treated as damaged, not as a seed.</summary>
+    [Fact]
+    public void UnknownFormatByteIsCorrupt()
+    {
+        Directory.CreateDirectory(_dir);
+        var raw = new byte[33];
+        raw[0] = 0x07;
+        File.WriteAllBytes(Path.Combine(_dir, MemberIdentity.FileName), MemberIdentity.Protect(_dir, raw));
+        using var identity = MemberIdentity.LoadOrCreate(_dir);
+        Assert.NotNull(identity.Warning);
+        Assert.True(File.Exists(Path.Combine(_dir, MemberIdentity.FileName + ".broken")));
+    }
+
+    [Fact]
+    public void LockedKeyProtectionKeepsTheIdentityFile()
+    {
+        // Windows only: DPAPI refusing for this logon (an SSH logon without a password) must not replace a good identity.
+        if (!OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, MemberIdentity.FileName);
+        byte[] stored = [.. "AMBID1"u8.ToArray(), .. new byte[200]];
+        File.WriteAllBytes(path, stored);
+        MemberIdentity.DpapiProbe = () => false;
+        try
+        {
+            using var identity = MemberIdentity.LoadOrCreate(_dir);
+            Assert.False(identity.IsPersisted);
+            Assert.Equal(Amber.Core.Localization.L.T("core.mp.identity.locked"), identity.Warning);
+            Assert.Equal(stored, File.ReadAllBytes(path));
+            Assert.False(File.Exists(path + ".broken"));
+        }
+        finally
+        {
+            MemberIdentity.DpapiProbe = null;
+        }
+    }
+
+    [Fact]
+    public void UndecryptableFileWithWorkingKeyProtectionIsReplaced()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, MemberIdentity.FileName);
+        File.WriteAllBytes(path, [.. "AMBID1"u8.ToArray(), .. new byte[200]]);
+        MemberIdentity.DpapiProbe = () => true;
+        try
+        {
+            using var identity = MemberIdentity.LoadOrCreate(_dir);
+            Assert.True(identity.IsPersisted);
+            Assert.Equal(Amber.Core.Localization.L.T("core.mp.identity.corrupt"), identity.Warning);
+            Assert.True(File.Exists(path + ".broken"));
+        }
+        finally
+        {
+            MemberIdentity.DpapiProbe = null;
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_dir)) Directory.Delete(_dir, true);

@@ -29,6 +29,15 @@
   </ItemGroup>
 
   <!--
+    CurseForge third-party API key for official builds: CI passes the repository secret CURSEFORGE_API_KEY as the
+    environment variable JAY_CURSEFORGE_API_KEY (push to main and tags only). It is never in the repository; local and
+    PR builds have none and fall back to the user's own key (Content/CurseForgeBuiltInKey.cs).
+  -->
+  <ItemGroup Condition="'$(JAY_CURSEFORGE_API_KEY)' != ''">
+    <AssemblyMetadata Include="Jay.CurseForgeApiKey" Value="$(JAY_CURSEFORGE_API_KEY)" />
+  </ItemGroup>
+
+  <!--
     Jay's DNS fallback for the Windows strong sandbox (tools/jay-dns, Java 18+): compiled from source with a local JDK
     and embedded as Amber.Core.jay-dns.jar. Without a JDK the build goes on without it (a warning) and Java 18+ games
     use the standard sandbox; release builds pass -p:RequireJayDns=true so a missing JDK fails the build instead.
