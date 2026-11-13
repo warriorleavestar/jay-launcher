@@ -53,12 +53,92 @@ internal sealed partial class SelfTest
         // No public network added yet: the setup card explains where public rooms come from; with one: the card and its hint.
         Check("公共网络：联机页有公共网络卡片和说明", page is not null && host.IsPublicTab && HasText("multiplayer.public.title")
             && (host.ShowPublicSetup ? HasText("multiplayer.public.setup_body") : HasText("multiplayer.public.hint")));
+        var service = host.TestService;
+        // The volunteer settings need no network or component: checked first, so they run everywhere.
+        {
+            // Volunteer relay settings: the card is there, a home-network address is refused, a public one is saved, then off again
+            // (the self-check must not listen on a public port).
+            Check("Volunteer relay: offered on this network", host.VolunteersAllowed);
+            Dispatcher.UIThread.Invoke(() => { host.VolunteerEnabled = true; host.VolunteerAddress = "192.168.1.20"; });
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: home-network address refused", !service.Settings.VolunteerNode, host.Status);
+            Dispatcher.UIThread.Invoke(() => host.VolunteerAddress = "jay.example.org");
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: public address saved", service.Settings.VolunteerNode && service.Settings.VolunteerAddress == "jay.example.org", host.Status);
+            await ShotAsync("Volunteer relay settings");
+            Dispatcher.UIThread.Invoke(() => host.VolunteerEnabled = false);
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: turned off again", !service.Settings.VolunteerNode, host.Status);
+            // Detect and Test port need the public network; before connecting they say so and do nothing else.
+            // The buttons sit in the collapsed "Volunteer relay" expander on the settings tab: open both first.
+            Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("settings"));
+            var volunteerExpander = await FindAsync<Expander>(e => Equals(e.Header, L.T("multiplayer.volunteer.title")));
+            if (volunteerExpander is not null) Dispatcher.UIThread.Invoke(() => volunteerExpander.IsExpanded = true);
+            await Task.Delay(300);
+            Check("Volunteer relay: Detect and Test port buttons shown",
+                await FindAsync<Button>(b => ReferenceEquals(b.Command, host.DetectVolunteerAddressCommand)) is not null
+                && await FindAsync<Button>(b => ReferenceEquals(b.Command, host.TestVolunteerPortCommand)) is not null);
+            // Signing with the Jay account is its own switch, off by default (installs that volunteered before stay unsigned);
+            // what it tells the network's operator shows once it is turned on.
+            var signText = L.T("multiplayer.volunteer.sign_privacy");
+            Check("Volunteer relay: signing is off by default", !new Amber.App.Services.AppSettings().VolunteerSigned);
+            var signedBefore = service.Settings.VolunteerSigned;
+            Dispatcher.UIThread.Invoke(() => host.VolunteerSigned = false);
+            Check("Volunteer relay: signing switch shown", await FindAsync<CheckBox>(c => c.Content is TextBlock { Text: var t } && t == L.T("multiplayer.volunteer.sign")) is not null);
+            Check("Volunteer relay: signing privacy text hidden while off", await FindAsync<TextBlock>(t => t.Text == signText && t.IsEffectivelyVisible) is null);
+            Dispatcher.UIThread.Invoke(() => { host.VolunteerEnabled = true; host.VolunteerSigned = true; });
+            await Task.Delay(300);
+            Check("Volunteer relay: signing privacy text shown once turned on", await FindAsync<TextBlock>(t => t.Text == signText && t.IsEffectivelyVisible) is not null);
+            if (await FindAsync<TextBlock>(t => t.Text == signText) is { } signHint)
+            {
+                Dispatcher.UIThread.Invoke(() => signHint.BringIntoView());
+                await Task.Delay(400);
+            }
+            await ShotAsync("Volunteer relay signing");
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: signing saved", service.Settings.VolunteerSigned, host.Status);
+            // The longest volunteer message wraps in a narrow window, in the languages where it is longest.
+            var width = Dispatcher.UIThread.Invoke(() => window.Width);
+            foreach (var language in new[] { "en", "ja" })
+            {
+                Dispatcher.UIThread.Invoke(() =>
+                {
+                    Amber.Core.Localization.L.SetLanguage(language);
+                    window.Width = 640;
+                    host.VolunteerStatus = L.T("core.mp.public.volunteer_owner");
+                });
+                await Task.Delay(400);
+                var status = await FindAsync<TextBlock>(t => t.Text == host.VolunteerStatus && t.IsEffectivelyVisible);
+                if (status is not null) Dispatcher.UIThread.Invoke(() => status.BringIntoView());
+                Check($"Volunteer relay: long message wraps in a narrow window ({language})",
+                    status is not null && Dispatcher.UIThread.Invoke(() => status.Bounds.Height > status.FontSize * 2 && status.Bounds.Right <= (status.Parent as Control)!.Bounds.Width + 1));
+                await ShotAsync($"Volunteer relay narrow {language}");
+            }
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                Amber.Core.Localization.L.SetLanguage("zh-Hans");
+                window.Width = width;
+                host.VolunteerStatus = "";
+            });
+            Dispatcher.UIThread.Invoke(() => { host.VolunteerSigned = false; host.VolunteerEnabled = false; });
+            host.SaveVolunteerCommand.Execute(null);
+            Check("Volunteer relay: signing turned off again", !service.Settings.VolunteerSigned && !service.Settings.VolunteerNode, host.Status);
+            // Leave the setting as it was found.
+            Dispatcher.UIThread.Invoke(() => host.VolunteerSigned = signedBefore);
+            host.SaveVolunteerCommand.Execute(null);
+            await host.DetectVolunteerAddressCommand.ExecuteAsync(null);
+            Check("Volunteer relay: Detect asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && host.VolunteerAddress == "jay.example.org", host.Status);
+            await host.TestVolunteerPortCommand.ExecuteAsync(null);
+            Check("Volunteer relay: Test port asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && !host.IsCheckingVolunteer, host.Status);
+            // Back to the public rooms tab for the checks below.
+            Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
+            await Task.Delay(300);
+        }
         if (!host.IsComponentReady)
         {
             Log("SKIP 公共网络：联机组件没有下载");
             return;
         }
-        var service = host.TestService;
         // 收到的文件放进报告目录（私聊在进房间时就建好了，要在开房间之前设）。
         host.DownloadsDir = Path.Combine(reportDir, "downloads-host");
 
@@ -82,32 +162,6 @@ internal sealed partial class SelfTest
         host.SavePublicNodesCommand.Execute(null);
         Check("公共网络：保存种子节点", host.HasPublicNodes, host.Status);
 
-        // Volunteer relay settings: the card is there, a home-network address is refused, a public one is saved, then off again
-        // (the self-check must not listen on a public port).
-        Check("Volunteer relay: offered on this network", host.VolunteersAllowed);
-        Dispatcher.UIThread.Invoke(() => { host.VolunteerEnabled = true; host.VolunteerAddress = "192.168.1.20"; });
-        host.SaveVolunteerCommand.Execute(null);
-        Check("Volunteer relay: home-network address refused", !service.Settings.VolunteerNode, host.Status);
-        Dispatcher.UIThread.Invoke(() => host.VolunteerAddress = "jay.example.org");
-        host.SaveVolunteerCommand.Execute(null);
-        Check("Volunteer relay: public address saved", service.Settings.VolunteerNode && service.Settings.VolunteerAddress == "jay.example.org", host.Status);
-        await ShotAsync("Volunteer relay settings");
-        Dispatcher.UIThread.Invoke(() => host.VolunteerEnabled = false);
-        host.SaveVolunteerCommand.Execute(null);
-        Check("Volunteer relay: turned off again", !service.Settings.VolunteerNode, host.Status);
-        // Detect and Test port need the public network; before connecting they say so and do nothing else.
-        // The buttons sit in the collapsed "Volunteer relay" expander on the settings tab: open both first.
-        Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("settings"));
-        var volunteerExpander = await FindAsync<Expander>(e => Equals(e.Header, L.T("multiplayer.volunteer.title")));
-        if (volunteerExpander is not null) Dispatcher.UIThread.Invoke(() => volunteerExpander.IsExpanded = true);
-        await Task.Delay(300);
-        Check("Volunteer relay: Detect and Test port buttons shown",
-            await FindAsync<Button>(b => ReferenceEquals(b.Command, host.DetectVolunteerAddressCommand)) is not null
-            && await FindAsync<Button>(b => ReferenceEquals(b.Command, host.TestVolunteerPortCommand)) is not null);
-        await host.DetectVolunteerAddressCommand.ExecuteAsync(null);
-        Check("Volunteer relay: Detect asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && host.VolunteerAddress == "jay.example.org", host.Status);
-        await host.TestVolunteerPortCommand.ExecuteAsync(null);
-        Check("Volunteer relay: Test port asks to connect first", host.Status == L.T("multiplayer.volunteer.connect_first") && !host.IsCheckingVolunteer, host.Status);
         service.Settings.PublicNetworkNoticeAccepted = false;
         Dispatcher.UIThread.Invoke(() => host.ShowTabCommand.Execute("public"));
         await Task.Delay(300);

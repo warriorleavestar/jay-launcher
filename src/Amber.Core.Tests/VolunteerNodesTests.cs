@@ -41,10 +41,9 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     private static bool Ok(JsonObject reply) => reply["ok"]?.GetValue<bool>() == true;
 
     [Theory]
-    [InlineData("tcp://8.8.8.8:11010", "tcp://8.8.8.8:11010")]
-    [InlineData("8.8.4.4:12000", "tcp://8.8.4.4:12000")]
+    [InlineData("tcp://node1.example.org:11010", "tcp://node1.example.org:11010")]
+    [InlineData("node2.example.org:12000", "tcp://node2.example.org:12000")]
     [InlineData(" tcp://Jay.Example.ORG:11010 ", "tcp://jay.example.org:11010")]
-    [InlineData("tcp://[2606:4700::1111]:11010", "tcp://[2606:4700::1111]:11010")]
     [InlineData("tcp://192.168.1.5:11010", null)]
     [InlineData("tcp://10.0.0.1:11010", null)]
     [InlineData("tcp://172.20.0.1:11010", null)]
@@ -52,14 +51,15 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     [InlineData("tcp://127.0.0.1:11010", null)]
     [InlineData("tcp://169.254.1.1:11010", null)]
     [InlineData("tcp://203.0.113.5:11010", null)]
+    [InlineData("tcp://[2001:db8::1]:11010", null)]
     [InlineData("tcp://[fe80::1]:11010", null)]
     [InlineData("tcp://[fd00::1]:11010", null)]
     [InlineData("tcp://localhost:11010", null)]
     [InlineData("tcp://printer.local:11010", null)]
     [InlineData("tcp://nas:11010", null)]
-    [InlineData("udp://8.8.8.8:11010", null)]
-    [InlineData("tcp://8.8.8.8:11010/x", null)]
-    [InlineData("tcp://user@8.8.8.8:11010", null)]
+    [InlineData("udp://node1.example.org:11010", null)]
+    [InlineData("tcp://node1.example.org:11010/x", null)]
+    [InlineData("tcp://user@node1.example.org:11010", null)]
     [InlineData("", null)]
     public void OnlyPublicTcpAddressesAreVolunteers(string input, string? expected) =>
         Assert.Equal(expected, VolunteerNodes.Normalize(input));
@@ -67,26 +67,26 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     [Fact]
     public async Task RegistryListsOnlyAfterTheProbeAndForgetsUnrenewedNodes()
     {
-        var reachable = new HashSet<string> { "tcp://8.8.8.8:11010" };
+        var reachable = new HashSet<string> { "tcp://node1.example.org:11010" };
         var probes = 0;
         var registry = new VolunteerRegistry((url, _) => { Interlocked.Increment(ref probes); return Task.FromResult(reachable.Contains(url)); }, () => _now);
 
-        var first = registry.Register("tcp://8.8.8.8:11010");
+        var first = registry.Register("tcp://node1.example.org:11010");
         Assert.True(Ok(first));
         Assert.False(first["listed"]!.GetValue<bool>());
         await registry.LastProbe;
-        Assert.Equal(["tcp://8.8.8.8:11010"], registry.Pick());
-        Assert.True(registry.Register("8.8.8.8:11010")["listed"]!.GetValue<bool>());
+        Assert.Equal(["tcp://node1.example.org:11010"], registry.Pick().Select(n => n.Url));
+        Assert.True(registry.Register("node1.example.org:11010")["listed"]!.GetValue<bool>());
         Assert.Equal(1, probes);
 
         // Unreachable: probed, never listed, dropped.
-        registry.Register("tcp://1.1.1.1:11010");
+        registry.Register("tcp://node3.example.org:11010");
         await registry.LastProbe;
-        Assert.DoesNotContain("tcp://1.1.1.1:11010", registry.Listed());
+        Assert.DoesNotContain("tcp://node3.example.org:11010", registry.Listed());
         Assert.Equal("bad", registry.Register("tcp://192.168.0.2:11010")["error"]!.GetValue<string>());
 
         // Re-probed after an hour of renewals.
-        for (var i = 0; i < 21; i++) { _now += VolunteerNodes.RenewEvery; registry.Register("tcp://8.8.8.8:11010"); }
+        for (var i = 0; i < 21; i++) { _now += VolunteerNodes.RenewEvery; registry.Register("tcp://node1.example.org:11010"); }
         await registry.LastProbe;
         Assert.Equal(3, probes);   // first probe, the unreachable one, and the hourly re-probe
 
@@ -94,8 +94,8 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         _now += VolunteerNodes.Ttl + TimeSpan.FromSeconds(1);
         Assert.Empty(registry.Listed());
 
-        registry.Blocked = url => url == "tcp://8.8.8.8:11010";
-        Assert.Equal("banned", registry.Register("tcp://8.8.8.8:11010")["error"]!.GetValue<string>());
+        registry.Blocked = url => url == "tcp://node1.example.org:11010";
+        Assert.Equal("banned", registry.Register("tcp://node1.example.org:11010")["error"]!.GetValue<string>());
     }
 
     [Fact]
@@ -104,6 +104,8 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         var registry = new VolunteerRegistry((_, _) => Task.FromResult(true), () => _now);
         for (var i = 0; i < VolunteerRegistry.MaxEntries; i++)
         {
+            // New addresses are taken at a limited rate per minute.
+            if (i > 0 && i % (VolunteerRegistry.NewPerMinute / 2) == 0) _now += TimeSpan.FromSeconds(61);
             Assert.True(Ok(registry.Register($"tcp://node{i}.example.org:11010")));
             await registry.LastProbe;
         }
@@ -123,24 +125,36 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         };
         var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port));
         Assert.Empty(await client.NodesAsync(default));
-        Assert.False(await client.VolunteerAsync("tcp://8.8.8.8:11010", default));
+        Assert.False(await client.VolunteerAsync("tcp://node1.example.org:11010", null, default));
         await directory.Volunteers.LastProbe;
-        Assert.True(await client.VolunteerAsync("tcp://8.8.8.8:11010", default));
-        Assert.Equal(["tcp://8.8.8.8:11010"], await client.NodesAsync(default));
-        await Assert.ThrowsAsync<ArgumentException>(() => client.VolunteerAsync("tcp://192.168.1.2:11010", default));
+        Assert.True(await client.VolunteerAsync("tcp://node1.example.org:11010", null, default));
+        Assert.Equal(["tcp://node1.example.org:11010"], await client.NodesAsync(default));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.VolunteerAsync("tcp://192.168.1.2:11010", null, default));
 
         directory.Volunteers = null;
-        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.VolunteerAsync("tcp://8.8.8.8:11010", default));
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.VolunteerAsync("tcp://node1.example.org:11010", null, default));
         Assert.Equal("off", e.Code);
         Assert.Empty(await client.NodesAsync(default));
     }
 
+    /// <summary>Stands in for "on the public internet" in tests, so no real public address is needed.</summary>
+    private static bool TestRangeIsPublic(IPAddress ip) => ip.ToString().StartsWith("10.235.", StringComparison.Ordinal) || ip.ToString() == "fd00::235";
+
+    [Theory]
+    [InlineData("tcp://10.235.0.9:11010", "tcp://10.235.0.9:11010")]
+    [InlineData("10.235.0.9:12000", "tcp://10.235.0.9:12000")]
+    [InlineData("tcp://[fd00::235]:11010", "tcp://[fd00::235]:11010")]
+    [InlineData("tcp://10.0.0.1:11010", null)]
+    [InlineData("udp://10.235.0.9:11010", null)]
+    public void PublicAddressLiteralsAreKept(string input, string? expected) =>
+        Assert.Equal(expected, VolunteerNodes.Normalize(input, TestRangeIsPublic));
+
     [Fact]
     public void PublicAddressComesFromEasyTiersStunResult()
     {
-        Assert.Equal("8.8.4.4", VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":["8.8.4.4"]},"ip_list":{"public_ipv4":null}}"""));
-        // ip_list.public_ipv4 as EasyTier's numeric form (1.1.1.1 = 16843009).
-        Assert.Equal("1.1.1.1", VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":[]},"ip_list":{"public_ipv4":{"addr":16843009}}}"""));
+        Assert.Equal("10.235.0.4", VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":["10.235.0.4"]},"ip_list":{"public_ipv4":null}}""", TestRangeIsPublic));
+        // ip_list.public_ipv4 as EasyTier's numeric form (10.235.0.9 = 183173129).
+        Assert.Equal("10.235.0.9", VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":[]},"ip_list":{"public_ipv4":{"addr":183173129}}}""", TestRangeIsPublic));
         // Private / CGNAT results and garbage give nothing.
         Assert.Null(VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":["100.64.3.4","192.168.1.2"]}}"""));
         Assert.Null(VolunteerNodes.PublicAddressFromNodeInfo("""{"stun_info":{"public_ip":[]},"ip_list":{"public_ipv4":null}}"""));
@@ -151,16 +165,16 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     [Fact]
     public async Task ProbeTellsAWouldBeVolunteerWhetherItsPortIsOpenAndIsRateLimited()
     {
-        var open = new HashSet<string> { "tcp://8.8.8.8:11010" };
+        var open = new HashSet<string> { "tcp://node1.example.org:11010" };
         await using var directory = new RoomDirectoryServer(IPAddress.Loopback, 0, clock: () => _now)
         {
             Volunteers = new VolunteerRegistry((url, _) => Task.FromResult(open.Contains(url)), () => _now),
         };
         var client = new RoomDirectoryClient(new LoopbackNetwork(directory.Port));
-        Assert.True(await client.ProbeAsync("tcp://8.8.8.8:11010", default));
-        Assert.False(await client.ProbeAsync("tcp://1.1.1.1:11010", default));
+        Assert.True(await client.ProbeAsync("tcp://node1.example.org:11010", default));
+        Assert.False(await client.ProbeAsync("tcp://node3.example.org:11010", default));
         // Same address again right away: refused.
-        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.ProbeAsync("tcp://8.8.8.8:11010", default));
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.ProbeAsync("tcp://node1.example.org:11010", default));
         Assert.Equal("rate", e.Code);
         // "Test port" says it was the port test that was too soon, not the directory's "Publishing too often".
         Assert.Equal("multiplayer.volunteer.test_rate_limited", Amber.App.ViewModels.MultiplayerViewModel.PortTestRejected(e).Key);
@@ -168,7 +182,7 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         var other = new DirectoryRejectedException("banned", "nope");
         Assert.Equal(["nope"], Amber.App.ViewModels.MultiplayerViewModel.PortTestRejected(other).Args);
         _now += VolunteerRegistry.CheckSameAddressEvery + TimeSpan.FromSeconds(1);
-        Assert.True(await client.ProbeAsync("tcp://8.8.8.8:11010", default));
+        Assert.True(await client.ProbeAsync("tcp://node1.example.org:11010", default));
         // Probing never lists anything.
         Assert.Empty(directory.Volunteers.Listed());
         // Whole-directory cap per minute.
@@ -180,16 +194,16 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => client.ProbeAsync("tcp://192.168.0.9:11010", default));
 
         directory.Volunteers = null;
-        Assert.Equal("off", (await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.ProbeAsync("tcp://8.8.4.4:11010", default))).Code);
+        Assert.Equal("off", (await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.ProbeAsync("tcp://node2.example.org:11010", default))).Code);
     }
 
     [Fact]
     public void VolunteerArgsListenPubliclyRelayOnlyThisNetworkAndCapBandwidth()
     {
-        var profile = PublicNetworkProfile.Jay(["tcp://8.8.4.4:11010"]);
+        var profile = PublicNetworkProfile.Jay(["tcp://node2.example.org:11010"]);
         var me = new VolunteerSettings("jay.example.org", 12000, 512);
         var args = PublicNetworkArgs.Build(new PublicNetworkOptions(profile, 15000, 15001,
-            ExtraPeers: ["tcp://1.1.1.1:11010", "tcp://jay.example.org:12000"], Volunteer: me));
+            ExtraPeers: ["tcp://node3.example.org:11010", "tcp://jay.example.org:12000"], Volunteer: me));
         string After(string flag) => args[args.IndexOf(flag) + 1];
         Assert.Contains("tcp://0.0.0.0:12000", args);
         Assert.Contains("udp://0.0.0.0:12000", args);
@@ -197,7 +211,7 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         Assert.Equal("tcp://jay.example.org:12000", After("--mapped-listeners"));
         Assert.Equal(PublicNetworkProfile.JayNetworkName, After("--relay-network-whitelist"));
         Assert.Equal("524288", After("--instance-recv-bps-limit"));
-        Assert.Contains("tcp://1.1.1.1:11010", args);
+        Assert.Contains("tcp://node3.example.org:11010", args);
         // Never peers with itself.
         Assert.Equal(1, args.Count(a => a == "tcp://jay.example.org:12000"));
         Assert.Contains("--dhcp", args);
@@ -213,15 +227,15 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     {
         var cache = new VolunteerCache(Path.Combine(_dir, "volunteer-nodes.json"));
         Assert.Empty(cache.For("jay"));
-        cache.Remember("jay", ["tcp://8.8.8.8:11010", "tcp://10.0.0.1:11010"]);
+        cache.Remember("jay", ["tcp://node1.example.org:11010", "tcp://10.0.0.1:11010"]);
         cache.Remember("jay", Enumerable.Range(0, 20).Select(i => $"tcp://n{i}.example.org:11010"));
-        cache.Remember("nz", ["tcp://1.1.1.1:11010"]);
+        cache.Remember("nz", ["tcp://node3.example.org:11010"]);
         var jay = cache.For("jay");
         Assert.Equal(VolunteerNodes.Remember, jay.Count);
         Assert.Equal("tcp://n0.example.org:11010", jay[0]);
         Assert.DoesNotContain("tcp://10.0.0.1:11010", jay);
-        Assert.Equal(["tcp://1.1.1.1:11010"], cache.For("nz"));
-        cache.Forget("nz", "tcp://1.1.1.1:11010");
+        Assert.Equal(["tcp://node3.example.org:11010"], cache.For("nz"));
+        cache.Forget("nz", "tcp://node3.example.org:11010");
         Assert.Empty(cache.For("nz"));
         File.WriteAllText(Path.Combine(_dir, "volunteer-nodes.json"), "{ broken");
         Assert.Empty(cache.For("jay"));
@@ -252,7 +266,7 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
 
         var byConfig = await StartAsync(b => b.UseConfig(off));
         Assert.Null(byConfig.Volunteers);
-        Assert.Equal("off", byConfig.Directory!.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = "tcp://8.8.8.8:11010" })["error"]!.GetValue<string>());
+        Assert.Equal("off", byConfig.Directory!.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = "tcp://node1.example.org:11010" })["error"]!.GetValue<string>());
         await byConfig.DisposeAsync();
         _cleanup.Remove(byConfig);
 
@@ -267,7 +281,7 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     public async Task OperatorSeesAndBansVolunteerNodes()
     {
         var server = await StartAsync(admin: true);
-        Assert.True(Ok(server.Directory!.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = "tcp://8.8.8.8:11010" })));
+        Assert.True(Ok(server.Directory!.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = "tcp://node1.example.org:11010" })));
         await server.Volunteers!.LastProbe;
         Assert.Equal(1, server.Health()["volunteers"]!.GetValue<int>());
 
@@ -275,12 +289,12 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         var port = server.AdminPort!.Value.ToString();
         var output = new StringWriter();
         Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "nodes", "--admin-port", port]), output, http));
-        Assert.Contains("tcp://8.8.8.8:11010", output.ToString());
-        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "ban", "node", "8.8.8.8:11010", "--reason", "slow", "--admin-port", port]), output, http));
+        Assert.Contains("tcp://node1.example.org:11010", output.ToString());
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "ban", "node", "node1.example.org:11010", "--reason", "slow", "--admin-port", port]), output, http));
         Assert.Empty(server.Volunteers.Listed());
-        Assert.Equal("banned", server.Directory.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = "tcp://8.8.8.8:11010" })["error"]!.GetValue<string>());
+        Assert.Equal("banned", server.Directory.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = "tcp://node1.example.org:11010" })["error"]!.GetValue<string>());
         Assert.Throws<ArgumentException>(() => server.Ban("node", "tcp://192.168.1.1:11010", null));
-        Assert.True(server.Bans!.Remove("node", "8.8.8.8:11010"));
-        Assert.True(Ok(server.Directory.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = "tcp://8.8.8.8:11010" })));
+        Assert.True(server.Bans!.Remove("node", "node1.example.org:11010"));
+        Assert.True(Ok(server.Directory.Handle(new JsonObject { ["op"] = "volunteer", ["url"] = "tcp://node1.example.org:11010" })));
     }
 }
