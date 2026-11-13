@@ -230,6 +230,7 @@ public sealed partial class MultiplayerViewModel
             RoomCodeText = "";
             HostFingerprint = outcome.HostFingerprint;
             HostJayAccount = outcome.HostJayAccount;
+            SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);
             DirectHint = L.T("multiplayer.direct.guest_hint");
             SetStatus(StatusMessage.Info("multiplayer.direct.punching"));
             await direct.CompleteJoinAsync(room);

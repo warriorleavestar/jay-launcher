@@ -121,8 +121,6 @@ public sealed class ContentInstaller(Downloader downloader, IReadOnlyDictionary<
     /// <summary>远端给的文件名不能带目录，防止写到目标文件夹之外。</summary>
     public static string SafeFileName(string name)
     {
-        var clean = Path.GetFileName(name.Replace('\\', '/'));
-        if (string.IsNullOrWhiteSpace(clean) || clean is "." or "..") throw new InvalidDataException(L.F("core.content.install.invalidfilename", name));
-        return clean;
+        return FileNames.TryBare(name) ?? throw new InvalidDataException(L.F("core.content.install.invalidfilename", name));
     }
 }

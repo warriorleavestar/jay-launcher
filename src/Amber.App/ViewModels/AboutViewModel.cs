@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Amber.App.Services;
 using Amber.Core.Auth;
+using Amber.Core.Launch;
 using Amber.Core.Localization;
 using Amber.Core.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -28,7 +29,7 @@ public static class NetworkList
         var microsoft = service.Accounts.Store.Accounts.Count(a => a.Kind == AccountKind.Microsoft);
         var external = service.Accounts.Store.Accounts.Count(a => a.Kind == AccountKind.External);
         var login = microsoft == 0 && external == 0 ? L.T("about.net.login.none") : L.F("about.net.login.count", microsoft + external);
-        var update = string.IsNullOrWhiteSpace(settings.UpdateFeedUrl) ? L.T("about.net.update.no_feed") : L.T("about.net.update.manual");
+        var update = L.T(UpdateStatusKey(AutoUpdateCheck.IsSupported, settings.AutoUpdateCheck, settings.UpdateFeedUrl));
         var play = multiplayer is null || multiplayer.IsIdle ? L.T("about.net.play.idle")
             : multiplayer.IsHosting ? L.T("about.net.play.hosting") : L.T("about.net.play.joined");
         return
@@ -36,10 +37,18 @@ public static class NetworkList
             Row(NetworkCategory.Download, "about.net.download", "about.net.download.when", L.T("about.net.download.status"), "settings#Source"),
             Row(NetworkCategory.Login, "about.net.login", "about.net.login.when", login, "me"),
             Row(NetworkCategory.ContentApi, "about.net.content", "about.net.content.when", L.T("about.net.content.status"), "settings#CurseForgeKey"),
-            Row(NetworkCategory.UpdateCheck, "about.net.update", "about.net.update.when", update, "settings#UpdateFeed"),
+            Row(NetworkCategory.UpdateCheck, "about.net.update", AutoUpdateCheck.IsSupported ? "about.net.update.when" : "about.net.update.when_mobile", update, AutoUpdateCheck.IsSupported ? "settings#AutoUpdate" : "settings#UpdateFeed"),
             Row(NetworkCategory.Multiplayer, "about.net.play", "about.net.play.when", play, "play"),
         ];
     }
+
+    /// <summary>
+    /// Row 4's status: never (a phone or tablet without an own address, where even the manual check asks nobody), once a
+    /// day (a desktop with the switch on) or only on click. Phones and tablets never check by themselves.
+    /// </summary>
+    internal static string UpdateStatusKey(bool supported, bool autoSwitch, string? userFeed) =>
+        AutoUpdateCheck.ManualFeed(userFeed, supported) is null ? "about.net.update.never"
+        : supported && autoSwitch ? "about.net.update.auto" : "about.net.update.manual";
 
     private static NetworkRow Row(NetworkCategory category, string titleKey, string whenKey, string status, string? route) =>
         new(category, L.T(titleKey), L.T(whenKey), status, route,

@@ -118,7 +118,40 @@ public sealed class TunnelServer : IAsyncDisposable
 
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
     public int Accepted;
+    /// <summary>
+    /// Connections never handed to a handler: refused for want of a place, handshake failed or timed out, closed to make
+    /// room, failed before the handshake, or a service that isn't offered. A handler that fails later doesn't count.
+    /// </summary>
     public int Rejected;
+
+    /// <summary>
+    /// Connections still in their handshake at most. Past that one still in its handshake is closed to make room
+    /// (<see cref="HandshakeSlots"/>), so unauthenticated connections can only tie up so much, and keeping new members
+    /// out takes refilling every place faster than a member's handshake. Connections handed over on loopback (a local
+    /// relay or port forwarder in front of the listener) can't be told apart: they share one group with no per-caller
+    /// limit, so behind such a forwarder the choice of who makes room is by age only and the protection is weaker.
+    /// </summary>
+    public const int MaxPendingHandshakes = 256;
+
+    /// <summary>Places one caller with its own address may hold.</summary>
+    public const int MaxPendingPerCaller = 16;
+    private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, MaxPendingPerCaller);
+    private long _slotsFullLogged;
+    private long _handshakeFailedLogged;
+    // Its own limit, so frequent ended lines (a room without members) don't hide the failed handshakes.
+    private long _endedLogged;
+
+    /// <summary>Connections in their handshake right now.</summary>
+    public int PendingHandshakes => _slots.Held;
+
+    /// <summary>Connections closed in their handshake to make room for newer ones.</summary>
+    public int Evicted => _slots.Evicted;
+
+    /// <summary>How long one connection may take to finish its handshake.</summary>
+    internal TimeSpan HandshakeTimeout { get; init; } = TunnelHandshake.Timeout;
+
+    /// <summary>Tests: runs on each accepted socket before anything else (to make that step fail).</summary>
+    internal Action<TcpClient>? BeforeServeForTest { get; init; }
 
     /// <param name="route">每种服务怎么处理；返回 null 表示不提供这个服务（连接会被关掉）。</param>
     public TunnelServer(RoomCode room, TunnelSettings settings, int port, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null, IPAddress? address = null)
@@ -155,25 +188,88 @@ public sealed class TunnelServer : IAsyncDisposable
             {
                 return;
             }
-            _ = HandleAsync(client, ct);
+            var slot = _slots.TryTake(CallerOf(client), () => { Pump.Abort(client); client.Dispose(); }, out var evicted);
+            if (evicted) LogSlotsFull(_log, ref _slotsFullLogged);
+            if (slot is null)
+            {
+                Interlocked.Increment(ref Rejected);
+                Pump.Abort(client);
+                client.Dispose();
+                continue;
+            }
+            _ = HandleAsync(client, slot, ct);
         }
     }
 
-    private async Task HandleAsync(TcpClient client, CancellationToken ct)
+    /// <summary>
+    /// The caller for handshake places: an IPv4 address, or the /64 of an IPv6 one (one machine usually has a whole /64).
+    /// Null for loopback, where callers handed over can't be told apart.
+    /// </summary>
+    internal static string? CallerOf(TcpClient client)
     {
+        try { return CallerOf((client.Client.RemoteEndPoint as IPEndPoint)?.Address); }
+        catch (Exception e) when (e is SocketException or ObjectDisposedException) { return null; }
+    }
+
+    internal static string? CallerOf(IPAddress? address)
+    {
+        if (address is null) return null;
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (IPAddress.IsLoopback(address)) return null;
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return address.ToString();
+        var bytes = address.GetAddressBytes();
+        Array.Clear(bytes, 8, 8);
+        return new IPAddress(bytes) + "/64";
+    }
+
+    /// <summary>Logs that the handshake places are full, at most once a minute.</summary>
+    internal static void LogSlotsFull(Action<string>? log, ref long lastLogged)
+    {
+        if (OncePerMinute(ref lastLogged)) log?.Invoke(L.T("core.mp.transport.handshake_slots_full"));
+    }
+
+    /// <summary>True at most once a minute per <paramref name="lastLogged"/>: anything a caller can trigger before it is
+    /// a member is logged this way, so unauthenticated connections can't flood the log.</summary>
+    internal static bool OncePerMinute(ref long lastLogged)
+    {
+        var now = Environment.TickCount64;
+        var last = Interlocked.Read(ref lastLogged);
+        if (last != 0 && now - last < 60_000) return false;
+        return Interlocked.CompareExchange(ref lastLogged, now, last) == last;
+    }
+
+    private async Task HandleAsync(TcpClient client, HandshakeSlots.Slot slot, CancellationToken ct)
+    {
+        void HandshakeDone() => _slots.Release(slot);
         using (client)
         {
-            Pump.Tune(client);
-            Stream stream = client.GetStream();
+            Stream? stream = null;
             CancellationTokenRegistration revocation = default;
+            var served = false;
+            // A member (with its own key) passed the handshake: from here its failures are logged in full, not limited.
+            // A room without members (shared room key only) and the unwrapped SOCKS mode stay limited.
+            var authenticated = false;
+            var handshakeOk = false;
             try
             {
+                BeforeServeForTest?.Invoke(client);
+                Pump.Tune(client);
+                stream = client.GetStream();
                 TunnelService service;
                 if (_settings.Wraps)
                 {
-                    var accepted = await TunnelHandshake.AcceptWithMemberAsync(stream, _room, _settings.Mode, _settings.Disguise, ct);
+                    (SecureStream Stream, TunnelService Service, MemberEntry? Member)? accepted;
+                    using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                    {
+                        // Each connection has its own deadline to finish the handshake, whatever the handshake itself waits for.
+                        deadline.CancelAfter(HandshakeTimeout);
+                        accepted = await TunnelHandshake.AcceptWithMemberAsync(stream, _room, _settings.Mode, _settings.Disguise, deadline.Token);
+                    }
+                    HandshakeDone();
                     if (accepted is null) return;
                     (stream, service, var member) = accepted.Value;
+                    authenticated = member is not null;
+                    handshakeOk = true;
                     // 邀请房间：这个成员的钥匙一作废（踢出、重新批准换了钥匙、房间结束）就断开这条连接。
                     // 握手完之前已经作废的，Register 会立刻调用。
                     if (member is not null)
@@ -184,6 +280,7 @@ public sealed class TunnelServer : IAsyncDisposable
                         });
                 }
                 else service = TunnelService.Socks;
+                HandshakeDone();
                 var handler = _route(service);
                 if (handler is null)
                 {
@@ -192,19 +289,43 @@ public sealed class TunnelServer : IAsyncDisposable
                     return;
                 }
                 Interlocked.Increment(ref Accepted);
+                served = true;
                 await handler(stream, ct);
             }
-            catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or PlatformNotSupportedException or InvalidDataException or ArgumentException)
+            catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or PlatformNotSupportedException
+                                       or InvalidDataException or ArgumentException or ObjectDisposedException or InvalidOperationException)
             {
                 // 出错断开：不给对面发“正常结束”。
                 (stream as IAuthenticatedStream)?.Abort();
-                Interlocked.Increment(ref Rejected);
-                if (e is CryptographicException or PlatformNotSupportedException) _log?.Invoke(L.T("core.mp.transport.endpoint_handshake_failed") + e.Message);
+                // Only a connection that never got served counts as refused; a forwarding that ended is not.
+                if (!served) Interlocked.Increment(ref Rejected);
+                // Once the handshake succeeded, a failure is a connection that ended, not a failed handshake.
+                var ended = served || handshakeOk;
+                var what = ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed";
+                var line = e is CryptographicException or PlatformNotSupportedException ? L.T(what) + e.Message
+                    : e is InvalidOperationException or ArgumentException ? L.T(what) + e.GetType().Name : null;
+                // Anyone can cause this before a member's handshake succeeded: then at most one line a minute (only
+                // lines actually written use it up).
+                if (line is not null && (authenticated || OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged))) _log?.Invoke(line);
+            }
+            catch (Exception e)
+            {
+                // Anything else still ends this connection quietly and is logged by type only (no member details).
+                (stream as IAuthenticatedStream)?.Abort();
+                if (!served) Interlocked.Increment(ref Rejected);
+                var ended = served || handshakeOk;
+                if (authenticated || OncePerMinute(ref ended ? ref _endedLogged : ref _handshakeFailedLogged))
+                    _log?.Invoke(L.T(ended ? "core.mp.transport.endpoint_ended" : "core.mp.transport.endpoint_handshake_failed") + e.GetType().Name);
             }
             finally
             {
+                HandshakeDone();
                 await revocation.DisposeAsync();
-                await stream.DisposeAsync();
+                if (stream is not null)
+                {
+                    try { await stream.DisposeAsync(); }
+                    catch (Exception e) when (e is IOException or ObjectDisposedException or SocketException) { }
+                }
             }
         }
     }
@@ -249,6 +370,23 @@ public sealed class TunnelClient : IAsyncDisposable
         _listener.Start();
         // 在线程池上跑：不要带上界面线程的同步上下文（否则每条连接的收尾都要排队等界面线程）。
         _loop = Task.Run(() => AcceptLoopAsync(_cts.Token));
+    }
+
+    /// <summary>A plain TCP connection to host:port (one leg of a split connection, before its handshake).</summary>
+    internal static async Task<Stream> Raw(string host, int port, CancellationToken ct)
+    {
+        var tcp = new TcpClient();
+        try
+        {
+            await tcp.ConnectAsync(host, port, ct);
+            Pump.Tune(tcp);
+            return new OwnedStream(tcp);
+        }
+        catch
+        {
+            tcp.Dispose();
+            throw;
+        }
     }
 
     /// <summary>经 EasyTier 连到 host:port，再按房间设置做封装握手。</summary>
