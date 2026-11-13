@@ -85,6 +85,7 @@ public sealed partial class MultiplayerViewModel
         IsWaitingForGame = true;
         OnPropertyChanged(nameof(HasGameRelay));
         OnPropertyChanged(nameof(GameLinkText));
+        StartRoomGameWatch();
     }
 
     /// <summary>
@@ -137,6 +138,7 @@ public sealed partial class MultiplayerViewModel
         IsWaitingForGame = false;
         OnPropertyChanged(nameof(HasGameRelay));
         OnPropertyChanged(nameof(GameLinkText));
+        StopRoomGameWatch();
     }
 
     /// <summary>A LAN world was picked or a port typed while the room waits (or runs) on a relay: point it at the game.</summary>
@@ -162,11 +164,12 @@ public sealed partial class MultiplayerViewModel
         relay.SetTarget(port);
         // A new link, even back to a port linked before: checks still running are about the old one.
         _gameLink++;
-        _relayGameLabel = manual is not null ? L.F("multiplayer.guide.port_label", port) : game?.Label ?? "";
+        _relayGameLabel = manual is not null ? L.F("multiplayer.guide.port_label", port) : game?.Game.Motd ?? "";
         _relayTyped = manual is not null;
         var wasWaiting = IsWaitingForGame;
         IsWaitingForGame = false;
         OnPropertyChanged(nameof(GameLinkText));
+        RebuildRoomGames();
         SetStatus(StatusMessage.Success(wasWaiting ? "multiplayer.relay.connected" : "multiplayer.relay.switched", _relayGameLabel));
     }
 
@@ -272,6 +275,9 @@ public sealed partial class MultiplayerViewModel
         }
         IsWaitingForGame = true;
         OnPropertyChanged(nameof(GameLinkText));
+        RebuildRoomGames();
+        // Another world already open (the same one reopened on a new port) takes over.
+        FollowRoomGame();
         SetStatus(StatusMessage.Info("multiplayer.relay.game_gone", label));
     }
 
@@ -289,8 +295,4 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>Self-check: back to a room without a relay.</summary>
     internal void StopGameRelayForTest() => StopGameRelay();
-
-    /// <summary>The room card's [Find]: listen for LAN worlds; a found one is picked up by the relay.</summary>
-    [RelayCommand]
-    private Task FindGameForRoomAsync() => ScanAsync();
 }
