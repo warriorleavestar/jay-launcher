@@ -171,6 +171,7 @@ public sealed partial class MultiplayerViewModel
             // Keep this network's directory snapshot fresh on a fixed schedule: lookups and the room list read it locally.
             var connected = _public;
             // The same copy every DirectoryClient(connected) reads (one per network), so lookups never ask on their own.
+            _snapshotPolling?.Dispose();
             _snapshotPolling = DirectoryClient(connected).Snapshots.StartPolling(() => DirectoryClient(connected));
             SetStatus(StatusMessage.Success("multiplayer.public.connected", profile.Name));
             StartAnnouncerIfHosting();

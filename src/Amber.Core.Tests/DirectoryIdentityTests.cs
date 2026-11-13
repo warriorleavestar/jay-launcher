@@ -168,6 +168,43 @@ public class DirectoryIdentityTests
         await serverSide;
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnlyASnapshotCallTakesASnapshotReply(bool askedForSnapshot)
+    {
+        // A directory answering an ordinary request with a length frame (asking the reader to set aside a big buffer)
+        // gets a bad reply; a snapshot call reads it, chunk by chunk.
+        using var identity = X25519KeyPair.Generate();
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var serverSide = Task.Run(async () =>
+        {
+            using var c = await listener.AcceptTcpClientAsync();
+            var s = c.GetStream();
+            var first = new byte[1];
+            await SecureStream.ReadExactAsync(s, first, default);
+            var accepted = await DirectoryChannel.AcceptAsync(s, first[0], identity, Secret, default) ?? throw new InvalidOperationException();
+            try { await accepted.Snapshot(System.Text.Encoding.UTF8.GetBytes("{\"ok\":true}"), 1024, TimeSpan.FromSeconds(5), default); }
+            catch (IOException) { }
+        });
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync(IPAddress.Loopback, port);
+        var trust = new DirectoryTrust { Network = "", Pinned = [identity.PublicKey] };
+        var lengths = new List<int>();
+        var call = DirectoryChannel.CallAsync(tcp.GetStream(), trust, "", Secret, new JsonObject { ["op"] = "hello" }, default,
+            askedForSnapshot ? lengths.Add : null);
+        if (askedForSnapshot)
+        {
+            Assert.True((await call)["ok"]!.GetValue<bool>());
+            Assert.Equal(1024, Assert.Single(lengths));
+        }
+        else await Assert.ThrowsAsync<InvalidDataException>(() => call);
+        tcp.Dispose();
+        await serverSide;
+    }
+
     [Fact]
     public async Task ClientsFirstMessageHasTheExpectedLength()
     {
