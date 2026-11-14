@@ -1363,7 +1363,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// unexpired, under that lookup and whose signer <paramref name="acceptSigner"/> accepts (check it against what the
     /// code expects, so a directory can't hand over someone else's record). Null when none qualifies.
     /// </summary>
-    public async Task<SignedRecord?> GetRecordAsync(byte[] lookup, Func<byte[], bool> acceptSigner, CancellationToken ct, DateTimeOffset? now = null)
+    /// <param name="seen">
+    /// The highest seqs this computer accepted before: a record older than that for the lookup is not taken (null), and
+    /// a newer one is noted.
+    /// </param>
+    public async Task<SignedRecord?> GetRecordAsync(byte[] lookup, Func<byte[], bool> acceptSigner, CancellationToken ct, DateTimeOffset? now = null,
+        RecordSeqMemory? seen = null)
     {
         if (lookup.Length != SignedRecord.LookupLength) throw new ArgumentException("Lookup length", nameof(lookup));
         var results = await FanOutAsync(new JsonObject { ["op"] = "rec.get", ["lookup"] = Convert.ToHexStringLower(lookup) }, ct);
@@ -1373,6 +1378,12 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             .OfType<SignedRecord>()
             .Where(r => r.LookupKey.AsSpan().SequenceEqual(lookup) && r.Expires > at && acceptSigner(r.Signer))
             .MaxBy(r => r.Seq);
+        // Older than a record this computer already took for the lookup: rolled back, so not used.
+        if (best is not null && seen is not null)
+        {
+            if (best.Seq < seen.Floor(lookup)) best = null;
+            else seen.Note(lookup, best.Seq);
+        }
         if (best is not null || results.Any(r => r.Reply is not null)) return best;
         throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
     }
