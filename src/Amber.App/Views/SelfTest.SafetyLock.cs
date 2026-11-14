@@ -67,7 +67,6 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
             var (newDevice, removeFriend) = FriendPanels();
             // Settings › Multiplayer's [Reset all to defaults] question, as the real view shows it.
             var mpView = new MultiplayerSettingsView { DataContext = settings, Width = 560, HorizontalAlignment = HorizontalAlignment.Left };
-            settings.ConfirmingAdvancedReset = true;
             var stage = new ScrollViewer
             {
                 Content = new StackPanel
@@ -78,6 +77,9 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 },
             };
             window.Content = stage;
+            // Asked once the view is on screen, as a click on [Reset all to defaults] would.
+            await Task.Delay(200);
+            settings.ConfirmingAdvancedReset = true;
             Check("安全面板标题行写的是 Jay 安全提示", panel.BadgeText == Amber.Core.Localization.L.T("safety.title"), panel.BadgeText);
             _locked = [("安全面板", panel), ("隐私行", row), ("朋友新设备", newDevice), ("移除朋友", removeFriend), ("联机设置的恢复默认确认", mpView.MultiplayerResetConfirm)];
             await Task.Delay(300);
