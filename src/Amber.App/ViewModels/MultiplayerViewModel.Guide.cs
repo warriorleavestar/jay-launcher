@@ -112,6 +112,18 @@ public sealed partial class MultiplayerViewModel
     /// 输入框里贴的不是这里要的码时，转到对应的地方处理，返回 true 表示已经处理了。
     /// 认不出来的码交回原来的流程，由它报“格式不对”。
     /// </summary>
+    /// <summary>
+    /// A server invite from somewhere other than the lobby's paste box (another box, the command palette): it goes into
+    /// the paste box. A plain one is used at once when <paramref name="join"/>; a sealed one waits for its passphrase.
+    /// </summary>
+    internal void FillServerInvite(string text, bool join)
+    {
+        Tab = MultiplayerTab.Play;
+        JoinCode = text.Trim();
+        if (JoinNeedsPassphrase) SetStatus(StatusMessage.Info("core.gate.invite.sealed"));
+        else if (join) JoinCommand.Execute(null);
+    }
+
     private bool RouteMisplacedCode(string text, PastedCodeKind expected, Action clearSource)
     {
         var kind = PastedCode.Detect(text);
@@ -157,10 +169,10 @@ public sealed partial class MultiplayerViewModel
                 else SetStatus(StatusMessage.Warning("multiplayer.sealed.reply_misplaced"));
                 return true;
             case PastedCodeKind.JayServer:
-                // Jay 服务器邀请：交给“Jay 服务器”卡片加入（只能用一次，所以直接用掉，不留在原来的框里）。
+                // A server invite goes to the lobby's paste box, where [Join and save] uses it (a sealed one first asks
+                // for its passphrase there).
                 clearSource();
-                JayServers.InviteText = text;
-                JayServers.JoinCommand.Execute(null);
+                FillServerInvite(text, join: true);
                 return true;
             case PastedCodeKind.FriendCode when ShowPublicNetworks:
                 // 好友码：到“公开房间”里找朋友的隐藏房间（要先连上公共网络）。

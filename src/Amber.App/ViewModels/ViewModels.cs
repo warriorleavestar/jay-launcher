@@ -482,7 +482,7 @@ public sealed partial class MainViewModel : ObservableObject
             JoinJayServer = code =>
             {
                 shell.Navigate("play");
-                multiplayer.JayServers.InviteText = code;
+                multiplayer.FillServerInvite(code, join: false);
             },
         };
         multiplayer.Navigate = r => shell.Navigate(r);

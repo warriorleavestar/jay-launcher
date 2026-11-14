@@ -343,18 +343,22 @@ public sealed class LobbyOpenRoomTests
         vm.ShowMailedInvites([row.Invite]);
         Assert.Single(vm.FriendRooms);
 
-        // "Not now" in the request bar closes the request only.
+        // "Not now" in the request bar lets the room go with its invite; the same invite arriving again stays away.
         var request = Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
         service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(vm.FriendRooms);
+        Assert.Equal(0, vm.HeldFriendInvites);
+        vm.ShowMailedInvites([row.Invite]);
+        Assert.Empty(vm.FriendRooms);
+        vm.ShowMailedInvites([Mail(TimeSpan.FromMinutes(30), "Robin's world")]);
         Assert.Single(vm.FriendRooms);
 
-        // An invite that has run out leaves the list the next time it is looked at.
+        // An invite that has already run out is not listed, and asks nothing.
         vm.ShowMailedInvites([Mail(TimeSpan.FromSeconds(-1), "Old room")]);
         vm.PruneFriendRooms();
         Assert.Equal(["Robin's world"], vm.FriendRooms.Select(r => r.Title));
-
-        // The request that offered to join the old room went with its row.
-        Assert.DoesNotContain(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
+        Assert.Contains("Robin's world", Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite").Spec.Title);
 
         // "For a child" has no networks: the friends and public filters fall back to "all".
         vm.Where = WhereFilter.Friends;
@@ -366,6 +370,72 @@ public sealed class LobbyOpenRoomTests
         vm.Where = WhereFilter.Public;
         Assert.Equal(WhereFilter.All, vm.Where);
         foreach (var pending in service.Requests.Pending.ToList()) service.Requests.Withdraw(pending.Spec.DedupeKey ?? "");
+    });
+
+    /// <summary>
+    /// A friend can mail any number of invites (new ids and tokens, no end date or a far one): the list, the invites held
+    /// and the requests stay within the per-device and overall limits, and every row leaves by itself at the latest
+    /// <see cref="MultiplayerViewModel.MaxFriendRoomAge"/> after it arrived.
+    /// </summary>
+    [Fact]
+    public void AFloodOfInvitesFromFriendsStaysBoundedAndLeavesByItself() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var now = DateTimeOffset.UtcNow;
+        vm.FriendRoomClock = () => now;
+        using var host = X25519KeyPair.Generate();
+        var friends = Enumerable.Range(0, 8).Select(_ => X25519KeyPair.Generate()).ToList();
+        MailedInvite Mail(X25519KeyPair from, DateTimeOffset? expires, string room) => new(
+            new Contact(from.PublicKey, "Friend", true, now),
+            new InviteBook().Create(20, null, false, TunnelSettings.Default, boundTo: vm.Identity.PublicKey).Invite,
+            host.PublicKey, room, expires);
+        int Requests() => service.Requests.Pending.Count(r => r.Spec.Kind == "contact-invite");
+        void AssertBounded()
+        {
+            Assert.InRange(vm.FriendRooms.Count, 0, MultiplayerViewModel.MaxFriendRooms);
+            Assert.Equal(vm.FriendRooms.Count, vm.HeldFriendInvites);
+            Assert.Equal(vm.FriendRooms.Count, Requests());
+            foreach (var group in vm.FriendRooms.GroupBy(r => r.Sender))
+                Assert.InRange(group.Count(), 1, MultiplayerViewModel.MaxFriendRoomsPerDevice);
+        }
+
+        try
+        {
+            // One friend, 200 distinct invites with no end, one at a time and in batches: at most three rows, newest kept.
+            var robin = friends[0];
+            for (var i = 0; i < 100; i++) vm.ShowMailedInvites([Mail(robin, null, $"room {i}")]);
+            AssertBounded();
+            vm.ShowMailedInvites(Enumerable.Range(100, 100).Select(i => Mail(robin, now.AddYears(50), $"room {i}")).ToList());
+            AssertBounded();
+            Assert.Equal(["room 199", "room 198", "room 197"], vm.FriendRooms.Select(r => r.Title));
+
+            // The same invite again is still one row.
+            vm.ShowMailedInvites([vm.FriendRooms[0].Invite]);
+            AssertBounded();
+            Assert.Equal(3, vm.FriendRooms.Count);
+
+            // Eight friends flooding together: never more than the overall limit.
+            foreach (var friend in friends)
+                vm.ShowMailedInvites(Enumerable.Range(0, 10).Select(i => Mail(friend, null, $"{i}")).ToList());
+            AssertBounded();
+            Assert.Equal(MultiplayerViewModel.MaxFriendRooms, vm.FriendRooms.Count);
+            Assert.True(vm.WatchingFriendRoomExpiry);
+
+            // A far end date doesn't keep a row: it goes at the latest MaxFriendRoomAge after it arrived.
+            Assert.All(vm.FriendRooms, r => Assert.True(r.Until <= now + MultiplayerViewModel.MaxFriendRoomAge));
+            now += MultiplayerViewModel.MaxFriendRoomAge;
+            vm.PruneFriendRooms();
+            Assert.Empty(vm.FriendRooms);
+            Assert.Equal(0, vm.HeldFriendInvites);
+            Assert.Equal(0, Requests());
+            Assert.False(vm.WatchingFriendRoomExpiry);
+        }
+        finally
+        {
+            foreach (var friend in friends) friend.Dispose();
+            foreach (var pending in service.Requests.Pending.ToList()) service.Requests.Withdraw(pending.Spec.DedupeKey ?? "");
+        }
     });
 
     [Fact]
@@ -502,6 +572,23 @@ public sealed class LobbyOpenRoomTests
                 Assert.True(vm.Contacts.Unreadable);
                 Assert.Contains(lobby.Book.Pending, i => i.BoundTo is [1, ..]);
                 Assert.Equal(2, lobby.Book.Pending.Count);
+
+                // The invites mailed for a room end with it: opening and closing rooms again and again keeps none.
+                Assert.True(vm.FriendInvitesHeld > 0);
+                vm.StopHostLobbyForTest();
+                Assert.Equal(0, vm.FriendInvitesHeld);
+                vm.ContactsDir = root;
+                vm.TestSendInvite = (_, _, _) => Task.FromResult(Guid.NewGuid().ToString("N"));
+                for (var round = 0; round < 5; round++)
+                {
+                    var again = new HostLobby(_ => new NoLobby(), () => [],
+                        book => new KnockServer(book, vm.Identity.KeyPair, () => credentials, _ => false, (_, _) => Task.FromResult(false), System.Net.IPAddress.Loopback, 0));
+                    vm.HostLobbyForTest(again, credentials);
+                    Wait(vm.InviteFriendsToKnockAsync());
+                    Assert.InRange(vm.FriendInvitesHeld, 1, 3);
+                    vm.StopHostLobbyForTest();
+                    Assert.Equal(0, vm.FriendInvitesHeld);
+                }
             }
             finally
             {
@@ -593,8 +680,13 @@ public sealed class LobbyOpenRoomTests
             // Nor is it registered with a public network, while an ordinary hosted room may be.
             vm.Mode = "host";
             Assert.True(vm.MayAnnounce);
+            Assert.True(vm.ShowPublishRoom);
             vm.IsDirect = true;
             Assert.False(vm.MayAnnounce);
+            // [Publish…] is not offered, and publishing anyway says why instead of "published".
+            Assert.False(vm.ShowPublishRoom);
+            Wait(vm.PublishRoomCommand.ExecuteAsync(null));
+            Assert.Equal("multiplayer.direct.use_sealed", vm.StatusInfo?.Key);
             vm.IsDirect = false;
             vm.Mode = "";
         }
@@ -769,24 +861,23 @@ public sealed class LobbyOpenRoomTests
             new InviteBook().Create(1, TimeSpan.FromHours(12), false, TunnelSettings.Default, boundTo: vm.Identity.PublicKey).Invite,
             host.PublicKey, room, DateTimeOffset.UtcNow + lifetime);
 
-        // Listed rooms that can run out are checked on a timer, so nobody has to touch the list.
+        // Listed rooms are checked on a timer (every one runs out), so nobody has to touch the list.
         Assert.False(vm.WatchingFriendRoomExpiry);
         vm.ShowMailedInvites([Mail(TimeSpan.FromHours(12), "Robin's world")]);
         Assert.True(vm.WatchingFriendRoomExpiry);
 
-        // The user's own "Ignore" keeps the room; the request timing out takes it away.
-        var request = Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
-        service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
-        Dispatcher.UIThread.RunJobs();
-        Assert.Single(vm.FriendRooms);
+        // The request timing out takes the room away, and so does the user's own "Not now".
         vm.ShowMailedInvites([Mail(TimeSpan.FromHours(12), "Second world")]);
-        request = Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
+        var request = service.Requests.Pending.Single(r => r.Spec.Kind == "contact-invite" && r.Spec.Title.Contains("Second world"));
         service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Timeout);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(["Robin's world"], vm.FriendRooms.Select(r => r.Title));
+        request = Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
+        service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(vm.FriendRooms);
 
-        // Once nothing listed can run out, the timer stops.
-        vm.FriendRooms.Clear();
+        // Once nothing is listed, the timer stops.
         Assert.False(vm.WatchingFriendRoomExpiry);
     });
 
