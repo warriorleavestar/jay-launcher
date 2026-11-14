@@ -295,12 +295,21 @@ public sealed record DeviceCertificate(byte[] AccountEd, byte[] AccountMlDsa, by
         }
     }
 
-    /// <summary>Device names are shown to others: no control characters, trimmed, at most <see cref="MaxNameLength"/> characters.</summary>
+    /// <summary>
+    /// Device names are shown to others on one line: no control, invisible formatting (zero-width, direction marks and
+    /// overrides), line or paragraph separator, surrogate or private-use characters; trimmed, at most
+    /// <see cref="MaxNameLength"/> characters.
+    /// </summary>
     public static string CleanName(string? name)
     {
-        var clean = new string((name ?? "").Where(c => !char.IsControl(c) && !char.IsSurrogate(c) && c is not ('‪' or '‫' or '‬' or '‭' or '‮' or '⁦' or '⁧' or '⁨' or '⁩')).ToArray()).Trim();
+        var clean = new string((name ?? "").Where(Shown).ToArray()).Trim();
         return clean.Length > MaxNameLength ? clean[..MaxNameLength].TrimEnd() : clean;
     }
+
+    private static bool Shown(char c) => char.GetUnicodeCategory(c) is not (System.Globalization.UnicodeCategory.Control
+        or System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.LineSeparator
+        or System.Globalization.UnicodeCategory.ParagraphSeparator or System.Globalization.UnicodeCategory.Surrogate
+        or System.Globalization.UnicodeCategory.PrivateUse);
 }
 
 /// <summary>

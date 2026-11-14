@@ -401,6 +401,25 @@ public sealed class JayAccountTests : IDisposable
         Assert.True(lastWords.Count > 32);
     }
 
+    /// <summary>
+    /// Names shown to others keep visible text only: zero-width and direction-mark characters, line separators and
+    /// private-use characters go, so a signed device name can't hide characters or break its line.
+    /// </summary>
+    [Theory]
+    [InlineData("Win\u200Bdows", "Windows")]
+    [InlineData("\u200EmacOS\u200F", "macOS")]
+    [InlineData("Lin\u2028ux", "Linux")]
+    [InlineData("\uFEFFJay\u2060", "Jay")]
+    [InlineData("Jay\u061C\u200D", "Jay")]
+    [InlineData("\uE000iOS", "iOS")]
+    [InlineData("Win\u202Edows", "Windows")]
+    [InlineData("我的 电脑", "我的 电脑")]
+    [InlineData("  Android  ", "Android")]
+    public void CleanNameKeepsOnlyVisibleText(string raw, string expected)
+    {
+        Assert.Equal(expected, DeviceCertificate.CleanName(System.Text.RegularExpressions.Regex.Unescape(raw)));
+    }
+
     /// <summary>An entry left in the new file because it couldn't be moved before is moved, and saved, once it can be.</summary>
     [Fact]
     public void EntryThatCouldNotMoveBeforeIsSavedOnceMoved()
