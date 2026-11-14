@@ -165,10 +165,11 @@ public sealed class GateTests : IAsyncLifetime
         await using var local = new TunnelClient(0, GateClient.Opener(membership, identity));
         using var game = new TcpClient();
         await game.ConnectAsync(IPAddress.Loopback, local.Port);
-        var hello = LoginPackets("steve");
-        await game.GetStream().WriteAsync(hello);
+        // Any casing logs in, but the server gets the bound spelling (an offline-mode server keys players by the exact name).
+        await game.GetStream().WriteAsync(LoginPackets("steve"));
 
         using var server = await _backend.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var hello = LoginPackets("Steve");
         var received = new byte[hello.Length];
         await server.GetStream().ReadExactlyAsync(received).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(hello, received);
@@ -374,6 +375,18 @@ public sealed class GateTests : IAsyncLifetime
         await Assert.ThrowsAsync<InvalidDataException>(() => McLogin.ReadAsync(new MemoryStream([0xFE, 0x01]), CancellationToken.None));
     }
 
+    /// <summary>Rewriting the name's letter case keeps every other byte, also behind a two-byte length prefix.</summary>
+    [Fact]
+    public async Task LoginNameTakesTheBoundSpelling()
+    {
+        byte[] packets = [.. Handshake(2), .. Packet([0x00, .. String("sTeVe_1"), .. new byte[200]])];
+        var login = await McLogin.ReadAsync(new MemoryStream(packets), CancellationToken.None);
+        var fixedCase = login.WithUsername("Steve_1");
+        Assert.Equal("Steve_1", fixedCase.Username);
+        Assert.Equal([.. Handshake(2), .. Packet([0x00, .. String("Steve_1"), .. new byte[200]])], fixedCase.Raw);
+        Assert.Throws<ArgumentException>(() => login.WithUsername("Alex"));
+    }
+
     private async Task<SecureStream> JoinRaw(GateMembership membership, MemberIdentity identity)
     {
         var tcp = new TcpClient();
@@ -392,7 +405,8 @@ public sealed class GateTests : IAsyncLifetime
         return [(byte)bytes.Length, .. bytes];
     }
 
-    private static byte[] Packet(byte[] body) => [(byte)body.Length, .. body];
+    private static byte[] Packet(byte[] body) =>
+        body.Length < 0x80 ? [(byte)body.Length, .. body] : [(byte)(body.Length & 0x7F | 0x80), (byte)(body.Length >> 7), .. body];
 }
 
 /// <summary>JAYS1- / JAYS2- / JAYSS1- 贴错输入框时能认出来，不和 JAY2 系列的前缀混淆。</summary>

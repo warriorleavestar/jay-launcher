@@ -14,7 +14,24 @@ public static class McLogin
     /// <summary>Handshake 的 next state。</summary>
     public enum Intent { Status = 1, Login = 2, Transfer = 3 }
 
-    public sealed record Result(Intent Intent, string? Username, byte[] Raw);
+    /// <param name="NameOffset">Where the username's bytes start in <paramref name="Raw"/> (-1 for a status ping).</param>
+    public sealed record Result(Intent Intent, string? Username, byte[] Raw, int NameOffset = -1)
+    {
+        /// <summary>
+        /// The same packets with the username written as <paramref name="canonical"/>, which must differ from it only in
+        /// letter case. Usernames are ASCII, so the length and every other byte stay as they were.
+        /// </summary>
+        public Result WithUsername(string canonical)
+        {
+            if (Username is null || NameOffset < 0 || !string.Equals(Username, canonical, StringComparison.OrdinalIgnoreCase)
+                || !GateInvite.IsValidUsername(canonical))
+                throw new ArgumentException(L.T("core.gate.mc.malformed"), nameof(canonical));
+            if (Username == canonical) return this;
+            var raw = (byte[])Raw.Clone();
+            Encoding.ASCII.GetBytes(canonical, raw.AsSpan(NameOffset, canonical.Length));
+            return this with { Username = canonical, Raw = raw };
+        }
+    }
 
     // Handshake：服务器地址最长 255 个字符（UTF-8 最多 ×3），Forge 会在后面加 “\0FML3\0” 之类的标记，留够余量。
     private const int MaxHandshake = 2048;
@@ -36,12 +53,15 @@ public static class McLogin
         var intent = (Intent)next;
         if (intent == Intent.Status) return new Result(intent, null, raw.ToArray());
 
+        var loginStart = raw.Length;
         var login = await ReadPacketAsync(stream, raw, MaxLoginStart, ct);
+        var header = (int)(raw.Length - loginStart) - login.Length;
         p = 0;
         if (ReadVarInt(login, ref p) != 0x00) throw Bad();
         var name = ReadString(login, ref p, 16);
         if (!GateInvite.IsValidUsername(name)) throw Bad();
-        return new Result(intent, name, raw.ToArray());
+        // A valid name is ASCII: its bytes are the last name.Length bytes read so far.
+        return new Result(intent, name, raw.ToArray(), (int)loginStart + header + p - name.Length);
     }
 
     private static InvalidDataException Bad() => new(L.T("core.gate.mc.malformed"));

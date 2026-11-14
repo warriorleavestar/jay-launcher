@@ -218,6 +218,9 @@ public sealed class GateServer : IAsyncDisposable
                     if (login.Intent != McLogin.Intent.Status)
                     {
                         name = names.FirstOrDefault(n => string.Equals(n, login.Username, StringComparison.OrdinalIgnoreCase));
+                        // Any casing may log in, but the server gets the bound spelling: an offline-mode server treats each
+                        // casing as a different player, which would sidestep its bans and whitelist.
+                        if (name is not null) login = login.WithUsername(name);
                         if (name is null)
                         {
                             await WriteLoginDisconnectAsync(session, L.F("core.gate.mc.name_not_bound", login.Username!), timeout.Token);
