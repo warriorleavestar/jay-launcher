@@ -98,6 +98,8 @@ public sealed class LaunchSteps
     private readonly LaunchStepTimings? _timings;
     private readonly string? _instance;
     private DateTimeOffset _started, _lastChange;
+    private long _bytes;
+    private bool _ended;
 
     public LaunchSteps(Func<DateTimeOffset>? now = null, LaunchStepTimings? timings = null, string? instance = null)
     {
@@ -122,9 +124,12 @@ public sealed class LaunchSteps
     /// <summary>Starts a step. A step still running before it counts as done.</summary>
     public void Begin(LaunchStepId id, string? detail = null)
     {
+        // Steps only move forward: a finished step does not run again, and nothing runs after a cancel or a failure.
+        if (_ended || IsFinished(this[id].State)) return;
         if (this[id].State == LaunchStepState.Running) { Detail(id, detail); return; }
         if (Current is { } running && running.Id != id) Finish(running.Id, LaunchStepState.Done, null, null);
         _started = _lastChange = _now();
+        _bytes = 0;
         Set(id, new LaunchStep(id, LaunchStepState.Running, detail));
     }
 
@@ -137,15 +142,29 @@ public sealed class LaunchSteps
         Set(id, step with { Detail = detail, Slow = false });
     }
 
-    /// <summary>A count for the running step (12 of 87); starts it when it is not running yet.</summary>
-    public void Count(LaunchStepId id, int done, int total, string? detail = null)
+    /// <summary>
+    /// A count for the running step (12 of 87); starts it when it is not running yet. A late report (for a step that
+    /// already finished, one before a step that has started since, or after a cancel or a failure) is ignored.
+    /// <paramref name="bytes"/> is how much a download has received so far: a big file that is still arriving is not
+    /// a stall even while the file count stays the same.
+    /// </summary>
+    public void Count(LaunchStepId id, int done, int total, string? detail = null, long? bytes = null)
     {
+        if (_ended || IsFinished(this[id].State)) return;
+        if (this[id].State == LaunchStepState.Pending && _steps.Skip((int)id + 1).Any(s => s.State != LaunchStepState.Pending)) return;
         if (this[id].State != LaunchStepState.Running) Begin(id, detail);
         var step = this[id];
+        if (bytes is { } b && b > _bytes)
+        {
+            _bytes = b;
+            _lastChange = _now();
+        }
         if (step.Done == done && step.Total == total && (detail is null || step.Detail == detail)) return;
         _lastChange = _now();
         Set(id, step with { Done = done, Total = total, Detail = detail ?? step.Detail, Slow = false });
     }
+
+    private static bool IsFinished(LaunchStepState state) => state is LaunchStepState.Done or LaunchStepState.Skipped or LaunchStepState.Failed;
 
     public void Done(LaunchStepId id, string? detail = null) => Finish(id, LaunchStepState.Done, detail, null);
 
@@ -157,12 +176,14 @@ public sealed class LaunchSteps
     {
         var at = Current?.Id ?? _steps.LastOrDefault(s => s.State != LaunchStepState.Pending)?.Id ?? LaunchStepId.Files;
         Finish(at, LaunchStepState.Failed, null, reason);
+        _ended = true;
     }
 
     /// <summary>The player cancelled: the running step stops with that reason, the rest stay pending.</summary>
     public void Cancel(string reason)
     {
         if (Current is { } running) Finish(running.Id, LaunchStepState.Skipped, null, reason);
+        _ended = true;
     }
 
     private void Finish(LaunchStepId id, LaunchStepState state, string? detail, string? reason)

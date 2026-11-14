@@ -524,8 +524,13 @@ public sealed partial class HomeViewModel : PageViewModel
     /// The question goes to the request bar (a safety request, "Not now" by default), not a modal: it says why Windows
     /// is about to ask before the admin prompt. Yes runs the admin step; anything else starts in the standard sandbox.
     /// </summary>
-    private Task<bool> AskSandboxByRequestAsync()
+    /// <summary>
+    /// Cancelling the start while the question is up ends the wait (an <see cref="OperationCanceledException"/>, so the
+    /// start ends as cancelled and nothing is remembered as declined) and takes the request off the bar.
+    /// </summary>
+    private async Task<bool> AskSandboxByRequestAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         RequestHandle? handle = null;
         void OnResolved(RequestHandle r)
@@ -544,8 +549,18 @@ public sealed partial class HomeViewModel : PageViewModel
             DetailsLabel = L.T("home.sandbox.consent.details_label"),
         });
         if (handle.IsResolved) OnResolved(handle);
-        return answer.Task;
+        using var stop = ct.Register(() =>
+        {
+            // Cancelled first, so the withdrawal below is not read as an answer.
+            answer.TrySetCanceled(ct);
+            _service.Requests.Resolved -= OnResolved;
+            _service.Requests.Resolve(handle, SandboxConsentCancelled, RequestSource.Program);
+        });
+        return await answer.Task;
     }
+
+    /// <summary>The choice recorded on the strong-sandbox request when the start was cancelled while it was up.</summary>
+    internal const string SandboxConsentCancelled = "cancelled";
 
     private async Task RunAsync(LaunchRequest request, bool allowSecond = false)
     {
@@ -621,7 +636,7 @@ public sealed partial class HomeViewModel : PageViewModel
                 {
                     _launchMeter.Add(DateTimeOffset.Now, (double)p.Files.CompletedFiles / p.Files.TotalFiles, p.Files.BytesDownloaded);
                     Progress = 100.0 * p.Files.CompletedFiles / p.Files.TotalFiles;
-                    steps.Count(p.Files.BytesDownloaded > 0 ? LaunchStepId.Download : LaunchStepId.Files, p.Files.CompletedFiles, p.Files.TotalFiles);
+                    steps.Count(p.Files.BytesDownloaded > 0 ? LaunchStepId.Download : LaunchStepId.Files, p.Files.CompletedFiles, p.Files.TotalFiles, bytes: p.Files.BytesDownloaded);
                 }
             }), ct);
             if (steps[LaunchStepId.Download].State == LaunchStepState.Pending) steps.Skip(LaunchStepId.Download, L.T("launch.step.download.none"));
@@ -720,7 +735,7 @@ public sealed partial class HomeViewModel : PageViewModel
             steps.Begin(LaunchStepId.Sandbox);
             options = options with
             {
-                Sandbox = await _service.SandboxForLaunchAsync(javaPath, AskSandboxConsent ?? AskSandboxByRequestAsync, note => _log.AddRaw(run.Log, "[Sandbox] " + note), ct),
+                Sandbox = await _service.SandboxForLaunchAsync(javaPath, AskSandboxConsent is { } ask ? () => ask().WaitAsync(ct) : () => AskSandboxByRequestAsync(ct), note => _log.AddRaw(run.Log, "[Sandbox] " + note), ct),
             };
             string? fellBack = null;
             if (_service.Settings.StrongSandboxFallback is { } fallback && fallback != fallbackBefore)
@@ -739,6 +754,8 @@ public sealed partial class HomeViewModel : PageViewModel
             var parser = new GameLogParser();
             var launcher = new GameLauncher(ctx.Directory);
             using var running = _service.MarkRunning(workDir);
+            // The last moment a cancel can stop the start: past here the game process exists.
+            ct.ThrowIfCancellationRequested();
             var game = launcher.Launch(options, line =>
             {
                 lock (parser)
@@ -1179,7 +1196,7 @@ public sealed partial class HomeViewModel : PageViewModel
     internal void ReportFilesForTest(int done, int total, long bytes, DateTimeOffset at)
     {
         _launchMeter.Add(at, (double)done / total, bytes);
-        Latest?.Session.Steps.Count(LaunchStepId.Download, done, total);
+        Latest?.Session.Steps.Count(LaunchStepId.Download, done, total, bytes: bytes);
         Progress = 100.0 * done / total;
     }
 
@@ -1187,7 +1204,7 @@ public sealed partial class HomeViewModel : PageViewModel
     internal static LaunchSteps StepsForTest(object run) => ((GameRun)run).Session.Steps;
 
     /// <summary>Self-check: the strong-sandbox question as a launch would ask it (on the request bar).</summary>
-    internal Task<bool> AskSandboxForTest() => AskSandboxByRequestAsync();
+    internal Task<bool> AskSandboxForTest(CancellationToken ct = default) => AskSandboxByRequestAsync(ct);
 
     internal void RemoveRunForTest(object run)
     {

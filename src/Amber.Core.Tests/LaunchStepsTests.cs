@@ -131,6 +131,58 @@ public sealed class LaunchStepsTests
     }
 
     [Fact]
+    public void FileProgressAfterJavaStartedIsIgnored()
+    {
+        var steps = New();
+        steps.Count(LaunchStepId.Files, 10, 480);
+        steps.Begin(LaunchStepId.Java);
+        steps.Count(LaunchStepId.Files, 480, 480);
+        steps.Count(LaunchStepId.Download, 3, 480);
+        Assert.Equal(LaunchStepState.Done, steps[LaunchStepId.Files].State);
+        Assert.Equal(LaunchStepState.Pending, steps[LaunchStepId.Download].State);
+        Assert.Equal(LaunchStepId.Java, steps.Current?.Id);
+    }
+
+    [Fact]
+    public void ProgressAfterCancelOrFailureIsIgnored()
+    {
+        var steps = New();
+        steps.Count(LaunchStepId.Download, 5, 100);
+        steps.Cancel("Cancelled");
+        steps.Count(LaunchStepId.Download, 6, 100);
+        steps.Count(LaunchStepId.Java, 1, 2);
+        steps.Begin(LaunchStepId.Account);
+        Assert.Equal(LaunchStepState.Skipped, steps[LaunchStepId.Download].State);
+        Assert.Null(steps.Current);
+        Assert.Equal(LaunchStepState.Pending, steps[LaunchStepId.Java].State);
+
+        var failed = New();
+        failed.Begin(LaunchStepId.Java);
+        failed.Fail("No Java");
+        failed.Detail(LaunchStepId.Java, "later");
+        failed.Begin(LaunchStepId.Account);
+        Assert.Equal(LaunchStepState.Failed, failed[LaunchStepId.Java].State);
+        Assert.Null(failed.Current);
+    }
+
+    [Fact]
+    public void ABigFileStillArrivingIsNotAStall()
+    {
+        var steps = New();
+        steps.Count(LaunchStepId.Download, 0, 3, bytes: 1_000);
+        for (var i = 0; i < 6; i++)
+        {
+            _now += TimeSpan.FromSeconds(10);
+            steps.Count(LaunchStepId.Download, 0, 3, bytes: 1_000 + (i + 1) * 5_000_000L);
+            Assert.False(steps.Tick());
+        }
+        // Neither the bytes nor the count move: now it is waiting on the server.
+        _now += LaunchStepTimings.Stalled + TimeSpan.FromSeconds(1);
+        steps.Count(LaunchStepId.Download, 0, 3, bytes: 30_001_000);
+        Assert.True(steps.Tick());
+    }
+
+    [Fact]
     public void LinesUseTheStepNamesAndTheCount()
     {
         using var _ = new Lang("zh-Hans");
