@@ -110,7 +110,7 @@ public static class Program
           jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
               在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）。先逐项显示内容和核对码，手打目录节点公钥最后 6 位才签
           jay-server network hw-cert --cosign <hardware.cert> --root <根钥匙文件>
-              另一位信任人在自己的离线电脑上加签（Jay 公共网络要三人中两人；自己的网络看 dirRootsNeed），同样先显示再手打确认
+              另一位信任人在自己的离线电脑上加签（Jay 公共网络看 JayTrust.Need，现在是 2 把要 2 把；自己的网络看 dirRootsNeed），同样先显示再手打确认
           jay-server node bind --install <证书> [--network <连接串或文件>]  只认签名够数的证书（不加 --network 就是 Jay 信任人）
           jay-server directory --network <连接串或文件> ...     用自己的公共网络当节点（不加就是 Jay 公共网络）
           网络 JSON 的格式见 networks/README.md。
@@ -134,7 +134,7 @@ public static class Program
           jay-server release trust-change --key <发版钥匙文件> --to <新名单文件> --need <几人> --seq <序号> [--from <旧名单文件>] [--chain trust-chain.json]
               换信任人：旧名单里够数的人签了，旧版 Jay 才认新名单（名单文件每行一把完整公钥）
           jay-server release verify <安装包> [--tag <v0.9.0>]   核对安装包、清单、签名和 trust-chain.json（放在安装包旁边）
-          EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 2/3 信任人签：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
+          EasyTier 加固版（Yumao-Feather/jay-easytier）的发布也要 Jay 发版钥匙签够数（现在是 2 把要 2 把）：prepare 和 verify 加 --component easytier，--tag 用它自己的（例如 jay-v2.6.4-1）
 
         通用选项：--dir <数据目录>（默认是程序旁边的 jay-server-data，也可以用环境变量 JAY_SERVER_DIR）
         """;
@@ -318,7 +318,7 @@ public static class Program
 
     /// <summary>
     /// Release signing for trustees (privacy plan items 2 and 3). Every trustee signs on their own offline machine with
-    /// their own release key (separate from the key that reviews networks); a release needs 2 of the 3. Nothing here can run in CI.
+    /// their own release key (separate from the key that reviews networks); a release needs JayTrust.ReleaseNeed of them (currently 2 of 2). Nothing here can run in CI.
     /// </summary>
     internal static int ReleaseCommand(Options options, TextWriter output, Func<IReadOnlyList<string>, string, string, bool>? confirm = null)
     {
