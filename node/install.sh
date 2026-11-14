@@ -95,15 +95,19 @@ NODE_SECRET="$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 # The list is one argument: EasyTier splits it at spaces.
 if [ "$RELAY" = "amber" ]; then WHITELIST="jay-* amber-*"; else WHITELIST="*"; fi
 
-# The secret goes to easytier-core through ET_NETWORK_SECRET in the owner-only unit file, not on the command line,
-# where every local user could read it in the process list.
+# The secret reaches easytier-core as ET_NETWORK_SECRET from a root-only file (EnvironmentFile= below). Not on the
+# command line, where every local user could read it in the process list, and not as Environment= in the unit,
+# which systemd shows to every local user (systemctl show).
+SECRET_FILE="${INSTALL_DIR}/node.env"
+(umask 077; printf 'ET_NETWORK_SECRET=%s\n' "$NODE_SECRET" > "$SECRET_FILE")
+chmod 0600 "$SECRET_FILE"
+
 ARGS="--network-name ${NODE_NET} --no-tun"
 ARGS="${ARGS} --listeners tcp://0.0.0.0:${PORT} udp://0.0.0.0:${PORT}"
 ARGS="${ARGS} --relay-network-whitelist '${WHITELIST}' --hostname amber-node --rpc-portal 127.0.0.1:15888"
 [ "$BANDWIDTH_LIMIT" -gt 0 ] && ARGS="${ARGS} --foreign-relay-bps-limit ${BANDWIDTH_LIMIT}"
 
-# Created owner-only from the start (umask), as it holds the node's secret; the chmod below keeps an existing file so.
-(umask 077; cat > "/etc/systemd/system/${SERVICE}.service") <<UNIT
+cat > "/etc/systemd/system/${SERVICE}.service" <<UNIT
 [Unit]
 Description=Amber relay node (EasyTier ${VERSION})
 Documentation=https://github.com/EasyTier/EasyTier
@@ -113,7 +117,7 @@ Wants=network-online.target
 [Service]
 User=${SERVICE_USER}
 Group=${SERVICE_USER}
-Environment=ET_NETWORK_SECRET=${NODE_SECRET}
+EnvironmentFile=${SECRET_FILE}
 ExecStart=/bin/sh -c "exec ${INSTALL_DIR}/easytier-core ${ARGS}"
 Restart=always
 RestartSec=5
