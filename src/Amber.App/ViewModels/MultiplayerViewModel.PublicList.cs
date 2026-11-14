@@ -70,13 +70,7 @@ public sealed partial class MultiplayerViewModel
         SelectedRoomSort = RoomSortChoices[0];
         PublicRooms.CollectionChanged += (_, _) =>
         {
-            if (PublicRooms.Count > 0 || IsPublicConnected) PublicRefreshed = DateTimeOffset.Now;
-            var keep = SelectedRoomGame;
-            RoomGameChoices.Clear();
-            RoomGameChoices.Add(AllGames);
-            foreach (var g in RoomFilter.Games(PublicRooms.Select(r => r.Listing))) RoomGameChoices.Add(new RoomGameChoice(g));
-            SelectedRoomGame = keep is not null && RoomGameChoices.Contains(keep) ? keep : AllGames;
-            ApplyRoomFilter();
+            if (!_fillingRooms) OnPublicRoomsChanged();
         };
         PropertyChanged += (_, e) =>
         {
@@ -89,6 +83,33 @@ public sealed partial class MultiplayerViewModel
         };
         RoomGameChoices.Add(AllGames);
         SelectedRoomGame = AllGames;
+    }
+
+    /// <summary>True while <see cref="ReplacePublicRooms"/> fills the list: the choices and filter are rebuilt once at the end, not per room.</summary>
+    private bool _fillingRooms;
+
+    private void OnPublicRoomsChanged()
+    {
+        if (PublicRooms.Count > 0 || IsPublicConnected) PublicRefreshed = DateTimeOffset.Now;
+        var keep = SelectedRoomGame;
+        RoomGameChoices.Clear();
+        RoomGameChoices.Add(AllGames);
+        foreach (var g in RoomFilter.Games(PublicRooms.Select(r => r.Listing))) RoomGameChoices.Add(new RoomGameChoice(g));
+        SelectedRoomGame = keep is not null && RoomGameChoices.Contains(keep) ? keep : AllGames;
+        ApplyRoomFilter();
+    }
+
+    /// <summary>Replaces the listed rooms with a fresh directory listing.</summary>
+    internal void ReplacePublicRooms(IEnumerable<RoomListing> rooms)
+    {
+        _fillingRooms = true;
+        try
+        {
+            PublicRooms.Clear();
+            foreach (var room in rooms) PublicRooms.Add(new PublicRoomItem(room));
+        }
+        finally { _fillingRooms = false; }
+        OnPublicRoomsChanged();
     }
 
     partial void OnRoomSearchChanged(string value) => ApplyRoomFilter();

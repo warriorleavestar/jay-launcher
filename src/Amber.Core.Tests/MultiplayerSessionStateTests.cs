@@ -90,4 +90,24 @@ public sealed class MultiplayerSessionStateTests
             try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     });
+
+    /// <summary>Refreshing the room list rebuilds the visible list once, not once per room.</summary>
+    [Fact]
+    public void RefillingThePublicRoomsRebuildsTheListOnce() => UiTestThread.Run(() =>
+    {
+        var (service, vm) = Create();
+        using var s = service;
+        var rooms = Enumerable.Range(0, 50).Select(i => new Amber.Core.Multiplayer.Public.RoomListing
+        {
+            Id = "r" + i, Name = "Room " + i, Host = "Host " + i, Mode = Amber.Core.Multiplayer.Public.RoomVisibility.Public,
+            HostKey = new byte[32], Game = i % 2 == 0 ? "1.21.1" : "1.20.1", Players = i,
+        }).ToList();
+        var changes = 0;
+        vm.VisibleRooms.CollectionChanged += (_, _) => changes++;
+        vm.ReplacePublicRooms(rooms);
+        Assert.Equal(50, vm.VisibleRooms.Count);
+        Assert.Equal(["", "1.20.1", "1.21.1"], vm.RoomGameChoices.Select(c => c.Game));
+        // One rebuild (clear + one add per room), maybe a second from the game choice being set again; never one per room.
+        Assert.True(changes <= 2 * (rooms.Count + 1), $"{changes} changes for {rooms.Count} rooms");
+    });
 }

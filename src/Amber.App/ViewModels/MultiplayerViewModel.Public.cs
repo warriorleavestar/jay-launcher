@@ -244,8 +244,7 @@ public sealed partial class MultiplayerViewModel
         try
         {
             var rooms = await DirectoryClient(network).ListAsync(default);
-            PublicRooms.Clear();
-            foreach (var room in rooms) PublicRooms.Add(new PublicRoomItem(room));
+            ReplacePublicRooms(rooms);
             if (rooms.Count == 0) SetStatus(StatusMessage.Info("multiplayer.public.no_rooms"));
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException or OperationCanceledException)
