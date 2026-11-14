@@ -35,6 +35,11 @@ public sealed class GateState
     public string? RecordNetwork { get; set; }
     /// <summary>The locator id (Base64, 16 bytes). Kept when records are turned off, so old invites work again after turning them on.</summary>
     public string? RecordId { get; set; }
+    /// <summary>
+    /// Devices taken off a name by revoke or remove. Redeem refuses such a device for any invite of that name made
+    /// before it was taken off, so a multi-use invite it still holds does not bring it back; a new invite does.
+    /// </summary>
+    public List<GateRevokedDevice> Revoked { get; set; } = [];
 
     public GateMember? Member(string name) => Members.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
 }
@@ -53,6 +58,14 @@ public sealed class GateDevice
     public string Fingerprint { get; set; } = "";
     public DateTimeOffset Added { get; set; }
     public DateTimeOffset? LastSeen { get; set; }
+}
+
+public sealed class GateRevokedDevice
+{
+    public string Name { get; set; } = "";
+    /// <summary>Device public key (Base64).</summary>
+    public string PublicKey { get; set; } = "";
+    public DateTimeOffset At { get; set; }
 }
 
 public sealed class GateRelayEntry
@@ -130,7 +143,7 @@ public sealed class GateConfig
 [JsonSerializable(typeof(GateHealth))]
 internal sealed partial class GateJsonContext : JsonSerializerContext;
 
-public enum RedeemOutcome { Ok, InviteGone, DeviceLimit, Disabled }
+public enum RedeemOutcome { Ok, InviteGone, DeviceLimit, Disabled, Revoked }
 
 /// <summary>
 /// 网关数据目录（默认 /var/lib/jay-gate）：server.key（网关长期私钥，0600）、state.json（名单和邀请）、gate.json（设置）。
@@ -145,6 +158,8 @@ public sealed class GateStore
     public const string RecordKeyFile = "record.key";
     private const string LockFile = "state.lock";
     private static readonly TimeSpan LastSeenResolution = TimeSpan.FromHours(1);
+    /// <summary>The longest an invite lives. A revoked-device entry older than this can no longer match an invite.</summary>
+    public static readonly TimeSpan MaxInviteTtl = TimeSpan.FromDays(30);
 
     private readonly string _dir;
     private readonly Lock _gate = new();
@@ -224,6 +239,7 @@ public sealed class GateStore
             var result = change(state);
             var now = DateTimeOffset.UtcNow;
             state.Invites.RemoveAll(i => i.Expires <= now || i.UsesLeft <= 0);
+            state.Revoked.RemoveAll(r => now - r.At > MaxInviteTtl);
             WriteAtomic(StatePath, JsonSerializer.SerializeToUtf8Bytes(state, GateJsonContext.Default.GateState));
             _cache = null;
             return result;
@@ -244,7 +260,7 @@ public sealed class GateStore
     {
         if (!GateInvite.IsValidUsername(name)) throw new ArgumentException(L.T("core.gate.admin.badname"));
         if (uses < 1 || uses > 100) throw new ArgumentException(L.T("core.gate.admin.baduses"));
-        if (ttl <= TimeSpan.Zero || ttl > TimeSpan.FromDays(30)) throw new ArgumentException(L.T("core.gate.admin.badttl"));
+        if (ttl <= TimeSpan.Zero || ttl > MaxInviteTtl) throw new ArgumentException(L.T("core.gate.admin.badttl"));
         var config = LoadConfig();
         var keyHash = GateProtocol.ServerKeyHash(serverPublicKey);
         var token = RandomNumberGenerator.GetBytes(GateInvite.TokenLength);
@@ -283,12 +299,15 @@ public sealed class GateStore
         if (invite is null) return (RedeemOutcome.InviteGone, (string?)null);
         var member = s.Member(invite.Name);
         if (member is { Disabled: true }) return (RedeemOutcome.Disabled, null);
+        var key = Convert.ToBase64String(devicePublicKey);
+        // Taken off this name after the invite was made: only a newer invite lets this device back in.
+        if (s.Revoked.Any(r => r.PublicKey == key && r.At >= invite.Created && string.Equals(r.Name, invite.Name, StringComparison.OrdinalIgnoreCase)))
+            return (RedeemOutcome.Revoked, null);
         if (member is null)
         {
             member = new GateMember { Name = invite.Name };
             s.Members.Add(member);
         }
-        var key = Convert.ToBase64String(devicePublicKey);
         if (!member.Devices.Any(d => d.PublicKey == key))
         {
             if (member.Devices.Count >= s.MaxDevicesPerMember) return (RedeemOutcome.DeviceLimit, null);
@@ -326,8 +345,21 @@ public sealed class GateStore
         var member = s.Member(name);
         if (member is null) return 0;
         var prefix = fingerprintPrefix?.Replace("-", "").ToUpperInvariant();
-        return member.Devices.RemoveAll(d => prefix is null || d.Fingerprint.Replace("-", "").StartsWith(prefix, StringComparison.Ordinal));
+        var gone = member.Devices.Where(d => prefix is null || d.Fingerprint.Replace("-", "").StartsWith(prefix, StringComparison.Ordinal)).ToList();
+        foreach (var d in gone) member.Devices.Remove(d);
+        NoteRevoked(s, member.Name, gone);
+        return gone.Count;
     });
+
+    private static void NoteRevoked(GateState s, string name, IEnumerable<GateDevice> devices)
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var d in devices)
+        {
+            s.Revoked.RemoveAll(r => r.PublicKey == d.PublicKey && string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+            s.Revoked.Add(new GateRevokedDevice { Name = name, PublicKey = d.PublicKey, At = now });
+        }
+    }
 
     public bool SetDisabled(string name, bool disabled) => Mutate(s =>
     {
@@ -337,7 +369,14 @@ public sealed class GateStore
         return true;
     });
 
-    public bool RemoveMember(string name) => Mutate(s => s.Members.RemoveAll(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)) > 0);
+    public bool RemoveMember(string name) => Mutate(s =>
+    {
+        var member = s.Member(name);
+        if (member is null) return false;
+        s.Members.Remove(member);
+        NoteRevoked(s, member.Name, member.Devices);
+        return true;
+    });
 
     public bool CancelInvite(string id) => Mutate(s => s.Invites.RemoveAll(i => i.Id == id) > 0);
 

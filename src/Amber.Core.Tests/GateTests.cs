@@ -310,6 +310,34 @@ public sealed class GateTests : IAsyncLifetime
         Assert.Equal(2, _store.Read().Member("steve")!.Devices.Count);
     }
 
+    /// <summary>
+    /// A revoked or removed device cannot come back with a multi-use invite it still holds, while another device can
+    /// still use that invite (the "revoke an old device, then retry" flow) and a newer invite lets the revoked one back.
+    /// </summary>
+    [Theory]
+    [InlineData("revoke")]
+    [InlineData("remove")]
+    public async Task RevokedDeviceCannotReuseAnOlderInvite(string how)
+    {
+        var invite = Invite("Steve", uses: 3);
+        using var a = Identity("a");
+        using var b = Identity("b");
+        await GateClient.EnrollAsync(invite, a);
+        if (how == "revoke") Assert.Equal(1, _store.RevokeDevices("Steve", null));
+        else Assert.True(_store.RemoveMember("Steve"));
+
+        var e = await Assert.ThrowsAsync<GateRejectedException>(() => GateClient.EnrollAsync(invite, a));
+        Assert.Equal(GateStatus.NotMember, e.Status);
+        Assert.Empty(_store.AllowedNames(a.KeyPair.PublicKey));
+
+        await GateClient.EnrollAsync(invite, b);
+        Assert.Equal(["Steve"], _store.AllowedNames(b.KeyPair.PublicKey));
+
+        await Task.Delay(20);
+        await GateClient.EnrollAsync(Invite("Steve"), a);
+        Assert.Equal(["Steve"], _store.AllowedNames(a.KeyPair.PublicKey));
+    }
+
     [Fact]
     public async Task ScannerGetsNoBytes()
     {
