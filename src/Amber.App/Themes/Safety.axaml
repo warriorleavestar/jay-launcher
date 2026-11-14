@@ -57,8 +57,11 @@
     </Style>
   </ControlTheme>
 
+  <!-- Opaque, from the locked default tokens: nothing a theme draws in the sidebar (a picture, say) shows through. -->
   <ControlTheme x:Key="{x:Type s:PrivacyRow}" TargetType="s:PrivacyRow">
-    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Background" Value="{DynamicResource SidebarBg}" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="6,4" />
     <Setter Property="TextElement.FontFamily" Value="{DynamicResource SafetyFont}" />
   </ControlTheme>
 

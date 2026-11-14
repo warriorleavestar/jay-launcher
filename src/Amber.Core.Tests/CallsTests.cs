@@ -2,6 +2,7 @@ using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Activity;
 using Amber.Core.Calls;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 using Amber.Core.Navigation;
 using Amber.Core.Safety;
@@ -223,6 +224,88 @@ public sealed class CallsTests : IDisposable
             off.StartWithFriend("Alex", CallStep.Voice);
             Assert.False(off.IsInCall);
             Assert.False(off.OffersVideo || off.OffersControl);
+        });
+    }
+
+    [Fact]
+    public void TwoCallsRingingEitherCanBeAnsweredAndTheOtherIsDeclined()
+    {
+        UiTestThread.Run(() =>
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = _root, PlayerName = "Me" });
+            var call = new CallViewModel(service, available: true);
+            var first = call.Ring("Alex", verifiedFriend: true, sameRoom: true)!;
+            var second = call.Ring("Sam", verifiedFriend: true, sameRoom: true)!;
+            Assert.Equal(2, call.RingingCount);
+            // A call rings in the popup too while Jay is in the background.
+            Assert.True(first.Spec.Popup);
+
+            service.Requests.Resolve(first, "answer", RequestSource.Bar);
+            Assert.True(call.IsInCall);
+            Assert.Equal("Alex", call.Peer);
+            Assert.True(second.IsResolved);
+            Assert.Equal("decline", second.Choice);
+            Assert.Equal(0, call.RingingCount);
+        });
+    }
+
+    [Fact]
+    public void WhileInACallNobodyElseGetsThroughAndANewCallEndsTheOldOne()
+    {
+        UiTestThread.Run(() =>
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = _root, PlayerName = "Me" });
+            var call = new CallViewModel(service, available: true);
+            call.StartWithFriend("Alex", CallStep.Screen);
+            Assert.True(call.Sharing);
+            Assert.Null(call.Ring("Sam", verifiedFriend: true, sameRoom: true));
+            Assert.Empty(service.Requests.Pending);
+
+            // Starting another call (room voice, say) ends the first, sharing and all, before it starts.
+            call.JoinRoomVoice("Room", ["Sam"]);
+            Assert.True(call.IsInCall);
+            Assert.True(call.IsRoomCall);
+            Assert.False(call.Sharing);
+            Assert.Equal("Sam", call.Peer);
+        });
+    }
+
+    [Fact]
+    public void SomeoneInTheRoomWhoIsNotAFriendTalksInTheRoomPanel()
+    {
+        UiTestThread.Run(() =>
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = _root, PlayerName = "Me" });
+            var call = new CallViewModel(service, available: true);
+            string? went = null;
+            call.Navigate = r => went = r;
+            var ring = call.Ring("Sam", verifiedFriend: false, sameRoom: true)!;
+            service.Requests.Resolve(ring, "answer", RequestSource.Bar);
+            Assert.True(call.IsInCall);
+            Assert.True(call.ShowInRoom);
+            Assert.False(call.ShowInPeople);
+            Assert.Equal("play", went);
+            call.HangUpCommand.Execute(null);
+            Assert.False(call.IsInCall);
+        });
+    }
+
+    [Fact]
+    public void LeavingTheRoomEndsAFriendsCallToo()
+    {
+        UiTestThread.Run(() =>
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = _root, PlayerName = "Me" });
+            var call = new CallViewModel(service, available: true);
+            call.StartWithFriend("Alex", CallStep.Screen);
+            Assert.True(call.IsInCall);
+            Assert.False(call.IsRoomCall);
+            var ringing = call.Ring("Sam", verifiedFriend: true, sameRoom: true);
+            Assert.Null(ringing);
+            call.RoomClosed();
+            Assert.False(call.IsInCall);
+            Assert.False(call.Sharing);
+            Assert.Equal(L.T("call.ended_room"), call.EndedText);
         });
     }
 

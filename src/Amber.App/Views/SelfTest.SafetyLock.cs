@@ -1,6 +1,7 @@
 using Amber.App.Controls.Safety;
 using Amber.App.Services;
 using Amber.App.ViewModels;
+using Amber.Core.Localization;
 using Amber.Core.Themes;
 using Avalonia;
 using Avalonia.Controls;
@@ -61,15 +62,43 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 Width = 460,
             };
             var row = new PrivacyRow();
-            var stage = new StackPanel { Margin = new Thickness(24), Spacing = 16, Children = { new Border { Classes = { "card" }, Child = panel }, row } };
+            // The friends page's two locked confirms, as the page builds them, with a long name and device name and as
+            // wide as a 600×420 window leaves them: a new device their account vouched for, and removing a friend.
+            var (newDevice, removeFriend) = FriendPanels();
+            // Settings › Multiplayer's [Reset all to defaults] question, as the real view shows it.
+            var mpView = new MultiplayerSettingsView { DataContext = settings, Width = 560, HorizontalAlignment = HorizontalAlignment.Left };
+            settings.ConfirmingAdvancedReset = true;
+            var stage = new ScrollViewer
+            {
+                Content = new StackPanel
+                {
+                    Margin = new Thickness(24),
+                    Spacing = 16,
+                    Children = { new Border { Classes = { "card" }, Child = panel }, row, new Border { Classes = { "card" }, Child = newDevice }, new Border { Classes = { "card" }, Child = removeFriend }, mpView },
+                },
+            };
             window.Content = stage;
             Check("安全面板标题行写的是 Jay 安全提示", panel.BadgeText == Amber.Core.Localization.L.T("safety.title"), panel.BadgeText);
+            _locked = [("安全面板", panel), ("隐私行", row), ("朋友新设备", newDevice), ("移除朋友", removeFriend), ("联机设置的恢复默认确认", mpView.MultiplayerResetConfirm)];
+            await Task.Delay(300);
+            Check("设置 › 联机【全部恢复默认】的确认是锁定的安全面板，按钮是安全按钮，焦点在【取消】",
+                mpView.MultiplayerResetConfirm is SafetyPanel && mpView.MultiplayerResetConfirm.IsEffectivelyVisible
+                    && mpView.MultiplayerResetCancel.GetType() == typeof(SafetyButton) && mpView.MultiplayerResetDo.GetType() == typeof(SafetyButton)
+                    && mpView.MultiplayerResetCancel.IsFocused);
+            foreach (var (name, friendPanel) in new[] { ("朋友新设备", newDevice), ("移除朋友", removeFriend) })
+            {
+                var buttons = Dispatcher.UIThread.Invoke(() => friendPanel.GetVisualDescendants().OfType<SafetyButton>().ToList());
+                Check($"{name}的确认是安全面板，按钮是安全按钮，安全的那个排第一",
+                    buttons.Count == 2 && buttons[0].Kind == SafetyKind.Safe && buttons[1].Kind == SafetyKind.Confirm);
+                Check($"{name}在 600×420 窗口的宽度里放得下（长名字也不裁掉按钮）", Dispatcher.UIThread.Invoke(() => buttons.All(b =>
+                    b.TranslatePoint(new Point(b.Bounds.Width, b.Bounds.Height), friendPanel) is { } corner && corner.X <= friendPanel.Bounds.Width + 0.5 && corner.Y <= friendPanel.Bounds.Height + 0.5)));
+            }
 
             var baseline = new Dictionary<string, byte[]>();
             foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
             {
                 Application.Current!.RequestedThemeVariant = variant;
-                foreach (var (name, bytes) in await CaptureAsync(panel, row, $"default-{variant}")) baseline[$"{variant}/{name}"] = bytes;
+                foreach (var (name, bytes) in await CaptureAsync($"default-{variant}")) baseline[$"{variant}/{name}"] = bytes;
             }
 
             foreach (var extreme in Extremes)
@@ -83,13 +112,58 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
                 {
                     Application.Current!.RequestedThemeVariant = variant;
-                    foreach (var (name, bytes) in await CaptureAsync(panel, row, $"{extreme}-{variant}"))
+                    foreach (var (name, bytes) in await CaptureAsync($"{extreme}-{variant}"))
                     {
                         var same = baseline.TryGetValue($"{variant}/{name}", out var b) && b.AsSpan().SequenceEqual(bytes);
                         Check($"极端主题 {extreme}（{variant}）下 {name} 和默认逐像素一致", same);
                     }
                 }
             }
+
+            // Esc in the question cancels; nothing is reset.
+            var customizedBefore = settings.AnyAdvancedCustomized;
+            await Dispatcher.UIThread.InvokeAsync(() => mpView.MultiplayerResetCancel.RaiseEvent(new Avalonia.Input.KeyEventArgs
+                { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Escape }));
+            await Task.Delay(200);
+            Check("【全部恢复默认】的确认按 Esc 等于取消，什么都不改", !settings.ConfirmingAdvancedReset && settings.AnyAdvancedCustomized == customizedBefore);
+            settings.ConfirmingAdvancedReset = true;
+            window.Content = original;
+            await Task.Delay(200);
+            Check("离开页面也等于取消", !settings.ConfirmingAdvancedReset && settings.AnyAdvancedCustomized == customizedBefore);
+
+            // A theme's sidebar picture can't show through the privacy row: the real window, a noisy sidebar picture
+            // with no cover, both colour modes, a wide and the smallest window; the composited pixels of the row match.
+            window.Content = original;
+            var noisePack = Path.Combine(reportDir, "noise-sidebar.jaytheme");
+            ImageTheme.Write(noisePack, "selftest-noise-sidebar", "Noise sidebar", ImageTheme.Extract([]),
+                new Dictionary<string, ImageThemeSlot> { [ThemeSlots.Sidebar] = new(new ThemeSlot { Image = "", Dim = 0 }, NoisePng(480, 1400), ".png") });
+            var sidebarRow = window.GetVisualDescendants().OfType<PrivacyRow>().First(r => r.Name == "PrivacyRow");
+            foreach (var (w, h) in new[] { (1280, 800), (600, 420) })
+            {
+                window.Width = w;
+                window.Height = h;
+                settings.ResetThemePackCommand.Execute(null);
+                await Task.Delay(600);
+                var plain = new Dictionary<ThemeVariant, (byte[] Row, byte[] Above)>();
+                foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
+                {
+                    Application.Current!.RequestedThemeVariant = variant;
+                    plain[variant] = await RowPixelsAsync(sidebarRow, $"privacy-row-{w}x{h}-default-{variant}");
+                }
+                settings.ImportThemePack(noisePack);
+                await Task.Delay(800);
+                foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
+                {
+                    Application.Current!.RequestedThemeVariant = variant;
+                    var (rowNow, aboveNow) = await RowPixelsAsync(sidebarRow, $"privacy-row-{w}x{h}-noise-{variant}");
+                    Check($"{w}×{h}（{variant}）：侧栏图片确实画出来了（隐私行上面一块跟默认不一样）", !aboveNow.AsSpan().SequenceEqual(plain[variant].Above));
+                    Check($"{w}×{h}（{variant}）：侧栏图片透不过隐私行，整窗截图里这一行和默认外观逐像素一致", rowNow.AsSpan().SequenceEqual(plain[variant].Row));
+                }
+            }
+            settings.ResetThemePackCommand.Execute(null);
+            Application.Current!.RequestedThemeVariant = ThemeVariant.Default;
+            window.Content = stage;
+            await Task.Delay(300);
 
             // 带保留词的主题包：名字、作者、布局文字里有“Jay 安全提示”都整包拒绝。
             var reserved = Path.Combine(reportDir, "reserved.jaytheme");
@@ -101,6 +175,17 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
 
             // 恢复默认，再看一次确认框的窗口是锁定的。
             settings.ResetThemePackCommand.Execute(null);
+            await Task.Delay(300);
+            // Compact density makes ordinary controls shorter; the locked ones stay exactly as they were.
+            settings.SelectedDensityIndex = 1;
+            await Task.Delay(300);
+            foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
+            {
+                Application.Current!.RequestedThemeVariant = variant;
+                foreach (var (name, bytes) in await CaptureAsync($"compact-{variant}"))
+                    Check($"紧凑密度（{variant}）下 {name} 和标准密度逐像素一致", baseline.TryGetValue($"{variant}/{name}", out var b) && b.AsSpan().SequenceEqual(bytes));
+            }
+            settings.SelectedDensityIndex = 0;
             await Task.Delay(300);
             var dialog = SafetyDialog.CreateForSelfTest("删除实例“生存服”？", "这一步做完就找不回来了。", "永久删除", ["12 个世界", "3 张截图"]);
             dialog.Show(window);
@@ -135,13 +220,39 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
         }
     }
 
-    private async Task<List<(string Name, byte[] Pixels)>> CaptureAsync(Control panel, Control row, string tag)
+    private (string Name, Control Control)[] _locked = [];
+
+    /// <summary>The friends page's new-device and remove-friend panels, built the way PeoplePage.axaml builds them.</summary>
+    private static (SafetyPanel NewDevice, SafetyPanel RemoveFriend) FriendPanels()
+    {
+        const string name = "Robin the Very Long Named Friend From Far Away";
+        const string device = "Robin's second laptop with a long device name";
+        static SafetyPanel Locked(string title, Control? text, string safe, string confirm)
+        {
+            var body = new StackPanel { Spacing = 6 };
+            if (text is not null) body.Children.Add(text);
+            body.Children.Add(new WrapPanel
+            {
+                ItemSpacing = 8,
+                LineSpacing = 6,
+                Children = { new SafetyButton { Content = safe, Kind = SafetyKind.Safe }, new SafetyButton { Content = confirm, Kind = SafetyKind.Confirm } },
+            });
+            return new SafetyPanel { Title = title, Body = body, Width = 552 - 48 };
+        }
+        var newDevice = Locked(L.F("multiplayer.contacts.new_device", name),
+            new SelectableTextBlock { Text = L.F("multiplayer.contacts.new_device_body", device, "ABCD-EFGH-IJKL-MNOP"), TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+            L.T("multiplayer.contacts.new_device_remove"), L.T("multiplayer.contacts.new_device_ok"));
+        var removeFriend = Locked(L.F("people.safety.remove_confirm", name), null, L.T("people.safety.remove_keep"), L.T("people.safety.remove_yes"));
+        return (newDevice, removeFriend);
+    }
+
+    private async Task<List<(string Name, byte[] Pixels)>> CaptureAsync(string tag)
     {
         await Task.Delay(300);
         return await Dispatcher.UIThread.InvokeAsync(() =>
         {
             var result = new List<(string, byte[])>();
-            foreach (var (name, control) in new[] { ("安全面板", panel), ("隐私行", row) })
+            foreach (var (name, control) in _locked)
             {
                 var size = new PixelSize((int)Math.Max(1, control.Bounds.Width), (int)Math.Max(1, control.Bounds.Height));
                 using var bmp = new RenderTargetBitmap(size);
@@ -150,11 +261,57 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 var handle = System.Runtime.InteropServices.GCHandle.Alloc(bytes, System.Runtime.InteropServices.GCHandleType.Pinned);
                 try { bmp.CopyPixels(new PixelRect(size), handle.AddrOfPinnedObject(), bytes.Length, size.Width * 4); }
                 finally { handle.Free(); }
-                bmp.Save(Path.Combine(reportDir, $"{tag}-{(name == "安全面板" ? "panel" : "privacy")}.png"));
+                bmp.Save(Path.Combine(reportDir, $"{tag}-{Array.FindIndex(_locked, l => l.Name == name)}.png"));
                 result.Add((name, bytes));
             }
             return result;
         });
+    }
+
+    /// <summary>
+    /// Renders the whole window and returns the privacy row's pixels (inset past its rounded corners) and a strip of the
+    /// sidebar just above it; also saves the window.
+    /// </summary>
+    private async Task<(byte[] Row, byte[] Above)> RowPixelsAsync(PrivacyRow row, string tag)
+    {
+        await Task.Delay(400);
+        return await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            var size = new PixelSize((int)window.Bounds.Width, (int)window.Bounds.Height);
+            using var bmp = new RenderTargetBitmap(size);
+            bmp.Render(window);
+            bmp.Save(Path.Combine(reportDir, tag + ".png"));
+            var all = new byte[size.Width * size.Height * 4];
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(all, System.Runtime.InteropServices.GCHandleType.Pinned);
+            try { bmp.CopyPixels(new PixelRect(size), handle.AddrOfPinnedObject(), all.Length, size.Width * 4); }
+            finally { handle.Free(); }
+            var origin = row.TranslatePoint(new Point(0, 0), window) ?? default;
+            var inner = new PixelRect((int)Math.Ceiling(origin.X) + 4, (int)Math.Ceiling(origin.Y) + 4,
+                Math.Max(1, (int)row.Bounds.Width - 9), Math.Max(1, (int)row.Bounds.Height - 9));
+            var above = new PixelRect(inner.X, Math.Max(0, (int)origin.Y - 40), inner.Width, 30);
+            byte[] cut(PixelRect r)
+            {
+                var result = new byte[r.Width * r.Height * 4];
+                for (var y = 0; y < r.Height; y++)
+                    Array.Copy(all, ((r.Y + y) * size.Width + r.X) * 4, result, y * r.Width * 4, r.Width * 4);
+                return result;
+            }
+            return (cut(inner), cut(above));
+        });
+    }
+
+    /// <summary>A sidebar picture of hard-edged colour blocks, the worst case behind small text.</summary>
+    private static byte[] NoisePng(int width, int height)
+    {
+        var random = new Random(7);
+        using var bitmap = new SkiaSharp.SKBitmap(width, height);
+        using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+            for (var y = 0; y < height; y += 6)
+                for (var x = 0; x < width; x += 6)
+                    using (var paint = new SkiaSharp.SKPaint { Color = new SkiaSharp.SKColor((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256)) })
+                        canvas.DrawRect(x, y, 6, 6, paint);
+        using var data = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
     }
 
     private static (string Tokens, string Styles) Pack(string kind)

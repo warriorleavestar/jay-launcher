@@ -167,6 +167,19 @@ internal sealed partial class SelfTest
             Dispatcher.UIThread.Invoke(() => call.End("call.ended"));
             await Task.Delay(200);
 
+            // Two people ring at once: answering one declines the other; while in a call nobody else rings.
+            var first = Dispatcher.UIThread.Invoke(() => call.Ring("Robin", verifiedFriend: true, sameRoom: true));
+            var second = Dispatcher.UIThread.Invoke(() => call.Ring("Kai", verifiedFriend: true, sameRoom: true));
+            await Task.Delay(300);
+            Check("两个人同时打来：两条都在请求条里", first is not null && second is not null
+                && requests.Pending.Contains(first) && requests.Pending.Contains(second));
+            requests.Resolve(first!, "answer", Amber.Core.Activity.RequestSource.Bar);
+            await Task.Delay(400);
+            Check("接了一个：另一个自动拒绝，请求条里不留", call.IsInCall && call.Peer == "Robin" && !requests.Pending.Contains(second!));
+            Check("通话中别人打不进来", Dispatcher.UIThread.Invoke(() => call.Ring("Kai", verifiedFriend: true, sameRoom: true)) is null);
+            Dispatcher.UIThread.Invoke(() => call.End("call.ended"));
+            await Task.Delay(200);
+
             // ---- the room: voice on the banner, sharing with one member ----
             shell.Navigate("play");
             await Task.Delay(500);

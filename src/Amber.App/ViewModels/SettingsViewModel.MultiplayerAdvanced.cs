@@ -102,7 +102,7 @@ public sealed partial class SettingsViewModel
 
     /// <summary>
     /// Puts every value in the panel back to its default. What a room that is open opened with stays (the protection,
-    /// the whole LAN and what members may route through me are fixed for the room); those defaults change from the next room.
+    /// the whole LAN and what members may route through me are fixed for the room); those go back when it closes.
     /// </summary>
     [RelayCommand]
     private void ResetAdvanced()
@@ -124,14 +124,18 @@ public sealed partial class SettingsViewModel
             m.RequestPopup = d.RequestPopup;
             m.AllowModSync = d.ModSync;
             roomOpen = !m.IsIdle;
-            if (!roomOpen)
+            // While a room is open these are what it opened with: they go back to the defaults when it closes, unless
+            // one was changed again meanwhile (that change stands).
+            var (transport, disguise, fullLan, exit, proxy) = (m.SelectedTransport, m.DisguiseAsMinecraft, m.FullLanMode, m.AllowExitNode, m.AllowGameProxy);
+            m.ApplyNowOrAfterRoom(() =>
             {
-                if (m.TransportChoices.FirstOrDefault(c => c.Mode == d.Transport) is { } transport) m.SelectedTransport = transport;
-                m.DisguiseAsMinecraft = d.Disguise;
-                m.FullLanMode = d.FullLan;
-                m.AllowExitNode = d.NetworkExit;
-                m.AllowGameProxy = d.GameProxy;
-            }
+                if (m.SelectedTransport == transport && m.TransportChoices.FirstOrDefault(c => c.Mode == d.Transport) is { } standard) m.SelectedTransport = standard;
+                if (m.DisguiseAsMinecraft == disguise) m.DisguiseAsMinecraft = d.Disguise;
+                if (m.FullLanMode == fullLan) m.FullLanMode = d.FullLan;
+                if (m.AllowExitNode == exit) m.AllowExitNode = d.NetworkExit;
+                if (m.AllowGameProxy == proxy) m.AllowGameProxy = d.GameProxy;
+                RefreshAdvanced();
+            });
         }
         RefreshAdvanced();
         AdvancedResetStatus = L.T(roomOpen ? "settings.mp.reset_done_room" : "settings.mp.reset_done");

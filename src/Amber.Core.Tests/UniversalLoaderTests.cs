@@ -85,14 +85,42 @@ public sealed class UniversalLoaderTests : IDisposable
         Assert.Null(UniversalLoaderFit.BaseLoaderFor(Pinned, "1.20.4"));
         Assert.Null(UniversalLoaderFit.BaseLoaderFor(null, "1.21.1"));
         Assert.Null(UniversalLoaderFit.BaseLoaderFor(Pinned, null));
+        // A platform that preparing does not know (a newer loader's own Forge 1.12.2 line) is not offered either.
         var legacy = new CrossLoader.Capabilities(new Dictionary<string, IReadOnlyList<string>> { ["forge-1.12.2"] = ["1.12.2"] }, []);
-        Assert.Equal(Amber.Core.Install.LoaderKind.Forge, UniversalLoaderFit.BaseLoaderFor(legacy, "1.12.2"));
+        Assert.Null(UniversalLoaderFit.BaseLoaderFor(legacy, "1.12.2"));
+        Assert.NotNull(UniversalLoaderFit.Unsupported(legacy, "forge", "1.12.2"));
         // 1.12.2 starts only on Forge 14.23.5.x; other versions take any build.
         Assert.True(UniversalLoaderFit.AcceptsBase("1.12.2", Amber.Core.Install.LoaderKind.Forge, "14.23.5.2860"));
         Assert.False(UniversalLoaderFit.AcceptsBase("1.12.2", Amber.Core.Install.LoaderKind.Forge, "14.23.4.2759"));
         Assert.True(UniversalLoaderFit.AcceptsBase("1.21.1", Amber.Core.Install.LoaderKind.NeoForge, "21.1.77"));
         Assert.Equal("1.21.1-Jay", Amber.Core.GameLibrary.NewInstanceNames.WithSuffix("1.21.1", "Jay", []));
         Assert.Equal("1.21.1-Jay-2", Amber.Core.GameLibrary.NewInstanceNames.WithSuffix("1.21.1", "Jay", ["1.21.1-jay"]));
+    }
+
+    [Theory]
+    [InlineData("1.21.1")]
+    [InlineData("1.20.1")]
+    [InlineData("1.20.4")]
+    [InlineData("1.12.2")]
+    public void WhatTheNewInstancePanelOffersIsWhatPreparingAccepts(string mc)
+    {
+        var platforms = new Dictionary<string, IReadOnlyList<string>>
+        {
+            [BakePlatform.Vanilla] = ["1.21.1"], [BakePlatform.NeoForge] = ["1.21.1"], [BakePlatform.Forge] = ["1.20.1"], ["forge-1.12.2"] = ["1.12.2"],
+        };
+        var caps = new CrossLoader.Capabilities(platforms, []);
+        var loader = new BakeLoaderInfo("0.4.0", 1, new Version(1, 3), platforms);
+        var offered = UniversalLoaderFit.BaseLoaderFor(caps, mc);
+        if (offered is not { } kind)
+        {
+            Assert.NotNull(UniversalLoaderFit.Unsupported(caps, "forge", mc));
+            Assert.NotNull(UniversalLoaderFit.Unsupported(caps, "neoforge", mc));
+            return;
+        }
+        var name = kind == Amber.Core.Install.LoaderKind.NeoForge ? "neoforge" : "forge";
+        Assert.Null(UniversalLoaderFit.Unsupported(caps, name, mc));
+        var instance = new GameInstance("jay", mc, name, "1.0", "");
+        Assert.True(BakeService.Supports(instance, loader, out var reason), reason);
     }
 
     [Fact]
@@ -178,6 +206,56 @@ public sealed class UniversalLoaderTests : IDisposable
     }
 
     [Fact]
+    public void TheCardSaysPreparedOnceTheModsArePrepared()
+    {
+        Version("neo", """[{"name":"net.neoforged:neoforge:21.1.1"}]""", "1.21.1");
+        UiTestThread.Run(() =>
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = _root, PlayerName = "" });
+            service.SetUniversalLoader("neo", true);
+            var vm = new InstanceViewModel(service);
+            vm.SelectedId = "neo";
+            vm.TabIndex = (int)InstanceTab.Settings;
+            Assert.False(vm.UniversalLoaderPrepared);
+
+            var workDir = vm.Current!.WorkDir;
+            var state = Path.Combine(workDir, BakeService.StateFolder, "state.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(state)!);
+            File.WriteAllText(state, "{}");
+            BakeRecord.Write(workDir, new BakeRecord("prepared", new BakedLaunch("test.Main", [], [], [], state, "key")));
+            service.NoteUniversalLoaderPrepared("neo");
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.True(vm.UniversalLoaderPrepared);
+        });
+    }
+
+    [Fact]
+    public void CancellingTheCardsDownloadStopsIt()
+    {
+        Version("neo", """[{"name":"net.neoforged:neoforge:21.1.1"}]""", "1.21.1");
+        if (!BakeLoaderRelease.Pinned.IsPublished) return;
+        UiTestThread.Run(() =>
+        {
+            using var service = new LauncherService(new AppSettings { GameDirectory = _root, PlayerName = "" });
+            var vm = new InstanceViewModel(service);
+            vm.SelectedId = "neo";
+            var stopped = new TaskCompletionSource<bool>();
+            vm.DownloadLoader = async (_, ct) =>
+            {
+                try { await Task.Delay(Timeout.Infinite, ct); }
+                catch (OperationCanceledException) { stopped.TrySetResult(true); }
+                return "cancelled";
+            };
+            var download = vm.DownloadUniversalLoaderCommand.ExecuteAsync(null);
+            Assert.True(vm.IsBusy);
+            vm.CancelWorkCommand.Execute(null);
+            while (!download.IsCompleted) Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.True(stopped.Task.IsCompleted);
+            Assert.False(vm.IsBusy);
+        });
+    }
+
+    [Fact]
     public void TheCardFollowsTheSwitchAndSaysWhyNot()
     {
         Version("neo", """[{"name":"net.neoforged:neoforge:21.1.1"}]""", "1.21.1");
@@ -227,6 +305,50 @@ public sealed class UniversalLoaderTests : IDisposable
             var parent = Path.Combine(_root, "versions", mc);
             Directory.CreateDirectory(parent);
             File.WriteAllText(Path.Combine(parent, mc + ".json"), $$"""{"id":"{{mc}}","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":[]}""");
+        }
+    }
+}
+
+/// <summary>A mixed pack whose import finishes after the game directory was switched.</summary>
+public sealed class MixedImportContextTests
+{
+    [Fact]
+    public void AnImportFinishedAfterSwitchingGameDirectoriesChangesOnlyTheOneItWentInto()
+    {
+        var first = Path.Combine(Path.GetTempPath(), "amber-mix-a-" + Guid.NewGuid().ToString("N"));
+        var second = Path.Combine(Path.GetTempPath(), "amber-mix-b-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+        try
+        {
+            UiTestThread.Run(() =>
+            {
+                using var service = new LauncherService(new AppSettings { GameDirectory = first, PlayerName = "" });
+                var vm = new ContentViewModel(service, _ => null!, () => false);
+                var started = service.Context;
+                service.Settings.GameDirectory = second;
+                service.Reload();
+                var lastBefore = service.Settings.LastVersion;
+
+                vm.FinishImport(started, "pack", mixed: true);
+
+                var there = InstanceSettings.Load(started.Directory, "pack");
+                Assert.True(there.UniversalLoader == true);
+                Assert.True(there.Isolate == true);
+                var here = InstanceSettings.Load(service.Directory, "pack");
+                Assert.NotEqual(true, here.UniversalLoader);
+                Assert.NotEqual(true, here.Isolate);
+                Assert.Equal(lastBefore, service.Settings.LastVersion);
+
+                vm.FinishImport(service.Context, "pack", mixed: true);
+                Assert.True(InstanceSettings.Load(service.Directory, "pack").UniversalLoader == true);
+                Assert.Equal("pack", service.Settings.LastVersion);
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(first, true); } catch (IOException) { }
+            try { Directory.Delete(second, true); } catch (IOException) { }
         }
     }
 }

@@ -45,7 +45,7 @@
         <Expander x:Name="PublicNodes" Header="{l:T multiplayer.public.nodes_title}" IsExpanded="{Binding !HasPublicNodes, Mode=OneTime}" HorizontalAlignment="Stretch">
           <StackPanel Spacing="6">
             <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.public.nodes_hint}" />
-            <TextBox Text="{Binding PublicNodesText}" AcceptsReturn="True" MinHeight="56" FontFamily="Consolas,monospace" PlaceholderText="tcp://1.2.3.4:11010" />
+            <TextBox Text="{Binding PublicNodesText}" AcceptsReturn="True" MinHeight="56" FontFamily="Consolas,monospace" PlaceholderText="tcp://relay.example.org:11010" />
             <Button Content="{l:T multiplayer.public.save_nodes}" Command="{Binding SavePublicNodesCommand}" HorizontalAlignment="Left" />
           </StackPanel>
         </Expander>

@@ -249,6 +249,12 @@ internal sealed partial class SelfTest
             var confirm = Classed<Button>("device-confirm");
             Check("设备列表里这台标着待确认，有【是 TA】", confirm is not null && (confirm.Content as string) == L.T("multiplayer.contacts.new_device_ok")
                 && people.Selected!.DeviceItems.Count(d => d.IsNew) == 1);
+            Check("新设备的确认是锁定的安全面板：写 TA 的名字和设备的安全码，两个都是安全按钮，焦点在【不是 TA？移除这台设备】",
+                confirm is Amber.App.Controls.Safety.SafetyButton { Kind: Amber.App.Controls.Safety.SafetyKind.Confirm }
+                && Dispatcher.UIThread.Invoke(() => confirm.FindAncestorOfType<Amber.App.Controls.Safety.SafetyPanel>() is { } locked
+                    && locked.Title == L.F("multiplayer.contacts.new_device", "Bob")
+                    && page.NewDeviceSafeButton() is { Kind: Amber.App.Controls.Safety.SafetyKind.Safe } safe
+                    && (safe.IsFocused || TopLevel.GetTopLevel(page)?.FocusManager?.GetFocusedElement() == safe)));
             await ShotAsync("friends-new-device");
             Press(confirm);
             Check("点【是 TA】：状态回到“已核对”，请求条里的提示也收起", await WaitAsync(() => people.Selected is { Name: "Bob", NeedsLook: false }
@@ -399,6 +405,7 @@ internal sealed partial class SelfTest
         Press(Named<Button>("RemoveFriendButton"));
         await Task.Delay(400);
         Check("【从朋友里移除】先问一句，写 TA 的名字，焦点在【留着】", people.IsConfirmingRemove && Shown("RemoveFriendConfirm") && !Shown("RemoveFriendButton")
+            && Named<Control>("RemoveFriendConfirm") is Amber.App.Controls.Safety.SafetyPanel && Named<Control>("ConfirmRemoveFriendButton") is Amber.App.Controls.Safety.SafetyButton
             && people.RemoveQuestion.Contains("Robin") && Named<Control>("KeepFriendButton") is { } keep && Dispatcher.UIThread.Invoke(() => keep.IsFocused)
             && people.Friends.Any(f => f.Name == "Robin"));
         Press(Named<Button>("KeepFriendButton"));

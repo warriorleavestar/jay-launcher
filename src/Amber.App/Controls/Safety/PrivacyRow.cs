@@ -10,7 +10,8 @@ namespace Amber.App.Controls.Safety;
 
 /// <summary>
 /// 侧栏底部的隐私行（§5.9）：盾牌 + “无云控 · 无遥测”，任何尺寸都看得见，主题改不了。
-/// 底色透明（跟着侧栏），文字用默认令牌的侧栏次要色。
+/// The row has an opaque backing in the default sidebar colour (from the locked tokens), so a theme's sidebar picture
+/// can't show through behind the fixed text and shield; the text uses the default sidebar muted colour.
 /// </summary>
 public class PrivacyRow : SafetySurface
 {
@@ -30,7 +31,7 @@ public class PrivacyRow : SafetySurface
         _panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { shield, _text } };
         Child = _panel;
         Update();
-        L.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(Update);
+        Amber.App.Localization.LanguageListeners.Add(this, static o => ((PrivacyRow)o).Update());
     }
 
     private string FullText => $"{L.T("main.no_cloud_control")} · {L.T("main.no_telemetry")}";

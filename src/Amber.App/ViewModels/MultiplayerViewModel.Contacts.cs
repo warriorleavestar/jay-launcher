@@ -50,6 +50,11 @@ public sealed class ContactDeviceItem(Contact device, ContactItem person)
     public bool IsNew => Device.NewDevice;
     public string Fingerprint => (Device.DeviceName.Length > 0 ? Device.DeviceName + " · " : "") + Device.Fingerprint
         + (Device.NewDevice ? " · " + L.T("multiplayer.contacts.new_device_tag") : "");
+
+    /// <summary>The locked new-device panel: the same words as the request bar's notice.</summary>
+    public string NewDeviceTitle => L.F("multiplayer.contacts.new_device", Person.Name);
+    public string NewDeviceBody => L.F("multiplayer.contacts.new_device_body",
+        Device.DeviceName.Length > 0 ? Device.DeviceName : L.T("multiplayer.contacts.new_device_unnamed"), Device.Fingerprint);
 }
 
 /// <summary>An add-contact exchange under way: waiting, asking me, or the emoji to compare.</summary>
@@ -481,15 +486,17 @@ public sealed partial class MultiplayerViewModel
         foreach (var m in invites)
         {
             var key = "contact-invite:" + Convert.ToHexStringLower(m.Invite.Token);
-            _mailedInvites[key] = m;
             var who = new ContactItem(m.From).Name;
             var room = m.Room.Length > 0 ? m.Room : L.T("multiplayer.room.friend_room");
-            ListFriendRoom(key, m, who, room);
+            // Listed (within the per-device and overall limits) or nothing is kept: no request without its row.
+            if (!ListFriendRoom(key, m, who, room)) continue;
+            _mailedInvites[key] = m;
             NoteInvitedBy(m, key, room);
+            var until = FriendRooms.First(r => r.Key == key).Until;
             _service.Requests.Post(new RequestSpec("contact-invite", L.F("multiplayer.contacts.invite.title", who, room),
                 L.F("multiplayer.contacts.invite.body", m.From.Fingerprint),
                 [new("ignore", L.T("multiplayer.contacts.ignore"), IsDefault: true), new("join", L.T("multiplayer.contacts.invite.join"))],
-                Timeout: m.Expires is { } e ? e - DateTimeOffset.Now : null, DedupeKey: key, TimeoutChoice: "ignore"));
+                Timeout: until - FriendRoomClock(), DedupeKey: key, TimeoutChoice: "ignore"));
         }
     }
 
@@ -510,11 +517,12 @@ public sealed partial class MultiplayerViewModel
                 OpenAddFriend();
                 break;
             case "contact-invite":
-                // "Ignore" only closes the request: the room stays under "where to play" until the invite runs out.
-                // The request timing out means just that, so the room goes with it.
+                // "Not now" lets the room go with its invite, and the same invite doesn't come back. The request timing
+                // out means it ran out, so the room goes with it too.
                 if (handle.Choice != "join")
                 {
                     if (handle.ResolvedBy == RequestSource.Timeout) DropFriendRoom(key);
+                    else IgnoreFriendRoom(key);
                     break;
                 }
                 PruneFriendRooms();

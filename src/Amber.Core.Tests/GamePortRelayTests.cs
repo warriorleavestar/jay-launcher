@@ -1039,6 +1039,109 @@ public sealed class GamePortRelayTests
         Assert.False(vm.RoomOtherPortOpen);
     });
 
+    [Fact]
+    public void AFloodOfBroadcastsStaysBoundedAndStopsWithTheRoom() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var now = new DateTime(2026, 11, 13, 12, 0, 0, DateTimeKind.Utc);
+        Action<LanGame>? heard = null;
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GamePortReadyForTest = (_, _) => Task.FromResult(true),
+            RoomGameListenForTest = (h, ct) => { heard = h; return Task.Delay(Timeout.Infinite, ct); },
+            RoomGamesClockForTest = () => now,
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted && heard is not null);
+        var relay = vm.GameRelayForTest!;
+
+        // Many ports, changing names and repeats, far faster than the list is updated (the UI isn't pumped meanwhile).
+        for (var i = 0; i < 20_000; i++) heard!(new LanGame($"world {i}", 30000 + i % 500));
+        Assert.InRange(vm.RoomGamesWaitingForTest, 1, LanGameWatch.MaxGames);
+        Assert.Equal(1, vm.RoomGamesFlushesForTest);
+        Pump(() => vm.RoomGamesWaitingForTest == 0 && vm.HasRoomGames);
+        Assert.InRange(vm.RoomGames.Count, 1, LanGameWatch.MaxGames + 1);
+        Assert.InRange(vm.RoomGamesKnownForTest, 1, LanGameWatch.MaxGames * 5);
+        Assert.NotNull(relay.Target);
+
+        // More rounds: still one update at a time, and what is remembered stays bounded.
+        for (var round = 0; round < 5; round++)
+        {
+            now = now.AddSeconds(10);
+            for (var i = 0; i < 2_000; i++) heard!(new LanGame($"r{round} {i}", 40000 + round * 1000 + i));
+            Assert.InRange(vm.RoomGamesWaitingForTest, 1, LanGameWatch.MaxGames);
+            Pump(() => vm.RoomGamesWaitingForTest == 0);
+            vm.ExpireRoomGames();
+            Assert.InRange(vm.RoomGamesKnownForTest, 1, LanGameWatch.MaxGames * 5);
+            Assert.InRange(vm.RoomGames.Count, 1, LanGameWatch.MaxGames + 1);
+        }
+        Assert.InRange(vm.RoomGamesFlushesForTest, 2, 12);
+
+        // The room stops: broadcasts that still come in (or were already waiting) change nothing.
+        heard!(new LanGame("late", 50000));
+        vm.StopCommand.Execute(null);
+        Pump(() => !vm.HasGameRelay);
+        var flushes = vm.RoomGamesFlushesForTest;
+        heard!(new LanGame("after", 50001));
+        Thread.Sleep(MultiplayerViewModel.RoomGamesFlushInterval * 3);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.HasRoomGames);
+        Assert.Equal(0, vm.RoomGamesKnownForTest);
+        Assert.Equal(0, vm.RoomGamesWaitingForTest);
+        Assert.Equal(flushes, vm.RoomGamesFlushesForTest);
+    });
+
+    [Fact]
+    public void AWorldWhoseFirstCheckFailedIsLinkedOnALaterTry() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var now = new DateTime(2026, 11, 13, 12, 0, 0, DateTimeKind.Utc);
+        var ready = false;
+        var checks = 0;
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GamePortReadyForTest = (_, _) => { checks++; return Task.FromResult(ready); },
+            RoomGameListenForTest = (_, ct) => Task.Delay(Timeout.Infinite, ct),
+            RoomGamesClockForTest = () => now,
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var relay = vm.GameRelayForTest!;
+
+        // The world broadcasts while it is still starting: the first check fails and the room keeps waiting.
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        Pump(() => checks == 1);
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+
+        // The same broadcast keeps coming; it isn't a change, and a refresh before the retry interval does nothing.
+        now = now.AddSeconds(1.5);
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        vm.ExpireRoomGames();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(1, checks);
+
+        // The game is up now: the next refresh after the interval tries again and links it.
+        ready = true;
+        now = now.AddSeconds(4);
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        vm.ExpireRoomGames();
+        Pump(() => relay.Target == 25565);
+        Assert.False(vm.IsWaitingForGame);
+        Assert.Equal(2, checks);
+
+        // Once linked, refreshes don't check it again this way.
+        now = now.AddSeconds(10);
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        vm.ExpireRoomGames();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(2, checks);
+        vm.StopCommand.Execute(null);
+        Pump(() => !vm.HasGameRelay);
+    });
+
     private static void Pump(Func<bool> done)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);

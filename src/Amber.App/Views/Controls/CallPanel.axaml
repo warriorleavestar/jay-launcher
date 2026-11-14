@@ -112,7 +112,6 @@
         </ToggleButton>
         <Button x:Name="LetControlButton" Classes="secondary" Content="{l:T call.control}" Command="{Binding AskControlCommand}"
                 IsVisible="{Binding OffersControl}" IsEnabled="{Binding CanLetControl}" ToolTip.Tip="{l:T call.control_needs_share}" />
-        <Button x:Name="PopOutButton" Classes="ghost" Content="{l:T call.popout}" Command="{Binding PopOutCommand}" />
         <Button x:Name="HangUpButton" Classes="danger" Content="{l:T call.hangup}" Command="{Binding HangUpCommand}" />
       </WrapPanel>
     </StackPanel>
