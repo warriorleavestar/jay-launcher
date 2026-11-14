@@ -115,7 +115,7 @@ format 2 的名字和 format 1 的名字都认（左边是 format 2 写法，括
 | LogDebug, LogInfo, LogWarn, LogError, LogFatal, LogJay | 日志各级别的文字色 |
 | WingLight, WingDark | 翅膀条纹里的浅条和深条（见下） |
 
-Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥珀只给开始游戏），完整色表和对比度见官方设计 §4.2。
+Jay 默认配色是“夜 / 晨”两套（墨蓝底、松鸦蓝强调色、琥珀只给开始游戏），完整色表在 `src/Amber.App/Themes/Tokens.axaml`。
 
 **翅膀条纹**是 Jay 的标记：一段 13 像素，依次是强调色 6、深条 2、浅条 3、深条 2，只出现在选中的导航项、选中的页签、进度条和码卡片的左边。主题改了 `Accent` 时条纹跟着换色；没写 `WingLight` / `WingDark` 时，Jay 用强调色调出同一色相的浅条和深条，所以单色主题不用管它。想去掉条纹，把这两个颜色都写成和 `Accent` 一样。
 

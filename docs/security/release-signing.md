@@ -1,7 +1,7 @@
 # Release signatures
 
 A Jay release counts only when **enough Jay trustee release keys** (`JayTrust.ReleaseNeed`; the goal is 2 of 3 trustees, today both of the two keys below) have signed it, each with both **Ed25519 and
-ML-DSA-65** (privacy plan, items 2 and 3). Every trustee holds **two separate keys**: a trust key for
+ML-DSA-65**. Every trustee holds **two separate keys**: a trust key for
 networks, directory certificates and hardware certificates (`JayTrust.Keys`), and a **release key** used only
 for releases and trustee list changes (`JayTrust.ReleaseKeys`, both in
 `src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). `jay-server` refuses a release key for network signing and
@@ -17,7 +17,7 @@ Each release carries, next to its packages:
 
 ## What the app checks
 
-The update check (`UpdateCheck.cs`, Tools › Check for updates) downloads those three files from the newer
+The update check (`UpdateCheck.cs`, Settings › About › Check for updates) downloads those three files from the newer
 release's assets and offers the update only when:
 
 - `SHA256SUMS.txt.sigs` is for exactly this `SHA256SUMS.txt` and this tag;

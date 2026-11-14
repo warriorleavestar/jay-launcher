@@ -1,6 +1,6 @@
 # Pinned binaries (`build/pins.json`)
 
-`build/pins.json` lists every binary that Jay bundles or downloads with a fixed hash. For each one it gives the source and the SHA-256 (or a content address), so you can check exactly what a Jay build will fetch. This is the pins part of privacy plan item 4.
+`build/pins.json` lists every binary that Jay bundles or downloads with a fixed hash. For each one it gives the source and the SHA-256 (or a content address), so you can check exactly what a Jay build will fetch.
 
 ## What is in it
 
