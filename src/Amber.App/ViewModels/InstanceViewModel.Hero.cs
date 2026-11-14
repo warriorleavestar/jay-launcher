@@ -304,6 +304,9 @@ public sealed partial class InstanceViewModel
         // Joined a room with other mods than the host's: that comes first.
         if (Current is { } instance && _service.MetaOf(instance.Id)?.ModsDifferFromHost is { } host)
             LastRunCauses.Add(new LastRunCause(new CrashFinding(L.F("instance.lastrun.mods_differ", host), L.T("instance.lastrun.mods_differ_advice")), []));
+        // Forge 1.12.2 through the universal loader: what the loader said comes before the crash report's guesses.
+        foreach (var (finding, fixes) in Amber.Core.Bake.LegacyLaunchProblems.Causes(_home.CrashBakeProblems))
+            LastRunCauses.Add(new LastRunCause(finding, [.. fixes.Select(f => new LastRunFixButton(f, L.T(f.LabelKey)))]));
         foreach (var finding in crash.Findings)
         {
             var fixes = CrashFixes.For(finding, crash.SuspectMods)
@@ -356,6 +359,26 @@ public sealed partial class InstanceViewModel
                 break;
             case CrashFixKind.RepairFiles:
                 CompleteFilesCommand.Execute(null);
+                break;
+            case CrashFixKind.TransformerCacheOff:
+            {
+                var own = InstanceSettings.Load(_service.Directory, c.Id);
+                var before = own.LegacyTransformerCache;
+                own.LegacyTransformerCache = false;
+                own.Save(_service.Directory, c.Id);
+                if (TabIndex == (int)InstanceTab.Settings) LoadSettings();
+                Toasts.WithAction(L.T("instance.lastrun.cache_off_done"), L.T("common.undo"), () =>
+                {
+                    var again = InstanceSettings.Load(_service.Directory, c.Id);
+                    again.LegacyTransformerCache = before;
+                    again.Save(_service.Directory, c.Id);
+                    if (TabIndex == (int)InstanceTab.Settings) LoadSettings();
+                });
+                break;
+            }
+            case CrashFixKind.LaunchWithoutLoader:
+                _service.SetCurrentInstance(c.Id);
+                _service.RequestLaunch(new LaunchRequest(c.Id, SkipBake: true));
                 break;
             case CrashFixKind.ShadersOff:
                 bool off;
