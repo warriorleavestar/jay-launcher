@@ -5,8 +5,11 @@
   "button.primary": { "background": "token:Accent", "foreground": "#0B1A0B", "fontWeight": "bold",
                       ":hover": { "background": "#7CF07C", "foreground": "#0B1A0B" } },
   "card": { "borderWidth": 2, "border": "#2A3360", "background": "#E6141A33", "shadow": "6 6 0 0 #05060E" },
-  "pill": { "radius": 0, "borderWidth": 1, "border": "#2A3360" },
+  "chip": { "radius": 0, "borderWidth": 1, "border": "#2A3360" },
+  "badge": { "radius": 0, "borderWidth": 1, "border": "#2A3360" },
+  "tag": { "radius": 0, "borderWidth": 1, "border": "#2A3360" },
   "nav.item": { "radius": 0, ":selected": { "background": "#2A3D2A" }, ":hover": { "background": "#1A2040" } },
+  "rail.item": { "radius": 0, ":selected": { "background": "#2A3D2A" }, ":hover": { "background": "#1A2040" } },
   "input": { "radius": 0, "borderWidth": 2, "border": "#2A3360", ":focus": { "border": "token:Accent" } },
   "combobox": { "radius": 0, "borderWidth": 2, "border": "#2A3360" },
   "heading": { "foreground": "token:Accent", "fontWeight": "bold" }

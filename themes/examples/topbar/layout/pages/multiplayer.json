@@ -1,0 +1,27 @@
+{
+  // 宽窗口：标题、页签和房间顶栏横贯整页；下面左边是内容，右边一栏放网络状态。
+  "wide": {
+    "type": "grid", "columns": ["*", "320"], "rows": ["auto", "auto", "auto", "*"], "spacing": 12,
+    "children": [
+      { "type": "region", "name": "multiplayer.title", "columnSpan": 2 },
+      { "type": "region", "name": "multiplayer.tabs", "row": 1, "columnSpan": 2 },
+      { "type": "region", "name": "multiplayer.room", "row": 2, "columnSpan": 2 },
+      { "type": "region", "name": "multiplayer.body", "row": 3 },
+      { "type": "stack", "row": 3, "column": 1, "spacing": 12, "valign": "start", "children": [
+        "multiplayer.status",
+        { "type": "text", "text": "顶栏主题：导航在上面，网络状态在右边。", "style": "hint" }
+      ] }
+    ]
+  },
+  // 中等和窄窗口：从上到下一条，网络状态贴在底部。
+  "default": {
+    "type": "dock",
+    "children": [
+      { "type": "region", "name": "multiplayer.title", "dock": "top" },
+      { "type": "region", "name": "multiplayer.tabs", "dock": "top" },
+      { "type": "region", "name": "multiplayer.room", "dock": "top" },
+      { "type": "region", "name": "multiplayer.status", "dock": "bottom" },
+      "multiplayer.body"
+    ]
+  }
+}
