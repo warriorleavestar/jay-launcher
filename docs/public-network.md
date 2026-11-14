@@ -128,6 +128,12 @@ jay-server directory --listen 11010
 
 然后在每个人的 Jay 里：联机 → Jay 公共网络 → 公共节点，填 `tcp://<这台机器的公网地址>:11010`，保存。
 
+**内置的 Jay 公共网络只认有证书的目录。** Jay 只用带着 Jay 信任钥匙签过的目录证书（`directory.cert`，见 [zero-leak-codes.md](security/zero-leak-codes.md#trustee-keys-for-the-built-in-network-offline-one-per-person)）的目录节点；没有证书的目录，房间列表、发布房间、捎话和登录都会失败（“证明不了自己是这个网络的目录”）。所以：
+
+- 想帮内置网络转发：用 `jay-server directory --listen 11010 --seed-only` 只当种子节点，不跑目录，不需要证书。
+- 想给内置网络跑目录：把节点的目录公钥（`jay-server network dir-key`）交给 Jay 信任人，由他们签好证书再放进节点数据目录。
+- 想自己管目录：建一个自己的公共网络，见 [network-server.md](network-server.md#二自己的公共网络四步)。
+
 Linux 上长期运行可以用 `server/install-network-node.sh`（一键装成 systemd 服务）或 `server/docker/`，见 [network-server.md](network-server.md#六长期运行)。
 
 这台节点同时也会被加进房间用的中继节点，所以经公共网络找到的房主和加入方在它上面一定碰得上面。
