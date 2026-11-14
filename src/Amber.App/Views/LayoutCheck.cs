@@ -25,9 +25,12 @@ internal sealed class LayoutCheck(MainWindow window, MainViewModel main, string 
     /// 窗口客户区的逻辑尺寸（DIP）。不对应哪一台电脑：同一个逻辑尺寸在不同分辨率和缩放下都会出现，
     /// 比如 1280×800 既是 1920×1200 开 150%，也是 2560×1600 开 200%。
     /// </summary>
+    /// <summary>The smallest window the user can make (<see cref="Amber.Core.Layout.WindowSizing"/>).</summary>
+    private const string MinSizeName = "600x420-min";
+
     public static readonly (double Width, double Height, string Name)[] Sizes =
     [
-        (760, 440, "760x440-min"),
+        (Amber.Core.Layout.WindowSizing.MinWidth, Amber.Core.Layout.WindowSizing.MinHeight, MinSizeName),
         (853, 402, "853x402"),
         (1024, 640, "1024x640"),
         (1280, 800, "1280x800"),
@@ -125,7 +128,7 @@ internal sealed class LayoutCheck(MainWindow window, MainViewModel main, string 
             {
                 Amber.Core.Localization.L.SetLanguage(language);
                 await Task.Delay(300);
-                foreach (var (w, h, name) in Sizes.Where(s => s.Name == "760x440-min" || ReportSizes.Contains(s.Name)))
+                foreach (var (w, h, name) in Sizes.Where(s => s.Name == MinSizeName || ReportSizes.Contains(s.Name)))
                 {
                     var found = await CheckAtAsync(root, w, h, $"{tag}[{language}]", name,
                         () => Shot(root, w, h, 1.5, $"{tag}-{language}-{name}"));
@@ -186,7 +189,7 @@ internal sealed class LayoutCheck(MainWindow window, MainViewModel main, string 
     {
         var lines = new List<string>
         {
-            $"尺寸 {Sizes.Length} 种 × 语言 {Variants().Count()} 种（含伪本地化）× 页面 {main.Pages.Count} 个；这台电脑的缩放 {window.RenderScaling:0.##}（排版取整按它算，其它缩放只改截图像素）",
+            $"尺寸 {Sizes.Length} 种 × 语言 {Variants().Count()} 种（含伪本地化）× 页面 {main.Pages.Count(p => p.HasView)} 个；这台电脑的缩放 {window.RenderScaling:0.##}（排版取整按它算，其它缩放只改截图像素）",
             $"切边 {problems.Count(p => p.Kind == Kind.Clipped)} 处，自适应 {problems.Count(p => p.Kind == Kind.Adaptive)} 处",
         };
         foreach (var group in problems.GroupBy(p => p.Size))
