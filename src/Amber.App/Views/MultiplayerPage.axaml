@@ -111,6 +111,7 @@
       <Border x:Name="RoomHeader" Classes="scene" Margin="0" AutomationProperties.Name="{Binding RoomHeaderText}"
               Background="{Binding RoomCoverSlot, Converter={x:Static v:CoverBrush.Instance}}">
         <Panel>
+          <c:SlotImage x:Name="RoomBannerPicture" Slot="banner" />
           <Border x:Name="RoomCoverShade" IsHitTestVisible="False">
             <Border.Background>
               <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">

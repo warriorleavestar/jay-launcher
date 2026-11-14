@@ -128,6 +128,22 @@
                 </CheckBox>
               </Grid>
             </Border>
+            <!-- Make a theme from pictures (design doc "Image themes"): no file to write by hand. -->
+            <Border x:Name="ImageThemeCard" Classes="card">
+              <StackPanel Spacing="12">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{l:T theme.image.title}" FontWeight="SemiBold" />
+                    <TextBlock Classes="hint" Text="{l:T theme.image.summary}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Button x:Name="OpenImageThemeButton" Grid.Column="1" Classes="secondary" Content="{l:T theme.image.open}" VerticalAlignment="Center"
+                          Command="{Binding ImageTheme.OpenCommand}" IsVisible="{Binding !ImageTheme.IsOpen}" />
+                </Grid>
+                <Panel IsVisible="{Binding ImageTheme.IsOpen}">
+                  <views:ImageThemeEditor x:Name="ImageThemeEditor" DataContext="{Binding ImageTheme}" />
+                </Panel>
+              </StackPanel>
+            </Border>
             <Border x:Name="ThemeReportBanner" Classes="banner" Margin="0,0,0,12" IsVisible="{Binding HasThemeReport}">
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <TextBlock x:Name="ThemeReportText" Text="{Binding ThemeReportText}" TextWrapping="Wrap" VerticalAlignment="Center" />

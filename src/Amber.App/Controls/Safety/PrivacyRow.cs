@@ -10,7 +10,8 @@ namespace Amber.App.Controls.Safety;
 
 /// <summary>
 /// 侧栏底部的隐私行（§5.9）：盾牌 + “无云控 · 无遥测”，任何尺寸都看得见，主题改不了。
-/// 底色透明（跟着侧栏），文字用默认令牌的侧栏次要色。
+/// The row has an opaque backing in the default sidebar colour (from the locked tokens), so a theme's sidebar picture
+/// can't show through behind the fixed text and shield; the text uses the default sidebar muted colour.
 /// </summary>
 public class PrivacyRow : SafetySurface
 {
@@ -57,6 +58,9 @@ public class PrivacyRow : SafetySurface
             _panel.HorizontalAlignment = value ? HorizontalAlignment.Center : HorizontalAlignment.Left;
             _text.TextAlignment = value ? TextAlignment.Center : TextAlignment.Left;
             _text.MaxWidth = value ? 68 : double.PositiveInfinity;
+            // The opaque backing keeps its vertical padding, but in the narrow icon rail the side padding would push
+            // "No telemetry" onto three lines with a word cut in half.
+            Padding = value ? new Thickness(0, 4) : new Thickness(6, 4);
             foreach (var c in _panel.Children) c.HorizontalAlignment = value ? HorizontalAlignment.Center : HorizontalAlignment.Left;
             Update();
         }

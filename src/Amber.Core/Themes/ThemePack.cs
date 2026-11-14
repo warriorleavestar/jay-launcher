@@ -57,6 +57,9 @@ public sealed class ThemePack
     public string? BackgroundImage { get; init; }
     public double BackgroundOpacity { get; init; } = 1;
 
+    /// <summary>Image slots (tokens.json "slots"): background, sidebar, mascot, banner. A background slot wins over BackgroundImage.</summary>
+    public Dictionary<string, ThemeSlot> Slots { get; } = [];
+
     /// <summary>第 2 层组件样式：组件名 → 状态（"" 是普通状态）→ 属性。</summary>
     public Dictionary<string, Dictionary<string, StyleProps>> Styles { get; } = [];
 
@@ -359,6 +362,8 @@ public static partial class ThemePackReader
             ReadColors(illo, pack.DarkColors, pack, "illustration");
             ReadColors(illo, pack.LightColors, pack, "illustration");
         }
+        if (has("slots", out var slots))
+            ThemeSlots.Read(pack, slots, image => CheckAsset(open, image, ["assets/"], [".png", ".jpg", ".jpeg"]));
         if (pack.Format < 2) ThemeFormat.UpgradeTokens(pack);
 
         ThemeContrast.Enforce(pack);

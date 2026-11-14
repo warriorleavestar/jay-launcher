@@ -3,7 +3,7 @@ using System.IO.Compression;
 namespace Amber.Core.Content;
 
 /// <summary>What a file dragged into the window is (official design §6.25).</summary>
-public enum DropKind { Modpack, Mod, ResourcePack, Shader, Datapack, World, Theme, Unknown }
+public enum DropKind { Modpack, Mod, ResourcePack, Shader, Datapack, World, Theme, Picture, Unknown }
 
 /// <summary>Files of one kind dragged in together: they are handled together.</summary>
 public sealed record DropGroup(DropKind Kind, IReadOnlyList<string> Paths);
@@ -29,6 +29,8 @@ public static class DropClassifier
                 case ".mrpack": return DropKind.Modpack;
                 case ".jar": return DropKind.Mod;
                 case ".jaytheme": return DropKind.Theme;
+                // A picture goes into a slot of a theme made from pictures (design doc "Image themes").
+                case ".png" or ".jpg" or ".jpeg" or ".webp" or ".bmp" or ".gif": return DropKind.Picture;
                 case ".zip": break;
                 default: return DropKind.Unknown;
             }
