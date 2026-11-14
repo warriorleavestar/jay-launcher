@@ -716,7 +716,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var members = new MemberTable();
         // My own "always relays only" setting turns direct connections off on this computer without making it the room's rule.
         var room = WithMyRelayChoice(credentials.ToHostRoom(members, ChatName));
-        if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
+        if (!await TryStartSessionAsync(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
                 AllowProxy = AllowGameProxy,
             }))
@@ -781,7 +781,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     }
 
     /// <summary>拿到房间凭据之后：启动 EasyTier 加入房间。</summary>
-    private bool StartJoin(RoomCode room)
+    private async Task<bool> StartJoinAsync(RoomCode room)
     {
         if (!IsIdle) return false;
         // 封装模式下游戏和聊天都先连本机的 Amber，再封装着发给房主（完整局域网模式也一样）。
@@ -792,7 +792,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // What the host decided for the room, then my own "always relays only" setting on top of it.
         var relayRule = room.RelayOnly;
         room = WithMyRelayChoice(room);
-        if (!TryStartSession(new EasyTierOptions(room, false, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), local, TestListeners, Guid.NewGuid().ToString(), FullLanMode, chatPort, FullLanMode && AllowExitNode)
+        if (!await TryStartSessionAsync(new EasyTierOptions(room, false, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), local, TestListeners, Guid.NewGuid().ToString(), FullLanMode, chatPort, FullLanMode && AllowExitNode)
             {
                 LocalTunnelPort = wraps && !FullLanMode ? EasyTierArgs.FreeTcpPort() : null,
                 // One local port per split leg (each forwarded over its own network); none when the room doesn't split.
@@ -819,15 +819,37 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         return true;
     }
 
-    private bool TryStartSession(EasyTierOptions options)
+    /// <summary>A whole-LAN start is waiting for the permission prompt: another start can't begin meanwhile.</summary>
+    private bool _awaitingPermission;
+
+    /// <summary>Counts <see cref="StopSession"/> calls, so a start that waited for the permission prompt sees it was stopped meanwhile.</summary>
+    private int _sessionStops;
+
+    private async Task<bool> TryStartSessionAsync(EasyTierOptions options)
     {
+        if (_awaitingPermission) return false;
         StopSession();
+        var stops = _sessionStops;
         try
         {
             var workDir = Path.Combine(EasyTierWorkRoot, options.Tun ? "run-lan" : "run");
-            _session = options.Tun
-                ? EasyTierElevatedSession.Start(_service.EasyTier, options, workDir)
-                : EasyTierSession.Start(_service.EasyTier, options, workDir);
+            if (options.Tun)
+            {
+                // The Mac/Linux password dialog doesn't cover the screen: keep the window responsive while it is open.
+                _awaitingPermission = true;
+                SetStatus(StatusMessage.Info("multiplayer.room.waiting_permission"));
+                IEasyTierSession started;
+                try { started = await Task.Run(() => EasyTierElevatedSession.Start(_service.EasyTier, options, workDir)); }
+                finally { _awaitingPermission = false; }
+                if (stops != _sessionStops || !IsIdle)
+                {
+                    // Left the room or started something else while the prompt was open.
+                    started.Dispose();
+                    return false;
+                }
+                _session = started;
+            }
+            else _session = EasyTierSession.Start(_service.EasyTier, options, workDir);
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException or PlatformNotSupportedException)
         {
@@ -1268,7 +1290,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 else
                 {
                     old.Dispose();
-                    var next = EasyTierElevatedSession.Start(_service.EasyTier, options, Path.Combine(EasyTierWorkRoot, "run-lan"));
+                    var next = await Task.Run(() => EasyTierElevatedSession.Start(_service.EasyTier, options, Path.Combine(EasyTierWorkRoot, "run-lan")));
                     replacement = next;
                     await next.WaitForReadyAsync(lifetime.Token);
                     if (_sessionCts != lifetime || _direct != direct) return false;
@@ -1527,6 +1549,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private void StopSession()
     {
+        _sessionStops++;
         _timer?.Stop();
         _timer = null;
         _sessionCts?.Cancel();

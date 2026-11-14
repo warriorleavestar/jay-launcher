@@ -1032,6 +1032,7 @@
   "multiplayer.room.player_count": "房間內有 {0} 位玩家",
   "multiplayer.room.server_name": "Jay 連線房間",
   "multiplayer.room.start_failed": "未能啟動連線：{0}",
+  "multiplayer.room.waiting_permission": "正在等你在系統的權限確認視窗中允許系統管理員權限…",
   "multiplayer.room.stop": "結束連線",
   "multiplayer.room.stop_confirm_guest": "你會離開這個房間，遊戲裡的連線也會斷開。",
   "multiplayer.room.stop_confirm_host_empty": "房間會關閉，沒用完的邀請也會作廢。",

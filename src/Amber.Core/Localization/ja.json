@@ -1032,6 +1032,7 @@
   "multiplayer.room.player_count": "ルーム内のプレイヤー：{0} 人",
   "multiplayer.room.server_name": "Jay マルチプレイルーム",
   "multiplayer.room.start_failed": "マルチプレイを開始できませんでした：{0}",
+  "multiplayer.room.waiting_permission": "システムの権限確認で管理者アクセスを許可するのを待っています…",
   "multiplayer.room.stop": "マルチプレイを終了",
   "multiplayer.room.stop_confirm_guest": "このルームから抜け、ゲーム内の接続も切れます。",
   "multiplayer.room.stop_confirm_host_empty": "ルームが閉じられ、未使用の招待も無効になります。",
