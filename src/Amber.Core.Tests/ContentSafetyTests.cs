@@ -79,6 +79,50 @@ public sealed class ContentSafetyTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_root, "skins")) && Directory.EnumerateFiles(Path.Combine(_root, "skins")).Any());
     }
 
+    /// <summary>A body that hands out <paramref name="chunk"/> bytes after each <paramref name="pause"/>, up to <paramref name="total"/> (or forever).</summary>
+    private sealed class TrickleStream(int chunk, TimeSpan pause, long total = long.MaxValue) : Stream
+    {
+        private long _sent;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _sent; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("synchronous read");
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (_sent >= total) return 0;
+            await Task.Delay(pause, ct);
+            var n = (int)Math.Min(Math.Min(chunk, buffer.Length), total - _sent);
+            buffer.Span[..n].Fill(0x41);
+            _sent += n;
+            return n;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task ASkinBodyIsReadWithoutBlockingAndWithinItsLimits()
+    {
+        var stall = TimeSpan.FromMilliseconds(300);
+        // A normal body arrives whole (only asynchronous reads are used: the stream refuses synchronous ones).
+        Assert.Equal(5000, (await AccountService.ReadCappedAsync(new TrickleStream(1000, TimeSpan.Zero, 5000), 10_000, stall, default)).Length);
+        // Too large.
+        await Assert.ThrowsAsync<InvalidDataException>(() => AccountService.ReadCappedAsync(new TrickleStream(1000, TimeSpan.Zero, 20_000), 10_000, stall, default));
+        // A server that goes quiet is given up on after the stall time, not held forever.
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => AccountService.ReadCappedAsync(new TrickleStream(1, TimeSpan.FromMinutes(5)), 10_000, stall, default));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        // A trickle that never stalls long enough still ends at the overall deadline the caller passes.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        watch.Restart();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => AccountService.ReadCappedAsync(new TrickleStream(1, TimeSpan.FromMilliseconds(50)), 1_000_000, stall, deadline.Token));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+    }
+
     [Fact]
     public void ShaderPackNamesRoundTripThroughTheJavaPropertiesFormat()
     {

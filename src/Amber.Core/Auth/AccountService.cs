@@ -84,10 +84,13 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
             byte[] bytes;
             using (NetworkPolicy.Scope(NetworkCategory.Login))
             {
-                using var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
+                // A slow or silent skin server must not hold the preview (or anything awaiting it) for long.
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                deadline.CancelAfter(SkinTotalTimeout);
+                using var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
                 response.EnsureSuccessStatusCode();
-                await using var stream = await response.Content.ReadAsStreamAsync(ct);
-                bytes = ArchiveMetadata.ReadBytes(stream, MaxSkinBytes);
+                await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+                bytes = await ReadCappedAsync(stream, MaxSkinBytes, SkinStallTimeout, deadline.Token);
             }
             if (!bytes.AsSpan().StartsWith(PngSignature)) return null;
             var temp = path + ".tmp";
@@ -95,10 +98,33 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
             File.Move(temp, path, overwrite: true);
             return path;
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or InvalidOperationException
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or IOException or InvalidOperationException
                                        or FormatException or InvalidDataException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
         {
             return null;
+        }
+    }
+
+    private static readonly TimeSpan SkinTotalTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan SkinStallTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Reads <paramref name="stream"/> to the end without blocking a thread. Throws <see cref="InvalidDataException"/> past
+    /// <paramref name="max"/> bytes and <see cref="OperationCanceledException"/> when no byte arrives for
+    /// <paramref name="stall"/> or <paramref name="ct"/> is cancelled.
+    /// </summary>
+    internal static async Task<byte[]> ReadCappedAsync(Stream stream, int max, TimeSpan stall, CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        while (true)
+        {
+            using var quiet = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            quiet.CancelAfter(stall);
+            var n = await stream.ReadAsync(chunk, quiet.Token);
+            if (n == 0) return buffer.ToArray();
+            if (buffer.Length + n > max) throw new InvalidDataException("too large");
+            buffer.Write(chunk, 0, n);
         }
     }
 }
