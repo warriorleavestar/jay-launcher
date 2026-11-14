@@ -299,6 +299,21 @@ public partial class LocalizationTests
         return null;
     }
 
+    /// <summary>English counts of one read "1 mod", "1 friend", "1 person", not "1 mods".</summary>
+    [Theory]
+    [InlineData("newinstance.mods.resolving")]
+    [InlineData("multiplayer.friends.backed_up")]
+    [InlineData("multiplayer.friends.restored")]
+    [InlineData("multiplayer.rekey.done_missed")]
+    [InlineData("multiplayer.kick.invite_revoked_missed")]
+    public void EnglishCountsOfOneAreSingular(string key)
+    {
+        var en = L.Load("en");
+        Assert.Equal(key + ".one", L.PluralKey(en, key, 1));
+        Assert.Equal(key, L.PluralKey(en, key, 2));
+        Assert.DoesNotMatch(@"\b1 (mods|friends|people)\b", en[key + ".one"]);
+    }
+
     /// <summary>
     /// Classical Chinese is written in traditional characters (its interface falls back to zh-Hant): no value uses a
     /// character that only exists in simplified Chinese.

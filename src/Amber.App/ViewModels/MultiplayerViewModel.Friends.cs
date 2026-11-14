@@ -53,7 +53,7 @@ public sealed partial class MultiplayerViewModel
         try
         {
             await File.WriteAllBytesAsync(path, data);
-            SetStatus(StatusMessage.Success("multiplayer.friends.backed_up", count));
+            SetStatus(StatusMessage.Success("multiplayer.friends.backed_up", count) with { Count = count });
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -113,7 +113,7 @@ public sealed partial class MultiplayerViewModel
         var keys = LoadRelink();
         foreach (var c in contacts) keys.Add(Convert.ToHexStringLower(c.PublicKey));
         SaveRelink(keys);
-        SetStatus(StatusMessage.Success("multiplayer.friends.restored", added));
+        SetStatus(StatusMessage.Success("multiplayer.friends.restored", added) with { Count = added });
         await RelinkFriendsAsync();
     }
 
