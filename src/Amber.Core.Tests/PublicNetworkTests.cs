@@ -144,6 +144,24 @@ public sealed class PublicNetworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task EachRoomExpiresOnTimeWhenOthersAreRenewed()
+    {
+        var client = new RoomDirectoryClient(_net);
+        var early = new RoomSigner();
+        var late = new RoomSigner();
+        await client.AnnounceAsync(early.Sign(Listing() with { Name = "early" }, _now), true, [], default);
+        _now += TimeSpan.FromSeconds(60);
+        await client.AnnounceAsync(late.Sign(Listing() with { Name = "late" }, _now), true, [], default);
+        _now += RoomDirectoryProtocol.Ttl - TimeSpan.FromSeconds(60);
+        Assert.Equal("late", Assert.Single(await client.ListAsync(default)).Name);
+        await client.AnnounceAsync(late.Sign(Listing() with { Name = "late" }, _now), true, [], default);
+        _now += RoomDirectoryProtocol.Ttl - TimeSpan.FromSeconds(1);
+        Assert.Equal(1, _directory.Count);
+        _now += TimeSpan.FromSeconds(1);
+        Assert.Equal(0, _directory.Count);
+    }
+
+    [Fact]
     public async Task ReplayAndForgedWithdrawAreRejected()
     {
         var client = new RoomDirectoryClient(_net);

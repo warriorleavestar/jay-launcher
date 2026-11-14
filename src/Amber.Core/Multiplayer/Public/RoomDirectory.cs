@@ -766,6 +766,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             entry.Listed = listed;
             entry.Account = account;
             entry.Expires = _now() + RoomDirectoryProtocol.Ttl;
+            if (entry.Expires < _nextRoomExpiry) _nextRoomExpiry = entry.Expires;
             _rooms[listing.Id] = entry;
             SetSnapshot("r:" + listing.Id, listed && listing.Mode != RoomVisibility.Hidden ? PublicItem(entry.Listing) : null);
             var published = entry.Listing;
@@ -978,7 +979,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             }
             if (items.Any(i => i.Blob == blob)) return new JsonObject { ["ok"] = true };
             if (items.Count >= RoomDirectoryProtocol.MaxMailPerBox || _sealedCount >= MaxSealedMail) return Error("full");
-            items.Add(new SealedItem(blob, drop!, _now() + RoomDirectoryProtocol.MailTtl));
+            var expires = _now() + RoomDirectoryProtocol.MailTtl;
+            items.Add(new SealedItem(blob, drop!, expires));
+            if (expires < _nextMailExpiry) _nextMailExpiry = expires;
             _sealedCount++;
             return new JsonObject { ["ok"] = true };
         }
@@ -1053,6 +1056,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 _recordPuts[source] = (count + 1, until);
             }
             _records[lookup] = record;
+            if (record.Expires < _nextRecordExpiry) _nextRecordExpiry = record.Expires;
             return new JsonObject { ["ok"] = true };
         }
     }
@@ -1068,27 +1072,45 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
+    // The earliest expiry in each table (or later, never earlier): the prunes below only scan a table once something in it
+    // may have expired, instead of on every request. Exact under any clock, including the tests' fake ones.
+    private DateTimeOffset _nextRoomExpiry = DateTimeOffset.MaxValue;
+    private DateTimeOffset _nextRecordExpiry = DateTimeOffset.MaxValue;
+    private DateTimeOffset _nextMailExpiry = DateTimeOffset.MaxValue;
+
     private void PruneRecords()
     {
         var now = _now();
-        foreach (var (lookup, record) in _records.Where(p => p.Value.Expires <= now).ToList()) _records.Remove(lookup);
+        if (now >= _nextRecordExpiry)
+        {
+            foreach (var (lookup, record) in _records.Where(p => p.Value.Expires <= now).ToList()) _records.Remove(lookup);
+            _nextRecordExpiry = _records.Count == 0 ? DateTimeOffset.MaxValue : _records.Values.Min(r => r.Expires);
+        }
         foreach (var (source, used) in _recordPuts.Where(p => p.Value.Until <= now).ToList()) _recordPuts.Remove(source);
     }
 
     private void PruneMail()
     {
         var now = _now();
-        foreach (var (box, items) in _mailboxes.ToList())
+        if (now >= _nextMailExpiry)
         {
-            _sealedCount -= items.RemoveAll(i => i.Expires <= now);
-            if (items.Count == 0) _mailboxes.Remove(box);
+            var next = DateTimeOffset.MaxValue;
+            foreach (var (box, items) in _mailboxes.ToList())
+            {
+                _sealedCount -= items.RemoveAll(i => i.Expires <= now);
+                if (items.Count == 0) _mailboxes.Remove(box);
+                foreach (var item in items) if (item.Expires < next) next = item.Expires;
+            }
+            _nextMailExpiry = next;
         }
     }
 
     private void Prune()
     {
         var now = _now();
+        if (now < _nextRoomExpiry) return;
         foreach (var (id, entry) in _rooms.Where(p => p.Value.Expires <= now).ToList()) RemoveLocked(id, entry, RoomRemoval.Expired);
+        _nextRoomExpiry = _rooms.Count == 0 ? DateTimeOffset.MaxValue : _rooms.Values.Min(e => e.Expires);
     }
 
     private void RemoveLocked(string id, Entry entry, RoomRemoval reason)
