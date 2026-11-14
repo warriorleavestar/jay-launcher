@@ -66,8 +66,9 @@ internal sealed partial class SelfTest
             else Check("设置 › 网络：连着联机页的设置", false);
             main.Shell.Navigate("settings/multiplayer");
             await Task.Delay(300);
-            Check("settings/multiplayer：只显示联机（邀请、新房间默认、联机组件、紧急断开）", Shown() is ["Group_multiplayer"] && settings.SelectedGroupId == SettingsCatalog.Multiplayer, string.Join(",", Shown()));
+            Check("settings/multiplayer：只显示联机（分组的联机高级设置）", Shown() is ["Group_multiplayer"] && settings.SelectedGroupId == SettingsCatalog.Multiplayer, string.Join(",", Shown()));
             await ShotAsync("settings-multiplayer-1440");
+            await MultiplayerAdvancedAsync(page, settings);
             settings.SelectedGroupIndex = 1;
             await Task.Delay(200);
 

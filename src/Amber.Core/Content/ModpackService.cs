@@ -383,14 +383,14 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
 
     /// <summary>
     /// Why a mixed pack cannot be imported, or null when it can: every extra loader must be one the universal loader
-    /// runs on the base (<paramref name="extras"/> from <see cref="Bake.CrossLoader.Extras"/>), and baking must be ready.
+    /// runs on the base (<paramref name="extras"/> from <see cref="Bake.CrossLoader.Extras"/>), and the loader must be installed.
     /// </summary>
-    public static string? MixedRefusal(ModpackInfo info, IReadOnlyList<string> extras, bool bakeReady)
+    public static string? MixedRefusal(ModpackInfo info, IReadOnlyList<string> extras, bool loaderInstalled)
     {
         if (!info.IsMixed) return null;
         var missing = info.ExtraLoaders.Select(k => NewInstanceMods.LoaderId(k)).Where(id => id is null || !extras.Contains(id)).ToList();
         if (missing.Count > 0) return L.F("core.content.modpack.mixed_unsupported", MixedLoaders(info));
-        return bakeReady ? null : L.F("core.content.modpack.mixed_needs_bake", MixedLoaders(info));
+        return loaderInstalled ? null : L.F("core.content.modpack.mixed_needs_bake", MixedLoaders(info));
     }
 
     /// <summary>

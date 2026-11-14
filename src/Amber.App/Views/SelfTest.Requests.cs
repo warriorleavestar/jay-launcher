@@ -113,9 +113,9 @@ internal sealed partial class SelfTest
         await ModCheckAsync(vm, page);
 
         // Settings › Multiplayer: the popup can be turned off.
-        main.Shell.Navigate(Amber.Core.Navigation.LegacyRoutes.MultiplayerSettings);
+        main.Shell.Navigate("settings#RequestPopup");
         await Task.Delay(300);
-        Check("设置 › 联机：置顶小窗开关（默认开）", vm.RequestPopup && await FindAsync<CheckBox>(c => c.Name == "RequestPopupBox", 3) is not null);
+        Check("设置 › 联机：置顶小窗开关（默认开）", vm.RequestPopup && await FindAsync<CheckBox>(c => c.Name == "RequestPopupBox" && c.IsEffectivelyVisible, 3) is not null);
         main.Shell.Navigate("play");
         await Task.Delay(300);
         page = (await FindAsync<MultiplayerPage>(p => p.IsEffectivelyVisible))!;

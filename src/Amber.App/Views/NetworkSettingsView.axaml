@@ -49,7 +49,7 @@
             <Button Content="{l:T multiplayer.public.save_nodes}" Command="{Binding SavePublicNodesCommand}" HorizontalAlignment="Left" />
           </StackPanel>
         </Expander>
-        <Expander Header="{l:T multiplayer.volunteer.title}" HorizontalAlignment="Stretch" IsVisible="{Binding VolunteersAllowed}">
+        <Expander x:Name="Volunteer" Header="{l:T multiplayer.volunteer.title}" HorizontalAlignment="Stretch" IsVisible="{Binding VolunteersAllowed}">
           <StackPanel Spacing="6">
             <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.hint}" />
             <TextBlock FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.volunteer.privacy}" />

@@ -369,6 +369,12 @@ public sealed partial class MainViewModel : ObservableObject
             _ = settingsPage.DownloadBakeLoaderAsync();
         };
         content.DownloadBakeLoader = home.DownloadBakeLoader;
+        // The instance card downloads in place (no trip to Settings); Settings keeps the one copy of the loader path.
+        Pages.OfType<InstanceViewModel>().Single().DownloadLoader = async (report, ct) =>
+        {
+            await settingsPage.DownloadBakeLoaderAsync(report, ct);
+            return settingsPage.BakeLoaderStatus;
+        };
         Help.Navigate = r => shell.Navigate(r);
         Views.Controls.TermHint.Navigate = r => shell.Navigate(r);
         var about = Pages.OfType<AboutViewModel>().Single();
@@ -543,6 +549,31 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] public partial string BakeLoaderStatus { get; set; } = "";
     [ObservableProperty] public partial bool IsInstallingBakeLoader { get; set; }
 
+    /// <summary>Settings › Game › Universal loader: the platforms and game versions the installed loader runs ("" without one).</summary>
+    [ObservableProperty] public partial string UniversalLoaderRuns { get; set; } = "";
+    /// <summary>Which instances launch through it.</summary>
+    [ObservableProperty] public partial string UniversalLoaderUsedBy { get; set; } = "";
+    /// <summary>How big its cache is ("" until measured or when there is none).</summary>
+    [ObservableProperty] public partial string UniversalLoaderCache { get; set; } = "";
+    private int _universalLoaderGeneration;
+
+    /// <summary>Fills in what the loader runs, who uses it and its cache size (the size in the background).</summary>
+    public void RefreshUniversalLoader()
+    {
+        UniversalLoaderRuns = _service.InstalledBakeCapabilities is { } caps ? L.F("settings.ul.runs", Amber.Core.Bake.UniversalLoaderFit.Supported(caps)) : "";
+        List<string> users;
+        try { users = _service.InstalledVersions().Where(id => _service.UsesUniversalLoader(id)).ToList(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { users = []; }
+        UniversalLoaderUsedBy = users.Count == 0 ? L.T("settings.ul.used_by_none")
+            : L.F("settings.ul.used_by", string.Join(L.T("common.list_separator"), users.Take(5)) + (users.Count > 5 ? "…" : ""));
+        var generation = ++_universalLoaderGeneration;
+        _ = Task.Run(() => Amber.Core.Bake.UniversalLoaderFit.FolderSize(LauncherService.BakeRuntime.CacheRoot)).ContinueWith(t => Dispatcher.UIThread.Post(() =>
+        {
+            if (generation == _universalLoaderGeneration)
+                UniversalLoaderCache = t.IsCompletedSuccessfully && t.Result > 0 ? L.F("settings.ul.cache", Fmt.Size(t.Result)) : "";
+        }), TaskScheduler.Default);
+    }
+
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(CanStartBakeLoaderDownload))] public partial bool IsDownloadingBakeLoader { get; set; }
     /// <summary>The pin names a published zip (until the loader project publishes one, the button stays off and says why).</summary>
     public bool BakeLoaderPublished => Amber.Core.Bake.BakeLoaderRelease.Pinned.IsPublished;
@@ -558,11 +589,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// accepted only with the pinned SHA-256, then installed like a zip the player picked. Cancel keeps the partial
     /// file so the next try resumes.
     /// </summary>
-    public async Task DownloadBakeLoaderAsync()
+    public async Task DownloadBakeLoaderAsync(IProgress<(double Percent, long Bytes)>? report = null, CancellationToken ct = default)
     {
         if (IsDownloadingBakeLoader || IsInstallingBakeLoader) return;
         if (!BakeLoaderPublished) { BakeLoaderStatus = L.T("core.bake.download_unpublished"); return; }
-        using var cts = new CancellationTokenSource();
+        // Cancelled from here ([Cancel] in Settings) or by the caller (the progress row on the instance page).
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _bakeLoaderDownload = cts;
         IsDownloadingBakeLoader = true;
         IsInstallingBakeLoader = true;
@@ -574,6 +606,7 @@ public sealed partial class SettingsViewModel : PageViewModel
             {
                 if (IsDownloadingBakeLoader)
                     BakeLoaderStatus = L.F("settings.bake.downloading", p.CurrentFile ?? "", (int)(100 * Math.Min(p.BytesDownloaded, release.Size) / release.Size), Fmt.Size(release.Size));
+                report?.Report((100.0 * Math.Min(p.BytesDownloaded, release.Size) / release.Size, p.BytesDownloaded));
             });
             var package = await _service.DownloadBakeLoaderAsync(progress, cts.Token);
             BakeLoaderPath = package.Root;
@@ -630,14 +663,13 @@ public sealed partial class SettingsViewModel : PageViewModel
     /// <summary>One line about the selected loader folder; reads the manifest only (files are checked before each bake).</summary>
     private static string DescribeBakeLoader(string path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return "";
         try
         {
-            return Amber.Core.Bake.BakeToolkit.Find(path) switch
+            return Amber.Core.Bake.BakeToolkit.Find(string.IsNullOrWhiteSpace(path) ? null : path) switch
             {
                 { Package: { } p } => L.F("settings.bake.loader_package", p.LoaderVersion, p.Interface.ToString(2)),
                 { } => L.T("settings.bake.loader_devbuild"),
-                null => L.T("settings.bake.loader_none"),
+                null => string.IsNullOrWhiteSpace(path) ? L.T("settings.ul.none") : L.T("settings.bake.loader_none"),
             };
         }
         catch (Amber.Core.Bake.BakeException e) { return e.Message; }
@@ -720,7 +752,9 @@ public sealed partial class SettingsViewModel : PageViewModel
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
             if (!IsInstallingBakeLoader) BakeLoaderStatus = DescribeBakeLoader(BakeLoaderPath);
+            if (_universalLoaderGeneration > 0) RefreshUniversalLoader();
         });
+        service.UniversalLoaderChanged += _ => Dispatcher.UIThread.Post(() => { if (_universalLoaderGeneration > 0) RefreshUniversalLoader(); });
         L.Changed += () => Dispatcher.UIThread.Post(() =>
         {
             var automatic = JavaOptions.FirstOrDefault(o => o.Path is null);
@@ -809,7 +843,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         _ = LoadJavaAsync(false);
     }
 
-    protected override void OnBecameCurrent() { Recycle.Refresh(); RefreshPrivacy(); }
+    protected override void OnBecameCurrent() { Recycle.Refresh(); RefreshPrivacy(); RefreshUniversalLoader(); }
 
     public Amber.App.Localization.OptionItem[] ThemeOptions { get; } = Amber.App.Localization.OptionItem.Keys("settings.theme.system", "settings.theme.light", "settings.theme.dark");
     private static readonly string[] ThemeKeys = ["system", "light", "dark"];
@@ -1084,14 +1118,36 @@ public sealed partial class SettingsViewModel : PageViewModel
         Persist();
     }
     partial void OnNoTraceChanged(bool value) => Persist();
-    partial void OnAttestationIndexChanged(int value) => Persist();
-    partial void OnSecurityBreakerChanged(bool value) => Persist();
-    partial void OnBreakerRestartDelayChanged(string value) => Persist();
-    partial void OnBreakerSkipDelayChanged(bool value) => Persist();
-    partial void OnExperimentalBakeChanged(bool value) => Persist();
+    partial void OnAttestationIndexChanged(int value)
+    {
+        Persist();
+        RefreshAdvanced();
+    }
+    partial void OnSecurityBreakerChanged(bool value)
+    {
+        Persist();
+        RefreshAdvanced();
+    }
+    partial void OnBreakerRestartDelayChanged(string value)
+    {
+        Persist();
+        RefreshAdvanced();
+    }
+    partial void OnBreakerSkipDelayChanged(bool value)
+    {
+        Persist();
+        RefreshAdvanced();
+    }
+    partial void OnExperimentalBakeChanged(bool value)
+    {
+        Persist();
+        // The default moves every instance that has not chosen.
+        if (!_loading && _universalLoaderGeneration > 0) RefreshUniversalLoader();
+    }
     partial void OnBakeLoaderPathChanged(string value)
     {
         Persist();
+        if (!_loading && _universalLoaderGeneration > 0) RefreshUniversalLoader();
         if (!IsInstallingBakeLoader) BakeLoaderStatus = DescribeBakeLoader(value);
         BakeCleanupStatus = "";   // the last cleanup's answer was about the previous folder
     }

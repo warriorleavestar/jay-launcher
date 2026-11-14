@@ -42,26 +42,47 @@ public sealed partial class RemoteVersionItem(ManifestEntry entry, bool installe
 /// One option of the loader segment (official design §6.11). Options the chosen game version can't have are greyed out
 /// with the reason, decided offline by <see cref="LoaderSupport"/>; the loader's own list still has the last word.
 /// </summary>
-public sealed partial class LoaderChoice(string name, LoaderKind? kind) : LocalizedObservable
+public sealed partial class LoaderChoice(string name, LoaderKind? kind, bool jay = false) : LocalizedObservable
 {
     public string Name { get; } = name;
-    public LoaderKind? Kind { get; } = kind;
-    public string Label => Kind is null ? L.T("home.version.vanilla") : Name;
+
+    /// <summary>
+    /// The Jay loader (Jay's universal loader): an instance on the loader it runs for the chosen version (NeoForge or
+    /// Forge, <see cref="Base"/>) that launches through the universal loader, so it can mix in mods from other loaders.
+    /// </summary>
+    public bool IsJay { get; } = jay;
+
+    /// <summary>For the Jay loader: the loader it builds on for the chosen game version (null: it doesn't run it).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Kind), nameof(Description))]
+    public partial LoaderKind? Base { get; set; }
+
+    /// <summary>The loader that gets installed (the Jay loader installs its base).</summary>
+    public LoaderKind? Kind => IsJay ? Base : kind;
+
+    public string Label => IsJay ? L.T("newinstance.loader.jay") : Kind is null ? L.T("home.version.vanilla") : Name;
 
     /// <summary>One line on what the loader is good for, under the segment.</summary>
-    public string Description => L.T(Kind switch
-    {
-        LoaderKind.Fabric => "newinstance.loader.about.fabric",
-        LoaderKind.Quilt => "newinstance.loader.about.quilt",
-        LoaderKind.Forge => "newinstance.loader.about.forge",
-        LoaderKind.NeoForge => "newinstance.loader.about.neoforge",
-        LoaderKind.OptiFine => "newinstance.loader.about.optifine",
-        _ => "newinstance.loader.about.none",
-    });
+    public string Description => IsJay
+        ? Base is { } b ? L.F("newinstance.loader.about.jay", b) : L.T("newinstance.loader.about.jay_none")
+        : L.T(Kind switch
+        {
+            LoaderKind.Fabric => "newinstance.loader.about.fabric",
+            LoaderKind.Quilt => "newinstance.loader.about.quilt",
+            LoaderKind.Forge => "newinstance.loader.about.forge",
+            LoaderKind.NeoForge => "newinstance.loader.about.neoforge",
+            LoaderKind.OptiFine => "newinstance.loader.about.optifine",
+            _ => "newinstance.loader.about.none",
+        });
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsAvailable), nameof(BlockReason))]
     public partial LoaderBlock Block { get; set; }
+
+    /// <summary>Why the Jay loader can't run the chosen version (set with <see cref="LoaderBlock.NotRunByJay"/>).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BlockReason))]
+    public partial string JayReason { get; set; } = "";
 
     public bool IsAvailable => Block == LoaderBlock.None;
 
@@ -70,6 +91,7 @@ public sealed partial class LoaderChoice(string name, LoaderKind? kind) : Locali
         LoaderBlock.AncientVersion => L.T("newinstance.loader.block.ancient"),
         LoaderBlock.Snapshot => L.F("newinstance.loader.block.snapshot", Label),
         LoaderBlock.TooOld => L.F("newinstance.loader.block.too_old", Label, Kind is { } k ? LoaderSupport.Minimum(k) : ""),
+        LoaderBlock.NotRunByJay => JayReason,
         _ => "",
     };
 }
@@ -95,6 +117,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         new("Forge", LoaderKind.Forge),
         new("NeoForge", LoaderKind.NeoForge),
         new("OptiFine", LoaderKind.OptiFine),
+        new("Jay", null, jay: true),
     ];
 
     public ObservableCollection<LoaderVersion> LoaderVersions { get; } = [];
@@ -208,8 +231,57 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
     partial void OnTargetChanged(RemoteVersionItem? value)
     {
         foreach (var choice in LoaderChoices)
+        {
+            if (choice.IsJay)
+            {
+                UpdateJayChoice(choice, value);
+                continue;
+            }
             choice.Block = value is null || choice.Kind is not { } kind ? LoaderBlock.None : LoaderSupport.Check(value.Id, value.Entry.Type, kind);
+        }
         OnModsContextChanged();
+        UpdateUniversalLoaderOption();
+    }
+
+    /// <summary>
+    /// The Jay loader for this game version: built on what the universal loader runs there (NeoForge, else Forge), and
+    /// greyed out with the versions it does run when it runs neither.
+    /// </summary>
+    private void UpdateJayChoice(LoaderChoice jay, RemoteVersionItem? target)
+    {
+        var caps = _service.UniversalLoaderCapabilities;
+        jay.Base = target is null ? null : Amber.Core.Bake.UniversalLoaderFit.BaseLoaderFor(caps, target.Id);
+        jay.JayReason = target is null || jay.Base is not null ? ""
+            : caps is null ? L.T("core.bake.fit.unavailable")
+            : L.F("newinstance.loader.block.jay", target.Id, Amber.Core.Bake.UniversalLoaderFit.Supported(caps));
+        jay.Block = target is null ? LoaderBlock.None
+            : jay.Base is { } kind ? LoaderSupport.Check(target.Id, target.Entry.Type, kind)
+            : LoaderBlock.NotRunByJay;
+    }
+
+    // ---- "Use the universal loader to mix in mods from other loaders" (redesign batch 10) ----
+
+    /// <summary>Ticked: the new instance launches through the universal loader. Starts as the default in Settings › Game.</summary>
+    [ObservableProperty] public partial bool UseUniversalLoader { get; set; }
+
+    /// <summary>Why the universal loader cannot run this game version and loader; empty when it can.</summary>
+    [ObservableProperty] public partial string UniversalLoaderUnavailable { get; set; } = "";
+
+    /// <summary>
+    /// The tick box shows once a loader is picked (a vanilla instance has nothing to run other mods on). The Jay loader
+    /// is the universal loader already, so it has no tick box.
+    /// </summary>
+    public bool ShowUniversalLoaderOption => SelectedLoader is { Kind: not null, IsJay: false } && Target is not null;
+
+    public bool CanUseUniversalLoader => ShowUniversalLoaderOption && UniversalLoaderUnavailable.Length == 0;
+
+    private void UpdateUniversalLoaderOption()
+    {
+        UniversalLoaderUnavailable = !ShowUniversalLoaderOption ? ""
+            : Amber.Core.Bake.UniversalLoaderFit.Unsupported(_service.UniversalLoaderCapabilities, Amber.Core.Content.NewInstanceMods.LoaderId(SelectedLoader.Kind), Target!.Id) ?? "";
+        UseUniversalLoader = CanUseUniversalLoader && _service.Settings.ExperimentalBake;
+        OnPropertyChanged(nameof(ShowUniversalLoaderOption));
+        OnPropertyChanged(nameof(CanUseUniversalLoader));
     }
 
     public bool IsConfiguring => Target is not null;
@@ -378,6 +450,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
             return;
         }
         OnModsContextChanged();
+        UpdateUniversalLoaderOption();
         _ = LoadLoaderVersionsAsync();
     }
     partial void OnShowUnstableLoadersChanged(bool value) => _ = LoadLoaderVersionsAsync();
@@ -465,7 +538,9 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         {
             var versions = await LoaderInstallers.Create(kind, _service.Loaders).ListAsync(target.Id, cts.Token);
             if (cts.IsCancellationRequested) return;
-            foreach (var v in versions.Where(v => v.Stable || ShowUnstableLoaders)) LoaderVersions.Add(v);
+            var jay = SelectedLoader.IsJay;
+            foreach (var v in versions.Where(v => (v.Stable || ShowUnstableLoaders) && (!jay || Amber.Core.Bake.UniversalLoaderFit.AcceptsBase(target.Id, kind, v.Version))))
+                LoaderVersions.Add(v);
             SelectedLoaderVersion = LoaderVersions.FirstOrDefault(v => v.Recommended) ?? LoaderVersions.FirstOrDefault();
             var loader = SelectedLoader;
             var targetId = target.Id;
@@ -487,7 +562,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         // 原版的文件夹名就是版本号；加载器默认“1.21.1-Fabric”，重名加序号（改版规格 4.4）。
         CustomName = SelectedLoader.Kind is not { } kind ? Target.Id
             : SelectedLoaderVersion is null ? ""
-            : NewInstanceNames.Default(Target.Id, kind, _service.InstalledVersions());
+            : NewInstanceNames.WithSuffix(Target.Id, SelectedLoader.IsJay ? "Jay" : kind.ToString(), _service.InstalledVersions());
     }
 
     private void StartWaitTimer()
@@ -527,6 +602,10 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
         StartWaitTimer();
         // "Add mods while you're at it": what was ticked when [Install] was pressed.
         var picks = loader is null ? [] : PickedMods.ToList();
+        // Written only when it differs from the default, so an untouched instance keeps following Settings › Game.
+        // The Jay loader always launches through the universal loader, whatever the default says.
+        bool? universalLoader = loader is not null && SelectedLoader.IsJay ? true
+            : loader is not null && CanUseUniversalLoader && UseUniversalLoader != _service.Settings.ExperimentalBake ? UseUniversalLoader : null;
         _modProblems = [];
         _modsInstalled = 0;
         // §6.11: the panel closes and the install carries on as a task in the activity centre.
@@ -581,6 +660,7 @@ public sealed partial class DownloadViewModel : PageViewModel, ISnapshotDemo
                 }), ct);
                 item.Installed = true;
             }
+            if (universalLoader is { } useUniversalLoader) _service.SetUniversalLoader(ctx, id, useUniversalLoader);
             if (picks.Count > 0) await InstallPickedModsAsync(picks, ctx, id, task, ct);
             await Ui.FlushAsync();
             acceptingProgress = false;

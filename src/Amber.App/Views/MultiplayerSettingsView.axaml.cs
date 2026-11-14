@@ -1,19 +1,63 @@
 using Amber.App.ViewModels;
 using Amber.Core.Localization;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 
 namespace Amber.App.Views;
 
-/// <summary>Settings › Multiplayer: invites, what a new room starts with, the multiplayer component and hotspot sharing.</summary>
+/// <summary>
+/// Settings › Multiplayer, the multiplayer advanced settings panel: groups that open one at a time (opening one closes
+/// the others, also when a settings#Field reveal opens it), and the locked reset confirmation with focus on [Cancel].
+/// </summary>
 public partial class MultiplayerSettingsView : UserControl
 {
-    public MultiplayerSettingsView() => InitializeComponent();
+    private bool _closingOthers;
+
+    public MultiplayerSettingsView()
+    {
+        InitializeComponent();
+        foreach (var group in Groups) group.PropertyChanged += OnGroupChanged;
+        MultiplayerResetConfirm.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == IsVisibleProperty && MultiplayerResetConfirm.IsVisible)
+                Dispatcher.UIThread.Post(() => MultiplayerResetCancel.Focus(Avalonia.Input.NavigationMethod.Tab), DispatcherPriority.Loaded);
+        };
+        // Esc in the question, or leaving the panel, is [Cancel]: nothing is reset without the button.
+        MultiplayerResetConfirm.KeyDown += (_, e) =>
+        {
+            if (e.Key != Avalonia.Input.Key.Escape || DataContext is not SettingsViewModel { ConfirmingAdvancedReset: true } vm) return;
+            vm.CancelAdvancedResetCommand.Execute(null);
+            Dispatcher.UIThread.Post(() => MultiplayerReset.Focus(Avalonia.Input.NavigationMethod.Tab), DispatcherPriority.Loaded);
+            e.Handled = true;
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            if (DataContext is SettingsViewModel { ConfirmingAdvancedReset: true } vm) vm.CancelAdvancedResetCommand.Execute(null);
+        };
+    }
+
+    /// <summary>The groups in panel order.</summary>
+    internal IReadOnlyList<Expander> Groups =>
+        [MpGroupProtection, MpGroupConnection, MpGroupInvites, MpGroupRoom, MpGroupNetwork, MpGroupTroubleshoot];
+
+    private void OnGroupChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property != Expander.IsExpandedProperty || sender is not Expander { IsExpanded: true } opened || _closingOthers) return;
+        _closingOthers = true;
+        try
+        {
+            foreach (var group in Groups)
+                if (!ReferenceEquals(group, opened)) group.IsExpanded = false;
+        }
+        finally { _closingOthers = false; }
+    }
 
     private async void ImportComponent_Click(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MultiplayerViewModel vm) await ImportComponentAsync(this, vm);
+        if (DataContext is SettingsViewModel { Multiplayer: { } vm }) await ImportComponentAsync(this, vm);
     }
 
     /// <summary>Asks for the component zip and imports it. Shared with the lobby's "Import from a file" button.</summary>

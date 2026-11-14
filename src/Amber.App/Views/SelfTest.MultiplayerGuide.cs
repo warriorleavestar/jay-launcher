@@ -173,9 +173,11 @@ internal sealed partial class SelfTest
             && await WaitAsync(() => main.CurrentPage is SettingsViewModel { SelectedGroupId: SettingsCatalog.Multiplayer }, 3)
             && Route() == LegacyRoutes.RoomDefaults && !vm.IsSubView, Route());
         await Task.Delay(300);
-        Check("设置 › 联机：邀请、新房间默认、联机组件、热点、紧急断开都在", Anywhere("multiplayer.settings.invites") && Anywhere("settings.mp.room_defaults")
-            && Anywhere("multiplayer.settings.component") && Anywhere("settings.mp.emergency")
-            && window.GetVisualDescendants().OfType<Controls.HotspotSharingPanel>().Any(h => h.IsEffectivelyVisible));
+        Check("设置 › 联机：分组面板（保护、连接、邀请和敲门、房间里能做什么、网络和中转、排查），【高级设置】打开“连接”组",
+            Anywhere("settings.mp.group.protection") && Anywhere("settings.mp.group.connection") && Anywhere("settings.mp.group.invites")
+            && Anywhere("settings.mp.group.room") && Anywhere("settings.mp.group.network") && Anywhere("settings.mp.group.troubleshoot")
+            && Anywhere("multiplayer.settings.component")
+            && window.GetVisualDescendants().OfType<CheckBox>().Any(c => c.Name == "DefaultRelayOnlyBox" && c.IsEffectivelyVisible));
         Check("设置 › 联机：没在房间里时不写“现在在房间里”", vm.IsIdle && !Anywhere("settings.mp.room_defaults_busy"));
         await ShotAsync("设置-联机-1440");
         await BackToPlay();
@@ -199,7 +201,9 @@ internal sealed partial class SelfTest
         });
         await vm.CreateInviteCommand.ExecuteAsync(null);
         await WaitAsync(() => vm.HasLongInvites, 3);
-        await Task.Delay(200);
+        // The list is in the "Invites and knocks" group of the panel: reveal a field there to open it.
+        main.Shell.Navigate("settings#InviteAutoCopy");
+        await Task.Delay(300);
         var longItem = vm.LongInviteItems.FirstOrDefault();
         Check("30 天邀请：有一张时列在设置 › 联机里，30 天、默认打码、能被认出是邀请", longItem is { Label: "Bob" } && longItem.Left == L.P("multiplayer.longinvite.days_left", 30, 30)
             && longItem.CodeDisplay.Contains('•') && JayInvite.TryParse(longItem.Code, out _) && vm.LongInviteLabel.Length == 0
