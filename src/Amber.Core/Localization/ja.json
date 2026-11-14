@@ -453,6 +453,8 @@
   "core.mp.join.points_to_local_name": "{0} はこのコンピューターまたは LAN の名前を指しているので、直接接続します",
   "core.mp.join.resolves_to_lan": "このコンピューターでは {0} が LAN のアドレスに解決されるので、直接接続します",
   "core.mp.mapping.removed": "ルーターのポートマッピングを削除しました",
+  "core.mp.mapping.renewed": "ルーターのポートマッピングを更新しました",
+  "core.mp.mapping.lost": "ルーターのポートマッピングを更新できませんでした。これから参加するフレンドはマッピングなしで接続します",
   "core.mp.matrix.connected": "接続成功",
   "core.mp.matrix.defaultmode": "既定モード",
   "core.mp.matrix.disconnected": "参加側との制御接続が切れました",

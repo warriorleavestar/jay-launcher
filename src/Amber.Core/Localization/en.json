@@ -461,6 +461,8 @@
   "core.mp.join.points_to_local_name": "{0} points to a local or LAN name. Connecting directly",
   "core.mp.join.resolves_to_lan": "{0} resolves to a LAN address on this computer. Connecting directly",
   "core.mp.mapping.removed": "Router port mapping removed",
+  "core.mp.mapping.renewed": "Router port mapping renewed",
+  "core.mp.mapping.lost": "Couldn't renew the router port mapping. Friends who join from now on connect without it",
   "core.mp.matrix.connected": "Connected",
   "core.mp.matrix.defaultmode": "Default mode",
   "core.mp.matrix.disconnected": "The control connection to the joining player was lost",

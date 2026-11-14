@@ -192,7 +192,17 @@ public static class DirectKeys
 /// <summary>收集能连到本机的地址：IPv6 公网地址、局域网地址、STUN 查到的外部地址、路由器映射。</summary>
 public static class DirectGatherer
 {
-    public sealed record Gathered(List<Candidate> Candidates, NatKind Nat, string NatDetail, PortMappingResult? Mapping);
+    /// <param name="Nat">The NAT kind offered to the other side: open while a router mapping is held.</param>
+    /// <param name="StunNat">The NAT kind STUN found, which applies again if the mapping is lost.</param>
+    public sealed record Gathered(List<Candidate> Candidates, NatKind Nat, string NatDetail, PortMappingResult? Mapping, NatKind? StunNat = null)
+    {
+        /// <summary>The same addresses without the router-mapped port (its lease could not be renewed).</summary>
+        public Gathered WithoutMapping() => this with
+        {
+            Candidates = Candidates.Where(c => c.Kind != PathKind.Mapped).ToList(),
+            Nat = StunNat ?? Nat,
+        };
+    }
 
     public static async Task<Gathered> GatherAsync(Socket socket, IReadOnlyList<string> stunServers, bool tryPortMapping, Action<string> log, CancellationToken ct = default)
     {
@@ -231,7 +241,7 @@ public static class DirectGatherer
                 Transport.ExitPolicy.ReportPublicAddress(mapping.External.Address);
             }
         }
-        return new Gathered(list, mapping is not null && stun.Kind != NatKind.Open ? NatKind.Open : stun.Kind, stun.Detail, mapping);
+        return new Gathered(list, mapping is not null && stun.Kind != NatKind.Open ? NatKind.Open : stun.Kind, stun.Detail, mapping, stun.Kind);
     }
 }
 

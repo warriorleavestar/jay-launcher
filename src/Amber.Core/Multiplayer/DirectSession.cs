@@ -159,7 +159,7 @@ public sealed class DirectSession : IAsyncDisposable
         }
         else
         {
-            _gathered = await DirectGatherer.GatherAsync(socket, Options.StunServers, Options.TryPortMapping, Log, ct);
+            _gathered = GatherForTest is { } gather ? await gather(ct) : await DirectGatherer.GatherAsync(socket, Options.StunServers, Options.TryPortMapping, Log, ct);
         }
         Log(L.F("core.mp.session.nat", DirectText.Nat(_gathered.Nat)));
         if (IsHost)
@@ -183,7 +183,72 @@ public sealed class DirectSession : IAsyncDisposable
         if (!Options.Simulated) await StartNatKeepAliveAsync(ct);
         var session = IsHost ? Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8)) : _remote?.Session ?? "";
         LocalAddresses = new DirectAddresses(session.Length >= 8 ? session : "0000000000000000", _gathered.Nat, _gathered.Candidates);
+        if (_gathered.Mapping is { Renew: not null } mapping && _mappingKeeper is null)
+        {
+            _mappingCts = new CancellationTokenSource();
+            _mappingKeeper = KeepMappingAsync(mapping, MappingRetryInterval, Task.Delay, Log, DropMapping, _mappingCts.Token);
+        }
         return LocalAddresses;
+    }
+
+    /// <summary>Test hook: replaces STUN and router discovery.</summary>
+    internal Func<CancellationToken, Task<DirectGatherer.Gathered>>? GatherForTest { get; init; }
+
+    /// <summary>After a failed renewal, how long to wait before trying again (while the lease lasts).</summary>
+    internal TimeSpan MappingRetryInterval { get; init; } = TimeSpan.FromMinutes(1);
+
+    private CancellationTokenSource? _mappingCts;
+    private Task? _mappingKeeper;
+
+    /// <summary>
+    /// Keeps a router mapping alive for as long as the room is open: renews it halfway through its lease, and when
+    /// renewals keep failing until the lease would run out, calls <paramref name="lost"/> so it is no longer offered.
+    /// </summary>
+    internal static async Task KeepMappingAsync(PortMappingResult mapping, TimeSpan retryInterval, Func<TimeSpan, CancellationToken, Task> delay,
+        Action<string> log, Action lost, CancellationToken ct)
+    {
+        if (mapping.Renew is not { } renew) return;
+        var lease = mapping.Lease ?? PortMappingResult.RequestedLease;
+        var remaining = lease;
+        var wait = lease / 2;
+        try
+        {
+            while (true)
+            {
+                await delay(wait, ct);
+                remaining -= wait;
+                bool renewed;
+                try { renewed = await renew(ct); }
+                catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { renewed = false; }
+                if (renewed)
+                {
+                    log(L.T("core.mp.mapping.renewed"));
+                    remaining = lease;
+                    wait = lease / 2;
+                    continue;
+                }
+                if (remaining <= retryInterval)
+                {
+                    lost();
+                    return;
+                }
+                wait = retryInterval;
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+    }
+
+    /// <summary>
+    /// The router mapping could not be renewed: stop offering it. Later guests get this side's addresses without the
+    /// mapped port and with the NAT kind STUN found (so they punch, and spray when that is symmetric).
+    /// </summary>
+    private void DropMapping()
+    {
+        if (_disposed || _gathered is not { } gathered) return;
+        _gathered = gathered.WithoutMapping();
+        if (LocalAddresses is { } local) LocalAddresses = local with { Nat = _gathered.Nat, Candidates = _gathered.Candidates };
+        if (Bridge is { } bridge) bridge.OwnsMappedPort = false;
+        Log(L.T("core.mp.mapping.lost"));
     }
 
     /// <summary>
@@ -1241,6 +1306,7 @@ public sealed class DirectSession : IAsyncDisposable
             catch (Exception e) { Log(L.F("core.mp.punch.localerror", e.GetType().Name)); }
         }
         _disposed = true;
+        Try(() => _mappingCts?.Cancel());
         Try(() => _hostAbort?.Cancel());
         Try(() => _consentWatch?.Dispose());
         Try(() => _pendingWatch?.Dispose());
@@ -1257,6 +1323,8 @@ public sealed class DirectSession : IAsyncDisposable
         if (_speed is not null) await TryAsync(() => _speed.DisposeAsync().AsTask());
         if (Bridge is not null) await TryAsync(() => Bridge.DisposeAsync().AsTask());
         if (_bridgeKey is { } bridgeKey) CryptographicOperations.ZeroMemory(bridgeKey);
+        if (_mappingKeeper is not null) await TryAsync(() => _mappingKeeper);
+        Try(() => _mappingCts?.Dispose());
         if (_gathered?.Mapping?.Remove is { } remove)
         {
             try

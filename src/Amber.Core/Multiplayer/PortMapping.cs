@@ -10,8 +10,19 @@ using System.Xml.Linq;
 
 namespace Amber.Core.Multiplayer;
 
-/// <summary>路由器上开的一个端口映射。Dispose 时删掉映射。</summary>
-public sealed record PortMappingResult(string Method, IPEndPoint External, Func<Task>? Remove);
+/// <summary>
+/// 路由器上开的一个端口映射。Dispose 时删掉映射。
+/// <paramref name="Renew"/> asks the router again for the same mapping (true when it still maps the same external port);
+/// <paramref name="Lease"/> is how long the router keeps it without a renewal.
+/// </summary>
+public sealed record PortMappingResult(string Method, IPEndPoint External, Func<Task>? Remove,
+    Func<CancellationToken, Task<bool>>? Renew = null, TimeSpan? Lease = null)
+{
+    /// <summary>The lease Jay asks for.</summary>
+    public static readonly TimeSpan RequestedLease = TimeSpan.FromSeconds(LeaseSeconds);
+
+    internal const int LeaseSeconds = 7200;
+}
 
 /// <summary>
 /// 请路由器把一个外部 UDP 端口转到本机（UPnP IGD 和 NAT-PMP）。只改路由器上的临时映射（带租期），
@@ -103,7 +114,7 @@ public static partial class PortMapping
 
         var args = $"<NewRemoteHost></NewRemoteHost><NewExternalPort>{localPort}</NewExternalPort><NewProtocol>UDP</NewProtocol>" +
                    $"<NewInternalPort>{localPort}</NewInternalPort><NewInternalClient>{localIp}</NewInternalClient><NewEnabled>1</NewEnabled>" +
-                   $"<NewPortMappingDescription>Jay</NewPortMappingDescription><NewLeaseDuration>7200</NewLeaseDuration>";
+                   $"<NewPortMappingDescription>Jay</NewPortMappingDescription><NewLeaseDuration>{PortMappingResult.LeaseSeconds}</NewLeaseDuration>";
         await SoapAsync(http, control!, type, "AddPortMapping", args, ct);
         log(L.F("core.mp.upnp.mapped", localPort, localIp, localPort));
         return new PortMappingResult("UPnP", new IPEndPoint(externalIp, localPort), async () =>
@@ -112,7 +123,21 @@ public static partial class PortMapping
             using var h = new GatewayHttp(gateway, localIp, location, handlerFactory?.Invoke(), TimeSpan.FromSeconds(3));
             await SoapAsync(h, control!, type, "DeletePortMapping",
                 $"<NewRemoteHost></NewRemoteHost><NewExternalPort>{localPort}</NewExternalPort><NewProtocol>UDP</NewProtocol>", CancellationToken.None);
-        });
+        }, async renewCt =>
+        {
+            // Renewing is the same AddPortMapping again, under the same destination, proxy and redirect limits.
+            try
+            {
+                using var h = new GatewayHttp(gateway, localIp, location, handlerFactory?.Invoke());
+                await SoapAsync(h, control!, type, "AddPortMapping", args, renewCt);
+                return true;
+            }
+            catch (Exception e) when (e is HttpRequestException or SocketException or IOException or InvalidDataException
+                                          or OperationCanceledException && !renewCt.IsCancellationRequested)
+            {
+                return false;
+            }
+        }, PortMappingResult.RequestedLease);
     }
 
     private static async Task<Uri?> DiscoverAsync(IPAddress gateway, IPAddress localIp, CancellationToken ct)
@@ -288,10 +313,11 @@ public static partial class PortMapping
         mapRequest[1] = 1;
         BinaryPrimitives.WriteUInt16BigEndian(mapRequest.AsSpan(4), (ushort)localPort);
         BinaryPrimitives.WriteUInt16BigEndian(mapRequest.AsSpan(6), (ushort)localPort);
-        BinaryPrimitives.WriteUInt32BigEndian(mapRequest.AsSpan(8), 7200);
+        BinaryPrimitives.WriteUInt32BigEndian(mapRequest.AsSpan(8), PortMappingResult.LeaseSeconds);
         var mapped = await PmpRequestAsync(udp, target, mapRequest, 16, ct);
         if (mapped is null || BinaryPrimitives.ReadUInt16BigEndian(mapped.AsSpan(2)) != 0) return null;
         var externalPort = BinaryPrimitives.ReadUInt16BigEndian(mapped.AsSpan(10));
+        var lease = PmpLease(mapped);
         log(L.F("core.mp.natpmp.mapped", externalPort, localPort));
         return new PortMappingResult("NAT-PMP", new IPEndPoint(externalIp, externalPort), async () =>
         {
@@ -300,7 +326,28 @@ public static partial class PortMapping
             BinaryPrimitives.WriteUInt16BigEndian(delete.AsSpan(6), 0);
             BinaryPrimitives.WriteUInt32BigEndian(delete.AsSpan(8), 0);
             await u.SendAsync(delete, target);
-        });
+        }, async renewCt =>
+        {
+            // The same request again (RFC 6886, 3.3); it must still map the same external port.
+            try
+            {
+                using var u = new UdpClient(AddressFamily.InterNetwork);
+                var again = await PmpRequestAsync(u, target, mapRequest, 16, renewCt);
+                return again is not null && BinaryPrimitives.ReadUInt16BigEndian(again.AsSpan(2)) == 0
+                    && BinaryPrimitives.ReadUInt16BigEndian(again.AsSpan(10)) == externalPort;
+            }
+            catch (Exception e) when (e is SocketException or OperationCanceledException && !renewCt.IsCancellationRequested)
+            {
+                return false;
+            }
+        }, lease);
+    }
+
+    /// <summary>The lifetime a NAT-PMP mapping reply grants (bytes 12–15), kept between 20 s and the lease that was asked for.</summary>
+    internal static TimeSpan PmpLease(ReadOnlySpan<byte> reply)
+    {
+        var seconds = reply.Length >= 16 ? BinaryPrimitives.ReadUInt32BigEndian(reply[12..]) : 0;
+        return TimeSpan.FromSeconds(seconds == 0 ? PortMappingResult.LeaseSeconds : Math.Clamp(seconds, 20, PortMappingResult.LeaseSeconds));
     }
 
     private static async Task<byte[]?> PmpRequestAsync(UdpClient udp, IPEndPoint target, byte[] request, int expected, CancellationToken ct)

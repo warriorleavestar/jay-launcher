@@ -453,6 +453,8 @@
   "core.mp.join.points_to_local_name": "{0} 指向本機或區域網路的名稱，會直接連線",
   "core.mp.join.resolves_to_lan": "{0} 在本機解析為區域網路位址，會直接連線",
   "core.mp.mapping.removed": "已刪除路由器連接埠對應",
+  "core.mp.mapping.renewed": "已續租路由器連接埠對應",
+  "core.mp.mapping.lost": "路由器連接埠對應續租失敗。之後加入的朋友不再經過這個對應連線",
   "core.mp.matrix.connected": "可連通",
   "core.mp.matrix.defaultmode": "預設模式",
   "core.mp.matrix.disconnected": "與加入方的控制連線已中斷",

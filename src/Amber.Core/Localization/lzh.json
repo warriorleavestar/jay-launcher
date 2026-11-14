@@ -448,6 +448,8 @@
   "core.mp.join.points_to_local_name": "{0} 指本機或區域網之名，將逕連",
   "core.mp.join.resolves_to_lan": "{0} 於本機析為區域網之址，將逕連",
   "core.mp.mapping.removed": "已除路由器之埠對",
+  "core.mp.mapping.renewed": "已續路由器之埠對",
+  "core.mp.mapping.lost": "路由器之埠對未能續。此後入者不經之而連",
   "core.mp.matrix.connected": "可通",
   "core.mp.matrix.defaultmode": "常式",
   "core.mp.matrix.disconnected": "與入者之控連已斷",

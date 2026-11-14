@@ -453,6 +453,8 @@
   "core.mp.join.points_to_local_name": "{0} 指向本机或局域网的名字，直接连",
   "core.mp.join.resolves_to_lan": "{0} 在本机解析成了局域网地址，直接连",
   "core.mp.mapping.removed": "已删除路由器端口映射",
+  "core.mp.mapping.renewed": "已续租路由器端口映射",
+  "core.mp.mapping.lost": "路由器端口映射续租失败。之后加入的朋友不再经过这个映射连接",
   "core.mp.matrix.connected": "通",
   "core.mp.matrix.defaultmode": "默认模式",
   "core.mp.matrix.disconnected": "和加入方的控制连接断了",
