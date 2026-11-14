@@ -444,6 +444,17 @@ public static class EasyTierArgs
     /// <summary>经环境变量传给 easytier-core 的值。</summary>
     public static Dictionary<string, string> Environment(EasyTierOptions o) => new() { [SecretVariable] = o.Room.EasyTierSecret };
 
+    /// <summary>
+    /// The STUN servers easytier-core asks for this computer's public address (for direct connections): Jay's documented
+    /// list (<see cref="Stun.DefaultServers"/>). Without it, EasyTier uses its own built-in list, which includes hosts read
+    /// from a DNS TXT record that someone else controls.
+    /// </summary>
+    internal static IEnumerable<string> StunArgs()
+    {
+        var list = string.Join(',', Stun.DefaultServers);
+        return ["--stun-servers=" + list, "--stun-servers-v6=" + list];
+    }
+
     public static List<string> Build(EasyTierOptions o)
     {
         // 房间密钥不放命令行（别的程序能读到进程命令行，开了命令行审计还会记进系统日志），经环境变量 ET_NETWORK_SECRET 传，见 Environment。
@@ -457,6 +468,7 @@ public static class EasyTierArgs
             "--multi-thread",
             "--latency-first",
         };
+        args.AddRange(StunArgs());
         // 默认不建虚拟网卡；完整局域网模式才建（要管理员权限和 wintun）。
         if (!o.Tun) args.Add("--no-tun");
         // 完整局域网模式下转发本机游戏发出的 UDP 广播，很多游戏靠广播找局域网房间（EasyTier 的这个功能只在 Windows 上、要管理员权限，正好这个模式已经有；
@@ -856,6 +868,7 @@ public static class LobbyArgs
             "--no-tun",
             "--latency-first",
         };
+        args.AddRange(EasyTierArgs.StunArgs());
         // 直连房间的房主：只在本机回环上监听，给直连桥用；其他情况不监听。
         if (o.IsHost && o.ListenUdpPort is { } listen) args.AddRange(["--listeners", $"udp://127.0.0.1:{listen.ToString(System.Globalization.CultureInfo.InvariantCulture)}"]);
         else args.Add("--no-listener");
