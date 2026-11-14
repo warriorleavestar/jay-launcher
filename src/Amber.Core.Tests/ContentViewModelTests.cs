@@ -484,6 +484,22 @@ public sealed class ContentViewModelTests
             $$"""{"id":"{{id}}","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":{{libraries}}}""");
     }
 
+    /// <summary>A modpack import that starts and ends while an install runs leaves the install running and cancellable.</summary>
+    [Fact]
+    public void AnImportDoesNotTakeOverARunningInstall() => Run((vm, _, _) =>
+    {
+        var install = vm.BeginWorkForTest();
+        var import = vm.ImportLocalPackAsync(Path.Combine(Path.GetTempPath(), "amber-no-such-pack-" + Guid.NewGuid().ToString("N") + ".mrpack"));
+        Assert.True(import.IsCompleted);
+        Assert.Null(import.Result);
+        Assert.False(install.IsCancellationRequested);
+        Assert.True(vm.IsBusy);
+        vm.CancelCommand.Execute(null);
+        Assert.True(install.IsCancellationRequested);
+        vm.EndWorkForTest(install);
+        Assert.False(vm.IsBusy);
+    });
+
     private static void Run(Action<ContentViewModel, FakeProvider, FakeProvider> test) => Run(test, hasCurseForge: true);
 
     private static void Run(Action<ContentViewModel, FakeProvider, FakeProvider> test, bool hasCurseForge)
