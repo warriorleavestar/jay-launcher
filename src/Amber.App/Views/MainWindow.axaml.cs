@@ -62,6 +62,8 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
             else if (e.Key == Avalonia.Input.Key.Escape) Controls.ConfirmButton.CancelAll();
+            // Nothing below acts on the shell behind the first-run wizard or the breaker countdown.
+            else if (DataContext is MainViewModel covered && BlockingOverlayOpen(covered)) return;
             // Ctrl+Enter 启动当前实例；焦点在输入框里（JVM 参数这类）时不触发，免得边填参数边把游戏启动了。
             else if (e.Key == Avalonia.Input.Key.Enter && e.KeyModifiers == Avalonia.Input.KeyModifiers.Control)
             {

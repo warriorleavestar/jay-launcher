@@ -239,6 +239,9 @@ public partial class MainWindow
             e.Handled = true;
             return;
         }
+        // The first-run wizard and the breaker countdown cover the whole window: the shell underneath takes no shortcut
+        // (no paste, no navigation, no request answers) except the few that stay global (§8.5).
+        if (BlockingOverlayOpen(main) && !AllowedOverBlockingOverlay(e.Key, e.KeyModifiers)) return;
         // Alt+Y accepts the first incoming file on the request bar, Alt+N declines it (the card's default).
         if (e.KeyModifiers == KeyModifiers.Alt && e.Key is Key.Y or Key.N && !e.Handled && main.Activity.FirstRequest is { Handle.Spec.Kind: "file" } fileRequest)
         {
@@ -327,6 +330,18 @@ public partial class MainWindow
         else if (e.Key == Key.BrowserForward) e.Handled = shell.Router.Forward();
     }
 
+    /// <summary>A full-window overlay the shell must not act behind: the first-run wizard or the breaker countdown.</summary>
+    internal static bool BlockingOverlayOpen(MainViewModel main) => main.FirstRun.IsOpen || main.Multiplayer.IsBreakerCounting;
+
+    /// <summary>
+    /// The shell shortcuts that still work over the first-run wizard and the breaker countdown: back to the default look
+    /// (Ctrl+Alt+Shift+T, the way out of an unreadable theme), quitting the running game (Ctrl+Shift+Q) and stopping
+    /// remote control (Ctrl+Shift+F12, handled before this check).
+    /// </summary>
+    internal static bool AllowedOverBlockingOverlay(Key key, KeyModifiers modifiers) =>
+        (key == Key.T && modifiers == (KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Shift))
+        || (key == Key.Q && modifiers == (KeyModifiers.Control | KeyModifiers.Shift));
+
     /// <summary>The keyboard regions in F6 order; ones that are hidden right now are skipped.</summary>
     internal IReadOnlyList<Control> FocusRegions => [SidebarHost, TopBar, RequestBar, PageHost, LogDock];
 
@@ -382,7 +397,7 @@ public partial class MainWindow
     /// <summary>鼠标侧键：返回、前进。</summary>
     private void OnShellPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (DataContext is not MainViewModel { Shell: var shell }) return;
+        if (DataContext is not MainViewModel { Shell: var shell } main || BlockingOverlayOpen(main)) return;
         var kind = e.GetCurrentPoint(this).Properties.PointerUpdateKind;
         if (kind == PointerUpdateKind.XButton1Pressed) e.Handled = shell.Router.Back();
         else if (kind == PointerUpdateKind.XButton2Pressed) e.Handled = shell.Router.Forward();
