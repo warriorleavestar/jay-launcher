@@ -344,10 +344,12 @@ public sealed class PublicNetworkTests : IAsyncDisposable
         }
         finally
         {
+            // Let the accept loops end on the cancellation first: a listener stopped under a loop that has not yet seen
+            // it throws "not listening" from its next accept.
             stop.Cancel();
+            await Task.WhenAll(accepting, answering);
             silent.Stop();
             garbage.Stop();
-            await Task.WhenAll(accepting, answering);
             foreach (var c in held) c.Dispose();
         }
     }

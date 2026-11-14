@@ -66,4 +66,33 @@ public sealed class JayServerRunnerTests : IDisposable
         lock (lines) Assert.Single(lines);
         Assert.Equal(1, tunnel.Failures);
     }
+
+    /// <summary>Stopping runs every step even when one fails (the MC server is still told to save), then reports the first failure.</summary>
+    [Fact]
+    public async Task StopStepsAllRunAndTheFirstFailureIsRethrown()
+    {
+        var ran = new List<int>();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => JayServerRunner.RunAllAsync(
+            () => { ran.Add(1); throw new InvalidOperationException("first"); },
+            () => { ran.Add(2); throw new IOException("second"); },
+            () => { ran.Add(3); return Task.CompletedTask; }));
+        Assert.Equal("first", error.Message);
+        Assert.Equal([1, 2, 3], ran);
+    }
+
+    /// <summary>A record publish that fails in an unexpected way is logged and tried again, not left to end publishing.</summary>
+    [Fact]
+    public async Task RecordPublishingRetriesAfterAnyFailure()
+    {
+        using var cts = new CancellationTokenSource();
+        var attempts = 0;
+        var log = new List<string>();
+        await GateRecordPublisher.RetryAsync(_ =>
+        {
+            if (++attempts >= 3) cts.Cancel();
+            throw new NotSupportedException("unexpected");
+        }, l => { lock (log) log.Add(l); }, TimeSpan.FromMilliseconds(10), cts.Token);
+        Assert.Equal(3, attempts);
+        lock (log) Assert.Equal(3, log.Count(l => l.Contains("unexpected", StringComparison.Ordinal)));
+    }
 }

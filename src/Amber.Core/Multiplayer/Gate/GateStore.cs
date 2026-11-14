@@ -455,12 +455,16 @@ public sealed class GateStore
         return new GateNetwork(state.Privacy, direct, relays, rotation);
     }
 
+    /// <summary>Healthy relays privacy++ needs before the breaker stays closed: never fewer than two.</summary>
+    public static int RequiredHealthyRelays(GateState state) => Math.Max(2, state.MinHealthyRelays);
+
     /// <summary>切换隐私等级。隐私+ 至少要两个节点。</summary>
     public void SetPrivacy(PrivacyLevel level) => Mutate(s =>
     {
         if (level.IsSplit() && s.Relays.Count < 2) throw new ArgumentException(L.T("core.gate.admin.plus_needs_relays"));
-        if (level == PrivacyLevel.PlusPlus && s.Relays.Count(r => r.HeartbeatPsk is not null) < s.MinHealthyRelays)
-            throw new ArgumentException(L.F("core.gate.admin.plusplus_needs_codes", s.MinHealthyRelays));
+        var needed = RequiredHealthyRelays(s);
+        if (level == PrivacyLevel.PlusPlus && s.Relays.Count(r => r.HeartbeatPsk is not null) < needed)
+            throw new ArgumentException(L.F("core.gate.admin.plusplus_needs_codes", needed));
         s.Privacy = level;
         return 0;
     });
