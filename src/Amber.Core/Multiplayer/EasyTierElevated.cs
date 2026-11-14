@@ -103,9 +103,6 @@ public sealed class EasyTierElevatedSession : IEasyTierSession, IHotspotSharingS
         catch (OperationCanceledException) { _guard.Dispose(); throw; }
     }
 
-    /// <summary>守护脚本还没按最近一次的参数重启好。</summary>
-    public bool RestartPending => _guard.StartPending;
-
     public bool HotspotSharingActive => !HasExited && _guard.HotspotSharingActive;
 
     /// <summary>沿用已提权的守护，并和出口重启共用锁；不另起可脱离会话的共享进程。</summary>

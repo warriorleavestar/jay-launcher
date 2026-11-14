@@ -2,7 +2,7 @@ namespace Amber.Core.Launch;
 
 /// <summary>
 /// The automatic update check: once a day Jay asks the release feed whether there is a newer version. A newer release is
-/// shown only when 2 of the 3 trustees signed it (<see cref="UpdateCheck"/>); Jay never downloads or installs it, the
+/// shown only when enough Jay release keys signed it (<see cref="UpdateCheck"/>); Jay never downloads or installs it, the
 /// notice only opens the release page. Users can turn the check off or point it at their own feed.
 /// </summary>
 public static class AutoUpdateCheck

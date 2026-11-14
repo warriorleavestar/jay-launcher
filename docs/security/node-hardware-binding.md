@@ -73,7 +73,7 @@ Back up `directory.key` and `login.key` offline before `--install`. After a fals
 
 ## No root needed
 
-The node runs as its own service user (`jay-network`). On Linux, add that user to the `tss` group for `/dev/tpmrm0`. The board UUID is root-only on most distributions, so it is simply left out. The TPM, the disk serial and the machine id are enough.
+The node runs as the `jay` service user (systemd unit `jay-network`). `server/install-network-node.sh` already adds the `tss` group through `SupplementaryGroups` when that group exists; for a hand-made unit on Linux, add `jay` to the `tss` group for `/dev/tpmrm0`. The board UUID is root-only on most distributions, so it is simply left out. The TPM, the disk serial and the machine id are enough.
 
 ## What this does not cover
 

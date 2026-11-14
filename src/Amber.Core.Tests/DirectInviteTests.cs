@@ -83,7 +83,7 @@ public sealed class DirectInviteTests
         var book = new InviteBook { KeepLobbyKey = true };
         var text = book.Create(1, TimeSpan.FromMinutes(10), false, credentials.Tunnel).Invite.ToString();
         Assert.StartsWith(JayInvite.Prefix, text);
-        Assert.False(OldDirectCodes.Contains(text));
+        Assert.NotEqual(PastedCodeKind.OldDirect, PastedCode.Detect(text));
         Assert.DoesNotMatch(@"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", text);
         Assert.DoesNotContain("25565", text);
         foreach (var secret in room.Secrets) Assert.DoesNotContain(secret, text, StringComparison.OrdinalIgnoreCase);
@@ -106,7 +106,6 @@ public sealed class DirectInviteTests
     [InlineData("AMBREPLY1-eyJhIjoxfQ")]
     public void OldDirectCodesAreRefused(string text)
     {
-        Assert.True(OldDirectCodes.Contains(text));
         Assert.Equal(PastedCodeKind.OldDirect, PastedCode.Detect(text));
         Assert.False(JayInvite.TryParse(text, out _));
     }
@@ -181,21 +180,44 @@ public sealed class DirectInviteTests
     };
 
     /// <summary>从加入方本机“EasyTier”往直连桥发一个包，看它到了房主那边的哪个实例。</summary>
-    private static async Task<string?> ArrivesAtAsync(DirectSession guest, UdpClient lobby, UdpClient? room, string text)
+    private static async Task<string?> ArrivesAtAsync(DirectSession guest, UdpClient lobby, UdpClient? room, string text, double seconds = 10)
     {
         using var et = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
         var data = Encoding.UTF8.GetBytes(text);
-        using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        var fromLobby = lobby.ReceiveAsync(wait.Token).AsTask();
-        var fromRoom = room?.ReceiveAsync(wait.Token).AsTask() ?? Task.Delay(Timeout.Infinite, wait.Token).ContinueWith(_ => default(UdpReceiveResult));
-        for (var i = 0; i < 10 && !fromLobby.IsCompleted && !fromRoom.IsCompleted; i++)
+        // Resend until the datagram lands; a busy CI machine can take well over a second to pass the first one through
+        // the bridge. Where it lands is all that matters, so the generous window only costs time when something is wrong.
+        using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
+        var fromLobby = ReceiveTextAsync(lobby, data, wait.Token);
+        var fromRoom = room is null ? Task.Delay(Timeout.Infinite, wait.Token).ContinueWith(_ => false) : ReceiveTextAsync(room, data, wait.Token);
+        try
         {
-            await et.SendAsync(data, new IPEndPoint(IPAddress.Loopback, guest.Bridge!.LocalPort));
-            await Task.WhenAny(fromLobby, fromRoom, Task.Delay(150));
+            while (!wait.IsCancellationRequested && !fromLobby.IsCompleted && !fromRoom.IsCompleted)
+            {
+                await et.SendAsync(data, new IPEndPoint(IPAddress.Loopback, guest.Bridge!.LocalPort));
+                await Task.WhenAny(fromLobby, fromRoom, Task.Delay(150));
+            }
+            if (fromLobby.IsCompletedSuccessfully && fromLobby.Result) return "lobby";
+            if (fromRoom.IsCompletedSuccessfully && fromRoom.Result) return "room";
+            return null;
         }
-        if (fromLobby.IsCompletedSuccessfully && Encoding.UTF8.GetString(fromLobby.Result.Buffer) == text) return "lobby";
-        if (fromRoom.IsCompletedSuccessfully && Encoding.UTF8.GetString(fromRoom.Result.Buffer) == text) return "room";
-        return null;
+        finally
+        {
+            // Stop the receive still waiting on the other socket, and let it end, before the next check starts its
+            // own: one left behind would take that check's datagram. (Disposing the source would not cancel it.)
+            wait.Cancel();
+            try { await Task.WhenAll(fromLobby, fromRoom); }
+            catch (OperationCanceledException) { }
+        }
+    }
+
+    /// <summary>
+    /// Waits for this text and skips anything else: extra copies of an earlier text, resent before its first copy landed,
+    /// can still be queued on the socket and must not end the wait.
+    /// </summary>
+    private static async Task<bool> ReceiveTextAsync(UdpClient client, byte[] text, CancellationToken ct)
+    {
+        while (true)
+            if ((await client.ReceiveAsync(ct)).Buffer.AsSpan().SequenceEqual(text)) return true;
     }
 
     /// <summary>
@@ -336,7 +358,8 @@ public sealed class DirectInviteTests
         // 加入方的心跳停了会补发探测：踢出的地址不再接。
         await Task.Delay(DirectBridge.ReprobeAfter + TimeSpan.FromSeconds(1.5));
         Assert.Empty(host.Host.Bridge.Peers);
-        Assert.Null(await ArrivesAtAsync(guest, host.Lobby, room, "after-kick"));
+        // Checking that nothing arrives: a shorter window is enough, as everything above already passed through.
+        Assert.Null(await ArrivesAtAsync(guest, host.Lobby, room, "after-kick", seconds: 2));
     }
 
     /// <summary>

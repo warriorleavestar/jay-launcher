@@ -244,13 +244,6 @@ public static class DirectoryChannel
         return key;
     }
 
-    private static bool IsPinned(byte[] key, IReadOnlyList<byte[]> pinned)
-    {
-        var match = false;
-        foreach (var p in pinned) match |= p.Length == key.Length && CryptographicOperations.FixedTimeEquals(p, key);
-        return match;
-    }
-
     private static async Task WriteFrameAsync(Stream stream, byte[] message, CancellationToken ct)
     {
         if (message.Length > MaxMessage) throw new InvalidDataException(L.T("core.mp.public.too_large"));

@@ -38,7 +38,6 @@ public static class EasyTierRelease
     public const string SourceUrl = "https://github.com/Yumao-Feather/jay-easytier";
     private const string BaseUrl = SourceUrl + "/releases/download/" + ReleaseTag + "/";
     public const string License = "LGPL-3.0";
-    public const string ProjectUrl = "https://github.com/EasyTier/EasyTier";
 
     public sealed record Asset(string Platform, string Name, string Sha256, long Size, string CoreName, string CliName)
     {
@@ -229,14 +228,47 @@ public sealed class EasyTierInstaller
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
 
+    /// <summary>
+    /// One lock per install folder, shared by every installer in this process: installers are created per use, and two
+    /// first-time installs would otherwise share the same download file and temporary extract folder.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> InstallLocks = new(PathComparer);
+
+    /// <summary>Paths that differ only in case are the same folder on Windows and (by default) macOS.</summary>
+    internal static StringComparer PathComparer => OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+
+    internal SemaphoreSlim InstallLock => InstallLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(Path.GetFullPath(InstallDir)), _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// Tests only: awaited first thing once <see cref="EnsureAsync"/> or <see cref="ImportAsync"/> holds the install lock,
+    /// so a test can hold a real install there and watch the next caller wait. Always null in the app.
+    /// </summary>
+    internal Func<CancellationToken, Task>? WhileLockedForTests { get; set; }
+
+    private Task WhileLocked(CancellationToken ct) => WhileLockedForTests?.Invoke(ct) ?? Task.CompletedTask;
+
     /// <summary>progress 的 CurrentFile 是正在尝试的来源名。</summary>
     public async Task EnsureAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
-        if (IsInstalled)
+        // Checked only under the lock: mid-install the files can already be in place before they are made runnable.
+        var gate = InstallLock;
+        await gate.WaitAsync(ct);
+        try
         {
-            RemoveOldInstalls();
-            return;
+            await WhileLocked(ct);
+            // Another install may have finished while this one waited.
+            if (IsInstalled)
+            {
+                RemoveOldInstalls();
+                return;
+            }
+            await InstallAsync(progress, ct);
         }
+        finally { gate.Release(); }
+    }
+
+    private async Task InstallAsync(IProgress<DownloadProgress>? progress, CancellationToken ct)
+    {
         var failures = new List<EasyTierSourceFailure>();
 
         if (File.Exists(BundledPath))
@@ -285,7 +317,17 @@ public sealed class EasyTierInstaller
     }
 
     /// <summary>用户手动选的安装包：同样要求大小和 SHA-256 与固定值一致。</summary>
-    public Task ImportAsync(string zipPath, CancellationToken ct = default) => InstallFromZipAsync(zipPath, ct);
+    public async Task ImportAsync(string zipPath, CancellationToken ct = default)
+    {
+        var gate = InstallLock;
+        await gate.WaitAsync(ct);
+        try
+        {
+            await WhileLocked(ct);
+            await InstallFromZipAsync(zipPath, ct);
+        }
+        finally { gate.Release(); }
+    }
 
     private async Task InstallFromZipAsync(string zip, CancellationToken ct)
     {
@@ -798,7 +840,7 @@ public sealed class EasyTierSession : IEasyTierSession
             RedirectStandardError = true,
         };
         foreach (var a in args) info.ArgumentList.Add(a);
-        foreach (var (name, value) in environment) info.Environment[name] = value;
+        ApplyEnvironment(info, environment);
         // Mac/Linux：经看门脚本启动，Jay 崩溃或被 kill -9 后一两秒内 easytier-core 跟着结束（不用等下次开房间时清理）。
         EasyTierProcessGuard.Wrap(info);
         var process = Process.Start(info) ?? throw new InvalidOperationException(L.T("core.mp.component.startfailed"));
@@ -820,6 +862,18 @@ public sealed class EasyTierSession : IEasyTierSession
             }
         }
         return (process, job);
+    }
+
+    /// <summary>
+    /// Drops every inherited ET_* variable (easytier-core reads its options from them) and then adds only the given ones,
+    /// matching the elevated hosts, which pass nothing but the room secret.
+    /// </summary>
+    internal static void ApplyEnvironment(ProcessStartInfo info, IReadOnlyDictionary<string, string> environment)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var name in info.Environment.Keys.Where(k => k.StartsWith("ET_", comparison)).ToList())
+            info.Environment.Remove(name);
+        foreach (var (name, value) in environment) info.Environment[name] = value;
     }
 
     private void OnLine(string? line)

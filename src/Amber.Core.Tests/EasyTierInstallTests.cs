@@ -58,13 +58,69 @@ public sealed class EasyTierInstallTests : IDisposable
 
     private static HttpResponseMessage Bytes(byte[] data) => new(HttpStatusCode.OK) { Content = new ByteArrayContent(data) };
 
-    private (EasyTierInstaller Installer, Handler Handler) Create(Func<string, HttpResponseMessage> respond, string? bundledDir = null)
+    private (EasyTierInstaller Installer, Handler Handler) Create(Func<string, HttpResponseMessage> respond, string? bundledDir = null, string? dataDir = null,
+        EasyTierRelease.Asset? asset = null)
     {
         var handler = new Handler(respond);
         var downloader = new Downloader(new HttpClient(handler), new SourceChain([new OfficialSource()])) { RetriesPerSource = 1 };
         IReadOnlyList<(string, string)> sources = [("A", "https://a.test/et.zip"), ("B", "https://b.test/et.zip"), ("C", "https://c.test/et.zip")];
-        var installer = new EasyTierInstaller(downloader, Path.Combine(_root, "data"), bundledDir ?? Path.Combine(_root, "no-bundle"), _asset, sources);
+        var installer = new EasyTierInstaller(downloader, dataDir ?? Path.Combine(_root, "data"), bundledDir ?? Path.Combine(_root, "no-bundle"), asset ?? _asset, sources);
         return (installer, handler);
+    }
+
+    private static HttpResponseMessage NoNetwork(string _) => throw new InvalidOperationException("must not download");
+
+    /// <summary>Bound on every await in the lock tests, so a regression fails instead of hanging the run.</summary>
+    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
+
+    private string WriteFile(string name, byte[] data)
+    {
+        var path = Path.Combine(_root, name);
+        File.WriteAllBytes(path, data);
+        return path;
+    }
+
+    private string Bundle(string name)
+    {
+        var bundle = Path.Combine(_root, name);
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        return bundle;
+    }
+
+    private static void AssertInstalledGood(EasyTierInstaller installer)
+    {
+        Assert.True(installer.IsInstalled);
+        Assert.Equal("goodeasytier-core.exe", File.ReadAllText(installer.CorePath));
+        Assert.Equal("goodeasytier-cli.exe", File.ReadAllText(installer.CliPath));
+        Assert.False(Directory.Exists(installer.InstallDir + ".tmp"));
+    }
+
+    /// <summary>Keeps a real install paused right after it took the folder's lock, until <see cref="Go"/>.</summary>
+    private sealed class Hold
+    {
+        private readonly TaskCompletionSource _go = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void Go() => _go.TrySetResult();
+
+        public async Task Run(CancellationToken _)
+        {
+            Entered.TrySetResult();
+            // Only a safety net (tests always call Go in a finally); longer than Bound so a test's own bound fails first.
+            await _go.Task.WaitAsync(3 * Bound);
+        }
+    }
+
+    /// <summary>What a waiting install saw of the folder once it got the lock.</summary>
+    private static TaskCompletionSource<(bool Installed, bool TempLeft)> Observe(EasyTierInstaller installer)
+    {
+        var saw = new TaskCompletionSource<(bool, bool)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        installer.WhileLockedForTests = _ =>
+        {
+            saw.TrySetResult((installer.IsInstalled, Directory.Exists(installer.InstallDir + ".tmp")));
+            return Task.CompletedTask;
+        };
+        return saw;
     }
 
     [Fact]
@@ -75,7 +131,7 @@ public sealed class EasyTierInstallTests : IDisposable
         File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
         var (installer, handler) = Create(_ => throw new InvalidOperationException("不该联网"), bundle);
 
-        await installer.EnsureAsync();
+        await installer.EnsureAsync().WaitAsync(Bound);
 
         Assert.True(installer.IsInstalled);
         Assert.Empty(handler.Requests);
@@ -90,7 +146,7 @@ public sealed class EasyTierInstallTests : IDisposable
         var (installer, handler) = Create(url => url.Contains("a.test") ? new HttpResponseMessage(HttpStatusCode.NotFound)
             : url.Contains("b.test") ? Bytes(Tampered()) : Bytes(_good), bundle);
 
-        await installer.EnsureAsync();
+        await installer.EnsureAsync().WaitAsync(Bound);
 
         Assert.True(installer.IsInstalled);
         Assert.Contains(handler.Requests, u => u.Contains("c.test"));
@@ -107,7 +163,7 @@ public sealed class EasyTierInstallTests : IDisposable
         var (installer, _) = Create(url => url.Contains("a.test") ? throw new TaskCanceledException("timeout")
             : url.Contains("b.test") ? new HttpResponseMessage(HttpStatusCode.Forbidden) : Bytes(Tampered()));
 
-        var e = await Assert.ThrowsAsync<EasyTierInstallException>(() => installer.EnsureAsync());
+        var e = await Assert.ThrowsAsync<EasyTierInstallException>(() => installer.EnsureAsync().WaitAsync(Bound));
 
         Assert.Equal(["A", "B", "C"], e.Failures.Select(f => f.Source));
         Assert.Equal(L.T("common.request_timeout"), e.Failures[0].Reason);
@@ -124,16 +180,16 @@ public sealed class EasyTierInstallTests : IDisposable
         var (installer, _) = Create(_ => throw new InvalidOperationException("不该联网"));
         var bad = Path.Combine(_root, "bad.zip");
         File.WriteAllBytes(bad, Tampered());
-        await Assert.ThrowsAsync<InvalidDataException>(() => installer.ImportAsync(bad));
+        await Assert.ThrowsAsync<InvalidDataException>(() => installer.ImportAsync(bad).WaitAsync(Bound));
         var other = Path.Combine(_root, "other.zip");
         File.WriteAllBytes(other, MakeZip("other-size-" + new string('x', 50)));
-        var wrong = await Assert.ThrowsAsync<InvalidDataException>(() => installer.ImportAsync(other));
+        var wrong = await Assert.ThrowsAsync<InvalidDataException>(() => installer.ImportAsync(other).WaitAsync(Bound));
         Assert.Contains(_asset.Name, wrong.Message);
         Assert.False(installer.IsInstalled);
 
         var good = Path.Combine(_root, "good.zip");
         File.WriteAllBytes(good, _good);
-        await installer.ImportAsync(good);
+        await installer.ImportAsync(good).WaitAsync(Bound);
         Assert.True(installer.IsInstalled);
         Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
     }
@@ -150,6 +206,204 @@ public sealed class EasyTierInstallTests : IDisposable
         Assert.False(installer.IsInstalled);
         await installer.EnsureAsync();
         Assert.True(installer.IsInstalled);
+    }
+
+    [Fact]
+    public async Task ConcurrentFirstInstallsDoNotCollide()
+    {
+        var bundle = Path.Combine(_root, "bundle");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        // Several rounds over a fresh data folder each: every round is a first-time install raced by several installers.
+        for (var round = 0; round < 10; round++)
+        {
+            var data = Path.Combine(_root, "data-" + round);
+            var installers = Enumerable.Range(0, 6)
+                .Select(_ => Create(_ => throw new InvalidOperationException("must not download"), bundle, data).Installer)
+                .ToList();
+
+            await Task.WhenAll(installers.Select(i => Task.Run(() => i.EnsureAsync()))).WaitAsync(Bound);
+
+            Assert.All(installers, i => Assert.True(i.IsInstalled));
+            Assert.False(Directory.Exists(installers[0].InstallDir + ".tmp"));
+        }
+    }
+
+    /// <summary>An install in progress holds the folder: a second caller waits for it even when the files already show up.</summary>
+    [Fact]
+    public async Task EnsureWaitsForAnInstallInProgressEvenWhenTheFilesAreThere()
+    {
+        var bundle = Path.Combine(_root, "bundle-wait");
+        Directory.CreateDirectory(bundle);
+        File.WriteAllBytes(Path.Combine(bundle, _asset.Name), _good);
+        var installer = Create(_ => throw new InvalidOperationException("must not download"), bundle, Path.Combine(_root, "data-wait")).Installer;
+        await installer.EnsureAsync().WaitAsync(Bound);
+        Assert.True(installer.IsInstalled);
+        var gate = installer.InstallLock;
+        Assert.True(await gate.WaitAsync(Bound));
+        Task ensure;
+        try
+        {
+            ensure = installer.EnsureAsync();
+            await Task.Delay(200);
+            Assert.False(ensure.IsCompleted);
+        }
+        finally { gate.Release(); }
+        await ensure.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>
+    /// Two imports into one folder: the second starts only once the first has finished. ImportAsync asks for the lock
+    /// before it first yields, so without the lock the second one's hook would already have run when the call returns.
+    /// </summary>
+    [Fact]
+    public async Task ConcurrentImportsIntoTheSameFolderRunOneAfterTheOther()
+    {
+        var data = Path.Combine(_root, "data-imports");
+        var zip = WriteFile("import.zip", _good);
+        var first = Create(NoNetwork, dataDir: data).Installer;
+        var second = Create(NoNetwork, dataDir: data).Installer;
+        Assert.Same(first.InstallLock, second.InstallLock);
+        var hold = new Hold();
+        first.WhileLockedForTests = hold.Run;
+        var secondSaw = Observe(second);
+
+        var a = first.ImportAsync(zip);
+        try
+        {
+            await hold.Entered.Task.WaitAsync(Bound);
+            var b = second.ImportAsync(zip);
+            Assert.False(secondSaw.Task.IsCompleted, "the second import went ahead while the first held the folder");
+            Assert.False(b.IsCompleted);
+            hold.Go();
+            await Task.WhenAll(a, b).WaitAsync(Bound);
+        }
+        finally { hold.Go(); }
+
+        var (installed, tempLeft) = await secondSaw.Task.WaitAsync(Bound);
+        Assert.True(installed, "the second import started before the first had finished");
+        Assert.False(tempLeft);
+        AssertInstalledGood(first);
+        Assert.Equal(1, first.InstallLock.CurrentCount);
+    }
+
+    /// <summary>A manual import and an automatic install (here from the bundled package) into one folder take turns, whichever comes first.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ImportAndAutomaticInstallIntoTheSameFolderDoNotInterleave(bool automaticFirst)
+    {
+        var data = Path.Combine(_root, "data-mixed");
+        var (auto, autoHandler) = Create(NoNetwork, Bundle("bundle-mixed"), data);
+        var import = Create(NoNetwork, dataDir: data).Installer;
+        var zip = WriteFile("import.zip", _good);
+        Task Start(EasyTierInstaller i) => i == auto ? i.EnsureAsync() : i.ImportAsync(zip);
+        var (holder, waiter) = automaticFirst ? (auto, import) : (import, auto);
+        var hold = new Hold();
+        holder.WhileLockedForTests = hold.Run;
+        var waiterSaw = Observe(waiter);
+
+        var a = Start(holder);
+        try
+        {
+            await hold.Entered.Task.WaitAsync(Bound);
+            var b = Start(waiter);
+            Assert.False(waiterSaw.Task.IsCompleted, "the second install went ahead while the first held the folder");
+            Assert.False(b.IsCompleted);
+            hold.Go();
+            await Task.WhenAll(a, b).WaitAsync(Bound);
+        }
+        finally { hold.Go(); }
+
+        var (installed, tempLeft) = await waiterSaw.Task.WaitAsync(Bound);
+        Assert.True(installed, "the second install started before the first had finished");
+        Assert.False(tempLeft);
+        AssertInstalledGood(auto);
+        Assert.Empty(autoHandler.Requests);
+        Assert.Equal(1, auto.InstallLock.CurrentCount);
+    }
+
+    /// <summary>A call waiting for the folder gives up as soon as it is cancelled; the install holding the folder carries on.</summary>
+    [Fact]
+    public async Task CancellingACallThatWaitsForTheFolderLeavesTheInstallInProgressAlone()
+    {
+        var data = Path.Combine(_root, "data-cancel");
+        var zip = WriteFile("import.zip", _good);
+        var holder = Create(NoNetwork, dataDir: data).Installer;
+        var importWaiter = Create(NoNetwork, dataDir: data).Installer;
+        var ensureWaiter = Create(NoNetwork, Bundle("bundle-cancel"), data).Installer;
+        var hold = new Hold();
+        holder.WhileLockedForTests = hold.Run;
+        var importSaw = Observe(importWaiter);
+        var ensureSaw = Observe(ensureWaiter);
+
+        var a = holder.ImportAsync(zip);
+        try
+        {
+            await hold.Entered.Task.WaitAsync(Bound);
+            using var cts = new CancellationTokenSource();
+            var waitingImport = importWaiter.ImportAsync(zip, cts.Token);
+            var waitingEnsure = ensureWaiter.EnsureAsync(null, cts.Token);
+            Assert.False(waitingImport.IsCompleted);
+            Assert.False(waitingEnsure.IsCompleted);
+
+            cts.Cancel();
+            // The holder is still paused inside, so these can only end by giving up the wait.
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waitingImport.WaitAsync(Bound));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waitingEnsure.WaitAsync(Bound));
+            Assert.False(a.IsCompleted);
+            Assert.False(importSaw.Task.IsCompleted);
+            Assert.False(ensureSaw.Task.IsCompleted);
+
+            hold.Go();
+            await a.WaitAsync(Bound);
+        }
+        finally { hold.Go(); }
+
+        AssertInstalledGood(holder);
+        Assert.False(importSaw.Task.IsCompleted);
+        Assert.False(ensureSaw.Task.IsCompleted);
+        Assert.Equal(1, holder.InstallLock.CurrentCount);
+    }
+
+    /// <summary>A call that fails while it holds the folder lets it go: the next call goes ahead and succeeds.</summary>
+    [Fact]
+    public async Task AFailedInstallReleasesTheFolder()
+    {
+        var data = Path.Combine(_root, "data-fail");
+        var (installer, _) = Create(_ => new HttpResponseMessage(HttpStatusCode.NotFound), dataDir: data);
+        var gate = installer.InstallLock;
+
+        // Same size, wrong hash.
+        var tampered = WriteFile("tampered.zip", Tampered());
+        await Assert.ThrowsAsync<InvalidDataException>(() => installer.ImportAsync(tampered).WaitAsync(Bound));
+        Assert.Equal(1, gate.CurrentCount);
+
+        // Passes the pinned size and hash but isn't a zip: fails while extracting.
+        var junk = System.Text.Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("not a zip ", 40)));
+        var corrupt = Create(NoNetwork, dataDir: data,
+            asset: _asset with { Sha256 = Convert.ToHexStringLower(SHA256.HashData(junk)), Size = junk.Length }).Installer;
+        Assert.Same(gate, corrupt.InstallLock);
+        var junkPath = WriteFile("junk.zip", junk);
+        await Assert.ThrowsAsync<InvalidDataException>(() => corrupt.ImportAsync(junkPath).WaitAsync(Bound));
+        Assert.Equal(1, gate.CurrentCount);
+
+        // An automatic install where every source fails.
+        await Assert.ThrowsAsync<EasyTierInstallException>(() => installer.EnsureAsync().WaitAsync(Bound));
+        Assert.Equal(1, gate.CurrentCount);
+
+        var good = WriteFile("good.zip", _good);
+        await installer.ImportAsync(good).WaitAsync(Bound);
+        AssertInstalledGood(installer);
+        Assert.Equal(1, gate.CurrentCount);
+    }
+
+    [Fact]
+    public void InstallFoldersThatDifferOnlyInCaseShareALockWhereTheFileSystemIgnoresCase()
+    {
+        var comparer = EasyTierInstaller.PathComparer;
+        Assert.Equal(!OperatingSystem.IsLinux(), comparer.Equals(@"C:\Data\EasyTier", @"c:\data\easytier"));
+        Assert.True(comparer.Equals("/data/easytier", "/data/easytier"));
     }
 
     [Fact]
