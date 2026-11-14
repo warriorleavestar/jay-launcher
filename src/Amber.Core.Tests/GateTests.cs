@@ -312,27 +312,101 @@ public sealed class GateTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// A revoked or removed device cannot come back with a multi-use invite it still holds, while another device can
-    /// still use that invite (the "revoke an old device, then retry" flow) and a newer invite lets the revoked one back.
+    /// After a revoke, a multi-use invite made before it serves only devices it turned away for the device limit (the
+    /// "revoke an old device, then retry" flow). The revoked device and a fresh key are refused; a newer invite works.
     /// </summary>
-    [Theory]
-    [InlineData("revoke")]
-    [InlineData("remove")]
-    public async Task RevokedDeviceCannotReuseAnOlderInvite(string how)
+    [Fact]
+    public async Task RevokedDeviceCannotReuseAnOlderInvite()
     {
-        var invite = Invite("Steve", uses: 3);
+        var invite = Invite("Steve", uses: 10);
         using var a = Identity("a");
         using var b = Identity("b");
+        using var c = Identity("c");
+        using var fresh = Identity("fresh");
         await GateClient.EnrollAsync(invite, a);
-        if (how == "revoke") Assert.Equal(1, _store.RevokeDevices("Steve", null));
-        else Assert.True(_store.RemoveMember("Steve"));
+        await GateClient.EnrollAsync(invite, b);
+        var full = await Assert.ThrowsAsync<GateRejectedException>(() => GateClient.EnrollAsync(invite, c));
+        Assert.Equal(GateStatus.DeviceLimit, full.Status);
+        await Task.Delay(20);
+        Assert.Equal(1, _store.RevokeDevices("Steve", MemberIdentity.FingerprintOf(a.KeyPair.PublicKey)));
+        var usesLeft = _store.Read().Invites.Single().UsesLeft;
 
         var e = await Assert.ThrowsAsync<GateRejectedException>(() => GateClient.EnrollAsync(invite, a));
         Assert.Equal(GateStatus.NotMember, e.Status);
         Assert.Empty(_store.AllowedNames(a.KeyPair.PublicKey));
+        // A key the invite has not seen before the revoke (for example after resetting the identity) is refused too.
+        e = await Assert.ThrowsAsync<GateRejectedException>(() => GateClient.EnrollAsync(invite, fresh));
+        Assert.Equal(GateStatus.NotMember, e.Status);
+        Assert.Empty(_store.AllowedNames(fresh.KeyPair.PublicKey));
+        Assert.Equal(usesLeft, _store.Read().Invites.Single().UsesLeft);
 
+        // The device that was told the slots were full retries with the same invite and gets in.
+        await GateClient.EnrollAsync(invite, c);
+        Assert.Equal(["Steve"], _store.AllowedNames(c.KeyPair.PublicKey));
+        // A device still on the name re-enrolls as before.
         await GateClient.EnrollAsync(invite, b);
-        Assert.Equal(["Steve"], _store.AllowedNames(b.KeyPair.PublicKey));
+
+        Assert.Equal(2, _store.RevokeDevices("Steve", null));
+        await Task.Delay(20);
+        var newer = Invite("Steve", uses: 2);
+        await GateClient.EnrollAsync(newer, a);
+        await GateClient.EnrollAsync(newer, fresh);
+        Assert.Equal(["Steve"], _store.AllowedNames(a.KeyPair.PublicKey));
+        Assert.Equal(["Steve"], _store.AllowedNames(fresh.KeyPair.PublicKey));
+    }
+
+    /// <summary>Device-limit refusals are only remembered before a revoke, and only up to a cap per invite.</summary>
+    [Fact]
+    public void InviteRemembersDeviceLimitRefusalsOnlyBeforeARevoke()
+    {
+        static byte[] Key() => RandomNumberGenerator.GetBytes(32);
+        Invite("Steve", uses: 50);
+        var id = _store.Read().Invites.Single().Id;
+        var a = Key();
+        var b = Key();
+        Assert.Equal(RedeemOutcome.Ok, _store.Redeem(id, a).Outcome);
+        Assert.Equal(RedeemOutcome.Ok, _store.Redeem(id, b).Outcome);
+        var refused = Enumerable.Range(0, GateStore.MaxRefusedPerInvite + 2).Select(_ => Key()).ToList();
+        foreach (var k in refused) Assert.Equal(RedeemOutcome.DeviceLimit, _store.Redeem(id, k).Outcome);
+        Assert.Equal(RedeemOutcome.DeviceLimit, _store.Redeem(id, refused[0]).Outcome);
+        Assert.Equal(GateStore.MaxRefusedPerInvite, _store.Read().Invites.Single().RefusedForLimit.Count);
+
+        Thread.Sleep(20);
+        Assert.Equal(2, _store.RevokeDevices("Steve", null));
+        Assert.Equal(RedeemOutcome.Revoked, _store.Redeem(id, Key()).Outcome);
+        Assert.Equal(RedeemOutcome.Revoked, _store.Redeem(id, refused[^1]).Outcome);
+        Assert.Equal(GateStore.MaxRefusedPerInvite, _store.Read().Invites.Single().RefusedForLimit.Count);
+        Assert.Equal(RedeemOutcome.Ok, _store.Redeem(id, refused[0]).Outcome);
+        Assert.Equal(RedeemOutcome.Ok, _store.Redeem(id, refused[1]).Outcome);
+        Assert.Equal(RedeemOutcome.DeviceLimit, _store.Redeem(id, refused[2]).Outcome);
+    }
+
+    /// <summary>Removing a name cancels its open invites, so neither the removed device nor a new key can use them.</summary>
+    [Fact]
+    public async Task RemovingAMemberCancelsTheirInvites()
+    {
+        var invite = Invite("Steve", uses: 3);
+        Invite("Alex");
+        using var a = Identity("a");
+        using var fresh = Identity("fresh");
+        await GateClient.EnrollAsync(invite, a);
+        var steveInvite = _store.OpenInvitesFor("steve").Single().Id;
+
+        var (removed, cancelled) = _store.RemoveMemberAndInvites("STEVE");
+        Assert.True(removed);
+        Assert.Equal([steveInvite], cancelled);
+        Assert.Empty(_store.OpenInvitesFor("Steve"));
+        Assert.Single(_store.OpenInvitesFor("Alex"));
+
+        await Assert.ThrowsAsync<IOException>(() => GateClient.EnrollAsync(invite, a));
+        await Assert.ThrowsAsync<IOException>(() => GateClient.EnrollAsync(invite, fresh));
+        Assert.Empty(_store.AllowedNames(a.KeyPair.PublicKey));
+        Assert.Empty(_store.AllowedNames(fresh.KeyPair.PublicKey));
+
+        // A name with only an invite and no devices yet: remove still cancels the invite.
+        Invite("Herobrine");
+        Assert.False(_store.RemoveMember("Herobrine"));
+        Assert.Empty(_store.OpenInvitesFor("Herobrine"));
 
         await Task.Delay(20);
         await GateClient.EnrollAsync(Invite("Steve"), a);

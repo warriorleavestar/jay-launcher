@@ -38,7 +38,7 @@ jay-server invite Steve
 没有域名又不想用口令：`jay-server records on`（默认 Jay 公共网络，也可以 `--network <.jaynet 文件>`）。之后的邀请码只写一个记录编号，服务运行时会在公共网络的目录里放一份签名的地址记录（每 12 小时续一次；运行中改开关或入口，一分钟内生效，不用重启），玩家入服时 Jay 去查。服务没开着时玩家查不到地址；手机版暂时还要用口令加密的邀请码。
 
 - 邀请码默认 **24 小时、只能用 1 次**（`--ttl 7d`、`--uses 3` 可以改），绑定一个用户名。
-- 每个用户名最多绑定 **2 台设备**。换电脑时，给他发一个新邀请。名额满了就先 `revoke` 一台旧的。
+- 每个用户名最多绑定 **2 台设备**。换电脑时，给他发一个新邀请。名额满了就先 `revoke` 一台旧的，再让他用同一个邀请重试。撤销之后，之前发的邀请只能给当时因名额满被拒的设备用，别的设备要新邀请。
 - 防火墙或云服务商的安全组里只需要放行网关端口（TCP 47670）。**不要**放行 25565。
 
 ## 管理命令
@@ -50,7 +50,7 @@ jay-server invite Steve
 | `jay-server invites` / `cancel-invite <编号>` | 查看或作废还没用掉的邀请 |
 | `jay-server revoke <用户名> [设备码前几位]` | 撤销设备（不写设备码就撤销全部） |
 | `jay-server disable <用户名>` / `enable <用户名>` | 暂时停用或恢复 |
-| `jay-server remove <用户名>` | 从名单移除 |
+| `jay-server remove <用户名>` | 从名单移除，并作废给这个名字的邀请 |
 | `jay-server online-mode on\|off` | 正版验证（默认 off） |
 | `jay-server privacy basic\|plus\|plusplus` | 隐私等级（见下面的隐私+） |
 | `jay-server relays add\|remove\|list` | 管理节点 |

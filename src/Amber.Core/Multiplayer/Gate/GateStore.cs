@@ -118,6 +118,11 @@ public sealed class GatePendingInvite
     public DateTimeOffset Created { get; set; }
     public DateTimeOffset Expires { get; set; }
     public int UsesLeft { get; set; }
+    /// <summary>
+    /// Device keys (Base64) this invite turned away because the name had no free device slot. Once a device of the name
+    /// is revoked, this invite may only enroll these keys: the player who was told to revoke an old device can retry.
+    /// </summary>
+    public List<string> RefusedForLimit { get; set; } = [];
 }
 
 /// <summary>网关的设置（gate.json）。</summary>
@@ -160,6 +165,8 @@ public sealed class GateStore
     private static readonly TimeSpan LastSeenResolution = TimeSpan.FromHours(1);
     /// <summary>The longest an invite lives. A revoked-device entry older than this can no longer match an invite.</summary>
     public static readonly TimeSpan MaxInviteTtl = TimeSpan.FromDays(30);
+    /// <summary>How many device-limit refusals one invite remembers.</summary>
+    public const int MaxRefusedPerInvite = 8;
 
     private readonly string _dir;
     private readonly Lock _gate = new();
@@ -310,9 +317,9 @@ public sealed class GateStore
         var member = s.Member(invite.Name);
         if (member is { Disabled: true }) return (RedeemOutcome.Disabled, null);
         var key = Convert.ToBase64String(devicePublicKey);
+        var revokedSince = s.Revoked.Where(r => r.At >= invite.Created && string.Equals(r.Name, invite.Name, StringComparison.OrdinalIgnoreCase)).ToList();
         // Taken off this name after the invite was made: only a newer invite lets this device back in.
-        if (s.Revoked.Any(r => r.PublicKey == key && r.At >= invite.Created && string.Equals(r.Name, invite.Name, StringComparison.OrdinalIgnoreCase)))
-            return (RedeemOutcome.Revoked, null);
+        if (revokedSince.Any(r => r.PublicKey == key)) return (RedeemOutcome.Revoked, null);
         if (member is null)
         {
             member = new GateMember { Name = invite.Name };
@@ -320,7 +327,15 @@ public sealed class GateStore
         }
         if (!member.Devices.Any(d => d.PublicKey == key))
         {
-            if (member.Devices.Count >= s.MaxDevicesPerMember) return (RedeemOutcome.DeviceLimit, null);
+            // A device of this name was revoked after the invite was made: the invite still serves a device it turned away
+            // for the device limit before then (revoke an old device, then retry), but not a device it has not seen.
+            if (revokedSince.Count > 0 && !invite.RefusedForLimit.Contains(key)) return (RedeemOutcome.Revoked, null);
+            if (member.Devices.Count >= s.MaxDevicesPerMember)
+            {
+                if (revokedSince.Count == 0 && !invite.RefusedForLimit.Contains(key) && invite.RefusedForLimit.Count < MaxRefusedPerInvite)
+                    invite.RefusedForLimit.Add(key);
+                return (RedeemOutcome.DeviceLimit, null);
+            }
             member.Devices.Add(new GateDevice { PublicKey = key, Fingerprint = MemberIdentity.FingerprintOf(devicePublicKey), Added = now });
         }
         invite.UsesLeft--;
@@ -379,14 +394,30 @@ public sealed class GateStore
         return true;
     });
 
-    public bool RemoveMember(string name) => Mutate(s =>
+    public bool RemoveMember(string name) => RemoveMemberAndInvites(name).Removed;
+
+    /// <summary>
+    /// Takes the name off the list and cancels every invite still open for it, so nobody can come back under that name
+    /// with an invite sent earlier. Returns whether the name was on the list and the ids of the cancelled invites.
+    /// </summary>
+    public (bool Removed, IReadOnlyList<string> CancelledInvites) RemoveMemberAndInvites(string name) => Mutate(s =>
     {
+        var cancelled = s.Invites.Where(i => string.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var i in cancelled) s.Invites.Remove(i);
+        var ids = (IReadOnlyList<string>)cancelled.Select(i => i.Id).ToList();
         var member = s.Member(name);
-        if (member is null) return false;
+        if (member is null) return (false, ids);
         s.Members.Remove(member);
         NoteRevoked(s, member.Name, member.Devices);
-        return true;
+        return (true, ids);
     });
+
+    /// <summary>The invites for this name that can still be used.</summary>
+    public IReadOnlyList<GatePendingInvite> OpenInvitesFor(string name)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return Read().Invites.Where(i => string.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase) && i.Expires > now && i.UsesLeft > 0).ToList();
+    }
 
     public bool CancelInvite(string id) => Mutate(s => s.Invites.RemoveAll(i => i.Id == id) > 0);
 
