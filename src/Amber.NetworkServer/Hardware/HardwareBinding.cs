@@ -405,7 +405,9 @@ public sealed class NodeIntegrityException(IReadOnlyList<string> problems) : IOE
 public sealed class NodeHardwareGuard(string dataDir)
 {
     public IHardwareSource Hardware { get; init; } = SystemHardwareSource.Instance;
-    public ITpmSealer Tpm { get; init; } = TpmSealers.ForThisMachine();
+    private ITpmSealer? _tpm;
+    /// <summary>The machine's TPM, probed only when a bound node first needs it (an unbound node never touches it).</summary>
+    public ITpmSealer Tpm { get => _tpm ??= TpmSealers.ForThisMachine(); init => _tpm = value; }
     public IRuntimeIntegrity Integrity { get; init; } = RuntimeIntegrity.Instance;
     /// <summary>
     /// Who must have signed hardware.cert: the network's root quorum (<see cref="JayTrust"/> for the built-in network,

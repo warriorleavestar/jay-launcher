@@ -103,6 +103,15 @@ public sealed class AdminPanelTests : IAsyncDisposable
     }
 
     [Fact]
+    public void PanelStylesheetKeepsHiddenElementsHidden()
+    {
+        // The panel shows and hides its sections with the hidden attribute; author display rules (#app { display: grid })
+        // beat the browser's own [hidden] rule unless the stylesheet restates it.
+        var css = Encoding.UTF8.GetString(AdminPanel.Find("/panel.css")!.Bytes);
+        Assert.Matches(@"\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}", css);
+    }
+
+    [Fact]
     public async Task NodePanelCommandPrintsALoginLink()
     {
         var port = await StartAsync();
