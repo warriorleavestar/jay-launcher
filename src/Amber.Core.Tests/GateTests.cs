@@ -62,6 +62,9 @@ public sealed class GateTests : IAsyncLifetime
         Assert.Equal(invite.Port, parsed.Port);
         Assert.Equal(invite.Token, parsed.Token);
         Assert.Equal(invite.ServerKeyHash, parsed.ServerKeyHash);
+        // Latin words after the code, on the same line or the next, are not part of it.
+        Assert.NotNull(GateInvite.TryParse(code + " thanks, see you at 8", out _));
+        Assert.NotNull(GateInvite.TryParse(code + "\nJoin tonight", out _));
         var raw = GateInvite.Base32Decode(code[GateInvite.Prefix.Length..])!;
         Assert.DoesNotContain("Steve", System.Text.Encoding.ASCII.GetString(raw), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(Convert.ToHexString(invite.Token), invite.ToString());
@@ -338,6 +341,71 @@ public sealed class GateTests : IAsyncLifetime
         var received = new byte[handshake.Length];
         await server.GetStream().ReadExactlyAsync(received).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(handshake, received);
+    }
+
+    /// <summary>
+    /// An unreadable member list keeps the gate closed (nobody can be checked) and says so once in the log; when the file
+    /// is readable again members get in.
+    /// </summary>
+    [Fact]
+    public async Task AnUnreadableMemberListIsLoggedOnceAndRefusesEveryone()
+    {
+        using var identity = Identity("a");
+        var membership = await GateClient.EnrollAsync(Invite("Steve"), identity);
+        var path = Path.Combine(_root, "gate", GateStore.StateFile);
+        var good = File.ReadAllBytes(path);
+        File.WriteAllText(path, "{ not json");
+        int Logged() { lock (_log) return _log.Count(l => l.Contains("state.json", StringComparison.Ordinal)); }
+        for (var i = 0; i < 60 && Logged() == 0; i++) await Task.Delay(100);
+        Assert.Equal(1, Logged());
+        lock (_log) Assert.DoesNotContain(_log, l => l.Contains(_root, StringComparison.OrdinalIgnoreCase));
+        await Assert.ThrowsAnyAsync<Exception>(() => JoinRaw(membership, identity));
+        await Task.Delay(2500);
+        Assert.Equal(1, Logged());
+        File.WriteAllBytes(path, good);
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(5));
+        await using var joined = await JoinRaw(membership, identity);
+    }
+
+    /// <summary>
+    /// A health.json that can't be written is reported as that, once, and not as an unreadable member list: members still
+    /// get in.
+    /// </summary>
+    [Fact]
+    public async Task AnUnwritableHealthFileIsLoggedOnceOnItsOwn()
+    {
+        using var identity = Identity("a");
+        var membership = await GateClient.EnrollAsync(Invite("Steve"), identity);
+        var health = Path.Combine(_root, "gate", GateServer.HealthFile);
+        // A folder in its place: the next write can't replace it.
+        for (var i = 0; i < 20 && !Directory.Exists(health); i++)
+        {
+            try
+            {
+                if (File.Exists(health)) File.Delete(health);
+                Directory.CreateDirectory(health);
+            }
+            catch (IOException) { await Task.Delay(50); }
+        }
+        Assert.True(Directory.Exists(health));
+        int Logged(string text) { lock (_log) return _log.Count(l => l.Contains(text, StringComparison.Ordinal)); }
+        for (var i = 0; i < 120 && Logged(GateServer.HealthFile) == 0; i++) await Task.Delay(100);
+        Assert.Equal(1, Logged(GateServer.HealthFile));
+        await Task.Delay(5500);
+        Assert.Equal(1, Logged(GateServer.HealthFile));
+        Assert.Equal(0, Logged(GateStore.StateFile));
+        lock (_log) Assert.DoesNotContain(_log, l => l.Contains(_root, StringComparison.OrdinalIgnoreCase));
+        await using var joined = await JoinRaw(membership, identity);
+    }
+
+    /// <summary>File system errors are logged by type only: their messages name full paths, and with them the account name.</summary>
+    [Fact]
+    public void LoggedReasonsLeaveOutPaths()
+    {
+        var path = Path.Combine(_root, "gate", GateStore.StateFile);
+        Assert.Equal(nameof(IOException), GateServer.Reason(new IOException($"The process cannot access the file '{path}'.")));
+        Assert.Equal(nameof(UnauthorizedAccessException), GateServer.Reason(new UnauthorizedAccessException($"Access to the path '{path}' is denied.")));
+        Assert.Equal("bad json", GateServer.Reason(new System.Text.Json.JsonException("bad json")));
     }
 
     [Fact]

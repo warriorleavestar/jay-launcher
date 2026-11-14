@@ -39,14 +39,17 @@ public class SpeedTestSecurityTests
     [Fact]
     public async Task TotalDeadlineStopsAContinuouslyTricklingBody()
     {
-        var limits = new SpeedTestServer.Limits(1, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2),
+        // Handshake and idle limits are far longer than the close window, so only the 300 ms total deadline can close
+        // the connection in time. The window itself leaves room for a busy CI runner (a full parallel test run on
+        // Windows has taken over 1.5 s to deliver the close).
+        var limits = new SpeedTestServer.Limits(1, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30),
             TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(300));
         await using var server = new SpeedTestServer(0, limits);
         using var client = await ConnectAsync(server.BoundPort);
         await client.GetStream().WriteAsync(BitConverter.GetBytes(64L * 1024 * 1024));
         using var stop = new CancellationTokenSource();
         var trickle = TrickleAsync(client, stop.Token);
-        try { await AssertClosedAsync(client, TimeSpan.FromSeconds(1.5)); }
+        try { await AssertClosedAsync(client, TimeSpan.FromSeconds(10)); }
         finally { stop.Cancel(); await trickle; }
         await WaitForAsync(() => server.ActiveSessions == 0);
     }
