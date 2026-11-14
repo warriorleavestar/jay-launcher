@@ -918,7 +918,9 @@ public sealed class DirectSession : IAsyncDisposable
             case "admit-result" when !IsHost:
                 if (Bool(message, "ok") is { } ok && ReferenceEquals(peer, _admitPeer) && peer.HostVerified) _admitReply?.TrySetResult(ok);
                 break;
-            case "test-request" or "test-end" or "step" or "elevate" when !IsHost && !TrustsAsHost(peer):
+            // "test-end" is taken from any peer that names the running test: it only ends the test and restores the
+            // guest's own settings, and right after a step moved the bridge it can arrive before the new bridge is verified.
+            case "test-request" or "step" or "elevate" when !IsHost && !TrustsAsHost(peer):
                 break;
             case "test-request" when !IsHost:
                 if (Str(message, "run") is not { Length: >= 8 and <= 64 } requestRun) break;

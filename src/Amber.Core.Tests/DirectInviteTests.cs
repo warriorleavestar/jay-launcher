@@ -489,6 +489,43 @@ public sealed class DirectInviteTests
         Assert.Equal("room", await ArrivesAtAsync(guest, host.Lobby, room, "real"));
     }
 
+    /// <summary>
+    /// A guest that joined through an invite takes a test request only from a peer that proved it is the host. A
+    /// "test-end" naming the test is taken from any bridge peer: it only stops the test and restores the guest's own
+    /// settings, and right after a step moved the bridge it can arrive before the new bridge is verified.
+    /// </summary>
+    [Fact]
+    public async Task TestRequestsComeOnlyFromAVerifiedHost()
+    {
+        await using var host = new DirectRoom();
+        await host.PrepareAsync();
+        await using var guest = Guest();
+        Assert.True(await JoinAsync(host, guest, host.Admit(RandomNumberGenerator.GetBytes(32), "Steve")));
+        var hostSide = Assert.Single(guest.Bridge!.Peers);
+        var toGuest = Assert.Single(host.Host.Bridge!.Peers);
+        Assert.True(hostSide.HostVerified);
+        var requested = new TaskCompletionSource<TestRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ended = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        guest.TestRequested += r => requested.TrySetResult(r);
+        guest.TestEnded += run => ended.TrySetResult(run);
+        const string run = "0123456789abcdef";
+
+        hostSide.HostVerified = false;
+        await host.Host.Bridge.SendControlAsync(toGuest, new JsonObject { ["op"] = "test-request", ["run"] = run });
+        await Task.Delay(500);
+        Assert.False(requested.Task.IsCompleted);
+        Assert.Null(guest.TestConsent.Pending);
+
+        hostSide.HostVerified = true;
+        await host.Host.Bridge.SendControlAsync(toGuest, new JsonObject { ["op"] = "test-request", ["run"] = run });
+        Assert.Equal(run, (await requested.Task.WaitAsync(Deadline)).Run);
+
+        hostSide.HostVerified = false;
+        await host.Host.Bridge.SendControlAsync(toGuest, new JsonObject { ["op"] = "test-end", ["run"] = run });
+        Assert.Equal(run, await ended.Task.WaitAsync(Deadline));
+        Assert.Null(guest.TestConsent.Pending);
+    }
+
     /// <summary>踢人换网络：留下的直连成员换到新房间，直连桥不动（还是接在房间上）。</summary>
     [Fact]
     public async Task RekeyKeepsTheBridgeAndSwitchesTheRoom()

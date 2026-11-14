@@ -55,6 +55,17 @@ public sealed class DirectAdmissionTests
         }
     }
 
+    /// <summary>The per-source cap counts an IPv6 /64 as one source: one machine can pick any address in it.</summary>
+    [Theory]
+    [InlineData("203.0.113.5", "203.0.113.5", true)]
+    [InlineData("203.0.113.5", "203.0.113.6", false)]
+    [InlineData("::ffff:203.0.113.5", "203.0.113.5", true)]
+    [InlineData("2001:db8:1:2::1", "2001:db8:1:2:abcd::99", true)]
+    [InlineData("2001:db8:1:2::1", "2001:db8:1:3::1", false)]
+    [InlineData("2001:db8:1:2::1", "203.0.113.5", false)]
+    public void UnprovenBridgesCountAnIPv6PrefixAsOneSource(string a, string b, bool same) =>
+        Assert.Equal(same, DirectBridge.SameSource(IPAddress.Parse(a), IPAddress.Parse(b)));
+
     [Fact]
     public async Task BridgeTakenWhileClosedReachesNothingAndIsDroppedUnlessItProvesMembership()
     {

@@ -751,8 +751,25 @@ public sealed class DirectBridge : IAsyncDisposable
     /// </summary>
     public const int MaxUnadmittedPeers = MaxHostPeers / 2;
 
-    /// <summary>Host with a lobby: at most this many bridges that have not proved membership from one IP address.</summary>
+    /// <summary>
+    /// Host with a lobby: at most this many bridges that have not proved membership from one source (one IPv4 address,
+    /// or one IPv6 /64, see <see cref="SameSource"/>).
+    /// </summary>
     public const int MaxUnadmittedPerAddress = 4;
+
+    /// <summary>
+    /// Whether two remote addresses count as one source for <see cref="MaxUnadmittedPerAddress"/>. An IPv6 home or
+    /// server is usually given a whole /64 and can pick any address in it, so IPv6 addresses count by their /64 prefix.
+    /// </summary>
+    internal static bool SameSource(IPAddress a, IPAddress b)
+    {
+        if (a.IsIPv4MappedToIPv6) a = a.MapToIPv4();
+        if (b.IsIPv4MappedToIPv6) b = b.MapToIPv4();
+        if (a.AddressFamily != b.AddressFamily) return false;
+        if (a.AddressFamily != AddressFamily.InterNetworkV6) return a.Equals(b);
+        Span<byte> x = stackalloc byte[16], y = stackalloc byte[16];
+        return a.TryWriteBytes(x, out _) && b.TryWriteBytes(y, out _) && x[..8].SequenceEqual(y[..8]);
+    }
 
     /// <summary>Host: how long a bridge that came in while no invite was open has to prove membership.</summary>
     internal TimeSpan AdmitOnlyWindow { get; init; } = TimeSpan.FromSeconds(30);
@@ -830,7 +847,7 @@ public sealed class DirectBridge : IAsyncDisposable
             {
                 if (p.Admitted) continue;
                 unadmitted++;
-                if (p.Remote.Address.Equals(from.Address)) sameAddress++;
+                if (SameSource(p.Remote.Address, from.Address)) sameAddress++;
             }
             if (unadmitted >= MaxUnadmittedPeers || sameAddress >= MaxUnadmittedPerAddress)
             {
