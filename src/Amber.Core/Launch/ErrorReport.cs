@@ -68,8 +68,33 @@ public static partial class ErrorReport
         {
             // Also paths that don't start at the home folder (C:\Users\name, /home/name, /Users/name).
             text = Regex.Replace(text, @"(?i)([\\/](?:users|home)[\\/])" + Regex.Escape(userName) + @"(?=[\\/]|\b)", "$1<user>");
+            // The 8.3 short form Windows uses for a long or spaced profile folder (TMP=C:\Users\ALICES~1\…).
+            if (ShortNamePattern(userName) is { } shortName)
+                text = Regex.Replace(text, @"(?i)([\\/](?:users|home)[\\/])" + shortName + @"~\d{1,6}(?=[\\/]|\b)", "$1<user>");
+            // A folder named after the account right under a drive or a mount point (D:\name\…, /media/name/…,
+            // /run/media/name/…, /mnt/name/…, /Volumes/name/…). Only whole path segments: ordinary words stay readable.
+            text = Regex.Replace(text, @"(?i)((?:\b[a-z]:[\\/]|/run/media/|/media/|/mnt/|/Volumes/))" + Regex.Escape(userName) + @"(?=[\\/])", "$1<user>");
         }
         return text;
+    }
+
+    /// <summary>
+    /// A pattern for the part before "~N" of the 8.3 short name Windows makes for a folder called <paramref name="name"/>:
+    /// spaces and dots dropped, at most six characters. A character 8.3 can't hold becomes "_" or a code page
+    /// character, so it matches any one character there. Null when nothing is left.
+    /// </summary>
+    internal static string? ShortNamePattern(string name)
+    {
+        var sb = new StringBuilder();
+        var count = 0;
+        foreach (var c in name)
+        {
+            if (count == 6) break;
+            if (c is ' ' or '.') continue;
+            sb.Append(c is > (char)0x20 and < (char)0x7F && "\"*+,/:;<=>?[\\]|".IndexOf(c) < 0 ? Regex.Escape(c.ToString()) : @"[^\\/~\s]");
+            count++;
+        }
+        return count == 0 ? null : sb.ToString();
     }
 
     [GeneratedRegex(@"(--(?:accessToken|session|uuid|xuid|clientId|userProperties))\s+(?:""[^""]*""|\S+)", RegexOptions.IgnoreCase)]
