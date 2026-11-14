@@ -27,8 +27,8 @@
       <Setter Property="MaxWidth" Value="720" />
       <Setter Property="HorizontalAlignment" Value="Left" />
     </Style>
-    <!-- The Jay account card can be narrow too (expanded sidebar beside a small content area): its buttons wrap the same way. -->
-    <Style Selector="Border#JayCard Button /template/ ContentPresenter">
+    <!-- The Jay account and devices cards can be narrow too (expanded sidebar beside a small content area): their buttons wrap the same way. -->
+    <Style Selector="Border#JayCard Button /template/ ContentPresenter, Border#DevicesCard Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
     <ContainerQuery Name="AccountsPageRoot" Query="max-width:640">
