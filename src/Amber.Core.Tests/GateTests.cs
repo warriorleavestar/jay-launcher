@@ -340,6 +340,29 @@ public sealed class GateTests : IAsyncLifetime
         Assert.Equal(handshake, received);
     }
 
+    /// <summary>
+    /// An unreadable member list keeps the gate closed (nobody can be checked) and says so once in the log; when the file
+    /// is readable again members get in.
+    /// </summary>
+    [Fact]
+    public async Task AnUnreadableMemberListIsLoggedOnceAndRefusesEveryone()
+    {
+        using var identity = Identity("a");
+        var membership = await GateClient.EnrollAsync(Invite("Steve"), identity);
+        var path = Path.Combine(_root, "gate", GateStore.StateFile);
+        var good = File.ReadAllBytes(path);
+        File.WriteAllText(path, "{ not json");
+        int Logged() { lock (_log) return _log.Count(l => l.Contains("state.json", StringComparison.Ordinal)); }
+        for (var i = 0; i < 60 && Logged() == 0; i++) await Task.Delay(100);
+        Assert.Equal(1, Logged());
+        await Assert.ThrowsAnyAsync<Exception>(() => JoinRaw(membership, identity));
+        await Task.Delay(2500);
+        Assert.Equal(1, Logged());
+        File.WriteAllBytes(path, good);
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(5));
+        await using var joined = await JoinRaw(membership, identity);
+    }
+
     [Fact]
     public async Task LegacyPingIsRejected()
     {

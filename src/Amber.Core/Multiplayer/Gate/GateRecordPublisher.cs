@@ -63,8 +63,9 @@ public sealed class GateRecordPublisher : IAsyncDisposable
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
-            catch (Exception e) when (e is IOException or DirectoryRejectedException or InvalidDataException or InvalidOperationException
-                or System.Net.Sockets.SocketException or System.Net.Http.HttpRequestException or System.ComponentModel.Win32Exception or TimeoutException)
+            // Any failure is logged and retried: an exception leaving this loop would end publishing for good and surface
+            // later from the server's stop.
+            catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 log(L.F("core.gate.record.failed", e.Message));
             }

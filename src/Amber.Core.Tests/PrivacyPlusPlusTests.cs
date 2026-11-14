@@ -142,6 +142,20 @@ public sealed class PrivacyPlusPlusTests : IAsyncLifetime
         Assert.Throws<ArgumentException>(() => _store.IssueRelayCode("127.0.0.1:3", _serverKey.PublicKey));
     }
 
+    /// <summary>The breaker needs at least two healthy relays whatever MinHealthyRelays says; switching on privacy++ asks the same.</summary>
+    [Fact]
+    public void PlusPlusAsksForAsManyCodedRelaysAsTheBreakerNeeds()
+    {
+        _store.AddRelay(new GateEndpoint("127.0.0.1", 1), null);
+        _store.AddRelay(new GateEndpoint("127.0.0.1", 2), null);
+        _store.Mutate(s => { s.MinHealthyRelays = 1; return 0; });
+        _store.IssueRelayCode("127.0.0.1:1", _serverKey.PublicKey);
+        Assert.Equal(2, GateStore.RequiredHealthyRelays(_store.Read()));
+        Assert.Throws<ArgumentException>(() => _store.SetPrivacy(PrivacyLevel.PlusPlus));
+        _store.IssueRelayCode("127.0.0.1:2", _serverKey.PublicKey);
+        _store.SetPrivacy(PrivacyLevel.PlusPlus);
+    }
+
     [Fact]
     public async Task HealthyRelaysLetPlayersInThroughTwoPaths()
     {

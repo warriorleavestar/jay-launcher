@@ -119,15 +119,25 @@ public sealed class JayServerRunner : IAsyncDisposable
     public async Task StopAsync(TimeSpan? timeout = null)
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
-        if (_records is not null) await _records.DisposeAsync();
-        await Gate.DisposeAsync();
-        if (Mc is not null)
+        // Every step runs even when an earlier one fails (above all, the MC server is still told to stop and save);
+        // the first error is rethrown at the end.
+        Exception? first = null;
+        try { if (_records is not null) await _records.DisposeAsync(); }
+        catch (Exception e) { first ??= e; }
+        try { await Gate.DisposeAsync(); }
+        catch (Exception e) { first ??= e; }
+        try
         {
-            await Mc.StopAsync(timeout ?? TimeSpan.FromSeconds(60));
-            Mc.Dispose();
+            if (Mc is not null)
+            {
+                try { await Mc.StopAsync(timeout ?? TimeSpan.FromSeconds(60)); }
+                finally { Mc.Dispose(); }
+            }
         }
+        catch (Exception e) { first ??= e; }
         _key.Dispose();
         _exited.TrySetResult();
+        if (first is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
     }
 
     public async ValueTask DisposeAsync() => await StopAsync();

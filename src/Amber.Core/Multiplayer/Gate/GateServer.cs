@@ -99,7 +99,16 @@ public sealed class GateServer : IAsyncDisposable
         {
             var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.MapToIPv6() ?? IPAddress.IPv6None;
             Pump.Tune(client);
-            var state = _store.Read();
+            GateState state;
+            try { state = _store.Read(); }
+            catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+            {
+                // Without the member list nobody is let in (fail closed), but say why.
+                ReportStateError(e);
+                Interlocked.Increment(ref Rejected);
+                Pump.Abort(client);
+                return;
+            }
             var plus = state.Privacy.IsSplit();
             var fromRelay = state.Relays.Count > 0 && RelaySources(state).Contains(remote);
             if (FixedPortClosedTo(client, state, fromRelay))
@@ -398,6 +407,7 @@ public sealed class GateServer : IAsyncDisposable
             try
             {
                 var state = _store.Read();
+                ReportStateError(null);
                 Check(state);
                 SyncListeners(state);
                 PushRotation(state);
@@ -405,9 +415,20 @@ public sealed class GateServer : IAsyncDisposable
             }
             catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
             {
-                // 状态文件正被管理命令改写：下一秒再看。
+                // 状态文件正被管理命令改写：下一秒再看。A file that stays unreadable is logged once.
+                ReportStateError(e);
             }
         }
+    }
+
+    private string? _stateError;
+
+    /// <summary>Logs an unreadable state.json once per distinct error; null after a good read clears it.</summary>
+    private void ReportStateError(Exception? e)
+    {
+        var message = e?.Message;
+        if (Interlocked.Exchange(ref _stateError, message) == message || message is null) return;
+        _log(L.F("core.gate.log.state_unreadable", message));
     }
 
     /// <summary>每秒看一次：纪元号变了（吊销了节点）就全员断开；隐私++ 下健康节点不够就熔断，连续健康一段时间后恢复。</summary>
@@ -442,7 +463,7 @@ public sealed class GateServer : IAsyncDisposable
         foreach (var id in _healthyLast.Except(healthy)) _log(L.F("core.gate.log.relay_down", id));
         _healthyLast = healthy;
 
-        var enough = healthy.Count >= Math.Max(2, state.MinHealthyRelays);
+        var enough = healthy.Count >= GateStore.RequiredHealthyRelays(state);
         if (state.Privacy != PrivacyLevel.PlusPlus || enough)
         {
             if (_healthySince == DateTime.MinValue) _healthySince = now;
@@ -455,16 +476,24 @@ public sealed class GateServer : IAsyncDisposable
             var down = string.Join(", ", known.Except(healthy).DefaultIfEmpty("-"));
             var n = AbortAll();
             _log(L.F("core.gate.log.breaker_open", down, n));
-            WriteHealth();
+            // The event first (the server saves the world on it); a failed health write must not skip it.
             BreakerChanged?.Invoke(true, down);
+            TryWriteHealth();
         }
         else if (_breakerOpen && (state.Privacy != PrivacyLevel.PlusPlus || _healthySince != DateTime.MinValue && now - _healthySince >= RecoverDelay))
         {
             _breakerOpen = false;
             _log(L.T("core.gate.log.breaker_closed"));
-            WriteHealth();
             BreakerChanged?.Invoke(false, "");
+            TryWriteHealth();
         }
+    }
+
+    /// <summary>The periodic write in the monitor loop rewrites the file within seconds, so a failed write here is let go.</summary>
+    private void TryWriteHealth()
+    {
+        try { WriteHealth(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
     }
 
     private static bool StillAllowed(GateState state, string name, byte[] device)
@@ -548,13 +577,15 @@ public sealed class GateServer : IAsyncDisposable
         }
     }
 
-    private (GateState State, DateTime Resolved, HashSet<IPAddress> Addresses)? _relaySources;
+    /// <summary>One immutable snapshot, swapped as a whole: connection handlers read it from several threads.</summary>
+    private sealed record RelaySourceCache(GateState State, DateTime Resolved, HashSet<IPAddress> Addresses);
+    private volatile RelaySourceCache? _relaySources;
 
     /// <summary>节点的来源 IP（填了 Source 用 Source，没填就解析地址里的主机名；一分钟重新解析一次）。</summary>
     private HashSet<IPAddress> RelaySources(GateState state)
     {
         var cached = _relaySources;
-        if (cached is { } c && ReferenceEquals(c.State, state) && DateTime.UtcNow - c.Resolved < TimeSpan.FromMinutes(1)) return c.Addresses;
+        if (cached is not null && ReferenceEquals(cached.State, state) && DateTime.UtcNow - cached.Resolved < TimeSpan.FromMinutes(1)) return cached.Addresses;
         var set = new HashSet<IPAddress>();
         foreach (var relay in state.Relays)
         {
@@ -573,7 +604,7 @@ public sealed class GateServer : IAsyncDisposable
                 // 解析不了就先不认这个节点，下次再试。
             }
         }
-        _relaySources = (state, DateTime.UtcNow, set);
+        _relaySources = new RelaySourceCache(state, DateTime.UtcNow, set);
         return set;
     }
 

@@ -1721,6 +1721,7 @@
   "core.gate.relay.heartbeat_down": "ハートビート通路が切断されました。再接続します：{0}",
   "core.gate.log.relay_wrong_key": "拒否：中継 {0} の ID が変わりました（{1}）。再インストールした場合は jay-server relays code でコードを再発行してください。",
   "core.gate.log.epoch": "中継を失効（エポック {0}）：全 {1} 接続を切断し、新しい鍵で再接続させます",
+  "core.gate.log.state_unreadable": "メンバー一覧（state.json）を読めません：{0}。読めるようになるまで新しい接続は受け付けません。",
   "core.gate.log.relay_up": "中継稼働：{0}",
   "core.gate.log.relay_down": "中継のハートビート停止：{0}",
   "core.gate.log.breaker_open": "プライバシー++ 緊急切断：利用不可の中継 {0}。{1} 接続を切断し、新規接続を停止しました",
