@@ -257,8 +257,11 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         await WritePackAsync(outputPath, "modrinth.index.json", index, modFiles.Where(f => !linked.Contains(f.Relative)), ct);
     }
 
-    /// <summary>导出 CurseForge 整合包：有 Key 且能按指纹识别的写进 manifest，其余放进 overrides。</summary>
-    public async Task ExportCurseForgeAsync(GameInstance instance, string outputPath, string name, string version, string author, IReadOnlyCollection<string> includeRelative, CancellationToken ct = default)
+    /// <summary>
+    /// 导出 CurseForge 整合包：有 Key 且能按指纹识别的写进 manifest，其余放进 overrides。
+    /// The manifest's author is always empty: an exported pack is shared, and no account or computer name goes into it.
+    /// </summary>
+    public async Task ExportCurseForgeAsync(GameInstance instance, string outputPath, string name, string version, IReadOnlyCollection<string> includeRelative, CancellationToken ct = default)
     {
         var all = EnumerateIncluded(instance.WorkDir, includeRelative).ToList();
         var mods = all.Where(f => f.Relative.StartsWith("mods/", StringComparison.Ordinal)).ToList();
@@ -293,7 +296,7 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
             ["manifestVersion"] = 1,
             ["name"] = name,
             ["version"] = version,
-            ["author"] = author,
+            ["author"] = "",
             ["files"] = files,
             ["overrides"] = "overrides",
         };

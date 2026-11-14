@@ -315,7 +315,7 @@ try
             var instance = Instance(argList[1], isolate);
             var include = ModpackService.ExportCandidates(instance.WorkDir);
             Console.WriteLine("包含：" + string.Join(", ", include));
-            if (format == "curseforge") await modpacks.ExportCurseForgeAsync(instance, argList[2], instance.Id, "1.0.0", "", include, cts.Token);
+            if (format == "curseforge") await modpacks.ExportCurseForgeAsync(instance, argList[2], instance.Id, "1.0.0", include, cts.Token);
             else await modpacks.ExportMrpackAsync(instance, argList[2], instance.Id, "1.0.0", include, cts.Token);
             Console.WriteLine($"已导出 {argList[2]}（{new FileInfo(argList[2]).Length / 1024} KB）");
             break;
