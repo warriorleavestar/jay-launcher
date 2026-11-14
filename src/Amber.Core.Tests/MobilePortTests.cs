@@ -8,6 +8,8 @@ using Avalonia.Threading;
 using System.Security.Cryptography;
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Net;
+using Amber.Core.Net;
 
 namespace Amber.Core.Tests;
 
@@ -564,6 +566,172 @@ public sealed class MobilePortTests
         }
     }
 
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallsIntoTheSameFolderRunOneAtATime()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "game-runtime");
+        try
+        {
+            var archive = Convert.FromBase64String(RuntimeXzFixture);
+            var descriptor = RuntimeArchive(archive);
+            var slow = new GatedStream(archive, archive.Length / 2);
+            var firstInstall = RuntimeArchiveInstaller.InstallAsync(target, descriptor, (_, _) => Task.FromResult<Stream>(slow));
+            await slow.ReachedGate.WaitAsync(TimeSpan.FromSeconds(10));
+            var download = Assert.Single(Directory.GetFiles(parent, "game-runtime.download-*"));
+            var staging = Assert.Single(Directory.GetDirectories(parent, "game-runtime.install-*"));
+
+            var secondOpened = false;
+            var secondInstall = RuntimeArchiveInstaller.InstallAsync(target, descriptor, (_, _) =>
+            {
+                secondOpened = true;
+                return Task.FromResult<Stream>(new MemoryStream(archive, writable: false));
+            });
+            await Task.Delay(200);
+            Assert.False(secondOpened);
+            Assert.True(File.Exists(download));
+            Assert.True(Directory.Exists(staging));
+
+            slow.Release();
+            var manifests = await Task.WhenAll(firstInstall, secondInstall).WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(secondOpened);
+            Assert.True(await RuntimeBundleVerifier.VerifyAsync(target, manifests[1], "arm64-v8a"));
+            Assert.Equal([target], Directory.GetDirectories(parent));
+            Assert.Empty(Directory.GetFiles(parent));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AndroidRuntimeArchiveInstallerRestoresTheRuntimeOfAnInterruptedActivation(bool cancelled)
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "game-runtime");
+        try
+        {
+            var archive = Convert.FromBase64String(RuntimeXzFixture);
+            var descriptor = RuntimeArchive(archive);
+            var installed = await RuntimeArchiveInstaller.InstallAsync(
+                target, descriptor, (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)));
+            // The app was killed after the old runtime was moved to its backup and before the new one was moved in.
+            Directory.Move(target, target + ".backup-old");
+            Directory.CreateDirectory(target + ".install-new");
+            await File.WriteAllTextAsync(Path.Combine(target + ".install-new", "partial"), "partial");
+
+            using var cts = new CancellationTokenSource();
+            Task<Stream> Open(RuntimeArchiveDescriptor _, CancellationToken token)
+            {
+                if (!cancelled) throw new HttpRequestException("offline");
+                cts.Cancel();
+                token.ThrowIfCancellationRequested();
+                throw new InvalidOperationException("unreachable");
+            }
+            if (cancelled)
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => RuntimeArchiveInstaller.InstallAsync(target, descriptor, Open, ct: cts.Token));
+            else
+                await Assert.ThrowsAsync<HttpRequestException>(() => RuntimeArchiveInstaller.InstallAsync(target, descriptor, Open));
+
+            var restored = RuntimeBundleManifest.Read(Path.Combine(target, "runtime-manifest.json"));
+            Assert.Equal(installed.Id, restored.Id);
+            Assert.True(await RuntimeBundleVerifier.VerifyAsync(target, restored, "arm64-v8a"));
+            Assert.Equal([target], Directory.GetDirectories(parent));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public async Task MobileSetupKeepsThePageUsableAfterAFailedGameDownloadAndCanStartAgain()
+    {
+        const string files = "/data/user/0/example.app/files";
+        var page = new RecordingSetupPage();
+        var attempt = new MobileSetupAttempt(page.Page, [(files + "/game-runtime", "<runtime>"), (files, "<files>")]);
+
+        var result = await attempt.RunAsync(MobileSetupStage.GameInstall, async (_, _) =>
+        {
+            await Task.Yield();
+            throw new DownloadException(
+                $"1 file failed: {files}/minecraft/assets/objects/ab/cd",
+                [(new DownloadItem("https://example.invalid/cd", files + "/minecraft/assets/objects/ab/cd"),
+                  new HttpRequestException("not found", null, HttpStatusCode.NotFound))]);
+        });
+
+        Assert.Equal(MobileSetupResult.Failed, result);
+        Assert.False(attempt.IsRunning);
+        Assert.Equal([true, false], page.Busy);
+        Assert.Equal(1, page.PanelShown);
+        Assert.Equal(0, page.CancelledCount);
+        var shown = Assert.Single(page.Failures);
+        Assert.Contains("<files>/minecraft/assets/objects/ab/cd", shown);
+        Assert.DoesNotContain(files, shown);
+        var line = Assert.Single(page.Logs);
+        Assert.StartsWith("setup failed: stage=GameInstall error=DownloadException code=0x", line);
+        Assert.Contains("<files>/minecraft/assets", line);
+        Assert.DoesNotContain(files, line);
+        Assert.DoesNotContain(" at ", line);
+
+        // The launch step fails after the page was taken away: the panel comes back and the log names the stage.
+        result = await attempt.RunAsync(MobileSetupStage.GameInstall, (current, _) =>
+        {
+            current.Stage = MobileSetupStage.GameLaunch;
+            throw new FileNotFoundException("The Android GLFW bridge is missing.", files + "/game-runtime/native/libglfw.so");
+        });
+        Assert.Equal(MobileSetupResult.Failed, result);
+        Assert.Equal(2, page.PanelShown);
+        Assert.StartsWith("setup failed: stage=GameLaunch error=FileNotFoundException", page.Logs[^1]);
+        Assert.DoesNotContain("/data/", page.Logs[^1]);
+
+        var ran = false;
+        result = await attempt.RunAsync(MobileSetupStage.GameInstall, (_, _) =>
+        {
+            ran = true;
+            return Task.CompletedTask;
+        });
+        Assert.Equal(MobileSetupResult.Completed, result);
+        Assert.True(ran);
+        Assert.Equal([true, false, true, false, true, false], page.Busy);
+        Assert.Equal(2, page.Logs.Count);
+    }
+
+    [Fact]
+    public async Task MobileSetupCancelRestoresTheButtonsAndOnlyTheUsersCancelCountsAsCancel()
+    {
+        var page = new RecordingSetupPage();
+        var attempt = new MobileSetupAttempt(page.Page, []);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = attempt.RunAsync(MobileSetupStage.RuntimeDownload, async (_, token) =>
+        {
+            started.SetResult();
+            await Task.Delay(Timeout.Infinite, token);
+        });
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(attempt.IsRunning);
+        Assert.Equal(MobileSetupResult.AlreadyRunning, await attempt.RunAsync(MobileSetupStage.RuntimeDownload, (_, _) => Task.CompletedTask));
+
+        attempt.Cancel();
+        Assert.Equal(MobileSetupResult.Cancelled, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.False(attempt.IsRunning);
+        Assert.Equal([true, false], page.Busy);
+        Assert.Equal(1, page.CancelledCount);
+        Assert.Equal(1, page.PanelShown);
+        Assert.Empty(page.Logs);
+        Assert.Empty(page.Failures);
+
+        // A timeout inside the work is a failure, not the user's cancel.
+        var result = await attempt.RunAsync(MobileSetupStage.RuntimeDownload, (_, _) => throw new TaskCanceledException("timed out"));
+        Assert.Equal(MobileSetupResult.Failed, result);
+        Assert.Equal(1, page.CancelledCount);
+        Assert.StartsWith("setup failed: stage=RuntimeDownload error=TaskCanceledException", Assert.Single(page.Logs));
+        Assert.Equal([true, false, true, false], page.Busy);
+    }
+
     private static RuntimeBundleFile RuntimeFile(string path, byte[] bytes) => new(
         path,
         bytes.Length,
@@ -618,6 +786,63 @@ public sealed class MobilePortTests
         uOSkvqrb56xEuy4315U0RexbEnxSs1NeGvEtAHrr4MdiD+fnhi1ZfdCIMM9cNZzJAKFIrqxwOpQl9QAAAAAAqDkUZuAiHJcAAfEG
         gOQBAMcUcsixxGf7AgAAAAAEWVo=
         """;
+
+    private sealed class RecordingSetupPage
+    {
+        public List<bool> Busy { get; } = [];
+        public List<string> Failures { get; } = [];
+        public List<string> Logs { get; } = [];
+        public int PanelShown { get; private set; }
+        public int CancelledCount { get; private set; }
+
+        public MobileSetupPage Page => new(
+            Busy.Add,
+            () => PanelShown++,
+            () => CancelledCount++,
+            Failures.Add,
+            Logs.Add);
+    }
+
+    /// <summary>Hands out the first part of the data, then waits until <see cref="Release"/>.</summary>
+    private sealed class GatedStream(byte[] data, int gateAt) : Stream
+    {
+        private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _position;
+
+        public Task ReachedGate => _reached.Task;
+        public void Release() => _release.TrySetResult();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_position >= gateAt)
+            {
+                _reached.TrySetResult();
+                await _release.Task.WaitAsync(cancellationToken);
+            }
+            var limit = _position < gateAt ? gateAt : data.Length;
+            var count = Math.Min(buffer.Length, limit - _position);
+            data.AsMemory(_position, count).CopyTo(buffer);
+            _position += count;
+            return count;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 
     private sealed class FakeMobilePlatformServices : IMobilePlatformServices
     {

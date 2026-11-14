@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using SharpCompress.Readers;
 
@@ -45,6 +46,12 @@ public readonly record struct RuntimeInstallProgress(RuntimeInstallPhase Phase, 
 /// <summary>Downloads, bounds, extracts and atomically activates a self-contained Android JRE archive.</summary>
 public static class RuntimeArchiveInstaller
 {
+    // One gate per target folder, so two installs into the same folder never run at the same time and the
+    // leftover sweep can't delete a download that is still running. Installs only run in Jay's game process,
+    // so an in-process lock is enough. The gates are kept for the life of the process (one per folder used).
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> InstallLocks = new(
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
     public static async Task<RuntimeBundleManifest> InstallAsync(
         string destination,
         RuntimeArchiveDescriptor descriptor,
@@ -63,6 +70,8 @@ public static class RuntimeArchiveInstaller
         var parent = Directory.GetParent(target)?.FullName
             ?? throw new InvalidDataException("The runtime destination has no parent directory.");
         Directory.CreateDirectory(parent);
+        using var installLock = await LockTargetAsync(target, ct);
+        RestoreInterruptedActivation(target, parent);
         SweepLeftovers(target, parent);
 
         var suffix = Guid.NewGuid().ToString("N");
@@ -90,6 +99,8 @@ public static class RuntimeArchiveInstaller
 
             progress?.Report(new(RuntimeInstallPhase.Activating, files.Count, files.Count));
             RuntimeBundleInstaller.ActivateStaged(target, staging, backup);
+            // Only now, with the new runtime in place, are backups left by interrupted activations stale.
+            DeleteLeftoverDirectories(parent, Path.GetFileName(target) + ".backup-*");
             return manifest;
         }
         finally
@@ -99,23 +110,59 @@ public static class RuntimeArchiveInstaller
         }
     }
 
+    private static async Task<IDisposable> LockTargetAsync(string target, CancellationToken ct)
+    {
+        var gate = InstallLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(target), _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        return new LockRelease(gate);
+    }
+
+    private sealed class LockRelease(SemaphoreSlim gate) : IDisposable
+    {
+        private int _released;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) gate.Release();
+        }
+    }
+
     /// <summary>
-    /// Removes staging, backup and download leftovers from earlier installs that were interrupted
-    /// (for example when the app was killed), so they do not use storage forever.
+    /// If an earlier activation stopped after the old runtime was moved to its backup but before the new one was
+    /// moved in (for example because the app was killed), the backup is the only complete runtime. Put it back
+    /// before this install downloads anything, so a failed or cancelled install still leaves a usable runtime.
+    /// </summary>
+    private static void RestoreInterruptedActivation(string target, string parent)
+    {
+        if (Directory.Exists(target)) return;
+        var backup = Directory.EnumerateDirectories(parent, Path.GetFileName(target) + ".backup-*")
+            .OrderByDescending(directory => File.Exists(Path.Combine(directory, "runtime-manifest.json")))
+            .ThenByDescending(Directory.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+        if (backup is not null) Directory.Move(backup, target);
+    }
+
+    /// <summary>
+    /// Removes staging and download leftovers from earlier installs that were interrupted (for example when the
+    /// app was killed), so they do not use storage forever. Runs under the install lock, so none of them belongs
+    /// to an install that is still running. Backups are removed only after a successful activation.
     /// </summary>
     private static void SweepLeftovers(string target, string parent)
     {
         var name = Path.GetFileName(target);
-        foreach (var pattern in new[] { name + ".install-*", name + ".backup-*" })
-            foreach (var directory in Directory.EnumerateDirectories(parent, pattern))
-            {
-                try { Directory.Delete(directory, true); }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-            }
-
+        DeleteLeftoverDirectories(parent, name + ".install-*");
         foreach (var file in Directory.EnumerateFiles(parent, name + ".download-*"))
         {
             try { File.Delete(file); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void DeleteLeftoverDirectories(string parent, string pattern)
+    {
+        foreach (var directory in Directory.EnumerateDirectories(parent, pattern))
+        {
+            try { Directory.Delete(directory, true); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
     }
