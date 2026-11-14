@@ -212,9 +212,19 @@ public sealed class EasyTierInstaller
     public string BundledPath => Path.Combine(_bundledDir, Asset.Name);
     /// <summary>手动导入时需要的文件名。</summary>
     public string ExpectedFileName => Asset.Name;
-    /// <summary>The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again.</summary>
+    /// <summary>
+    /// The WinDivert driver (full-LAN broadcast relay on Windows) must be there too; if it's missing, extract again. So must
+    /// the package itself: the elevated guard checks and extracts it again on its own (<see cref="ElevatedCoreStore"/>).
+    /// </summary>
     public bool IsInstalled => File.Exists(CorePath) && File.Exists(CliPath)
-        && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)));
+        && (!OperatingSystem.IsWindows() || Asset.DriverName is not { } driver || File.Exists(Path.Combine(InstallDir, driver)))
+        && File.Exists(PackagePath);
+
+    /// <summary>A copy of the checked package, kept for the elevated guard when it didn't come from the bundled one.</summary>
+    public string KeptPackagePath => Path.Combine(_dataDir, "easytier", EasyTierRelease.InstallTag, Asset.Name);
+
+    /// <summary>The package the elevated guard checks and runs easytier-core from: the kept copy, otherwise the bundled one.</summary>
+    public string PackagePath => File.Exists(KeptPackagePath) ? KeptPackagePath : BundledPath;
 
     /// <summary>下载来源，按尝试顺序排列。</summary>
     public IReadOnlyList<(string Name, string Url)> Sources => _sources ?? EasyTierRelease.Sources(Asset, SourceChain.PrefersMirrors());
@@ -294,6 +304,9 @@ public sealed class EasyTierInstaller
         Extract(zip, InstallDir, Asset);
         MakeExecutable(CorePath);
         MakeExecutable(CliPath);
+        // Keep the checked package for the elevated guard, unless it is the bundled one (which stays where it is).
+        var full = Path.GetFullPath(zip);
+        if (full != Path.GetFullPath(BundledPath) && full != Path.GetFullPath(KeptPackagePath)) File.Copy(full, KeptPackagePath, overwrite: true);
         if (!IsInstalled) throw new InvalidDataException(L.T("core.mp.component.missingexecutable"));
         RemoveOldInstalls();
     }
@@ -395,23 +408,26 @@ public sealed class EasyTierInstaller
         var temp = target + ".tmp";
         if (Directory.Exists(temp)) Directory.Delete(temp, true);
         Directory.CreateDirectory(temp);
-        using (var zip = ZipFile.OpenRead(zipPath))
-        {
-            foreach (var entry in zip.Entries)
-            {
-                if (entry.FullName.EndsWith('/')) continue;
-                var name = Path.GetFileName(entry.FullName);
-                if (name.Length == 0 || name.Contains("..")) continue;
-                // 只要命令行程序、它们用的库和 WinDivert 驱动文件（完整局域网模式转发广播用）；网页控制台用不到。
-                if (name != asset.CoreName && name != asset.CliName && name != asset.DriverName
-                    && !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-                    && !name.EndsWith(".so", StringComparison.Ordinal)
-                    && !name.EndsWith(".dylib", StringComparison.Ordinal)) continue;
-                entry.ExtractToFile(Path.Combine(temp, name), true);
-            }
-        }
+        using (var zip = ZipFile.OpenRead(zipPath)) ExtractEntries(zip, temp, asset);
         if (Directory.Exists(target)) Directory.Delete(target, true);
         Directory.Move(temp, target);
+    }
+
+    /// <summary>The files Jay uses from a package, flattened into <paramref name="dir"/> (also used by the elevated guard).</summary>
+    internal static void ExtractEntries(ZipArchive zip, string dir, EasyTierRelease.Asset asset)
+    {
+        foreach (var entry in zip.Entries)
+        {
+            if (entry.FullName.EndsWith('/')) continue;
+            var name = Path.GetFileName(entry.FullName);
+            if (name.Length == 0 || name.Contains("..")) continue;
+            // 只要命令行程序、它们用的库和 WinDivert 驱动文件（完整局域网模式转发广播用）；网页控制台用不到。
+            if (name != asset.CoreName && name != asset.CliName && name != asset.DriverName
+                && !name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                && !name.EndsWith(".so", StringComparison.Ordinal)
+                && !name.EndsWith(".dylib", StringComparison.Ordinal)) continue;
+            entry.ExtractToFile(Path.Combine(dir, name), true);
+        }
     }
 
     private static void MakeExecutable(string path)

@@ -94,6 +94,9 @@ public sealed class EasyTierInstallTests : IDisposable
 
         Assert.True(installer.IsInstalled);
         Assert.Contains(handler.Requests, u => u.Contains("c.test"));
+        // The elevated guard gets the checked download, not the broken bundle.
+        Assert.Equal(installer.KeptPackagePath, installer.PackagePath);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
         // 装好后下载用的临时文件不留。
         Assert.False(File.Exists(Path.Combine(_root, "data", "easytier", "download", _asset.Name)));
     }
@@ -131,6 +134,21 @@ public sealed class EasyTierInstallTests : IDisposable
         var good = Path.Combine(_root, "good.zip");
         File.WriteAllBytes(good, _good);
         await installer.ImportAsync(good);
+        Assert.True(installer.IsInstalled);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
+    }
+
+    [Fact]
+    public async Task APackageIsKeptForTheElevatedGuard()
+    {
+        var (installer, _) = Create(_ => Bytes(_good));
+        await installer.EnsureAsync();
+        Assert.True(installer.IsInstalled);
+        Assert.Equal(_good, File.ReadAllBytes(installer.PackagePath));
+        // Without the package (an install from before it was kept) the component counts as missing and is fetched again.
+        File.Delete(installer.KeptPackagePath);
+        Assert.False(installer.IsInstalled);
+        await installer.EnsureAsync();
         Assert.True(installer.IsInstalled);
     }
 

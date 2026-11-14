@@ -54,12 +54,12 @@ public sealed class EasyTierElevatedSession : IEasyTierSession, IHotspotSharingS
         if (OperatingSystem.IsWindows())
         {
             LegacyFiles.Remove(workDir);
-            guard = ElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), elevate: true, network: ExitNetworkPlan.Create(options));
+            guard = ElevatedGuard.Start(installer.PackagePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), elevate: true, network: ExitNetworkPlan.Create(options));
         }
         else
         {
             // Mac/Linux：经 pkexec（Linux）或系统管理员密码框（macOS）以 root 运行 Jay 自己的守护模式，见 UnixElevatedGuard。
-            guard = UnixElevatedGuard.Start(installer.CorePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options), EasyTierArgs.VirtualIp(options));
+            guard = UnixElevatedGuard.Start(installer.PackagePath, EasyTierArgs.Build(options), EasyTierArgs.Environment(options), ExitNetworkPlan.Create(options), EasyTierArgs.VirtualIp(options));
         }
         return new EasyTierElevatedSession(options, installer.CliPath, guard);
     }

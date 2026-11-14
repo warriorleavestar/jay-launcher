@@ -11,7 +11,9 @@ namespace Amber.Core.Multiplayer;
 
 /// <summary>
 /// The Windows full-LAN guard: Jay itself, started through the admin prompt with
-/// <c>Jay.exe --jay-lan-guard &lt;pipe id&gt; &lt;Jay pid&gt; &lt;user SID&gt; &lt;easytier-core path&gt;</c>.
+/// <c>Jay.exe --jay-lan-guard &lt;pipe id&gt; &lt;Jay pid&gt; &lt;user SID&gt; &lt;package path&gt;</c>.
+/// The guard checks the package and runs easytier-core only from its own administrators-only copy
+/// (<see cref="ElevatedCoreStore"/>), never from the user's data folder.
 /// It connects to the four pipes the non-admin Jay created, checks they belong to that Jay process (server process id,
 /// owner is the user or Administrators) before reading anything, then starts, restarts and stops easytier-core on
 /// command and sends its output back through the pipes. The room key only travels through the pipe; nothing is written
@@ -34,8 +36,8 @@ public static class WindowsElevatedGuardHost
     public static bool IsGuardInvocation(string[] args) => args.Length > 0 && args[0] == GuardFlag;
 
     /// <summary>The guard's command line after the executable.</summary>
-    internal static IReadOnlyList<string> Arguments(string pipeId, int jayPid, string userSid, string corePath) =>
-        [GuardFlag, pipeId, jayPid.ToString(System.Globalization.CultureInfo.InvariantCulture), userSid, corePath];
+    internal static IReadOnlyList<string> Arguments(string pipeId, int jayPid, string userSid, string packagePath) =>
+        [GuardFlag, pipeId, jayPid.ToString(System.Globalization.CultureInfo.InvariantCulture), userSid, packagePath];
 
     /// <summary>Guard entry point. Exit code: 0 normal end, 2 bad command line, 3 the pipes did not check out, 4 a failure while running.</summary>
     public static int Run(string[] args)
@@ -47,8 +49,8 @@ public static class WindowsElevatedGuardHost
         SecurityIdentifier user;
         try { user = new SecurityIdentifier(args[3]); }
         catch (ArgumentException) { return 2; }
-        var corePath = args[4];
-        if (!Path.IsPathFullyQualified(corePath)) return 2;
+        var packagePath = args[4];
+        if (!Path.IsPathFullyQualified(packagePath)) return 2;
 
         // Join a kill-on-close job before starting anything: every child (easytier-core, the exit helper) inherits it.
         if (!GuardJob.Protect()) return 4;
@@ -74,7 +76,8 @@ public static class WindowsElevatedGuardHost
             var output = Connect("out", PipeDirection.Out);
             var error = Connect("err", PipeDirection.Out);
             var ack = Connect("ack", PipeDirection.Out);
-            using var session = new GuardSession(cmd, output, error, ack, corePath, () => new ExitNetworkHelper());
+            var core = new Lazy<string>(() => ResolveCore(packagePath, jayPid), LazyThreadSafetyMode.ExecutionAndPublication);
+            using var session = new GuardSession(cmd, output, error, ack, () => core.Value, () => new ExitNetworkHelper());
             return session.Run();
         }
         catch (Exception e) when (e is IOException or TimeoutException or UnauthorizedAccessException or InvalidOperationException) { return 3; }
@@ -84,9 +87,39 @@ public static class WindowsElevatedGuardHost
         }
     }
 
-    /// <summary>One guard run over connected pipes. Internal so tests can drive it with a fake exit helper.</summary>
-    internal sealed class GuardSession(Stream cmd, Stream output, Stream error, Stream ack, string corePath, Func<IExitNetworkHelper> helperFactory) : IDisposable
+    /// <summary>
+    /// The program to run. A package (what Jay passes) is checked and run from the administrators-only copy. A program path
+    /// is accepted only when this guard has no more rights than the Jay that asked for it (tests and a Jay that already runs
+    /// as administrator), so the guard never runs a program the user's account could have swapped with rights it lacks.
+    /// </summary>
+    internal static string ResolveCore(string path, uint jayPid)
     {
+        if (ElevatedCoreStore.IsPackage(path)) return ElevatedCoreStore.Prepare(path);
+        if (!IsElevated(GetCurrentProcess()) || ProcessIsElevated(jayPid)) return path;
+        throw new UnauthorizedAccessException("The guard only runs easytier-core from the checked package");
+    }
+
+    private static bool ProcessIsElevated(uint pid)
+    {
+        var process = OpenProcess(0x1000, false, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+        if (process == IntPtr.Zero) return false;
+        try { return IsElevated(process); }
+        finally { CloseHandle(process); }
+    }
+
+    private static bool IsElevated(IntPtr process)
+    {
+        if (!OpenProcessToken(process, 0x0008, out var token)) return false; // TOKEN_QUERY
+        try { return GetTokenInformation(token, 20, out var elevated, sizeof(int), out _) && elevated != 0; } // TokenElevation
+        finally { CloseHandle(token); }
+    }
+
+    /// <summary>One guard run over connected pipes. Internal so tests can drive it with a fake exit helper.</summary>
+    internal sealed class GuardSession(Stream cmd, Stream output, Stream error, Stream ack, Func<string> resolveCore, Func<IExitNetworkHelper> helperFactory) : IDisposable
+    {
+        public GuardSession(Stream cmd, Stream output, Stream error, Stream ack, string corePath, Func<IExitNetworkHelper> helperFactory)
+            : this(cmd, output, error, ack, () => corePath, helperFactory) { }
+
         private readonly StreamWriter _ack = new(ack, Utf8) { AutoFlush = true, NewLine = "\n" };
         private readonly object _ackLock = new();
         private Process? _core;
@@ -187,9 +220,12 @@ public static class WindowsElevatedGuardHost
 
         private void StartCore(string arguments, IReadOnlyDictionary<string, string>? env)
         {
+            var corePath = resolveCore();
             var info = new ProcessStartInfo(corePath)
             {
                 Arguments = arguments,
+                // Not Jay's working folder: easytier-core and the libraries it loads come from its own folder only.
+                WorkingDirectory = Path.GetDirectoryName(corePath),
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
@@ -337,6 +373,24 @@ public static class WindowsElevatedGuardHost
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetCurrentProcess();
     }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

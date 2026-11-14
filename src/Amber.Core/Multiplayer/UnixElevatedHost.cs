@@ -8,7 +8,9 @@ using System.Text.Json;
 namespace Amber.Core.Multiplayer;
 
 /// <summary>
-/// Mac/Linux 守护模式（以 root 运行）：<c>Jay --amber-et-guard 套接字 用户uid Jay进程号 easytier-core路径</c>。
+/// Mac/Linux 守护模式（以 root 运行）：<c>Jay --amber-et-guard 套接字 用户uid Jay进程号 安装包路径</c>。
+/// The guard checks the package and runs easytier-core only from its own root-owned copy (<see cref="ElevatedCoreStore"/>),
+/// never from the user's data folder.
 /// 先核对套接字是那个 Jay 进程（对端进程号和 uid）建的才读命令；按命令启动、重启、结束 easytier-core，输出经套接字送回；
 /// 完整局域网模式下顺带转发本机游戏发出的 UDP 广播（<see cref="UnixBroadcastRelay"/>）。
 /// 套接字断开（Jay 退出或崩溃）、收到停止命令或 easytier-core 自己退出时，结束一切后退出。不写任何文件。
@@ -112,14 +114,15 @@ public static class UnixElevatedGuardHost
                 try { UnixExitNetwork.RestoreResolvConf(); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
             }
-            CheckCore(corePath);
+            var core = ResolveCore();
+            CheckCore(core);
             // 经别人上网：承载地址的主机路由要在 EasyTier 加 /1 路由之前查好、加好。
             if (cmd.Network is { } plan)
             {
                 _exit = new UnixExitNetwork(plan);
                 _exit.EnterRoutes();
             }
-            var info = new ProcessStartInfo(corePath)
+            var info = new ProcessStartInfo(core)
             {
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -153,6 +156,18 @@ public static class UnixElevatedGuardHost
                 }
                 _relay = UnixBroadcastRelay.Start(ip, message => Send("error " + B64(message)));
             }
+        }
+
+        /// <summary>
+        /// The program to run. A package (what Jay passes) is checked and run from the root-owned copy. A program path is
+        /// accepted only when the guard has no more rights than the Jay that asked (the guard isn't root, or that Jay is):
+        /// tests and a Jay started as root.
+        /// </summary>
+        private string ResolveCore()
+        {
+            if (ElevatedCoreStore.IsPackage(corePath)) return ElevatedCoreStore.Prepare(corePath);
+            if (UnixIds.EffectiveUserId() != 0 || UnixIds.PeerUserId(socket) == 0) return corePath;
+            throw new UnauthorizedAccessException("The guard only runs easytier-core from the checked package");
         }
 
         /// <summary>以 root 运行的程序：必须是普通文件（不是符号链接），别的用户和组不能改它。</summary>

@@ -221,4 +221,132 @@ public sealed class UnixFullLanTests
             File.Delete(core);
         }
     }
+
+    /// <summary>A package like the pinned one, holding a shell script as easytier-core.</summary>
+    private static (byte[] Zip, EasyTierRelease.Asset Asset) FakePackage(string script)
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true))
+        {
+            using (var w = new StreamWriter(zip.CreateEntry("easytier-test/easytier-core").Open())) w.Write(script);
+            using (var w = new StreamWriter(zip.CreateEntry("easytier-test/easytier-cli").Open())) w.Write("#!/bin/sh\n");
+            using (var w = new StreamWriter(zip.CreateEntry("easytier-test/readme.txt").Open())) w.Write("not extracted");
+        }
+        var bytes = ms.ToArray();
+        var asset = new EasyTierRelease.Asset("test-unix", "easytier-test.zip", Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)),
+            bytes.Length, "easytier-core", "easytier-cli");
+        return (bytes, asset);
+    }
+
+    private static void WithCoreStore(Action<string, string, EasyTierRelease.Asset, byte[]> test, string script = "#!/bin/sh\nexit 0\n")
+    {
+        var dir = Directory.CreateTempSubdirectory("jay-core-store-");
+        var (zip, asset) = FakePackage(script);
+        var package = Path.Combine(dir.FullName, "user", asset.Name);
+        Directory.CreateDirectory(Path.GetDirectoryName(package)!);
+        File.WriteAllBytes(package, zip);
+        ElevatedCoreStore.RootForTest = Path.Combine(dir.FullName, "protected", "Jay", "easytier");
+        ElevatedCoreStore.AssetForTest = asset;
+        try { test(dir.FullName, package, asset, zip); }
+        finally
+        {
+            ElevatedCoreStore.RootForTest = null;
+            ElevatedCoreStore.AssetForTest = null;
+            dir.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void GuardCopyComesFromTheCheckedPackageAndIsReused()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((_, package, asset, _) =>
+        {
+            var core = ElevatedCoreStore.Prepare(package);
+            Assert.Equal(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag, asset.Platform, "easytier-core"), core);
+            Assert.StartsWith("#!/bin/sh", File.ReadAllText(core));
+            var dir = Path.GetDirectoryName(core)!;
+            Assert.False(File.Exists(Path.Combine(dir, "readme.txt")));
+            // Only the owner may write anything in it.
+            foreach (var path in Directory.EnumerateFileSystemEntries(dir).Append(dir))
+                Assert.Equal((UnixFileMode)0, File.GetUnixFileMode(path) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite));
+            Assert.NotEqual((UnixFileMode)0, File.GetUnixFileMode(core) & UnixFileMode.UserExecute);
+            // A change to the user's package afterwards doesn't matter: the guard's own copy is used.
+            File.Delete(package);
+            Assert.Equal(core, ElevatedCoreStore.Prepare(package));
+        });
+    }
+
+    [Fact]
+    public void GuardRefusesAPackageThatDoesNotMatch()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((_, package, _, zip) =>
+        {
+            var tampered = (byte[])zip.Clone();
+            tampered[^30] ^= 0xFF;
+            File.WriteAllBytes(package, tampered);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            File.WriteAllBytes(package, [.. zip, 0]);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            File.Delete(package);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.False(Directory.Exists(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag)) &&
+                Directory.EnumerateFileSystemEntries(Path.Combine(ElevatedCoreStore.RootForTest!, EasyTierRelease.InstallTag)).Any(e => !e.Contains(".tmp-")));
+        });
+    }
+
+    [Fact]
+    public void GuardRefusesACopyOthersCouldChange()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((root, package, asset, _) =>
+        {
+            var core = ElevatedCoreStore.Prepare(package);
+            File.SetUnixFileMode(core, File.GetUnixFileMode(core) | UnixFileMode.OtherWrite);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            File.SetUnixFileMode(core, File.GetUnixFileMode(core) & ~UnixFileMode.OtherWrite);
+            Assert.Equal(core, ElevatedCoreStore.Prepare(package));
+            // A link in place of the folder is refused too.
+            var dir = Path.GetDirectoryName(core)!;
+            var elsewhere = Path.Combine(root, "elsewhere");
+            Directory.Move(dir, elsewhere);
+            Directory.CreateSymbolicLink(dir, elsewhere);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+        });
+    }
+
+    [Fact]
+    public void ElevatedGuardRunsCoreFromItsOwnCopyOfThePackage()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((_, package, _, _) =>
+        {
+            Thread? host = null;
+            UnixElevatedGuard.LaunchForTest = command =>
+            {
+                var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+                var args = command.Skip(flag).ToArray();
+                host = new Thread(() => UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+                host.Start();
+                return Process.GetCurrentProcess();
+            };
+            UnixElevatedGuard.AcceptAnyUserForTest = true;
+            try
+            {
+                using var guard = UnixElevatedGuard.Start(package, ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+                guard.WaitForReadyAsync().Wait(TimeSpan.FromSeconds(10));
+                Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("from ", StringComparison.Ordinal)), 5000));
+                var from = guard.RecentOutput.First(l => l.StartsWith("from ", StringComparison.Ordinal))["from ".Length..];
+                Assert.StartsWith(ElevatedCoreStore.RootForTest!, from, StringComparison.Ordinal);
+                guard.Dispose();
+                Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
+            }
+            finally
+            {
+                UnixElevatedGuard.LaunchForTest = null;
+                UnixElevatedGuard.AcceptAnyUserForTest = false;
+            }
+        }, "#!/bin/sh\necho \"from $0\"\nexec sleep 30\n");
+    }
 }
