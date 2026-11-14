@@ -220,14 +220,7 @@ public static class HardwareBinding
         return plain;
     }
 
-    private static void WritePrivate(string path, byte[] bytes)
-    {
-        var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write };
-        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-        using var f = new FileStream(path, options);
-        f.Write(bytes);
-        f.Flush(true);
-    }
+    private static void WritePrivate(string path, byte[] bytes) => Amber.Core.PrivateFile.WriteAllBytes(path, bytes);
 
     private static void Overwrite(string path)
     {
