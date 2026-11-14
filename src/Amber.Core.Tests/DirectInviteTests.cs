@@ -189,14 +189,25 @@ public sealed class DirectInviteTests
         using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
         var fromLobby = ReceiveTextAsync(lobby, data, wait.Token);
         var fromRoom = room is null ? Task.Delay(Timeout.Infinite, wait.Token).ContinueWith(_ => false) : ReceiveTextAsync(room, data, wait.Token);
-        while (!wait.IsCancellationRequested && !fromLobby.IsCompleted && !fromRoom.IsCompleted)
+        try
         {
-            await et.SendAsync(data, new IPEndPoint(IPAddress.Loopback, guest.Bridge!.LocalPort));
-            await Task.WhenAny(fromLobby, fromRoom, Task.Delay(150));
+            while (!wait.IsCancellationRequested && !fromLobby.IsCompleted && !fromRoom.IsCompleted)
+            {
+                await et.SendAsync(data, new IPEndPoint(IPAddress.Loopback, guest.Bridge!.LocalPort));
+                await Task.WhenAny(fromLobby, fromRoom, Task.Delay(150));
+            }
+            if (fromLobby.IsCompletedSuccessfully && fromLobby.Result) return "lobby";
+            if (fromRoom.IsCompletedSuccessfully && fromRoom.Result) return "room";
+            return null;
         }
-        if (fromLobby.IsCompletedSuccessfully && fromLobby.Result) return "lobby";
-        if (fromRoom.IsCompletedSuccessfully && fromRoom.Result) return "room";
-        return null;
+        finally
+        {
+            // Stop the receive still waiting on the other socket, and let it end, before the next check starts its
+            // own: one left behind would take that check's datagram. (Disposing the source would not cancel it.)
+            wait.Cancel();
+            try { await Task.WhenAll(fromLobby, fromRoom); }
+            catch (OperationCanceledException) { }
+        }
     }
 
     /// <summary>
