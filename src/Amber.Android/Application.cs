@@ -12,6 +12,8 @@ public sealed class Application : AvaloniaAndroidApplication<Mobile.App>
 
     public override void OnCreate()
     {
+        // Before anything reads the device identity or saved servers: seal their wrap keys in the Keystore.
+        Amber.Core.Auth.LocalKeyProtection.Protector = new AndroidKeystoreKeyProtector();
         Mobile.App.PlatformServices = new AndroidMobilePlatformServices(this);
         base.OnCreate();
     }
