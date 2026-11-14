@@ -1131,6 +1131,11 @@ public sealed class DirectSession : IAsyncDisposable
     public async Task<List<MatrixResult>> RunMatrixAsync(bool wantFullLan, IProgress<MatrixResult>? progress, Func<MatrixStep, bool, CancellationToken, Task<bool?>>? chatProbe, CancellationToken ct)
     {
         if (!IsHost || Bridge?.Peers.FirstOrDefault() is not { } peer) throw new InvalidOperationException(L.T("core.mp.matrix.peerrequired"));
+        // The test switches the whole bridge and the host's EasyTier step by step, and keeps one guest's addresses: it can
+        // only run with exactly one guest on the bridge, one that has joined the room (not someone still knocking).
+        if (TestedGuest(Bridge.Peers, LobbyUdpPort is not null) is not { } tested) throw new InvalidOperationException(L.T("core.mp.matrix.oneguest"));
+        peer = tested;
+        _testedMember = peer.Member;
         var run = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         using var abort = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _hostAbort = abort;
@@ -1186,18 +1191,34 @@ public sealed class DirectSession : IAsyncDisposable
             {
                 if (!_disposed && Bridge.Peers.Count == 0 && _guestCandidates.Count > 0)
                     await Bridge.PunchAsync(_guestCandidates, _guestNat, TimeSpan.FromSeconds(30));
-                if (Bridge.Peers.FirstOrDefault() is { } back)
+                if (TestedPeer() is { } back)
                     await Bridge.SendControlAsync(back, new JsonObject { ["op"] = "test-end", ["run"] = run });
             }
             catch (Exception e) when (e is SocketException or ObjectDisposedException or OperationCanceledException)
             {
                 Log(L.T("core.mp.matrix.restorefailedsettings") + e.Message);
             }
+            _testedMember = null;
             if (!_disposed) await StartEasyTierAsync(HostOptions(Options.FullLan, Options.AllowExit), CancellationToken.None);
         }
     }
 
     private Func<MatrixStep, bool, CancellationToken, Task<bool?>>? _chatProbe;
+
+    /// <summary>Host: the member the running test is with (null in a room without admission).</summary>
+    private MemberEntry? _testedMember;
+
+    /// <summary>
+    /// The one guest a full-condition test can run with: the bridge's only peer, admitted when the room admits members.
+    /// Null when there are several, or the only one has not joined yet.
+    /// </summary>
+    internal static DirectPeer? TestedGuest(IReadOnlyCollection<DirectPeer> peers, bool admission) =>
+        peers.Count == 1 && peers.First() is { } only && (!admission || only.Admitted) ? only : null;
+
+    /// <summary>Host, during a test: the bridge peer of the tested guest (after a step it may be on a new bridge).</summary>
+    private DirectPeer? TestedPeer() =>
+        Bridge?.Peers.Where(p => _testedMember is null || ReferenceEquals(p.Member, _testedMember)).FirstOrDefault()
+        ?? Bridge?.Peers.FirstOrDefault();
 
     /// <summary>加入方的聊天探测（界面设置）：发一条消息、等回显。</summary>
     public Func<MatrixStep, CancellationToken, Task<bool?>>? GuestChatProbe { get; set; }
@@ -1252,7 +1273,7 @@ public sealed class DirectSession : IAsyncDisposable
     {
         public async Task<MatrixResult> RunAsync(MatrixStep step, CancellationToken ct)
         {
-            var peer = s.Bridge!.Peers.FirstOrDefault() ?? throw new InvalidOperationException(L.T("core.mp.matrix.disconnected"));
+            var peer = s.TestedPeer() ?? throw new InvalidOperationException(L.T("core.mp.matrix.disconnected"));
             var reply = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
             lock (s._pending) s._pending[step.Index] = reply;
             using var work = CancellationTokenSource.CreateLinkedTokenSource(ct);

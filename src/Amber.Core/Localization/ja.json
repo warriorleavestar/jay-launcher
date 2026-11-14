@@ -475,6 +475,7 @@
   "core.mp.matrix.passed": "成功",
   "core.mp.matrix.pathfailed": "{0} で接続できませんでした",
   "core.mp.matrix.peerrequired": "先に誰かが直接接続でルームに参加する必要があります",
+  "core.mp.matrix.oneguest": "全条件テストは、直接接続ですでに参加しているフレンドが 1 人だけのときに実行できます。参加が終わるまで待つか、直接接続しているのがその人だけのときに実行してください",
   "core.mp.matrix.plan": "テスト計画：{0} ステップ",
   "core.mp.matrix.prerequisitefailed": "スキップ：この経路では範囲「LAN 全体」で接続できませんでした",
   "core.mp.matrix.relay": "第三者経由で中継",

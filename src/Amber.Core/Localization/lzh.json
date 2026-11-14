@@ -470,6 +470,7 @@
   "core.mp.matrix.passed": "通",
   "core.mp.matrix.pathfailed": "{0} 未能通",
   "core.mp.matrix.peerrequired": "須先有人以直連入房",
+  "core.mp.matrix.oneguest": "諸況之試，唯直連已入者僅一友時可行。待其入畢，或待直連者唯其一人時再試",
   "core.mp.matrix.plan": "試之計：凡 {0} 步",
   "core.mp.matrix.prerequisitefailed": "略：此徑之全區域網未通",
   "core.mp.matrix.relay": "藉第三人中繼",

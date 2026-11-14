@@ -144,6 +144,30 @@ public sealed class DirectMatrixNetworkTests
         Assert.Equal([IPAddress.Parse("198.51.100.7"), IPAddress.Parse("203.0.113.5")], hostPublic.OrderBy(a => a.ToString()));
     }
 
+    /// <summary>
+    /// The test switches the whole bridge and the host's EasyTier: it runs only with exactly one guest on the bridge, and
+    /// in a room that admits members only with one who has joined.
+    /// </summary>
+    [Fact]
+    public async Task FullTestNeedsExactlyOneJoinedGuest()
+    {
+        await using var host = NewSession(true);
+        await using var first = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        await using var second = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        await ConnectHostAsync(host, first);
+        Assert.NotNull(await second.PunchAsync([new(PathKind.Lan, new IPEndPoint(IPAddress.Loopback, host.Bridge!.SocketEndPoint.Port))], NatKind.Cone, Deadline));
+        Assert.Equal(2, host.Bridge.Peers.Count);
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => host.RunMatrixAsync(false, null, null, default));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.matrix.oneguest"), refused.Message);
+        Assert.Equal(1, host.EasyTierStarts);
+
+        var one = Assert.Single(host.Bridge.Peers, p => p.Remote.Port == first.SocketEndPoint.Port);
+        Assert.Same(one, DirectSession.TestedGuest([one], admission: false));
+        Assert.Null(DirectSession.TestedGuest(host.Bridge.Peers, admission: false));
+        var knocking = new DirectPeer { Remote = one.Remote, Path = PathKind.Lan };
+        Assert.Null(DirectSession.TestedGuest([knocking], admission: true));
+    }
+
     [Fact]
     public async Task CancelledHostStepWaitsForProbeCleanupBeforeReturning()
     {

@@ -475,6 +475,7 @@
   "core.mp.matrix.passed": "通過",
   "core.mp.matrix.pathfailed": "{0} 未能連通",
   "core.mp.matrix.peerrequired": "需要先有人透過直連加入房間",
+  "core.mp.matrix.oneguest": "所有條件測試只能在恰好一位已經透過直連加入的朋友時進行。請等朋友加入完成，或在只有這一位朋友直連時再測",
   "core.mp.matrix.plan": "測試計畫：{0} 個步驟",
   "core.mp.matrix.prerequisitefailed": "跳過：這條路的「整個區域網路」範圍沒通",
   "core.mp.matrix.relay": "透過第三人中繼",

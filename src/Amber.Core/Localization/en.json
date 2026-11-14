@@ -483,6 +483,7 @@
   "core.mp.matrix.passed": "Passed",
   "core.mp.matrix.pathfailed": "{0} connection failed",
   "core.mp.matrix.peerrequired": "Someone must join the room through a direct connection first",
+  "core.mp.matrix.oneguest": "The all-condition test runs with exactly one friend who has already joined over a direct connection. Wait until your friend has finished joining, or run it when they are the only one connected directly",
   "core.mp.matrix.plan": "Test plan: {0} steps",
   "core.mp.matrix.plan.one": "Test plan: {0} step",
   "core.mp.matrix.prerequisitefailed": "Skipped: the whole-LAN scope failed on this path",
