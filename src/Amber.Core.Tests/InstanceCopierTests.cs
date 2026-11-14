@@ -55,6 +55,17 @@ public sealed class InstanceCopierTests : IDisposable
         Assert.Contains("copy", _dir.ListInstalled());
     }
 
+    [Theory]
+    [InlineData("src", "copy")]
+    [InlineData("1.12.2", "1.12.2")]
+    public void AJarModInstanceNamesItsOwnRenamedJar(string jar, string expected)
+    {
+        File.WriteAllText(Path.Combine(_dir.VersionDir("src"), "src.json"), $$"""{"id":"src","inheritsFrom":"1.21.1","mainClass":"x","jar":"{{jar}}"}""");
+        InstanceCopier.Copy(_dir, "src", "copy", includeSaves: false);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_dir.VersionJsonPath("copy")))!;
+        Assert.Equal(expected, (string?)json["jar"]);
+    }
+
     [Fact]
     public void BringsWorldsWhenAsked()
     {
