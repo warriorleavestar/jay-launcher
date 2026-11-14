@@ -97,6 +97,35 @@ public sealed class NetworkAccountsTests : IAsyncDisposable
     }
 
     [Fact]
+    public void AFullFailureTableNeverUnlocksALockedAccount()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "a.json"));
+        store.Set("carol", "password1");
+        var now = DateTimeOffset.UtcNow;
+        for (var i = 0; i < AccountStore.MaxFails; i++) store.RecordFailure("carol", now);
+        Assert.Equal(LoginResult.Locked, store.Check("carol", "password1", now));
+        // Junk names, more than the table holds: carol stays locked and the table stays bounded.
+        for (var i = 0; i < AccountStore.MaxTrackedNames + 50; i++) store.RecordFailure("junk" + i, now + TimeSpan.FromMilliseconds(i));
+        Assert.Equal(LoginResult.Locked, store.Check("carol", "password1", now + TimeSpan.FromMinutes(1)));
+        Assert.True(store.TrackedNames <= AccountStore.MaxTrackedNames);
+    }
+
+    [Fact]
+    public void ExpiredFailuresAreDroppedBeforeAnythingElse()
+    {
+        var store = new AccountStore(Path.Combine(_dir, "a.json"));
+        var start = DateTimeOffset.UtcNow;
+        for (var i = 0; i < AccountStore.MaxTrackedNames; i++) store.RecordFailure("old" + i, start);
+        var later = start + AccountStore.Lockout + TimeSpan.FromSeconds(1);
+        for (var i = 0; i < 3; i++) store.RecordFailure("dave", later);
+        store.RecordFailure("erin", later);
+        // The expired names made room; the live counts survive.
+        Assert.Equal(2, store.TrackedNames);
+        for (var i = 0; i < 2; i++) store.RecordFailure("dave", later);
+        Assert.Equal(LoginResult.Locked, store.Check("dave", "whatever1", later));
+    }
+
+    [Fact]
     public void AccountsArePersistedWithoutThePassword()
     {
         var path = Path.Combine(_dir, "a.json");

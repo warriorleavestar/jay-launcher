@@ -240,9 +240,34 @@ public sealed class AccountStore : IAccountStore
     {
         lock (_gate)
         {
-            var fails = _fails.TryGetValue(name, out var f) && f.Until > now ? f.Fails + 1 : 1;
+            var known = _fails.TryGetValue(name, out var f);
+            if (!known && _fails.Count >= MaxTrackedNames) TrimFailures(now);
+            var fails = known && f.Until > now ? f.Fails + 1 : 1;
             _fails[name] = (fails, now + Lockout);
         }
+    }
+
+    /// <summary>How many names the failure table holds before it is trimmed (see <see cref="TrimFailures"/>).</summary>
+    internal const int MaxTrackedNames = 10_000;
+
+    /// <summary>Names in the failure table (tests).</summary>
+    internal int TrackedNames
+    {
+        get { lock (_gate) return _fails.Count; }
+    }
+
+    /// <summary>
+    /// Makes room in a full failure table. Entries whose window has passed go first; if that isn't enough, names that
+    /// aren't locked go, the ones closest to expiring first. A locked name is never dropped, so filling the table with
+    /// junk names can't unlock anybody. Called under the gate.
+    /// </summary>
+    private void TrimFailures(DateTimeOffset now)
+    {
+        foreach (var name in _fails.Where(p => p.Value.Until <= now).Select(p => p.Key).ToList()) _fails.Remove(name);
+        if (_fails.Count < MaxTrackedNames) return;
+        var excess = _fails.Count - MaxTrackedNames + 1;
+        foreach (var name in _fails.Where(p => p.Value.Fails < MaxFails).OrderBy(p => p.Value.Until).Take(excess).Select(p => p.Key).ToList())
+            _fails.Remove(name);
     }
 
     /// <summary>整个登录都通过了：清掉失败次数。</summary>
@@ -269,7 +294,6 @@ public sealed class AccountStore : IAccountStore
         {
             // 密码对了也先不清失败次数：两步验证也过了才算登录成功（见 Succeeded），不然有密码的人能一直试验证码。
             if (ok) return account!.Disabled ? LoginResult.Disabled : LoginResult.Ok;
-            if (_fails.Count > 10_000) _fails.Clear();
         }
         RecordFailure(clean, now);
         return LoginResult.Wrong;
