@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using System.Security.Cryptography;
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Collections.Concurrent;
 
 namespace Amber.Core.Tests;
 
@@ -528,6 +529,158 @@ public sealed class MobilePortTests
         }
     }
 
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallerExtractsOffTheCallingThread()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        var archive = Convert.FromBase64String(RuntimeXzFixture);
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var ui = new SingleThreadSynchronizationContext();
+        var extractThread = 0;
+        SynchronizationContext? extractContext = null;
+        var held = 0;
+        var started = new TaskCompletionSource<Task<RuntimeBundleManifest>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            // Start the install from a single-threaded "UI" context, the way the Android activity does.
+            ui.Post(_ =>
+            {
+                try
+                {
+                    started.SetResult(RuntimeArchiveInstaller.InstallCoreAsync(
+                        target,
+                        RuntimeArchive(archive),
+                        (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)),
+                        progress: null,
+                        CancellationToken.None,
+                        beforeExtractEntry: () =>
+                        {
+                            if (Interlocked.Exchange(ref held, 1) != 0) return;
+                            extractThread = Environment.CurrentManagedThreadId;
+                            extractContext = SynchronizationContext.Current;
+                            entered.Set();
+                            release.Wait();
+                        }));
+                }
+                catch (Exception e)
+                {
+                    started.SetException(e);
+                }
+            }, null);
+
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(30)), "Extraction never started.");
+            Assert.NotEqual(ui.ThreadId, extractThread);
+            Assert.NotSame(ui, extractContext);
+
+            // While extraction is held, the call has already handed back an unfinished task...
+            var install = await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.False(install.IsCompleted);
+            // ...and the UI thread still runs other work.
+            var probe = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            ui.Post(_ => probe.SetResult(), null);
+            await probe.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.False(install.IsCompleted);
+
+            release.Set();
+            var manifest = await install.WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.True(await RuntimeBundleVerifier.VerifyAsync(target, manifest, "arm64-v8a"));
+        }
+        finally
+        {
+            release.Set();
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
+    public async Task AndroidRuntimeArchiveInstallerCancelsDuringExtraction()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        var archive = CreateRuntimeArchive();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var cts = new CancellationTokenSource();
+        var held = 0;
+        try
+        {
+            var install = RuntimeArchiveInstaller.InstallCoreAsync(
+                target,
+                RuntimeArchive(archive),
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(archive, writable: false)),
+                progress: null,
+                cts.Token,
+                beforeExtractEntry: () =>
+                {
+                    if (Interlocked.Exchange(ref held, 1) != 0) return;
+                    entered.Set();
+                    release.Wait();
+                });
+
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(30)), "Extraction never started.");
+            cts.Cancel();
+            release.Set();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => install.WaitAsync(TimeSpan.FromSeconds(60)));
+            Assert.False(Directory.Exists(target));
+            Assert.Empty(Directory.GetFileSystemEntries(parent));
+        }
+        finally
+        {
+            release.Set();
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AndroidRuntimeArchiveInstallerKeepsPreviousRuntimeAfterCancelOrFailure(bool cancel)
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "jay-runtime-archive-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(parent, "active");
+        try
+        {
+            var previousArchive = CreateRuntimeArchive();
+            var previous = await RuntimeArchiveInstaller.InstallAsync(
+                target,
+                RuntimeArchive(previousArchive),
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(previousArchive, writable: false)));
+
+            var updateArchive = CreateRuntimeArchive(("lib/extra.so", "update"u8.ToArray()));
+            using var cts = new CancellationTokenSource();
+            var install = RuntimeArchiveInstaller.InstallCoreAsync(
+                target,
+                RuntimeArchive(updateArchive),
+                (_, _) => Task.FromResult<Stream>(new MemoryStream(updateArchive, writable: false)),
+                progress: null,
+                cts.Token,
+                beforeExtractEntry: () =>
+                {
+                    if (cancel) cts.Cancel();
+                    else throw new IOException("Simulated disk failure during extraction.");
+                });
+
+            if (cancel) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => install);
+            else await Assert.ThrowsAsync<IOException>(() => install);
+
+            // No staging, download or backup leftovers next to the runtime.
+            Assert.Equal([target], Directory.GetFileSystemEntries(parent));
+            // The previous runtime is untouched and still passes full verification.
+            var active = RuntimeBundleManifest.Read(Path.Combine(target, "runtime-manifest.json"));
+            Assert.Equal(previous.Files.Select(file => file.Path).Order(), active.Files.Select(file => file.Path).Order());
+            Assert.False(File.Exists(Path.Combine(target, "lib", "extra.so")));
+            Assert.Equal("jvm"u8.ToArray(), await File.ReadAllBytesAsync(Path.Combine(target, "lib", "server", "libjvm.so")));
+            Assert.True(await RuntimeBundleVerifier.VerifyAsync(target, active, "arm64-v8a"));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+    }
+
     private static RuntimeBundleFile RuntimeFile(string path, byte[] bytes) => new(
         path,
         bytes.Length,
@@ -582,6 +735,46 @@ public sealed class MobilePortTests
         uOSkvqrb56xEuy4315U0RexbEnxSs1NeGvEtAHrr4MdiD+fnhi1ZfdCIMM9cNZzJAKFIrqxwOpQl9QAAAAAAqDkUZuAiHJcAAfEG
         gOQBAMcUcsixxGf7AgAAAAAEWVo=
         """;
+
+    /// <summary>A minimal UI-like context: one thread that runs posted work in order.</summary>
+    private sealed class SingleThreadSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
+        private readonly Thread _thread;
+
+        public SingleThreadSynchronizationContext()
+        {
+            _thread = new Thread(Run) { IsBackground = true, Name = "test-ui" };
+            _thread.Start();
+        }
+
+        public int ThreadId => _thread.ManagedThreadId;
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            try
+            {
+                _queue.Add((d, state));
+            }
+            catch (InvalidOperationException)
+            {
+                // Disposed: finish stray continuations on the pool instead.
+                ThreadPool.QueueUserWorkItem(_ => d(state));
+            }
+        }
+
+        public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
+
+        public override SynchronizationContext CreateCopy() => this;
+
+        public void Dispose() => _queue.CompleteAdding();
+
+        private void Run()
+        {
+            SetSynchronizationContext(this);
+            foreach (var (callback, state) in _queue.GetConsumingEnumerable()) callback(state);
+        }
+    }
 
     private sealed class FakeMobilePlatformServices : IMobilePlatformServices
     {
