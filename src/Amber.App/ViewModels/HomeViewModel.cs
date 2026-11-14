@@ -440,12 +440,15 @@ public sealed partial class HomeViewModel : PageViewModel
         RunStateChanged?.Invoke();
     }
 
-    private string PrimaryKey(GameRun? run)
+    private string PrimaryKey(GameRun? run) => run is not null ? RunKey(run) : IdleKey(SelectedVersion);
+
+    private static string RunKey(GameRun run) =>
+        run.Game is null ? "home.button.cancel_launch" : run.Exiting ? "home.button.exiting" : "home.button.exit_game";
+
+    private string IdleKey(string? id)
     {
-        if (run is not null)
-            return run.Game is null ? "home.button.cancel_launch" : run.Exiting ? "home.button.exiting" : "home.button.exit_game";
         if (SelectedAccount is null) return "home.button.need_account";
-        if (SelectedVersion is not { } id) return "home.button.need_instance";
+        if (id is null) return "home.button.need_instance";
         return _service.Directory.StateOf(id) switch
         {
             Amber.Core.Game.InstanceState.Incomplete => "home.button.resume_install",
@@ -482,6 +485,32 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         await RunAsync(new LaunchRequest(id));
     }
+
+    private GameRun? RunOf(string id) => _runs.LastOrDefault(r => string.Equals(r.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The primary action for one instance (the library's continue card): cancel or quit that instance's own run, and
+    /// otherwise start it. Another instance's run is never touched.
+    /// </summary>
+    public Task PrimaryForAsync(string id)
+    {
+        if (RunOf(id) is { } run)
+        {
+            if (run.Game is null) CancelRun(run);
+            else if (!run.Exiting) ExitGame(run);
+            return Task.CompletedTask;
+        }
+        if (SelectedAccount is null)
+        {
+            Toasts.Show(L.T("home.status.account_required"), Avalonia.Controls.Notifications.NotificationType.Warning);
+            NavigateToAccounts?.Invoke();
+            return Task.CompletedTask;
+        }
+        return RunAsync(new LaunchRequest(id));
+    }
+
+    /// <summary>The label of <see cref="PrimaryForAsync"/> for that instance.</summary>
+    public string PrimaryLabelFor(string id) => L.T(RunOf(id) is { } run ? RunKey(run) : IdleKey(id));
 
     /// <summary>
     /// Ctrl+Enter（改版规格 7.1）：没在启动、没在运行时等于点主按钮；正在准备或运行时什么也不做（快捷键不拿来取消或退出游戏）。
@@ -1051,6 +1080,8 @@ public sealed partial class HomeViewModel : PageViewModel
         Progress = 100.0 * done / total;
         Status = L.F("home.status.completing_files", done, total);
     }
+
+    internal static bool CancelledForTest(object run) => ((GameRun)run).Cts.IsCancellationRequested;
 
     internal void RemoveRunForTest(object run)
     {

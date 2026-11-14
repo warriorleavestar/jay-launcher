@@ -82,6 +82,7 @@ public sealed partial class LibraryViewModel : PageViewModel
         service.LibraryChanged += () => Dispatcher.UIThread.Post(Refresh);
         service.ContentChanged += () => Dispatcher.UIThread.Post(Refresh);
         _activity.Runs.CollectionChanged += (_, _) => Dispatcher.UIThread.Post(Refresh);
+        home.RunStateChanged += UpdateContinueLabel;
         home.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(HomeViewModel.HasFailure) or nameof(HomeViewModel.HasCrash) or nameof(HomeViewModel.PrimaryLabel))
@@ -106,6 +107,13 @@ public sealed partial class LibraryViewModel : PageViewModel
     public partial LibraryCard? Continue { get; set; }
 
     public bool HasContinue => Continue is not null;
+
+    /// <summary>The continue card's button follows the card's own instance (start it, or stop its own run).</summary>
+    [ObservableProperty] public partial string ContinueLabel { get; set; } = "";
+
+    partial void OnContinueChanged(LibraryCard? value) => UpdateContinueLabel();
+
+    private void UpdateContinueLabel() => ContinueLabel = Continue is { } c ? _home.PrimaryLabelFor(c.Id) : "";
     public bool HasNeeds => Needs.Count > 0;
     /// <summary>Every instance in the library, unfiltered (command palette).</summary>
     public IReadOnlyList<LibraryCard> AllCards => _all;
@@ -303,8 +311,9 @@ public sealed partial class LibraryViewModel : PageViewModel
     [RelayCommand]
     private void PlayContinue()
     {
-        if (Continue is { } c && _service.CurrentInstance != c.Id) _service.SetCurrentInstance(c.Id);
-        if (_home.PrimaryCommand.CanExecute(null)) _home.PrimaryCommand.Execute(null);
+        if (Continue is not { } c) return;
+        if (_service.CurrentInstance != c.Id) _service.SetCurrentInstance(c.Id);
+        _ = _home.PrimaryForAsync(c.Id);
     }
 
     internal static string LoaderName(string? loader) => loader switch
