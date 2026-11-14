@@ -24,7 +24,10 @@ release's assets and offers the update only when:
 - at least 2 distinct trustees on the list signed it, each with **both** algorithms valid (one valid and
   one wrong is no vote; a key outside the list is no vote; a key signing twice is one vote);
 - the trustee list it names is the one built into this Jay, or reachable from it through
-  `trust-chain.json`, each step signed by enough of the list before it;
+  `trust-chain.json`, each step signed by enough of the list before it, with seqs that grow along the
+  chain. Once this Jay has followed a change, it remembers that change's seq (`trust-chain-seq.txt` in
+  the data folder, together with the hash of the built-in list) and refuses a release whose list was
+  retired by it;
 - its release seq is not lower than the highest this Jay has accepted (kept in `release-seq.txt` in the
   data folder), so an old signed release can't be passed off as new.
 
@@ -149,4 +152,5 @@ jay-server release trust-change --key jay-release.key --to new-trustees.txt --ne
 The review shows who stays, who leaves, who joins, and the new list hash; the trustee types its last 6
 characters. Once enough old trustees have signed, put the new keys in `JayTrust.ReleaseKeys`, and ship
 `trust-chain.json` with every later release so old installs can follow. A change's seq must not be
-lower than the last release's seq.
+lower than the last release's seq. Link seqs are only compared along the chain, never with the seq of a
+release, so installs that have not updated yet keep verifying every later release.

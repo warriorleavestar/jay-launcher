@@ -51,8 +51,10 @@ public static class ReleaseSignature
     /// <param name="highestSeq">The highest release seq this Jay has accepted before: an older one is refused (no rollback).</param>
     /// <param name="component">Null for a Jay release; a <see cref="ReleaseStatement.Components"/> name (for example
     /// <c>easytier</c>) for a component build. A signature for anything else is refused, so one can never pass as the other.</param>
+    /// <param name="chainSeq">The seq of the newest trustee change this Jay has followed from <paramref name="own"/> (0 when
+    /// none): a release signed by a list that change retired is refused (<see cref="ReleaseCheck.ChainSeq"/> gives the new value).</param>
     public static ReleaseCheck Verify(string manifestJson, ReadOnlySpan<byte> sums, string? chainJson, string? expectedTag,
-        TrustList? own = null, long highestSeq = 0, string? component = null)
+        TrustList? own = null, long highestSeq = 0, string? component = null, long chainSeq = 0)
     {
         own ??= TrustList.Jay;
         if (own.Keys.Count == 0) return new(ReleaseVerdict.NoTrustedKey, null, 0);
@@ -62,10 +64,12 @@ public static class ReleaseSignature
         if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(s.SumsHash), SHA256.HashData(sums)))
             return new(ReleaseVerdict.SumsMismatch, s.Tag, s.Seq);
         if (s.Seq < highestSeq) return new(ReleaseVerdict.Rollback, s.Tag, s.Seq);
-        if (TrustChain.Resolve(own, s.TrustHash, chainJson, highestSeq) is not { } list) return new(ReleaseVerdict.BrokenChain, s.Tag, s.Seq);
+        if (TrustChain.Walk(own, s.TrustHash, chainJson) is not { } reached || reached.Seq < chainSeq)
+            return new(ReleaseVerdict.BrokenChain, s.Tag, s.Seq);
+        var list = reached.List;
         if (list.Votes(s.Bytes(), manifest.Signatures) < list.Need) return new(ReleaseVerdict.NotEnoughSignatures, s.Tag, s.Seq);
         if (expectedTag is not null && (component is null ? NormalizeTag(expectedTag) : expectedTag) != s.Tag) return new(ReleaseVerdict.WrongTag, s.Tag, s.Seq);
-        return new(ReleaseVerdict.Valid, s.Tag, s.Seq);
+        return new(ReleaseVerdict.Valid, s.Tag, s.Seq) { ChainSeq = reached.Seq };
     }
 
     /// <summary>
@@ -302,14 +306,25 @@ public static class TrustChain
 
     /// <summary>
     /// The list named <paramref name="targetHash"/>, reached from <paramref name="own"/> through the chain. Null when the
-    /// chain is missing a link, a link isn't signed by enough of the list before it, or its seq goes backwards.
+    /// chain is missing a link, a link isn't signed by enough of the list before it, its seq goes backwards along the
+    /// chain, or the list reached was introduced before <paramref name="minChainSeq"/> (a change this Jay already
+    /// followed retired it).
     /// </summary>
-    public static TrustList? Resolve(TrustList own, string targetHash, string? chainJson, long highestSeq = 0)
+    public static TrustList? Resolve(TrustList own, string targetHash, string? chainJson, long minChainSeq = 0) =>
+        Walk(own, targetHash, chainJson) is { } reached && reached.Seq >= minChainSeq ? reached.List : null;
+
+    /// <summary>
+    /// Follows the chain from <paramref name="own"/> to the list named <paramref name="targetHash"/>. Returns that list and
+    /// the seq of the last change followed (0 when it is <paramref name="own"/> itself), or null when the chain doesn't get
+    /// there. Seqs only have to grow along the chain; they are not compared with release seqs, so a release made after a
+    /// change still verifies on every later check (rollback of releases is <see cref="ReleaseSignature.Verify"/>'s job).
+    /// </summary>
+    public static (TrustList List, long Seq)? Walk(TrustList own, string targetHash, string? chainJson)
     {
-        if (own.Hash == targetHash) return own;
+        if (own.Hash == targetHash) return (own, 0);
         if (chainJson is null || ParseEntries(chainJson) is not { } entries) return null;
         var current = own;
-        var lastSeq = highestSeq;
+        long lastSeq = 0, reached = 0;
         for (var step = 0; step < entries.Count && current.Hash != targetHash; step++)
         {
             var link = entries.FirstOrDefault(e => e.From == current.Hash);
@@ -317,9 +332,10 @@ public static class TrustChain
             var next = new TrustList(link.Keys, link.Need);
             if (current.Votes(ChangeBytes(link.From, next.Hash, link.Seq), link.Signatures) < current.Need) return null;
             current = next;
+            reached = link.Seq;
             lastSeq = link.Seq + 1;
         }
-        return current.Hash == targetHash ? current : null;
+        return current.Hash == targetHash ? (current, reached) : null;
     }
 
     /// <summary>Adds a signature to the change from <paramref name="from"/> to the given list, creating the entry if needed.</summary>
@@ -401,4 +417,7 @@ public enum ReleaseVerdict
 public sealed record ReleaseCheck(ReleaseVerdict Verdict, string? Tag, long Seq)
 {
     public bool IsValid => Verdict == ReleaseVerdict.Valid;
+
+    /// <summary>For a valid release: the seq of the last trustee change followed to reach its list (0 for the built-in list).</summary>
+    public long ChainSeq { get; init; }
 }
