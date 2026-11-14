@@ -26,6 +26,9 @@ public partial class MainWindow
 
     private DropViewModel? DropModel => (DataContext as MainViewModel)?.Drop;
 
+    /// <summary>The files of the drag the zones were built for.</summary>
+    private List<string> _dragFiles = [];
+
     private static List<string> FilesOf(DragEventArgs e) =>
         e.DataTransfer.TryGetFiles()?.Select(f => f.TryGetLocalPath()).OfType<string>().ToList() ?? [];
 
@@ -38,6 +41,14 @@ public partial class MainWindow
             e.DragEffects = DragDropEffects.None;
             return;
         }
+        // Enter also fires when the pointer crosses between child controls: the same drag keeps its zones (no
+        // rebuild, no disk reads) and only updates the highlight, like DragOver.
+        if (drop.IsActive && files.SequenceEqual(_dragFiles))
+        {
+            OnDragOver(sender, e);
+            return;
+        }
+        _dragFiles = files;
         drop.Begin(files);
         e.DragEffects = DragDropEffects.Copy;
     }

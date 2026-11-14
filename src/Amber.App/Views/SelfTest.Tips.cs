@@ -100,9 +100,21 @@ internal sealed partial class SelfTest
             Page<HelpCenterViewModel>().ResetTipsCommand.Execute(null);
             Check("Tips: \"Show all tips again\" forgets seen and muted tips", rules.State.Seen.Count == 0 && rules.State.MutedKinds.Count == 0 && !rules.MutedThisRun);
             PressKey(window, Key.Escape);
+
+            // 6. The popped-out game log is a long-lived owned window, not a dialog: tips still show while it is open.
+            main.Shell.Navigate("library");
+            await Task.Delay(400);
+            main.PopOutLog();
+            await Task.Delay(400);
+            TutorialService.Request(Tips.FirstCrash);
+            await Task.Delay(1500);
+            Check("Tips: a tip still shows while the game log is popped out", Dispatcher.UIThread.Invoke(() => window.PoppedOutLog is { IsVisible: true })
+                && rules.Current == Tips.FirstCrash, rules.Current?.Id ?? "none");
+            if (rules.Current is not null) window.CloseTip(false);
         }
         finally
         {
+            Dispatcher.UIThread.Invoke(() => window.PoppedOutLog?.Close());
             if (rules.Current is not null) window.CloseTip(false);
             TutorialService.ResetAll();
             window.Width = 1440;

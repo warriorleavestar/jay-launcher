@@ -215,15 +215,34 @@ public sealed partial class InstanceViewModel
 
     private void RebuildLogRows()
     {
-        // New rows are new objects: carry the selected row (F8 position, highlight) over by its event index.
-        var selected = SelectedLogRow?.Event.Index;
-        LogRows.Clear();
-        foreach (var e in _allEvents.Where(Shows)) LogRows.Add(new LogRow(e));
-        if (selected is { } index)
+        // A live run regroups its whole log once a second. Rows whose event didn't change are kept as they are (an
+        // opened stack stays open, the list isn't redone); a changed event (more stack lines, a higher ×N) gets a new
+        // row that keeps the old one's expanded state. Rows are matched by their first line, which, unlike the event
+        // index, doesn't shift once the live log is full and old lines roll out.
+        var old = new Dictionary<StoredLogLine, LogRow>();
+        foreach (var r in LogRows) old.TryAdd(r.Event.Line, r);
+        var selected = SelectedLogRow;
+        LogRow? selectedAgain = null;
+        var rows = new List<LogRow>();
+        var kept = new HashSet<LogRow>(ReferenceEqualityComparer.Instance);
+        foreach (var e in _allEvents.Where(Shows))
         {
-            var again = LogRows.FirstOrDefault(r => r.Event.Index == index);
-            if (again is not null) again.IsHighlighted = true;
-            SelectedLogRow = again;
+            old.Remove(e.Line, out var before);
+            LogRow row;
+            if (before is not null && before.Event.Repeats == e.Repeats && before.Event.Stack.SequenceEqual(e.Stack))
+            {
+                row = before;
+                kept.Add(row);
+            }
+            else row = new LogRow(e) { Expanded = before?.Expanded == true };
+            if (before is not null && ReferenceEquals(before, selected)) selectedAgain = row;
+            rows.Add(row);
+        }
+        SyncLogRows(rows, kept);
+        if (selected is not null)
+        {
+            if (selectedAgain is not null) selectedAgain.IsHighlighted = true;
+            SelectedLogRow = selectedAgain;
         }
         LogErrorCount = _allEvents.Where(e => e.IsError).Sum(e => e.Repeats);
         LogWarningCount = _allEvents.Where(e => e.IsWarning).Sum(e => e.Repeats);
@@ -232,6 +251,34 @@ public sealed partial class InstanceViewModel
         OnPropertyChanged(nameof(LogEmpty));
         OnPropertyChanged(nameof(LogEmptyText));
         if (LogFollow && LogRows.Count > 0) LogJumpRequested?.Invoke(LogRows[^1]);
+    }
+
+    /// <summary>
+    /// Makes <see cref="LogRows"/> equal to <paramref name="rows"/> with the fewest changes: rows that left are removed and
+    /// new ones inserted where they belong, so the list only redraws what changed.
+    /// </summary>
+    private void SyncLogRows(List<LogRow> rows, HashSet<LogRow> kept)
+    {
+        if (kept.Count == 0)
+        {
+            LogRows.Clear();
+            foreach (var r in rows) LogRows.Add(r);
+            return;
+        }
+        for (var i = LogRows.Count - 1; i >= 0; i--)
+            if (!kept.Contains(LogRows[i])) LogRows.RemoveAt(i);
+        for (var k = 0; k < rows.Count; k++)
+        {
+            if (k < LogRows.Count && ReferenceEquals(LogRows[k], rows[k])) continue;
+            if (kept.Contains(rows[k]))
+            {
+                // The kept rows came back in another order (shouldn't happen for a log): start over.
+                LogRows.Clear();
+                foreach (var r in rows) LogRows.Add(r);
+                return;
+            }
+            LogRows.Insert(k, rows[k]);
+        }
     }
 
     /// <summary>While a live run is shown, new lines come in once a second.</summary>

@@ -25,6 +25,7 @@ public static class SystemMotion
     {
         get
         {
+            SystemQueries++;
             if (_read) return _system;
             _read = true;
             try { _system = Read(); } catch { _system = null; }
@@ -35,15 +36,27 @@ public static class SystemMotion
     /// <summary>启动时调用：先按“不减少”或用户的明确选择套上，系统设置在后台读完再补一次（读系统可能要起一个进程，不卡启动）。</summary>
     public static void Start(string? mode)
     {
+        _started = true;
         Apply(MotionPreference.Normalize(mode) == MotionPreference.System ? MotionPreference.Off : mode);
         if (MotionPreference.Normalize(mode) != MotionPreference.System) return;
         _ = Task.Run(() => SystemReduces).ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(() => Apply(mode)), TaskScheduler.Default);
     }
 
     private static string? _mode;
+    private static bool _started;
 
-    /// <summary>The theme changed: its animation lengths apply unless motion is reduced (reduced motion always wins).</summary>
-    public static void Reapply() => Apply(_mode);
+    /// <summary>Test hook: how many times <see cref="SystemReduces"/> was asked for on this thread.</summary>
+    [ThreadStatic] internal static int SystemQueries;
+
+    /// <summary>
+    /// The theme changed: its animation lengths apply unless motion is reduced (reduced motion always wins).
+    /// Before <see cref="Start"/> (a theme pack applied at startup) this does nothing: Start applies the themed lengths
+    /// itself, and the user's choice isn't known yet, so reading the system setting here would block the UI thread.
+    /// </summary>
+    public static void Reapply()
+    {
+        if (_started) Apply(_mode);
+    }
 
     public static void Apply(string? mode)
     {
@@ -78,8 +91,15 @@ public static class SystemMotion
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi);
         if (p is null) return null;
-        var output = p.StandardOutput.ReadToEnd();
-        return p.WaitForExit(2000) && p.ExitCode == 0 ? output : null;
+        // Read in the background so the timeout also bounds a helper that never exits; a hung one is killed.
+        var output = p.StandardOutput.ReadToEndAsync();
+        _ = p.StandardError.ReadToEndAsync();
+        if (!p.WaitForExit(2000))
+        {
+            try { p.Kill(); } catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            return null;
+        }
+        return output.Wait(1000) && p.ExitCode == 0 ? output.Result : null;
     }
 
     [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
