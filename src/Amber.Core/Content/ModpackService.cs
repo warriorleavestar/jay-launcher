@@ -295,7 +295,7 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         var mods = all.Where(f => f.Relative.StartsWith("mods/", StringComparison.Ordinal)).ToList();
 
         var fingerprints = new Dictionary<uint, string>();
-        foreach (var f in mods) fingerprints[CurseForgeProvider.Fingerprint(await File.ReadAllBytesAsync(f.FullPath, ct))] = f.Relative;
+        foreach (var f in mods) fingerprints[await CurseForgeProvider.FingerprintAsync(f.FullPath, ct)] = f.Relative;
         Dictionary<uint, ContentFile> matches;
         try
         {
