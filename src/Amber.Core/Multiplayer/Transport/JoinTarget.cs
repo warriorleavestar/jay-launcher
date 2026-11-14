@@ -134,47 +134,10 @@ public static partial class JoinTarget
     }
 
     /// <summary>
-    /// The ASCII form the game writes for a host name (Java's IDN.toASCII, IDNA2003), or null when it isn't a valid name.
-    /// Labels are split at the dot and its ideographic and full-width forms; ASCII labels and a trailing root dot are kept
-    /// as they are. IdnMapping follows UTS #46 non-transitional processing, which keeps ß, ς, ZWJ and ZWNJ where IDNA2003
-    /// maps them (to ss, σ, nothing, nothing), and doesn't drop every character Nameprep maps to nothing, so "straße"
-    /// would otherwise become a different domain than the game's "strasse": map those first.
+    /// The ASCII form the game writes for a host name (Java's IDN.toASCII, IDNA2003 with Unicode 3.2 data), or null
+    /// where Java would refuse the name. See <see cref="Idna2003"/>.
     /// </summary>
-    internal static string? ToAsciiLikeTheGame(string host)
-    {
-        var labels = host.Split(['.', '\u3002', '\uFF0E', '\uFF61']);
-        var idn = new System.Globalization.IdnMapping();
-        for (var i = 0; i < labels.Length; i++)
-        {
-            // Only the root label (after a trailing dot) may be empty.
-            if (labels[i].Length == 0 && i < labels.Length - 1) return null;
-            if (System.Text.Ascii.IsValid(labels[i])) continue;
-            var label = MapLikeNameprep(labels[i]);
-            try { labels[i] = idn.GetAscii(label); }
-            catch (ArgumentException) { return null; }
-        }
-        return string.Join('.', labels);
-    }
-
-    /// <summary>
-    /// The IDNA2003 mappings IdnMapping doesn't do the same way: ß to ss, final sigma to sigma, and the Nameprep
-    /// "commonly mapped to nothing" characters (RFC 3454 table B.1, which include ZWJ, ZWNJ and the soft hyphens) dropped.
-    /// </summary>
-    private static string MapLikeNameprep(string label)
-    {
-        var mapped = new System.Text.StringBuilder(label.Length);
-        foreach (var c in label.ToLowerInvariant())
-        {
-            if (IsMappedToNothing(c)) continue;
-            if (c == '\u00DF') mapped.Append("ss");
-            else mapped.Append(c == '\u03C2' ? '\u03C3' : c);
-        }
-        return mapped.ToString();
-    }
-
-    private static bool IsMappedToNothing(char c) =>
-        c is '\u00AD' or '\u034F' or '\u1806' or (>= '\u180B' and <= '\u180D') or (>= '\u200B' and <= '\u200D')
-            or '\u2060' or (>= '\uFE00' and <= '\uFE0F') or '\uFEFF';
+    internal static string? ToAsciiLikeTheGame(string host) => Idna2003.ToAscii(host);
 
     private static string IPv6Only => L.T("core.mp.join.ipv6_only");
 
