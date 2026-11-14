@@ -208,6 +208,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
         if (_sealedKeys is null) Guard = null;
         Bans = b.BanListOn ? new BanList(Path.Combine(b.DataDir, "bans.json"), b.Clock) : null;
         Stats = new DirectoryStats();
+        IAccountStore? accountStore = null;
         if (b.Login is { } login) Login = login;
         else if (b.Accounts is { } accounts)
         {
@@ -220,7 +221,30 @@ public sealed class JayNetworkServer : IAsyncDisposable
                 Factors = [new TotpFactor(store), .. b.Factors],
                 RequireSecondFactor = accounts.RequireSecondFactor,
             };
+            accountStore = store;
         }
+        MigrateAccountBans(accountStore);
+    }
+
+    /// <summary>
+    /// Ties account bans saved by older versions to the exact account they name, and tells the admin about the ones that
+    /// can't be tied to one account (they keep matching the name in any case; <c>node bans</c> marks them "anyCase").
+    /// </summary>
+    private void MigrateAccountBans(IAccountStore? store)
+    {
+        if (Bans is not { } bans) return;
+        if (store?.AccountNames() is { } names)
+        {
+            var result = bans.MigrateAccountBans(names);
+            if (result.Migrated > 0) _b.Log($"Ban list: {result.Migrated} account ban(s) from an older version now name the exact account");
+            foreach (var (ban, count) in result.Unresolved)
+                _b.Log($"Ban list: please review the account ban \"{ban.Value}\": "
+                    + (count == 0 ? "no account has this name" : $"{count} accounts have this name in different case")
+                    + "; it keeps matching the name in any case (\"anyCase\" in node bans). Ban the exact account name and unban this entry.");
+        }
+        else if (bans.List().Count(b => b.AnyCase) is > 0 and var left)
+            _b.Log($"Ban list: {left} account ban(s) from an older version keep matching names in any case because the account store "
+                + "can't list its accounts (\"anyCase\" in node bans). Please review them.");
     }
 
     private DateTimeOffset Now => _b.Clock?.Invoke() ?? DateTimeOffset.UtcNow;

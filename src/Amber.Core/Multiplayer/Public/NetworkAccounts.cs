@@ -102,6 +102,12 @@ public interface IAccountStore
     void Succeeded(string name);
     /// <summary>这个账号的 TOTP 密钥（没开两步验证是 null）。</summary>
     byte[]? TotpSecret(string name);
+
+    /// <summary>
+    /// Every account name, exactly as stored, or null when the store can't list them. The node's ban list uses it once at
+    /// start-up to tie account bans saved by older versions to the account they name.
+    /// </summary>
+    IReadOnlyCollection<string>? AccountNames() => null;
 }
 
 public sealed class AccountStore : IAccountStore
@@ -157,6 +163,8 @@ public sealed class AccountStore : IAccountStore
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or JsonException
             or FormatException or InvalidOperationException) { }
     }
+
+    public IReadOnlyCollection<string> AccountNames() => [.. List().Select(a => a.Name)];
 
     public IReadOnlyList<(string Name, bool Disabled)> List()
     {

@@ -219,10 +219,16 @@ public sealed class AdminApi : IAsyncDisposable
                     return (200, new JsonObject
                     {
                         ["ok"] = true,
-                        ["bans"] = new JsonArray([.. (_server.Bans?.List() ?? []).Select(b => (JsonNode)new JsonObject
+                        ["bans"] = new JsonArray([.. (_server.Bans?.List() ?? []).Select(b =>
                         {
-                            ["kind"] = b.Kind, ["value"] = b.Value, ["reason"] = b.Reason, ["at"] = b.At.ToUnixTimeSeconds(),
-                            ["until"] = b.Until?.ToUnixTimeSeconds(),
+                            var ban = new JsonObject
+                            {
+                                ["kind"] = b.Kind, ["value"] = b.Value, ["reason"] = b.Reason, ["at"] = b.At.ToUnixTimeSeconds(),
+                                ["until"] = b.Until?.ToUnixTimeSeconds(),
+                            };
+                            // An account ban from an older version that still matches the name in any case: for the admin to review.
+                            if (b.AnyCase) ban["anyCase"] = true;
+                            return (JsonNode)ban;
                         })]),
                     });
                 case ("POST", "/ban"):

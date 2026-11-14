@@ -259,9 +259,11 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     }
 
     /// <summary>第三方的账号库：比如接自己的论坛账号。</summary>
-    private sealed class ForumAccounts : IAccountStore
+    /// <param name="names">The account names it lists; none = it can't list accounts.</param>
+    private sealed class ForumAccounts(params string[] names) : IAccountStore
     {
         public int Failures;
+        public IReadOnlyCollection<string>? AccountNames() => names.Length == 0 ? null : names;
         public LoginResult Check(string name, string password, DateTimeOffset now) =>
             name == "bob" && password == "forum-password" ? LoginResult.Ok : LoginResult.Wrong;
         public void RecordFailure(string name, DateTimeOffset now) => Failures++;
@@ -650,6 +652,132 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         Assert.True(reloaded.IsAccountBanned("Bob"));
         Assert.False(reloaded.IsAccountBanned("bob"));
         Assert.True(reloaded.IsBanned(listing));
+    }
+
+    /// <summary>Writes a ban list the way versions before account bans matched the exact name did.</summary>
+    private void WriteOldBans(string path, params string[] accounts)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, new JsonObject
+        {
+            ["v"] = 1,
+            ["bans"] = new JsonArray([.. accounts.Select(a => (JsonNode)new JsonObject
+            {
+                ["kind"] = "account", ["value"] = a, ["reason"] = "old", ["at"] = _now.ToUnixTimeSeconds(), ["until"] = null,
+            })]),
+        }.ToJsonString());
+    }
+
+    private static int FileVersion(string path) => JsonNode.Parse(File.ReadAllText(path))!["v"]!.GetValue<int>();
+
+    private string LogInError(JayNetworkServer server, string user)
+    {
+        var login = NetworkLogin.Parse(server.LoginSection!)!;
+        return server.Directory!.Handle(NetworkLoginClient.Request(X25519KeyPair.Generate(), login, user, "forum-password", _now))["error"]?.GetValue<string>() ?? "";
+    }
+
+    [Fact]
+    public async Task OlderAccountBansStillApplyBeforeAndAfterMigration()
+    {
+        // The store can't list accounts, so nothing is migrated at start-up.
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts()));
+        var (token, host) = LogIn(server);
+        // An older node writes the shared list with the name in another case.
+        var path = Path.Combine(_dir, "bans.json");
+        WriteOldBans(path, "Bob");
+        _now += TimeSpan.FromSeconds(6);
+        Assert.True(Assert.Single(server.Bans!.List()).AnyCase);
+        Assert.True(server.Bans.IsAccountBanned("bob"));
+        Assert.Equal("disabled", LogInError(server, "bob"));
+        Assert.Equal("banned", server.Directory!.Handle(AnnounceAs(new RoomSigner(), host, token))["error"]!.GetValue<string>());
+
+        var result = server.Bans.MigrateAccountBans(["bob", "alice"]);
+        Assert.Equal(1, result.Migrated);
+        Assert.Empty(result.Unresolved);
+        var ban = Assert.Single(server.Bans.List());
+        Assert.Equal(("bob", false, "old"), (ban.Value, ban.AnyCase, ban.Reason));
+        Assert.Equal("disabled", LogInError(server, "bob"));
+        Assert.Equal("banned", server.Directory.Handle(AnnounceAs(new RoomSigner(), host, token))["error"]!.GetValue<string>());
+        Assert.False(server.Bans.IsAccountBanned("BOB"));
+        Assert.Equal(BanList.FormatVersion, FileVersion(path));
+    }
+
+    [Fact]
+    public async Task NodeTiesOlderAccountBansToTheAccountAtStartUp()
+    {
+        var path = Path.Combine(_dir, "bans.json");
+        WriteOldBans(path, "Bob");
+        var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts("bob", "alice")).UseLog(log.Enqueue));
+        Assert.Equal("disabled", LogInError(server, "bob"));
+        Assert.Contains(log, l => l.Contains("1 account ban(s)"));
+        Assert.DoesNotContain(log, l => l.Contains("review"));
+
+        // The migrated file reads back with the exact name.
+        Assert.Equal(BanList.FormatVersion, FileVersion(path));
+        var reloaded = new BanList(path, () => _now);
+        var ban = Assert.Single(reloaded.List());
+        Assert.Equal(("bob", false), (ban.Value, ban.AnyCase));
+        Assert.True(reloaded.IsAccountBanned("bob"));
+        Assert.False(reloaded.IsAccountBanned("Bob"));
+        Assert.Equal(0, reloaded.MigrateAccountBans(["bob"]).Migrated);
+    }
+
+    [Fact]
+    public async Task OlderAccountBansThatNameNoSingleAccountKeepMatchingAnyCase()
+    {
+        var path = Path.Combine(_dir, "bans.json");
+        WriteOldBans(path, "Bob", "Carol");
+        var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        // "Bob" and "bob" are two accounts; nobody is called Carol in any case.
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts("Bob", "bob")).UseLog(log.Enqueue), admin: true);
+        Assert.All(server.Bans!.List(), b => Assert.True(b.AnyCase));
+        Assert.Equal(2, server.Bans.List().Count);
+        Assert.True(server.Bans.IsAccountBanned("Bob"));
+        Assert.True(server.Bans.IsAccountBanned("bob"));
+        Assert.True(server.Bans.IsAccountBanned("CAROL"));
+        Assert.Equal("disabled", LogInError(server, "bob"));
+        Assert.Contains(log, l => l.Contains("review") && l.Contains("\"Bob\"") && l.Contains("2 accounts"));
+        Assert.Contains(log, l => l.Contains("review") && l.Contains("\"Carol\"") && l.Contains("no account"));
+
+        // The admin sees them marked in the list.
+        using var http = new HttpClient();
+        var output = new StringWriter();
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "bans", "--admin-port", server.AdminPort!.Value.ToString()]), output, http));
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(output.ToString(), "\"anyCase\": ?true"));
+
+        // Saved in the new format, they keep the old rule.
+        Assert.Equal(BanList.FormatVersion, FileVersion(path));
+        var reloaded = new BanList(path, () => _now);
+        Assert.True(reloaded.IsAccountBanned("bob"));
+        Assert.True(reloaded.IsAccountBanned("carol"));
+        Assert.Equal(2, reloaded.MigrateAccountBans(["Bob", "bob"]).Unresolved.Count);
+        // Unbanning works by the name in any case, as before.
+        Assert.True(reloaded.Remove("account", "carol"));
+        Assert.False(reloaded.IsAccountBanned("Carol"));
+    }
+
+    [Fact]
+    public void NewAccountBansMatchExactlyNextToOlderOnes()
+    {
+        var path = Path.Combine(_dir, "mixed-bans.json");
+        WriteOldBans(path, "Bob");
+        var bans = new BanList(path, () => _now);
+        bans.Add("account", "Carol", null, _now);
+        Assert.True(bans.IsAccountBanned("Carol"));
+        Assert.False(bans.IsAccountBanned("carol"));
+        Assert.True(bans.IsAccountBanned("bob"));
+        // Saving writes the new format, and each ban keeps its rule when read back.
+        Assert.Equal(BanList.FormatVersion, FileVersion(path));
+        var reloaded = new BanList(path, () => _now);
+        Assert.True(reloaded.IsAccountBanned("Carol"));
+        Assert.False(reloaded.IsAccountBanned("carol"));
+        Assert.True(reloaded.IsAccountBanned("bob"));
+
+        // Migrating onto an exact ban of the same account keeps whichever lasts longer.
+        reloaded.Add("account", "bob", null, _now, TimeSpan.FromHours(1));
+        Assert.Equal(1, reloaded.MigrateAccountBans(["bob", "Carol"]).Migrated);
+        Assert.Null(Assert.Single(reloaded.List(), b => b.Value == "bob").Until);
     }
 
     [Fact]
