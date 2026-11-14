@@ -68,7 +68,7 @@ public sealed partial class MultiplayerViewModel
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsDirectHost))]
+    [NotifyPropertyChangedFor(nameof(IsDirectHost), nameof(ShowCreateInvite))]
     public partial bool IsDirect { get; set; }
 
     public bool IsDirectHost => IsDirect && IsHosting;
@@ -139,7 +139,7 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>
     /// 房主：创建直连房间。和经节点的房间一样是邀请房间：随机的房间凭据、成员表、大厅和敲门；
-    /// 大厅密钥 L 在整个房间期间不换（直连桥的 HMAC 钥匙由它派生）。马上发第一张邀请（一次、要房主批准），生成直连邀请码。
+    /// 大厅密钥 L 在整个房间期间不换（直连桥的 HMAC 钥匙由它派生）。Invites are sealed codes only (see CreateSealedOfferAsync).
     /// </summary>
     [RelayCommand]
     private async Task CreateDirectRoomAsync()
@@ -188,7 +188,8 @@ public sealed partial class MultiplayerViewModel
             // approved guests, inside the encrypted knock reply, and never into a readable code. The room isn't announced.
             StartHostLobby(credentials, members, book, direct.LobbyUdpPort, direct: direct);
             DirectHint = L.F("multiplayer.direct.host_hint", DirectText.Nat(addresses.Nat));
-            if (await IssueInviteAsync(1, InviteOffer.Lifetime(InviteLife.TenMinutes), false) is null) return;
+            // No plain invite: its knock would go through a relay, and this room's lobby reaches none. Friends come in
+            // with a sealed code (CreateSealedOfferAsync), which carries its own one-use invite.
             SetStatus(HasGameRelay ? StatusMessage.Success("multiplayer.relay.created") : StatusMessage.Success("multiplayer.direct.created"));
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or System.Net.Sockets.SocketException or InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
