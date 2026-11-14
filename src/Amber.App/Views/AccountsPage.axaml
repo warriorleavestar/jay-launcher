@@ -22,6 +22,10 @@
     <Style Selector="Border#AddCard Button /template/ ContentPresenter">
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
+    <!-- The Jay account card can be narrow too (expanded sidebar beside a small content area): its buttons wrap the same way. -->
+    <Style Selector="Border#JayCard Button /template/ ContentPresenter">
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
     <ContainerQuery Name="AccountsPageRoot" Query="max-width:640">
       <Style Selector="Border#AddCard">
         <Setter Property="Width" Value="240" />
@@ -159,7 +163,10 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <Expander Header="{l:T accounts.jay.passphrase_title}" HorizontalAlignment="Stretch">
+            <Expander HorizontalAlignment="Stretch">
+              <Expander.Header>
+                <TextBlock Text="{l:T accounts.jay.passphrase_title}" TextWrapping="Wrap" />
+              </Expander.Header>
               <StackPanel Spacing="8">
                 <TextBlock Classes="hint" Text="{l:T accounts.jay.passphrase_hint}" TextWrapping="Wrap" />
                 <TextBox Text="{Binding NewPassphrase}" PasswordChar="●" PlaceholderText="{l:T accounts.jay.passphrase_placeholder}" />
@@ -197,7 +204,10 @@
             <TextBlock FontWeight="SemiBold" FontSize="15" Text="{l:T accounts.jay.restore_title}" />
             <TextBox x:Name="RestoreWordsBox" Text="{Binding RestoreText}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72"
                      PlaceholderText="{l:T accounts.jay.restore_placeholder}" />
-            <Expander Header="{l:T accounts.jay.passphrase_title}" HorizontalAlignment="Stretch">
+            <Expander HorizontalAlignment="Stretch">
+              <Expander.Header>
+                <TextBlock Text="{l:T accounts.jay.passphrase_title}" TextWrapping="Wrap" />
+              </Expander.Header>
               <TextBox Text="{Binding RestorePassphrase}" PasswordChar="●" PlaceholderText="{l:T accounts.jay.passphrase_placeholder}" />
             </Expander>
             <WrapPanel ItemSpacing="8" LineSpacing="8">
