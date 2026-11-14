@@ -94,6 +94,51 @@ public sealed class ModSyncChannelTests : IDisposable
         Assert.Null(await guest.RequestModFileAsync(Fp(_host), listedSha).WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
+    private string ListedMod(PrivateMessenger host)
+    {
+        Directory.CreateDirectory(_dir);
+        var listed = Path.Combine(_dir, "private-mod.jar");
+        File.WriteAllBytes(listed, RandomNumberGenerator.GetBytes(10_000));
+        var sha = Convert.ToHexStringLower(SHA1.HashData(File.ReadAllBytes(listed)));
+        host.ModListProvider = () => new ModManifest([new ModManifestEntry("private-mod.jar", sha, 10_000)]);
+        host.ModFileProvider = s => s == sha ? listed : null;
+        return sha;
+    }
+
+    [Fact]
+    public async Task FileTheHostMayNotSendIsAnsweredAtOnce()
+    {
+        var (host, guest) = Pair();
+        await using var _h = host;
+        await using var _g = guest;
+        var sha = ListedMod(host);
+        host.AllowsFile = _ => false;
+        Assert.Null(await guest.RequestModFileAsync(Fp(_host), sha).WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task FileTheJoinerMayNotTakeIsAnsweredAtOnce()
+    {
+        var (host, guest) = Pair();
+        await using var _h = host;
+        await using var _g = guest;
+        var sha = ListedMod(host);
+        guest.AllowsFile = _ => false;
+        Assert.Null(await guest.RequestModFileAsync(Fp(_host), sha).WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task FileWithoutDiskSpaceIsAnsweredAtOnce()
+    {
+        var (host, guest) = Pair();
+        await using var _h = host;
+        await using var _g = guest;
+        var sha = ListedMod(host);
+        guest.FreeSpaceOf = _ => 0;
+        Assert.Null(await guest.RequestModFileAsync(Fp(_host), sha).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.False(Directory.Exists(Path.Combine(_dir, "guest")) && Directory.EnumerateFiles(Path.Combine(_dir, "guest")).Any());
+    }
+
     [Fact]
     public void DamagedListIsRejected()
     {

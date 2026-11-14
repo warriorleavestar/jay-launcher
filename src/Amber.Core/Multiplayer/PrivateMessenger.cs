@@ -364,7 +364,9 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         var have = File.Exists(temp) ? new FileInfo(temp).Length : 0;
         if (have > job.Offer.Size) have = 0;
         var from = have / ChunkSize;
-        if (FreeSpaceOf(Downloads) is { } free && free < job.Offer.Size - from * ChunkSize + DiskReserve)
+        // Written without adding DiskReserve to the size: a peer-declared size near long.MaxValue must not wrap around.
+        var need = job.Offer.Size - from * ChunkSize;
+        if (FreeSpaceOf(Downloads) is { } free && (free < DiskReserve || need > free - DiskReserve))
         {
             _incoming.TryRemove(id, out _);
             await SendAsync(job.Offer.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
@@ -460,17 +462,35 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                     var size = body["size"]?.GetValue<long>() ?? -1;
                     var sha = body["sha"]?.GetValue<string>();
                     var name = SafeName(body["name"]?.GetValue<string>() ?? "");
-                    if (size < 0 || sha is not { Length: 64 } || _incoming.Count >= MaxIncoming) return;
-                    if (!AllowsFile(size))
+                    var wanted = WantedMod(frame.FromFingerprint, body["mod"]?.GetValue<string>(), size);
+                    if (size < 0 || sha is not { Length: 64 })
                     {
+                        RefuseMod(frame.FromFingerprint, wanted);
+                        return;
+                    }
+                    if (_incoming.Count >= MaxIncoming && wanted is null) return;
+                    if (_incoming.Count >= MaxIncoming || !AllowsFile(size))
+                    {
+                        // A mod file we asked for is answered too, so the sync doesn't wait out its timeout.
+                        RefuseMod(frame.FromFingerprint, wanted);
                         await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
                         return;
                     }
                     var offer = new FileOffer(id, frame.FromFingerprint, frame.FromName, name, size);
-                    var wanted = WantedMod(frame.FromFingerprint, body["mod"]?.GetValue<string>(), size);
-                    _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey, ModSha1 = wanted, LastActivity = Clock() };
+                    var incoming = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey, ModSha1 = wanted, LastActivity = Clock() };
+                    _incoming[id] = incoming;
                     // A mod file we asked for during a sync: take it without a card. Anything else asks the user as before.
-                    if (wanted is not null) await AcceptAsync(id);
+                    if (wanted is not null)
+                    {
+                        try { await AcceptAsync(id); }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                        {
+                            // No space, or the download folder can't be written: give the file up and let the sync move on.
+                            if (_incoming.TryRemove(new(id, incoming)))
+                                await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
+                            CompleteMod(incoming, null);
+                        }
+                    }
                     else FileOffered?.Invoke(offer);
                     break;
                 case "mods?" or "mods" or "modsoff" or "modfile?" or "modfileno":
