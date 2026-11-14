@@ -125,6 +125,61 @@ public sealed class ContainedFilesTests : IDisposable
     }
 
     [Fact]
+    public void AConfigFolderSwappedForALinkMeanwhileIsNeverWrittenThrough()
+    {
+        // The game swaps the folder for a link as fast as it can while Jay writes: a held level cannot be swapped, and
+        // a link put there before Jay holds it is refused.
+        var sentinel = Sentinel();
+        var before = File.ReadAllBytes(sentinel);
+        var outsideCfg = Path.Combine(_outside, "forge.cfg");
+        File.Copy(sentinel, outsideCfg);
+        var real = Directory.CreateDirectory(Path.Combine(_work, "config")).FullName;
+        var aside = real + "-real";
+        using var stop = new CancellationTokenSource();
+        var swaps = 0;
+        var swapper = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                try
+                {
+                    if (Directory.Exists(aside))
+                    {
+                        if (Directory.Exists(real)) Directory.Delete(real, true);
+                        Directory.Move(aside, real);
+                    }
+                    Directory.Move(real, aside);
+                    FolderLink(real, _outside);
+                    Directory.Delete(real);
+                    Directory.Move(aside, real);
+                    swaps++;
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { }
+            }
+        });
+        try
+        {
+            var until = DateTime.UtcNow.AddSeconds(2);
+            while (DateTime.UtcNow < until)
+            {
+                try { BakePlatform.DisableLegacyForgeUpdateCheck(_work); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                // Room for the game: Jay holding the folder keeps it from being swapped, which would prove nothing.
+                Thread.Sleep(1);
+            }
+        }
+        finally
+        {
+            stop.Cancel();
+            swapper.Wait(TimeSpan.FromSeconds(10));
+        }
+        Assert.True(swaps > 0);
+        Assert.Equal(before, File.ReadAllBytes(sentinel));
+        Assert.Equal(before, File.ReadAllBytes(outsideCfg));
+        Assert.Equal(new[] { sentinel, outsideCfg }.Order(), Directory.GetFiles(_outside).Order());
+    }
+
+    [Fact]
     public void FoldersAreCreatedLevelByLevelAndALinkStopsThem()
     {
         ContainedFiles.CreateDirectory(_work, [".amber-ul", "legacy-1.12.2", "abc"]);

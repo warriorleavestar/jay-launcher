@@ -136,6 +136,10 @@ public static partial class ContainedFiles
     private static partial class Windows
     {
         private const uint FileReadAttributes = 0x80, GenericRead = 0x80000000, GenericWrite = 0x40000000;
+
+        // A handle with only attribute access takes no part in sharing checks, so its share mode would not keep the
+        // folder from being renamed. Listing access does.
+        private const uint ListDirectory = 0x1, HoldFolder = FileReadAttributes | ListDirectory;
         private const uint ShareRead = 1, ShareWrite = 2;
         private const uint OpenExisting = 3, OpenAlways = 4;
         private const uint BackupSemantics = 0x02000000, OpenReparsePoint = 0x00200000;
@@ -179,20 +183,20 @@ public static partial class ContainedFiles
         public static SafeHandle OpenRoot(string path)
         {
             // The root itself is trusted (it may be a junction the player set up); only what is below it is checked.
-            var handle = CreateFile(LongPath(path), FileReadAttributes, ShareRead | ShareWrite, 0, OpenExisting, BackupSemantics, 0);
+            var handle = CreateFile(LongPath(path), HoldFolder, ShareRead | ShareWrite, 0, OpenExisting, BackupSemantics, 0);
             if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastPInvokeError(), path);
             return handle;
         }
 
         public static SafeHandle OpenLevel(string path, bool create)
         {
-            var handle = Open(path, FileReadAttributes, OpenExisting, BackupSemantics);
+            var handle = Open(path, HoldFolder, OpenExisting, BackupSemantics);
             if (handle.IsInvalid && create && Marshal.GetLastPInvokeError() is ErrorFileNotFound or ErrorPathNotFound)
             {
                 handle.Dispose();
                 // The level above is held, so this creates the folder in the right place.
                 Directory.CreateDirectory(path);
-                handle = Open(path, FileReadAttributes, OpenExisting, BackupSemantics);
+                handle = Open(path, HoldFolder, OpenExisting, BackupSemantics);
             }
             if (handle.IsInvalid)
             {
