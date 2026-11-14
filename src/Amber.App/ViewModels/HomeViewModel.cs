@@ -804,7 +804,13 @@ public sealed partial class HomeViewModel : PageViewModel
             lock (run.BakeProblems) rebaked = run.BakeProblems.Any(p => p.AsksForWarm);
             if (run.Baked && rebaked) _service.WarmBakeInBackground(ctx, id);
             if (!string.IsNullOrWhiteSpace(settings.PostExitCommand))
+            {
+                // The game has exited, so its run ends now: the start buttons, the multi-launch question and Ctrl+Shift+Q
+                // stop treating it as running while the command works. The work folder stays marked in use until the
+                // command is done, and the command's output still goes to this run's log.
+                EndRun(run, gameStarted, crashed);
                 await RunUserCommandAsync(settings.PostExitCommand, id, workDir, run.Log, CancellationToken.None);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -823,12 +829,18 @@ public sealed partial class HomeViewModel : PageViewModel
         finally
         {
             FinishStore(run, crashed);
-            _runs.Remove(run);
+            if (_runs.Contains(run)) EndRun(run, gameStarted, crashed);
             run.Cts.Dispose();
-            Progress = 0;
-            UpdateRunState();
-            if (gameStarted && _runs.Count == 0) GameExited?.Invoke(crashed);
         }
+    }
+
+    /// <summary>The run is over (its game exited, or it never started): it no longer counts as running.</summary>
+    private void EndRun(GameRun run, bool gameStarted, bool crashed)
+    {
+        _runs.Remove(run);
+        Progress = 0;
+        UpdateRunState();
+        if (gameStarted && _runs.Count == 0) GameExited?.Invoke(crashed);
     }
 
     /// <summary>A run began (its saved log exists from now on): the Logs tab lists it.</summary>
@@ -1204,7 +1216,7 @@ public sealed partial class HomeViewModel : PageViewModel
     }
 
     /// <summary>用户自己配置的启动前 / 退出后命令。命令失败只记日志，不拦启动。</summary>
-    private async Task RunUserCommandAsync(string command, string id, string workDir, RunLog? log, CancellationToken ct)
+    internal async Task RunUserCommandAsync(string command, string id, string workDir, RunLog? log, CancellationToken ct)
     {
         // cmd 不按 C 规则解析引号，整条命令要原样放在 /s /c "…" 里。
         var psi = OperatingSystem.IsWindows()
@@ -1220,7 +1232,14 @@ public sealed partial class HomeViewModel : PageViewModel
         {
             using var process = Process.Start(psi);
             if (process is null) return;
-            await process.WaitForExitAsync(ct);
+            try { await process.WaitForExitAsync(ct); }
+            catch (OperationCanceledException)
+            {
+                // A cancelled start also stops the command, with everything it started.
+                try { process.Kill(entireProcessTree: true); }
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { }
+                throw;
+            }
             _log.AddRaw(log, L.F("home.log.command_exited", command, process.ExitCode));
         }
         catch (System.ComponentModel.Win32Exception e)
