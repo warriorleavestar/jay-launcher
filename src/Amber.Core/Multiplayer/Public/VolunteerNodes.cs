@@ -622,6 +622,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         bool ok;
         IPAddress? ip = null;
         var crowded = false;
+        DateTimeOffset? sameListener = null;
         if (_resolve is not null)
         {
             try { ip = await _resolve(address, total.Token); }
@@ -629,19 +630,31 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             if (ip is not null)
             {
                 var machine = VolunteerNodes.MachineOf(ip);
+                var port = new Uri(address).Port;
                 lock (_gate)
                 {
                     // Many names for one machine count as that machine: over the cap, the entry goes without being dialled.
-                    // As for names, listed entries and entries still being probed are counted apart.
+                    // As for names, listed entries and entries still being probed are counted apart. Names for the same
+                    // port of the machine are one listener and take one place between them, so names somebody else points
+                    // at a node can't crowd out the node's own registration (Pick lists one of them).
                     var others = _entries.Where(p => p.Key != address && p.Value.Machine == machine).ToList();
-                    crowded = others.Count(p => p.Value.VerifiedAt is not null) >= MaxPerHost
-                              || others.Count(p => p.Value.VerifiedAt is null) >= MaxPerHost
-                              || CoolingDown(DialKey(machine, address), _now());
-                    if (!crowded && _entries.TryGetValue(address, out var mine)) mine.Machine = machine;
+                    int Ports(bool verified) => others.Where(p => (p.Value.VerifiedAt is not null) == verified)
+                        .Select(p => new Uri(p.Key).Port).Where(p => p != port).Distinct().Count();
+                    crowded = Ports(true) >= MaxPerHost || Ports(false) >= MaxPerHost || CoolingDown(DialKey(machine, address), _now());
+                    // A listener checked under another name since this one was needn't be dialled again: the name takes
+                    // that check's time, so the listener is still dialled once its newest check is too old.
+                    _entries.TryGetValue(address, out var mine);
+                    var now = _now();
+                    sameListener = crowded ? null : others
+                        .Where(p => p.Value.VerifiedAt is { } at && now - at < ReprobeEvery && at > (mine?.VerifiedAt ?? DateTimeOffset.MinValue)
+                                    && new Uri(p.Key).Port == port)
+                        .Max(p => p.Value.VerifiedAt);
+                    if (!crowded && mine is not null) mine.Machine = machine;
                 }
             }
         }
         if (crowded || (_resolve is not null && ip is null)) ok = false;
+        else if (sameListener is not null) ok = true;
         else
         {
             try { ok = await Dial(address, ip, total.Token); }
@@ -652,7 +665,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             if (_entries.TryGetValue(address, out var entry))
             {
                 entry.Probing = false;
-                if (ok) entry.VerifiedAt = _now();
+                if (ok) entry.VerifiedAt = sameListener ?? _now();
                 else
                 {
                     _lastDialed[address] = _now();
@@ -673,9 +686,15 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// Up to <paramref name="count"/> verified, live volunteers in random order (spreads the load), at most one per
     /// operator while there are others to give. Each comes with its operator tag ("" when unsigned).
     /// </summary>
+    /// <remarks>Names for one listener (the same port of one machine) are given once.</remarks>
     public IReadOnlyList<VolunteerNode> Pick(int count = VolunteerNodes.PerRequest)
     {
-        var shuffled = Live().OrderBy(_ => Random.Shared.Next()).Select(p => new VolunteerNode(p.Url, p.Disputed ? "" : p.Operator ?? ""));
+        // A name that is the address itself can't be pointed elsewhere later, so it goes first among a listener's names.
+        var shuffled = LiveEntries().OrderBy(p => IPAddress.TryParse(new Uri(p.Entry.Url).Host.Trim('[', ']'), out _) ? 0 : 1)
+            .ThenBy(_ => Random.Shared.Next())
+            .DistinctBy(p => p.Listener)
+            .OrderBy(_ => Random.Shared.Next())
+            .Select(p => new VolunteerNode(p.Entry.Url, p.Entry.Disputed ? "" : p.Entry.Operator ?? ""));
         return [.. VolunteerNode.SpreadOperators(shuffled).Take(count)];
     }
 
@@ -688,7 +707,10 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// </summary>
     public IReadOnlyList<VolunteerEntry> Operators() => Live();
 
-    private List<VolunteerEntry> Live()
+    private List<VolunteerEntry> Live() => [.. LiveEntries().Select(p => p.Entry)];
+
+    /// <summary>Live entries with the listener each one names (machine and port; the name itself until it resolved).</summary>
+    private List<(VolunteerEntry Entry, string Listener)> LiveEntries()
     {
         var now = _now();
         lock (_gate)
@@ -697,7 +719,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             return [.. _entries.Where(p => p.Value.VerifiedAt is not null && Blocked?.Invoke(p.Key) != true
                     && (p.Value.Operator is not { } op || BlockedOperator?.Invoke(op) != true))
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
-                .Select(p => Public(p.Key, p.Value))];
+                .Select(p => (Public(p.Key, p.Value), p.Value.Machine is { } m ? $"{m}:{new Uri(p.Key).Port}" : p.Key))];
         }
     }
 

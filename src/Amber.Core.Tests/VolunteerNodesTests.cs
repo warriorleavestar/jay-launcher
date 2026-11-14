@@ -187,19 +187,21 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
             return Task.FromResult(ip);
         }
         var registry = new VolunteerRegistry((url, _) => { lock (dialled) dialled.Add(url); return Task.FromResult(true); }, () => _now, Resolve);
+        var port = 11010;
         foreach (var name in new[] { "a", "bb", "ccc" })
         {
-            Assert.True(Ok(registry.Register($"tcp://{name}.one.example.org:11010")));
+            Assert.True(Ok(registry.Register($"tcp://{name}.one.example.org:{port++}")));
             await registry.LastProbe;
             _now += TimeSpan.FromSeconds(1.1);
         }
         // Two listed; the third name of that machine was dropped without being dialled.
         Assert.Equal(VolunteerRegistry.MaxPerHost, registry.Listed().Count(u => u.Contains(".one.")));
-        Assert.DoesNotContain("tcp://ccc.one.example.org:11010", dialled);
+        Assert.DoesNotContain("tcp://ccc.one.example.org:11012", dialled);
         // IPv6 counts by /64.
+        port = 11010;
         foreach (var name in new[] { "a", "bb", "ccc" })
         {
-            registry.Register($"tcp://{name}.six.example.org:11010");
+            registry.Register($"tcp://{name}.six.example.org:{port++}");
             await registry.LastProbe;
             _now += TimeSpan.FromSeconds(1.1);
         }
@@ -216,6 +218,51 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
         // Once the wait is over, another name of that machine can be checked.
         _now += VolunteerRegistry.CheckSameAddressEvery + TimeSpan.FromSeconds(1);
         Assert.True((await registry.CheckAsync("tcp://r.one.example.org:11012"))["reachable"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task NamesOthersPointAtANodeDontCrowdItOut()
+    {
+        // Two names somebody else registered for the node's own port, then the node's own name: one listener, one place.
+        var dialled = new List<string>();
+        Task<IPAddress?> Resolve(string url, CancellationToken _) =>
+            Task.FromResult<IPAddress?>(new Uri(url).Host.EndsWith(".six.example.org") ? IPAddress.Parse($"fd00:1:2:3::{new Uri(url).Host.Length:x}")
+                : IPAddress.Parse("10.20.30.40"));
+        var registry = new VolunteerRegistry((url, _) => { lock (dialled) dialled.Add(url); return Task.FromResult(true); }, () => _now, Resolve);
+        foreach (var url in new[] { "tcp://x1.example.org:11010", "tcp://x2.example.org:11010", "tcp://node.example.org:11010",
+                     "tcp://y1.six.example.org:11010", "tcp://y22.six.example.org:11010", "tcp://node333.six.example.org:11010" })
+        {
+            Assert.True(Ok(registry.Register(url)));
+            await registry.LastProbe;
+            _now += TimeSpan.FromSeconds(1.1);
+        }
+        Assert.Contains("tcp://node.example.org:11010", registry.Listed());
+        Assert.Contains("tcp://node333.six.example.org:11010", registry.Listed());
+        // The listener was dialled once; its other names weren't dialled again.
+        Assert.Equal(["tcp://x1.example.org:11010", "tcp://y1.six.example.org:11010"], dialled);
+        // Players are given each listener once.
+        for (var i = 0; i < 20; i++) Assert.Equal(2, registry.Pick(10).Count);
+        // Renewals keep every name listed, and each listener is still dialled again once its check is old.
+        var names = registry.Listed();
+        for (var round = 0; round < 3; round++)
+        {
+            _now += VolunteerRegistry.ReprobeEvery + TimeSpan.FromSeconds(1);
+            foreach (var url in names)
+            {
+                Assert.True(Ok(registry.Register(url)));
+                await registry.LastProbe;
+            }
+        }
+        Assert.Equal(names, registry.Listed());
+        Assert.Equal(2 + 3 * 2, dialled.Count);
+        // Other ports of the machine still count against it.
+        foreach (var url in new[] { "tcp://p1.example.org:22", "tcp://p2.example.org:80" })
+        {
+            registry.Register(url);
+            await registry.LastProbe;
+            _now += TimeSpan.FromSeconds(1.1);
+        }
+        Assert.DoesNotContain("tcp://p2.example.org:80", registry.Listed());
     }
 
     [Fact]

@@ -638,12 +638,19 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>
     /// The source the per-source limits use. Until the first caller arrives mapped (127.235.c.d), the node's EasyTier is
     /// taken to lack the loopback-source patch: then every caller over the network arrives from a local address, and
-    /// counting them as one source would let one caller use up everyone's allowance. So until then local callers get no
-    /// per-source limits (null) and only the directory-wide budgets and <see cref="MaxConcurrent"/> hold. Once a mapped
-    /// caller was seen, the shared local source is limited like any other.
+    /// counting them as one source would let one caller use up everyone's allowance. So until then local callers are
+    /// <see cref="UnmappedLoopbackSource"/>: no per-source limits (<see cref="PerSource"/>) and only the directory-wide
+    /// budgets and <see cref="MaxConcurrent"/> hold, except for what stays in the directory for days (new signed records,
+    /// which they share one allowance for). Once a mapped caller was seen, the shared local source is limited like any other.
     /// </summary>
     private string? Limited(string? source) =>
-        source == SharedLoopbackSource && !Volatile.Read(ref _mappingSeen) ? null : source;
+        source == SharedLoopbackSource && !Volatile.Read(ref _mappingSeen) ? UnmappedLoopbackSource : source;
+
+    /// <summary>Local callers while no caller has arrived mapped (see <see cref="Limited"/>).</summary>
+    internal const string UnmappedLoopbackSource = "loopback-unmapped";
+
+    /// <summary>The source for limits that would let one caller use up everyone's allowance: none for unmapped callers.</summary>
+    private static string? PerSource(string? source) => source == UnmappedLoopbackSource ? null : source;
 
     /// <summary>Has a mapped caller been seen (per-source limits apply to local callers too)? Tests.</summary>
     internal bool MappingSeen => Volatile.Read(ref _mappingSeen);
@@ -659,6 +666,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     private bool TryOpen(string? source)
     {
+        source = PerSource(source);
         if (source is null) return true;
         lock (_openBySource)
         {
@@ -671,6 +679,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
 
     private void Close(string? source)
     {
+        source = PerSource(source);
         if (source is null) return;
         lock (_openBySource)
         {
@@ -699,14 +708,14 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "withdraw" => Withdraw(request),
                 "snap" => JsonNode.Parse(BuildSnapshot(PlanSnapshot(request))) as JsonObject ?? Error("bad"),
                 "find" => Find(request),
-                "post" => Post(request, source),
+                "post" => Post(request, PerSource(source)),
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
-                "rv.put" => RendezvousPut(request, source),
+                "rv.put" => RendezvousPut(request, PerSource(source)),
                 "rv.take" => RendezvousTake(request),
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
-                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], source) : Error("off"),
+                "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], PerSource(source)) : Error("off"),
                 // In-process calls only (the server awaits "probe" itself): blocks for at most VolunteerNodes.CheckTimeout.
                 "probe" => Volunteers is { } p ? p.CheckAsync(request["url"]?.GetValue<string>()).GetAwaiter().GetResult() : Error("off"),
                 "nodes" => Volunteers is { } v ? NodesReply(v.Pick()) : Error("off"),
@@ -1281,6 +1290,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             }
             else if (_records.Count >= MaxRecords) return Error("full");
             // Every check first; allowances are only used up by a put that is taken.
+            // Unmapped local callers can't be told apart, so they share one allowance, and only for new records: renewals of
+            // records they hold aren't held back by somebody else's puts (each signer is still limited below).
+            if (source == UnmappedLoopbackSource && renewal) source = null;
             var (count, until) = source is not null && _recordPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + TimeSpan.FromHours(1));
             if (source is not null && count >= MaxRecordPutsPerSource) return Error("rate");
             var signer = Convert.ToHexStringLower(record.Signer);

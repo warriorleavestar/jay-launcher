@@ -152,6 +152,43 @@ public class SignedRecordTests
     }
 
     [Fact]
+    public async Task UnmappedLocalCallersShareOneAllowanceForNewRecords()
+    {
+        // Without the loopback-source patch every caller arrives from 127.0.0.1 and can't be told apart. New records stay
+        // for days, so those callers share one source's allowance for them (fresh keys each time don't help).
+        using var key = X25519KeyPair.Generate();
+        await using var server = Server(key);
+        var client = Client((server, key));
+        var now = DateTimeOffset.UtcNow;
+        var mine = new RecordSigner();
+        var lookup = SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16));
+        await client.PutRecordAsync(mine.Sign(lookup, [1], TimeSpan.FromDays(6), now), default);
+        for (var i = 1; i < RoomDirectoryServer.MaxRecordPutsPerSource; i++)
+            await client.PutRecordAsync(new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromDays(6), now), default);
+        Assert.False(server.MappingSeen);
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() =>
+            client.PutRecordAsync(new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromDays(6), now), default));
+        Assert.Equal("rate", e.Code);
+        // Renewing a record already held still works.
+        await client.PutRecordAsync(mine.Sign(lookup, [2], TimeSpan.FromDays(6), now), default);
+        Assert.Equal(RoomDirectoryServer.MaxRecordPutsPerSource, server.RecordCount);
+    }
+
+    [Fact]
+    public async Task UnmappedLocalCallersCantFillTheStore()
+    {
+        var now = DateTimeOffset.UtcNow;
+        using var key = X25519KeyPair.Generate();
+        await using var server = Server(key, () => now);
+        // Three hours of puts as fast as the directory-wide budget allows, each under a fresh key.
+        for (var minute = 0; minute < 180; minute++, now += TimeSpan.FromMinutes(1))
+            for (var i = 0; i < RoomDirectoryServer.MaxRecordPutsPerMinute; i++)
+                server.Handle(PutOp(new RecordSigner().Sign(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), [1], TimeSpan.FromDays(6), now)),
+                    RoomDirectoryServer.UnmappedLoopbackSource);
+        Assert.Equal(3 * RoomDirectoryServer.MaxRecordPutsPerSource, server.RecordCount);
+    }
+
+    [Fact]
     public async Task RecordPutsHaveADirectoryWideBudget()
     {
         var now = DateTimeOffset.UtcNow;
