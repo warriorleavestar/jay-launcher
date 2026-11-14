@@ -61,6 +61,45 @@ public sealed class ContainedFilesTests : IDisposable
         Assert.Empty(Directory.GetFiles(_work, ".jay-write-*"));
     }
 
+    [Theory]
+    [InlineData("utf-8")]
+    [InlineData("utf-8-bom")]
+    [InlineData("utf-16le")]
+    [InlineData("utf-16be")]
+    public void AConfigFileKeepsItsEncodingAndByteOrderMark(string kind)
+    {
+        // Forge 1.12.2 reads UTF-16 config files with a byte order mark: what Jay writes back is the same encoding.
+        Encoding encoding = kind switch
+        {
+            "utf-8" => new UTF8Encoding(false),
+            "utf-8-bom" => new UTF8Encoding(true),
+            "utf-16le" => new UnicodeEncoding(false, true),
+            _ => new UnicodeEncoding(true, true),
+        };
+        var cfg = Path.Combine(Directory.CreateDirectory(Path.Combine(_work, "config")).FullName, "forge.cfg");
+        var before = "# 配置 ✓\ngeneral {\n    B:Global=true\n}\n";
+        File.WriteAllBytes(cfg, [.. encoding.GetPreamble(), .. encoding.GetBytes(before)]);
+        BakePlatform.DisableLegacyForgeUpdateCheck(_work);
+        var after = before.Replace("B:Global=true", "B:Global=false");
+        Assert.Equal([.. encoding.GetPreamble(), .. encoding.GetBytes(after)], File.ReadAllBytes(cfg));
+    }
+
+    [Fact]
+    public void AConfigFileThatIsNotValidTextIsLeftAsItIs()
+    {
+        var cfg = Path.Combine(Directory.CreateDirectory(Path.Combine(_work, "config")).FullName, "forge.cfg");
+        // Not UTF-8 (a legacy code page) and UTF-32: neither is decoded, neither is written.
+        byte[] legacy = [.. Encoding.ASCII.GetBytes("# "), 0xC5, 0xE4, 0xD6, 0xC3, .. Encoding.ASCII.GetBytes("\ngeneral {\n    B:Global=true\n}\n")];
+        File.WriteAllBytes(cfg, legacy);
+        BakePlatform.DisableLegacyForgeUpdateCheck(_work);
+        Assert.Equal(legacy, File.ReadAllBytes(cfg));
+        Assert.False(ContainedFiles.UpdateText(_work, ["config"], "forge.cfg", t => t + "x"));
+        byte[] utf32 = [0xFF, 0xFE, 0x00, 0x00, .. new UTF32Encoding(false, false).GetBytes("B:Global=true\n")];
+        File.WriteAllBytes(cfg, utf32);
+        Assert.False(ContainedFiles.UpdateText(_work, ["config"], "forge.cfg", t => t + "x"));
+        Assert.Equal(utf32, File.ReadAllBytes(cfg));
+    }
+
     [Fact]
     public void AConfigFileThatIsALinkIsNotWrittenThrough()
     {

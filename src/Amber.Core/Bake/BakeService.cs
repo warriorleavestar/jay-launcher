@@ -306,14 +306,16 @@ public sealed partial class BakeService(BakeToolkit toolkit, string cacheRoot, s
         if (range is null) keep = major == versionMajor;
         else
         {
-            var actual = Java.JavaFinder.MajorOf(javaPath);
-            keep = actual > 0 ? range.Contains(actual) : major == versionMajor;
+            // The real version decides: one that cannot be told is not guessed (a Java 9+ would break the game).
+            var actual = await Java.JavaFinder.MajorOfAsync(javaPath, ct);
+            if (actual <= 0) throw new BakeException(L.F("core.java.version_unknown", javaPath), [], "java_unknown");
+            keep = range.Contains(actual);
             if (keep && actual > 0) major = actual;
         }
         var gamePath = keep ? javaPath : await forMajor(major, ct);
         // The Java found for the range may not be in it (only 17 and 21 installed for forge-1.12.2): say so before
         // anything runs, instead of baking for, and launching on, a Java the game cannot use.
-        if (!keep && range is not null && Java.JavaFinder.MajorOf(gamePath) is > 0 and var picked)
+        if (!keep && range is not null && await Java.JavaFinder.MajorOfAsync(gamePath, ct) is > 0 and var picked)
         {
             EnsureGameJava(picked, range);
             major = picked;
