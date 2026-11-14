@@ -554,16 +554,41 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         foreach (var (key, p) in _pending.Where(p => p.Value.Started < cutoff).ToList()) _pending.Remove(key);
     }
 
+    /// <summary>The last read failed (the file was locked or not readable): nothing is cached, and nothing is written over it.</summary>
+    private bool _readFailed;
+    /// <summary>The file could not be understood: a copy is kept as .broken before it is first replaced.</summary>
+    private bool _broken;
+
     private List<Contact> Load()
     {
         if (_contacts is not null) return _contacts;
-        _contacts = [];
+        var contacts = new List<Contact>();
         _removed.Clear();
         _unreadable = false;
-        try
+        _readFailed = false;
+        string? text;
+        try { text = ListFile.Read(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            if (!File.Exists(path) || JsonNode.Parse(File.ReadAllText(path)) is not JsonArray array) return _contacts;
-            foreach (var item in array.OfType<JsonObject>())
+            // Not readable right now: an empty list for this call only. The next call reads again, and Save leaves the file alone.
+            _unreadable = true;
+            _readFailed = true;
+            return contacts;
+        }
+        JsonArray? array = null;
+        if (text is not null)
+        {
+            try { array = JsonNode.Parse(text) as JsonArray ?? throw new JsonException(); }
+            catch (JsonException)
+            {
+                _broken = true;
+                _unreadable = true;
+            }
+        }
+        foreach (var item in array?.OfType<JsonObject>() ?? [])
+        {
+            // One damaged entry is skipped; the others stay.
+            try
             {
                 if (MailMessage.Hex(item["pub"], X25519KeyPair.Length) is not { } pub) continue;
                 var jay = item["jay"]?.GetValue<string>();
@@ -575,7 +600,7 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     continue;
                 }
                 var added = item["added"]?.GetValue<long>() is { } s ? DateTimeOffset.FromUnixTimeSeconds(s) : DateTimeOffset.UnixEpoch;
-                _contacts.Add(new Contact(pub, KnockProtocol.SanitizeName(item["name"]?.GetValue<string>()), item["verified"]?.GetValue<bool>() == true, added)
+                contacts.Add(new Contact(pub, KnockProtocol.SanitizeName(item["name"]?.GetValue<string>()), item["verified"]?.GetValue<bool>() == true, added)
                 {
                     JayAccount = account,
                     DeviceName = Identity.DeviceCertificate.CleanName(item["device"]?.GetValue<string>()),
@@ -585,18 +610,21 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     RefusedAccount = Identity.JayAddress.Canonical(item["refused"]?.GetValue<string>()),
                 });
             }
+            catch (Exception e) when (e is InvalidOperationException or FormatException or ArgumentOutOfRangeException or JsonException) { }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException or ArgumentOutOfRangeException)
-        {
-            _contacts.Clear();
-            _removed.Clear();
-            _unreadable = true;
-        }
-        return _contacts;
+        _contacts = contacts;
+        return contacts;
     }
 
     private void Save(List<Contact> list)
     {
+        // Never write over a file that couldn't be read: it may hold every contact.
+        if (_readFailed) return;
+        if (_broken)
+        {
+            ListFile.KeepBroken(path);
+            _broken = false;
+        }
         _contacts = list;
         var array = new JsonArray();
         foreach (var c in list)
@@ -626,5 +654,6 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         var temp = path + ".tmp";
         MemberIdentity.WritePrivate(temp, System.Text.Encoding.UTF8.GetBytes(array.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
         File.Move(temp, path, true);
+        _unreadable = false;
     }
 }

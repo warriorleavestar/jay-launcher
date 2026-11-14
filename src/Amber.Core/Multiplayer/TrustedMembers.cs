@@ -18,7 +18,7 @@ public sealed record TrustedMember(byte[] PublicKey, string Name)
 
 /// <summary>
 /// 房主的信任列表（trusted.json）：只存公钥和名字。列表里的人用任何一张有效邀请敲门都直接批准。
-/// 文件坏了当作空列表（不崩），下次保存时覆盖。
+/// 文件坏了当作空列表（不崩）；下次保存前先把坏文件留一份 .broken。读不出来（被占用）时不缓存、不覆盖，下次再读。
 /// </summary>
 public sealed class TrustedMembers(string path)
 {
@@ -107,33 +107,57 @@ public sealed class TrustedMembers(string path)
         Changed?.Invoke();
     }
 
+    /// <summary>The last read failed (locked or not readable): nothing is cached, and nothing is written over the file.</summary>
+    private bool _readFailed;
+    /// <summary>The file could not be understood: a copy is kept as .broken before it is first replaced.</summary>
+    private bool _broken;
+
     private List<TrustedMember> Load()
     {
         if (_members is not null) return _members;
-        _members = [];
-        try
+        var members = new List<TrustedMember>();
+        _readFailed = false;
+        string? text;
+        try { text = ListFile.Read(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            if (!File.Exists(path)) return _members;
-            if (JsonNode.Parse(File.ReadAllText(path)) is not JsonArray array) return _members;
-            foreach (var item in array)
+            // Not readable right now: empty for this call only; the next call reads again and Save leaves the file alone.
+            _readFailed = true;
+            return members;
+        }
+        JsonArray? array = null;
+        if (text is not null)
+        {
+            try { array = JsonNode.Parse(text) as JsonArray ?? throw new JsonException(); }
+            catch (JsonException) { _broken = true; }
+        }
+        foreach (var item in array ?? new JsonArray())
+        {
+            // One damaged entry is skipped; the others stay.
+            try
             {
                 if (item?["pub"]?.GetValue<string>() is not { Length: 64 } hex || !hex.All(char.IsAsciiHexDigit)) continue;
                 var jay = item["jay"]?.GetValue<string>();
-                _members.Add(new TrustedMember(Convert.FromHexString(hex), KnockProtocol.SanitizeName(item["name"]?.GetValue<string>()))
+                members.Add(new TrustedMember(Convert.FromHexString(hex), KnockProtocol.SanitizeName(item["name"]?.GetValue<string>()))
                 {
                     JayAccount = Identity.JayAddress.TryDecode(jay, out var account) ? Identity.JayAddress.Encode(account) : null,
                 });
             }
+            catch (Exception e) when (e is InvalidOperationException or FormatException or JsonException) { }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException)
-        {
-            _members.Clear();
-        }
-        return _members;
+        _members = members;
+        return members;
     }
 
     private void Save(List<TrustedMember> list)
     {
+        // Never write over a file that couldn't be read: it may hold everyone the host trusts.
+        if (_readFailed) return;
+        if (_broken)
+        {
+            ListFile.KeepBroken(path);
+            _broken = false;
+        }
         _members = list;
         var array = new JsonArray();
         foreach (var m in list)
