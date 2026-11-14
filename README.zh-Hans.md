@@ -198,6 +198,8 @@ Jay 只有一个承诺：**只为你要做的事联网**；唯一的例外是每
 - 游戏：Mojang 游戏文件服务器、你选择的下载源、各加载器的下载地址（OptiFine 通过 BMCLAPI，authlib-injector 通过其官方地址或 BMCLAPI）。
 - 模组：Modrinth 和 CurseForge，只在你浏览或安装时。
 - 联机，只在你开房间或加入时：联机页里列出的中转节点、房间里的其他玩家、Jay 服务器邀请里写的那台服务器，以及 jay-easytier 的 GitHub 发布页（仅在自带的那份缺失或用不了时）。
+- 少数下载：很老的 Forge（1.5.2 及更早）缺的库从 web.archive.org 下载，Mojang 不提供 Java 的平台（ARM Linux）从 api.adoptium.net 下载 Java，打开烘焙（通用加载器）后从 jay-loader 的发布页下载加载器包。
+- GitHub 下载镜像：联机组件或加载器包从 GitHub 下不下来时，改走第三方镜像 `ghfast.top`、`gh-proxy.com`、`ghproxy.net`（系统时区是中国时先试镜像）。Jay 只接受大小和 SHA-256 与固定值一致的文件。
 - 直连房间会向你设置的 STUN 服务器（默认 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`，可改可清空）询问你的外部地址，它们不经过游戏数据；也可能请你的路由器临时映射一个端口，结束联机时删掉。
 </details>
 
@@ -236,7 +238,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 
 还有一个命令行版本，例如 `dotnet run --project Amber.Cli -- list-remote`。
 
-[Android](docs/android.md) 和 [iOS](docs/ios.md) 实验版提供 Jay 服务器登记和本机网关。Android 版现在有 Jay 自己的全屏游戏画面与触屏控制基础；独立 JVM 和图形运行环境仍在开发。iOS 仍需要另外兼容的客户端。
+[Android](docs/android.md) 和 [iOS](docs/ios.md) 实验版提供 Jay 服务器登记和本机网关。Android 版可以自己下载经过校验的 Java 运行环境，用离线玩家名和触屏控制运行 Minecraft 1.21.11，见 [docs/android.md](docs/android.md)。iOS 仍需要另外兼容的客户端。
 
 第一次看代码？从 [docs/CODEMAP.md](docs/CODEMAP.md) 和 [参与贡献](CONTRIBUTING.zh-Hans.md) 开始。
 </details>

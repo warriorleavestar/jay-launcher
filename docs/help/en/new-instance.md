@@ -17,4 +17,4 @@ Create a new game: pick a version and, if you want mods, a loader.
 - Esc closes the panel.
 
 ## If something goes wrong
-- The install fails: usually a network problem; choose another route in [Settings › Download route](jay:settings#Source) and try again.
+- The install fails: usually a network problem; choose another download source in [Settings › Download source](jay:settings#Source) and try again.

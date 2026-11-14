@@ -16,7 +16,7 @@ The library is Jay's home: every game you installed (an instance) is here, the m
 - Open an instance: click the card itself to open its details.
 - Pin: choose **Pin** in the card's "⋯" menu to keep it at the front.
 - Search: type a name or version in the search box (Ctrl+F).
-- New: click **New** (Ctrl+N).
+- New: click **New instance** (Ctrl+N).
 
 ## If something goes wrong
 - Your old games are missing: check the game folder in [Settings › Storage](jay:settings#GameDirectory).

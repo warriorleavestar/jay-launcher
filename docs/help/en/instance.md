@@ -11,7 +11,7 @@ An instance is one self-contained game: its own version, loader, mods, worlds an
 
 ## How to
 - Play: click the amber **Play** button at the top right.
-- Tabs: Overview, Mods, Resource packs, Shaders, Worlds, Logs. Switch with Alt+number or Ctrl+Tab.
+- Tabs: Overview, Mods, Worlds, Resource packs, Shader packs, Servers, Screenshots, Logs, Settings. Switch with Alt+number or Ctrl+Tab.
 - Add mods: on the Mods tab click **+ Add mods**; Discover opens showing only mods that fit this instance.
 - Last session crashed: the Overview shows a "Last session" panel; use its fix buttons (memory, disable a mod, turn off shaders).
 

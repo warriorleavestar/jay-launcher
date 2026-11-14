@@ -198,6 +198,8 @@ Jay is built on a simple promise: **it only goes online to do what you asked**, 
 - Games: Mojang's game file servers, your chosen download source, loader download sites (OptiFine via BMCLAPI, authlib-injector via its official site or BMCLAPI).
 - Mods: Modrinth and CurseForge, only when you browse or install.
 - Multiplayer, only while you host or join: the relay nodes listed on the Multiplayer page, the other players in the room, the server named in a Jay Server invite, and the jay-easytier GitHub releases page (only if the bundled copy is missing or can't be used).
+- Rare downloads: web.archive.org for missing libraries of very old Forge (1.5.2 and earlier), api.adoptium.net for Java on platforms Mojang has no Java for (ARM Linux), and the jay-loader releases page when baking (the universal loader) is turned on.
+- GitHub download mirrors: when the multiplayer component or the loader package can't be fetched from GitHub, the third-party mirrors `ghfast.top`, `gh-proxy.com` and `ghproxy.net` (tried before GitHub when the system time zone is China). Jay accepts a file only if it matches the fixed size and SHA-256.
 - Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address. They carry no game data. Jay may also ask your router for a temporary port mapping, removed when the session ends.
 </details>
 
@@ -236,7 +238,7 @@ dotnet publish Amber.App -c Release -r osx-arm64 --self-contained -p:PublishSing
 
 There is also a command-line version, for example `dotnet run --project Amber.Cli -- list-remote`.
 
-The experimental [Android](docs/android.md) and [iOS](docs/ios.md) projects provide Jay Server enrollment and a localhost gateway. Android now has Jay's own full-screen game surface and touch-control foundation; its independent JVM and graphics runtime is still under development. iOS still needs a separate compatible client.
+The experimental [Android](docs/android.md) and [iOS](docs/ios.md) projects provide Jay Server enrollment and a localhost gateway. Android can download its own verified Java runtime and run Minecraft 1.21.11 with an offline name and touch controls; see [docs/android.md](docs/android.md). iOS still needs a separate compatible client.
 
 New to the code? Start with [docs/CODEMAP.md](docs/CODEMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 </details>
