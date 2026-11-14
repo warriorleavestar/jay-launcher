@@ -26,7 +26,10 @@ public sealed partial class CallViewModel : ObservableObject
 {
     private readonly LauncherService _service;
     private CallSession? _session;
-    private RequestHandle? _ringing;
+    /// <summary>Calls ringing now, each with who it is (two people can ring one after the other).</summary>
+    private readonly Dictionary<RequestHandle, Ringing> _ringing = [];
+
+    private sealed record Ringing(string Name, CallRoute Route, bool Verified);
 
     private readonly bool? _available;
 
@@ -86,9 +89,6 @@ public sealed partial class CallViewModel : ObservableObject
     /// <summary>The locked "just this once" confirmation is showing (focus on [Don't allow]).</summary>
     [ObservableProperty] public partial bool ConfirmingControl { get; set; }
 
-    /// <summary>The stage is in its own window.</summary>
-    [ObservableProperty] public partial bool PoppedOut { get; set; }
-
     /// <summary>The last call's end, said once on the panel's page.</summary>
     [ObservableProperty] public partial string EndedText { get; set; } = "";
 
@@ -135,44 +135,49 @@ public sealed partial class CallViewModel : ObservableObject
     public RequestHandle? Ring(string name, bool verifiedFriend, bool sameRoom, CallRoute route = CallRoute.Relay)
     {
         if (!Available || !CallRules.MayRing(CallRules.Parse(_service.Settings.CallsWhoCanCall), verifiedFriend, sameRoom)) return null;
-        _ringRoute = route;
-        _ringVerified = verifiedFriend;
-        _ringing = _service.Requests.Post(new RequestSpec("call", L.F("call.ring.title", name),
+        // Busy: one call at a time. Whoever rings meanwhile does not get through (hang up first to take another).
+        if (IsInCall) return null;
+        var handle = _service.Requests.Post(new RequestSpec("call", L.F("call.ring.title", name),
             L.T(verifiedFriend ? "call.ring.friend" : "call.ring.room"),
             [new("decline", L.T("call.ring.decline"), IsDefault: true), new("answer", L.T("call.ring.answer"))],
-            Timeout: TimeSpan.FromSeconds(45), DedupeKey: "call:" + name, TimeoutChoice: "decline"));
-        _ringName = name;
-        return _ringing;
+            Timeout: TimeSpan.FromSeconds(45), DedupeKey: "call:" + name, TimeoutChoice: "decline") { Popup = true });
+        _ringing[handle] = new Ringing(name, route, verifiedFriend);
+        return handle;
     }
 
-    private string _ringName = "";
-    private CallRoute _ringRoute;
-    private bool _ringVerified;
+    /// <summary>Calls ringing now (tests).</summary>
+    internal int RingingCount => _ringing.Count;
 
     private void OnRequestResolved(RequestHandle handle)
     {
-        if (!ReferenceEquals(handle, _ringing)) return;
-        _ringing = null;
-        if (handle.Choice != "answer") return;
-        void Answer()
+        void Resolve()
         {
-            // Answering does not turn the microphone on.
-            Start(new CallSession(_ringName, _ringRoute, Child, [new CallMember(_ringName, false, _ringVerified)], Me), room: false, _ringName);
-            Navigate?.Invoke("people");
+            if (!_ringing.Remove(handle, out var ring) || handle.Choice != "answer") return;
+            // Answering one call declines the others still ringing: one call at a time.
+            foreach (var other in _ringing.Keys.ToList()) _service.Requests.Resolve(other, "decline", RequestSource.Program);
+            _ringing.Clear();
+            // Answering does not turn the microphone on. A friend's call shows in their conversation; someone else in
+            // the room (not a friend) talks in the room's panel, which is where they are.
+            Start(new CallSession(ring.Name, ring.Route, Child, [new CallMember(ring.Name, false, ring.Verified)], Me), room: !ring.Verified, ring.Name);
+            Navigate?.Invoke(ring.Verified ? "people" : "play");
         }
-        if (Dispatcher.UIThread.CheckAccess()) Answer();
-        else Dispatcher.UIThread.Post(Answer);
+        if (Dispatcher.UIThread.CheckAccess()) Resolve();
+        else Dispatcher.UIThread.Post(Resolve);
     }
 
     private void Start(CallSession session, bool room, string peer)
     {
-        if (_session is { } old) old.Changed -= Sync;
+        if (_session is { } old)
+        {
+            // A new call never runs alongside the old one: that one ends first (and stops sharing and control with it).
+            if (!old.Ended) old.End("call.ended");
+            old.Changed -= Sync;
+        }
         _session = session;
         IsRoomCall = room;
         Peer = peer.Length > 0 ? peer : session.Members.FirstOrDefault(m => !m.IsMe)?.Name ?? "";
         EndedText = "";
         ConfirmingControl = false;
-        PoppedOut = false;
         session.Changed += Sync;
         Sync();
     }
@@ -188,7 +193,6 @@ public sealed partial class CallViewModel : ObservableObject
         {
             EndedText = L.T(ended.EndReason ?? "call.ended");
             ConfirmingControl = false;
-            PoppedOut = false;
         }
         foreach (var name in (string[])[nameof(Available), nameof(IsInCall), nameof(IsRoomCall), nameof(ShowInPeople), nameof(ShowInRoom), nameof(Title), nameof(ChipText),
                      nameof(RouteText), nameof(MicOn), nameof(CameraOn), nameof(Sharing), nameof(CanLetControl), nameof(IsControlled), nameof(ControlBarText),
@@ -242,11 +246,20 @@ public sealed partial class CallViewModel : ObservableObject
 
     [RelayCommand] private void HangUp() => End("call.ended");
 
-    [RelayCommand] private void PopOut() => PoppedOut = !PoppedOut;
-
     /// <summary>The top bar chip: back to the page that holds the panel.</summary>
     [RelayCommand]
     private void OpenPanel() => Navigate?.Invoke(IsRoomCall ? "play" : "people");
+
+    /// <summary>
+    /// I left the room (or it closed): every call ends, room voice and a friend's call alike, since a call rides on the
+    /// room's link as messages do. Calls still ringing stop too.
+    /// </summary>
+    public void RoomClosed()
+    {
+        foreach (var ring in _ringing.Keys.ToList()) _service.Requests.Resolve(ring, "decline", RequestSource.Program);
+        _ringing.Clear();
+        if (IsInCall) End("call.ended_room");
+    }
 
     /// <summary>Ends the call: hang up, dropped link, kicked, left the room, closing Jay.</summary>
     public void End(string reasonKey) => _session?.End(reasonKey);

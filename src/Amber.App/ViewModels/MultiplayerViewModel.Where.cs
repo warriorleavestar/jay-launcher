@@ -17,9 +17,25 @@ public enum WhereFilter
     Servers,
 }
 
-/// <summary>A room a friend invited me to: one row under "where to play" until the invite runs out or is used.</summary>
-public sealed class FriendRoomItem(string key, MailedInvite invite, string who, string room)
+/// <summary>
+/// A room a friend invited me to: one row under "where to play" until the invite runs out or is used, or until
+/// <see cref="Until"/>, whichever comes first.
+/// </summary>
+public sealed class FriendRoomItem(string key, MailedInvite invite, string who, string room, DateTimeOffset received)
 {
+    /// <summary>When it arrived here, by this computer's clock.</summary>
+    public DateTimeOffset Received { get; } = received;
+
+    /// <summary>
+    /// When the row goes: the invite's own end, but never later than <see cref="MultiplayerViewModel.MaxFriendRoomAge"/>
+    /// after it arrived, so an invite with no end (or a far one) can't stay for good.
+    /// </summary>
+    public DateTimeOffset Until { get; } = invite.Expires is { } e && e < received + MultiplayerViewModel.MaxFriendRoomAge
+        ? e : received + MultiplayerViewModel.MaxFriendRoomAge;
+
+    /// <summary>The device that sent it (a friend's rows are counted per device).</summary>
+    internal string Sender { get; } = Convert.ToHexStringLower(invite.From.PublicKey);
+
     public string Key { get; } = key;
     public MailedInvite Invite { get; } = invite;
     public string Who { get; } = who;
@@ -30,7 +46,7 @@ public sealed class FriendRoomItem(string key, MailedInvite invite, string who, 
         Invite.Invite.Game is { } game ? (game.Loader is { } loader ? $"{game.McVersion} {loader}" : game.McVersion) : null,
         L.F("multiplayer.invite.fingerprint", Invite.From.Fingerprint),
     }.Where(s => !string.IsNullOrEmpty(s)));
-    public bool IsExpired(DateTimeOffset now) => Invite.Expires is { } e && e <= now;
+    public bool IsExpired(DateTimeOffset now) => Until <= now;
 }
 
 /// <summary>
@@ -134,12 +150,54 @@ public sealed partial class MultiplayerViewModel
             OnPropertyChanged(name);
     }
 
-    private void ListFriendRoom(string key, MailedInvite invite, string who, string room)
+    /// <summary>The longest a friend's room stays listed after its invite arrived, whatever the invite says.</summary>
+    internal static readonly TimeSpan MaxFriendRoomAge = TimeSpan.FromHours(12);
+
+    /// <summary>Rooms listed from one device at a time: a newer invite from it takes the place of its oldest.</summary>
+    internal const int MaxFriendRoomsPerDevice = 3;
+
+    /// <summary>Rooms listed at a time from all friends: past it the oldest row goes.</summary>
+    internal const int MaxFriendRooms = 16;
+
+    /// <summary>Invites I said "not now" to, by key, until they would have left the list anyway (bounded).</summary>
+    private readonly Dictionary<string, DateTimeOffset> _ignoredFriendRooms = new(StringComparer.Ordinal);
+    private const int MaxIgnoredFriendRooms = 256;
+
+    /// <summary>The clock for friends' rooms (tests move it).</summary>
+    internal Func<DateTimeOffset> FriendRoomClock { get; set; } = () => DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// Lists a friend's room. False when it is not listed: already there, said "not now" to, or run out. A device's
+    /// fourth room replaces its oldest; past <see cref="MaxFriendRooms"/> the oldest row of anyone goes.
+    /// </summary>
+    private bool ListFriendRoom(string key, MailedInvite invite, string who, string room)
     {
         PruneFriendRooms();
-        if (FriendRooms.Any(r => r.Key == key)) return;
-        FriendRooms.Insert(0, new FriendRoomItem(key, invite, who, room));
+        var now = FriendRoomClock();
+        if (FriendRooms.Any(r => r.Key == key) || _ignoredFriendRooms.ContainsKey(key)) return false;
+        var row = new FriendRoomItem(key, invite, who, room, now);
+        if (row.IsExpired(now)) return false;
+        while (FriendRooms.Count(r => r.Sender == row.Sender) >= MaxFriendRoomsPerDevice)
+            DropFriendRoom(FriendRooms.Last(r => r.Sender == row.Sender).Key);
+        while (FriendRooms.Count >= MaxFriendRooms) DropFriendRoom(FriendRooms[^1].Key);
+        FriendRooms.Insert(0, row);
+        return true;
     }
+
+    /// <summary>"Not now" on a friend's room: the row, the invite and the request all go, and the same invite stays away.</summary>
+    private void IgnoreFriendRoom(string key)
+    {
+        var until = FriendRooms.FirstOrDefault(r => r.Key == key)?.Until ?? FriendRoomClock() + MaxFriendRoomAge;
+        DropFriendRoom(key);
+        var now = FriendRoomClock();
+        foreach (var old in _ignoredFriendRooms.Where(p => p.Value <= now).Select(p => p.Key).ToList()) _ignoredFriendRooms.Remove(old);
+        while (_ignoredFriendRooms.Count >= MaxIgnoredFriendRooms)
+            _ignoredFriendRooms.Remove(_ignoredFriendRooms.MinBy(p => p.Value).Key);
+        _ignoredFriendRooms[key] = until;
+    }
+
+    /// <summary>Tests: how many invites from friends are still held (listed or waiting on a request).</summary>
+    internal int HeldFriendInvites => _mailedInvites.Count;
 
     private DispatcherTimer? _friendRoomTimer;
 
@@ -155,7 +213,8 @@ public sealed partial class MultiplayerViewModel
     /// </summary>
     private void WatchFriendRoomExpiry()
     {
-        if (FriendRooms.Any(r => r.Invite.Expires is not null))
+        // Every row runs out (at the latest MaxFriendRoomAge after it arrived), so the timer runs while there is one.
+        if (FriendRooms.Count > 0)
         {
             _friendRoomTimer ??= new DispatcherTimer(FriendRoomCheckInterval, DispatcherPriority.Background, (_, _) => PruneFriendRooms());
             _friendRoomTimer.Start();
@@ -163,23 +222,21 @@ public sealed partial class MultiplayerViewModel
         else _friendRoomTimer?.Stop();
     }
 
-    /// <summary>Drops one room from the list (its request timed out: the invite ran out).</summary>
+    /// <summary>Drops one room from the list, with its invite and the request that offered to join.</summary>
     private void DropFriendRoom(string key)
     {
         if (FriendRooms.FirstOrDefault(r => r.Key == key) is { } row) FriendRooms.Remove(row);
         _mailedInvites.Remove(key);
+        _service.Requests.Withdraw(key);
     }
 
-    /// <summary>Drops rows whose invite has run out, with the request that offered to join.</summary>
+    /// <summary>Drops rows that have run out, with the request that offered to join, and any invite held without a row.</summary>
     internal void PruneFriendRooms()
     {
-        var now = DateTimeOffset.UtcNow;
-        foreach (var row in FriendRooms.Where(r => r.IsExpired(now)).ToList())
-        {
-            FriendRooms.Remove(row);
-            _mailedInvites.Remove(row.Key);
-            _service.Requests.Withdraw(row.Key);
-        }
+        var now = FriendRoomClock();
+        foreach (var row in FriendRooms.Where(r => r.IsExpired(now)).ToList()) DropFriendRoom(row.Key);
+        if (_mailedInvites.Count > FriendRooms.Count)
+            foreach (var key in _mailedInvites.Keys.Where(k => FriendRooms.All(r => r.Key != k)).ToList()) DropFriendRoom(key);
     }
 
     /// <summary>

@@ -501,6 +501,86 @@ public sealed class FriendsPageTests
     });
 
     [Fact]
+    public void AFailedSendGoesBackOnlyIntoTheSamePersonsBox() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        AddFriends(mp, Friend(1, "Robin"), Friend(2, "Sam"));
+        var pending = new TaskCompletionSource<bool>();
+        mp.SendToFriendForTest = (_, _) => pending.Task;
+
+        // Sent to Robin, then Sam picked while it goes: the failure doesn't put Robin's words in Sam's box.
+        people.Selected = people.Friends.First(f => f.Name == "Robin");
+        people.Draft = "for robin only";
+        var send = people.SendCommand.ExecuteAsync(null);
+        people.Selected = people.Friends.First(f => f.Name == "Sam");
+        pending.SetResult(false);
+        Wait(send);
+        Assert.Equal("", people.Draft);
+
+        // Still on the same person (the list rebuilt in between): the words come back.
+        pending = new TaskCompletionSource<bool>();
+        people.Draft = "for sam";
+        send = people.SendCommand.ExecuteAsync(null);
+        mp.RefreshContacts();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("Sam", people.Selected?.Name);
+        pending.SetResult(false);
+        Wait(send);
+        Assert.Equal("for sam", people.Draft);
+    });
+
+    [Fact]
+    public void TheConversationStaysWhenAFriendsJayAccountIsLinked() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        using var bob = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        using var laptop = DeviceKeys.Generate();
+        AddFriends(mp, new Contact(laptop.Dh.PublicKey, "Bob", true, DateTimeOffset.UtcNow));
+        people.Selected = people.Friends.Single();
+        mp.FriendMessageForTest(laptop.Dh.PublicKey, "before the link", mine: false);
+        var lines = people.Lines!;
+        Assert.Single(lines);
+
+        // A live handshake ties the device to Bob's Jay account: the person's key changes, the conversation doesn't.
+        mp.Contacts.SeenLive(laptop.Dh.PublicKey, bob.CertifyDevice(laptop, "Laptop", 0, DateTimeOffset.UtcNow));
+        mp.RefreshContacts();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(bob.Address, mp.ContactList.Single().JayAccount);
+        people.Selected = people.Friends.Single();
+        Assert.Same(lines, people.Lines);
+        mp.FriendMessageForTest(laptop.Dh.PublicKey, "after the link", mine: false);
+        Assert.Equal(["before the link", "after the link"], people.Lines!.Select(l => l.Text));
+    });
+
+    [Fact]
+    public void WhatAddingOrBackingUpSaysShowsOnTheFriendsPage() => WithMain((_, main, people, _) =>
+    {
+        var mp = main.Multiplayer;
+        mp.ContactCodeInput = "not a friend code";
+        Wait(people.AddCommand.ExecuteAsync(null));
+        Assert.Equal("multiplayer.contacts.bad_code", people.StatusInfo?.Key);
+
+        // A status the room sets on its own doesn't show up here.
+        people.SetStatus(null);
+        mp.SetStatus(StatusMessage.Info("multiplayer.room.waiting"));
+        Assert.Null(people.StatusInfo);
+    });
+
+    [Fact]
+    public void ASafetyPanelThatIsDroppedIsLetGo() => UiTestThread.Run(() =>
+    {
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static WeakReference Make() => new(new Amber.App.Controls.Safety.SafetyPanel { Title = "x" });
+        var weak = Make();
+        for (var i = 0; i < 5 && weak.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(weak.IsAlive);
+    });
+
+    [Fact]
     public void AMessageNeedsTheFriendInTheSameRoomAndSaysSo() => WithMain((_, main, people, _) =>
     {
         var mp = main.Multiplayer;

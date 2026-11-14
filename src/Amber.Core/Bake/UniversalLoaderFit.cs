@@ -16,7 +16,7 @@ public static class UniversalLoaderFit
     public static string? Unsupported(CrossLoader.Capabilities? caps, string? instanceLoader, string? mcVersion)
     {
         if (instanceLoader is null) return L.T("core.bake.fit.no_loader");
-        if (CrossLoader.PlatformOf(instanceLoader) is not { } platform) return L.F("core.bake.unsupported_loader", instanceLoader);
+        if (CrossLoader.PlatformOf(instanceLoader, mcVersion) is not { } platform) return L.F("core.bake.unsupported_loader", instanceLoader);
         if (caps is null) return L.T("core.bake.fit.unavailable");
         var versions = caps.Platforms.GetValueOrDefault(platform) ?? [];
         if (string.IsNullOrEmpty(mcVersion) || !versions.Contains(mcVersion))
@@ -27,19 +27,16 @@ public static class UniversalLoaderFit
 
     /// <summary>
     /// The loader a "Jay loader" instance is built on for this game version: NeoForge where the universal loader runs
-    /// NeoForge on it, else Forge; null when it runs neither (or nothing is known about the loader yet).
+    /// NeoForge on it, else Forge; null when it runs neither (or nothing is known about the loader yet). It asks
+    /// <see cref="Unsupported"/>, so the new-instance panel offers exactly what preparing and starting accept.
     /// </summary>
     public static Install.LoaderKind? BaseLoaderFor(CrossLoader.Capabilities? caps, string? mcVersion)
     {
         if (caps is null || string.IsNullOrEmpty(mcVersion)) return null;
-        bool Runs(string platform) => caps.Platforms.GetValueOrDefault(platform) is { } versions && versions.Contains(mcVersion);
-        return Runs(BakePlatform.NeoForge) ? Install.LoaderKind.NeoForge
-            : Runs(BakePlatform.Forge) || Runs(ForgeLegacyPlatform) ? Install.LoaderKind.Forge
+        return Unsupported(caps, "neoforge", mcVersion) is null ? Install.LoaderKind.NeoForge
+            : Unsupported(caps, "forge", mcVersion) is null ? Install.LoaderKind.Forge
             : null;
     }
-
-    /// <summary>Where newer loader releases list 1.12.2 (Forge 14.23.5.x), apart from modern Forge.</summary>
-    internal const string ForgeLegacyPlatform = "forge-1.12.2";
 
     /// <summary>A base loader build the universal loader starts on: on 1.12.2 only Forge 14.23.5.x, elsewhere any.</summary>
     public static bool AcceptsBase(string mcVersion, Install.LoaderKind kind, string loaderVersion) =>
