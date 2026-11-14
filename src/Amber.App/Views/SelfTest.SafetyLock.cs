@@ -138,6 +138,7 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
             ImageTheme.Write(noisePack, "selftest-noise-sidebar", "Noise sidebar", ImageTheme.Extract([]),
                 new Dictionary<string, ImageThemeSlot> { [ThemeSlots.Sidebar] = new(new ThemeSlot { Image = "", Dim = 0 }, NoisePng(480, 1400), ".png") });
             var sidebarRow = window.GetVisualDescendants().OfType<PrivacyRow>().First(r => r.Name == "PrivacyRow");
+            var (windowWidth, windowHeight) = (window.ClientSize.Width, window.ClientSize.Height);
             foreach (var (w, h) in new[] { (1280, 800), (600, 420) })
             {
                 window.Width = w;
@@ -162,7 +163,11 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
             }
             settings.ResetThemePackCommand.Execute(null);
             Application.Current!.RequestedThemeVariant = ThemeVariant.Default;
+            // Back to the size the baseline was taken at, so the later comparisons see the same layout.
+            (window.Width, window.Height) = (windowWidth, windowHeight);
             window.Content = stage;
+            // The leave-the-page check cancelled the question; ask it again for the comparisons below.
+            settings.ConfirmingAdvancedReset = true;
             await Task.Delay(300);
 
             // 带保留词的主题包：名字、作者、布局文字里有“Jay 安全提示”都整包拒绝。
