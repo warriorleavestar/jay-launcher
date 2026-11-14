@@ -255,25 +255,113 @@ public sealed class DeviceAttestationTests
     public void BadNetworkPolicyIsRefused(string json) =>
         Assert.Throws<InvalidDataException>(() => SecurityPolicy.Parse(JsonNode.Parse(json)));
 
-    [Fact]
-    public async Task AFailedAttestationClosesTheEncryptedStream()
+    // A handshake that succeeds and an attestation that then fails (peer gone, cancelled, timed out) must close the
+    // connection under the encrypted stream: otherwise its record loops and keys stay alive. Plain and disguised tunnels
+    // have their own code paths on both sides.
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AFailedAttestationClosesTheHostsStream(bool disguise)
     {
         using var hostDevice = X25519KeyPair.Generate();
         using var memberDevice = X25519KeyPair.Generate();
         var (table, entry) = HostTable(hostDevice, memberDevice.PublicKey);
+        var (hostRoom, memberRoom) = InviteRooms(table, entry.Key, disguise);
         var (client, server, a, b) = await PairAsync();
         using (a)
         using (b)
         {
             var spy = new DisposeSpy(server);
-            var profile = MemberChannel.ChatProfile(TransportMode.High);
-            var accept = MemberChannel.AcceptAsync(spy, table, profile, "chat");
+            var accept = TunnelHandshake.AcceptWithMemberAsync(spy, hostRoom, TransportMode.High, disguise);
             // The member completes the handshake with the right key, then hangs up before sending its proof.
-            await MemberChannel.ConnectAsync(client, entry.Key, profile, "chat", []);
+            await using var memberSide = await TunnelHandshake.ConnectAsync(client, memberRoom, TransportMode.High, disguise, TunnelService.Game);
             a.Client.Close();
             await Assert.ThrowsAnyAsync<Exception>(() => accept);
             Assert.True(await spy.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(5)));
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AFailedAttestationClosesTheMembersStream(bool disguise)
+    {
+        using var hostDevice = X25519KeyPair.Generate();
+        using var memberDevice = X25519KeyPair.Generate();
+        var (table, entry) = HostTable(hostDevice, memberDevice.PublicKey);
+        // The host doesn't ask this member for a proof, so it never answers the member's.
+        entry.Attests = false;
+        var (hostRoom, memberRoom) = InviteRooms(table, MemberKeyFor(entry, memberDevice, hostDevice.PublicKey), disguise);
+        var (client, server, a, b) = await PairAsync();
+        using (a)
+        using (b)
+        {
+            var spy = new DisposeSpy(client);
+            var connect = TunnelHandshake.ConnectAsync(spy, memberRoom, TransportMode.High, disguise, TunnelService.Game);
+            var accepted = await TunnelHandshake.AcceptWithMemberAsync(server, hostRoom, TransportMode.High, disguise);
+            await using var hostSide = accepted!.Value.Stream;
+            // The host hangs up while the member waits for its proof.
+            b.Client.Close();
+            await Assert.ThrowsAnyAsync<Exception>(() => connect);
+            Assert.True(await spy.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ACancelledAttestationClosesTheStream(bool disguise, bool hostSide)
+    {
+        using var hostDevice = X25519KeyPair.Generate();
+        using var memberDevice = X25519KeyPair.Generate();
+        var (table, entry) = HostTable(hostDevice, memberDevice.PublicKey);
+        // The side under test waits for a proof the other side never sends.
+        entry.Attests = hostSide;
+        var memberKey = hostSide ? entry.Key : MemberKeyFor(entry, memberDevice, hostDevice.PublicKey);
+        var (hostRoom, memberRoom) = InviteRooms(table, memberKey, disguise);
+        var proof = new byte[AttestationScheme.Default.ProofLength];
+        var (client, server, a, b) = await PairAsync();
+        using var cts = new CancellationTokenSource();
+        using (a)
+        using (b)
+        {
+            if (hostSide)
+            {
+                var spy = new DisposeSpy(server);
+                var accept = TunnelHandshake.AcceptWithMemberAsync(spy, hostRoom, TransportMode.High, disguise, cts.Token);
+                await using var memberSide = await TunnelHandshake.ConnectAsync(client, memberRoom, TransportMode.High, disguise, TunnelService.Game);
+                // The host's own proof arriving means it is past the handshake and now waits for the member's.
+                await memberSide.ReadExactlyAsync(proof);
+                await cts.CancelAsync();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => accept);
+                Assert.True(await spy.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            }
+            else
+            {
+                var spy = new DisposeSpy(client);
+                var connect = TunnelHandshake.ConnectAsync(spy, memberRoom, TransportMode.High, disguise, TunnelService.Game, cts.Token);
+                var accepted = await TunnelHandshake.AcceptWithMemberAsync(server, hostRoom, TransportMode.High, disguise);
+                await using var hostStream = accepted!.Value.Stream;
+                // The member's proof arriving means it is past the handshake and now waits for the host's answer.
+                await hostStream.ReadExactlyAsync(proof);
+                await cts.CancelAsync();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connect);
+                Assert.True(await spy.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            }
+        }
+    }
+
+    /// <summary>The host's invite room (with its member table) and the member's (with its own key).</summary>
+    private static (RoomCode Host, RoomCode Member) InviteRooms(MemberTable table, MemberKey memberKey, bool disguise)
+    {
+        var tunnel = new TunnelSettings(TransportMode.High, disguise);
+        const string network = "jay-0123456789abcdef";
+        var secret = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
+        return (RoomCode.FromCredentials(network, secret, 25565, tunnel, members: table),
+            RoomCode.FromCredentials(network, secret, 25565, tunnel, member: memberKey));
     }
 
     private sealed class DisposeSpy(Stream inner) : Stream

@@ -89,8 +89,8 @@ public static partial class JoinTarget
         // and the SRV lookup only understand ASCII names.
         if (!System.Text.Ascii.IsValid(typedHost))
         {
-            try { typedHost = new System.Globalization.IdnMapping().GetAscii(typedHost.TrimEnd('.')); }
-            catch (ArgumentException) { return Skip(L.F("core.mp.join.invalid_address", server)); }
+            if (ToAsciiLikeTheGame(typedHost) is not { } ascii) return Skip(L.F("core.mp.join.invalid_address", server));
+            typedHost = ascii;
         }
         if (IsLocalName(typedHost)) return Skip(L.F("core.mp.join.local_name", typedHost));
         if (typedHost.Length > 253) return Skip(L.T("core.mp.join.name_too_long"));
@@ -131,6 +131,29 @@ public static partial class JoinTarget
             // 本机解析不了也没关系，交给出口那边解析。
         }
         return new RelayPlan(host, port, host, port);
+    }
+
+    /// <summary>
+    /// The ASCII form the game writes for a host name (Java's IDN.toASCII, IDNA2003), or null when it isn't a valid name.
+    /// Labels are split at the dot and its ideographic and full-width forms; ASCII labels and a trailing root dot are kept
+    /// as they are. IdnMapping follows UTS #46 non-transitional processing, which keeps ß, ς, ZWJ and ZWNJ where IDNA2003
+    /// maps them (to ss, σ, nothing, nothing), so "straße" would otherwise become a different domain than the game's
+    /// "strasse": map those first.
+    /// </summary>
+    internal static string? ToAsciiLikeTheGame(string host)
+    {
+        var labels = host.Split(['.', '\u3002', '\uFF0E', '\uFF61']);
+        var idn = new System.Globalization.IdnMapping();
+        for (var i = 0; i < labels.Length; i++)
+        {
+            // Only the root label (after a trailing dot) may be empty.
+            if (labels[i].Length == 0 && i < labels.Length - 1) return null;
+            if (System.Text.Ascii.IsValid(labels[i])) continue;
+            var label = labels[i].ToLowerInvariant().Replace("\u00DF", "ss").Replace('\u03C2', '\u03C3').Replace("\u200C", "").Replace("\u200D", "");
+            try { labels[i] = idn.GetAscii(label); }
+            catch (ArgumentException) { return null; }
+        }
+        return string.Join('.', labels);
     }
 
     private static string IPv6Only => L.T("core.mp.join.ipv6_only");

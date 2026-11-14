@@ -434,6 +434,42 @@ public class SecurityReviewFixTests
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(6));
     }
 
+    /// <summary>
+    /// Names in another script are relayed under the name the game itself would use (Java's IDN.toASCII, IDNA2003),
+    /// not under a different domain: ß and final sigma fold, ZWJ/ZWNJ drop, ideographic and full-width dots separate
+    /// labels, a trailing root dot stays, ASCII labels keep their case.
+    /// </summary>
+    [Theory]
+    [InlineData("straße.example.org", "strasse.example.org")]
+    [InlineData("STRAßE.example.org", "strasse.example.org")]
+    [InlineData("λόγος.example.org", "xn--oxapnq6b.example.org")]
+    [InlineData("bü\u200Dcher.example.org", "xn--bcher-kva.example.org")]
+    [InlineData("bü\u200Ccher.example.org", "xn--bcher-kva.example.org")]
+    [InlineData("例子\u3002example\u3002org", "xn--fsqu00a.example.org")]
+    [InlineData("例子\uFF0Eexample\uFF0Eorg", "xn--fsqu00a.example.org")]
+    [InlineData("例子\uFF61example\uFF61org", "xn--fsqu00a.example.org")]
+    [InlineData("bücher.example.org.", "xn--bcher-kva.example.org.")]
+    [InlineData("bücher.example.org\u3002", "xn--bcher-kva.example.org.")]
+    [InlineData("Bücher.EXAMPLE.org", "xn--bcher-kva.EXAMPLE.org")]
+    public async Task JoinTarget_IdnNamesMatchTheGame(string typed, string expected)
+    {
+        static Task<IPAddress[]> Public(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("8.8.8.8") });
+        string? srvAsked = null;
+        (string, int)? SrvSpy(string name) { srvAsked = name; return null; }
+        Assert.Equal(new RelayPlan(expected, 25565, expected, 25565), await JoinTarget.ResolveForRelayAsync(typed, default, Public, SrvSpy));
+        Assert.Equal("_minecraft._tcp." + expected.TrimEnd('.'), srvAsked);
+    }
+
+    [Theory]
+    [InlineData("bücher..example.org")]
+    [InlineData("\u200D.example.org")]
+    public async Task JoinTarget_InvalidIdnNamesAreNotRelayed(string typed)
+    {
+        static Task<IPAddress[]> Public(string _, CancellationToken __) => Task.FromResult(new[] { IPAddress.Parse("8.8.8.8") });
+        static (string, int)? NoSrv(string _) => null;
+        Assert.Null(await JoinTarget.ResolveForRelayAsync(typed, default, Public, NoSrv));
+    }
+
     [Fact]
     public void JoinTarget_RealSrvLookupDoesNotCrash()
     {
