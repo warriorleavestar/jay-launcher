@@ -347,7 +347,8 @@ internal static class InstanceSettingsTrust
     {
         var store = new Store();
         string text;
-        for (var attempt = 0; ; attempt++)
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 2;
+        while (true)
         {
             try
             {
@@ -362,10 +363,10 @@ internal static class InstanceSettingsTrust
                 // Not there yet: folders are adopted as they are now.
                 return store;
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException && attempt < 3)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && Stopwatch.GetTimestamp() < deadline)
             {
                 // Windows can refuse an open for a moment while the file is being replaced.
-                Thread.Sleep(10);
+                Thread.Sleep(5);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -412,11 +413,38 @@ internal static class InstanceSettingsTrust
             // Written aside and moved over the record in one step, so a read without the lock never sees half a file.
             var temp = StorePath + "." + Environment.ProcessId + ".tmp";
             File.WriteAllText(temp, json.ToJsonString());
-            File.Move(temp, StorePath, overwrite: true);
+            MoveOver(temp, StorePath);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             throw Unavailable(e);
+        }
+    }
+
+    /// <summary>
+    /// Moves <paramref name="temp"/> over <paramref name="path"/>. Windows refuses to replace a file another thread or
+    /// process has open, even one opened with FileShare.Delete, so a lock-free <see cref="Read"/> that is reading the
+    /// record makes the move fail for a moment: try again for a short while, then give up and remove the temp file.
+    /// </summary>
+    private static void MoveOver(string temp, string path)
+    {
+        var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency;
+        while (true)
+        {
+            try
+            {
+                File.Move(temp, path, overwrite: true);
+                return;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && Stopwatch.GetTimestamp() < deadline)
+            {
+                Thread.Sleep(5);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                try { File.Delete(temp); } catch (Exception d) when (d is IOException or UnauthorizedAccessException) { }
+                throw;
+            }
         }
     }
 
