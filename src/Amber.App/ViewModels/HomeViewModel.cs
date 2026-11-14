@@ -385,7 +385,6 @@ public sealed partial class HomeViewModel : PageViewModel
         }
     }
 
-    /// <summary>按最近一次启动的阶段和当前选择，重算主按钮文字和进度条。</summary>
     /// <summary>The latest session of each instance in this run of Jay (instance page start button).</summary>
     private readonly Dictionary<string, LaunchSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
 
@@ -420,6 +419,7 @@ public sealed partial class HomeViewModel : PageViewModel
     /// <summary>When that session ended.</summary>
     public DateTimeOffset? CrashTime { get; private set; }
 
+    /// <summary>按最近一次启动的阶段和当前选择，重算主按钮文字和进度条。</summary>
     private void UpdateRunState()
     {
         var run = Latest;
@@ -596,7 +596,6 @@ public sealed partial class HomeViewModel : PageViewModel
         RunStarted?.Invoke(id);
         _runs.Add(run);
         _sessions[id] = run.Session;
-        _lastRequest = request;
         SessionStarted?.Invoke(run.Session);
         Crash = null;
         Failure = null;
@@ -1248,7 +1247,6 @@ public sealed partial class HomeViewModel : PageViewModel
         }
     }
 
-    private LaunchRequest? _lastRequest;
     private string[] _failureOutput = [];
 
     private void ShowFailure(GameRun run, LaunchRequest request, Exception e)
