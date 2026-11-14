@@ -364,8 +364,10 @@ public sealed class DirectBridge : IAsyncDisposable
     public HashSet<PathKind> AllowedPaths { get; } = [.. Enum.GetValues<PathKind>()];
 
     /// <summary>
-    /// 房主：现在收不收新的加入方。直连房间的大厅密钥 L（也就是桥钥匙）整个房间都不换，
-    /// 所以没有待用邀请时不再接新的桥——拿着旧码的人连大厅都到不了；已经连着的、证明过身份的照常。
+    /// Host: whether new bridges may reach the lobby now. The direct room's lobby key L (the bridge key) stays the same for
+    /// the whole room, so while no invite is open a new bridge reaches nothing, not even the lobby: someone holding an old
+    /// invite can't knock. It is still taken for a short while so that a member coming back from a new address can prove
+    /// membership on it; bridges that already proved membership carry on as before.
     /// </summary>
     public Func<bool>? AcceptingNewPeers { get; set; }
 

@@ -748,11 +748,18 @@ public sealed class DirectSession : IAsyncDisposable
         {
             try
             {
+                // Each try that finds nobody waits twice as long before the next, up to a minute.
+                var wait = ReconnectInterval;
                 while (!_disposed)
                 {
-                    await Task.Delay(ReconnectInterval, _lifetime.Token);
-                    if (bridge.Peers.Count > 0 || TestConsent.ActiveRun is not null || TestConsent.RestoringRun is not null) continue;
-                    await bridge.PunchAsync(host.Candidates, host.Nat, TimeSpan.FromSeconds(15), _lifetime.Token);
+                    await Task.Delay(wait, _lifetime.Token);
+                    if (bridge.Peers.Count > 0 || TestConsent.ActiveRun is not null || TestConsent.RestoringRun is not null)
+                    {
+                        wait = ReconnectInterval;
+                        continue;
+                    }
+                    var back = await bridge.PunchAsync(host.Candidates, host.Nat, TimeSpan.FromSeconds(15), _lifetime.Token);
+                    wait = back is not null ? ReconnectInterval : TimeSpan.FromTicks(Math.Min(wait.Ticks * 2, TimeSpan.FromMinutes(1).Ticks));
                 }
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException) { }
