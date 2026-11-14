@@ -126,8 +126,12 @@ public sealed class GameLauncher(GameDirectory dir)
         var scriptPath = Path.GetFullPath(path);
         var (launcher, mapped) = ForCurrentCodePage(options, notice);
         var args = launcher.BuildArguments(mapped, notice, out _, scriptPath + ".amber");
-        return Toolbox.WriteLaunchScript(scriptPath, mapped.JavaPath, mapped.WorkingDirectory ?? launcher.GameDir.Root,
-            args, mapped.Session.AccessToken);
+        var workDir = mapped.WorkingDirectory ?? launcher.GameDir.Root;
+        // The script gets the same legacy home as a launch from Jay, or old versions would write to the real .minecraft.
+        var legacyHome = launcher.LegacyHomeFor(launcher.GameDir.ResolveVersion(mapped.VersionId), workDir, notice);
+        if (legacyHome is not null && !OperatingSystem.IsWindows()) args.Insert(0, "-Duser.home=" + legacyHome);
+        return Toolbox.WriteLaunchScript(scriptPath, mapped.JavaPath, workDir, args, mapped.Session.AccessToken,
+            appData: OperatingSystem.IsWindows() ? legacyHome : null);
     }
 
     /// <summary>noTraceDir：这次无痕模式配置放的临时目录（没生成时为 null），用完由调用方删掉。</summary>
@@ -317,7 +321,7 @@ public sealed class GameLauncher(GameDirectory dir)
                 ExtraJvmArgs = options.ExtraJvmArgs.Select(a => AsciiPaths.MapArgument(Map(a), onOutput)).ToList(),
                 ExtraGameArgs = options.ExtraGameArgs.Select(a => AsciiPaths.MapArgument(Map(a), onOutput)).ToList(),
             };
-            return (new GameLauncher(new GameDirectory(root)) { BaseRules = BaseRules, RealRoot = dir.Root, NoTraceRoot = NoTraceRoot }, mapped);
+            return (new GameLauncher(new GameDirectory(root)) { BaseRules = BaseRules, RealRoot = dir.Root, NoTraceRoot = NoTraceRoot, LegacyHomeDataDir = LegacyHomeDataDir }, mapped);
         }
         // 游戏目录和 Java 都是英文路径，参数里也可能带别处的路径（比如外置登录的 -javaagent 指向数据目录）。
         var args = options with
@@ -350,8 +354,7 @@ public sealed class GameLauncher(GameDirectory dir)
             CreateNoWindow = true,
         };
         // 1.6 以前的版本（和 Jay 装的老 Forge）会按系统家目录写文件，先准备指向本实例的隔离家目录。
-        var realWorkDir = RealRoot is { } real ? AsciiPaths.Remap(workDir, dir.Root, real) : workDir;
-        var legacyHome = IsPreLaunchwrapperHome(version) ? AsciiPaths.LegacyHome(realWorkDir, onOutput) : null;
+        var legacyHome = LegacyHomeFor(version, workDir, onOutput);
         string? noTraceDir = null;
         try
         {
@@ -528,6 +531,22 @@ public sealed class GameLauncher(GameDirectory dir)
     /// 还在被运行中的游戏用的、刚建好还没启动游戏的、删不掉的都跳过。返回删掉了几个。
     /// </summary>
     public static int SweepNoTrace(string? root = null) => NoTraceDirs.Sweep(root ?? DefaultNoTraceRoot, DateTime.UtcNow);
+
+    /// <summary>Tests: where the legacy homes go instead of Jay's data folder.</summary>
+    internal string? LegacyHomeDataDir { get; init; }
+
+    /// <summary>
+    /// The separate home folder for a version that writes to the system home (see <see cref="IsPreLaunchwrapperHome"/>),
+    /// or null for any other version. Throws when it can't be made: such a game would otherwise write into the
+    /// player's real .minecraft.
+    /// </summary>
+    internal string? LegacyHomeFor(VersionJson version, string workDir, Action<string>? log)
+    {
+        if (!IsPreLaunchwrapperHome(version)) return null;
+        var realWorkDir = RealRoot is { } real ? AsciiPaths.Remap(workDir, dir.Root, real) : workDir;
+        return AsciiPaths.LegacyHome(realWorkDir, log, LegacyHomeDataDir)
+               ?? throw new InvalidOperationException(L.T("core.launch.game.legacyhomefailed"));
+    }
 
     /// <summary>1.6.1（2013-06-25）以前发布的版本，或者 Amber 装的老 Forge。</summary>
     internal static bool IsPreLaunchwrapperHome(VersionJson version) =>
