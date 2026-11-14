@@ -125,9 +125,7 @@ public sealed partial class MultiplayerViewModel
         {
             Person = to.Friend is { } f ? PersonOf(f) : to.Peer is { } p ? PersonOf(p) : null,
         };
-        _cards[item.Id] = item;
-        Transfers.Insert(0, item);
-        while (Transfers.Count > 50) Transfers.RemoveAt(Transfers.Count - 1);
+        AddCard(item);
         if (to.Friend is { } friend) AddFriendLine(friend.Contact, new FriendLine(FriendLineKind.File, () => item.Name, DateTimeOffset.Now) { File = item });
         item.Task = _service.Tasks.Track("file", L.F("files.task.send", name, to.DisplayName), cancel: () => _ = CancelCardAsync(item));
 
@@ -137,13 +135,14 @@ public sealed partial class MultiplayerViewModel
             Set(item, FileCardState.Packing);
             item.Packing = new CancellationTokenSource();
             var token = item.Packing.Token;
+            string[] secrets = _room is { } room ? [.. room.Secrets] : [];
             try
             {
                 item.SourcePath = await Task.Run(() => source.Kind switch
                 {
                     FileKind.World or FileKind.Folder => FilePacker.PackFolder(source.Path, OutgoingDir, token),
                     FileKind.ModList => FilePacker.WriteModList(source.Manifest ?? ModManifest.Read(source.Path), source.Title ?? "mods", OutgoingDir),
-                    _ => FilePacker.RedactLog(source.Path, OutgoingDir),
+                    _ => FilePacker.RedactLog(source.Path, OutgoingDir, secrets: secrets),
                 }, token);
                 item.Packed = true;
             }
@@ -195,6 +194,21 @@ public sealed partial class MultiplayerViewModel
         Finish(item, FileCardState.Unreachable);
     }
 
+    /// <summary>
+    /// How many files go out at once. The others wait their turn on their cards: the other side holds only a few offers
+    /// at a time (<see cref="PrivateMessenger.MaxIncoming"/>), and a batch should not crowd out what others send.
+    /// </summary>
+    internal const int MaxSendsAtOnce = 3;
+
+    private readonly HashSet<TransferItem> _sending = [];
+    private readonly List<TransferItem> _sendLine = [];
+
+    /// <summary>Files going out now and files waiting their turn (tests).</summary>
+    internal (int Sending, int Waiting) SendCounts => (_sending.Count, _sendLine.Count);
+
+    /// <summary>Tests: stands in for handing a file to the channel.</summary>
+    internal Func<string, string, string, CancellationToken, Task<bool>>? SendForTest { get; set; }
+
     private void Start(TransferItem item, OnlinePeerItem peer)
     {
         if (_messenger is not { } messenger || item.SourcePath is not { } path) return;
@@ -205,23 +219,73 @@ public sealed partial class MultiplayerViewModel
         item.ResetSpeed();
         if (item.Task is not { IsRunning: true }) item.Task = _service.Tasks.Track("file", L.F("files.task.send", item.Name, item.PeerName), cancel: () => _ = CancelCardAsync(item));
         Set(item, FileCardState.Waiting);
+        if (_sending.Count >= MaxSendsAtOnce)
+        {
+            if (!_sendLine.Contains(item)) _sendLine.Add(item);
+            return;
+        }
+        _sendLine.Remove(item);
+        _sending.Add(item);
+        item.Sending?.Dispose();
+        var cts = item.Sending = new CancellationTokenSource();
+        var send = SendForTest ?? ((to, file, id, ct) => messenger.SendFileAsync(to, file, id, ct));
+        var to = peer.Entry.Fingerprint;
         _ = Task.Run(async () =>
         {
-            try { await messenger.SendFileAsync(peer.Entry.Fingerprint, path, item.Id); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or ObjectDisposedException)
+            string? error = null;
+            var cancelled = false;
+            try { await send(to, path, item.Id, cts.Token); }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested) { cancelled = true; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or ObjectDisposedException) { error = e.Message; }
+            Dispatcher.UIThread.Post(() =>
             {
-                Dispatcher.UIThread.Post(() =>
+                // Cancelled before the channel took it (while hashing): nothing went out, the card ends here.
+                if (cancelled && item.IsActive) Finish(item, FileCardState.Cancelled);
+                else if (error is not null)
                 {
-                    item.Error = e.Message;
+                    item.Error = error;
                     Finish(item, FileCardState.Failed);
-                });
-            }
+                }
+                if (ReferenceEquals(item.Sending, cts)) item.Sending = null;
+                cts.Dispose();
+                _sending.Remove(item);
+                StartNextInLine();
+            });
         });
+    }
+
+    /// <summary>A send ended: the next file waiting its turn goes, if its person is still here.</summary>
+    private void StartNextInLine()
+    {
+        while (_sending.Count < MaxSendsAtOnce && _sendLine.Count > 0)
+        {
+            var next = _sendLine[0];
+            _sendLine.RemoveAt(0);
+            if (next.State != FileCardState.Waiting) continue;
+            var peer = OnlinePeers.FirstOrDefault(p => p.Entry.Fingerprint == next.Fingerprint && KeyMatches(p.Entry));
+            if (peer is not null) Start(next, peer);
+            else if (FriendForCard(next) is { } friend) StartOrQueue(next, new FileRecipient(next.PeerName, friend, null));
+            else Finish(next, FileCardState.Unreachable);
+        }
+    }
+
+    /// <summary>
+    /// A send to a friend broke because they are gone: with queueing on it waits for them and carries on by itself when
+    /// they are back (the card says so). True when it was queued.
+    /// </summary>
+    private bool QueueInterrupted(TransferItem item)
+    {
+        if (!item.Outgoing || item.State != FileCardState.Interrupted || FriendForCard(item) is not { } friend || !_service.Settings.FilesQueueOffline
+            || item.Person is not { } person || item.SourcePath is not { } path || PeerOf(friend) is not null) return false;
+        return _fileQueue.Add(new QueuedFile(item.Id, person, path, item.Name, item.Kind, DateTimeOffset.Now));
     }
 
     /// <summary>Someone may have come online: their queued files start, oldest first.</summary>
     private void FlushFileQueue()
     {
+        // Someone may have left too: a send to them that broke waits for them now.
+        foreach (var item in _cards.Values.ToList())
+            if (item.Outgoing && item.State == FileCardState.Interrupted && !_fileQueue.All.Any(q => q.Id == item.Id)) QueueInterrupted(item);
         if (_messenger is null || _fileQueue.Count == 0) return;
         foreach (var friend in ContactList)
         {
@@ -238,9 +302,7 @@ public sealed partial class MultiplayerViewModel
         {
             // A mod file during a sync, or a file accepted before its card existed.
             item = new TransferItem(p.Id, p.Outgoing, p.Name, p.Size, this, peerName: NameOfFingerprint(p.Peer));
-            _cards[p.Id] = item;
-            Transfers.Insert(0, item);
-            while (Transfers.Count > 50) Transfers.RemoveAt(Transfers.Count - 1);
+            AddCard(item);
         }
         if (item.Size == 0) item.Size = p.Size;
         item.Sample(p.Done, DateTimeOffset.Now);
@@ -255,7 +317,9 @@ public sealed partial class MultiplayerViewModel
         item.SavedPath = p.SavedPath is { Length: > 0 } saved ? saved : null;
         if (!p.Outgoing && item.SavedPath is { } path)
         {
-            item.Kind = FileKinds.OfReceived(path);
+            // By name now; whether a zip holds a world is read off the UI thread (it can be a big or odd zip).
+            item.Kind = FileKinds.Of(path);
+            if (FileKinds.MayBeWorld(path)) _ = CheckReceivedWorldAsync(item, path);
             RefreshInstanceChoices();
             if (_service.Settings.FilesNotifyDone) SetStatus(StatusMessage.Success("multiplayer.private.saved", path));
         }
@@ -267,7 +331,28 @@ public sealed partial class MultiplayerViewModel
             return;
         }
         Finish(item, state);
+        // Only they left (the room is still open): carry on when they are back, as after a lost room.
+        QueueInterrupted(item);
     }
+
+    /// <summary>Stops world checks on received zips when the room's channel closes.</summary>
+    private CancellationTokenSource _receivedChecks = new();
+
+    /// <summary>Received a zip: looks for a world in it in the background; the card becomes a world card when there is one.</summary>
+    private async Task CheckReceivedWorldAsync(TransferItem item, string path)
+    {
+        var token = _receivedChecks.Token;
+        bool world;
+        try { world = await Task.Run(() => FileKinds.LooksLikeWorld(path, token), token); }
+        catch (OperationCanceledException) { return; }
+        if (!world || token.IsCancellationRequested || item.SavedPath != path) return;
+        item.Kind = FileKind.World;
+        item.Changed();
+        WorldChecked?.Invoke(item);
+    }
+
+    /// <summary>Self-checks and tests: a received zip was found to hold a world.</summary>
+    internal event Action<TransferItem>? WorldChecked;
 
     /// <summary>The friend a card belongs to (by its person key), if it is a friend's.</summary>
     private ContactItem? FriendForCard(TransferItem item) => item.Person is { } person ? ContactList.FirstOrDefault(f => PersonOf(f) == person) : null;
@@ -297,7 +382,71 @@ public sealed partial class MultiplayerViewModel
             FilePacker.TryDelete(packed);
             item.Packed = false;
         }
+        TrimCards();
     }
+
+    /// <summary>The most cards the room's list keeps; finished ones beyond it are forgotten, oldest first.</summary>
+    internal const int MaxCards = 50;
+
+    /// <summary>Cards in the room's list and the ones still known by id (tests).</summary>
+    internal int CardCount => _cards.Count;
+
+    /// <summary>Every new card goes in here, so every path shares the same limit.</summary>
+    private void AddCard(TransferItem item)
+    {
+        _cards[item.Id] = item;
+        Transfers.Insert(0, item);
+        TrimCards();
+    }
+
+    /// <summary>
+    /// Forgets finished cards past <see cref="MaxCards"/>, oldest first, and any finished card no longer in the list.
+    /// A card still moving, packing, waiting in the queue or able to carry on stays.
+    /// </summary>
+    private void TrimCards()
+    {
+        for (var i = Transfers.Count - 1; i >= 0 && Transfers.Count > MaxCards; i--)
+        {
+            var old = Transfers[i];
+            if (!CanForget(old)) continue;
+            Transfers.RemoveAt(i);
+            _cards.Remove(old.Id);
+        }
+        if (_cards.Count <= Transfers.Count) return;
+        var shown = Transfers.Select(t => t.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var (id, card) in _cards.ToList())
+            if (!shown.Contains(id) && CanForget(card)) _cards.Remove(id);
+    }
+
+    private bool CanForget(TransferItem item) =>
+        item.Finished && item.State is not (FileCardState.Queued or FileCardState.Packing)
+        && !(item.Outgoing && item.State == FileCardState.Interrupted) && !_fileQueue.All.Any(q => q.Id == item.Id);
+
+    /// <summary>Leaving the room: the list empties and only cards that will carry on later (queued for a friend) are kept.</summary>
+    private void ForgetRoomCards()
+    {
+        Transfers.Clear();
+        foreach (var (id, card) in _cards.ToList())
+            if (!_fileQueue.All.Any(q => q.Id == id) && card.State is not (FileCardState.Queued or FileCardState.Packing)) _cards.Remove(id);
+        _autoAccepted.Clear();
+    }
+
+    /// <summary>What each sender may still hand over without being asked.</summary>
+    private readonly AutoAcceptBudget _autoAccepted = new();
+
+    /// <summary>Tests: an offer from the device with <paramref name="key"/> on the automatic path (a card when it was taken).</summary>
+    internal bool TakeOfferForTest(FileOffer offer, byte[]? key)
+    {
+        if (!TakeOfferAutomatically(offer, key)) return false;
+        CardForAccepted(offer);
+        return true;
+    }
+
+    /// <summary>Tests: a progress report as the room's channel hands it over.</summary>
+    internal void ApplyTransferForTest(FileProgress p) => ApplyTransfer(p);
+
+    /// <summary>Tests: leaving the room, as far as the file cards go.</summary>
+    internal void ForgetRoomCardsForTest() => ForgetRoomCards();
 
     /// <summary>[Cancel] on a card: a queued or packing file simply stops; one on the wire tells the other side.</summary>
     internal async Task CancelCardAsync(TransferItem item)
@@ -307,11 +456,13 @@ public sealed partial class MultiplayerViewModel
             item.Packing?.Cancel();
             return;
         }
-        if (_fileQueue.Remove(item.Id) || item.State == FileCardState.Queued || item.State == FileCardState.Interrupted)
+        if (_fileQueue.Remove(item.Id) | _sendLine.Remove(item) || item.State == FileCardState.Queued || item.State == FileCardState.Interrupted)
         {
             Finish(item, FileCardState.Cancelled);
             return;
         }
+        // Still being hashed (the channel does not know it yet) or already going out: both stop.
+        item.Sending?.Cancel();
         if (_messenger is { } messenger) await messenger.CancelAsync(item.Id);
         else Finish(item, FileCardState.Cancelled);
     }
@@ -339,6 +490,9 @@ public sealed partial class MultiplayerViewModel
     /// </summary>
     private void OnFilesChannelClosed()
     {
+        _receivedChecks.Cancel();
+        _receivedChecks.Dispose();
+        _receivedChecks = new CancellationTokenSource();
         foreach (var item in _cards.Values.ToList())
         {
             if (!item.IsActive || item.State is FileCardState.Queued or FileCardState.Packing) continue;
@@ -349,18 +503,23 @@ public sealed partial class MultiplayerViewModel
                 continue;
             }
             Finish(item, FileCardState.Interrupted);
-            if (item.Outgoing && item.State == FileCardState.Interrupted && FriendForCard(item) is { } again && _service.Settings.FilesQueueOffline
+            if (item.Outgoing && item.State == FileCardState.Interrupted && FriendForCard(item) is not null && _service.Settings.FilesQueueOffline
                 && item.Person is { } person && item.SourcePath is { } path)
                 _fileQueue.Add(new QueuedFile(item.Id, person, path, item.Name, item.Kind, DateTimeOffset.Now));
         }
+        _sendLine.Clear();
+        _sending.Clear();
+        TrimCards();
     }
 
     /// <summary>Someone offered a file: decline it for "for a child" rules, take it from a checked friend when asked to, or ask.</summary>
     private bool TakeOfferAutomatically(FileOffer offer, byte[]? key)
     {
         if (!_service.Settings.FilesAutoAcceptFriends || ReceivedFiles.IsProgram(offer.Name) || Child.FriendsFilesOnly) return false;
-        return key is not null && FriendOf(key, null) is { } friend && StateOf(friend) != FriendState.NewDevice
+        var checkedFriend = key is not null && FriendOf(key, null) is { } friend && StateOf(friend) != FriendState.NewDevice
             && friend.Devices.Any(d => d.PublicKey.AsSpan().SequenceEqual(key) && d.Verified && !d.NewDevice);
+        // Past the sender's allowance the offer is asked about like anyone else's.
+        return checkedFriend && _autoAccepted.TryTake(offer.FromFingerprint, offer.Size);
     }
 
     /// <summary>An offer came in: the friend's conversation keeps one line pointing at the request bar.</summary>
@@ -371,8 +530,19 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>I accepted an offer: its card goes into the conversation with the friend who sent it.</summary>
-    private void CardForAccepted(FileOffer offer)
+    private TransferItem CardForAccepted(FileOffer offer)
     {
+        // The sender lost the connection and offers the same transfer again: its card carries on.
+        if (_cards.TryGetValue(offer.Id, out var earlier) && !earlier.Outgoing && earlier.Fingerprint == offer.FromFingerprint)
+        {
+            earlier.Error = null;
+            earlier.Finished = false;
+            earlier.ResetSpeed();
+            if (earlier.Task is not { IsRunning: true })
+                earlier.Task = _service.Tasks.Track("file", L.F("files.task.receive", offer.Name, earlier.PeerName), cancel: () => _ = CancelCardAsync(earlier));
+            Set(earlier, FileCardState.Waiting);
+            return earlier;
+        }
         var key = OnlinePeers.FirstOrDefault(p => p.Entry.Fingerprint == offer.FromFingerprint)?.Entry.PublicKey;
         var friend = key is null ? null : FriendOf(key, null);
         var item = new TransferItem(offer.Id, false, offer.Name, offer.Size, this, peerName: offer.FromName.Length > 0 ? offer.FromName : L.T("multiplayer.peers.player"))
@@ -381,10 +551,11 @@ public sealed partial class MultiplayerViewModel
             Fingerprint = offer.FromFingerprint,
         };
         item.Route = RouteTo(offer.FromFingerprint);
-        _cards[item.Id] = item;
-        Transfers.Insert(0, item);
+        AddCard(item);
         if (friend is not null) AddFriendLine(friend.Contact, new FriendLine(FriendLineKind.File, () => item.Name, DateTimeOffset.Now) { File = item });
         item.Task = _service.Tasks.Track("file", L.F("files.task.receive", offer.Name, item.PeerName), cancel: () => _ = CancelCardAsync(item));
+        Set(item, FileCardState.Waiting);
+        return item;
     }
 
     internal void RefreshInstanceChoices()

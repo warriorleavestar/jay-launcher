@@ -1,3 +1,4 @@
+using Amber.Core.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using Amber.Core.Multiplayer;
@@ -198,6 +199,55 @@ public sealed class FilesTests : IDisposable
     }
 
     [Fact]
+    public void ALogGoesOutWithoutCodesSecretsTokensOrPublicAddresses()
+    {
+        // Documentation-only addresses (RFC 5737 / RFC 3849) and made-up codes.
+        var a26 = new string('A', 13) + new string('7', 13);
+        var invite = $"JAY2-{a26}-{a26}-K";
+        var room = $"AMB-ABCD2345-{a26}-11010";
+        var friendCode = "JAYC1-" + new string('Q', 40);
+        var direct = "JAYDS1-abcDEF_123-xyz";
+        var server = "JAYS2-" + new string('m', 30);
+        const string roomSecret = "room-secret-value-42";
+        var lines = string.Join('\n',
+            $"[main] Loading from /home/someone/games",
+            $"[mp] pasted {invite} into the box",
+            $"[mp] joining {room} via {direct}",
+            $"[mp] friend code {friendCode}, server {server}",
+            $"[et] easytier-core --network-name jay-0123456789abcdef --network-secret hunter2hunter2",
+            $"[et] config network_secret: \"topsecret99\"",
+            $"[mp] my secret is {roomSecret}",
+            $"[auth] {{\"access_token\":\"abcdefghijklmnop\",\"refreshToken\": \"qrstuvwxyz012345\"}}",
+            $"[net] peer 203.0.113.7:11010 and [2001:db8::1]:11010, lan 192.168.1.5 and fe80::1",
+            $"[mod] loaded examplemod v1.2.3.4 and forge-47.2.0.1");
+        var log = Path.Combine(_dir, "latest.log");
+        File.WriteAllText(log, lines);
+        var copy = FilePacker.RedactLog(log, Path.Combine(_dir, "out"), userName: "someone", homeDir: "/home/someone", secrets: [roomSecret]);
+        var text = File.ReadAllText(copy);
+        foreach (var gone in new[] { "someone", invite, a26, room, "ABCD2345", friendCode, direct, server, "0123456789abcdef", "hunter2hunter2",
+                     "topsecret99", roomSecret, "abcdefghijklmnop", "qrstuvwxyz012345", "203.0.113", "2001:db8" })
+            Assert.DoesNotContain(gone, text);
+        // What helps to read the log stays: private addresses and version numbers.
+        Assert.Contains("192.168.1.5", text);
+        Assert.Contains("fe80::1", text);
+        Assert.Contains("v1.2.3.4", text);
+        Assert.Contains("forge-47.2.0.1", text);
+        Assert.Contains(Redaction.Code, text);
+        Assert.Contains(Redaction.Address, text);
+        // Running it again changes nothing, and the original log is untouched.
+        Assert.Equal(text, Redaction.ForSharing(text, [roomSecret], "someone", "/home/someone"));
+        Assert.Equal(lines, File.ReadAllText(log));
+    }
+
+    [Fact]
+    public void ExportsAndErrorReportsUseTheSameMasking()
+    {
+        var line = "joined JAY2-" + new string('B', 26) + "-" + new string('C', 26) + " at 198.51.100.20";
+        Assert.Equal(Redaction.ForSharing(line), CrashAnalyzer.RedactForExport(line));
+        Assert.DoesNotContain("198.51.100.20", CrashAnalyzer.RedactForExport(line));
+    }
+
+    [Fact]
     public void LeftoverPacksAreCleanedAfterADay()
     {
         var outDir = Path.Combine(_dir, "out");
@@ -280,6 +330,60 @@ public sealed class FilesTests : IDisposable
         Assert.False(reports.First().Started);
         Assert.True(reports.Last() is { Finished: true, Started: true, End: FileEnd.None });
         Assert.Throws<ArgumentException>(() => { _ = alice.SendFileAsync(Fp(_bob), source, "NOT-AN-ID"); });
+    }
+
+    [Fact]
+    public async Task OnlyTheSenderReconnectingResumesUnderTheSameId()
+    {
+        var a = new Link(Fp(_alice), _alice.PublicKey, "Alice");
+        var b = new Link(Fp(_bob), _bob.PublicKey, "Bob");
+        a.Peer = b;
+        b.Peer = a;
+        var keys = new Dictionary<string, byte[]> { [Fp(_alice)] = _alice.PublicKey, [Fp(_bob)] = _bob.PublicKey };
+        await using var alice = new PrivateMessenger(a, _alice, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "alice"));
+        await using var bob = new PrivateMessenger(b, _bob, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "bob"));
+        var source = Path.Combine(_dir, "big.bin");
+        var data = RandomNumberGenerator.GetBytes(PrivateMessenger.ChunkSize * 40);
+        await File.WriteAllBytesAsync(source, data);
+        alice.SendLimit = () => PrivateMessenger.ChunkSize * 20;
+        var offers = 0;
+        bob.FileOffered += offer =>
+        {
+            Interlocked.Increment(ref offers);
+            _ = bob.AcceptAsync(offer.Id);
+        };
+        FileProgress? saved = null;
+        var cut = 0;
+        bob.Progress += p =>
+        {
+            // Alice's side goes away part way; Bob has not noticed yet and still holds the part file.
+            if (!p.Outgoing && !p.Finished && p.Done >= PrivateMessenger.ChunkSize * 3 && Interlocked.Exchange(ref cut, 1) == 0) a.Peer = null;
+            if (p is { Outgoing: false, Finished: true, SavedPath.Length: > 0 }) saved = p;
+        };
+        var id = PrivateMessenger.NewTransferId();
+        Assert.False(await alice.SendFileAsync(Fp(_bob), source, id).WaitAsync(TimeSpan.FromSeconds(20)));
+
+        // Alice is back and sends again under the same id: Bob lets go of the stale attempt and carries on.
+        a.Peer = b;
+        Assert.True(await alice.SendFileAsync(Fp(_bob), source, id).WaitAsync(TimeSpan.FromSeconds(30)));
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (saved is null && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.NotNull(saved);
+        Assert.Equal(2, offers);
+        Assert.Equal(data, await File.ReadAllBytesAsync(saved!.SavedPath!));
+    }
+
+    [Fact]
+    public void AHugeLogIsReadOnlyFromItsEnd()
+    {
+        var log = Path.Combine(_dir, "huge.log");
+        // A two-byte character straddles the cut: it is dropped, not turned into garbage.
+        var text = new string('a', 100) + "é" + new string('b', 99);
+        File.WriteAllText(log, text);
+        var tail = FilePacker.ReadTail(log, 100);
+        Assert.Equal(new string('b', 99), tail);
+        Assert.Equal(text, FilePacker.ReadTail(log, 10_000));
+        Assert.True(FilePacker.MaxLogBytes <= 8 * 1024 * 1024);
     }
 
     [Fact]

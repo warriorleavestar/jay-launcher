@@ -57,6 +57,8 @@ public sealed partial class TransferItem : ObservableObject
     /// <summary>The source is a packed copy in the outgoing folder, deleted once it has been delivered.</summary>
     internal bool Packed { get; set; }
     internal CancellationTokenSource? Packing { get; set; }
+    /// <summary>Stops this send from the moment it is handed over, while the file is still being hashed too.</summary>
+    internal CancellationTokenSource? Sending { get; set; }
     internal Amber.Core.Activity.TaskHandle? Task { get; set; }
 
     public double Percent => Size > 0 ? Math.Clamp(Done * 100.0 / Size, 0, 100) : State is FileCardState.Received or FileCardState.Delivered ? 100 : 0;

@@ -1561,7 +1561,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         _hub = null;
         StopPrivate();
         PrivateLines.Clear();
-        Transfers.Clear();
+        ForgetRoomCards();
         ChatReady = false;
         ChatStatus = "";
         ChatLines.Clear();
