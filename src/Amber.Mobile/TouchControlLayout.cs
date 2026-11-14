@@ -42,6 +42,12 @@ public sealed class TouchControlProfile
         set => _aspectRatio = double.IsFinite(value) && value > 0 ? value : 1;
     }
 
+    /// <summary>
+    /// Where the game currently draws its hotbar (fractions of the view), or null when unknown. The
+    /// inventory key sits right after the hotbar's end unless the player moved it.
+    /// </summary>
+    public (double Left, double Top, double Right, double Bottom)? HotbarBounds { get; set; }
+
     public IReadOnlyList<TouchControlDefinition> Controls => TouchControlLayout.For(Mode)
         .Select(Apply).ToArray();
 
@@ -81,16 +87,32 @@ public sealed class TouchControlProfile
 
     private TouchControlDefinition Apply(TouchControlDefinition control)
     {
-        var positioned = _positions.TryGetValue((Mode, control.Action), out var position)
+        var custom = _positions.TryGetValue((Mode, control.Action), out var position);
+        var positioned = custom
             ? control with { CenterX = position.X, CenterY = position.Y }
             : control;
-        return positioned with { Radius = Math.Clamp(positioned.Radius * Scale, 0.018, 0.15) };
+        positioned = positioned with { Radius = Math.Clamp(positioned.Radius * Scale, 0.018, 0.15) };
+        if (!custom && control.Action == TouchControlAction.Inventory && HotbarBounds is { } hotbar)
+        {
+            // The square face starts where the hotbar ends and shares its centre line.
+            var faceHalfWidth = positioned.Radius * TouchControlLayout.UtilityFaceScale *
+                                Math.Min(AspectRatio, 1) / AspectRatio;
+            positioned = positioned with
+            {
+                CenterX = hotbar.Right + faceHalfWidth,
+                CenterY = (hotbar.Top + hotbar.Bottom) / 2
+            };
+        }
+        return positioned;
     }
 }
 
 /// <summary>Built-in schemes modelled after the interaction choices familiar on mobile Minecraft.</summary>
 public static class TouchControlLayout
 {
+    /// <summary>Half the drawn face of the menu, keyboard, inventory and drop keys, in radii.</summary>
+    public const double UtilityFaceScale = 0.82;
+
     private static readonly TouchControlDefinition[] Shared =
     [
         new(TouchControlAction.Keyboard, 0.475, 0.050, 0.026, "mobile.touch.keyboard", MenuVisible: true),
@@ -99,7 +121,7 @@ public static class TouchControlLayout
         // Keep both actions in the landscape right-thumb arc instead of the unreachable top edge.
         new(TouchControlAction.Jump, 0.940, 0.780, 0.036, "mobile.touch.jump"),
         new(TouchControlAction.Sneak, 0.860, 0.860, 0.036, "mobile.touch.sneak"),
-        // The square face starts exactly where the vanilla hotbar ends and shares its centre line.
+        // Fallback position next to the vanilla hotbar until the game surface size is known.
         new(TouchControlAction.Inventory, 0.608, 0.975, 0.025, "mobile.touch.inventory"),
         new(TouchControlAction.SecondaryAction, 0.940, 0.455, 0.044, "mobile.touch.split",
             GameplayVisible: false, MenuVisible: true)

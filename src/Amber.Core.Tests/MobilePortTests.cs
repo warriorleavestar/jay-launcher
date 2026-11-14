@@ -201,6 +201,77 @@ public sealed class MobilePortTests
         Assert.Equal(1, profile.AspectRatio);
     }
 
+    [Theory]
+    [InlineData(2400, 1080, 3, 3)]
+    [InlineData(1600, 720, 3, 3)]
+    [InlineData(1280, 720, 0, 3)]
+    [InlineData(854, 480, 3, 2)]
+    [InlineData(2400, 1080, 2, 2)]
+    public void HotbarFollowsTheGameGuiScale(int width, int height, int option, int expectedScale)
+    {
+        Assert.Equal(expectedScale, MinecraftHotbar.EffectiveGuiScale(width, height, option));
+
+        var (left, top, right, bottom) = MinecraftHotbar.Bounds(width, height, option);
+        Assert.Equal(182.0 * expectedScale / width, right - left, 6);
+        Assert.Equal(0.5, (left + right) / 2, 2);
+        Assert.InRange(bottom, 1.0, 1.0 + (double)expectedScale / height);
+        Assert.Equal(22.0 * expectedScale / height, bottom - top, 6);
+
+        // The middle of each visible slot selects that slot; just outside the bar selects nothing.
+        for (var slot = 0; slot < 9; slot++)
+        {
+            var x = left + (1 + 20 * slot + 10.0) * expectedScale / width;
+            Assert.True(MinecraftHotbar.TryGetSlot(x, (top + bottom) / 2, width, height, option, out var picked));
+            Assert.Equal(slot, picked);
+        }
+        Assert.False(MinecraftHotbar.TryGetSlot(left - 1.0 / width, (top + bottom) / 2, width, height, option, out _));
+        Assert.False(MinecraftHotbar.TryGetSlot(right + 1.0 / width, (top + bottom) / 2, width, height, option, out _));
+        Assert.False(MinecraftHotbar.TryGetSlot(0.5, top - 2.0 / height, width, height, option, out _));
+    }
+
+    [Fact]
+    public void HotbarTapsMatchTheVisibleSlotsOnAWidePhone()
+    {
+        // 2400x1080 at GUI scale 3: the hotbar spans 927..1473 px. Pixel 940 is inside the first slot,
+        // which the old fixed fractions (0.405..0.595) did not accept.
+        Assert.True(MinecraftHotbar.TryGetSlot(940.0 / 2400, 1060.0 / 1080, 2400, 1080, 3, out var first));
+        Assert.Equal(0, first);
+        Assert.True(MinecraftHotbar.TryGetSlot(1000.0 / 2400, 1060.0 / 1080, 2400, 1080, 3, out var second));
+        Assert.Equal(1, second);
+    }
+
+    [Theory]
+    [InlineData(null, MinecraftHotbar.DefaultGuiScaleOption)]
+    [InlineData("version:4671\nguiScale:2\nmaxFps:60\n", 2)]
+    [InlineData("version:4671\r\nguiScale:0\r\n", 0)]
+    [InlineData("version:4671\n", 0)]
+    [InlineData("guiScale:big\n", MinecraftHotbar.DefaultGuiScaleOption)]
+    public void HotbarReadsTheGuiScaleFromOptions(string? text, int expected) =>
+        Assert.Equal(expected, MinecraftHotbar.ReadGuiScaleOption(text));
+
+    [Fact]
+    public void InventoryKeyFollowsTheHotbarUnlessMoved()
+    {
+        const int width = 2400, height = 1080;
+        var profile = new TouchControlProfile
+        {
+            AspectRatio = (double)width / height,
+            HotbarBounds = MinecraftHotbar.Bounds(width, height, 3)
+        };
+        var hotbar = profile.HotbarBounds!.Value;
+        var inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        var faceLeftPixels = (inventory.CenterX * width) -
+                             inventory.Radius * TouchControlLayout.UtilityFaceScale * Math.Min(width, height);
+        Assert.Equal(hotbar.Right * width, faceLeftPixels, 3);
+        Assert.Equal((hotbar.Top + hotbar.Bottom) / 2, inventory.CenterY, 6);
+        Assert.False(MinecraftHotbar.TryGetSlot(inventory.CenterX, inventory.CenterY, width, height, 3, out _));
+        Assert.Equal(TouchControlAction.Inventory, profile.HitTest(inventory.CenterX, inventory.CenterY)!.Action);
+
+        profile.SetPosition(TouchControlAction.Inventory, 0.30, 0.40);
+        inventory = profile.Controls.Single(control => control.Action == TouchControlAction.Inventory);
+        Assert.Equal((0.30, 0.40), (inventory.CenterX, inventory.CenterY));
+    }
+
     [Fact]
     public void TouchControlTextIsTranslatedInEveryLanguage()
     {

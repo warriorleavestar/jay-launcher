@@ -315,6 +315,8 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     private int? _editingPointer;
     private TouchControlAction? _editingAction;
     private float _controlOpacity = 0.62f;
+    private int _guiScaleOption = MinecraftHotbar.DefaultGuiScaleOption;
+    private bool _lastGameplayControlsActive;
 
     public TouchControlOverlay(Context context) : base(context)
     {
@@ -340,6 +342,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         base.OnDraw(canvas);
         var gameplayControlsActive = NativeJvmHost.GameplayControlsActive;
+        // The GUI scale can only change in a menu, so re-read it whenever play resumes.
+        if (gameplayControlsActive && !_lastGameplayControlsActive) RefreshHotbar();
+        _lastGameplayControlsActive = gameplayControlsActive;
         _stroke.SetStyle(Paint.Style.Stroke);
         ApplyControlOpacity();
         foreach (var control in _profile.Controls)
@@ -525,8 +530,9 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         var compact = control.Action is TouchControlAction.PreviousSlot or TouchControlAction.NextSlot;
         var utility = control.Action is TouchControlAction.Menu or TouchControlAction.Keyboard or
             TouchControlAction.Inventory or TouchControlAction.Drop;
-        var halfWidth = radius * (compact ? 0.78f : utility ? 0.82f : 0.92f);
-        var halfHeight = radius * (compact ? 0.78f : utility ? 0.82f : 0.92f);
+        var faceScale = compact ? 0.78f : utility ? (float)TouchControlLayout.UtilityFaceScale : 0.92f;
+        var halfWidth = radius * faceScale;
+        var halfHeight = radius * faceScale;
         var bounds = new RectF((float)Math.Round(x - halfWidth), (float)Math.Round(y - halfHeight),
             (float)Math.Round(x + halfWidth), (float)Math.Round(y + halfHeight));
         _buttonBorder.SetStyle(Paint.Style.Stroke);
@@ -644,17 +650,22 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
         }
     }
 
-    private static bool TryGetHotbarSlot(double x, double y, out int slot)
+    private bool TryGetHotbarSlot(double x, double y, out int slot) =>
+        MinecraftHotbar.TryGetSlot(x, y, Width, Height, _guiScaleOption, out slot);
+
+    /// <summary>Re-reads the game's GUI scale and places the hotbar for the current surface size.</summary>
+    private void RefreshHotbar()
     {
-        const double left = 0.405;
-        const double right = 0.595;
-        if (y < 0.905 || x < left || x >= right)
+        string? options = null;
+        try
         {
-            slot = -1;
-            return false;
+            options = File.ReadAllText(Path.Combine(Context!.FilesDir!.AbsolutePath, "minecraft", "options.txt"));
         }
-        slot = Math.Clamp((int)((x - left) / ((right - left) / 9)), 0, 8);
-        return true;
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        _guiScaleOption = MinecraftHotbar.ReadGuiScaleOption(options);
+        _profile.HotbarBounds = Width > 0 && Height > 0
+            ? MinecraftHotbar.Bounds(Width, Height, _guiScaleOption)
+            : null;
     }
 
     private void DrawChevron(Canvas canvas, float x, float y, float size)
@@ -672,6 +683,7 @@ internal sealed class TouchControlOverlay : View, ITouchInputSink
     {
         base.OnSizeChanged(width, height, oldWidth, oldHeight);
         _profile.AspectRatio = height > 0 ? (double)width / height : 1;
+        RefreshHotbar();
         if (Build.VERSION.SdkInt < BuildVersionCodes.Q) return;
 #pragma warning disable CA1416
         SystemGestureExclusionRects = [new Rect(0, Math.Max(0, height - 200), width, height)];
