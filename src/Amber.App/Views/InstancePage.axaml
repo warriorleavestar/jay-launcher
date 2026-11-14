@@ -1033,7 +1033,7 @@
 
               <TextBlock Grid.Row="10" Classes="label" Text="{l:T instance.settings.transformer_cache}" IsVisible="{Binding IsForgeLegacy}" />
               <StackPanel Grid.Row="10" Grid.Column="1" Margin="0,8,0,0" Spacing="4" IsVisible="{Binding IsForgeLegacy}">
-                <CheckBox IsChecked="{Binding TransformerCache}" Content="{l:T instance.settings.transformer_cache.on}" />
+                <CheckBox Name="TransformerCacheBox" IsChecked="{Binding TransformerCache}" Content="{l:T instance.settings.transformer_cache.on}" />
                 <TextBlock Classes="hint" Text="{l:T instance.settings.transformer_cache.hint}" TextWrapping="Wrap" />
               </StackPanel>
 

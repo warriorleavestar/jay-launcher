@@ -264,7 +264,7 @@ public sealed class JavaBakeProcess : IBakeProcess
 /// <param name="cacheRoot">The loader's cache root, shared by every instance (baked jars, nested jars).</param>
 /// <param name="dataRoot">Jay's own bake files: downloaded mapping tables, the mapping cache, platform installs, the list of states.</param>
 /// <param name="download">How to download files (Jay's downloader with mirrors). Null: downloads are refused.</param>
-public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string dataRoot,
+public sealed partial class BakeService(BakeToolkit toolkit, string cacheRoot, string dataRoot,
     Func<IReadOnlyCollection<DownloadItem>, CancellationToken, Task>? download = null, IBakeProcess? process = null)
 {
     public const string StateFolder = ".amber-ul";
@@ -311,6 +311,13 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
             if (keep && actual > 0) major = actual;
         }
         var gamePath = keep ? javaPath : await forMajor(major, ct);
+        // The Java found for the range may not be in it (only 17 and 21 installed for forge-1.12.2): say so before
+        // anything runs, instead of baking for, and launching on, a Java the game cannot use.
+        if (!keep && range is not null && Java.JavaFinder.MajorOf(gamePath) is > 0 and var picked)
+        {
+            EnsureGameJava(picked, range);
+            major = picked;
+        }
         var toolMajor = ToolJavaMajorFor(instance, major);
         var toolPath = toolMajor == major ? gamePath : await forMajor(toolMajor, ct);
         return (new BakeJava(toolPath, toolMajor, major), gamePath);
@@ -705,8 +712,19 @@ public sealed class BakeService(BakeToolkit toolkit, string cacheRoot, string da
         }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return launch with { WritableCache = null }; }
         var inside = Path.IsPathFullyQualified(folder) && !GameDirectoryPaths.IsWithin(area, full, comparison) && GameDirectoryPaths.IsWithin(full, area, comparison);
-        return inside ? launch with { WritableCache = full } : launch with { WritableCache = null };
+        if (!inside) return launch with { WritableCache = null };
+        // The text is inside; the folder must be too. Rebuilt from the instance root out of plain folder names, and
+        // dropped when one of its levels already on disk is a link (Jay creates it level by level before launch).
+        var parts = Path.GetRelativePath(area, full).Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0 || parts.Any(p => p is "." or ".." || !CacheFolderName().IsMatch(p))) return launch with { WritableCache = null };
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workDir));
+        string[] levels = [StateFolder, .. parts];
+        if (ContainedFiles.HasLink(root, levels)) return launch with { WritableCache = null };
+        return launch with { WritableCache = Path.Combine([root, .. levels]) };
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[A-Za-z0-9._+-]+$")]
+    private static partial System.Text.RegularExpressions.Regex CacheFolderName();
 
     /// <summary>The platform kind a state file was baked for (<c>platform.kind</c>), or vanilla.</summary>
     internal static string StatePlatform(string stateFile)

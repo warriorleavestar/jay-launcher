@@ -89,9 +89,32 @@ public sealed class JavaRuntimeManifestTests : IDisposable
     public void AJavaWithoutAReleaseFileIsAskedForItsVersion()
     {
         Assert.Equal(0, JavaFinder.MajorOf(Path.Combine(Path.GetTempPath(), "no-such-java", "bin", "java.exe")));
-        // A real Java on this machine, when there is one: the release file or the Java itself gives the same major version.
-        var installed = JavaFinder.FindAll().FirstOrDefault();
-        if (installed is null) return;
-        Assert.Equal(installed.MajorVersion, JavaFinder.MajorOf(installed.JavaPath));
+        // A Java home with no release file (as some older Mojang runtimes): a stand-in java that only answers the
+        // version question, so the answer can only come from running it.
+        var home = Path.Combine(Path.GetTempPath(), "amber-norelease-" + Guid.NewGuid().ToString("N")[..8]);
+        var bin = Directory.CreateDirectory(Path.Combine(home, "bin")).FullName;
+        try
+        {
+            string java;
+            if (OperatingSystem.IsWindows())
+            {
+                java = Path.Combine(bin, "java.cmd");
+                File.WriteAllText(java, "@echo off\r\necho     java.version = 17.0.12 1>&2\r\necho     os.arch = amd64 1>&2\r\n");
+            }
+            else
+            {
+                java = Path.Combine(bin, "java");
+                File.WriteAllText(java, "#!/bin/sh\necho '    java.version = 17.0.12' >&2\necho '    os.arch = amd64' >&2\n");
+                File.SetUnixFileMode(java, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+            Assert.False(File.Exists(Path.Combine(home, "release")));
+            Assert.Equal(17, JavaFinder.MajorOf(java));
+            // The sandbox's own check (which Java 9+ flags to pass) takes the same way when the release file is missing.
+            Assert.Equal(17, Amber.Core.Launch.WindowsSandbox.JavaMajor(java));
+        }
+        finally
+        {
+            try { Directory.Delete(home, true); } catch (IOException) { }
+        }
     }
 }

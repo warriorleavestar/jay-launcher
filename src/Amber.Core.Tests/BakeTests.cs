@@ -1268,6 +1268,36 @@ public sealed class BakeTests : IDisposable
     }
 
     [Fact]
+    public async Task Forge1122WithOnlyANewerJavaSaysSoInsteadOfLaunching()
+    {
+        LegacyInstall();
+        var instance = Instance("forge", "1.12.2", LegacyForge, "f1122");
+        string FakeJava(string name, string version)
+        {
+            var home = Directory.CreateDirectory(Path.Combine(Game, "runtimes", name)).FullName;
+            File.WriteAllText(Path.Combine(home, "release"), $"JAVA_VERSION=\"{version}\"\nOS_ARCH=\"amd64\"\n");
+            var java = Path.Combine(Directory.CreateDirectory(Path.Combine(home, "bin")).FullName, OperatingSystem.IsWindows() ? "java.exe" : "java");
+            File.WriteAllText(java, "");
+            return java;
+        }
+        var java17 = FakeJava("jdk17", "17.0.12");
+        var java21 = FakeJava("jdk21", "21.0.5");
+        var java8 = FakeJava("jre8", "1.8.0_402");
+        var bake = Service(LegacyLoader());
+
+        // Only 17 and 21 installed: asked for Java 8, the finder hands back 17. A Java problem, not a launch on 17.
+        var e = await Assert.ThrowsAsync<BakeException>(() => bake.ChooseJavaAsync(instance, 8, java21,
+            (major, _) => Task.FromResult(major == 21 ? java21 : java17), CancellationToken.None));
+        Assert.Equal("java_too_new", e.Code);
+
+        // A Java 8 found: the game launches on it and the stages on 21.
+        var (java, gamePath) = await bake.ChooseJavaAsync(instance, 8, java21,
+            (major, _) => Task.FromResult(major == 21 ? java21 : java8), CancellationToken.None);
+        Assert.Equal(java8, gamePath);
+        Assert.Equal(new BakeJava(java21, 21, 8), java);
+    }
+
+    [Fact]
     public async Task ATransformerCacheOutsideTheInstanceIsDropped()
     {
         LegacyInstall();
