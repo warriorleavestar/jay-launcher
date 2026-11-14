@@ -123,7 +123,7 @@ public static class Program
           jay-server account add|passwd <账号>      加账号 / 改密码（密码在终端输入；脚本里可以用环境变量 JAY_ACCOUNT_PASSWORD）
           jay-server account remove|disable|enable <账号> / account list
           jay-server account 2fa on <账号> [--issuer <网络名>]   开两步验证：打印密钥和 otpauth 地址，用验证器 App 添加
-          jay-server account 2fa off <账号>提交到 Jay 仓库的 networks/ 审核合并后，CI 会用 Jay 注册表钥匙签名，Jay 里显示“已审核”。
+          jay-server account 2fa off <账号>
 
         发版签名（维护者在离线电脑上用，见 docs/security/release-signing.md）：
           jay-server release sums <文件...> [--out SHA256SUMS.txt]  算发布包的 SHA-256 清单
@@ -435,7 +435,7 @@ public static class Program
     /// <summary>公共网络连接串：生成钥匙、签名、检查、显示。</summary>
     internal static int NetworkCommand(Options options, TextWriter output, string? root = null)
     {
-        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
+        var sub = options.Positional.FirstOrDefault() ?? throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert|hw-cert");
         var rest = options.Positional.Skip(1).ToList();
         switch (sub)
         {
@@ -666,7 +666,7 @@ public static class Program
                     target = existing;
                     var bytes = File.ReadAllBytes(existing);
                     shown = HardwareCertificate.Parse(bytes) ?? throw new InvalidDataException(existing + " 不是有效的硬件证书（有签名对不上，或格式不认识）");
-                    sign = () => HardwareCertificate.Cosign(bytes, TrustCommands.LoadKey(rootFile));
+                    sign = () => HardwareCertificate.Cosign(bytes, TrustCommands.ForUse(TrustCommands.LoadKey(rootFile), release: false));
                 }
                 else
                 {
@@ -678,7 +678,7 @@ public static class Program
                     int? need = options.Get("need") is { } n ? int.Parse(n, System.Globalization.CultureInfo.InvariantCulture) : null;
                     bool? tpm = options.Has("no-tpm") ? false : null;
                     shown = HardwareCertificate.Preview(request, options.Get("network"), need, tpm, options.Has("secure-boot"));
-                    sign = () => HardwareCertificate.Issue(TrustCommands.LoadKey(rootFile), request, options.Get("network"), need, tpm, options.Has("secure-boot"));
+                    sign = () => HardwareCertificate.Issue(TrustCommands.ForUse(TrustCommands.LoadKey(rootFile), release: false), request, options.Get("network"), need, tpm, options.Has("secure-boot"));
                 }
                 if (!ConfirmHardwareCertificate(shown, output)) return 3;
                 var cert = sign();
@@ -699,7 +699,7 @@ public static class Program
                 return 0;
             }
             default:
-                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert");
+                throw new ArgumentException("用法：jay-server network init|keygen|sign|cosign|config-hash|check|show|root-key|key-public|paper-check|paper-restore|dir-key|dir-cert|hw-cert");
         }
     }
 
