@@ -61,7 +61,14 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Called after the child-mode settings change: hide what they hide, turn off what they forbid.</summary>
     internal void ApplyChildMode()
     {
-        if (Child.HideNetworkExit) AllowExitNode = false;
+        if (Child.HideNetworkExit)
+        {
+            AllowExitNode = false;
+            // "No going online through my computer or theirs" covers forwarding members' game traffic too, also in
+            // the room that is open now.
+            AllowGameProxy = false;
+            if (_currentOptions is { AllowProxy: true }) _ = SetGameProxySharingAsync(false, forChildMode: true);
+        }
         if (Child.AlwaysAskKnock) InviteAutoApprove = false;
         // A child hosting must not keep a remote-control service open, nor stay on a public network or in its room list.
         if (Child.HideRemoteControl && _remoteHub is not null) StopRemote();

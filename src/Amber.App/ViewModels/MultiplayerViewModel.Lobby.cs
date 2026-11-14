@@ -193,6 +193,7 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task HostFromLobbyAsync()
     {
+        if (RefuseHostWhileKnocking()) return;
         if (!IsComponentReady)
         {
             await InstallComponentStepAsync();

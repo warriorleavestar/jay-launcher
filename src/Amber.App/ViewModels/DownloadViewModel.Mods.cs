@@ -75,7 +75,6 @@ public sealed partial class DownloadViewModel
 
     public bool ShowModsNeedLoader => !CanAddMods;
 
-    public bool HasModResults => ModResults.Count > 0;
 
     private bool _modsSearched;
 
@@ -106,7 +105,6 @@ public sealed partial class DownloadViewModel
     {
         OnPropertyChanged(nameof(CanAddMods));
         OnPropertyChanged(nameof(ShowModsNeedLoader));
-        OnPropertyChanged(nameof(HasModResults));
         OnPropertyChanged(nameof(ShowModsEmpty));
         OnPropertyChanged(nameof(ModsHeader));
     }
@@ -164,8 +162,8 @@ public sealed partial class DownloadViewModel
         Amber.Core.Activity.TaskHandle task, CancellationToken ct)
     {
         var instance = _service.GetInstance(ctx, id);
-        SetStatus(StatusMessage.Info("newinstance.mods.resolving", picks.Count));
-        task.Report(null, L.F("newinstance.mods.resolving", picks.Count));
+        SetStatus(StatusMessage.Info("newinstance.mods.resolving", picks.Count) with { Count = picks.Count });
+        task.Report(null, L.P("newinstance.mods.resolving", picks.Count, picks.Count));
         var plan = await NewInstanceMods.PlanAsync(_service.Modrinth, ctx.ContentInstaller, picks, instance, ct);
         await ctx.ContentInstaller.InstallAsync(plan, instance.DirectoryFor(ContentType.Mod), new Progress<Amber.Core.Net.DownloadProgress>(p =>
         {

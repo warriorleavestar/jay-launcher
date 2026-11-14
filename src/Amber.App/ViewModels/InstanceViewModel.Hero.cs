@@ -72,7 +72,7 @@ public sealed partial class InstanceViewModel
         });
         PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(Current)) { UpdateHero(); UpdateLastRun(); UpdateLaunchFailure(); }
+            if (e.PropertyName is nameof(Current) or nameof(BrokenId)) { UpdateHero(); UpdateLastRun(); UpdateLaunchFailure(); }
         };
         UpdateHero();
         UpdateLastRun();
@@ -94,8 +94,8 @@ public sealed partial class InstanceViewModel
 
     private void UpdateLaunchLine()
     {
-        var mine = _home is { } home && Current is { } c && string.Equals(home.LastRunInstance, c.Id, StringComparison.OrdinalIgnoreCase);
-        ShowLaunchLine = mine && _home!.ShowProgress && string.Equals(_home.LatestInstance, Current!.Id, StringComparison.OrdinalIgnoreCase);
+        var mine = _home is { } home && HeroId is { } id && string.Equals(home.LastRunInstance, id, StringComparison.OrdinalIgnoreCase);
+        ShowLaunchLine = mine && _home!.ShowProgress && string.Equals(_home.LatestInstance, HeroId, StringComparison.OrdinalIgnoreCase);
         if (ShowLaunchLine)
         {
             LaunchStep = _home!.Status;
@@ -117,8 +117,8 @@ public sealed partial class InstanceViewModel
     public bool HasLaunchFailure => LaunchFailure is not null;
 
     private void UpdateLaunchFailure() =>
-        LaunchFailure = _home?.Failure is { } failure && Current is { } c
-                        && string.Equals(failure.Request.VersionId, c.Id, StringComparison.OrdinalIgnoreCase) ? failure : null;
+        LaunchFailure = _home?.Failure is { } failure && HeroId is { } id
+                        && string.Equals(failure.Request.VersionId, id, StringComparison.OrdinalIgnoreCase) ? failure : null;
 
     [RelayCommand]
     private void FixLaunch(LaunchFix fix) => _home?.FixCommand.Execute(fix);
@@ -163,6 +163,7 @@ public sealed partial class InstanceViewModel
             HeroName = HeroFacts = "";
             Start = null;
             _heroClock.Stop();
+            if (BrokenId is { } broken) UpdateBrokenHero(broken);
             return;
         }
         var meta = _service.MetaOf(c.Id);
@@ -183,9 +184,31 @@ public sealed partial class InstanceViewModel
         if (meta?.PlayMinutes is >= 1 and var minutes) facts.Add(L.F("library.play_time", Fmt.PlayTime(TimeSpan.FromMinutes(minutes))));
         HeroFacts = string.Join(" · ", facts);
         if (_heroModCount?.For != c.Id && c.Loader is not null) CountModsForHero(c);
+        UpdateStart(c.Id);
+    }
 
-        var session = _home?.SessionOf(c.Id);
-        var plan = StartButton.For(session, _home?.SelectedAccount is not null, _service.Directory.StateOf(c.Id), _home?.ForceKillOfferedFor(c.Id) == true);
+    /// <summary>
+    /// The hero of an instance whose version files cannot be read: its name and cover, and the start button in its
+    /// Repair state (open folder next to it); version and loader are unknown.
+    /// </summary>
+    private void UpdateBrokenHero(string id)
+    {
+        var meta = _service.MetaOf(id);
+        HeroName = string.IsNullOrWhiteSpace(meta?.DisplayName) ? id : meta!.DisplayName!;
+        HeroVersion = "";
+        HeroLoader = "";
+        CoverSlot = CoverArt.SlotFor(id);
+        CoverInitial = CoverArt.InitialOf(HeroName);
+        IsPinned = meta?.Pinned == true;
+        PinTip = L.T(IsPinned ? "library.unpin" : "library.pin");
+        HeroFacts = meta?.LastPlayed is { } played ? L.F("library.last_played", Fmt.Ago(played, DateTimeOffset.Now)) : L.T("library.never_played");
+        UpdateStart(id);
+    }
+
+    private void UpdateStart(string id)
+    {
+        var session = _home?.SessionOf(id);
+        var plan = StartButton.For(session, _home?.SelectedAccount is not null, _service.Directory.StateOf(id), _home?.ForceKillOfferedFor(id) == true);
         Start = plan;
         StartLabel = plan.Kind == StartKind.Playing && session is not null
             ? L.F("instance.hero.playing", Math.Max(0, (int)session.PlayTime(DateTimeOffset.Now).TotalMinutes))
@@ -231,15 +254,15 @@ public sealed partial class InstanceViewModel
     [RelayCommand]
     private void StartGame()
     {
-        if (Current is not { } c || Start is not { } plan) return;
+        if (HeroId is not { } id || Start is not { } plan) return;
         switch (plan.Kind)
         {
             case StartKind.NeedAccount:
                 _home?.NavigateToAccounts?.Invoke();
                 break;
             case StartKind.Ready or StartKind.RetryAfterCrash or StartKind.ResumeInstall or StartKind.Repair:
-                _service.SetCurrentInstance(c.Id);
-                _service.RequestLaunch(new LaunchRequest(c.Id));
+                _service.SetCurrentInstance(id);
+                _service.RequestLaunch(new LaunchRequest(id));
                 break;
         }
     }
@@ -248,11 +271,11 @@ public sealed partial class InstanceViewModel
     [RelayCommand]
     private void SideAction()
     {
-        if (Current is not { } c || Start is not { } plan) return;
+        if (HeroId is not { } id || Start is not { } plan) return;
         switch (plan.Side)
         {
             case StartSide.Cancel or StartSide.QuitGame:
-                _home?.StopRun(c.Id);
+                _home?.StopRun(id);
                 break;
             case StartSide.ForceKill:
                 _home?.ForceKillCommand.Execute(null);
@@ -269,8 +292,8 @@ public sealed partial class InstanceViewModel
     [RelayCommand]
     private void TogglePin()
     {
-        if (Current is not { } c) return;
-        _service.SetPinned(c.Id, !IsPinned);
+        if (HeroId is not { } id) return;
+        _service.SetPinned(id, !IsPinned);
     }
 
     // ---- Last session panel ----

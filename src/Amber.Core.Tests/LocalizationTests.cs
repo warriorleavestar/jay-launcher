@@ -299,6 +299,55 @@ public partial class LocalizationTests
         return null;
     }
 
+    /// <summary>English counts of one read "1 mod", "1 friend", "1 person", not "1 mods".</summary>
+    [Theory]
+    [InlineData("newinstance.mods.resolving")]
+    [InlineData("multiplayer.friends.backed_up")]
+    [InlineData("multiplayer.friends.restored")]
+    [InlineData("multiplayer.rekey.done_missed")]
+    [InlineData("multiplayer.kick.invite_revoked_missed")]
+    public void EnglishCountsOfOneAreSingular(string key)
+    {
+        var en = L.Load("en");
+        Assert.Equal(key + ".one", L.PluralKey(en, key, 1));
+        Assert.Equal(key, L.PluralKey(en, key, 2));
+        Assert.DoesNotMatch(@"\b1 (mods|friends|people)\b", en[key + ".one"]);
+    }
+
+    /// <summary>
+    /// On Android the game runs inside Jay, so the gateway hint must not send people to another launcher, matching the
+    /// scope text on the same screen.
+    /// </summary>
+    [Fact]
+    public void AndroidGatewayHintPointsAtTheBuiltInGame()
+    {
+        var en = L.Load("en");
+        Assert.DoesNotContain("another", en["mobile.tunnel.hint.android"], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("built-in", en["mobile.tunnel.hint.android"], StringComparison.Ordinal);
+        // The built-in game is opened from the Library page, not from under the gateway card: every language names it.
+        foreach (var language in new[] { "en", "ja", "lzh", "zh-Hans", "zh-Hant" })
+        {
+            var table = L.Load(language);
+            Assert.Contains(table["shell.nav.library"], table["mobile.tunnel.hint.android"], StringComparison.Ordinal);
+        }
+        Assert.Contains("No separate launcher", en["mobile.scope.description.android"], StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Classical Chinese is written in traditional characters (its interface falls back to zh-Hant): no value uses a
+    /// character that only exists in simplified Chinese.
+    /// </summary>
+    [Fact]
+    public void ClassicalChineseUsesTraditionalCharacters()
+    {
+        const string simplifiedOnly = "这们说时会对过还没开关门问题网络设启动备账号码钥发现显应该请让为从样实选项给听记录种类简资帮语数据统计远无广颜亲长条将专东车读写书报纸页难点线进运连认识证换与产买卖头岁乐阳阴节电话气风爱两层态径载辑览错误删饰组戏调变";
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(Path.Combine(Src, "Amber.Core", "Localization", "lzh.json")));
+        var simplified = doc.RootElement.EnumerateObject()
+            .Where(p => p.Value.ValueKind == System.Text.Json.JsonValueKind.String && p.Value.GetString()!.Any(c => simplifiedOnly.Contains(c)))
+            .Select(p => p.Name).ToList();
+        Assert.Empty(simplified);
+    }
+
     /// <summary>同一个 JSON 文件里重复的键（后一个会悄悄盖掉前一个）。</summary>
     [Theory]
     [InlineData("zh-Hans")]

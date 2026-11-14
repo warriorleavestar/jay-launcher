@@ -79,7 +79,32 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     private readonly SemaphoreSlim _iconGate = new(6, 6);
     private CancellationTokenSource? _searchCts;
     private CancellationTokenSource? _filesCts;
-    private CancellationTokenSource? _workCts;
+    /// <summary>
+    /// The page's running jobs (installs, modpack imports), each with its own cancellation: a modpack import started
+    /// while an install runs neither replaces nor cancels the install. [Cancel] on the page stops all of them; the
+    /// activity center stops one.
+    /// </summary>
+    private readonly List<CancellationTokenSource> _workJobs = [];
+
+    private CancellationTokenSource BeginWork()
+    {
+        var cts = new CancellationTokenSource();
+        _workJobs.Add(cts);
+        IsBusy = true;
+        return cts;
+    }
+
+    private void EndWork(CancellationTokenSource cts)
+    {
+        _workJobs.Remove(cts);
+        cts.Dispose();
+        if (_workJobs.Count > 0) return;
+        IsBusy = false;
+        Progress = 0;
+    }
+
+    internal CancellationTokenSource BeginWorkForTest() => BeginWork();
+    internal void EndWorkForTest(CancellationTokenSource cts) => EndWork(cts);
     private int _total;
 
     /// <summary>当前选中的项目是经 Sinytra Connector 装的 Fabric 模组。</summary>
@@ -879,8 +904,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         var crossOrder = CurrentType == ContentType.Mod && !_viaConnector ? CrossDependencyOrder(file, instance, _service.CrossLoaderFor(instance).Extras) : null;
         if (crossOrder is not null) ShowCrossPrompt(instance, file);
 
-        IsBusy = true;
-        _workCts = new CancellationTokenSource();
+        var cts = BeginWork();
         try
         {
             var target = IsDatapack ? DatapackManager.DirectoryOf(world!.World.Path) : instance.DirectoryFor(CurrentType);
@@ -891,13 +915,13 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
                 if (_viaConnector)
                 {
                     var hasConnector = ConnectorInstaller.IsInstalled(new ModManager(instance.ModsDir).List().Where(m => m.Enabled).Select(m => m.Requirements));
-                    plan = await ConnectorInstaller.PlanFabricModAsync(file, instance, _service.Modrinth, _service.ContentInstaller, null, hasConnector, _workCts.Token);
+                    plan = await ConnectorInstaller.PlanFabricModAsync(file, instance, _service.Modrinth, _service.ContentInstaller, null, hasConnector, cts.Token);
                 }
                 else
                 {
                     var optional = OptionalDependencies.Where(d => d.Include && d.ProjectId is not null).Select(d => d.ProjectId!).ToHashSet(StringComparer.Ordinal);
                     var optionalFiles = OptionalDependencies.Where(d => d.Include && d.ProjectId is null && d.FileId is not null).Select(d => d.FileId!).ToHashSet(StringComparer.Ordinal);
-                    plan = await _service.ContentInstaller.ResolveAsync(file, instance, null, _workCts.Token, loaderPreference: crossOrder,
+                    plan = await _service.ContentInstaller.ResolveAsync(file, instance, null, cts.Token, loaderPreference: crossOrder,
                         optionalProjects: optional, optionalFiles: optionalFiles);
                 }
                 // 目标文件夹里已经有同名文件的依赖不用再下，下载器会校验并跳过。
@@ -907,7 +931,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
                 Work.Bytes(p.BytesDownloaded);
                 Progress = 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles);
                 SetStatus(StatusMessage.Info("content.install.progress", p.CompletedFiles, p.TotalFiles, p.CurrentFile));
-            }), _workCts.Token);
+            }), cts.Token);
 
             await Ui.FlushAsync();
             var extra = plan.Files.Count > 1 ? L.P("content.install.dependencies", plan.Files.Count - 1, plan.Files.Count - 1) : "";
@@ -919,13 +943,13 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             var kind = problems.Length > 0 || noLoader.Length > 0 ? StatusKind.Warning : StatusKind.Success;
             SetStatus(new StatusMessage("content.install.completed", [file.DisplayName, extra, where, problems, noLoader], kind));
             _service.NotifyContentChanged();
-            if (shaderState is { } state) await AfterShaderInstallAsync(instance, state, file.DisplayName, _workCts.Token);
+            if (shaderState is { } state) await AfterShaderInstallAsync(instance, state, file.DisplayName, cts.Token);
         }
         catch (ManualDownloadRequiredException e)
         {
             ShowManualDownload(e.File);
         }
-        catch (OperationCanceledException) when (_workCts?.IsCancellationRequested == true)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
@@ -935,8 +959,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         }
         finally
         {
-            IsBusy = false;
-            Progress = 0;
+            EndWork(cts);
         }
     }
 
@@ -994,23 +1017,22 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     private async Task<string?> InstallModpackFromFileAsync(ContentFile file)
     {
         string? id = null;
-        IsBusy = true;
-        _workCts = new CancellationTokenSource();
+        var cts = BeginWork();
         var importStarted = false;
         var temp = Path.Combine(Path.GetTempPath(), "amber-pack-" + Guid.NewGuid().ToString("N"), ContentInstaller.SafeFileName(file.FileName));
         try
         {
             SetStatus(StatusMessage.Info("content.modpack.downloading"));
-            await _service.Downloader.DownloadOneAsync(ContentInstaller.ToItem(file, Path.GetDirectoryName(temp)!), _workCts.Token);
+            await _service.Downloader.DownloadOneAsync(ContentInstaller.ToItem(file, Path.GetDirectoryName(temp)!), cts.Token);
             importStarted = true;
-            id = await ImportCoreAsync(temp, NewInstanceName, _workCts.Token);
+            id = await ImportCoreAsync(temp, NewInstanceName, cts.Token);
         }
         catch (ManualDownloadRequiredException e)
         {
             await Ui.FlushAsync();
             ShowManualDownload(e.File, importStarted ? ManualDownloadContext.ModpackImport : ManualDownloadContext.ModpackArchive);
         }
-        catch (OperationCanceledException) when (_workCts?.IsCancellationRequested == true)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             SetStatus(StatusMessage.Warning("common.cancelled"));
         }
@@ -1020,8 +1042,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         }
         finally
         {
-            IsBusy = false;
-            Progress = 0;
+            EndWork(cts);
             try { Directory.Delete(Path.GetDirectoryName(temp)!, true); } catch { /* 临时文件 */ }
         }
         return id;
@@ -1036,14 +1057,13 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         _searchCts?.Cancel();
         // 被取消的搜索不会自己收起“正在搜索”：这里收起，不然转圈和慢速提示会一直留着。
         if (IsSearching) SetSearchState(false);
-        IsBusy = true;
-        var cts = _workCts = new CancellationTokenSource();
-        var task = _importTask = _service.Tasks.Track("import", L.F("activity.kind.import", Path.GetFileName(path)), () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
+        var cts = BeginWork();
+        var task = _service.Tasks.Track("import", L.F("activity.kind.import", Path.GetFileName(path)), () => { try { cts.Cancel(); } catch (ObjectDisposedException) { } });
         try
         {
             var info = ModpackService.Inspect(path);
             task.Rename(L.F("activity.kind.import", SafeName(info.Name)));
-            imported = await ImportCoreAsync(path, SafeName(info.Name), _workCts.Token);
+            imported = await ImportCoreAsync(path, SafeName(info.Name), cts.Token, task);
             task.Succeed(Status);
         }
         catch (ManualDownloadRequiredException e)
@@ -1052,7 +1072,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             task.Fail(L.T("activity.task.manual"));
             ShowManualDownload(e.File, ManualDownloadContext.ModpackImport);
         }
-        catch (OperationCanceledException) when (_workCts?.IsCancellationRequested == true)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             task.Cancelled();
             SetStatus(StatusMessage.Warning("common.cancelled"));
@@ -1065,16 +1085,12 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         finally
         {
             task.Cancelled();
-            _importTask = null;
-            IsBusy = false;
-            Progress = 0;
+            EndWork(cts);
         }
         return imported;
     }
 
-    private Amber.Core.Activity.TaskHandle? _importTask;
-
-    private async Task<string> ImportCoreAsync(string path, string name, CancellationToken ct)
+    private async Task<string> ImportCoreAsync(string path, string name, CancellationToken ct, Amber.Core.Activity.TaskHandle? task = null)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException(L.T("content.modpack.name_required"));
         var skipped = new List<string>();
@@ -1085,7 +1101,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         {
             Status = p.Stage;
             if (p.Percent is { } percent) Progress = percent;
-            _importTask?.Report(p.Percent / 100.0, p.Stage);
+            task?.Report(p.Percent / 100.0, p.Stage);
         }), ct, onSkip: file => { lock (skipped) skipped.Add(file); }, mixedRefusal: info => { mixed = true; return MixedRefusal(info); });
         await Ui.FlushAsync();
         FinishImport(ctx, id, mixed);
@@ -1122,7 +1138,14 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
     }
 
     [RelayCommand]
-    private void Cancel() => _workCts?.Cancel();
+    private void Cancel()
+    {
+        foreach (var cts in _workJobs.ToList())
+        {
+            try { cts.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+    }
 
 
     public async Task RunSnapshotDemoAsync()

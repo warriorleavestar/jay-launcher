@@ -415,8 +415,8 @@ public sealed partial class MultiplayerViewModel
             for (var i = 0; i < Members.Count; i++)
                 if (missed.Any(e => e.PublicKey.AsSpan().SequenceEqual(Members[i].PublicKey))) Members[i] = Members[i] with { NeedsInvite = true };
             if (!SwitchNetwork(room.Rekeyed(next.ToRekey()))) return;
-            SetStatus(missed.Count > 0 && inviteRevoked ? StatusMessage.Warning("multiplayer.kick.invite_revoked_missed", item.Name, missed.Count)
-                : missed.Count > 0 ? StatusMessage.Warning("multiplayer.rekey.done_missed", item.Name, missed.Count)
+            SetStatus(missed.Count > 0 && inviteRevoked ? StatusMessage.Warning("multiplayer.kick.invite_revoked_missed", item.Name, missed.Count) with { Count = missed.Count }
+                : missed.Count > 0 ? StatusMessage.Warning("multiplayer.rekey.done_missed", item.Name, missed.Count) with { Count = missed.Count }
                 : inviteRevoked ? StatusMessage.Warning("multiplayer.kick.invite_revoked", item.Name)
                 : StatusMessage.Success("multiplayer.rekey.done", item.Name));
         }
@@ -789,6 +789,13 @@ public sealed partial class MultiplayerViewModel
             {
                 if (guestDirect is not null) await guestDirect.DisposeAsync();
                 SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
+                return KnockEnd.NotAnswered;
+            }
+            if (!IsIdle)
+            {
+                // Something else put me in a room meanwhile: joining now would replace it, so this approval is not used.
+                if (guestDirect is not null) await guestDirect.DisposeAsync();
+                SetStatus(StatusMessage.Warning("multiplayer.invite.approved_busy"));
                 return KnockEnd.NotAnswered;
             }
             IsKnocking = false;

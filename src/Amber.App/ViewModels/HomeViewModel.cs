@@ -379,13 +379,12 @@ public sealed partial class HomeViewModel : PageViewModel
             var mods = new ModManager(instance.ModsDir).CountEnabled();
             VersionInfo = _service.WithStateNote(value, L.F("home.version.info", instance.McVersion, loader, mods == 0 ? "" : L.P("home.version.mod_count", mods, mods)));
         }
-        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (Amber.Core.Game.GameDirectory.IsUnreadable(e))
         {
             VersionInfo = L.F("home.version.read_failed", e.Message);
         }
     }
 
-    /// <summary>按最近一次启动的阶段和当前选择，重算主按钮文字和进度条。</summary>
     /// <summary>The latest session of each instance in this run of Jay (instance page start button).</summary>
     private readonly Dictionary<string, LaunchSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
 
@@ -420,6 +419,7 @@ public sealed partial class HomeViewModel : PageViewModel
     /// <summary>When that session ended.</summary>
     public DateTimeOffset? CrashTime { get; private set; }
 
+    /// <summary>按最近一次启动的阶段和当前选择，重算主按钮文字和进度条。</summary>
     private void UpdateRunState()
     {
         var run = Latest;
@@ -440,12 +440,15 @@ public sealed partial class HomeViewModel : PageViewModel
         RunStateChanged?.Invoke();
     }
 
-    private string PrimaryKey(GameRun? run)
+    private string PrimaryKey(GameRun? run) => run is not null ? RunKey(run) : IdleKey(SelectedVersion);
+
+    private static string RunKey(GameRun run) =>
+        run.Game is null ? "home.button.cancel_launch" : run.Exiting ? "home.button.exiting" : "home.button.exit_game";
+
+    private string IdleKey(string? id)
     {
-        if (run is not null)
-            return run.Game is null ? "home.button.cancel_launch" : run.Exiting ? "home.button.exiting" : "home.button.exit_game";
         if (SelectedAccount is null) return "home.button.need_account";
-        if (SelectedVersion is not { } id) return "home.button.need_instance";
+        if (id is null) return "home.button.need_instance";
         return _service.Directory.StateOf(id) switch
         {
             Amber.Core.Game.InstanceState.Incomplete => "home.button.resume_install",
@@ -482,6 +485,32 @@ public sealed partial class HomeViewModel : PageViewModel
         }
         await RunAsync(new LaunchRequest(id));
     }
+
+    private GameRun? RunOf(string id) => _runs.LastOrDefault(r => string.Equals(r.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The primary action for one instance (the library's continue card): cancel or quit that instance's own run, and
+    /// otherwise start it. Another instance's run is never touched.
+    /// </summary>
+    public Task PrimaryForAsync(string id)
+    {
+        if (RunOf(id) is { } run)
+        {
+            if (run.Game is null) CancelRun(run);
+            else if (!run.Exiting) ExitGame(run);
+            return Task.CompletedTask;
+        }
+        if (SelectedAccount is null)
+        {
+            Toasts.Show(L.T("home.status.account_required"), Avalonia.Controls.Notifications.NotificationType.Warning);
+            NavigateToAccounts?.Invoke();
+            return Task.CompletedTask;
+        }
+        return RunAsync(new LaunchRequest(id));
+    }
+
+    /// <summary>The label of <see cref="PrimaryForAsync"/> for that instance.</summary>
+    public string PrimaryLabelFor(string id) => L.T(RunOf(id) is { } run ? RunKey(run) : IdleKey(id));
 
     /// <summary>
     /// Ctrl+Enter（改版规格 7.1）：没在启动、没在运行时等于点主按钮；正在准备或运行时什么也不做（快捷键不拿来取消或退出游戏）。
@@ -567,7 +596,6 @@ public sealed partial class HomeViewModel : PageViewModel
         RunStarted?.Invoke(id);
         _runs.Add(run);
         _sessions[id] = run.Session;
-        _lastRequest = request;
         SessionStarted?.Invoke(run.Session);
         Crash = null;
         Failure = null;
@@ -775,7 +803,13 @@ public sealed partial class HomeViewModel : PageViewModel
             lock (run.BakeProblems) rebaked = run.BakeProblems.Any(p => p.AsksForWarm);
             if (run.Baked && rebaked) _service.WarmBakeInBackground(ctx, id);
             if (!string.IsNullOrWhiteSpace(settings.PostExitCommand))
+            {
+                // The game has exited, so its run ends now: the start buttons, the multi-launch question and Ctrl+Shift+Q
+                // stop treating it as running while the command works. The work folder stays marked in use until the
+                // command is done, and the command's output still goes to this run's log.
+                EndRun(run, gameStarted, crashed);
                 await RunUserCommandAsync(settings.PostExitCommand, id, workDir, run.Log, CancellationToken.None);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -794,12 +828,18 @@ public sealed partial class HomeViewModel : PageViewModel
         finally
         {
             FinishStore(run, crashed);
-            _runs.Remove(run);
+            if (_runs.Contains(run)) EndRun(run, gameStarted, crashed);
             run.Cts.Dispose();
-            Progress = 0;
-            UpdateRunState();
-            if (gameStarted && _runs.Count == 0) GameExited?.Invoke(crashed);
         }
+    }
+
+    /// <summary>The run is over (its game exited, or it never started): it no longer counts as running.</summary>
+    private void EndRun(GameRun run, bool gameStarted, bool crashed)
+    {
+        _runs.Remove(run);
+        Progress = 0;
+        UpdateRunState();
+        if (gameStarted && _runs.Count == 0) GameExited?.Invoke(crashed);
     }
 
     /// <summary>A run began (its saved log exists from now on): the Logs tab lists it.</summary>
@@ -861,7 +901,7 @@ public sealed partial class HomeViewModel : PageViewModel
         if (ctx.Directory.StateOf(id) != Amber.Core.Game.InstanceState.Broken) return;
         Amber.Core.Game.VersionJson own;
         try { own = ctx.Directory.ReadVersion(id); }
-        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException)
+        catch (Exception e) when (Amber.Core.Game.GameDirectory.IsUnreadable(e))
         {
             throw new InvalidDataException(L.T("instance.state.broken"), e);
         }
@@ -1052,6 +1092,8 @@ public sealed partial class HomeViewModel : PageViewModel
         Status = L.F("home.status.completing_files", done, total);
     }
 
+    internal static bool CancelledForTest(object run) => ((GameRun)run).Cts.IsCancellationRequested;
+
     internal void RemoveRunForTest(object run)
     {
         _runs.Remove((GameRun)run);
@@ -1173,7 +1215,7 @@ public sealed partial class HomeViewModel : PageViewModel
     }
 
     /// <summary>用户自己配置的启动前 / 退出后命令。命令失败只记日志，不拦启动。</summary>
-    private async Task RunUserCommandAsync(string command, string id, string workDir, RunLog? log, CancellationToken ct)
+    internal async Task RunUserCommandAsync(string command, string id, string workDir, RunLog? log, CancellationToken ct)
     {
         // cmd 不按 C 规则解析引号，整条命令要原样放在 /s /c "…" 里。
         var psi = OperatingSystem.IsWindows()
@@ -1189,7 +1231,14 @@ public sealed partial class HomeViewModel : PageViewModel
         {
             using var process = Process.Start(psi);
             if (process is null) return;
-            await process.WaitForExitAsync(ct);
+            try { await process.WaitForExitAsync(ct); }
+            catch (OperationCanceledException)
+            {
+                // A cancelled start also stops the command, with everything it started.
+                try { process.Kill(entireProcessTree: true); }
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { }
+                throw;
+            }
             _log.AddRaw(log, L.F("home.log.command_exited", command, process.ExitCode));
         }
         catch (System.ComponentModel.Win32Exception e)
@@ -1198,7 +1247,6 @@ public sealed partial class HomeViewModel : PageViewModel
         }
     }
 
-    private LaunchRequest? _lastRequest;
     private string[] _failureOutput = [];
 
     private void ShowFailure(GameRun run, LaunchRequest request, Exception e)

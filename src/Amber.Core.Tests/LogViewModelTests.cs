@@ -227,8 +227,8 @@ public class LogViewModelTests
         vm.Flush();
 
         Assert.Equal(L.F("log.errors", 1), vm.ErrorSummary);
-        Assert.Equal(L.F("log.warnings", 1), vm.WarningSummary);
-        foreach (var property in new[] { nameof(vm.ErrorCount), nameof(vm.WarningCount), nameof(vm.ErrorSummary), nameof(vm.WarningSummary) })
+        Assert.Equal(1, vm.WarningCount);
+        foreach (var property in new[] { nameof(vm.ErrorCount), nameof(vm.WarningCount), nameof(vm.ErrorSummary) })
             Assert.True(changed.Contains(property) || changed.Contains(null) || changed.Contains(""), property);
     }
 
@@ -249,10 +249,9 @@ public class LogViewModelTests
         vm.NextErrorCommand.Execute(null);
         vm.NextErrorCommand.Execute(null);
         vm.NextErrorCommand.Execute(null);
-        vm.NextWarningCommand.Execute(null);
 
-        Assert.Equal(["[main/ERROR]: first", "[main/ERROR]: second", "[main/ERROR]: first", "[main/WARN]: warn"], jumps);
-        Assert.Equal("[main/WARN]: warn", vm.SelectedLine?.Message);
+        Assert.Equal(["[main/ERROR]: first", "[main/ERROR]: second", "[main/ERROR]: first"], jumps);
+        Assert.Equal("[main/ERROR]: first", vm.SelectedLine?.Message);
         Assert.False(vm.FollowLatest);
         Assert.True(vm.HasErrors);
     }

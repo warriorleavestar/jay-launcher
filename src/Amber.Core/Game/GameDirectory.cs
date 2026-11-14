@@ -109,11 +109,19 @@ public sealed class GameDirectory(string root)
             ResolveVersion(id);
             return InstanceState.Ready;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or NotSupportedException)
+        catch (Exception e) when (IsUnreadable(e))
         {
             return InstanceState.Broken;
         }
     }
+
+    /// <summary>
+    /// The exceptions that mean an instance's version files cannot be read (missing, denied, malformed): the same set
+    /// <see cref="StateOf"/> reports as <see cref="InstanceState.Broken"/>. Callers that read an instance use it so a
+    /// broken instance is shown as broken instead of throwing.
+    /// </summary>
+    public static bool IsUnreadable(Exception e) =>
+        e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException or NotSupportedException;
 
     public VersionJson ReadVersion(string id)
     {
