@@ -25,8 +25,15 @@ internal sealed class WaylandSession : IDisposable
     private WaylandPortal? _portal;
     private SafeFileHandle? _pipewire;
     private IReadOnlyList<WaylandPortal.Stream> _streams = [];
+    private readonly bool _wantControl = true;
 
-    public WaylandSession() => _start = new Lazy<Task<bool>>(() => Task.Run(StartAsync));
+    /// <param name="wantControl">Also ask the portal for keyboard and pointer control; false when the user agreed to
+    /// view-only, so the system dialog asks only for the screen.</param>
+    public WaylandSession(bool wantControl = true)
+    {
+        _wantControl = wantControl;
+        _start = new Lazy<Task<bool>>(() => Task.Run(StartAsync));
+    }
 
     /// <summary>测试用：不经门户，直接用一个已经连上 PipeWire 的描述符和已知的节点。</summary>
     internal WaylandSession(IReadOnlyList<WaylandPortal.Stream> streams, SafeFileHandle pipewire)
@@ -39,12 +46,15 @@ internal sealed class WaylandSession : IDisposable
     /// <summary>最近一次为截屏建的会话（注入用它）。</summary>
     public static WaylandSession? Latest => Volatile.Read(ref _latest);
 
-    public static WaylandSession Create()
+    public static WaylandSession Create(bool wantControl = true)
     {
-        var session = new WaylandSession();
+        var session = new WaylandSession(wantControl);
         Volatile.Write(ref _latest, session);
         return session;
     }
+
+    /// <summary>Asked the portal for the screen only (no keyboard and pointer).</summary>
+    public bool ViewOnly => !_wantControl;
 
     /// <summary>启动失败的原因（只给开发者看，不翻译）。</summary>
     public string? LastError { get; private set; }
@@ -65,7 +75,7 @@ internal sealed class WaylandSession : IDisposable
         {
             using var consent = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
             consent.CancelAfter(ConsentTimeout);
-            _portal = await WaylandPortal.StartAsync(wantControl: true, consent.Token);
+            _portal = await WaylandPortal.StartAsync(_wantControl, consent.Token);
             _pipewire = await _portal.OpenPipeWireRemote();
             Volatile.Write(ref _streams, _portal.Streams);
             return await StartReadersAsync();
@@ -289,7 +299,15 @@ internal sealed class WaylandSession : IDisposable
 [SupportedOSPlatform("linux")]
 public sealed class WaylandScreenSource : IScreenSource
 {
-    private readonly WaylandSession _session = WaylandSession.Create();
+    private readonly WaylandSession _session;
+
+    public WaylandScreenSource() : this(viewOnly: false) { }
+
+    /// <param name="viewOnly">The user agreed to view-only: the portal is asked for the screen only.</param>
+    public WaylandScreenSource(bool viewOnly) => _session = WaylandSession.Create(wantControl: !viewOnly);
+
+    /// <summary>Whether the portal is asked for keyboard and pointer control as well as the screen.</summary>
+    internal bool WantsControl => !_session.ViewOnly;
 
     public ScreenBounds Bounds => _session.Bounds;
     public bool TryCapture(ScreenFrame frame) => _session.TryCapture(frame);

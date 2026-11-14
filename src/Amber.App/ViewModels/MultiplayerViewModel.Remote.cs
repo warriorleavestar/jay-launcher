@@ -109,7 +109,8 @@ public sealed partial class MultiplayerViewModel
         if (_remoteHub is not null || !room.FromInvite || Child.HideRemoteControl) return;
         try
         {
-            var hub = new RemoteHub(room, new RemoteHostOptions(RemoteConsentPolicy, RemotePlatform.CreateScreen, RemotePlatform.CreateInput, RemoteCodec));
+            var hub = new RemoteHub(room, new RemoteHostOptions(RemoteConsentPolicy, RemotePlatform.CreateScreen, RemotePlatform.CreateInput, RemoteCodec)
+                { ScreenFor = RemotePlatform.CreateScreen });
             hub.SharingStarted += (sharer, _) => Dispatcher.UIThread.Post(() => TrackSharing(sharer));
             _remoteHub = hub;
         }
@@ -253,7 +254,7 @@ public sealed partial class MultiplayerViewModel
             await DeclineRemote(client, sessionId);
             return;
         }
-        var screen = RemotePlatform.CreateScreen();
+        var screen = RemotePlatform.CreateScreen(consent.ViewOnly);
         if (screen is null)
         {
             // macOS 还没授权屏幕录制（系统这时已经弹了授权提示）之类：这次按拒绝回，界面上写原因。
