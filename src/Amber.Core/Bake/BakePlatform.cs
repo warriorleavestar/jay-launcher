@@ -94,8 +94,12 @@ public static partial class BakePlatform
         }
         catch (Exception e) when (e is InvalidDataException or JsonException or InvalidOperationException)
         {
-            // A broken or truncated installer: drop the cached copy so the next attempt downloads it again.
-            try { File.Delete(installer); } catch (Exception d) when (d is IOException or UnauthorizedAccessException) { }
+            // A broken or truncated installer: drop the cached copy so the next attempt downloads it again,
+            // and the files taken from it, so a fresh copy is unpacked again rather than skipped as already there.
+            foreach (var stale in new[] { installer, Path.Combine(inst, "install_profile.json"), Path.Combine(inst, "version.json"), Path.Combine(inst, "data", "client.lzma") })
+            {
+                try { File.Delete(stale); } catch (Exception d) when (d is IOException or UnauthorizedAccessException) { }
+            }
             throw;
         }
 
