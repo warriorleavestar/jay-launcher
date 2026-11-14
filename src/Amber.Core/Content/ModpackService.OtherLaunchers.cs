@@ -187,7 +187,7 @@ public sealed partial class ModpackService
             case Mcbbs:
                 var meta = ReadJson(McbbsMeta(zip, info.Root)!);
                 await AddOptiFineModAsync(info, OptiFineAddon(meta["addons"] as JsonArray, info.McVersion), workDir, progress, ct);
-                await DownloadMcbbsCurseFilesAsync(meta, workDir, progress, ct);
+                await DownloadMcbbsCurseFilesAsync(meta, pack, progress, ct);
                 break;
             case Hmcl:
                 var addon = OptiFineAddon(ReadJson(zip.GetEntry(info.Root + "modpack.json")!)["addons"] as JsonArray, info.McVersion);
@@ -250,8 +250,9 @@ public sealed partial class ModpackService
     }
 
     /// <summary>MCBBS 整合包里 type 为 curse 的文件要从 CurseForge 下载；其他文件都在 overrides 里。</summary>
-    private async Task DownloadMcbbsCurseFilesAsync(JsonObject meta, string workDir, IProgress<LoaderProgress>? progress, CancellationToken ct)
+    private async Task DownloadMcbbsCurseFilesAsync(JsonObject meta, PackTarget pack, IProgress<LoaderProgress>? progress, CancellationToken ct)
     {
+        var workDir = pack.WorkDir;
         var curse = (meta["files"] as JsonArray ?? []).OfType<JsonObject>()
             .Where(f => Str(f, "type") == "curse" && f["fileID"] is not null).ToList();
         if (curse.Count == 0) return;
@@ -261,7 +262,7 @@ public sealed partial class ModpackService
         var folders = await curseForge.GetProjectFoldersAsync(files.Select(f => long.Parse(f.ProjectId)).Distinct().ToList(), ct);
         var items = await ContentInstaller.PrepareDownloadItemsAsync(files.Select(f => (f, Path.Combine(workDir, folders.GetValueOrDefault(f.ProjectId, "mods")))), ct);
         await ctx.Downloader.DownloadAllAsync(items, new Progress<Net.DownloadProgress>(p => progress?.Report(new(L.F("core.content.modpack.downloadprogress", p.CompletedFiles, p.TotalFiles), 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles)))), ct);
-        if (ids.Count > files.Count) throw new InvalidDataException(L.P("core.content.modpack.missingcursefiles", ids.Count - files.Count, ids.Count - files.Count));
+        ReportMissing(ids, files, pack, progress);
     }
 
     private static string? Str(JsonNode? node, string key) =>

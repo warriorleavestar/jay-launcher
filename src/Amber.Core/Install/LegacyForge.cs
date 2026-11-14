@@ -130,7 +130,9 @@ public static class LegacyForge
         {
             try
             {
-                await downloader.DownloadOneAsync(new DownloadItem($"{ForgeMaven}{fullVersion}/forge-{fullVersion}-{classifier}.zip", path), ct);
+                // Merged into the game jar: whichever source serves it must match the official repository's hash.
+                var url = $"{ForgeMaven}{fullVersion}/forge-{fullVersion}-{classifier}.zip";
+                await downloader.DownloadOneAsync(new DownloadItem(url, path, await downloader.GetOfficialSha1Async(url, ct)), ct);
                 return;
             }
             catch (Exception e) when (e is HttpRequestException or DownloadException or IOException)

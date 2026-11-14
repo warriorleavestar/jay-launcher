@@ -111,7 +111,8 @@ public sealed partial class InstanceViewModel
         if (Current is not { } c) return;
         try
         {
-            ResourcePackOptions.SetEnabled(c.WorkDir, EnabledPacks.Select(p => p.Name).ToList());
+            // With the game version, packs made for another version are also marked as accepted, or the game drops them.
+            ResourcePackOptions.SetEnabled(c.WorkDir, EnabledPacks.Select(p => p.Name).ToList(), c.McVersion);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

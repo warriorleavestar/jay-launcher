@@ -9,11 +9,14 @@ namespace Amber.Core.Content;
 /// Which resource packs are on and in what order, read from and written to the game's own <c>options.txt</c> (the same
 /// list as the in-game resource pack screen; official design §6.7). Minecraft lists packs lowest priority first, with
 /// built-in packs like <c>vanilla</c> at the bottom; Jay shows them top = highest, so the order is reversed here.
-/// Only the <c>resourcePacks</c> line is touched; every other option is kept as it is.
+/// Only the <c>resourcePacks</c> and <c>incompatibleResourcePacks</c> lines are touched; every other option is kept as
+/// it is. The game drops a selected pack made for another game version unless it is also listed in
+/// <c>incompatibleResourcePacks</c> (what its own pack screen writes after asking), so Jay lists those packs there too.
 /// </summary>
 public static class ResourcePackOptions
 {
     private const string Key = "resourcePacks:";
+    private const string IncompatibleKey = "incompatibleResourcePacks:";
     private const string FilePrefix = "file/";
 
     /// <summary>Folder or zip names of the packs that are on, highest priority first.</summary>
@@ -25,21 +28,38 @@ public static class ResourcePackOptions
 
     /// <summary>
     /// Turns on exactly these packs (highest priority first). Built-in entries that were there (vanilla, fabric, programmer
-    /// art…) stay below them in their old order; vanilla is added when missing.
+    /// art…) stay below them in their old order; vanilla is added when missing. With <paramref name="mcVersion"/>, a pack
+    /// made for another game version (<see cref="PackFormat.AgeOf"/>) is also listed as accepted, so the game keeps it on.
     /// </summary>
-    public static void SetEnabled(string workDir, IReadOnlyList<string> topFirst)
+    public static void SetEnabled(string workDir, IReadOnlyList<string> topFirst, string? mcVersion = null)
     {
         var builtIn = ReadList(workDir).Where(e => !e.StartsWith(FilePrefix, StringComparison.Ordinal)).ToList();
         if (!builtIn.Contains("vanilla")) builtIn.Insert(0, "vanilla");
         var entries = builtIn.Concat(topFirst.Reverse().Select(n => FilePrefix + n)).ToList();
-        var json = new JsonArray(entries.Select(e => (JsonNode?)JsonValue.Create(e)).ToArray()).ToJsonString();
         var path = Path.Combine(workDir, "options.txt");
         var lines = File.Exists(path) ? File.ReadAllLines(path).ToList() : [];
-        var index = lines.FindIndex(l => l.StartsWith(Key, StringComparison.Ordinal));
-        if (index >= 0) lines[index] = Key + json;
-        else lines.Add(Key + json);
+        SetLine(lines, Key, entries);
+
+        // Entries the game (or an earlier save) put there stay while their pack is on; a pack switched off leaves.
+        var accepted = ReadList(lines, IncompatibleKey).Where(entries.Contains).ToList();
+        if (mcVersion is not null)
+            foreach (var name in topFirst)
+                if (PackFormat.AgeOf(Path.Combine(workDir, "resourcepacks", name), mcVersion) is PackAge.Older or PackAge.Newer
+                    && !accepted.Contains(FilePrefix + name))
+                    accepted.Add(FilePrefix + name);
+        if (accepted.Count > 0 || lines.Any(l => l.StartsWith(IncompatibleKey, StringComparison.Ordinal)))
+            SetLine(lines, IncompatibleKey, accepted);
+
         Directory.CreateDirectory(workDir);
         File.WriteAllLines(path, lines, new UTF8Encoding(false));
+    }
+
+    private static void SetLine(List<string> lines, string key, IEnumerable<string> entries)
+    {
+        var json = new JsonArray(entries.Select(e => (JsonNode?)JsonValue.Create(e)).ToArray()).ToJsonString();
+        var index = lines.FindIndex(l => l.StartsWith(key, StringComparison.Ordinal));
+        if (index >= 0) lines[index] = key + json;
+        else lines.Add(key + json);
     }
 
     /// <summary>Moves one enabled pack up (toward higher priority) or down. Returns the new order.</summary>
@@ -56,12 +76,23 @@ public static class ResourcePackOptions
     internal static List<string> ReadList(string workDir)
     {
         var path = Path.Combine(workDir, "options.txt");
-        if (!File.Exists(path)) return [];
-        var line = File.ReadLines(path).FirstOrDefault(l => l.StartsWith(Key, StringComparison.Ordinal));
+        return File.Exists(path) ? ReadList(File.ReadLines(path), Key) : [];
+    }
+
+    /// <summary>The packs the game was told to keep although they were made for another version.</summary>
+    internal static List<string> Accepted(string workDir)
+    {
+        var path = Path.Combine(workDir, "options.txt");
+        return File.Exists(path) ? ReadList(File.ReadLines(path), IncompatibleKey) : [];
+    }
+
+    private static List<string> ReadList(IEnumerable<string> lines, string key)
+    {
+        var line = lines.FirstOrDefault(l => l.StartsWith(key, StringComparison.Ordinal));
         if (line is null) return [];
         try
         {
-            return JsonNode.Parse(line[Key.Length..]) is JsonArray array
+            return JsonNode.Parse(line[key.Length..]) is JsonArray array
                 ? [.. array.Select(n => n?.GetValueKind() == JsonValueKind.String ? n.GetValue<string>() : null).OfType<string>()]
                 : [];
         }
@@ -108,7 +139,34 @@ public static class PackFormat
     };
 
     /// <summary><c>pack.pack_format</c> from a zip or a folder, or null when it can't be read.</summary>
-    public static int? Read(string path)
+    public static int? Read(string path) => Number(ReadPack(path)?["pack_format"]);
+
+    /// <summary>
+    /// <see cref="Age"/> of the pack at <paramref name="path"/>, except that a pack whose <c>supported_formats</c> covers
+    /// the format the game expects fits (games from 1.20.2 on read that range).
+    /// </summary>
+    public static PackAge AgeOf(string path, string mcVersion)
+    {
+        var pack = ReadPack(path);
+        if (Expected(mcVersion) is >= 18 and var expected && SupportedRange(pack?["supported_formats"]) is var (min, max)
+            && min <= expected && expected <= max)
+            return PackAge.Fits;
+        return Age(Number(pack?["pack_format"]), mcVersion);
+    }
+
+    /// <summary><c>supported_formats</c>: a number, <c>[min, max]</c>, or <c>{"min_inclusive", "max_inclusive"}</c>.</summary>
+    private static (int Min, int Max)? SupportedRange(JsonNode? node) => node switch
+    {
+        JsonValue when Number(node) is { } one => (one, one),
+        JsonArray { Count: 2 } pair when Number(pair[0]) is { } min && Number(pair[1]) is { } max => (min, max),
+        JsonObject range when Number(range["min_inclusive"]) is { } min && Number(range["max_inclusive"]) is { } max => (min, max),
+        _ => null,
+    };
+
+    private static int? Number(JsonNode? node) => node is JsonValue v && v.TryGetValue<int>(out var n) ? n : null;
+
+    /// <summary>The <c>pack</c> object of <c>pack.mcmeta</c> in a zip or a folder, or null when it can't be read.</summary>
+    private static JsonObject? ReadPack(string path)
     {
         try
         {
@@ -128,7 +186,8 @@ public static class PackFormat
                 }
             }
             if (text is null) return null;
-            return JsonNode.Parse(text, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true })?["pack"]?["pack_format"]?.GetValue<int>();
+            return JsonNode.Parse(text, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true }) is JsonObject root
+                ? root["pack"] as JsonObject : null;
         }
         catch (Exception e) when (e is IOException or InvalidDataException or JsonException or InvalidOperationException or FormatException or UnauthorizedAccessException)
         {

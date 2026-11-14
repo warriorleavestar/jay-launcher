@@ -9,9 +9,9 @@ public enum DropKind { Modpack, Mod, ResourcePack, Shader, Datapack, World, Them
 public sealed record DropGroup(DropKind Kind, IReadOnlyList<string> Paths);
 
 /// <summary>
-/// Recognises dragged files. A <c>.zip</c> is judged by what is inside it, not its name: <c>modrinth.index.json</c> or a
-/// CurseForge <c>manifest.json</c> is a modpack, <c>level.dat</c> a world, <c>shaders/</c> a shader pack, and
-/// <c>pack.mcmeta</c> a datapack (with <c>data/</c>) or a resource pack.
+/// Recognises dragged files. A <c>.zip</c> is judged by what is inside it, not its name: anything the modpack import
+/// accepts is a modpack (see <see cref="ModpackService.LooksLikePack"/>), <c>level.dat</c> a world, <c>shaders/</c> a
+/// shader pack, and <c>pack.mcmeta</c> a datapack (with <c>data/</c>) or a resource pack.
 /// </summary>
 public static class DropClassifier
 {
@@ -46,6 +46,9 @@ public static class DropClassifier
         var names = zip.Entries.Take(MaxEntries).Select(e => e.FullName.Replace('\\', '/').TrimStart('/')).ToList();
         if (names.Contains("modrinth.index.json", StringComparer.OrdinalIgnoreCase)) return DropKind.Modpack;
         if (zip.GetEntry("manifest.json") is { } manifest && IsCurseForgeManifest(manifest)) return DropKind.Modpack;
+        // Every other format the import reads (MCBBS, HMCL, MultiMC / Prism, a wrapping folder, a launcher bundle,
+        // a zipped game folder), recognised from the entry names and small metadata only.
+        if (ModpackService.LooksLikePack(zip)) return DropKind.Modpack;
         // A world is level.dat at the top or inside one folder (most world zips hold the world folder).
         if (names.Any(n => IsAtDepth(n, "level.dat", 1))) return DropKind.World;
         if (names.Any(n => StartsWithAtDepth(n, "shaders/", 1))) return DropKind.Shader;

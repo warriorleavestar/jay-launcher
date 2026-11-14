@@ -203,6 +203,33 @@ public sealed class Downloader
         throw new HttpRequestException(L.F("core.net.download.allsourcesfailed", officialUrl), last);
     }
 
+    /// <summary>
+    /// The SHA-1 a Maven repository publishes next to a file (<c>&lt;url&gt;.sha1</c>), asked from the official host only,
+    /// never through a mirror: the file itself may then come from any source and must match it. Null when the host
+    /// publishes none or can't be reached in time, so the download still works where only a mirror is reachable.
+    /// </summary>
+    public async Task<string?> GetOfficialSha1Async(string officialUrl, CancellationToken ct = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(MetadataTimeout);
+        try
+        {
+            using var response = await _http.GetAsync(officialUrl + ".sha1", HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            if (!response.IsSuccessStatusCode) return null;
+            var buffer = new byte[256];
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+            var read = await stream.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, timeout.Token);
+            // Either the bare hash or "hash  file name".
+            var text = System.Text.Encoding.ASCII.GetString(buffer, 0, read).Trim();
+            var hash = text.Split([' ', '\t', '\r', '\n'], 2)[0];
+            return hash.Length == 40 && hash.All(Uri.IsHexDigit) ? hash.ToLowerInvariant() : null;
+        }
+        catch (Exception e) when (e is HttpRequestException or IOException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     public async Task DownloadAllAsync(IReadOnlyCollection<DownloadItem> items, IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
         var total = items.Count;

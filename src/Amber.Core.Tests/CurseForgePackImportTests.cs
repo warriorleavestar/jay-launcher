@@ -36,7 +36,7 @@ public sealed class CurseForgePackImportTests : IDisposable
         Directory.Delete(_root, true);
     }
 
-    private string Pack(string format, string contents, string root = "", string? allowedOverride = null)
+    private string Pack(string format, string contents, string root = "", string? allowedOverride = null, bool goneFile = false)
     {
         var path = Path.Combine(_root, "pack.zip");
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -46,6 +46,11 @@ public sealed class CurseForgePackImportTests : IDisposable
         var metadata = JsonNode.Parse(format == "CurseForge"
             ? """{"manifestType":"minecraftModpack","name":"Pack","minecraft":{"version":"1.21.1"},"files":[{"projectID":123,"fileID":456,"required":true}],"overrides":"custom-overrides"}"""
             : """{"name":"Pack","addons":[{"id":"game","version":"1.21.1"}],"files":[{"type":"curse","projectID":123,"fileID":456}]}""")!;
+        // A file whose author removed it from CurseForge: the API doesn't return it.
+        if (goneFile)
+            metadata["files"]!.AsArray().Add(format == "CurseForge"
+                ? new JsonObject { ["projectID"] = 998, ["fileID"] = 999, ["required"] = true }
+                : new JsonObject { ["type"] = "curse", ["projectID"] = 998, ["fileID"] = 999 });
         if (allowedOverride is not null)
         {
             metadata["files"]!.AsArray().Add(new JsonObject { ["projectID"] = 789, ["fileID"] = 101, ["required"] = true });
@@ -75,6 +80,22 @@ public sealed class CurseForgePackImportTests : IDisposable
         Assert.Equal("hello", await File.ReadAllTextAsync(Path.Combine(_dir.VersionDir("Fresh"), "mods", "example.jar")));
         Assert.Equal("pack configuration", await File.ReadAllTextAsync(Path.Combine(_dir.VersionDir("Fresh"), "config", "pack.txt")));
         Assert.Equal(0, _handler.FileDownloads);
+    }
+
+    [Theory]
+    [InlineData("CurseForge")]
+    [InlineData("MCBBS")]
+    public async Task FileGoneFromCurseForgeIsReportedAndTheRestStaysInstalled(string format)
+    {
+        var skipped = new List<string>();
+        var stages = new List<string>();
+        Assert.Equal("Fresh", await _packs.ImportAsync(Pack(format, "hello", goneFile: true), "Fresh", _dir.VersionDir,
+            new SyncProgress<LoaderProgress>(p => stages.Add(p.Stage)), onSkip: skipped.Add));
+
+        Assert.Equal("hello", await File.ReadAllTextAsync(Path.Combine(_dir.VersionDir("Fresh"), "mods", "example.jar")));
+        Assert.Equal("pack configuration", await File.ReadAllTextAsync(Path.Combine(_dir.VersionDir("Fresh"), "config", "pack.txt")));
+        Assert.Contains("999", Assert.Single(skipped));
+        Assert.Contains(stages, s => s.Contains("999"));
     }
 
     [Theory]

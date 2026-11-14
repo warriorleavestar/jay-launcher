@@ -44,13 +44,17 @@ public static partial class JavaFinder
             }
         }
 
+        // The game folder's runtime folder may be writable by the game: what is found there is never run just to look
+        // at it. The runtimes Jay installs there (Mojang's and Temurin) carry a release file, which is read instead.
+        var gameRuntimes = gameRoot is null ? null : Path.Combine(gameRoot, "runtime");
         var result = new List<JavaInstall>();
         var seenExe = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var home in homes)
         {
             var exe = Path.Combine(home, "bin", JavaExe);
             if (!File.Exists(exe) || !seenExe.Add(Path.GetFullPath(exe))) continue;
-            if (Probe(home, exe) is { } install) result.Add(install);
+            var mayRun = gameRuntimes is null || !Launch.GameSandbox.IsInside(home, gameRuntimes);
+            if (Probe(home, exe, mayRun) is { } install) result.Add(install);
         }
         return result.OrderByDescending(j => j.MajorVersion).ThenBy(j => j.JavaPath).ToList();
     }
@@ -102,7 +106,7 @@ public static partial class JavaFinder
         catch { return []; }
     }
 
-    private static JavaInstall? Probe(string home, string exe)
+    private static JavaInstall? Probe(string home, string exe, bool mayRun)
     {
         // 优先读 release 文件，避免为每个 Java 起进程。
         var release = Path.Combine(home, "release");
@@ -116,7 +120,13 @@ public static partial class JavaFinder
                 else if (line.StartsWith("OS_ARCH=")) is64 = line.Contains("64");
             }
         }
-        if (version is null || is64 is null)
+        if (!mayRun)
+        {
+            // A runtime Jay installed is built for this computer, so a release file without OS_ARCH still says enough.
+            if (version is null) return null;
+            is64 ??= Environment.Is64BitOperatingSystem;
+        }
+        else if (version is null || is64 is null)
         {
             (version, is64) = ProbeByRunning(exe);
             if (version is null) return null;
