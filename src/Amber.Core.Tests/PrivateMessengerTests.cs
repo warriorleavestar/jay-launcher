@@ -41,6 +41,59 @@ public sealed class PrivateMessengerTests : IDisposable
     [InlineData("in\u200Bvoice\u2066.pdf\u2069.exe", "invoice.pdf.exe")]
     public void FileNamesFromOthersAreMadeSafe(string name, string expected) => Assert.Equal(expected, PrivateMessenger.SafeName(name));
 
+    /// <summary>A link that delivers by fingerprint, for tests with more than two people.</summary>
+    private sealed class RoutedLink(string me, byte[] myKey, string name, Dictionary<string, RoutedLink> all) : IPrivateLink
+    {
+        public event Action<PrivateFrame>? PrivateReceived;
+
+        public Task<bool> SendPrivateAsync(string to, byte[] sealedData, CancellationToken ct)
+        {
+            if (!all.TryGetValue(to, out var peer)) return Task.FromResult(false);
+            peer.PrivateReceived?.Invoke(new PrivateFrame(me, myKey, name, sealedData));
+            return Task.FromResult(true);
+        }
+    }
+
+    /// <summary>One member's unanswered offers take at most their own share of places; another member's offer still arrives, and over-cap offers are declined.</summary>
+    [Fact]
+    public async Task OneSendersOffersDoNotBlockOthers()
+    {
+        using var carol = X25519KeyPair.Generate();
+        var all = new Dictionary<string, RoutedLink>();
+        foreach (var (key, name) in new[] { (_alice, "Alice"), (_bob, "Bob"), (carol, "Carol") }) all[Fp(key)] = new RoutedLink(Fp(key), key.PublicKey, name, all);
+        var keys = new Dictionary<string, byte[]> { [Fp(_alice)] = _alice.PublicKey, [Fp(_bob)] = _bob.PublicKey, [Fp(carol)] = carol.PublicKey };
+        await using var bob = new PrivateMessenger(all[Fp(_bob)], _bob, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "bob"));
+        var offered = new List<FileOffer>();
+        bob.FileOffered += o => { lock (offered) offered.Add(o); };
+        var declined = new List<string>();
+        all[Fp(_alice)].PrivateReceived += frame =>
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(PrivateSeal.Open(_alice, frame.FromPublicKey, frame.Sealed)!) is { } body && body["t"]?.GetValue<string>() == "decline")
+                lock (declined) declined.Add(body["id"]!.GetValue<string>());
+        };
+        async Task Offer(X25519KeyPair from, string id)
+        {
+            var body = new System.Text.Json.Nodes.JsonObject { ["t"] = "offer", ["id"] = id, ["name"] = "a.txt", ["size"] = 10, ["sha"] = new string('a', 64) };
+            await all[Fp(from)].SendPrivateAsync(Fp(_bob), PrivateSeal.Seal(from, _bob.PublicKey, System.Text.Encoding.UTF8.GetBytes(body.ToJsonString())), default);
+        }
+
+        var ids = Enumerable.Range(0, PrivateMessenger.MaxIncomingPerSender + 1).Select(_ => PrivateMessenger.NewTransferId()).ToList();
+        foreach (var id in ids) await Offer(_alice, id);
+        var fromCarol = PrivateMessenger.NewTransferId();
+        await Offer(carol, fromCarol);
+
+        Assert.True(await WaitUntil(() => { lock (offered) return offered.Count == PrivateMessenger.MaxIncomingPerSender + 1; }));
+        lock (offered) Assert.Contains(offered, o => o.Id == fromCarol);
+        Assert.True(await WaitUntil(() => { lock (declined) return declined.Count == 1; }));
+        Assert.Equal(ids[^1], declined[0]);
+    }
+
+    private static async Task<bool> WaitUntil(Func<bool> condition)
+    {
+        for (var i = 0; i < 100 && !condition(); i++) await Task.Delay(50);
+        return condition();
+    }
+
     // ---- 不经网络：两头直接连 ----
 
     private sealed class Link(string me, byte[] myKey, string name) : IPrivateLink

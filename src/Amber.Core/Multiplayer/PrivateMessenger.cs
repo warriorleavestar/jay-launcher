@@ -69,8 +69,13 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
     /// <see cref="MaxIncoming"/> receive slots forever.
     /// </summary>
     internal static readonly TimeSpan ReceiveIdleTimeout = TimeSpan.FromSeconds(60);
-    /// <summary>At most this many incoming offers and receives at once; further offers are ignored.</summary>
-    public const int MaxIncoming = 8;
+    /// <summary>At most this many incoming offers and receives at once; further offers are declined.</summary>
+    public const int MaxIncoming = 16;
+    /// <summary>
+    /// At most this many from one sender, so one member's unanswered offers can't take every place. Mod files this side
+    /// asked for (mod sync) count against neither limit.
+    /// </summary>
+    public const int MaxIncomingPerSender = 8;
 
     private readonly IPrivateLink _link;
     private readonly X25519KeyPair _me;
@@ -465,14 +470,16 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
                     var size = body["size"]?.GetValue<long>() ?? -1;
                     var sha = body["sha"]?.GetValue<string>();
                     var name = SafeName(body["name"]?.GetValue<string>() ?? "");
-                    if (size < 0 || sha is not { Length: 64 } || _incoming.Count >= MaxIncoming) return;
-                    if (!AllowsFile(size))
+                    if (size < 0 || sha is not { Length: 64 }) return;
+                    var wanted = WantedMod(frame.FromFingerprint, body["mod"]?.GetValue<string>(), size);
+                    var full = wanted is null && (_incoming.Count >= MaxIncoming
+                        || _incoming.Values.Count(i => i.ModSha1 is null && i.Offer.FromFingerprint == frame.FromFingerprint) >= MaxIncomingPerSender);
+                    if (full || !AllowsFile(size))
                     {
                         await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "decline", ["id"] = id }, _cts.Token);
                         return;
                     }
                     var offer = new FileOffer(id, frame.FromFingerprint, frame.FromName, name, size);
-                    var wanted = WantedMod(frame.FromFingerprint, body["mod"]?.GetValue<string>(), size);
                     _incoming[id] = new Incoming { Offer = offer, Hash = Convert.FromHexString(sha), PeerKey = frame.FromPublicKey, ModSha1 = wanted, LastActivity = Clock() };
                     // A mod file we asked for during a sync: take it without a card. Anything else asks the user as before.
                     if (wanted is not null) await AcceptAsync(id);
