@@ -270,13 +270,19 @@ public sealed partial class MultiplayerViewModel
             var stream = await RemoteConnector.OpenAsync(host, port, room, RemoteRole.Controlled, sessionId, connect.Token);
             var sharer = new RemoteSharer(stream, screen, input, RemoteCodec, !consent.ViewOnly, HostDisplayName, HostFingerprint);
             if (_sessionCts is { } lifetime) sharer.EndWith(lifetime.Token);
-            sharer.Ended += _ =>
-            {
-                screen?.Dispose();
-                input?.Dispose();
-            };
             TrackSharing(sharer);
-            _ = Task.Run(sharer.RunAsync);
+            // Release the screen and input only once RunAsync has returned: Ended fires as soon as the session is told to
+            // stop, while a capture or an injected event may still be using them (same order as RemoteHub).
+            _ = Task.Run(async () =>
+            {
+                try { await sharer.RunAsync(); }
+                finally
+                {
+                    sharer.Abort(RemoteEnd.Disconnected);
+                    screen.Dispose();
+                    input?.Dispose();
+                }
+            });
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or OperationCanceledException
             or System.Security.Cryptography.CryptographicException or InvalidOperationException)
