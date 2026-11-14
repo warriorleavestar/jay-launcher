@@ -45,7 +45,9 @@ public static class RelayNodes
         if (useBuiltIn) list.AddRange(BuiltIn.Where(b => !list.Contains(b)));
         return list;
     }
-    private static readonly string[] Schemes = ["tcp", "udp", "ws", "wss", "quic", "wg"];
+    // The transports Jay's EasyTier build can connect over. It is built without websocket support,
+    // so ws:// and wss:// relays are not accepted: they could never connect.
+    private static readonly string[] Schemes = ["tcp", "udp", "quic", "wg"];
 
     /// <summary>检查节点地址：协议是 EasyTier 支持的，带主机和端口。</summary>
     public static bool IsValid(string url) =>
@@ -166,11 +168,11 @@ public static class RelayNodes
         return TryReadJson(bytes, out name, out urls, allowIp: false);
     }
 
-    /// <summary>测节点延迟：TCP 类（tcp/ws/wss）测建立连接的时间；UDP 类测不了，返回 null 和说明。</summary>
+    /// <summary>Measures a relay's latency as the time to open a TCP connection (tcp:// only); other transports return null and a reason.</summary>
     public static async Task<(double? Ms, string? Error)> ProbeAsync(string url, CancellationToken ct = default)
     {
         if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u)) return (null, L.T("core.mp.nodes.invalidaddress"));
-        if (u.Scheme is not ("tcp" or "ws" or "wss")) return (null, L.F("core.mp.nodes.unsupportedlatency", u.Scheme.ToUpperInvariant()));
+        if (u.Scheme is not "tcp") return (null, L.F("core.mp.nodes.unsupportedlatency", u.Scheme.ToUpperInvariant()));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
         try

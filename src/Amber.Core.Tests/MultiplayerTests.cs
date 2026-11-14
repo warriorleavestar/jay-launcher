@@ -160,11 +160,31 @@ public class RelayNodeTests
     [Theory]
     [InlineData("tcp://public.easytier.top:11010", true)]
     [InlineData("udp://1.2.3.4:11010", true)]
-    [InlineData("wss://node.example.com:443", true)]
+    [InlineData("quic://node.example.com:11012", true)]
+    [InlineData("wg://node.example.com:11011", true)]
+    // Jay's EasyTier build has no websocket support, so ws/wss relays could never connect.
+    [InlineData("wss://node.example.com:443", false)]
+    [InlineData("ws://node.example.com:80", false)]
     [InlineData("tcp://public.easytier.top", false)]
     [InlineData("http://example.com:80", false)]
     [InlineData("public.easytier.top:11010", false)]
     public void Validate(string url, bool ok) => Assert.Equal(ok, RelayNodes.IsValid(url));
+
+    [Fact]
+    public void WebSocketRelaysAreDroppedFromSavedListsAndShareCodes()
+    {
+        Assert.Equal(["tcp://my.node.example:11010"], RelayNodes.Effective(["wss://ws.node.example:443/et", "tcp://my.node.example:11010", "ws://ws.node.example:80"], false));
+        Assert.True(RelayNodes.TryDecode("wss://ws.node.example:443\ntcp://my.node.example:11010", out _, out var urls));
+        Assert.Equal(["tcp://my.node.example:11010"], urls);
+    }
+
+    [Fact]
+    public async Task LatencyIsOnlyMeasuredForTcpRelays()
+    {
+        var (ms, error) = await RelayNodes.ProbeAsync("wss://ws.node.example:443");
+        Assert.Null(ms);
+        Assert.Equal(L.F("core.mp.nodes.unsupportedlatency", "WSS"), error);
+    }
 
     [Fact]
     public void ShareCode_RoundTrip()
