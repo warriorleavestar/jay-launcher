@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 卸载 Amber 联机节点 / uninstall the Amber relay node
+# 卸载 Jay 联机节点 / uninstall the Jay relay node
 # 用法 / usage:  sudo bash uninstall.sh      （PORT 和安装时一样 / same PORT as install, default 11010）
 set -euo pipefail
 
