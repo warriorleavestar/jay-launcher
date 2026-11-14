@@ -32,6 +32,8 @@ BANDWIDTH_LIMIT="${BANDWIDTH_LIMIT:-0}"
 INSTALL_DIR="/opt/amber-node"
 SERVICE="amber-node"
 SERVICE_USER="amber-node"
+# Where the unit file goes; only the script tests point it elsewhere.
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf '错误 / error: %s\n' "$*" >&2; exit 1; }
@@ -98,7 +100,7 @@ ARGS="${ARGS} --listeners tcp://0.0.0.0:${PORT} udp://0.0.0.0:${PORT}"
 ARGS="${ARGS} --relay-network-whitelist '${WHITELIST}' --hostname amber-node --rpc-portal 127.0.0.1:15888"
 [ "$BANDWIDTH_LIMIT" -gt 0 ] && ARGS="${ARGS} --foreign-relay-bps-limit ${BANDWIDTH_LIMIT}"
 
-cat > "/etc/systemd/system/${SERVICE}.service" <<UNIT
+cat > "${UNIT_DIR}/${SERVICE}.service" <<UNIT
 [Unit]
 Description=Jay relay node (EasyTier ${VERSION})
 Documentation=https://github.com/Yumao-Feather/jay-easytier
@@ -129,7 +131,7 @@ WorkingDirectory=/tmp
 [Install]
 WantedBy=multi-user.target
 UNIT
-chmod 0600 "/etc/systemd/system/${SERVICE}.service"
+chmod 0600 "${UNIT_DIR}/${SERVICE}.service"
 
 systemctl daemon-reload
 systemctl enable "$SERVICE" >/dev/null

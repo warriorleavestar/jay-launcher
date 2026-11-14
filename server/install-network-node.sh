@@ -11,9 +11,10 @@ PORT="${PORT:-11010}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR=/opt/jay-server
 DATA=/var/lib/jay-network
-UNIT=/etc/systemd/system/jay-network.service
+# UNIT_DIR: where the unit file goes; only the script tests point it elsewhere.
+UNIT="${UNIT_DIR:-/etc/systemd/system}/jay-network.service"
 
-[[ $EUID -eq 0 ]] || { echo "要用 sudo 运行"; exit 1; }
+[[ "$(id -u)" -eq 0 ]] || { echo "要用 sudo 运行"; exit 1; }
 [[ -x "$HERE/jay-server" ]] || { echo "没找到 $HERE/jay-server：在解压好的 JayServer 文件夹里运行这个脚本"; exit 1; }
 command -v systemctl >/dev/null || { echo "这台机器没有 systemd；直接运行 ./jay-server directory 或者用 server/docker"; exit 1; }
 [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || { echo "PORT 要是 1–65535"; exit 1; }
