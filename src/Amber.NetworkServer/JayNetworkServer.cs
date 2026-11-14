@@ -240,7 +240,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             foreach (var (ban, count) in result.Unresolved)
                 _b.Log($"Ban list: please review the account ban \"{ban.Value}\": "
                     + (count == 0 ? "no account has this name" : $"{count} accounts have this name in different case")
-                    + "; it keeps matching the name in any case (\"anyCase\" in node bans). Ban the exact account name and unban this entry.");
+                    + "; it keeps matching the name in any case (\"anyCase\" in node bans). Ban the exact account name, then lift only this entry (node unban account <name> --any-case).");
         }
         else if (bans.List().Count(b => b.AnyCase) is > 0 and var left)
             _b.Log($"Ban list: {left} account ban(s) from an older version keep matching names in any case because the account store "
@@ -490,11 +490,14 @@ public sealed class JayNetworkServer : IAsyncDisposable
     /// <summary>The reason on address bans that came with banning an operator (how unbanning finds them).</summary>
     private static string OperatorBanReason(string account) => "with operator " + account;
 
-    /// <summary>Lifts a ban. Lifting an operator ban also lifts the address bans that came with it.</summary>
-    public bool Unban(string kind, string value)
+    /// <summary>
+    /// Lifts a ban (<paramref name="match"/>: see <see cref="BanList.Remove"/>). Lifting an operator ban also lifts the
+    /// address bans that came with it.
+    /// </summary>
+    public bool Unban(string kind, string value, BanMatch match = BanMatch.Auto)
     {
         if (Bans is null) throw new InvalidOperationException("This node has no ban list.");
-        if (!Bans.Remove(kind, value)) return false;
+        if (!Bans.Remove(kind, value, match)) return false;
         if (kind == "operator" && Amber.Core.Identity.JayAddress.Canonical(value.Trim()) is { } account)
             foreach (var node in Bans.List().Where(b => b.Kind == "node" && b.Reason == OperatorBanReason(account)).ToList())
                 Bans.Remove("node", node.Value);

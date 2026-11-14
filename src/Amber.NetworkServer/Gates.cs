@@ -42,6 +42,21 @@ public sealed class NameFilterGate : IRoomGate
     }
 }
 
+/// <summary>Which account ban <see cref="BanList.Remove"/> lifts.</summary>
+public enum BanMatch
+{
+    /// <summary>Whichever ban there is; refuses when both kinds below are in force.</summary>
+    Auto,
+    /// <summary>Only the ban on this exact value.</summary>
+    Exact,
+    /// <summary>Only an account ban from an older version that matches the name in any case.</summary>
+    AnyCase,
+}
+
+/// <summary>An unban that would lift both an exact account ban and an older any-case one; say which with <see cref="BanMatch"/>.</summary>
+public sealed class AmbiguousUnbanException(string kind, string value)
+    : InvalidOperationException($"both an exact {kind} ban and an older any-case ban match \"{value}\"; choose one (exact or anyCase)");
+
 /// <summary>
 /// The node's ban list. A ban targets a host identity (host fingerprint, survives new rooms), a room id, or a network
 /// account (survives a new identity when the network requires login to publish). Bans can expire. The list lives in a JSON
@@ -165,17 +180,31 @@ public sealed class BanList : IRoomGate
         return ban;
     }
 
-    public bool Remove(string kind, string value)
+    /// <summary>
+    /// Lifts one ban. <paramref name="match"/> picks which account ban: <see cref="BanMatch.Exact"/> only the ban on this
+    /// exact name, <see cref="BanMatch.AnyCase"/> only a ban from an older version that matches the name in any case.
+    /// <see cref="BanMatch.Auto"/> lifts whichever one there is, and throws <see cref="AmbiguousUnbanException"/> without
+    /// changing anything when both are in force, so lifting the old entry never lifts the exact ban too.
+    /// </summary>
+    public bool Remove(string kind, string value, BanMatch match = BanMatch.Auto)
     {
         Validate(kind, value);
+        if (match == BanMatch.AnyCase && kind != "account") throw new ArgumentException("only account bans can match a name in any case");
         if (kind == "node") value = VolunteerNodes.Normalize(value) ?? value;
         if (kind == "operator") value = Amber.Core.Identity.JayAddress.Canonical(value.Trim()) ?? value;
+        value = value.Trim();
         lock (_gate)
         {
             Refresh();
-            var removed = _bans.Remove(Key(kind, value.Trim()));
+            var now = _now();
+            var key = Key(kind, value);
+            var exact = match != BanMatch.AnyCase && _bans.ContainsKey(key);
             // A version 1 account ban is lifted by its name in any case, as it was before.
-            if (kind == "account") removed |= _anyCase.Remove(value.Trim());
+            var old = kind == "account" && match != BanMatch.Exact && _anyCase.ContainsKey(value);
+            if (match == BanMatch.Auto && exact && old && _bans[key].ActiveAt(now) && _anyCase[value].ActiveAt(now))
+                throw new AmbiguousUnbanException(kind, value);
+            var removed = exact && _bans.Remove(key);
+            if (old) removed |= _anyCase.Remove(value);
             if (!removed) return false;
             Save();
             return true;

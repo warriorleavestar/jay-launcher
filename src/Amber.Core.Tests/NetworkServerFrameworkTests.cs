@@ -265,7 +265,7 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         public int Failures;
         public IReadOnlyCollection<string>? AccountNames() => names.Length == 0 ? null : names;
         public LoginResult Check(string name, string password, DateTimeOffset now) =>
-            name == "bob" && password == "forum-password" ? LoginResult.Ok : LoginResult.Wrong;
+            (names.Length == 0 ? name == "bob" : names.Contains(name)) && password == "forum-password" ? LoginResult.Ok : LoginResult.Wrong;
         public void RecordFailure(string name, DateTimeOffset now) => Failures++;
         public void Succeeded(string name) { }
         public byte[]? TotpSecret(string name) => null;
@@ -778,6 +778,101 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
         reloaded.Add("account", "bob", null, _now, TimeSpan.FromHours(1));
         Assert.Equal(1, reloaded.MigrateAccountBans(["bob", "Carol"]).Migrated);
         Assert.Null(Assert.Single(reloaded.List(), b => b.Value == "bob").Until);
+    }
+
+    [Fact]
+    public async Task LiftingAnOlderAccountBanKeepsTheExactBanOnTheSameName()
+    {
+        // "Bob" and "bob" are two accounts, both logged in before an older node writes a ban on "Bob" in any case.
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts("Bob", "bob")), admin: true);
+        var (bigToken, bigHost) = LogIn(server, "Bob");
+        var (smallToken, smallHost) = LogIn(server, "bob");
+        var path = Path.Combine(_dir, "bans.json");
+        WriteOldBans(path, "Bob");
+        _now += TimeSpan.FromSeconds(6);
+        Assert.True(server.Bans!.IsAccountBanned("bob"));
+
+        // As the review hint says: ban the exact account, then lift the old entry.
+        using var http = new HttpClient();
+        var port = server.AdminPort!.Value.ToString();
+        var output = new StringWriter();
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "ban", "account", "Bob", "--admin-port", port]), output, http));
+        Assert.Equal(2, server.Bans.List().Count);
+
+        // A plain unban matches both entries: it changes nothing and asks which one.
+        output = new StringWriter();
+        Assert.Equal(1, await Program.NodeCommand(_dir, Options.Parse(["node", "unban", "account", "Bob", "--admin-port", port]), output, http));
+        Assert.Contains("ambiguous", output.ToString());
+        Assert.Contains("--any-case", output.ToString());
+        Assert.Equal(2, server.Bans.List().Count);
+        // --exact names the exact account only, so another case finds nothing.
+        Assert.Equal(1, await Program.NodeCommand(_dir, Options.Parse(["node", "unban", "account", "BOB", "--exact", "--admin-port", port]), output, http));
+        Assert.Equal(2, server.Bans.List().Count);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            Program.NodeCommand(_dir, Options.Parse(["node", "unban", "account", "Bob", "--exact", "--any-case", "--admin-port", port]), output, http));
+        // --any-case lifts only the old entry, by its name in any case.
+        Assert.Equal(0, await Program.NodeCommand(_dir, Options.Parse(["node", "unban", "account", "bOB", "--any-case", "--admin-port", port]), output, http));
+
+        var ban = Assert.Single(server.Bans.List());
+        Assert.Equal(("Bob", false), (ban.Value, ban.AnyCase));
+        // Bob stays out: no new login, and the token from before can't publish.
+        Assert.Equal("disabled", LogInError(server, "Bob"));
+        Assert.Equal("banned", server.Directory!.Handle(AnnounceAs(new RoomSigner(), bigHost, bigToken))["error"]!.GetValue<string>());
+        // bob was only caught by the old entry and is back.
+        Assert.Equal("", LogInError(server, "bob"));
+        Assert.True(Ok(server.Directory.Handle(AnnounceAs(new RoomSigner(), smallHost, smallToken))));
+
+        // The same after saving and reading the list back.
+        var reloaded = new BanList(path, () => _now);
+        Assert.True(reloaded.IsAccountBanned("Bob"));
+        Assert.False(reloaded.IsAccountBanned("bob"));
+        Assert.False(reloaded.Remove("account", "Bob", BanMatch.AnyCase));
+        Assert.True(reloaded.IsAccountBanned("Bob"));
+    }
+
+    [Fact]
+    public async Task AdminApiUnbanPicksOneAccountBanByMatch()
+    {
+        var server = await StartAsync(b => b.UseAccounts(new ForumAccounts("Bob", "bob")), admin: true);
+        var path = Path.Combine(_dir, "bans.json");
+        WriteOldBans(path, "Bob");
+        _now += TimeSpan.FromSeconds(6);
+        server.Ban("account", "Bob", null);
+        using var http = new HttpClient();
+        var client = AdminClient.ForDataDir(http, _dir, server.AdminPort!.Value);
+
+        var plain = await client.CallAsync("POST", "/unban", new() { ["kind"] = "account", ["value"] = "Bob" });
+        Assert.Equal("ambiguous", plain["error"]!.GetValue<string>());
+        Assert.Equal("bad", (await client.CallAsync("POST", "/unban", new() { ["kind"] = "account", ["value"] = "Bob", ["match"] = "other" }))["error"]!.GetValue<string>());
+        Assert.Equal("bad", (await client.CallAsync("POST", "/unban", new() { ["kind"] = "host", ["value"] = "abc", ["match"] = "anyCase" }))["error"]!.GetValue<string>());
+        Assert.Equal(2, server.Bans!.List().Count);
+
+        // Lifting the exact ban leaves the old entry, which still covers both names.
+        Assert.True((await client.CallAsync("POST", "/unban", new() { ["kind"] = "account", ["value"] = "Bob", ["match"] = "exact" }))["ok"]!.GetValue<bool>());
+        Assert.True(Assert.Single(server.Bans.List()).AnyCase);
+        Assert.True(server.Bans.IsAccountBanned("Bob"));
+        Assert.True(server.Bans.IsAccountBanned("bob"));
+        // With only one entry left, a plain unban lifts it as before.
+        Assert.True((await client.CallAsync("POST", "/unban", new() { ["kind"] = "account", ["value"] = "BOB" }))["ok"]!.GetValue<bool>());
+        Assert.Empty(server.Bans.List());
+    }
+
+    [Fact]
+    public void BanListRefusesAnUnbanThatMatchesBothAccountBans()
+    {
+        var path = Path.Combine(_dir, "both-bans.json");
+        WriteOldBans(path, "Bob");
+        var bans = new BanList(path, () => _now);
+        bans.Add("account", "Bob", null, _now);
+        Assert.Throws<AmbiguousUnbanException>(() => bans.Remove("account", "Bob"));
+        Assert.Equal(2, bans.List().Count);
+        // A different case only reaches the old entry, so there is nothing to choose between.
+        Assert.True(bans.Remove("account", "bob"));
+        var left = Assert.Single(bans.List());
+        Assert.Equal(("Bob", false), (left.Value, left.AnyCase));
+        Assert.Throws<ArgumentException>(() => bans.Remove("host", "abc", BanMatch.AnyCase));
+        Assert.True(bans.Remove("account", "Bob"));
+        Assert.Empty(bans.List());
     }
 
     [Fact]

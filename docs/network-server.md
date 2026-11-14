@@ -93,7 +93,7 @@ jay-server node remove <房间编号>       # 只删这一次，房主续期时�
 - 封禁名单存在数据目录的 `bans.json`。`--for 30m` / `24h` / `7d` 是临时封禁，到点自动解除；不加就是永久。房主被拒时能看到原因和解封时间。
 - 节点每 5 秒检查一次 `bans.json` 有没有被改过，改了就重新读。几台目录节点想共用一份封禁名单，可以用 rsync、共享盘之类把这个文件同步过去，不用在每台上各执行一次。
 - 封账号只在开了账号登录的节点上有用：Jay 发布房间时会带上登录凭证，节点核对过签名才记下账号。
-- Account bans match the exact account name. Lists saved by older versions (`"v": 1` in `bans.json`) matched the name in any case; at start-up the node ties each such ban to the one account with that name and saves the list as `"v": 2`. A ban that matches no account, or several accounts that differ only in case, keeps matching any case: `node bans` marks it `"anyCase": true` and the log names it. Ban the exact account name and unban the old entry.
+- Account bans match the exact account name. Lists saved by older versions (`"v": 1` in `bans.json`) matched the name in any case; at start-up the node ties each such ban to the one account with that name and saves the list as `"v": 2`. A ban that matches no account, or several accounts that differ only in case, keeps matching any case: `node bans` marks it `"anyCase": true` and the log names it. Ban the exact account name, then lift only the old entry with `node unban account <name> --any-case`. When an exact and an old ban share a name, a plain `node unban account <name>` changes nothing and asks for `--exact` or `--any-case`; the panel's Unban button lifts only the row it is on.
 
 ## 要求的 Jay 版本
 

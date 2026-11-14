@@ -316,7 +316,9 @@ function ban(kind, value, reason, seconds) {
 }
 
 function unban(b) {
-  if (confirm(T("confirm_unban"))) act(api("POST", "/unban", { kind: b.kind, value: b.value }));
+  // Each row is one entry: lift only that one, even when an exact and an older any-case account ban share the name.
+  const match = b.kind === "account" ? (b.anyCase ? "anyCase" : "exact") : undefined;
+  if (confirm(T("confirm_unban"))) act(api("POST", "/unban", { kind: b.kind, value: b.value, match }));
 }
 
 function signIn(value) {

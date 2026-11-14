@@ -27,7 +27,7 @@ public static class AdminToken
 /// <list type="bullet">
 /// <item><c>GET /health</c>：不用口令，给 systemd / Docker / 监控用。</item>
 /// <item>其他都要 <c>Authorization: Bearer &lt;admin.token&gt;</c>：
-/// <c>GET /stats</c>、<c>GET /metrics</c>（Prometheus 文本）、<c>GET /rooms</c>、<c>GET /bans</c>、<c>POST /ban</c> {kind, value, reason}、<c>POST /unban</c> {kind, value}、<c>POST /remove</c> {id}。</item>
+/// <c>GET /stats</c>、<c>GET /metrics</c>（Prometheus 文本）、<c>GET /rooms</c>、<c>GET /bans</c>、<c>POST /ban</c> {kind, value, reason}、<c>POST /unban</c> {kind, value, match}、<c>POST /remove</c> {id}。</item>
 /// </list>
 /// 只听本机，又要口令：同一台机器上别的用户读不到口令文件，也就管不了。
 /// </summary>
@@ -266,7 +266,17 @@ public sealed class AdminApi : IAsyncDisposable
                 {
                     var o = Body();
                     if (_server.Bans is null) return (400, Fail("no_bans"));
-                    var ok = _server.Unban(o["kind"]?.GetValue<string>() ?? "", o["value"]?.GetValue<string>() ?? "");
+                    // "exact" or "anyCase" picks one account ban when both match the name; without it both matching is refused.
+                    var match = o["match"]?.GetValue<string>() switch
+                    {
+                        null or "" => BanMatch.Auto,
+                        "exact" => BanMatch.Exact,
+                        "anyCase" => BanMatch.AnyCase,
+                        _ => throw new ArgumentException("match must be exact or anyCase"),
+                    };
+                    bool ok;
+                    try { ok = _server.Unban(o["kind"]?.GetValue<string>() ?? "", o["value"]?.GetValue<string>() ?? "", match); }
+                    catch (AmbiguousUnbanException) { return (409, Fail("ambiguous")); }
                     return (ok ? 200 : 404, ok ? new JsonObject { ["ok"] = true } : Fail("not_found"));
                 }
                 case ("POST", "/remove"):
