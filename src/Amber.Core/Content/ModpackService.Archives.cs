@@ -70,6 +70,30 @@ public sealed partial class ModpackService
     }
 
     /// <summary>
+    /// Whether <see cref="Inspect(ZipArchive)"/> would take this zip as a pack of some format, judged from entry names and
+    /// small metadata files only: nothing is unpacked and nothing throws. Used to recognise a dropped file.
+    /// </summary>
+    internal static bool LooksLikePack(ZipArchive zip)
+    {
+        try
+        {
+            var root = PackRoot(zip);
+            if (zip.GetEntry(root + "modrinth.index.json") is not null || McbbsMeta(zip, root) is not null
+                || zip.GetEntry(root + "modpack.json") is not null)
+                return true;
+            if (zip.GetEntry(root + "manifest.json") is { } manifest && ReadJson(manifest)["manifestType"] is JsonValue type
+                && type.TryGetValue<string>(out var kind) && kind == "minecraftModpack")
+                return true;
+            if (FindEntry(zip, "mmc-pack.json") is not null || FindEntry(zip, "instance.cfg") is not null || InnerPack(zip) is not null) return true;
+            return zip.Entries.Any(e => !e.FullName.StartsWith("__MACOSX/", StringComparison.Ordinal) && VersionJsonEntry().IsMatch(e.FullName));
+        }
+        catch (Exception e) when (e is System.Text.Json.JsonException or InvalidDataException or InvalidOperationException or IOException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 带启动器的压缩包：根上或唯一一层文件夹里有 modpack.mrpack / modpack.zip，而外层自己不是整合包。
     /// </summary>
     internal static ZipArchiveEntry? InnerPack(ZipArchive zip)

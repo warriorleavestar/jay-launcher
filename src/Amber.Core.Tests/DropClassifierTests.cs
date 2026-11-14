@@ -46,6 +46,23 @@ public sealed class DropClassifierTests : IDisposable
     }
 
     [Fact]
+    public void EveryPackFormatTheImportReadsIsAModpack()
+    {
+        // MCBBS, HMCL, MultiMC / Prism, a pack inside one folder, a launcher bundle and a zipped game folder.
+        Assert.Equal(DropKind.Modpack, DropClassifier.Classify(Zip("mcbbs.zip", ("mcbbs.packmeta", """{"addons":[{"id":"game","version":"1.20.1"}]}"""))));
+        Assert.Equal(DropKind.Modpack, DropClassifier.Classify(Zip("mcbbs2.zip", ("manifest.json", """{"addons":[{"id":"game","version":"1.20.1"}]}"""))));
+        Assert.Equal(DropKind.Modpack, DropClassifier.Classify(Zip("hmcl.zip", ("modpack.json", """{"gameVersion":"1.20.1"}"""), ("minecraft/mods/a.jar", ""))));
+        Assert.Equal(DropKind.Modpack, DropClassifier.Classify(Zip("mmc.zip", ("Pack/mmc-pack.json", "{}"), ("Pack/instance.cfg", "name=Pack"))));
+        Assert.Equal(DropKind.Modpack, DropClassifier.Classify(Zip("wrapped.zip", ("My Pack/modrinth.index.json", "{}"))));
+        Assert.Equal(DropKind.Modpack, DropClassifier.Classify(Zip("bundle.zip", ("Launcher.exe", "MZ"), ("modpack.mrpack", "x"))));
+        Assert.Equal(DropKind.Modpack, DropClassifier.Classify(Zip("folder.zip",
+            (".minecraft/versions/1.20.1/1.20.1.json", "{}"), (".minecraft/saves/W/level.dat", ""))));
+        // A version file deeper than a pack keeps it doesn't make an ordinary zip a pack.
+        Assert.Equal(DropKind.Unknown, DropClassifier.Classify(Zip("deep.zip", ("a/b/c/versions/x/x.json", "{}"))));
+        Assert.Equal(DropKind.Unknown, DropClassifier.Classify(Zip("bad.zip", ("manifest.json", "not json"))));
+    }
+
+    [Fact]
     public void ZipsAreJudgedByTheirContents()
     {
         Assert.Equal(DropKind.Modpack, DropClassifier.Classify(Zip("a.zip", ("modrinth.index.json", "{}"))));
