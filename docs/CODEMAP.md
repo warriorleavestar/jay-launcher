@@ -73,11 +73,11 @@ Root files: `AmberJson.cs` (source-generated JSON context, AOT-safe), `ArchiveMe
 | `AMB-` | Legacy room code | `Multiplayer/RoomCode.cs` |
 | `JAYS2-` | Jay server invite (domain only, no player name; version 3 carries a signed-record locator instead of an address) | `Multiplayer/Gate/GateInvite.cs`, `Multiplayer/Gate/GateRecord.cs` |
 | `JAYSS1-` | Jay server invite sealed with a passphrase (server with no domain) | `Multiplayer/Gate/GateInvite.cs` |
-| `JAYC1-` | Contact code (identity public key) | `Multiplayer/Contacts/ContactCode.cs` |
+| `JAYC1-` | Friend code (identity public key) | `Multiplayer/Contacts/ContactCode.cs` |
 | `JAYR1-` | Relay node code | `Multiplayer/Gate/GateRelayCode.cs` |
 | `AMBNODE-`, `JAYNS1-`, `JAYNR1-` | Relay share: domains only / sealed with a passphrase / signed-record locator (relays that go by an IP) | `Multiplayer/RelayNodes.cs`, `Multiplayer/Public/RelayRecord.cs` |
 | `JAYNET2-` | Public network connection string | `Multiplayer/Public/NetworkString.cs` |
-| `JAYF1-` | Device fingerprint | `Multiplayer/Public/DeviceFingerprint.cs` |
+| `JAYF1-` | Device code | `Multiplayer/Public/DeviceFingerprint.cs` |
 
 ## src/Amber.App/
 
@@ -108,17 +108,19 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | --- | --- |
 | `docs/` | Design and operator docs: `public-network.md`, `network-server.md`, `network-server-framework.md`, `themes.md`, `platform-porting-guide.md`, `privacy.md`, `i18n-glossary.md`. |
 | `docs/help/` | In-app help articles per language (`zh-Hans`, `zh-Hant`, `en`, `ja`), embedded into Core. |
+| `themes/builtin/` | Built-in theme packs (`classic-amber`, `high-contrast`), embedded into Core. |
 | `themes/examples/` | Example theme packs (`pixel-night`, `sakura`, `topbar`). |
-| `networks/` | Registry of third-party public networks; CI (`networks.yml`) signs them into `JAYNET2-` strings after merge. |
+| `networks/` | Registry of third-party public networks; CI (`networks.yml`) only checks the format. The network owner signs the `JAYNET2-` string and the trustees co-sign it offline (2 of 3); see `networks/README.md`. |
 | `node/` | Install scripts and compose file for a community relay node. |
 | `server/` | `jay-server` deployment: systemd units, Docker, public node installer. |
 | `scripts/` | Release helpers: bundle EasyTier, publish and package macOS, attach the universal loader zip to its release (`attach-loader.ps1`, see `docs/universal-loader-release.md`). |
 | `build/` | `pins.json`: every binary Jay bundles or downloads with a fixed hash (source, SHA-256, size), embedded in Amber.Core; see `docs/pins.md`. |
-| `tools/` | GUI self-check runner, multiplayer test, NAT bench, brand icon export, this code index builder. |
+| `tools/` | GUI self-check runner, multiplayer test, NAT bench, brand icon export, live-region spike check (`spike-live-check.ps1`), this code index builder. |
 | `tools/FullLanCheck/` | Headless end-to-end check of full-LAN mode on macOS/Linux (needs root), used by the fulllan-e2e workflow. |
 | `tools/jay-dns/` | Java 18+ name resolver for the Windows strong sandbox; built by Amber.Core.csproj and embedded (`WindowsSandbox.ResolverJar`). |
 | `tools/jay-fs/` | Java file system provider for the Windows sandbox (fixes `Files.isWritable` under low integrity / AppContainer); `stub/` is compile-only. Embedded (`WindowsSandbox.FileSystemJar`). |
-| `.github/` | CI (`build.yml`), security regression tests, network registry checks, issue templates. |
+| `third_party/` | Android runtime sources and patches (`android-glfw`, `android-lwjgl`, `android-mesa`, `android-mobileglues`, `android-openjdk`); built by `scripts/build-android-*.sh` and the `android-*-runtime` workflows. |
+| `.github/` | Workflows: CI (`build.yml`), security regression tests (`security-regression.yml`), full-LAN end-to-end check (`fulllan-e2e.yml`), network registry checks (`networks.yml`), Android runtimes (`android-runtime.yml`, `android-graphics-runtime.yml`, `android-lwjgl-runtime.yml`); plus issue templates. |
 
 ## Where to start for common tasks
 
