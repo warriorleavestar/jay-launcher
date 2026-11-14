@@ -1,6 +1,8 @@
 using Android.App;
 using Android.Content;
+using Android.Content.PM;
 using Amber.Mobile;
+using System.Runtime.Versioning;
 
 namespace Amber.Android;
 
@@ -39,9 +41,29 @@ public sealed class AndroidMobilePlatformServices(Context context) : IMobilePlat
             return;
         }
 
+        if (OperatingSystem.IsAndroidVersionAtLeast(33)) RequestNotificationPermissionOnce();
+        // The gateway runs whether or not the notification may be shown.
         if (OperatingSystem.IsAndroidVersionAtLeast(26))
             _context.StartForegroundService(intent);
         else
             _context.StartService(intent);
     }
+
+    /// <summary>
+    /// Android 13 and later hide the gateway's ongoing notification until the user allows
+    /// notifications. Ask once, the first time the gateway starts, and never again after that.
+    /// </summary>
+    [SupportedOSPlatform("android33.0")]
+    private void RequestNotificationPermissionOnce()
+    {
+        const string AskedKey = "notifications-asked";
+        if (_context.CheckSelfPermission(global::Android.Manifest.Permission.PostNotifications) == Permission.Granted) return;
+        var preferences = _context.GetSharedPreferences("jay-permissions", FileCreationMode.Private);
+        if (preferences is null || preferences.GetBoolean(AskedKey, false)) return;
+        if (MainActivity.Resumed is not { } activity) return;
+        preferences.Edit()?.PutBoolean(AskedKey, true)?.Apply();
+        activity.RequestPermissions([global::Android.Manifest.Permission.PostNotifications], NotificationPermissionRequest);
+    }
+
+    private const int NotificationPermissionRequest = 4108;
 }
