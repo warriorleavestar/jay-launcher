@@ -75,7 +75,23 @@ public sealed class SecurityHardeningTests : IDisposable
         PrivateFile.WriteAllText(path, "second\n");
         Assert.Equal("second\n", File.ReadAllText(path));
         Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
-        if (OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows())
+        {
+            // The file and the folder it made carry their own access list: nothing inherited, only this user, SYSTEM and Administrators.
+            var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+            string[] allowed = [me, "S-1-5-18", "S-1-5-32-544"];
+            System.Security.AccessControl.FileSystemSecurity[] lists =
+                [new FileInfo(path).GetAccessControl(), new DirectoryInfo(Path.GetDirectoryName(path)!).GetAccessControl()];
+            foreach (var security in lists)
+            {
+                Assert.True(security.AreAccessRulesProtected);
+                var rules = security.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier))
+                    .OfType<System.Security.AccessControl.FileSystemAccessRule>().ToList();
+                Assert.NotEmpty(rules);
+                foreach (var rule in rules) Assert.Contains(rule.IdentityReference.Value, allowed);
+            }
+            return;
+        }
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.GetDirectoryName(path)!));
     }
