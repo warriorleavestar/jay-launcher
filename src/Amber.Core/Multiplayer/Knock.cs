@@ -25,6 +25,12 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     /// <summary>Multi-path split settings (wrapped invite rooms only). <see cref="SplitSettings.None"/> when the room doesn't split.</summary>
     public SplitSettings Split { get; init; } = SplitSettings.None;
 
+    /// <summary>
+    /// The last part of this member's room address, given out by the host (<see cref="MemberEntry.VirtualHost"/>) so members
+    /// don't clash. Null from a host that doesn't send one: the joiner then picks its own.
+    /// </summary>
+    public int? MemberHost { get; init; }
+
     public static RoomCredentials Create(byte[] hostPublicKey, int gamePort, TunnelSettings tunnel) =>
         new(NewNetwork(), NewSecret(), 1, (byte[])hostPublicKey.Clone(), gamePort, RoomChat.Port, tunnel);
 
@@ -32,13 +38,13 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
     private static string NewSecret() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
     /// <summary>踢人之后换网络：新的随机网络名和 256 位密钥，版本加一。其余不变。</summary>
-    public RoomCredentials Rotate() => this with { Network = NewNetwork(), Secret = NewSecret(), Epoch = Epoch + 1, Member = null, Split = Split.Rotate() };
+    public RoomCredentials Rotate() => this with { Network = NewNetwork(), Secret = NewSecret(), Epoch = Epoch + 1, Member = null, MemberHost = null, Split = Split.Rotate() };
 
     /// <summary>发给留下来的成员的那部分（经他们各自的成员通道）。</summary>
     public RoomRekey ToRekey() => new(Network, Secret, Epoch) { SplitNets = UsableSplit.Nets };
 
     /// <summary>加入方：按凭据建出内部的房间对象。</summary>
-    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch) with { Split = UsableSplit };
+    public RoomCode ToRoom() => RoomCode.FromCredentials(Network, Secret, GamePort, Tunnel, Member ?? throw new InvalidOperationException("no member key"), epoch: Epoch) with { Split = UsableSplit, MemberHost = MemberHost };
 
     /// <summary>房主：建房间对象，带上成员表，并给自己（本机的聊天客户端）发一把钥匙。</summary>
     public RoomCode ToHostRoom(MemberTable members, string hostName)
@@ -71,6 +77,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         ["memberPsk"] = Member.PskBase64,
         ["attest"] = Scheme?.ToJson(),
         ["split"] = UsableSplit.Enabled ? UsableSplit.ToJson() : null,
+        ["vhost"] = MemberHost,
     };
 
     internal static RoomCredentials FromJson(JsonNode json)
@@ -89,6 +96,9 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
         if (!KnockProtocol.NetworkPattern().IsMatch(net) || !KnockProtocol.SecretPattern().IsMatch(secret) || !KnockProtocol.KeyPattern().IsMatch(hostPub)
             || epoch < 1 || game is < 1 or > 65535 || chat is < 1 or > 65535 || mode is < 0 or > 3)
             throw new InvalidDataException(L.T("core.mp.knock.badreply"));
+        int? memberHost = null;
+        if (json["vhost"] is { } vhost)
+            memberHost = vhost is JsonValue value && value.TryGetValue<int>(out var h) && h is >= 2 and <= 254 ? h : throw new InvalidDataException(L.T("core.mp.knock.badreply"));
         var tunnel = mode == 0 ? TunnelSettings.Default : new TunnelSettings((TransportMode)mode, disguise);
         var psk = Convert.FromBase64String(memberPsk);
         try
@@ -98,6 +108,7 @@ public sealed record RoomCredentials(string Network, string Secret, int Epoch, b
                 Member = new MemberKey(Convert.FromHexString(memberId), psk),
                 Scheme = json["attest"] is JsonObject attest ? AttestationScheme.FromJson(attest) : null,
                 Split = tunnel.Wraps ? SplitFor(SplitSettings.FromJson(json["split"]), net, secret) : SplitSettings.None,
+                MemberHost = memberHost,
             };
         }
         finally
@@ -1005,7 +1016,7 @@ public sealed class KnockServer : IAsyncDisposable
                     member = _members.Issue(guestPub, request.Name, invite: invite);
                     var attestation = guestAttests ? _members.Attestation : null;
                     member.Attests = attestation is not null;
-                    reply = (_credentials() with { Member = member.Key, Scheme = attestation?.Scheme }).ToJson();
+                    reply = (_credentials() with { Member = member.Key, MemberHost = member.VirtualHost, Scheme = attestation?.Scheme }).ToJson();
                     if (KnockProtocol.Says(about, KnockProtocol.JayProofField) && JayCertificate?.Invoke() is { } hostProof
                         && hostProof.Certificate.DeviceKey.AsSpan().SequenceEqual(_identity.PublicKey)) reply["proof"] = hostProof.ToJson(hostContext);
                     if (DirectOffer?.Invoke() is { } offered) reply["direct"] = offered.ToJson();

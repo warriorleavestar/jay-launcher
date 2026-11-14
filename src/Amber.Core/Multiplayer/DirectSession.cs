@@ -342,7 +342,7 @@ public sealed class DirectSession : IAsyncDisposable
                 var elevatedStart = options.Tun;
                 EasyTier = CreateSessionForTest is { } create ? create(elevatedStart, options)
                     : elevatedStart
-                        ? EasyTierElevatedSession.Start(_installer, options, Path.Combine(_workDir, "run-lan"))
+                        ? await EasyTierElevatedSession.StartAsync(_installer, options, Path.Combine(_workDir, "run-lan"), ct)
                         : EasyTierSession.Start(_installer, options, Path.Combine(_workDir, IsHost ? "run-direct-host" : "run-direct-guest"));
                 if (EasyTier is EasyTierSession plain && Options.Verbose) plain.Output += line => _log.Add("EasyTier", NetDiagnostics.Redact(line, _room is { } r ? [.. r.Secrets] : [], includePublicIps: true));
                 if (EasyTier is EasyTierElevatedSession fresh) await fresh.WaitForReadyAsync(ct);
@@ -1146,16 +1146,19 @@ public sealed class DirectSession : IAsyncDisposable
             }
             // 等 EasyTier 看到房主。
             PeerInfo? host = null;
+            List<PeerInfo> peers = [];
             for (var i = 0; i < 60 && host is null; i++)
             {
                 await Task.Delay(500, cts.Token);
-                host = (await EasyTier!.PeersAsync(cts.Token)).FirstOrDefault(x => x.Ip == EasyTierArgs.HostIp && x.Cost != "Local");
+                peers = await EasyTier!.PeersAsync(cts.Token);
+                host = peers.FirstOrDefault(x => x.Ip == EasyTierArgs.HostIp && x.Cost != "Local");
             }
             if (host is null) throw new DirectFailedException(L.T("core.mp.matrix.hosttimeout"));
             result["connectMs"] = watch.ElapsedMilliseconds;
             if (step.Route == RouteKind.Relay)
             {
-                var other = (await EasyTier!.PeersAsync(cts.Token)).FirstOrDefault(x => x.Hostname == "amber-guest" && x.Cost.StartsWith("relay", StringComparison.Ordinal));
+                // The list that just showed the host is current enough: no second easytier-cli run for it.
+                var other = peers.FirstOrDefault(x => x.Hostname == "amber-guest" && x.Cost.StartsWith("relay", StringComparison.Ordinal));
                 if (other is null) throw new DirectFailedException(L.T("core.mp.matrix.nootherpeer"));
                 result["latency"] = other.LatencyMs;
             }

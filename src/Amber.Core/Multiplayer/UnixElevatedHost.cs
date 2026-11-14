@@ -8,7 +8,9 @@ using System.Text.Json;
 namespace Amber.Core.Multiplayer;
 
 /// <summary>
-/// Mac/Linux 守护模式（以 root 运行）：<c>Jay --amber-et-guard 套接字 用户uid Jay进程号 easytier-core路径</c>。
+/// Mac/Linux 守护模式（以 root 运行）：<c>Jay --amber-et-guard 套接字 用户uid Jay进程号 安装包路径</c>。
+/// The guard checks the package and runs easytier-core only from its own root-owned copy (<see cref="ElevatedCoreStore"/>),
+/// never from the user's data folder.
 /// 先核对套接字是那个 Jay 进程（对端进程号和 uid）建的才读命令；按命令启动、重启、结束 easytier-core，输出经套接字送回；
 /// 完整局域网模式下顺带转发本机游戏发出的 UDP 广播（<see cref="UnixBroadcastRelay"/>）。
 /// 套接字断开（Jay 退出或崩溃）、收到停止命令或 easytier-core 自己退出时，结束一切后退出。不写任何文件。
@@ -106,14 +108,21 @@ public static class UnixElevatedGuardHost
         private void StartCore(UnixGuardCommand cmd)
         {
             StopCore();
-            CheckCore(corePath);
+            // A guard killed during an exit session may have left Jay's temporary resolv.conf in place: put the original back.
+            if (OperatingSystem.IsLinux() && UnixIds.EffectiveUserId() == 0)
+            {
+                try { UnixExitNetwork.RestoreResolvConf(); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Send("error " + B64(e.Message)); }
+            }
+            var core = ResolveCore();
+            CheckCore(core);
             // 经别人上网：承载地址的主机路由要在 EasyTier 加 /1 路由之前查好、加好。
             if (cmd.Network is { } plan)
             {
                 _exit = new UnixExitNetwork(plan);
                 _exit.EnterRoutes();
             }
-            var info = new ProcessStartInfo(corePath)
+            var info = new ProcessStartInfo(core)
             {
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -147,6 +156,18 @@ public static class UnixElevatedGuardHost
                 }
                 _relay = UnixBroadcastRelay.Start(ip, message => Send("error " + B64(message)));
             }
+        }
+
+        /// <summary>
+        /// The program to run. A package (what Jay passes) is checked and run from the root-owned copy. A program path is
+        /// accepted only when the guard has no more rights than the Jay that asked (the guard isn't root, or that Jay is):
+        /// tests and a Jay started as root.
+        /// </summary>
+        private string ResolveCore()
+        {
+            if (ElevatedCoreStore.IsPackage(corePath)) return ElevatedCoreStore.Prepare(corePath);
+            if (UnixIds.EffectiveUserId() != 0 || UnixIds.PeerUserId(socket) == 0) return corePath;
+            throw new UnauthorizedAccessException("The guard only runs easytier-core from the checked package");
         }
 
         /// <summary>以 root 运行的程序：必须是普通文件（不是符号链接），别的用户和组不能改它。</summary>
@@ -237,6 +258,41 @@ internal static class UnixIds
     public static uint EffectiveUserId() => GetEuid();
 
     public static void Terminate(int pid) => _ = Kill(pid, 15);
+
+    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
+    private static extern unsafe int LStat(string path, byte* buffer);
+
+    [DllImport("libc", EntryPoint = "lstat$INODE64", SetLastError = true)]
+    private static extern unsafe int LStatInode64(string path, byte* buffer);
+
+    [DllImport("libc", EntryPoint = "__lxstat", SetLastError = true)]
+    private static extern unsafe int LXStat(int version, string path, byte* buffer);
+
+    /// <summary>
+    /// The uid that owns <paramref name="path"/> itself (a link is not followed). Read with lstat; the offset of st_uid in
+    /// struct stat is known for the systems Jay ships on (Linux x64/arm64, macOS). Elsewhere, or when lstat fails, this
+    /// throws, so callers that use it for a safety check refuse instead of guessing.
+    /// </summary>
+    public static unsafe uint FileOwner(string path)
+    {
+        var arch = RuntimeInformation.ProcessArchitecture;
+        int offset;
+        if (OperatingSystem.IsMacOS() && arch is Architecture.X64 or Architecture.Arm64) offset = 16; // dev(4) mode(2) nlink(2) ino(8)
+        else if (OperatingSystem.IsLinux() && arch == Architecture.X64) offset = 28;                   // dev(8) ino(8) nlink(8) mode(4)
+        else if (OperatingSystem.IsLinux() && arch == Architecture.Arm64) offset = 24;                 // dev(8) ino(8) mode(4) nlink(4)
+        else throw new IOException("Can't read file owners on this system");
+        var buffer = stackalloc byte[512];
+        int result;
+        if (OperatingSystem.IsMacOS() && arch == Architecture.X64) result = LStatInode64(path, buffer);
+        else
+        {
+            try { result = LStat(path, buffer); }
+            // glibc before 2.33 exports lstat only as __lxstat (struct version 1 on x64, 0 on arm64).
+            catch (EntryPointNotFoundException) when (OperatingSystem.IsLinux()) { result = LXStat(arch == Architecture.X64 ? 1 : 0, path, buffer); }
+        }
+        if (result != 0) throw new IOException($"Can't read the owner of {path} (error {Marshal.GetLastPInvokeError()})");
+        return *(uint*)(buffer + offset);
+    }
 
     /// <summary>对端进程的 uid；取不到时返回 null。Linux 用 SO_PEERCRED，macOS 用 LOCAL_PEERCRED。</summary>
     public static uint? PeerUserId(Socket socket)

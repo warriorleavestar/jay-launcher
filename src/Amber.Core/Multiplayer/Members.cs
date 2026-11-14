@@ -144,6 +144,12 @@ public sealed class MemberEntry
     /// <summary>敲门时对方说自己支持设备验证、房主也发了方案：之后他的每条通道都必须先证明设备。</summary>
     public bool Attests { get; internal set; }
 
+    /// <summary>
+    /// The last part of this member's room address (2 to 254), handed out by the host so that no two members in the room
+    /// get the same one. The host's own entry has <see cref="EasyTierArgs.HostIp"/>'s 1.
+    /// </summary>
+    public int VirtualHost { get; internal init; }
+
     internal MemberTable? Owner { get; set; }
 
     /// <summary>这个成员拿着对的 psk 却证明不了设备：钥匙多半泄露给了别人。交给成员表处理（踢出 + 通知房主）。</summary>
@@ -210,7 +216,9 @@ public sealed class MemberTable
             MemberKey key;
             do key = MemberKey.Create();
             while (_byId.ContainsKey(key.IdHex));
-            entry = new MemberEntry(key, pub, name, isHost, invite) { Owner = this };
+            // The same person approved again keeps their address; anyone else gets one no current member has.
+            var address = isHost ? 1 : replaced.FirstOrDefault()?.VirtualHost ?? FreeVirtualHost(_byId.Values.Select(e => e.VirtualHost));
+            entry = new MemberEntry(key, pub, name, isHost, invite) { Owner = this, VirtualHost = address };
             _byId[entry.Id] = entry;
         }
         foreach (var old in replaced)
@@ -220,6 +228,14 @@ public sealed class MemberTable
         }
         Changed?.Invoke();
         return entry;
+    }
+
+    /// <summary>A random member address (2 to 254) that none of <paramref name="used"/> has; any random one once all are taken.</summary>
+    internal static int FreeVirtualHost(IEnumerable<int> used)
+    {
+        var taken = used.ToHashSet();
+        var free = Enumerable.Range(2, 253).Where(h => !taken.Contains(h)).ToList();
+        return free.Count > 0 ? free[System.Security.Cryptography.RandomNumberGenerator.GetInt32(free.Count)] : System.Security.Cryptography.RandomNumberGenerator.GetInt32(2, 255);
     }
 
     /// <summary>房主自己的那把（没有时 null）。</summary>

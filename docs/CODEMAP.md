@@ -9,6 +9,8 @@ python3 tools/build-code-index.py --check    # fails if a source folder is missi
 
 Namespaces are still `Amber.*`; the product name is Jay. Many `///` summaries are in Chinese.
 
+Amber names kept on purpose (renaming them would break existing installs, so leave them): the `Amber.*` namespaces and project folders, the settings folder (`%APPDATA%\Amber`, `~/Library/Application Support/Amber`, `~/.config/Amber`), the `AMBER_*` environment variables, code and crypto labels that are already on the wire or on disk, and the Windows virtual network adapter `Amber LAN` (`Amber LAN-<port>` with a remote exit; `amberlan` on Linux), with the `Amber …` names of the temporary exit firewall rules. Users already allowed games through the `Amber LAN` network in Windows Firewall, and the UI text tells them to look for that name.
+
 ## Projects
 
 | Project | What it is | Entry point |

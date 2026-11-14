@@ -12,7 +12,6 @@ dest="${2:?usage: $0 <rid> <dir>}"
 case "$rid" in
     win-x64) platform=windows-x86_64 ;;
     win-arm64) platform=windows-arm64 ;;
-    win-x86) platform=windows-i686 ;;
     osx-x64) platform=macos-x86_64 ;;
     osx-arm64) platform=macos-aarch64 ;;
     linux-x64) platform=linux-x86_64 ;;

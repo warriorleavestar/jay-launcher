@@ -908,7 +908,7 @@
   "multiplayer.exit.direct_route": "（直连）",
   "multiplayer.exit.peer_label": "经这个人上网（全部流量）",
   "multiplayer.exit.relay_route": "（经其他成员或中转转发，会慢一些）",
-  "multiplayer.exit.start_tooltip": "对方要先打开“让房间里的人经我上网”。Windows 上会重新弹出权限确认。",
+  "multiplayer.exit.start_tooltip": "对方要先打开“让房间里的人经我上网”。Windows 上会重新弹出权限确认。开着时，电脑的域名解析（DNS）也会经对方发到 Cloudflare 和 Google 的公共 DNS 服务器。",
   "multiplayer.exit.stop": "停止，恢复正常上网",
   "multiplayer.exit.stopped": "已停止经 TA 上网，网络恢复正常",
   "multiplayer.exit.switch_failed": "没能换成经另一个人上网，联机已结束：{0}",
