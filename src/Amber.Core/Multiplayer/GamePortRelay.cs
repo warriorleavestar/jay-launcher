@@ -25,18 +25,27 @@ public sealed class GamePortRelay : IAsyncDisposable
     private TcpListener? _adapterListener;
     private Task? _adapterLoop;
     private readonly object _gate = new();
-    // Each connection being passed on: the caller's side, its side to the game and the game port it reached.
-    private readonly HashSet<(TcpClient In, Socket Out, int Port)> _open = [];
+    // Each connection being passed on: the caller's side (a TCP connection, or a room stream handed over in this
+    // process), its side to the game and the game port it reached.
+    private readonly HashSet<(IDisposable In, Socket Out, int Port)> _open = [];
     // Callers taken on for a game port whose connection to the game isn't up yet, by port.
     private readonly Dictionary<int, int> _connecting = [];
     /// <summary>Connections passed on (or being connected) at once; a LAN world takes far fewer players.</summary>
     internal const int MaxConnections = 64;
 
-    /// <summary>Connections one guest whose address is known may have passed on (or being connected) at once.</summary>
+    /// <summary>Connections one known caller (a guest's address, or a room member handed over in this process) may
+    /// have passed on (or being connected) at once.</summary>
     internal const int MaxPerSource = 16;
 
-    // Connections passed on (or being connected) by guest address, for those whose address is known.
-    private readonly Dictionary<IPAddress, int> _perSource = [];
+    // Connections passed on (or being connected) by known caller: a guest's address or the member a room stream is for.
+    private readonly Dictionary<object, int> _perSource = [];
+
+    // Relays in this process by their loopback port, so the room's tunnels can hand a member's game stream over
+    // directly, with the member it belongs to, instead of through a loopback connection that loses who it is.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, GamePortRelay> InProcess = new();
+
+    /// <summary>The relay listening on loopback <paramref name="port"/> in this process, if any.</summary>
+    internal static GamePortRelay? At(int port) => InProcess.TryGetValue(port, out var relay) ? relay : null;
 
     /// <summary>
     /// A connection over which nothing has passed either way for this long is closed and its place freed. A game in
@@ -46,10 +55,11 @@ public sealed class GamePortRelay : IAsyncDisposable
     internal TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(120);
 
     /// <summary>
-    /// New connections from callers that can't be told apart (loopback) allowed at once: a connection counts as new for
-    /// <see cref="NewFor"/>. Minecraft drops a connection that hasn't logged in by then and a world takes a limited number
-    /// of players, so a flood of fresh connections only delays new players; players already in are never pushed out, and
-    /// a room can still pass on <see cref="MaxConnections"/>.
+    /// New connections from callers that can't be told apart (loopback, or a room stream without a member) allowed at
+    /// once: a connection counts as new for <see cref="NewFor"/>. Minecraft drops a connection that hasn't logged in by
+    /// then and a world takes a limited number of players, so a flood of fresh connections only delays new players;
+    /// players already in are never pushed out, and a room can still pass on <see cref="MaxConnections"/>. Known callers
+    /// (see <see cref="ServeStreamAsync"/>) never use this budget, so one member can't take it from the others.
     /// </summary>
     internal const int MaxNewUnidentified = 16;
 
@@ -70,6 +80,7 @@ public sealed class GamePortRelay : IAsyncDisposable
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+        InProcess[Port] = this;
         _acceptLoop = Task.Run(() => AcceptLoopAsync(_listener));
     }
 
@@ -235,12 +246,33 @@ public sealed class GamePortRelay : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Passes on a game stream the room's tunnel took from <paramref name="owner"/> (the member it authenticated, or the
+    /// caller's address; null when it couldn't tell). A known owner is limited to its own <see cref="MaxPerSource"/>
+    /// places and never uses the budget for callers that can't be told apart. Returns when the connection ends or is
+    /// turned away; the caller closes <paramref name="stream"/>.
+    /// </summary>
+    public Task ServeStreamAsync(Stream stream, object? owner, CancellationToken ct = default) =>
+        ServeCoreAsync(stream, new StreamHolder(stream), owner, ct);
+
+    // Closes a handed-over stream when the relay stops; the tunnel that handed it over owns it otherwise.
+    private sealed class StreamHolder(Stream stream) : IDisposable
+    {
+        public void Dispose() => stream.Dispose();
+    }
+
     /// <param name="source">The guest's address when it is known (a whole-LAN guest on the virtual address); its
     /// connections count against <see cref="MaxPerSource"/>. Null on loopback, where callers can't be told apart (the
-    /// wrapped transport limits each member before it hands a connection over).</param>
+    /// room's tunnels hand their streams over in process instead, see <see cref="ServeStreamAsync"/>).</param>
     private async Task ServeAsync(TcpClient client, IPAddress? source = null)
     {
         using var inbound = client;
+        inbound.NoDelay = true;
+        await ServeCoreAsync(inbound.GetStream(), inbound, source, CancellationToken.None);
+    }
+
+    private async Task ServeCoreAsync(Stream inboundStream, IDisposable inbound, object? source, CancellationToken ct)
+    {
         int port;
         // 1 while this unidentified connection still counts as new; whoever sets it to 0 first gives the place back.
         var isNew = 0;
@@ -275,7 +307,7 @@ public sealed class GamePortRelay : IAsyncDisposable
         if (isNew == 1) _ = Task.Delay(NewFor, _cts.Token).ContinueWith(_ => NoLongerNew(), TaskScheduler.Default);
         var connecting = true;
         Socket? outbound = null;
-        (TcpClient, Socket, int)? entry = null;
+        (IDisposable, Socket, int)? entry = null;
         try
         {
             if (BeforeConnectForTest is { } before) await before();
@@ -283,7 +315,6 @@ public sealed class GamePortRelay : IAsyncDisposable
             // Inside the try so a failure creating the connection still takes the caller off the connecting count.
             outbound = CreateOutboundForTest is { } create ? create() : await GameLanBridge.ConnectAsync(port, _connectTimeout, _cts.Token);
             if (outbound is null) return;
-            inbound.NoDelay = true;
             outbound.NoDelay = true;
             entry = (inbound, outbound, port);
             lock (_gate)
@@ -292,10 +323,10 @@ public sealed class GamePortRelay : IAsyncDisposable
                 if (_cts.IsCancellationRequested) return;
                 _open.Add(entry.Value);
             }
-            var a = inbound.GetStream();
+            var a = inboundStream;
             var b = new NetworkStream(outbound, ownsSocket: false);
             var lastSeen = Environment.TickCount64;
-            using var idle = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, ct);
             var up = PumpAsync(a, b, () => Volatile.Write(ref lastSeen, Environment.TickCount64), idle.Token);
             var down = PumpAsync(b, a, () => Volatile.Write(ref lastSeen, Environment.TickCount64), idle.Token);
             var watch = WatchIdleAsync(() => Volatile.Read(ref lastSeen), idle.Token);
@@ -372,8 +403,9 @@ public sealed class GamePortRelay : IAsyncDisposable
             _adapterListener?.Stop();
             adapterLoop = _adapterLoop;
         }
+        InProcess.TryRemove(new KeyValuePair<int, GamePortRelay>(Port, this));
         _listener.Stop();
-        (TcpClient In, Socket Out, int Port)[] open;
+        (IDisposable In, Socket Out, int Port)[] open;
         lock (_gate) open = [.. _open];
         foreach (var c in open)
         {

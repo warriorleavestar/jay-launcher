@@ -73,6 +73,10 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     /// <summary>Each member's share of game connections, shared with the room's single tunnel (<see cref="GameStreamQuota"/>).</summary>
     public GameStreamQuota GameQuota { get; init; } = new();
 
+    /// <summary>Serves a game stream with the member it belongs to, in place of the route's handler (see
+    /// <see cref="TunnelServer.GameHandler"/>).</summary>
+    public Func<Stream, object?, CancellationToken, Task>? GameHandler { get; init; }
+
     public SplitTunnelServer(RoomCode room, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null,
         IPAddress? address = null, IReadOnlyList<int>? ports = null, SplitRegistry? registry = null, IReadOnlyList<TcpListener>? listeners = null,
         Action? giveBack = null)
@@ -231,7 +235,8 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             served = true;
             try
             {
-                await handler(joined, ct);
+                if (service == TunnelService.Game && GameHandler is { } game) await game(joined, member, ct);
+                else await handler(joined, ct);
             }
             catch (Exception e) when (e is IOException or SocketException or OperationCanceledException or ObjectDisposedException or CryptographicException)
             {

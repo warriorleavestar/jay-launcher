@@ -254,6 +254,28 @@ public sealed class GameLanBridgeTests : IDisposable
     }
 
     [Fact]
+    public void AQueryForIpv6LoopbackUsesTheAgentOnlyWhenTheSameGameTakesBoth()
+    {
+        const int port = 25565, game = 100, other = 200;
+        // Who takes [::1]: a listener on ::1 or [::]; two different processes, nobody.
+        Assert.Equal(game, TcpRow.Ipv6LoopbackListener([Listening("::", port, game)], port));
+        Assert.Equal(game, TcpRow.Ipv6LoopbackListener([Listening("::1", port, game)], port));
+        Assert.Null(TcpRow.Ipv6LoopbackListener([Listening("::1", port, game), Listening("::", port, other)], port));
+        Assert.Null(TcpRow.Ipv6LoopbackListener([Listening("::1", port + 1, game)], port));
+
+        // 127.0.0.1 (or no address given): the game that takes it.
+        Assert.Equal(game, GameLanBridge.GameReachedThroughAgent(null, game, () => null));
+        Assert.Equal(game, GameLanBridge.GameReachedThroughAgent(IPAddress.Loopback, game, () => other));
+        // [::1]: a dual-stack world takes both, so its agent reaches the same game.
+        Assert.Equal(game, GameLanBridge.GameReachedThroughAgent(IPAddress.IPv6Loopback, game, () => game));
+        // Another process on ::1 is not the game the agent would reach.
+        Assert.Null(GameLanBridge.GameReachedThroughAgent(IPAddress.IPv6Loopback, game, () => other));
+        Assert.Null(GameLanBridge.GameReachedThroughAgent(IPAddress.IPv6Loopback, null, () => game));
+        // Any other address never goes through an agent.
+        Assert.Null(GameLanBridge.GameReachedThroughAgent(IPAddress.Parse("127.0.0.2"), game, () => game));
+    }
+
+    [Fact]
     public async Task AnotherGamesAgentOnTheSamePortNumberOverIpv6GetsNothing()
     {
         if (!OperatingSystem.IsWindows() || !Socket.OSSupportsIPv6) return;

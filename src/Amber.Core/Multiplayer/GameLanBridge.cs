@@ -185,9 +185,7 @@ public static class GameLanBridge
         if (timeout != Timeout.InfiniteTimeSpan) linked.CancelAfter(timeout);
         try
         {
-            // The agent connects to 127.0.0.1: only a connection meant for that address goes through it.
-            var viaLoopback = direct is null || direct.Equals(IPAddress.Loopback);
-            return viaLoopback && AgentFor(port) is { } agent ? await ViaAgentAsync(agent, port, linked.Token).ConfigureAwait(false) : await DirectAsync(port, linked.Token, direct).ConfigureAwait(false);
+            return AgentFor(port, direct) is { } agent ? await ViaAgentAsync(agent, port, linked.Token).ConfigureAwait(false) : await DirectAsync(port, linked.Token, direct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -222,13 +220,31 @@ public static class GameLanBridge
     /// they aren't, or that process has no agent, the connection is made directly and never handed to an agent. So a game
     /// listening on the same port number elsewhere (::1, another address) can't receive another game's players.
     /// </summary>
-    private static Agent? AgentFor(int port)
+    /// <summary>
+    /// The agent of the game that a connection to <paramref name="port"/> on <paramref name="direct"/> (127.0.0.1 when
+    /// null) would reach. The agent itself connects to 127.0.0.1, so a connection meant for [::1] goes through it only
+    /// when the same game takes both (a dual-stack world does); any other address never does.
+    /// </summary>
+    private static Agent? AgentFor(int port, IPAddress? direct = null)
     {
+        if (direct is not null && !direct.Equals(IPAddress.Loopback) && !direct.Equals(IPAddress.IPv6Loopback)) return null;
         List<Agent> agents;
         lock (Gate) agents = [.. Launches.Values.Select(l => l.Agent).OfType<Agent>()];
         if (agents.Count == 0 || !OperatingSystem.IsWindows()) return null;
-        if (LocalPortOwners.LoopbackListener(port) is not { } owner) return null;
-        return agents.FirstOrDefault(a => a.Pid == owner);
+        var owner = GameReachedThroughAgent(direct, LocalPortOwners.LoopbackListener(port),
+            () => LocalPortOwners.Ipv6LoopbackListener(port));
+        return owner is null ? null : agents.FirstOrDefault(a => a.Pid == owner);
+    }
+
+    /// <summary>
+    /// The game process an agent would reach for a connection meant for <paramref name="direct"/> (127.0.0.1 when null),
+    /// given who takes 127.0.0.1 and [::1] on that port; null when the agent must not be used.
+    /// </summary>
+    internal static int? GameReachedThroughAgent(IPAddress? direct, int? v4Owner, Func<int?> v6Owner)
+    {
+        if (direct is null || direct.Equals(IPAddress.Loopback)) return v4Owner;
+        if (!direct.Equals(IPAddress.IPv6Loopback) || v4Owner is null) return null;
+        return v6Owner() == v4Owner ? v4Owner : null;
     }
 
     private static async Task<Socket?> ViaAgentAsync(Agent agent, int port, CancellationToken ct)
@@ -562,6 +578,9 @@ internal static class LocalPortOwners
     public static int? LoopbackListener(int port) =>
         TcpRow.LoopbackListener(Rows(AfInet, TcpTableOwnerPidListener), Rows(AfInet6, TcpTableOwnerPidListener), port);
 
+    /// <summary>The one process a connection to [::1]:<paramref name="port"/> would reach, or null.</summary>
+    public static int? Ipv6LoopbackListener(int port) => TcpRow.Ipv6LoopbackListener(Rows(AfInet6, TcpTableOwnerPidListener), port);
+
     /// <summary>The process at the <paramref name="local"/> end of a TCP connection to <paramref name="remote"/>.</summary>
     public static int? ConnectionPid(IPEndPoint local, IPEndPoint remote)
     {
@@ -649,6 +668,14 @@ internal readonly record struct TcpRow(IPEndPoint Local, IPEndPoint Remote, int 
     {
         var pids = v4.Where(r => r.Local.Port == port && (r.Local.Address.Equals(IPAddress.Loopback) || r.Local.Address.Equals(IPAddress.Any)))
             .Concat(v6.Where(r => r.Local.Port == port && r.Local.Address.Equals(IPAddress.IPv6Any)))
+            .Select(r => r.Pid).Distinct().Take(2).ToList();
+        return pids.Count == 1 ? pids[0] : null;
+    }
+
+    /// <summary>Like <see cref="LoopbackListener"/> for [::1]: an IPv6 listener on ::1 or on [::] takes it.</summary>
+    internal static int? Ipv6LoopbackListener(IEnumerable<TcpRow> v6, int port)
+    {
+        var pids = v6.Where(r => r.Local.Port == port && (r.Local.Address.Equals(IPAddress.IPv6Loopback) || r.Local.Address.Equals(IPAddress.IPv6Any)))
             .Select(r => r.Pid).Distinct().Take(2).ToList();
         return pids.Count == 1 ? pids[0] : null;
     }

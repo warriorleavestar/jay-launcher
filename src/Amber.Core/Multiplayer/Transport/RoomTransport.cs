@@ -135,7 +135,7 @@ public sealed class RoomTransport : IAsyncDisposable
                     TunnelService.Game => TunnelServer.ToLocalPort(room.Port),
                     TunnelService.Chat => TunnelServer.ToLocalPort(RoomChat.Port),
                     _ => null,
-                }, _log, listeners: legs, giveBack: giveBack) { GameQuota = _gameQuota });
+                }, _log, listeners: legs, giveBack: giveBack) { GameQuota = _gameQuota, GameHandler = TunnelServer.ToGamePort(room.Port) });
             }
         }
 
@@ -155,7 +155,7 @@ public sealed class RoomTransport : IAsyncDisposable
                         stillReady: () => policy.CanForward);
                 },
                 _ => null,
-            }, _log, listen) { GameQuota = _gameQuota });
+            }, _log, listen) { GameQuota = _gameQuota, GameHandler = TunnelServer.ToGamePort(room.Port) });
         }
 
         if (!o.IsHost && settings.Wraps)

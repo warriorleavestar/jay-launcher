@@ -157,6 +157,12 @@ public sealed class TunnelServer : IAsyncDisposable
 
     /// <summary>Each member's share of game connections; the room gives its split tunnel the same one.</summary>
     public GameStreamQuota GameQuota { get; init; } = new();
+
+    /// <summary>
+    /// Serves a game stream with the caller it was taken from (the member, its address, or null), in place of the
+    /// route's handler, when the route offers the game at all (see <see cref="ToGamePort"/>).
+    /// </summary>
+    public Func<Stream, object?, CancellationToken, Task>? GameHandler { get; init; }
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, MaxPendingPerCaller);
     private long _slotsFullLogged;
     private long _handshakeFailedLogged;
@@ -249,6 +255,14 @@ public sealed class TunnelServer : IAsyncDisposable
         _boundTcs.TrySetResult();
         return true;
     }
+
+    /// <summary>
+    /// Hands game streams to <paramref name="port"/>: to the relay listening there in this process with the caller they
+    /// came from, so the relay can limit each member on its own, else over a loopback connection like
+    /// <see cref="ToLocalPort"/>.
+    /// </summary>
+    public static Func<Stream, object?, CancellationToken, Task> ToGamePort(int port) => (stream, owner, ct) =>
+        GamePortRelay.At(port) is { } relay ? relay.ServeStreamAsync(stream, owner, ct) : ToLocalPort(port)(stream, ct);
 
     /// <summary>把服务交给本机的一个 TCP 端口（游戏、聊天）。</summary>
     public static Func<Stream, CancellationToken, Task> ToLocalPort(int port) => async (stream, ct) =>
@@ -387,7 +401,8 @@ public sealed class TunnelServer : IAsyncDisposable
                 }
                 Interlocked.Increment(ref Accepted);
                 served = true;
-                await handler(stream, ct);
+                if (service == TunnelService.Game && GameHandler is { } game) await game(stream, gameOwner, ct);
+                else await handler(stream, ct);
             }
             catch (Exception e) when (e is CryptographicException or IOException or SocketException or EndOfStreamException or OperationCanceledException or PlatformNotSupportedException
                                        or InvalidDataException or ArgumentException or ObjectDisposedException or InvalidOperationException)
