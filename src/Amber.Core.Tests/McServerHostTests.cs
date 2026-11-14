@@ -247,11 +247,8 @@ public sealed class McServerHostTests : IDisposable
             File.WriteAllText(file, texts[i]);
             info.ArgumentList.Add(file);
         }
-        using var process = Process.Start(info)!;
-        var stderr = process.StandardError.ReadToEndAsync();
-        var output = process.StandardOutput.ReadToEnd();
-        Assert.True(process.WaitForExit(120_000), "java did not finish");
-        Assert.True(process.ExitCode == 0, stderr.Result);
+        var (exitCode, output, stderr) = Run(info);
+        Assert.True(exitCode == 0, stderr);
         var maps = new List<Dictionary<string, string>> { new() };
         foreach (var line in output.Split('\n').Select(l => l.TrimEnd('\r')))
         {
@@ -264,14 +261,50 @@ public sealed class McServerHostTests : IDisposable
         static string Unesc(string s) => s.Replace("\\r", "\r").Replace("\\n", "\n").Replace("\\t", "\t").Replace("\\\\", "\\");
     }
 
+    /// <summary>The first Java runtime found that can run a source file directly (Java 11 and later); null otherwise.</summary>
     private static string? FindJava()
     {
         var name = OperatingSystem.IsWindows() ? "java.exe" : "java";
-        if (Environment.GetEnvironmentVariable("JAVA_HOME") is { Length: > 0 } home && File.Exists(Path.Combine(home, "bin", name)))
-            return Path.Combine(home, "bin", name);
+        var candidates = new List<string>();
+        if (Environment.GetEnvironmentVariable("JAVA_HOME") is { Length: > 0 } home) candidates.Add(Path.Combine(home, "bin", name));
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-            if (File.Exists(Path.Combine(dir, name))) return Path.Combine(dir, name);
-        return null;
+            candidates.Add(Path.Combine(dir, name));
+        return candidates.FirstOrDefault(path => File.Exists(path) && CanRunSourceFiles(path));
+    }
+
+    private static bool CanRunSourceFiles(string java)
+    {
+        var info = new ProcessStartInfo(java) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        info.ArgumentList.Add("-XshowSettings:properties");
+        info.ArgumentList.Add("-version");
+        try
+        {
+            var (_, output, stderr) = Run(info, 30_000);
+            // "1.8" for Java 8, "11", "17", ... after it.
+            var match = System.Text.RegularExpressions.Regex.Match(stderr + output, @"java\.specification\.version = (\d+)(?:\.(\d+))?");
+            if (!match.Success) return false;
+            var major = int.Parse(match.Groups[1].Value);
+            if (major == 1 && match.Groups[2].Success) major = int.Parse(match.Groups[2].Value);
+            return major >= 11;
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or Xunit.Sdk.XunitException) { return false; }
+    }
+
+    /// <summary>Runs a process to the end, reading both streams; kills it (and its children) when it takes too long.</summary>
+    private static (int ExitCode, string Output, string Error) Run(ProcessStartInfo info, int timeoutMs = 120_000)
+    {
+        using var process = Process.Start(info)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(timeoutMs))
+        {
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            process.WaitForExit();
+            Assert.Fail($"{Path.GetFileName(info.FileName)} did not finish in {timeoutMs / 1000} s");
+        }
+        // Both streams close once the process and anything holding them have gone.
+        Task.WaitAll([output, error], timeoutMs);
+        return (process.ExitCode, output.IsCompleted ? output.Result : "", error.IsCompleted ? error.Result : "");
     }
 
     public void Dispose()
