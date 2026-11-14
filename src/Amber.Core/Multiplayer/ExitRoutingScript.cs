@@ -1,6 +1,10 @@
 namespace Amber.Core.Multiplayer;
 
-/// <summary>固定脚本经已认证管道传送，守护核对摘要后加载；这里只管理本次会话创建的短租约 IPv4 旁路。</summary>
+/// <summary>
+/// 固定脚本经已认证管道传送，守护核对摘要后加载；这里只管理本次会话创建的短租约旁路（IPv4 /32 and IPv6 /128 host routes).
+/// The capture routes are IPv4 only; an IPv6 bypass still pins the address to the physical interface the traffic gate
+/// permits, so it can't follow another route (a later VPN, say) that the gate would block.
+/// </summary>
 internal static class ExitRoutingScript
 {
     internal const string Script = """
@@ -44,10 +48,26 @@ internal static class ExitRoutingScript
             return $adapter
         }
 
+        function Get-ExitRouteFamily([string]$prefix) { if ($prefix.Contains(':')) { return 'IPv6' } else { return 'IPv4' } }
+
+        # A physical address the connection itself may use: the same rules as ExitNetworkPlan.IsSafeUnderlay. Returns the
+        # host route prefix (/32 or /128); throws for anything else.
+        function Get-ExitUnderlayPrefix([string]$address, [string]$virtualIp) {
+            $parsed = $null
+            if (-not [Net.IPAddress]::TryParse($address, [ref]$parsed) -or $parsed.ToString() -cne $address -or [Net.IPAddress]::IsLoopback($parsed)) { throw 'Invalid underlay address' }
+            if ($parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
+                $bytes = $parsed.GetAddressBytes()
+                if ($bytes[0] -eq 0 -or $bytes[0] -ge 224 -or $address -eq $virtualIp) { throw 'Unsafe underlay IPv4 address' }
+                return ($address + '/32')
+            }
+            if ($parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetworkV6 -or $parsed.ScopeId -ne 0 -or $parsed.IsIPv4MappedToIPv6 -or $parsed.IsIPv6LinkLocal -or $parsed.IsIPv6SiteLocal -or $parsed.IsIPv6Multicast -or $parsed.Equals([Net.IPAddress]::IPv6Any)) { throw 'Unsafe underlay IPv6 address' }
+            return ($address + '/128')
+        }
+
         function Get-OwnedExitRoute($entry) {
             $adapter = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object { $_.ifIndex -eq $entry.Index }) | Select-Object -First 1
             if (-not $adapter -or [string]$adapter.InterfaceGuid -ne $entry.Guid) { return $null }
-            $route = @(Get-NetRoute -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction Stop |
+            $route = @(Get-NetRoute -AddressFamily (Get-ExitRouteFamily $entry.Prefix) -PolicyStore ActiveStore -ErrorAction Stop |
                 Where-Object { $_.DestinationPrefix -eq $entry.Prefix -and $_.InterfaceIndex -eq $entry.Index -and $_.NextHop -eq $entry.Hop -and $_.RouteMetric -eq $entry.Metric }) | Select-Object -First 1
             # A short lease changed externally into a long-lived route no longer belongs to this session; never renew or remove it.
             if ($route -and $entry.Owned -and ($null -eq $route.ValidLifetime -or $route.ValidLifetime.TotalSeconds -gt 125)) { return $null }
@@ -67,17 +87,13 @@ internal static class ExitRoutingScript
             $addresses = @($plan.UnderlayAddresses | Select-Object -Unique)
             if ($addresses.Count -gt 128) { throw 'Too many underlay addresses' }
             foreach ($address in $addresses) {
-                $parsed = $null
-                if (-not [Net.IPAddress]::TryParse([string]$address, [ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsed.ToString() -ne $address -or [Net.IPAddress]::IsLoopback($parsed)) { throw 'Invalid underlay IPv4 address' }
-                $bytes = $parsed.GetAddressBytes()
-                if ($bytes[0] -eq 0 -or $bytes[0] -ge 224 -or $address -eq $plan.VirtualIp) { throw 'Unsafe underlay IPv4 address' }
+                $prefix = Get-ExitUnderlayPrefix ([string]$address) ([string]$plan.VirtualIp)
                 # The old core and capture routes are gone, so the current best route is the original underlay path to preserve.
                 $route = @(Find-NetRoute -RemoteIPAddress $address -ErrorAction Stop | Where-Object { $_.DestinationPrefix }) | Select-Object -First 1
                 if (-not $route) { throw 'No route to underlay address' }
                 $adapter = Get-ExitAdapter $route.InterfaceIndex
                 if ($adapter.Name -like 'Amber LAN*') { throw 'Underlay resolves through Amber LAN' }
-                $prefix = $address + '/32'
-                $existing = @(Get-NetRoute -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction Stop |
+                $existing = @(Get-NetRoute -AddressFamily (Get-ExitRouteFamily $prefix) -PolicyStore ActiveStore -ErrorAction Stop |
                     Where-Object { $_.DestinationPrefix -eq $prefix -and $_.InterfaceIndex -eq $route.InterfaceIndex -and $_.NextHop -eq $route.NextHop }) | Select-Object -First 1
                 $entry = [pscustomobject]@{ Prefix=$prefix; Index=[int]$route.InterfaceIndex; Hop=[string]$route.NextHop; Guid=[string]$adapter.InterfaceGuid; Metric=1; Owned=$false }
                 if ($existing) { $entry.Metric = $existing.RouteMetric }

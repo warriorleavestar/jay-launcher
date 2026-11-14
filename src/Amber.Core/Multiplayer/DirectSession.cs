@@ -244,7 +244,7 @@ public sealed class DirectSession : IAsyncDisposable
 
     private EasyTierOptions HostOptions(bool tun, bool allowExit, IReadOnlyList<string>? extra = null) =>
         new(Room, true, Options.FallbackNodes, EasyTierArgs.FreeTcpPort(), null, [$"udp://127.0.0.1:{_easyTierUdpPort}"], _machineId, tun, null, allowExit, null,
-            Verbose(extra)) { ServesSpeedTest = true, DirectUnderlayAddresses = UnderlayAddresses(), DirectUnderlayUsesIpv6 = UnderlayUsesIpv6 };
+            Verbose(extra)) { ServesSpeedTest = true, DirectUnderlayAddresses = UnderlayAddresses() };
 
     private EasyTierOptions GuestOptions(bool viaBridge, bool tun, string? exitNode, IReadOnlyList<string>? extra = null, bool nodes = true)
     {
@@ -256,22 +256,87 @@ public sealed class DirectSession : IAsyncDisposable
         {
             LocalRemotePort = tun ? null : LocalRemotePort,
             DirectUnderlayAddresses = UnderlayAddresses(),
-            DirectUnderlayUsesIpv6 = UnderlayUsesIpv6,
         };
     }
 
     private IReadOnlyList<string> UnderlayAddresses() => CollectDirectUnderlayAddresses(
         (_remote?.Candidates ?? _guestCandidates).Select(c => c.EndPoint.Address),
-        Bridge?.Peers.Select(p => p.Remote.Address) ?? []);
+        TrustedPeerAddresses(BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode, CurrentBridgePeers())));
 
-    private bool UnderlayUsesIpv6 => Bridge?.Peers.Any(p => p.Remote.Address.AddressFamily == AddressFamily.InterNetworkV6
-        && !p.Remote.Address.IsIPv4MappedToIPv6) == true;
+    /// <summary>
+    /// Bridge peers that actually carry this room. A guest that joined through a backup node runs the room over that node:
+    /// its bridge stays open but idle, and a peer that turns up there later carries nothing of the room, so it gets no
+    /// exception from the exit.
+    /// </summary>
+    internal static IEnumerable<DirectPeer> BridgePeersCarryingTheRoom(bool isHost, bool usingFallbackNode, IEnumerable<DirectPeer> peers) =>
+        !isHost && usingFallbackNode ? [] : peers;
 
-    /// <summary>出口接管系统流量之前，直连桥的物理对端仍须走原网络；包含打洞后变化的端口对应地址。</summary>
-    internal static IReadOnlyList<string> CollectDirectUnderlayAddresses(IEnumerable<IPAddress> candidates, IEnumerable<IPAddress> connected) =>
-        candidates.Concat(connected).Select(a => a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a)
-            .Where(a => a.AddressFamily == AddressFamily.InterNetwork).Select(a => a.ToString())
-            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    /// <summary>
+    /// Connected peers whose address the exit may trust. An IPv6 peer must be admitted to the room (host side: proved
+    /// membership on this bridge) and have answered a fresh random ping from that very address
+    /// (<see cref="DirectPeer.Verified"/>): a probe or probe answer replayed from a forged source address, or one that
+    /// never came back, gets no exception. IPv4 peers are kept as before.
+    /// <para>
+    /// The exceptions are fixed while the exit runs: a peer that leaves keeps its address exception until the exit is
+    /// changed or stopped. That peer proved it holds the room's bridge key from that address and already sees this
+    /// computer's physical address, so the exception tells it nothing new; starting the exit again by itself would
+    /// instead leave a moment without the traffic gate, which a member could then trigger at will by going quiet.
+    /// </para>
+    /// </summary>
+    internal static IEnumerable<IPAddress> TrustedPeerAddresses(IEnumerable<DirectPeer> peers) =>
+        peers.Where(p => Normal(p.Remote.Address).AddressFamily == AddressFamily.InterNetwork || (p.Admitted && p.Verified))
+            .Select(p => p.Remote.Address);
+
+    private static IPAddress Normal(IPAddress a) => a.IsIPv4MappedToIPv6 ? a.MapToIPv4() : a;
+
+
+    /// <summary>
+    /// 出口接管系统流量之前，直连桥的物理对端仍须走原网络；包含打洞后变化的端口对应地址。IPv6 is taken only from peers the
+    /// bridge is actually connected over (they answered the room's own handshake), never from candidates the other side
+    /// merely listed: an address that never answered would otherwise get a direct exception. A connected link-local peer
+    /// is kept, so the plan refuses it with a reason instead of the gate silently cutting the connection.
+    /// </summary>
+    internal static IReadOnlyList<string> CollectDirectUnderlayAddresses(IEnumerable<IPAddress> candidates, IEnumerable<IPAddress> connected)
+    {
+        return candidates.Select(Normal).Where(a => a.AddressFamily == AddressFamily.InterNetwork)
+            .Concat(connected.Select(Normal).Where(a => a.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6))
+            .Select(a => a.ToString()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    }
+
+    internal Func<IEnumerable<DirectPeer>>? BridgePeersForTest { get; init; }
+
+    private IEnumerable<DirectPeer> CurrentBridgePeers() => BridgePeersForTest?.Invoke() ?? Bridge?.Peers ?? [];
+
+    /// <summary>How long switching to an exit waits for members over IPv6 to answer a ping (one goes out every second).</summary>
+    internal TimeSpan BearerWait { get; init; } = TimeSpan.FromSeconds(6);
+
+    /// <summary>A bridge peer not admitted yet but heard from this recently counts as still joining.</summary>
+    internal static readonly TimeSpan JoiningWindow = TimeSpan.FromSeconds(10);
+
+    internal enum BearerWaitResult { Ready, Unverified, Outdated }
+
+    /// <summary>
+    /// <see cref="BearerWaitResult.Ready"/> once every admitted IPv6 peer carrying the room has answered a fresh ping
+    /// (<see cref="DirectPeer.Verified"/>) and no IPv6 peer is still joining (heard from lately but not admitted yet: the
+    /// exceptions are fixed when the exit starts, so it would be cut off halfway through).
+    /// <see cref="BearerWaitResult.Outdated"/> at once when every peer still holding the switch runs an older Jay, whose
+    /// answers never verify, so waiting or trying again can't help; <see cref="BearerWaitResult.Unverified"/> when one
+    /// still isn't ready after <paramref name="wait"/>. The wait runs on a monotonic clock, so a change of the system
+    /// time neither cuts it short nor stretches it.
+    /// </summary>
+    internal static async Task<BearerWaitResult> BearersVerifiedAsync(Func<IEnumerable<DirectPeer>> peers, TimeSpan wait, CancellationToken ct)
+    {
+        var waited = Stopwatch.StartNew();
+        while (true)
+        {
+            var holding = peers().Where(p => Normal(p.Remote.Address).AddressFamily == AddressFamily.InterNetworkV6
+                && (p.Admitted ? !p.Verified : DateTime.UtcNow - p.LastSeen < JoiningWindow)).ToList();
+            if (holding.Count == 0) return BearerWaitResult.Ready;
+            if (holding.All(p => p.Admitted && p.Outdated)) return BearerWaitResult.Outdated;
+            if (waited.Elapsed >= wait) return holding.Any(p => p.Admitted && p.Outdated) ? BearerWaitResult.Outdated : BearerWaitResult.Unverified;
+            await Task.Delay(100, ct);
+        }
+    }
 
     /// <summary>手动切换出口和矩阵切换共用启动锁，直连会话一直拥有其 EasyTier 子会话。</summary>
     public async Task SetExitNodeAsync(string? exitNode, CancellationToken ct = default)
@@ -283,15 +348,56 @@ public sealed class DirectSession : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             var current = EasyTier?.Options ?? _currentOptions;
             if (current is null || !current.Tun) throw new InvalidOperationException(L.T("core.mp.component.exitrequireslan"));
-            var options = current with { ExitNode = exitNode, DirectUnderlayAddresses = UnderlayAddresses(), DirectUnderlayUsesIpv6 = UnderlayUsesIpv6 };
+            // The traffic gate lets through only bridge peers that answered a fresh ping. A member over IPv6 whose answer
+            // hasn't come back yet (just connected, a lost answer, a reconnect) would be left out and then cut off, ping
+            // answers included: wait for it, and keep the running session when it doesn't come.
+            if (exitNode is not null)
+            {
+                // From here no IPv6 peer the bridge doesn't have yet gets in: one arriving after the addresses are fixed
+                // would be cut off by the gate. Peers already here may finish joining, and are waited for.
+                HoldIpv6([.. CurrentBridgePeers().Select(p => p.Remote.Address)]);
+                var bearers = await BearersVerifiedAsync(() => BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode,
+                    CurrentBridgePeers()), BearerWait, ct);
+                if (bearers == BearerWaitResult.Outdated) throw new IOException(L.T("core.mp.session.bearer_outdated"));
+                if (bearers == BearerWaitResult.Unverified) throw new IOException(L.T("core.mp.session.bearer_unverified"));
+            }
+            var options = current with { ExitNode = exitNode, DirectUnderlayAddresses = UnderlayAddresses() };
+            // The addresses are fixed now: IPv6 only from them until the exit is turned off.
+            if (exitNode is not null) HoldIpv6(PlannedAddresses(options));
             await StartEasyTierLockedAsync(options, ct);
             ObjectDisposedException.ThrowIf(_disposed, this);
+            // Anything that still slipped in between (a peer the bridge already had that finished joining just then).
+            if (exitNode is not null && PeersOutsideThePlan(BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode, CurrentBridgePeers()),
+                    options.DirectUnderlayAddresses).Any())
+                Log(L.T("core.mp.session.exit_peer_rejoin"));
         }
         finally
         {
+            // Whatever happened, the limit matches what runs now: the running exit's addresses, or none without an exit.
+            HoldIpv6(EasyTier?.Options is { ExitNode: not null } running ? PlannedAddresses(running) : null);
             _startLock.Release();
             StateChanged?.Invoke();
         }
+    }
+
+    /// <summary>Tests: sees every change of the bridge's IPv6 limit (see <see cref="DirectBridge.Ipv6Allowed"/>).</summary>
+    internal Action<IReadOnlySet<IPAddress>?>? Ipv6HoldForTest { get; init; }
+
+    private void HoldIpv6(IEnumerable<IPAddress>? allowed)
+    {
+        IReadOnlySet<IPAddress>? set = allowed?.Select(Normal).Where(a => a.AddressFamily == AddressFamily.InterNetworkV6).ToHashSet();
+        if (Bridge is { } bridge) bridge.Ipv6Allowed = set;
+        Ipv6HoldForTest?.Invoke(set);
+    }
+
+    private static IEnumerable<IPAddress> PlannedAddresses(EasyTierOptions options) =>
+        options.DirectUnderlayAddresses.Select(a => IPAddress.TryParse(a, out var ip) ? ip : null).OfType<IPAddress>();
+
+    /// <summary>Admitted IPv6 peers whose address the exit's gate doesn't let through.</summary>
+    internal static IEnumerable<DirectPeer> PeersOutsideThePlan(IEnumerable<DirectPeer> peers, IReadOnlyList<string> planned)
+    {
+        var set = planned.ToHashSet(StringComparer.Ordinal);
+        return peers.Where(p => Normal(p.Remote.Address) is { AddressFamily: AddressFamily.InterNetworkV6 } a && p.Admitted && !set.Contains(a.ToString()));
     }
 
     private IReadOnlyList<string> Verbose(IReadOnlyList<string>? extra) =>
@@ -401,8 +507,7 @@ public sealed class DirectSession : IAsyncDisposable
     private static bool SameConfig(EasyTierOptions a, EasyTierOptions b) =>
         a.Tun == b.Tun && a.AllowExit == b.AllowExit && a.ExitNode == b.ExitNode && (a.ConfiguredPeers ?? a.Peers).SequenceEqual(b.ConfiguredPeers ?? b.Peers)
         && (a.ExtraArgs ?? []).SequenceEqual(b.ExtraArgs ?? [])
-        && (a.ExitNode is null || (a.DirectUnderlayAddresses.SequenceEqual(b.DirectUnderlayAddresses)
-            && a.DirectUnderlayUsesIpv6 == b.DirectUnderlayUsesIpv6));
+        && (a.ExitNode is null || (a.DirectUnderlayAddresses.SequenceEqual(b.DirectUnderlayAddresses)));
 
     /// <summary>
     /// Guest, during the knock: the host approved and sent its addresses inside the encrypted reply. Gathers this side's

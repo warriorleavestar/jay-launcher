@@ -3,6 +3,7 @@ using System.Reflection;
 using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Multiplayer;
+using Amber.Core.Localization;
 
 namespace Amber.Core.Tests;
 
@@ -31,6 +32,194 @@ public sealed class ExitLifecycleRegressionTests
     private static DirectSession NewSession(Func<EasyTierOptions, CancellationToken, Task<IEasyTierSession>> start) =>
         new(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")), Room, false, Direct, new DiagnosticLog())
         { StartForTest = start };
+
+    private static DirectPeer Ipv6Member(bool verified) =>
+        new() { Remote = new IPEndPoint(IPAddress.Parse("2001:db8::7"), 40000), Path = PathKind.IPv6, Admitted = true, _verified = verified };
+
+    [Fact]
+    public async Task AMemberWhosePingAnswerHasNotArrivedKeepsTheRunningSession()
+    {
+        // Data already flows over the bridge, but the member's answer to a fresh ping hasn't come back: turning the exit on
+        // now would leave its address out of the gate and cut the room off. The switch waits, then gives up and keeps
+        // what is running.
+        var member = Ipv6Member(verified: false);
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [member],
+            BearerWait = TimeSpan.FromMilliseconds(300),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var original = session.EasyTier!;
+        await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp));
+        Assert.Same(original, session.EasyTier);
+        Assert.False(original.HasExited);
+        Assert.Null(original.Options.ExitNode);
+        Assert.Equal(1, session.EasyTierStarts);
+
+        // Turning the exit off never waits.
+        await session.SetExitNodeAsync(null);
+    }
+
+    [Fact]
+    public async Task ALateAnswerLetsTheSwitchGoAheadWithThatMembersAddress()
+    {
+        var member = Ipv6Member(verified: false);
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [member],
+            BearerWait = TimeSpan.FromSeconds(5),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var switching = session.SetExitNodeAsync(EasyTierArgs.HostIp);
+        await Task.Delay(250);
+        Assert.False(switching.IsCompleted);
+        Assert.Equal(1, session.EasyTierStarts);
+        Volatile.Write(ref member._verified, true);
+        await switching.WaitAsync(Deadline);
+        Assert.Equal(EasyTierArgs.HostIp, session.EasyTier!.Options.ExitNode);
+        Assert.Contains("2001:db8::7", session.EasyTier.Options.DirectUnderlayAddresses);
+    }
+
+    [Fact]
+    public async Task AnIpv6PlayerStillJoiningIsWaitedForAndThenKeepsItsPlace()
+    {
+        // Another player over IPv6 is halfway through joining (heard from, not admitted yet) when the exit is turned on:
+        // starting now would fix the exceptions without it and cut its join off. The switch waits until it is in.
+        var joining = Ipv6Member(verified: false);
+        joining.Admitted = false;
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [joining],
+            BearerWait = TimeSpan.FromSeconds(5),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var switching = session.SetExitNodeAsync(EasyTierArgs.HostIp);
+        await Task.Delay(250);
+        Assert.False(switching.IsCompleted);
+        joining.Admitted = true;
+        await Task.Delay(250);
+        Assert.False(switching.IsCompleted);
+        Volatile.Write(ref joining._verified, true);
+        await switching.WaitAsync(Deadline);
+        Assert.Contains("2001:db8::7", session.EasyTier!.Options.DirectUnderlayAddresses);
+    }
+
+    [Fact]
+    public async Task AMemberOnAnOlderJayFailsAtOnceWithAMessageThatSaysToUpdate()
+    {
+        // An older Jay's answers never verify, so waiting and "try again" can't help: say what can.
+        var older = Ipv6Member(verified: false);
+        older._outdated = true;
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [older],
+            BearerWait = TimeSpan.FromSeconds(30),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var original = session.EasyTier!;
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        var error = await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline));
+        Assert.True(waited.Elapsed < TimeSpan.FromSeconds(5));
+        Assert.Equal(L.T("core.mp.session.bearer_outdated"), error.Message);
+        Assert.Same(original, session.EasyTier);
+
+        // Another member still on its way keeps the plain wait going; once it's verified, the older one decides.
+        var current = Ipv6Member(verified: false);
+        Assert.Equal(DirectSession.BearerWaitResult.Unverified,
+            await DirectSession.BearersVerifiedAsync(() => [current], TimeSpan.FromMilliseconds(200), default));
+        Volatile.Write(ref current._verified, true);
+        Assert.Equal(DirectSession.BearerWaitResult.Outdated,
+            await DirectSession.BearersVerifiedAsync(() => [current, older], TimeSpan.FromMilliseconds(200), default));
+        Assert.Equal(DirectSession.BearerWaitResult.Ready,
+            await DirectSession.BearersVerifiedAsync(() => [current], TimeSpan.FromMilliseconds(200), default));
+    }
+
+    [Fact]
+    public async Task WhileTheExitRunsTheBridgeTakesIpv6OnlyFromThePlannedAddresses()
+    {
+        // From the start of the switch no IPv6 peer the bridge doesn't have yet gets in, then only the planned ones,
+        // until the exit is turned off. A switch that fails leaves no limit behind.
+        var member = Ipv6Member(verified: true);
+        var holds = new List<IReadOnlySet<IPAddress>?>();
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [member],
+            BearerWait = TimeSpan.FromMilliseconds(300),
+            Ipv6HoldForTest = h => { lock (holds) holds.Add(h); },
+        };
+        await session.StartEasyTierAsync(Original, default);
+        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
+        var only = IPAddress.Parse("2001:db8::7");
+        Assert.Equal(3, holds.Count);
+        Assert.All(holds, h => Assert.Equal([only], h!));
+
+        await session.SetExitNodeAsync(null).WaitAsync(Deadline);
+        Assert.Null(holds[^1]);
+
+        holds.Clear();
+        Volatile.Write(ref member._verified, false);
+        await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp));
+        Assert.Equal([only], holds[0]!);
+        Assert.Null(holds[^1]);
+    }
+
+    [Fact]
+    public async Task APeerThatSlipsInWhileTheExitStartsIsReported()
+    {
+        var member = Ipv6Member(verified: true);
+        var late = new DirectPeer { Remote = new IPEndPoint(IPAddress.Parse("2001:db8::9"), 40000), Path = PathKind.IPv6, Admitted = true, _verified = true };
+        var peers = new List<DirectPeer> { member };
+        var log = new DiagnosticLog();
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, log)
+        {
+            StartForTest = (o, _) =>
+            {
+                if (o.ExitNode is not null) lock (peers) peers.Add(late);
+                return Task.FromResult<IEasyTierSession>(new FakeEasyTier(o));
+            },
+            BridgePeersForTest = () => { lock (peers) return [.. peers]; },
+        };
+        await session.StartEasyTierAsync(Original, default);
+        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
+        Assert.DoesNotContain("2001:db8::9", session.EasyTier!.Options.DirectUnderlayAddresses);
+        Assert.Contains(log.Snapshot(), e => e.Text.Contains(L.T("core.mp.session.exit_peer_rejoin"), StringComparison.Ordinal));
+        Assert.Single(DirectSession.PeersOutsideThePlan([member, late], session.EasyTier.Options.DirectUnderlayAddresses));
+    }
+
+    [Fact]
+    public async Task AJoinThatDoesNotFinishKeepsTheRunningSessionButAnAbandonedOneDoesNotHoldTheSwitch()
+    {
+        var joining = Ipv6Member(verified: false);
+        joining.Admitted = false;
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [joining],
+            BearerWait = TimeSpan.FromMilliseconds(300),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var original = session.EasyTier!;
+        await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp));
+        Assert.Same(original, session.EasyTier);
+        Assert.Equal(1, session.EasyTierStarts);
+
+        // Not heard from for a while: it gave up, and doesn't hold the switch (nor get an exception).
+        joining.LastSeen = DateTime.UtcNow - DirectSession.JoiningWindow - TimeSpan.FromSeconds(1);
+        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
+        Assert.DoesNotContain("2001:db8::7", session.EasyTier!.Options.DirectUnderlayAddresses);
+    }
 
     [Fact]
     public async Task ExitIsPublishedOnlyAfterReadinessAcknowledgement()
@@ -145,9 +334,11 @@ public sealed class ExitLifecycleRegressionTests
     public void UnderlayIncludesChangedPeerAddressesAndNormalizesMappedIpv4()
     {
         var result = DirectSession.CollectDirectUnderlayAddresses(
-            [IPAddress.Parse("198.51.100.20"), IPAddress.Parse("2001:db8::1")],
-            [IPAddress.Parse("::ffff:198.51.100.20"), IPAddress.Parse("203.0.113.30")]);
-        Assert.Equal(["198.51.100.20", "203.0.113.30"], result);
+            [IPAddress.Parse("198.51.100.20"), IPAddress.Parse("2001:db8::1"), IPAddress.Parse("fe80::2")],
+            [IPAddress.Parse("::ffff:198.51.100.20"), IPAddress.Parse("203.0.113.30"), IPAddress.Parse("2001:db8::9"), IPAddress.Parse("fe80::3")]);
+        // IPv6 only from peers actually connected: a listed candidate that never answered (2001:db8::1) gets no exception.
+        // A connected link-local peer is kept so the plan refuses it with a reason.
+        Assert.Equal(["198.51.100.20", "2001:db8::9", "203.0.113.30", "fe80::3"], result);
     }
 
     [Fact]
