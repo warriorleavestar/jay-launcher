@@ -130,6 +130,23 @@ public sealed class RunLifecycleTests : IDisposable
                 await launching.WaitAsync(TimeSpan.FromSeconds(1));
             }
         }
+        // The session stays for the start button, but the ended run no longer listens to its steps (nothing holds the run).
+        UiTestThread.Run(() => Assert.False(home!.SessionOf("A")?.Steps?.HasListeners ?? false));
+    }
+
+    [Fact]
+    public void ARemovedRunLetsGoOfItsSteps()
+    {
+        using var service = Service();
+        UiTestThread.Run(() =>
+        {
+            var home = new HomeViewModel(service, new LogViewModel());
+            var run = home.AddPreparingRunForTest("A");
+            var steps = HomeViewModel.StepsForTest(run);
+            Assert.True(steps.HasListeners);
+            home.RemoveRunForTest(run);
+            Assert.False(steps.HasListeners);
+        });
     }
 
     [Fact]

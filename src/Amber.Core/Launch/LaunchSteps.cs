@@ -111,6 +111,9 @@ public sealed class LaunchSteps
     /// <summary>A step changed (state, detail, count, or became slow).</summary>
     public event Action? Changed;
 
+    /// <summary>Something still listens to <see cref="Changed"/> (tests: the launch let go when it ended).</summary>
+    internal bool HasListeners => Changed is not null;
+
     public IReadOnlyList<LaunchStep> Steps => _steps;
 
     public LaunchStep this[LaunchStepId id] => _steps[(int)id];
@@ -158,6 +161,12 @@ public sealed class LaunchSteps
         {
             _bytes = b;
             _lastChange = _now();
+            // Bytes arriving again after a stall: no longer waiting on the server.
+            if (step.Slow)
+            {
+                step = step with { Slow = false };
+                Set(id, step);
+            }
         }
         if (step.Done == done && step.Total == total && (detail is null || step.Detail == detail)) return;
         _lastChange = _now();

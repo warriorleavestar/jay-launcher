@@ -155,8 +155,31 @@ internal sealed partial class SelfTest
             Check("强沙盒：卡片只有一句正文和一行淡字，不写 AppContainer，细节收在“这会改什么”后面",
                 consent is { Spec.Body: { } body, Spec.Note: { Length: > 0 }, Spec.Details: { Length: > 0 } } && !body.Contains("AppContainer") && !body.Contains('\n')
                 && Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).All(t => t.Text != consent.Spec.Details)
-                    && window.RequestBar.GetVisualDescendants().OfType<Button>().Any(t => t.IsEffectivelyVisible && t.Classes.Contains("ghost") && t.Content as string == L.T("home.sandbox.consent.details_label"))),
+                    && window.RequestBar.GetVisualDescendants().OfType<Button>().Any(t => t.IsEffectivelyVisible && t.Content as string == L.T("home.sandbox.consent.details_label"))),
                 consent?.Spec.Body ?? "(none)");
+            Check("强沙盒：“这会改什么”也是锁定的安全按钮（主题改不了它的样子）", Dispatcher.UIThread.Invoke(() =>
+                window.RequestBar.GetVisualDescendants().OfType<Button>().FirstOrDefault(t => t.IsEffectivelyVisible && t.Content as string == L.T("home.sandbox.consent.details_label"))
+                    is Amber.App.Controls.Safety.SafetyButton { Classes: var c } && c.Contains("link")));
+            var order = Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<Amber.App.Controls.Safety.SafetyButton>()
+                .Where(b => b.IsEffectivelyVisible && !b.Classes.Contains("link")).Select(b => b.Content as string).ToList());
+            Check("强沙盒：【这次不用】排在【允许】前面，样子是安全的那种",
+                order.Count == 2 && order[0] == L.T("launch.step.sandbox.not_now") && Dispatcher.UIThread.Invoke(() =>
+                    MainWindow.DefaultChoice(window.RequestBar) is Amber.App.Controls.Safety.SafetyButton { Kind: Amber.App.Controls.Safety.SafetyKind.Safe } safe
+                    && safe.Content as string == L.T("launch.step.sandbox.not_now")), string.Join(" | ", order));
+            // Keyboard focus coming in: F6 into the request bar, and Tab arriving on the "why" link first.
+            string? Focused() => Dispatcher.UIThread.Invoke(() => (window.FocusManager?.GetFocusedElement() as Button)?.Content as string);
+            Dispatcher.UIThread.Invoke(() => window.PageHost.GetVisualDescendants().OfType<InputElement>().FirstOrDefault(c => c.Focusable && c.IsEffectivelyVisible)?.Focus());
+            for (var i = 0; i < 6 && Dispatcher.UIThread.Invoke(() => window.FocusedRegion) != window.RequestBar; i++)
+            {
+                window.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.F6, Source = window });
+                await Task.Delay(80);
+            }
+            Check("强沙盒：F6 进请求条，焦点落在【这次不用】", Focused() == L.T("launch.step.sandbox.not_now"), Focused() ?? "(none)");
+            Dispatcher.UIThread.Invoke(() => window.PageHost.GetVisualDescendants().OfType<InputElement>().FirstOrDefault(c => c.Focusable && c.IsEffectivelyVisible)?.Focus());
+            await Task.Delay(80);
+            Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<Button>().First(t => t.IsEffectivelyVisible && t.Content as string == L.T("home.sandbox.consent.details_label")).Focus(NavigationMethod.Tab));
+            await Task.Delay(80);
+            Check("强沙盒：Tab 从外面进来先到“这会改什么”时也转到【这次不用】，不会是【允许】", Focused() == L.T("launch.step.sandbox.not_now"), Focused() ?? "(none)");
             await ShotAsync("instance-steps-sandbox-request");
             Dispatcher.UIThread.Invoke(() => window.RequestBar.GetVisualDescendants().OfType<Button>().First(t => t.IsEffectivelyVisible && t.Content as string == L.T("home.sandbox.consent.details_label")).Command?.Execute(null));
             await Task.Delay(200);

@@ -166,6 +166,23 @@ public sealed class LaunchStepsTests
     }
 
     [Fact]
+    public void BytesArrivingAgainAfterAStallClearSlow()
+    {
+        var steps = New();
+        var changes = 0;
+        steps.Count(LaunchStepId.Download, 0, 3, bytes: 1_000);
+        _now += LaunchStepTimings.Stalled + TimeSpan.FromSeconds(1);
+        Assert.True(steps.Tick());
+        Assert.True(steps[LaunchStepId.Download].Slow);
+        steps.Changed += () => changes++;
+        // Same file count, more bytes: the line stops saying it waits on the server.
+        steps.Count(LaunchStepId.Download, 0, 3, bytes: 2_000_000);
+        Assert.False(steps[LaunchStepId.Download].Slow);
+        Assert.Equal(1, changes);
+        Assert.False(steps.Tick());
+    }
+
+    [Fact]
     public void ABigFileStillArrivingIsNotAStall()
     {
         var steps = New();

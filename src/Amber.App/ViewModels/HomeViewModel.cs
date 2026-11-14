@@ -74,6 +74,8 @@ public sealed partial class HomeViewModel : PageViewModel
     private sealed class GameRun(string id)
     {
         public string Id { get; } = id;
+        /// <summary>Lets go of the steps' change event (the session outlives the run in <c>_sessions</c>).</summary>
+        public Action? UnhookSteps { get; set; }
         public CancellationTokenSource Cts { get; } = new();
         public Process? Game { get; set; }
         public bool StoppedByUser { get; set; }
@@ -612,7 +614,7 @@ public sealed partial class HomeViewModel : PageViewModel
         _runs.Add(run);
         _sessions[id] = run.Session;
         var steps = run.Session.Steps = new LaunchSteps(timings: _stepTimings, instance: id);
-        steps.Changed += () => OnStepsChanged(run);
+        HookSteps(run, steps);
         _lastRequest = request;
         SessionStarted?.Invoke(run.Session);
         _stepClock.Start();
@@ -875,6 +877,8 @@ public sealed partial class HomeViewModel : PageViewModel
         finally
         {
             FinishStore(run, crashed);
+            // The session stays in _sessions for the start button and Activity: it must not keep the whole run alive.
+            run.UnhookSteps?.Invoke();
             _runs.Remove(run);
             if (_runs.Count == 0) _stepClock.Stop();
             run.Cts.Dispose();
@@ -898,6 +902,13 @@ public sealed partial class HomeViewModel : PageViewModel
     /// A step changed: the status line (the instance's progress row and the activity drawer read it) says the running
     /// step and its count, the bar shows that step's own progress, and every step that ended goes into the run log.
     /// </summary>
+    private void HookSteps(GameRun run, LaunchSteps steps)
+    {
+        Action changed = () => OnStepsChanged(run);
+        steps.Changed += changed;
+        run.UnhookSteps = () => steps.Changed -= changed;
+    }
+
     private void OnStepsChanged(GameRun run)
     {
         var steps = run.Session.Steps;
@@ -1181,7 +1192,7 @@ public sealed partial class HomeViewModel : PageViewModel
     {
         var run = new GameRun(id);
         run.Session.Steps = new LaunchSteps(timings: _stepTimings, instance: id);
-        run.Session.Steps.Changed += () => OnStepsChanged(run);
+        HookSteps(run, run.Session.Steps);
         _runs.Add(run);
         // As a real start does: the instance's start button shows this run as preparing.
         _sessions[id] = run.Session;
@@ -1209,6 +1220,7 @@ public sealed partial class HomeViewModel : PageViewModel
     internal void RemoveRunForTest(object run)
     {
         var r = (GameRun)run;
+        r.UnhookSteps?.Invoke();
         _runs.Remove(r);
         if (_sessions.TryGetValue(r.Id, out var s) && s == r.Session) _sessions.Remove(r.Id);
         UpdateRunState();

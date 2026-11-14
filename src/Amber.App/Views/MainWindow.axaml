@@ -35,8 +35,8 @@
               <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Body}" IsVisible="{Binding HasBody}" TextWrapping="Wrap" />
               <TextBlock Text="{Binding Note}" IsVisible="{Binding HasNote}" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
-              <Button Classes="ghost small" IsVisible="{Binding HasDetails}" Command="{Binding ToggleDetailsCommand}" Padding="0,2" HorizontalAlignment="Left"
-                      Content="{Binding DetailsLabel}" />
+              <safety:SafetyButton Classes="link" IsVisible="{Binding HasDetails}" Command="{Binding ToggleDetailsCommand}" HorizontalAlignment="Left"
+                                   Content="{Binding DetailsLabel}" />
               <TextBlock Text="{Binding Details}" IsVisible="{Binding ShowDetails}" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="{Binding RemainingText}" IsVisible="{Binding HasRemaining}" FontSize="12" />
             </StackPanel>
@@ -44,7 +44,7 @@
               <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate DataType="vm:RequestButton">
-                  <safety:SafetyButton Content="{Binding Label}" Command="{Binding ChooseCommand}" />
+                  <safety:SafetyButton Kind="{Binding Kind}" Classes.request-default="{Binding IsDefault}" Content="{Binding Label}" Command="{Binding ChooseCommand}" />
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -66,7 +66,7 @@
               <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate DataType="vm:RequestButton">
-                  <Button Classes="small" Classes.secondary="{Binding !Choice.IsDefault}" Classes.primary="{Binding Choice.IsDefault}" Content="{Binding Label}" Command="{Binding ChooseCommand}" />
+                  <Button Classes="small" Classes.secondary="{Binding !Choice.IsDefault}" Classes.primary="{Binding Choice.IsDefault}" Classes.request-default="{Binding IsDefault}" Content="{Binding Label}" Command="{Binding ChooseCommand}" />
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>

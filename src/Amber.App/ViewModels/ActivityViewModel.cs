@@ -80,6 +80,13 @@ public sealed partial class RequestButton(RequestItem owner, RequestChoice choic
     public RequestChoice Choice { get; } = choice;
     public string Label => Choice.Label;
 
+    /// <summary>The safe choice: first, and where keyboard focus lands when it comes into the request.</summary>
+    public bool IsDefault => Choice.IsDefault;
+
+    /// <summary>How the locked safety banner draws it (the same as the pinned request window).</summary>
+    public Amber.App.Controls.Safety.SafetyKind Kind => Choice.IsDanger ? Amber.App.Controls.Safety.SafetyKind.Danger
+        : Choice.IsDefault ? Amber.App.Controls.Safety.SafetyKind.Safe : Amber.App.Controls.Safety.SafetyKind.Confirm;
+
     [RelayCommand]
     private void Choose() => owner.Choose(Choice.Id);
 }
@@ -93,7 +100,9 @@ public sealed partial class RequestItem : ObservableObject
     {
         _center = center;
         Handle = handle;
-        Buttons = handle.Spec.Choices.Select(c => new RequestButton(this, c)).ToList();
+        // A safety request puts the safe choice first, so neither the eye nor Tab meets "Allow" before it.
+        var choices = handle.Spec.IsSafety ? handle.Spec.Choices.OrderByDescending(c => c.IsDefault).ToList() : handle.Spec.Choices.ToList();
+        Buttons = choices.Select(c => new RequestButton(this, c)).ToList();
     }
 
     public RequestHandle Handle { get; }
