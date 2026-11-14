@@ -14,9 +14,11 @@ namespace Amber.Core.Multiplayer.Public;
 /// Volunteer nodes: players who choose to let other Jay users connect to the public network through their computer.
 /// A volunteer's Jay listens on a public TCP/UDP port and registers <c>tcp://address:port</c> with the directory
 /// ("volunteer" op, renewed every few minutes). The directory only lists an address after it has connected to it itself,
-/// and only addresses on the public internet (no private or loopback ranges), so the list can't be used to point Jay at
-/// someone's LAN. Members ask for a handful ("nodes" op), add them as extra EasyTier peers and keep them for next time,
-/// so the network keeps working when the official nodes are down.
+/// and only addresses on the public internet (no private or loopback ranges). Members ask for a handful ("nodes" op),
+/// resolve each name themselves and use it only when every address is public (<see cref="PinAsync"/>), so the list can't
+/// be used to point Jay at someone's LAN even if a name changes after the directory checked it. They add them as extra
+/// EasyTier peers by address and keep those addresses for next time, so the network keeps working when the official
+/// nodes are down.
 /// <para>
 /// Volunteers see the same public-network traffic any node sees: knocks and directory requests, never room traffic
 /// (rooms have their own encrypted subnets). Their public address is shown to whoever asks the directory, which is why
@@ -112,6 +114,35 @@ public static class VolunteerNodes
                 .FirstOrDefault(ip => ip is { AddressFamily: AddressFamily.InterNetwork } && isPublic(ip))?.ToString();
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or OverflowException) { return null; }
+    }
+
+    /// <summary>
+    /// The address a member hands to its EasyTier for a volunteer from the directory's list: <c>tcp://ip:port</c> with the
+    /// host name resolved here and every address it resolves to checked to be public, so a name that has since been pointed
+    /// at a private or local address isn't dialled. Null when the address isn't usable. An IP address is only checked.
+    /// </summary>
+    public static Task<string?> PinAsync(string url, CancellationToken ct) => PinAsync(url, IsPublic, Dns.GetHostAddressesAsync, ct);
+
+    internal static async Task<string?> PinAsync(string url, Func<IPAddress, bool> isPublic,
+        Func<string, CancellationToken, Task<IPAddress[]>> resolve, CancellationToken ct)
+    {
+        if (Normalize(url, isPublic) is not { } normalized) return null;
+        var uri = new Uri(normalized);
+        if (IPAddress.TryParse(uri.Host.Trim('[', ']'), out _)) return normalized;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        IPAddress[] addresses;
+        try { addresses = await resolve(uri.DnsSafeHost, deadline.Token); }
+        catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException)
+        {
+            ct.ThrowIfCancellationRequested();
+            return null;
+        }
+        if (addresses.Length == 0 || !addresses.All(isPublic)) return null;
+        var ip = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ?? addresses[0];
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        var host = ip.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{ip}]" : ip.ToString();
+        return $"tcp://{host}:{uri.Port.ToString(CultureInfo.InvariantCulture)}";
     }
 
     /// <summary>
@@ -660,22 +691,34 @@ public sealed class VolunteerCache(string path)
 {
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 
+    /// <summary>Which addresses count as public (tests use their own range).</summary>
+    internal Func<IPAddress, bool> IsPublic { get; init; } = VolunteerNodes.IsPublic;
+
+    private string? Normalize(string? url) => VolunteerNodes.Normalize(url, IsPublic);
+
     public IReadOnlyList<string> For(string networkId)
     {
         try
         {
             if (!File.Exists(path)) return [];
             var o = JsonNode.Parse(File.ReadAllText(path)) as JsonObject;
-            return [.. (o?[networkId] as JsonArray ?? []).Select(n => n?.GetValue<string>()).Select(VolunteerNodes.Normalize).OfType<string>()
-                .Distinct().Take(VolunteerNodes.Remember)];
+            // Only addresses: these go to EasyTier as they are at the next start, so a remembered host name (kept by older
+            // Jay) would be resolved without the public-address check. Fresh ones come from the directory once connected.
+            return [.. (o?[networkId] as JsonArray ?? []).Select(n => n?.GetValue<string>()).Select(Normalize).OfType<string>()
+                .Where(IsAddress).Distinct().Take(VolunteerNodes.Remember)];
         }
         catch (Exception e) when (e is IOException or JsonException or InvalidOperationException or UnauthorizedAccessException) { return []; }
     }
 
-    /// <summary>Puts <paramref name="fresh"/> first and keeps at most <see cref="VolunteerNodes.Remember"/>.</summary>
+    private static bool IsAddress(string normalized) => IPAddress.TryParse(new Uri(normalized).Host.Trim('[', ']'), out _);
+
+    /// <summary>
+    /// Puts <paramref name="fresh"/> first and keeps at most <see cref="VolunteerNodes.Remember"/>. Only addresses are kept
+    /// (see <see cref="VolunteerNodes.PinAsync"/>); host names are skipped.
+    /// </summary>
     public void Remember(string networkId, IEnumerable<string> fresh)
     {
-        var list = fresh.Select(VolunteerNodes.Normalize).OfType<string>().Concat(For(networkId)).Distinct().Take(VolunteerNodes.Remember).ToList();
+        var list = fresh.Select(Normalize).OfType<string>().Where(IsAddress).Concat(For(networkId)).Distinct().Take(VolunteerNodes.Remember).ToList();
         try
         {
             JsonObject o;
@@ -690,7 +733,7 @@ public sealed class VolunteerCache(string path)
 
     public void Forget(string networkId, string url)
     {
-        if (VolunteerNodes.Normalize(url) is not { } address) return;
+        if (Normalize(url) is not { } address) return;
         var rest = For(networkId).Where(u => u != address).ToList();
         try
         {
