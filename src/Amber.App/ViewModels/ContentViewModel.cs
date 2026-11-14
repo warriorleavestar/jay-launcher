@@ -456,8 +456,19 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
         await SearchAsync();
     }
 
-    private GameInstance? CurrentInstance() =>
-        TargetInstance is { } id ? _service.GetInstance(id) : null;
+    /// <summary>The "install to" instance, or null when none is picked or its files cannot be read (a broken instance).</summary>
+    private GameInstance? CurrentInstance()
+    {
+        if (TargetInstance is not { } id) return null;
+        try
+        {
+            return _service.GetInstance(id);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or NotSupportedException)
+        {
+            return null;
+        }
+    }
 
     // ---- 结果列表的三种状态（改版规格 4.5）：加载中（10 秒后提示慢）、空结果、出错 ----
 
@@ -580,7 +591,8 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             Status = result.Total == 0 ? L.T("content.search.no_results") : L.P("content.search.results", result.Total, result.Total, Page + 1);
             SetSearchState(false, empty: result.Total == 0 ? EmptyMessage(Query.Trim(), instance is not null) : null);
         }
-        catch (OperationCanceledException) { }
+        // Only our own cancellation is silent: an HTTP timeout is also an OperationCanceledException and must show an error.
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
         catch (Exception e)
         {
             if (!cts.IsCancellationRequested)
@@ -704,7 +716,7 @@ public sealed partial class ContentViewModel : PageViewModel, ISnapshotDemo
             // 提示也放在详情面板的安装按钮上方：状态条会被后面的消息覆盖，这条不能被跳过（改版规格 4.5）。
             LoaderNote = loaderNote;
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
         catch (Exception e)
         {
             SetStatus(StatusMessage.Failure("content.files.fetch_failed", e, ErrorText.Of(e)));
