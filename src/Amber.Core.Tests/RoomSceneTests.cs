@@ -474,6 +474,28 @@ public sealed class RoomSceneTests : IDisposable
     });
 
     [Fact]
+    public void ARoomWithAStrictSplitKeepsItsDirectMainPath() => UiTestThread.Run(() =>
+    {
+        var (service, vm, room) = Create();
+        using var s = service;
+        var switched = false;
+        vm.TestSwitchNetwork = _ => switched = true;
+        var strict = room with { Split = SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Off) };
+        vm.EnterTestRoom(strict, host: false);
+        Assert.False(vm.CanChangeRelayOnly);
+        Assert.Equal(L.T("multiplayer.sees.relay_only.strict_split"), vm.RelayOnlyNote);
+        Wait(vm.SetRelayOnlyAsync(true));
+        Assert.False(vm.MyRelayOnly);
+        Assert.False(switched);
+        // My "relays only" default leaves such a room as it is (on relays only it would never connect), not others.
+        vm.DefaultRelayOnly = true;
+        Assert.False(vm.WithMyRelayChoice(strict).RelayOnly);
+        Assert.True(vm.WithMyRelayChoice(room).RelayOnly);
+        vm.LeaveTestRoom();
+        Assert.Equal("", vm.RelayOnlyNote);
+    });
+
+    [Fact]
     public void RelaysOnlyCanBeMyDefaultForEveryRoom() => UiTestThread.Run(() =>
     {
         var (service, vm, _) = Create();

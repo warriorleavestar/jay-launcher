@@ -162,6 +162,7 @@ public sealed partial class MultiplayerViewModel
         InviteShown = false;
         OnPropertyChanged(nameof(InviteDisplay));
         OnPropertyChanged(nameof(HasInvite));
+        OnPropertyChanged(nameof(ShowCreateInvite));
         NotifyInvitePanel();
     }
 
@@ -183,6 +184,7 @@ public sealed partial class MultiplayerViewModel
         InviteShown = false;
         OnPropertyChanged(nameof(InviteDisplay));
         OnPropertyChanged(nameof(HasInvite));
+        OnPropertyChanged(nameof(ShowCreateInvite));
         NotifyInvitePanel();
     }
 
