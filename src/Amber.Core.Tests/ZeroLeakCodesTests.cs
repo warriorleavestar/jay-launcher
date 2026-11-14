@@ -1,3 +1,4 @@
+using Amber.Core.Localization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
@@ -352,6 +353,8 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
         var client = new RoomDirectoryClient(new Loopback(server.Port));
         var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => client.PostMailAsync(new string('d', 32), [9, 9], SealedMail.DropHash(new byte[16]), default));
         Assert.Equal("rate", e.Code);
+        // The network is busy, not the user sending too fast.
+        Assert.Equal(L.T("core.mp.public.err_mail_busy"), e.Message);
         _now += TimeSpan.FromMinutes(1.1);
         await client.PostMailAsync(new string('d', 32), [9, 9], SealedMail.DropHash(new byte[16]), default);
     }

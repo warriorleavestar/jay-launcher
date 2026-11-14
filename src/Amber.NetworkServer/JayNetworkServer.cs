@@ -295,6 +295,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
             {
                 Volunteers = new VolunteerRegistry(_b.VolunteerProbe, _b.Clock)
                 {
+                    NetworkName = Profile.NetworkName,
                     Blocked = Bans is { } b ? b.IsNodeBanned : null,
                     BlockedOperator = Bans is { } o ? o.IsOperatorBanned : null,
                     RequireOperator = _b.VolunteersSigned,

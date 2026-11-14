@@ -1921,6 +1921,7 @@
   "core.mp.public.observer_error": "Directory event handler failed: {0}",
   "core.mp.public.err_rate": "Publishing too often. This network asks you to wait a moment",
   "core.mp.public.err_mail_rate": "You've sent a lot of friend requests or invites through this network in a short time. Wait about ten minutes and try again",
+  "core.mp.public.err_mail_busy": "Lots of people are sending friend requests and invites through this network right now. Try again in a minute",
   "core.mp.public.budget_full": "Directory: the whole directory's budget for \"{0}\" is used up for this minute; requests get \"rate\". If this keeps happening, someone may be flooding the directory.",
   "core.mp.public.callers_unmapped": "Directory: every caller so far arrives from a local address (none from 127.235.x.y), so per-caller limits are off for them and only the whole directory's budgets apply. The EasyTier running here doesn't hand callers over with their own address: use the EasyTier build that ships with Jay.",
   "core.mp.public.err_busy": "The directory is busy right now. Jay will try again shortly.",

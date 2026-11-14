@@ -247,8 +247,11 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     public int BudgetRefusals => Volatile.Read(ref _budgetRefusals);
     private int _budgetRefusals;
 
-    /// <summary>A directory-wide budget ran out: counts it, logs it at most once a minute per op, replies "rate". Called under the gate.</summary>
-    private JsonObject BudgetFull(string op)
+    /// <summary>
+    /// A directory-wide budget ran out: counts it, logs it at most once a minute per op, replies "rate" (with
+    /// <paramref name="what"/>, when given, so newer Jay can tell the user what it is about). Called under the gate.
+    /// </summary>
+    private JsonObject BudgetFull(string op, string? what = null)
     {
         Interlocked.Increment(ref _budgetRefusals);
         var now = _now();
@@ -257,7 +260,9 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             _budgetLogged[op] = now;
             _log?.Invoke(L.F("core.mp.public.budget_full", op));
         }
-        return Error("rate");
+        var reply = Error("rate");
+        if (what is not null) reply["what"] = what;
+        return reply;
     }
 
     private readonly RateLimiter _rendezvousBudget;
@@ -1176,7 +1181,7 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
             var (count, until) = source is not null && _mailPosts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + MailPostWindow);
             // "rate" so older Jay still shows a sensible text; "what" lets newer Jay say it is about mail.
             if (source is not null && count >= MaxMailPostsPerSource) return new JsonObject { ["ok"] = false, ["error"] = "rate", ["what"] = "mail" };
-            if (!_mailBudget.CanAcquire()) return BudgetFull("post");
+            if (!_mailBudget.CanAcquire()) return BudgetFull("post", "mail-busy");
             if (source is not null) _mailPosts[source] = (count + 1, until);
             _mailBudget.TryAcquire();
             if (!existing) _mailboxes[box!] = items = [];
@@ -1525,6 +1530,7 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             "full" => L.T("core.mp.public.err_full"),
             "gone" => L.T("core.mp.public.err_gone"),
             "rate" when reply["what"] is JsonValue what && what.TryGetValue<string>(out var w) && w == "mail" => L.T("core.mp.public.err_mail_rate"),
+            "rate" when reply["what"] is JsonValue what && what.TryGetValue<string>(out var w) && w == "mail-busy" => L.T("core.mp.public.err_mail_busy"),
             "rate" => L.T("core.mp.public.err_rate"),
             "busy" => L.T("core.mp.public.err_busy"),
             "clock" => L.T("core.mp.public.err_clock"),

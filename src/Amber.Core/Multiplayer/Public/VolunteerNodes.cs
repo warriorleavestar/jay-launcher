@@ -164,6 +164,40 @@ public static class VolunteerNodes
         catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException) { return false; }
     }
 
+    /// <summary>
+    /// Is a node of network <paramref name="networkName"/> listening at <paramref name="address"/>:<paramref name="port"/>?
+    /// Opens a TCP connection, sends the opening of an EasyTier peer handshake (network name only, no secret) and waits
+    /// for the node's handshake back under that network's name, then closes; within 5 seconds (less when
+    /// <paramref name="ct"/> says so). Any other service at that port (a web or game server, say) isn't one.
+    /// </summary>
+    public static Task<bool> IsNetworkNodeAsync(IPAddress address, int port, string networkName, CancellationToken ct) =>
+        IsPublic(address) ? AnswersAsNodeAsync(address, port, networkName, ct) : Task.FromResult(false);
+
+    /// <summary><see cref="IsNetworkNodeAsync"/> for any address (tests dial this machine).</summary>
+    internal static async Task<bool> AnswersAsNodeAsync(IPAddress address, int port, string networkName, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            using var client = new TcpClient(address.AddressFamily);
+            await client.ConnectAsync(address, port, deadline.Token);
+            var stream = client.GetStream();
+            await stream.WriteAsync(NodeHandshake.Request(networkName, RandomNumberGenerator.GetInt32(1, int.MaxValue)), deadline.Token);
+            var length = new byte[4];
+            await stream.ReadExactlyAsync(length, deadline.Token);
+            var body = BinaryPrimitives.ReadUInt32LittleEndian(length);
+            if (body is < NodeHandshake.HeaderSize or > NodeHandshake.MaxReply) return false;
+            var reply = new byte[body];
+            await stream.ReadExactlyAsync(reply, deadline.Token);
+            return NodeHandshake.IsReply(reply, networkName);
+        }
+        catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ArgumentException or EndOfStreamException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>The machine an address belongs to, for per-machine caps: the IPv4 address, or the /64 of an IPv6 one.</summary>
     public static string MachineOf(IPAddress address)
     {
@@ -328,6 +362,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         public bool Probing;
         /// <summary>The machine it resolved to (<see cref="VolunteerNodes.MachineOf"/>), once known.</summary>
         public string? Machine;
+        /// <summary>The address it resolved to, once known: with the port, the listener it names.</summary>
+        public string? Ip;
     }
 
     private readonly Func<string, CancellationToken, Task<bool>>? _customProbe = probe;
@@ -347,6 +383,12 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     /// <summary>The network this directory serves (<see cref="VolunteerOperator.NetworkTag"/>); signed registrations must name it.</summary>
     public string NetworkId { get; init; } = "";
+
+    /// <summary>
+    /// The EasyTier network name of the network. When set (and no custom probe is given), an address is listed only once a
+    /// node of this network answers there (<see cref="VolunteerNodes.IsNetworkNodeAsync"/>), not just any open port.
+    /// </summary>
+    public string? NetworkName { get; init; }
 
     /// <summary>Conflicting claims kept per address.</summary>
     public const int MaxClaims = 4;
@@ -416,6 +458,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     private bool CoolingDown(string key, DateTimeOffset now) => _failedAt.TryGetValue(key, out var at) && now - at < FailedCooldown;
 
     private static string HostOf(string normalized) => new Uri(normalized).Host;
+    private static string Endpoint(string ip, int port) => $"{ip}|{port}";
     private static string DialKey(string machine, string address) => $"dial:{machine}:{new Uri(address).Port}";
     private readonly Dictionary<string, DateTimeOffset> _lastCheck = new(StringComparer.Ordinal);
 
@@ -458,7 +501,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             }
         }
         bool reachable;
-        try { reachable = await Dial(address, ip, ct); }
+        try { reachable = await Dial(address, ip, asNode: false, ct); }
         catch (Exception e) when (e is not OutOfMemoryException) { reachable = false; }
         return new JsonObject { ["ok"] = true, ["reachable"] = reachable };
     }
@@ -611,8 +654,13 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     /// Dials the address: at the IP it already resolved to when there is one (it isn't looked up again, so a name can't
     /// point somewhere else between the check and the connection), or through the custom probe.
     /// </summary>
-    private Task<bool> Dial(string address, IPAddress? ip, CancellationToken ct) =>
+    /// <remarks>
+    /// <paramref name="asNode"/>: before listing, a node of the network must answer (when <see cref="NetworkName"/> is set);
+    /// a would-be volunteer's port check only needs the port open.
+    /// </remarks>
+    private Task<bool> Dial(string address, IPAddress? ip, bool asNode, CancellationToken ct) =>
         _customProbe is not null ? _customProbe(address, ct)
+        : ip is not null && asNode && NetworkName is { } network ? VolunteerNodes.IsNetworkNodeAsync(ip, new Uri(address).Port, network, ct)
         : ip is not null ? VolunteerNodes.ConnectAsync(ip, new Uri(address).Port, ct)
         : VolunteerNodes.ProbeAsync(address, ct);
 
@@ -631,25 +679,26 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             {
                 var machine = VolunteerNodes.MachineOf(ip);
                 var port = new Uri(address).Port;
+                var endpoint = Endpoint(ip.ToString(), port);
                 lock (_gate)
                 {
-                    // Many names for one machine count as that machine: over the cap, the entry goes without being dialled.
-                    // As for names, listed entries and entries still being probed are counted apart. Names for the same
-                    // port of the machine are one listener and take one place between them, so names somebody else points
-                    // at a node can't crowd out the node's own registration (Pick lists one of them).
+                    // Many names for one machine (an IPv4 address, or an IPv6 /64) count as that machine: over the cap, the
+                    // entry goes without being dialled. As for names, listed entries and entries still being probed are
+                    // counted apart. Names for one listener (the same address and port) take one place between them, so
+                    // names somebody else points at a node can't crowd out the node's own registration (Pick lists one).
                     var others = _entries.Where(p => p.Key != address && p.Value.Machine == machine).ToList();
-                    int Ports(bool verified) => others.Where(p => (p.Value.VerifiedAt is not null) == verified)
-                        .Select(p => new Uri(p.Key).Port).Where(p => p != port).Distinct().Count();
-                    crowded = Ports(true) >= MaxPerHost || Ports(false) >= MaxPerHost || CoolingDown(DialKey(machine, address), _now());
+                    int Listeners(bool verified) => others.Where(p => (p.Value.VerifiedAt is not null) == verified && p.Value.Ip is not null)
+                        .Select(p => Endpoint(p.Value.Ip!, new Uri(p.Key).Port)).Where(e => e != endpoint).Distinct().Count();
+                    crowded = Listeners(true) >= MaxPerHost || Listeners(false) >= MaxPerHost || CoolingDown(DialKey(machine, address), _now());
                     // A listener checked under another name since this one was needn't be dialled again: the name takes
                     // that check's time, so the listener is still dialled once its newest check is too old.
                     _entries.TryGetValue(address, out var mine);
                     var now = _now();
                     sameListener = crowded ? null : others
                         .Where(p => p.Value.VerifiedAt is { } at && now - at < ReprobeEvery && at > (mine?.VerifiedAt ?? DateTimeOffset.MinValue)
-                                    && new Uri(p.Key).Port == port)
+                                    && p.Value.Ip is { } other && Endpoint(other, new Uri(p.Key).Port) == endpoint)
                         .Max(p => p.Value.VerifiedAt);
-                    if (!crowded && mine is not null) mine.Machine = machine;
+                    if (!crowded && mine is not null) (mine.Machine, mine.Ip) = (machine, ip.ToString());
                 }
             }
         }
@@ -657,7 +706,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         else if (sameListener is not null) ok = true;
         else
         {
-            try { ok = await Dial(address, ip, total.Token); }
+            try { ok = await Dial(address, ip, asNode: true, total.Token); }
             catch (Exception e) when (e is not OutOfMemoryException) { ok = false; }
         }
         lock (_gate)
@@ -719,7 +768,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             return [.. _entries.Where(p => p.Value.VerifiedAt is not null && Blocked?.Invoke(p.Key) != true
                     && (p.Value.Operator is not { } op || BlockedOperator?.Invoke(op) != true))
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
-                .Select(p => (Public(p.Key, p.Value), p.Value.Machine is { } m ? $"{m}:{new Uri(p.Key).Port}" : p.Key))];
+                .Select(p => (Public(p.Key, p.Value), p.Value.Ip is { } ip ? Endpoint(ip, new Uri(p.Key).Port) : p.Key))];
         }
     }
 
@@ -855,5 +904,93 @@ public sealed class VolunteerCache(string path)
             File.WriteAllText(path, o.ToJsonString(Options));
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
+    }
+}
+
+/// <summary>
+/// The first packet of an EasyTier peer connection over TCP, enough to tell a node of a network from any other service:
+/// a 4-byte length, the 16-byte peer header (from, to, type, flags, forward count, reserved, payload length; little
+/// endian) and a protobuf HandshakeRequest (magic, peer id, version, network name, secret digest), as EasyTier's
+/// <c>tunnel/packet_def.rs</c> and <c>proto/peer_rpc.proto</c> describe them.
+/// </summary>
+internal static class NodeHandshake
+{
+    public const int HeaderSize = 16;
+    public const int MaxReply = 4096;
+    private const uint Magic = 0xd1e1a5e1;
+    private const byte HandshakeType = 2;
+
+    /// <summary>The handshake request, with the secret digest left zero (the node replies all the same).</summary>
+    public static byte[] Request(string networkName, int peerId)
+    {
+        var payload = new List<byte>();
+        Varint(payload, 1 << 3); Varint(payload, Magic);
+        Varint(payload, 2 << 3); Varint(payload, (uint)peerId);
+        Varint(payload, 3 << 3); Varint(payload, 1);
+        var name = Encoding.UTF8.GetBytes(networkName);
+        Varint(payload, (5 << 3) | 2); Varint(payload, (uint)name.Length); payload.AddRange(name);
+        Varint(payload, (6 << 3) | 2); Varint(payload, 32); payload.AddRange(new byte[32]);
+        var packet = new byte[4 + HeaderSize + payload.Count];
+        BinaryPrimitives.WriteUInt32LittleEndian(packet, (uint)(HeaderSize + payload.Count));
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(4), (uint)peerId);
+        packet[12] = HandshakeType;
+        packet[14] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(16), (uint)payload.Count);
+        payload.CopyTo(packet, 4 + HeaderSize);
+        return packet;
+    }
+
+    /// <summary>Is <paramref name="body"/> (after the length) a handshake from a node of <paramref name="networkName"/>?</summary>
+    public static bool IsReply(ReadOnlySpan<byte> body, string networkName)
+    {
+        if (body.Length < HeaderSize || body[8] != HandshakeType) return false;
+        var length = BinaryPrimitives.ReadUInt32LittleEndian(body[12..]);
+        if (length != body.Length - HeaderSize) return false;
+        var payload = body[HeaderSize..];
+        uint? magic = null;
+        string? name = null;
+        var at = 0;
+        while (at < payload.Length)
+        {
+            if (!TryVarint(payload, ref at, out var key)) return false;
+            switch (key & 7)
+            {
+                case 0:
+                    if (!TryVarint(payload, ref at, out var value)) return false;
+                    if (key >> 3 == 1) magic = (uint)value;
+                    break;
+                case 2:
+                    if (!TryVarint(payload, ref at, out var size) || size > (ulong)(payload.Length - at)) return false;
+                    if (key >> 3 == 5) name = Encoding.UTF8.GetString(payload.Slice(at, (int)size));
+                    at += (int)size;
+                    break;
+                case 5: at += 4; break;
+                case 1: at += 8; break;
+                default: return false;
+            }
+        }
+        return at == payload.Length && magic == Magic && name == networkName;
+    }
+
+    private static void Varint(List<byte> to, uint value)
+    {
+        while (value >= 0x80)
+        {
+            to.Add((byte)(value | 0x80));
+            value >>= 7;
+        }
+        to.Add((byte)value);
+    }
+
+    private static bool TryVarint(ReadOnlySpan<byte> from, ref int at, out ulong value)
+    {
+        value = 0;
+        for (var shift = 0; shift < 64 && at < from.Length; shift += 7)
+        {
+            var b = from[at++];
+            value |= (ulong)(b & 0x7f) << shift;
+            if (b < 0x80) return true;
+        }
+        return false;
     }
 }

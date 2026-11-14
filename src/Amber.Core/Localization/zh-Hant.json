@@ -1890,6 +1890,7 @@
   "core.mp.public.observer_error": "目錄事件處理出錯：{0}",
   "core.mp.public.err_rate": "發佈得太頻繁了，這個網路讓你稍等一會兒",
   "core.mp.public.err_mail_rate": "你短時間內透過這個網路發了太多好友請求或邀請，等十分鐘左右再試",
+  "core.mp.public.err_mail_busy": "現在透過這個網路發好友請求和邀請的人很多，過一分鐘再試",
   "core.mp.public.budget_full": "目錄：「{0}」這一分鐘的全目錄額度用完了，請求會收到 rate。如果一直這樣，可能有人在刷目錄。",
   "core.mp.public.callers_unmapped": "目錄：到現在為止所有呼叫方都從本機位址進來（沒有一個來自 127.235.x.y），所以先不按呼叫方限制，只用全目錄的額度。這裡執行的 EasyTier 沒有按各自位址把呼叫方交過來，請用隨 Jay 發佈的 EasyTier。",
   "core.mp.public.err_busy": "目錄現在太忙，Jay 稍後會自動再試。",

@@ -223,21 +223,21 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     [Fact]
     public async Task NamesOthersPointAtANodeDontCrowdItOut()
     {
-        // Two names somebody else registered for the node's own port, then the node's own name: one listener, one place.
+        // Two names somebody else registered for the node's own address and port, then the node's own name: one listener,
+        // one place. The same for an IPv6 node.
         var dialled = new List<string>();
         Task<IPAddress?> Resolve(string url, CancellationToken _) =>
-            Task.FromResult<IPAddress?>(new Uri(url).Host.EndsWith(".six.example.org") ? IPAddress.Parse($"fd00:1:2:3::{new Uri(url).Host.Length:x}")
-                : IPAddress.Parse("10.20.30.40"));
+            Task.FromResult<IPAddress?>(IPAddress.Parse(new Uri(url).Host.EndsWith(".six.example.org") ? "fd00:1:2:3::5" : "10.20.30.40"));
         var registry = new VolunteerRegistry((url, _) => { lock (dialled) dialled.Add(url); return Task.FromResult(true); }, () => _now, Resolve);
         foreach (var url in new[] { "tcp://x1.example.org:11010", "tcp://x2.example.org:11010", "tcp://node.example.org:11010",
-                     "tcp://y1.six.example.org:11010", "tcp://y22.six.example.org:11010", "tcp://node333.six.example.org:11010" })
+                     "tcp://y1.six.example.org:11010", "tcp://y2.six.example.org:11010", "tcp://node.six.example.org:11010" })
         {
             Assert.True(Ok(registry.Register(url)));
             await registry.LastProbe;
             _now += TimeSpan.FromSeconds(1.1);
         }
         Assert.Contains("tcp://node.example.org:11010", registry.Listed());
-        Assert.Contains("tcp://node333.six.example.org:11010", registry.Listed());
+        Assert.Contains("tcp://node.six.example.org:11010", registry.Listed());
         // The listener was dialled once; its other names weren't dialled again.
         Assert.Equal(["tcp://x1.example.org:11010", "tcp://y1.six.example.org:11010"], dialled);
         // Players are given each listener once.
@@ -263,6 +263,85 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
             _now += TimeSpan.FromSeconds(1.1);
         }
         Assert.DoesNotContain("tcp://p2.example.org:80", registry.Listed());
+    }
+
+    [Fact]
+    public async Task OtherAddressesInOneIPv6PrefixAreOtherListeners()
+    {
+        // Same /64 and port, different addresses: each is dialled on its own; only the one that answers is listed, and
+        // the one that doesn't can't take the other's place in the list.
+        var answers = new HashSet<string> { "tcp://node.example.org:11010", "tcp://a7.example.org:11010" };
+        var dialled = new List<string>();
+        Task<IPAddress?> Resolve(string url, CancellationToken _) => Task.FromResult<IPAddress?>(new Uri(url).Host switch
+        {
+            "node.example.org" => IPAddress.Parse("fd00:1:2:3::5"),
+            var host => IPAddress.Parse("fd00:1:2:3::" + host[1]),
+        });
+        var registry = new VolunteerRegistry((url, _) => { lock (dialled) dialled.Add(url); return Task.FromResult(answers.Contains(url)); }, () => _now, Resolve);
+        Assert.True(Ok(registry.Register("tcp://node.example.org:11010")));
+        await registry.LastProbe;
+        _now += TimeSpan.FromSeconds(1.1);
+        Assert.True(Ok(registry.Register("tcp://a6.example.org:11010")));
+        await registry.LastProbe;
+        Assert.Contains("tcp://a6.example.org:11010", dialled);
+        Assert.Equal(["tcp://node.example.org:11010"], registry.Listed());
+        for (var i = 0; i < 20; i++) Assert.Equal("tcp://node.example.org:11010", Assert.Single(registry.Pick(10)).Url);
+        // Two that both answer are two listeners, and both are given out.
+        _now += VolunteerRegistry.FailedCooldown + TimeSpan.FromSeconds(1);
+        Assert.True(Ok(registry.Register("tcp://a7.example.org:11010")));
+        await registry.LastProbe;
+        Assert.Equal(2, registry.Listed().Count);
+        Assert.Equal(2, registry.Pick(10).Count);
+    }
+
+    [Fact]
+    public async Task ANodeOfTheNetworkMustAnswer()
+    {
+        // A fake node: reads the handshake and answers with its own under the given network name.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        string? asked = null;
+        async Task Serve(string answerAs, bool answer)
+        {
+            using var c = await listener.AcceptTcpClientAsync();
+            var stream = c.GetStream();
+            var length = new byte[4];
+            await stream.ReadExactlyAsync(length);
+            var body = new byte[BitConverter.ToUInt32(length)];
+            await stream.ReadExactlyAsync(body);
+            asked = NodeHandshake.IsReply(body, "jay-net-test") ? "handshake" : "other";
+            if (answer) await stream.WriteAsync(NodeHandshake.Request(answerAs, 7));
+        }
+        var serve = Serve("jay-net-test", answer: true);
+        Assert.True(await VolunteerNodes.AnswersAsNodeAsync(IPAddress.Loopback, port, "jay-net-test", default));
+        await serve;
+        Assert.Equal("handshake", asked);
+        // Another network's node, or a service that says nothing, isn't one.
+        serve = Serve("someone-else", answer: true);
+        Assert.False(await VolunteerNodes.AnswersAsNodeAsync(IPAddress.Loopback, port, "jay-net-test", default));
+        await serve;
+        serve = Serve("", answer: false);
+        using (var quick = new CancellationTokenSource(300))
+            Assert.False(await VolunteerNodes.AnswersAsNodeAsync(IPAddress.Loopback, port, "jay-net-test", quick.Token));
+        await serve;
+        // Not a public address: never dialled.
+        Assert.False(await VolunteerNodes.IsNetworkNodeAsync(IPAddress.Loopback, port, "jay-net-test", default));
+    }
+
+    [Fact]
+    public void HandshakeRepliesAreReadStrictly()
+    {
+        var good = NodeHandshake.Request("jay-net-test", 9)[4..];
+        Assert.True(NodeHandshake.IsReply(good, "jay-net-test"));
+        Assert.False(NodeHandshake.IsReply(good[..^1], "jay-net-test"));
+        var wrongType = (byte[])good.Clone();
+        wrongType[8] = 1;
+        Assert.False(NodeHandshake.IsReply(wrongType, "jay-net-test"));
+        var wrongMagic = (byte[])good.Clone();
+        wrongMagic[NodeHandshake.HeaderSize + 1] ^= 1;
+        Assert.False(NodeHandshake.IsReply(wrongMagic, "jay-net-test"));
+        Assert.False(NodeHandshake.IsReply("SSH-2.0-OpenSSH_9.6\r\n"u8, "jay-net-test"));
     }
 
     [Fact]
