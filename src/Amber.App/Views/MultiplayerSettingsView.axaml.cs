@@ -10,7 +10,7 @@ namespace Amber.App.Views;
 
 /// <summary>
 /// Settings › Multiplayer, the multiplayer advanced settings panel: groups that open one at a time (opening one closes
-/// the others, also when a settings#Field reveal opens it), and the reset confirmation with focus on [Cancel].
+/// the others, also when a settings#Field reveal opens it), and the locked reset confirmation with focus on [Cancel].
 /// </summary>
 public partial class MultiplayerSettingsView : UserControl
 {
@@ -24,6 +24,18 @@ public partial class MultiplayerSettingsView : UserControl
         {
             if (e.Property == IsVisibleProperty && MultiplayerResetConfirm.IsVisible)
                 Dispatcher.UIThread.Post(() => MultiplayerResetCancel.Focus(Avalonia.Input.NavigationMethod.Tab), DispatcherPriority.Loaded);
+        };
+        // Esc in the question, or leaving the panel, is [Cancel]: nothing is reset without the button.
+        MultiplayerResetConfirm.KeyDown += (_, e) =>
+        {
+            if (e.Key != Avalonia.Input.Key.Escape || DataContext is not SettingsViewModel { ConfirmingAdvancedReset: true } vm) return;
+            vm.CancelAdvancedResetCommand.Execute(null);
+            Dispatcher.UIThread.Post(() => MultiplayerReset.Focus(Avalonia.Input.NavigationMethod.Tab), DispatcherPriority.Loaded);
+            e.Handled = true;
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            if (DataContext is SettingsViewModel { ConfirmingAdvancedReset: true } vm) vm.CancelAdvancedResetCommand.Execute(null);
         };
     }
 

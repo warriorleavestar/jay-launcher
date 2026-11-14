@@ -61,15 +61,23 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 Width = 460,
             };
             var row = new PrivacyRow();
-            var stage = new StackPanel { Margin = new Thickness(24), Spacing = 16, Children = { new Border { Classes = { "card" }, Child = panel }, row } };
+            // Settings › Multiplayer's [Reset all to defaults] question, as the real view shows it.
+            var mpView = new MultiplayerSettingsView { DataContext = settings, Width = 560, HorizontalAlignment = HorizontalAlignment.Left };
+            settings.ConfirmingAdvancedReset = true;
+            var stage = new StackPanel { Margin = new Thickness(24), Spacing = 16, Children = { new Border { Classes = { "card" }, Child = panel }, row, mpView } };
             window.Content = stage;
             Check("安全面板标题行写的是 Jay 安全提示", panel.BadgeText == Amber.Core.Localization.L.T("safety.title"), panel.BadgeText);
+            await Task.Delay(300);
+            Check("设置 › 联机【全部恢复默认】的确认是锁定的安全面板，按钮是安全按钮，焦点在【取消】",
+                mpView.MultiplayerResetConfirm is SafetyPanel && mpView.MultiplayerResetConfirm.IsEffectivelyVisible
+                    && mpView.MultiplayerResetCancel.GetType() == typeof(SafetyButton) && mpView.MultiplayerResetDo.GetType() == typeof(SafetyButton)
+                    && mpView.MultiplayerResetCancel.IsFocused);
 
             var baseline = new Dictionary<string, byte[]>();
             foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
             {
                 Application.Current!.RequestedThemeVariant = variant;
-                foreach (var (name, bytes) in await CaptureAsync(panel, row, $"default-{variant}")) baseline[$"{variant}/{name}"] = bytes;
+                foreach (var (name, bytes) in await CaptureAsync(panel, row, mpView.MultiplayerResetConfirm, $"default-{variant}")) baseline[$"{variant}/{name}"] = bytes;
             }
 
             foreach (var extreme in Extremes)
@@ -83,13 +91,24 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 foreach (var variant in new[] { ThemeVariant.Dark, ThemeVariant.Light })
                 {
                     Application.Current!.RequestedThemeVariant = variant;
-                    foreach (var (name, bytes) in await CaptureAsync(panel, row, $"{extreme}-{variant}"))
+                    foreach (var (name, bytes) in await CaptureAsync(panel, row, mpView.MultiplayerResetConfirm, $"{extreme}-{variant}"))
                     {
                         var same = baseline.TryGetValue($"{variant}/{name}", out var b) && b.AsSpan().SequenceEqual(bytes);
                         Check($"极端主题 {extreme}（{variant}）下 {name} 和默认逐像素一致", same);
                     }
                 }
             }
+
+            // Esc in the question cancels; nothing is reset.
+            var customizedBefore = settings.AnyAdvancedCustomized;
+            await Dispatcher.UIThread.InvokeAsync(() => mpView.MultiplayerResetCancel.RaiseEvent(new Avalonia.Input.KeyEventArgs
+                { RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent, Key = Avalonia.Input.Key.Escape }));
+            await Task.Delay(200);
+            Check("【全部恢复默认】的确认按 Esc 等于取消，什么都不改", !settings.ConfirmingAdvancedReset && settings.AnyAdvancedCustomized == customizedBefore);
+            settings.ConfirmingAdvancedReset = true;
+            window.Content = original;
+            await Task.Delay(200);
+            Check("离开页面也等于取消", !settings.ConfirmingAdvancedReset && settings.AnyAdvancedCustomized == customizedBefore);
 
             // 带保留词的主题包：名字、作者、布局文字里有“Jay 安全提示”都整包拒绝。
             var reserved = Path.Combine(reportDir, "reserved.jaytheme");
@@ -135,13 +154,13 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
         }
     }
 
-    private async Task<List<(string Name, byte[] Pixels)>> CaptureAsync(Control panel, Control row, string tag)
+    private async Task<List<(string Name, byte[] Pixels)>> CaptureAsync(Control panel, Control row, Control resetConfirm, string tag)
     {
         await Task.Delay(300);
         return await Dispatcher.UIThread.InvokeAsync(() =>
         {
             var result = new List<(string, byte[])>();
-            foreach (var (name, control) in new[] { ("安全面板", panel), ("隐私行", row) })
+            foreach (var (name, control) in new[] { ("安全面板", panel), ("隐私行", row), ("联机设置的恢复默认确认", resetConfirm) })
             {
                 var size = new PixelSize((int)Math.Max(1, control.Bounds.Width), (int)Math.Max(1, control.Bounds.Height));
                 using var bmp = new RenderTargetBitmap(size);
@@ -150,7 +169,7 @@ internal sealed class SafetyLockSelfTest(MainWindow window, MainViewModel main, 
                 var handle = System.Runtime.InteropServices.GCHandle.Alloc(bytes, System.Runtime.InteropServices.GCHandleType.Pinned);
                 try { bmp.CopyPixels(new PixelRect(size), handle.AddrOfPinnedObject(), bytes.Length, size.Width * 4); }
                 finally { handle.Free(); }
-                bmp.Save(Path.Combine(reportDir, $"{tag}-{(name == "安全面板" ? "panel" : "privacy")}.png"));
+                bmp.Save(Path.Combine(reportDir, $"{tag}-{(name == "安全面板" ? "panel" : name == "隐私行" ? "privacy" : "mp-reset")}.png"));
                 result.Add((name, bytes));
             }
             return result;

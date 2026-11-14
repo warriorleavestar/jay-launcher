@@ -3,6 +3,7 @@
              xmlns:l="using:Amber.App.Localization"
              xmlns:vm="using:Amber.App.ViewModels"
              xmlns:c="using:Amber.App.Views.Controls"
+             xmlns:safety="using:Amber.App.Controls.Safety"
              x:Class="Amber.App.Views.MultiplayerSettingsView"
              x:DataType="vm:SettingsViewModel">
   <!-- Settings › Multiplayer as the multiplayer advanced settings panel (redesign batch 10): every multiplayer setting,
@@ -265,7 +266,8 @@
       </StackPanel>
     </Expander>
 
-    <!-- Reset all: asks first (focus on [Cancel]); networks and relays stay. -->
+    <!-- Reset all: asks first in a locked safety panel (a theme pack can't restyle or relabel it; focus on [Cancel],
+         Esc or leaving cancels); networks and relays stay. -->
     <StackPanel Spacing="6" Margin="0,6,0,0">
       <WrapPanel ItemSpacing="8" LineSpacing="4">
         <Button x:Name="MultiplayerReset" Content="{l:T settings.mp.reset_all}" Command="{Binding AskAdvancedResetCommand}" IsEnabled="{Binding AnyAdvancedCustomized}"
@@ -273,15 +275,17 @@
         <TextBlock x:Name="MultiplayerAllDefault" Classes="hint" FontSize="12" VerticalAlignment="Center" Text="{l:T settings.mp.all_default}"
                    IsVisible="{Binding !AnyAdvancedCustomized}" />
       </WrapPanel>
-      <Border x:Name="MultiplayerResetConfirm" Classes="card" Margin="0" IsVisible="{Binding ConfirmingAdvancedReset}">
-        <StackPanel Spacing="8">
-          <TextBlock Text="{l:T settings.mp.reset_confirm}" TextWrapping="Wrap" />
-          <WrapPanel ItemSpacing="8" LineSpacing="6">
-            <Button x:Name="MultiplayerResetDo" Content="{l:T settings.mp.reset_do}" Command="{Binding ResetAdvancedCommand}" />
-            <Button x:Name="MultiplayerResetCancel" Content="{l:T common.cancel}" Command="{Binding CancelAdvancedResetCommand}" />
-          </WrapPanel>
-        </StackPanel>
-      </Border>
+      <safety:SafetyPanel x:Name="MultiplayerResetConfirm" IsVisible="{Binding ConfirmingAdvancedReset}">
+        <safety:SafetyPanel.Body>
+          <StackPanel Spacing="8">
+            <TextBlock Text="{l:T settings.mp.reset_confirm}" TextWrapping="Wrap" />
+            <WrapPanel ItemSpacing="8" LineSpacing="6">
+              <safety:SafetyButton x:Name="MultiplayerResetCancel" Kind="Safe" Content="{l:T common.cancel}" Command="{Binding CancelAdvancedResetCommand}" />
+              <safety:SafetyButton x:Name="MultiplayerResetDo" Kind="Confirm" Content="{l:T settings.mp.reset_do}" Command="{Binding ResetAdvancedCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </safety:SafetyPanel.Body>
+      </safety:SafetyPanel>
       <TextBlock x:Name="MultiplayerResetStatus" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{Binding AdvancedResetStatus}"
                  IsVisible="{Binding !!AdvancedResetStatus.Length}" />
     </StackPanel>
