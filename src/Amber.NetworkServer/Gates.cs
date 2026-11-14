@@ -60,7 +60,7 @@ public sealed class BanList : IRoomGate
     private readonly string? _path;
     private readonly Func<DateTimeOffset> _now;
     private readonly Lock _gate = new();
-    private Dictionary<string, Ban> _bans = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, Ban> _bans = new(StringComparer.Ordinal);
     private DateTime _loadedStamp;
     private DateTimeOffset _checkedAt;
 
@@ -72,13 +72,15 @@ public sealed class BanList : IRoomGate
         lock (_gate) Load();
     }
 
-    private static string Key(string kind, string value) => kind + ":" + value;
+    // Account names are case-sensitive (NetworkAccounts), so an account ban matches only that exact name.
+    // Fingerprints, room ids, node addresses and jay1 addresses compare case-insensitively.
+    private static string Key(string kind, string value) => kind + ":" + (kind == "account" ? value : value.ToLowerInvariant());
 
     private void Load()
     {
         if (_path is null || !File.Exists(_path)) return;
         var stamp = File.GetLastWriteTimeUtc(_path);
-        var bans = new Dictionary<string, Ban>(StringComparer.OrdinalIgnoreCase);
+        var bans = new Dictionary<string, Ban>(StringComparer.Ordinal);
         var o = JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? throw new InvalidDataException(_path);
         foreach (var item in o["bans"] as JsonArray ?? [])
             if (item is JsonObject b && b["kind"]?.GetValue<string>() is { } kind && Kinds.Contains(kind) && b["value"]?.GetValue<string>() is { Length: > 0 } value)

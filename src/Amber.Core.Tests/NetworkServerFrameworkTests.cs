@@ -623,6 +623,36 @@ public sealed class NetworkServerFrameworkTests : IAsyncDisposable
     }
 
     [Fact]
+    public void AccountBansMatchTheExactNameOnly()
+    {
+        var bans = new BanList(clock: () => _now);
+        bans.Add("account", "Bob", null, _now);
+        Assert.True(bans.IsAccountBanned("Bob"));
+        // Account names are case-sensitive, so "bob" is a different account.
+        Assert.False(bans.IsAccountBanned("bob"));
+        Assert.False(bans.Remove("account", "bob"));
+
+        // Fingerprints and room ids still match whatever the case.
+        var listing = Listing(X25519KeyPair.Generate());
+        var flipped = new string([.. listing.HostFingerprint.Select(c => char.IsUpper(c) ? char.ToLowerInvariant(c) : char.ToUpperInvariant(c))]);
+        Assert.NotEqual(listing.HostFingerprint, flipped);
+        bans.Add("host", flipped, null, _now);
+        Assert.True(bans.IsBanned(listing));
+        bans.Add("room", "Room1", null, _now);
+        Assert.True(bans.Remove("room", "ROOM1"));
+
+        // A saved list keeps the same rules after it is read back.
+        var path = Path.Combine(_dir, "case-bans.json");
+        var saved = new BanList(path, () => _now);
+        saved.Add("account", "Bob", null, _now);
+        saved.Add("host", flipped, null, _now);
+        var reloaded = new BanList(path, () => _now);
+        Assert.True(reloaded.IsAccountBanned("Bob"));
+        Assert.False(reloaded.IsAccountBanned("bob"));
+        Assert.True(reloaded.IsBanned(listing));
+    }
+
+    [Fact]
     public void BanListPicksUpChangesFromAnotherNode()
     {
         var path = Path.Combine(_dir, "shared-bans.json");

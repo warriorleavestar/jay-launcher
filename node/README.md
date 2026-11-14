@@ -1,10 +1,10 @@
-# Amber 联机节点 / Amber relay node
+# Jay 联机节点 / Jay relay node
 
 [简体中文](#简体中文) | [English](#english)
 
 ## 简体中文
 
-Amber 的联机功能靠 [EasyTier](https://github.com/EasyTier/EasyTier) 组网：房间里的人先连到同一个**联机节点**互相找到对方，能直连就直连，连不上时由节点转发（数据用房间密钥加密，节点看不到内容）。Jay 内置了几个公共节点（社区公开的，可能随时失效）；想要更稳，可以自己搭一个节点，或者用朋友搭好的。
+Jay 的联机功能靠 [EasyTier](https://github.com/EasyTier/EasyTier) 组网：房间里的人先连到同一个**联机节点**互相找到对方，能直连就直连，连不上时由节点转发（数据用房间密钥加密，节点看不到内容）。Jay 内置了几个公共节点（社区公开的，可能随时失效）；想要更稳，可以自己搭一个节点，或者用朋友搭好的。
 
 这个文件夹里是一键部署的脚本。节点只做转发，不建虚拟网卡，用普通用户身份运行。
 
@@ -19,17 +19,17 @@ sudo bash install.sh
 
 脚本会：
 
-1. 从 EasyTier 的 GitHub 发布页下载固定版本（2.6.4），校验 SHA-256；
+1. 从 [Yumao-Feather/jay-easytier](https://github.com/Yumao-Feather/jay-easytier) 的 GitHub 发布页下载 Jay 加固版 EasyTier 的固定版本（2.6.4），校验 SHA-256；
 2. 建一个专用的系统用户 `amber-node`，注册 systemd 服务 `amber-node`（开机启动，挂了自动重启）；
 3. 如果开着 ufw 或 firewalld，放行 TCP 和 UDP 11010；
-4. 打印节点地址和 **Amber 节点分享码**，在 Amber 联机页的“联机节点”里导入就能用。
+4. 打印节点地址；`PUBLIC_HOST` 是域名时还会打印 **Jay 节点分享码**，在 Jay 联机设置的“中转服务器”里导入就能用（只有 IP 时见下面 `PUBLIC_HOST` 的说明）。
 
 可选设置（写在 `sudo` 后面）：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | `11010` | 监听端口，TCP 和 UDP 都用这个 |
-| `RELAY` | `amber` | `amber` 只转发 Amber 联机房间；`all` 转发所有 EasyTier 网络 |
+| `RELAY` | `amber` | `amber` 只转发 Jay 联机房间；`all` 转发所有 EasyTier 网络 |
 | `NODE_NAME` | 空 | 分享码里显示的名字 |
 | `PUBLIC_HOST` | 自动猜 | 公网 IP 或域名。云服务器网卡上常是内网地址，这时要手动填。填域名时脚本会打印节点分享码；只有 IP 时分享码不能写 IP，在 Jay 里添加地址后点【导出】，生成加密分享码和口令 |
 | `BANDWIDTH_LIMIT` | `0` | 转发别人流量的限速（字节/秒），0 不限 |
@@ -46,7 +46,7 @@ curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main
 docker compose up -d
 ```
 
-镜像是 EasyTier 官方的 `easytier/easytier:v2.6.4`。在 Amber 里添加节点 `tcp://你的公网IP:11010`。
+镜像是 EasyTier 官方的 `easytier/easytier:v2.6.4`。在 Jay 联机设置的“中转服务器”里添加节点 `tcp://你的公网IP:11010`。
 
 ### 方法三：Windows
 
@@ -56,7 +56,7 @@ docker compose up -d
 powershell -ExecutionPolicy Bypass -File install-windows.ps1 -PublicHost 你的公网IP
 ```
 
-脚本注册一个开机运行的计划任务（用权限最低的 LOCAL SERVICE 账户），在 Windows 防火墙放行端口，打印分享码。卸载加 `-Uninstall`。家里的电脑一般在路由器后面，要在路由器上把 11010 端口（TCP 和 UDP）转发到这台电脑。
+脚本注册一个开机运行的计划任务（用权限最低的 LOCAL SERVICE 账户），在 Windows 防火墙放行端口，打印节点地址（`-PublicHost` 是域名时还打印分享码）。卸载加 `-Uninstall`。家里的电脑一般在路由器后面，要在路由器上把 11010 端口（TCP 和 UDP）转发到这台电脑。
 
 ### 端口和安全组
 
@@ -68,15 +68,15 @@ powershell -ExecutionPolicy Bypass -File install-windows.ps1 -PublicHost 你的�
 
 - 能直连的玩家只通过节点“打个招呼”，几乎不占带宽；连不上直连时，游戏数据全部经节点转发。
 - Minecraft 联机每个玩家大约 20–100 KB/s，人多、跑图时会更多。1 Mbps 上行大约够两三个人同时转发。
-- 按流量计费的服务器建议设 `BANDWIDTH_LIMIT`，或者保持 `RELAY=amber` 只给 Amber 房间用。
+- 按流量计费的服务器建议设 `BANDWIDTH_LIMIT`，或者保持 `RELAY=amber` 只给 Jay 房间用。
 
 ### 贡献给更多人用
 
-`RELAY=all` 时节点可以给任何 EasyTier 用户当共享节点。EasyTier 官方文档的[搭建共享节点](https://easytier.cn/guide/network/host-public-server.html)页面讲了公共节点的设置，但目前没有写公开的节点登记流程；想让更多人知道你的节点，可以在 EasyTier 的 [GitHub Issues](https://github.com/EasyTier/EasyTier/issues) 或文档首页列出的社区群组里问。也可以直接把 Amber 节点分享码发给朋友。
+`RELAY=all` 时节点可以给任何 EasyTier 用户当共享节点。EasyTier 官方文档的[搭建共享节点](https://easytier.cn/guide/network/host-public-server.html)页面讲了公共节点的设置，但目前没有写公开的节点登记流程；想让更多人知道你的节点，可以在 EasyTier 的 [GitHub Issues](https://github.com/EasyTier/EasyTier/issues) 或文档首页列出的社区群组里问。也可以直接把 Jay 节点分享码发给朋友。
 
 ## English
 
-Amber's multiplayer uses [EasyTier](https://github.com/EasyTier/EasyTier): everyone in a room first connects to the same **relay node** to find each other, then connects directly when possible and goes through the node when not (traffic is encrypted with the room secret; the node cannot read it). Amber has no servers and ships no nodes, so someone needs to run one, or use a friend's.
+Jay's multiplayer uses [EasyTier](https://github.com/EasyTier/EasyTier): everyone in a room first connects to the same **relay node** to find each other, then connects directly when possible and goes through the node when not (traffic is encrypted with the room secret; the node cannot read it). Jay has a few built-in community nodes (public ones that may stop working at any time); for something more reliable, run your own node or use a friend's.
 
 This folder has one-step install scripts. The node only relays, creates no network adapter and runs as an unprivileged user.
 
@@ -89,19 +89,19 @@ curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main
 sudo bash install.sh
 ```
 
-The script downloads the pinned EasyTier release (2.6.4) from GitHub and verifies its SHA-256, creates a dedicated `amber-node` system user and an `amber-node` systemd service, opens TCP and UDP 11010 in ufw or firewalld if active, and prints the node address. With a domain (`PUBLIC_HOST=<domain>`) it also prints a **node share code** to import in Jay's multiplayer settings. Share codes never carry an IP address: for a node with only an IP, add the address in Jay and press Export, and Jay makes a sealed code plus a passphrase to tell your friends another way.
+The script downloads the pinned Jay-hardened EasyTier build (2.6.4) from the [Yumao-Feather/jay-easytier](https://github.com/Yumao-Feather/jay-easytier) GitHub releases and verifies its SHA-256, creates a dedicated `amber-node` system user and an `amber-node` systemd service, opens TCP and UDP 11010 in ufw or firewalld if active, and prints the node address. With a domain (`PUBLIC_HOST=<domain>`) it also prints a **node share code** to import in Jay (Multiplayer settings, relay servers). Share codes never carry an IP address: for a node with only an IP, add the address in Jay and press Export, and Jay makes a sealed code plus a passphrase to tell your friends another way.
 
-Options (set them after `sudo`): `PORT` (default 11010), `RELAY` (`amber` = Amber rooms only, `all` = every EasyTier network), `NODE_NAME`, `PUBLIC_HOST` (public IP or domain; set it when the interface only has a private address), `BANDWIDTH_LIMIT` (bytes/s for relayed traffic, 0 = unlimited).
+Options (set them after `sudo`): `PORT` (default 11010), `RELAY` (`amber` = Jay rooms only, `all` = every EasyTier network), `NODE_NAME`, `PUBLIC_HOST` (public IP or domain; set it when the interface only has a private address), `BANDWIDTH_LIMIT` (bytes/s for relayed traffic, 0 = unlimited).
 
 Uninstall: `sudo bash uninstall.sh`
 
 ### Option 2: Docker
 
-Download `docker-compose.yml`, replace `NODE_SECRET` with a random string, then `docker compose up -d`. It uses EasyTier's official image `easytier/easytier:v2.6.4`. Add `tcp://<public IP>:11010` in Amber.
+Download `docker-compose.yml`, replace `NODE_SECRET` with a random string, then `docker compose up -d`. It uses EasyTier's official image `easytier/easytier:v2.6.4`. Add `tcp://<public IP>:11010` in Jay (Multiplayer settings, relay servers).
 
 ### Option 3: Windows
 
-From an elevated PowerShell: `powershell -ExecutionPolicy Bypass -File install-windows.ps1 -PublicHost <public IP>`. It registers a startup scheduled task running as LOCAL SERVICE, adds Windows Firewall rules and prints a share code. Add `-Uninstall` to remove it. Behind a home router, forward TCP and UDP 11010 to the PC.
+From an elevated PowerShell: `powershell -ExecutionPolicy Bypass -File install-windows.ps1 -PublicHost <public IP>`. It registers a startup scheduled task running as LOCAL SERVICE, adds Windows Firewall rules and prints the node address (and a share code when `-PublicHost` is a domain). Add `-Uninstall` to remove it. Behind a home router, forward TCP and UDP 11010 to the PC.
 
 ### Ports and security groups
 
@@ -113,4 +113,4 @@ Peers that connect directly barely use the node. When they can't, all game traff
 
 ### Sharing your node more widely
 
-With `RELAY=all` the node can serve any EasyTier user. EasyTier's [shared node guide](https://easytier.cn/guide/network/host-public-server.html) covers public node settings but currently documents no public listing process; ask in EasyTier's [GitHub Issues](https://github.com/EasyTier/EasyTier/issues) or the community channels linked from its docs. Or just send your Amber node share code to friends.
+With `RELAY=all` the node can serve any EasyTier user. EasyTier's [shared node guide](https://easytier.cn/guide/network/host-public-server.html) covers public node settings but currently documents no public listing process; ask in EasyTier's [GitHub Issues](https://github.com/EasyTier/EasyTier/issues) or the community channels linked from its docs. Or just send your Jay node share code to friends.

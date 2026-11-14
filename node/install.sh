@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Amber 联机节点一键部署（Linux，x86_64 / arm64，systemd）
-# Amber relay node installer (Linux, x86_64 / arm64, systemd)
+# Jay 联机节点一键部署（Linux，x86_64 / arm64，systemd）
+# Jay relay node installer (Linux, x86_64 / arm64, systemd)
 #
 # 下载 Jay 加固版 EasyTier 的 easytier-core（固定版本，校验 SHA-256；源码 https://github.com/Yumao-Feather/jay-easytier），以普通用户身份作为 systemd 服务运行，
 # 只做中继（--no-tun，不建虚拟网卡，不需要 root 权限运行）。
@@ -9,9 +9,9 @@
 #   sudo bash install.sh
 # 可选环境变量 / optional environment variables:
 #   PORT=11010            监听端口（TCP 和 UDP）/ listen port (TCP and UDP)
-#   RELAY=amber           amber：只转发 Amber 联机房间（网络名 amber-*）；all：转发所有 EasyTier 网络
+#   RELAY=amber           amber：只转发 Jay 联机房间（网络名 amber-*）；all：转发所有 EasyTier 网络
 #   NODE_NAME=我的节点     分享码里显示的名字 / name shown in the share code
-#   PUBLIC_HOST=1.2.3.4   公网 IP 或域名（不填就从本机网卡猜）/ public IP or domain (guessed if empty)
+#   PUBLIC_HOST=203.0.113.5 公网 IP 或域名（不填就从本机网卡猜）/ public IP or domain (guessed if empty)
 #   BANDWIDTH_LIMIT=0     转发别的网络的限速，字节/秒，0 不限 / relay limit for foreign networks, bytes/s, 0 = none
 
 set -euo pipefail
@@ -32,6 +32,8 @@ BANDWIDTH_LIMIT="${BANDWIDTH_LIMIT:-0}"
 INSTALL_DIR="/opt/amber-node"
 SERVICE="amber-node"
 SERVICE_USER="amber-node"
+# Where the unit file goes; only the script tests point it elsewhere.
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf '错误 / error: %s\n' "$*" >&2; exit 1; }
@@ -98,10 +100,10 @@ ARGS="${ARGS} --listeners tcp://0.0.0.0:${PORT} udp://0.0.0.0:${PORT}"
 ARGS="${ARGS} --relay-network-whitelist '${WHITELIST}' --hostname amber-node --rpc-portal 127.0.0.1:15888"
 [ "$BANDWIDTH_LIMIT" -gt 0 ] && ARGS="${ARGS} --foreign-relay-bps-limit ${BANDWIDTH_LIMIT}"
 
-cat > "/etc/systemd/system/${SERVICE}.service" <<UNIT
+cat > "${UNIT_DIR}/${SERVICE}.service" <<UNIT
 [Unit]
-Description=Amber relay node (EasyTier ${VERSION})
-Documentation=https://github.com/EasyTier/EasyTier
+Description=Jay relay node (EasyTier ${VERSION})
+Documentation=https://github.com/Yumao-Feather/jay-easytier
 After=network-online.target
 Wants=network-online.target
 
@@ -129,10 +131,12 @@ WorkingDirectory=/tmp
 [Install]
 WantedBy=multi-user.target
 UNIT
-chmod 0600 "/etc/systemd/system/${SERVICE}.service"
+chmod 0600 "${UNIT_DIR}/${SERVICE}.service"
 
 systemctl daemon-reload
-systemctl enable --now "$SERVICE" >/dev/null
+systemctl enable "$SERVICE" >/dev/null
+# restart, not start: a re-run must replace a node that is already running with the new settings.
+systemctl restart "$SERVICE"
 sleep 2
 systemctl is-active --quiet "$SERVICE" || { journalctl -u "$SERVICE" -n 30 --no-pager; die "服务没有启动 / service failed to start"; }
 
@@ -145,12 +149,12 @@ elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 
 fi
 
 if [ -z "$PUBLIC_HOST" ]; then
-    PUBLIC_HOST="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' | head -n 1)"
+    PUBLIC_HOST="$(ip -4 route get 192.0.2.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' | head -n 1)"
     case "$PUBLIC_HOST" in
         10.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|192.168.*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*|"")
             say ""
             say "注意：本机网卡上是内网地址 ${PUBLIC_HOST:-（未知）}，云服务器一般要用控制台里的公网 IP。"
-            say "Note: the interface address is private; use your server's public IP. Re-run with PUBLIC_HOST=<public IP> to print the right share code."
+            say "Note: the interface address is private; use your server's public IP. Re-run with PUBLIC_HOST=<public IP or domain>; with a domain the script prints a share code."
             ;;
     esac
 fi
@@ -173,7 +177,7 @@ say ""
 say "=========================================================="
 say "节点已运行 / node is running（${SERVICE}.service）"
 say "节点地址 / node address:  tcp://${PUBLIC_HOST}:${PORT}   udp://${PUBLIC_HOST}:${PORT}"
-say "转发范围 / relays:        $([ "$RELAY" = amber ] && echo 'Amber 联机房间 only' || echo '所有 EasyTier 网络 / all networks')"
+say "转发范围 / relays:        $([ "$RELAY" = amber ] && echo 'Jay 联机房间 / Jay rooms only' || echo '所有 EasyTier 网络 / all networks')"
 say ""
 if [ -n "$CODE" ]; then
     say "Jay 节点分享码（在联机设置“中转服务器”里导入）/ Jay node share code:"
