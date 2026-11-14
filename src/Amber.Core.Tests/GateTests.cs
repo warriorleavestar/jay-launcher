@@ -340,6 +340,15 @@ public sealed class GateTests : IAsyncLifetime
     }
 
     [Fact]
+    public void HandshakeLimitCountsAnIpv6SlashSixtyFourAsOneAddress()
+    {
+        Assert.Equal(GateServer.RateKey(IPAddress.Parse("2001:db8:1:2::1")), GateServer.RateKey(IPAddress.Parse("2001:db8:1:2:ffff:1:2:3")));
+        Assert.NotEqual(GateServer.RateKey(IPAddress.Parse("2001:db8:1:2::1")), GateServer.RateKey(IPAddress.Parse("2001:db8:1:3::1")));
+        Assert.Equal(IPAddress.Parse("192.0.2.7").MapToIPv6(), GateServer.RateKey(IPAddress.Parse("192.0.2.7")));
+        Assert.NotEqual(GateServer.RateKey(IPAddress.Parse("192.0.2.7")), GateServer.RateKey(IPAddress.Parse("192.0.2.8")));
+    }
+
+    [Fact]
     public async Task ScannerGetsNoBytes()
     {
         using var tcp = new TcpClient();

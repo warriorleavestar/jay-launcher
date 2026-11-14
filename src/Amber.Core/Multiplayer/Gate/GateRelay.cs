@@ -188,7 +188,7 @@ public sealed class GateRelay : IAsyncDisposable
             client.Dispose();
             return;
         }
-        var remote = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.MapToIPv6() ?? IPAddress.IPv6None;
+        var remote = GateServer.RateKey((client.Client.RemoteEndPoint as IPEndPoint)?.Address ?? IPAddress.IPv6None);
         if (_perIp.AddOrUpdate(remote, 1, (_, n) => n + 1) > _maxPerIp || !_slots.Wait(0))
         {
             Release(remote);

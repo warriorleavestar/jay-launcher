@@ -133,7 +133,7 @@ public sealed class GateConfig
     public string PublicHost { get; set; } = "";
     public int PublicPort { get; set; } = 47670;
     public int MaxConnections { get; set; } = 512;
-    /// <summary>同一个 IP 同时在握手中的连接数上限。</summary>
+    /// <summary>Most connections in the handshake at once from one address (an IPv6 /64 counts as one address).</summary>
     public int MaxHandshakesPerIp { get; set; } = 8;
 }
 
