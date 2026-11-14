@@ -1364,8 +1364,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
     /// code expects, so a directory can't hand over someone else's record). Null when none qualifies.
     /// </summary>
     /// <param name="seen">
-    /// The highest seqs this computer accepted before: a record older than that for the lookup is not taken (null), and
-    /// a newer one is noted.
+    /// The highest seqs this computer accepted before: a record older than that for the lookup and its signer is not taken
+    /// (null), and a newer one is noted.
     /// </param>
     public async Task<SignedRecord?> GetRecordAsync(byte[] lookup, Func<byte[], bool> acceptSigner, CancellationToken ct, DateTimeOffset? now = null,
         RecordSeqMemory? seen = null)
@@ -1381,8 +1381,8 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
         // Older than a record this computer already took for the lookup: rolled back, so not used.
         if (best is not null && seen is not null)
         {
-            if (best.Seq < seen.Floor(lookup)) best = null;
-            else seen.Note(lookup, best.Seq);
+            if (best.Seq < seen.Floor(lookup, best.Signer)) best = null;
+            else seen.Note(lookup, best.Signer, best.Seq);
         }
         if (best is not null || results.Any(r => r.Reply is not null)) return best;
         throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
