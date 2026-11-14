@@ -174,7 +174,9 @@ public static class GameLanBridge
         if (timeout != Timeout.InfiniteTimeSpan) linked.CancelAfter(timeout);
         try
         {
-            return AgentFor(port) is { } agent ? await ViaAgentAsync(agent, port, linked.Token).ConfigureAwait(false) : await DirectAsync(port, linked.Token, direct).ConfigureAwait(false);
+            // The agent connects to 127.0.0.1: only a connection meant for that address goes through it.
+            var viaLoopback = direct is null || direct.Equals(IPAddress.Loopback);
+            return viaLoopback && AgentFor(port) is { } agent ? await ViaAgentAsync(agent, port, linked.Token).ConfigureAwait(false) : await DirectAsync(port, linked.Token, direct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -203,13 +205,19 @@ public static class GameLanBridge
         }
     }
 
+    /// <summary>
+    /// The agent of the game that would take a connection to 127.0.0.1:<paramref name="port"/> (where the agent itself
+    /// connects), or null. Only listeners that can take that connection count, and they must all be one process: when
+    /// they aren't, or that process has no agent, the connection is made directly and never handed to an agent. So a game
+    /// listening on the same port number elsewhere (::1, another address) can't receive another game's players.
+    /// </summary>
     private static Agent? AgentFor(int port)
     {
         List<Agent> agents;
         lock (Gate) agents = [.. Launches.Values.Select(l => l.Agent).OfType<Agent>()];
         if (agents.Count == 0 || !OperatingSystem.IsWindows()) return null;
-        var owners = LocalPortOwners.ListenerPids(port);
-        return agents.FirstOrDefault(a => owners.Contains(a.Pid));
+        if (LocalPortOwners.LoopbackListener(port) is not { } owner) return null;
+        return agents.FirstOrDefault(a => a.Pid == owner);
     }
 
     private static async Task<Socket?> ViaAgentAsync(Agent agent, int port, CancellationToken ct)
@@ -490,6 +498,13 @@ internal static class LocalPortOwners
         return pids;
     }
 
+    /// <summary>
+    /// The one process whose listener would take a connection to 127.0.0.1:<paramref name="port"/>; null when none, or
+    /// when more than one could (never a guess).
+    /// </summary>
+    public static int? LoopbackListener(int port) =>
+        TcpRow.LoopbackListener(Rows(AfInet, TcpTableOwnerPidListener), Rows(AfInet6, TcpTableOwnerPidListener), port);
+
     /// <summary>The process at the <paramref name="local"/> end of a TCP connection to <paramref name="remote"/>.</summary>
     public static int? ConnectionPid(IPEndPoint local, IPEndPoint remote)
     {
@@ -505,11 +520,10 @@ internal static class LocalPortOwners
     private static IPEndPoint Normalize(IPEndPoint e) =>
         e.Address.IsIPv4MappedToIPv6 ? new IPEndPoint(e.Address.MapToIPv4(), e.Port) : e;
 
-    internal readonly record struct Row(IPEndPoint Local, IPEndPoint Remote, int Pid);
 
-    internal static List<Row> Rows(int family, int table)
+    internal static List<TcpRow> Rows(int family, int table)
     {
-        var rows = new List<Row>();
+        var rows = new List<TcpRow>();
         var size = 0;
         for (var attempt = 0; attempt < 4; attempt++)
         {
@@ -526,7 +540,7 @@ internal static class LocalPortOwners
                     if (family == AfInet)
                     {
                         // MIB_TCPROW_OWNER_PID: state, local addr, local port, remote addr, remote port, pid
-                        rows.Add(new Row(
+                        rows.Add(new TcpRow(
                             new IPEndPoint(new IPAddress((uint)Marshal.ReadInt32(row, 4)), Port(Marshal.ReadInt32(row, 8))),
                             new IPEndPoint(new IPAddress((uint)Marshal.ReadInt32(row, 12)), Port(Marshal.ReadInt32(row, 16))),
                             Marshal.ReadInt32(row, 20)));
@@ -535,7 +549,7 @@ internal static class LocalPortOwners
                     else
                     {
                         // MIB_TCP6ROW_OWNER_PID: local addr[16], scope, port, remote addr[16], scope, port, state, pid
-                        rows.Add(new Row(
+                        rows.Add(new TcpRow(
                             new IPEndPoint(new IPAddress(Bytes(row, 0), Marshal.ReadInt32(row, 16)), Port(Marshal.ReadInt32(row, 20))),
                             new IPEndPoint(new IPAddress(Bytes(row, 24), Marshal.ReadInt32(row, 40)), Port(Marshal.ReadInt32(row, 44))),
                             Marshal.ReadInt32(row, 52)));
@@ -564,4 +578,21 @@ internal static class LocalPortOwners
 
     [DllImport("iphlpapi.dll")]
     private static extern uint GetExtendedTcpTable(nint table, ref int size, bool sort, int family, int tableClass, uint reserved);
+}
+
+/// <summary>One row of Windows' TCP tables: local and remote end, and the owning process.</summary>
+internal readonly record struct TcpRow(IPEndPoint Local, IPEndPoint Remote, int Pid)
+{
+    /// <summary>
+    /// <see cref="LocalPortOwners.LoopbackListener(int)"/> over given tables. A connection to 127.0.0.1:port reaches an IPv4 listener on
+    /// 127.0.0.1 or 0.0.0.0, or a dual-stack one on [::]; never one on ::1 or another address. Every such listener counts,
+    /// and they must all belong to one process.
+    /// </summary>
+    internal static int? LoopbackListener(IEnumerable<TcpRow> v4, IEnumerable<TcpRow> v6, int port)
+    {
+        var pids = v4.Where(r => r.Local.Port == port && (r.Local.Address.Equals(IPAddress.Loopback) || r.Local.Address.Equals(IPAddress.Any)))
+            .Concat(v6.Where(r => r.Local.Port == port && r.Local.Address.Equals(IPAddress.IPv6Any)))
+            .Select(r => r.Pid).Distinct().Take(2).ToList();
+        return pids.Count == 1 ? pids[0] : null;
+    }
 }

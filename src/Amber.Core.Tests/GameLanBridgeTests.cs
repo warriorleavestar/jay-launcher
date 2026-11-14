@@ -160,6 +160,72 @@ public sealed class GameLanBridgeTests : IDisposable
         Assert.Equal(before, GameLanBridge.ActiveForTest);
     }
 
+    private static TcpRow Listening(string address, int port, int pid) =>
+        new(new IPEndPoint(IPAddress.Parse(address), port), new IPEndPoint(IPAddress.Any, 0), pid);
+
+    [Fact]
+    public void OnlyTheListenerThatTakes127001CountsAndNeverAGuess()
+    {
+        const int port = 25565, game = 100, other = 200;
+        // The game on IPv4, another process on the same port number on ::1 only: the game.
+        Assert.Equal(game, TcpRow.LoopbackListener([Listening("127.0.0.1", port, game)], [Listening("::1", port, other)], port));
+        Assert.Equal(game, TcpRow.LoopbackListener([Listening("0.0.0.0", port, game)], [Listening("::1", port, other)], port));
+        // A dual-stack game ([::]) takes 127.0.0.1 too; so does one listening on both families.
+        Assert.Equal(game, TcpRow.LoopbackListener([], [Listening("::", port, game)], port));
+        Assert.Equal(game, TcpRow.LoopbackListener([Listening("0.0.0.0", port, game)], [Listening("::", port, game)], port));
+        // Another address with the same port number doesn't take 127.0.0.1.
+        Assert.Equal(game, TcpRow.LoopbackListener([Listening("127.0.0.1", port, game), Listening("127.0.0.2", port, other)], [], port));
+        Assert.Null(TcpRow.LoopbackListener([Listening("127.0.0.2", port, other)], [Listening("::1", port, other)], port));
+        // Two processes that could both take it: nobody is picked.
+        Assert.Null(TcpRow.LoopbackListener([Listening("127.0.0.1", port, game)], [Listening("::", port, other)], port));
+        Assert.Null(TcpRow.LoopbackListener([Listening("0.0.0.0", port, game), Listening("127.0.0.1", port, other)], [], port));
+        // Other ports don't count.
+        Assert.Null(TcpRow.LoopbackListener([Listening("127.0.0.1", port + 1, game)], [], port));
+    }
+
+    [Fact]
+    public async Task AnotherGamesAgentOnTheSamePortNumberOverIpv6GetsNothing()
+    {
+        if (!OperatingSystem.IsWindows() || !Socket.OSSupportsIPv6) return;
+        // The world: this process, on 127.0.0.1 (IPv4).
+        using var world = new Listener();
+        var port = world.Port;
+        // Another game (a separate process with its own launch and agent) listens on [::1] at the same port number.
+        var script = "$l=[Net.Sockets.TcpListener]::new([Net.IPAddress]::IPv6Loopback," + port + ");$l.Start();'LISTENING';[Console]::Out.Flush();" +
+                     "$t=[Console]::In.ReadLine();$c=[Net.Sockets.TcpClient]::new('127.0.0.1'," + GameLanBridge.PortForTest + ");$s=$c.GetStream();" +
+                     "$b=[Text.Encoding]::ASCII.GetBytes(\"JAYLAN1 $t control`n\");$s.Write($b,0,$b.Length);$r=[IO.StreamReader]::new($s);" +
+                     "while(($x=$r.ReadLine()) -ne $null){\"GOT $x\";[Console]::Out.Flush()}";
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
+        {
+            UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, CreateNoWindow = true,
+        };
+        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command", script }) psi.ArgumentList.Add(a);
+        var other = Process.Start(psi)!;
+        _cleanup.Add(new Killer(other));
+        var lines = new List<string>();
+        other.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (lines) lines.Add(e.Data); };
+        other.BeginOutputReadLine();
+        bool Saw(string text) { lock (lines) return lines.Any(l => l.StartsWith(text, StringComparison.Ordinal)); }
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (!Saw("LISTENING") && DateTime.UtcNow < deadline) await Task.Delay(50);
+        Assert.True(Saw("LISTENING"), "the other game didn't start");
+        // Its agent is genuine: its own token, from its own process.
+        var token = Launch(other);
+        await other.StandardInput.WriteLineAsync(token);
+        await other.StandardInput.FlushAsync();
+        while (!Saw("GOT ok") && DateTime.UtcNow < deadline) await Task.Delay(50);
+        Assert.True(Saw("GOT ok"), "the other game's agent wasn't accepted");
+
+        // A player for the world on 127.0.0.1:port goes to the world, and the other agent is never asked.
+        Assert.False(GameLanBridge.IsBridged(port));
+        var accepted = world.AcceptAsync();
+        using var socket = await GameLanBridge.ConnectAsync(port, TimeSpan.FromSeconds(5));
+        Assert.NotNull(socket);
+        using var at = await accepted.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(500);
+        Assert.False(Saw("GOT open"));
+    }
+
     [Fact]
     public async Task DataConnectionForAnUnknownRequestIsClosed()
     {
@@ -357,6 +423,8 @@ public sealed class GameLanBridgeTests : IDisposable
         public Listener() => _listener.Start();
 
         public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+
+        public Task<Socket> AcceptAsync() => _listener.AcceptSocketAsync();
 
         public void Dispose() => _listener.Stop();
     }

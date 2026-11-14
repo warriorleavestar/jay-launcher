@@ -70,6 +70,9 @@ public sealed class SplitTunnelServer : IAsyncDisposable
     /// the server owns them from here on, unless <paramref name="giveBack"/> is set.</param>
     /// <param name="giveBack">The listeners are lent: when the server stops (or refuses to start) it leaves them bound and
     /// calls this instead of stopping them.</param>
+    /// <summary>Each member's share of game connections, shared with the room's single tunnel (<see cref="GameStreamQuota"/>).</summary>
+    public GameStreamQuota GameQuota { get; init; } = new();
+
     public SplitTunnelServer(RoomCode room, Func<TunnelService, Func<Stream, CancellationToken, Task>?> route, Action<string>? log = null,
         IPAddress? address = null, IReadOnlyList<int>? ports = null, SplitRegistry? registry = null, IReadOnlyList<TcpListener>? listeners = null,
         Action? giveBack = null)
@@ -174,6 +177,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         void HandshakeDone() => _slots.Release(slot);
         var authenticated = false;
         var handshakeOk = false;
+        MemberEntry? quotaOwner = null;
         var served = false;
         try
         {
@@ -212,6 +216,17 @@ public sealed class SplitTunnelServer : IAsyncDisposable
             // The member's key revoked (kick, re-approval, room ended): drop every leg at once.
             var target = joined;
             revocation = member!.Revocation.Register(target.Abort);
+            // The member's share of game connections is the room's, counted with its single-tunnel ones.
+            if (service == TunnelService.Game)
+            {
+                if (!GameQuota.TryTake(member))
+                {
+                    Interlocked.Increment(ref _rejected);
+                    joined.Abort();
+                    return;
+                }
+                quotaOwner = member;
+            }
             Interlocked.Increment(ref _accepted);
             served = true;
             try
@@ -257,6 +272,7 @@ public sealed class SplitTunnelServer : IAsyncDisposable
         finally
         {
             HandshakeDone();
+            if (quotaOwner is not null) GameQuota.GiveBack(quotaOwner);
             await revocation.DisposeAsync();
             if (secure is not null) secure.Abort();
             // Closing a joined connection writes a close record, which fails when the other side is already gone.

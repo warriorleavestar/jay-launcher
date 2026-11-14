@@ -152,15 +152,11 @@ public sealed class TunnelServer : IAsyncDisposable
     /// <summary>Places one caller with its own address may hold.</summary>
     public const int MaxPendingPerCaller = 16;
 
-    /// <summary>
-    /// Game connections one member (or, without members, one caller address) may have open at once. The game's side
-    /// takes a bounded number of connections in all, and on loopback it can't tell who a connection is for, so each
-    /// member's share is kept here, where the member is known: past it only that member is turned away.
-    /// </summary>
-    public const int MaxGameStreamsPerMember = 16;
+    /// <summary>Game connections one member may have open at once (see <see cref="GameStreamQuota"/>).</summary>
+    public const int MaxGameStreamsPerMember = GameStreamQuota.PerMember;
 
-    private readonly object _gameStreamsGate = new();
-    private readonly Dictionary<object, int> _gameStreams = [];
+    /// <summary>Each member's share of game connections; the room gives its split tunnel the same one.</summary>
+    public GameStreamQuota GameQuota { get; init; } = new();
     private readonly HandshakeSlots _slots = new(MaxPendingHandshakes, MaxPendingPerCaller);
     private long _slotsFullLogged;
     private long _handshakeFailedLogged;
@@ -382,7 +378,7 @@ public sealed class TunnelServer : IAsyncDisposable
                 if (service == TunnelService.Game)
                 {
                     gameOwner = (object?)servedMember ?? CallerOf(client);
-                    if (gameOwner is not null && !TakeGameStream(gameOwner))
+                    if (gameOwner is not null && !GameQuota.TryTake(gameOwner))
                     {
                         gameOwner = null;
                         Interlocked.Increment(ref Rejected);
@@ -421,7 +417,7 @@ public sealed class TunnelServer : IAsyncDisposable
             finally
             {
                 HandshakeDone();
-                if (gameOwner is not null) GiveBackGameStream(gameOwner);
+                if (gameOwner is not null) GameQuota.GiveBack(gameOwner);
                 await revocation.DisposeAsync();
                 if (stream is not null)
                 {
@@ -429,26 +425,6 @@ public sealed class TunnelServer : IAsyncDisposable
                     catch (Exception e) when (e is IOException or ObjectDisposedException or SocketException) { }
                 }
             }
-        }
-    }
-
-    private bool TakeGameStream(object owner)
-    {
-        lock (_gameStreamsGate)
-        {
-            var n = _gameStreams.GetValueOrDefault(owner);
-            if (n >= MaxGameStreamsPerMember) return false;
-            _gameStreams[owner] = n + 1;
-            return true;
-        }
-    }
-
-    private void GiveBackGameStream(object owner)
-    {
-        lock (_gameStreamsGate)
-        {
-            if (_gameStreams.GetValueOrDefault(owner) <= 1) _gameStreams.Remove(owner);
-            else _gameStreams[owner]--;
         }
     }
 
