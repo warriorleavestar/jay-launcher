@@ -691,12 +691,13 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
 
     private async Task LoadJavaChoicesAsync(string? current)
     {
-        // 扫描要一会儿，这期间下拉框不留空。
-        if (JavaChoices.Count == 0)
-        {
-            JavaChoices.Add(new JavaChoice("", null));
-            SelectedJava = JavaChoices[0];
-        }
+        // The scan takes a while. Until it returns, the list holds the automatic entry and this instance's stored path,
+        // and the stored path stays selected, so an edit made meanwhile saves the right Java (not the automatic one
+        // or the previous instance's choice). This part runs while the settings are still being loaded.
+        JavaChoices.Clear();
+        JavaChoices.Add(new JavaChoice("", null));
+        if (current is not null) JavaChoices.Add(new JavaChoice(current, current));
+        SelectedJava = JavaChoices[^1];
         var found = await _service.Java.ScanAsync();
         var wasLoading = _loadingSettings;
         _loadingSettings = true;
