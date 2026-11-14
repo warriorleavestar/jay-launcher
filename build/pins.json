@@ -149,7 +149,8 @@
   ],
   "notPinned": [
     { "what": "Minecraft game files, libraries and assets", "checkedBy": "the SHA-1 in Mojang's version manifests" },
-    { "what": "NeoForge, Forge, Fabric and Quilt installers and libraries", "checkedBy": "the hashes the loader's own metadata gives, where it gives one" },
+    { "what": "NeoForge, Forge, Fabric and Quilt installers and libraries", "checkedBy": "the hashes the loader's own metadata gives, where it gives one; Forge installers also against the .sha1 on the official Maven when it is reachable" },
+    { "what": "OptiFine", "checkedBy": "nothing: only a third-party mirror (BMCLAPI) serves it, and the app labels it unverified" },
     { "what": "Temurin Java for ARM Linux (latest release)", "checkedBy": "the SHA-256 Adoptium's API returns with the package" },
     { "what": "Mods, resource packs, shaders and modpacks", "checkedBy": "the hashes Modrinth and CurseForge return; chosen by the player" }
   ]

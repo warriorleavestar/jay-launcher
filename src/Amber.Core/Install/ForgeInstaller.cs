@@ -57,7 +57,9 @@ public abstract partial class ForgeLikeInstaller(LoaderContext ctx) : ILoaderIns
         {
             progress?.Report(new(L.F("core.install.forge.downloadinstaller", Kind)));
             var installerPath = Path.Combine(work, "installer.jar");
-            await Ctx.Downloader.DownloadOneAsync(new DownloadItem(InstallerUrl(version), installerPath), ct);
+            // The installer runs outside the sandbox: whichever source serves it must match the official repository's hash.
+            var installerUrl = InstallerUrl(version);
+            await Ctx.Downloader.DownloadOneAsync(new DownloadItem(installerUrl, installerPath, await Ctx.Downloader.GetOfficialSha1Async(installerUrl, ct)), ct);
 
             using var zip = ZipFile.OpenRead(installerPath);
             var profile = ReadJson(zip, "install_profile.json")
