@@ -156,11 +156,11 @@ sudo NETWORK=nz-friends.jaynet SEED_ONLY=1 SEEDS=tcp://主节点:11010 bash inst
 sudo NETWORK=nz-friends.jaynet CONFIG=nz-friends/config.json SEEDS=tcp://主节点:11010 EXTRA="--directory-index 2" bash install-network-node.sh
 ```
 
-脚本建 `jay` 用户、数据放 `/var/lib/jay-network`、注册 `jay-network` 服务、在 ufw / firewalld 上放行端口。之后：
+脚本建 `jay-network` 用户（和 `jay-server` 用的 `jay` 分开，同一台机器上的 MC 服务器读不到节点的钥匙；从旧版升级时会把数据目录交给新用户）、数据放 `/var/lib/jay-network`、注册 `jay-network` 服务、在 ufw / firewalld 上放行端口。之后：
 
 ```bash
 journalctl -u jay-network -f
-sudo -u jay JAY_SERVER_DIR=/var/lib/jay-network /opt/jay-server/jay-server node status
+sudo -u jay-network JAY_SERVER_DIR=/var/lib/jay-network /opt/jay-server/jay-server node status
 ```
 
 **Docker**（在仓库根目录）：
