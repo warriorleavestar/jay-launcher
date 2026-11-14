@@ -56,6 +56,12 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
     private byte[]? _receivePlain;
     private byte[]? _sendPlain;
     private byte[]? _sendRecord;
+
+    /// <summary>
+    /// The most data put in one record. With padding buckets it is the largest bucket below the maximum, less the record
+    /// header, so bulk data fills that bucket exactly instead of being padded up to the maximum size.
+    /// </summary>
+    private readonly int _maxChunk;
     private long _sentSinceRekey;
     private long _lastRekeyTicks = Stopwatch.GetTimestamp();
     private long _lastWriteTicks = Stopwatch.GetTimestamp();
@@ -75,6 +81,7 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
         _profile = profile;
         _sendMask = sendMask;
         _receiveMask = receiveMask;
+        _maxChunk = MaxChunk(profile);
         if (profile.CoverTrafficIdle is { } idle) _cover = CoverLoopAsync(idle, _cts.Token);
         _rekeyTimer = RekeyLoopAsync(_cts.Token);
     }
@@ -171,15 +178,25 @@ public sealed class SecureStream : Stream, IAuthenticatedStream
         return buffer ??= new byte[ReusedRecord];
     }
 
+    private static int MaxChunk(TransportProfile profile)
+    {
+        var largest = 0;
+        if (profile.PadBuckets is { } buckets)
+            foreach (var b in buckets)
+                if (b < MaxPlaintext && b > largest) largest = b;
+        // Buckets too small to carry bulk data in reasonable records keep the normal split.
+        return largest >= 1024 ? largest - HeaderLength : MaxData;
+    }
+
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
     {
         await _writeLock.WaitAsync(ct);
         try
         {
             ObjectDisposedException.ThrowIf(_closeSent, this);
-            for (var offset = 0; offset < buffer.Length || buffer.Length == 0 && offset == 0; offset += MaxData)
+            for (var offset = 0; offset < buffer.Length || buffer.Length == 0 && offset == 0; offset += _maxChunk)
             {
-                var chunk = buffer.Slice(offset, Math.Min(MaxData, buffer.Length - offset));
+                var chunk = buffer.Slice(offset, Math.Min(_maxChunk, buffer.Length - offset));
                 await WriteRecordAsync(chunk, 0, ct);
                 if (buffer.Length == 0) break;
             }
