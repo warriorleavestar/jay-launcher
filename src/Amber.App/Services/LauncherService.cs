@@ -268,7 +268,7 @@ public sealed class LauncherService : IDisposable
 
     private InstanceMeta EnsureMeta(string id)
     {
-        Settings.Instances ??= [];
+        Settings.Instances ??= new(StringComparer.OrdinalIgnoreCase);
         if (!Settings.Instances.TryGetValue(id, out var meta)) Settings.Instances[id] = meta = new InstanceMeta();
         return meta;
     }
