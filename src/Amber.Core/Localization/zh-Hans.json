@@ -1338,7 +1338,7 @@
   "multiplayer.invite.waiting_approval": "找到房主了，正在等 TA 批准…",
   "multiplayer.invite.reason.expired": "这张邀请已经用完、过期或被撤销了，请房主重新发一张",
   "multiplayer.invite.reason.full": "房间满了",
-  "multiplayer.invite.reason.denied": "房主没有批准（或 2 分钟内没有回应）",
+  "multiplayer.invite.reason.denied": "房主没有批准，或者没有及时回应",
   "multiplayer.invite.cancelled": "已取消加入",
   "multiplayer.invite.knock_failed": "敲门失败：{0}。邀请可能不对或已失效",
   "multiplayer.invite.old_code": "这是旧版本的码，请房主更新 Jay 后重新发邀请（JAY2- 开头）",

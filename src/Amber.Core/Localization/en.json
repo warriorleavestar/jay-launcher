@@ -1369,7 +1369,7 @@
   "multiplayer.invite.waiting_approval": "Found the host, waiting for approval…",
   "multiplayer.invite.reason.expired": "This invite was used up, expired or revoked. Ask the host for a new one",
   "multiplayer.invite.reason.full": "The room is full",
-  "multiplayer.invite.reason.denied": "The host didn't approve (or didn't answer within 2 minutes)",
+  "multiplayer.invite.reason.denied": "The host didn't approve, or didn't answer in time",
   "multiplayer.invite.cancelled": "Join cancelled",
   "multiplayer.invite.knock_failed": "Knock failed: {0}. The invite may be wrong or no longer valid",
   "multiplayer.invite.old_code": "This code is from an older version. Ask the host to update Jay and send a new invite (starting with JAY2-)",

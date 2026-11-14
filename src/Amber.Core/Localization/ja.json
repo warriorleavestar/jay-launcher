@@ -1338,7 +1338,7 @@
   "multiplayer.invite.waiting_approval": "ホストが見つかりました。承認を待っています…",
   "multiplayer.invite.reason.expired": "この招待は使い切られたか、期限切れか、取り消されています。ホストに新しい招待をもらってください",
   "multiplayer.invite.reason.full": "ルームが満員です",
-  "multiplayer.invite.reason.denied": "ホストが承認しませんでした（または 2 分以内に応答がありませんでした）",
+  "multiplayer.invite.reason.denied": "ホストが承認しませんでした（または時間内に応答がありませんでした）",
   "multiplayer.invite.cancelled": "参加をキャンセルしました",
   "multiplayer.invite.knock_failed": "ノックに失敗しました：{0}。招待が間違っているか、無効になっている可能性があります",
   "multiplayer.invite.old_code": "これは古いバージョンのコードです。ホストに Jay を更新してもらい、新しい招待（JAY2- で始まるもの）を送ってもらってください",

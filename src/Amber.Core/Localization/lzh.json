@@ -1289,7 +1289,7 @@
   "multiplayer.invite.waiting_approval": "已得房主，方候其許…",
   "multiplayer.invite.reason.expired": "此邀已盡、已逾期或已撤，請房主復發一邀",
   "multiplayer.invite.reason.full": "房已滿",
-  "multiplayer.invite.reason.denied": "房主未許（或二分內無應）",
+  "multiplayer.invite.reason.denied": "房主未許（或未及時應）",
   "multiplayer.invite.cancelled": "入已罷",
   "multiplayer.invite.knock_failed": "叩門未成：{0}。邀碼或誤，或已失效",
   "multiplayer.invite.old_code": "此乃舊版之房碼，請房主更 Jay 而發新邀碼（以 JAY2- 始）",
