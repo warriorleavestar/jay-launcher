@@ -69,7 +69,11 @@ internal static class TrustCommands
 
     /// <summary>Refuses a release key for network, directory or hardware signing, and a network key for releases.</summary>
     internal static TrustSigner ForUse(TrustSigner signer, bool release) =>
-        ForUse(signer, release, JayTrust.IsNetworkKey, JayTrust.IsReleaseKey);
+        ForUse(signer, release, IsNetworkKey, IsReleaseKey);
+
+    /// <summary>Which keys count as Jay's network and release keys; tests point these at their own keys.</summary>
+    internal static Func<byte[], bool> IsNetworkKey = JayTrust.IsNetworkKey;
+    internal static Func<byte[], bool> IsReleaseKey = JayTrust.IsReleaseKey;
 
     internal static TrustSigner ForUse(TrustSigner signer, bool release, Func<byte[], bool> isNetworkKey, Func<byte[], bool> isReleaseKey)
     {

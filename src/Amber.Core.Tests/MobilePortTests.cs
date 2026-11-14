@@ -130,17 +130,19 @@ public sealed class MobilePortTests
         var jump = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Jump);
         var sneak = TouchControlLayout.Default.Single(control => control.Action == TouchControlAction.Sneak);
         Assert.InRange(menu.CenterX, 0.47, 0.53);
-        Assert.True(movePad.CenterX < 0.25 && movePad.CenterY > 0.60);
+        Assert.True(movePad.CenterX < 0.25);
+        Assert.InRange(movePad.CenterY, 0.75, 0.82);
         Assert.InRange(inventory.CenterX, 0.600, 0.612);
-        Assert.True(inventory.CenterY > 0.95);
-        Assert.True(jump.CenterY > 0.70 && sneak.CenterY > 0.70);
+        Assert.InRange(inventory.CenterY, 0.95, 0.96);
+        Assert.True(jump.CenterY > 0.75 && sneak.CenterY > 0.84);
+        Assert.True(jump.Radius >= 0.04 && sneak.Radius >= 0.04);
         Assert.False(split.GameplayVisible);
         Assert.True(split.MenuVisible);
         Assert.Null(TouchControlLayout.HitTest(split.CenterX, split.CenterY));
     }
 
     [Fact]
-    public void TouchProfilesExposeThreeDistinctMobileSchemes()
+    public void TouchProfilesExposeFourDistinctMobileSchemes()
     {
         var profile = new TouchControlProfile();
         Assert.DoesNotContain(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
@@ -156,6 +158,12 @@ public sealed class MobilePortTests
         profile.Mode = TouchControlMode.JoystickAndCrosshair;
         Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.PrimaryAction);
         Assert.Contains(profile.Controls, control => control.Action == TouchControlAction.SecondaryAction && control.GameplayVisible);
+
+        profile.Mode = TouchControlMode.ExternalKeyboardMouse;
+        Assert.Single(profile.Controls);
+        Assert.Equal(TouchControlAction.Settings, profile.Controls[0].Action);
+        Assert.True(profile.Controls[0].GameplayVisible);
+        Assert.True(profile.Controls[0].MenuVisible);
     }
 
     [Fact]

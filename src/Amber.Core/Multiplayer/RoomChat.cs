@@ -304,6 +304,8 @@ internal static class ChatWire
     internal static List<RosterEntry> ParseRoster(JsonObject json)
     {
         var list = new List<RosterEntry>();
+        // The roster comes from the host: keep one entry per member, so a repeated entry can't break lookups by fingerprint.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var node in (json["m"] as JsonArray ?? []).Take(ChatHub.MaxConnections + 1))
         {
             try
@@ -314,6 +316,8 @@ internal static class ChatWire
                 var key = Convert.FromHexString(pk);
                 if (MemberIdentity.FingerprintOf(key) != fp) continue;
                 var name = node?["name"]?.GetValue<string>();
+                // Claim the fingerprint only once the whole entry has been read, so a broken entry can't hide a good one after it.
+                if (!seen.Add(fp)) continue;
                 list.Add(new RosterEntry(fp, key, RoomChat.Clean(name, RoomChat.MaxNameLength)));
             }
             catch (Exception e) when (e is InvalidOperationException or FormatException) { }

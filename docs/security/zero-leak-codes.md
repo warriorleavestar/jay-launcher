@@ -89,7 +89,7 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 1. **Pinned**: keys in the signed connection string (`dirKeys`, #145).
 2. **Root-certified**: the connection string lists root key ids (`dirRoots`, at most 4; each the SHA-256 id of a hybrid
    Ed25519 + ML-DSA-65 key, see `TrustSigner`) and how many of them must
-   sign (`dirRootsNeed`, default 1). The built-in network uses the Jay trustees (`JayTrust`): 2 of 3.
+   sign (`dirRootsNeed`, default 1). The built-in network uses the Jay trustee keys (`JayTrust.Need`, today 2 of 2).
    - A directory sends `{"c","sigs"}` as the payload of its handshake message.
    - `c` is `{"key","net","exp"}`; `sigs` is a list of base64 `TrustSignature` entries (both public keys, an Ed25519
      and an ML-DSA-65 signature over `"jay-directory-cert-v2\n" ‖ c`, about 5.3 KB each). Both algorithms must verify;
@@ -103,7 +103,7 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 
 ### Trustee keys for the built-in network (offline, one per person)
 
-The built-in network's directory certificates, and reviewed network strings, need 2 of the 3 Jay trustees
+The built-in network's directory certificates, and reviewed network strings, need enough Jay trustee keys (`JayTrust.Need`, today 2 of 2)
 (`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
 
 ```bash
