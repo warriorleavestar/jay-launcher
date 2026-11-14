@@ -94,6 +94,30 @@ public sealed class HostLobbyTests
         Assert.Equal("secret", LobbyArgs.Environment(new LobbyOptions("n", "secret", true, [], 1))[EasyTierArgs.SecretVariable]);
     }
 
+    /// <summary>
+    /// Nobody in a lobby opens a direct link: the knocker can't know yet whether the room is "relays only", and a
+    /// direct link would show the host and every knocker each other's addresses.
+    /// </summary>
+    [Fact]
+    public void ALobbyNeverOpensADirectLink()
+    {
+        LobbyOptions[] all =
+        [
+            new("jay-l-x", "s", true, ["tcp://relay.example:11010"], 15000),
+            new("jay-l-x", "s", false, ["tcp://relay.example:11010"], 15001, 40000),
+            // Direct rooms: the host listens on loopback for the bridge, the guest reaches it through the bridge.
+            new("jay-l-x", "s", true, [], 15002, null, 40123),
+            new("jay-l-x", "s", false, ["udp://127.0.0.1:40124"], 15003, 40001),
+        ];
+        foreach (var options in all)
+        {
+            var args = LobbyArgs.Build(options);
+            Assert.Contains("--disable-p2p", args);
+            for (var i = args.IndexOf("--listeners"); i >= 0; i = args.IndexOf("--listeners", i + 1))
+                Assert.StartsWith("udp://127.0.0.1:", args[i + 1]);
+        }
+    }
+
     private static async Task<bool> WaitAsync(Func<bool> condition)
     {
         for (var i = 0; i < 100; i++)

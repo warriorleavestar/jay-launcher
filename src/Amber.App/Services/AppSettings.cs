@@ -363,6 +363,11 @@ public sealed class LastRoom
     public string Visibility { get; set; } = "Hidden";
     public string? RoomName { get; set; }
     public bool PublishAutoApprove { get; set; }
+    /// <summary>The four choices of the open-a-room card, as enum names (<c>RoomAccess</c>, <c>RoomRoute</c>, <c>RoomProtection</c>, <c>RoomScope</c>); null in settings written before them.</summary>
+    public string? Access { get; set; }
+    public string? Route { get; set; }
+    public string? Protection { get; set; }
+    public string? Scope { get; set; }
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(AppSettings))]

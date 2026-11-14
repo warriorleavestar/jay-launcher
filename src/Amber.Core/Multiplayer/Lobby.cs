@@ -62,7 +62,7 @@ public sealed class HostLobby : IAsyncDisposable
         InviteBook? book = null, int? listenUdpPort = null, Func<Public.DevicePolicy>? devicePolicy = null,
         Func<Public.AccountPolicy?>? accountPolicy = null, Func<TimeSpan>? decisionWait = null, Action<KnockRequest>? timedOut = null,
         Func<string, bool>? isTrustedJayAccount = null, Func<Identity.JayProof?>? jayCertificate = null, Func<bool>? alwaysAsk = null,
-        Func<DirectAddresses?>? directOffer = null)
+        Func<DirectAddresses?>? directOffer = null, Action<string>? relayOnlyRefused = null)
     {
         HostLobby? lobby = null;
         lobby = new HostLobby(
@@ -75,6 +75,7 @@ public sealed class HostLobby : IAsyncDisposable
                     { DevicePolicy = devicePolicy, AccountPolicy = accountPolicy, DecisionWait = decisionWait, IsTrustedJayAccount = isTrustedJayAccount, JayCertificate = jayCertificate, AlwaysAsk = alwaysAsk,
                       DirectOffer = directOffer };
                 if (timedOut is not null) server.TimedOut += timedOut;
+                if (relayOnlyRefused is not null) server.RelayOnlyRefused += relayOnlyRefused;
                 return server;
             },
             log, book) { ListenUdpPort = listenUdpPort };

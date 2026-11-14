@@ -100,6 +100,50 @@ public sealed class KnockTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ARelaysOnlyRoomTurnsAwayAGuestWhoseJayDoesNotKnowTheSetting()
+    {
+        _credentials = _credentials with { RelayOnly = true };
+        var refused = new List<string>();
+        var server = Server();
+        server.RelayOnlyRefused += name =>
+        {
+            lock (refused) refused.Add(name);
+        };
+        var invite = Invite(uses: 2);
+
+        // A Jay from before "relays only" would connect directly to other members like it: it is not let in, the host
+        // is never asked, and the invite is not used up.
+        KnockOutcome old;
+        using (var client = new TcpClient())
+        {
+            await client.ConnectAsync(IPAddress.Loopback, server.Port);
+            old = await KnockClient.KnockAsync(client.GetStream(), invite.Invite, _guest, "Old", "0.7.0", decisionTimeout: TimeSpan.FromSeconds(5), keepsRelayOnly: false);
+        }
+        Assert.False(old.Approved);
+        Assert.Equal("denied", old.Reason);
+        Assert.Empty(_asked);
+        Assert.Equal(2, invite.UsesLeft);
+        Assert.Equal(["Old"], refused);
+
+        // A current Jay says it keeps to the setting, comes in and is told the room is relays only.
+        var current = await KnockAsync(invite.Invite);
+        Assert.True(current.Approved);
+        Assert.True(current.Credentials!.RelayOnly);
+        Assert.True(current.Credentials.ToRoom().RelayOnly);
+        Assert.Equal(1, invite.UsesLeft);
+
+        // A room opened the usual way lets the older Jay in as before.
+        _credentials = _credentials with { RelayOnly = false };
+        using (var client = new TcpClient())
+        {
+            await client.ConnectAsync(IPAddress.Loopback, server.Port);
+            old = await KnockClient.KnockAsync(client.GetStream(), invite.Invite, _guest, "Old", "0.7.0", decisionTimeout: TimeSpan.FromSeconds(5), keepsRelayOnly: false);
+        }
+        Assert.True(old.Approved);
+        Assert.False(old.Credentials!.RelayOnly);
+    }
+
+    [Fact]
     public async Task DeniedGuestGetsReason()
     {
         _decide = (_, _) => Task.FromResult(false);
@@ -555,6 +599,25 @@ public sealed class KnockTests : IAsyncDisposable
         always = false;
         Assert.True((await KnockAsync(standing.Invite)).Approved);
         Assert.Single(_asked);
+    }
+
+    /// <summary>An invite that asks each time is answered by the host even for someone on the "let straight in" list.</summary>
+    [Fact]
+    public async Task AnInviteThatAsksEachTimeAsksEvenATrustedGuest()
+    {
+        _trusted = pub => pub.AsSpan().SequenceEqual(_guest.PublicKey);
+        _decide = (_, _) => Task.FromResult(false);
+        var invite = _book.Create(5, TimeSpan.FromMinutes(10), false, TunnelSettings.Default, askEachTime: true);
+        var refused = await KnockAsync(invite.Invite);
+        Assert.False(refused.Approved);
+        Assert.Null(refused.Credentials);
+        Assert.True(Assert.Single(_asked).Trusted);
+
+        _decide = (_, _) => Task.FromResult(true);
+        Assert.True((await KnockAsync(invite.Invite)).Approved);
+        Assert.Equal(2, _asked.Count);
+        // It can't also let people in without asking.
+        Assert.Throws<ArgumentException>(() => _book.Create(1, null, true, TunnelSettings.Default, askEachTime: true));
     }
 
     /// <summary>prologue 里带着邀请编号：报的是这张邀请的编号、握手却按另一个编号做，第一条消息就失败。</summary>

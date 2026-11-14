@@ -94,6 +94,8 @@ public sealed partial class MultiplayerViewModel
     private readonly Dictionary<string, MailedInvite> _mailedInvites = [];
     private readonly Dictionary<string, string> _sentInvites = [];
     private readonly HashSet<string> _heldBackShown = [];
+    /// <summary>Invites I mailed to friends' devices in the room that is open (only these end with the friend).</summary>
+    private readonly HashSet<PendingInvite> _friendInvites = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Where contacts.json and mail-seen.json live. Tests point it at a temporary folder.</summary>
     internal string ContactsDir
@@ -186,17 +188,31 @@ public sealed partial class MultiplayerViewModel
         RefreshContacts();
     }
 
+    /// <summary>The contact list is being rebuilt: <see cref="RefreshOpenChoices"/> waits until it's done.</summary>
+    private bool _rebuildingContacts;
+
     /// <summary>Rebuilds both lists from the book and keeps the activity centre's requests in step with it.</summary>
     internal void RefreshContacts()
     {
         var book = Contacts;
-        ContactList.Clear();
-        // One row per person: devices sharing a Jay account are grouped, the newest one names the person.
-        var people = book.All.Where(c => c.Verified)
-            .GroupBy(c => c.JayAccount ?? Convert.ToHexStringLower(c.PublicKey))
-            .Select(g => g.OrderByDescending(c => c.Added).ToList())
-            .Select(devices => new ContactItem(devices[0]) { Devices = devices });
-        foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
+        _rebuildingContacts = true;
+        try
+        {
+            ContactList.Clear();
+            // One row per person: devices sharing a Jay account are grouped, the newest one names the person.
+            var people = book.All.Where(c => c.Verified)
+                .GroupBy(c => c.JayAccount ?? Convert.ToHexStringLower(c.PublicKey))
+                .Select(g => g.OrderByDescending(c => c.Added).ToList())
+                .Select(devices => new ContactItem(devices[0]) { Devices = devices });
+            foreach (var person in people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)) ContactList.Add(person);
+        }
+        finally
+        {
+            _rebuildingContacts = false;
+        }
+        RefreshOpenChoices();
+        DropRoomsOfRemovedFriends();
+        RevokeInvitesOfRemovedFriends();
         ContactRequests.Clear();
         var pending = book.Pending;
         foreach (var p in pending.OrderByDescending(p => p.Step == ContactStep.Compare).ThenByDescending(p => p.Step == ContactStep.AskingMe))
@@ -403,13 +419,16 @@ public sealed partial class MultiplayerViewModel
         foreach (var m in invites)
         {
             var key = "contact-invite:" + Convert.ToHexStringLower(m.Invite.Token);
-            _mailedInvites[key] = m;
             var who = new ContactItem(m.From).Name;
             var room = m.Room.Length > 0 ? m.Room : L.T("multiplayer.room.friend_room");
+            // Listed (within the per-device and overall limits) or nothing is kept: no request without its row.
+            if (!ListFriendRoom(key, m, who, room)) continue;
+            _mailedInvites[key] = m;
+            var until = FriendRooms.First(r => r.Key == key).Until;
             _service.Requests.Post(new RequestSpec("contact-invite", L.F("multiplayer.contacts.invite.title", who, room),
                 L.F("multiplayer.contacts.invite.body", m.From.Fingerprint),
                 [new("ignore", L.T("multiplayer.contacts.ignore"), IsDefault: true), new("join", L.T("multiplayer.contacts.invite.join"))],
-                Timeout: m.Expires is { } e ? e - DateTimeOffset.Now : null, DedupeKey: key, TimeoutChoice: "ignore"));
+                Timeout: until - FriendRoomClock(), DedupeKey: key, TimeoutChoice: "ignore"));
         }
     }
 
@@ -430,7 +449,17 @@ public sealed partial class MultiplayerViewModel
                 Navigate?.Invoke("play/settings");
                 break;
             case "contact-invite":
-                if (_mailedInvites.Remove(key, out var invite) && handle.Choice == "join") _ = JoinMailedInviteAsync(invite);
+                // "Not now" lets the room go with its invite, and the same invite doesn't come back. The request timing
+                // out means it ran out, so the room goes with it too.
+                if (handle.Choice != "join")
+                {
+                    if (handle.ResolvedBy == RequestSource.Timeout) DropFriendRoom(key);
+                    else IgnoreFriendRoom(key);
+                    break;
+                }
+                PruneFriendRooms();
+                if (FriendRooms.FirstOrDefault(r => r.Key == key) is { } listed) _ = JoinFriendRoomAsync(listed);
+                else SetStatus(StatusMessage.Warning("multiplayer.where.friend_room.expired"));
                 break;
             case "contact-account" when key.StartsWith("contact-account:", StringComparison.Ordinal):
                 if (handle.Choice is "ok" or "no" && key["contact-account:".Length..].Split(':') is [var deviceHex, var account])
@@ -451,17 +480,21 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>Joins from a mailed invite. The knock stops before saying anything if the host isn't the one the invite names.</summary>
-    internal async Task JoinMailedInviteAsync(MailedInvite invite)
+    /// <returns>True when the invite is done with: I am in the room, or the host says it is over.</returns>
+    internal async Task<bool> JoinMailedInviteAsync(MailedInvite invite)
     {
         if (!IsIdle || IsKnocking)
         {
             SetStatus(StatusMessage.Warning("multiplayer.contacts.invite.busy"));
-            return;
+            return false;
         }
         Tab = MultiplayerTab.Play;
         Navigate?.Invoke("play");
-        await KnockAndJoinAsync(invite.Invite, expectedHost: invite.HostKey);
+        return await (TestKnock?.Invoke(invite) ?? KnockAndJoinAsync(invite.Invite, expectedHost: invite.HostKey)) != KnockEnd.NotAnswered;
     }
+
+    /// <summary>Tests: stands in for the knock on a mailed invite.</summary>
+    internal Func<MailedInvite, Task<KnockEnd>>? TestKnock { get; set; }
 
     // ---- host: invite a contact ----
 
@@ -469,37 +502,99 @@ public sealed partial class MultiplayerViewModel
     /// Mails a contact an invite bound to their key: one use, 30 minutes, let in without asking (it can only be them).
     /// </summary>
     [RelayCommand]
-    private async Task InviteContactAsync(ContactItem? item)
+    private Task InviteContactAsync(ContactItem? item) => MailInviteAsync(item, 1, ContactInviteLifetime, askFirst: false, quiet: false);
+
+    /// <summary>
+    /// Mails one invite per device of a friend, each bound to that device's key: whichever computer they are at, they
+    /// can come in, and nobody else can use it.
+    /// </summary>
+    /// <param name="askFirst">The host approves the knock even for a friend who could be let straight in.</param>
+    /// <param name="quiet">No status line per friend (the caller sums up).</param>
+    private async Task<bool> MailInviteAsync(ContactItem? item, int uses, TimeSpan lifetime, bool askFirst, bool quiet)
     {
-        if (item is null || _lobby is not { } lobby || _credentials is not { } credentials) return;
-        if (Post is not { } post)
+        if (item is null || _lobby is not { } lobby || _credentials is not { } credentials) return false;
+        // A mailed invite knocks through a relay; a "No server" room's lobby reaches none.
+        if (IsDirect)
         {
-            SetStatus(StatusMessage.Warning("multiplayer.contacts.needs_public"));
-            return;
+            if (!quiet) SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
+            return false;
+        }
+        var send = TestSendInvite;
+        if (send is null)
+        {
+            if (Post is not { } post)
+            {
+                if (!quiet) SetStatus(StatusMessage.Warning("multiplayer.contacts.needs_public"));
+                return false;
+            }
+            var hostKey = Identity.PublicKey;
+            var room = PublishRoomName.Trim().Length > 0 ? PublishRoomName.Trim() : L.F("multiplayer.public.default_name", ChatName);
+            send = (device, invite, expires) => post.SendInviteAsync(device, invite, hostKey, room, expires, default);
         }
         lobby.Book.Game = await HostGameAsync();
-        if (_lobby != lobby) return;
-        // One invite per device, each bound to that device's key: whichever computer they're at, they can come in.
-        var pendings = item.Devices.Select(d => (Device: d, Invite: lobby.Book.Create(1, ContactInviteLifetime, Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel, boundTo: d.PublicKey))).ToList();
+        if (_lobby != lobby) return false;
+        // The contact list may have changed while waiting: only devices that are still there (and still verified, for
+        // "friends can knock") get an invite, and each is checked again around its send.
+        bool StillWanted(Contact device) => Contacts.Find(device.PublicKey) is { } now && (!askFirst || now.Verified);
+        IReadOnlyList<Contact> devices = [.. item.Devices.Where(StillWanted)];
+        if (devices.Count == 0) return false;
+        var pendings = devices.Select(d => (Device: d, Invite: lobby.Book.Create(uses, lifetime, !askFirst && Child.MayAutoAdmit(d.MayBeAutoAdmitted), credentials.Tunnel,
+            boundTo: d.PublicKey, askEachTime: askFirst))).ToList();
+        foreach (var (_, pending) in pendings) _friendInvites.Add(pending);
         RefreshInvites();
         try
         {
             await lobby.UpdateAsync();
-            var room = PublishRoomName.Trim().Length > 0 ? PublishRoomName.Trim() : L.F("multiplayer.public.default_name", ChatName);
+            var mailed = 0;
             foreach (var (device, pending) in pendings)
             {
-                var id = await post.SendInviteAsync(device, pending.Invite, Identity.PublicKey, room, DateTimeOffset.UtcNow + ContactInviteLifetime, default);
+                if (pending.Revoked || !StillWanted(device))
+                {
+                    DropFriendInvite(lobby, pending);
+                    continue;
+                }
+                var id = await send(device, pending.Invite, DateTimeOffset.UtcNow + lifetime);
+                if (!StillWanted(device))
+                {
+                    DropFriendInvite(lobby, pending);
+                    continue;
+                }
+                mailed++;
                 // Only the newest device's receipt counts: an older computer that's switched off shouldn't raise "held back".
-                if (ReferenceEquals(device, item.Devices[0])) _sentInvites[id] = item.Name;
+                if (!quiet && ReferenceEquals(device, devices[0])) _sentInvites[id] = item.Name;
             }
-            SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
+            if (mailed == 0) return false;
+            if (!quiet) SetStatus(StatusMessage.Success("multiplayer.contacts.invite.sent", item.Name));
+            return true;
         }
         catch (Exception e) when (IsMailError(e) || e is System.ComponentModel.Win32Exception)
         {
-            foreach (var (_, pending) in pendings) lobby.Book.Revoke(pending);
+            foreach (var (_, pending) in pendings)
+            {
+                lobby.Book.Revoke(pending);
+                _friendInvites.Remove(pending);
+            }
             RefreshInvites();
-            SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
+            if (!quiet) SetStatus(StatusMessage.Failure("multiplayer.contacts.mail_failed", e, ErrorText.Of(e)));
+            return false;
         }
+    }
+
+    private void DropFriendInvite(HostLobby lobby, PendingInvite invite)
+    {
+        lobby.Book.Revoke(invite);
+        _friendInvites.Remove(invite);
+        RefreshInvites();
+    }
+
+    /// <summary>Tests: stands in for mailing an invite over the connected network (device, invite, expiry; returns the mail id).</summary>
+    internal Func<Contact, JayInvite, DateTimeOffset, Task<string>>? TestSendInvite { get; set; }
+
+    /// <summary>Tests: a host lobby that starts no EasyTier, with the room's credentials, as if a room were open.</summary>
+    internal void HostLobbyForTest(HostLobby lobby, RoomCredentials credentials)
+    {
+        _lobby = lobby;
+        _credentials = credentials;
     }
 
     private void OnInviteReceipt(SentMail sent)
