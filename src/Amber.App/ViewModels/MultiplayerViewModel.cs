@@ -640,7 +640,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         try
         {
-            return await Amber.Core.Multiplayer.Public.RelayRecord.ResolveAsync(new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network), locator, default);
+            return await Amber.Core.Multiplayer.Public.RelayRecord.ResolveAsync(DirectoryClient(network), locator, default, RecordSeqs);
         }
         catch (IOException e)
         {

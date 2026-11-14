@@ -484,7 +484,7 @@ internal sealed partial class SelfTest
         var first = host.MyFingerprintCode;
         host.NewFingerprintCodeCommand.Execute(null);
         var code = host.MyFingerprintCode;
-        Check("设备指纹：打开后生成指纹码，每次都不一样", host.DeviceEnabled && first.StartsWith("JAYF1-") && code.StartsWith("JAYF1-") && first != code, first + " / " + code);
+        Check("设备指纹：打开后生成指纹码，每次都不一样", host.DeviceEnabled && first.StartsWith("JAYF2-") && code.StartsWith("JAYF2-") && first != code, first + " / " + code);
         var page = await FindAsync<MultiplayerPage>(_ => true);
         if (page?.GetVisualDescendants().OfType<Expander>().FirstOrDefault(e => Equals(e.Header, L.T("multiplayer.device.title"))) is { } expander)
         {
@@ -508,6 +508,10 @@ internal sealed partial class SelfTest
         Check("设备指纹：房主要求设备指纹，没打开进不去", guest.IsIdle && guest.Status == L.T("multiplayer.device.reason"), guest.Status);
 
         guest.EnableDeviceCommand.Execute(null);
+        // An older (JAYF1) code on the list admits nobody: the host is told to ask for a new code.
+        var nonce = System.Security.Cryptography.RandomNumberGenerator.GetBytes(FingerprintCode.NonceLength);
+        host.AllowedDevicesText = FingerprintCode.Format(new ParsedFingerprint(1, nonce, FingerprintCode.Tag(1, guest.Device!.SearchKey, nonce)));
+        Check("设备指纹：名单里贴旧版设备码时提示要新码", host.Status == L.T("multiplayer.device.old_code") && host.HostDevicePolicy.OldCodes == 1, host.Status);
         host.AllowedDevicesText = guest.MyFingerprintCode;
         var joining = guest.JoinFoundRoomCommand.ExecuteAsync(null);
         var asked = await WaitAsync(() => host.ApprovalCards.Count == 1, 30);

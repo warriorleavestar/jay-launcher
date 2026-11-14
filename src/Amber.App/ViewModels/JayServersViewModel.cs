@@ -113,8 +113,11 @@ public sealed partial class JayServersViewModel : ObservableObject
             Status = L.F("core.gate.record.looking_up", profile.Name);
             try
             {
+                // The same directory keys and record versions the multiplayer page remembers.
                 invite = await Amber.Core.Multiplayer.Gate.GateRecord.ResolveOnNetworkAsync(invite, profile, _service.EasyTier,
-                    Path.Combine(AppSettings.DataDir, "easytier", "gate-lookup"), default);
+                    Path.Combine(AppSettings.DataDir, "easytier", "gate-lookup"), default,
+                    new Amber.Core.Multiplayer.Public.DirectoryKeyMemory(Path.Combine(AppSettings.DataDir, Amber.Core.Multiplayer.Public.DirectoryKeyMemory.FileName)),
+                    new Amber.Core.Multiplayer.Public.RecordSeqMemory(Path.Combine(AppSettings.DataDir, Amber.Core.Multiplayer.Public.RecordSeqMemory.FileName)));
             }
             catch (Exception e) when (e is IOException or TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception
                 or System.Net.Sockets.SocketException or System.Net.Http.HttpRequestException)

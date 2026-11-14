@@ -23,7 +23,7 @@ Codes that must travel are either public by design (a public key) or never leave
 `JAYC1-` + Crockford Base32 of the X25519 identity public key and a 2-byte check (55 characters).
 `Contacts/ContactCode.cs`. Parsing ignores case, spaces and dashes, and refuses a code with a wrong check.
 
-The JAYF1 device fingerprint code (shown in the UI as the "friend code") is a different thing: it finds a friend's hidden
+The JAYF2 device fingerprint code (shown in the UI as the "friend code") is a different thing: it finds a friend's hidden
 room. The UI needs a name for JAYC1 that doesn't clash with it.
 
 ## Adding a contact: the emoji check

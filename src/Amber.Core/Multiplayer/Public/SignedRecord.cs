@@ -180,3 +180,75 @@ public sealed class RecordSigner
         return unsigned with { Signature = signer.GenerateSignature() };
     }
 }
+
+/// <summary>
+/// The highest <see cref="SignedRecord.Seq"/> this computer has accepted for each lookup and signer, kept in a small file in
+/// the data folder. Passed as the floor to <see cref="RoomDirectoryClient.GetRecordAsync"/>, so once a newer record was
+/// seen, an older one that hasn't expired yet (put back after a directory restarted, or served by a directory on its own) is
+/// not taken again. Kept per signer: a record some other key signed under the same lookup (only a code naming that key
+/// takes it) never raises the floor for the signer another code expects. Holds the most recent <see cref="MaxEntries"/>.
+/// </summary>
+public sealed class RecordSeqMemory(string path)
+{
+    public const string FileName = "record-seqs.json";
+    public const int MaxEntries = 512;
+    private readonly Lock _gate = new();
+    private Dictionary<string, (long Seq, long At)>? _seen;
+
+    /// <summary>The highest seq accepted for <paramref name="lookup"/> signed by <paramref name="signer"/>, or 0 when none was.</summary>
+    public long Floor(byte[] lookup, byte[] signer)
+    {
+        lock (_gate) return Load().TryGetValue(Key(lookup, signer), out var seen) ? seen.Seq : 0;
+    }
+
+    /// <summary>
+    /// Notes that a record with <paramref name="seq"/> signed by <paramref name="signer"/> was accepted for
+    /// <paramref name="lookup"/> (keeps the highest).
+    /// </summary>
+    public void Note(byte[] lookup, byte[] signer, long seq)
+    {
+        lock (_gate)
+        {
+            var seen = Load();
+            var key = Key(lookup, signer);
+            if (seen.TryGetValue(key, out var had) && had.Seq >= seq) return;
+            // When it was noted, for keeping the most recent: always later than the last one noted.
+            var at = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), seen.Count == 0 ? 0 : seen.Values.Max(v => v.At) + 1);
+            seen[key] = (seq, at);
+            foreach (var old in seen.OrderBy(p => p.Value.At).Take(Math.Max(0, seen.Count - MaxEntries)).Select(p => p.Key).ToList()) seen.Remove(old);
+            Save(seen);
+        }
+    }
+
+    private static string Key(byte[] lookup, byte[] signer) => Convert.ToHexStringLower(lookup) + Convert.ToHexStringLower(signer);
+
+    private Dictionary<string, (long Seq, long At)> Load()
+    {
+        if (_seen is not null) return _seen;
+        _seen = new Dictionary<string, (long, long)>(StringComparer.Ordinal);
+        try
+        {
+            if (File.Exists(path) && JsonNode.Parse(File.ReadAllText(path)) is JsonObject o)
+                foreach (var (k, v) in o)
+                    if (k.Length == (SignedRecord.LookupLength + SignedRecord.SignerLength) * 2 && v is JsonObject e && e["seq"] is JsonValue s && s.TryGetValue<long>(out var seq)
+                        && e["at"] is JsonValue a && a.TryGetValue<long>(out var at))
+                        _seen[k] = (seq, at);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException) { }
+        return _seen;
+    }
+
+    private void Save(Dictionary<string, (long Seq, long At)> seen)
+    {
+        try
+        {
+            var o = new JsonObject();
+            foreach (var (k, v) in seen) o[k] = new JsonObject { ["seq"] = v.Seq, ["at"] = v.At };
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            var temp = path + ".tmp";
+            File.WriteAllText(temp, o.ToJsonString());
+            File.Move(temp, path, true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+}

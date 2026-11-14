@@ -63,7 +63,17 @@ public sealed partial class MultiplayerViewModel
     internal DevicePolicy HostDevicePolicy => _hostPolicy;
 
     partial void OnRequireDeviceChanged(bool value) => UpdateHostPolicy();
-    partial void OnAllowedDevicesTextChanged(string value) => UpdateHostPolicy();
+    partial void OnAllowedDevicesTextChanged(string value)
+    {
+        UpdateHostPolicy();
+        // An older code on the list admits nobody: say so once when one is added, so the host can ask for a new code.
+        var old = _hostPolicy.OldCodes;
+        if (old > _oldAllowedCodes) SetStatus(StatusMessage.Warning("multiplayer.device.old_code"));
+        _oldAllowedCodes = old;
+    }
+
+    /// <summary>Older codes on the host's list the last time it changed.</summary>
+    private int _oldAllowedCodes;
 
     /// <summary>房主的设备策略：自己勾的“要求设备指纹”，或者公共网络的配置要求（只会更严）。</summary>
     private void UpdateHostPolicy() =>
