@@ -128,6 +128,20 @@ public sealed class AdminPanelTests : IAsyncDisposable
         Assert.Contains("token = null", signOut);
         Assert.Contains("storeToken(null)", signOut);
         Assert.Contains("showLogin(", signOut);
+        // ...and leaves nothing from the old session on the page.
+        Assert.Contains("clearSession()", signOut);
+        var clear = FunctionBody(js, "function clearSession(");
+        foreach (var cleared in new[] { "$(\"network\").textContent = \"\"", "state.textContent = \"\"", "state.hidden = true",
+                     "$(\"numbers\").replaceChildren()", "$(\"rooms\").tBodies[0].replaceChildren()", "$(\"nodes\").replaceChildren()",
+                     "$(\"bans\").tBodies[0].replaceChildren()", "$(\"rooms-summary\").textContent = \"\"", "$(\"nodes-summary\").textContent = \"\"",
+                     "$(\"token\").value = \"\"" })
+            Assert.Contains(cleared, clear);
+        Assert.True(HasHiddenAttribute(html, "state"), "the status pill should start hidden");
+        // A refresh still on its way when the session ends must not bring the old data back.
+        var refresh = FunctionBody(js, "async function refresh(");
+        Assert.Contains("const asked = token;", refresh);
+        Assert.True(refresh.IndexOf("if (!asked || token !== asked) return;", StringComparison.Ordinal)
+                    < refresh.IndexOf("$(\"app\").hidden = false", StringComparison.Ordinal));
         Assert.Contains("$(\"logout\").addEventListener(\"click\", () => signOut())", js);
         Assert.Matches(@"response\.status === 401\) \{ signOut\(", FunctionBody(js, "async function api("));
         Assert.Contains("if (initial) signIn(initial); else showLogin();", js);

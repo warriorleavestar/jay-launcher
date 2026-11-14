@@ -171,7 +171,24 @@ function showLogin(error) {
 function signOut(error) {
   token = null;
   storeToken(null);
+  clearSession();
   showLogin(error);
+}
+
+// Nothing from the signed-out session stays on the page: header, numbers, tables, lists and the typed token.
+function clearSession() {
+  $("network").textContent = "";
+  const state = $("state");
+  state.textContent = "";
+  state.className = "pill";
+  state.hidden = true;
+  $("numbers").replaceChildren();
+  $("rooms-summary").textContent = "";
+  $("rooms").tBodies[0].replaceChildren();
+  $("nodes-summary").textContent = "";
+  $("nodes").replaceChildren();
+  $("bans").tBodies[0].replaceChildren();
+  $("token").value = "";
 }
 
 function formatUptime(seconds) {
@@ -215,6 +232,7 @@ function renderNumbers(health, stats, nodes) {
   const state = $("state");
   state.textContent = health.ok ? T("healthy") : T("unhealthy");
   state.className = "pill " + (health.ok ? "ok" : "bad");
+  state.hidden = false;
 }
 
 function renderRooms(data) {
@@ -276,8 +294,11 @@ function renderBans(data) {
 }
 
 async function refresh() {
+  const asked = token;
   try {
     const [stats, rooms, nodes, bans] = await Promise.all([api("GET", "/stats"), api("GET", "/rooms"), api("GET", "/nodes"), api("GET", "/bans")]);
+    // Signed out (or signed in again) while this was on its way: its answers belong to that old session.
+    if (!asked || token !== asked) return;
     $("login").hidden = true;
     $("app").hidden = false;
     $("logout").hidden = false;
@@ -287,7 +308,7 @@ async function refresh() {
     renderNodes(nodes.ok ? nodes : { enabled: false, nodes: [] });
     renderBans(bans.ok ? bans : { bans: [] });
   } catch (e) {
-    if (e.message !== "token") (token ? toast : showLogin)(T("unreachable"), true);
+    if (e.message !== "token" && token === asked) (token ? toast : showLogin)(T("unreachable"), true);
   }
 }
 
