@@ -109,4 +109,24 @@ public sealed class ChatRouteTests
         bindNew(() => ran++)();
         Assert.Equal(2, ran);
     }
+
+    /// <summary>An answer goes over a connection the hub still knows, on whichever side of a move the request came in.</summary>
+    [Fact]
+    public void RepliesGoOverAConnectionTheHubStillKnows()
+    {
+        var route = new ChatRoute<Conn>();
+        Conn old = new(), incoming = new();
+        Assert.Same(old, route.ReplyVia(old, old));
+        route.Moving(incoming);
+        // Came in on the new connection before it is in place here: the hub sent it there, so answer there.
+        Assert.Same(incoming, route.ReplyVia(incoming, old));
+        route.Switched(old);
+        route.MoveEnded(incoming);
+        // Came in on the old connection, handled after the switch: the hub has dropped it, so answer on the new one.
+        Assert.Same(incoming, route.ReplyVia(old, incoming));
+        route.Closed(old);
+        Assert.Same(incoming, route.ReplyVia(old, incoming));
+        // No chat connection at all: the one it came in on is all there is.
+        Assert.Same(old, route.ReplyVia(old, null));
+    }
 }

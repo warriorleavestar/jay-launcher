@@ -33,6 +33,14 @@ public sealed class ChatRoute<T> where T : class
     /// <summary>Whether what <paramref name="client"/> receives belongs to the chat whose connection is <paramref name="current"/>.</summary>
     public bool Accepts(T client, T? current) => client == current || client == Incoming || client == Outgoing;
 
+    /// <summary>
+    /// Which connection answers something that came in on <paramref name="client"/>: the same one while the hub still
+    /// knows it (the current connection, or the new one of a move even before it is in place here), otherwise the one in
+    /// use now (the request came in on the old side of a move, which the hub has dropped).
+    /// </summary>
+    public T ReplyVia(T client, T? current) =>
+        client == current || client == Incoming || current is null ? client : current;
+
     /// <summary>A move started: <paramref name="incoming"/> is heard from now on.</summary>
     public void Moving(T incoming) => Incoming = incoming;
 

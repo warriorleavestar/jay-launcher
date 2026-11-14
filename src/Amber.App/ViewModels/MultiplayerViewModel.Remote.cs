@@ -234,9 +234,8 @@ public sealed partial class MultiplayerViewModel
         // 已经在被控或者正在问：直接拒绝（不叠弹窗）。
         if (Child.HideRemoteControl || !RemotePlatform.Supported || _remoteSessions.OfType<RemoteSharer>().Any() || Interlocked.Exchange(ref _remotePrompting, 1) != 0)
         {
-            // Every answer goes over the chat connection in use now (the request may have come in on one that chat has
-            // since moved away from).
-            await DeclineRemote(_chat ?? client, sessionId);
+            // Answered over a connection the hub still knows (the request may have come in on either side of a move).
+            await DeclineRemote(_chatRoute.ReplyVia(client, _chat), sessionId);
             return;
         }
         var generation = _chatRoute.Generation;
@@ -253,7 +252,7 @@ public sealed partial class MultiplayerViewModel
         // Still this room session (chat may have moved to a new connection meanwhile): the answer goes over the chat
         // connection in use now.
         if (_room != room || !_chatRoute.IsCurrent(generation)) return;
-        var reply = _chat ?? client;
+        var reply = _chatRoute.ReplyVia(client, _chat);
         if (!consent.Accepted)
         {
             await DeclineRemote(reply, sessionId);
