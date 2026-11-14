@@ -1364,6 +1364,7 @@
   "core.mp.lobby.closed": "No usable invites left; no longer taking knocks",
   "core.mp.lobby.failed": "Can't take knocks: {0}",
   "core.mp.lobby.nohost": "Connected to the relay, but no host was found within 60 s. This invite may already have been used (invites are single-use by default) or have expired, or the host closed the room or went offline. Ask the host for a new invite",
+  "core.mp.lobby.sealed_gone": "Connected to the host directly, but the host is no longer taking this sealed code: it has expired (codes last 10 minutes and work once) or the host withdrew it. Ask the host for a new code",
   "core.mp.lobby.nonodes": "No host found within 60 s, and no relays are set up. Without a relay only a host on the same local network can be found. If you're on different networks, add a relay in Multiplayer settings › Relays first",
   "core.mp.lobby.norelay": "Couldn't reach the relay ({0}), so the search for the host never started. This isn't a problem with the invite. Check your network, or switch to a relay that works in Multiplayer settings › Relays (you can test its latency first)",
   "multiplayer.invite.pending_item": "{0} · {1}/{2} uses left · {3}{4}",

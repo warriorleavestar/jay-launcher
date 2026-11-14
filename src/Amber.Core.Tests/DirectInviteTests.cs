@@ -322,6 +322,26 @@ public sealed class DirectInviteTests
     }
 
     /// <summary>
+    /// Sealed code that the host no longer takes: the bridge to the host works, but the lobby never shows up. The guest is
+    /// told the code expired or was withdrawn, not that a relay can't be reached.
+    /// </summary>
+    [Fact]
+    public async Task SealedCodeNoLongerTakenSaysSo()
+    {
+        await using var host = new DirectRoom(() => true);
+        var offerAddresses = await host.PrepareAsync();
+        using var offer = SealedDirect.Seal(offerAddresses, DirectTestKeys.Invite, DateTimeOffset.UtcNow);
+        using var opened = SealedDirect.Open(offer.Code, offer.Passphrase, DateTimeOffset.UtcNow);
+        await using var guest = Guest();
+        var mine = await guest.AnswerAsync(opened.Host);
+        _ = host.Host.AddGuestAsync(offer.OpenReply(SealedDirect.SealReply(opened, mine!, DateTimeOffset.UtcNow), DateTimeOffset.UtcNow));
+        var e = await Assert.ThrowsAsync<LobbyNoHostException>(() => guest.JoinThroughBridgeAsync((peers, _) =>
+            throw new LobbyUnreachableException(Amber.Core.Localization.L.F("core.mp.lobby.norelay", peers[0]))));
+        Assert.Equal(Amber.Core.Localization.L.T("core.mp.lobby.sealed_gone"), e.Message);
+        Assert.False(guest.HasRoom);
+    }
+
+    /// <summary>
     /// 成员钥匙不在房主的成员表里（没批准、伪造的）：房主不认，桥接不到房间。The host can't prove itself for a key it doesn't
     /// know either, so the guest gives the direct link up.
     /// </summary>

@@ -582,7 +582,18 @@ public sealed class DirectSession : IAsyncDisposable
             UsingFallbackNode = true;
             lobbyPeers = Options.FallbackNodes;
         }
-        if (await knock(lobbyPeers, ct) is not { } room) return false;
+        RoomCode? knocked;
+        try
+        {
+            knocked = await knock(lobbyPeers, ct);
+        }
+        catch (LobbyUnreachableException) when (peer is not null)
+        {
+            // The bridge to the host's computer works, so no relay was missing: the host's lobby is closed because it no
+            // longer takes this code (expired or withdrawn).
+            throw new LobbyNoHostException(L.T("core.mp.lobby.sealed_gone"));
+        }
+        if (knocked is not { } room) return false;
         _room = room;
         if (peer is not null && room.FromInvite && !await AdmitOrFallBackAsync(room, ct)) peer = null;
         await StartEasyTierAsync(GuestOptions(peer is not null, Options.FullLan, null), ct);
