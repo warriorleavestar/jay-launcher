@@ -717,8 +717,10 @@
                         </Grid>
                       </StackPanel>
                     </Border>
-                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.hint}" IsVisible="{Binding !HasInvite}" />
-                    <Button x:Name="CreateFirstInviteButton" Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" IsVisible="{Binding !HasInvite}" HorizontalAlignment="Left" />
+                    <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.invite.hint}" IsVisible="{Binding ShowCreateInvite}" />
+                    <Button x:Name="CreateFirstInviteButton" Classes="primary" Content="{l:T multiplayer.invite.create}" Command="{Binding CreateInviteCommand}" IsVisible="{Binding ShowCreateInvite}" HorizontalAlignment="Left" />
+                    <!-- "No server" room: guests come in with the sealed code in the direct room card. -->
+                    <TextBlock x:Name="DirectInviteHint" Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T multiplayer.direct.use_sealed}" IsVisible="{Binding IsDirectHost}" />
                     <StackPanel Spacing="6" IsVisible="{Binding HasInvite}">
                       <Border Classes="code-card">
                         <Panel>
@@ -803,7 +805,7 @@
                   </StackPanel>
                 </Border>
 
-                <!-- 直连房间：路径、全条件测试（邀请就是普通的 JAY2 邀请，地址只在加密的敲门里交换） -->
+                <!-- 直连房间（不经服务器）：路径、加密直连码、全条件测试。没有普通邀请：它的敲门要经中转，这种房间的大厅不连任何中转。 -->
                 <Border Classes="card" Margin="0" IsVisible="{Binding IsDirect}">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="h2" Text="{l:T multiplayer.direct.title}" Margin="0" />
@@ -817,7 +819,7 @@
                       <StackPanel Spacing="6" IsVisible="{Binding HasSealedOffer}">
                         <Grid ColumnDefinitions="*,Auto">
                           <TextBox x:Name="SealedCodeBox" Text="{Binding SealedOfferCode}" IsReadOnly="True" TextWrapping="Wrap" FontSize="12" />
-                          <Button Grid.Column="1" Content="{l:T multiplayer.sealed.copy_code}" Command="{Binding CopySealedCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
+                          <Button x:Name="CopySealedCodeButton" Grid.Column="1" Content="{l:T multiplayer.sealed.copy_code}" Command="{Binding CopySealedCodeCommand}" Margin="6,0,0,0" VerticalAlignment="Top" />
                         </Grid>
                         <Grid ColumnDefinitions="Auto,*,Auto">
                           <TextBlock VerticalAlignment="Center" Margin="0,0,6,0" Text="{l:T multiplayer.sealed.passphrase_label}" />

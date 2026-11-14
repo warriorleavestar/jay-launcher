@@ -172,10 +172,13 @@ public sealed partial class MultiplayerViewModel
     [ObservableProperty] public partial bool InviteAutoApprove { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(InviteDisplay), nameof(HasInvite))]
+    [NotifyPropertyChangedFor(nameof(InviteDisplay), nameof(HasInvite), nameof(ShowCreateInvite))]
     public partial bool InviteShown { get; set; }
 
     public bool HasInvite => _lastInvite is not null;
+
+    /// <summary>The invite card offers a new invite: not in a "No server" room, whose guests use a sealed code.</summary>
+    public bool ShowCreateInvite => !HasInvite && !IsDirect;
     /// <summary>
     /// Every room, direct or not, shares the same plain invite (JAY2-): it holds no address. A direct room's addresses go
     /// only to approved guests, inside the encrypted knock. Masked by default.
@@ -216,7 +219,20 @@ public sealed partial class MultiplayerViewModel
     /// <summary>开房间时调用：生成这个房间的随机凭据。</summary>
     /// <remarks>The whole-LAN scope doesn't split in this version, so a room opened with it carries no split settings.</remarks>
     private RoomCredentials NewCredentials(int port, TunnelSettings tunnel) =>
-        RoomCredentials.Create(Identity.PublicKey, port, tunnel) with { Split = SplitSettings.ForNewRoom(tunnel.Wraps, FullLanMode, SplitSettings.Requested.FitTo(TestPeers ?? _service.MultiplayerPeers)) };
+        RoomCredentials.Create(Identity.PublicKey, port, tunnel) with { Split = NewRoomSplit(tunnel) };
+
+    private SplitSettings NewRoomSplit(TunnelSettings tunnel) =>
+        SplitSettings.ForNewRoom(tunnel.Wraps, FullLanMode, (TestSplit ?? SplitSettings.Requested).FitTo(TestPeers ?? _service.MultiplayerPeers));
+
+    /// <summary>Tests: stands in for the AMBER_SPLIT developer switch.</summary>
+    internal SplitSettings? TestSplit { get; set; }
+
+    /// <summary>
+    /// A strict split needs a direct main path to the host (see SplitPaths), and "Relays only" turns direct connections
+    /// off for everyone: such a room would never connect its game or chat, so it isn't opened.
+    /// </summary>
+    internal static bool SplitNeedsDirect(SplitSettings split) =>
+        split.For(TunnelService.Game) == SplitPolicy.Strict || split.For(TunnelService.Chat) == SplitPolicy.Strict;
 
     private IReadOnlyList<string> LobbyPeers(bool host) =>
         [.. (host ? TestListeners ?? [] : []), .. TestPeers ?? _service.MultiplayerPeers];
@@ -311,6 +327,7 @@ public sealed partial class MultiplayerViewModel
         InviteShown = false;
         OnPropertyChanged(nameof(InviteDisplay));
         OnPropertyChanged(nameof(HasInvite));
+        OnPropertyChanged(nameof(ShowCreateInvite));
         InviteDialogOpen = false;
         foreach (var card in ApprovalCards) card.Decision.TrySetResult(false);
         ApprovalCards.Clear();
@@ -514,6 +531,11 @@ public sealed partial class MultiplayerViewModel
     private void OpenInviteDialog()
     {
         if (!IsHosting || _lobby is null) return;
+        if (IsDirect)
+        {
+            _ = InviteFriendsAsync();
+            return;
+        }
         SelectedInviteExpiry ??= InviteExpiryChoices[0];
         InviteDialogOpen = true;
     }
@@ -526,16 +548,21 @@ public sealed partial class MultiplayerViewModel
     {
         var uses = (int)Math.Clamp(InviteUses ?? 1, 1, 20);
         if (await IssueInviteAsync(uses, (SelectedInviteExpiry ?? InviteExpiryChoices[0]).Lifetime, InviteAutoApprove) is not null)
-            SetStatus(StatusMessage.Success(IsDirect ? "multiplayer.direct.invite_created" : "multiplayer.invite.created"));
+            SetStatus(StatusMessage.Success("multiplayer.invite.created"));
     }
 
     /// <summary>
-    /// 发一张邀请、确保大厅开着。直连房间也发同样的邀请：码里没有地址。
-    /// 大厅开不起来时撤掉这张邀请、显示原因，返回 null。
+    /// 发一张邀请、确保大厅开着。大厅开不起来时撤掉这张邀请、显示原因，返回 null。
+    /// A "No server" room makes none: a plain invite knocks through a relay, and that room's lobby reaches no relay.
     /// </summary>
     private async Task<PendingInvite?> IssueInviteAsync(int uses, TimeSpan? lifetime, bool autoApprove)
     {
         if (_lobby is not { } lobby || _credentials is not { } credentials) return null;
+        if (IsDirect)
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.direct.use_sealed"));
+            return null;
+        }
         lobby.Book.Game = await HostGameAsync();
         if (_lobby != lobby) return null;
         var invite = lobby.Book.Create(uses, lifetime, Child.MayAutoAdmit(autoApprove), credentials.Tunnel);
@@ -544,6 +571,7 @@ public sealed partial class MultiplayerViewModel
         InviteShown = false;
         OnPropertyChanged(nameof(InviteDisplay));
         OnPropertyChanged(nameof(HasInvite));
+        OnPropertyChanged(nameof(ShowCreateInvite));
         RefreshInvites();
         try
         {
@@ -557,6 +585,7 @@ public sealed partial class MultiplayerViewModel
             _lastInvite = null;
             OnPropertyChanged(nameof(InviteDisplay));
             OnPropertyChanged(nameof(HasInvite));
+            OnPropertyChanged(nameof(ShowCreateInvite));
             SetStatus(StatusMessage.Failure("multiplayer.invite.lobby_failed", e, KnockProtocol.Port, ErrorText.Of(e)));
             return null;
         }
@@ -606,6 +635,7 @@ public sealed partial class MultiplayerViewModel
             _lastInvite = null;
             OnPropertyChanged(nameof(InviteDisplay));
             OnPropertyChanged(nameof(HasInvite));
+            OnPropertyChanged(nameof(ShowCreateInvite));
         }
         SetStatus(StatusMessage.Info("multiplayer.invite.revoked"));
     }
