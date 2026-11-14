@@ -393,6 +393,103 @@ public sealed class SplitRoomTests
         Assert.Equal(new[] { TunnelService.Game, TunnelService.Chat }, rig.Served);
     }
 
+    /// <summary>
+    /// Split game connections come out of the same per-member share as single-tunnel ones: a member can't fill the
+    /// game's places through the split tunnel, and its places come back as connections end.
+    /// </summary>
+    [Fact]
+    public async Task SplitGameConnectionsShareTheMembersQuota()
+    {
+        var quota = new GameStreamQuota();
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict), Wrapped, quota: quota);
+        var connector = rig.Connector(TunnelService.Game);
+
+        static async Task<bool> EchoesAsync(Stream stream, byte value)
+        {
+            try
+            {
+                await stream.WriteAsync(new[] { value });
+                await stream.FlushAsync();
+                var back = new byte[1];
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                return await stream.ReadAsync(back, timeout.Token) == 1 && back[0] == value;
+            }
+            catch (Exception e) when (e is IOException or SocketException or CryptographicException or ObjectDisposedException or OperationCanceledException or EndOfStreamException)
+            {
+                return false;
+            }
+        }
+
+        // The member already has all but two of its places through the single tunnel.
+        for (var i = 0; i < GameStreamQuota.PerMember - 2; i++) Assert.True(quota.TryTake(rig.GuestEntry));
+        var held = new List<Stream>();
+        try
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                held.Add(await connector.OpenAsync(CancellationToken.None));
+                Assert.True(await EchoesAsync(held[^1], (byte)i));
+            }
+            Assert.Equal(GameStreamQuota.PerMember, quota.HeldBy(rig.GuestEntry));
+            // Its share is used up: one more split game connection is turned away after pairing.
+            var rejectedBefore = rig.Server.Rejected;
+            await using (var over = await connector.OpenAsync(CancellationToken.None)) Assert.False(await EchoesAsync(over, 0xAA));
+            await WaitUntilAsync(() => rig.Server.Rejected > rejectedBefore);
+            // Another member's share is its own.
+            Assert.True(quota.TryTake(new object()));
+
+            // Closing a split connection gives its place back.
+            await held[0].DisposeAsync();
+            held.RemoveAt(0);
+            await WaitUntilAsync(() => quota.HeldBy(rig.GuestEntry) == GameStreamQuota.PerMember - 1);
+            held.Add(await connector.OpenAsync(CancellationToken.None));
+            Assert.True(await EchoesAsync(held[^1], 0xCC));
+        }
+        finally
+        {
+            foreach (var h in held) await h.DisposeAsync();
+        }
+        await WaitUntilAsync(() => quota.HeldBy(rig.GuestEntry) == GameStreamQuota.PerMember - 2);
+    }
+
+    /// <summary>
+    /// A split game connection reaches the relay in front of the game with its member: when the budget for callers the
+    /// relay can't tell apart is used up (here by plain loopback connections), the member still gets in.
+    /// </summary>
+    [Fact]
+    public async Task SplitGameConnectionsReachTheRelayWithTheirMember()
+    {
+        using var game = new TestGame();
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        await using var rig = await Rig.StartAsync(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict), Wrapped,
+            route: service => service == TunnelService.Game ? TunnelServer.ToLocalPort(relay.Port) : null,
+            gameHandler: TunnelServer.ToGamePort(relay.Port));
+        var anonymous = new List<TcpClient>();
+        try
+        {
+            for (var i = 0; i < GamePortRelay.MaxNewUnidentified; i++)
+            {
+                var c = new TcpClient();
+                await c.ConnectAsync(IPAddress.Loopback, relay.Port);
+                anonymous.Add(c);
+            }
+            await WaitUntilAsync(() => relay.OpenConnectionsTo(game.Port) == GamePortRelay.MaxNewUnidentified);
+
+            await using var stream = await rig.Connector(TunnelService.Game).OpenAsync(CancellationToken.None);
+            await stream.WriteAsync(new byte[] { 0x5A });
+            await stream.FlushAsync();
+            var back = new byte[1];
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await stream.ReadExactlyAsync(back, timeout.Token);
+            Assert.Equal(0x5A, back[0]);
+        }
+        finally
+        {
+            foreach (var c in anonymous) c.Dispose();
+        }
+    }
+
     [Fact]
     public async Task AHandlerThatFailsAfterPairingIsNotARefusedLeg()
     {
@@ -838,12 +935,13 @@ public sealed class SplitRoomTests
 
         public static Task<Rig> StartAsync(SplitSettings split, TunnelSettings tunnel, bool hostEpochBump = false, Action<TcpClient>? beforeServe = null,
             TimeSpan? handshakeTimeout = null, Func<Stream, CancellationToken, Task>? handler = null, Action<string>? log = null,
-            Func<TunnelService, Func<Stream, CancellationToken, Task>?>? route = null)
+            Func<TunnelService, Func<Stream, CancellationToken, Task>?>? route = null, GameStreamQuota? quota = null,
+            Func<Stream, object?, CancellationToken, Task>? gameHandler = null)
         {
             var (credentials, table, host, guest) = NewRoom(split, tunnel);
             var rig = new Rig { Table = table, GuestEntry = guest, Member = credentials.ToRoom() };
             if (hostEpochBump) host = host with { Epoch = host.Epoch + 1 };
-            rig.Server = new SplitTunnelServer(host, route ?? (service => handler ?? Echo(rig, service)), log, ports: [.. Enumerable.Repeat(0, split.Paths)]) { BeforeServeForTest = beforeServe, HandshakeTimeout = handshakeTimeout ?? TunnelHandshake.Timeout };
+            rig.Server = new SplitTunnelServer(host, route ?? (service => handler ?? Echo(rig, service)), log, ports: [.. Enumerable.Repeat(0, split.Paths)]) { BeforeServeForTest = beforeServe, HandshakeTimeout = handshakeTimeout ?? TunnelHandshake.Timeout, GameQuota = quota ?? new GameStreamQuota(), GameHandler = gameHandler };
             rig._single.Start();
             rig._singleLoop = Task.Run(rig.SingleLoopAsync);
             return Task.FromResult(rig);

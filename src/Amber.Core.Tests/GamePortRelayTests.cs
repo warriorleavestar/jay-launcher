@@ -339,6 +339,136 @@ public sealed class GamePortRelayTests
     });
 
     [Fact]
+    public async Task PlayersBeyondTheLimitAreClosedAtOnce()
+    {
+        using var game = new EchoGame(0xE1);
+        // The total on its own (new connections are capped separately, see AFloodOfNewConnections…).
+        await using var relay = new GamePortRelay { MaxNewForTest = int.MaxValue };
+        relay.SetTarget(game.Port);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        relay.BeforeConnectForTest = () => release.Task;
+
+        // The limit is taken by players still connecting: one more is closed straight away.
+        var held = Enumerable.Range(0, GamePortRelay.MaxConnections).Select(i => RoundTripAsync(relay.Port, [(byte)i])).ToList();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (relay.OpenConnectionsTo(game.Port) < GamePortRelay.MaxConnections && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Equal(GamePortRelay.MaxConnections, relay.OpenConnectionsTo(game.Port));
+        Assert.Null(await RoundTripAsync(relay.Port, [0xFF]).WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // Once they are through, the slots come back as they leave.
+        release.SetResult();
+        foreach (var trip in held) Assert.NotNull(await trip);
+        relay.BeforeConnectForTest = null;
+        deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (relay.OpenConnectionsTo(game.Port) > 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Equal(new byte[] { 0xE1, 7 }, await RoundTripAsync(relay.Port, [7]));
+    }
+
+    [Fact]
+    public async Task OneGuestFillingItsShareDoesNotKeepAnotherGuestOut()
+    {
+        using var game = new EchoGame(0xE3);
+        await using var relay = new GamePortRelay();
+        relay.SetTarget(game.Port);
+        // A loopback listener stands in for the virtual address; guests come from 127.0.0.1 and 127.0.0.2.
+        TcpListener? adapter = null;
+        await relay.ListenOnAdapterAsync(IPAddress.Parse("10.235.255.254"), _ => true, TimeSpan.FromSeconds(5), (_, _) =>
+        {
+            adapter = new TcpListener(IPAddress.Loopback, 0);
+            adapter.Start();
+            return adapter;
+        });
+        var adapterPort = ((IPEndPoint)adapter!.LocalEndpoint).Port;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var taken = 0;
+        relay.BeforeConnectForTest = () => Interlocked.Increment(ref taken) <= GamePortRelay.MaxPerSource ? release.Task : Task.CompletedTask;
+
+        async Task<byte[]?> TripFromAsync(IPAddress from, byte value)
+        {
+            using var client = new TcpClient(new IPEndPoint(from, 0));
+            await client.ConnectAsync(IPAddress.Loopback, adapterPort);
+            var s = client.GetStream();
+            await s.WriteAsync(new[] { value });
+            var reply = new byte[2];
+            var read = 0;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try
+            {
+                while (read < 2)
+                {
+                    var n = await s.ReadAsync(reply.AsMemory(read), timeout.Token);
+                    if (n == 0) return null;
+                    read += n;
+                }
+            }
+            catch (Exception e) when (e is IOException or SocketException) { return null; }
+            return reply;
+        }
+
+        // The first guest takes its whole share (still connecting) ...
+        var first = Enumerable.Range(0, GamePortRelay.MaxPerSource).Select(i => TripFromAsync(IPAddress.Loopback, (byte)i)).ToList();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (relay.OpenConnectionsTo(game.Port) < GamePortRelay.MaxPerSource && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Equal(GamePortRelay.MaxPerSource, relay.OpenConnectionsTo(game.Port));
+        // ... so one more of its own is closed at once, while another guest still gets through to the game.
+        Assert.Null(await TripFromAsync(IPAddress.Loopback, 0xFE));
+        IPAddress other = IPAddress.Parse("127.0.0.2");
+        try { using var probe = new TcpClient(new IPEndPoint(other, 0)); }
+        catch (SocketException) { release.SetResult(); return; } // No second loopback address on this machine.
+        Assert.Equal(new byte[] { 0xE3, 0x42 }, await TripFromAsync(other, 0x42));
+
+        release.SetResult();
+        foreach (var trip in first) Assert.NotNull(await trip);
+    }
+
+    [Fact]
+    public void AWholeLanRoomPutsTheRelayInFrontOfAGameInTheStrongSandbox() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var game = new EchoGame(0xE2);
+        var vm = new MultiplayerViewModel(service)
+        {
+            FullLanMode = true,
+            ManualPort = game.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        // A plain game is reached on its own port, whole-LAN or not.
+        vm.BridgedForTest = _ => false;
+        var plain = vm.HostGamePortForTest();
+        Pump(() => plain.IsCompleted);
+        Assert.Equal((game.Port, (GamePortRelay?)null), plain.Result);
+
+        // A game in the strong sandbox only through Jay: the room gets the relay's port, already linked to the game.
+        // Another game being in the strong sandbox doesn't put a relay in front of this one.
+        vm.BridgedForTest = p => p != game.Port;
+        var other = vm.HostGamePortForTest();
+        Pump(() => other.IsCompleted);
+        Assert.Equal((game.Port, (GamePortRelay?)null), other.Result);
+        vm.BridgedForTest = p => p == game.Port;
+        var bridged = vm.HostGamePortForTest();
+        Pump(() => bridged.IsCompleted);
+        var (port, relay) = bridged.Result!.Value;
+        Assert.NotNull(relay);
+        Assert.Equal(relay!.Port, port);
+        Assert.Equal(game.Port, relay.Target);
+        // Unwrapped whole-LAN guests reach the virtual address, so the room also listens there for them.
+        Assert.True(MultiplayerViewModel.RelayOnAdapter(fullLan: true, wraps: false));
+        var reply = Task.Run(() => RoundTripAsync(relay.Port, [9]));
+        Pump(() => reply.IsCompleted);
+        Assert.Equal(new byte[] { 0xE2, 9 }, reply.Result);
+        var disposed = relay.DisposeAsync().AsTask();
+        Pump(() => disposed.IsCompleted);
+
+        // Adopted by the room, it is linked at once and named by the typed port alone.
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        Assert.True(prepared.Result);
+        Assert.False(vm.IsWaitingForGame);
+        Assert.Equal(L.F("multiplayer.relay.linked_port", game.Port), vm.GameLinkText);
+        vm.StopGameRelayForTest();
+    });
+
+    [Fact]
     public async Task APlayerStillConnectingToTheGameKeepsItLinked()
     {
         using var game = new EchoGame(0xB6);
@@ -370,6 +500,80 @@ public sealed class GamePortRelayTests
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (relay.OpenConnectionsTo(port) > 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
         Assert.Equal(0, relay.OpenConnectionsTo(port));
+    }
+
+    [Fact]
+    public async Task AFloodOfNewConnectionsOnlyDelaysNewPlayersAndBigRoomsStillFill()
+    {
+        using var game = new EchoGame(0xE3);
+        await using var relay = new GamePortRelay { NewFor = TimeSpan.FromMilliseconds(800) };
+        relay.SetTarget(game.Port);
+        // Callers on loopback can't be told apart: only so many new connections at once, the rest closed straight away.
+        var first = new List<TcpClient>();
+        for (var i = 0; i < GamePortRelay.MaxNewUnidentified; i++) first.Add(await PlayerAsync(relay, (byte)i));
+        Assert.Null(await RoundTripAsync(relay.Port, [99]));
+
+        // Once they are no longer new, more get in, up to the room's total; the first ones are still there.
+        var all = new List<TcpClient>(first);
+        while (all.Count < GamePortRelay.MaxConnections)
+        {
+            await Task.Delay(900);
+            for (var i = 0; i < GamePortRelay.MaxNewUnidentified && all.Count < GamePortRelay.MaxConnections; i++)
+                all.Add(await PlayerAsync(relay, (byte)all.Count));
+        }
+        Assert.Equal(GamePortRelay.MaxConnections, relay.OpenConnectionsTo(game.Port));
+        foreach (var (player, i) in first.Select((p, i) => (p, i)))
+        {
+            await player.GetStream().WriteAsync(new byte[] { (byte)(100 + i) });
+            var back = new byte[2];
+            await player.GetStream().ReadExactlyAsync(back);
+            Assert.Equal(new byte[] { 0xE3, (byte)(100 + i) }, back);
+        }
+        foreach (var p in all) p.Dispose();
+    }
+
+    /// <summary>A player through the relay, checked with one round trip and kept open.</summary>
+    private static async Task<TcpClient> PlayerAsync(GamePortRelay relay, byte value)
+    {
+        var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, relay.Port);
+        var stream = client.GetStream();
+        await stream.WriteAsync(new[] { value });
+        var back = new byte[2];
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await stream.ReadExactlyAsync(back, limit.Token);
+        Assert.Equal(value, back[1]);
+        return client;
+    }
+
+    [Fact]
+    public async Task AConnectionThatStaysQuietIsClosedAndItsPlaceFreedWhileAnActiveOneStays()
+    {
+        using var game = new EchoGame(0xE1);
+        await using var relay = new GamePortRelay { IdleTimeout = TimeSpan.FromMilliseconds(400) };
+        relay.SetTarget(game.Port);
+        // Callers on loopback can't be told apart: a quiet one must not keep its place.
+        using var parked = new TcpClient();
+        await parked.ConnectAsync(IPAddress.Loopback, relay.Port);
+        using var playing = new TcpClient();
+        await playing.ConnectAsync(IPAddress.Loopback, relay.Port);
+        var stream = playing.GetStream();
+        var back = new byte[2];
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(1.5);
+        while (DateTime.UtcNow < until)
+        {
+            await stream.WriteAsync(new byte[] { 7 });
+            await stream.ReadExactlyAsync(back);
+            Assert.Equal(new byte[] { 0xE1, 7 }, back);
+            await Task.Delay(100);
+        }
+        // The quiet one was closed (the relay's side reads end of stream) and only the playing one is counted.
+        using var read = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, await parked.GetStream().ReadAsync(new byte[1], read.Token));
+        Assert.Equal(1, relay.OpenConnectionsTo(game.Port));
+        await stream.WriteAsync(new byte[] { 8 });
+        await stream.ReadExactlyAsync(back);
+        Assert.Equal(new byte[] { 0xE1, 8 }, back);
     }
 
     [Fact]
@@ -667,6 +871,42 @@ public sealed class GamePortRelayTests
             Pump(() => watch.IsCompleted);
             watch.GetAwaiter().GetResult();
         }
+    });
+
+    [Fact]
+    public void AnOutOfDateReasonForAPortThatDidNotAnswerDoesNotReplaceTheNewLink() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var good = new EchoGame(0x91);
+        const int Dead = 1;
+        var reason = new TaskCompletionSource<StatusMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GamePortReadyForTest = (p, _) => Task.FromResult(p == good.Port),
+            // Working out why the first port didn't answer takes a while.
+            PortUnavailableForTest = _ =>
+            {
+                asked.TrySetResult();
+                return reason.Task;
+            },
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var relay = vm.GameRelayForTest!;
+        vm.ManualPort = Dead.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => asked.Task.IsCompleted);
+        // Meanwhile the player types a port that answers: it is linked.
+        vm.ManualPort = good.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == good.Port);
+        var linked = vm.Status;
+        // The reason for the first port arrives late and is dropped: the status still says the new link.
+        reason.SetResult(StatusMessage.Error("multiplayer.lan.port_unavailable", Dead));
+        Settle();
+        Assert.Equal(good.Port, relay.Target);
+        Assert.Equal(linked, vm.Status);
+        vm.StopCommand.Execute(null);
     });
 
     private static void Settle()

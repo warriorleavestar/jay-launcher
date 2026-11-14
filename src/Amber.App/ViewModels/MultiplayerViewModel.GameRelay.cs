@@ -39,6 +39,12 @@ public sealed partial class MultiplayerViewModel
         : _relayTyped ? L.F("multiplayer.relay.linked_port", _gameRelay.Target ?? 0)
         : L.F("multiplayer.relay.linked", _relayGameLabel ?? "", _gameRelay.Target ?? 0);
 
+    /// <summary>Tests: stands in for "this port is a game with a LAN bridge agent" (a real one needs the Windows sandbox).</summary>
+    internal Func<int, bool>? BridgedForTest { get; set; }
+
+    /// <summary>Tests: the game port and relay a new room would use.</summary>
+    internal Task<(int Port, GamePortRelay? Relay)?> HostGamePortForTest(bool checkManual = false) => HostGamePortAsync(checkManual);
+
     /// <summary>Tests: the relay's own port (the room's game port) and where it points.</summary>
     internal GamePortRelay? GameRelayForTest => _gameRelay;
 
@@ -59,14 +65,33 @@ public sealed partial class MultiplayerViewModel
         {
             if ((manual is null || checkManual) && !await GamePortReadyAsync(known, manual: manual is not null))
             {
-                SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", known));
+                SetStatus(await PortUnavailableAsync(known));
                 return null;
+            }
+            // A game in the strong sandbox can't be reached by EasyTier, the direct bridge or (in a whole-LAN room) a
+            // guest on the virtual address, only through Jay (GameLanBridge): put the relay in front of the game when
+            // the chosen port is such a game's. Other games are reached directly as before. The caller decides where it
+            // listens (RelayOnAdapter), as for a relay without a game.
+            if ((BridgedForTest ?? GameLanBridge.IsBridged)(known))
+            {
+                var front = new GamePortRelay();
+                front.SetTarget(known);
+                return (front.Port, front);
             }
             return (known, null);
         }
         var relay = new GamePortRelay();
         return (relay.Port, relay);
     }
+
+    /// <summary>
+    /// The game port didn't answer. When something does listen there, it is most likely a game in the strong sandbox
+    /// whose LAN bridge isn't connected (started before Jay was restarted): say to restart the game.
+    /// </summary>
+    private async Task<StatusMessage> PortUnavailableAsync(int port) => PortUnavailableForTest is { } test ? await test(port) :
+        await GameLanBridge.ListenedButUnreachableAsync(port)
+            ? StatusMessage.Error("multiplayer.lan.port_unreachable_sandbox", port)
+            : StatusMessage.Error("multiplayer.lan.port_unavailable", port);
 
     /// <summary>
     /// Whether the relay must also listen on this computer's virtual address: a whole-LAN room whose traffic isn't
@@ -81,8 +106,13 @@ public sealed partial class MultiplayerViewModel
         if (relay is null) return;
         if (onAdapter) _ = ListenOnAdapterAsync(relay);
         _gameRelay = relay;
-        _relayGameLabel = null;
-        IsWaitingForGame = true;
+        // A relay put in front of a known game (strong sandbox) is linked already: a typed port is named by its number
+        // only, a found world by its name.
+        _relayTyped = relay.Target is not null && ManualPortValue is not null;
+        _relayGameLabel = relay.Target is { } port && !_relayTyped
+            ? SelectedLanGame?.Label ?? L.F("multiplayer.guide.port_label", port)
+            : null;
+        IsWaitingForGame = relay.Target is null;
         OnPropertyChanged(nameof(HasGameRelay));
         OnPropertyChanged(nameof(GameLinkText));
     }
@@ -156,7 +186,9 @@ public sealed partial class MultiplayerViewModel
         if (version != _relayCheck || _gameRelay != relay) return;
         if (!ok)
         {
-            SetStatus(StatusMessage.Error("multiplayer.lan.port_unavailable", port));
+            var unavailable = await PortUnavailableAsync(port);
+            // Another pick or a new relay while the reason was worked out: this one is out of date.
+            if (version == _relayCheck && _gameRelay == relay) SetStatus(unavailable);
             return;
         }
         relay.SetTarget(port);
@@ -198,6 +230,9 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>Tests: stands in for the check a port gets before the relay links it (port, typed).</summary>
     internal Func<int, bool, Task<bool>>? GamePortReadyForTest { get; set; }
+
+    /// <summary>Tests: works out why a game port didn't answer, in place of asking the LAN bridge.</summary>
+    internal Func<int, Task<StatusMessage>>? PortUnavailableForTest { get; set; }
 
     /// <summary>Tests: stands in for listening for LAN worlds.</summary>
     internal Func<Task<List<LanGame>>>? ScanForTest { get; set; }

@@ -391,9 +391,12 @@ public sealed class GameLauncher(GameDirectory dir)
             process = windowsLevel is { } level && OperatingSystem.IsWindows()
                 ? WindowsSandbox.Start(psi, level)
                 : Process.Start(psi) ?? throw new InvalidOperationException(L.T("core.launch.game.javastartfailed"));
+            // The LAN bridge agent (strong sandbox) is accepted from this process only.
+            Multiplayer.GameLanBridge.Started(psi.ArgumentList, process);
         }
         catch
         {
+            Multiplayer.GameLanBridge.Ended(psi.ArgumentList);
             DeleteNoTraceDir(noTraceDir);
             throw;
         }
@@ -465,6 +468,20 @@ public sealed class GameLauncher(GameDirectory dir)
                     if (WindowsSandbox.DnsArguments(major, javaHome, servers, jar) is { } dns)
                         for (var i = 0; i < dns.Count; i++) psi.ArgumentList.Insert(i, dns[i]);
                     if (jar is not null) extraReadOnly.Add(jar);
+                }
+                // Windows drops loopback connections into the container, so a room cannot reach the world opened to
+                // LAN; the bridge agent connects out to Jay instead (see GameLanBridge).
+                if (windowsLevel == WindowsSandboxLevel.Strong)
+                {
+                    if (WindowsSandbox.LanBridgeJar(Path.Combine(dir.Root, "libraries", "jay", "jay-lan")) is not { } lan)
+                        onOutput?.Invoke(L.T("core.launch.sandbox.win.no_lan_bridge"));
+                    else if (Multiplayer.GameLanBridge.AgentArgument(lan) is not { } agent)
+                        onOutput?.Invoke(L.T("core.launch.sandbox.win.lan_bridge_path"));
+                    else
+                    {
+                        psi.ArgumentList.Insert(0, agent);
+                        extraReadOnly.Add(lan);
+                    }
                 }
             }
             if (windowsLevel == WindowsSandboxLevel.Standard && WindowsSandbox.SocketFolder(workDir) is { } sockets)

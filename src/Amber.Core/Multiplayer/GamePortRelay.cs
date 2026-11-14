@@ -7,7 +7,8 @@ namespace Amber.Core.Multiplayer;
 /// A room opened before the game: the room's game port is this loopback listener, and connections are passed on to the
 /// game's real LAN port once it is known (the world was opened to LAN, or the player typed a port). Until then a
 /// connection is closed straight away. Changing the target later (the world was reopened on a new port) only affects
-/// new connections.
+/// new connections. A game in the Windows strong sandbox is reached through its LAN bridge (<see cref="GameLanBridge"/>),
+/// which is why rooms always put this relay in front of such a game.
 /// <para>
 /// It listens on 127.0.0.1, the same place EasyTier and the direct bridge hand room traffic to, so it is not reachable
 /// from the network. A whole-LAN room without wrapping, where guests reach the host's virtual address directly, also
@@ -24,10 +25,52 @@ public sealed class GamePortRelay : IAsyncDisposable
     private TcpListener? _adapterListener;
     private Task? _adapterLoop;
     private readonly object _gate = new();
-    // Each connection being passed on: the caller's side, its side to the game and the game port it reached.
-    private readonly HashSet<(TcpClient In, TcpClient Out, int Port)> _open = [];
+    // Each connection being passed on: the caller's side (a TCP connection, or a room stream handed over in this
+    // process), its side to the game and the game port it reached.
+    private readonly HashSet<(IDisposable In, Socket Out, int Port)> _open = [];
     // Callers taken on for a game port whose connection to the game isn't up yet, by port.
     private readonly Dictionary<int, int> _connecting = [];
+    /// <summary>Connections passed on (or being connected) at once; a LAN world takes far fewer players.</summary>
+    internal const int MaxConnections = 64;
+
+    /// <summary>Connections one known caller (a guest's address, or a room member handed over in this process) may
+    /// have passed on (or being connected) at once.</summary>
+    internal const int MaxPerSource = 16;
+
+    // Connections passed on (or being connected) by known caller: a guest's address or the member a room stream is for.
+    private readonly Dictionary<object, int> _perSource = [];
+
+    // Relays in this process by their loopback port, so the room's tunnels can hand a member's game stream over
+    // directly, with the member it belongs to, instead of through a loopback connection that loses who it is.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, GamePortRelay> InProcess = new();
+
+    /// <summary>The relay listening on loopback <paramref name="port"/> in this process, if any.</summary>
+    internal static GamePortRelay? At(int port) => InProcess.TryGetValue(port, out var relay) ? relay : null;
+
+    /// <summary>
+    /// A connection over which nothing has passed either way for this long is closed and its place freed. A game in
+    /// play never goes this quiet (Minecraft sends a keep-alive every 15 seconds), so a caller can't park places it
+    /// doesn't use. This matters most where callers can't be told apart (see <see cref="ServeAsync"/>).
+    /// </summary>
+    internal TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(120);
+
+    /// <summary>
+    /// New connections from callers that can't be told apart (loopback, or a room stream without a member) allowed at
+    /// once: a connection counts as new for <see cref="NewFor"/>. Minecraft drops a connection that hasn't logged in by
+    /// then and a world takes a limited number of players, so a flood of fresh connections only delays new players;
+    /// players already in are never pushed out, and a room can still pass on <see cref="MaxConnections"/>. Known callers
+    /// (see <see cref="ServeStreamAsync"/>) never use this budget, so one member can't take it from the others.
+    /// </summary>
+    internal const int MaxNewUnidentified = 16;
+
+    internal TimeSpan NewFor { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Tests: the cap on new unidentified connections (raised to test the total limit on its own).</summary>
+    internal int MaxNewForTest { get; init; } = MaxNewUnidentified;
+
+    // Unidentified connections still counted as new (under _gate).
+    private int _newUnidentified;
+
     private readonly TimeSpan _connectTimeout;
     private int _target;
 
@@ -37,6 +80,7 @@ public sealed class GamePortRelay : IAsyncDisposable
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+        InProcess[Port] = this;
         _acceptLoop = Task.Run(() => AcceptLoopAsync(_listener));
     }
 
@@ -97,8 +141,8 @@ public sealed class GamePortRelay : IAsyncDisposable
     /// <summary>Tests: runs once a caller is taken on for a port, before the connection to the game is made.</summary>
     internal Func<Task>? BeforeConnectForTest { get; set; }
 
-    /// <summary>Tests: makes the connection to the game in place of <c>new TcpClient()</c> (to make that fail).</summary>
-    internal Func<TcpClient>? CreateOutboundForTest { get; set; }
+    /// <summary>Tests: makes the connection to the game in place of <see cref="GameLanBridge.ConnectAsync"/> (to make that fail).</summary>
+    internal Func<Socket>? CreateOutboundForTest { get; set; }
 
     /// <summary>
     /// Also listen on <paramref name="address"/> (a whole-LAN room's virtual address) at the same port, waiting for the
@@ -159,12 +203,14 @@ public sealed class GamePortRelay : IAsyncDisposable
                 IPAddress? source;
                 try { source = (client.Client.RemoteEndPoint as IPEndPoint)?.Address; }
                 catch (Exception e) when (e is SocketException or ObjectDisposedException) { source = null; }
-                if (source is null || !allowSource(source.IsIPv4MappedToIPv6 ? source.MapToIPv4() : source))
+                if (source is not null && source.IsIPv4MappedToIPv6) source = source.MapToIPv4();
+                if (source is null || !allowSource(source))
                 {
                     client.Dispose();
                     continue;
                 }
-                _ = Task.Run(() => ServeAsync(client));
+                var guest = source;
+                _ = Task.Run(() => ServeAsync(client, guest));
             }
         }
         finally
@@ -200,33 +246,75 @@ public sealed class GamePortRelay : IAsyncDisposable
         }
     }
 
-    private async Task ServeAsync(TcpClient client)
+    /// <summary>
+    /// Passes on a game stream the room's tunnel took from <paramref name="owner"/> (the member it authenticated, or the
+    /// caller's address; null when it couldn't tell). A known owner is limited to its own <see cref="MaxPerSource"/>
+    /// places and never uses the budget for callers that can't be told apart. Returns when the connection ends or is
+    /// turned away; the caller closes <paramref name="stream"/>.
+    /// </summary>
+    public Task ServeStreamAsync(Stream stream, object? owner, CancellationToken ct = default) =>
+        ServeCoreAsync(stream, new StreamHolder(stream), owner, ct);
+
+    // Closes a handed-over stream when the relay stops; the tunnel that handed it over owns it otherwise.
+    private sealed class StreamHolder(Stream stream) : IDisposable
+    {
+        public void Dispose() => stream.Dispose();
+    }
+
+    /// <param name="source">The guest's address when it is known (a whole-LAN guest on the virtual address); its
+    /// connections count against <see cref="MaxPerSource"/>. Null on loopback, where callers can't be told apart (the
+    /// room's tunnels hand their streams over in process instead, see <see cref="ServeStreamAsync"/>).</param>
+    private async Task ServeAsync(TcpClient client, IPAddress? source = null)
     {
         using var inbound = client;
+        inbound.NoDelay = true;
+        await ServeCoreAsync(inbound.GetStream(), inbound, source, CancellationToken.None);
+    }
+
+    private async Task ServeCoreAsync(Stream inboundStream, IDisposable inbound, object? source, CancellationToken ct)
+    {
         int port;
+        // 1 while this unidentified connection still counts as new; whoever sets it to 0 first gives the place back.
+        var isNew = 0;
+        void NoLongerNew()
+        {
+            if (Interlocked.Exchange(ref isNew, 0) == 1)
+                lock (_gate) _newUnidentified--;
+        }
         // The target is read and the caller counted for it under the same lock ClearTargetIfIdle takes, so a game that
         // is taking a player right now is never dropped between the two.
         lock (_gate)
         {
             // No game yet: close at once so the player's game shows a connection error instead of hanging.
             if (Target is not { } target || _cts.IsCancellationRequested) return;
+            // Players passed on at once, counted from the moment they are taken on: more are closed straight away.
+            if (_open.Count + _connecting.Values.Sum() >= MaxConnections) return;
+            // One guest can't take every place: past its own share only that guest is turned away.
+            if (source is not null)
+            {
+                if (_perSource.GetValueOrDefault(source) >= MaxPerSource) return;
+                _perSource[source] = _perSource.GetValueOrDefault(source) + 1;
+            }
+            else
+            {
+                if (_newUnidentified >= MaxNewForTest) return;
+                _newUnidentified++;
+                isNew = 1;
+            }
             port = target;
             _connecting[port] = _connecting.GetValueOrDefault(port) + 1;
         }
+        if (isNew == 1) _ = Task.Delay(NewFor, _cts.Token).ContinueWith(_ => NoLongerNew(), TaskScheduler.Default);
         var connecting = true;
-        TcpClient? outbound = null;
-        (TcpClient, TcpClient, int)? entry = null;
+        Socket? outbound = null;
+        (IDisposable, Socket, int)? entry = null;
         try
         {
-            // Created inside the try so a failure here still takes the caller off the connecting count.
-            outbound = (CreateOutboundForTest ?? (() => new TcpClient()))();
             if (BeforeConnectForTest is { } before) await before();
-            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token))
-            {
-                timeout.CancelAfter(_connectTimeout);
-                await outbound.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
-            }
-            inbound.NoDelay = true;
+            // Through the game's LAN bridge when the game is in the strong sandbox (see GameLanBridge), else directly.
+            // Inside the try so a failure creating the connection still takes the caller off the connecting count.
+            outbound = CreateOutboundForTest is { } create ? create() : await GameLanBridge.ConnectAsync(port, _connectTimeout, _cts.Token);
+            if (outbound is null) return;
             outbound.NoDelay = true;
             entry = (inbound, outbound, port);
             lock (_gate)
@@ -235,11 +323,15 @@ public sealed class GamePortRelay : IAsyncDisposable
                 if (_cts.IsCancellationRequested) return;
                 _open.Add(entry.Value);
             }
-            var a = inbound.GetStream();
-            var b = outbound.GetStream();
-            var up = PumpAsync(a, b);
-            var down = PumpAsync(b, a);
-            await Task.WhenAny(up, down);
+            var a = inboundStream;
+            var b = new NetworkStream(outbound, ownsSocket: false);
+            var lastSeen = Environment.TickCount64;
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, ct);
+            var up = PumpAsync(a, b, () => Volatile.Write(ref lastSeen, Environment.TickCount64), idle.Token);
+            var down = PumpAsync(b, a, () => Volatile.Write(ref lastSeen, Environment.TickCount64), idle.Token);
+            var watch = WatchIdleAsync(() => Volatile.Read(ref lastSeen), idle.Token);
+            await Task.WhenAny(up, down, watch);
+            idle.Cancel();
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or SocketException or ObjectDisposedException)
         {
@@ -250,8 +342,14 @@ public sealed class GamePortRelay : IAsyncDisposable
             {
                 Done();
                 if (entry is { } done) _open.Remove(done);
+                if (source is not null)
+                {
+                    if (_perSource.GetValueOrDefault(source) <= 1) _perSource.Remove(source);
+                    else _perSource[source]--;
+                }
             }
             outbound?.Dispose();
+            NoLongerNew();
         }
 
         // No longer connecting (once): the caller is now open, or gone.
@@ -264,13 +362,33 @@ public sealed class GamePortRelay : IAsyncDisposable
         }
     }
 
-    private async Task PumpAsync(Stream from, Stream to)
+    private static async Task PumpAsync(Stream from, Stream to, Action seen, CancellationToken ct)
     {
         try
         {
-            await from.CopyToAsync(to, 16 * 1024, _cts.Token);
+            var buffer = new byte[16 * 1024];
+            int read;
+            while ((read = await from.ReadAsync(buffer, ct)) > 0)
+            {
+                seen();
+                await to.WriteAsync(buffer.AsMemory(0, read), ct);
+            }
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or SocketException or ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>Ends when nothing has passed for <see cref="IdleTimeout"/> (or when <paramref name="ct"/> is cancelled).</summary>
+    private async Task WatchIdleAsync(Func<long> lastSeen, CancellationToken ct)
+    {
+        var limit = (long)IdleTimeout.TotalMilliseconds;
+        var step = TimeSpan.FromMilliseconds(Math.Clamp(limit / 4, 10, 5000));
+        try
+        {
+            while (Environment.TickCount64 - lastSeen() < limit) await Task.Delay(step, ct);
+        }
+        catch (OperationCanceledException)
         {
         }
     }
@@ -285,8 +403,9 @@ public sealed class GamePortRelay : IAsyncDisposable
             _adapterListener?.Stop();
             adapterLoop = _adapterLoop;
         }
+        InProcess.TryRemove(new KeyValuePair<int, GamePortRelay>(Port, this));
         _listener.Stop();
-        (TcpClient In, TcpClient Out, int Port)[] open;
+        (IDisposable In, Socket Out, int Port)[] open;
         lock (_gate) open = [.. _open];
         foreach (var c in open)
         {

@@ -118,6 +118,7 @@ Root files: `Program.cs` (startup checks, dev flags, Avalonia bootstrap), `App.a
 | `tools/FullLanCheck/` | Headless end-to-end check of full-LAN mode on macOS/Linux (needs root), used by the fulllan-e2e workflow. |
 | `tools/jay-dns/` | Java 18+ name resolver for the Windows strong sandbox; built by Amber.Core.csproj and embedded (`WindowsSandbox.ResolverJar`). |
 | `tools/jay-fs/` | Java file system provider for the Windows sandbox (fixes `Files.isWritable` under low integrity / AppContainer); `stub/` is compile-only. Embedded (`WindowsSandbox.FileSystemJar`). |
+| `tools/jay-lan/` | Java agent for the Windows strong sandbox: connects out of the game to Jay so rooms reach a world opened to LAN (Windows drops loopback connections into the AppContainer). Embedded (`WindowsSandbox.LanBridgeJar`); Jay side is `Multiplayer/GameLanBridge.cs`. |
 | `.github/` | CI (`build.yml`), security regression tests, network registry checks, issue templates. |
 
 ## Where to start for common tasks
