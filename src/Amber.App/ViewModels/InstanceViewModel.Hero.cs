@@ -408,14 +408,27 @@ public sealed partial class InstanceViewModel
             own.MaxMemoryMb = raised;
             text = L.F("instance.lastrun.memory_done", raised);
         }
-        own.Save(_service.Directory, id);
+        try { own.Save(_service.Directory, id); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            SetStatus(StatusMessage.Failure("instance.lastrun.fix_failed", e, ErrorText.Of(e)));
+            return null;
+        }
         InvalidateTab(InstanceTab.Settings);
         InvalidateTab(InstanceTab.Overview);
         return (text, () =>
         {
-            var s = InstanceSettings.Load(_service.Directory, id);
-            (s.AutoMemory, s.MaxMemoryMb) = before;
-            s.Save(_service.Directory, id);
+            try
+            {
+                var s = InstanceSettings.Load(_service.Directory, id);
+                (s.AutoMemory, s.MaxMemoryMb) = before;
+                s.Save(_service.Directory, id);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                SetStatus(StatusMessage.Failure("instance.lastrun.fix_failed", e, ErrorText.Of(e)));
+                return;
+            }
             InvalidateTab(InstanceTab.Settings);
             InvalidateTab(InstanceTab.Overview);
         });

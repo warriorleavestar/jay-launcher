@@ -742,7 +742,12 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             // Changed on its own card (and from Discover), never by this form.
             UniversalLoader = old.UniversalLoader,
         };
-        s.Save(_service.Directory, c.Id);
+        try { s.Save(_service.Directory, c.Id); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            SetStatus(StatusMessage.Failure("settings.error.save_failed", e, ErrorText.Of(e)));
+            return;
+        }
         var id = c.Id;
         if (s.Isolate != old.Isolate)
         {

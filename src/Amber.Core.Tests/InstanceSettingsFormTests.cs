@@ -65,4 +65,29 @@ public sealed class InstanceSettingsFormTests : IDisposable
         Assert.Equal(javaB, vm.SelectedJava?.Path);
         Assert.Equal(javaB, InstanceSettings.Load(service.Directory, "b").JavaPath);
     });
+
+    [Fact]
+    public void DeniedInstanceSettingsWriteShowsAnError() => UiTestThread.Run(() =>
+    {
+        var dir = Path.Combine(_root, "versions", "a");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "a.json"), """{"id":"a","mainClass":"Example","libraries":[]}""");
+        File.WriteAllBytes(Path.Combine(dir, "a.jar"), []);
+        // A folder where the settings file belongs: writing it fails with access denied.
+        Directory.CreateDirectory(Path.Combine(dir, InstanceSettings.FileName));
+        var service = new LauncherService(new AppSettings
+        {
+            GameDirectory = _root,
+            SavePathForTest = Path.Combine(_root, "settings.json"),
+            PlayerName = "",
+            AutoJavaDownload = false,
+        });
+        var vm = new InstanceViewModel(service);
+        vm.SelectedId = "a";
+        vm.TabIndex = (int)InstanceTab.Settings;
+
+        vm.MemoryText = "4096";
+
+        Assert.Equal("settings.error.save_failed", vm.StatusInfo?.Key);
+    });
 }
