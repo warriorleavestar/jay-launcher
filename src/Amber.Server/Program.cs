@@ -900,8 +900,12 @@ public static class Program
             var cert = HardwareCertificate.Parse(File.Exists(Path.Combine(root, HardwareBinding.CertificateFile)) ? File.ReadAllBytes(Path.Combine(root, HardwareBinding.CertificateFile)) : []);
             if (cert is null) { output.WriteLine("hardware.cert 缺失或签名不对：节点启动时会删除自己的文件。"); return 2; }
             var match = cert.Match(factors);
-            output.WriteLine(match.Ok ? $"硬件对得上（{match.Reason}）。" : $"硬件对不上：{match.Reason}。现在启动节点会删除它的文件；换硬件前先重新绑定。");
-            return match.Ok && problems.Count == 0 ? 0 : 2;
+            IReadOnlyList<string> unreadable = match.Ok ? [] : cert.Unreadable(factors, match);
+            output.WriteLine(match.Ok ? $"硬件对得上（{match.Reason}）。"
+                : unreadable.Count > 0 ? $"读不到这些硬件标识：{string.Join("、", unreadable)}。现在启动节点会拒绝运行（不删文件）；先检查工具和权限（TPM 要 tpm2-tools 和 tss 组）。"
+                : $"硬件对不上：{match.Reason}。现在启动节点会删除它的文件；换硬件前先重新绑定。");
+            if (match.Ok && cert.RequireTpm && !tpm.Available) output.WriteLine("证书要求 TPM，但现在用不了：启动时会拒绝运行（不删文件）。");
+            return match.Ok && problems.Count == 0 && !(cert.RequireTpm && !tpm.Available) ? 0 : 2;
         }
         if (options.Get("install") is { } certFile)
         {

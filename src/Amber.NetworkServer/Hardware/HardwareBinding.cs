@@ -367,6 +367,20 @@ public sealed record HardwareCertificate(
         }
     }
 
+    /// <summary>
+    /// The identifiers the certificate lists that <paramref name="hardware"/> didn't report at all, when they alone explain
+    /// a failed <paramref name="match"/>: every identifier that was read and differs is still tolerated. Empty otherwise
+    /// (something that was read is different, so this is other hardware).
+    /// </summary>
+    public IReadOnlyList<string> Unreadable(IReadOnlyList<HardwareFactor> hardware, HardwareMatch match)
+    {
+        var read = hardware.Select(f => f.Kind).ToHashSet(StringComparer.Ordinal);
+        var unreadable = Factors.Keys.Where(k => !read.Contains(k)).Order(StringComparer.Ordinal).ToArray();
+        if (unreadable.Length == 0) return [];
+        var mustDiffers = Must.Any(m => read.Contains(m) && !match.Shares.ContainsKey(m));
+        return !mustDiffers && match.Matched + unreadable.Length >= Need ? unreadable : [];
+    }
+
     /// <summary>Compares this machine's identifiers with the certificate.</summary>
     public HardwareMatch Match(IReadOnlyList<HardwareFactor> hardware)
     {
@@ -441,9 +455,18 @@ public sealed class NodeHardwareGuard(string dataDir)
         if (cert is null) Fail("hardware.cert is missing or its signature is invalid");
         if (!Trust.IsMet(cert!.Signers))
             throw new NodeIntegrityException([$"hardware.cert has {Trust.Count(cert.Signers)} of the {Trust.Need} root signatures this network needs; check --network"]);
-        var match = cert!.Match(Hardware.Read());
-        if (!match.Ok) Fail(match.Reason);
-        if (cert.RequireTpm && !Tpm.Available) Fail("the certificate requires a TPM and this machine has none");
+        var read = Hardware.Read();
+        var match = cert!.Match(read);
+        if (!match.Ok)
+        {
+            // An identifier that can't be read at all (a tool failed or timed out, the service user lost the tss group)
+            // isn't proof of other hardware: refuse, delete nothing. Only identifiers that were read and differ wipe.
+            if (cert.Unreadable(read, match) is { Count: > 0 } unreadable)
+                throw new NodeIntegrityException([$"hardware identifiers could not be read: {string.Join(", ", unreadable)} (nothing was deleted; check the tools and permissions, for the TPM tpm2-tools and the tss group)"]);
+            Fail(match.Reason);
+        }
+        if (cert.RequireTpm && !Tpm.Available)
+            throw new NodeIntegrityException(["the certificate requires a TPM and none is usable here (nothing was deleted; check tpm2-tools and the tss group)"]);
 
         Dictionary<string, byte[]> keys = [];
         try { keys = HardwareBinding.Open(dataDir, cert, match, Tpm); }

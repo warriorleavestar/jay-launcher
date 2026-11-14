@@ -158,6 +158,59 @@ public sealed class NodeHardwareBindingTests : IDisposable
     }
 
     [Fact]
+    public void AnUnreadableTpmRefusesWithoutWiping()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        Bind(hw, tpm);
+        // tpm2-tools failed or the service user lost the tss group: the endorsement key isn't reported and the TPM isn't usable.
+        hw.Factors.RemoveAll(f => f.Kind == "tpm");
+        var e = Assert.Throws<NodeIntegrityException>(() => Guard(hw, NoTpm.Instance).Enforce());
+        Assert.Contains("tpm", e.Problems[0]);
+        Assert.True(Has("directory.key.hw"));
+        Assert.False(Has(NodeWiper.LogFile));
+        // Readable again: the node starts as before.
+        hw.Change("tpm", "EK-1234");
+        Assert.NotNull(Guard(hw, tpm).Enforce());
+    }
+
+    [Fact]
+    public void ARequiredTpmThatIsNotUsableRefusesWithoutWiping()
+    {
+        var hw = Machine();
+        Bind(hw, new FakeTpm());
+        Assert.Throws<NodeIntegrityException>(() => Guard(hw, NoTpm.Instance).Enforce());
+        Assert.True(Has("directory.key.hw"));
+    }
+
+    [Fact]
+    public void UnreadableIdentifiersDoNotHideOnesThatDiffer()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        Bind(hw, tpm);
+        // 3 of 4 needed. Board unreadable, disk replaced: only the unreadable board stands between this and a pass, so refuse.
+        // Then the machine id differs too: what was read already differs beyond the tolerance, so this is other hardware.
+        hw.Factors.RemoveAll(f => f.Kind == "board");
+        hw.Change("disk", "SN-NEW-DISK");
+        Assert.Throws<NodeIntegrityException>(() => Guard(hw, tpm).Enforce());
+        hw.Change("machine", "mid-other");
+        Assert.Throws<HardwareMismatchException>(() => Guard(hw, tpm).Enforce());
+        Assert.False(Has("directory.key.hw"));
+    }
+
+    [Fact]
+    public void AMandatoryIdentifierThatWasReadAndDiffersStillWipes()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        Bind(hw, tpm);
+        hw.Factors.RemoveAll(f => f.Kind == "board");
+        hw.Change("tpm", "EK-OTHER");
+        Assert.Throws<HardwareMismatchException>(() => Guard(hw, new FakeTpm()).Enforce());
+    }
+
+    [Fact]
     public void CopiedFilesOnAnotherMachineAreWiped()
     {
         Bind(Machine(), new FakeTpm());
