@@ -250,6 +250,9 @@ public sealed partial class MultiplayerViewModel
     /// <summary>Tests: closes the host's knock lobby.</summary>
     internal void StopHostLobbyForTest() => StopHostLobby();
 
+    /// <summary>Tests: invites mailed to friends for the room that is open.</summary>
+    internal int FriendInvitesHeld => _friendInvites.Count;
+
     /// <summary>Tests: the nodes the host's knock lobby would connect to.</summary>
     internal IReadOnlyList<string>? HostLobbyPeersForTest => _hostLobbyPeers?.Invoke();
     private Func<IReadOnlyList<string>>? _hostLobbyPeers;
@@ -334,6 +337,8 @@ public sealed partial class MultiplayerViewModel
         PendingInvites.Clear();
         Members.Clear();
         BannedPeople.Clear();
+        // The invites mailed to friends belonged to this room's book: they end with it.
+        _friendInvites.Clear();
         if (lobby is not null) _ = lobby.DisposeAsync().AsTask();
     }
 
