@@ -1337,7 +1337,8 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
             if (ExportFormatIndex == 0)
                 await _service.Modpacks.ExportMrpackAsync(c, path, ExportName, ExportVersion, include, ct);
             else
-                await _service.Modpacks.ExportCurseForgeAsync(c, path, ExportName, ExportVersion, Environment.UserName, include, ct);
+                // The author field stays empty: the pack is shared, and the computer's login name is not for other people.
+                await _service.Modpacks.ExportCurseForgeAsync(c, path, ExportName, ExportVersion, include, ct);
             SetStatus(StatusMessage.Success("instance.export.saved", path, new FileInfo(path).Length / 1024));
         });
     }

@@ -129,8 +129,9 @@ public class JsonCompatTests
     }
 
     /// <summary>
-    /// 本机真实数据（不进仓库、CI 上没有就跳过）：测试游戏目录里所有版本 JSON 和资源索引、本机的 settings.json 和 accounts.json。
-    /// 只比较两路结果是否相同，不输出内容；账号文件里的令牌是 DPAPI 加密串，这里不解密。
+    /// Local test data (not committed, skipped on CI): every version JSON and asset index in the test game directory
+    /// beside the repository. Only the two parse results are compared; nothing is printed. The settings and account
+    /// files are covered by fixed samples above: a test never opens the real per-user data folder.
     /// </summary>
     [Fact]
     public void RealLocalFiles_SameParse()
@@ -149,17 +150,6 @@ public class JsonCompatTests
             var indexes = Path.Combine(game, "assets", "indexes");
             if (Directory.Exists(indexes))
                 foreach (var index in Directory.EnumerateFiles(indexes, "*.json")) { AssertSame<AssetIndex>(File.ReadAllText(index), Json.Options, Core); checkedFiles++; }
-        }
-        var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Amber");
-        if (File.Exists(Path.Combine(data, "settings.json")))
-        {
-            AssertSame<AppSettings>(File.ReadAllText(Path.Combine(data, "settings.json")), AppSettingsJson.Options, AppSettingsJson.Generated);
-            checkedFiles++;
-        }
-        if (File.Exists(Path.Combine(data, "accounts.json")))
-        {
-            AssertSame<AccountStore.FileModel>(File.ReadAllText(Path.Combine(data, "accounts.json")), Field(typeof(AccountStore), "Options"), Core);
-            checkedFiles++;
         }
         // 只是让输出里看得到比较了多少个文件。
         Console.WriteLine($"RealLocalFiles_SameParse: {checkedFiles} files");
