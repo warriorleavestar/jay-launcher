@@ -1993,6 +1993,7 @@
   "multiplayer.device.allowed_placeholder": "これらのPCだけ参加可：相手のデバイスコードを1行に1つ（空なら制限なし）",
   "multiplayer.device.enable_first": "先にデバイスコードをオンにしてください",
   "multiplayer.device.reason": "ホストはデバイスコードを求めています。オンにしてください。リスト制の場合は自分のデバイスコードをホストに送ってください",
+  "multiplayer.device.old_code": "リストに古いバージョンのデバイスコードがあり、誰も入れません。相手に Jay を更新して新しいコード（JAYF2- で始まる）を送ってもらってください",
   "core.mp.private.no_space": "ディスクの空き容量が足りず「{0}」を受け取れません",
   "core.mp.private.offline": "相手はオフラインです",
   "core.mp.private.no_answer": "応答がありません",

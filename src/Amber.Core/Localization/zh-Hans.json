@@ -1993,6 +1993,7 @@
   "multiplayer.device.allowed_placeholder": "只让这些电脑进：贴上对方的设备码，一行一个（空着就不限）",
   "multiplayer.device.enable_first": "先在“设备码”里把它打开",
   "multiplayer.device.reason": "房主要求设备码：先打开你的设备码；房主只让名单里的电脑进时，要把你的设备码发给房主",
+  "multiplayer.device.old_code": "名单里有旧版本的设备码，谁也进不来。请对方更新 Jay，再发一个新码（以 JAYF2- 开头）",
   "core.mp.private.no_space": "磁盘空间不够，收不下“{0}”",
   "core.mp.private.offline": "对方不在线",
   "core.mp.private.no_answer": "对方没有回应",

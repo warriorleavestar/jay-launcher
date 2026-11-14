@@ -2025,6 +2025,7 @@
   "multiplayer.device.allowed_placeholder": "Only let these computers in: paste their device codes, one per line (empty means anyone)",
   "multiplayer.device.enable_first": "Turn on device codes first",
   "multiplayer.device.reason": "The host requires a device code. Turn yours on; if the host only lets listed computers in, send them your device code",
+  "multiplayer.device.old_code": "A device code on the list is from an older version and lets nobody in. Ask them to update Jay and send a new code (starting with JAYF2-)",
   "core.mp.private.no_space": "Not enough disk space to receive \"{0}\"",
   "core.mp.private.offline": "They're not online",
   "core.mp.private.no_answer": "No answer",

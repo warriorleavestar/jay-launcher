@@ -330,6 +330,9 @@ public sealed record DevicePolicy(bool Require, IReadOnlyList<ParsedFingerprint>
 
     public bool IsActive => Require || Allowed.Count > 0;
 
+    /// <summary>How many codes on the list are of a version without a device check (JAYF1): they admit nobody.</summary>
+    public int OldCodes => Allowed.Count(c => !FingerprintCode.HasCheck(c.Version));
+
     /// <summary>从用户填的文本里读名单（一行或用逗号、空格隔开的多个码），读不出来的跳过。</summary>
     public static IReadOnlyList<ParsedFingerprint> ParseCodes(string? text) =>
         [.. (text ?? "").Split(['\n', '\r', ',', '\uFF0C', ';', '\uFF1B', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

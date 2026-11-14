@@ -89,6 +89,17 @@ public sealed class DeviceFingerprintTests : IAsyncDisposable
     }
 
     [Fact]
+    public void AHostsListCountsOlderCodes()
+    {
+        var device = DeviceFingerprint.Enable(Dir("a"));
+        Assert.Equal(0, new DevicePolicy(false, DevicePolicy.ParseCodes(device.NewCode())).OldCodes);
+        var list = new DevicePolicy(false, DevicePolicy.ParseCodes(device.NewCode() + "\n" + V1Code(device) + "\n" + V1Code(device)));
+        Assert.Equal(3, list.Allowed.Count);
+        Assert.Equal(2, list.OldCodes);
+        Assert.Equal(0, DevicePolicy.None.OldCodes);
+    }
+
+    [Fact]
     public void AnswersToAHostsNoncesMakeNoCode()
     {
         var device = DeviceFingerprint.Enable(Dir("a"));

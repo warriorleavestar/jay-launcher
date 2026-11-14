@@ -1993,6 +1993,7 @@
   "multiplayer.device.allowed_placeholder": "只讓這些電腦進：貼上對方的裝置碼，一行一個（空著就不限）",
   "multiplayer.device.enable_first": "先在「裝置碼」裡把它開啟",
   "multiplayer.device.reason": "房主要求裝置碼：先開啟你的裝置碼；房主只讓名單裡的電腦進時，要把你的裝置碼發給房主",
+  "multiplayer.device.old_code": "名單裡有舊版本的裝置碼，誰也進不來。請對方更新 Jay，再發一個新碼（以 JAYF2- 開頭）",
   "core.mp.private.no_space": "磁碟空間不足，收不下「{0}」",
   "core.mp.private.offline": "對方不在線",
   "core.mp.private.no_answer": "對方沒有回應",
