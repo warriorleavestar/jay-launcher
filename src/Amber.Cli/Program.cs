@@ -214,6 +214,8 @@ try
             await installer.CompleteAsync(instance.Id, null, cts.Token);
             // 和启动器一样按这个版本的设置启动（命令行没有全局设置，只用版本自己的）。
             var settings = InstanceSettings.Load(dir, instance.Id);
+            // Commands, Java path and arguments Jay did not save are left out; say so instead of running without them silently.
+            if (settings.DroppedUnknownValues) Console.WriteLine($"SETTINGS-LEFT-OUT {settings.DropReason}");
             if (isolate) settings.Isolate = true;
             var java = !string.IsNullOrEmpty(settings.JavaPath) && File.Exists(settings.JavaPath)
                 ? settings.JavaPath

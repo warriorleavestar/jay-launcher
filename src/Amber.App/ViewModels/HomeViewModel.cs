@@ -579,6 +579,10 @@ public sealed partial class HomeViewModel : PageViewModel
         try
         {
             var settings = _service.EffectiveSettings(ctx, id);
+            // The instance's own commands, Java path and arguments were left out (Jay did not save them, or could not
+            // check them): say so, rather than launch with the global ones unannounced.
+            if (settings.DroppedUnknownValues)
+                Toasts.Show(L.F("home.launch.settings_dropped", id), Avalonia.Controls.Notifications.NotificationType.Warning);
             try { await RepairIfBrokenAsync(ctx, id, ct); }
             finally { if (_service.IsCurrentDirectory(ctx)) _service.NotifyInstanceStateChanged(id); }
             SetStatus(StatusMessage.Info("home.status.checking_game_files"));

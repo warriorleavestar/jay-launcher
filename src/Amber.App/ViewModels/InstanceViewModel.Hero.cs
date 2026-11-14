@@ -408,17 +408,32 @@ public sealed partial class InstanceViewModel
             own.MaxMemoryMb = raised;
             text = L.F("instance.lastrun.memory_done", raised);
         }
-        own.Save(_service.Directory, id);
+        if (!TrySaveSettings(own, id)) return null;
         InvalidateTab(InstanceTab.Settings);
         InvalidateTab(InstanceTab.Overview);
         return (text, () =>
         {
             var s = InstanceSettings.Load(_service.Directory, id);
             (s.AutoMemory, s.MaxMemoryMb) = before;
-            s.Save(_service.Directory, id);
+            if (!TrySaveSettings(s, id)) return;
             InvalidateTab(InstanceTab.Settings);
             InvalidateTab(InstanceTab.Overview);
         });
+    }
+
+    /// <summary>Saves instance settings for a fix; says so in a toast when they can't be saved (the file stays as it was).</summary>
+    private bool TrySaveSettings(InstanceSettings settings, string id)
+    {
+        try
+        {
+            settings.Save(_service.Directory, id);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Toasts.Show(L.F("instance.lastrun.fix_failed", ErrorText.Of(e)), NotificationType.Error);
+            return false;
+        }
     }
 
     private async Task<bool> DisableModAsync(GameInstance c, string name)

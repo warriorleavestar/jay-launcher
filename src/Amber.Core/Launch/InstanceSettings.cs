@@ -1,4 +1,5 @@
 using Amber.Core;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -7,6 +8,18 @@ using Amber.Core.Auth;
 using Amber.Core.Game;
 
 namespace Amber.Core.Launch;
+
+/// <summary>Why <see cref="InstanceSettings.Load"/> left out commands, the Java path and arguments.</summary>
+public enum InstanceSettingsDrop
+{
+    None,
+
+    /// <summary>Jay did not save these values (something else wrote the file).</summary>
+    NotSavedByJay,
+
+    /// <summary>Jay could not read its record just then, so it could not check them; trying again may load them.</summary>
+    RecordUnavailable,
+}
 
 /// <summary>全局和单个版本共用的启动设置。版本设置里为 null 的项沿用全局值。</summary>
 public sealed class InstanceSettings
@@ -34,24 +47,198 @@ public sealed class InstanceSettings
 
     public const string FileName = "amber-instance.json";
 
+    /// <summary>
+    /// True when the file held a command, Java path or argument that Jay did not write (the sandboxed game can write
+    /// the instance folder), or that Jay could not check. Those values were dropped; the rest of the settings load as
+    /// usual. <see cref="DropReason"/> says which. See <see cref="InstanceSettingsTrust"/>.
+    /// </summary>
+    [JsonIgnore]
+    public bool DroppedUnknownValues => DropReason != InstanceSettingsDrop.None;
+
+    /// <summary>Why <see cref="Load"/> dropped values, if it did.</summary>
+    [JsonIgnore]
+    public InstanceSettingsDrop DropReason { get; private set; }
+
+    /// <summary>
+    /// True when the instance folder holds settings that a save replaced before Jay could confirm them (see
+    /// <see cref="UnconfirmedCopies"/>). They are never used on their own; only the player can take them back.
+    /// </summary>
+    [JsonIgnore]
+    public bool HasUnconfirmedValues { get; private set; }
+
+    private const int MaxUnconfirmedCopies = 5;
+
+    /// <summary>
+    /// The files whose values <see cref="Load"/> dropped, by path, with the fingerprint dropped. A save that would
+    /// replace those values keeps a copy first, even when the record lists them by then (it could not be read at load
+    /// time): the player never saw them, so replacing them was not their choice.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, string> DroppedOnLoad = new(StringComparer.Ordinal);
+
     public static InstanceSettings Load(GameDirectory dir, string id)
     {
         var path = Path.Combine(dir.VersionDir(id), FileName);
-        if (!File.Exists(path)) return new InstanceSettings();
+        if (!File.Exists(path))
+        {
+            // Nothing to check, but the folder is still recorded as seen now, before a game from it can write here.
+            try { InstanceSettingsTrust.EnsureAdopted(dir, InstanceSettingsTrust.QuickWait); } catch (IOException) { }
+            return new InstanceSettings { HasUnconfirmedValues = UnconfirmedCopies(dir, id).Count > 0 };
+        }
+        var settings = ReadFile(path) ?? new InstanceSettings();
+        settings.HasUnconfirmedValues = UnconfirmedCopies(dir, id).Count > 0;
+        var verdict = InstanceSettingsTrust.Check(dir, settings);
+        if (verdict != InstanceSettingsTrust.Verdict.Trusted)
+        {
+            DroppedOnLoad[Path.GetFullPath(path)] = InstanceSettingsTrust.Fingerprint(settings)!;
+            settings.PreLaunchCommand = null;
+            settings.PostExitCommand = null;
+            settings.JavaPath = null;
+            settings.JvmArgs = null;
+            settings.GameArgs = null;
+            settings.DropReason = verdict == InstanceSettingsTrust.Verdict.RecordUnavailable
+                ? InstanceSettingsDrop.RecordUnavailable
+                : InstanceSettingsDrop.NotSavedByJay;
+        }
+        return settings;
+    }
+
+    /// <summary>
+    /// The copies of settings a save replaced before Jay could confirm them, oldest first. They hold what the file held
+    /// then, as it was; read one with <see cref="ReadUnconfirmed"/>. Nothing in them is used unless the player saves
+    /// it again. They are kept in Jay's own data folder (see <see cref="UnconfirmedFolder"/>), which the game never sees.
+    /// </summary>
+    public static IReadOnlyList<string> UnconfirmedCopies(GameDirectory dir, string id)
+    {
+        List<string> copies = [];
+        var folder = UnconfirmedFolder(dir, id);
+        for (var n = 1; n <= MaxUnconfirmedCopies; n++)
+            if (UnconfirmedPath(folder, n) is var copy && File.Exists(copy)) copies.Add(copy);
+        return copies;
+    }
+
+    /// <summary>The settings in an unconfirmed copy, unchecked (for showing them to the player); null when unreadable.</summary>
+    public static InstanceSettings? ReadUnconfirmed(string path) => ReadFile(path);
+
+    /// <summary>
+    /// Where the unconfirmed copies of one instance's settings are kept: in Jay's data folder, next to its record of
+    /// the settings it saved, named after the instance folder. Never in the instance folder: the game can write there,
+    /// so it could put a link where a copy is about to be written.
+    /// </summary>
+    public static string UnconfirmedFolder(GameDirectory dir, string id) =>
+        Path.Combine(InstanceSettingsTrust.DataFolder, "instance-settings-kept", InstanceSettingsTrust.FolderKey(dir.VersionDir(id)));
+
+    private static string UnconfirmedPath(string folder, int n) => Path.Combine(folder, n + ".json");
+
+    /// <summary>The file as it is, with no check of who wrote it; null when it cannot be read.</summary>
+    internal static InstanceSettings? ReadFile(string path)
+    {
         try
         {
-            return JsonSerializer.Deserialize(File.ReadAllText(path), Options.Info<InstanceSettings>()) ?? new InstanceSettings();
+            return Parse(File.ReadAllText(path));
         }
-        catch (JsonException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return new InstanceSettings();
+            return null;
         }
     }
 
+    /// <summary>The settings in <paramref name="json"/>; null when it is not a settings file.</summary>
+    internal static InstanceSettings? Parse(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, Options.Info<InstanceSettings>());
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes the settings. Throws <see cref="IOException"/> when Jay cannot record them as its own (see
+    /// <see cref="InstanceSettingsTrust"/>); the file is then left as it was.
+    /// <para>
+    /// When the file holds commands, a Java path or arguments that this save would replace and that the player could not
+    /// have seen (the record does not list them, or <see cref="Load"/> dropped them), the file is first copied aside
+    /// (see <see cref="UnconfirmedCopies"/>), so they are not lost. They stay unconfirmed: nothing trusts them again.
+    /// </para>
+    /// </summary>
     public void Save(GameDirectory dir, string id)
     {
-        Directory.CreateDirectory(dir.VersionDir(id));
-        File.WriteAllText(Path.Combine(dir.VersionDir(id), FileName), JsonSerializer.Serialize(this, Options.Info<InstanceSettings>()));
+        var folder = dir.VersionDir(id);
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, FileName);
+        var json = JsonSerializer.Serialize(this, Options.Info<InstanceSettings>());
+        var print = InstanceSettingsTrust.Fingerprint(this);
+        InstanceSettingsTrust.Trust(dir, this, isTrusted =>
+        {
+            KeepUnconfirmed(UnconfirmedFolder(dir, id), path, print, isTrusted);
+            WriteReplacing(folder, path, json);
+        });
+        DroppedOnLoad.TryRemove(Path.GetFullPath(path), out _);
+        DropReason = InstanceSettingsDrop.None;
+        HasUnconfirmedValues = UnconfirmedCopies(dir, id).Count > 0;
+    }
+
+    /// <summary>
+    /// Writes the settings file as a new file next to it, then moves that over it. The game can write the instance
+    /// folder, so the file there may be a link (or a hard link) to some other file; writing into it would change that
+    /// file. A move replaces only the name in this folder. The new file is created only if nothing has that name yet
+    /// (not even a link), so it cannot be redirected either.
+    /// </summary>
+    private static void WriteReplacing(string folder, string path, string json)
+    {
+        var temp = Path.Combine(folder, "." + FileName + "." + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                stream.Write(Encoding.UTF8.GetBytes(json));
+            InstanceSettingsTrust.MoveOver(temp, path);
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>
+    /// Copies the file aside, into <paramref name="keptFolder"/>, before a save replaces values the player never saw
+    /// (see <see cref="Save"/>).
+    /// </summary>
+    private static void KeepUnconfirmed(string keptFolder, string path, string? newPrint, Func<string, bool> isTrusted)
+    {
+        // Jay never writes a link here: one in its place was put there by something else and holds nothing of the
+        // player's. Reading through it would only copy some other file.
+        if (new FileInfo(path).LinkTarget is not null) return;
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return;
+        }
+        // Any other read error stops the save: the file is left as it was.
+        if (Parse(text) is not { } existing || InstanceSettingsTrust.Fingerprint(existing) is not { } oldPrint) return;
+        if (oldPrint == newPrint) return;
+        var droppedHere = DroppedOnLoad.TryGetValue(Path.GetFullPath(path), out var dropped) && dropped == oldPrint;
+        if (isTrusted(oldPrint) && !droppedHere) return;
+        Directory.CreateDirectory(keptFolder);
+        string? free = null;
+        for (var n = 1; n <= MaxUnconfirmedCopies; n++)
+        {
+            var copy = UnconfirmedPath(keptFolder, n);
+            if (!File.Exists(copy))
+            {
+                free ??= copy;
+                continue;
+            }
+            if (File.ReadAllText(copy) == text) return; // kept already
+        }
+        // All copies in use: the newest takes the place of the last, so the oldest (likely the player's own) stay.
+        File.WriteAllText(free ?? UnconfirmedPath(keptFolder, MaxUnconfirmedCopies), text);
     }
 
     /// <summary>
@@ -83,6 +270,9 @@ public sealed class InstanceSettings
     /// <summary>this 是版本设置，fallback 是全局设置。</summary>
     public InstanceSettings Over(InstanceSettings fallback) => new()
     {
+        // What Load left out stays known: the merged values below fall back to the global ones for those fields.
+        DropReason = DropReason,
+        HasUnconfirmedValues = HasUnconfirmedValues,
         Isolate = Isolate ?? fallback.Isolate,
         JavaPath = Empty(JavaPath) ?? fallback.JavaPath,
         AutoMemory = AutoMemory ?? fallback.AutoMemory,
