@@ -314,20 +314,27 @@ public sealed class DirectSession : IAsyncDisposable
     /// <summary>A bridge peer not admitted yet but heard from this recently counts as still joining.</summary>
     internal static readonly TimeSpan JoiningWindow = TimeSpan.FromSeconds(10);
 
+    internal enum BearerWaitResult { Ready, Unverified, Outdated }
+
     /// <summary>
-    /// True once every admitted IPv6 peer carrying the room has answered a fresh ping (<see cref="DirectPeer.Verified"/>)
-    /// and no IPv6 peer is still joining (heard from lately but not admitted yet: the exceptions are fixed when the exit
-    /// starts, so it would be cut off halfway through), false when one still isn't after <paramref name="wait"/>.
+    /// <see cref="BearerWaitResult.Ready"/> once every admitted IPv6 peer carrying the room has answered a fresh ping
+    /// (<see cref="DirectPeer.Verified"/>) and no IPv6 peer is still joining (heard from lately but not admitted yet: the
+    /// exceptions are fixed when the exit starts, so it would be cut off halfway through).
+    /// <see cref="BearerWaitResult.Outdated"/> at once when every peer still holding the switch runs an older Jay, whose
+    /// answers never verify, so waiting or trying again can't help; <see cref="BearerWaitResult.Unverified"/> when one
+    /// still isn't ready after <paramref name="wait"/>. The wait runs on a monotonic clock, so a change of the system
+    /// time neither cuts it short nor stretches it.
     /// </summary>
-    internal static async Task<bool> BearersVerifiedAsync(Func<IEnumerable<DirectPeer>> peers, TimeSpan wait, CancellationToken ct)
+    internal static async Task<BearerWaitResult> BearersVerifiedAsync(Func<IEnumerable<DirectPeer>> peers, TimeSpan wait, CancellationToken ct)
     {
-        var deadline = DateTime.UtcNow + wait;
+        var waited = Stopwatch.StartNew();
         while (true)
         {
-            if (!peers().Any(p => Normal(p.Remote.Address).AddressFamily == AddressFamily.InterNetworkV6
-                    && (p.Admitted ? !p.Verified : DateTime.UtcNow - p.LastSeen < JoiningWindow)))
-                return true;
-            if (DateTime.UtcNow >= deadline) return false;
+            var holding = peers().Where(p => Normal(p.Remote.Address).AddressFamily == AddressFamily.InterNetworkV6
+                && (p.Admitted ? !p.Verified : DateTime.UtcNow - p.LastSeen < JoiningWindow)).ToList();
+            if (holding.Count == 0) return BearerWaitResult.Ready;
+            if (holding.All(p => p.Admitted && p.Outdated)) return BearerWaitResult.Outdated;
+            if (waited.Elapsed >= wait) return holding.Any(p => p.Admitted && p.Outdated) ? BearerWaitResult.Outdated : BearerWaitResult.Unverified;
             await Task.Delay(100, ct);
         }
     }
@@ -345,9 +352,13 @@ public sealed class DirectSession : IAsyncDisposable
             // The traffic gate lets through only bridge peers that answered a fresh ping. A member over IPv6 whose answer
             // hasn't come back yet (just connected, a lost answer, a reconnect) would be left out and then cut off, ping
             // answers included: wait for it, and keep the running session when it doesn't come.
-            if (exitNode is not null && !await BearersVerifiedAsync(() => BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode,
-                    CurrentBridgePeers()), BearerWait, ct))
-                throw new IOException(L.T("core.mp.session.bearer_unverified"));
+            if (exitNode is not null)
+            {
+                var bearers = await BearersVerifiedAsync(() => BridgePeersCarryingTheRoom(IsHost, UsingFallbackNode,
+                    CurrentBridgePeers()), BearerWait, ct);
+                if (bearers == BearerWaitResult.Outdated) throw new IOException(L.T("core.mp.session.bearer_outdated"));
+                if (bearers == BearerWaitResult.Unverified) throw new IOException(L.T("core.mp.session.bearer_unverified"));
+            }
             var options = current with { ExitNode = exitNode, DirectUnderlayAddresses = UnderlayAddresses() };
             await StartEasyTierLockedAsync(options, ct);
             ObjectDisposedException.ThrowIf(_disposed, this);

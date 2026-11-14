@@ -43,6 +43,7 @@ public sealed class ExitPeerTrustTests
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         Assert.NotNull(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2), limit.Token));
         while (!(host.Peers.Single().Verified && guest.Peers.Single().Verified)) await Task.Delay(50, limit.Token);
+        Assert.False(host.Peers.Single().Outdated || guest.Peers.Single().Outdated);
     }
 
     [Fact]
@@ -204,6 +205,7 @@ public sealed class ExitPeerTrustTests
             Assert.Equal(new byte[] { 0, 0, 0, 9 }, packet.Buffer[1..^16]);
             break;
         }
+        Assert.True(peer.Outdated);
         // It echoes our pings whole, without its side: they count for round-trip times, not for verifying.
         var before = peer.PongsReceived;
         for (var answered = 0; answered < 2;)

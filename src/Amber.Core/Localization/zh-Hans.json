@@ -541,6 +541,7 @@
   "core.mp.session.fallback": "改用中转：",
   "core.mp.session.nofallback": "没有可用的中转（没开“打不通时用中转”或者中转列表是空的），不能改走中转",
   "core.mp.session.bearer_unverified": "IPv6 直连还没确认通，过几秒再试",
+  "core.mp.session.bearer_outdated": "有一位走 IPv6 直连的玩家用的 Jay 版本太旧，没法确认连通。请 TA 更新 Jay 后再试",
   "core.mp.session.guest": "加入方",
   "core.mp.session.host": "房主",
   "core.mp.session.hostnat": "房主网络类型：{0}；经加密通道收到 {1} 个地址",

@@ -3,6 +3,7 @@ using System.Reflection;
 using Amber.App.Services;
 using Amber.App.ViewModels;
 using Amber.Core.Multiplayer;
+using Amber.Core.Localization;
 
 namespace Amber.Core.Tests;
 
@@ -107,6 +108,38 @@ public sealed class ExitLifecycleRegressionTests
         Volatile.Write(ref joining._verified, true);
         await switching.WaitAsync(Deadline);
         Assert.Contains("2001:db8::7", session.EasyTier!.Options.DirectUnderlayAddresses);
+    }
+
+    [Fact]
+    public async Task AMemberOnAnOlderJayFailsAtOnceWithAMessageThatSaysToUpdate()
+    {
+        // An older Jay's answers never verify, so waiting and "try again" can't help: say what can.
+        var older = Ipv6Member(verified: false);
+        older._outdated = true;
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [older],
+            BearerWait = TimeSpan.FromSeconds(30),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var original = session.EasyTier!;
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        var error = await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline));
+        Assert.True(waited.Elapsed < TimeSpan.FromSeconds(5));
+        Assert.Equal(L.T("core.mp.session.bearer_outdated"), error.Message);
+        Assert.Same(original, session.EasyTier);
+
+        // Another member still on its way keeps the plain wait going; once it's verified, the older one decides.
+        var current = Ipv6Member(verified: false);
+        Assert.Equal(DirectSession.BearerWaitResult.Unverified,
+            await DirectSession.BearersVerifiedAsync(() => [current], TimeSpan.FromMilliseconds(200), default));
+        Volatile.Write(ref current._verified, true);
+        Assert.Equal(DirectSession.BearerWaitResult.Outdated,
+            await DirectSession.BearersVerifiedAsync(() => [current, older], TimeSpan.FromMilliseconds(200), default));
+        Assert.Equal(DirectSession.BearerWaitResult.Ready,
+            await DirectSession.BearersVerifiedAsync(() => [current], TimeSpan.FromMilliseconds(200), default));
     }
 
     [Fact]

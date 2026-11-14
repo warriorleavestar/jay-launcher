@@ -233,6 +233,12 @@ public sealed class DirectPeer
     /// </summary>
     public bool Verified => Volatile.Read(ref _verified);
     internal bool _verified;
+    /// <summary>
+    /// This peer sends the older, shorter ping (no side), so it runs a Jay from before pings carried sides and its
+    /// answers can never verify the address. Pings are sealed with the bridge key, so only a key holder can set this.
+    /// </summary>
+    public bool Outdated => Volatile.Read(ref _outdated);
+    internal bool _outdated;
     /// <summary>房主：这条桥的数据转发到本机哪个 EasyTier（批准前是大厅，批准后是房间）。</summary>
     internal int TargetPort;
     /// <summary>Host: cached loopback endpoint for <see cref="TargetPort"/>, so forwarding doesn't allocate one per packet.</summary>
@@ -629,6 +635,7 @@ public sealed class DirectBridge : IAsyncDisposable
                 p1.LastSeen = DateTime.UtcNow;
                 if (payload.Length < PingLength)
                 {
+                    Volatile.Write(ref p1._outdated, true);
                     await SendRawAsync(Seal(Pong, payload), from, _cts.Token);
                     break;
                 }
