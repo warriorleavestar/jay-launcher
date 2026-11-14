@@ -82,10 +82,14 @@ public static class RuntimeArchiveInstaller
 
         try
         {
+            // Each phase is reported before its step starts, so a step that fails at once is still named correctly.
+            progress?.Report(new(RuntimeInstallPhase.Downloading, 0, descriptor.ArchiveSize));
             await using (var input = await openArchive(descriptor, ct))
                 await WriteArchiveAsync(input, archivePath, descriptor, progress, ct);
 
+            progress?.Report(new(RuntimeInstallPhase.Extracting, 0, descriptor.MaximumExtractedSize));
             var files = ExtractVerifiedFiles(archivePath, staging, descriptor, progress, ct);
+            progress?.Report(new(RuntimeInstallPhase.Verifying, 0, files.Count));
             RequireRuntimeFiles(files);
             var manifest = new RuntimeBundleManifest(
                 RuntimeBundleManifest.CurrentFormat,
@@ -93,7 +97,6 @@ public static class RuntimeArchiveInstaller
                 descriptor.Architecture,
                 files);
             manifest.Write(Path.Combine(staging, "runtime-manifest.json"));
-            progress?.Report(new(RuntimeInstallPhase.Verifying, 0, files.Count));
             if (!await RuntimeBundleVerifier.VerifyAsync(staging, manifest, descriptor.Architecture, ct))
                 throw new InvalidDataException("The extracted Android runtime did not pass final verification.");
 

@@ -732,6 +732,112 @@ public sealed class MobilePortTests
         Assert.Equal([true, false, true, false], page.Busy);
     }
 
+    [Fact]
+    public async Task MobileSetupLogsTheFailingStageEvenBeforeThePostedProgressUpdateRuns()
+    {
+        var page = new RecordingSetupPage();
+        var attempt = new MobileSetupAttempt(page.Page, []);
+        // Stands in for Progress<T> on the UI thread: reports are queued and their callbacks have not run yet.
+        var posted = new PostedProgress<RuntimeInstallProgress>();
+
+        // Activation fails synchronously right after reporting it.
+        var result = await attempt.RunAsync(MobileSetupStage.RuntimeDownload, (current, _) =>
+        {
+            current.TrackRuntimeStages(posted).Report(new(RuntimeInstallPhase.Activating, 1, 1));
+            throw new IOException("The runtime folder is in use.");
+        });
+        Assert.Equal(MobileSetupResult.Failed, result);
+        Assert.StartsWith("setup failed: stage=RuntimeActivate error=IOException", page.Logs[^1]);
+        Assert.Equal([RuntimeInstallPhase.Activating], posted.Queued.Select(value => value.Phase));
+
+        // The real installer: extraction throws on the first entry, before any per-entry progress.
+        var parent = Path.Combine(Path.GetTempPath(), "amber-mobile-stage-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var archive = new MemoryStream();
+            using (var gzip = new GZipStream(archive, CompressionLevel.SmallestSize, leaveOpen: true))
+            using (var writer = new TarWriter(gzip, leaveOpen: false))
+                writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "../escape")
+                {
+                    DataStream = new MemoryStream("x"u8.ToArray(), writable: false)
+                });
+            var bytes = archive.ToArray();
+            posted.Queued.Clear();
+            result = await attempt.RunAsync(MobileSetupStage.RuntimeDownload, (current, token) =>
+                RuntimeArchiveInstaller.InstallAsync(
+                    Path.Combine(parent, "game-runtime"),
+                    RuntimeArchive(bytes),
+                    (_, _) => Task.FromResult<Stream>(new MemoryStream(bytes, writable: false)),
+                    current.TrackRuntimeStages(posted),
+                    token));
+            Assert.Equal(MobileSetupResult.Failed, result);
+            Assert.StartsWith("setup failed: stage=RuntimeExtract error=InvalidDataException", page.Logs[^1]);
+            Assert.Equal(RuntimeInstallPhase.Extracting, posted.Queued[^1].Phase);
+            Assert.False(File.Exists(Path.Combine(parent, "escape")));
+        }
+        finally
+        {
+            if (Directory.Exists(parent)) Directory.Delete(parent, true);
+        }
+
+        // The next attempt starts again from its first stage, not from where the last one failed.
+        result = await attempt.RunAsync(MobileSetupStage.RuntimeDownload, (_, _) => throw new HttpRequestException("offline"));
+        Assert.Equal(MobileSetupResult.Failed, result);
+        Assert.StartsWith("setup failed: stage=RuntimeDownload error=HttpRequestException", page.Logs[^1]);
+        Assert.Equal(3, page.Logs.Count);
+    }
+
+    [Fact]
+    public async Task MobileSetupPageCallbacksRunInOrderThroughFailureCancelAndRetry()
+    {
+        var page = new RecordingSetupPage();
+        var attempt = new MobileSetupAttempt(page.Page, []);
+        attempt.Cancel(); // nothing running: does nothing
+
+        // Failure: busy, then the message, then the panel comes back, and only then are the buttons enabled.
+        Assert.Equal(MobileSetupResult.Failed,
+            await attempt.RunAsync(MobileSetupStage.GameInstall, (_, _) => throw new InvalidOperationException("broken")));
+        Assert.Equal(["busy", "failed", "panel", "idle"], page.Events);
+
+        // Cancel: the user's cancel shows the cancelled text and the panel, then enables the buttons.
+        page.Events.Clear();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var run = attempt.RunAsync(MobileSetupStage.GameInstall, async (_, token) =>
+        {
+            started.SetResult();
+            await Task.Delay(Timeout.Infinite, token);
+        });
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(["busy"], page.Events);
+        attempt.Cancel();
+        Assert.Equal(MobileSetupResult.Cancelled, await run.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(["busy", "cancelled", "panel", "idle"], page.Events);
+
+        // Retry after the cancel gets a fresh token and completes; a finished attempt does not touch the panel.
+        page.Events.Clear();
+        var tokenWasCancelled = true;
+        Assert.Equal(MobileSetupResult.Completed, await attempt.RunAsync(MobileSetupStage.GameInstall, (_, token) =>
+        {
+            tokenWasCancelled = token.IsCancellationRequested;
+            return Task.CompletedTask;
+        }));
+        Assert.False(tokenWasCancelled);
+        Assert.Equal(["busy", "idle"], page.Events);
+        attempt.Cancel(); // after completion: does nothing to the next run
+
+        // The work took the panel away (the game is showing) and then failed: the panel is put back.
+        page.Events.Clear();
+        Assert.Equal(MobileSetupResult.Failed, await attempt.RunAsync(MobileSetupStage.GameInstall, async (current, _) =>
+        {
+            current.Stage = MobileSetupStage.GameLaunch;
+            await Task.Yield();
+            throw new InvalidOperationException("The game stopped.");
+        }));
+        Assert.Equal(["busy", "failed", "panel", "idle"], page.Events);
+        Assert.StartsWith("setup failed: stage=GameLaunch", page.Logs[^1]);
+        Assert.False(attempt.IsRunning);
+    }
+
     private static RuntimeBundleFile RuntimeFile(string path, byte[] bytes) => new(
         path,
         bytes.Length,
@@ -795,12 +901,38 @@ public sealed class MobilePortTests
         public int PanelShown { get; private set; }
         public int CancelledCount { get; private set; }
 
+        /// <summary>Every page call in order: busy, idle, panel, cancelled, failed.</summary>
+        public List<string> Events { get; } = [];
+
         public MobileSetupPage Page => new(
-            Busy.Add,
-            () => PanelShown++,
-            () => CancelledCount++,
-            Failures.Add,
+            busy =>
+            {
+                Busy.Add(busy);
+                Events.Add(busy ? "busy" : "idle");
+            },
+            () =>
+            {
+                PanelShown++;
+                Events.Add("panel");
+            },
+            () =>
+            {
+                CancelledCount++;
+                Events.Add("cancelled");
+            },
+            message =>
+            {
+                Failures.Add(message);
+                Events.Add("failed");
+            },
             Logs.Add);
+    }
+
+    /// <summary>Queues reports like a <see cref="Progress{T}"/> whose UI-thread callbacks have not run yet.</summary>
+    private sealed class PostedProgress<T> : IProgress<T>
+    {
+        public List<T> Queued { get; } = [];
+        public void Report(T value) => Queued.Add(value);
     }
 
     /// <summary>Hands out the first part of the data, then waits until <see cref="Release"/>.</summary>

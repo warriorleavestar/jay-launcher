@@ -168,7 +168,6 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             var report = new Progress<RuntimeInstallProgress>(value =>
             {
                 if (!acceptingProgress) return;
-                attempt.Stage = MobileSetupAttempt.StageOf(value.Phase);
                 var percent = value.Total <= 0 ? 0 : (int)Math.Clamp(value.Completed * 100 / value.Total, 0, 100);
                 progress.Progress = percent;
                 status.Text = value.Phase switch
@@ -182,7 +181,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
 
             await attempt.RunAsync(MobileSetupStage.RuntimeDownload, async (_, token) =>
             {
-                await AndroidRuntimeStore.InstallAsync(this, descriptor, report, token);
+                await AndroidRuntimeStore.InstallAsync(this, descriptor, attempt.TrackRuntimeStages(report), token);
                 acceptingProgress = false;
                 progress.Progress = 100;
                 status.Text = L.T("mobile.runtime.ready");

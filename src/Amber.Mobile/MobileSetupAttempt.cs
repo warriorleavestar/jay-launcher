@@ -45,8 +45,19 @@ public sealed class MobileSetupAttempt(MobileSetupPage page, IReadOnlyList<(stri
 {
     private const int MaxDetailLength = 300;
     private CancellationTokenSource? _cts;
+    private volatile MobileSetupStage _stage;
 
-    public MobileSetupStage Stage { get; set; }
+    /// <summary>
+    /// The step that is running now; a failure is logged under it. Set it before the step starts, on the thread that
+    /// runs the step (or report through <see cref="TrackStages{T}"/>), never from a posted UI callback, which may
+    /// not have run yet when the step throws.
+    /// </summary>
+    public MobileSetupStage Stage
+    {
+        get => _stage;
+        set => _stage = value;
+    }
+
     public bool IsRunning => _cts is not null;
 
     public void Cancel() => _cts?.Cancel();
@@ -83,6 +94,33 @@ public sealed class MobileSetupAttempt(MobileSetupPage page, IReadOnlyList<(stri
         {
             _cts = null;
             page.SetBusy(false);
+        }
+    }
+
+    /// <summary>
+    /// Wraps a progress handler so that every report moves <see cref="Stage"/> at once, on the reporting thread,
+    /// before the report is handed to <paramref name="inner"/> (usually a <see cref="Progress{T}"/> that posts to
+    /// the UI thread later). A step that throws right after reporting is then logged under its own stage.
+    /// </summary>
+    public IProgress<T> TrackStages<T>(Func<T, MobileSetupStage> stageOf, IProgress<T>? inner)
+    {
+        ArgumentNullException.ThrowIfNull(stageOf);
+        return new StageTrackingProgress<T>(this, stageOf, inner);
+    }
+
+    /// <summary><see cref="TrackStages{T}"/> for the runtime installer's phases.</summary>
+    public IProgress<RuntimeInstallProgress> TrackRuntimeStages(IProgress<RuntimeInstallProgress>? inner) =>
+        TrackStages<RuntimeInstallProgress>(value => StageOf(value.Phase), inner);
+
+    private sealed class StageTrackingProgress<T>(
+        MobileSetupAttempt attempt,
+        Func<T, MobileSetupStage> stageOf,
+        IProgress<T>? inner) : IProgress<T>
+    {
+        public void Report(T value)
+        {
+            attempt.Stage = stageOf(value);
+            inner?.Report(value);
         }
     }
 
