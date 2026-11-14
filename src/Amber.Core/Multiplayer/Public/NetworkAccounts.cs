@@ -407,7 +407,8 @@ public static class NetworkLoginClient
             && JsonNode.Parse(sealedNeed) is JsonObject needed)
         {
             var need = (needed["need"] as JsonArray ?? []).OfType<JsonObject>()
-                .Select(f => LoginFactorPrompt.From(f["name"]?.GetValue<string>(), f["prompt"]?.GetValue<string>())).OfType<LoginFactorPrompt>().Take(4).ToList();
+                .Select(f => LoginFactorPrompt.From(f["name"]?.GetValue<string>(), f["prompt"]?.GetValue<string>())).OfType<LoginFactorPrompt>()
+                .DistinctBy(p => p.Name, StringComparer.Ordinal).Take(4).ToList();
             if (need.Count == 0) throw new InvalidDataException(L.T("core.mp.account.failed"));
             var wrong = needed["wrong"]?.GetValue<bool>() == true;
             throw new SecondFactorRequiredException(need, wrong, L.T(wrong ? "core.mp.factor.wrong" : "core.mp.factor.needed"));
