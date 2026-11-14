@@ -432,7 +432,7 @@ public sealed partial class MultiplayerViewModel
             return true;
         }
         if (_session is not { } old) return false;
-        var options = old.Options with { Room = next };
+        var options = (CurrentSessionOptions ?? old.Options) with { Room = next };
         StopTransport();
         old.Dispose();
         _session = null;
