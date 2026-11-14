@@ -232,6 +232,9 @@ public static partial class ThemeLayout
         var count = 0;
         var used = new HashSet<string>();
         var tree = Node(pack, where, root, allowedRegions, used, 0, ref count);
+        // Each text node is checked on its own in Node; the page's texts read one after another are checked here too, so a
+        // reserved title can't be split over neighbouring text nodes.
+        if (tree is not null && SafetyWords.Contains(string.Concat(Texts(tree)))) throw new ThemePackException("reserved_words", where);
         if (tree is not null && !ContainerTypes.Contains(tree.Type))
         {
             var wrapper = new LayoutNode { Type = "stack" };
@@ -239,6 +242,13 @@ public static partial class ThemeLayout
             tree = wrapper;
         }
         return tree;
+    }
+
+    private static IEnumerable<string> Texts(LayoutNode node)
+    {
+        if (node.Text is { } text) yield return text;
+        foreach (var child in node.Children)
+            foreach (var t in Texts(child)) yield return t;
     }
 
     private static LayoutNode? Node(ThemePack pack, string where, JsonElement e, string[] allowedRegions, HashSet<string> used, int depth, ref int count)

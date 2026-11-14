@@ -10,6 +10,8 @@ public enum InstanceNameProblem
     Empty,
     InvalidCharacters,
     Reserved,
+    /// <summary>"new" and "current": Jay's own routes under library/ (the new-instance view, the instance in focus).</summary>
+    ReservedByJay,
     TrailingDotOrSpace,
     Taken,
 }
@@ -67,6 +69,7 @@ public static class NewInstanceNames
         if (name != name.TrimEnd('.', ' ') || name != name.TrimStart()) return InstanceNameProblem.TrailingDotOrSpace;
         var stem = name.Split('.')[0].TrimEnd();
         if (ReservedNames.Contains(stem)) return InstanceNameProblem.Reserved;
+        if (Amber.Core.Navigation.LegacyRoutes.IsReservedInstanceSegment(name)) return InstanceNameProblem.ReservedByJay;
         if (taken.Contains(name, StringComparer.OrdinalIgnoreCase)) return InstanceNameProblem.Taken;
         return InstanceNameProblem.None;
     }

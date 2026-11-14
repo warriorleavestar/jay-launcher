@@ -332,6 +332,21 @@ public sealed class RemoteControlTests
         Assert.False(sharer.ControlAllowed);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ScreenIsOpenedForTheConsentGiven(bool viewOnly)
+    {
+        // On Wayland the screen source asks the system for keyboard and pointer control too, unless the session is view-only.
+        var (hostRoom, _, guest, _) = Rooms();
+        var asked = new List<bool>();
+        var options = HostOptions(new FixedPolicy(new RemoteConsent(true, viewOnly)), new FakeScreen(), new FakeInput()) with { ScreenFor = v => { lock (asked) asked.Add(v); return new FakeScreen(); } };
+        await using var hub = new RemoteHub(hostRoom, options, 0);
+        await using var viewer = await ConnectAsControllerAsync(hub, guest);
+        Assert.NotNull(await viewer.StartAsync());
+        lock (asked) Assert.Equal([viewOnly], asked);
+    }
+
     [Fact]
     public async Task RevokedControl_InputIsDropped_ScreenContinues()
     {

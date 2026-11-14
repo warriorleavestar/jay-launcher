@@ -110,7 +110,8 @@ public sealed partial class MultiplayerViewModel
         if (_remoteHub is not null || !room.FromInvite || Child.HideRemoteControl) return;
         try
         {
-            var hub = new RemoteHub(room, new RemoteHostOptions(RemoteConsentPolicy, RemotePlatform.CreateScreen, RemotePlatform.CreateInput, RemoteCodec));
+            var hub = new RemoteHub(room, new RemoteHostOptions(RemoteConsentPolicy, RemotePlatform.CreateScreen, RemotePlatform.CreateInput, RemoteCodec)
+                { ScreenFor = RemotePlatform.CreateScreen });
             hub.SharingStarted += (sharer, _) => Dispatcher.UIThread.Post(() => TrackSharing(sharer));
             _remoteHub = hub;
         }
@@ -254,7 +255,7 @@ public sealed partial class MultiplayerViewModel
             await DeclineRemote(client, sessionId);
             return;
         }
-        var screen = RemotePlatform.CreateScreen();
+        var screen = RemotePlatform.CreateScreen(consent.ViewOnly);
         if (screen is null)
         {
             // macOS 还没授权屏幕录制（系统这时已经弹了授权提示）之类：这次按拒绝回，界面上写原因。
@@ -271,13 +272,19 @@ public sealed partial class MultiplayerViewModel
             var stream = await RemoteConnector.OpenAsync(host, port, room, RemoteRole.Controlled, sessionId, connect.Token);
             var sharer = new RemoteSharer(stream, screen, input, RemoteCodec, !consent.ViewOnly, HostDisplayName, HostFingerprint);
             if (_sessionCts is { } lifetime) sharer.EndWith(lifetime.Token);
-            sharer.Ended += _ =>
-            {
-                screen?.Dispose();
-                input?.Dispose();
-            };
             TrackSharing(sharer);
-            _ = Task.Run(sharer.RunAsync);
+            // Release the screen and input only once RunAsync has returned: Ended fires as soon as the session is told to
+            // stop, while a capture or an injected event may still be using them (same order as RemoteHub).
+            _ = Task.Run(async () =>
+            {
+                try { await sharer.RunAsync(); }
+                finally
+                {
+                    sharer.Abort(RemoteEnd.Disconnected);
+                    screen.Dispose();
+                    input?.Dispose();
+                }
+            });
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or OperationCanceledException
             or System.Security.Cryptography.CryptographicException or InvalidOperationException)

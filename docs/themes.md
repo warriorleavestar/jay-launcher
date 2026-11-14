@@ -320,13 +320,15 @@ map to the new ones: `accounts.title` → `me.title`, `accounts.list` → `me.ac
 ```jsonc
 "ui": { "url": "https://你的网站/net.jaytheme", "sha256": "64 位十六进制", "size": 123456, "scope": "network" }
 // 或者只带配色（不超过 64 KB，不能引用字体文件和图片）：
-"ui": { "inline": { "seed": { "accent": "#CC2233" } }, "scope": "network" }
+"ui": { "inline": { "seed": { "accent": "#CC2233" } }, "scope": "network", "format": 2 }
 ```
 
-- 网址只能是 https，由网络主人自己托管。Jay 只下载 `size` 字节，大小和 sha256 都对上才用，然后照常按导入规则检查；对不上整个丢掉，联机不受影响。下载过的按 sha256 缓存。
+- 内联配色的 `format`（可选）：`inline` 里的颜色名、字号名按哪个格式写。没写按 format 1 读并自动升级（和老主题包一样，比如 `FontDisplay` 当作大标题字号），所以已有的网络不受影响；按 format 2 写的新网络写 `"format": 2`，名字原样使用。
+
+- 网址只能是 https，由网络主人自己托管。Jay 只下载 `size` 字节，大小和 sha256 都对上才用，然后照常按导入规则检查；对不上整个丢掉，联机不受影响。下载过的按 sha256 缓存，只留正在用的网络的那一个。
 - `scope: "network"`：只在联机页里用，离开联机页换回你自己的主题；不改导航。
 - `scope: "global"`：Jay 先问你，同意了才用在整个 Jay 上（只对这一次的主题有效）。
-- 网络主题不写进设置、不出现在主题列表里。设置里可以关掉“使用联机网络带来的主题”；用 `--default-theme` 启动时也不用。
+- 网络主题不写进设置、不出现在主题列表里。设置里可以关掉“使用联机网络带来的主题”：关掉后不下载、不用，缓存也清掉；重新打开时马上给当前的网络取一次。用 `--default-theme` 启动时也不下载、不用。
 
 ## 边改边看
 

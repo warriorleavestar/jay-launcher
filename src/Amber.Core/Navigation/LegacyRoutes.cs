@@ -14,6 +14,19 @@ public static class LegacyRoutes
     /// <summary>The instance in focus, when a route cannot name one.</summary>
     public const string CurrentInstance = "library/current";
 
+    /// <summary>
+    /// Route segments under library/ that are not instances ("library/new", "library/current"). New instances can't take
+    /// these names; an older instance that has one is opened as the instance in focus (<see cref="InstanceRoute"/>).
+    /// </summary>
+    public static bool IsReservedInstanceSegment(string id) =>
+        string.Equals(id, "new", StringComparison.OrdinalIgnoreCase) || string.Equals(id, "current", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The route of an instance's page: library/{id}, or <see cref="CurrentInstance"/> for an instance whose name is a
+    /// reserved segment (the caller puts that instance in focus first).
+    /// </summary>
+    public static string InstanceRoute(string id) => IsReservedInstanceSegment(id) ? CurrentInstance : "library/" + id;
+
     /// <summary>Logs of the instance in focus (the old log page).</summary>
     public const string Logs = "library/current/logs";
 

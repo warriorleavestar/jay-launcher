@@ -48,12 +48,26 @@ public sealed partial class MultiplayerViewModel
             _diag.Add(L.T("multiplayer.public.diagnostics_category"), L.F("multiplayer.netconfig.theme_failed", e.Message));
             return;
         }
+        // Network themes turned off, or started with --default-theme: nothing is downloaded, and the cache is cleared.
+        // Turning the setting back on runs this again for the current network.
+        if (!ThemeService.NetworkThemesWanted)
+        {
+            SetTheme(null, "network");
+            var dir = NetworkThemeDir;
+            if (ThemeService.SafeModeReason != "requested") _ = Task.Run(() => NetworkTheme.Prune(dir, null));
+            return;
+        }
         _ = LoadAsync();
 
         async Task LoadAsync()
         {
             ThemePack? pack = null;
-            try { pack = await NetworkTheme.GetAsync(_service.Http, spec, NetworkThemeDir); }
+            try
+            {
+                pack = await NetworkTheme.GetAsync(_service.Http, spec, NetworkThemeDir);
+                // Keep only the theme of the network in use (none, when network themes were turned off during the download).
+                NetworkTheme.Prune(NetworkThemeDir, ThemeService.NetworkThemesWanted ? spec.Sha256 : null);
+            }
             catch (Exception e) when (e is ThemePackException or HttpRequestException or IOException or InvalidDataException or TaskCanceledException)
             {
                 _diag.Add(L.T("multiplayer.public.diagnostics_category"), L.F("multiplayer.netconfig.theme_failed", e.Message));
@@ -70,6 +84,18 @@ public sealed partial class MultiplayerViewModel
         {
             NetworkThemePack = pack;
             ThemeService.SetNetworkTheme(pack, scope);
+        }
+    }
+
+    /// <summary>The "use themes from multiplayer networks" setting changed: fetch or drop the current network's theme.</summary>
+    internal void NetworkThemesAllowedChanged()
+    {
+        if (_networkConfig is not null) ApplyNetworkTheme(_networkConfig);
+        // Turned off: clear the cache even when no network (or one without a theme) is in use right now.
+        if (!ThemeService.NetworkThemesWanted && ThemeService.SafeModeReason != "requested")
+        {
+            var dir = NetworkThemeDir;
+            _ = Task.Run(() => NetworkTheme.Prune(dir, null));
         }
     }
 

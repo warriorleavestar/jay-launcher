@@ -43,6 +43,9 @@ public sealed class NewInstanceNameTests
     [InlineData("nul.txt", InstanceNameProblem.Reserved)]
     [InlineData("com1", InstanceNameProblem.Reserved)]
     [InlineData("console", InstanceNameProblem.None)]
+    [InlineData("new", InstanceNameProblem.ReservedByJay)]
+    [InlineData("Current", InstanceNameProblem.ReservedByJay)]
+    [InlineData("new pack", InstanceNameProblem.None)]
     [InlineData("existing", InstanceNameProblem.Taken)]
     [InlineData("EXISTING", InstanceNameProblem.Taken)]
     public void NameCheck(string name, InstanceNameProblem expected) =>

@@ -164,6 +164,7 @@ public sealed partial class DownloadViewModel
         InstanceNameProblem.InvalidCharacters => L.T("newinstance.name.invalid"),
         InstanceNameProblem.TrailingDotOrSpace => L.T("newinstance.name.trailing"),
         InstanceNameProblem.Reserved => L.T("newinstance.name.reserved"),
+        InstanceNameProblem.ReservedByJay => L.T("newinstance.name.reserved_jay"),
         InstanceNameProblem.Taken => L.T("newinstance.name.taken"),
         _ => "",
     };

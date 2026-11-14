@@ -4,6 +4,8 @@ namespace Amber.Core.Themes;
 /// 安全界面的保留词（官方设计 §10.7）：只有 Jay 自己的安全确认框能写“Jay 安全提示”这类标题。
 /// 主题包的名字、作者、布局里的文字一旦含有这些词就整包拒绝，免得主题冒充安全提示骗人点按钮。
 /// 比对前去掉空白、统一大小写和全角半角，“Ｊａｙ 安全 提示”也算。
+/// Punctuation, symbols, invisible formatting characters and combining marks are dropped too, so "Safety-notice" or
+/// "Safety·notice" count as well.
 /// </summary>
 public static class SafetyWords
 {
@@ -26,8 +28,13 @@ public static class SafetyWords
 
     private static string Normalize(string s)
     {
-        var folded = s.Normalize(System.Text.NormalizationForm.FormKC);
-        return string.Concat(folded.Where(c => !char.IsWhiteSpace(c) && !char.IsControl(c) && c != '​' && c != '‌' && c != '‍' && c != '﻿'))
-            .ToLowerInvariant();
+        var folded = s.Normalize(System.Text.NormalizationForm.FormKD); // decomposed, so accents come apart and drop out below
+        return string.Concat(folded.Where(Kept)).ToLowerInvariant();
     }
+
+    /// <summary>Only letters and digits count: spacing, punctuation, symbols, invisible and combining characters don't.</summary>
+    private static bool Kept(char c) =>
+        !char.IsWhiteSpace(c) && !char.IsControl(c) && !char.IsPunctuation(c) && !char.IsSymbol(c)
+        && char.GetUnicodeCategory(c) is not (System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.NonSpacingMark
+            or System.Globalization.UnicodeCategory.EnclosingMark or System.Globalization.UnicodeCategory.SpacingCombiningMark);
 }

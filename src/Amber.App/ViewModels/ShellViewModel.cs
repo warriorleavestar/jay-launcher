@@ -138,7 +138,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>页面的路由（从别处直接换了当前页时，按它补一条历史）。</summary>
     public Route RouteOf(PageViewModel page) => page switch
     {
-        InstanceViewModel => Route.Of(Section.Library, _service.CurrentInstance ?? "current"),
+        InstanceViewModel => Route.Parse(_service.CurrentInstance is { } current ? LegacyRoutes.InstanceRoute(current) : LegacyRoutes.CurrentInstance),
         DownloadViewModel => Route.Parse(LegacyRoutes.NewInstance),
         ContentViewModel => Route.Parse("discover"),
         MultiplayerViewModel => Route.Parse("play"),
@@ -149,6 +149,13 @@ public sealed partial class ShellViewModel : ObservableObject
         AccountsViewModel => Route.Parse("me"),
         _ => Route.Library,
     };
+
+    /// <summary>Opens an installed instance's page (puts it in focus first, so an instance named "new" or "current" opens too).</summary>
+    public void OpenInstance(string id)
+    {
+        if (_service.InstalledVersions().Contains(id)) _service.SetCurrentInstance(id);
+        Navigate(LegacyRoutes.InstanceRoute(id));
+    }
 
     /// <summary>去一处。returnLabel 不为空时是带上下文的跳转：顶栏显示【完成，返回】和这段面包屑。</summary>
     public void Navigate(string route, string? returnLabel = null) =>
@@ -174,14 +181,18 @@ public sealed partial class ShellViewModel : ObservableObject
             _syncing = true;
             try
             {
-                // library/{实例}：把它设成焦点实例，实例页显示它。
+                // library/{实例}：把它设成焦点实例，实例页显示它。library/current shows the instance in focus (that is how an
+                // instance named "new" or "current" is opened, see LegacyRoutes.InstanceRoute).
                 string? instanceId = null;
-                if (route.Section == Section.Library && route[1] is { } id && id is not ("new" or "current")
+                if (route.Section == Section.Library && route[1] is { } id && !LegacyRoutes.IsReservedInstanceSegment(id)
                     && _service.InstalledVersions().Contains(id))
                 {
                     _service.SetCurrentInstance(id);
                     instanceId = id;
                 }
+                else if (route.Section == Section.Library && route[1] is "current" && _service.CurrentInstance is { } focused
+                    && _service.InstalledVersions().Contains(focused))
+                    instanceId = focused;
                 _main.CurrentPage = PageFor(route);
                 if (_main.CurrentPage is HelpCenterViewModel help) help.ShowArticle(route[1]);
                 if (_main.CurrentPage is MultiplayerViewModel multiplayer) multiplayer.ShowRoute(route[1]);

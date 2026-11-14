@@ -64,6 +64,17 @@ public class WaylandRemoteTests
     }
 
     [Fact]
+    public void ViewOnlyScreenAsksThePortalForTheScreenOnly()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        // Constructing a source doesn't start the portal session (that happens on the first capture).
+        using var viewOnly = new WaylandScreenSource(viewOnly: true);
+        Assert.False(viewOnly.WantsControl);
+        using var withControl = new WaylandScreenSource();
+        Assert.True(withControl.WantsControl);
+    }
+
+    [Fact]
     public void Portal_CapturesRealScreen()
     {
         if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("AMBER_WAYLAND_PORTAL_TEST") != "1") return;

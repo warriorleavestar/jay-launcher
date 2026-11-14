@@ -99,4 +99,47 @@ public class NetworkThemeTests : IDisposable
         Assert.Null(pack.Shell);
         Assert.Empty(pack.Pages);
     }
+
+    [Fact]
+    public async Task InlineTokensCanSayTheyAreFormat2()
+    {
+        const string tokens = """{ "sizes": { "FontDisplay": 40 } }""";
+        // Without "format" the tokens are format 1 and upgraded (FontDisplay meant the headline size then).
+        var old = await NetworkTheme.GetAsync(new HttpClient(new Handler([])), NetworkTheme.Parse(Json($$"""{ "inline": {{tokens}} }""")), _dir);
+        Assert.True(old.Upgraded);
+        Assert.Equal(40, old.Numbers["FontHeadline"]);
+        // "format": 2 keeps the author's format 2 names as written.
+        var spec = NetworkTheme.Parse(Json($$"""{ "inline": {{tokens}}, "format": 2 }"""));
+        Assert.Equal(2, spec.InlineFormat);
+        var pack = await NetworkTheme.GetAsync(new HttpClient(new Handler([])), spec, _dir);
+        Assert.False(pack.Upgraded);
+        Assert.Equal(40, pack.Numbers["FontDisplay"]);
+        Assert.False(pack.Numbers.ContainsKey("FontHeadline"));
+        foreach (var bad in new[] { "0", "3", "\"2\"", "1.5" })
+            Assert.Equal("bad_network_ui", Assert.Throws<ThemePackException>(() => NetworkTheme.Parse(Json($$"""{ "inline": {}, "format": {{bad}} }"""))).Code);
+    }
+
+    [Fact]
+    public void PruneKeepsOnlyTheThemeInUse()
+    {
+        var keep = new string('a', 64);
+        var other = new string('b', 64);
+        Directory.CreateDirectory(Path.Combine(_dir, keep));
+        Directory.CreateDirectory(Path.Combine(_dir, other));
+        Directory.CreateDirectory(Path.Combine(_dir, "not-a-cache-entry"));
+        File.WriteAllText(Path.Combine(_dir, keep + ".download"), "x");
+        File.WriteAllText(Path.Combine(_dir, other + ".download"), "x");
+
+        NetworkTheme.Prune(_dir, keep);
+        Assert.True(Directory.Exists(Path.Combine(_dir, keep)));
+        Assert.False(Directory.Exists(Path.Combine(_dir, other)));
+        Assert.True(File.Exists(Path.Combine(_dir, keep + ".download")));
+        Assert.False(File.Exists(Path.Combine(_dir, other + ".download")));
+        Assert.True(Directory.Exists(Path.Combine(_dir, "not-a-cache-entry")));
+
+        NetworkTheme.Prune(_dir, null);
+        Assert.False(Directory.Exists(Path.Combine(_dir, keep)));
+        Assert.True(Directory.Exists(Path.Combine(_dir, "not-a-cache-entry")));
+        NetworkTheme.Prune(Path.Combine(_dir, "missing"), null);
+    }
 }

@@ -2367,6 +2367,7 @@
   "newinstance.name.invalid": "名前に / \\ : * ? \" < > | は使えません。",
   "newinstance.name.trailing": "名前の先頭に空白、末尾に空白やピリオドは使えません。",
   "newinstance.name.reserved": "この名前は Windows で予約されています。別の名前にしてください。",
+  "newinstance.name.reserved_jay": "この名前は Jay 自身のページで使われています。別の名前にしてください。",
   "newinstance.name.taken": "同じ名前のインスタンスがすでにあります。",
   "newinstance.pack.heading": "Modpack ファイルを読み込む",
   "newinstance.pack.hint": "Modrinth（.mrpack）、CurseForge、MultiMC / Prism、HMCL の Modpack に対応。読み込む前に中身を確認できます。",

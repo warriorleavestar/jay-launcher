@@ -26,7 +26,11 @@ public enum RemoteRequestFailure
 public sealed record RemoteRequestResult(RemoteViewer? Viewer, RemoteRequestFailure Failure);
 
 /// <summary>房主这边被控时用到的东西：同意策略、截屏和注入（按需新建，结束时释放）、编码。</summary>
-public sealed record RemoteHostOptions(IRemoteConsentPolicy Consent, Func<IScreenSource?> Screen, Func<IInputSink?> Input, ITileCodec Codec);
+public sealed record RemoteHostOptions(IRemoteConsentPolicy Consent, Func<IScreenSource?> Screen, Func<IInputSink?> Input, ITileCodec Codec)
+{
+    /// <summary>The screen source for a session agreed to as view-only (true) or with control; defaults to <see cref="Screen"/>.</summary>
+    public Func<bool, IScreenSource?> ScreenFor { get; init; } = _ => Screen();
+}
 
 /// <summary>
 /// 房主电脑上的远程控制服务（端口 47662，只在房间网络里能连到）。所有远程控制连接都由成员发起：
@@ -201,7 +205,7 @@ public sealed class RemoteHub : IAsyncDisposable
             await DenyAsync(stream, RemoteDenyReason.Declined);
             return;
         }
-        var screen = _options.Screen();
+        var screen = _options.ScreenFor(consent.ViewOnly);
         if (screen is null)
         {
             await DenyAsync(stream, RemoteDenyReason.Unsupported);

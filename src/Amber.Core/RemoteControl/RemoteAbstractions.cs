@@ -125,13 +125,19 @@ public static class RemotePlatform
     }
 
     /// <summary>截屏来源；不支持或者（macOS）还没授权时 null，调用方按“不支持”拒绝。</summary>
-    public static IScreenSource? CreateScreen()
+    public static IScreenSource? CreateScreen() => CreateScreen(viewOnly: false);
+
+    /// <summary>
+    /// The screen source for a session the user agreed to in this way. View-only matters on Wayland, where the same
+    /// portal dialog would otherwise also ask for keyboard and pointer control.
+    /// </summary>
+    public static IScreenSource? CreateScreen(bool viewOnly)
     {
         try
         {
             if (OperatingSystem.IsWindows()) return new Windows.GdiScreenSource();
             if (OperatingSystem.IsMacOS()) return Unix.MacCg.EnsureScreenAccess() ? new Unix.MacScreenSource() : null;
-            if (OperatingSystem.IsLinux() && Unix.X11.IsWayland()) return Unix.WaylandSession.UnavailableReason() is null ? new Unix.WaylandScreenSource() : null;
+            if (OperatingSystem.IsLinux() && Unix.X11.IsWayland()) return Unix.WaylandSession.UnavailableReason() is null ? new Unix.WaylandScreenSource(viewOnly) : null;
             if (OperatingSystem.IsLinux()) return Unix.X11.UnavailableReason() is null ? new Unix.X11ScreenSource() : null;
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or InvalidOperationException) { }

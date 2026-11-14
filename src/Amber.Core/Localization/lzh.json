@@ -2263,6 +2263,7 @@
   "newinstance.name.invalid": "名中不可有 / \\ : * ? \" < > |。",
   "newinstance.name.trailing": "名不可以空起，亦不可以空或點終。",
   "newinstance.name.reserved": "此名 Windows 所留，請易之。",
+  "newinstance.name.reserved_jay": "此名 Jay 自用，請易之。",
   "newinstance.name.taken": "已有同名之局。",
   "newinstance.pack.heading": "引合輯之檔",
   "newinstance.pack.hint": "可用 Modrinth（.mrpack）、CurseForge、MultiMC / Prism、HMCL 之合輯。引前先觀其內。",
