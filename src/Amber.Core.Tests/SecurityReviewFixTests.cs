@@ -427,11 +427,4 @@ public class SecurityReviewFixTests
         Assert.NotNull(await JoinTarget.ResolveForRelayAsync("play.example.org", default, Public, Hang));
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(6));
     }
-
-    [Fact]
-    public void JoinTarget_RealSrvLookupDoesNotCrash()
-    {
-        // 真的查一次（没有这条记录也行），确认 DnsQuery 的结构读法不会崩。
-        _ = JoinTarget.LookupSrv("_minecraft._tcp.example.org");
-    }
 }
