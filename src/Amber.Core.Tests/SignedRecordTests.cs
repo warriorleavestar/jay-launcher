@@ -146,7 +146,39 @@ public class SignedRecordTests
                 var renewal = signer.Sign(lookup, [3], TimeSpan.FromDays(1), now + TimeSpan.FromHours(2));
                 await Client((restarted, key)).PutRecordAsync(renewal, default);
                 Assert.Equal(renewal.Seq, (await Client((restarted, key)).GetRecordAsync(lookup, Is(signer), default, seen: seen))!.Seq);
-                Assert.Equal(renewal.Seq, seen.Floor(lookup));
+                Assert.Equal(renewal.Seq, seen.Floor(lookup, signer.PublicKey));
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task AnotherSignersRecordDoesNotRaiseTheFloor()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var dir = Path.Combine(Path.GetTempPath(), "jay-rec-seq-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var key = X25519KeyPair.Generate();
+            var owner = new RecordSigner();
+            var other = new RecordSigner();
+            var lookup = SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16));
+            var seen = new RecordSeqMemory(Path.Combine(dir, RecordSeqMemory.FileName));
+            // A code naming another key took that key's much newer record under the same lookup.
+            await using (var server = Server(key))
+            {
+                await Client((server, key)).PutRecordAsync(other.Sign(lookup, [9], TimeSpan.FromDays(1), now + TimeSpan.FromDays(2)), default);
+                Assert.NotNull(await Client((server, key)).GetRecordAsync(lookup, Is(other), default, now, seen));
+            }
+            // The owner's record is still taken by a code naming the owner.
+            await using (var restarted = Server(key))
+            {
+                var mine = owner.Sign(lookup, [1], TimeSpan.FromDays(1), now);
+                await Client((restarted, key)).PutRecordAsync(mine, default);
+                Assert.Equal(mine.Seq, (await Client((restarted, key)).GetRecordAsync(lookup, Is(owner), default, now, seen))!.Seq);
             }
         }
         finally
@@ -163,13 +195,15 @@ public class SignedRecordTests
         {
             var seen = new RecordSeqMemory(Path.Combine(dir, RecordSeqMemory.FileName));
             var first = SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16));
-            seen.Note(first, 5);
-            seen.Note(first, 3);
-            Assert.Equal(5, seen.Floor(first));
-            for (var i = 0; i < RecordSeqMemory.MaxEntries + 5; i++) seen.Note(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), 1);
+            var signer = RandomNumberGenerator.GetBytes(SignedRecord.SignerLength);
+            seen.Note(first, signer, 5);
+            seen.Note(first, signer, 3);
+            Assert.Equal(5, seen.Floor(first, signer));
+            Assert.Equal(5, new RecordSeqMemory(Path.Combine(dir, RecordSeqMemory.FileName)).Floor(first, signer));
+            for (var i = 0; i < RecordSeqMemory.MaxEntries + 5; i++) seen.Note(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), signer, 1);
             var again = new RecordSeqMemory(Path.Combine(dir, RecordSeqMemory.FileName));
-            Assert.Equal(0, again.Floor(first));
-            Assert.Equal(0, again.Floor(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16))));
+            Assert.Equal(0, again.Floor(first, signer));
+            Assert.Equal(0, again.Floor(SignedRecord.Lookup(RandomNumberGenerator.GetBytes(16)), signer));
         }
         finally
         {

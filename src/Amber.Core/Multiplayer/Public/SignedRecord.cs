@@ -182,10 +182,11 @@ public sealed class RecordSigner
 }
 
 /// <summary>
-/// The highest <see cref="SignedRecord.Seq"/> this computer has accepted for each lookup, kept in a small file in the data
-/// folder. Passed as the floor to <see cref="RoomDirectoryClient.GetRecordAsync"/>, so once a newer record was seen, an
-/// older one that hasn't expired yet (put back after a directory restarted, or served by a directory on its own) is not
-/// taken again. Holds the most recent <see cref="MaxEntries"/> lookups.
+/// The highest <see cref="SignedRecord.Seq"/> this computer has accepted for each lookup and signer, kept in a small file in
+/// the data folder. Passed as the floor to <see cref="RoomDirectoryClient.GetRecordAsync"/>, so once a newer record was
+/// seen, an older one that hasn't expired yet (put back after a directory restarted, or served by a directory on its own) is
+/// not taken again. Kept per signer: a record some other key signed under the same lookup (only a code naming that key
+/// takes it) never raises the floor for the signer another code expects. Holds the most recent <see cref="MaxEntries"/>.
 /// </summary>
 public sealed class RecordSeqMemory(string path)
 {
@@ -194,19 +195,22 @@ public sealed class RecordSeqMemory(string path)
     private readonly Lock _gate = new();
     private Dictionary<string, (long Seq, long At)>? _seen;
 
-    /// <summary>The highest seq accepted for <paramref name="lookup"/>, or 0 when none was.</summary>
-    public long Floor(byte[] lookup)
+    /// <summary>The highest seq accepted for <paramref name="lookup"/> signed by <paramref name="signer"/>, or 0 when none was.</summary>
+    public long Floor(byte[] lookup, byte[] signer)
     {
-        lock (_gate) return Load().TryGetValue(Convert.ToHexStringLower(lookup), out var seen) ? seen.Seq : 0;
+        lock (_gate) return Load().TryGetValue(Key(lookup, signer), out var seen) ? seen.Seq : 0;
     }
 
-    /// <summary>Notes that a record with <paramref name="seq"/> was accepted for <paramref name="lookup"/> (keeps the highest).</summary>
-    public void Note(byte[] lookup, long seq)
+    /// <summary>
+    /// Notes that a record with <paramref name="seq"/> signed by <paramref name="signer"/> was accepted for
+    /// <paramref name="lookup"/> (keeps the highest).
+    /// </summary>
+    public void Note(byte[] lookup, byte[] signer, long seq)
     {
         lock (_gate)
         {
             var seen = Load();
-            var key = Convert.ToHexStringLower(lookup);
+            var key = Key(lookup, signer);
             if (seen.TryGetValue(key, out var had) && had.Seq >= seq) return;
             // When it was noted, for keeping the most recent: always later than the last one noted.
             var at = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), seen.Count == 0 ? 0 : seen.Values.Max(v => v.At) + 1);
@@ -216,6 +220,8 @@ public sealed class RecordSeqMemory(string path)
         }
     }
 
+    private static string Key(byte[] lookup, byte[] signer) => Convert.ToHexStringLower(lookup) + Convert.ToHexStringLower(signer);
+
     private Dictionary<string, (long Seq, long At)> Load()
     {
         if (_seen is not null) return _seen;
@@ -224,7 +230,7 @@ public sealed class RecordSeqMemory(string path)
         {
             if (File.Exists(path) && JsonNode.Parse(File.ReadAllText(path)) is JsonObject o)
                 foreach (var (k, v) in o)
-                    if (k.Length == SignedRecord.LookupLength * 2 && v is JsonObject e && e["seq"] is JsonValue s && s.TryGetValue<long>(out var seq)
+                    if (k.Length == (SignedRecord.LookupLength + SignedRecord.SignerLength) * 2 && v is JsonObject e && e["seq"] is JsonValue s && s.TryGetValue<long>(out var seq)
                         && e["at"] is JsonValue a && a.TryGetValue<long>(out var at))
                         _seen[k] = (seq, at);
         }
