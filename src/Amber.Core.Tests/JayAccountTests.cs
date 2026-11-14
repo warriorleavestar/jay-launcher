@@ -223,6 +223,41 @@ public sealed class JayAccountTests : IDisposable
         Assert.Empty(empty.Accounts);
     }
 
+    /// <summary>
+    /// The accounts file can't be read at start (another program holds it): Load doesn't throw, nothing is saved over the
+    /// file while it stays unreadable, and once it can be read again the next change keeps the accounts that were in it.
+    /// </summary>
+    [Fact]
+    public void UnreadableFileIsNeitherFatalNorOverwritten()
+    {
+        using var keys = DeviceKeys.Generate();
+        using var first = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        using var second = JayAccount.FromMnemonic(Bip39.Generate(MnemonicLanguage.English), null);
+        new JayAccountStore(_dir).Add(first, "First", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        var path = Path.Combine(_dir, JayAccountStore.FileName);
+        var before = File.ReadAllBytes(path);
+
+        var store = new JayAccountStore(_dir);
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            store.Load();
+            Assert.Empty(store.Accounts);
+            Assert.True(store.Unreadable);
+            Assert.Throws<IOException>(() => store.Add(second, "Second", backedUp: true, keys, "PC", DateTimeOffset.UtcNow));
+        }
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.False(File.Exists(path + ".broken"));
+
+        // Readable again: the next change reads the file first and keeps what is in it.
+        store.Add(second, "Second", backedUp: true, keys, "PC", DateTimeOffset.UtcNow);
+        Assert.False(store.Unreadable);
+        var again = new JayAccountStore(_dir);
+        again.Load();
+        Assert.Equal(2, again.Accounts.Count);
+        Assert.Contains(again.Accounts, a => a.Address == first.Address);
+        Assert.Contains(again.Accounts, a => a.Address == second.Address);
+    }
+
     /// <summary>An account saved with a version 0 address moves to its version 1 address, and says so for the bindings.</summary>
     [Fact]
     public void SavedVersion0AddressMovesToTheNewAddress()

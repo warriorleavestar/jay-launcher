@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
 
 namespace Amber.Core.Identity;
@@ -18,7 +19,9 @@ public sealed record JayAccountEntry(string Address, string Label, bool BackedUp
 /// The Jay accounts saved on this computer, in jay-accounts-2.json in the data directory. Each seed is encrypted like the
 /// multiplayer identity (Windows: DPAPI for the current user; macOS/Linux: a 0600 local key + AES-GCM). The recovery phrase
 /// itself is never stored: only the seed derived from it (and the optional extra password), so the words are only ever on paper.
-/// A damaged file is kept as .broken and treated as empty, never crashing the app.
+/// A damaged file is kept as .broken and treated as empty, never crashing the app. A file that can't be read right now
+/// (locked by another program, no permission) is left alone: the list is empty for now, and nothing is saved over it until
+/// a later read succeeds, so the accounts in it are never lost.
 /// Accounts saved by versions before version 1 addresses (in jay-accounts.json) are read once, when the new file doesn't
 /// exist yet, and that file is never written: an older version sharing or going back to this data folder keeps its accounts,
 /// and can't erase the new ones it doesn't understand.
@@ -47,6 +50,15 @@ public sealed class JayAccountStore(string directory)
     public JayAccountEntry? Find(string? address)
     {
         lock (_gate) return _items.Select(i => i.Entry).FirstOrDefault(e => e.Address == address);
+    }
+
+    // The file exists but couldn't be read (an I/O or permission error): saving would replace accounts that weren't read.
+    private bool _unreadable;
+
+    /// <summary>The accounts file is there but couldn't be read this time; it is tried again before the next save.</summary>
+    public bool Unreadable
+    {
+        get { lock (_gate) return _unreadable; }
     }
 
     // Version 0 entries that couldn't be moved this time (the seed didn't open: a locked file, DPAPI unavailable, ...).
@@ -98,6 +110,7 @@ public sealed class JayAccountStore(string directory)
         {
             _items.Clear();
             _unmoved.Clear();
+            _unreadable = false;
             var legacy = !File.Exists(PathOnDisk);
             var moved = false;
             var path = legacy ? Path.Combine(directory, LegacyFileName) : PathOnDisk;
@@ -150,12 +163,31 @@ public sealed class JayAccountStore(string directory)
                 try { File.Copy(PathOnDisk, PathOnDisk + ".broken", true); }
                 catch (Exception copy) when (copy is IOException or UnauthorizedAccessException) { }
             }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Not damaged, just not readable now: start empty and keep the file exactly as it is.
+                _unmoved.Clear();
+                _items.Clear();
+                _unreadable = true;
+            }
         }
+    }
+
+    /// <summary>Before a change is saved: when the file couldn't be read at start, read it again first, and refuse while it still can't be.</summary>
+    private void ReadAgainIfUnreadable()
+    {
+        bool unreadable;
+        lock (_gate) unreadable = _unreadable;
+        if (!unreadable) return;
+        Load();
+        lock (_gate)
+            if (_unreadable) throw new IOException(L.T("core.identity.accounts_unreadable"));
     }
 
     /// <summary>Saves an account (replacing one with the same address) and certifies this device's keys for it.</summary>
     public JayAccountEntry Add(JayAccount account, string label, bool backedUp, DeviceKeys device, string deviceName, DateTimeOffset now)
     {
+        ReadAgainIfUnreadable();
         Directory.CreateDirectory(directory);
         var seed = account.ExportSeed();
         string protectedSeed;
@@ -272,6 +304,8 @@ public sealed class JayAccountStore(string directory)
 
     private void SaveLocked()
     {
+        // Never replace a file whose accounts weren't read.
+        if (_unreadable) throw new IOException(L.T("core.identity.accounts_unreadable"));
         var accounts = new JsonArray();
         foreach (var (entry, seed) in _items)
         {
