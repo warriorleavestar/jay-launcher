@@ -1516,6 +1516,7 @@
   "multiplayer.rekey.done_missed": "Kicked {0}. The room switched to new keys. {1} people were offline and need a new invite.",
   "multiplayer.rekey.reconnecting": "The room switched to new keys. Reconnecting…",
   "multiplayer.kick.invite_revoked": "Kicked {0}. The room switched to new keys. The invite they used is now void; send a new one to anyone else you still want to invite.",
+  "multiplayer.kick.now_asking": "Kicked {0}. The room switched to new keys. From now on you approve everyone who knocks with this room's open invite, so {0} can't come back under a new identity.",
   "multiplayer.kick.invite_revoked_missed": "Kicked {0}. The room switched to new keys. {1} people were offline and need a new invite. The invite they used is now void; send a new one to anyone else you still want to invite.",
   "core.mp.direct.admitted": "{0} proved they are an approved member; the direct bridge now reaches the room",
   "core.mp.direct.kicked": "Dropped the direct bridge of {0} (kicked)",

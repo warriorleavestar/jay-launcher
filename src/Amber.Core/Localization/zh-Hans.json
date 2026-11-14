@@ -1485,6 +1485,7 @@
   "multiplayer.rekey.done_missed": "已踢出 {0}，房间换了密钥。有 {1} 个人当时不在线，需要重新邀请",
   "multiplayer.rekey.reconnecting": "房间换了密钥，正在重连",
   "multiplayer.kick.invite_revoked": "已踢出 {0}，房间换了密钥。这张邀请已作废，还要邀请的人请重新发一张",
+  "multiplayer.kick.now_asking": "已踢出 {0}，房间换了密钥。之后凡是用这个房间公开邀请敲门的人都要你批准，{0} 换个身份也不能直接进来",
   "multiplayer.kick.invite_revoked_missed": "已踢出 {0}，房间换了密钥。有 {1} 个人当时不在线，需要重新邀请。这张邀请已作废，还要邀请的人请重新发一张",
   "core.mp.direct.admitted": "{0} 证明了自己是批准过的成员，直连桥接到房间",
   "core.mp.direct.kicked": "断开了 {0} 的直连桥（已被踢出）",

@@ -374,13 +374,20 @@ public sealed partial class MultiplayerViewModel
         {
             // 连他进来用的那张邀请一起作废（禁入名单按公钥记，换个身份就能拿同一张再进来）。
             var inviteRevoked = false;
+            // Open invites (public, password, direct rooms) that let people in unasked ask from now on: tell the host.
+            var openBefore = _lobby?.Book.Pending.Count(i => i.Standing && i.AutoApprove) ?? 0;
             if (members.FindGuest(item.PublicKey) is { } entry)
             {
                 // 先告诉他“你已被移出房间”（他那边停止联机），等他确认收到（最多 2 秒，旧客户端不回确认就等满）再作废钥匙断开。
                 await hub.NotifyKickedAsync(entry);
                 inviteRevoked = members.Kick(entry, _lobby?.Book);
             }
-            else members.Ban(item.PublicKey, item.Name);
+            else
+            {
+                members.Ban(item.PublicKey, item.Name);
+                _lobby?.Book.AskAfterKick();
+            }
+            var nowAsking = openBefore > 0;
             Members.Remove(item);
             RefreshInvites();
             RefreshBanned();
@@ -396,6 +403,7 @@ public sealed partial class MultiplayerViewModel
             if (!SwitchNetwork(room.Rekeyed(next.ToRekey()))) return;
             SetStatus(missed.Count > 0 && inviteRevoked ? StatusMessage.Warning("multiplayer.kick.invite_revoked_missed", item.Name, missed.Count)
                 : missed.Count > 0 ? StatusMessage.Warning("multiplayer.rekey.done_missed", item.Name, missed.Count)
+                : nowAsking ? StatusMessage.Warning("multiplayer.kick.now_asking", item.Name)
                 : inviteRevoked ? StatusMessage.Warning("multiplayer.kick.invite_revoked", item.Name)
                 : StatusMessage.Success("multiplayer.rekey.done", item.Name));
         }

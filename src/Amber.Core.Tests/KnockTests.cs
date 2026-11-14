@@ -734,6 +734,42 @@ public sealed class KnockTests : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// After a kick, an open (auto-approve) standing invite asks the host for every knock: the kicked person can't come
+    /// back unasked under a new identity. Trusted friends still get straight in.
+    /// </summary>
+    [Fact]
+    public async Task AKickMakesOpenStandingInvitesAsk()
+    {
+        _decide = (_, _) => Task.FromResult(false);
+        var server = Server();
+        var open = _book.CreateStanding(true, TunnelSettings.Default);
+        Assert.True((await KnockAsync(open.Invite, "Griefer")).Approved);
+        lock (_asked) Assert.Empty(_asked);
+
+        var entry = server.Members.FindGuest(_guest.PublicKey)!;
+        Assert.False(server.Members.Kick(entry, _book));
+        Assert.False(open.AutoApprove);
+        Assert.False(open.Revoked);
+
+        using var reset = X25519KeyPair.Generate();
+        using (var c = new TcpClient())
+        {
+            await c.ConnectAsync(IPAddress.Loopback, server.Port);
+            Assert.False((await KnockClient.KnockAsync(c.GetStream(), open.Invite, reset, "Griefer2", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5))).Approved);
+        }
+        lock (_asked) Assert.Single(_asked);
+
+        using var friend = X25519KeyPair.Generate();
+        _trusted = pub => pub.AsSpan().SequenceEqual(friend.PublicKey);
+        using (var c = new TcpClient())
+        {
+            await c.ConnectAsync(IPAddress.Loopback, server.Port);
+            Assert.True((await KnockClient.KnockAsync(c.GetStream(), open.Invite, friend, "Friend", "0.6.0", decisionTimeout: TimeSpan.FromSeconds(5))).Approved);
+        }
+        lock (_asked) Assert.Single(_asked);
+    }
+
     private static readonly KnockLimits Watching = Fast with { DecisionTimeout = TimeSpan.FromMinutes(5), DisconnectCheck = TimeSpan.FromMilliseconds(100) };
 
     /// <summary>Waits until the host answers or the knock's token is cancelled (the card goes away).</summary>

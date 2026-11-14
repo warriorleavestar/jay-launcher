@@ -254,11 +254,13 @@ public sealed class MemberTable
     /// 踢出：记进禁入名单、移出成员表（钥匙作废，现有连接马上断开），并作废他进来用的那张邀请——
     /// 禁入名单按公钥记，换一个身份就能绕过，所以那张邀请也不能再用。
     /// 那张邀请本来还有剩余次数时返回 true（界面提示房主：还要邀请的人请重新发一张）。
+    /// Standing invites stay, but the ones that let people in unasked ask the host from now on (<see cref="InviteBook.AskAfterKick"/>).
     /// </summary>
     public bool Kick(MemberEntry entry, InviteBook? book)
     {
         Ban(entry.PublicKey, entry.Name);
         Remove(entry);
+        book?.AskAfterKick();
         if (entry.Invite is not { } invite || book is null || invite.Standing) return false;
         var hadUses = invite.IsUsable(book.Now);
         book.Revoke(invite);

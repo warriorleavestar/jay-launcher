@@ -461,10 +461,18 @@ public sealed class PendingInvite
     /// <summary>No use count (<see cref="InviteBook.UnlimitedUses"/>, standing and long-lived invites).</summary>
     public bool Unlimited => Uses == InviteBook.UnlimitedUses;
     public DateTimeOffset? ExpiresAt { get; }
-    public bool AutoApprove { get; }
+    /// <summary>
+    /// Lets people in without asking the host. A standing invite stops doing so after a kick in the room (see
+    /// <see cref="InviteBook.AskAfterKick"/>): bans go by key, and a new identity would otherwise walk straight back in.
+    /// </summary>
+    public bool AutoApprove { get; private set; }
+
+    internal void StopAutoApprove() => AutoApprove = false;
+
     public bool Revoked { get; internal set; }
     /// <summary>
-    /// 长期邀请：在公共网络上公开或设了密码的房间用它敲门，次数不限、房间关掉才失效。踢人时不作废它（被踢的人按公钥进了禁入名单）。
+    /// 长期邀请：在公共网络上公开或设了密码的房间用它敲门，次数不限、房间关掉才失效。踢人时不作废它（被踢的人按公钥进了禁入名单），
+    /// but from then on it asks the host for every knock (<see cref="InviteBook.AskAfterKick"/>).
     /// </summary>
     public bool Standing { get; }
 
@@ -605,6 +613,23 @@ public sealed class InviteBook(Func<DateTimeOffset>? clock = null)
         }
         Changed?.Invoke();
         return invite;
+    }
+
+    /// <summary>
+    /// After a kick: every standing invite that lets people in unasked asks the host from now on (public, password and
+    /// direct rooms keep their invite, but the kicked person can't come back as someone new). Returns how many changed.
+    /// </summary>
+    public int AskAfterKick()
+    {
+        int changed;
+        lock (_gate)
+        {
+            var open = _invites.Where(i => i.Standing && i.AutoApprove && !i.Revoked).ToList();
+            foreach (var invite in open) invite.StopAutoApprove();
+            changed = open.Count;
+        }
+        if (changed > 0) Changed?.Invoke();
+        return changed;
     }
 
     public void Revoke(PendingInvite invite)

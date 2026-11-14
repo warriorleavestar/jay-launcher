@@ -1436,6 +1436,7 @@
   "multiplayer.rekey.done_missed": "已逐 {0}，房已易鑰。時有 {1} 人不在，須復邀之",
   "multiplayer.rekey.reconnecting": "房已易鑰，方復連",
   "multiplayer.kick.invite_revoked": "已逐 {0}，房已易鑰。此邀已廢，猶欲邀者，請復發一邀",
+  "multiplayer.kick.now_asking": "已逐 {0}，房已易鑰。自今凡持此房公邀叩門者，皆待君允，{0} 不得易身而返",
   "multiplayer.kick.invite_revoked_missed": "已逐 {0}，房已易鑰。時有 {1} 人不在，須復邀之。此邀已廢，猶欲邀者，請復發一邀",
   "core.mp.direct.admitted": "{0} 自證為已許之成員，直連橋接於房",
   "core.mp.direct.kicked": "已斷 {0} 之直連橋（已見逐）",
