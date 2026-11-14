@@ -20,6 +20,8 @@ public sealed class MultiplayerTestLogRedactionTests
     private const string Net = "QWERTYUIOPAS";
     private const string RoomSecret = "MNBVCXZLKJHGFDSA2468";
     private const string Passphrase = "orbitlanternmaplequiet";
+    // EasyTier's own secret is derived from the room code, so it never appears inside one.
+    private const string EtSecret = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
     private const string WrappedRoom = $"AMB-T2D-{Net}-{RoomSecret}-25565";
     private const string PlainRoom = $"AMB-{Net}-{RoomSecret}-25566";
     private const string Invite = $"JAY2-{A}-{B}";
@@ -30,8 +32,19 @@ public sealed class MultiplayerTestLogRedactionTests
         "LOCAL 127.0.0.1:40000",
         "PATH direct 12ms",
         "RPC 15888",
-        "ARGS --network-name <secret> --network-secret <secret>",
+        "  et| network_secret_digest: Some([1, 2, 3])",
+        "  et| network_name: \"jay-room\"",
         @"CLI C:\work\Jay-launcher\easytier-cli.exe",
+    ];
+
+    /// <summary>The forms EasyTier's verbose output and the CLI print its secret in (see NetDiagnostics.SecretConfigPattern).</summary>
+    private static readonly string[] EasyTierSecretLines =
+    [
+        $"  et| network_secret = Some(\"{EtSecret}\")",
+        $"  et| NetworkIdentity {{ network_name: \"jay-room\", network_secret: Some(\"{EtSecret}\"), network_secret_digest: Some([1]) }}",
+        $"  et| network_secret: '{EtSecret}'",
+        $"  et| network_secret={EtSecret}",
+        $"ARGS --network-name jay-room --network-secret {EtSecret}",
     ];
 
     [Fact]
@@ -61,6 +74,7 @@ public sealed class MultiplayerTestLogRedactionTests
             [
                 "TRANSPORT Wrapped disguise=True server=- socks=-", .. Harmless, $"ROOM {WrappedRoom}",
                 $"  et| network_secret = \"{RoomSecret}\"", $"  et| {{\"network_secret\":\"{RoomSecret}\"}}",
+                .. EasyTierSecretLines,
             ];
             Write(work, "room-host.out.txt", hostOut);
             Write(work, "room-host.err.txt", [$"error: room {WrappedRoom} closed"]);
@@ -72,7 +86,7 @@ public sealed class MultiplayerTestLogRedactionTests
             Write(work, "direct-guest.out.txt", [$"  lobby| knocking with {InviteWithGame}", "DIRECT", "LOCAL 127.0.0.1:40001"]);
             Write(work, "direct-guest.err.txt", [$"Unhandled exception: invite {InviteWithGame} expired"]);
             // Early exit: the host printed its codes after the script stopped waiting, so no code was captured.
-            Write(work, "early.out.txt", [$"ROOM {PlainRoom}", $"INVITE {Invite}", $"  lobby| retry {Invite}", .. Harmless]);
+            Write(work, "early.out.txt", [$"ROOM {PlainRoom}", $"INVITE {Invite}", $"  lobby| retry {Invite}", .. Harmless, .. EasyTierSecretLines]);
             Write(work, "early.err.txt", [$"crash while serving {PlainRoom}"]);
 
             var harness = $$"""
@@ -118,7 +132,7 @@ public sealed class MultiplayerTestLogRedactionTests
             Assert.Contains("PASS", output);
 
             var log = await File.ReadAllTextAsync(Path.Combine(work, "log.txt"));
-            foreach (var secret in new[] { A, B, RoomSecret, Passphrase, Net, WrappedRoom, PlainRoom, Invite, InviteWithGame })
+            foreach (var secret in new[] { A, B, RoomSecret, Passphrase, Net, WrappedRoom, PlainRoom, Invite, InviteWithGame, EtSecret })
             {
                 Assert.DoesNotContain(secret, log);
                 Assert.DoesNotContain(secret, output);
@@ -126,6 +140,9 @@ public sealed class MultiplayerTestLogRedactionTests
             foreach (var prefix in new[] { "ROOM", "INVITE", "SEALED", "PASSPHRASE", "REPLY" })
                 Assert.Contains($"  {prefix} <hidden>", log);
             Assert.Contains("network_secret = \"<hidden>\"", log);
+            Assert.Contains("network_secret = Some(\"<hidden>\")", log);
+            Assert.Contains("network_secret: Some(\"<hidden>\"), network_secret_digest", log);
+            Assert.Contains("ARGS --network-name jay-room --network-secret <hidden>", log);
             foreach (var line in Harmless) Assert.Contains("  " + line, log);
             Assert.Contains("PASS room", log);
             Assert.Contains("FAIL direct join failed for <hidden>", log);

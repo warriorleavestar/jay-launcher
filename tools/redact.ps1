@@ -12,8 +12,11 @@ $script:CredentialCodePatterns = @(
     '\bAMB(?:-|DIRECT|REPLY)[0-9A-Za-z*~$=+/_.\-]*',
     '\bJAY[0-9A-Z]*-[0-9A-Za-z*~$=+/_.\-]+'
 )
-# "network_secret = ..." and similar key/value forms from verbose EasyTier output.
-$script:SecretValuePattern = '(?i)(network[_-]?secret["'']?\s*[=:]\s*["'']?)[^"''\s,;}]+'
+# EasyTier's own secret, which is derived from the room code and so never matches it as text. Same forms as
+# NetDiagnostics.SecretConfigPattern: network_secret = "x", network_secret: Some("x"), {"network_secret":"x"}, unquoted.
+$script:SecretValuePattern = '(?i)(network[_-]?secret["'']?\s*[:=]\s*(?:Some\(\s*)?["'']?)[^"''\s,;)}]+'
+# The command-line form, as NetDiagnostics.SecretArgPattern.
+$script:SecretArgPattern = '(?i)(--network-secret\s+)\S+'
 
 function Hide-Credentials([string]$line, [string[]]$known = @()) {
     if ($null -eq $line) { return $line }
@@ -22,6 +25,7 @@ function Hide-Credentials([string]$line, [string[]]$known = @()) {
     }
     $line = $line -creplace $script:CredentialLinePattern, ('$1' + $script:RedactedPlaceholder)
     foreach ($pattern in $script:CredentialCodePatterns) { $line = $line -creplace $pattern, $script:RedactedPlaceholder }
+    $line = $line -replace $script:SecretArgPattern, ('$1' + $script:RedactedPlaceholder)
     return $line -replace $script:SecretValuePattern, ('$1' + $script:RedactedPlaceholder)
 }
 
