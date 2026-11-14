@@ -166,6 +166,32 @@ public static class DirectKeys
     public static byte[] Bridge(ReadOnlySpan<byte> lobbyKey) => Derive(lobbyKey, "bridge");
 
     /// <summary>
+    /// The host's side of the admission: it shows the guest that it holds this member's key, over the guest's fresh
+    /// nonce and the bridge's challenge. Everyone who saw the invite holds the bridge key, so passing the bridge HMAC does
+    /// not show that a peer is the host; this does. A separate key from <see cref="AdmitProof"/>, so neither proof can be
+    /// passed off as the other.
+    /// </summary>
+    public static byte[] HostProof(MemberKey member, string session, ReadOnlySpan<byte> challenge, ReadOnlySpan<byte> guestNonce)
+    {
+        var psk = member.CopyPsk();
+        var key = Derive(psk, "admit-host");
+        try
+        {
+            var data = new List<byte>();
+            data.AddRange("jay-direct-host-v1|"u8.ToArray());
+            data.AddRange(Encoding.ASCII.GetBytes(session + "|" + member.IdHex + "|"));
+            data.AddRange(challenge.ToArray());
+            data.AddRange(guestNonce.ToArray());
+            return HMACSHA256.HashData(key, data.ToArray());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(psk);
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    /// <summary>
     /// 批准后的证明：加入方用自己成员钥匙的 psk 对房主这条桥上发来的随机挑战做 HMAC（带上会话 id 和成员编号），
     /// 房主据此把这条桥接到房间的 EasyTier。挑战每条桥一个，路上的人抄下来也用不到别的桥上。
     /// </summary>
@@ -266,7 +292,6 @@ public sealed class DirectPeer
     public required PathKind Path { get; init; }
     public long ConnectedMs { get; internal set; }
     internal Socket? Local { get; set; }
-    internal IPEndPoint? LocalClient { get; set; }
     internal readonly ConcurrentDictionary<uint, long> PendingPings = new();
     /// <summary>房主：这条桥的数据转发到本机哪个 EasyTier（批准前是大厅，批准后是房间）。</summary>
     internal int TargetPort;
@@ -278,9 +303,17 @@ public sealed class DirectPeer
     public MemberEntry? Member { get; internal set; }
     /// <summary>房主：发给这条桥的随机挑战（批准后的证明要对它做 HMAC）。</summary>
     internal byte[]? Challenge;
+    /// <summary>
+    /// Host: this bridge came in while no invite was open. It reaches nothing (not even the lobby) and is dropped at this
+    /// time unless a member proves membership on it first (a member coming back from a new address).
+    /// </summary>
+    internal DateTime? AdmitBy;
+    /// <summary>Guest: this peer proved it holds this member's key, so it really is the host (<see cref="DirectKeys.HostProof"/>).</summary>
+    public bool HostVerified { get; internal set; }
     internal CancellationTokenRegistration Revocation;
     internal int PingsSent;
     internal int PongsReceived;
+    internal int AdmissionTicks;
     public double? RttMs { get; internal set; }
     public double LossPercent => PingsSent == 0 ? 0 : Math.Max(0, 100.0 * (PingsSent - PongsReceived - PendingPings.Count) / PingsSent);
     public long BytesIn;
@@ -313,9 +346,9 @@ public sealed class DirectBridge : IAsyncDisposable
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     /// <summary>房主：踢出的人的地址，之后它的探测包不再接。</summary>
     private readonly HashSet<IPEndPoint> _blocked = [];
-    /// <summary>房主：证明过成员身份的地址（桥断了从同一地址回来时不算新人）。</summary>
-    private readonly ConcurrentDictionary<IPEndPoint, MemberEntry> _admittedRemotes = new();
     private Socket? _guestLocal;
+    /// <summary>Guest: where the local EasyTier talks from. Kept across host peers, so a new path carries on at once.</summary>
+    private IPEndPoint? _guestClient;
     private int _probeRound;
     /// <summary>Placeholder remote endpoint for ReceiveFromAsync on the shared socket (matches its address family).</summary>
     private readonly IPEndPoint _anyRemote;
@@ -341,6 +374,12 @@ public sealed class DirectBridge : IAsyncDisposable
 
     public event Action<DirectPeer>? Connected;
     public event Action<DirectPeer, JsonObject>? ControlReceived;
+
+    /// <summary>
+    /// Host with a lobby: raised every few seconds for each peer that has not proved membership yet, so a member that
+    /// came back on a new bridge (its address changed, or the bridge timed out) is asked to prove it again.
+    /// </summary>
+    public event Action<DirectPeer>? AdmissionWanted;
 
     /// <summary>
     /// One UDP socket for every path: dual-stack IPv6 when the OS has IPv6, otherwise plain IPv4
@@ -704,6 +743,24 @@ public sealed class DirectBridge : IAsyncDisposable
     /// <summary>房主：加入方这么久没有任何回应就移除（腾出位子，也关掉它的本机套接字和转发循环）。</summary>
     internal TimeSpan PeerTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// Host with a lobby: at most this many bridges that have not proved membership (knocking guests, members coming back)
+    /// at once, so they can never take the places of members already in the room.
+    /// </summary>
+    public const int MaxUnadmittedPeers = MaxHostPeers / 2;
+
+    /// <summary>Host with a lobby: at most this many bridges that have not proved membership from one IP address.</summary>
+    public const int MaxUnadmittedPerAddress = 4;
+
+    /// <summary>Host: how long a bridge that came in while no invite was open has to prove membership.</summary>
+    internal TimeSpan AdmitOnlyWindow { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Guest: the host peer has been silent this long (its pings and probes stopped) and an authenticated probe comes
+    /// from another address: the host's address changed, so the new one replaces it (and membership is proved again).
+    /// </summary>
+    internal TimeSpan HostReplaceAfter { get; init; } = TimeSpan.FromSeconds(10);
+
     /// <summary>登记一个对方。已经登记过返回 true；不接（加入方已经有房主、人满、路径没开、建不了套接字）返回 false。</summary>
     private bool Accept(IPEndPoint from, bool throughMapping = false)
     {
@@ -728,8 +785,8 @@ public sealed class DirectBridge : IAsyncDisposable
             known.LastSeen = DateTime.UtcNow;
             return true;
         }
-        if (!_isHost && !_peers.IsEmpty) return false;
         if (_blocked.Contains(from)) return false;
+        if (!_isHost && !_peers.IsEmpty && !ReplaceSilentHost()) return false;
         var path = Classify(from, throughMapping);
         if (!AllowedPaths.Contains(path) && !(path == PathKind.Punch && AllowedPaths.Contains(PathKind.PunchSpray)))
         {
@@ -745,16 +802,39 @@ public sealed class DirectBridge : IAsyncDisposable
             connected = resumed;
             return true;
         }
-        if (_isHost && AcceptingNewPeers?.Invoke() == false
-            && !(_admittedRemotes.TryGetValue(from, out var member) && !member.Revoked))
+        // No invite is open: a new bridge can still be a member coming back from a new address (Wi-Fi changed, the laptop
+        // slept, the NAT gave it a new port). It reaches nothing, not even the lobby, until it proves membership, and is
+        // dropped if it doesn't within AdmitOnlyWindow. Without a lobby there is no admission, so nobody new comes in.
+        var admitOnly = false;
+        if (_isHost && AcceptingNewPeers?.Invoke() == false)
         {
-            _log(L.F("core.mp.direct.closed_to_new", from));
-            return false;
+            if (LobbyPort is null)
+            {
+                _log(L.F("core.mp.direct.closed_to_new", from));
+                return false;
+            }
+            admitOnly = true;
         }
         if (_isHost && _peers.Count + _pausedPeers.Count >= MaxHostPeers)
         {
             _log(L.F("core.mp.punch.toomanypeers", from, MaxHostPeers));
             return false;
+        }
+        if (_isHost && LobbyPort is not null)
+        {
+            var unadmitted = 0;
+            var sameAddress = 0;
+            foreach (var p in _peers.Values)
+            {
+                if (p.Admitted) continue;
+                unadmitted++;
+                if (p.Remote.Address.Equals(from.Address)) sameAddress++;
+            }
+            if (unadmitted >= MaxUnadmittedPeers || sameAddress >= MaxUnadmittedPerAddress)
+            {
+                _log(L.F("core.mp.direct.too_many_unadmitted", from));
+                return false;
+            }
         }
         if (!_isHost)
         {
@@ -762,7 +842,14 @@ public sealed class DirectBridge : IAsyncDisposable
             _pausedPeers.Clear();
         }
         var peer = new DirectPeer { Remote = from, Path = path, ConnectedMs = _clock.ElapsedMilliseconds, TargetPort = LobbyPort ?? LocalPort, Admitted = LobbyPort is null };
-        if (_isHost)
+        if (admitOnly)
+        {
+            // No local socket: nothing it sends goes anywhere until Admit gives it one.
+            peer.TargetPort = 0;
+            peer.AdmitBy = DateTime.UtcNow + AdmitOnlyWindow;
+            if (!_peers.TryAdd(from, peer)) return true;
+        }
+        else if (_isHost)
         {
             // 每个加入方一个本机套接字，去连本机 EasyTier 的监听端口。先建好再登记：建不了就不接这个加入方，
             // 不会留下一个没有本机套接字的对方（之后它的数据包会让转发出错）。
@@ -795,7 +882,11 @@ public sealed class DirectBridge : IAsyncDisposable
         return true;
     }
 
-    /// <summary>房主：移除超过 PeerTimeout 没有任何回应的加入方（离开了、换了地址、掉线了）。</summary>
+    /// <summary>
+    /// Drops peers that went silent for PeerTimeout (left, changed address, offline), and on the host the bridges that
+    /// came in while no invite was open and did not prove membership in time. A guest drops its host the same way, so a
+    /// later probe from the host's new address can take its place.
+    /// </summary>
     private void EvictStale()
     {
         lock (_peerGate)
@@ -807,19 +898,31 @@ public sealed class DirectBridge : IAsyncDisposable
                 _pausedPeers.Remove(endpoint);
                 peer.Local?.Dispose();
             }
-            if (!_isHost) return;
             foreach (var (endpoint, peer) in _peers)
             {
-                if (now - peer.LastSeen <= PeerTimeout || !_peers.TryRemove(endpoint, out var removed)) continue;
+                var expired = now - peer.LastSeen > PeerTimeout || !peer.Admitted && peer.AdmitBy is { } by && now > by;
+                if (!expired || !_peers.TryRemove(endpoint, out var removed)) continue;
                 removed.Local?.Dispose();
                 _log(L.F("core.mp.punch.peerevicted", endpoint));
             }
         }
     }
 
+    /// <summary>Guest, under the peer lock: the host peer has gone silent, so let a new address take its place.</summary>
+    private bool ReplaceSilentHost()
+    {
+        foreach (var (endpoint, peer) in _peers)
+        {
+            if (DateTime.UtcNow - peer.LastSeen <= HostReplaceAfter) return false;
+            if (_peers.TryRemove(endpoint, out _)) _log(L.F("core.mp.punch.peerevicted", endpoint));
+        }
+        return _peers.IsEmpty;
+    }
+
     private async Task ForwardToLocalAsync(DirectPeer peer, ReadOnlyMemory<byte> data)
     {
-        peer.LastSeen = DateTime.UtcNow;
+        // Data packets carry no HMAC: they keep only an admitted bridge alive, never a slot that has proved nothing.
+        if (peer.Admitted) peer.LastSeen = DateTime.UtcNow;
         Interlocked.Add(ref peer.BytesIn, data.Length);
         try
         {
@@ -830,7 +933,7 @@ public sealed class DirectBridge : IAsyncDisposable
                 if (target is null || target.Port != peer.TargetPort) peer.LocalTarget = target = new IPEndPoint(IPAddress.Loopback, peer.TargetPort);
                 await local.SendToAsync(data, SocketFlags.None, target);
             }
-            else if (peer.LocalClient is { } client) await _guestLocal!.SendToAsync(data, SocketFlags.None, client);
+            else if (Volatile.Read(ref _guestClient) is { } client) await _guestLocal!.SendToAsync(data, SocketFlags.None, client);
         }
         catch (Exception e) when (e is SocketException or ObjectDisposedException) { }
     }
@@ -882,8 +985,8 @@ public sealed class DirectBridge : IAsyncDisposable
                     peer = entry.Value;
                     break;
                 }
+                if (!r.RemoteEndPoint.Equals(_guestClient)) Volatile.Write(ref _guestClient, (IPEndPoint)r.RemoteEndPoint);
                 if (peer is null) continue;
-                if (!r.RemoteEndPoint.Equals(peer.LocalClient)) peer.LocalClient = (IPEndPoint)r.RemoteEndPoint;
                 await SendDataAsync(peer, buffer, r.ReceivedBytes);
             }
             catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
@@ -917,6 +1020,13 @@ public sealed class DirectBridge : IAsyncDisposable
             EvictStale();
             foreach (var peer in _peers.Values)
             {
+                // Came in while no invite was open, and now one is: it may reach the lobby like any new bridge.
+                if (_isHost && peer is { Admitted: false, AdmitBy: not null } && AcceptingNewPeers?.Invoke() != false) OpenToLobby(peer);
+                if (_isHost && !peer.Admitted && LobbyPort is not null && ++peer.AdmissionTicks % 3 == 1)
+                {
+                    try { AdmissionWanted?.Invoke(peer); }
+                    catch (Exception e) when (e is not OperationCanceledException) { _log(L.F("core.mp.punch.controlerror", e.GetType().Name)); }
+                }
                 seq++;
                 // 超过 5 秒没回的算丢包。
                 foreach (var (s, at) in peer.PendingPings)
@@ -962,7 +1072,7 @@ public sealed class DirectBridge : IAsyncDisposable
             peer.TargetPort = LocalPort;
             peer.Member = member;
             peer.Admitted = true;
-            _admittedRemotes[peer.Remote] = member;
+            peer.AdmitBy = null;
             _loops.Add(HostLocalLoopAsync(peer, local));
         }
         old?.Dispose();
@@ -978,12 +1088,53 @@ public sealed class DirectBridge : IAsyncDisposable
         lock (_peerGate)
         {
             _blocked.Add(peer.Remote);
-            _admittedRemotes.TryRemove(peer.Remote, out _);
             if (_peers.TryGetValue(peer.Remote, out var active) && ReferenceEquals(active, peer)) _peers.TryRemove(peer.Remote, out _);
             if (_pausedPeers.TryGetValue(peer.Remote, out var paused) && ReferenceEquals(paused, peer)) _pausedPeers.Remove(peer.Remote);
             peer.Local?.Dispose();
         }
         _log(L.F("core.mp.direct.kicked", peer.Remote));
+    }
+
+    /// <summary>
+    /// Guest: this peer did not prove it is the host (<see cref="DirectKeys.HostProof"/>). Drops it so the real host's
+    /// probes can get through. <paramref name="block"/>: it answered with a wrong proof, so its address is refused from
+    /// now on; one that only stayed silent may come back.
+    /// </summary>
+    public void RejectHost(DirectPeer peer, bool block = true)
+    {
+        if (_isHost) throw new InvalidOperationException();
+        lock (_peerGate)
+        {
+            if (block) _blocked.Add(peer.Remote);
+            if (_peers.TryGetValue(peer.Remote, out var active) && ReferenceEquals(active, peer)) _peers.TryRemove(peer.Remote, out _);
+        }
+        _log(L.F("core.mp.direct.host_unverified", peer.Remote));
+    }
+
+    /// <summary>Host: a bridge that came in while no invite was open, now that one is: it reaches the lobby.</summary>
+    private void OpenToLobby(DirectPeer peer)
+    {
+        lock (_peerGate)
+        {
+            if (LobbyPort is not { } lobby || peer.Admitted || peer.AdmitBy is null
+                || !_peers.TryGetValue(peer.Remote, out var active) || !ReferenceEquals(active, peer)) return;
+            Socket local;
+            try
+            {
+                local = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                if (OperatingSystem.IsWindows()) local.IOControl(unchecked((int)0x9800000C), [0, 0, 0, 0], null);
+                local.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            }
+            catch (SocketException e)
+            {
+                _log(L.F("core.mp.punch.localerror", e.GetType().Name));
+                return;
+            }
+            peer.Local = local;
+            peer.TargetPort = lobby;
+            peer.AdmitBy = null;
+            _loops.Add(HostLocalLoopAsync(peer, local));
+        }
     }
 
     /// <summary>房主：这条桥的随机挑战（批准后的证明对它做 HMAC）。每条桥一个，第一次要时生成。</summary>

@@ -109,8 +109,25 @@ public sealed class DirectSession : IAsyncDisposable
 
     /// <summary>加入方：证明自己是批准过的成员最多等这么久。</summary>
     internal static TimeSpan AdmitTimeout { get; set; } = TimeSpan.FromSeconds(20);
-    private TaskCompletionSource<byte[]>? _challenge;
+    private TaskCompletionSource<(byte[] Nonce, byte[]? HostProof)>? _challenge;
+    private DirectPeer? _admitPeer;
     private TaskCompletionSource<bool>? _admitReply;
+    // Guest: one admission at a time; a request that comes in meanwhile runs once more afterwards.
+    private readonly SemaphoreSlim _admitLock = new(1, 1);
+    private int _readmitting;
+    private volatile bool _readmitAgain;
+    /// <summary>Guest: the room runs over the direct bridge, so the bridge has to stay admitted and connected.</summary>
+    private volatile bool _bridgeJoined;
+    private readonly CancellationTokenSource _lifetime = new();
+
+    /// <summary>Guest: how long the peer at the host's address has to answer the admission request before it is dropped.</summary>
+    internal TimeSpan ChallengeWait { get; init; } = TimeSpan.FromSeconds(6);
+
+    /// <summary>Guest: after the peer at the host's address failed to prove it is the host, how long to punch for the real one.</summary>
+    internal TimeSpan AdmitRepunchTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Guest: how often to check that the bridge to the host is still there (and punch again when it is not).</summary>
+    internal TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(5);
     public bool IsHost { get; }
     public DirectOptions Options { get; private set; }
     /// <summary>This side's addresses. Only ever sent inside the encrypted knock (host: to approved guests; guest: to the host).</summary>
@@ -170,6 +187,7 @@ public sealed class DirectSession : IAsyncDisposable
             Bridge = new DirectBridge(socket, key, true, _easyTierUdpPort, Log, LobbyUdpPort) { AcceptingNewPeers = () => AcceptNewPeers?.Invoke() != false || ExpectingGuest };
             Bridge.Connected += OnConnected;
             Bridge.ControlReceived += OnControl;
+            Bridge.AdmissionWanted += AskToAdmit;
             _speed = new SpeedTestServer(SpeedTestPortForTest);
             await StartEasyTierAsync(HostOptions(Options.FullLan, Options.AllowExit), ct);
         }
@@ -496,8 +514,9 @@ public sealed class DirectSession : IAsyncDisposable
         if (IsHost) throw new InvalidOperationException("host");
         _room = room;
         DirectPeer? peer = null;
+        // Already connected (the host's probes got here first): admission below checks that it really is the host.
         if (_remote is { } host && Bridge is { } bridge)
-            peer = await bridge.PunchAsync(host.Candidates, host.Nat, TimeSpan.FromSeconds(host.DirectlyReachable ? 20 : 45), ct);
+            peer = bridge.Peers.FirstOrDefault() ?? await bridge.PunchAsync(host.Candidates, host.Nat, TimeSpan.FromSeconds(host.DirectlyReachable ? 20 : 45), ct);
         if (peer is null)
         {
             var reason = _remote is { } h ? FailureReason(h.Nat, LocalNat, h.Candidates, _gathered?.Candidates ?? []) : L.T("core.mp.session.nooffer");
@@ -510,9 +529,30 @@ public sealed class DirectSession : IAsyncDisposable
             Log(L.T("core.mp.session.fallback") + string.Join(L.T("core.mp.format.listseparator"), Options.FallbackNodes));
             UsingFallbackNode = true;
         }
-        if (peer is not null && room.FromInvite) await AdmitAsync(room.Member ?? throw new InvalidOperationException("no member key"), ct);
+        if (peer is not null && room.FromInvite && !await AdmitOrFallBackAsync(room, ct)) peer = null;
         await StartEasyTierAsync(GuestOptions(peer is not null, Options.FullLan, null), ct);
+        if (peer is not null) StartKeepingBridge();
         return peer is not null;
+    }
+
+    /// <summary>
+    /// Guest: proves membership over the bridge. When that fails and the room has relays, the room runs over the relays
+    /// instead (false); without relays the failure is thrown.
+    /// </summary>
+    private async Task<bool> AdmitOrFallBackAsync(RoomCode room, CancellationToken ct)
+    {
+        try
+        {
+            await AdmitVerifiedAsync(room.Member ?? throw new InvalidOperationException("no member key"), ct);
+            return true;
+        }
+        catch (DirectFailedException e) when (Options.FallbackNodes.Count > 0)
+        {
+            Log(L.T("core.mp.session.failed") + e.Message);
+            Log(L.T("core.mp.session.fallback") + string.Join(L.T("core.mp.format.listseparator"), Options.FallbackNodes));
+            UsingFallbackNode = true;
+            return false;
+        }
     }
 
     /// <summary>
@@ -526,7 +566,7 @@ public sealed class DirectSession : IAsyncDisposable
         if (IsHost) throw new InvalidOperationException("host");
         if (_remote is not { } host || Bridge is not { } bridge) throw new InvalidOperationException("no offer");
         // The host can punch only once the friend has carried the reply back by hand: wait longer than in the knock flow.
-        var peer = await bridge.PunchAsync(host.Candidates, host.Nat, TimeSpan.FromSeconds(host.DirectlyReachable ? 60 : 120), ct);
+        var peer = bridge.Peers.FirstOrDefault() ?? await bridge.PunchAsync(host.Candidates, host.Nat, TimeSpan.FromSeconds(host.DirectlyReachable ? 60 : 120), ct);
         IReadOnlyList<string> lobbyPeers;
         if (peer is not null) lobbyPeers = [$"udp://127.0.0.1:{bridge.LocalPort}"];
         else
@@ -544,34 +584,91 @@ public sealed class DirectSession : IAsyncDisposable
         }
         if (await knock(lobbyPeers, ct) is not { } room) return false;
         _room = room;
-        if (peer is not null && room.FromInvite) await AdmitAsync(room.Member ?? throw new InvalidOperationException("no member key"), ct);
+        if (peer is not null && room.FromInvite && !await AdmitOrFallBackAsync(room, ct)) peer = null;
         await StartEasyTierAsync(GuestOptions(peer is not null, Options.FullLan, null), ct);
+        if (peer is not null) StartKeepingBridge();
         return true;
     }
 
     /// <summary>
+    /// Guest: proves membership on the bridge (<see cref="AdmitAsync"/>). When the peer at the host's address cannot prove
+    /// it is the host, drops it and punches again for the real one, a few times.
+    /// </summary>
+    internal async Task AdmitVerifiedAsync(MemberKey member, CancellationToken ct)
+    {
+        await _admitLock.WaitAsync(ct);
+        try
+        {
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await AdmitAsync(member, ct);
+                    return;
+                }
+                catch (UnverifiedHostException) when (attempt < 3 && _remote is { } host && Bridge is { } bridge && !_disposed)
+                {
+                    if (await bridge.PunchAsync(host.Candidates, host.Nat, AdmitRepunchTimeout, ct) is null)
+                        throw new DirectFailedException(L.T("core.mp.direct.host_unproven"));
+                }
+                catch (UnverifiedHostException)
+                {
+                    throw new DirectFailedException(L.T("core.mp.direct.host_unproven"));
+                }
+            }
+        }
+        finally
+        {
+            _admitLock.Release();
+        }
+    }
+
+    private sealed class UnverifiedHostException : Exception;
+
+    /// <summary>
     /// 加入方：向房主证明自己是批准过的成员（要一个挑战，再用成员钥匙对它做 HMAC）。UDP 会丢包，每秒重发，最多 <see cref="AdmitTimeout"/>。
-    /// 控制消息里只有成员编号和 HMAC，没有密钥。
+    /// The guest asks with a fresh nonce, and the host has to answer with <see cref="DirectKeys.HostProof"/> over it before
+    /// the guest proves anything: everyone who saw the invite can pass the bridge HMAC, only the host holds this member's
+    /// key. A peer that cannot is dropped (<see cref="DirectBridge.RejectHost"/>).
+    /// 控制消息里只有成员编号、随机数和 HMAC，没有密钥。
     /// </summary>
     internal async Task AdmitAsync(MemberKey member, CancellationToken ct)
     {
         if (Bridge?.Peers.FirstOrDefault() is not { } peer || LocalAddresses is not { } local) throw new DirectFailedException(L.T("core.mp.direct.admit_timeout"));
-        var challenge = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var challenge = new TaskCompletionSource<(byte[] Nonce, byte[]? HostProof)>(TaskCreationOptions.RunContinuationsAsynchronously);
         var reply = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _admitPeer = peer;
         _challenge = challenge;
         _admitReply = reply;
+        var guestNonce = RandomNumberGenerator.GetBytes(16);
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
         limit.CancelAfter(AdmitTimeout);
         try
         {
-            byte[] nonce;
+            (byte[] Nonce, byte[]? HostProof) answer;
+            var start = new JsonObject { ["op"] = "admit-start", ["id"] = member.IdHex, ["gn"] = Convert.ToBase64String(guestNonce) };
+            var asked = Stopwatch.StartNew();
             while (true)
             {
-                await Bridge.SendControlAsync(peer, new JsonObject { ["op"] = "admit-start" });
-                try { nonce = await challenge.Task.WaitAsync(TimeSpan.FromSeconds(1), limit.Token); break; }
-                catch (TimeoutException) { }
+                await Bridge.SendControlAsync(peer, start);
+                try { answer = await challenge.Task.WaitAsync(TimeSpan.FromSeconds(1), limit.Token); break; }
+                catch (TimeoutException) when (asked.Elapsed < ChallengeWait) { }
+                catch (TimeoutException)
+                {
+                    // Answers probes but not this: not the host, or a link too bad to use. Drop it without blocking it,
+                    // and look for the host again.
+                    Bridge.RejectHost(peer, block: false);
+                    throw new UnverifiedHostException();
+                }
             }
-            var proof = DirectKeys.AdmitProof(member, local.Session, nonce);
+            var expectedHost = DirectKeys.HostProof(member, local.Session, answer.Nonce, guestNonce);
+            if (answer.HostProof is not { } hostProof || !CryptographicOperations.FixedTimeEquals(expectedHost, hostProof))
+            {
+                Bridge.RejectHost(peer);
+                throw new UnverifiedHostException();
+            }
+            peer.HostVerified = true;
+            var proof = DirectKeys.AdmitProof(member, local.Session, answer.Nonce);
             var message = new JsonObject { ["op"] = "admit", ["id"] = member.IdHex, ["mac"] = Convert.ToBase64String(proof) };
             bool ok;
             while (true)
@@ -591,8 +688,75 @@ public sealed class DirectSession : IAsyncDisposable
         {
             _challenge = null;
             _admitReply = null;
+            _admitPeer = null;
         }
     }
+
+    /// <summary>
+    /// Guest, once the room runs over the bridge: proves membership again in the background (the host asked, or the
+    /// bridge reconnected from another address). A request while one runs makes it run once more.
+    /// </summary>
+    private void ReadmitSoon()
+    {
+        if (!_bridgeJoined || _disposed || _room is not { FromInvite: true, Member: { } member }) return;
+        _readmitAgain = true;
+        if (Interlocked.Exchange(ref _readmitting, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (_readmitAgain && !_disposed)
+                {
+                    _readmitAgain = false;
+                    try { await AdmitVerifiedAsync(member, _lifetime.Token); }
+                    catch (Exception e) when (e is DirectFailedException or SocketException or InvalidOperationException)
+                    {
+                        Log(L.T("core.mp.direct.readmit_failed") + e.Message);
+                    }
+                }
+            }
+            catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException) { }
+            finally
+            {
+                Volatile.Write(ref _readmitting, 0);
+                StateChanged?.Invoke();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Guest, once the room runs over the bridge: while the bridge has no peer (the host was silent long enough to be
+    /// dropped), punches towards the host's addresses again, so the direct link comes back by itself. Not during a test,
+    /// which switches paths on purpose and restores them itself.
+    /// </summary>
+    private void StartKeepingBridge()
+    {
+        if (_remote is not { } host || Bridge is not { } bridge) return;
+        _bridgeJoined = true;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!_disposed)
+                {
+                    await Task.Delay(ReconnectInterval, _lifetime.Token);
+                    if (bridge.Peers.Count > 0 || TestConsent.ActiveRun is not null || TestConsent.RestoringRun is not null) continue;
+                    await bridge.PunchAsync(host.Candidates, host.Nat, TimeSpan.FromSeconds(15), _lifetime.Token);
+                }
+            }
+            catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException) { }
+        });
+    }
+
+    /// <summary>Host: asks a bridge that has not proved membership to do so (a member that came back on a new bridge).</summary>
+    private void AskToAdmit(DirectPeer peer)
+    {
+        if (!IsHost || LobbyUdpPort is null || peer.Admitted || Bridge is not { } bridge) return;
+        _ = bridge.SendControlAsync(peer, new JsonObject { ["op"] = "admit-needed" });
+    }
+
+    /// <summary>Guest: control messages that drive the full-condition test are taken only from a host that proved itself.</summary>
+    private bool TrustsAsHost(DirectPeer peer) => IsHost || _room is not { FromInvite: true, Member: not null } || peer.HostVerified;
 
     /// <summary>房主：加入方报上成员编号和对挑战的 HMAC。对得上（批准过、没作废）就把这条桥接到房间。</summary>
     internal bool TryAdmit(DirectPeer peer, JsonObject message)
@@ -622,6 +786,26 @@ public sealed class DirectSession : IAsyncDisposable
         }
         if (!CryptographicOperations.FixedTimeEquals(expected, mac)) return false;
         return bridge.Admit(peer, entry);
+    }
+
+    /// <summary>
+    /// Host: the answer to a guest's "admit-start": a proof over the guest's nonce and this bridge's challenge with the
+    /// named member's key, showing that this is the host. Null for an unknown, removed or malformed member.
+    /// </summary>
+    private byte[]? HostProofFor(JsonObject message, byte[] challenge)
+    {
+        if (!HasRoom || Room.Members is not { } members || LocalAddresses is not { } local) return null;
+        if (Str(message, "id") is not { Length: MemberKey.IdLength * 2 } idHex || Str(message, "gn") is not { } nonceText) return null;
+        try
+        {
+            var guestNonce = Convert.FromBase64String(nonceText);
+            if (guestNonce.Length != 16 || !members.TryGet(Convert.FromHexString(idHex), out var entry) || entry.IsHost || entry.Revoked) return null;
+            return DirectKeys.HostProof(entry.Key, local.Session, challenge, guestNonce);
+        }
+        catch (Exception e) when (e is FormatException or CryptographicException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -659,7 +843,11 @@ public sealed class DirectSession : IAsyncDisposable
             // Say which session this is. Addresses already went to the host inside the encrypted knock ack, so the hello
             // (authenticated, not encrypted) carries none.
             if (LocalAddresses is { } local) _ = Bridge.SendControlAsync(peer, Hello(local.Session));
+            // A new bridge to the host once the room runs over it (the host's address changed, or a test step moved
+            // the path): prove membership on it again, and check that it really is the host.
+            ReadmitSoon();
         }
+        if (IsHost) AskToAdmit(peer);
         StateChanged?.Invoke();
     }
 
@@ -684,7 +872,10 @@ public sealed class DirectSession : IAsyncDisposable
                 if (LocalAddresses is { } local && !TryParseHello(message, local.Session)) Log(L.F("core.mp.direct.admit_rejected", peer.Remote));
                 break;
             case "admit-start" when IsHost && Bridge is { } challengeBridge:
-                _ = challengeBridge.SendControlAsync(peer, new JsonObject { ["op"] = "challenge", ["n"] = Convert.ToBase64String(challengeBridge.ChallengeFor(peer)) });
+                var nonce = challengeBridge.ChallengeFor(peer);
+                var reply = new JsonObject { ["op"] = "challenge", ["n"] = Convert.ToBase64String(nonce) };
+                if (HostProofFor(message, nonce) is { } hostProof) reply["hp"] = Convert.ToBase64String(hostProof);
+                _ = challengeBridge.SendControlAsync(peer, reply);
                 break;
             case "admit" when IsHost:
                 var admitted = TryAdmit(peer, message);
@@ -693,17 +884,23 @@ public sealed class DirectSession : IAsyncDisposable
                 if (admitted) StateChanged?.Invoke();
                 break;
             case "challenge" when !IsHost:
-                if (Str(message, "n") is { } n && _challenge is { } waiting)
+                if (Str(message, "n") is { } n && _challenge is { } waiting && ReferenceEquals(peer, _admitPeer))
                 {
                     try
                     {
-                        if (Convert.FromBase64String(n) is { Length: 16 } nonce) waiting.TrySetResult(nonce);
+                        var hp = Str(message, "hp") is { } hpText ? Convert.FromBase64String(hpText) : null;
+                        if (Convert.FromBase64String(n) is { Length: 16 } challengeNonce) waiting.TrySetResult((challengeNonce, hp));
                     }
                     catch (FormatException) { }
                 }
                 break;
+            case "admit-needed" when !IsHost:
+                if (Bridge?.Peers.FirstOrDefault() is { } current && ReferenceEquals(current, peer)) ReadmitSoon();
+                break;
             case "admit-result" when !IsHost:
-                if (Bool(message, "ok") is { } ok) _admitReply?.TrySetResult(ok);
+                if (Bool(message, "ok") is { } ok && ReferenceEquals(peer, _admitPeer) && peer.HostVerified) _admitReply?.TrySetResult(ok);
+                break;
+            case "test-request" or "test-end" or "step" or "elevate" when !IsHost && !TrustsAsHost(peer):
                 break;
             case "test-request" when !IsHost:
                 if (Str(message, "run") is not { Length: >= 8 and <= 64 } requestRun) break;
@@ -1306,6 +1503,7 @@ public sealed class DirectSession : IAsyncDisposable
             catch (Exception e) { Log(L.F("core.mp.punch.localerror", e.GetType().Name)); }
         }
         _disposed = true;
+        Try(() => _lifetime.Cancel());
         Try(() => _mappingCts?.Cancel());
         Try(() => _hostAbort?.Cancel());
         Try(() => _consentWatch?.Dispose());

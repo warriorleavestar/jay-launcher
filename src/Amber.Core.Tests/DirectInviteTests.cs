@@ -211,6 +211,9 @@ public sealed class DirectInviteTests
         BridgeKey = DirectTestKeys.Bridge,
         StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
         SpeedTestPortForTest = 0,
+        AdmitRepunchTimeout = TimeSpan.FromSeconds(3),
+        ChallengeWait = TimeSpan.FromSeconds(3),
+        ReconnectInterval = TimeSpan.FromMilliseconds(500),
     };
 
     /// <summary>从加入方本机“EasyTier”往直连桥发一个包，看它到了房主那边的哪个实例。</summary>
@@ -318,7 +321,10 @@ public sealed class DirectInviteTests
         Assert.False(host.Host.Bridge!.Peers.Single().Admitted);
     }
 
-    /// <summary>成员钥匙不在房主的成员表里（没批准、伪造的）：房主不认，桥还是只能到大厅。</summary>
+    /// <summary>
+    /// 成员钥匙不在房主的成员表里（没批准、伪造的）：房主不认，桥接不到房间。The host can't prove itself for a key it doesn't
+    /// know either, so the guest gives the direct link up.
+    /// </summary>
     [Fact]
     public async Task UnknownMemberKeyIsRefusedAndTheBridgeStaysOnTheLobby()
     {
@@ -328,8 +334,8 @@ public sealed class DirectInviteTests
         await using var guest = Guest();
         var forged = (host.Credentials with { Member = MemberKey.Create() }).ToRoom();
         await Assert.ThrowsAsync<DirectFailedException>(() => JoinAsync(host, guest, forged));
-        Assert.False(host.Host.Bridge.Peers.Single().Admitted);
-        Assert.Equal("lobby", await ArrivesAtAsync(guest, host.Lobby, room, "sneak"));
+        Assert.All(host.Host.Bridge.Peers, p => Assert.False(p.Admitted));
+        Assert.NotEqual("room", await ArrivesAtAsync(guest, host.Lobby, room, "sneak"));
     }
 
     /// <summary>挑战每条桥一个：别人的证明（换了挑战）不对。</summary>
@@ -373,22 +379,30 @@ public sealed class DirectInviteTests
     }
 
     /// <summary>
-    /// 没有待用邀请时房主的直连桥不接新人：桥钥匙（由 L 派生）整个房间都不换，拿着旧邀请的人连大厅都到不了。
-    /// 一个刚批准的加入方经加密敲门交了地址之后，短时间内能接（他的一次性邀请那时已经用掉了）。
+    /// 没有待用邀请时房主的直连桥不接新人进大厅：桥钥匙（由 L 派生）整个房间都不换，拿着旧邀请的人连大厅都到不了。
+    /// Such a bridge is still taken, reaching nothing, so a member coming back from a new address can prove membership
+    /// on it. 一个刚批准的加入方经加密敲门交了地址之后，短时间内能接到大厅（他的一次性邀请那时已经用掉了）。
     /// </summary>
     [Fact]
     public async Task ClosedRoomTakesOnlyTheGuestItJustApproved()
     {
         await using var host = new DirectRoom(() => false);
         var offer = await host.PrepareAsync();
+        using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
         await using var guest = Guest();
         var mine = await guest.AnswerAsync(offer);
-        Assert.Null(await guest.Bridge!.PunchAsync(offer.Candidates, offer.Nat, TimeSpan.FromSeconds(3)));
-        Assert.Empty(host.Host.Bridge!.Peers);
+        Assert.NotNull(await guest.Bridge!.PunchAsync(offer.Candidates, offer.Nat, TimeSpan.FromSeconds(3)));
+        var waiting = Assert.Single(host.Host.Bridge!.Peers);
+        Assert.False(waiting.Admitted);
+        Assert.Null(waiting.Local);
+        Assert.Null(await ArrivesAtAsync(guest, host.Lobby, room, "old-invite"));
         var hostPunch = host.Host.AddGuestAsync(mine!);
-        Assert.NotNull(await guest.Bridge.PunchAsync(offer.Candidates, offer.Nat, TimeSpan.FromSeconds(5)));
         Assert.True(await hostPunch.WaitAsync(Deadline));
         Assert.Single(host.Host.Bridge.Peers);
+        // Approved just now: within a heartbeat the same bridge reaches the lobby.
+        string? arrived = null;
+        for (var i = 0; i < 5 && arrived is null; i++) arrived = await ArrivesAtAsync(guest, host.Lobby, room, "knock");
+        Assert.Equal("lobby", arrived);
     }
 
     /// <summary>邀请用完了（不再接新人），已经证明过身份的直连成员照常：还连着房间。</summary>
@@ -404,6 +418,55 @@ public sealed class DirectInviteTests
         Volatile.Write(ref open, false);
         Assert.True(host.Host.Bridge.Peers.Single().Admitted);
         Assert.Equal("room", await ArrivesAtAsync(guest, host.Lobby, room, "still-here"));
+    }
+
+    /// <summary>
+    /// The host dropped an admitted member's bridge (it went quiet: Wi-Fi dropped, the laptop slept) and no invite is open
+    /// any more. When the member's bridge comes back, the host asks it to prove membership again and it reaches the room,
+    /// not the lobby.
+    /// </summary>
+    [Fact]
+    public async Task MemberWhoseBridgeWasDroppedIsAdmittedAgain()
+    {
+        var open = true;
+        await using var host = new DirectRoom(() => Volatile.Read(ref open));
+        await host.PrepareAsync();
+        using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
+        await using var guest = Guest();
+        Assert.True(await JoinAsync(host, guest, host.Admit(RandomNumberGenerator.GetBytes(32), "Steve")));
+        Volatile.Write(ref open, false);
+        host.Host.Bridge.DropPeers();
+        Assert.Empty(host.Host.Bridge.Peers);
+        // The guest's heartbeat goes unanswered, it probes again, and the host asks for the proof.
+        using var limit = new CancellationTokenSource(Deadline);
+        while (host.Host.Bridge.Peers.FirstOrDefault() is not { Admitted: true }) await Task.Delay(100, limit.Token);
+        Assert.Equal("room", await ArrivesAtAsync(guest, host.Lobby, room, "back"));
+    }
+
+    /// <summary>
+    /// Someone else who saw the invite holds the bridge key too and gets to the guest's bridge before the host. It can't
+    /// prove it holds the guest's member key, so the guest drops it, finds the real host and joins the room through it.
+    /// </summary>
+    [Fact]
+    public async Task BridgeThatCannotProveItIsTheHostIsDropped()
+    {
+        await using var host = new DirectRoom();
+        var offer = await host.PrepareAsync();
+        await using var impostor = new DirectRoom();
+        await impostor.PrepareAsync();
+        using var room = new UdpClient(new IPEndPoint(IPAddress.Loopback, host.Host.Bridge!.LocalPort));
+        await using var guest = Guest();
+        var mine = await guest.AnswerAsync(offer);
+        // The impostor reaches the guest first.
+        Assert.NotNull(await impostor.Host.Bridge!.PunchAsync(mine!.Candidates, mine.Nat, Deadline));
+        var hostPunch = host.Host.AddGuestAsync(mine);
+        Assert.True(await guest.CompleteJoinAsync(host.Admit(RandomNumberGenerator.GetBytes(32), "Steve")));
+        Assert.True(await hostPunch.WaitAsync(Deadline));
+        var hostSide = Assert.Single(guest.Bridge!.Peers);
+        Assert.True(hostSide.HostVerified);
+        Assert.Equal(host.Host.Bridge.SocketEndPoint.Port, hostSide.Remote.Port);
+        Assert.All(impostor.Host.Bridge.Peers, p => Assert.False(p.Admitted));
+        Assert.Equal("room", await ArrivesAtAsync(guest, host.Lobby, room, "real"));
     }
 
     /// <summary>踢人换网络：留下的直连成员换到新房间，直连桥不动（还是接在房间上）。</summary>

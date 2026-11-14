@@ -138,6 +138,14 @@ of either side, and a rejected or expired knock gets none either. The bridge's c
 encrypted) carry no key and no address: the session id in the hello, the member id and a proof in the admission
 exchange, and step settings and results in the full-condition test. `JAY2D-` / `JAY2R-` are refused.
 
+The bridge key comes from the invite's lobby key, so passing its HMAC shows only that a peer saw an invite for the room.
+Membership is proved separately: the guest sends a fresh nonce, the host answers with an HMAC over it and the bridge's
+challenge under a key derived from that member's psk (`DirectKeys.HostProof`), and only then does the guest prove its own
+membership (`DirectKeys.AdmitProof`). A peer that cannot prove it is the host is dropped, and the guest takes test
+requests only from a host that proved itself. Bridges that have not proved membership reach only the lobby (nothing at
+all when no invite is open), are capped overall and per IP address, and are asked to prove membership again whenever a
+member's bridge comes back from a new address.
+
 ## Direct links with no server at all: sealed codes
 
 For two people with no relay, no public network and no shared LAN. `Multiplayer/SealedDirect.cs`:
