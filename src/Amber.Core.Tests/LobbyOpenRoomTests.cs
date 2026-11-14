@@ -671,6 +671,127 @@ public sealed class LobbyOpenRoomTests
     });
 
     [Fact]
+    public void ANoServerRoomHandsOutNoPlainInvite() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        var root = Path.Combine(Path.GetTempPath(), "jay-lobby-noserver-invite-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            vm.ContactsDir = root;
+            var key = new byte[32];
+            key[0] = 1;
+            vm.Contacts.Import([new Contact(key, "Robin", true, DateTimeOffset.UtcNow)]);
+            vm.RefreshContacts();
+            var credentials = RoomCredentials.Create(vm.Identity.PublicKey, 25565, TunnelSettings.Default);
+            var lobby = new HostLobby(_ => new NoLobby(), () => [],
+                book => new KnockServer(book, vm.Identity.KeyPair, () => credentials, _ => false, (_, _) => Task.FromResult(false), System.Net.IPAddress.Loopback, 0));
+            try
+            {
+                vm.HostLobbyForTest(lobby, credentials);
+                vm.Mode = "host";
+                var mailed = 0;
+                vm.TestSendInvite = (_, _, _) =>
+                {
+                    mailed++;
+                    return Task.FromResult(Guid.NewGuid().ToString("N"));
+                };
+
+                // An ordinary room offers a new invite on its card.
+                Assert.True(vm.ShowCreateInvite);
+
+                // "No server": a plain invite would knock through a relay this room's lobby never reaches.
+                vm.IsDirect = true;
+                Assert.False(vm.ShowCreateInvite);
+                Wait(vm.CreateInviteCommand.ExecuteAsync(null));
+                Assert.False(vm.HasInvite);
+                Assert.Empty(lobby.Book.Pending);
+                Assert.Equal("multiplayer.direct.use_sealed", vm.StatusInfo?.Key);
+
+                // "Invite friends" and Ctrl+Shift+I go to the sealed code instead (none can be made here: no addresses).
+                Wait(vm.InviteFriendsCommand.ExecuteAsync(null));
+                Assert.False(vm.HasInvite);
+                Assert.Empty(lobby.Book.Pending);
+
+                // Nor is a friend mailed a plain invite.
+                var told = vm.InviteFriendsToKnockAsync();
+                Wait(told);
+                Assert.Equal(0, told.Result);
+                Assert.Equal(0, mailed);
+                Assert.Empty(lobby.Book.Pending);
+
+                // Back in an ordinary room, the same friend is mailed one.
+                vm.IsDirect = false;
+                told = vm.InviteFriendsToKnockAsync();
+                Wait(told);
+                Assert.Equal(1, told.Result);
+                Assert.Equal(1, mailed);
+                vm.Mode = "";
+            }
+            finally
+            {
+                Wait(lobby.DisposeAsync().AsTask());
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
+    });
+
+    [Fact]
+    public void RelaysOnlyWithAStrictSplitDoesNotOpen() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        // A strict split needs a direct main path; "Relays only" turns direct connections off.
+        Assert.True(MultiplayerViewModel.SplitNeedsDirect(SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Off)));
+        Assert.True(MultiplayerViewModel.SplitNeedsDirect(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Strict)));
+        Assert.False(MultiplayerViewModel.SplitNeedsDirect(SplitSettings.Create(SplitPolicy.Auto, SplitPolicy.Auto)));
+        Assert.False(MultiplayerViewModel.SplitNeedsDirect(SplitSettings.None));
+
+        vm.TestPeers = ["tcp://relay.example.org:11010"];
+        vm.TestSplit = SplitSettings.Create(SplitPolicy.Strict, SplitPolicy.Strict);
+        vm.SelectedRoute = vm.RouteChoices.First(c => c.Id == nameof(RoomRoute.RelayOnly));
+        Wait(vm.CreateRoomCommand.ExecuteAsync(null));
+        Assert.True(vm.IsIdle);
+        Assert.Equal("multiplayer.split.relay_only_strict", vm.StatusInfo?.Key);
+    });
+
+    [Fact]
+    public void AFriendsRoomLeavesTheListWhenItRunsOut() => UiTestThread.Run(() =>
+    {
+        var (service, vm, _) = Create();
+        using var s = service;
+        using var friend = X25519KeyPair.Generate();
+        using var host = X25519KeyPair.Generate();
+        MailedInvite Mail(TimeSpan lifetime, string room) => new(new Contact(friend.PublicKey, "Robin", true, DateTimeOffset.UtcNow),
+            new InviteBook().Create(1, TimeSpan.FromHours(12), false, TunnelSettings.Default, boundTo: vm.Identity.PublicKey).Invite,
+            host.PublicKey, room, DateTimeOffset.UtcNow + lifetime);
+
+        // Listed rooms that can run out are checked on a timer, so nobody has to touch the list.
+        Assert.False(vm.WatchingFriendRoomExpiry);
+        vm.ShowMailedInvites([Mail(TimeSpan.FromHours(12), "Robin's world")]);
+        Assert.True(vm.WatchingFriendRoomExpiry);
+
+        // The user's own "Ignore" keeps the room; the request timing out takes it away.
+        var request = Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
+        service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Bar);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Single(vm.FriendRooms);
+        vm.ShowMailedInvites([Mail(TimeSpan.FromHours(12), "Second world")]);
+        request = Assert.Single(service.Requests.Pending, r => r.Spec.Kind == "contact-invite");
+        service.Requests.Resolve(request, "ignore", Amber.Core.Activity.RequestSource.Timeout);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(["Robin's world"], vm.FriendRooms.Select(r => r.Title));
+
+        // Once nothing listed can run out, the timer stops.
+        vm.FriendRooms.Clear();
+        Assert.False(vm.WatchingFriendRoomExpiry);
+    });
+
+    [Fact]
     public void JoiningTheSameServerAgainCountsAsJoined() => UiTestThread.Run(() =>
     {
         var (service, vm, _) = Create();

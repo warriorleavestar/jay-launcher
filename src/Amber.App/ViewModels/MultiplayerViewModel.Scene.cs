@@ -170,13 +170,18 @@ public sealed partial class MultiplayerViewModel
         set => _ = SetRelayOnlyAsync(value);
     }
 
-    /// <summary>The switch can be flipped: in a room that is not a sealed direct one, and whose rule does not already decide it.</summary>
-    public bool CanChangeRelayOnly => _room is not null && !IsDirect && !RoomRuleRelayOnly && !_componentRestarting && !IsRekeying;
+    /// <summary>
+    /// The switch can be flipped: in a room that is not a sealed direct one, whose rule does not already decide it, and
+    /// that does not need a direct main path for a strict split (relays only would cut this computer off).
+    /// </summary>
+    public bool CanChangeRelayOnly => _room is { } room && !IsDirect && !RoomRuleRelayOnly && !_componentRestarting && !IsRekeying
+        && (room.RelayOnly || !SplitNeedsDirect(room.Split));
 
     /// <summary>Why the switch is fixed (empty when it can be flipped).</summary>
     public string RelayOnlyNote => _room is null ? ""
         : IsDirect ? L.T("multiplayer.sees.relay_only.direct_room")
         : RoomRuleRelayOnly ? L.T("multiplayer.sees.relay_only.room_rule")
+        : !_room.RelayOnly && SplitNeedsDirect(_room.Split) ? L.T("multiplayer.sees.relay_only.strict_split")
         : "";
 
     public bool HasRelayOnlyNote => RelayOnlyNote.Length > 0;
@@ -247,8 +252,12 @@ public sealed partial class MultiplayerViewModel
             OnPropertyChanged(name);
     }
 
-    /// <summary>My own default on top of what the room says: used when my side of a room starts.</summary>
-    private RoomCode WithMyRelayChoice(RoomCode room) => _service.Settings.MultiplayerRelayOnly && !room.RelayOnly ? room with { RelayOnly = true } : room;
+    /// <summary>
+    /// My own default on top of what the room says: used when my side of a room starts. A room that needs a direct main
+    /// path for a strict split is left as it is: on relays only it would never connect.
+    /// </summary>
+    internal RoomCode WithMyRelayChoice(RoomCode room) =>
+        _service.Settings.MultiplayerRelayOnly && !room.RelayOnly && !SplitNeedsDirect(room.Split) ? room with { RelayOnly = true } : room;
 
     // ---- the one amber action: enter the game ----
 

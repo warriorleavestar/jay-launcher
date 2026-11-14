@@ -1695,12 +1695,15 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         host.DebugMode = true;
         host.ManualPort = gamePort.ToString();
         await host.CreateDirectRoomCommand.ExecuteAsync(null);
-        var directInvite = host.TestInviteText ?? "";
-        Check("直连：创建房间，发的是普通邀请（JAY2-）", host.IsDirect && directInvite.StartsWith(Amber.Core.Multiplayer.JayInvite.Prefix, StringComparison.Ordinal), host.Status);
-        Check("直连：邀请默认打码", host.InviteDisplay.Contains('•') && !host.InviteDisplay.Contains(directInvite[5..^4]), host.InviteDisplay);
-        Check("直连：邀请里没有任何地址（不含 IP、不含端口）", !ContainsAddress(directInvite) && !directInvite.Contains("127.0.0.1"), directInvite.Length.ToString());
+        // "No server": no plain invite (its knock would need a relay); friends come in with a sealed code and a passphrase.
+        Check("直连：创建房间，不发普通邀请", host.IsDirect && !host.HasInvite && host.PendingInvites.Count == 0, host.Status);
+        await host.CreateSealedOfferCommand.ExecuteAsync(null);
+        var sealedCode = host.SealedOfferCode;
+        var sealedPassphrase = host.SealedPassphrase;
+        Check("直连：生成加密直连码和口令", host.HasSealedOffer && sealedPassphrase.Length > 0 && host.PendingInvites.Count == 1, host.Status);
+        Check("直连：加密直连码里读不出地址（不含 IP、不含端口）", !ContainsAddress(sealedCode) && !sealedCode.Contains("127.0.0.1"), sealedCode.Length.ToString());
         var hostSecrets = host.RoomSecretsForTest;
-        Check("直连：邀请里没有房间的网络名和密钥", hostSecrets.Count > 0 && hostSecrets.All(s => !directInvite.Contains(s, StringComparison.OrdinalIgnoreCase)));
+        Check("直连：加密直连码里没有房间的网络名和密钥", hostSecrets.Count > 0 && hostSecrets.All(s => !sealedCode.Contains(s, StringComparison.OrdinalIgnoreCase)));
         await ShotAsync("直连房主");
 
         var guest = host.CreateTestPeer();
@@ -1711,12 +1714,17 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         guest.JoinCode = "JAY2D-eyJhIjoxfQ";
         await guest.JoinCommand.ExecuteAsync(null);
         Check("直连：旧的直连码（JAY2D-，带公网 IP）不认，提示更新", guest.IsIdle && guest.Status == L.T("multiplayer.direct.old_code"), guest.Status);
-        guest.JoinCode = directInvite;
+        guest.JoinCode = sealedCode;
+        guest.JoinPassphrase = sealedPassphrase;
         var joining = guest.JoinCommand.ExecuteAsync(null);
-        // 经中继敲门：房主批准前，两边都还没拿到对方的地址，也没有直连桥。
+        // The guest opens the code with the passphrase and gets a sealed reply for the host; the host pastes it and the
+        // two connect directly. The knock then goes over the direct bridge, never through a relay.
+        Check("直连：加入方用口令打开码，得到回复码", await WaitAsync(() => guest.HasMySealedReply, 60), guest.Status);
+        host.SealedReplyInput = guest.MySealedReply;
+        await host.AddSealedReplyCommand.ExecuteAsync(null);
         var knocked = await WaitAsync(() => host.ApprovalCards.Count == 1, 90);
-        Check("直连：经中继敲门，房主看到批准卡片", knocked, guest.Status);
-        Check("直连：批准前加入方没有直连会话、房主的直连桥上没有人", guest.DirectForTest is null && host.DirectForTest?.Bridge?.Peers is { Count: 0 }, guest.Status);
+        Check("直连：经直连桥敲门，房主看到批准卡片", knocked, guest.Status);
+        Check("直连：批准前房主的直连桥上没有已证明身份的成员", host.DirectForTest?.Bridge?.Peers is { } before && before.All(p => !p.Admitted), guest.Status);
         if (knocked) host.ApproveKnockCommand.Execute(host.ApprovalCards[0]);
         await joining;
         Check("直连：批准后加入房间", guest.IsDirect && guest.IsJoined, guest.Status);
@@ -1766,7 +1774,7 @@ internal sealed partial class SelfTest(MainWindow window, MainViewModel main, st
         host.ExportDiagnostics(report);
         var text = File.ReadAllText(report);
         Check("直连：诊断报告去掉了房间密钥和邀请", File.Exists(report) && host.RoomSecretsForTest.All(s => !text.Contains(s, StringComparison.OrdinalIgnoreCase))
-            && !text.Contains(directInvite[5..]) && text.Contains("全条件测试结果"), $"{text.Length} 字");
+            && !text.Contains(sealedCode) && !text.Contains(sealedPassphrase) && text.Contains("全条件测试结果"), $"{text.Length} 字");
 
         // 踢出直连成员：他的直连桥马上断开，他那边看到“你已被移出房间”并停止联机。
         var member = host.Members.First();

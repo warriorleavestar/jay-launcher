@@ -53,6 +53,13 @@ public partial class MultiplayerPage : UserControl
                 vm.InviteFocusRequested = () => Dispatcher.UIThread.Post(() =>
                 {
                     ApplyRoomLayout(Bounds.Width);
+                    if (vm.IsDirectHost)
+                    {
+                        // "No server" room: the sealed code is the invite.
+                        SealedHostPanel.BringIntoView();
+                        (CopySealedCodeButton.IsEffectivelyVisible ? CopySealedCodeButton : (Control)CreateSealedButton).Focus();
+                        return;
+                    }
                     InviteCard.BringIntoView();
                     (CopyInviteButton.IsEffectivelyVisible ? CopyInviteButton : (Control)CreateFirstInviteButton).Focus();
                 }, DispatcherPriority.Background);
