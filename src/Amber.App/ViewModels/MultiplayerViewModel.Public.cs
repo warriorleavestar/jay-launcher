@@ -64,8 +64,6 @@ public sealed partial class MultiplayerViewModel
     private RoomAnnouncer? _announcer;
     private PendingInvite? _standing;
     private byte[]? _standingSalt;
-    /// <summary>直连房间公开时列表里放的直连码（用长期邀请生成，和“邀请朋友”生成的单次直连码分开）。</summary>
-    /// <summary>加入方：从列表点了直连房间，生成回复码后经目录捎给房主。</summary>
 
     public ObservableCollection<PublicRoomItem> PublicRooms { get; } = [];
 
@@ -170,6 +168,9 @@ public sealed partial class MultiplayerViewModel
             IsPublicConnected = true;
             // Keep this network's directory snapshot fresh on a fixed schedule: lookups and the room list read it locally.
             var connected = _public;
+            // EasyTier ending on its own (crash, killed) disconnects: the page must not keep showing a network that is gone.
+            connected.Exited += () => Dispatcher.UIThread.Post(() => OnPublicExited(connected));
+            if (connected.HasExited) Dispatcher.UIThread.Post(() => OnPublicExited(connected));
             // The same copy every DirectoryClient(connected) reads (one per network), so lookups never ask on their own.
             _snapshotPolling?.Dispose();
             _snapshotPolling = DirectoryClient(connected).Snapshots.StartPolling(() => DirectoryClient(connected));
@@ -208,6 +209,15 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private void ClosePublicNotice() => PublicNoticeOpen = false;
 
+    /// <summary>The public network's EasyTier exited while connected: disconnect and say why. No automatic reconnect.</summary>
+    internal void OnPublicExited(PublicNetworkSession session)
+    {
+        if (_public != session) return;
+        var reason = session.RecentOutput.LastOrDefault() ?? "";
+        DisconnectPublic();
+        SetStatus(new StatusMessage("common.raw", [L.F("core.mp.public.exited", reason)], StatusKind.Warning));
+    }
+
     [RelayCommand]
     private void DisconnectPublic()
     {
@@ -232,8 +242,7 @@ public sealed partial class MultiplayerViewModel
         try
         {
             var rooms = await DirectoryClient(network).ListAsync(default);
-            PublicRooms.Clear();
-            foreach (var room in rooms) PublicRooms.Add(new PublicRoomItem(room));
+            ReplacePublicRooms(rooms);
             if (rooms.Count == 0) SetStatus(StatusMessage.Info("multiplayer.public.no_rooms"));
         }
         catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or InvalidDataException or OperationCanceledException)
@@ -356,7 +365,17 @@ public sealed partial class MultiplayerViewModel
     /// </summary>
     private IReadOnlyList<byte[]> LobbyKeys() => _lobby?.Book.CurrentLobbyKey() is { } key ? [key] : [];
 
-    private RoomListing BuildListing()
+    /// <summary>The Minecraft version of a local instance, or null when it can't be read.</summary>
+    private string? TryMcVersion(string id)
+    {
+        try { return _service.GetInstance(id).McVersion; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    internal RoomListing BuildListing()
     {
         var mode = CurrentVisibility;
         var standing = _standing;
@@ -368,7 +387,8 @@ public sealed partial class MultiplayerViewModel
             Mode = standing is null && mode != RoomVisibility.Hidden ? RoomVisibility.Hidden : mode,
             // 隐藏房间开了指纹查找：带一张要房主批准的长期邀请，只有拿着指纹码的人能从目录里拿到。
             HostKey = Identity.PublicKey,
-            Game = TargetInstance ?? "",
+            // The Minecraft version (what the room list shows and filters by), not the local instance's name.
+            Game = TargetInstance is { } id && TryMcVersion(id) is { } mcVersion ? mcVersion : "",
             Version = Amber.Core.Launch.UpdateChecker.CurrentVersion,
             Players = 1 + Members.Count,
             Approval = !(standing?.AutoApprove ?? false),

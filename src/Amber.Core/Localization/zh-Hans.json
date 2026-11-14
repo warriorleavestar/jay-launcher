@@ -1017,7 +1017,6 @@
   "multiplayer.proxy.stopped": "已停止转发游戏，之后启动的游戏直接连网。",
   "multiplayer.proxy.switching": "游戏会经 {0}（{1}）的电脑出去。对方要先勾选“帮房间里的人转发游戏”。之后从 Jay 启动的游戏生效。",
   "multiplayer.room.added_to_servers": "已加到 {0} 的多人游戏列表（地址 {1}，每次加入房间端口会变）",
-  "multiplayer.room.code_copied": "房间码已复制，5 分钟后自动从剪贴板清除",
   "multiplayer.room.connected": "已连上房主{0}。在游戏里添加服务器 {1}，或点下面的按钮直接进入",
   "multiplayer.room.connecting": "正在连接房主……",
   "multiplayer.room.connecting_first_time": "正在连接房主……（第一次可能要十几秒）",

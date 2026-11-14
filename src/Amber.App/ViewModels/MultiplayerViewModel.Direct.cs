@@ -181,7 +181,6 @@ public sealed partial class MultiplayerViewModel
             AdoptGameRelay(relay, RelayOnAdapter(FullLanMode, credentials.Tunnel.Wraps));
             relay = null;
             Mode = "host";
-            RoomCodeText = "";
             RestoreChatHistory(room);
             StartHub(room);
             // Guests knock over the direct bridge (no relays: see ServerlessLobbyPeers); the host's addresses go only to
@@ -229,7 +228,6 @@ public sealed partial class MultiplayerViewModel
             Mode = "join";
             IsDirect = true;
             _direct = direct;
-            RoomCodeText = "";
             HostFingerprint = outcome.HostFingerprint;
             HostJayAccount = outcome.HostJayAccount;
             SeenJayDevice(outcome.HostPublicKey, outcome.HostJayDevice);
@@ -506,14 +504,15 @@ public sealed partial class MultiplayerViewModel
         _matrixCts?.Cancel();
         // 会话结束：确认卡片、测试横幅跟着收起（之后旧会话的事件不再理会）。
         ResetGuestTest();
-        if (_direct is { } direct)
-        {
-            _direct = null;
-            await direct.DisposeAsync();
-        }
+        // Reset the shared state before awaiting the dispose: a room opened while the old session is still closing must
+        // keep its own direct state and sealed invite. ClearSealed still sees the old lobby here (StopSession stops the
+        // direct session before the host lobby).
+        var direct = _direct;
+        _direct = null;
         IsDirect = false;
         DirectHint = "";
         PathText = "";
         ClearSealed();
+        if (direct is not null) await direct.DisposeAsync();
     }
 }

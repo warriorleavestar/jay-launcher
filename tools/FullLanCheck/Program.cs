@@ -373,8 +373,22 @@ static class FullLanCheck
         return false;
     }
 
-    private static string? FindInterface(IPAddress ip) => NetworkInterface.GetAllNetworkInterfaces()
-        .FirstOrDefault(n => n.GetIPProperties().UnicastAddresses.Any(a => a.Address.Equals(ip)))?.Name;
+    private static string? FindInterface(IPAddress ip)
+    {
+        // Listing interfaces can fail while one of them is being torn down (macOS); that says nothing either way, so look again.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return NetworkInterface.GetAllNetworkInterfaces()
+                    .FirstOrDefault(n => n.GetIPProperties().UnicastAddresses.Any(a => a.Address.Equals(ip)))?.Name;
+            }
+            catch (NetworkInformationException) when (attempt < 10)
+            {
+                Thread.Sleep(100);
+            }
+        }
+    }
 
     private static List<int> CorePids() => Pids("easytier-core");
     private static List<int> GuardPids() => Pids("--amber-et-guard");
