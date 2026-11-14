@@ -1115,6 +1115,7 @@
   "tools.junk.cleaned_skipped": "清理了 {0:F1} MB，游戏运行中的文件会被跳过",
   "tools.junk.initial": "点“扫描”看看能清理多少",
   "tools.junk.scan": "扫描",
+  "tools.junk.scan_failed": "扫描失败：{0}",
   "tools.junk.scanning": "正在扫描……",
   "tools.junk.summary": "共 {0:F1} MB 可以清理。存档、模组和配置不在清理范围内。",
   "tools.junk.title": "清理游戏垃圾",

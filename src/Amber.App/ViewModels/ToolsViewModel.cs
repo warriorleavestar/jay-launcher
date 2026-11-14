@@ -97,7 +97,14 @@ public sealed partial class ToolsViewModel : PageViewModel
     {
         JunkStatus = L.T("tools.junk.scanning");
         var dir = service.Directory;
-        var groups = await Task.Run(() => Toolbox.ScanJunk(dir));
+        var running = service.AnyRunning;
+        List<JunkGroup> groups;
+        try { groups = await Task.Run(() => Toolbox.ScanJunk(dir, running)); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            JunkStatus = L.F("tools.junk.scan_failed", e.Message);
+            return;
+        }
         Junk.Clear();
         foreach (var g in groups) Junk.Add(new JunkItem(g));
         JunkStatus = L.F("tools.junk.summary", groups.Sum(g => g.Bytes) / 1024.0 / 1024);
@@ -108,7 +115,8 @@ public sealed partial class ToolsViewModel : PageViewModel
     {
         var selected = Junk.Where(j => j.Selected).Select(j => j.Group).ToList();
         if (selected.Count == 0) return;
-        var freed = await Task.Run(() => Toolbox.Clean(selected));
+        var running = service.AnyRunning;
+        var freed = await Task.Run(() => Toolbox.Clean(selected, running));
         JunkStatus = L.F("tools.junk.cleaned", freed / 1024.0 / 1024);
         await ScanJunkAsync();
         JunkStatus = L.F("tools.junk.cleaned_skipped", freed / 1024.0 / 1024);

@@ -1144,6 +1144,7 @@
   "tools.junk.cleaned_skipped": "Cleaned up {0:F1} MB; files used by running games were skipped",
   "tools.junk.initial": "Select “Scan” to see how much space you can free up",
   "tools.junk.scan": "Scan",
+  "tools.junk.scan_failed": "Couldn't scan: {0}",
   "tools.junk.scanning": "Scanning…",
   "tools.junk.summary": "{0:F1} MB can be cleaned up. Worlds, mods, and configuration are excluded.",
   "tools.junk.title": "Clean up junk files",

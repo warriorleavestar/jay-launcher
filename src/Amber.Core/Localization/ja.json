@@ -1115,6 +1115,7 @@
   "tools.junk.cleaned_skipped": "{0:F1} MB を削除しました。実行中のゲームが使用しているファイルはスキップしました。",
   "tools.junk.initial": "「スキャン」で削除できる容量を確認できます",
   "tools.junk.scan": "スキャン",
+  "tools.junk.scan_failed": "スキャンできませんでした：{0}",
   "tools.junk.scanning": "スキャン中…",
   "tools.junk.summary": "{0:F1} MB を削除できます。ワールド、MOD、設定は削除の対象外です。",
   "tools.junk.title": "ゲームの不要ファイルを削除",

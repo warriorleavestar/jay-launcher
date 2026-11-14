@@ -1087,6 +1087,7 @@
   "tools.junk.cleaned_skipped": "已清 {0:F1} MB，方行之戲所用之檔略之",
   "tools.junk.initial": "按「掃」以觀可清之地",
   "tools.junk.scan": "掃",
+  "tools.junk.scan_failed": "掃之不能：{0}",
   "tools.junk.scanning": "方掃……",
   "tools.junk.summary": "凡可清 {0:F1} MB。界、模組及設皆不在清列。",
   "tools.junk.title": "清戲之冗檔",

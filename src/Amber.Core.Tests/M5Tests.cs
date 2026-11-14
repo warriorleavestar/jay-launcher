@@ -286,6 +286,46 @@ public class M5Tests : IDisposable
     }
 
     [Fact]
+    public void Junk_LeavesDownloadsInProgressAndNativesOfARunningGame()
+    {
+        var dir = new GameDirectory(_root);
+        Directory.CreateDirectory(dir.NativesDir("v"));
+        File.WriteAllText(dir.VersionJsonPath("v"), "{}");
+        File.WriteAllText(Path.Combine(dir.NativesDir("v"), "a.dll"), "12345");
+        Directory.CreateDirectory(Path.Combine(dir.LibrariesDir, "x"));
+        var fresh = Path.Combine(dir.LibrariesDir, "x", "fresh.jar.part");
+        var stale = Path.Combine(dir.LibrariesDir, "x", "stale.jar.part");
+        File.WriteAllText(fresh, "123");
+        File.WriteAllText(stale, "1234");
+        var now = DateTime.UtcNow;
+        File.SetLastWriteTimeUtc(stale, now - Toolbox.RecentDownload - TimeSpan.FromMinutes(1));
+
+        var running = Toolbox.ScanJunk(dir, gameRunning: true, now);
+        Assert.Empty(running.Single(g => g.Kind == JunkKind.Natives).Paths);
+        Assert.Equal([stale], running.Single(g => g.Kind == JunkKind.PartialDownload).Paths);
+
+        // Scanned while idle, cleaned after a game started and a download resumed: both are left alone.
+        var idle = Toolbox.ScanJunk(dir, gameRunning: false, now);
+        Assert.Single(idle.Single(g => g.Kind == JunkKind.Natives).Paths);
+        File.SetLastWriteTimeUtc(stale, now);
+        Assert.Equal(0, Toolbox.Clean(idle, gameRunning: true, now));
+        Assert.True(Directory.Exists(dir.NativesDir("v")) && File.Exists(fresh) && File.Exists(stale));
+    }
+
+    [Fact]
+    public void Junk_ScanSkipsAFolderItCannotRead()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var dir = new GameDirectory(_root);
+        var locked = Path.Combine(dir.LibrariesDir, "locked");
+        Directory.CreateDirectory(locked);
+        File.WriteAllText(Path.Combine(locked, "a.part"), "x");
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try { Assert.NotNull(Toolbox.ScanJunk(dir)); }
+        finally { File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
+    }
+
+    [Fact]
     public async Task UpdateChecker_NoFeedMeansNoNetwork_OnlyReportsNewer()
     {
         var fake = new FakeHttp().On("https://u.example/feed", """{"tag_name":"v1.2.0","html_url":"https://u.example/r","body":"new"}""");

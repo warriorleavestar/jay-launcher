@@ -8,13 +8,24 @@ using Amber.Core.Net;
 
 namespace Amber.Core.Launch;
 
-public sealed record JunkGroup(string Name, string Description, IReadOnlyList<string> Paths, long Bytes);
+public sealed record JunkGroup(string Name, string Description, IReadOnlyList<string> Paths, long Bytes, JunkKind Kind = JunkKind.Other);
+
+/// <summary>Natives and partial downloads can be in use right now; the other kinds never are.</summary>
+public enum JunkKind { Other, Natives, PartialDownload }
 
 /// <summary>清理游戏垃圾：只动日志、崩溃报告、natives 和下载残留，不碰存档、模组和配置。</summary>
 public static class Toolbox
 {
-    public static List<JunkGroup> ScanJunk(GameDirectory dir)
+    /// <summary>A partial download written to this recently may still be downloading.</summary>
+    public static readonly TimeSpan RecentDownload = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// What can be cleaned now. While a game runs no natives folder is listed (one of them is in use), and a partial
+    /// download written to in the last <see cref="RecentDownload"/> is left alone. Folders that cannot be read are skipped.
+    /// </summary>
+    public static List<JunkGroup> ScanJunk(GameDirectory dir, bool gameRunning = false, DateTime? nowUtc = null)
     {
+        var now = nowUtc ?? DateTime.UtcNow;
         var logs = new List<string>();
         var crashes = new List<string>();
         var natives = new List<string>();
@@ -25,33 +36,38 @@ public static class Toolbox
             AddFiles(logs, Path.Combine(root, "logs"), "*.log.gz");
             AddFiles(logs, Path.Combine(root, "logs"), "debug*.log*");
             AddFiles(crashes, Path.Combine(root, "crash-reports"), "*.txt");
-            if (Directory.Exists(root)) crashes.AddRange(Directory.EnumerateFiles(root, "hs_err_pid*.log"));
+            AddFiles(crashes, root, "hs_err_pid*.log");
         }
-        foreach (var id in dir.ListInstalled())
-        {
-            var native = dir.NativesDir(id);
-            if (Directory.Exists(native)) natives.Add(native);
-        }
+        if (!gameRunning)
+            foreach (var id in dir.ListInstalled())
+            {
+                var native = dir.NativesDir(id);
+                if (Directory.Exists(native)) natives.Add(native);
+            }
         foreach (var folder in new[] { dir.LibrariesDir, dir.VersionsDir, Path.Combine(dir.AssetsDir, "objects") })
-        {
-            if (Directory.Exists(folder)) parts.AddRange(Directory.EnumerateFiles(folder, "*.part", SearchOption.AllDirectories));
-        }
+            AddFiles(parts, folder, "*.part", recursive: true);
+        parts.RemoveAll(p => !StillJunk(p, JunkKind.PartialDownload, gameRunning, now));
 
         return
         [
             new JunkGroup(L.T("core.launch.cleanup.oldlogs"), L.T("core.launch.cleanup.oldlogsdescription"), logs, SizeOf(logs)),
             new JunkGroup(L.T("core.launch.cleanup.crashes"), L.T("core.launch.cleanup.crashesdescription"), crashes, SizeOf(crashes)),
-            new JunkGroup("natives", L.T("core.launch.cleanup.nativesdescription"), natives, SizeOf(natives)),
-            new JunkGroup(L.T("core.launch.cleanup.partialdownloads"), L.T("core.launch.cleanup.partialdownloadsdescription"), parts, SizeOf(parts)),
+            new JunkGroup("natives", L.T("core.launch.cleanup.nativesdescription"), natives, SizeOf(natives), JunkKind.Natives),
+            new JunkGroup(L.T("core.launch.cleanup.partialdownloads"), L.T("core.launch.cleanup.partialdownloadsdescription"), parts, SizeOf(parts), JunkKind.PartialDownload),
         ];
     }
 
-    /// <summary>返回实际清掉的字节数。被占用的文件跳过。</summary>
-    public static long Clean(IEnumerable<JunkGroup> groups)
+    /// <summary>
+    /// 返回实际清掉的字节数。被占用的文件跳过。Checked again at clean time: a game started or a download resumed since
+    /// the scan keeps its files (on macOS and Linux a file in use could otherwise be deleted).
+    /// </summary>
+    public static long Clean(IEnumerable<JunkGroup> groups, bool gameRunning = false, DateTime? nowUtc = null)
     {
+        var now = nowUtc ?? DateTime.UtcNow;
         long freed = 0;
-        foreach (var path in groups.SelectMany(g => g.Paths))
+        foreach (var (path, kind) in groups.SelectMany(g => g.Paths.Select(p => (p, g.Kind))))
         {
+            if (!StillJunk(path, kind, gameRunning, now)) continue;
             try
             {
                 var size = SizeOf([path]);
@@ -70,9 +86,23 @@ public static class Toolbox
         foreach (var id in dir.ListInstalled()) yield return dir.VersionDir(id);
     }
 
-    private static void AddFiles(List<string> list, string folder, string pattern)
+    private static bool StillJunk(string path, JunkKind kind, bool gameRunning, DateTime nowUtc)
     {
-        if (Directory.Exists(folder)) list.AddRange(Directory.EnumerateFiles(folder, pattern));
+        if (kind == JunkKind.Natives) return !gameRunning;
+        if (kind != JunkKind.PartialDownload) return true;
+        try { return nowUtc - File.GetLastWriteTimeUtc(path) >= RecentDownload; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    private static void AddFiles(List<string> list, string folder, string pattern, bool recursive = false)
+    {
+        // Unreadable subfolders are skipped; a folder that disappears mid-scan just adds nothing.
+        var options = new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = recursive, AttributesToSkip = 0, MatchType = MatchType.Win32 };
+        try
+        {
+            if (Directory.Exists(folder)) list.AddRange(Directory.EnumerateFiles(folder, pattern, options));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     public static long SizeOf(IEnumerable<string> paths)

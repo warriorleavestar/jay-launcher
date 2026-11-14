@@ -1115,6 +1115,7 @@
   "tools.junk.cleaned_skipped": "已清理 {0:F1} MB，已略過執行中遊戲使用的檔案",
   "tools.junk.initial": "點選「掃描」查看可清理的空間",
   "tools.junk.scan": "掃描",
+  "tools.junk.scan_failed": "掃描失敗：{0}",
   "tools.junk.scanning": "正在掃描……",
   "tools.junk.summary": "共可清理 {0:F1} MB。世界、模組及設定不在清理範圍內。",
   "tools.junk.title": "清理遊戲垃圾檔案",
