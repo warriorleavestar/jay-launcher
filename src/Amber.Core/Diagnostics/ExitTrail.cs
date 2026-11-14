@@ -31,7 +31,8 @@ public static class ExitTrail
     /// <summary>True when the previous run ended without <see cref="CleanExit"/>; its trail is in <see cref="PreviousRunPath"/>.</summary>
     public static bool PreviousRunEndedUnexpectedly { get; private set; }
 
-    public static string? PreviousRunPath => _dir is null ? null : Path.Combine(_dir, PreviousName);
+    /// <summary>Where the previous unclean run's trail was copied (a local aid for reading it by hand; the app doesn't open it).</summary>
+    internal static string? PreviousRunPath => _dir is null ? null : Path.Combine(_dir, PreviousName);
 
     public static string? TrailPath => _dir is null ? null : Path.Combine(_dir, TrailName);
 

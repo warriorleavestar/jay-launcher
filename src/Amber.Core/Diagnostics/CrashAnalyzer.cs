@@ -164,8 +164,9 @@ public static partial class CrashAnalyzer
     /// 分析一次运行：取启动之后产生的崩溃报告和 JVM 错误文件，加上 latest.log 和内存里的输出。
     /// pid 给了时只认这个进程的 hs_err_pid 文件；sharedWorkDir（期间另一局游戏也用这个目录）时
     /// 崩溃报告和 latest.log 可能是那一局的，只用自己的输出和自己的 hs_err_pid 文件。
+    /// Kept for the unit tests: the app snapshots the files itself (<see cref="FindRunFiles"/>) and calls <see cref="Analyze"/>.
     /// </summary>
-    public static CrashAnalysis AnalyzeRun(string workDir, DateTime startedUtc, IEnumerable<string> recentOutput, int? pid = null, bool sharedWorkDir = false)
+    internal static CrashAnalysis AnalyzeRun(string workDir, DateTime startedUtc, IEnumerable<string> recentOutput, int? pid = null, bool sharedWorkDir = false)
     {
         var sources = FindRunFiles(workDir, startedUtc, pid, sharedWorkDir);
         var parts = new List<string>();
