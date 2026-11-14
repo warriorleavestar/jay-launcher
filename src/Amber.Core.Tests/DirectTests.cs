@@ -176,10 +176,8 @@ public class DirectBridgeTests
         await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
         await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
         // 模拟“局域网路径被禁用”：两边都只允许 IPv6，本机回环地址连不上。
-        host.AllowedPaths.Clear();
-        host.AllowedPaths.Add(PathKind.IPv6);
-        guest.AllowedPaths.Clear();
-        guest.AllowedPaths.Add(PathKind.IPv6);
+        host.SetAllowedPaths([PathKind.IPv6]);
+        guest.SetAllowedPaths([PathKind.IPv6]);
         Assert.Null(await guest.PunchAsync(Loopback(host), NatKind.Cone, TimeSpan.FromSeconds(2)));
         Assert.Empty(host.Peers);
     }
