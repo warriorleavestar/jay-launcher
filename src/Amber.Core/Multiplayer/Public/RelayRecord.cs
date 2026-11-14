@@ -99,10 +99,12 @@ public static class RelayRecord
     }
 
     /// <summary>Looks the relays up. Throws <see cref="IOException"/> with a reason when they aren't there or the record is damaged.</summary>
-    public static async Task<(string? Name, List<string> Urls)> ResolveAsync(RoomDirectoryClient directories, GateLocator locator, CancellationToken ct)
+    /// <param name="seen">Highest record versions taken before (see <see cref="RecordSeqMemory"/>): an older one isn't used.</param>
+    public static async Task<(string? Name, List<string> Urls)> ResolveAsync(RoomDirectoryClient directories, GateLocator locator, CancellationToken ct,
+        RecordSeqMemory? seen = null)
     {
         var record = await directories.GetRecordAsync(SignedRecord.Lookup(locator.Id),
-            key => CryptographicOperations.FixedTimeEquals(SignerHash(key), locator.SignerHash), ct)
+            key => CryptographicOperations.FixedTimeEquals(SignerHash(key), locator.SignerHash), ct, seen: seen)
             ?? throw new IOException(L.T("core.mp.nodes.record_not_found"));
         try
         {

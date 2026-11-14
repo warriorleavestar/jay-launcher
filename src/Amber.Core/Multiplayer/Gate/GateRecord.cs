@@ -101,11 +101,12 @@ public static class GateRecord
     /// Player side: looks the locator up on the directories and returns the invite with a real entry to connect to (a random
     /// one when the record lists several, as a plain invite would). Throws <see cref="IOException"/> with a reason.
     /// </summary>
-    public static async Task<GateInvite> ResolveAsync(RoomDirectoryClient directories, GateInvite invite, CancellationToken ct)
+    /// <param name="seen">Highest record versions taken before (see <see cref="RecordSeqMemory"/>): an older one isn't used.</param>
+    public static async Task<GateInvite> ResolveAsync(RoomDirectoryClient directories, GateInvite invite, CancellationToken ct, RecordSeqMemory? seen = null)
     {
         if (invite.Locator is not { } locator) return invite;
         var record = await directories.GetRecordAsync(SignedRecord.Lookup(locator.Id),
-            key => CryptographicOperations.FixedTimeEquals(SignerHash(key), locator.SignerHash), ct)
+            key => CryptographicOperations.FixedTimeEquals(SignerHash(key), locator.SignerHash), ct, seen: seen)
             ?? throw new IOException(L.T("core.gate.record.not_found"));
         IReadOnlyList<GateRecordEntry>? entries;
         try
@@ -126,13 +127,14 @@ public static class GateRecord
     /// Where directory keys of networks that pin none are remembered (trust on first use): the app's
     /// <see cref="DirectoryKeyMemory"/>, so the lookup checks the same keys as every other directory call.
     /// </param>
+    /// <param name="seen">Highest record versions taken before (see <see cref="RecordSeqMemory"/>): an older one isn't used.</param>
     public static async Task<GateInvite> ResolveOnNetworkAsync(GateInvite invite, PublicNetworkProfile profile, EasyTierInstaller installer, string workDir,
-        CancellationToken ct, DirectoryKeyMemory? keyMemory = null)
+        CancellationToken ct, DirectoryKeyMemory? keyMemory = null, RecordSeqMemory? seen = null)
     {
         if (invite.Locator is null) return invite;
         await installer.EnsureAsync(null, ct);
         using var session = PublicNetworkSession.Start(installer, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()), workDir);
         await session.WaitForDirectoryAsync(TimeSpan.FromSeconds(60), ct);
-        return await ResolveAsync(new RoomDirectoryClient(session) { KeyMemory = keyMemory }, invite, ct);
+        return await ResolveAsync(new RoomDirectoryClient(session) { KeyMemory = keyMemory }, invite, ct, seen);
     }
 }
