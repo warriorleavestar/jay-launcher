@@ -57,6 +57,7 @@ internal sealed partial class SelfTest
         await Task.Delay(600);
         Check("置顶小窗：不抢焦点、置顶、宽 360、最矮 200", popup is { Topmost: true, ShowActivated: false, Width: 360 } && popup.Bounds.Height >= 199
             && popup.Content is SafetyPanel { Title: var title } && title == L.F("multiplayer.knock.wants_in", "Bo"), $"{popup.Bounds.Width}x{popup.Bounds.Height}");
+        Check("置顶小窗：锁定外观", Amber.App.Services.ThemeService.IsLocked(popup));
         Check("置顶小窗：默认按钮是【拒绝】", popup.DefaultButton.Content as string == L.T("multiplayer.invite.deny") && popup.DefaultButton.Kind == SafetyKind.Safe);
         await ShotWindowAsync(popup, "置顶小窗-敲门");
         Dispatcher.UIThread.Invoke(() => popup.DefaultButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)));
@@ -80,6 +81,25 @@ internal sealed partial class SelfTest
         await Task.Delay(300);
         Dispatcher.UIThread.Invoke(closing.Close);
         Check("置顶小窗：关窗算拒绝", await WaitAsync(() => fourth.IsCompleted, 3) && !fourth.Result);
+
+        // Several popups stack without overlapping, also after the bottom one closes and a new one opens.
+        var stackA = vm.AskApprovalAsync(Knock("Ed", 5), CancellationToken.None);
+        var stackB = vm.AskApprovalAsync(Knock("Fay", 6), CancellationToken.None);
+        await WaitAsync(() => vm.ApprovalCards.Count >= 2, 5);
+        var popupA = window.Popups.Show(vm.RequestFor(vm.ApprovalCards[0])!);
+        window.Popups.Show(vm.RequestFor(vm.ApprovalCards[1])!);
+        await Task.Delay(400);
+        Dispatcher.UIThread.Invoke(popupA.Close);
+        await WaitAsync(() => stackA.IsCompleted, 3);
+        var stackC = vm.AskApprovalAsync(Knock("Gus", 7), CancellationToken.None);
+        await WaitAsync(() => vm.ApprovalCards.Count >= 2, 5);
+        window.Popups.Show(vm.RequestFor(vm.ApprovalCards[^1])!);
+        await Task.Delay(400);
+        var rects = Dispatcher.UIThread.Invoke(() => RequestPopups.Open
+            .Select(w => new Avalonia.PixelRect(w.Position, Avalonia.PixelSize.FromSize(w.Bounds.Size, w.RenderScaling))).ToList());
+        Check("置顶小窗：几个一起时叠放不重叠（下面的关掉再来一个也是）", rects.Count == 2 && !rects[0].Intersects(rects[1]), string.Join(" ", rects));
+        Dispatcher.UIThread.Invoke(() => { foreach (var w in RequestPopups.Open.ToList()) w.Close(); });
+        await WaitAsync(() => stackB.IsCompleted && stackC.IsCompleted, 3);
 
         // A file: a locked card at the top of the room, a pointer in the chat, a warning for programs; bar and room in sync.
         main.Shell.Navigate("play");
