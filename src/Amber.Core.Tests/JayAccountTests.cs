@@ -149,7 +149,7 @@ public sealed class JayAccountTests : IDisposable
         Assert.False(JayAddress.IsValid(account.Address[..^1]));
         Assert.False(JayAddress.IsValid(Bech32m.Encode("abc", Bech32m.ConvertBits(account.PublicKey, 8, 5, true))));
         Assert.Equal($"{account.Address[..8]}…{account.Address[^4..]}", JayAddress.Short(account.Address));
-        Assert.Equal(4, JayAddress.CheckWords(account.Id, MnemonicLanguage.ChineseSimplified).Length);
+        Assert.Equal(8, JayAddress.CheckWords(account.Id, MnemonicLanguage.ChineseSimplified).Length);
         Assert.Equal(JayAddress.CheckWords(account.Id, MnemonicLanguage.English), JayAddress.CheckWords(key, MnemonicLanguage.English));
         // The single-key addresses from before (version 0, the Ed25519 key itself) are not addresses any more.
         Assert.False(JayAddress.IsValid(Bech32m.Encode(JayAddress.Hrp, [0, .. Bech32m.ConvertBits(account.PublicKey, 8, 5, true)!])));
@@ -366,7 +366,7 @@ public sealed class JayAccountTests : IDisposable
 
     /// <summary>
     /// The "Me" page and the "is this their account?" request both show <see cref="JayAddress.CheckWordsText"/>: the words
-    /// come from the account id in the address, so the owner and the friend see the same four.
+    /// come from the account id in the address, so the owner and the friend see the same eight.
     /// </summary>
     [Fact]
     public void CheckWordsTextMatchesTheAccountsCheckWords()
@@ -375,9 +375,30 @@ public sealed class JayAccountTests : IDisposable
         Assert.True(JayAddress.TryDecode(account.Address, out var id));
         foreach (var (ui, list) in new[] { ("en", MnemonicLanguage.English), ("ja", MnemonicLanguage.English), ("zh-Hans", MnemonicLanguage.ChineseSimplified), ("zh-Hant", MnemonicLanguage.ChineseSimplified), ("lzh", MnemonicLanguage.ChineseSimplified) })
             Assert.Equal(string.Join(" · ", JayAddress.CheckWords(id, list)), JayAddress.CheckWordsText(account.Address, ui));
-        Assert.Equal(4, JayAddress.CheckWordsText(account.Address, "en").Split(" · ").Length);
+        Assert.Equal(8, JayAddress.CheckWordsText(account.Address, "en").Split(" · ").Length);
         Assert.Equal("", JayAddress.CheckWordsText(JayAddress.EncodeVersion0(account.PublicKey), "en"));
         Assert.Equal("", JayAddress.CheckWordsText(null, "en"));
+    }
+
+    /// <summary>
+    /// Eight check words, all from the word list, and different for different accounts.
+    /// </summary>
+    [Fact]
+    public void CheckWordsCoverEightyEightBits()
+    {
+        var seen = new HashSet<string>();
+        for (var i = 0; i < 64; i++)
+        {
+            var id = new byte[32];
+            id[0] = (byte)i;
+            var words = JayAddress.CheckWords(id, MnemonicLanguage.English);
+            Assert.Equal(JayAddress.CheckWordCount, words.Length);
+            Assert.All(words, w => Assert.Contains(w, Bip39.Wordlist(MnemonicLanguage.English)));
+            Assert.True(seen.Add(string.Join(' ', words)));
+        }
+        // The eighth word comes from bits 77-87 of the hash, so it varies like the others.
+        var lastWords = Enumerable.Range(0, 64).Select(i => JayAddress.CheckWords([(byte)i, .. new byte[31]], MnemonicLanguage.English)[^1]).ToHashSet();
+        Assert.True(lastWords.Count > 32);
     }
 
     /// <summary>An entry left in the new file because it couldn't be moved before is moved, and saved, once it can be.</summary>
