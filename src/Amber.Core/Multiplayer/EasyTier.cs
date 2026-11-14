@@ -533,7 +533,7 @@ public static class EasyTierArgs
         var args = new List<string>
         {
             "--network-name", o.Room.EasyTierNetworkName,
-            "--ipv4", o.IsHost ? HostIp : Subnet + JoinerHost(o.MachineId),
+            "--ipv4", o.IsHost ? HostIp : Subnet + JoinerHost(o),
             "--rpc-portal", $"127.0.0.1:{o.RpcPort}",
             "--hostname", o.IsHost ? "amber-host" : "amber-guest",
             "--instance-name", $"amber-{(o.IsHost ? "host" : "guest")}-{o.RpcPort}",
@@ -645,12 +645,21 @@ public static class EasyTierArgs
     internal static bool SplitsOnThisInstance(EasyTierOptions o) => o.Room.FromInvite && o.Room.Tunnel.Wraps && o.Room.Split.Enabled && !o.Tun;
 
     /// <summary>这次会话里本机的虚拟 IP。</summary>
-    public static string VirtualIp(EasyTierOptions o) => o.IsHost ? HostIp : Subnet + JoinerHost(o.MachineId);
+    public static string VirtualIp(EasyTierOptions o) => o.IsHost ? HostIp : Subnet + JoinerHost(o);
 
     private static bool IsLoopback(string url) =>
         Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u) && (u.IsLoopback || u.Host == "localhost");
 
-    /// <summary>加入方地址的最后一段：2–254，按机器标识稳定地选，避免每次变。</summary>
+    /// <summary>
+    /// The last part of a joiner's address: the one the host handed out with the knock approval, so members don't clash;
+    /// otherwise derived from the machine id the caller passes (callers make a new one for every session).
+    /// </summary>
+    internal static int JoinerHost(EasyTierOptions o) => o.Room.MemberHost ?? JoinerHost(o.MachineId);
+
+    /// <summary>
+    /// 2–254 from the given machine id (or the computer's name when there is none). Callers pass a fresh id per session,
+    /// so this is random per session, not stable per machine, and two members can land on the same value.
+    /// </summary>
     internal static int JoinerHost(string? machineId)
     {
         var seed = machineId ?? System.Environment.MachineName;

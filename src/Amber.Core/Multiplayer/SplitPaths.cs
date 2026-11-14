@@ -45,7 +45,7 @@ public static class SplitPathArgs
     public static string HostIp(int index) => $"10.236.{index}.1";
 
     public static string MemberIp(SplitPathOptions o) =>
-        $"10.236.{o.Index}.{(o.MemberHost ?? EasyTierArgs.JoinerHost(null)).ToString(CultureInfo.InvariantCulture)}";
+        $"10.236.{o.Index}.{(o.MemberHost ?? EasyTierArgs.JoinerHost((string?)null)).ToString(CultureInfo.InvariantCulture)}";
 
     public static Dictionary<string, string> Environment(SplitPathOptions o) => new() { [EasyTierArgs.SecretVariable] = o.Net.Secret };
 
@@ -272,7 +272,7 @@ public sealed class SplitPathGroup : IDisposable
             for (var i = 1; i < split.Paths; i++)
             {
                 var options = new SplitPathOptions(i, split.Nets[i - 1], o.IsHost, plan.ExtraPeers[i - 1], EasyTierArgs.FreeTcpPort(),
-                    o.IsHost ? null : o.LocalSplitPorts![i], o.QuicProxy, o.IsHost ? null : EasyTierArgs.JoinerHost(o.MachineId));
+                    o.IsHost ? null : o.LocalSplitPorts![i], o.QuicProxy, o.IsHost ? null : EasyTierArgs.JoinerHost(o));
                 var (process, job) = launch(corePath, SplitPathArgs.Build(options), SplitPathArgs.Environment(options),
                     Path.Combine(workDir, $"path{i}"));
                 // Owned by the group from here on, so a failure below still ends this process.
