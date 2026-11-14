@@ -428,58 +428,9 @@ jobs:
           path: packages/Jay-ios-simulator-arm64-experimental.tar.gz
           if-no-files-found: error
 
-  # Windows 代码签名（SignPath Foundation）。只在发布标签上跑，并且要先在仓库设置里配好
-  # 变量 SIGNPATH_ORGANIZATION_ID 和密钥 SIGNPATH_API_TOKEN，没配时整个任务跳过，发布照旧（未签名）。
-  # 每次签名都要在 SignPath 网页上人工批准，所以等待时间放宽到 1 小时。
-  # 签名范围见 .signpath/artifact-configuration.xml，政策见 docs/code-signing-policy.md。
-  sign-windows:
-    if: startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != ''
-    needs: publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Find unsigned Windows artifact
-        id: unsigned
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
-            --jq '.artifacts[] | select(.name == "jay-win-x64") | .id')"
-          test -n "$id"
-          echo "artifact-id=$id" >> "$GITHUB_OUTPUT"
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Submit signing request
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'jay-launcher' }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signed
-          parameters: |
-            version: ${{ toJSON(steps.unsigned.outputs.version) }}
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: signed-jay-win-x64
-          path: signed/*
-          if-no-files-found: error
-
   release:
-    # 签名任务跳过（没配置 SignPath）时照常发布；签名失败或被拒时不发布，避免把未签名的包当成正式版发出去。
-    if: >-
-      always() && startsWith(github.ref, 'refs/tags/v') &&
-      needs.publish.result == 'success' &&
-      (needs.sign-windows.result == 'success' || needs.sign-windows.result == 'skipped')
-    needs: [publish, sign-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -490,20 +441,6 @@ jobs:
           pattern: 'jay-{win,osx,linux}-*'
           path: release-assets
           merge-multiple: true
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        if: needs.sign-windows.result == 'success'
-        with:
-          name: signed-jay-win-x64
-          path: signed-assets
-
-      - name: Use signed Windows packages
-        if: needs.sign-windows.result == 'success'
-        run: |
-          for f in Jay-win-x64.zip JayServer-win-x64.zip; do
-            test -f "signed-assets/$f"
-            cp -f "signed-assets/$f" "release-assets/$f"
-          done
 
       # Jay release signature (privacy plan item 2): 2 of the 3 trustees sign this list offline
       # (`jay-server release prepare` / `cosign`), then SHA256SUMS.txt.sigs (and trust-chain.json, once the
