@@ -261,9 +261,10 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             {
                 status.Text = L.T("mobile.game.setup");
             }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or HttpRequestException
-                                               or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            catch (Exception exception)
             {
+                // async void click handler: an unhandled exception would end the game process.
+                global::Android.Util.Log.Error("JayGame", exception.ToString());
                 status.Text = L.F("mobile.game.failed", exception.Message);
                 if (content.Parent is null) root.AddView(content, panel);
             }
