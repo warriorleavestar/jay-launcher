@@ -201,6 +201,33 @@ public sealed class MobilePortTests
         Assert.Equal(1, profile.AspectRatio);
     }
 
+    [Fact]
+    public void EmbeddedGameRunsOncePerProcessAndBackFollowsItsState()
+    {
+        var state = new EmbeddedGameRunState();
+        Assert.Equal(EmbeddedGameBackAction.CloseScreen, state.BackAction);
+
+        var runs = 0;
+        state.Run(() =>
+        {
+            runs++;
+            Assert.True(state.IsRunning);
+            Assert.Equal(EmbeddedGameBackAction.SendEscape, state.BackAction);
+        });
+        Assert.True(state.HasStarted);
+        Assert.False(state.IsRunning);
+        Assert.Equal(EmbeddedGameBackAction.EndProcess, state.BackAction);
+
+        // A second start in the same process never reaches the JVM.
+        Assert.Throws<InvalidOperationException>(() => state.Run(() => runs++));
+        Assert.Equal(1, runs);
+
+        // A game that fails after starting still counts as started.
+        var failed = new EmbeddedGameRunState();
+        Assert.Throws<InvalidOperationException>(() => failed.Run(() => throw new InvalidOperationException("crash")));
+        Assert.Equal(EmbeddedGameBackAction.EndProcess, failed.BackAction);
+    }
+
     [Theory]
     [InlineData(2400, 1080, 3, 3)]
     [InlineData(1600, 720, 3, 3)]

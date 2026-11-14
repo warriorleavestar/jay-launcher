@@ -4,6 +4,7 @@ using Amber.Core.Game;
 using Amber.Core.Install;
 using Amber.Core.Launch;
 using Amber.Core.Net;
+using Amber.Mobile;
 using System.Runtime.InteropServices;
 
 namespace Amber.Android;
@@ -20,6 +21,12 @@ internal static class AndroidEmbeddedGame
 {
     // Newest release that uses Java 21 and LWJGL 3.3.3/GLFW. The 26.x line uses Java 25 and SDL3.
     public const string FirstPlayableVersion = "1.21.11";
+
+    /// <summary>This process's one game run (a JVM can be created only once per process).</summary>
+    public static EmbeddedGameRunState State { get; } = new();
+
+    public static bool HasStarted => State.HasStarted;
+    public static bool IsRunning => State.IsRunning;
 
     public static async Task<AndroidPreparedGame> PrepareAsync(
         Context context,
@@ -131,8 +138,11 @@ internal static class AndroidEmbeddedGame
             error = NativeJvmHost.PreloadLocal(path);
             if (error is not null) throw new InvalidOperationException($"Could not load {library}: {error}");
         }
-        var (_, environment) = NativeJvmHost.Create(game.Invocation.VmOptions);
-        NativeJvmHost.RunMain(environment, game.Invocation.MainClass, game.Invocation.Arguments);
+        State.Run(() =>
+        {
+            var (_, environment) = NativeJvmHost.Create(game.Invocation.VmOptions);
+            NativeJvmHost.RunMain(environment, game.Invocation.MainClass, game.Invocation.Arguments);
+        });
     }
 
     private static RuleEvaluator AndroidRules() => new()

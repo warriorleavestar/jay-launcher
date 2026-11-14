@@ -10,6 +10,7 @@ using Android.Widget;
 using Amber.Core.Localization;
 using Amber.Core.Install;
 using Amber.Mobile;
+using System.Runtime.Versioning;
 using System.Text;
 
 namespace Amber.Android;
@@ -19,12 +20,19 @@ namespace Amber.Android;
     Process = ":game",
     Theme = "@style/MyTheme.NoActionBar",
     ScreenOrientation = ScreenOrientation.SensorLandscape,
-    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
+    // One game screen per game process: opening the game again brings the running one to the front.
+    LaunchMode = LaunchMode.SingleTask,
+    // The running game cannot be recreated, so keep the activity across keyboard and window changes.
+    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode |
+                           ConfigChanges.Keyboard | ConfigChanges.KeyboardHidden | ConfigChanges.Navigation |
+                           ConfigChanges.ScreenLayout | ConfigChanges.SmallestScreenSize)]
 public sealed class GameActivity : Activity, ISurfaceHolderCallback
 {
     public const string ServerAddressExtra = "nz.work.minecraft.jay.SERVER_ADDRESS";
+    private const int GlfwKeyEscape = 256;
     private CancellationTokenSource? _runtimeSetup;
     private CancellationTokenSource? _gameSetup;
+    private Java.Lang.Object? _backCallback;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -37,13 +45,97 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         root.AddView(surface, MatchParent());
         root.AddView(new TouchControlOverlay(this), MatchParent());
 
-        if (!AndroidRuntimeStore.IsInstalled(this))
+        if (AndroidEmbeddedGame.IsRunning)
+        {
+            // The screen was recreated under a running game; it continues on the new surface.
+        }
+        else if (AndroidEmbeddedGame.HasStarted)
+            AddGameEnded(root, L.T("mobile.game.ended"));
+        else if (!AndroidRuntimeStore.IsInstalled(this))
             AddRuntimeSetup(root);
         else
             AddGameSetup(root);
 
         SetContentView(root);
         EnterImmersiveMode();
+        if (OperatingSystem.IsAndroidVersionAtLeast(33)) RegisterBackCallback();
+    }
+
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        // Before the game starts, use the latest server address; a running game keeps its own.
+        if (intent is not null && !AndroidEmbeddedGame.HasStarted) Intent = intent;
+    }
+
+    [SupportedOSPlatform("android33.0")]
+    private void RegisterBackCallback()
+    {
+        var callback = new BackCallback(HandleBack);
+        // 0 is OnBackInvokedDispatcher.PRIORITY_DEFAULT.
+        OnBackInvokedDispatcher.RegisterOnBackInvokedCallback(0, callback);
+        _backCallback = callback;
+    }
+
+    [SupportedOSPlatform("android33.0")]
+    private void UnregisterBackCallback()
+    {
+        if (_backCallback is global::Android.Window.IOnBackInvokedCallback callback)
+            OnBackInvokedDispatcher.UnregisterOnBackInvokedCallback(callback);
+        _backCallback?.Dispose();
+        _backCallback = null;
+    }
+
+#pragma warning disable CS0672, CA1422 // Android 12 and older still deliver Back here.
+    public override void OnBackPressed() => HandleBack();
+#pragma warning restore CS0672, CA1422
+
+    private void HandleBack()
+    {
+        switch (AndroidEmbeddedGame.State.BackAction)
+        {
+            case EmbeddedGameBackAction.SendEscape:
+                // Back acts like Esc in the game (pause menu, close screens) instead of leaving the
+                // screen while the game keeps running in the background.
+                NativeJvmHost.AddKey(GlfwKeyEscape);
+                break;
+            case EmbeddedGameBackAction.EndProcess:
+                EndGameProcess();
+                break;
+            default:
+                Finish();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Leaves the game screen and ends the game process. The embedded JVM can be created only once per
+    /// process, so the next game starts in a fresh process.
+    /// </summary>
+    private void EndGameProcess()
+    {
+        Finish();
+        global::Android.OS.Process.KillProcess(global::Android.OS.Process.MyPid());
+    }
+
+    private void AddGameEnded(FrameLayout root, string message)
+    {
+        var status = new TextView(this) { Text = message, Gravity = GravityFlags.Center };
+        status.SetTextColor(Color.White);
+        var close = new Button(this) { Text = L.T("mobile.game.close") };
+        close.Click += (_, _) => EndGameProcess();
+
+        var content = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        content.SetGravity(GravityFlags.Center);
+        content.SetBackgroundColor(Color.Argb(225, 20, 24, 30));
+        content.SetPadding(40, 32, 40, 32);
+        content.AddView(status, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent));
+        content.AddView(close, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent));
+        root.AddView(content, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent, GravityFlags.Center)
+        {
+            LeftMargin = 64,
+            RightMargin = 64
+        });
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
@@ -87,6 +179,7 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
         _gameSetup?.Cancel();
         _gameSetup?.Dispose();
         _gameSetup = null;
+        if (OperatingSystem.IsAndroidVersionAtLeast(33)) UnregisterBackCallback();
         base.OnDestroy();
     }
 
@@ -254,8 +347,8 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
                 editor?.Apply();
                 root.RemoveView(content);
                 await Task.Run(() => AndroidEmbeddedGame.Run(prepared), _gameSetup.Token);
-                status.Text = L.T("mobile.game.exited");
-                root.AddView(content, panel);
+                // The game ended without ending the process. It cannot start again in this process.
+                EndGameProcess();
             }
             catch (System.OperationCanceledException)
             {
@@ -264,6 +357,13 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
             catch (Exception exception) when (exception is IOException or InvalidDataException or HttpRequestException
                                                or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
             {
+                if (AndroidEmbeddedGame.HasStarted)
+                {
+                    // The JVM exists already, so Play cannot work again here: offer only closing.
+                    if (content.Parent is not null) root.RemoveView(content);
+                    AddGameEnded(root, L.F("mobile.game.failed", exception.Message));
+                    return;
+                }
                 status.Text = L.F("mobile.game.failed", exception.Message);
                 if (content.Parent is null) root.AddView(content, panel);
             }
@@ -287,6 +387,12 @@ public sealed class GameActivity : Activity, ISurfaceHolderCallback
     private static FrameLayout.LayoutParams MatchParent() => new(
         ViewGroup.LayoutParams.MatchParent,
         ViewGroup.LayoutParams.MatchParent);
+
+    [SupportedOSPlatform("android33.0")]
+    private sealed class BackCallback(Action onBack) : Java.Lang.Object, global::Android.Window.IOnBackInvokedCallback
+    {
+        public void OnBackInvoked() => onBack();
+    }
 }
 
 internal sealed class TouchControlOverlay : View, ITouchInputSink
