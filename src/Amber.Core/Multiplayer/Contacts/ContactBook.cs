@@ -625,7 +625,13 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
                     RefusedAccount = Identity.JayAddress.Canonical(item["refused"]?.GetValue<string>()),
                 });
             }
-            catch (Exception e) when (e is InvalidOperationException or FormatException or ArgumentOutOfRangeException or JsonException) { }
+            catch (Exception e) when (e is InvalidOperationException or FormatException or ArgumentOutOfRangeException or JsonException)
+            {
+                // Keep the file as .broken before the entry is dropped on the next save, and stay careful until then:
+                // the skipped entry may be a friend (or a removed device) that Unreadable callers must not miss.
+                _broken = true;
+                _unreadable = true;
+            }
         }
         _contacts = contacts;
         return contacts;

@@ -777,8 +777,11 @@ public sealed record KnockLimits
     /// </summary>
     public int MaxUnknownPerHour { get; init; } = 30;
     public TimeSpan MaxGuessPause { get; init; } = TimeSpan.FromHours(6);
-    /// <summary>A pause after this long without one starts again from <see cref="PauseAfterFailures"/>.</summary>
-    public TimeSpan GuessStreakReset { get; init; } = TimeSpan.FromHours(1);
+    /// <summary>
+    /// A pause after this long without one starts again from <see cref="PauseAfterFailures"/>. A day, so that waiting
+    /// for the streak to reset costs a guesser more time than the short pauses it gets back.
+    /// </summary>
+    public TimeSpan GuessStreakReset { get; init; } = TimeSpan.FromDays(1);
 }
 
 /// <summary>

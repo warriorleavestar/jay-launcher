@@ -143,7 +143,8 @@ public sealed class TrustedMembers(string path)
                     JayAccount = Identity.JayAddress.TryDecode(jay, out var account) ? Identity.JayAddress.Encode(account) : null,
                 });
             }
-            catch (Exception e) when (e is InvalidOperationException or FormatException or JsonException) { }
+            // Keep the file as .broken before the entry is dropped on the next save.
+            catch (Exception e) when (e is InvalidOperationException or FormatException or JsonException) { _broken = true; }
         }
         _members = members;
         return members;

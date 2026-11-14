@@ -627,6 +627,15 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.True(server.IsPasswordPaused);
         _now += Fast.PauseAfterFailures;
         Assert.False(server.IsPasswordPaused);
+
+        // Waiting a couple of hours does not start the pauses over: the next one is twice as long again.
+        _now += TimeSpan.FromHours(2);
+        for (var i = 0; i < Fast.MaxUnknownPerMinute; i++) await SendUnknownIdAsync(server);
+        Assert.Equal(3, told);
+        _now += 3 * Fast.PauseAfterFailures;
+        Assert.True(server.IsPasswordPaused);
+        _now += Fast.PauseAfterFailures + TimeSpan.FromSeconds(1);
+        Assert.False(server.IsPasswordPaused);
     }
 
     /// <summary>Child mode's "always ask" overrides both a trusted guest and an auto-approve invite, checked at each knock.</summary>

@@ -28,8 +28,13 @@ public sealed class ListFileTests : IDisposable
             new JsonObject { ["pub"] = Hex(), ["name"] = "Alex", ["verified"] = true },
             new JsonObject { ["pub"] = Hex(), ["name"] = "Bo", ["verified"] = true, ["added"] = "not a number" },
             new JsonObject { ["pub"] = Hex(), ["name"] = "Cy", ["verified"] = true }).ToJsonString());
+        var original = File.ReadAllText(path);
         var book = new ContactBook(path);
         Assert.Equal(["Alex", "Cy"], book.All.Select(c => c.Name));
+        // Careful until the list is saved again: the skipped entry may be a friend.
+        Assert.True(book.Unreadable);
+        book.Import([NewContact("Di")]);
+        Assert.Equal(original, File.ReadAllText(path + ".broken"));
         Assert.False(book.Unreadable);
     }
 
@@ -76,7 +81,13 @@ public sealed class ListFileTests : IDisposable
             new JsonObject { ["pub"] = Hex(), ["name"] = "Alex" },
             new JsonObject { ["pub"] = Hex(), ["name"] = 5 },
             new JsonObject { ["pub"] = Hex(), ["name"] = "Cy" }).ToJsonString());
-        Assert.Equal(["Alex", "Cy"], new TrustedMembers(path).All.Select(m => m.Name));
+        var damaged = new TrustedMembers(path);
+        Assert.Equal(["Alex", "Cy"], damaged.All.Select(m => m.Name));
+        var original = File.ReadAllText(path);
+        damaged.Add(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32), "Di");
+        Assert.Equal(original, File.ReadAllText(path + ".broken"));
+        File.Delete(path + ".broken");
+        File.WriteAllText(path, original);
 
         var before = File.ReadAllText(path);
         var trusted = new TrustedMembers(path);
