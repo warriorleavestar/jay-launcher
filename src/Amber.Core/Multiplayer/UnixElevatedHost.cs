@@ -259,6 +259,41 @@ internal static class UnixIds
 
     public static void Terminate(int pid) => _ = Kill(pid, 15);
 
+    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
+    private static extern unsafe int LStat(string path, byte* buffer);
+
+    [DllImport("libc", EntryPoint = "lstat$INODE64", SetLastError = true)]
+    private static extern unsafe int LStatInode64(string path, byte* buffer);
+
+    [DllImport("libc", EntryPoint = "__lxstat", SetLastError = true)]
+    private static extern unsafe int LXStat(int version, string path, byte* buffer);
+
+    /// <summary>
+    /// The uid that owns <paramref name="path"/> itself (a link is not followed). Read with lstat; the offset of st_uid in
+    /// struct stat is known for the systems Jay ships on (Linux x64/arm64, macOS). Elsewhere, or when lstat fails, this
+    /// throws, so callers that use it for a safety check refuse instead of guessing.
+    /// </summary>
+    public static unsafe uint FileOwner(string path)
+    {
+        var arch = RuntimeInformation.ProcessArchitecture;
+        int offset;
+        if (OperatingSystem.IsMacOS() && arch is Architecture.X64 or Architecture.Arm64) offset = 16; // dev(4) mode(2) nlink(2) ino(8)
+        else if (OperatingSystem.IsLinux() && arch == Architecture.X64) offset = 28;                   // dev(8) ino(8) nlink(8) mode(4)
+        else if (OperatingSystem.IsLinux() && arch == Architecture.Arm64) offset = 24;                 // dev(8) ino(8) mode(4) nlink(4)
+        else throw new IOException("Can't read file owners on this system");
+        var buffer = stackalloc byte[512];
+        int result;
+        if (OperatingSystem.IsMacOS() && arch == Architecture.X64) result = LStatInode64(path, buffer);
+        else
+        {
+            try { result = LStat(path, buffer); }
+            // glibc before 2.33 exports lstat only as __lxstat (struct version 1 on x64, 0 on arm64).
+            catch (EntryPointNotFoundException) when (OperatingSystem.IsLinux()) { result = LXStat(arch == Architecture.X64 ? 1 : 0, path, buffer); }
+        }
+        if (result != 0) throw new IOException($"Can't read the owner of {path} (error {Marshal.GetLastPInvokeError()})");
+        return *(uint*)(buffer + offset);
+    }
+
     /// <summary>对端进程的 uid；取不到时返回 null。Linux 用 SO_PEERCRED，macOS 用 LOCAL_PEERCRED。</summary>
     public static uint? PeerUserId(Socket socket)
     {

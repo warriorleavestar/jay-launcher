@@ -12,6 +12,7 @@ namespace Amber.Core.Multiplayer;
 /// it once into memory, checks size, SHA-256 and the release signature itself, and extracts it into a folder only
 /// administrators or root can change:
 /// <c>%ProgramFiles%\Jay\easytier</c>, <c>/Library/Application Support/Jay/easytier</c> or <c>/var/lib/jay/easytier</c>.
+/// The folder and every folder above it must be owned by administrators or root, and copies of earlier builds are removed.
 /// Later starts reuse that copy. Messages here are for developers (the guard has no window), so they are not translated.
 /// </summary>
 internal static class ElevatedCoreStore
@@ -21,6 +22,9 @@ internal static class ElevatedCoreStore
 
     /// <summary>Tests: the package to expect instead of this system's pinned one.</summary>
     internal static EasyTierRelease.Asset? AssetForTest;
+
+    /// <summary>Tests: reports the owner uid of a path instead of reading it from the file system (Mac/Linux).</summary>
+    internal static Func<string, uint>? OwnerForTest;
 
     private const UnixFileMode DirMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
         | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
@@ -49,6 +53,8 @@ internal static class ElevatedCoreStore
         var dir = Path.Combine(root, EasyTierRelease.InstallTag, asset.Platform);
         var core = Path.Combine(dir, asset.CoreName);
         EnsureRoot(root);
+        // Before anything is written into it: a root that already existed must be one only administrators or root control.
+        CheckRoot(root);
         if (!Directory.Exists(dir))
         {
             var package = ReadPackage(packagePath, asset);
@@ -79,7 +85,43 @@ internal static class ElevatedCoreStore
             }
         }
         CheckTree(root, dir, core);
+        RemoveOtherBuilds(root);
         return core;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex BuildFolder =
+        new(@"^\d+\.\d+\.\d+-jay-[0-9a-f]{12}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static readonly System.Text.RegularExpressions.Regex RetiredFolder =
+        new(@"^\d+\.\d+\.\d+-jay-[0-9a-f]{12}\.old-[0-9a-f]{16}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Once the current build's copy checks out: removes the copies of earlier builds next to it. Each one is first renamed
+    /// aside, which fails on Windows while its easytier-core still runs; such a folder is left for a later start, so a
+    /// half-deleted copy never sits under a build's own name. Only folders named like a build are touched, and failures
+    /// are ignored.
+    /// </summary>
+    internal static void RemoveOtherBuilds(string root)
+    {
+        try
+        {
+            foreach (var folder in Directory.EnumerateDirectories(root).ToList())
+            {
+                var name = Path.GetFileName(folder);
+                if (name == EasyTierRelease.InstallTag || (File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) continue;
+                var doomed = folder;
+                if (BuildFolder.IsMatch(name))
+                {
+                    doomed = folder + ".old-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
+                    try { Directory.Move(folder, doomed); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+                }
+                else if (!RetiredFolder.IsMatch(name)) continue;
+                try { Directory.Delete(doomed, recursive: true); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>Reads the package once and checks it; the checked bytes are what gets extracted, so the file can't change in between.</summary>
@@ -117,6 +159,79 @@ internal static class ElevatedCoreStore
         while (missing.Count > 0) Directory.CreateDirectory(missing.Pop(), DirMode);
     }
 
+    /// <summary>
+    /// Refuses a root that someone other than administrators or root could change. Windows: the root must be owned by
+    /// Administrators, SYSTEM or TrustedInstaller and grant write access to no one else. Mac/Linux: the root and every
+    /// folder above it must be owned by root (see <see cref="IsTrustedOwner"/>), the root must not be writable by group
+    /// or others, and a folder above it only when the sticky bit is set (like /tmp).
+    /// </summary>
+    internal static void CheckRoot(string root)
+    {
+        var full = Path.GetFullPath(root);
+        if ((File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0) throw new IOException("The protected multiplayer folder is a link");
+        if (OperatingSystem.IsWindows())
+        {
+            if (AdminOnlyProblem(new DirectoryInfo(full).GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access)) is { } problem)
+                throw new IOException(problem + ": " + full);
+            return;
+        }
+        CheckOwner(full);
+        if ((File.GetUnixFileMode(full) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+            throw new IOException("The protected multiplayer folder can be changed by other users: " + full);
+        for (var d = Path.GetDirectoryName(full); d is not null; d = Path.GetDirectoryName(d))
+        {
+            CheckOwner(d);
+            var mode = File.GetUnixFileMode(d);
+            if ((mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0 && (mode & UnixFileMode.StickyBit) == 0)
+                throw new IOException("A folder above the protected multiplayer folder can be changed by other users: " + d);
+        }
+    }
+
+    /// <summary>
+    /// Root (uid 0), or the account the guard runs as. The guard runs as root, so in use this means uid 0; tests run the
+    /// store in a temporary folder under their own account.
+    /// </summary>
+    [UnsupportedOSPlatform("windows")]
+    private static bool IsTrustedOwner(uint uid) => uid == 0 || uid == UnixIds.EffectiveUserId();
+
+    [UnsupportedOSPlatform("windows")]
+    private static void CheckOwner(string path)
+    {
+        var owner = OwnerForTest?.Invoke(path) ?? UnixIds.FileOwner(path);
+        if (!IsTrustedOwner(owner))
+            throw new IOException($"The protected multiplayer folder is not owned by root ({path} belongs to uid {owner}); remove it so Jay can create it again");
+    }
+
+    private const FileSystemRights WriteRights = FileSystemRights.WriteData | FileSystemRights.AppendData
+        | FileSystemRights.WriteExtendedAttributes | FileSystemRights.WriteAttributes | FileSystemRights.Delete
+        | FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership
+        | (FileSystemRights)0x10000000 /* GENERIC_ALL */ | (FileSystemRights)0x40000000 /* GENERIC_WRITE */;
+
+    private const string TrustedInstallerSid = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
+    [SupportedOSPlatform("windows")]
+    private static bool IsAdminSid(SecurityIdentifier sid) =>
+        sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid) || sid.IsWellKnown(WellKnownSidType.LocalSystemSid) || sid.Value == TrustedInstallerSid;
+
+    /// <summary>
+    /// Why a Windows folder is not administrators-only, or null when it is: its owner must be Administrators, SYSTEM or
+    /// TrustedInstaller, and no allow entry may give anyone else a right to change it or what is in it. CREATOR OWNER is
+    /// allowed: it only applies to whoever creates something inside, which already takes one of those rights.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    internal static string? AdminOnlyProblem(DirectorySecurity security)
+    {
+        if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner || !IsAdminSid(owner))
+            return "The protected multiplayer folder is not owned by administrators; remove it so Jay can create it again";
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType != AccessControlType.Allow || (rule.FileSystemRights & WriteRights) == 0) continue;
+            if (rule.IdentityReference is SecurityIdentifier sid && (IsAdminSid(sid) || sid.IsWellKnown(WellKnownSidType.CreatorOwnerSid))) continue;
+            return "The protected multiplayer folder can be changed by users who are not administrators; remove it so Jay can create it again";
+        }
+        return null;
+    }
+
     private static void CreateProtectedDirectory(string path)
     {
         if (Directory.Exists(path)) return;
@@ -141,7 +256,8 @@ internal static class ElevatedCoreStore
 
     /// <summary>
     /// Refuses a copy that a non-administrator could have swapped: no link or junction anywhere from the root down, and on
-    /// Mac/Linux no folder or file in it that the group or others may write, and no folder above it that others may write.
+    /// Mac/Linux no folder or file in it that is not owned by root or that the group or others may write, and no folder
+    /// above it that fails <see cref="CheckRoot"/>.
     /// </summary>
     internal static void CheckTree(string root, string dir, string core)
     {
@@ -156,15 +272,11 @@ internal static class ElevatedCoreStore
         foreach (var path in folders.Concat(Directory.EnumerateFileSystemEntries(dir)))
         {
             if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new IOException("The protected multiplayer folder contains a link");
-            if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(path) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+            if (OperatingSystem.IsWindows()) continue;
+            if ((File.GetUnixFileMode(path) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
                 throw new IOException("The protected multiplayer folder can be changed by other users");
+            CheckOwner(path);
         }
-        if (OperatingSystem.IsWindows()) return;
-        for (var d = Path.GetDirectoryName(Path.GetFullPath(root)); d is not null; d = Path.GetDirectoryName(d))
-        {
-            var mode = File.GetUnixFileMode(d);
-            if ((mode & UnixFileMode.OtherWrite) != 0 && (mode & UnixFileMode.StickyBit) == 0 && RootForTest is null)
-                throw new IOException("A folder above the protected multiplayer folder can be changed by any user");
-        }
+        CheckRoot(root);
     }
 }

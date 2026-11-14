@@ -252,6 +252,7 @@ public sealed class UnixFullLanTests
         {
             ElevatedCoreStore.RootForTest = null;
             ElevatedCoreStore.AssetForTest = null;
+            ElevatedCoreStore.OwnerForTest = null;
             dir.Delete(true);
         }
     }
@@ -313,6 +314,85 @@ public sealed class UnixFullLanTests
             Directory.Move(dir, elsewhere);
             Directory.CreateSymbolicLink(dir, elsewhere);
             Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+        });
+    }
+
+    [Fact]
+    public void FileOwnerReadsTheOwnerOfAPath()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var dir = Directory.CreateTempSubdirectory("jay-owner-");
+        try
+        {
+            Assert.Equal(UnixIds.EffectiveUserId(), UnixIds.FileOwner(dir.FullName));
+            Assert.Equal(0u, UnixIds.FileOwner("/"));
+            // A link is reported itself, not followed.
+            var link = Path.Combine(dir.FullName, "link");
+            File.CreateSymbolicLink(link, "/");
+            Assert.Equal(UnixIds.EffectiveUserId(), UnixIds.FileOwner(link));
+            Assert.Throws<IOException>(() => UnixIds.FileOwner(Path.Combine(dir.FullName, "missing")));
+        }
+        finally { dir.Delete(true); }
+    }
+
+    [Fact]
+    public void GuardRefusesARootThatSomeoneElseOwns()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((root, package, _, _) =>
+        {
+            var store = ElevatedCoreStore.RootForTest!;
+            var someone = UnixIds.EffectiveUserId() == 1234u ? 4321u : 1234u;
+            // The root already exists and belongs to another account: nothing is extracted into it.
+            Directory.CreateDirectory(store);
+            ElevatedCoreStore.OwnerForTest = p => p == store ? someone : UnixIds.FileOwner(p);
+            var e = Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.Contains("not owned by root", e.Message);
+            Assert.False(Directory.Exists(Path.Combine(store, EasyTierRelease.InstallTag)));
+            // The same for a folder above it.
+            var above = Path.Combine(root, "protected");
+            ElevatedCoreStore.OwnerForTest = p => p == above ? someone : UnixIds.FileOwner(p);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.False(Directory.Exists(Path.Combine(store, EasyTierRelease.InstallTag)));
+            // A copy that is already in place, but whose program or folder belongs to another account, is refused too.
+            ElevatedCoreStore.OwnerForTest = null;
+            var core = ElevatedCoreStore.Prepare(package);
+            ElevatedCoreStore.OwnerForTest = p => p == core ? someone : UnixIds.FileOwner(p);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            var folder = Path.GetDirectoryName(core)!;
+            ElevatedCoreStore.OwnerForTest = p => p == folder ? someone : UnixIds.FileOwner(p);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+            ElevatedCoreStore.OwnerForTest = null;
+            Assert.Equal(core, ElevatedCoreStore.Prepare(package));
+            // A group-writable root is refused as well.
+            File.SetUnixFileMode(store, File.GetUnixFileMode(store) | UnixFileMode.GroupWrite);
+            Assert.Throws<IOException>(() => ElevatedCoreStore.Prepare(package));
+        });
+    }
+
+    [Fact]
+    public void GuardRemovesCopiesOfEarlierBuildsOnceTheCurrentOneChecksOut()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        WithCoreStore((_, package, asset, zip) =>
+        {
+            var store = ElevatedCoreStore.RootForTest!;
+            var older = Path.Combine(store, "2.6.3-jay-0123456789ab");
+            var retired = Path.Combine(store, "2.6.2-jay-0123456789ab.old-0011223344556677");
+            var other = Path.Combine(store, "notes");
+            foreach (var d in new[] { Path.Combine(older, asset.Platform), retired, other }) Directory.CreateDirectory(d);
+            File.WriteAllText(Path.Combine(older, asset.Platform, "easytier-core"), "old");
+            // A package that doesn't check out leaves the earlier copies alone.
+            File.WriteAllBytes(package, [1, 2, 3]);
+            Assert.Throws<InvalidDataException>(() => ElevatedCoreStore.Prepare(package));
+            Assert.True(Directory.Exists(older));
+            File.WriteAllBytes(package, zip);
+            var core = ElevatedCoreStore.Prepare(package);
+            Assert.True(File.Exists(core));
+            Assert.False(Directory.Exists(older));
+            Assert.False(Directory.Exists(retired));
+            Assert.True(Directory.Exists(other)); // not named like a build: never touched
+            Assert.Equal([EasyTierRelease.InstallTag, "notes"], Directory.EnumerateDirectories(store).Select(Path.GetFileName).Order(StringComparer.Ordinal));
         });
     }
 
