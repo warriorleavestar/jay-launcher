@@ -145,7 +145,22 @@ public sealed partial class SettingsViewModel
     public Action<string>? Navigate { get; set; }
 
     /// <summary>The multiplayer page's view model: Settings › Multiplayer and Settings › Network bind to it.</summary>
-    public MultiplayerViewModel? Multiplayer { get; set; }
+    public MultiplayerViewModel? Multiplayer
+    {
+        get;
+        set
+        {
+            if (field is not null) field.ActionStatus -= OnMultiplayerActionStatus;
+            field = value;
+            if (value is not null) value.ActionStatus += OnMultiplayerActionStatus;
+        }
+    }
+
+    /// <summary>The multiplayer commands in Settings › Multiplayer and › Network report here while Settings is on screen.</summary>
+    private void OnMultiplayerActionStatus(StatusMessage status)
+    {
+        if (IsCurrent) SetStatus(status);
+    }
 
     [RelayCommand]
     private void OpenHit(SettingsSearchHit? hit)

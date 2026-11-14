@@ -796,7 +796,13 @@ public sealed partial class SettingsViewModel : PageViewModel
         try { _service.Settings.Save(); } catch (IOException) { }
     }
 
-    protected override void OnFirstActivated() => _ = LoadJavaAsync(false);
+    protected override void OnFirstActivated()
+    {
+        // Settings › Multiplayer and › Network edit the multiplayer page's lists (relay nodes, trusted people): load them
+        // first, or saving from here would write an empty list over what was saved.
+        Multiplayer?.Activate();
+        _ = LoadJavaAsync(false);
+    }
 
     protected override void OnBecameCurrent() { Recycle.Refresh(); RefreshPrivacy(); }
 

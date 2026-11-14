@@ -17,9 +17,17 @@ public sealed partial class AccountsViewModel
         get;
         set
         {
-            if (field is not null) field.PropertyChanged -= OnMultiplayerChanged;
+            if (field is not null)
+            {
+                field.PropertyChanged -= OnMultiplayerChanged;
+                field.ActionStatus -= OnMultiplayerActionStatus;
+            }
             field = value;
-            if (value is not null) value.PropertyChanged += OnMultiplayerChanged;
+            if (value is not null)
+            {
+                value.PropertyChanged += OnMultiplayerChanged;
+                value.ActionStatus += OnMultiplayerActionStatus;
+            }
             OnPropertyChanged((string?)null);
         }
     }
@@ -41,6 +49,12 @@ public sealed partial class AccountsViewModel
     public string ThisDeviceCode => Multiplayer?.MyFingerprint ?? "";
 
     public string DevicesNote => L.T(HasJayAccounts ? "me.devices.with_jay" : "me.devices.no_jay");
+
+    /// <summary>What the multiplayer commands on this page (friend code, devices) say shows here while the page is on screen.</summary>
+    private void OnMultiplayerActionStatus(StatusMessage status)
+    {
+        if (IsCurrent) SetStatus(status);
+    }
 
     private void OnMultiplayerChanged(object? sender, PropertyChangedEventArgs e)
     {
