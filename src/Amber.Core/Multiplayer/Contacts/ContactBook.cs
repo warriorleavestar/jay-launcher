@@ -329,6 +329,22 @@ public sealed class ContactBook(string path, Func<DateTimeOffset>? clock = null)
         return reply;
     }
 
+    /// <summary>
+    /// The reply <see cref="Accept"/> made couldn't be sent: the request goes back to asking me, so it can be accepted
+    /// again (with a new nonce). Nothing changes once their nonce has come in.
+    /// </summary>
+    public void Unaccept(ReadOnlySpan<byte> theirs)
+    {
+        lock (_gate)
+        {
+            if (!_pending.TryGetValue(Convert.ToHexStringLower(theirs), out var pending) || pending.Initiator
+                || pending.Step != ContactStep.WaitingForNonce) return;
+            pending.Step = ContactStep.AskingMe;
+            pending.MyNonce = null;
+        }
+        Changed?.Invoke();
+    }
+
     private MailMessage AcceptLocked(PendingContact pending, string myName)
     {
         pending.MyNonce = ContactHandshake.NewNonce();

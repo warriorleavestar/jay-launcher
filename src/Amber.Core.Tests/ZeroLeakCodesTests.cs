@@ -229,6 +229,32 @@ public sealed class ZeroLeakCodesTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AnAcceptTheNetworkHeldBackCanBeAcceptedAgain()
+    {
+        var server = StartDirectory();
+        using var alex = NewPerson("alex", server);
+        using var steve = NewPerson("steve", server);
+        Assert.True(await alex.Post.AddAsync(steve.Key.PublicKey, alex.Name, default));
+        Assert.Empty(await steve.Post.CheckAsync(steve.Name, default));
+        // The directory-wide mail budget is used up: the reply isn't sent, and the request still asks steve.
+        for (var i = 0; i < RoomDirectoryServer.MaxMailPostsPerMinute; i++)
+            server.Handle(new JsonObject
+            {
+                ["op"] = "post", ["box"] = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)),
+                ["blob"] = Convert.ToBase64String([(byte)i, 3]), ["drop"] = SealedMail.DropHash(new byte[16]),
+            });
+        var e = await Assert.ThrowsAsync<DirectoryRejectedException>(() => steve.Post.AcceptAsync(alex.Key.PublicKey, steve.Name, default));
+        Assert.Equal("rate", e.Code);
+        Assert.Equal(ContactStep.AskingMe, Assert.Single(steve.Book.Pending).Step);
+        // A minute later, accepting again finishes the exchange.
+        _now += TimeSpan.FromMinutes(1.1);
+        await steve.Post.AcceptAsync(alex.Key.PublicKey, steve.Name, default);
+        await alex.Post.CheckAsync(alex.Name, default);
+        await steve.Post.CheckAsync(steve.Name, default);
+        Assert.Equal(Assert.Single(alex.Book.Pending).Sas, Assert.Single(steve.Book.Pending).Sas);
+    }
+
+    [Fact]
     public async Task InviteTravelsAsSealedMailAndComesBackWithAReceipt()
     {
         var server = StartDirectory();

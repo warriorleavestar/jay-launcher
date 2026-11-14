@@ -67,7 +67,14 @@ public sealed class ContactPost(Func<X25519KeyPair> me, ContactBook book, RoomDi
 
     public async Task AcceptAsync(byte[] theirs, string myName, CancellationToken ct)
     {
-        if (book.Accept(theirs, myName) is { } reply) await SendAsync(theirs, reply, ct);
+        if (book.Accept(theirs, myName) is not { } reply) return;
+        try { await SendAsync(theirs, reply, ct); }
+        catch
+        {
+            // Not sent (the network held it back, say): the request stays there to accept again later.
+            book.Unaccept(theirs);
+            throw;
+        }
     }
 
     /// <summary>
