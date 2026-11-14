@@ -1544,6 +1544,16 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         _room = null;
         StopAnnouncer();
         StopHostLobby();
+        // Per-room state: the next room starts from the settings default and without this room's invite reminders.
+        if (_roomKnockWait is not null)
+        {
+            _roomKnockWait = null;
+            OnPropertyChanged(nameof(RoomKnockWait));
+            OnPropertyChanged(nameof(SelectedRoomKnockWait));
+        }
+        _sentInvites.Clear();
+        _heldBackShown.Clear();
+        HeldBackText = "";
         HostFingerprint = "";
         HostJayAccount = null;
         _localChatPort = null;

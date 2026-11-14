@@ -110,4 +110,26 @@ public sealed class MultiplayerSessionStateTests
         // One rebuild (clear + one add per room), maybe a second from the game choice being set again; never one per room.
         Assert.True(changes <= 2 * (rooms.Count + 1), $"{changes} changes for {rooms.Count} rooms");
     });
+
+    /// <summary>A room's knock wait and its "invite held back" reminders end with the room.</summary>
+    [Fact]
+    public void ThisRoomsKnockWaitAndInviteRemindersEndWithTheRoom() => UiTestThread.Run(() =>
+    {
+        var (service, vm) = Create();
+        using var s = service;
+        var fallback = vm.RoomKnockWait;
+        var other = fallback == KnockWait.Forever ? KnockWait.TwoMinutes : KnockWait.Forever;
+        vm.RoomKnockWait = other;
+        vm.SentInviteForTest("abc", "Robin");
+        vm.ShowHeldBack([new Amber.Core.Multiplayer.Contacts.SentMail(new byte[32], "abc", Amber.Core.Multiplayer.Contacts.MailKind.Invite, DateTimeOffset.UtcNow)]);
+        Assert.True(vm.HasHeldBack);
+
+        vm.StopCommand.Execute(null);
+        Assert.Equal(fallback, vm.RoomKnockWait);
+        Assert.Equal(fallback, vm.SelectedRoomKnockWait.Wait);
+        Assert.False(vm.HasHeldBack);
+        // The closed room's invite is not brought up again later.
+        vm.ShowHeldBack([new Amber.Core.Multiplayer.Contacts.SentMail(new byte[32], "abc", Amber.Core.Multiplayer.Contacts.MailKind.Invite, DateTimeOffset.UtcNow)]);
+        Assert.False(vm.HasHeldBack);
+    });
 }
