@@ -114,18 +114,6 @@ public sealed record DirectAddresses(string Session, NatKind Nat, IReadOnlyList<
 }
 
 /// <summary>
-/// Codes of the removed direct-link format: JAY2D- / JAY2R- (and the even older AMBDIRECT / AMBREPLY). They carried both
-/// sides' public IP addresses in plain text, so they are refused; the paste box tells the person to ask for a current invite.
-/// </summary>
-public static class OldDirectCodes
-{
-    private static readonly string[] Prefixes = ["JAY2D-", "JAY2R-", "AMBDIRECT", "AMBREPLY"];
-
-    public static bool Contains(string? text) =>
-        text is not null && Prefixes.Any(p => text.Contains(p, StringComparison.OrdinalIgnoreCase));
-}
-
-/// <summary>
 /// 直连用的两种钥匙，都用 HKDF-SHA256（salt = "jay-direct-v1"）派生，和房间密钥无关：
 /// 桥的探测 / 控制包 HMAC 钥匙来自邀请里的大厅密钥 L；批准后的“这条桥是我的”证明来自这个成员自己的 psk。
 /// </summary>
@@ -545,7 +533,7 @@ public sealed class DirectBridge : IAsyncDisposable
         }
     }
 
-    private PathKind Classify(IPEndPoint from, IReadOnlyList<Candidate>? hints = null)
+    private PathKind Classify(IPEndPoint from)
     {
         if (from.AddressFamily == AddressFamily.InterNetworkV6) return PathKind.IPv6;
         if (!PortMapping.IsPublic(from.Address)) return PathKind.Lan;

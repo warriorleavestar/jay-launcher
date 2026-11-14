@@ -127,7 +127,7 @@ public sealed class DirectSession : IAsyncDisposable
     public string LocalNatDetail => _gathered?.NatDetail ?? "";
     public IPAddress? PublicIPv4 => _gathered?.Candidates.FirstOrDefault(c => c.Kind is PathKind.Punch or PathKind.Mapped)?.EndPoint.Address;
 
-    /// <summary>加入方：测试矩阵的一步交给界面执行（聊天探测要用界面那边的连接）。为空时用内置的探测。</summary>
+    /// <summary>Raised when the session's EasyTier or bridge state changes.</summary>
     public event Action? StateChanged;
 
     /// <param name="room">房主的房间；加入方传 null（批准后才拿到）。</param>
