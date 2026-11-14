@@ -122,12 +122,17 @@ public static class GateRecord
     /// <summary>
     /// Joins <paramref name="profile"/> just long enough to look the invite up (its own EasyTier, closed afterwards).
     /// </summary>
-    public static async Task<GateInvite> ResolveOnNetworkAsync(GateInvite invite, PublicNetworkProfile profile, EasyTierInstaller installer, string workDir, CancellationToken ct)
+    /// <param name="keyMemory">
+    /// Where directory keys of networks that pin none are remembered (trust on first use): the app's
+    /// <see cref="DirectoryKeyMemory"/>, so the lookup checks the same keys as every other directory call.
+    /// </param>
+    public static async Task<GateInvite> ResolveOnNetworkAsync(GateInvite invite, PublicNetworkProfile profile, EasyTierInstaller installer, string workDir,
+        CancellationToken ct, DirectoryKeyMemory? keyMemory = null)
     {
         if (invite.Locator is null) return invite;
         await installer.EnsureAsync(null, ct);
         using var session = PublicNetworkSession.Start(installer, new PublicNetworkOptions(profile, EasyTierArgs.FreeTcpPort(), EasyTierArgs.FreeTcpPort()), workDir);
         await session.WaitForDirectoryAsync(TimeSpan.FromSeconds(60), ct);
-        return await ResolveAsync(new RoomDirectoryClient(session), invite, ct);
+        return await ResolveAsync(new RoomDirectoryClient(session) { KeyMemory = keyMemory }, invite, ct);
     }
 }
