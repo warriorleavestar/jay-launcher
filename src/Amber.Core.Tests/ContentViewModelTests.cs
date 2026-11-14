@@ -455,7 +455,8 @@ public sealed class ContentViewModelTests
         var missingPack = Path.Combine(Path.GetTempPath(), "amber-missing-pack-" + Guid.NewGuid().ToString("N") + ".zip");
 
         Assert.True(vm.IsSearching);
-        vm.ImportLocalPackAsync(missingPack).GetAwaiter().GetResult();
+        // The pack is opened on the thread pool, so pump the UI thread instead of blocking it.
+        Pump(vm.ImportLocalPackAsync(missingPack));
         var status = vm.StatusInfo;
         Assert.Equal("instance.worlds.import_failed", status?.Key);
         Assert.True(Assert.Single(modrinth.Tokens).IsCancellationRequested);
@@ -562,6 +563,19 @@ public sealed class ContentViewModelTests
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, id + ".json"),
             $$"""{"id":"{{id}}","type":"release","mainClass":"net.minecraft.client.main.Main","libraries":{{libraries}}}""");
+    }
+
+    private static void Pump(Task task)
+    {
+        var until = DateTime.UtcNow.AddSeconds(15);
+        while (!task.IsCompleted && DateTime.UtcNow < until)
+        {
+            Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(1);
+        }
+        Assert.True(task.IsCompleted, "the task did not finish");
+        task.GetAwaiter().GetResult();
+        Dispatcher.UIThread.RunJobs();
     }
 
     private static void Run(Action<ContentViewModel, FakeProvider, FakeProvider> test) => Run(test, hasCurseForge: true);
