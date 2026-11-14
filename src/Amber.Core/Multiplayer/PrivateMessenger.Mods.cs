@@ -41,6 +41,16 @@ public sealed partial class PrivateMessenger
     private readonly ConcurrentDictionary<string, ModListWait> _modLists = new();
     private readonly ConcurrentDictionary<(string Peer, string Sha1), TaskCompletionSource<string?>> _modFiles = new();
     private readonly ConcurrentDictionary<string, DateTime> _modListAsked = new();
+    /// <summary>Host side: mod files being offered or sent to a member right now.</summary>
+    private readonly ConcurrentDictionary<(string Peer, string Sha1), byte> _modSending = new();
+    /// <summary>Host side: the SHA-256 of each listed file, kept while its size and write time stay the same.</summary>
+    private readonly ConcurrentDictionary<string, (long Length, DateTime Written, byte[] Hash)> _modHashes = new();
+
+    /// <summary>
+    /// Mod files the host sends one member at once. A joiner asks for one at a time; more requests are answered "no"
+    /// (the sync moves on), and a repeat request for a file already on its way is ignored.
+    /// </summary>
+    internal const int MaxModSendsPerPeer = 2;
 
     /// <summary>
     /// Host side: the room's mod list, or null when syncing is off. <see cref="ModFileProvider"/> finds a listed file by SHA-1.
@@ -155,13 +165,38 @@ public sealed partial class PrivateMessenger
                     await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "modfileno", ["sha1"] = sha1 ?? "" }, _cts.Token);
                     return;
                 }
-                _ = SendFileCoreAsync(frame.FromFingerprint, path, sha1, _cts.Token);
+                // Already on its way to this member: the offer will come.
+                if (_modSending.ContainsKey((frame.FromFingerprint, sha1))) return;
+                if (_modSending.Keys.Count(k => k.Peer == frame.FromFingerprint) >= MaxModSendsPerPeer)
+                {
+                    await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "modfileno", ["sha1"] = sha1 }, _cts.Token);
+                    return;
+                }
+                _modSending[(frame.FromFingerprint, sha1)] = 0;
+                _ = SendModFileAsync(frame.FromFingerprint, path, sha1);
                 break;
             case "modfileno":
                 var refused = body["sha1"]?.GetValue<string>()?.ToLowerInvariant();
                 if (refused is not null && _modFiles.TryGetValue((frame.FromFingerprint, refused), out var no)) no.TrySetResult(null);
                 break;
         }
+    }
+
+    private async Task SendModFileAsync(string to, string path, string sha1)
+    {
+        try { await SendFileCoreAsync(to, path, sha1, _cts.Token); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or OperationCanceledException or ObjectDisposedException) { }
+        finally { _modSending.TryRemove((to, sha1), out _); }
+    }
+
+    /// <summary>The SHA-256 of a listed mod file, hashed again only when the file changed.</summary>
+    private async Task<byte[]> ModHashAsync(FileInfo info, CancellationToken ct)
+    {
+        if (_modHashes.TryGetValue(info.FullName, out var known) && known.Length == info.Length && known.Written == info.LastWriteTimeUtc) return known.Hash;
+        byte[] hash;
+        await using (var read = File.OpenRead(info.FullName)) hash = await SHA256.HashDataAsync(read, ct);
+        _modHashes[info.FullName] = (info.Length, info.LastWriteTimeUtc, hash);
+        return hash;
     }
 
     internal static List<string> Pack(ModManifest manifest)

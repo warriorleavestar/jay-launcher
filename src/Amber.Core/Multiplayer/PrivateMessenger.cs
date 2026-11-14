@@ -247,7 +247,12 @@ public sealed partial class PrivateMessenger : IAsyncDisposable
         if (!info.Exists) throw new FileNotFoundException(path);
         if (!AllowsFile(info.Length)) throw new InvalidDataException(L.T("core.mp.private.not_allowed"));
         byte[] hash;
-        await using (var read = File.OpenRead(path)) hash = await SHA256.HashDataAsync(read, ct);
+        if (modSha1 is not null) hash = await ModHashAsync(info, ct);
+        else
+        {
+            await using var read = File.OpenRead(path);
+            hash = await SHA256.HashDataAsync(read, ct);
+        }
         var job = new Outgoing
         {
             Id = id ?? NewTransferId(),

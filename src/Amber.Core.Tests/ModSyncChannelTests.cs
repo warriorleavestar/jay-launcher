@@ -94,6 +94,51 @@ public sealed class ModSyncChannelTests : IDisposable
         Assert.Null(await guest.RequestModFileAsync(Fp(_host), listedSha).WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
+    /// <summary>
+    /// A member who floods the host with mod file requests gets at most two transfers at once; repeats of a file already on
+    /// its way are ignored and the rest are answered "no".
+    /// </summary>
+    [Fact]
+    public async Task ModFileRequestsAreLimitedPerMember()
+    {
+        var h = new Link(Fp(_host), _host.PublicKey, "Host");
+        var g = new Link(Fp(_guest), _guest.PublicKey, "Guest");
+        h.Peer = g;
+        g.Peer = h;
+        var keys = new Dictionary<string, byte[]> { [Fp(_host)] = _host.PublicKey, [Fp(_guest)] = _guest.PublicKey };
+        await using var host = new PrivateMessenger(h, _host, f => keys.GetValueOrDefault(f), Path.Combine(_dir, "host"));
+        Directory.CreateDirectory(_dir);
+        var files = Enumerable.Range(0, 4).Select(i =>
+        {
+            var path = Path.Combine(_dir, $"mod-{i}.jar");
+            File.WriteAllBytes(path, RandomNumberGenerator.GetBytes(5_000));
+            return (Path: path, Sha1: Convert.ToHexStringLower(SHA1.HashData(File.ReadAllBytes(path))));
+        }).ToList();
+        host.ModListProvider = () => new ModManifest([.. files.Select(f => new ModManifestEntry(Path.GetFileName(f.Path), f.Sha1, 5_000))]);
+        host.ModFileProvider = sha => files.FirstOrDefault(f => f.Sha1 == sha).Path;
+
+        var received = new List<(string Type, string? Mod)>();
+        g.PrivateReceived += frame =>
+        {
+            var plain = PrivateSeal.Open(_guest, frame.FromPublicKey, frame.Sealed);
+            if (System.Text.Json.Nodes.JsonNode.Parse(plain!) is not System.Text.Json.Nodes.JsonObject body) return;
+            lock (received) received.Add((body["t"]!.GetValue<string>(), body["mod"]?.GetValue<string>() ?? body["sha1"]?.GetValue<string>()));
+        };
+        async Task Ask(string sha1) => await g.SendPrivateAsync(Fp(_host),
+            PrivateSeal.Seal(_guest, _host.PublicKey, System.Text.Encoding.UTF8.GetBytes(new System.Text.Json.Nodes.JsonObject { ["t"] = "modfile?", ["sha1"] = sha1 }.ToJsonString())), default);
+
+        for (var round = 0; round < 10; round++)
+            foreach (var f in files) await Ask(f.Sha1);
+        await Task.Delay(1000);
+        lock (received)
+        {
+            var offers = received.Where(r => r.Type == "offer").ToList();
+            Assert.Equal(PrivateMessenger.MaxModSendsPerPeer, offers.Count);
+            Assert.Equal(offers.Count, offers.Select(o => o.Mod).Distinct().Count());
+            Assert.Contains(received, r => r.Type == "modfileno");
+        }
+    }
+
     [Fact]
     public void DamagedListIsRejected()
     {
