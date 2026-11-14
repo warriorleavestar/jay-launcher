@@ -221,7 +221,11 @@ public sealed class EasyTierInstaller
     /// <summary>progress 的 CurrentFile 是正在尝试的来源名。</summary>
     public async Task EnsureAsync(IProgress<DownloadProgress>? progress = null, CancellationToken ct = default)
     {
-        if (IsInstalled) return;
+        if (IsInstalled)
+        {
+            RemoveOldInstalls();
+            return;
+        }
         var failures = new List<EasyTierSourceFailure>();
 
         if (File.Exists(BundledPath))
@@ -290,6 +294,83 @@ public sealed class EasyTierInstaller
         MakeExecutable(CorePath);
         MakeExecutable(CliPath);
         if (!IsInstalled) throw new InvalidDataException(L.T("core.mp.component.missingexecutable"));
+        RemoveOldInstalls();
+    }
+
+    /// <summary>Install folders of earlier builds: <c>2.4.5</c> (upstream) or <c>2.6.4-jay-0123456789ab</c>.</summary>
+    private static readonly System.Text.RegularExpressions.Regex OldInstallName =
+        new(@"^\d+\.\d+\.\d+(-jay-[0-9a-f]{12})?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>A partial download is only removed when no Jay has touched it for this long (an older Jay may still be downloading it).</summary>
+    internal static readonly TimeSpan StaleDownloadAge = TimeSpan.FromDays(1);
+
+    /// <summary>Tests: the full paths of the running EasyTier programs, or null when one could not be read.</summary>
+    internal Func<IReadOnlyList<string>?>? RunningForTest { get; init; }
+
+    /// <summary>
+    /// Once this build is installed: removes the install folders of earlier builds and their downloads, which nothing uses
+    /// any more. Skipped while any EasyTier program runs from an old folder, or when a running one can't be checked (an
+    /// elevated guard's core, for example), since an older Jay open at the same time may be using it. Work folders under
+    /// <c>easytier/</c> are never touched: only folders named like a version are.
+    /// </summary>
+    internal void RemoveOldInstalls()
+    {
+        try
+        {
+            var root = Path.Combine(_dataDir, "easytier");
+            if (!Directory.Exists(root)) return;
+            var old = Directory.EnumerateDirectories(root)
+                .Where(d => Path.GetFileName(d) is var name && name != EasyTierRelease.InstallTag && OldInstallName.IsMatch(name)
+                    && (File.GetAttributes(d) & FileAttributes.ReparsePoint) == 0)
+                .Select(Path.GetFullPath).ToList();
+            if (old.Count > 0)
+            {
+                var running = (RunningForTest ?? RunningEasyTier)();
+                if (running is null) return;
+                foreach (var dir in old)
+                {
+                    var prefix = dir + Path.DirectorySeparatorChar;
+                    if (running.Any(p => p.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))) continue;
+                    try { Directory.Delete(dir, recursive: true); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                }
+            }
+            var downloads = Path.Combine(root, "download");
+            if (!Directory.Exists(downloads)) return;
+            foreach (var file in Directory.EnumerateFiles(downloads, "easytier-*"))
+            {
+                var name = Path.GetFileName(file);
+                if (name == Asset.Name || name.StartsWith(Asset.Name + ".", StringComparison.Ordinal)) continue;
+                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < StaleDownloadAge) continue;
+                TryDelete(file);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Paths of the running easytier-core and easytier-cli programs; null when any of them can't be read.</summary>
+    private static IReadOnlyList<string>? RunningEasyTier()
+    {
+        var paths = new List<string>();
+        foreach (var name in new[] { "easytier-core", "easytier-cli" })
+        {
+            foreach (var process in Process.GetProcessesByName(name))
+            {
+                using (process)
+                {
+                    try
+                    {
+                        if (process.MainModule?.FileName is not { } path) return null;
+                        paths.Add(Path.GetFullPath(path));
+                    }
+                    catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
+                    {
+                        return null;
+                    }
+                }
+            }
+        }
+        return paths;
     }
 
     /// <summary>把异常说成人话：超时不要显示成“操作已取消”。</summary>
