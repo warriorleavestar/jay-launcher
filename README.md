@@ -199,6 +199,7 @@ Jay is built on a simple promise: **it only goes online to do what you asked**, 
 - Mods: Modrinth and CurseForge, only when you browse or install.
 - Multiplayer, only while you host or join: the relay nodes listed on the Multiplayer page, the other players in the room, the server named in a Jay Server invite, and the jay-easytier GitHub releases page (only if the bundled copy is missing or can't be used).
 - Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address. They carry no game data. Jay may also ask your router for a temporary port mapping, removed when the session ends.
+- Rooms and the lobby, whatever the direct-room setting says: the multiplayer component asks the STUN servers `stun.miwifi.com`, `stun.chat.bilibili.com` and `stun.cloudflare.com` for this computer's public address, so room members can connect directly when possible. For direct TCP connections, the bundled EasyTier version also asks its built-in TCP STUN servers (`stun.hot-chilli.net`, `stun.fitauto.ru`, `fwa.lifesizecloud.com`, `global.turn.twilio.com`, `turn.cloudflare.com`, `stun.voip.blackberry.com`, `stun.radiojar.com`). They see only your public address and never carry game data.
 </details>
 
 The code is public, so you can check all of this yourself. The full privacy policy and the system changes Jay makes are in the [privacy policy](docs/privacy.md).

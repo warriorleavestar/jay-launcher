@@ -199,6 +199,7 @@ Jay 只有一个承诺：**只为你要做的事联网**；唯一的例外是每
 - 模组：Modrinth 和 CurseForge，只在你浏览或安装时。
 - 联机，只在你开房间或加入时：联机页里列出的中转节点、房间里的其他玩家、Jay 服务器邀请里写的那台服务器，以及 jay-easytier 的 GitHub 发布页（仅在自带的那份缺失或用不了时）。
 - 直连房间会向你设置的 STUN 服务器（默认 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`，可改可清空）询问你的外部地址，它们不经过游戏数据；也可能请你的路由器临时映射一个端口，结束联机时删掉。
+- 房间和大厅（不论直连房间怎么设置）：联机组件会向 STUN 服务器 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com` 询问这台电脑的公网地址，好让房间里的人尽量直接连上；现在自带的 EasyTier 版本为了 TCP 直连，还会问它内置的 TCP STUN 服务器（`stun.hot-chilli.net`、`stun.fitauto.ru`、`fwa.lifesizecloud.com`、`global.turn.twilio.com`、`turn.cloudflare.com`、`stun.voip.blackberry.com`、`stun.radiojar.com`）。它们只看到你的公网地址，不经手游戏数据。
 </details>
 
 代码完全公开，欢迎自己查。完整的隐私政策和 Jay 对系统的改动见[隐私政策](docs/privacy.md)。

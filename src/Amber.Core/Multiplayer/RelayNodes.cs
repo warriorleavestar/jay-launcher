@@ -45,11 +45,26 @@ public static class RelayNodes
         if (useBuiltIn) list.AddRange(BuiltIn.Where(b => !list.Contains(b)));
         return list;
     }
-    private static readonly string[] Schemes = ["tcp", "udp", "ws", "wss", "quic", "wg"];
+    // The transports Jay's EasyTier build can connect over. It is built without websocket support,
+    // so ws:// and wss:// relays are not accepted: they could never connect.
+    private static readonly string[] Schemes = ["tcp", "udp", "quic", "wg"];
+
+    // Transports EasyTier itself knows but Jay's build can't use. Signed network strings and server seeds made before
+    // that may still list them next to usable nodes, so they are read as well-formed and then left out when connecting.
+    private static readonly string[] LegacySchemes = ["ws", "wss"];
 
     /// <summary>检查节点地址：协议是 EasyTier 支持的，带主机和端口。</summary>
-    public static bool IsValid(string url) =>
-        Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u) && Schemes.Contains(u.Scheme) && u.Host.Length > 0 && u.Port > 0;
+    public static bool IsValid(string url) => HasForm(url, Schemes);
+
+    /// <summary>
+    /// A well-formed node address, including ws:// and wss:// ones Jay's EasyTier build can't connect over.
+    /// For lists made elsewhere that are kept as written (signed network strings, server seeds); use <see cref="IsValid"/>
+    /// to choose the nodes to connect to.
+    /// </summary>
+    public static bool IsWellFormed(string url) => HasForm(url, Schemes) || HasForm(url, LegacySchemes);
+
+    private static bool HasForm(string url, string[] schemes) =>
+        Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u) && schemes.Contains(u.Scheme) && u.Host.Length > 0 && u.Port > 0;
 
     /// <summary>The node's host is a raw IP address (any kind) rather than a name.</summary>
     public static bool HasIpHost(string url) =>
@@ -166,11 +181,11 @@ public static class RelayNodes
         return TryReadJson(bytes, out name, out urls, allowIp: false);
     }
 
-    /// <summary>测节点延迟：TCP 类（tcp/ws/wss）测建立连接的时间；UDP 类测不了，返回 null 和说明。</summary>
+    /// <summary>Measures a relay's latency as the time to open a TCP connection (tcp:// only); other transports return null and a reason.</summary>
     public static async Task<(double? Ms, string? Error)> ProbeAsync(string url, CancellationToken ct = default)
     {
         if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u)) return (null, L.T("core.mp.nodes.invalidaddress"));
-        if (u.Scheme is not ("tcp" or "ws" or "wss")) return (null, L.F("core.mp.nodes.unsupportedlatency", u.Scheme.ToUpperInvariant()));
+        if (u.Scheme is not "tcp") return (null, L.F("core.mp.nodes.unsupportedlatency", u.Scheme.ToUpperInvariant()));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
         try

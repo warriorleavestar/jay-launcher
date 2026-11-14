@@ -7,9 +7,33 @@
 # 只转发 Jay 房间：relay-network-whitelist 是 jay-* 和 amber-*（一个参数，空格隔开）；想转发所有 EasyTier 网络就改成 '*'。
 # Relays Jay rooms only (jay-* and amber-*, one argument, separated by a space); change the whitelist to '*' to relay every EasyTier network.
 
+# 镜像在本机构建：下载 Jay 加固版 EasyTier 的固定版本并校验 SHA-256（和 install.sh 相同），不用上游镜像；只支持 x86_64 和 arm64 主机。需要 Docker Compose 2.17 或更新；换版本后用 docker compose up -d --build 重新构建。
+# The image is built locally from Jay's hardened EasyTier build, pinned and checked by SHA-256 (the same pins as
+# install.sh), not from the upstream image; x86_64 and arm64 hosts only. Needs Docker Compose 2.17 or later; after a version change run docker compose up -d --build.
+
 services:
   amber-node:
-    image: easytier/easytier:v2.6.4
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f AS fetch
+        ARG TARGETARCH
+        RUN set -eu; \
+            case "$${TARGETARCH:-$$(uname -m)}" in \
+              amd64|x86_64) arch=x86_64; sha=6ad63ed07f270f2942387d1257ef0db45a31b2e525c73f8aa981c7c94fbcb300 ;; \
+              arm64|aarch64) arch=aarch64; sha=6c1a99ea81f1e1dd8fc8f13aa6f0df8d9e22925202dda18b4e40ad62ac49f7ac ;; \
+              *) echo "unsupported architecture" >&2; exit 1 ;; \
+            esac; \
+            name="easytier-linux-$${arch}-v2.6.4-jay-9407746b1ce1"; \
+            wget -q -O /et.zip "https://github.com/Yumao-Feather/jay-easytier/releases/download/jay-v2.6.4-3/$${name}.zip"; \
+            echo "$${sha}  /et.zip" | sha256sum -c -; \
+            unzip -q /et.zip -d /et; \
+            install -m 0755 "/et/easytier-linux-$${arch}/easytier-core" /easytier-core
+        # The Linux build is statically linked: the node needs nothing else and runs as an unprivileged user.
+        FROM scratch
+        COPY --from=fetch /easytier-core /easytier-core
+        USER 65534:65534
+        ENTRYPOINT ["/easytier-core"]
     container_name: amber-node
     restart: unless-stopped
     ports:

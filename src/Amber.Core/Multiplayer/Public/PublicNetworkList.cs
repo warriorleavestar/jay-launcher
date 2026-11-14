@@ -87,7 +87,7 @@ public sealed class PublicNetworkList
         if (string.IsNullOrEmpty(selectedId) || selectedId == "jay")
         {
             if (Find("jay") is { } update)
-                return jay with { Nodes = [.. jay.Nodes.Concat(update.Info.Nodes).Distinct()], Config = update.Info.Config, Home = update.Info.Home };
+                return jay with { Nodes = [.. jay.Nodes.Concat(SignedNetwork.UsableNodes(update.Info.Nodes)).Distinct()], Config = update.Info.Config, Home = update.Info.Home };
             return jay;
         }
         return Find(selectedId)?.ToProfile() ?? jay;

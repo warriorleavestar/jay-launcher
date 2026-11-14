@@ -2009,6 +2009,7 @@
   "core.mp.network.bad_easytier": "網路的 EasyTier 名稱或金鑰不對",
   "core.mp.network.bad_nodes": "網路要有 1~16 個有效的中轉位址（tcp:// 或 udp://）",
   "core.mp.network.ip_node": "中轉要用網域名稱：網路位址裡不能寫公網 IP 位址",
+  "core.mp.network.no_usable_nodes": "這個網路沒有 Jay 能連的中轉：ws:// 和 wss:// 中轉用不了，至少要有一個 tcp://、udp://、quic:// 或 wg:// 中轉",
   "core.mp.network.bad_link": "網路首頁要是 https 位址",
   "core.mp.network.bad_config": "網路設定檔要有 https 位址和 SHA-256",
   "core.mp.network.bad_dir_keys": "網路的目錄鑰匙要有 1 到 8 把，每把 32 位元組",
