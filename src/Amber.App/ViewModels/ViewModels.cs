@@ -446,6 +446,7 @@ public sealed partial class MainViewModel : ObservableObject
         var library = new LibraryViewModel(service, home, Activity) { Navigate = r => shell.Navigate(r) };
         // [▶ Play and open a room]: the lobby starts the focus instance the same way the library's ▶ does.
         multiplayer.StartInstance = library.LaunchInstance;
+        home.SessionStarted += multiplayer.WatchGameSession;
         Pages.Add(library);
         // The multi-launch question lives on the request bar.
         const string MultiKey = "multi-launch";

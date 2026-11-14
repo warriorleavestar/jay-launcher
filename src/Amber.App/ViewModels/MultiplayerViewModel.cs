@@ -355,7 +355,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             while (LanGames.Count(g => g.Source == source) > MaxLogLanGames) LanGames.Remove(LanGames.Last(g => g.Source == source));
             SelectedLanGame = item;
             if (IsIdle) SetStatus(StatusMessage.Success("multiplayer.lan.opened", versionId, port));
-            OnLanOpenedWhileWaiting();
+            OnLanOpenedWhileWaiting(versionId);
         });
     }
 
