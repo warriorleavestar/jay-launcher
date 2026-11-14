@@ -278,7 +278,7 @@ public sealed partial class MainViewModel : ObservableObject
         L.Changed += () => Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(VersionText)));
         var log = new LogViewModel();
         var home = new HomeViewModel(service, log);
-        var instance = new InstanceViewModel(service) { NavigateHome = null };
+        var instance = new InstanceViewModel(service);
         instance.AttachHome(home);
         var content = new ContentViewModel(service);
         var multiplayer = new MultiplayerViewModel(service);
@@ -327,7 +327,6 @@ public sealed partial class MainViewModel : ObservableObject
             shell.Navigate("discover");
             await content.ImportLocalPackAsync(path);
         };
-        instance.NavigateHome = () => shell.Navigate("library");
         instance.LiveLogFor = id => log.Runs.LastOrDefault(r => r.Instance == id && r.Store?.Record.Outcome == RunOutcome.Running);
         home.RunStarted += id => Avalonia.Threading.Dispatcher.UIThread.Post(() => instance.OnRunsChanged(id));
         home.RunFinished += id => Avalonia.Threading.Dispatcher.UIThread.Post(() => instance.OnRunsChanged(id));

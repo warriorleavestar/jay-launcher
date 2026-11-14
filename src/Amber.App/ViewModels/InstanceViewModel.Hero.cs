@@ -133,7 +133,6 @@ public sealed partial class InstanceViewModel
     [ObservableProperty] public partial string HeroName { get; set; } = "";
     [ObservableProperty] public partial string HeroFacts { get; set; } = "";
     [ObservableProperty] public partial string HeroLoader { get; set; } = "";
-    [ObservableProperty] public partial string HeroLoaderClass { get; set; } = "vanilla";
     [ObservableProperty] public partial string HeroVersion { get; set; } = "";
     [ObservableProperty] public partial int CoverSlot { get; set; }
     [ObservableProperty] public partial string CoverInitial { get; set; } = "";
@@ -168,7 +167,6 @@ public sealed partial class InstanceViewModel
         var meta = _service.MetaOf(c.Id);
         HeroName = string.IsNullOrWhiteSpace(meta?.DisplayName) ? c.Id : meta!.DisplayName!;
         HeroVersion = c.McVersion;
-        HeroLoaderClass = c.Loader ?? "vanilla";
         HeroLoader = c.Loader is null ? "" : string.IsNullOrWhiteSpace(c.LoaderVersion)
             ? LibraryViewModel.LoaderName(c.Loader)
             : LibraryViewModel.LoaderName(c.Loader) + " " + c.LoaderVersion;
@@ -280,7 +278,6 @@ public sealed partial class InstanceViewModel
     [ObservableProperty] public partial bool ShowLastRun { get; set; }
     [ObservableProperty] public partial string LastRunTitle { get; set; } = "";
     [ObservableProperty] public partial bool LastRunUnknown { get; set; }
-    [ObservableProperty] public partial bool HasLikelyCause { get; set; }
 
     private int _crashSerial;
     private object? _shownCrash;
@@ -312,7 +309,6 @@ public sealed partial class InstanceViewModel
             LastRunCauses.Add(new LastRunCause(finding, fixes));
         }
         LastRunUnknown = LastRunCauses.Count == 0;
-        HasLikelyCause = LastRunCauses.Any(c => c.IsLikely);
     }
 
     [RelayCommand]
