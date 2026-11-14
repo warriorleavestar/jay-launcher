@@ -34,10 +34,11 @@ public sealed partial class ModpackService
             try
             {
                 if (InnerPack(zip) is not { } inner) return new PackSource(zip, null);
+                CheckRoom([inner], Path.GetTempPath());
                 var tempDir = Path.Combine(Path.GetTempPath(), "amber-pack-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(tempDir);
                 var innerPath = Path.Combine(tempDir, inner.Name);
-                inner.ExtractToFile(innerPath);
+                ExtractLimited(inner, innerPath);
                 zip.Dispose();
                 try
                 {

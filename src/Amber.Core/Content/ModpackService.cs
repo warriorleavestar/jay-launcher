@@ -123,6 +123,10 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         {
             progress?.Report(new LoaderProgress(L.F("core.content.modpack.skipped", path)));
             onSkip?.Invoke(path);
+        }, OnUnavailable = file =>
+        {
+            progress?.Report(new LoaderProgress(L.F("core.content.modpack.unavailable", file)));
+            onSkip?.Invoke(file);
         } };
         switch (info.Format)
         {
@@ -172,8 +176,16 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
             if (file["env"]?["client"]?.GetValue<string>() == "unsupported") continue;
             if (pack.Resolve(file["path"]!.GetValue<string>()) is not { } target) continue;
             var sha1 = file["hashes"]?["sha1"]?.GetValue<string>() ?? throw new InvalidDataException(L.F("core.content.modpack.missingsha1", file["path"]));
-            var url = (file["downloads"] as JsonArray)?.Select(u => u?.GetValue<string>()).FirstOrDefault(u => u is not null && u.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                      ?? throw new InvalidDataException(L.F("core.content.modpack.nohttpsurl", file["path"]));
+            var urls = (file["downloads"] as JsonArray)?.Select(u => u?.GetValue<string>()).OfType<string>()
+                .Where(u => u.StartsWith("https://", StringComparison.OrdinalIgnoreCase)).ToList() ?? [];
+            if (urls.Count == 0) throw new InvalidDataException(L.F("core.content.modpack.nohttpsurl", file["path"]));
+            // The Modrinth format allows downloads from a few hosts only; a file anywhere else is reported and skipped,
+            // so a pack can't make Jay contact a server of its choosing.
+            if (urls.FirstOrDefault(IsAllowedMrpackHost) is not { } url)
+            {
+                pack.OnUnavailable?.Invoke(L.F("core.content.modpack.hostrefused", file["path"]!.GetValue<string>(), new Uri(urls[0]).Host));
+                continue;
+            }
             items.Add(new DownloadItem(url, target, sha1, file["fileSize"]?.GetValue<long>()));
         }
         progress?.Report(new(L.T("core.content.modpack.downloadfiles")));
@@ -191,7 +203,6 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         var ids = (manifest["files"] as JsonArray ?? []).OfType<JsonObject>().Select(f => f["fileID"]!.GetValue<long>()).ToList();
         progress?.Report(new(L.T("core.content.modpack.querymods")));
         var files = await curseForge.GetFilesByIdAsync(ids, ct);
-        var missing = ids.Count - files.Count;
 
         var folders = await curseForge.GetProjectFoldersAsync(files.Select(f => long.Parse(f.ProjectId)).Distinct().ToList(), ct);
         var targets = files.Select(f => (File: f, TargetDir: Path.Combine(workDir, folders.GetValueOrDefault(f.ProjectId, "mods")))).ToList();
@@ -208,8 +219,28 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
         await ctx.Downloader.DownloadAllAsync(items, new Progress<DownloadProgress>(p => progress?.Report(new(L.F("core.content.modpack.downloadprogress", p.CompletedFiles, p.TotalFiles), 100.0 * p.CompletedFiles / Math.Max(1, p.TotalFiles)))), ct);
 
         ExtractPrefix(zip, overridePrefix, pack);
-        if (missing > 0) throw new InvalidDataException(L.P("core.content.modpack.missingcursefiles", missing, missing));
+        ReportMissing(ids, files, pack, progress);
     }
+
+    /// <summary>
+    /// Files of a CurseForge or MCBBS pack that CurseForge no longer has (removed or archived by their author): the rest
+    /// of the pack is installed, and each missing one is reported like a skipped file.
+    /// </summary>
+    private static void ReportMissing(IReadOnlyCollection<long> ids, IReadOnlyCollection<ContentFile> files, PackTarget pack, IProgress<LoaderProgress>? progress)
+    {
+        var found = files.Select(f => f.FileId).ToHashSet(StringComparer.Ordinal);
+        var missing = ids.Select(id => id.ToString(System.Globalization.CultureInfo.InvariantCulture)).Where(id => !found.Contains(id)).Distinct().ToList();
+        if (missing.Count == 0) return;
+        progress?.Report(new(L.P("core.content.modpack.missingcursefiles", missing.Count, missing.Count)));
+        foreach (var id in missing) pack.OnUnavailable?.Invoke(L.F("core.content.modpack.missingcursefile", id));
+    }
+
+    /// <summary>Hosts the Modrinth pack format allows in <c>downloads</c>.</summary>
+    private static readonly string[] MrpackHosts = ["cdn.modrinth.com", "github.com", "raw.githubusercontent.com", "gitlab.com"];
+
+    internal static bool IsAllowedMrpackHost(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort
+        && string.IsNullOrEmpty(uri.UserInfo) && MrpackHosts.Contains(uri.IdnHost, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>导出 mrpack：能在 Modrinth 上按哈希识别的模组写成下载项，其余放进 overrides。</summary>
     public async Task ExportMrpackAsync(GameInstance instance, string outputPath, string name, string version, IReadOnlyCollection<string> includeRelative, CancellationToken ct = default)
@@ -444,9 +475,10 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
 
     private static void ExtractPrefix(ZipArchive zip, string prefix, PackTarget target, IReadOnlyCollection<string>? skip = null, Func<string, bool>? skipWhere = null)
     {
-        foreach (var entry in zip.Entries)
+        var entries = zip.Entries.Where(e => e.FullName.StartsWith(prefix, StringComparison.Ordinal) && !e.FullName.EndsWith('/')).ToList();
+        CheckRoom(entries, target.WorkDir);
+        foreach (var entry in entries)
         {
-            if (!entry.FullName.StartsWith(prefix, StringComparison.Ordinal) || entry.FullName.EndsWith('/')) continue;
             // 前缀后面多出来的斜杠（“overrides//mods/x.jar”）只是多余的分隔符，不是绝对路径：去掉再判断。
             var relative = entry.FullName[prefix.Length..].TrimStart('/', '\\');
             if (target.Resolve(relative) is not { } path) continue;
@@ -454,7 +486,7 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
             var normalized = Path.GetRelativePath(Path.GetFullPath(target.WorkDir), path).Replace('\\', '/');
             if (skip?.Contains(normalized) == true || skipWhere?.Invoke(normalized) == true) continue;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            entry.ExtractToFile(path, true);
+            ExtractLimited(entry, path);
         }
     }
 
@@ -467,6 +499,9 @@ public sealed partial class ModpackService(LoaderContext ctx, ModrinthProvider m
     {
         /// <summary>跳过了一个可疑或属于启动器的文件（参数：整合包里的原路径）。</summary>
         public Action<string>? OnSkip { get; init; }
+
+        /// <summary>A file the pack lists but that can't be fetched (gone from CurseForge, or on a host the format doesn't allow): a description of it.</summary>
+        public Action<string>? OnUnavailable { get; init; }
 
         /// <summary>
         /// 能释放时返回完整路径；启动器自己的文件、可疑的名字返回 null（并通知 OnSkip）；真正跳出目录的路径抛异常。
