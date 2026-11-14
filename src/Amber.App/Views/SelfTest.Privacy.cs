@@ -51,6 +51,20 @@ internal sealed partial class SelfTest
             await ShotAsync("about-1440");
             await VerifyDownloadAsync(about);
 
+            // Very wide: two reading columns instead of one narrow column that scrolls.
+            window.Width = 1920;
+            window.Height = 1080;
+            await Task.Delay(600);
+            Check("很宽的窗口：分成两栏（清单在左，其余在右），每栏还是阅读宽度",
+                Dispatcher.UIThread.Invoke(() => page.TwoColumns && page.LeftColumn.Bounds.Width <= 641 && page.RightColumn.Bounds.Width <= 641
+                    && page.RightColumn.Bounds.X > page.LeftColumn.Bounds.Right && Math.Abs(page.RightColumn.Bounds.Y - page.LeftColumn.Bounds.Y) < 1),
+                Dispatcher.UIThread.Invoke(() => $"{page.LeftColumn.Bounds} | {page.RightColumn.Bounds}"));
+            await ShotAsync("about-1920");
+            window.Width = 1440;
+            window.Height = 900;
+            await Task.Delay(600);
+            Check("窄回来：又是一栏", Dispatcher.UIThread.Invoke(() => !page.TwoColumns && page.RightColumn.Bounds.Y > page.LeftColumn.Bounds.Bottom));
+
             // Status follows the settings: with the daily check off it is "only when you click".
             AppSettingsAutoUpdate = false;
             about.Refresh();

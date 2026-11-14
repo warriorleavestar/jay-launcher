@@ -2,7 +2,7 @@
 id: friends
 category: multiplayer
 routes: people, people/*
-related: knock, multiplayer, child-mode, accounts
+related: knock, multiplayer, files-remote, child-mode, accounts
 ---
 
 # Friends
@@ -16,6 +16,7 @@ Friends are people you have checked once. After that you invite each other witho
 - Invite: open a room first, then click **Invite to my room**. The conversation gets a line that says Sent, Delivered or Not delivered yet.
 - Join their room: once they invite you, **Join “room name”** shows here.
 - Message: for now, only while you are both in the same room. Otherwise the box is greyed out and the reason is under it.
+- Send a file: click the paperclip left of the text box, or drag files onto the conversation. When you aren't in the same room, the file waits on your computer and goes when you meet. See [Sending files and remote help](help:files-remote).
 - **Let them straight in when they knock**: with it on, they come in with any invite of yours that still works, without asking you first. This switch is the old "trusted people" list.
 - Back up and restore the friend list: **⋯** at the top right. The backup is locked with your Jay account.
 
