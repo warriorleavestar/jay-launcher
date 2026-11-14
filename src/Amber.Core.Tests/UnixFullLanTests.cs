@@ -299,6 +299,75 @@ public sealed class UnixFullLanTests
         Assert.Equal(["cleanup with handlers", "session", "signal", "signal"], log);
     }
 
+    /// <summary>
+    /// The real guard entry point in its own process (Jay's own Main, the production signal handlers, only the root check
+    /// switched off) gets a real SIGTERM: it stops the core and exits normally. A second SIGTERM that arrives while it is
+    /// still stopping the core is absorbed too, so the clean-up is not cut short.
+    /// </summary>
+    [Fact]
+    public void RootGuardProcessCleansUpOnRealSigterm()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var app = typeof(Amber.App.Program).Assembly.Location; // Jay itself: its Main hands the guard flag to the guard
+        Assert.True(File.Exists(app), app);
+        // The core ignores SIGTERM but says when it gets one, so the guard's clean-up (TERM, then 5 s, then KILL) is
+        // known to be under way when the second signal is sent.
+        var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(core, "#!/bin/sh\ntrap 'echo got-term' TERM\necho \"pid=$$\"\nwhile :; do sleep 1 & wait $!; done\n");
+        File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Process? child = null;
+        var corePid = 0;
+        UnixElevatedGuard.LaunchForTest = command =>
+        {
+            var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+            var info = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } host ? host : "dotnet")
+            {
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            info.ArgumentList.Add(app);
+            foreach (var a in command.Skip(flag)) info.ArgumentList.Add(a);
+            info.Environment[UnixElevatedGuardHost.NoRootForTestVariable] = "1";
+            child = Process.Start(info)!;
+            child.StandardInput.Close();
+            _ = child.StandardOutput.ReadToEndAsync();
+            _ = child.StandardError.ReadToEndAsync();
+            return Process.GetCurrentProcess();
+        };
+        UnixElevatedGuard.AcceptAnyUserForTest = true;
+        try
+        {
+            using var guard = UnixElevatedGuard.Start(core, ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+            // Ready: the guard has registered its handlers (before it reads any command) and started the core.
+            Assert.True(guard.WaitForReadyAsync().Wait(TimeSpan.FromSeconds(30)), "guard ready");
+            Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("pid=", StringComparison.Ordinal)), 10000), "core started");
+            corePid = int.Parse(guard.RecentOutput.First(l => l.StartsWith("pid=", StringComparison.Ordinal))[4..]);
+
+            Signal(child!.Id);
+            Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Contains("got-term"), 10000), "the guard is stopping the core");
+            Assert.False(child.HasExited, "the guard is still cleaning up");
+            Signal(child.Id);
+
+            Assert.True(child.WaitForExit(TimeSpan.FromSeconds(20)), "guard exited");
+            Assert.Equal(0, child.ExitCode);
+            Assert.True(SpinWait.SpinUntil(() => !IsRunning(corePid), 5000), "core stopped");
+            Assert.True(guard.WaitForExit(TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            UnixElevatedGuard.LaunchForTest = null;
+            UnixElevatedGuard.AcceptAnyUserForTest = false;
+            try { if (child is { HasExited: false }) child.Kill(); } catch (InvalidOperationException) { }
+            if (corePid > 0 && IsRunning(corePid)) Process.Start("kill", ["-KILL", corePid.ToString()])!.WaitForExit();
+            child?.Dispose();
+            File.Delete(core);
+        }
+
+        static void Signal(int pid) => Process.Start("kill", ["-TERM", pid.ToString()])!.WaitForExit();
+    }
+
     private static bool IsRunning(int pid)
     {
         try

@@ -39,7 +39,7 @@ internal static class EasyTierProcessGuard
         info.ArgumentList.Clear();
         info.ArgumentList.Add("-c");
         info.ArgumentList.Add(WatchScript);
-        info.ArgumentList.Add("jay-easytier");
+        info.ArgumentList.Add(WatcherName);
         info.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
         info.ArgumentList.Add(core);
         foreach (var a in args) info.ArgumentList.Add(a);
@@ -198,6 +198,46 @@ internal static class EasyTierProcessGuard
                 .Select(s => int.TryParse(s.Trim(), CultureInfo.InvariantCulture, out var n) ? n : 0).Where(n => n > 0)];
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { return []; }
+    }
+
+    /// <summary>The watcher's $0, right after the script in its command line.</summary>
+    internal const string WatcherName = "jay-easytier";
+
+    /// <summary>
+    /// Whether <paramref name="pid"/> runs the watcher script for the Jay with PID <paramref name="ownerPid"/> (any Jay when
+    /// null): its command line is "sh -c script jay-easytier ownerPid core ...". A shell is a common program, so a PID
+    /// that was reused by another shell soon after the recorded watcher started must not pass for it.
+    /// </summary>
+    internal static bool IsWatcherFor(int pid, string? ownerPid)
+    {
+        var args = CommandLineWords(pid);
+        var at = args.IndexOf(WatcherName);
+        return at >= 2 && args[1] == "-c" && (ownerPid is null || at + 1 < args.Count && args[at + 1] == ownerPid);
+    }
+
+    /// <summary>
+    /// The words of <paramref name="pid"/>'s command line: Linux reads the exact arguments from /proc, macOS asks ps
+    /// (split at spaces, which is enough to find the watcher's name and the number after it). Empty when unknown.
+    /// </summary>
+    private static List<string> CommandLineWords(int pid)
+    {
+        var id = pid.ToString(CultureInfo.InvariantCulture);
+        try
+        {
+            if (OperatingSystem.IsLinux())
+                return [.. File.ReadAllText($"/proc/{id}/cmdline").Split('\0', StringSplitOptions.RemoveEmptyEntries)];
+            var info = new ProcessStartInfo("ps") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in new[] { "-ww", "-o", "args=", "-p", id }) info.ArgumentList.Add(a);
+            using var p = Process.Start(info);
+            if (p is null) return [];
+            var text = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(2000);
+            return [.. text.Split([' ', '\n'], StringSplitOptions.RemoveEmptyEntries)];
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return [];
+        }
     }
 
     private static bool StartedThroughWatcher(Process process)

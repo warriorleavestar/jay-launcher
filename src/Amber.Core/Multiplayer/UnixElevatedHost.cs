@@ -22,15 +22,22 @@ public static class UnixElevatedGuardHost
     public static bool IsGuardInvocation(string[] args) => args.Length > 0 && args[0] == UnixElevatedGuard.GuardFlag;
 
     /// <summary>守护入口，返回进程退出码：0 正常结束，2 参数或环境不对，3 核对失败，4 运行中出错。</summary>
-    public static int Run(string[] args) => Run(args, requireRoot: true);
+    public static int Run(string[] args) =>
+        Run(args, requireRoot: Environment.GetEnvironmentVariable(NoRootForTestVariable) != "1", handleSignals: true);
 
-    /// <summary>测试用：在测试进程里以当前用户身份跑守护。</summary>
-    internal static int RunForTest(string[] args) => Run(args, requireRoot: false);
+    /// <summary>
+    /// Tests only: set to "1", a guard started as its own process runs as the current user. Everything else, the signal
+    /// handlers included, is exactly what the root guard does; without root it can only do what the user can anyway.
+    /// </summary>
+    internal const string NoRootForTestVariable = "AMBER_ET_GUARD_TEST_NO_ROOT";
+
+    /// <summary>测试用：在测试进程里以当前用户身份跑守护（不接管测试进程的信号）。</summary>
+    internal static int RunForTest(string[] args) => Run(args, requireRoot: false, handleSignals: false);
 
     /// <summary>Tests: receives the running session's stop action (what a SIGTERM does in the real guard).</summary>
     internal static Action<Action>? StopHookForTest;
 
-    private static int Run(string[] args, bool requireRoot)
+    private static int Run(string[] args, bool requireRoot, bool handleSignals)
     {
         if (args.Length != 5 || !uint.TryParse(args[2], out var uid) || !int.TryParse(args[3], out var jayPid)) return 2;
         if (requireRoot && UnixIds.EffectiveUserId() != 0) return 2;
@@ -57,7 +64,7 @@ public static class UnixElevatedGuardHost
         // stop the session and clean up instead of letting the runtime end the process. The handlers stay in place
         // until the clean-up is over, so a second signal during it is absorbed too.
         var signals = new List<IDisposable>();
-        if (requireRoot)
+        if (handleSignals)
             foreach (var signal in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT, PosixSignal.SIGHUP, PosixSignal.SIGQUIT })
                 signals.Add(PosixSignalRegistration.Create(signal, ctx => { ctx.Cancel = true; session.RequestStop(); }));
         StopHookForTest?.Invoke(session.RequestStop);

@@ -122,6 +122,47 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(await Until(() => watch.HasExited && !Alive(core)));
     }
 
+    /// <summary>
+    /// Fast PID reuse: the recorded process is gone and its PID now belongs to another process that started shortly after,
+    /// inside (1 s) or just outside (2.5 s) the start-time tolerance. Whatever that process runs (another program, another
+    /// shell, or the watcher of a different Jay), it is not this record's leftover: it keeps running and the record goes.
+    /// </summary>
+    [Theory]
+    [InlineData("program", 1.0)]
+    [InlineData("program", 2.5)]
+    [InlineData("shell", 1.0)]
+    [InlineData("shell", 2.5)]
+    [InlineData("other-watcher", 1.0)]
+    [InlineData("other-watcher", 2.5)]
+    public async Task AReusedPidIsNotTakenForALeftover(string reusedBy, double startedSecondsLater)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var core = "/opt/not-easytier/easytier-core";
+        var other = reusedBy switch
+        {
+            "program" => Start("/bin/sleep", "600"),
+            "shell" => Start("/bin/sh", "-c", "sleep 600; :"),
+            // A watcher, but of a Jay with another PID (this test process) than the one the record names.
+            _ => Start("/bin/sh", "-c", EasyTierProcessGuard.WatchScript, EasyTierProcessGuard.WatcherName, Environment.ProcessId.ToString(), "/bin/sleep", "600"),
+        };
+        if (reusedBy != "program") Assert.True(await Until(() => Core(other.Id) > 0), "the shell is running");
+        // The record of a watcher (or core) that a Jay which is gone now started, just before the PID was handed on.
+        var deadJay = Start("/bin/true");
+        deadJay.WaitForExit();
+        var tracked = reusedBy == "program" ? core : EasyTierProcessGuard.WatcherExecutable;
+        var record = EasyTierProcessTracker.Track(other, _dir, tracked, deadJay.Id, ownerStartTicks: 1)!;
+        Assert.NotNull(record);
+        var lines = File.ReadAllLines(record);
+        lines[1] = (long.Parse(lines[1]) - (long)(startedSecondsLater * TimeSpan.TicksPerSecond)).ToString();
+        File.WriteAllLines(record, lines);
+
+        EasyTierProcessTracker.Cleanup(_dir, core, EasyTierProcessGuard.WatcherExecutable);
+
+        await Task.Delay(300);
+        Assert.False(other.HasExited, $"the process that reused the PID ({reusedBy}) was stopped");
+        Assert.False(File.Exists(record), "the stale record is removed");
+    }
+
     [Fact]
     public async Task StopEndsWatcherAndCoreThroughSigtermWithoutFallback()
     {
@@ -193,6 +234,9 @@ public sealed class EasyTierProcessGuardTests : IDisposable
     public async Task StopRightAfterStartLeavesNoCore()
     {
         // A SIGTERM can reach sh before its TERM trap is set (Dispose right after Launch). The core must not outlive it.
+        // With the stop this early, the watcher's own TERM to the core can land in the forked child before it has dropped
+        // the shell's inherited trap and exec'd the core, so it is lost and Stop ends both through its SIGKILL fallback.
+        // That fallback doesn't wait for the watcher to be reaped, so wait for its exit here instead of sampling HasExited.
         if (OperatingSystem.IsWindows()) return;
         for (var i = 0; i < 20; i++)
         {
@@ -205,7 +249,7 @@ public sealed class EasyTierProcessGuardTests : IDisposable
             _started.Add(watch);
             if (i % 2 == 1) await Task.Delay(i); // vary where in the script the signal lands
             EasyTierProcessGuard.Stop(watch);
-            Assert.True(watch.HasExited, "watcher ended");
+            Assert.True(watch.WaitForExit(TimeSpan.FromSeconds(5)), $"watcher ended (round {i})");
             Assert.True(await Until(() => WithMarker(marker).Count == 0, 5), $"core left behind (round {i})");
         }
     }

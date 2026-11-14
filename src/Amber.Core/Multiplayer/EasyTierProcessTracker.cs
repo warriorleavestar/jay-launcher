@@ -49,8 +49,13 @@ internal static class EasyTierProcessTracker
                 if (expected.Contains(Path.GetFullPath(runningPath)))
                 {
                     var watcher = Path.GetFullPath(runningPath) == Path.GetFullPath(EasyTierProcessGuard.WatcherExecutable);
-                    EasyTierProcessGuard.Stop(process, watcher);
-                    process.WaitForExit(5000);
+                    // The start time only matches to within SameStart's tolerance, and the watcher is the system shell: a
+                    // shell that took over the PID shortly after is ours only if it runs the watcher for this record's Jay.
+                    if (!watcher || EasyTierProcessGuard.IsWatcherFor(pid, lines.Length == 5 ? lines[3] : null))
+                    {
+                        EasyTierProcessGuard.Stop(process, watcher);
+                        process.WaitForExit(5000);
+                    }
                 }
                 File.Delete(record);
             }
