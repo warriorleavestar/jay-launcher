@@ -46,7 +46,7 @@ curl -fsSLO https://raw.githubusercontent.com/warriorleavestar/jay-launcher/main
 docker compose up -d
 ```
 
-镜像是 EasyTier 官方的 `easytier/easytier:v2.6.4`。在 Amber 里添加节点 `tcp://你的公网IP:11010`。
+镜像在你的机器上构建：下载 Jay 加固版 EasyTier 的固定版本（和安装脚本相同）并校验 SHA-256，不用 EasyTier 官方镜像（官方镜像没有 Jay 的加固补丁）。需要 Docker Compose 2.17 或更新；换了新的 `docker-compose.yml` 后用 `docker compose up -d --build` 重新构建。在 Amber 里添加节点 `tcp://你的公网IP:11010`。
 
 ### 方法三：Windows
 
@@ -97,7 +97,7 @@ Uninstall: `sudo bash uninstall.sh`
 
 ### Option 2: Docker
 
-Download `docker-compose.yml`, replace `NODE_SECRET` with a random string, then `docker compose up -d`. It uses EasyTier's official image `easytier/easytier:v2.6.4`. Add `tcp://<public IP>:11010` in Amber.
+Download `docker-compose.yml`, replace `NODE_SECRET` with a random string, then `docker compose up -d`. The image is built on your machine from Jay's hardened EasyTier build (the same pinned version as the install script), checked by SHA-256; it doesn't use EasyTier's official image, which has none of Jay's hardening patches. Needs Docker Compose 2.17 or later; after downloading a new `docker-compose.yml`, run `docker compose up -d --build`. Add `tcp://<public IP>:11010` in Amber.
 
 ### Option 3: Windows
 

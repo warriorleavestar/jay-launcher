@@ -73,4 +73,24 @@ public sealed class EasyTierHardenedBuildTests : IDisposable
         Assert.Contains(EasyTierRelease.For("linux", Architecture.Arm64).Sha256, sh, StringComparison.Ordinal);
         Assert.Contains(EasyTierRelease.For("windows", Architecture.X64).Sha256, ps, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void DockerRelayNodeIsBuiltFromTheSamePinnedBuild()
+    {
+        var compose = File.ReadAllText(Path.Combine(Repo, "node", "docker-compose.yml"));
+        // Never the upstream image: it has none of Jay's patches and goes by a tag that can change.
+        Assert.DoesNotContain("easytier/easytier", compose, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(@"(?m)^\s*image:", compose);
+        Assert.Contains("dockerfile_inline:", compose, StringComparison.Ordinal);
+        Assert.Contains(EasyTierRelease.ReleaseTag, compose, StringComparison.Ordinal);
+        Assert.Contains($"v{EasyTierRelease.Version}-jay-{EasyTierRelease.Commit}", compose, StringComparison.Ordinal);
+        Assert.Contains(EasyTierRelease.SourceUrl.Replace("https://", "", StringComparison.Ordinal) + "/releases/download/", compose, StringComparison.Ordinal);
+        Assert.Contains(EasyTierRelease.For("linux", Architecture.X64).Sha256, compose, StringComparison.Ordinal);
+        Assert.Contains(EasyTierRelease.For("linux", Architecture.Arm64).Sha256, compose, StringComparison.Ordinal);
+        Assert.Contains("sha256sum -c", compose, StringComparison.Ordinal);
+        // Every base image is pinned by digest, and the node doesn't run as root.
+        Assert.All(System.Text.RegularExpressions.Regex.Matches(compose, @"(?m)^\s*FROM\s+(\S+)").Select(m => m.Groups[1].Value),
+            image => Assert.True(image == "scratch" || System.Text.RegularExpressions.Regex.IsMatch(image, "@sha256:[0-9a-f]{64}$"), image));
+        Assert.Contains("USER 65534:65534", compose, StringComparison.Ordinal);
+    }
 }
