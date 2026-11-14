@@ -442,31 +442,122 @@ public sealed class VolunteerNodesTests : IAsyncDisposable
     [Fact]
     public async Task AddressesThatArentListedDontTakeAHostsPlaces()
     {
-        // Two ports of the host that never answer: still being probed, then dropped. Neither keeps the real one out.
+        // More ports of the host than may be dialled at once never answer. The real one waits its turn and is listed.
         var hold = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var registry = new VolunteerRegistry((url, _) => url.EndsWith(":11010") ? Task.FromResult(true) : hold.Task, () => _now);
-        Assert.True(Ok(registry.Register("tcp://host.example.org:1")));
-        Assert.True(Ok(registry.Register("tcp://host.example.org:2")));
-        // While both are being probed, a third waits its turn ("rate", not "host").
-        Assert.Equal("rate", registry.Register("tcp://host.example.org:11010")["error"]!.GetValue<string>());
+        var registry = new VolunteerRegistry((url, _) => url.EndsWith(":11010") ? Task.FromResult(true) : hold.Task, () => _now)
+            { WaitStep = TimeSpan.FromMilliseconds(5) };
+        for (var port = 1; port <= VolunteerRegistry.MaxProbingPerHost + 2; port++)
+            Assert.True(Ok(registry.Register($"tcp://host.example.org:{port}")));
+        var real = registry.Register("tcp://host.example.org:11010");
+        Assert.True(Ok(real), real.ToJsonString());
+        var probe = registry.LastProbe;
+        await Task.Delay(50);
+        Assert.Empty(registry.Listed());
         hold.SetResult(false);
-        await Task.WhenAll(registry.LastProbe, Task.Delay(50));
+        await probe.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(["tcp://host.example.org:11010"], registry.Listed());
+    }
+
+    public static TheoryData<string> Machines => ["10.40.0.1", "fd00:1:2:3::"];
+
+    [Theory]
+    [MemberData(nameof(Machines))]
+    public async Task ChecksThatHangDontStarveTheRealNode(string machine)
+    {
+        // Ports and names of one machine (the same IPv4 address, or one IPv6 /64 under different addresses) hang while
+        // new ones keep coming. The real node, registered after the first lot, is dialled before every one that came after
+        // it, and never more than MaxProbingPerHost checks of the machine run at once.
+        var (running, most, order) = (0, 0, new List<string>());
+        var gates = new Dictionary<string, TaskCompletionSource<bool>>();
+        TaskCompletionSource<bool> Gate(string url)
+        {
+            lock (gates)
+                return gates.TryGetValue(url, out var g) ? g : gates[url] = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        var addresses = 0;
+        Task<IPAddress?> Resolve(string url, CancellationToken _) => Task.FromResult<IPAddress?>(IPAddress.Parse(
+            machine.EndsWith("::") ? machine + (Interlocked.Increment(ref addresses) % 4000 + 1).ToString("x") : machine));
+        var registry = new VolunteerRegistry(async (url, _) =>
+        {
+            lock (order) { order.Add(url); most = Math.Max(most, ++running); }
+            try { return url.Contains("//real.") || await Gate(url).Task; }
+            finally { lock (order) running--; }
+        }, () => _now, Resolve) { WaitStep = TimeSpan.FromMilliseconds(5) };
+        async Task Dialled(int count)
+        {
+            for (var i = 0; i < 1000; i++) { lock (order) if (order.Count >= count) return; await Task.Delay(5); }
+            throw new TimeoutException(string.Join(",", order));
+        }
+        var early = Enumerable.Range(1, VolunteerRegistry.MaxProbingPerHost + 3).Select(i => $"tcp://a{i}.example.org:{12000 + i}").ToList();
+        foreach (var url in early) Assert.True(Ok(registry.Register(url)));
+        await Dialled(VolunteerRegistry.MaxProbingPerHost);
+        Assert.True(Ok(registry.Register("tcp://real.example.org:11010")));
+        var real = registry.LastProbe;
+        var late = Enumerable.Range(1, 12).Select(i => $"tcp://b{i}.example.org:{13000 + i}").ToList();
+        foreach (var url in late)
+        {
+            _now += TimeSpan.FromSeconds(1.1);
+            Assert.True(Ok(registry.Register(url)));
+        }
+        await Task.Delay(50);
+        // The hanging checks time out one by one: each frees one place, for whoever has waited longest.
+        for (var i = 0; !real.IsCompleted; i++)
+        {
+            Gate(early[i]).SetResult(false);
+            await Dialled(VolunteerRegistry.MaxProbingPerHost + i + 1);
+            await Task.Delay(20);
+        }
+        await real;
+        Assert.Equal(["tcp://real.example.org:11010"], registry.Listed());
+        lock (order)
+        {
+            Assert.Equal([.. early, "tcp://real.example.org:11010"], order.Take(early.Count + 1));
+            Assert.InRange(most, 1, VolunteerRegistry.MaxProbingPerHost);
+        }
+        foreach (var url in late) Gate(url).TrySetResult(false);
+        foreach (var url in early) Gate(url).TrySetResult(false);
+    }
+
+    [Fact]
+    public async Task AnEntryStillWaitingIsKeptForItsNextRenewal()
+    {
+        var hold = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registry = new VolunteerRegistry((url, _) => url.EndsWith(":11010") ? Task.FromResult(true) : hold.Task, () => _now)
+            { WaitStep = TimeSpan.FromMilliseconds(5), MaxWait = TimeSpan.FromMilliseconds(30) };
+        for (var port = 1; port <= VolunteerRegistry.MaxProbingPerHost; port++) registry.Register($"tcp://host.example.org:{port}");
         Assert.True(Ok(registry.Register("tcp://host.example.org:11010")));
+        await registry.LastProbe.WaitAsync(TimeSpan.FromSeconds(5));
+        // Gave up waiting for now: not dialled, not dropped.
+        Assert.Empty(registry.Listed());
+        hold.SetResult(false);
+        await Task.Delay(50);
+        _now += VolunteerNodes.RenewEvery;
+        var renewed = registry.Register("tcp://host.example.org:11010");
+        Assert.True(Ok(renewed), renewed.ToJsonString());
         await registry.LastProbe;
         Assert.Equal(["tcp://host.example.org:11010"], registry.Listed());
-        // The same for many names of one machine.
-        var hold2 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var byMachine = new VolunteerRegistry((url, _) => url.Contains("real.") ? Task.FromResult(true) : hold2.Task, () => _now,
-            (_, _) => Task.FromResult<IPAddress?>(IPAddress.Parse("10.40.0.1")));
-        foreach (var name in new[] { "x1", "x2" }) byMachine.Register($"tcp://{name}.example.org:11010");
-        await Task.Delay(50);
-        hold2.SetResult(false);
-        await byMachine.LastProbe;
-        Assert.Empty(byMachine.Listed());
-        // (Another port: the same machine and port that just failed is cooling down, and would fail for the real node too.)
-        Assert.True(Ok(byMachine.Register("tcp://real.example.org:11012")));
-        await byMachine.LastProbe;
-        Assert.Equal(["tcp://real.example.org:11012"], byMachine.Listed());
+    }
+
+    [Fact]
+    public async Task ACheckThatNeverAnswersEndsInTime()
+    {
+        // The dial is given up after ListingDialTimeout even when the connection ignores being cancelled.
+        var never = new TaskCompletionSource<bool>();
+        var registry = new VolunteerRegistry((_, _) => never.Task, () => _now);
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        Assert.True(Ok(registry.Register("tcp://slow.example.org:11010")));
+        await registry.LastProbe.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.InRange(started.Elapsed, VolunteerRegistry.ListingDialTimeout - TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(8));
+        Assert.Empty(registry.Listed());
+    }
+
+    [Fact]
+    public void MoreChecksMayRunPerHostThanNewAddressesCanKeepBusy()
+    {
+        // Unsigned and signed registrations each take NewPerMinute new addresses; each check is dialled for at most
+        // ListingDialTimeout. Hanging checks can't hold every place of a host all the time.
+        var busy = 2 * VolunteerRegistry.NewPerMinute * VolunteerRegistry.ListingDialTimeout.TotalMinutes;
+        Assert.True(VolunteerRegistry.MaxProbingPerHost > busy, $"{VolunteerRegistry.MaxProbingPerHost} <= {busy}");
     }
 
     [Theory]

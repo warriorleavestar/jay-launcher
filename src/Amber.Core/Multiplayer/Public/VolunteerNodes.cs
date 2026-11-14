@@ -364,6 +364,11 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
         public string? Machine;
         /// <summary>The address it resolved to, once known: with the port, the listener it names.</summary>
         public string? Ip;
+        /// <summary>Being dialled now (counts against its machine's <see cref="MaxProbingPerHost"/>).</summary>
+        public bool Dialing;
+        /// <summary>Its place in the line for a turn to be dialled (first come, first served), and which line (its machine, or its name unresolved).</summary>
+        public long? Ticket;
+        public string? Queue;
     }
 
     private readonly Func<string, CancellationToken, Task<bool>>? _customProbe = probe;
@@ -371,6 +376,7 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
     private readonly Func<DateTimeOffset> _now = clock ?? (() => DateTimeOffset.UtcNow);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
+    private long _tickets;
 
     /// <summary>Addresses the operator banned (checked on every register and list).</summary>
     public Func<string, bool>? Blocked { get; set; }
@@ -446,6 +452,21 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     /// <summary>Entries one host may have, whatever the port: counted by name, and by the machine it resolves to.</summary>
     public const int MaxPerHost = 2;
+
+    /// <summary>
+    /// Entries of one machine (or one name, unresolved) the directory dials at once to check them. More than the new
+    /// addresses the whole directory takes can keep busy (<see cref="NewPerMinute"/> unsigned plus as many signed, each
+    /// held at most <see cref="ListingDialTimeout"/>), so registrations that hang can't keep a host's real node from being
+    /// checked. The others wait their turn in the order they came.
+    /// </summary>
+    public const int MaxProbingPerHost = 8;
+
+    /// <summary>How long the check before listing waits for the node to answer (a node answers within a round trip).</summary>
+    public static readonly TimeSpan ListingDialTimeout = TimeSpan.FromSeconds(2.5);
+
+    /// <summary>How often an entry waiting for its turn looks again, and how long it waits before its next renewal takes over.</summary>
+    internal TimeSpan WaitStep { get; init; } = TimeSpan.FromMilliseconds(250);
+    internal TimeSpan MaxWait { get; init; } = VolunteerNodes.RenewEvery;
 
     /// <summary>
     /// After a probe fails, the address and port it resolved to aren't dialled again for this long, under any name.
@@ -566,12 +587,11 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
                 if (_lastDialed.ContainsKey(address)) return Error("rate");
                 // Each new address costs the directory an outgoing connection, so new addresses are also capped per host:
                 // registering can't be used to make the directory dial many ports of one machine. Listed entries hold a
-                // host's places; entries still being probed are capped on their own and can't keep a host's real node off
-                // the list (a failed probe drops its entry at once).
+                // host's places; entries still to be checked take turns being dialled (see ProbeAsync), so they can't keep
+                // a host's real node off the list (a failed probe drops its entry at once).
                 var host = HostOf(address);
                 if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is not null) >= MaxPerHost)
                     return new JsonObject { ["ok"] = false, ["error"] = "host", ["reason"] = $"one host may register at most {MaxPerHost} addresses" };
-                if (_entries.Count(p => HostOf(p.Key) == host && p.Value.VerifiedAt is null) >= MaxPerHost) return Error("rate");
                 // The caller's limit holds for everyone.
                 if (source is not null && Full(_newBy, "src:" + source, NewPerSourcePerMinute, now)) return Error("rate");
                 // A listed volunteer coming back to its own address isn't new.
@@ -669,52 +689,73 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
 
     private async Task ProbeAsync(string address)
     {
-        using var total = new CancellationTokenSource(VolunteerNodes.CheckTimeout);
         bool ok;
         IPAddress? ip = null;
         var crowded = false;
         DateTimeOffset? sameListener = null;
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        string? machine = null;
         if (_resolve is not null)
         {
-            try { ip = await _resolve(address, total.Token); }
+            using var lookup = new CancellationTokenSource(VolunteerNodes.CheckTimeout);
+            try { ip = await _resolve(address, lookup.Token); }
             catch (Exception e) when (e is not OutOfMemoryException) { ip = null; }
-            if (ip is not null)
+            if (ip is not null) machine = VolunteerNodes.MachineOf(ip);
+        }
+        // Checks of one machine (or, unresolved, one name) take turns: at most MaxProbingPerHost are dialled at once, and
+        // the rest wait in the order they came, so registrations that hang can't keep the machine's real node from being
+        // checked. More places are free than the new addresses the whole directory takes can keep busy.
+        var queue = machine ?? "name:" + HostOf(address);
+        while (true)
+        {
+            var wait = false;
+            lock (_gate)
             {
-                var machine = VolunteerNodes.MachineOf(ip);
-                var port = new Uri(address).Port;
-                var endpoint = Endpoint(ip.ToString(), port);
-                lock (_gate)
+                if (!_entries.TryGetValue(address, out var mine)) return;
+                var now = _now();
+                if (ip is not null)
                 {
+                    var port = new Uri(address).Port;
+                    var endpoint = Endpoint(ip.ToString(), port);
                     // Many names for one machine (an IPv4 address, or an IPv6 /64) count as that machine: over the cap, the
-                    // entry goes without being dialled. As for names, listed entries and entries still being probed are
-                    // counted apart. Names for one listener (the same address and port) take one place between them, so
-                    // names somebody else points at a node can't crowd out the node's own registration (Pick lists one).
+                    // entry goes without being dialled. Names for one listener (the same address and port) take one place
+                    // between them, so names somebody else points at a node can't crowd out the node's own registration
+                    // (Pick lists one).
                     var others = _entries.Where(p => p.Key != address && p.Value.Machine == machine).ToList();
-                    int Listeners(bool verified) => others.Where(p => (p.Value.VerifiedAt is not null) == verified && p.Value.Ip is not null)
+                    var listed = others.Where(p => p.Value.VerifiedAt is not null && p.Value.Ip is not null)
                         .Select(p => Endpoint(p.Value.Ip!, new Uri(p.Key).Port)).Where(e => e != endpoint).Distinct().Count();
-                    _entries.TryGetValue(address, out var mine);
                     // A listed node being checked again keeps its place: only its own check decides whether it stays, so
-                    // other entries for the machine (say, ones still being probed) can't push it out. A name that now
-                    // resolves to another listener is new there and counted like any new one.
+                    // other entries for the machine can't push it out. A name that now resolves to another listener is new
+                    // there and counted like any new one.
                     var holdsItsPlace = mine is { VerifiedAt: not null } && mine.Ip == ip.ToString();
-                    crowded = !holdsItsPlace && (Listeners(true) >= MaxPerHost || Listeners(false) >= MaxPerHost)
-                              || CoolingDown(DialKey(ip, address), _now());
+                    crowded = !holdsItsPlace && listed >= MaxPerHost || CoolingDown(DialKey(ip, address), now);
                     // A listener checked under another name since this one was needn't be dialled again: the name takes
                     // that check's time, so the listener is still dialled once its newest check is too old.
-                    var now = _now();
                     sameListener = crowded ? null : others
-                        .Where(p => p.Value.VerifiedAt is { } at && now - at < ReprobeEvery && at > (mine?.VerifiedAt ?? DateTimeOffset.MinValue)
+                        .Where(p => p.Value.VerifiedAt is { } at && now - at < ReprobeEvery && at > (mine.VerifiedAt ?? DateTimeOffset.MinValue)
                                     && p.Value.Ip is { } other && Endpoint(other, new Uri(p.Key).Port) == endpoint)
                         .Max(p => p.Value.VerifiedAt);
-                    if (!crowded && mine is not null) (mine.Machine, mine.Ip) = (machine, ip.ToString());
+                    wait = !crowded && sameListener is null && !holdsItsPlace && !TakeTurn(address, mine, queue);
+                    if (!crowded && !wait) (mine.Machine, mine.Ip) = (machine, ip.ToString());
+                }
+                else if (_resolve is null) wait = mine.VerifiedAt is null && !TakeTurn(address, mine, queue);
+                if (!wait) mine.Dialing = !crowded && sameListener is null && (_resolve is null || ip is not null);
+                if (wait && waited.Elapsed >= MaxWait)
+                {
+                    // Still waiting after a renewal's time: its next renewal starts again (keeping its place in line).
+                    mine.Probing = false;
+                    return;
                 }
             }
+            if (!wait) break;
+            await Task.Delay(WaitStep);
         }
         if (crowded || (_resolve is not null && ip is null)) ok = false;
         else if (sameListener is not null) ok = true;
         else
         {
-            try { ok = await Dial(address, ip, asNode: true, total.Token); }
+            using var dial = new CancellationTokenSource(ListingDialTimeout);
+            try { ok = await Dial(address, ip, asNode: true, dial.Token).WaitAsync(dial.Token); }
             catch (Exception e) when (e is not OutOfMemoryException) { ok = false; }
         }
         lock (_gate)
@@ -722,6 +763,8 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             if (_entries.TryGetValue(address, out var entry))
             {
                 entry.Probing = false;
+                entry.Dialing = false;
+                entry.Ticket = null;
                 if (ok) entry.VerifiedAt = sameListener ?? _now();
                 else
                 {
@@ -737,6 +780,20 @@ public sealed class VolunteerRegistry(Func<string, CancellationToken, Task<bool>
             }
         }
         Probed?.Invoke(address, ok);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="mine"/> may be dialled now: fewer than <see cref="MaxProbingPerHost"/> entries of its
+    /// machine are being dialled, counting the ones that have waited longer first. One that may not joins the line.
+    /// </summary>
+    private bool TakeTurn(string address, Entry mine, string queue)
+    {
+        var mineAt = mine.Ticket ??= ++_tickets;
+        mine.Queue = queue;
+        var dialing = _entries.Count(p => p.Key != address && p.Value.Queue == queue && p.Value.Dialing);
+        var ahead = _entries.Count(p => p.Key != address && p.Value.Queue == queue && !p.Value.Dialing && p.Value.Probing
+                                        && p.Value.Ticket < mineAt);
+        return dialing + ahead < MaxProbingPerHost;
     }
 
     /// <summary>
