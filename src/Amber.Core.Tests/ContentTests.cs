@@ -68,7 +68,7 @@ public class ContentTests : IDisposable
     public void SafeJoin_NormalizesZipSeparatorsOnEveryPlatform() =>
         Assert.Equal(Path.Combine(_root, "config", "a.txt"), ModpackService.SafeJoin(_root, "mods\\..\\config/a.txt"));
 
-    [Fact]
+    [UnixFact]
     public void SafeJoin_RejectsSiblingThatDiffersOnlyByCase()
     {
         // Windows 不区分大小写，那里“../INST”本来就是同一个目录。

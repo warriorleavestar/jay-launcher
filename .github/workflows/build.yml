@@ -321,6 +321,9 @@ jobs:
       group: android-preview-publish
       cancel-in-progress: false
     runs-on: ubuntu-latest
+    # The preview is signed with a key CI holds, outside the trustees' release signatures
+    # (docs/security/release-signing.md). Publishing waits for this environment's required reviewers.
+    environment: android-preview
     permissions:
       contents: write
     steps:
@@ -352,14 +355,8 @@ jobs:
           cd android-assets
           test -s Jay-android-experimental.apk
           sha256sum Jay-android-experimental.apk > SHA256SUMS.txt
-          cat > release-notes.md <<'NOTES'
-          直接下载 Jay-android-experimental.apk。支持 Android 8.0 及以上的 ARM64 和 x86_64 设备。
-
-          Jay 内置独立 JVM、MobileGlues 图形桥和 Minecraft 1.21.11 安装流程，不需要 FCL 或其他启动器。已经可以创建并进入世界。
-
-          支持摇杆移动、滑动转向、攻击、使用、跳跃、疾跑、潜行、背包、丢弃、聊天键盘和快捷栏切换。游戏菜单使用直接触摸，操作按钮会自动隐藏，只保留 Esc。
-
-          此发布从本版起使用固定的预览版签名，以后可覆盖升级并保留语言、设备身份和已保存的服务器。若此前安装过其他签名的测试包，Android 仍会拒绝首次覆盖安装。
+          cat > release-notes.md <<NOTES
+          Jay Android preview (experimental), built from ${GITHUB_SHA}. What it can do, how it is signed and how to install it: https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/android.md
           NOTES
           if gh release view android-preview --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # android-preview is a moving preview channel. Keep its tag, assets and notes on the

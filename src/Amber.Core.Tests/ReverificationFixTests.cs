@@ -90,19 +90,21 @@ public class ReverificationFixTests
     {
         var calls = 0;
         var ok = true;
+        var clock = new ManualTimeProvider();
         using var policy = new ExitPolicy([], [])
         {
             Discover = _ => { Interlocked.Increment(ref calls); return Task.FromResult(ok); },
             MaxPublicIpAge = TimeSpan.FromMilliseconds(50),
+            Time = clock,
         };
         policy.SetReady(true);
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         Assert.True(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
         Assert.Equal(1, calls);
         // 刚查过：不再查。
         Assert.True(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
         Assert.Equal(1, calls);
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         ok = false;
         Assert.False(await policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default));
         Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));

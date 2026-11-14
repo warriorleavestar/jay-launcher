@@ -16,7 +16,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, true);
 
-    [Fact]
+    [WindowsFact]
     public void NativeJunction_ReadsUnusualTarget_AndNeverOverwritesExistingPaths()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -40,7 +40,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         Assert.Equal("original", File.ReadAllText(Path.Combine(target, "keep.txt")));
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData(@"\\server\share\target")]
     [InlineData(@"\\?\UNC\server\share\target")]
     [InlineData("relative")]
@@ -52,7 +52,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         Assert.False(Directory.Exists(link));
     }
 
-    [Fact]
+    [WindowsFact]
     public void NativeJunction_MissingTargetLeavesLinkAvailableForRetry()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -69,7 +69,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         Assert.Equal("original", File.ReadAllText(Path.Combine(target, "keep.txt")));
     }
 
-    [Fact]
+    [WindowsFact]
     public void NativeJunction_AcceptsExtendedLocalPathsAndDriveRootTargets()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -96,7 +96,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         finally { Directory.Delete(link); }
     }
 
-    [Fact]
+    [WindowsFact]
     public void AsciiPaths_PreservesDriveRootAndNormalizesExtendedAliases()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -111,7 +111,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         Assert.Equal(Path.Combine(_root, "a", "b"), AsciiPaths.Remap(Path.Combine(driveRoot, "a", "b"), driveRoot, _root));
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task ExportedWindowsScript_RoundTripsArgumentsPathsAndLongClasspath()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -174,7 +174,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         Assert.False(File.Exists(marker));
     }
 
-    [Fact]
+    [UnixFact]
     public async Task ExportedPosixScript_TreatsShellSyntaxAsData_AndChecksCdFailure()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -215,7 +215,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         Assert.Equal("keep existing script", File.ReadAllText(script));
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task ExportedWindowsScript_MissingWorkingDirectoryDoesNotLaunchChild()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -309,7 +309,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
     [InlineData(WindowsSandboxLevel.Strong)]
     public async Task WindowsSandbox_HidesJayData_LetsTheGameWriteItsInstance(WindowsSandboxLevel level) => await HidesJayData(level);
 
-    [Theory]
+    [WindowsTheory]
     [InlineData(WindowsSandboxLevel.Standard)]
     [InlineData(WindowsSandboxLevel.Strong)]
     public async Task WindowsSandbox_GameCannotOpenJaysProcess(WindowsSandboxLevel level)
@@ -388,7 +388,7 @@ public sealed class ProcessBoundarySecurityTests : IDisposable
         Assert.Equal("secret-key-material", File.ReadAllText(key));
     }
 
-    [Fact]
+    [WindowsFact]
     public void WindowsSandbox_LabelsStayPut_AndArePreparedOnlyOnce()
     {
         if (!OperatingSystem.IsWindows()) return;

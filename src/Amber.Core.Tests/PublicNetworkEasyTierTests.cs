@@ -13,7 +13,7 @@ public sealed class PublicNetworkEasyTierTests
 {
     private static string? EtDir => Environment.GetEnvironmentVariable("JAY_ET_DIR");
 
-    [Fact]
+    [EnvFact("JAY_ET_DIR")]
     public async Task HostPublishesAndGuestJoinsThroughRealEasyTier()
     {
         if (EtDir is not { } dir) return;
@@ -66,7 +66,7 @@ public sealed class PublicNetworkEasyTierTests
     /// 网络服务端框架 + 真 EasyTier：一个目录节点、一个只当种子的地区节点（连到目录节点）。房主经地区节点、加入方经目录节点，
     /// 照样在同一个目录里碰面；屏蔽词经真网络把原因带回房主；封禁后房间马上消失。
     /// </summary>
-    [Fact]
+    [EnvFact("JAY_ET_DIR")]
     public async Task FrameworkDirectoryAndSeedOnlyNodeWorkThroughRealEasyTier()
     {
         if (EtDir is not { } dir) return;

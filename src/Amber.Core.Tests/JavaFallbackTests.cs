@@ -105,7 +105,7 @@ public class JavaFallbackTests
     }
 
     /// <summary>真的从 Adoptium 下一个 ARM Linux 的 Java 8 JRE（只验证下载、校验、解压，不运行）。设 AMBER_NET_TEST=1 才跑。</summary>
-    [Fact]
+    [EnvFact("AMBER_NET_TEST", "1")]
     public async Task Temurin_RealDownload()
     {
         if (Environment.GetEnvironmentVariable("AMBER_NET_TEST") != "1" || OperatingSystem.IsWindows()) return;

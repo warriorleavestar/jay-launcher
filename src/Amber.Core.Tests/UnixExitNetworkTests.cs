@@ -65,7 +65,7 @@ public sealed class UnixExitNetworkTests
         Assert.Empty(UnixExitNetwork.ParseScutilArray(dns, "SearchDomains"));
     }
 
-    [Fact]
+    [LinuxFact]
     public void LinuxEnterAndExitRunInTheSafeOrder()
     {
         if (!OperatingSystem.IsLinux()) return;
@@ -96,7 +96,7 @@ public sealed class UnixExitNetworkTests
         finally { UnixExitNetwork.RunForTest = null; }
     }
 
-    [Fact]
+    [UnixFact]
     public void RouteFailureStopsBeforeTheCoreStarts()
     {
         if (OperatingSystem.IsWindows()) return;

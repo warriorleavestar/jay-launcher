@@ -32,7 +32,7 @@ public sealed class PlatformPortingTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnixFact]
     public void LegacyPlainJayServerKeyMigratesOnUnix()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -51,7 +51,7 @@ public sealed class PlatformPortingTests : IDisposable
         Assert.Equal(key, list.ToMembership(entry).AccessKey);
     }
 
-    [Fact]
+    [UnixFact]
     public void UnixLegacyHomePointsAtTheInstance()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -87,7 +87,7 @@ public sealed class PlatformPortingTests : IDisposable
         Assert.Equal(OperatingSystem.IsWindows() || expected && UnixExitNetwork.Supported, PlatformFeatures.FullTrafficExit);
     }
 
-    [Fact]
+    [UnixFact]
     public void StaleEasyTierProcessIsCleanedOnUnix()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -102,7 +102,7 @@ public sealed class PlatformPortingTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_root, ".jay-easytier-*.pid"));
     }
 
-    [Fact]
+    [UnixFact]
     public void ThisJaysOwnRunningEasyTierIsLeftAlone()
     {
         // Linux multiplayer self-check: the guest's EasyTier started in the same work dir used to kill the host's room.
@@ -122,7 +122,7 @@ public sealed class PlatformPortingTests : IDisposable
         }
     }
 
-    [Fact]
+    [UnixFact]
     public void EasyTierOfAnotherRunningJayIsLeftAlone()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -151,7 +151,7 @@ public sealed class PlatformPortingTests : IDisposable
         }
     }
 
-    [Fact]
+    [LinuxFact]
     public void LinuxExitRequestSendsSigterm()
     {
         if (!OperatingSystem.IsLinux()) return;

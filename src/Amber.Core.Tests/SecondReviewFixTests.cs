@@ -24,8 +24,9 @@ public class SecondReviewFixTests
     [Fact]
     public async Task DelayedConnect_RechecksAtRequestTime()
     {
-        var newIp = IPAddress.Parse("203.0.114.9");
-        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(100), StaleGrace = TimeSpan.FromMilliseconds(50) };
+        var newIp = IPAddress.Parse("9.9.9.9");
+        var clock = new ManualTimeProvider();
+        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(100), StaleGrace = TimeSpan.FromMilliseconds(50), Time = clock };
         var calls = 0;
         policy.Discover = _ =>
         {
@@ -36,7 +37,7 @@ public class SecondReviewFixTests
         policy.SetReady(true);
         var (client, server, a, b) = await PairAsync();
         var serve = Socks5.ServeAsync(server, default, allow: policy.Allows, ensureReady: c => policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), c));
-        await Task.Delay(300);   // 连接开着，公网 IP 变旧了
+        clock.Advance(TimeSpan.FromMilliseconds(300));   // 连接开着，公网 IP 变旧了
         var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, newIp.ToString(), 25565, default));
         Assert.StartsWith("转发的那台电脑拒绝连接", e.Message);
         Assert.Equal(1, calls);
@@ -49,11 +50,12 @@ public class SecondReviewFixTests
     [Fact]
     public async Task DelayedConnect_RefreshFailsSaysNotReady()
     {
-        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(50), Discover = _ => Task.FromResult(false) };
+        var clock = new ManualTimeProvider();
+        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(50), Discover = _ => Task.FromResult(false), Time = clock };
         policy.SetReady(true);
         var (client, server, a, b) = await PairAsync();
         var serve = Socks5.ServeAsync(server, default, allow: policy.Allows, ensureReady: c => policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), c));
-        await Task.Delay(150);
+        clock.Advance(TimeSpan.FromMilliseconds(150));
         var e = await Assert.ThrowsAsync<IOException>(() => Socks5.ConnectAsync(client, "8.8.8.8", 443, default));
         Assert.Contains("没准备好", e.Message);
         await serve.WaitAsync(TimeSpan.FromSeconds(5));
@@ -63,12 +65,15 @@ public class SecondReviewFixTests
 
     // #1：公网 IP 太久没确认时，Allows 本身也拒绝（不只看“准备好了”这个标记）。
     [Fact]
-    public async Task Allows_RefusesWhenPublicIpTooOld()
+    public void Allows_RefusesWhenPublicIpTooOld()
     {
-        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(50), StaleGrace = TimeSpan.FromMilliseconds(50) };
+        var clock = new ManualTimeProvider();
+        using var policy = new ExitPolicy([], []) { MaxPublicIpAge = TimeSpan.FromMilliseconds(50), StaleGrace = TimeSpan.FromMilliseconds(50), Time = clock };
         policy.SetReady(true);
         Assert.True(policy.Allows(IPAddress.Parse("8.8.8.8")));
-        await Task.Delay(250);
+        clock.Advance(TimeSpan.FromMilliseconds(90));   // stale, but inside the grace period
+        Assert.True(policy.Allows(IPAddress.Parse("8.8.8.8")));
+        clock.Advance(TimeSpan.FromMilliseconds(160));
         Assert.True(policy.IsReady);
         Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
     }
@@ -89,6 +94,7 @@ public class SecondReviewFixTests
     public async Task EnsureFresh_CoalescesConcurrentCallers()
     {
         var calls = 0;
+        var clock = new ManualTimeProvider();
         using var policy = new ExitPolicy([], [])
         {
             MaxPublicIpAge = TimeSpan.FromMilliseconds(50),
@@ -98,9 +104,10 @@ public class SecondReviewFixTests
                 await Task.Delay(200, c);
                 return true;
             },
+            Time = clock,
         };
         policy.SetReady(true);
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         var results = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => policy.EnsureFreshAsync(TimeSpan.FromSeconds(2), default)));
         Assert.All(results, Assert.True);
         Assert.Equal(1, calls);

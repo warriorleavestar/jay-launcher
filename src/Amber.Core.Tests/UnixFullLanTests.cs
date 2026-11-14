@@ -30,7 +30,7 @@ public sealed class UnixFullLanTests
         return packet;
     }
 
-    [Fact]
+    [UnixFact]
     public void RelayKeepsPortsAndPayloadOfALocalBroadcast()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -54,7 +54,7 @@ public sealed class UnixFullLanTests
         Assert.Equal(IPAddress.Parse(expected),
             UnixBroadcastRelay.RelayTarget(IPAddress.Parse(ip), mask is null ? null : IPAddress.Parse(mask), mac));
 
-    [Fact]
+    [UnixFact]
     public void RelaySkipsFragmentsUnicastAndTheVirtualSubnet()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -65,7 +65,7 @@ public sealed class UnixFullLanTests
         Assert.False(UnixBroadcastRelay.TryParse(truncated.AsSpan(0, 27), out _, out _, out _));
     }
 
-    [Fact]
+    [UnixFact]
     public void DirectedBroadcastOfALocalSubnetCounts()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -82,7 +82,7 @@ public sealed class UnixFullLanTests
         Assert.Equal([true, true, true, false], Enumerable.Range(0, 4).Select(_ => limiter.Take()));
     }
 
-    [Fact]
+    [UnixFact]
     public void LinuxFilterJumpsLandInsideTheProgram()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -109,7 +109,7 @@ public sealed class UnixFullLanTests
         Assert.Equal(3, back.N);
     }
 
-    [Fact]
+    [UnixFact]
     public void GuardCommandLineNamesThisProcessAndTheCore()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -120,7 +120,7 @@ public sealed class UnixFullLanTests
         Assert.True(UnixElevatedGuardHost.IsGuardInvocation([.. line.Skip(flag)]));
     }
 
-    [Fact]
+    [UnixFact]
     public void GuardRefusesBadArgumentsAndOpenDirectories()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -157,7 +157,7 @@ public sealed class UnixFullLanTests
         finally { dir.Delete(true); }
     }
 
-    [Fact]
+    [UnixFact]
     public void PeerCredentialsAreReadFromTheSocket()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -177,7 +177,7 @@ public sealed class UnixFullLanTests
         finally { dir.Delete(true); }
     }
 
-    [Fact]
+    [UnixFact]
     public void ElevatedGuardStartsCoreRestartsAndStopsIt()
     {
         if (OperatingSystem.IsWindows()) return;

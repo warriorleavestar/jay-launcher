@@ -471,15 +471,15 @@ public class ForwardingTests
 public class ExitPolicyTests
 {
     private static ExitPolicy Policy() => new(
-        [IPAddress.Parse("192.168.1.20"), IPAddress.Parse("2400:1a00:b1:4e::25"), IPAddress.Parse("2400:1a00:b1:4e:a1b2:c3d4:e5f6:7788"), IPAddress.Parse("10.233.144.7")],
-        [(IPAddress.Parse("192.168.1.0"), 24), (IPAddress.Parse("2400:1a00:b1:4e::"), 64), (IPAddress.Parse("10.233.144.0"), 24)]);
+        [IPAddress.Parse("192.168.1.20"), IPAddress.Parse("2001:db8:b1:4e::25"), IPAddress.Parse("2001:db8:b1:4e:a1b2:c3d4:e5f6:7788"), IPAddress.Parse("10.233.144.7")],
+        [(IPAddress.Parse("192.168.1.0"), 24), (IPAddress.Parse("2001:db8:b1:4e::"), 64), (IPAddress.Parse("10.233.144.0"), 24)]);
 
     [Theory]
     // 本机自己的公网 IPv6（固定的和临时的）、同一网段里的别的设备（路由器 ::1、家里别的电脑）
-    [InlineData("2400:1a00:b1:4e::25")]
-    [InlineData("2400:1a00:b1:4e:a1b2:c3d4:e5f6:7788")]
-    [InlineData("2400:1a00:b1:4e::1")]
-    [InlineData("2400:1a00:b1:4e:1111:2222:3333:4444")]
+    [InlineData("2001:db8:b1:4e::25")]
+    [InlineData("2001:db8:b1:4e:a1b2:c3d4:e5f6:7788")]
+    [InlineData("2001:db8:b1:4e::1")]
+    [InlineData("2001:db8:b1:4e:1111:2222:3333:4444")]
     // 私有、回环、链路本地、CGNAT、组播、广播、ULA、EasyTier 虚拟网段
     [InlineData("127.0.0.1")]
     [InlineData("0.0.0.0")]
@@ -525,12 +525,12 @@ public class ExitPolicyTests
     public void DeniesRouterPublicIpOnceKnown()
     {
         var policy = Policy();
-        var wan = IPAddress.Parse("203.1.2.3");
+        var wan = IPAddress.Parse("9.9.9.9");
         Assert.True(policy.Allows(wan));
         policy.AddPublicAddress(wan);
         Assert.False(policy.Allows(wan));
-        Assert.False(policy.Allows(IPAddress.Parse("::ffff:203.1.2.3")));
-        Assert.False(policy.Allows(IPAddress.Parse("2002:cb01:0203::1")));
+        Assert.False(policy.Allows(IPAddress.Parse("::ffff:9.9.9.9")));
+        Assert.False(policy.Allows(IPAddress.Parse("2002:0909:0909::1")));
     }
 
     [Fact]

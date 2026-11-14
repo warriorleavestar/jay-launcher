@@ -61,7 +61,7 @@ Fabric, Quilt, Forge, NeoForge and OptiFine in one click, Modrinth and CurseForg
 </table>
 
 > [!NOTE]
-> Jay was called **Amber** until v0.7.0; accounts and settings carry over. Everyone in a multiplayer room needs v0.7.0 or newer.
+> Jay was called **Amber** up to v0.5.9 and has been Jay since v0.7.0; accounts and settings carry over. Everyone in a multiplayer room needs v0.7.0 or newer.
 > Features marked *experimental* pass the automated tests but have not been fully proven in real-world use. [Tell us](https://github.com/warriorleavestar/jay-launcher/issues/new/choose) when something breaks.
 
 ## Download

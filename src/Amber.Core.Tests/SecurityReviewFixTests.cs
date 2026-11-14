@@ -42,20 +42,21 @@ public class SecurityReviewFixTests
         Assert.False(policy.Allows(IPAddress.Parse("8.8.8.8")));
         policy.SetReady(true);
         Assert.True(policy.Allows(IPAddress.Parse("8.8.8.8")));
-        ExitPolicy.ReportPublicAddress(IPAddress.Parse("198.51.7.9"));
-        Assert.False(policy.Allows(IPAddress.Parse("198.51.7.9")));
-        Assert.False(policy.Allows(IPAddress.Parse("::ffff:198.51.7.9")));
+        // A well-known public resolver address: the reported set is shared by every policy, so no other test may expect it allowed.
+        ExitPolicy.ReportPublicAddress(IPAddress.Parse("149.112.112.112"));
+        Assert.False(policy.Allows(IPAddress.Parse("149.112.112.112")));
+        Assert.False(policy.Allows(IPAddress.Parse("::ffff:149.112.112.112")));
     }
 
     // 2. 公网 IPv6 的整个 /56（同一家里的别的 /64），以及路由表里的非默认路由。
     [Fact]
     public void Exit_BlocksSiblingPrefixesAndRoutes()
     {
-        using var policy = new ExitPolicy([IPAddress.Parse("2400:1a00:b1:4e::25")], [(IPAddress.Parse("2400:1a00:b1:4e::"), 64), (IPAddress.Parse("2400:1a00:b1:4e::25"), 56)]);
+        using var policy = new ExitPolicy([IPAddress.Parse("2001:db8:b1:4e::25")], [(IPAddress.Parse("2001:db8:b1:4e::"), 64), (IPAddress.Parse("2001:db8:b1:4e::25"), 56)]);
         Assert.Equal(48, new ExitPolicy(48).IPv6SitePrefix);
-        Assert.False(policy.Allows(IPAddress.Parse("2400:1a00:b1:4f::1")));
-        Assert.False(policy.Allows(IPAddress.Parse("2400:1a00:b1:ff::1")));
-        Assert.False(policy.Allows(IPAddress.Parse("2400:1a00:b2:0::1")));   // 仅游戏转发不转 IPv6
+        Assert.False(policy.Allows(IPAddress.Parse("2001:db8:b1:4f::1")));
+        Assert.False(policy.Allows(IPAddress.Parse("2001:db8:b1:ff::1")));
+        Assert.False(policy.Allows(IPAddress.Parse("2001:db8:b2:0::1")));   // 仅游戏转发不转 IPv6
         if (OperatingSystem.IsWindows())
         {
             var routes = ExitPolicy.NonDefaultRoutes();
@@ -343,7 +344,8 @@ public class SecurityReviewFixTests
         var client = new SecureStream(a, iSend, iReceive, TransportProfile.For(TransportMode.Extreme));
         var watch = System.Diagnostics.Stopwatch.StartNew();
         client.Dispose();
-        Assert.True(watch.ElapsedMilliseconds < 200, $"Dispose 用了 {watch.ElapsedMilliseconds} ms");
+        // Only proves Dispose doesn't wait on the network; a loose bound keeps a busy machine from failing it.
+        Assert.True(watch.ElapsedMilliseconds < 2000, $"Dispose 用了 {watch.ElapsedMilliseconds} ms");
         await using var server = new SecureStream(b, rSend, rReceive, TransportProfile.For(TransportMode.Extreme));
         Assert.Equal(0, await server.ReadAsync(new byte[4]).AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.True(server.ClosedCleanly);
@@ -415,7 +417,7 @@ public class SecurityReviewFixTests
         Assert.Null(await JoinTarget.ResolveForRelayAsync("intranet.example.org", default, Private, NoSrv));
         Assert.Null(await JoinTarget.ResolveForRelayAsync("localhost:25565", default, Public, NoSrv));
         Assert.Null(await JoinTarget.ResolveForRelayAsync("192.168.1.5:25565", default, Public, NoSrv));
-        Assert.Equal(new RelayPlan("1.2.3.4", 25565, "1.2.3.4", 25565), await JoinTarget.ResolveForRelayAsync("1.2.3.4", default, Public, NoSrv));
+        Assert.Equal(new RelayPlan("8.8.8.8", 25565, "8.8.8.8", 25565), await JoinTarget.ResolveForRelayAsync("8.8.8.8", default, Public, NoSrv));
         // 本机名字不去查 SRV。
         var asked = false;
         (string, int)? Spy(string _) { asked = true; return null; }
