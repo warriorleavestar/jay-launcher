@@ -22,7 +22,18 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/jay-server
+# A public network node on the same machine (server/install-network-node.sh, or jay-public-node.service) keeps its keys there.
+InaccessiblePaths=-/var/lib/jay-network -/var/lib/jay-public-node
 PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+# Not MemoryDenyWriteExecute: .NET and the Minecraft server's Java compile code at run time.
 
 [Install]
 WantedBy=multi-user.target

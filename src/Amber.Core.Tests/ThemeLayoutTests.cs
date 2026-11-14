@@ -199,11 +199,20 @@ public class ThemeLayoutTests
         {
             var pack = ThemePackReader.ReadDirectory(example);
             Assert.True(pack.Problems.Count == 0, $"{Path.GetFileName(example)}: {string.Join("; ", pack.Problems)}");
+            // The examples are what authors copy: current format, nothing left for the reader to upgrade.
+            Assert.Equal(2, pack.Format);
+            Assert.False(pack.Upgraded, Path.GetFileName(example));
+            Assert.Empty(pack.Migration);
+            // Only pages that still exist (home, tools and log layouts would never be applied).
+            Assert.DoesNotContain(pack.Pages.Keys, p => p is "home" or "tools" or "log");
         }
         var topbar = ThemePackReader.ReadDirectory(Path.Combine(dir!, "themes", "examples", "topbar"));
         Assert.Equal("top", topbar.Shell!.Nav);
-        Assert.Equal("dock", ThemeLayout.TreeFor(topbar.Pages["home"], "compact")!.Type);
-        Assert.Equal("grid", ThemeLayout.TreeFor(topbar.Pages["home"], "wide")!.Type);
+        Assert.Equal("rail", topbar.Shell.NavStyle);
+        Assert.Equal(["library", "multiplayer", "people", "discover"], topbar.Shell.Sections);
+        Assert.Empty(topbar.Shell.Hidden);
+        Assert.Equal("dock", ThemeLayout.TreeFor(topbar.Pages["multiplayer"], "compact")!.Type);
+        Assert.Equal("grid", ThemeLayout.TreeFor(topbar.Pages["multiplayer"], "wide")!.Type);
     }
 
     [Fact]

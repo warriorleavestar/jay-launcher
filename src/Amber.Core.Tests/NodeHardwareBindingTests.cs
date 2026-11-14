@@ -158,6 +158,88 @@ public sealed class NodeHardwareBindingTests : IDisposable
     }
 
     [Fact]
+    public void AnUnreadableTpmRefusesWithoutWiping()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        Bind(hw, tpm);
+        // tpm2-tools failed or the service user lost the tss group: the endorsement key isn't reported and the TPM isn't usable.
+        hw.Factors.RemoveAll(f => f.Kind == "tpm");
+        var e = Assert.Throws<NodeIntegrityException>(() => Guard(hw, NoTpm.Instance).Enforce());
+        Assert.Contains("tpm", e.Problems[0]);
+        Assert.True(Has("directory.key.hw"));
+        Assert.False(Has(NodeWiper.LogFile));
+        // Readable again: the node starts as before.
+        hw.Change("tpm", "EK-1234");
+        Assert.NotNull(Guard(hw, tpm).Enforce());
+    }
+
+    [Fact]
+    public void ARequiredTpmThatIsNotUsableRefusesWithoutWiping()
+    {
+        var hw = Machine();
+        Bind(hw, new FakeTpm());
+        Assert.Throws<NodeIntegrityException>(() => Guard(hw, NoTpm.Instance).Enforce());
+        Assert.True(Has("directory.key.hw"));
+    }
+
+    [Fact]
+    public void UnreadableIdentifiersDoNotHideOnesThatDiffer()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        Bind(hw, tpm);
+        // 3 of 4 needed. Board unreadable, disk replaced: only the unreadable board stands between this and a pass, so refuse.
+        // Then the machine id differs too: what was read already differs beyond the tolerance, so this is other hardware.
+        hw.Factors.RemoveAll(f => f.Kind == "board");
+        hw.Change("disk", "SN-NEW-DISK");
+        Assert.Throws<NodeIntegrityException>(() => Guard(hw, tpm).Enforce());
+        hw.Change("machine", "mid-other");
+        Assert.Throws<HardwareMismatchException>(() => Guard(hw, tpm).Enforce());
+        Assert.False(Has("directory.key.hw"));
+    }
+
+    [Fact]
+    public void AMandatoryIdentifierThatWasReadAndDiffersStillWipes()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        Bind(hw, tpm);
+        hw.Factors.RemoveAll(f => f.Kind == "board");
+        hw.Change("tpm", "EK-OTHER");
+        Assert.Throws<HardwareMismatchException>(() => Guard(hw, new FakeTpm()).Enforce());
+    }
+
+    [Fact]
+    public void ACertificateForAnotherNetworkIsRefusedWithoutWiping()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        Bind(hw, tpm); // issued for "jay-net-test"
+        var guard = new NodeHardwareGuard(_dir) { Hardware = hw, Tpm = tpm, Integrity = new FakeIntegrity(), Trust = Trustees, Networks = ["other", "other-et"] };
+        var e = Assert.Throws<NodeIntegrityException>(() => guard.Enforce());
+        Assert.Contains("jay-net-test", e.Problems[0]);
+        Assert.True(Has("directory.key.hw"));
+        Assert.False(Has(NodeWiper.LogFile));
+        Assert.NotNull(new NodeHardwareGuard(_dir) { Hardware = hw, Tpm = tpm, Integrity = new FakeIntegrity(), Trust = Trustees, Networks = ["jay-net-test", "x"] }.Enforce());
+    }
+
+    [Fact]
+    public void InstallRefusesACertificateForAnotherNetwork()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        using (DirectoryChannel.LoadOrCreateIdentity(Path.Combine(_dir, "directory.key"))) { }
+        var request = HardwareBinding.CreateRequest(_dir, hw, tpm);
+        var cert = HardwareCertificate.Cosign(HardwareCertificate.Issue(_rootKey, request, "jay-net-test"), _rootKey2);
+        Assert.Throws<InvalidDataException>(() => HardwareBinding.Install(_dir, cert, hw, tpm, Trustees, ["other", "other-et"]));
+        Assert.True(Has("directory.key"));
+        Assert.False(HardwareBinding.IsBound(_dir));
+        HardwareBinding.Install(_dir, cert, hw, tpm, Trustees, ["jay-net-test"]);
+        Assert.False(Has("directory.key"));
+    }
+
+    [Fact]
     public void CopiedFilesOnAnotherMachineAreWiped()
     {
         Bind(Machine(), new FakeTpm());
@@ -454,5 +536,21 @@ public sealed class NodeHardwareBindingTests : IDisposable
         hw.Change("tpm", "EK-OTHER");
         Assert.Equal(2, Program.NodeBind(_dir, Options.Parse(["node", "bind", "--check"]), output, hw, tpm));
         Assert.True(Has("directory.key.hw")); // --check never wipes
+    }
+
+    [Fact]
+    public async Task AccountLoginOnABoundNodeUsesTheSealedKey()
+    {
+        var hw = Machine();
+        var tpm = new FakeTpm();
+        var (_, login) = Bind(hw, tpm);
+        File.Delete(Path.Combine(_dir, "bans.json")); // Bind's placeholder isn't a ban list
+        var builder = Program.DirectoryBuilder(_dir, Options.Parse(["directory", "--accounts", "--no-admin"]), new StringWriter(), _ => { });
+        builder.UseHardwareGuard(Guard(hw, tpm));
+        await using var server = builder.Build();
+        Assert.False(Has("login.key"));
+        var (key, signer) = LoginAuthority.ParseKeys(login)!.Value;
+        Assert.Equal(key.PublicKey, server.Login!.PublicKey);
+        Assert.Equal(signer.PublicKey, server.Login.SignKey);
     }
 }

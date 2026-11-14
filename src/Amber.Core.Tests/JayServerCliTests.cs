@@ -216,13 +216,17 @@ public sealed class JayServerCliTests
             var accounts = new Amber.Core.Multiplayer.Public.AccountStore(Path.Combine(root, "accounts.json"));
             Assert.NotNull(accounts.TotpSecret("alice"));
 
-            var login = Program.LoginFor(root, Options.Parse(["directory", "--accounts", "--require-2fa", "--factor", "mail:邮件里的码:/bin/false"]), "nz-friends", output);
+            var server = Program.DirectoryBuilder(root, Options.Parse(["directory", "--accounts", "--require-2fa", "--factor", "mail:邮件里的码:/bin/false", "--no-admin"]), output, _ => { }).Build();
+            var login = server.Login;
             Assert.NotNull(login);
             Assert.Equal(["totp", "mail"], login!.Factors.Select(f => f.Name));
             Assert.True(login.RequireSecondFactor);
+            Program.PrintLoginSection(server, output);
             Assert.Contains("\"requireFactor\":true", output.ToString());
-            Assert.Null(Program.LoginFor(root, Options.Parse(["directory"]), "nz-friends", output));
-            Assert.Throws<ArgumentException>(() => Program.LoginFor(root, Options.Parse(["directory", "--factor", "Bad:x:y"]), "n", output));
+            Assert.Contains("（1 个账号）", output.ToString());
+            Assert.Null(Program.LoginFactorsFor(Options.Parse(["directory"]), "nz-friends"));
+            Assert.Null(Program.DirectoryBuilder(root, Options.Parse(["directory", "--no-admin"]), output, _ => { }).Build().Login);
+            Assert.Throws<ArgumentException>(() => Program.LoginFactorsFor(Options.Parse(["directory", "--factor", "Bad:x:y"]), "n"));
         }
         finally
         {

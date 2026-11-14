@@ -109,6 +109,7 @@ public static class Program
               （根钥匙和节点在同一台电脑时也可以用 --dir <节点数据目录> 直接写进去，但根钥匙不该放在服务器上）
           jay-server network hw-cert --root <根钥匙文件> --request <hardware.request.json> --out <hardware.cert> [--need N] [--secure-boot] [--no-tpm] [--network <网络名>]
               在离线电脑上给节点的硬件签证书（默认：只允许一项硬件标识变化，有 TPM 就必须对上 TPM）。先逐项显示内容和核对码，手打目录节点公钥最后 6 位才签
+              写了 --network（网络 id 或 EasyTier 网络名）时，别的网络的节点不认这张证书
           jay-server network hw-cert --cosign <hardware.cert> --root <根钥匙文件>
               另一位信任人在自己的离线电脑上加签（Jay 公共网络看 JayTrust.Need，现在是 2 把要 2 把；自己的网络看 dirRootsNeed），同样先显示再手打确认
           jay-server node bind --install <证书> [--network <连接串或文件>]  只认签名够数的证书（不加 --network 就是 Jay 信任人）
@@ -733,6 +734,7 @@ public static class Program
             return JayNetworkServer.NodeIntegrityExitCode;
         }
         await using var server = built;
+        PrintLoginSection(server, Console.Out);
         await server.StartAsync();
         server.EasyTierOutput += line => { if (options.Has("verbose")) log(line); };
         var listen = options.GetInt("listen", 11010);
@@ -820,7 +822,13 @@ public static class Program
         if (options.Has("signed-volunteers")) builder.RequireSignedVolunteers();
         if (options.Has("no-admin")) builder.WithoutAdmin();
         else builder.UseAdmin(options.GetInt("admin-port", JayNetworkServer.DefaultAdminPort));
-        if (!options.Has("seed-only") && LoginFor(root, options, networkId, output) is { } login) builder.UseLogin(login);
+        if (!options.Has("seed-only") && LoginFactorsFor(options, networkId) is { } factors)
+        {
+            // The server opens the login key itself after its hardware check, so a node bound to its hardware uses
+            // its sealed key (and never writes a plaintext one); see JayNetworkServer.
+            builder.UseAccounts(null, options.Has("require-2fa"));
+            foreach (var factor in factors) builder.AddLoginFactor(factor);
+        }
         return builder;
     }
 
@@ -864,6 +872,13 @@ public static class Program
         return new TrustQuorum(profile.DirectoryRoots, profile.DirectoryRootsNeed);
     }
 
+    /// <summary>The names the node's network goes by (id and EasyTier network name), to compare with a hardware certificate's network.</summary>
+    private static string[] NodeNetworkNames(Options options)
+    {
+        var profile = options.Get("network") is { } text ? NetworkString.Parse(File.Exists(text) ? File.ReadAllText(text) : text).ToProfile() : PublicNetworkProfile.Jay();
+        return [profile.Id, profile.NetworkName];
+    }
+
     /// <summary>The node's directory public key: from hardware.cert once the node is bound (the key itself is sealed), else directory.key.</summary>
     private static byte[] DirectoryPublicKey(string dataDir)
     {
@@ -893,12 +908,16 @@ public static class Program
             var cert = HardwareCertificate.Parse(File.Exists(Path.Combine(root, HardwareBinding.CertificateFile)) ? File.ReadAllBytes(Path.Combine(root, HardwareBinding.CertificateFile)) : []);
             if (cert is null) { output.WriteLine("hardware.cert 缺失或签名不对：节点启动时会删除自己的文件。"); return 2; }
             var match = cert.Match(factors);
-            output.WriteLine(match.Ok ? $"硬件对得上（{match.Reason}）。" : $"硬件对不上：{match.Reason}。现在启动节点会删除它的文件；换硬件前先重新绑定。");
-            return match.Ok && problems.Count == 0 ? 0 : 2;
+            IReadOnlyList<string> unreadable = match.Ok ? [] : cert.Unreadable(factors, match);
+            output.WriteLine(match.Ok ? $"硬件对得上（{match.Reason}）。"
+                : unreadable.Count > 0 ? $"读不到这些硬件标识：{string.Join("、", unreadable)}。现在启动节点会拒绝运行（不删文件）；先检查工具和权限（TPM 要 tpm2-tools 和 tss 组）。"
+                : $"硬件对不上：{match.Reason}。现在启动节点会删除它的文件；换硬件前先重新绑定。");
+            if (match.Ok && cert.RequireTpm && !tpm.Available) output.WriteLine("证书要求 TPM，但现在用不了：启动时会拒绝运行（不删文件）。");
+            return match.Ok && problems.Count == 0 && !(cert.RequireTpm && !tpm.Available) ? 0 : 2;
         }
         if (options.Get("install") is { } certFile)
         {
-            var sealedFiles = HardwareBinding.Install(root, File.ReadAllBytes(certFile), hardware, tpm, NodeTrust(options));
+            var sealedFiles = HardwareBinding.Install(root, File.ReadAllBytes(certFile), hardware, tpm, NodeTrust(options), NodeNetworkNames(options));
             output.WriteLine($"已绑定硬件。{string.Join("、", sealedFiles)} 现在只以加密形式存在（{string.Join("、", sealedFiles.Select(f => f + HardwareBinding.SealedSuffix))}），只有这台机器能打开。");
             output.WriteLine("硬件对不上时节点会删除数据目录里的 Jay 文件；换硬件或迁移虚拟机之前先跑 jay-server node bind --check。");
             return 0;
@@ -970,13 +989,14 @@ public static class Program
         return reply["ok"]?.GetValue<bool>() == true ? 0 : 1;
     }
 
-    /// <summary>directory --accounts：账号表 + 登录钥匙 + 第二步验证。没开就是 null。</summary>
-    internal static LoginAuthority? LoginFor(string root, Options options, string network, TextWriter output)
+    /// <summary>
+    /// directory --accounts / --require-2fa / --factor: the extra login factors (after the built-in TOTP), or null when
+    /// account login is off. Only checks the options; the login key and accounts are opened by the server.
+    /// </summary>
+    internal static List<ILoginFactor>? LoginFactorsFor(Options options, string network)
     {
         if (!options.Has("accounts") && !options.Has("require-2fa") && options.Get("factor") is null) return null;
-        var (key, signer) = LoginAuthority.LoadOrCreateKeys(Path.Combine(root, "login.key"));
-        var accounts = new AccountStore(Path.Combine(root, "accounts.json"));
-        var factors = new List<ILoginFactor> { new TotpFactor(accounts) };
+        var factors = new List<ILoginFactor>();
         foreach (var spec in (options.Get("factor") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var parts = spec.Split(':', 3);
@@ -984,18 +1004,16 @@ public static class Program
                 throw new ArgumentException($"--factor 格式是 <名字>:<提示>:<程序>，名字只用小写字母、数字、横线：{spec}");
             factors.Add(new CommandFactor(parts[0], parts[1], parts[2], [], network));
         }
-        var require = options.Has("require-2fa");
-        var section = new System.Text.Json.Nodes.JsonObject
-        {
-            ["required"] = true,
-            ["key"] = Convert.ToBase64String(key.PublicKey),
-            ["signKey"] = Convert.ToBase64String(signer.PublicKey),
-            ["factors"] = new System.Text.Json.Nodes.JsonArray([.. factors.Select(f => (System.Text.Json.Nodes.JsonNode)f.Name)]),
-            ["requireFactor"] = require,
-        };
-        output.WriteLine($"账号登录已开启（{accounts.List().Count} 个账号）。把这段写进网络配置文件的 \"login\"（required 改成 false 就是登录可选）：");
+        return factors;
+    }
+
+    /// <summary>After the server is built: tells the operator the "login" section to put in the network config.</summary>
+    internal static void PrintLoginSection(JayNetworkServer server, TextWriter output)
+    {
+        if (server.LoginSection is not { } section) return;
+        var count = server.Builtin is { } accounts ? accounts.List().Count : 0;
+        output.WriteLine($"账号登录已开启（{count} 个账号）。把这段写进网络配置文件的 \"login\"（required 改成 false 就是登录可选）：");
         output.WriteLine(section.ToJsonString());
-        return new LoginAuthority(accounts, key, signer, network) { Factors = factors, RequireSecondFactor = require };
     }
 
     /// <summary>公共网络账号：加、改密码、删、停用、两步验证。</summary>

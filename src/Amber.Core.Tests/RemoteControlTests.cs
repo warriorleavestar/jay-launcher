@@ -446,6 +446,39 @@ public sealed class RemoteControlTests
     }
 
     [Fact]
+    public async Task Viewer_EndsWhenTheSharerKeepsChangingTheFrameSize()
+    {
+        // Empty batches that only claim a new size each time: a few are a resolution switch, a stream of them is not.
+        var frames = new List<byte>();
+        frames.AddRange(RemoteWire.Accept(new RemoteAccept(true, 64, 64, new RawTileCodec().Id)));
+        for (var i = 0; i < 20; i++)
+            frames.AddRange(RemoteWire.Tiles(new RemoteTileBatch((uint)i, i % 2 == 0 ? 64 : 63, 64, [])));
+        await using var viewer = new RemoteViewer(new SilentAfterStream([.. frames]), new RawTileCodec(), "Host", "") { PeerSilenceTimeout = TimeSpan.FromSeconds(30) };
+        var ended = new TaskCompletionSource<RemoteEnd>(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewer.Ended += e => ended.TrySetResult(e);
+        Assert.NotNull(await viewer.StartAsync());
+        Assert.Equal(RemoteEnd.ProtocolError, await ended.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        // The first batch keeps the accepted 64×64; the next MaxResizeBurst each change it; the one after that is refused.
+        Assert.Equal(RemoteViewer.MaxResizeBurst + 1, viewer.BatchesReceived);
+    }
+
+    [Fact]
+    public async Task Viewer_AcceptsAResolutionSwitch()
+    {
+        var frames = new List<byte>();
+        frames.AddRange(RemoteWire.Accept(new RemoteAccept(true, 64, 64, new RawTileCodec().Id)));
+        foreach (var (w, h) in new[] { (64, 64), (64, 64), (128, 72), (128, 72), (96, 54) })
+            frames.AddRange(RemoteWire.Tiles(new RemoteTileBatch(0, w, h, [])));
+        await using var viewer = new RemoteViewer(new SilentAfterStream([.. frames]), new RawTileCodec(), "Host", "") { PeerSilenceTimeout = TimeSpan.FromSeconds(30) };
+        Assert.NotNull(await viewer.StartAsync());
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (viewer.BatchesReceived < 5 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Equal(5, viewer.BatchesReceived);
+        Assert.False(viewer.HasEnded);
+        lock (viewer.FrameLock) Assert.Equal((96, 54), (viewer.Frame.Width, viewer.Frame.Height));
+    }
+
+    [Fact]
     public async Task SilentPeer_EndsWithinWatchdogTimeout()
     {
         var accept = RemoteWire.Accept(new RemoteAccept(true, 64, 64, new RawTileCodec().Id));

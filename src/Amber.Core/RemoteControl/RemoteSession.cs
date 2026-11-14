@@ -566,6 +566,15 @@ public sealed class RemoteViewer : RemoteEndpoint
 {
     private readonly ITileCodec _codec;
     private volatile bool _control;
+    private double _resizeBudget = MaxResizeBurst;
+    private long _resizeBudgetAt = Environment.TickCount64;
+
+    /// <summary>
+    /// Frame size changes allowed back to back (the first frame, a resolution switch passing through a mode or two);
+    /// after that one more per second. A sharer that changes size faster only makes the viewer reallocate its buffer,
+    /// so it is a protocol error.
+    /// </summary>
+    internal const int MaxResizeBurst = 4;
 
     public RemoteViewer(Stream stream, ITileCodec codec, string peerName, string peerFingerprint) : base(stream, peerName, peerFingerprint) => _codec = codec;
 
@@ -643,6 +652,17 @@ public sealed class RemoteViewer : RemoteEndpoint
 
     public Task<bool> SendKeyAsync(RemoteKey key) => _control && !HasEnded ? SendAsync(RemoteWire.Key(key)) : Task.FromResult(false);
 
+    /// <summary>Takes one frame size change from the budget (refilled at one per second, up to <see cref="MaxResizeBurst"/>).</summary>
+    private bool TakeResize()
+    {
+        var now = Environment.TickCount64;
+        _resizeBudget = Math.Min(MaxResizeBurst, _resizeBudget + (now - _resizeBudgetAt) / 1000.0);
+        _resizeBudgetAt = now;
+        if (_resizeBudget < 1) return false;
+        _resizeBudget--;
+        return true;
+    }
+
     protected override async Task<bool> HandleAsync(RemoteFrame frame)
     {
         switch (frame.Type)
@@ -651,7 +671,11 @@ public sealed class RemoteViewer : RemoteEndpoint
                 var batch = RemoteWire.ParseTiles(frame.Payload);
                 lock (FrameLock)
                 {
-                    if (Frame.Width != batch.FrameWidth || Frame.Height != batch.FrameHeight) Frame.Resize(batch.FrameWidth, batch.FrameHeight);
+                    if (Frame.Width != batch.FrameWidth || Frame.Height != batch.FrameHeight)
+                    {
+                        if (!TakeResize()) return false;
+                        Frame.Resize(batch.FrameWidth, batch.FrameHeight);
+                    }
                     foreach (var t in batch.Tiles)
                     {
                         var dest = Frame.Pixels.AsSpan(t.Y * Frame.Stride + t.X * 4);
