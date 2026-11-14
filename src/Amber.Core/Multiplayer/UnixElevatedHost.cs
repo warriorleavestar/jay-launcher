@@ -132,6 +132,11 @@ public static class UnixElevatedGuardHost
                             StartCore(cmd);
                             Send($"started {cmd.N}");
                         }
+                        catch (StopRequestedException)
+                        {
+                            // Asked to stop while starting: end like any other stop; Dispose cleans up what was set up.
+                            return 0;
+                        }
                         catch (Exception e) when (e is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
                         {
                             StopCore();
@@ -149,9 +154,19 @@ public static class UnixElevatedGuardHost
             }
         }
 
+        /// <summary>Thrown inside <see cref="StartCore"/> when a stop (a signal) arrives part way through a start.</summary>
+        private sealed class StopRequestedException : Exception;
+
+        private void ThrowIfStopRequested()
+        {
+            if (_stop.IsSet) throw new StopRequestedException();
+        }
+
         private void StartCore(UnixGuardCommand cmd)
         {
             StopCore();
+            // A stop can arrive together with (or before) a start command; it wins, and no new core is started.
+            ThrowIfStopRequested();
             CheckCore(corePath);
             // 经别人上网：承载地址的主机路由要在 EasyTier 加 /1 路由之前查好、加好。
             if (cmd.Network is { } plan)
@@ -173,6 +188,7 @@ public static class UnixElevatedGuardHost
             info.Environment["PATH"] = "/usr/sbin:/usr/bin:/sbin:/bin";
             if (cmd.Env is { } env && env.TryGetValue(EasyTierArgs.SecretVariable, out var secret)) info.Environment[EasyTierArgs.SecretVariable] = secret;
             _coreExited.Reset();
+            ThrowIfStopRequested();
             var process = Process.Start(info) ?? throw new InvalidOperationException("easytier-core did not start");
             _core = process;
             process.StandardInput.Close();
@@ -203,13 +219,15 @@ public static class UnixElevatedGuardHost
             if ((File.GetUnixFileMode(path) & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0) throw new IOException("easytier-core is writable by others");
         }
 
-        private static string? WaitForTun(System.Net.IPAddress ip, Process core)
+        /// <summary>Waits up to 30 s for the virtual adapter; a stop request ends the wait at once.</summary>
+        private string? WaitForTun(System.Net.IPAddress ip, Process core)
         {
             for (var i = 0; i < 60 && !core.HasExited; i++)
             {
                 if (UnixBroadcastRelay.FindByAddress(ip) is { } tun) return tun.Name;
-                Thread.Sleep(500);
+                if (_stop.Wait(500)) throw new StopRequestedException();
             }
+            ThrowIfStopRequested();
             return null;
         }
 

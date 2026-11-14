@@ -21,7 +21,7 @@ internal static class EasyTierProcessTracker
             try
             {
                 var lines = File.ReadAllLines(record);
-                if ((lines.Length != 3 && lines.Length != 5) || !int.TryParse(lines[0], out var pid) || !long.TryParse(lines[1], out var ticks))
+                if ((lines.Length != 3 && lines.Length != 5 && lines.Length != 6) || !int.TryParse(lines[0], out var pid) || !long.TryParse(lines[1], out var ticks))
                 {
                     File.Delete(record);
                     continue;
@@ -29,14 +29,26 @@ internal static class EasyTierProcessTracker
                 // A record whose Jay is still running (another Jay, or this one) belongs to a live session, not a leftover.
                 // This Jay counts too: on Mac/Linux a second EasyTier started in the same work dir (the self-check's
                 // guest, or any session that overlaps another) must not kill the room this Jay is still hosting.
-                if (lines.Length == 5 && int.TryParse(lines[3], out var ownerPid) && long.TryParse(lines[4], out var ownerTicks)
+                if (lines.Length >= 5 && int.TryParse(lines[3], out var ownerPid) && long.TryParse(lines[4], out var ownerTicks)
                     && IsAlive(ownerPid, ownerTicks))
                 {
                     continue;
                 }
                 var recordedPath = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(lines[2]));
                 using var process = Process.GetProcessById(pid);
-                var sameStart = SameStart(process.StartTime.ToUniversalTime().Ticks, ticks);
+                // The exact start mark when the record has one: a near start time alone can't tell the recorded process
+                // from another EasyTier that took over its PID within the tolerance. Records from before the mark
+                // existed fall back to the start time.
+                bool sameStart;
+                if (lines.Length == 6)
+                {
+                    if (StartMark(pid) is not { } now) continue; // can't tell now: stop nothing, try again next time
+                    sameStart = now == lines[5];
+                }
+                else
+                {
+                    sameStart = SameStart(process.StartTime.ToUniversalTime().Ticks, ticks);
+                }
                 string? runningPath;
                 try { runningPath = process.MainModule?.FileName; }
                 catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { runningPath = null; }
@@ -51,7 +63,7 @@ internal static class EasyTierProcessTracker
                     var watcher = Path.GetFullPath(runningPath) == Path.GetFullPath(EasyTierProcessGuard.WatcherExecutable);
                     // The start time only matches to within SameStart's tolerance, and the watcher is the system shell: a
                     // shell that took over the PID shortly after is ours only if it runs the watcher for this record's Jay.
-                    if (!watcher || EasyTierProcessGuard.IsWatcherFor(pid, lines.Length == 5 ? lines[3] : null))
+                    if (!watcher || EasyTierProcessGuard.IsWatcherFor(pid, lines.Length >= 5 ? lines[3] : null))
                     {
                         EasyTierProcessGuard.Stop(process, watcher);
                         process.WaitForExit(5000);
@@ -80,9 +92,11 @@ internal static class EasyTierProcessTracker
         {
             Directory.CreateDirectory(workDir);
             var record = Path.Combine(workDir, $"{Prefix}{process.Id}-{Guid.NewGuid():N}.pid");
-            var text = string.Join('\n', process.Id.ToString(), process.StartTime.ToUniversalTime().Ticks.ToString(),
+            string[] fields = [process.Id.ToString(), process.StartTime.ToUniversalTime().Ticks.ToString(),
                 Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(corePath))),
-                ownerPid.ToString(), ownerStartTicks.ToString()) + "\n";
+                ownerPid.ToString(), ownerStartTicks.ToString()];
+            if (StartMark(process.Id) is { } mark) fields = [.. fields, mark];
+            var text = string.Join('\n', fields) + "\n";
             var options = new FileStreamOptions
             {
                 Mode = FileMode.CreateNew,
@@ -114,6 +128,37 @@ internal static class EasyTierProcessTracker
     /// starts much later than the recorded process.
     /// </summary>
     internal static bool SameStart(long a, long b) => Math.Abs(a - b) <= 2 * TimeSpan.TicksPerSecond;
+
+    /// <summary>
+    /// An exact mark of when the process with this PID started, the same every time it is read, or null where there is
+    /// none. Linux: the boot's id and the start time in clock ticks since boot, from /proc. macOS: the start time to the
+    /// millisecond, which the kernel keeps exactly (only Linux's reading drifts, through the boot time estimate).
+    /// </summary>
+    internal static string? StartMark(int pid)
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                var boot = File.ReadAllText("/proc/sys/kernel/random/boot_id").Trim();
+                var stat = File.ReadAllText($"/proc/{pid}/stat");
+                // Fields after the command name, which is in parentheses and may itself hold spaces or ')'.
+                var rest = stat[(stat.LastIndexOf(')') + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                // starttime is field 22 of the whole line; rest starts at field 3.
+                return rest.Length > 19 && ulong.TryParse(rest[19], out var since) && boot.Length > 0 ? $"linux:{boot}:{since}" : null;
+            }
+            if (OperatingSystem.IsMacOS())
+            {
+                using var process = Process.GetProcessById(pid);
+                return "mac:" + process.StartTime.ToUniversalTime().Ticks / TimeSpan.TicksPerMillisecond;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException
+                                       or System.ComponentModel.Win32Exception)
+        {
+        }
+        return null;
+    }
 
     private static long OwnStartTicks()
     {

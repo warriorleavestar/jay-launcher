@@ -11,6 +11,8 @@ using Amber.Core.Multiplayer;
 namespace Amber.Core.Tests;
 
 /// <summary>Mac/Linux 完整局域网模式：root 守护的命令、核对和广播转发的解析。</summary>
+// Shares UnixExitNetwork.RunForTest with UnixExitNetworkTests, so the two classes never run at the same time.
+[Collection("UnixExitNetwork")]
 public sealed class UnixFullLanTests
 {
     private static byte[] UdpPacket(byte[] src, byte[] dst, ushort srcPort, ushort dstPort, byte[] payload, ushort flags = 0)
@@ -260,6 +262,103 @@ public sealed class UnixFullLanTests
         }
         finally
         {
+            UnixElevatedGuardHost.StopHookForTest = null;
+            UnixElevatedGuard.LaunchForTest = null;
+            UnixElevatedGuard.AcceptAnyUserForTest = false;
+            File.Delete(core);
+        }
+    }
+
+    /// <summary>A stop that is already pending when a start command arrives wins: no core is started.</summary>
+    [Fact]
+    public void ElevatedGuardStartsNoCoreOnceAskedToStop()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var marker = Path.Combine(Path.GetTempPath(), "jay-fake-core-ran-" + Guid.NewGuid().ToString("N"));
+        var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(core, $"#!/bin/sh\ntouch '{marker}'\nexec sleep 30\n");
+        File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Thread? host = null;
+        var result = -1;
+        // The stop arrives as the session begins, after the start command is already waiting on the socket, so both are
+        // ready at the guard's first wait.
+        UnixElevatedGuardHost.StopHookForTest = s => { Thread.Sleep(500); s(); };
+        UnixElevatedGuard.LaunchForTest = command =>
+        {
+            var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+            var args = command.Skip(flag).ToArray();
+            host = new Thread(() => result = UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+            host.Start();
+            return Process.GetCurrentProcess();
+        };
+        UnixElevatedGuard.AcceptAnyUserForTest = true;
+        try
+        {
+            using var guard = UnixElevatedGuard.Start(core, ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+            Assert.True(SpinWait.SpinUntil(() => host is not null, 10000));
+            Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
+            Assert.Equal(0, result);
+            Thread.Sleep(300);
+            Assert.False(File.Exists(marker));
+        }
+        finally
+        {
+            UnixElevatedGuardHost.StopHookForTest = null;
+            UnixElevatedGuard.LaunchForTest = null;
+            UnixElevatedGuard.AcceptAnyUserForTest = false;
+            File.Delete(core);
+            File.Delete(marker);
+        }
+    }
+
+    /// <summary>
+    /// A stop while the guard waits for the virtual adapter (which can take up to 30 s) ends the wait at once and runs
+    /// the normal clean-up: the core is stopped and the exit routes are taken down again.
+    /// </summary>
+    [Fact]
+    public void ElevatedGuardStopsWhileWaitingForTheAdapter()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(core, "#!/bin/sh\necho \"pid=$$\"\nexec sleep 30\n");
+        File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var calls = new List<string>();
+        UnixExitNetwork.RunForTest = (tool, args, _) =>
+        {
+            lock (calls) calls.Add(tool + " " + string.Join(' ', args));
+            return args.Contains("get") ? (0, "203.0.113.10 via 192.168.1.1 dev wlan0 src 192.168.1.20 uid 0") : (0, "");
+        };
+        Thread? host = null;
+        var result = -1;
+        Action? stop = null;
+        UnixElevatedGuardHost.StopHookForTest = s => stop = s;
+        UnixElevatedGuard.LaunchForTest = command =>
+        {
+            var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+            var args = command.Skip(flag).ToArray();
+            host = new Thread(() => result = UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+            host.Start();
+            return Process.GetCurrentProcess();
+        };
+        UnixElevatedGuard.AcceptAnyUserForTest = true;
+        try
+        {
+            // No adapter ever carries this address, so without the stop the guard would wait the full 30 s.
+            using var guard = UnixElevatedGuard.Start(core, ["one"], new Dictionary<string, string>(),
+                new ExitNetworkPlan("10.233.144.250", ["203.0.113.10"], "amberlan-10000"), "10.233.144.250");
+            Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("pid=", StringComparison.Ordinal)), 10000));
+            var pid = int.Parse(guard.RecentOutput.First(l => l.StartsWith("pid=", StringComparison.Ordinal))[4..]);
+            var asked = Stopwatch.StartNew();
+            stop!();
+            Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
+            Assert.True(asked.Elapsed < TimeSpan.FromSeconds(10), $"the guard took {asked.Elapsed} to stop");
+            Assert.Equal(0, result);
+            Assert.True(SpinWait.SpinUntil(() => !IsRunning(pid), 5000));
+            lock (calls) Assert.Contains("ip -4 route del 203.0.113.10/32 proto 201", calls);
+        }
+        finally
+        {
+            UnixExitNetwork.RunForTest = null;
             UnixElevatedGuardHost.StopHookForTest = null;
             UnixElevatedGuard.LaunchForTest = null;
             UnixElevatedGuard.AcceptAnyUserForTest = false;
