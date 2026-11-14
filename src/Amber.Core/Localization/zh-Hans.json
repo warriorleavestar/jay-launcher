@@ -1659,6 +1659,7 @@
   "core.gate.mc.downloading_server": "下载 {0} 服务端……",
   "core.gate.mc.downloading_java": "下载 Java {0}……",
   "core.gate.mc.java_failed": "启动 Java 失败",
+  "core.gate.mc.properties_unsafe": "没能把 server.properties 改成只接受本机连接，所以没有启动服务器",
   "core.gate.mc.name_not_bound": "用户名 {0} 没有绑定这台设备",
   "core.gate.log.enrolled": "入服：{0} 绑定了设备 {1}",
   "core.gate.log.enroll_refused": "入服被拒（{0}）：设备 {1}",

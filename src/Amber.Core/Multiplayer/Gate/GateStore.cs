@@ -305,6 +305,13 @@ public sealed class GateStore
         return Read().Members.Where(m => !m.Disabled && m.Devices.Any(d => d.PublicKey == key)).Select(m => m.Name).ToList();
     }
 
+    /// <summary>The device belongs to a member who is disabled for now (and to no member who isn't).</summary>
+    public bool IsDisabledDevice(byte[] devicePublicKey)
+    {
+        var key = Convert.ToBase64String(devicePublicKey);
+        return Read().Members.Any(m => m.Disabled && m.Devices.Any(d => d.PublicKey == key));
+    }
+
     /// <summary>记下最后在线时间（一小时精度，免得每次连接都写盘）。</summary>
     public void Touch(string name, byte[] devicePublicKey)
     {

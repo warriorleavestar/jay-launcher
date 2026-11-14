@@ -215,6 +215,35 @@ public sealed class GateTests : IAsyncLifetime
         lock (_log) Assert.Contains(_log, l => l.Contains("Steve"));
     }
 
+    /// <summary>A device taken off the list is told so and gets no address book (relays, rotation seeds) with the answer.</summary>
+    [Fact]
+    public async Task ARevokedDeviceGetsNoAddressBook()
+    {
+        using var identity = Identity("a");
+        var membership = await GateClient.EnrollAsync(Invite("Steve"), identity);
+        _store.RevokeDevices("Steve", null);
+        GateNetwork? seen = null;
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync(IPAddress.Loopback, membership.Port);
+        var refused = await Assert.ThrowsAsync<GateRejectedException>(() =>
+            GateProtocol.JoinAsync(tcp.GetStream(), membership, identity.KeyPair, JoinRequest.Direct, n => seen = n, default));
+        Assert.Equal(GateStatus.NotMember, refused.Status);
+        Assert.Null(seen);
+    }
+
+    /// <summary>A disabled member who tries to join is told "disabled", as on enrollment; enabled again, the same device joins.</summary>
+    [Fact]
+    public async Task ADisabledMemberIsToldSo()
+    {
+        using var identity = Identity("a");
+        var membership = await GateClient.EnrollAsync(Invite("Steve"), identity);
+        Assert.True(_store.SetDisabled("Steve", true));
+        var refused = await Assert.ThrowsAsync<GateRejectedException>(() => JoinRaw(membership, identity));
+        Assert.Equal(GateStatus.Disabled, refused.Status);
+        Assert.True(_store.SetDisabled("Steve", false));
+        await using var joined = await JoinRaw(membership, identity);
+    }
+
     [Fact]
     public async Task OtherMembersStayOnlineWhenOneIsRevoked()
     {

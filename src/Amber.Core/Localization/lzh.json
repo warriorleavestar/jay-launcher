@@ -1609,6 +1609,7 @@
   "core.gate.mc.downloading_server": "取 {0} 伺服器端……",
   "core.gate.mc.downloading_java": "取 Java {0}……",
   "core.gate.mc.java_failed": "啟 Java 未成",
+  "core.gate.mc.properties_unsafe": "未能令 server.properties 唯納本機之連，故未啟服",
   "core.gate.mc.name_not_bound": "名 {0} 未綁此器",
   "core.gate.log.enrolled": "入服：{0} 綁器 {1}",
   "core.gate.log.enroll_refused": "入服見拒（{0}）：器 {1}",
