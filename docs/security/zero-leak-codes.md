@@ -207,22 +207,6 @@ For two people with no relay, no public network and no shared LAN. `Multiplayer/
 - **Flood limits**: per-sender limits once directories can see a stable sender (for example, a cheap proof of work per
   post).
 
-## One-shot rendezvous records
-
-`Public/Rendezvous.cs`, directory ops `rv.put` / `rv.take` in `Public/RoomDirectory.cs`. These let a code carry a random token
-instead of an address: the publisher puts a sealed record on the directories, the code's holder takes it once.
-
-- **Derivation**: from a token of at least 16 random bytes, id = `HKDF-SHA256(token, info "jay-rv-id-v1")` (32 bytes) and
-  seal key = `HKDF-SHA256(token, info "jay-rv-seal-v1")`. The record is ChaCha20-Poly1305 with a random nonce and the id as
-  associated data. The directory sees only the id and the opaque record, never the token.
-- **Single use**: `rv.take` removes the record in the same step that returns it. The client asks every directory at once,
-  so taking the record also clears the other copies.
-- **No overwrite**: `rv.put` on an id that is still waiting is refused with `exists`, so nobody can replace a record they
-  didn't publish.
-- **Encrypted channel**: like every directory op, only over `DirectoryChannel`.
-- **Limits**: 2 KB per record, at most 10 minutes, 4096 records per directory, 30 puts per source address per 10 minutes.
-  Nothing is written to disk. The node's `/metrics` shows only the number of waiting records (`jay_rendezvous_records`).
-
 ## Long-lived signed records
 
 `Public/SignedRecord.cs`, directory ops `rec.put` / `rec.get` in `Public/RoomDirectory.cs`. A server or network that has no

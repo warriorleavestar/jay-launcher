@@ -192,17 +192,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
     /// <summary>Mailbox id → sealed mail waiting there.</summary>
     private readonly Dictionary<string, List<SealedItem>> _mailboxes = new(StringComparer.Ordinal);
     private int _sealedCount;
-    /// <summary>Rendezvous id (hex) → sealed record, taken at most once (<see cref="Rendezvous"/>).</summary>
-    private readonly Dictionary<string, (string Blob, DateTimeOffset Expires)> _rendezvous = new(StringComparer.Ordinal);
-    /// <summary>Rendezvous puts per source address in the current window.</summary>
-    private readonly Dictionary<string, (int Count, DateTimeOffset Until)> _rendezvousPuts = new(StringComparer.Ordinal);
-
-    /// <summary>Live rendezvous records at most (about 11 MB of base64 at the largest size).</summary>
-    public const int MaxRendezvous = 4096;
-
-    /// <summary>Rendezvous puts one source address may make per <see cref="Rendezvous.MaxTtl"/>.</summary>
-    public const int MaxRendezvousPutsPerSource = 30;
-
     /// <summary>Lookup (hex) → signed record (<see cref="SignedRecord"/>), replaced only by its signer with a higher seq.</summary>
     private readonly Dictionary<string, SignedRecord> _records = new(StringComparer.Ordinal);
     /// <summary>Record puts per source address in the current hour.</summary>
@@ -275,12 +264,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
         _accept = AcceptLoopAsync();
-    }
-
-    /// <summary>Rendezvous records waiting to be taken (a total, for metrics).</summary>
-    public int RendezvousCount
-    {
-        get { lock (_gate) { PruneRendezvous(); return _rendezvous.Count; } }
     }
 
     /// <summary>Signed records held (a total, for metrics).</summary>
@@ -519,8 +502,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
                 "post" => Post(request),
                 "fetch" => Fetch(request),
                 "drop" => Drop(request),
-                "rv.put" => RendezvousPut(request, source),
-                "rv.take" => RendezvousTake(request),
                 "rec.put" => RecordPut(request, source),
                 "rec.get" => RecordGet(request),
                 "volunteer" => Volunteers is { } v ? v.Register(request["url"]?.GetValue<string>(), request["operator"], source) : Error("off"),
@@ -1034,46 +1015,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         }
     }
 
-    private JsonObject RendezvousPut(JsonObject request, string? source)
-    {
-        var id = request["id"]?.GetValue<string>()?.ToLowerInvariant();
-        var blob = request["blob"]?.GetValue<string>();
-        var ttl = request["ttl"]?.GetValue<int>() ?? (int)Rendezvous.MaxTtl.TotalSeconds;
-        if (!IsHex(id, Rendezvous.IdLength * 2) || blob is null || blob.Length > (Rendezvous.MaxSealed + 2) / 3 * 4) return Error("bad");
-        if (ttl <= 0 || ttl > Rendezvous.MaxTtl.TotalSeconds) return Error("bad");
-        try { if (Convert.FromBase64String(blob).Length is 0 or > Rendezvous.MaxSealed) return Error("bad"); }
-        catch (FormatException) { return Error("bad"); }
-        lock (_gate)
-        {
-            PruneRendezvous();
-            var now = _now();
-            if (source is not null)
-            {
-                var (count, until) = _rendezvousPuts.TryGetValue(source, out var used) && used.Until > now ? used : (0, now + Rendezvous.MaxTtl);
-                if (count >= MaxRendezvousPutsPerSource) return Error("rate");
-                _rendezvousPuts[source] = (count + 1, until);
-            }
-            // Never overwrite: whoever put first keeps the id until it is taken or expires.
-            if (_rendezvous.ContainsKey(id!)) return Error("exists");
-            if (_rendezvous.Count >= MaxRendezvous) return Error("full");
-            _rendezvous[id!] = (blob, now + TimeSpan.FromSeconds(ttl));
-            return new JsonObject { ["ok"] = true };
-        }
-    }
-
-    private JsonObject RendezvousTake(JsonObject request)
-    {
-        var id = request["id"]?.GetValue<string>()?.ToLowerInvariant();
-        if (!IsHex(id, Rendezvous.IdLength * 2)) return Error("bad");
-        lock (_gate)
-        {
-            PruneRendezvous();
-            // Single use: the record leaves the directory in the same step that hands it out.
-            if (!_rendezvous.Remove(id!, out var record)) return Error("not_found");
-            return new JsonObject { ["ok"] = true, ["blob"] = record.Blob };
-        }
-    }
-
     private JsonObject RecordPut(JsonObject request, string? source)
     {
         if (SignedRecord.FromJson(request["record"]) is not { } record) return Error("bad");
@@ -1118,13 +1059,6 @@ public sealed class RoomDirectoryServer : IAsyncDisposable
         var now = _now();
         foreach (var (lookup, record) in _records.Where(p => p.Value.Expires <= now).ToList()) _records.Remove(lookup);
         foreach (var (source, used) in _recordPuts.Where(p => p.Value.Until <= now).ToList()) _recordPuts.Remove(source);
-    }
-
-    private void PruneRendezvous()
-    {
-        var now = _now();
-        foreach (var (id, record) in _rendezvous.Where(p => p.Value.Expires <= now).ToList()) _rendezvous.Remove(id);
-        foreach (var (source, used) in _rendezvousPuts.Where(p => p.Value.Until <= now).ToList()) _rendezvousPuts.Remove(source);
     }
 
     private void PruneMail()
@@ -1323,48 +1257,6 @@ public sealed class RoomDirectoryClient(IPublicNetwork network, IReadOnlyList<st
             _ when !string.IsNullOrWhiteSpace(reason) => L.F("core.mp.public.err_policy", reason),
             _ => L.F("core.mp.public.err_other", code),
         });
-    }
-
-    /// <summary>
-    /// Puts a sealed rendezvous record (<see cref="Rendezvous"/>) on every directory. Always over the authenticated
-    /// channel, never the legacy protocol. True when at least one directory kept it; false when the id is already taken
-    /// everywhere that answered.
-    /// </summary>
-    public async Task<bool> PutRendezvousAsync(byte[] id, byte[] sealedRecord, TimeSpan ttl, CancellationToken ct)
-    {
-        if (id.Length != Rendezvous.IdLength) throw new ArgumentException("Rendezvous id length", nameof(id));
-        if (sealedRecord.Length is 0 or > Rendezvous.MaxSealed) throw new ArgumentException("Rendezvous record size", nameof(sealedRecord));
-        var seconds = (int)Math.Clamp(ttl.TotalSeconds, 1, Rendezvous.MaxTtl.TotalSeconds);
-        var request = new JsonObject { ["op"] = "rv.put", ["id"] = Convert.ToHexStringLower(id), ["blob"] = Convert.ToBase64String(sealedRecord), ["ttl"] = seconds };
-        var results = await FanOutAsync(request, ct);
-        if (results.Any(r => r.Reply is { } reply && IsOk(reply))) return true;
-        if (results.Any(r => r.Reply?["error"]?.GetValue<string>() == "exists")) return false;
-        NeedOne(results);
-        return false;
-    }
-
-    /// <summary>
-    /// Takes the rendezvous record under <paramref name="id"/>: the first directory that has it hands it over and drops
-    /// it, then the others are told to drop their copies too. Null when no directory has it (taken, expired, never put).
-    /// </summary>
-    public async Task<byte[]?> TakeRendezvousAsync(byte[] id, CancellationToken ct)
-    {
-        if (id.Length != Rendezvous.IdLength) throw new ArgumentException("Rendezvous id length", nameof(id));
-        var request = new JsonObject { ["op"] = "rv.take", ["id"] = Convert.ToHexStringLower(id) };
-        // Ask all of them at once: each copy is single-use, so taking every copy both finds the record and clears the rest.
-        var results = await FanOutAsync(request, ct);
-        foreach (var (reply, _) in results)
-        {
-            if (reply is null || !IsOk(reply) || reply["blob"]?.GetValue<string>() is not { } blob) continue;
-            try
-            {
-                var bytes = Convert.FromBase64String(blob);
-                if (bytes.Length is > 0 and <= Rendezvous.MaxSealed) return bytes;
-            }
-            catch (FormatException) { }
-        }
-        if (results.Any(r => r.Reply is not null)) return null;
-        throw results.Select(r => r.Error).OfType<Exception>().FirstOrDefault() ?? new IOException(L.T("core.mp.public.no_directory"));
     }
 
     /// <summary>

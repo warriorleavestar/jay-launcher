@@ -174,7 +174,7 @@ public class SignedRecordTests
         Assert.ThrowsAny<CryptographicException>(() => SignedRecord.Open(RandomNumberGenerator.GetBytes(16), blob));
         Assert.Throws<ArgumentException>(() => SignedRecord.Lookup(new byte[15]));
         Assert.Equal(SignedRecord.MaxBlob, SignedRecord.Seal(id, new byte[SignedRecord.MaxPlaintext]).Length);
-        // The lookup and rendezvous id derived from the same bytes differ (separate domains).
-        Assert.NotEqual(SignedRecord.Lookup(id), Rendezvous.Id(id));
+        // The lookup and a hidden entry's index derived from the same bytes differ (separate domains).
+        Assert.NotEqual(SignedRecord.Lookup(id), HiddenEntry.Index(id));
     }
 }

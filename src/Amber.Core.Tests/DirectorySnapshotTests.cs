@@ -191,7 +191,7 @@ public sealed class DirectorySnapshotTests : IAsyncDisposable
         // An entry pointing outside the public network is ignored.
         Assert.Null(HiddenEntry.Open(lobby, HiddenEntry.Seal(lobby, hit with { Ip = "203.0.113.5" })));
         Assert.Throws<ArgumentException>(() => HiddenEntry.Index(new byte[15]));
-        Assert.NotEqual(HiddenEntry.Index(lobby), Rendezvous.Id(lobby));
+        Assert.NotEqual(HiddenEntry.Index(lobby), SignedRecord.Lookup(lobby));
     }
 
     [Fact]

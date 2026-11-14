@@ -8,7 +8,7 @@ A public network is an EasyTier network whose name and secret are public, so any
 
 - `snap` to download the whole directory (public rooms and every hidden room's sealed entry), and `find` for fingerprint codes
 - `announce` and `withdraw` to publish your own room
-- `login`, sealed mail (`post` / `fetch` / `drop`), rendezvous and signed records, and `x-*` extensions
+- `login`, sealed mail (`post` / `fetch` / `drop`), signed records, and `x-*` extensions
 
 The 2026-11-10 real-device test (finding 8) showed that EasyTier's DHCP handed the address `10.235.0.1` to an ordinary member while the directory was offline. Any member can also take the address on purpose with `--ipv4 10.235.0.1`. A machine holding the address can:
 
