@@ -35,8 +35,9 @@ if [[ -n "${BLOCKED_WORDS:-}" ]]; then copy "$BLOCKED_WORDS" blocked-words.txt; 
 [[ -n "${EXTRA:-}" ]] && ARGS+=(${EXTRA})
 
 # The node user may use the TPM (hardware binding, docs/security/node-hardware-binding.md) when the tss group exists.
+# The service gets the group through the unit; the user joins it too, so `sudo -u jay ... node bind` sees the TPM.
 TPM_GROUP=""
-if getent group tss >/dev/null; then TPM_GROUP="SupplementaryGroups=tss"; fi
+if getent group tss >/dev/null; then TPM_GROUP="SupplementaryGroups=tss"; usermod -aG tss jay; fi
 
 cat > "$UNIT" <<UNIT
 # 由 install-network-node.sh 生成。改参数：改这里的 ExecStart，然后 systemctl daemon-reload && systemctl restart jay-network
