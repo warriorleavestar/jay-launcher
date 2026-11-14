@@ -291,6 +291,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         InitHotspot();
         InitGuide();
         InitRoom();
+        InitScene();
+        InitInvitePanel();
+        InitShare();
         InitRequests();
         InitPublic();
         InitContacts();
@@ -698,7 +701,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         var tunnel = new TunnelSettings(SelectedTransport.Mode, CanDisguise && DisguiseAsMinecraft);
         var relayOnly = OpenRoute == RoomRoute.RelayOnly;
-        if (relayOnly && SplitNeedsDirect(NewRoomSplit(tunnel)))
+        // My own "always relays only" counts too: a strict split would still connect directly from this computer.
+        if ((relayOnly || _service.Settings.MultiplayerRelayOnly) && SplitNeedsDirect(NewRoomSplit(tunnel)))
         {
             SetStatus(StatusMessage.Warning("multiplayer.split.relay_only_strict"));
             return;
@@ -715,7 +719,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var credentials = NewCredentials(gamePort, tunnel) with { RelayOnly = relayOnly };
         // 成员表：批准一个人时发给他自己的钥匙（游戏通道和聊天按它认人）；房主自己的聊天客户端也有一把。
         var members = new MemberTable();
-        var room = credentials.ToHostRoom(members, ChatName);
+        // My own "always relays only" setting turns direct connections off on this computer without making it the room's rule.
+        var room = WithMyRelayChoice(credentials.ToHostRoom(members, ChatName));
         if (!TryStartSession(new EasyTierOptions(room, true, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), null, TestListeners, Guid.NewGuid().ToString(), FullLanMode, null, FullLanMode && AllowExitNode)
             {
                 AllowProxy = AllowGameProxy,
@@ -731,6 +736,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         RestoreChatHistory(room);
         StartHub(room);
         StartHostLobby(credentials, members);
+        _openedAccess = OpenAccess;
+        OnRoomEntered();
         if (_lobby is { } lobby) SeedLongInvites(lobby, credentials.Tunnel);
         StartAnnouncerIfHosting();
         Status = FullLanMode
@@ -782,11 +789,21 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private bool StartJoin(RoomCode room)
     {
         if (!IsIdle) return false;
+        // A room that sends part of its traffic only directly, while I chose "always relays only": joining would show the
+        // host my address, so Jay stops here, before anything is started.
+        if (RefusesForMyRelayChoice(room))
+        {
+            SetStatus(StatusMessage.Warning("multiplayer.split.relay_only_mine"));
+            return false;
+        }
         // 封装模式下游戏和聊天都先连本机的 Amber，再封装着发给房主（完整局域网模式也一样）。
         var wraps = room.Tunnel.Wraps;
         var local = FullLanMode && !wraps ? (int?)null : EasyTierArgs.FreeTcpPort();
         var chatPort = FullLanMode && !wraps ? (int?)null : EasyTierArgs.FreeTcpPort();
         var remotePort = room.FromInvite && !(FullLanMode && !wraps) ? EasyTierArgs.FreeTcpPort() : (int?)null;
+        // What the host decided for the room, then my own "always relays only" setting on top of it.
+        var relayRule = room.RelayOnly;
+        room = WithMyRelayChoice(room);
         if (!TryStartSession(new EasyTierOptions(room, false, TestPeers ?? _service.MultiplayerPeers, EasyTierArgs.FreeTcpPort(), local, TestListeners, Guid.NewGuid().ToString(), FullLanMode, chatPort, FullLanMode && AllowExitNode)
             {
                 LocalTunnelPort = wraps && !FullLanMode ? EasyTierArgs.FreeTcpPort() : null,
@@ -796,12 +813,14 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 AllowProxy = AllowGameProxy,
             })) return false;
         _room = room;
+        _joinedRelayRule = relayRule;
         MarkJoinStarted(newRoom: true);
         RestoreChatHistory(room);
         _localChatPort = chatPort;
         _localRemotePort = remotePort;
         ChatStatus = L.T("multiplayer.chat.awaiting_host");
         Mode = "join";
+        OnRoomEntered();
         // 完整局域网模式下直接连房主的虚拟 IP；普通模式连本机转发端口。
         JoinAddress = local is { } l ? $"127.0.0.1:{l}" : $"{EasyTierArgs.HostIp}:{room.Port}";
         ShowRoomHostAddress(FullLanMode && local is not null);
@@ -812,8 +831,15 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         return true;
     }
 
+    /// <summary>Tests: stands in for starting EasyTier (gets the options it would start with; true as if it started).</summary>
+    internal Func<EasyTierOptions, bool>? TestStartSession { get; set; }
+
+    /// <summary>Tests: what <see cref="StartJoin"/> does with a room the host let me into.</summary>
+    internal bool StartJoinForTest(RoomCode room) => StartJoin(room);
+
     private bool TryStartSession(EasyTierOptions options)
     {
+        if (TestStartSession is { } test) return test(options);
         StopSession();
         try
         {
@@ -882,6 +908,12 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private bool TryStartTransport(EasyTierOptions options)
     {
+        if (TestStartTransport is { } test)
+        {
+            if (!test(options)) return false;
+            _currentOptions = options;
+            return true;
+        }
         try
         {
             _transport = RoomTransport.Start(options, line => _diag.Add(L.T("multiplayer.transport.diagnostics_category"), line),
@@ -963,7 +995,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task UseGameProxyAsync()
     {
-        if (Child.HideNetworkExit || SelectedExitPeer is not { } peer || _session is null || _currentOptions is not { } current) return;
+        if (Child.HideNetworkExit || _componentRestarting || SelectedExitPeer is not { } peer || _session is null || _currentOptions is not { } current) return;
         // 邀请房间的封装通道只在成员和房主之间有钥匙：只能经房主转发。
         if (current.Room.FromInvite && current.Room.Tunnel.Wraps && peer.Peer.Ip != EasyTierArgs.HostIp)
         {
@@ -983,7 +1015,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     [RelayCommand]
     private async Task StopGameProxyAsync()
     {
-        if (_currentOptions is not { } current || !UsingGameProxy) return;
+        if (_componentRestarting || _currentOptions is not { } current || !UsingGameProxy) return;
         if (await RestartForProxyAsync(current with { ProxyExit = null, LocalSocksPort = null, LocalExitPort = null }))
             SetStatus(StatusMessage.Info("multiplayer.proxy.stopped"));
     }
@@ -1012,13 +1044,45 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 return false;
             }
         }
-        if (!TryStartTransport(_session?.Options ?? options))
+        // Full-LAN mode keeps EasyTier running: only Jay's own transport takes the new forwarding settings, and the
+        // options later restarts start from carry them too (CurrentSessionOptions).
+        if (!TryStartTransport(_session is { } session ? WithTransportSide(session.Options, options) : options))
         {
             StopSession();
             return false;
         }
         return true;
     }
+
+    /// <summary>
+    /// The options the running session was started with, plus what only Jay's own room transport uses (forwarding the
+    /// game through this computer or someone else's). In full-LAN mode those change without restarting EasyTier, so
+    /// the session's own copy can be behind; every restart that starts from the session's options starts from this.
+    /// </summary>
+    private EasyTierOptions? CurrentSessionOptions => _session is not { } session ? null
+        : session.Options.Tun && _currentOptions is { } current ? WithTransportSide(session.Options, current) : session.Options;
+
+    internal static EasyTierOptions WithTransportSide(EasyTierOptions session, EasyTierOptions wanted) => !session.Tun ? session : session with
+    {
+        AllowProxy = wanted.AllowProxy,
+        ProxyExit = wanted.ProxyExit,
+        LocalSocksPort = wanted.LocalSocksPort,
+        LocalExitPort = wanted.LocalExitPort,
+    };
+
+    /// <summary>Tests: a running session (one that starts nothing) and the options my side runs with.</summary>
+    internal void UseTestSession(IEasyTierSession session, EasyTierOptions current)
+    {
+        _session = session;
+        _currentOptions = current;
+        NotifyShare();
+    }
+
+    /// <summary>Tests: the options a restart would start from.</summary>
+    internal EasyTierOptions? CurrentSessionOptionsForTest => CurrentSessionOptions;
+
+    /// <summary>Tests: stands in for starting Jay's own room transport (true as if it started).</summary>
+    internal Func<EasyTierOptions, bool>? TestStartTransport { get; set; }
 
     internal string ChatName => _service.Accounts.Store.Selected?.Name ?? _service.Settings.PlayerName;
 
@@ -1219,6 +1283,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (IsHosting && _hub is null && _room is { } room) StartHub(room);
         if (IsHosting && _chat is null && _hub is not null) _ = ConnectChatAsync("127.0.0.1", _hub.HostPort);
         TickRemote();
+        // The invite card counts down ("9 minutes left").
+        if (HasInvite) OnPropertyChanged(nameof(InviteSummary));
     }
 
     private bool _hubOnVirtualIp;
@@ -1241,7 +1307,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             if (_sessionCts != lifetime || _direct != direct || lifetime.IsCancellationRequested) return false;
             if (_session is not { } old || !old.Options.Tun) return false;
             // Relays named by domain are refused by the route plan (ExitRelays explains why), with their own message.
-            var options = old.Options with { ExitNode = exitIp };
+            var options = (CurrentSessionOptions ?? old.Options) with { ExitNode = exitIp };
             if (direct is not null)
             {
                 await direct.SetExitNodeAsync(exitIp, lifetime.Token);
@@ -1332,6 +1398,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private async Task RefreshPeersAsync()
     {
+        ExpireRoomGames();
         _ = WatchGameTargetAsync();
         if (_session is not { } session || _refreshing) return;
         if (session.HasExited)

@@ -190,17 +190,16 @@ public sealed partial class MultiplayerViewModel
         {
             await CreateDirectRoomAsync();
             if (!IsDirectHost) return;
-            RememberLastRoom(1, InviteExpiryChoices[0].Lifetime, false);
+            RememberLastRoom(1, InviteOffer.Lifetime(InviteLife.TenMinutes), false);
             await CreateSealedOfferAsync();
             return;
         }
         if (StartGameToHost()) return;
         await CreateRoomAsync();
         if (!IsHosting) return;
-        SelectedInviteExpiry ??= InviteExpiryChoices[0];
         InviteDialogOpen = true;
-        if (await IssueInviteAsync(1, InviteExpiryChoices[0].Lifetime, false) is null) return;
-        RememberLastRoom(1, InviteExpiryChoices[0].Lifetime, false);
+        if (await IssueInviteAsync(1, InviteOffer.Lifetime(InviteLife.TenMinutes), false) is null) return;
+        RememberLastRoom(1, InviteOffer.Lifetime(InviteLife.TenMinutes), false);
         if (AutoCopyInvite && _lastInvite is { } invite && await SecretClipboard.CopyAsync(invite.ToString()))
             SetStatus(StatusMessage.Success("multiplayer.lobby.invite_copied"));
         await ApplyAccessAsync(access);

@@ -322,7 +322,7 @@ public sealed class GamePortRelayTests
         var relay = vm.GameRelayForTest!;
 
         // [Find] is listening when the player types another port, which links.
-        vm.FindGameForRoomCommand.Execute(null);
+        vm.ScanCommand.Execute(null);
         Pump(() => vm.IsScanning);
         var port = typed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         vm.ManualPort = port;
@@ -520,7 +520,7 @@ public sealed class GamePortRelayTests
         Pump(() => prepared.IsCompleted);
         var relay = vm.GameRelayForTest!;
         // [Find] links the found world, then the player types another port.
-        vm.FindGameForRoomCommand.Execute(null);
+        vm.ScanCommand.Execute(null);
         Pump(() => relay.Target == found.Port && !vm.IsScanning);
         vm.ManualPort = typed.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         Pump(() => relay.Target == typed.Port);
@@ -568,7 +568,7 @@ public sealed class GamePortRelayTests
         var relay = vm.GameRelayForTest!;
 
         // [Find] is listening when the linked game is found closed and dropped.
-        vm.FindGameForRoomCommand.Execute(null);
+        vm.ScanCommand.Execute(null);
         Pump(() => vm.IsScanning);
         Check(vm.WatchGameTargetAsync());
         Check(vm.WatchGameTargetAsync());
@@ -964,6 +964,182 @@ public sealed class GamePortRelayTests
         Assert.Equal("multiplayer.room.full_lan_start_failed", vm.StatusInfo?.Key);
         if (!hangs) Assert.Contains("helper gone", vm.StatusInfo!.Args[0]?.ToString(), StringComparison.Ordinal);
         Assert.False(vm.HasGameRelay);
+    });
+
+    [Fact]
+    public void TheRoomListsItsGamesUsesTheFirstAndFollowsAReopenedWorld() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var now = new DateTime(2026, 11, 13, 12, 0, 0, DateTimeKind.Utc);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GamePortReadyForTest = (_, _) => Task.FromResult(true),
+            RoomGameListenForTest = (_, ct) => Task.Delay(Timeout.Infinite, ct),
+            RoomGamesClockForTest = () => now,
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var relay = vm.GameRelayForTest!;
+        Assert.False(vm.HasRoomGames);
+
+        // The first world opened to LAN is listed and used.
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        Pump(() => relay.Target == 25565);
+        Assert.False(vm.IsWaitingForGame);
+        var row = Assert.Single(vm.RoomGames);
+        Assert.Equal("Survival", row.Name);
+        Assert.True(row.IsLinked);
+        Assert.False(row.CanUse);
+        Assert.Equal(L.F("multiplayer.relay.linked", "Survival", 25565), vm.GameLinkText);
+
+        // A second world is only listed; the room keeps the first until the player picks the second.
+        now = now.AddSeconds(1);
+        vm.RoomGameHeard(new LanGame("Creative", 25600));
+        Assert.Equal(["Creative", "Survival"], vm.RoomGames.Select(r => r.Name));
+        Assert.Equal(25565, relay.Target);
+        vm.UseRoomGameItemCommand.Execute(vm.RoomGames[0]);
+        Pump(() => relay.Target == 25600);
+        Assert.True(vm.RoomGames.Single(r => r.Game.Port == 25600).IsLinked);
+        Assert.True(vm.RoomGames.Single(r => r.Game.Port == 25565).CanUse);
+
+        // Survival closes: it drops off the list. Creative is reopened on a new port: the room follows it.
+        now = now.AddSeconds(5);
+        vm.RoomGameHeard(new LanGame("Creative", 25600));
+        now = now.AddSeconds(2);
+        vm.ExpireRoomGames();
+        Assert.Equal([25600], vm.RoomGames.Select(r => r.Game.Port));
+        vm.RoomGameHeard(new LanGame("Creative", 25611));
+        Assert.Equal(25600, relay.Target);
+        now = now.AddSeconds(7);
+        vm.RoomGameHeard(new LanGame("Creative", 25611));
+        vm.ExpireRoomGames();
+        Pump(() => relay.Target == 25611);
+        Assert.Equal([25611], vm.RoomGames.Select(r => r.Game.Port));
+
+        // A typed port is listed as such and stays put when another world opens.
+        vm.ToggleRoomOtherPortCommand.Execute(null);
+        Assert.True(vm.RoomOtherPortOpen);
+        vm.ManualPort = "25700";
+        Pump(() => relay.Target == 25700);
+        var typed = vm.RoomGames.Single(r => r.Game.Port == 25700);
+        Assert.True(typed.IsTyped && typed.IsLinked && !typed.CanUse);
+        Assert.Equal(L.T("multiplayer.roomgames.typed"), typed.Name);
+        now = now.AddSeconds(1);
+        vm.RoomGameHeard(new LanGame("Another", 25800));
+        Assert.Equal(25700, relay.Target);
+        // The room's own port is never listed.
+        vm.RoomGameHeard(new LanGame("Room", relay.Port));
+        Assert.DoesNotContain(vm.RoomGames, r => r.Game.Port == relay.Port);
+
+        // Leaving the room empties the list.
+        vm.StopCommand.Execute(null);
+        Pump(() => !vm.HasGameRelay);
+        Assert.False(vm.HasRoomGames);
+        Assert.False(vm.RoomOtherPortOpen);
+    });
+
+    [Fact]
+    public void AFloodOfBroadcastsStaysBoundedAndStopsWithTheRoom() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var now = new DateTime(2026, 11, 13, 12, 0, 0, DateTimeKind.Utc);
+        Action<LanGame>? heard = null;
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GamePortReadyForTest = (_, _) => Task.FromResult(true),
+            RoomGameListenForTest = (h, ct) => { heard = h; return Task.Delay(Timeout.Infinite, ct); },
+            RoomGamesClockForTest = () => now,
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted && heard is not null);
+        var relay = vm.GameRelayForTest!;
+
+        // Many ports, changing names and repeats, far faster than the list is updated (the UI isn't pumped meanwhile).
+        for (var i = 0; i < 20_000; i++) heard!(new LanGame($"world {i}", 30000 + i % 500));
+        Assert.InRange(vm.RoomGamesWaitingForTest, 1, LanGameWatch.MaxGames);
+        Assert.Equal(1, vm.RoomGamesFlushesForTest);
+        Pump(() => vm.RoomGamesWaitingForTest == 0 && vm.HasRoomGames);
+        Assert.InRange(vm.RoomGames.Count, 1, LanGameWatch.MaxGames + 1);
+        Assert.InRange(vm.RoomGamesKnownForTest, 1, LanGameWatch.MaxGames * 5);
+        Assert.NotNull(relay.Target);
+
+        // More rounds: still one update at a time, and what is remembered stays bounded.
+        for (var round = 0; round < 5; round++)
+        {
+            now = now.AddSeconds(10);
+            for (var i = 0; i < 2_000; i++) heard!(new LanGame($"r{round} {i}", 40000 + round * 1000 + i));
+            Assert.InRange(vm.RoomGamesWaitingForTest, 1, LanGameWatch.MaxGames);
+            Pump(() => vm.RoomGamesWaitingForTest == 0);
+            vm.ExpireRoomGames();
+            Assert.InRange(vm.RoomGamesKnownForTest, 1, LanGameWatch.MaxGames * 5);
+            Assert.InRange(vm.RoomGames.Count, 1, LanGameWatch.MaxGames + 1);
+        }
+        Assert.InRange(vm.RoomGamesFlushesForTest, 2, 12);
+
+        // The room stops: broadcasts that still come in (or were already waiting) change nothing.
+        heard!(new LanGame("late", 50000));
+        vm.StopCommand.Execute(null);
+        Pump(() => !vm.HasGameRelay);
+        var flushes = vm.RoomGamesFlushesForTest;
+        heard!(new LanGame("after", 50001));
+        Thread.Sleep(MultiplayerViewModel.RoomGamesFlushInterval * 3);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.HasRoomGames);
+        Assert.Equal(0, vm.RoomGamesKnownForTest);
+        Assert.Equal(0, vm.RoomGamesWaitingForTest);
+        Assert.Equal(flushes, vm.RoomGamesFlushesForTest);
+    });
+
+    [Fact]
+    public void AWorldWhoseFirstCheckFailedIsLinkedOnALaterTry() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        var now = new DateTime(2026, 11, 13, 12, 0, 0, DateTimeKind.Utc);
+        var ready = false;
+        var checks = 0;
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GamePortReadyForTest = (_, _) => { checks++; return Task.FromResult(ready); },
+            RoomGameListenForTest = (_, ct) => Task.Delay(Timeout.Infinite, ct),
+            RoomGamesClockForTest = () => now,
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var relay = vm.GameRelayForTest!;
+
+        // The world broadcasts while it is still starting: the first check fails and the room keeps waiting.
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        Pump(() => checks == 1);
+        Assert.Null(relay.Target);
+        Assert.True(vm.IsWaitingForGame);
+
+        // The same broadcast keeps coming; it isn't a change, and a refresh before the retry interval does nothing.
+        now = now.AddSeconds(1.5);
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        vm.ExpireRoomGames();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(1, checks);
+
+        // The game is up now: the next refresh after the interval tries again and links it.
+        ready = true;
+        now = now.AddSeconds(4);
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        vm.ExpireRoomGames();
+        Pump(() => relay.Target == 25565);
+        Assert.False(vm.IsWaitingForGame);
+        Assert.Equal(2, checks);
+
+        // Once linked, refreshes don't check it again this way.
+        now = now.AddSeconds(10);
+        vm.RoomGameHeard(new LanGame("Survival", 25565));
+        vm.ExpireRoomGames();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(2, checks);
+        vm.StopCommand.Execute(null);
+        Pump(() => !vm.HasGameRelay);
     });
 
     private static void Pump(Func<bool> done)
