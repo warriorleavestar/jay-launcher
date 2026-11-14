@@ -22,8 +22,10 @@ internal static class AndroidRuntimeCatalog
     public const string SourceUrl =
         "https://github.com/warriorleavestar/jay-launcher/blob/main/docs/android-runtime-sources.md";
 
-    // These immutable release assets passed the repository's architecture, regular-file,
-    // license and 16 KiB ELF LOAD-alignment validation before publication.
+    // The installer verifies the archive size and SHA-256 below and every file inside it before use.
+    // These android-runtime-v1 assets were assembled before .github/workflows/android-runtime-release.yml
+    // existed, so no workflow run reproduces them (and their ids say v2). Replace them with the values a
+    // run of that workflow writes to its summary: new tag, id, URL, sizes and SHA-256 together.
     private static RuntimeArchiveDescriptor Arm64 => new(
         RuntimeArchiveDescriptor.CurrentFormat,
         "jay-android-runtime21-v2-arm64-v8a",

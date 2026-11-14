@@ -15,6 +15,11 @@ archive next to it.
 | x86_64 | 31,308,180 bytes | `1cec903c2c8ba4ac177b71c0984dac9239e2dcffda243c69f11c8c50a68949fe` |
 
 The archive is assembled by `scripts/assemble-android-runtime.sh` from the three component builds below.
+The `android-runtime-release` workflow (`.github/workflows/android-runtime-release.yml`) builds all
+three from the pinned sources, assembles both architectures and publishes the archives with their
+`.sha256` and size files under a new tag that is never rewritten. The archives listed above were
+assembled before that workflow existed; the next runtime update replaces them with a workflow-built
+release and updates this table and the catalog together.
 
 ## Components
 

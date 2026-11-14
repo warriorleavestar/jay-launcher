@@ -1,0 +1,274 @@
+name: android-runtime-release
+
+# Builds the Android game runtime from pinned sources (OpenJDK, MobileGlues, LWJGL), assembles one
+# archive per architecture and publishes the archives with their SHA-256 and size files under a new
+# tag. Runtime tags are never rewritten: a tag that already exists stops the run. After a run, copy
+# the values from the job summary into src/Amber.Android/AndroidRuntimeCatalog.cs and
+# docs/android-runtime-sources.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: New tag for the runtime archives, for example android-runtime-v2 (must not exist yet)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-runtime-release
+  cancel-in-progress: false
+
+jobs:
+  check-tag:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Refuse an existing or malformed tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^android-runtime-v[0-9]+$ ]]; then
+            echo "The tag must look like android-runtime-v2." >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists. Runtime tags are never rewritten; choose a new one." >&2
+            exit 1
+          fi
+
+  openjdk:
+    needs: check-tag
+    timeout-minutes: 90
+    strategy:
+      fail-fast: true
+      matrix:
+        architecture: [arm64-v8a, x86_64]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch pinned Android OpenJDK build source
+        shell: bash
+        run: |
+          git clone https://github.com/FCL-Team/Android-OpenJDK-Build.git runtime-source
+          git -C runtime-source checkout b79a530da187dbb33d40c4ed51ddeeeb9d379360
+          bash scripts/prepare-android-openjdk.sh runtime-source
+
+      - name: Build OpenJDK 21.0.12.1
+        shell: bash
+        run: |
+          case "${{ matrix.architecture }}" in
+            arm64-v8a) script=ci_build_arch_aarch64.sh ;;
+            x86_64) script=ci_build_arch_x86_64.sh ;;
+          esac
+          cd runtime-source
+          JOBS=4 bash "$script"
+
+      - name: Verify and stage runtime
+        shell: bash
+        run: |
+          source_archive="$(find runtime-source -maxdepth 1 -type f -name 'jre21-*.tar.xz' -print -quit)"
+          test -n "$source_archive"
+          normalized="$(mktemp -d)"
+          tar -xf "$source_archive" -C "$normalized"
+          mkdir -p runtime-artifact
+          archive="runtime-artifact/jay-jre21-${{ matrix.architecture }}.tar.xz"
+          # The installer rejects symbolic and hard links, so store every path as a regular file.
+          tar --hard-dereference -C "$normalized" -cJhf "$archive" .
+          readelf_path="runtime-source/android-ndk-r21/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          bash scripts/check-android-runtime.sh "$archive" "${{ matrix.architecture }}" "$readelf_path" 21.0.12.1
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-jre21-${{ matrix.architecture }}
+          path: runtime-artifact/*
+          if-no-files-found: error
+          retention-days: 7
+
+  mobileglues:
+    needs: check-tag
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        architecture: [arm64-v8a, x86_64]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Install Android NDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+
+      - name: Build MobileGlues
+        run: |
+          bash scripts/build-android-mobileglues.sh \
+            "$ANDROID_HOME/ndk/28.2.13676358" \
+            "${{ matrix.architecture }}" \
+            "graphics-${{ matrix.architecture }}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-mobileglues-${{ matrix.architecture }}
+          path: graphics-${{ matrix.architecture }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+  lwjgl:
+    needs: check-tag
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        architecture: [arm64-v8a, x86_64]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Android NDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+
+      - name: Install native build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      - name: Build LWJGL JNI libraries
+        run: |
+          bash scripts/build-android-lwjgl.sh \
+            "$ANDROID_HOME/ndk/28.2.13676358" \
+            "${{ matrix.architecture }}" \
+            "lwjgl-${{ matrix.architecture }}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-lwjgl-${{ matrix.architecture }}
+          path: lwjgl-${{ matrix.architecture }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    needs: [openjdk, mobileglues, lwjgl]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        architecture: [arm64-v8a, x86_64]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Android NDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-jre21-${{ matrix.architecture }}
+          path: parts/jre
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-mobileglues-${{ matrix.architecture }}
+          path: parts/graphics
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-lwjgl-${{ matrix.architecture }}
+          path: parts/lwjgl
+
+      - name: Assemble the runtime archive
+        shell: bash
+        run: |
+          readelf_path="$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          bash scripts/assemble-android-runtime.sh \
+            "parts/jre/jay-jre21-${{ matrix.architecture }}.tar.xz" \
+            parts/graphics \
+            parts/lwjgl \
+            "${{ matrix.architecture }}" \
+            "$readelf_path" \
+            "release/jay-android-runtime21-${{ matrix.architecture }}.tar.xz"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-runtime-${{ matrix.architecture }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: assemble
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: release-runtime-*
+          path: release
+          merge-multiple: true
+
+      - name: Publish under the new tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          # The assemble step records paths as release/<name>; check them, then publish
+          # checksum files that name the archive alone.
+          sha256sum -c release/*.sha256
+          cd release
+          for archive in ./*.tar.xz; do
+            name="$(basename "$archive")"
+            sha256sum "$name" > "$name.sha256"
+          done
+          cat > notes.md <<NOTES
+          Android game runtime built by the android-runtime-release workflow from commit $GITHUB_SHA.
+          Sources, licences and checksums: docs/android-runtime-sources.md.
+          NOTES
+          gh release create "$TAG" ./*.tar.xz ./*.sha256 ./*.metadata \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Jay Android runtime ($TAG)" \
+            --notes-file notes.md \
+            --prerelease \
+            --latest=false
+
+      - name: Check the published assets and write the catalog values
+        env:
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          cd release
+          {
+            echo "### Catalog values for $TAG"
+            echo
+            echo '| Architecture | Id | Archive bytes | Extracted bytes | SHA-256 | URL |'
+            echo '|---|---|---|---|---|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for architecture in arm64-v8a x86_64; do
+            name="jay-android-runtime21-$architecture.tar.xz"
+            url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$name"
+            expected="$(cut -d' ' -f1 "$name.sha256")"
+            actual="$(curl -fsSL --retry 3 "$url" | sha256sum | cut -d' ' -f1)"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "Published $name does not match the built archive." >&2
+              exit 1
+            fi
+            archive_bytes="$(sed -n 's/^archive-bytes=//p' "$name.metadata")"
+            extracted_bytes="$(sed -n 's/^extracted-bytes=//p' "$name.metadata")"
+            version="${TAG#android-runtime-}"
+            echo "| $architecture | jay-android-runtime21-$version-$architecture | $archive_bytes | $extracted_bytes | \`$expected\` | $url |" >> "$GITHUB_STEP_SUMMARY"
+          done
