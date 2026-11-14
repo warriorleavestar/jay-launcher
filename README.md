@@ -127,7 +127,7 @@ Jay's window needs a desktop session (X11, or Wayland with XWayland) and the lib
 - **Practice and diagnose.** A safe drill mode walks you through a knock without touching the network, and the "Connection trouble?" drawer runs a full test matrix and writes a report with secrets removed.
 - **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS2-` invite; unknown connections get not a single byte back.
 
-Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), in Jay's hardened build ([jay-easytier](https://github.com/Yumao-Feather/jay-easytier)), which Jay downloads and verifies the first time you use multiplayer. The default mode needs no admin rights and installs no driver.
+Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), in Jay's hardened build ([jay-easytier](https://github.com/Yumao-Feather/jay-easytier)), which comes with the release packages; Jay downloads and verifies it only when that copy is missing. The default mode needs no admin rights and installs no driver.
 
 ### 🔐 Privacy and safety
 
@@ -197,7 +197,9 @@ Jay is built on a simple promise: **it only goes online to do what you asked**, 
 - Signing in: Microsoft and Xbox sign-in, and any skin site you add.
 - Games: Mojang's game file servers, your chosen download source, loader download sites (OptiFine via BMCLAPI, authlib-injector via its official site or BMCLAPI).
 - Mods: Modrinth and CurseForge, only when you browse or install.
-- Multiplayer, only while you host or join: the relay nodes listed on the Multiplayer page, the other players in the room, the server named in a Jay Server invite, and EasyTier's GitHub releases page (first use only).
+- Multiplayer, only while you host or join: the relay nodes listed on the Multiplayer page, the other players in the room, the server named in a Jay Server invite, and the jay-easytier releases page (only if the copy that comes with Jay is missing).
+- Rare downloads: web.archive.org for missing libraries of very old Forge (1.5.2 and earlier), api.adoptium.net for Java on platforms Mojang has no Java for (ARM Linux), and the jay-loader releases page when baking (the universal loader) is turned on.
+- GitHub download mirrors: when the multiplayer component or the loader package can't be fetched from GitHub, the third-party mirrors `ghfast.top`, `gh-proxy.com` and `ghproxy.net` (tried before GitHub when the system time zone is China). Jay accepts a file only if it matches the fixed size and SHA-256.
 - Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address. They carry no game data. Jay may also ask your router for a temporary port mapping, removed when the session ends.
 </details>
 

@@ -127,7 +127,7 @@ Jay 的窗口需要桌面会话（X11，或带 XWayland 的 Wayland）和下面�
 - **演练和排查。** 演练模式不联网，带你走一遍敲门流程；“连接有问题？”抽屉能跑完整测试矩阵，生成去掉了密钥的报告。
 - **Jay 服务器**（实验）。在 VPS 或局域网电脑上开一个只有 Jay 能进的 Minecraft 服务器。玩家用一次性的 `JAYS2-` 邀请加入；陌生连接一个字节都收不到。
 
-联机基于开源项目 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0），用的是 Jay 维护的加固版本（[jay-easytier](https://github.com/Yumao-Feather/jay-easytier)），第一次使用联机时下载并校验。默认模式不需要管理员权限，也不安装驱动。
+联机基于开源项目 [EasyTier](https://github.com/EasyTier/EasyTier)（LGPL-3.0），用的是 Jay 维护的加固版本（[jay-easytier](https://github.com/Yumao-Feather/jay-easytier)），发布包里自带；自带的那份不在时才下载并校验。默认模式不需要管理员权限，也不安装驱动。
 
 ### 🔐 隐私与安全
 
@@ -197,7 +197,9 @@ Jay 只有一个承诺：**只为你要做的事联网**；唯一的例外是每
 - 登录：微软和 Xbox 登录，以及你添加的皮肤站。
 - 游戏：Mojang 游戏文件服务器、你选择的下载源、各加载器的下载地址（OptiFine 通过 BMCLAPI，authlib-injector 通过其官方地址或 BMCLAPI）。
 - 模组：Modrinth 和 CurseForge，只在你浏览或安装时。
-- 联机，只在你开房间或加入时：联机页里列出的中转节点、房间里的其他玩家、Jay 服务器邀请里写的那台服务器，以及 EasyTier 的 GitHub 发布页（仅首次）。
+- 联机，只在你开房间或加入时：联机页里列出的中转节点、房间里的其他玩家、Jay 服务器邀请里写的那台服务器，以及 jay-easytier 的发布页（只在 Jay 自带的那份不在时）。
+- 少数下载：很老的 Forge（1.5.2 及更早）缺的库从 web.archive.org 下载，Mojang 不提供 Java 的平台（ARM Linux）从 api.adoptium.net 下载 Java，打开烘焙（通用加载器）后从 jay-loader 的发布页下载加载器包。
+- GitHub 下载镜像：联机组件或加载器包从 GitHub 下不下来时，改走第三方镜像 `ghfast.top`、`gh-proxy.com`、`ghproxy.net`（系统时区是中国时先试镜像）。Jay 只接受大小和 SHA-256 与固定值一致的文件。
 - 直连房间会向你设置的 STUN 服务器（默认 `stun.miwifi.com`、`stun.chat.bilibili.com`、`stun.cloudflare.com`，可改可清空）询问你的外部地址，它们不经过游戏数据；也可能请你的路由器临时映射一个端口，结束联机时删掉。
 </details>
 
