@@ -131,10 +131,6 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>最小尺寸（见 WindowSizing）。屏幕放不下时再往下收到可用区域。</summary>
-    public const double PreferredMinWidth = Amber.Core.Layout.WindowSizing.MinWidth;
-    public const double PreferredMinHeight = Amber.Core.Layout.WindowSizing.MinHeight;
-
     /// <summary>
     /// 按屏幕的可用区域定窗口大小和位置：恢复上次的（还在某块屏幕上时），否则按可用区域的比例取默认大小并居中；
     /// 都不超过可用区域。不按哪一种屏幕定死大小。

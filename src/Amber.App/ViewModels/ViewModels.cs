@@ -595,9 +595,6 @@ public sealed partial class SettingsViewModel : PageViewModel
     public string BakeLoaderDownloadTip => BakeLoaderPublished ? L.T("settings.bake.download_hint") : L.T("core.bake.download_unpublished");
     private CancellationTokenSource? _bakeLoaderDownload;
 
-    /// <summary>The loader version "Download loader" fetches (shown on the button's tooltip).</summary>
-    public string BakeLoaderDownloadVersion => Amber.Core.Bake.BakeLoaderRelease.Pinned.LoaderVersion;
-
     /// <summary>
     /// "Download loader": the pinned zip from Jay's own GitHub release (mirrors and resume as other downloads),
     /// accepted only with the pinned SHA-256, then installed like a zip the player picked. Cancel keeps the partial

@@ -12,7 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 namespace Amber.App.ViewModels;
 
 /// <summary>One instance card or row on the library home.</summary>
-public sealed partial class LibraryCard(LibraryEntry entry, int modCount, double playMinutes, LibraryViewModel owner) : ObservableObject
+public sealed partial class LibraryCard(LibraryEntry entry, int modCount, LibraryViewModel owner) : ObservableObject
 {
     public LibraryEntry Entry { get; } = entry;
     public string Id => Entry.Id;
@@ -20,15 +20,11 @@ public sealed partial class LibraryCard(LibraryEntry entry, int modCount, double
     public int ModCount { get; } = modCount;
     public string Initial => CoverArt.InitialOf(Entry.Name);
     public int CoverSlot => CoverArt.SlotFor(Entry.Id);
-    /// <summary>Loader tag class (vanilla, fabric, forge, …).</summary>
-    public string LoaderClass => Entry.Loader ?? "vanilla";
     public string LoaderName => LibraryViewModel.LoaderName(Entry.Loader);
     public string Facts => Entry.Loader is null
         ? Entry.McVersion
         : ModCount > 0 ? L.F("library.facts.mods", Entry.McVersion, LoaderName, L.P("library.mods", ModCount, ModCount)) : L.F("library.facts", Entry.McVersion, LoaderName);
     public string LastPlayedText => Entry.LastPlayed is { } t ? L.F("library.last_played", Fmt.Ago(t, DateTimeOffset.Now)) : L.T("library.never_played");
-    public string PlayTimeText => playMinutes >= 1 ? L.F("library.play_time", Fmt.PlayTime(TimeSpan.FromMinutes(playMinutes))) : "";
-    public bool HasPlayTime => playMinutes >= 1;
     public bool IsPinned => Entry.Pinned;
     public bool IsRunning => Entry.IsRunning;
     public bool HasProblem => Entry.HasProblem;
@@ -156,10 +152,10 @@ public sealed partial class LibraryViewModel : PageViewModel
         }, TaskScheduler.Default);
     }
 
-    private List<(LibraryEntry Entry, int Mods, double Minutes)> BuildRows(IEnumerable<string> ids, Dictionary<string, InstanceMeta?> metas,
+    private List<(LibraryEntry Entry, int Mods)> BuildRows(IEnumerable<string> ids, Dictionary<string, InstanceMeta?> metas,
         HashSet<string> running, HashSet<string> crashed)
     {
-        var rows = new List<(LibraryEntry Entry, int Mods, double Minutes)>();
+        var rows = new List<(LibraryEntry Entry, int Mods)>();
         foreach (var id in ids)
         {
             var meta = metas.GetValueOrDefault(id);
@@ -174,14 +170,14 @@ public sealed partial class LibraryViewModel : PageViewModel
             }
             var entry = new LibraryEntry(id, meta?.DisplayName ?? id, instance?.McVersion ?? id, instance?.Loader, meta?.Pinned ?? false, meta?.LastPlayed,
                 HasProblem: instance is null || meta?.State is not null || crashed.Contains(id), IsRunning: running.Contains(id));
-            rows.Add((entry, mods, meta?.PlayMinutes ?? 0));
+            rows.Add((entry, mods));
         }
         return rows;
     }
 
-    private void Apply(List<(LibraryEntry Entry, int Mods, double Minutes)> rows)
+    private void Apply(List<(LibraryEntry Entry, int Mods)> rows)
     {
-        _all = rows.Select(r => new LibraryCard(r.Entry, r.Mods, r.Minutes, this)).ToList();
+        _all = rows.Select(r => new LibraryCard(r.Entry, r.Mods, this)).ToList();
         var current = _service.CurrentInstance;
         var pick = LibraryQuery.ContinueWith(_all.Select(c => c.Entry).ToList(),
             current is null ? _service.Settings.RecentInstances : [current, .. _service.Settings.RecentInstances ?? []], null);
