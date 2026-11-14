@@ -50,6 +50,11 @@ public sealed class ContactDeviceItem(Contact device, ContactItem person)
     public bool IsNew => Device.NewDevice;
     public string Fingerprint => (Device.DeviceName.Length > 0 ? Device.DeviceName + " · " : "") + Device.Fingerprint
         + (Device.NewDevice ? " · " + L.T("multiplayer.contacts.new_device_tag") : "");
+
+    /// <summary>The locked new-device panel: the same words as the request bar's notice.</summary>
+    public string NewDeviceTitle => L.F("multiplayer.contacts.new_device", Person.Name);
+    public string NewDeviceBody => L.F("multiplayer.contacts.new_device_body",
+        Device.DeviceName.Length > 0 ? Device.DeviceName : L.T("multiplayer.contacts.new_device_unnamed"), Device.Fingerprint);
 }
 
 /// <summary>An add-contact exchange under way: waiting, asking me, or the emoji to compare.</summary>
