@@ -166,7 +166,9 @@ public sealed class GateServer : IAsyncDisposable
                     var names = _store.AllowedNames(device);
                     if (names.Count == 0)
                     {
-                        await GateProtocol.SendJoinResultAsync(secure, GateStatus.NotMember, timeout.Token, network);
+                        // A device that is not (or no longer) on the list gets the status alone: the address book is for members.
+                        // A disabled member is told so, as on enrollment.
+                        await GateProtocol.SendJoinResultAsync(secure, _store.IsDisabledDevice(device) ? GateStatus.Disabled : GateStatus.NotMember, timeout.Token);
                         await secure.CloseAsync(timeout.Token);
                         _log(L.F("core.gate.log.not_member", fingerprint));
                         return;

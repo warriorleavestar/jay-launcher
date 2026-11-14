@@ -52,8 +52,10 @@ public sealed class McServerHost
         var manifest = await new VanillaInstaller(downloader, new GameDirectory(Path.Combine(_root, "launcher-cache"))).GetManifestAsync(ct);
         if (versionId == "latest") versionId = manifest.Latest.GetValueOrDefault("release") ?? throw new InvalidDataException(L.T("core.gate.mc.no_latest"));
         var entry = manifest.Versions.FirstOrDefault(v => v.Id == versionId) ?? throw new ArgumentException(L.F("core.gate.mc.no_version", versionId));
-        var versionPath = Path.Combine(_root, "launcher-cache", versionId + ".json");
-        await downloader.DownloadOneAsync(new DownloadItem(entry.Url, versionPath, entry.Sha1), ct);
+        // The id comes from the downloaded manifest: like the client installer, accept only a plain file name inside the cache.
+        var cache = Path.Combine(_root, "launcher-cache");
+        var versionPath = GameDirectory.Contained(cache, GameDirectory.CheckId(versionId) + ".json");
+        await downloader.DownloadOneAsync(new DownloadItem(entry.Url, versionPath, entry.Sha1, Within: cache), ct);
         var version = JsonSerializer.Deserialize(await File.ReadAllTextAsync(versionPath, ct), Json.Options.Info<VersionJson>())
                       ?? throw new InvalidDataException(L.T("core.gate.mc.bad_version"));
         var server = version.Downloads?.GetValueOrDefault("server") is { Url: { } url } s ? s : throw new InvalidDataException(L.F("core.gate.mc.no_server", versionId));
@@ -107,11 +109,22 @@ public sealed class McServerHost
         }
         foreach (var (key, value) in forced)
         {
-            var i = lines.FindIndex(l => l.StartsWith(key + "=", StringComparison.Ordinal));
-            if (i >= 0) lines[i] = $"{key}={value}";
-            else lines.Add($"{key}={value}");
+            // Java's Properties keeps the last line for a key, in any of its spellings (key=v, key = v, key:v, key v):
+            // drop every line for the key and write the forced one once.
+            var i = lines.FindIndex(l => PropertyKey(l) == key);
+            lines.RemoveAll(l => PropertyKey(l) == key);
+            lines.Insert(i >= 0 ? Math.Min(i, lines.Count) : lines.Count, $"{key}={value}");
         }
         File.WriteAllLines(path, lines);
+    }
+
+    /// <summary>The key of a server.properties line as Java reads it; null for blank lines and comments.</summary>
+    internal static string? PropertyKey(string line)
+    {
+        var text = line.TrimStart(' ', '\t', '\f');
+        if (text.Length == 0 || text[0] is '#' or '!') return null;
+        var end = text.IndexOfAny(['=', ':', ' ', '\t', '\f']);
+        return end < 0 ? text : text[..end];
     }
 
     /// <summary>启动服务端。输出逐行交给 output；返回的对象用来发控制台命令和关闭。</summary>
