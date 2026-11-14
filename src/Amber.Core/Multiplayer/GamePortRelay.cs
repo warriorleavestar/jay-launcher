@@ -38,6 +38,13 @@ public sealed class GamePortRelay : IAsyncDisposable
     // Connections passed on (or being connected) by guest address, for those whose address is known.
     private readonly Dictionary<IPAddress, int> _perSource = [];
 
+    /// <summary>
+    /// A connection over which nothing has passed either way for this long is closed and its place freed. A game in
+    /// play never goes this quiet (Minecraft sends a keep-alive every 15 seconds), so a caller can't park places it
+    /// doesn't use. This matters most where callers can't be told apart (see <see cref="ServeAsync"/>).
+    /// </summary>
+    internal TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(120);
+
     private readonly TimeSpan _connectTimeout;
     private int _target;
 
@@ -257,9 +264,13 @@ public sealed class GamePortRelay : IAsyncDisposable
             }
             var a = inbound.GetStream();
             var b = new NetworkStream(outbound, ownsSocket: false);
-            var up = PumpAsync(a, b);
-            var down = PumpAsync(b, a);
-            await Task.WhenAny(up, down);
+            var lastSeen = Environment.TickCount64;
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            var up = PumpAsync(a, b, () => Volatile.Write(ref lastSeen, Environment.TickCount64), idle.Token);
+            var down = PumpAsync(b, a, () => Volatile.Write(ref lastSeen, Environment.TickCount64), idle.Token);
+            var watch = WatchIdleAsync(() => Volatile.Read(ref lastSeen), idle.Token);
+            await Task.WhenAny(up, down, watch);
+            idle.Cancel();
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or SocketException or ObjectDisposedException)
         {
@@ -289,13 +300,33 @@ public sealed class GamePortRelay : IAsyncDisposable
         }
     }
 
-    private async Task PumpAsync(Stream from, Stream to)
+    private static async Task PumpAsync(Stream from, Stream to, Action seen, CancellationToken ct)
     {
         try
         {
-            await from.CopyToAsync(to, 16 * 1024, _cts.Token);
+            var buffer = new byte[16 * 1024];
+            int read;
+            while ((read = await from.ReadAsync(buffer, ct)) > 0)
+            {
+                seen();
+                await to.WriteAsync(buffer.AsMemory(0, read), ct);
+            }
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or SocketException or ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>Ends when nothing has passed for <see cref="IdleTimeout"/> (or when <paramref name="ct"/> is cancelled).</summary>
+    private async Task WatchIdleAsync(Func<long> lastSeen, CancellationToken ct)
+    {
+        var limit = (long)IdleTimeout.TotalMilliseconds;
+        var step = TimeSpan.FromMilliseconds(Math.Clamp(limit / 4, 10, 5000));
+        try
+        {
+            while (Environment.TickCount64 - lastSeen() < limit) await Task.Delay(step, ct);
+        }
+        catch (OperationCanceledException)
         {
         }
     }

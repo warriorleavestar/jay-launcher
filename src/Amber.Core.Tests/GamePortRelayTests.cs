@@ -497,6 +497,36 @@ public sealed class GamePortRelayTests
     }
 
     [Fact]
+    public async Task AConnectionThatStaysQuietIsClosedAndItsPlaceFreedWhileAnActiveOneStays()
+    {
+        using var game = new EchoGame(0xE1);
+        await using var relay = new GamePortRelay { IdleTimeout = TimeSpan.FromMilliseconds(400) };
+        relay.SetTarget(game.Port);
+        // Callers on loopback can't be told apart: a quiet one must not keep its place.
+        using var parked = new TcpClient();
+        await parked.ConnectAsync(IPAddress.Loopback, relay.Port);
+        using var playing = new TcpClient();
+        await playing.ConnectAsync(IPAddress.Loopback, relay.Port);
+        var stream = playing.GetStream();
+        var back = new byte[2];
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(1.5);
+        while (DateTime.UtcNow < until)
+        {
+            await stream.WriteAsync(new byte[] { 7 });
+            await stream.ReadExactlyAsync(back);
+            Assert.Equal(new byte[] { 0xE1, 7 }, back);
+            await Task.Delay(100);
+        }
+        // The quiet one was closed (the relay's side reads end of stream) and only the playing one is counted.
+        using var read = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, await parked.GetStream().ReadAsync(new byte[1], read.Token));
+        Assert.Equal(1, relay.OpenConnectionsTo(game.Port));
+        await stream.WriteAsync(new byte[] { 8 });
+        await stream.ReadExactlyAsync(back);
+        Assert.Equal(new byte[] { 0xE1, 8 }, back);
+    }
+
+    [Fact]
     public async Task APlayerTheGameRefusesIsNotCountedAfterwards()
     {
         var closed = new TcpListener(IPAddress.Loopback, 0);
@@ -791,6 +821,42 @@ public sealed class GamePortRelayTests
             Pump(() => watch.IsCompleted);
             watch.GetAwaiter().GetResult();
         }
+    });
+
+    [Fact]
+    public void AnOutOfDateReasonForAPortThatDidNotAnswerDoesNotReplaceTheNewLink() => UiTestThread.Run(() =>
+    {
+        using var service = new LauncherService(new AppSettings { GameDirectory = TestDataDir.Path, PlayerName = "" });
+        using var good = new EchoGame(0x91);
+        const int Dead = 1;
+        var reason = new TaskCompletionSource<StatusMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var vm = new MultiplayerViewModel(service)
+        {
+            RelayTypingDelay = TimeSpan.Zero,
+            GamePortReadyForTest = (p, _) => Task.FromResult(p == good.Port),
+            // Working out why the first port didn't answer takes a while.
+            PortUnavailableForTest = _ =>
+            {
+                asked.TrySetResult();
+                return reason.Task;
+            },
+        };
+        var prepared = vm.PrepareGameRelayForTest();
+        Pump(() => prepared.IsCompleted);
+        var relay = vm.GameRelayForTest!;
+        vm.ManualPort = Dead.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => asked.Task.IsCompleted);
+        // Meanwhile the player types a port that answers: it is linked.
+        vm.ManualPort = good.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Pump(() => relay.Target == good.Port);
+        var linked = vm.Status;
+        // The reason for the first port arrives late and is dropped: the status still says the new link.
+        reason.SetResult(StatusMessage.Error("multiplayer.lan.port_unavailable", Dead));
+        Settle();
+        Assert.Equal(good.Port, relay.Target);
+        Assert.Equal(linked, vm.Status);
+        vm.StopCommand.Execute(null);
     });
 
     private static void Settle()

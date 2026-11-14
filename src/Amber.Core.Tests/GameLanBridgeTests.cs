@@ -160,6 +160,41 @@ public sealed class GameLanBridgeTests : IDisposable
         Assert.Equal(before, GameLanBridge.ActiveForTest);
     }
 
+    [Fact]
+    public async Task ARequestThatTimesOutOrIsCancelledGivesItsSlotBackAndALateAnswerIsClosed()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var game = new Listener();
+        var token = Launch();
+        using var control = await DialAsync($"JAYLAN1 {token} control");
+        _cleanup.Add(control);
+        Assert.Equal("ok", await ReadLineAsync(control));
+        var before = GameLanBridge.ActiveForTest;
+
+        // The agent gets the request but doesn't answer in time: the player gets nothing and the slot is back.
+        var timedOut = GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromMilliseconds(500));
+        var request = (await ReadLineAsync(control))?.Split(' ');
+        Assert.True(request is ["open", _, _], "no request reached the agent");
+        Assert.Null(await timedOut);
+        Assert.Equal(before, GameLanBridge.ActiveForTest);
+        // Its answer arrives afterwards: that connection is closed, not handed to anyone, and takes no slot.
+        using (var late = await DialAsync($"JAYLAN1 {token} data {request![1]}"))
+            Assert.Null(await ReadLineAsync(late, TimeSpan.FromSeconds(5)));
+        Assert.Equal(before, GameLanBridge.ActiveForTest);
+
+        // The caller gives up (the relay stops) while the agent is asked: the same.
+        using var stop = new CancellationTokenSource();
+        var cancelled = GameLanBridge.ConnectAsync(game.Port, TimeSpan.FromSeconds(30), stop.Token);
+        request = (await ReadLineAsync(control))?.Split(' ');
+        Assert.True(request is ["open", _, _], "no second request reached the agent");
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+        Assert.Equal(before, GameLanBridge.ActiveForTest);
+        using (var late = await DialAsync($"JAYLAN1 {token} data {request![1]}"))
+            Assert.Null(await ReadLineAsync(late, TimeSpan.FromSeconds(5)));
+        Assert.Equal(before, GameLanBridge.ActiveForTest);
+    }
+
     private static TcpRow Listening(string address, int port, int pid) =>
         new(new IPEndPoint(IPAddress.Parse(address), port), new IPEndPoint(IPAddress.Any, 0), pid);
 

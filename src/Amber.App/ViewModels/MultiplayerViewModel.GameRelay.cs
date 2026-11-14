@@ -87,7 +87,7 @@ public sealed partial class MultiplayerViewModel
     /// The game port didn't answer. When something does listen there, it is most likely a game in the strong sandbox
     /// whose LAN bridge isn't connected (started before Jay was restarted): say to restart the game.
     /// </summary>
-    private static async Task<StatusMessage> PortUnavailableAsync(int port) =>
+    private async Task<StatusMessage> PortUnavailableAsync(int port) => PortUnavailableForTest is { } test ? await test(port) :
         await GameLanBridge.ListenedButUnreachableAsync(port)
             ? StatusMessage.Error("multiplayer.lan.port_unreachable_sandbox", port)
             : StatusMessage.Error("multiplayer.lan.port_unavailable", port);
@@ -185,7 +185,9 @@ public sealed partial class MultiplayerViewModel
         if (version != _relayCheck || _gameRelay != relay) return;
         if (!ok)
         {
-            SetStatus(await PortUnavailableAsync(port));
+            var unavailable = await PortUnavailableAsync(port);
+            // Another pick or a new relay while the reason was worked out: this one is out of date.
+            if (version == _relayCheck && _gameRelay == relay) SetStatus(unavailable);
             return;
         }
         relay.SetTarget(port);
@@ -227,6 +229,9 @@ public sealed partial class MultiplayerViewModel
 
     /// <summary>Tests: stands in for the check a port gets before the relay links it (port, typed).</summary>
     internal Func<int, bool, Task<bool>>? GamePortReadyForTest { get; set; }
+
+    /// <summary>Tests: works out why a game port didn't answer, in place of asking the LAN bridge.</summary>
+    internal Func<int, Task<StatusMessage>>? PortUnavailableForTest { get; set; }
 
     /// <summary>Tests: stands in for listening for LAN worlds.</summary>
     internal Func<Task<List<LanGame>>>? ScanForTest { get; set; }
