@@ -125,7 +125,6 @@ public sealed class DirectSession : IAsyncDisposable
     public bool UsingFallbackNode { get; private set; }
     public NatKind LocalNat => _gathered?.Nat ?? NatKind.Unknown;
     public string LocalNatDetail => _gathered?.NatDetail ?? "";
-    public IPAddress? PublicIPv4 => _gathered?.Candidates.FirstOrDefault(c => c.Kind is PathKind.Punch or PathKind.Mapped)?.EndPoint.Address;
 
     /// <summary>加入方：测试矩阵的一步交给界面执行（聊天探测要用界面那边的连接）。为空时用内置的探测。</summary>
     public event Action? StateChanged;
@@ -599,9 +598,10 @@ public sealed class DirectSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// 加入方连上后发给房主的 hello：只有会话 id。
-    /// 直连通道的控制消息只认证不加密，所以不带任何密钥，也不带地址（地址已经在加密的敲门里交换过）；
-    /// 能通过 HMAC 校验只说明对方拿到过邀请（知道大厅密钥），还不能进房间。
+    /// The hello a guest sends once connected: only the session id. Bridge control messages (hello, admission, the
+    /// full-condition test) are authenticated but not encrypted, so none of them carries a key or an address: addresses
+    /// travel only inside the encrypted knock. Passing the HMAC check only shows that the sender holds the invite's lobby
+    /// key; it does not let anyone into the room.
     /// </summary>
     internal static JsonObject Hello(string session) => new() { ["op"] = "hello", ["s"] = session };
 
@@ -1004,7 +1004,6 @@ public sealed class DirectSession : IAsyncDisposable
                     ["path"] = step.Path?.ToString(),
                     ["fullLan"] = step.FullLan,
                     ["exit"] = step.Exit,
-                    ["hostIp"] = s.PublicIPv4?.ToString(),
                 });
                 // 同样只开这条路径；保留本地传输端点，让同配置的 EasyTier 隧道能继续收发。
                 await s.ApplyStepAsync(step, work.Token);
@@ -1116,7 +1115,7 @@ public sealed class DirectSession : IAsyncDisposable
         try
         {
             GuestStepStarted?.Invoke(run!, step);
-            result = await GuestRunStepAsync(step, Str(message, "hostIp"), run);
+            result = await GuestRunStepAsync(step, run);
         }
         catch (OperationCanceledException) when (RunToken(run).IsCancellationRequested) { }
         finally
@@ -1128,7 +1127,7 @@ public sealed class DirectSession : IAsyncDisposable
             await Bridge.SendControlAsync(back, result);
     }
 
-    private async Task<JsonObject?> GuestRunStepAsync(MatrixStep step, string? hostIp, string? run)
+    private async Task<JsonObject?> GuestRunStepAsync(MatrixStep step, string? run)
     {
         Log(L.F("core.mp.matrix.step", step.Index, step.Label));
         var result = new JsonObject { ["op"] = "result", ["run"] = run, ["i"] = step.Index };
@@ -1184,7 +1183,9 @@ public sealed class DirectSession : IAsyncDisposable
             }
             if (step.Exit)
             {
-                if (Options.Simulated || hostIp is null)
+                // The host's public addresses came inside the encrypted knock; the step message carries none.
+                var hostPublic = HostPublicAddresses(_remote?.Candidates ?? []);
+                if (Options.Simulated || hostPublic.Count == 0)
                 {
                     result["exit"] = null;
                     result["reason"] = L.T("core.mp.matrix.simulatedexit");
@@ -1193,9 +1194,10 @@ public sealed class DirectSession : IAsyncDisposable
                 {
                     using var probe = DirectBridge.CreateSocket();
                     var mapped = await Stun.QueryAsync(probe, Options.StunServers.FirstOrDefault() ?? Stun.DefaultServers[0], TimeSpan.FromSeconds(4), cts.Token);
-                    result["exit"] = mapped?.Address.ToString() == hostIp;
+                    var throughHost = mapped is not null && hostPublic.Contains(Stun.Normalize(mapped).Address);
+                    result["exit"] = throughHost;
                     if (mapped is null) result["reason"] = L.T("core.mp.matrix.exitnostun");
-                    else if (mapped.Address.ToString() != hostIp) result["reason"] = L.T("core.mp.matrix.exitwrongip");
+                    else if (!throughHost) result["reason"] = L.T("core.mp.matrix.exitwrongip");
                 }
             }
             result["passed"] = Bool(result, "exit") != false;
@@ -1217,6 +1219,10 @@ public sealed class DirectSession : IAsyncDisposable
         Log(L.F("core.mp.matrix.restorefailed", step.Index));
         return null;
     }
+
+    /// <summary>The host's public IPv4 addresses (STUN and router-mapped candidates) from the encrypted knock reply.</summary>
+    internal static IReadOnlySet<IPAddress> HostPublicAddresses(IEnumerable<Candidate> hostCandidates) =>
+        hostCandidates.Where(c => c.Kind is PathKind.Punch or PathKind.Mapped).Select(c => Stun.Normalize(c.EndPoint).Address).ToHashSet();
 
     public async ValueTask DisposeAsync()
     {

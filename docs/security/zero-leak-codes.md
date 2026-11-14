@@ -135,7 +135,8 @@ room. Only when the host approves does the encrypted knock reply carry the host'
 `DirectAddresses`); the guest answers with its own inside the encrypted ack, tagged with the host's session id. Then both
 sides punch at once, and the room falls back to the relays if that fails. Someone who copies the invite learns no address
 of either side, and a rejected or expired knock gets none either. The bridge's control messages (authenticated, not
-encrypted) carry only the session id. `JAY2D-` / `JAY2R-` are refused.
+encrypted) carry no key and no address: the session id in the hello, the member id and a proof in the admission
+exchange, and step settings and results in the full-condition test. `JAY2D-` / `JAY2R-` are refused.
 
 ## Direct links with no server at all: sealed codes
 

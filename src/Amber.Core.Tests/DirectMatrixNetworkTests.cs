@@ -115,6 +115,35 @@ public sealed class DirectMatrixNetworkTests
         Assert.Equal([PathKind.IPv6], host.Bridge.AllowedPaths);
     }
 
+    /// <summary>
+    /// Step messages travel authenticated but not encrypted: they carry no address. The guest checks the exit against the
+    /// host's public addresses it got inside the encrypted knock.
+    /// </summary>
+    [Fact]
+    public async Task StepMessagesCarryNoAddress()
+    {
+        await using var host = NewSession(true, TimeSpan.FromMilliseconds(150), TimeSpan.FromMilliseconds(400));
+        await using var guest = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, false, null, _ => { });
+        var messages = Controls(guest);
+        var peer = await ConnectHostAsync(host, guest);
+        var run = host.RunMatrixAsync(false, null, null, default);
+        await AnswerAsync(guest, peer, await NextAsync(messages, "test-request"));
+        var step = await NextAsync(messages, "step");
+        await run.WaitAsync(Deadline);
+
+        Assert.Equal(["exit", "fullLan", "i", "op", "path", "route", "run"], step.Select(p => p.Key).Order(StringComparer.Ordinal));
+        Assert.DoesNotMatch(@"\d+\.\d+\.\d+\.\d+", step.ToJsonString());
+
+        var hostPublic = DirectSession.HostPublicAddresses(
+        [
+            new(PathKind.Punch, IPEndPoint.Parse("203.0.113.5:40000")),
+            new(PathKind.Mapped, IPEndPoint.Parse("[::ffff:198.51.100.7]:40001")),
+            new(PathKind.Lan, IPEndPoint.Parse("192.168.1.5:40000")),
+            new(PathKind.IPv6, IPEndPoint.Parse("[2408:8000::1]:40000")),
+        ]);
+        Assert.Equal([IPAddress.Parse("198.51.100.7"), IPAddress.Parse("203.0.113.5")], hostPublic.OrderBy(a => a.ToString()));
+    }
+
     [Fact]
     public async Task CancelledHostStepWaitsForProbeCleanupBeforeReturning()
     {
