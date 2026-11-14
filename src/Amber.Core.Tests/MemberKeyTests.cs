@@ -260,7 +260,8 @@ public sealed class MemberKeyTests : IDisposable
         await using var hub = new ChatHub(hostRoom, 0) { FirstFrameTimeout = TimeSpan.FromMilliseconds(500) };
         using var tcp = new System.Net.Sockets.TcpClient();
         await tcp.ConnectAsync("127.0.0.1", hub.Port);
-        var stream = await MemberChannel.ConnectAsync(tcp.GetStream(), alice.Key, MemberChannel.ChatProfile(TunnelSettings.Default.Mode), "chat", []);
+        // Disposed with the test, so its own rekey loop stops too.
+        await using var stream = await MemberChannel.ConnectAsync(tcp.GetStream(), alice.Key, MemberChannel.ChatProfile(TunnelSettings.Default.Mode), "chat", []);
         Assert.True(await WaitAsync(() => hub.ConnectionCount == 1));
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var dropped = false;
