@@ -93,9 +93,17 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
                 bytes = await ReadCappedAsync(stream, MaxSkinBytes, SkinStallTimeout, deadline.Token);
             }
             if (!bytes.AsSpan().StartsWith(PngSignature)) return null;
-            var temp = path + ".tmp";
-            await File.WriteAllBytesAsync(temp, bytes, ct);
-            File.Move(temp, path, overwrite: true);
+            // A temp name per attempt, so two fetches of the same skin at once do not write over each other.
+            var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                await File.WriteAllBytesAsync(temp, bytes, ct);
+                File.Move(temp, path, overwrite: true);
+            }
+            finally
+            {
+                TryDelete(temp);
+            }
             return path;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException or IOException or InvalidOperationException
@@ -103,6 +111,11 @@ public sealed class AccountService(HttpClient http, AccountStore store, string d
         {
             return null;
         }
+    }
+
+    private static void TryDelete(string file)
+    {
+        try { File.Delete(file); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     private static readonly TimeSpan SkinTotalTimeout = TimeSpan.FromSeconds(30);

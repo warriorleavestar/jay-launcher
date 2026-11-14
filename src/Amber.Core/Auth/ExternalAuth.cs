@@ -352,9 +352,17 @@ public sealed partial class AuthlibInjector(HttpClient http, string cacheDir)
         if (expected is not null && !Convert.ToHexStringLower(SHA256.HashData(bytes)).Equals(expected, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException(L.T("core.auth.injector.checksumfailed"));
         // Write next to it and move into place, so a cancelled write never leaves a truncated jar under the final name.
-        var temp = target + ".tmp";
-        await File.WriteAllBytesAsync(temp, bytes, ct);
-        File.Move(temp, target, overwrite: true);
+        // Each attempt has its own temp name, so two downloads of the same version at once do not collide.
+        var temp = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllBytesAsync(temp, bytes, ct);
+            File.Move(temp, target, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
         return target;
     }
 
