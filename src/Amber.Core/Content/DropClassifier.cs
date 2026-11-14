@@ -3,7 +3,9 @@ using System.IO.Compression;
 namespace Amber.Core.Content;
 
 /// <summary>What a file dragged into the window is (official design §6.25).</summary>
-public enum DropKind { Modpack, Mod, ResourcePack, Shader, Datapack, World, Theme, Picture, Unknown }
+public enum DropKind { Modpack, Mod, ResourcePack, Shader, Datapack, World, Theme, Picture, Unknown,
+    /// <summary>Dropped on a friend's conversation: the files are sent to them, whatever they are.</summary>
+    Send }
 
 /// <summary>Files of one kind dragged in together: they are handled together.</summary>
 public sealed record DropGroup(DropKind Kind, IReadOnlyList<string> Paths);

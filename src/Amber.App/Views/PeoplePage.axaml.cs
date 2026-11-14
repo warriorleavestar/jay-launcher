@@ -16,6 +16,19 @@ public partial class PeoplePage : UserControl
 
     private PeopleViewModel? _vm;
 
+    /// <summary>The paperclip's [Choose a file…] and [A folder…].</summary>
+    internal async Task<string?> PickPathAsync(bool folder)
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
+        if (folder)
+        {
+            var folders = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = L.T("files.menu.folder_pick"), AllowMultiple = false });
+            return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+        }
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions { Title = L.T("files.menu.file_pick"), AllowMultiple = false });
+        return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+    }
+
     public PeoplePage()
     {
         InitializeComponent();
@@ -31,6 +44,7 @@ public partial class PeoplePage : UserControl
             _vm = DataContext as PeopleViewModel;
             if (_vm is null) return;
             if (VisualRoot is not null) Hook();
+            _vm.PickPath = PickPathAsync;
             // The backup and restore of the friend list are in this page's [...]: it owns their file dialogs.
             _vm.Multiplayer.PickFriendBackupSave = async () =>
             {

@@ -2,6 +2,7 @@ using Amber.App.Localization;
 using Amber.App.Services;
 using Amber.Core.Localization;
 using Amber.Core.Multiplayer;
+using Amber.Core.Multiplayer.Files;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -31,6 +32,14 @@ public sealed record FileOfferItem(FileOffer Offer) : LocalizedRecord
 
     public string SafetyCode => Offer.FromFingerprint;
 
+    /// <summary>The sender is a friend whose emoji I compared (the safety card says so, or that they are not).</summary>
+    public bool FromFriend { get; init; }
+
+    public FileKind Kind => FileKinds.Of(Offer.Name);
+
+    /// <summary>"Alex is a friend you checked · World" on the request.</summary>
+    public string Facts => L.T(FromFriend ? "files.offer.friend" : "files.offer.not_friend") + " · " + L.T(FileKinds.LabelKey(Kind));
+
     /// <summary>Programs and scripts get an extra warning (Jay never opens a received file by itself).</summary>
     public bool IsProgram => ReceivedFiles.IsProgram(Offer.Name);
 
@@ -43,25 +52,6 @@ public sealed record FileOfferItem(FileOffer Offer) : LocalizedRecord
         < 1024L * 1024 * 1024 => $"{bytes / 1024.0 / 1024.0:0.#} MB",
         _ => $"{bytes / 1024.0 / 1024.0 / 1024.0:0.##} GB",
     };
-}
-
-/// <summary>一次传文件（发或收）的进度。</summary>
-public sealed partial class TransferItem(string id, bool outgoing, string name, long size) : ObservableObject
-{
-    public string Id { get; } = id;
-    public bool Outgoing { get; } = outgoing;
-    public string Name { get; } = name;
-    public long Size { get; } = size;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Text))] public partial long Done { get; set; }
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Text), nameof(IsActive), nameof(CanOpen))] public partial string? SavedPath { get; set; }
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Text), nameof(IsActive))] public partial string? Error { get; set; }
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Text), nameof(IsActive))] public partial bool Finished { get; set; }
-    public bool IsActive => !Finished;
-    public bool CanOpen => !string.IsNullOrEmpty(SavedPath);
-    public string Text => L.F(Outgoing ? "multiplayer.private.sending" : "multiplayer.private.receiving", Name)
-        + " · " + (Error is { } error ? error
-            : Finished ? L.T("multiplayer.private.done")
-            : $"{FileOfferItem.Size(Done)} / {FileOfferItem.Size(Size)}");
 }
 
 /// <summary>
@@ -96,12 +86,42 @@ public sealed partial class MultiplayerViewModel
     {
         StopPrivate();
         if (_room is not { FromInvite: true }) return;
-        var messenger = new PrivateMessenger(chat, Identity.KeyPair, fp => chat.Roster.FirstOrDefault(r => r.Fingerprint == fp)?.PublicKey, DownloadsDir);
-        // 公共网络的配置可以关掉传文件或限大小（按现在连着的网络算）。
-        messenger.AllowsFile = size => NetworkPolicy.AllowsFile(size);
-        _messenger = messenger;
+        var messenger = new PrivateMessenger(chat, Identity.KeyPair, fp => chat.Roster.FirstOrDefault(r => r.Fingerprint == fp)?.PublicKey, ReceiveFolder);
         _messengerChat = chat;
         chat.RosterChanged += roster => Dispatcher.UIThread.Post(() => OnRoster(chat, roster));
+        Wire(messenger, () => chat.Roster);
+        if (IsHosting) ServeMods(messenger);
+        OnRoster(chat, chat.Roster);
+    }
+
+    /// <summary>
+    /// Self-check seam: the room's private channel over a stand-in link (no connection), with the roster the test keeps
+    /// in <see cref="OnlinePeers"/>. Call <see cref="RosterChangedForTest"/> after changing it.
+    /// </summary>
+    internal PrivateMessenger UsePrivateLinkForTest(IPrivateLink link)
+    {
+        StopPrivate();
+        var messenger = new PrivateMessenger(link, Identity.KeyPair, fp => OnlinePeers.FirstOrDefault(p => p.Entry.Fingerprint == fp)?.Entry.PublicKey, ReceiveFolder);
+        Wire(messenger, () => [.. OnlinePeers.Select(p => p.Entry)]);
+        return messenger;
+    }
+
+    /// <summary>Self-check seam: the stand-in roster changed (someone came or went).</summary>
+    internal void RosterChangedForTest()
+    {
+        OnPropertyChanged(nameof(HasOnlinePeers));
+        FlushFileQueue();
+    }
+
+    /// <summary>Self-check seam: the stand-in channel closed, as when leaving the room.</summary>
+    internal void ClosePrivateForTest() => StopPrivate();
+
+    private void Wire(PrivateMessenger messenger, Func<IReadOnlyList<RosterEntry>> roster)
+    {
+        // 公共网络的配置可以关掉传文件或限大小（按现在连着的网络算）。
+        messenger.AllowsFile = size => NetworkPolicy.AllowsFile(size);
+        messenger.SendLimit = SendLimitNow;
+        _messenger = messenger;
         messenger.MessageReceived += m => Dispatcher.UIThread.Post(() =>
         {
             if (_messenger != messenger) return;
@@ -113,24 +133,33 @@ public sealed partial class MultiplayerViewModel
         messenger.FileOffered += offer => Dispatcher.UIThread.Post(() =>
         {
             if (_messenger != messenger) return;
-            // Child mode: files only from people on the trusted list; the rest are declined at once.
-            if (!Child.AcceptsFileFrom(Trusted.All.Any(m => m.Fingerprint == offer.FromFingerprint)))
+            var key = roster().FirstOrDefault(r => r.Fingerprint == offer.FromFingerprint)?.PublicKey;
+            // Child mode: files only from friends and people on the trusted list; the rest are declined at once.
+            if (!Child.AcceptsFileFrom(Trusted.All.Any(m => m.Fingerprint == offer.FromFingerprint) || (key is not null && FriendByKey(key) is not null)))
             {
                 _ = messenger.DeclineAsync(offer.Id);
                 SetStatus(StatusMessage.Info("settings.child.file_declined", offer.FromName));
                 return;
             }
-            FileOffers.Add(new FileOfferItem(offer));
+            // Settings › Multiplayer › Files: a checked friend's file (never a program) may be taken without asking.
+            if (TakeOfferAutomatically(offer, key))
+            {
+                _ = TakeOfferAsync(messenger, offer);
+                return;
+            }
+            NoteFileOffer(offer, key);
+            FileOffers.Add(new FileOfferItem(offer) { FromFriend = key is not null && FriendByKey(key) is not null });
             if (!IsCurrent) Badge++;
         });
-        messenger.Progress += p => Dispatcher.UIThread.Post(() => OnTransfer(messenger, p));
+        messenger.Progress += p => Dispatcher.UIThread.Post(() =>
+        {
+            if (_messenger == messenger) ApplyTransfer(p);
+        });
         messenger.FileOfferExpired += id => Dispatcher.UIThread.Post(() =>
         {
             if (_messenger != messenger) return;
             if (FileOffers.FirstOrDefault(o => o.Offer.Id == id) is { } expired) FileOffers.Remove(expired);
         });
-        if (IsHosting) ServeMods(messenger);
-        OnRoster(chat, chat.Roster);
     }
 
     /// <param name="keepPeers">Chat moved to a new connection in the same room: the people and the one selected stay
@@ -147,6 +176,7 @@ public sealed partial class MultiplayerViewModel
             SelectedPeer = null;
         }
         FileOffers.Clear();
+        OnFilesChannelClosed();
         OnPropertyChanged(nameof(HasOnlinePeers));
         if (messenger is not null) _ = messenger.DisposeAsync().AsTask();
     }
@@ -161,24 +191,7 @@ public sealed partial class MultiplayerViewModel
         SelectedPeer = OnlinePeers.FirstOrDefault(p => p.Entry.Fingerprint == selected);
         OnPropertyChanged(nameof(HasOnlinePeers));
         MaybeCheckMods();
-    }
-
-    private void OnTransfer(PrivateMessenger messenger, FileProgress p)
-    {
-        if (_messenger != messenger) return;
-        var item = Transfers.FirstOrDefault(t => t.Id == p.Id);
-        if (item is null)
-        {
-            item = new TransferItem(p.Id, p.Outgoing, p.Name, p.Size);
-            Transfers.Insert(0, item);
-            while (Transfers.Count > 50) Transfers.RemoveAt(Transfers.Count - 1);
-        }
-        item.Done = p.Done;
-        if (!p.Finished) return;
-        item.Error = p.Error;
-        item.SavedPath = p.SavedPath is { Length: > 0 } saved ? saved : null;
-        item.Finished = true;
-        if (!p.Outgoing && p.SavedPath is { Length: > 0 } path) SetStatus(StatusMessage.Success("multiplayer.private.saved", path));
+        FlushFileQueue();
     }
 
     [RelayCommand]
@@ -229,18 +242,21 @@ public sealed partial class MultiplayerViewModel
         if (await pick() is { } path) await SendFileToAsync(peer, path);
     }
 
+    /// <summary>Sends a file to someone in the room and waits until it is delivered (true) or has stopped (false).</summary>
     internal async Task<bool> SendFileToAsync(OnlinePeerItem peer, string path)
     {
-        if (_messenger is not { } messenger || !KeyMatches(peer.Entry)) return false;
-        try
+        if (_messenger is null || !KeyMatches(peer.Entry)) return false;
+        var friend = ContactList.FirstOrDefault(f => f.Devices.Any(d => d.PublicKey.AsSpan().SequenceEqual(peer.Entry.PublicKey)));
+        var item = await SendFileThingAsync(new FileRecipient(peer.Entry.Name, friend, peer), new FileSource(FileKind.File, path));
+        var end = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Watch(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            return await Task.Run(() => messenger.SendFileAsync(peer.Entry.Fingerprint, path));
+            if (!item.IsActive || item.State == FileCardState.Queued) end.TrySetResult(item.State == FileCardState.Delivered);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
-            return false;
-        }
+        item.PropertyChanged += Watch;
+        Watch(null, new(""));
+        try { return await end.Task; }
+        finally { item.PropertyChanged -= Watch; }
     }
 
     [RelayCommand]
@@ -249,12 +265,30 @@ public sealed partial class MultiplayerViewModel
         if (offer is null) return;
         FileOffers.Remove(offer);
         if (_messenger is not { } messenger) return;
-        try { await messenger.AcceptAsync(offer.Offer.Id); }
+        await TakeOfferAsync(messenger, offer.Offer);
+    }
+
+    /// <summary>
+    /// Accepts an offer (by hand or automatically) behind its card. When receiving cannot start (no room on the disk,
+    /// the downloads folder cannot be written), the card and its task in Activity end as failed with the reason.
+    /// </summary>
+    private async Task TakeOfferAsync(PrivateMessenger messenger, FileOffer offer)
+    {
+        var item = CardForAccepted(offer);
+        try { await (AcceptForTest?.Invoke(offer.Id) ?? messenger.AcceptAsync(offer.Id)); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             SetStatus(new StatusMessage("common.raw", [e.Message], StatusKind.Warning));
+            if (item.State is FileCardState.Waiting or FileCardState.Sending)
+            {
+                item.Error = e.Message;
+                Finish(item, FileCardState.Failed);
+            }
         }
     }
+
+    /// <summary>Tests: stands in for accepting an offer in the channel (to make it fail).</summary>
+    internal Func<string, Task>? AcceptForTest { get; set; }
 
     [RelayCommand]
     private async Task DeclineFileAsync(FileOfferItem? offer)
@@ -268,8 +302,7 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task CancelTransferAsync(TransferItem? item)
     {
-        if (item is null || _messenger is not { } messenger) return;
-        await messenger.CancelAsync(item.Id);
+        if (item is not null) await CancelCardAsync(item);
     }
 
     [RelayCommand]

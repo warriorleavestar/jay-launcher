@@ -56,11 +56,17 @@ public sealed partial class MultiplayerViewModel
         DedupeKey: "knock:" + Guid.NewGuid().ToString("N"),
         TimeoutChoice: "deny");
 
+    /// <summary>
+    /// The locked card for an incoming file: who, what, how big, whether they are a checked friend, and that Jay never opens
+    /// it (programs get the warning that cannot be dismissed). [Decline] is the default; five minutes without an answer declines.
+    /// </summary>
     private static RequestSpec FileRequestSpec(FileOfferItem offer) => new("file", offer.Headline,
-        offer.IsProgram ? L.T("multiplayer.file.program_warning") : L.T("multiplayer.file.never_runs"),
+        offer.Facts + "\n" + (offer.IsProgram ? L.T("multiplayer.file.program_warning") : L.T("multiplayer.file.never_runs")),
         [new("decline", L.T("multiplayer.private.decline"), IsDefault: true), new("accept", L.T("multiplayer.file.accept"))],
         IsSafety: true,
-        DedupeKey: "file:" + offer.Offer.Id);
+        Timeout: TimeSpan.FromMinutes(5),
+        DedupeKey: "file:" + offer.Offer.Id,
+        TimeoutChoice: "decline");
 
     /// <summary>Answered on the request bar or the popup: do the same as the room's buttons.</summary>
     private void AnswerFromElsewhere(RequestHandle handle)

@@ -52,6 +52,16 @@ public partial class MainWindow
                 Popups = new RequestPopups(this, main.Service.Requests, () => main.Service.Settings.MultiplayerRequestPopup);
                 UpdateMovedNotice();
                 main.Shell.Network.Done += () => NetworkFlyout.Hide();
+                main.Multiplayer.SendPanel.Pick = async folder =>
+                {
+                    if (folder)
+                    {
+                        var folders = await StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions { Title = L.T("files.menu.folder_pick") });
+                        return folders.Count > 0 ? Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(folders[0]) : null;
+                    }
+                    var files = await StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions { Title = L.T("files.menu.file_pick") });
+                    return files.Count > 0 ? Avalonia.Platform.Storage.StorageProviderExtensions.TryGetLocalPath(files[0]) : null;
+                };
             }
             ApplyShell();
         };
@@ -226,6 +236,19 @@ public partial class MainWindow
         if (e.Key == Key.F12 && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) && main.Call.IsControlled)
         {
             main.Call.StopControl();
+            e.Handled = true;
+            return;
+        }
+        // Alt+Y accepts the first incoming file on the request bar, Alt+N declines it (the card's default).
+        if (e.KeyModifiers == KeyModifiers.Alt && e.Key is Key.Y or Key.N && !e.Handled && main.Activity.FirstRequest is { Handle.Spec.Kind: "file" } fileRequest)
+        {
+            fileRequest.Choose(e.Key == Key.Y ? "accept" : "decline");
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Escape && main.Multiplayer.SendPanel.IsOpen)
+        {
+            main.Multiplayer.SendPanel.IsOpen = false;
             e.Handled = true;
             return;
         }
@@ -463,6 +486,19 @@ public partial class MainWindow
     private void HelpScrim_Pressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is MainViewModel main) main.Help.Close();
+        e.Handled = true;
+    }
+
+    private void SendFileScrim_Pressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel main) main.Multiplayer.SendPanel.IsOpen = false;
+        e.Handled = true;
+    }
+
+    private void SendFile_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || DataContext is not MainViewModel main) return;
+        main.Multiplayer.SendPanel.IsOpen = false;
         e.Handled = true;
     }
 

@@ -231,6 +231,51 @@
       </StackPanel>
     </Expander>
 
+    <!-- Files (batch 12): where received files go, taking checked friends' files, queueing, speed, saying when one arrived. -->
+    <Expander x:Name="MpGroupFiles" Classes="mp-group">
+      <Expander.Header>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="{l:T settings.mp.group.files}" FontWeight="SemiBold" />
+            <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.mp.group.files.summary}" />
+          </StackPanel>
+          <Border x:Name="MpFilesTag" Grid.Column="1" Classes="tag" VerticalAlignment="Center" IsVisible="{Binding FilesCustomized}">
+            <TextBlock Text="{l:T settings.mp.customized}" FontSize="12" />
+          </Border>
+        </Grid>
+      </Expander.Header>
+      <StackPanel Spacing="8">
+        <StackPanel x:Name="FilesFolder" Spacing="4">
+          <TextBlock Text="{l:T settings.files.folder}" FontWeight="SemiBold" />
+          <WrapPanel ItemSpacing="8" LineSpacing="6">
+            <TextBlock x:Name="FilesFolderText" Text="{Binding FilesFolderText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360" ToolTip.Tip="{Binding FilesFolderText}" />
+            <Button x:Name="FilesFolderChoose" Classes="secondary small" Content="{l:T settings.files.folder_choose}" Command="{Binding ChooseFilesFolderCommand}" />
+            <Button x:Name="FilesFolderReset" Classes="ghost small" Content="{l:T settings.files.folder_reset}" Command="{Binding ResetFilesFolderCommand}" IsVisible="{Binding FilesFolderIsCustom}" />
+          </WrapPanel>
+          <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.files.folder_hint}" />
+        </StackPanel>
+        <CheckBox x:Name="FilesAutoAcceptBox" IsChecked="{Binding FilesAutoAccept}">
+          <TextBlock Text="{l:T settings.files.auto_accept}" TextWrapping="Wrap" />
+        </CheckBox>
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.files.auto_accept_hint}" Margin="28,-4,0,0" />
+        <CheckBox x:Name="FilesQueueBox" IsChecked="{Binding FilesQueue}">
+          <TextBlock Text="{l:T settings.files.queue}" TextWrapping="Wrap" />
+        </CheckBox>
+        <TextBlock Classes="hint" FontSize="12" TextWrapping="Wrap" Text="{l:T settings.files.queue_hint}" Margin="28,-4,0,0" />
+        <StackPanel Spacing="4">
+          <TextBlock Text="{l:T settings.files.speed}" FontWeight="SemiBold" />
+          <ComboBox x:Name="FilesSpeedBox" ItemsSource="{Binding FilesSpeedOptions}" SelectedIndex="{Binding FilesSpeedIndex}" MinWidth="220">
+            <ComboBox.ItemTemplate>
+              <DataTemplate DataType="l:OptionItem"><TextBlock Text="{Binding Label}" /></DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+        <CheckBox x:Name="FilesNotifyBox" IsChecked="{Binding FilesNotify}">
+          <TextBlock Text="{l:T settings.files.notify}" TextWrapping="Wrap" />
+        </CheckBox>
+      </StackPanel>
+    </Expander>
+
     <!-- Networks and relays live in Settings › Network; this group points there. -->
     <Expander x:Name="MpGroupNetwork" Classes="mp-group">
       <Expander.Header>

@@ -108,6 +108,12 @@ public static class SettingsCatalog
         new("ModSyncDefault", Multiplayer, "multiplayer.room.mod_sync_allow", "multiplayer.room.mod_sync"),
         new("AllowGameProxy", Multiplayer, "multiplayer.proxy.allow"),
         new("AllowExitNode", Multiplayer, "multiplayer.exit.allow", "multiplayer.exit.warning"),
+        // Files (redesign batch 12).
+        new("FilesFolder", Multiplayer, "settings.files.folder", "settings.files.folder_hint"),
+        new("FilesAutoAccept", Multiplayer, "settings.files.auto_accept", "settings.files.auto_accept_hint"),
+        new("FilesQueue", Multiplayer, "settings.files.queue", "settings.files.queue_hint"),
+        new("FilesSpeed", Multiplayer, "settings.files.speed"),
+        new("FilesNotify", Multiplayer, "settings.files.notify"),
         new("Troubleshoot", Multiplayer, "multiplayer.room.problems", "settings.mp.troubleshoot.hint"),
         // Calls and screen (redesign batch 11, reserved).
         new("CallsWho", Multiplayer, "settings.calls.who", "settings.calls.who_hint", CallsOnly: true),

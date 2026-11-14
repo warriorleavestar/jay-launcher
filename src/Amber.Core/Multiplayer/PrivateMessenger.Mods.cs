@@ -155,7 +155,7 @@ public sealed partial class PrivateMessenger
                     await SendAsync(frame.FromFingerprint, new JsonObject { ["t"] = "modfileno", ["sha1"] = sha1 ?? "" }, _cts.Token);
                     return;
                 }
-                _ = SendFileAsync(frame.FromFingerprint, path, sha1, _cts.Token);
+                _ = SendFileCoreAsync(frame.FromFingerprint, path, sha1, _cts.Token);
                 break;
             case "modfileno":
                 var refused = body["sha1"]?.GetValue<string>()?.ToLowerInvariant();
