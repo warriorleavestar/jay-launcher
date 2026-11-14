@@ -1030,10 +1030,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         var client = new ChatClient(room, ChatName);
         // Everything this connection reports belongs to this room session: once it is over, it is dropped.
         var generation = _chatRoute.Generation;
-        void Post(Action handle) => Dispatcher.UIThread.Post(() =>
-        {
-            if (_chatRoute.IsCurrent(generation)) handle();
-        });
+        var bind = _chatRoute.Binder();
+        void Post(Action handle) => Dispatcher.UIThread.Post(bind(handle));
         client.Received += m => Post(() => OnChatMessage(client, m));
         client.Rekeyed += next => Post(() => OnRekey(client, next));
         client.Kicked += () => Post(() => OnKicked(client));

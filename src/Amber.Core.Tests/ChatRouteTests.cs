@@ -72,4 +72,41 @@ public sealed class ChatRouteTests
         route.MoveEnded(newA);
         Assert.True(route.IsCurrent(route.Generation));
     }
+
+    /// <summary>
+    /// The callbacks themselves: queued by room A's connections (either side of a move), run after leaving A and joining
+    /// B. None of them runs; B's own do.
+    /// </summary>
+    [Fact]
+    public void QueuedCallbacksFromALeftRoomDontRun()
+    {
+        var route = new ChatRoute<Conn>();
+        var queue = new List<Action>();
+        var ran = new List<string>();
+        var bindA = route.Binder();
+        route.Moving(new Conn());
+        foreach (var what in new[] { "kick", "breaker", "rekey", "remote", "message" })
+            queue.Add(bindA(() => ran.Add("A " + what)));
+        route.Retire();
+        var bindB = route.Binder();
+        queue.Add(bindB(() => ran.Add("B message")));
+        foreach (var callback in queue) callback();
+        Assert.Equal(["B message"], ran);
+    }
+
+    [Fact]
+    public void CallbacksOfTheSameSessionRunAcrossAMove()
+    {
+        var route = new ChatRoute<Conn>();
+        var ran = 0;
+        var bindOld = route.Binder();
+        Conn old = new(), incoming = new();
+        route.Moving(incoming);
+        var bindNew = route.Binder();
+        route.Switched(old);
+        route.MoveEnded(incoming);
+        bindOld(() => ran++)();
+        bindNew(() => ran++)();
+        Assert.Equal(2, ran);
+    }
 }

@@ -234,7 +234,9 @@ public sealed partial class MultiplayerViewModel
         // 已经在被控或者正在问：直接拒绝（不叠弹窗）。
         if (Child.HideRemoteControl || !RemotePlatform.Supported || _remoteSessions.OfType<RemoteSharer>().Any() || Interlocked.Exchange(ref _remotePrompting, 1) != 0)
         {
-            await DeclineRemote(client, sessionId);
+            // Every answer goes over the chat connection in use now (the request may have come in on one that chat has
+            // since moved away from).
+            await DeclineRemote(_chat ?? client, sessionId);
             return;
         }
         var generation = _chatRoute.Generation;

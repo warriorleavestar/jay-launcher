@@ -17,6 +17,19 @@ public sealed class ChatRoute<T> where T : class
 
     public bool IsCurrent(int generation) => generation == Generation;
 
+    /// <summary>
+    /// For one connection, made when it is created: wraps a handler so that it only runs while this room session (this
+    /// generation) is still the current one. The app queues every callback of the connection through it.
+    /// </summary>
+    public Func<Action, Action> Binder()
+    {
+        var generation = Generation;
+        return handle => () =>
+        {
+            if (generation == Generation) handle();
+        };
+    }
+
     /// <summary>Whether what <paramref name="client"/> receives belongs to the chat whose connection is <paramref name="current"/>.</summary>
     public bool Accepts(T client, T? current) => client == current || client == Incoming || client == Outgoing;
 
