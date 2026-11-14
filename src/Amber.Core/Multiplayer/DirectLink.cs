@@ -623,8 +623,15 @@ public sealed class DirectBridge : IAsyncDisposable
                 break;
             // A ping names the side that sent it. Our own pings sent back to us (a reflection by someone on the path who
             // doesn't hold the key) are never answered, so they can't be turned into an answer for ourselves.
-            case Ping when _peers.TryGetValue(from, out var p1) && payload.Length >= PingLength && payload[PingLength - 1] != OwnRole:
+            // Older versions send a shorter ping (no side) and expect it echoed: they still get their round-trip times.
+            // Such an answer is shorter than ours and can never verify an address, and none of our own pings is that short.
+            case Ping when _peers.TryGetValue(from, out var p1) && (payload.Length < PingLength || payload[PingLength - 1] != OwnRole):
                 p1.LastSeen = DateTime.UtcNow;
+                if (payload.Length < PingLength)
+                {
+                    await SendRawAsync(Seal(Pong, payload), from, _cts.Token);
+                    break;
+                }
                 var pong = new byte[PingLength + 1];
                 payload.AsSpan(0, PingLength).CopyTo(pong);
                 pong[PingLength] = OwnRole;

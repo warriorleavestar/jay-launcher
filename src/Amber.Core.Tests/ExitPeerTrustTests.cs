@@ -183,4 +183,37 @@ public sealed class ExitPeerTrustTests
         Assert.Equal(peers, DirectSession.BridgePeersCarryingTheRoom(isHost: false, usingFallbackNode: false, peers));
         Assert.Equal(peers, DirectSession.BridgePeersCarryingTheRoom(isHost: true, usingFallbackNode: false, peers));
     }
+
+    [Fact]
+    public async Task AnOlderVersionsPingsAreStillAnsweredButItsAnswersNeverVerify()
+    {
+        await using var host = new DirectBridge(DirectBridge.CreateSocket(), DirectTestKeys.Bridge, true, 1, _ => { });
+        using var older = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var target = new IPEndPoint(IPAddress.Loopback, host.SocketEndPoint.Port);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await older.SendAsync(host.Seal(Probe, [Guest]), target, limit.Token);
+        DirectPeer? peer = null;
+        while ((peer = host.Peers.SingleOrDefault()) is null) await Task.Delay(20, limit.Token);
+
+        // Its own ping, sequence number only, comes back as it was sent.
+        await older.SendAsync(host.Seal(Ping, [0, 0, 0, 9]), target, limit.Token);
+        while (true)
+        {
+            var packet = await older.ReceiveAsync(limit.Token);
+            if (packet.Buffer[0] != Pong) continue;
+            Assert.Equal(new byte[] { 0, 0, 0, 9 }, packet.Buffer[1..^16]);
+            break;
+        }
+        // It echoes our pings whole, without its side: they count for round-trip times, not for verifying.
+        var before = peer.PongsReceived;
+        for (var answered = 0; answered < 2;)
+        {
+            var ping = await older.ReceiveAsync(limit.Token);
+            if (ping.Buffer[0] != Ping) continue;
+            await older.SendAsync(host.Seal(Pong, ping.Buffer[1..^16]), target, limit.Token);
+            answered++;
+        }
+        while (peer.PongsReceived < before + 2) await Task.Delay(20, limit.Token);
+        Assert.False(peer.Verified);
+    }
 }

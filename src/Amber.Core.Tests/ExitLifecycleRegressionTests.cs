@@ -84,6 +84,56 @@ public sealed class ExitLifecycleRegressionTests
     }
 
     [Fact]
+    public async Task AnIpv6PlayerStillJoiningIsWaitedForAndThenKeepsItsPlace()
+    {
+        // Another player over IPv6 is halfway through joining (heard from, not admitted yet) when the exit is turned on:
+        // starting now would fix the exceptions without it and cut its join off. The switch waits until it is in.
+        var joining = Ipv6Member(verified: false);
+        joining.Admitted = false;
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [joining],
+            BearerWait = TimeSpan.FromSeconds(5),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var switching = session.SetExitNodeAsync(EasyTierArgs.HostIp);
+        await Task.Delay(250);
+        Assert.False(switching.IsCompleted);
+        joining.Admitted = true;
+        await Task.Delay(250);
+        Assert.False(switching.IsCompleted);
+        Volatile.Write(ref joining._verified, true);
+        await switching.WaitAsync(Deadline);
+        Assert.Contains("2001:db8::7", session.EasyTier!.Options.DirectUnderlayAddresses);
+    }
+
+    [Fact]
+    public async Task AJoinThatDoesNotFinishKeepsTheRunningSessionButAnAbandonedOneDoesNotHoldTheSwitch()
+    {
+        var joining = Ipv6Member(verified: false);
+        joining.Admitted = false;
+        await using var session = new DirectSession(null!, Path.Combine(Path.GetTempPath(), "amber-exit-lifecycle-" + Guid.NewGuid().ToString("N")),
+            Room, false, Direct, new DiagnosticLog())
+        {
+            StartForTest = (o, _) => Task.FromResult<IEasyTierSession>(new FakeEasyTier(o)),
+            BridgePeersForTest = () => [joining],
+            BearerWait = TimeSpan.FromMilliseconds(300),
+        };
+        await session.StartEasyTierAsync(Original, default);
+        var original = session.EasyTier!;
+        await Assert.ThrowsAsync<IOException>(() => session.SetExitNodeAsync(EasyTierArgs.HostIp));
+        Assert.Same(original, session.EasyTier);
+        Assert.Equal(1, session.EasyTierStarts);
+
+        // Not heard from for a while: it gave up, and doesn't hold the switch (nor get an exception).
+        joining.LastSeen = DateTime.UtcNow - DirectSession.JoiningWindow - TimeSpan.FromSeconds(1);
+        await session.SetExitNodeAsync(EasyTierArgs.HostIp).WaitAsync(Deadline);
+        Assert.DoesNotContain("2001:db8::7", session.EasyTier!.Options.DirectUnderlayAddresses);
+    }
+
+    [Fact]
     public async Task ExitIsPublishedOnlyAfterReadinessAcknowledgement()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

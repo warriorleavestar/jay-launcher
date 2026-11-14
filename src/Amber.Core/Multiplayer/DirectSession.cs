@@ -311,16 +311,21 @@ public sealed class DirectSession : IAsyncDisposable
     /// <summary>How long switching to an exit waits for members over IPv6 to answer a ping (one goes out every second).</summary>
     internal TimeSpan BearerWait { get; init; } = TimeSpan.FromSeconds(6);
 
+    /// <summary>A bridge peer not admitted yet but heard from this recently counts as still joining.</summary>
+    internal static readonly TimeSpan JoiningWindow = TimeSpan.FromSeconds(10);
+
     /// <summary>
-    /// True once every admitted IPv6 peer carrying the room has answered a fresh ping (<see cref="DirectPeer.Verified"/>),
-    /// false when one still hasn't after <paramref name="wait"/>.
+    /// True once every admitted IPv6 peer carrying the room has answered a fresh ping (<see cref="DirectPeer.Verified"/>)
+    /// and no IPv6 peer is still joining (heard from lately but not admitted yet: the exceptions are fixed when the exit
+    /// starts, so it would be cut off halfway through), false when one still isn't after <paramref name="wait"/>.
     /// </summary>
     internal static async Task<bool> BearersVerifiedAsync(Func<IEnumerable<DirectPeer>> peers, TimeSpan wait, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow + wait;
         while (true)
         {
-            if (!peers().Any(p => p.Admitted && !p.Verified && Normal(p.Remote.Address).AddressFamily == AddressFamily.InterNetworkV6))
+            if (!peers().Any(p => Normal(p.Remote.Address).AddressFamily == AddressFamily.InterNetworkV6
+                    && (p.Admitted ? !p.Verified : DateTime.UtcNow - p.LastSeen < JoiningWindow)))
                 return true;
             if (DateTime.UtcNow >= deadline) return false;
             await Task.Delay(100, ct);
