@@ -279,6 +279,7 @@ public sealed partial class MultiplayerViewModel
         lobby.Book.Changed += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.StateChanged += () => Dispatcher.UIThread.Post(RefreshInvites);
         lobby.Paused += () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Warning("multiplayer.invite.paused")));
+        lobby.PasswordGuessing += () => Dispatcher.UIThread.Post(() => SetStatus(StatusMessage.Warning("multiplayer.public.password_guessing")));
         // 发出凭据时就列上（对方不回确认也已经能进房间）；确认后改成“已确认”。同一个人重新敲门进来时替换旧的那行。
         lobby.Issued += (request, _) => Dispatcher.UIThread.Post(() =>
         {

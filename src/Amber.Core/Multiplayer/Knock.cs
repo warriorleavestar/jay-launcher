@@ -770,6 +770,15 @@ public sealed record KnockLimits
     /// one may be a password guess, so only the password invite goes quiet. Random-token invites keep working.
     /// </summary>
     public int MaxUnknownPerMinute { get; init; } = 20;
+
+    /// <summary>
+    /// Unknown invite ids per hour before the password invite pauses, so slow guessing is limited too. Each pause that
+    /// follows another within <see cref="GuessStreakReset"/> lasts twice as long, up to <see cref="MaxGuessPause"/>.
+    /// </summary>
+    public int MaxUnknownPerHour { get; init; } = 30;
+    public TimeSpan MaxGuessPause { get; init; } = TimeSpan.FromHours(6);
+    /// <summary>A pause after this long without one starts again from <see cref="PauseAfterFailures"/>.</summary>
+    public TimeSpan GuessStreakReset { get; init; } = TimeSpan.FromHours(1);
 }
 
 /// <summary>
@@ -793,6 +802,8 @@ public sealed class KnockServer : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Queue<DateTimeOffset> _failures = new();
     private readonly Queue<DateTimeOffset> _unknown = new();
+    private readonly Queue<DateTimeOffset> _unknownHour = new();
+    private int _guessStreak;
     private readonly Lock _gate = new();
     private readonly Task _loop;
     private int _active;
@@ -892,17 +903,31 @@ public sealed class KnockServer : IAsyncDisposable
         {
             var now = _book.Now;
             _unknown.Enqueue(now);
+            _unknownHour.Enqueue(now);
             while (_unknown.Count > 0 && now - _unknown.Peek() > TimeSpan.FromMinutes(1)) _unknown.Dequeue();
-            if (_unknown.Count >= _limits.MaxUnknownPerMinute)
+            while (_unknownHour.Count > 0 && now - _unknownHour.Peek() > TimeSpan.FromHours(1)) _unknownHour.Dequeue();
+            if (_unknown.Count >= _limits.MaxUnknownPerMinute || _unknownHour.Count >= _limits.MaxUnknownPerHour)
             {
+                // Guessing again soon after a pause: each pause lasts twice as long as the one before.
+                if (now - _guessPausedUntil > _limits.GuessStreakReset) _guessStreak = 0;
+                var pause = TimeSpan.FromTicks(Math.Min(_limits.MaxGuessPause.Ticks, _limits.PauseAfterFailures.Ticks << Math.Min(_guessStreak, 16)));
+                _guessStreak++;
                 started = now >= _guessPausedUntil;
-                _guessPausedUntil = now + _limits.PauseAfterFailures;
+                _guessPausedUntil = now + pause;
                 _unknown.Clear();
+                _unknownHour.Clear();
             }
         }
-        if (started) _log?.Invoke(L.T("core.mp.knock.guessing"));
+        if (started)
+        {
+            _log?.Invoke(L.T("core.mp.knock.guessing"));
+            PasswordGuessing?.Invoke();
+        }
         return started;
     }
+
+    /// <summary>Many unknown invite ids: someone may be guessing the room password, which is ignored for a while (the host is told).</summary>
+    public event Action? PasswordGuessing;
 
     private async Task AcceptLoopAsync()
     {

@@ -34,6 +34,8 @@ public sealed class HostLobby : IAsyncDisposable
     public event Action<KnockRequest, MemberEntry>? Withdrawn;
     /// <summary>失败的敲门太多，暂停 60 秒。</summary>
     public event Action? Paused;
+    /// <summary>Someone may be guessing the room password; the password invite is ignored for a while.</summary>
+    public event Action? PasswordGuessing;
     /// <summary>Direct rooms: an approved guest sent its addresses in the encrypted knock ack.</summary>
     public event Action<KnockRequest, MemberEntry, DirectAddresses>? DirectAnswered;
 
@@ -109,6 +111,7 @@ public sealed class HostLobby : IAsyncDisposable
                     _knock.Admitted += r => Admitted?.Invoke(r);
                     _knock.DirectAnswered += (r, m, a) => DirectAnswered?.Invoke(r, m, a);
                     _knock.Paused += () => Paused?.Invoke();
+                    _knock.PasswordGuessing += () => PasswordGuessing?.Invoke();
                     _knock.SessionEnded += () => _ = UpdateQuietlyAsync();
                     _lobby = _startLobby(new LobbyOptions(lobby.Name, lobby.Secret, true, _peers(), EasyTierArgs.FreeTcpPort(), ListenUdpPort: ListenUdpPort));
                     _openName = lobby.Name;

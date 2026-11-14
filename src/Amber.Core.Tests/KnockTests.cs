@@ -585,6 +585,50 @@ public sealed class KnockTests : IAsyncDisposable
         Assert.True((await KnockAsync(room.Invite)).Approved);
     }
 
+    private async Task SendUnknownIdAsync(KnockServer server)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, server.Port);
+        var stream = client.GetStream();
+        await KnockProtocol.WriteFrameAsync(stream, RandomNumberGenerator.GetBytes(KnockProtocol.IdLength), default);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, await ReadToEndAsync(stream, timeout.Token));
+    }
+
+    /// <summary>
+    /// Slow guessing (under the per-minute limit) is caught by the hourly budget, each pause soon after another lasts twice
+    /// as long, and the host is told.
+    /// </summary>
+    [Fact]
+    public async Task SlowPasswordGuessingIsLimitedPerHourWithLongerPauses()
+    {
+        var salt = Amber.Core.Multiplayer.Public.RoomPassword.NewSalt();
+        _book.CreateStanding(true, TunnelSettings.Default, Amber.Core.Multiplayer.Public.RoomPassword.Token("hunter2", salt));
+        var server = Server();
+        var told = 0;
+        server.PasswordGuessing += () => Interlocked.Increment(ref told);
+        for (var i = 0; i < Fast.MaxUnknownPerHour; i++)
+        {
+            Assert.False(server.IsPasswordPaused);
+            await SendUnknownIdAsync(server);
+            _now += TimeSpan.FromSeconds(100);
+        }
+        // The last guess paused the password invite, just before the clock moved on.
+        _now -= TimeSpan.FromSeconds(100);
+        Assert.True(server.IsPasswordPaused);
+        Assert.Equal(1, told);
+        _now += Fast.PauseAfterFailures + TimeSpan.FromSeconds(1);
+        Assert.False(server.IsPasswordPaused);
+
+        // Right after: a burst pauses again, for twice as long.
+        for (var i = 0; i < Fast.MaxUnknownPerMinute; i++) await SendUnknownIdAsync(server);
+        Assert.Equal(2, told);
+        _now += Fast.PauseAfterFailures + TimeSpan.FromSeconds(1);
+        Assert.True(server.IsPasswordPaused);
+        _now += Fast.PauseAfterFailures;
+        Assert.False(server.IsPasswordPaused);
+    }
+
     /// <summary>Child mode's "always ask" overrides both a trusted guest and an auto-approve invite, checked at each knock.</summary>
     [Fact]
     public async Task AlwaysAskOverridesTrustAndAutoApprove()
