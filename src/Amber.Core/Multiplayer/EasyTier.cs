@@ -718,7 +718,7 @@ public sealed class EasyTierSession : IEasyTierSession
             RedirectStandardError = true,
         };
         foreach (var a in args) info.ArgumentList.Add(a);
-        foreach (var (name, value) in environment) info.Environment[name] = value;
+        ApplyEnvironment(info, environment);
         // Mac/Linux：经看门脚本启动，Jay 崩溃或被 kill -9 后一两秒内 easytier-core 跟着结束（不用等下次开房间时清理）。
         EasyTierProcessGuard.Wrap(info);
         var process = Process.Start(info) ?? throw new InvalidOperationException(L.T("core.mp.component.startfailed"));
@@ -740,6 +740,18 @@ public sealed class EasyTierSession : IEasyTierSession
             }
         }
         return (process, job);
+    }
+
+    /// <summary>
+    /// Drops every inherited ET_* variable (easytier-core reads its options from them) and then adds only the given ones,
+    /// matching the elevated hosts, which pass nothing but the room secret.
+    /// </summary>
+    internal static void ApplyEnvironment(ProcessStartInfo info, IReadOnlyDictionary<string, string> environment)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var name in info.Environment.Keys.Where(k => k.StartsWith("ET_", comparison)).ToList())
+            info.Environment.Remove(name);
+        foreach (var (name, value) in environment) info.Environment[name] = value;
     }
 
     private void OnLine(string? line)
