@@ -195,4 +195,21 @@ public sealed class CodeHygieneTests
             Assert.NotEqual(generalText, text);
         }
     }
+
+    /// <summary>
+    /// Every directory call from the multiplayer page goes through DirectoryClient(network), which remembers the
+    /// directory's key on first use; a client built by hand would skip that check.
+    /// </summary>
+    [Fact]
+    public void DirectoryClientsComeFromTheOneFactory()
+    {
+        var repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var viewModels = Path.Combine(repo, "src", "Amber.App", "ViewModels");
+        var made = new System.Text.RegularExpressions.Regex(@"new\s+(Amber\.Core\.Multiplayer\.Public\.)?RoomDirectoryClient\s*\(");
+        foreach (var file in Directory.EnumerateFiles(viewModels, "*.cs", SearchOption.AllDirectories))
+        {
+            if (Path.GetFileName(file) == "MultiplayerViewModel.Contacts.cs") continue;
+            Assert.False(made.IsMatch(File.ReadAllText(file)), $"{Path.GetFileName(file)} builds a RoomDirectoryClient without DirectoryClient(network)");
+        }
+    }
 }

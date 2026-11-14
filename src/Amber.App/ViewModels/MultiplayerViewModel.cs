@@ -573,7 +573,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             try
             {
                 var identity = RelayRecordIdentity();
-                await new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network).PutRecordAsync(
+                await DirectoryClient(network).PutRecordAsync(
                     Amber.Core.Multiplayer.Public.RelayRecord.Make(identity, null, urls, DateTimeOffset.UtcNow), default);
                 _service.Settings.RelayRecordNetwork = network.Profile.Id;
                 _service.Settings.Save();
@@ -606,7 +606,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if (_service.Settings.RelayRecordNetwork != network.Profile.Id || !urls.Any(RelayNodes.HasIpHost)) return;
         try
         {
-            await new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network).PutRecordAsync(
+            await DirectoryClient(network).PutRecordAsync(
                 Amber.Core.Multiplayer.Public.RelayRecord.Make(RelayRecordIdentity(), null, urls, DateTimeOffset.UtcNow), default);
         }
         catch (IOException e)
@@ -630,7 +630,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         }
         try
         {
-            return await Amber.Core.Multiplayer.Public.RelayRecord.ResolveAsync(new Amber.Core.Multiplayer.Public.RoomDirectoryClient(network), locator, default);
+            return await Amber.Core.Multiplayer.Public.RelayRecord.ResolveAsync(DirectoryClient(network), locator, default);
         }
         catch (IOException e)
         {
