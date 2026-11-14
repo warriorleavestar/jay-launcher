@@ -25,7 +25,9 @@ internal static class EasyTierProcessGuard
         "[ -z \"$t\" ] || { kill -TERM \"$c\" 2>/dev/null; wait \"$c\"; exit; }; " +
         // `sleep 1 & wait` instead of a foreground sleep, so the trap runs as soon as the signal arrives.
         "while kill -0 \"$p\" 2>/dev/null && kill -0 \"$c\" 2>/dev/null; do sleep 1 & wait $!; done; " +
-        "kill -TERM \"$c\" 2>/dev/null; wait \"$c\"";
+        // Jay is gone: ask the core to stop, and kill it if it is still there after 5 seconds.
+        "kill -TERM \"$c\" 2>/dev/null; n=0; while kill -0 \"$c\" 2>/dev/null && [ \"$n\" -lt 5 ]; do sleep 1 & wait $!; n=$((n+1)); done; " +
+        "kill -KILL \"$c\" 2>/dev/null; wait \"$c\"";
 
     /// <summary>非 Windows：把要启动的 easytier-core 改成经看门脚本启动。参数原样传，不经过 shell 拼接。</summary>
     internal static void Wrap(ProcessStartInfo info)

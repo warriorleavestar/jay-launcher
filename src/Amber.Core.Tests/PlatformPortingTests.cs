@@ -102,6 +102,36 @@ public sealed class PlatformPortingTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(_root, ".jay-easytier-*.pid"));
     }
 
+    /// <summary>
+    /// A start time read by a later Jay run differs by a few milliseconds on Linux: the leftover is still recognised
+    /// and stopped, while a start time seconds apart (a reused PID) is not the same process.
+    /// </summary>
+    [Fact]
+    public void ALeftoverIsRecognisedDespiteASlightlyDifferentStartTime()
+    {
+        Assert.True(EasyTierProcessTracker.SameStart(1_000_000_000, 1_000_030_000));
+        Assert.False(EasyTierProcessTracker.SameStart(1_000_000_000, 1_000_000_000 + 10 * TimeSpan.TicksPerSecond));
+        if (OperatingSystem.IsWindows()) return;
+        using var process = Process.Start(new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false })!;
+        try
+        {
+            var executable = process.MainModule!.FileName!;
+            var record = EasyTierProcessTracker.Track(process, _root, executable, Environment.ProcessId, ownerStartTicks: 1)!;
+            var lines = File.ReadAllLines(record);
+            lines[1] = (long.Parse(lines[1]) + 30_000).ToString();
+            File.WriteAllLines(record, lines);
+
+            EasyTierProcessTracker.Cleanup(_root, executable);
+
+            Assert.True(process.WaitForExit(5000));
+            Assert.Empty(Directory.EnumerateFiles(_root, ".jay-easytier-*.pid"));
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill();
+        }
+    }
+
     [Fact]
     public void ThisJaysOwnRunningEasyTierIsLeftAlone()
     {

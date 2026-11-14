@@ -36,7 +36,7 @@ internal static class EasyTierProcessTracker
                 }
                 var recordedPath = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(lines[2]));
                 using var process = Process.GetProcessById(pid);
-                var sameStart = process.StartTime.ToUniversalTime().Ticks == ticks;
+                var sameStart = SameStart(process.StartTime.ToUniversalTime().Ticks, ticks);
                 string? runningPath;
                 try { runningPath = process.MainModule?.FileName; }
                 catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) { runningPath = null; }
@@ -103,6 +103,13 @@ internal static class EasyTierProcessTracker
         }
     }
 
+    /// <summary>
+    /// Whether two readings of a start time are the same process. On Linux the start time is derived from the boot time,
+    /// which each Jay run estimates slightly differently, so exact equality almost never holds across runs; a reused PID
+    /// starts much later than the recorded process.
+    /// </summary>
+    internal static bool SameStart(long a, long b) => Math.Abs(a - b) <= 2 * TimeSpan.TicksPerSecond;
+
     private static long OwnStartTicks()
     {
         using var self = Process.GetCurrentProcess();
@@ -114,7 +121,7 @@ internal static class EasyTierProcessTracker
         try
         {
             using var owner = Process.GetProcessById(pid);
-            return !owner.HasExited && owner.StartTime.ToUniversalTime().Ticks == startTicks;
+            return !owner.HasExited && SameStart(owner.StartTime.ToUniversalTime().Ticks, startTicks);
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {

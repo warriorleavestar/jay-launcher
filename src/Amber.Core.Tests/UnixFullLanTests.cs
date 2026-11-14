@@ -221,4 +221,57 @@ public sealed class UnixFullLanTests
             File.Delete(core);
         }
     }
+
+    /// <summary>A stop signal to the root guard (what SIGTERM triggers) ends the core and returns normally, so cleanup runs.</summary>
+    [Fact]
+    public void ElevatedGuardStopsTheCoreWhenAskedToStop()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var core = Path.Combine(Path.GetTempPath(), "jay-fake-core-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(core, "#!/bin/sh\necho \"pid=$$\"\nexec sleep 30\n");
+        File.SetUnixFileMode(core, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Thread? host = null;
+        var result = -1;
+        Action? stop = null;
+        UnixElevatedGuardHost.StopHookForTest = s => stop = s;
+        UnixElevatedGuard.LaunchForTest = command =>
+        {
+            var flag = command.ToList().IndexOf(UnixElevatedGuard.GuardFlag);
+            var args = command.Skip(flag).ToArray();
+            host = new Thread(() => result = UnixElevatedGuardHost.RunForTest(args)) { IsBackground = true };
+            host.Start();
+            return Process.GetCurrentProcess();
+        };
+        UnixElevatedGuard.AcceptAnyUserForTest = true;
+        try
+        {
+            using var guard = UnixElevatedGuard.Start(core, ["one"], new Dictionary<string, string>(), null, "10.233.144.250");
+            guard.WaitForReadyAsync().Wait(TimeSpan.FromSeconds(10));
+            Assert.True(SpinWait.SpinUntil(() => guard.RecentOutput.Any(l => l.StartsWith("pid=", StringComparison.Ordinal)), 5000));
+            var pid = int.Parse(guard.RecentOutput.First(l => l.StartsWith("pid=", StringComparison.Ordinal))[4..]);
+            Assert.True(SpinWait.SpinUntil(() => stop is not null, 5000));
+            stop!();
+            Assert.True(host!.Join(TimeSpan.FromSeconds(10)));
+            Assert.Equal(0, result);
+            Assert.True(SpinWait.SpinUntil(() => !IsRunning(pid), 5000));
+        }
+        finally
+        {
+            UnixElevatedGuardHost.StopHookForTest = null;
+            UnixElevatedGuard.LaunchForTest = null;
+            UnixElevatedGuard.AcceptAnyUserForTest = false;
+            File.Delete(core);
+        }
+    }
+
+    private static bool IsRunning(int pid)
+    {
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
 }

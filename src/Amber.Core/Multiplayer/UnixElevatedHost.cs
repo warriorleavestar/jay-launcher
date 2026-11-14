@@ -27,6 +27,9 @@ public static class UnixElevatedGuardHost
     /// <summary>测试用：在测试进程里以当前用户身份跑守护。</summary>
     internal static int RunForTest(string[] args) => Run(args, requireRoot: false);
 
+    /// <summary>Tests: receives the running session's stop action (what a SIGTERM does in the real guard).</summary>
+    internal static Action<Action>? StopHookForTest;
+
     private static int Run(string[] args, bool requireRoot)
     {
         if (args.Length != 5 || !uint.TryParse(args[2], out var uid) || !int.TryParse(args[3], out var jayPid)) return 2;
@@ -50,7 +53,15 @@ public static class UnixElevatedGuardHost
         }
         catch (Exception e) when (e is IOException or SocketException or UnauthorizedAccessException or ArgumentException) { return 3; }
         using var session = new GuardSession(socket, corePath);
-        return session.Run();
+        // A signal (logout, kill, Ctrl+C in a terminal) must still take down the core, routes and firewall rules:
+        // stop the session and let the using block clean up instead of letting the runtime end the process.
+        var signals = new List<PosixSignalRegistration>();
+        if (requireRoot)
+            foreach (var signal in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT, PosixSignal.SIGHUP, PosixSignal.SIGQUIT })
+                signals.Add(PosixSignalRegistration.Create(signal, ctx => { ctx.Cancel = true; session.RequestStop(); }));
+        StopHookForTest?.Invoke(session.RequestStop);
+        try { return session.Run(); }
+        finally { foreach (var r in signals) r.Dispose(); }
     }
 
     private sealed class GuardSession(Socket socket, string corePath) : IDisposable
@@ -61,6 +72,9 @@ public static class UnixElevatedGuardHost
         private IDisposable? _relay;
         private UnixExitNetwork? _exit;
         private readonly ManualResetEventSlim _coreExited = new(false);
+        private readonly ManualResetEventSlim _stop = new(false);
+
+        public void RequestStop() => _stop.Set();
 
         public int Run()
         {
@@ -70,7 +84,8 @@ public static class UnixElevatedGuardHost
             {
                 while (true)
                 {
-                    var index = WaitHandle.WaitAny([((IAsyncResult)pending).AsyncWaitHandle, _coreExited.WaitHandle]);
+                    var index = WaitHandle.WaitAny([((IAsyncResult)pending).AsyncWaitHandle, _coreExited.WaitHandle, _stop.WaitHandle]);
+                    if (index == 2) return 0;
                     if (index == 1)
                     {
                         Send("error " + B64("easytier-core exited"));
@@ -97,8 +112,9 @@ public static class UnixElevatedGuardHost
                     pending = reader.ReadLineAsync();
                 }
             }
-            catch (Exception e) when (e is IOException or JsonException or ObjectDisposedException or SocketException or AggregateException)
+            catch (Exception)
             {
+                // Any error ends the session the same way, so the caller's using block always removes what it set up.
                 return 4;
             }
         }
@@ -220,6 +236,7 @@ public static class UnixElevatedGuardHost
             StopCore();
             _stream.Dispose();
             _coreExited.Dispose();
+            _stop.Dispose();
         }
     }
 }

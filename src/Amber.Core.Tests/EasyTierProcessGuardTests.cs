@@ -80,6 +80,20 @@ public sealed class EasyTierProcessGuardTests : IDisposable
         Assert.True(await Until(() => watch.HasExited));
     }
 
+    /// <summary>A core that ignores SIGTERM is killed a few seconds after Jay is gone, instead of running on.</summary>
+    [Fact]
+    public async Task ACoreThatIgnoresTermIsKilledAfterJayIsGone()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var jay = Start("/bin/sleep", "600");
+        var watch = Start("/bin/sh", "-c", EasyTierProcessGuard.WatchScript, "jay-easytier", jay.Id.ToString(), "/bin/sh", "-c", "trap '' TERM; exec sleep 600");
+        Assert.True(await Until(() => Core(watch.Id) > 0), "core started");
+        var core = Core(watch.Id);
+        jay.Kill();
+        Assert.True(await Until(() => !Alive(core), 15), "the core is killed");
+        Assert.True(await Until(() => watch.HasExited));
+    }
+
     [Fact]
     public async Task StoppingTheWatcherStopsTheCore()
     {
