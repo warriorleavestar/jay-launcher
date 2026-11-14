@@ -91,6 +91,14 @@ public partial class MainWindow : Window
         if (Environment.GetEnvironmentVariable("AMBER_SELFTEST") is { Length: > 0 } report)
             Opened += async (_, _) =>
             {
+                // Never against this computer's own settings: every scope changes them.
+                if (SelfTestGuard.DataDirProblem(Environment.GetEnvironmentVariable("AMBER_DATA_DIR")) is { } refused)
+                {
+                    Directory.CreateDirectory(report);
+                    File.WriteAllText(Path.Combine(report, "report.txt"), $"FAIL {refused}{Environment.NewLine}");
+                    Close();
+                    return;
+                }
                 if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "content-layout")
                     await new ContentPageSelfTest(this, (MainViewModel)DataContext!, report).RunAsync();
                 else if (Environment.GetEnvironmentVariable("AMBER_SELFTEST_SCOPE") == "remote")
