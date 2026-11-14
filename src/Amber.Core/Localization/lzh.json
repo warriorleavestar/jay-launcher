@@ -1006,6 +1006,8 @@
   "multiplayer.room.created": "房已立。按「邀」生邀碼而遣之；閉 Jay 或按「終連」，則房閉。",
   "multiplayer.room.created_full_lan": "房已立（全區域網之式）。按「邀」生邀碼。若友不能入，請於 Windows 防火牆許 Java（javaw.exe）通「Amber LAN」之網。",
   "multiplayer.room.extreme_unsupported": "此房用極高強之密，須系統容 ML-KEM（較新之 Windows 11），此機不容。請房主改用「高強之密」。",
+  "multiplayer.room.knock_pending": "尚候人納汝入室。欲自開室，先罷其候。",
+  "multiplayer.invite.approved_busy": "彼已納汝，然汝已在他室，故 Jay 未入。",
   "multiplayer.room.full_lan_ended": "全區域網之式已終：{0}",
   "multiplayer.room.invalid_code": "邀碼之式不正，當若 JAY2-XXXX…-XXXX…-X（JAY2- 之後二段各二十六位，或另有式段，若 JAY2-T2D-…）",
   "multiplayer.room.latency": "，延 {0:F0} ms",

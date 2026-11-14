@@ -80,7 +80,7 @@ public sealed partial class MultiplayerViewModel
     [RelayCommand]
     private async Task RepeatLastRoomAsync()
     {
-        if (LastRoomSettings is not { } last || !IsIdle) return;
+        if (LastRoomSettings is not { } last || !IsIdle || RefuseHostWhileKnocking()) return;
         // Same world when the game has it open to LAN again.
         if (last.World is { } world && LanGames.FirstOrDefault(g => g.Game.Motd == world) is { } same) SelectedLanGame = same;
         // The same four choices, as far as they can be picked today. A serverless room makes a new sealed code each

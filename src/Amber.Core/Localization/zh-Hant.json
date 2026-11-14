@@ -1024,6 +1024,8 @@
   "multiplayer.room.created_full_lan": "房間已建立（範圍：整個區域網路）。點「邀請」產生邀請。如果朋友連不進來，在 Windows 防火牆裡允許 Java（javaw.exe）通過「Amber LAN」網路。",
   "multiplayer.room.created_full_lan_unix": "房間已建立（範圍：整個區域網路）。點「邀請」產生邀請。如果朋友連不進來，看看系統防火牆是不是擋了 Java 的傳入連線（macOS：系統設定 → 網路 → 防火牆）。",
   "multiplayer.room.extreme_unsupported": "這個房間使用極高強度加密，需要 ML-KEM，這台電腦無法使用。請房主改用「高強度加密」。",
+  "multiplayer.room.knock_pending": "你還在等對方讓你進房間。想自己開房間的話，先取消等待。",
+  "multiplayer.invite.approved_busy": "對方讓你進去了，但你已經在另一個房間裡，所以 Jay 沒有加入。",
   "multiplayer.room.full_lan_ended": "「整個區域網路」範圍已結束：{0}",
   "multiplayer.room.invalid_code": "邀請格式不對，應該像 JAY2-XXXX…-XXXX…-X（JAY2- 後面兩段各 26 位，可能還有一段模式，例如 JAY2-T2D-…）",
   "multiplayer.room.latency": "，延遲 {0:F0} ms",

@@ -1024,6 +1024,8 @@
   "multiplayer.room.created_full_lan": "房间已创建（范围：整个局域网）。点“邀请”生成邀请。如果朋友连不进来，在 Windows 防火墙里允许 Java（javaw.exe）通过“Amber LAN”网络。",
   "multiplayer.room.created_full_lan_unix": "房间已创建（范围：整个局域网）。点“邀请”生成邀请。如果朋友连不进来，看看系统防火墙是不是挡了 Java 的传入连接（macOS：系统设置 → 网络 → 防火墙）。",
   "multiplayer.room.extreme_unsupported": "这个房间用的是极端加密，要用 ML-KEM，这台电脑上用不了。请房主换成“高加密”。",
+  "multiplayer.room.knock_pending": "你还在等对方让你进房间。想自己开房间的话，先取消等待。",
+  "multiplayer.invite.approved_busy": "对方让你进去了，但你已经在另一个房间里，所以 Jay 没有加入。",
   "multiplayer.room.full_lan_ended": "“整个局域网”范围已结束：{0}",
   "multiplayer.room.invalid_code": "邀请格式不对，应该像 JAY2-XXXX…-XXXX…-X（JAY2- 后面两段各 26 位，可能还有一段模式，比如 JAY2-T2D-…）",
   "multiplayer.room.latency": "，延迟 {0:F0} ms",

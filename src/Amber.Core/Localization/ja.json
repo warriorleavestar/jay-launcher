@@ -1024,6 +1024,8 @@
   "multiplayer.room.created_full_lan": "ルームを作成しました（範囲：LAN 全体）。「招待」で招待を作ってください。フレンドが接続できない場合は、Windows ファイアウォールで Java（javaw.exe）の「Amber LAN」ネットワークでの通信を許可してください。",
   "multiplayer.room.created_full_lan_unix": "ルームを作成しました（範囲：LAN 全体）。「招待」で招待を作れます。フレンドが接続できない場合は、システムのファイアウォールが Java への着信接続をブロックしていないか確認してください（macOS：システム設定 → ネットワーク → ファイアウォール）。",
   "multiplayer.room.extreme_unsupported": "このルームは最高度の暗号化を使用しており ML-KEM が必要ですが、このパソコンでは使用できません。ホストに「高度な暗号化」への変更を依頼してください。",
+  "multiplayer.room.knock_pending": "まだ部屋に入れてもらうのを待っています。自分の部屋を開くなら、先に待つのをやめてください。",
+  "multiplayer.invite.approved_busy": "入室を許可されましたが、すでに別の部屋にいるため Jay は参加しませんでした。",
   "multiplayer.room.full_lan_ended": "範囲「LAN 全体」を終了しました：{0}",
   "multiplayer.room.invalid_code": "招待の形式が正しくありません。JAY2-XXXX…-XXXX…-X のような形です（JAY2- の後に 26 文字が 2 つ。JAY2-T2D-… のようにモードが入ることもあります）",
   "multiplayer.room.latency": "、遅延 {0:F0} ms",

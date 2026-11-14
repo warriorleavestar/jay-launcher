@@ -1052,6 +1052,8 @@
   "multiplayer.room.created_full_lan": "Room created (scope: whole LAN). Select “Invite” to make an invite. If friends can't connect, allow Java (javaw.exe) through the “Amber LAN” network in Windows Firewall.",
   "multiplayer.room.created_full_lan_unix": "Room created (scope: whole LAN). Select “Invite” to make an invite. If friends can't connect, check whether the system firewall blocks incoming connections to Java (macOS: System Settings → Network → Firewall).",
   "multiplayer.room.extreme_unsupported": "This room uses extreme encryption, which needs ML-KEM, and Jay couldn't set it up on this computer. Ask the host to switch to “High encryption”.",
+  "multiplayer.room.knock_pending": "You're still waiting to be let into a room. Cancel that first if you want to open your own room.",
+  "multiplayer.invite.approved_busy": "You were let in, but you're already in another room, so Jay didn't join.",
   "multiplayer.room.full_lan_ended": "The whole-LAN scope ended: {0}",
   "multiplayer.room.invalid_code": "That isn't a valid invite. It should look like JAY2-XXXX…-XXXX…-X (two 26-character parts after JAY2-, sometimes with a mode part such as JAY2-T2D-…)",
   "multiplayer.room.latency": ", latency {0:F0} ms",

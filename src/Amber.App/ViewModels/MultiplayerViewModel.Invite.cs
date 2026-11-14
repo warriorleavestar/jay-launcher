@@ -754,6 +754,13 @@ public sealed partial class MultiplayerViewModel
                 SetStatus(StatusMessage.Warning("multiplayer.room.extreme_unsupported"));
                 return KnockEnd.NotAnswered;
             }
+            if (!IsIdle)
+            {
+                // Something else put me in a room meanwhile: joining now would replace it, so this approval is not used.
+                if (guestDirect is not null) await guestDirect.DisposeAsync();
+                SetStatus(StatusMessage.Warning("multiplayer.invite.approved_busy"));
+                return KnockEnd.NotAnswered;
+            }
             IsKnocking = false;
             if (guestDirect is not null)
             {
