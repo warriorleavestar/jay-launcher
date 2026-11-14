@@ -822,6 +822,9 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     /// <summary>A whole-LAN start is waiting for the permission prompt: another start can't begin meanwhile.</summary>
     private bool _awaitingPermission;
 
+    /// <summary>Cancels a whole-LAN start that waits for the permission prompt; <see cref="StopSession"/> cancels it.</summary>
+    private CancellationTokenSource? _permissionCts;
+
     /// <summary>Counts <see cref="StopSession"/> calls, so a start that waited for the permission prompt sees it was stopped meanwhile.</summary>
     private int _sessionStops;
 
@@ -839,8 +842,15 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 _awaitingPermission = true;
                 SetStatus(StatusMessage.Info("multiplayer.room.waiting_permission"));
                 IEasyTierSession started;
-                try { started = await Task.Run(() => EasyTierElevatedSession.Start(_service.EasyTier, options, workDir)); }
-                finally { _awaitingPermission = false; }
+                // Cancelled when the user leaves: that closes the Mac/Linux password dialog.
+                using var leave = new CancellationTokenSource();
+                _permissionCts = leave;
+                try { started = await EasyTierElevatedSession.StartAsync(_service.EasyTier, options, workDir, leave.Token); }
+                finally
+                {
+                    _awaitingPermission = false;
+                    if (_permissionCts == leave) _permissionCts = null;
+                }
                 if (stops != _sessionStops || !IsIdle)
                 {
                     // Left the room or started something else while the prompt was open.
@@ -850,6 +860,11 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 _session = started;
             }
             else _session = EasyTierSession.Start(_service.EasyTier, options, workDir);
+        }
+        catch (OperationCanceledException) when (stops != _sessionStops)
+        {
+            // Left the room while the permission prompt was open.
+            return false;
         }
         catch (Exception e) when (e is OperationCanceledException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException or PlatformNotSupportedException)
         {
@@ -1290,7 +1305,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 else
                 {
                     old.Dispose();
-                    var next = await Task.Run(() => EasyTierElevatedSession.Start(_service.EasyTier, options, Path.Combine(EasyTierWorkRoot, "run-lan")));
+                    var next = await EasyTierElevatedSession.StartAsync(_service.EasyTier, options, Path.Combine(EasyTierWorkRoot, "run-lan"), lifetime.Token);
                     replacement = next;
                     await next.WaitForReadyAsync(lifetime.Token);
                     if (_sessionCts != lifetime || _direct != direct) return false;
@@ -1586,6 +1601,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private void StopSession()
     {
         _sessionStops++;
+        _permissionCts?.Cancel();
+        _permissionCts = null;
         _lastPeers = null;
         _lastPeersSession = null;
         _timer?.Stop();

@@ -20,11 +20,27 @@ public sealed class MultiplayerPeerPollingTests
     [Fact]
     public void TheWholeLanPermissionPromptIsNotWaitedForOnTheUiThread()
     {
-        var dir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Amber.App", "ViewModels");
-        var source = File.ReadAllText(Path.Combine(dir, "MultiplayerViewModel.cs"));
-        // Starting or switching a whole-LAN session waits for the system's permission prompt: it runs off the UI thread.
-        foreach (var line in source.Split('\n').Where(l => l.Contains("EasyTierElevatedSession.Start(", StringComparison.Ordinal)))
-            Assert.Contains("Task.Run(", line, StringComparison.Ordinal);
+        // The source folder, found by walking up from the test output (its depth depends on the build's runtime folder).
+        var dir = AppContext.BaseDirectory;
+        while (!Directory.Exists(Path.Combine(dir, "Amber.App", "ViewModels"))) dir = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(dir))!;
+        dir = Path.Combine(dir, "Amber.App", "ViewModels");
+        // Every partial of the room page, not just the main file: rekeys and switches live in the others.
+        var files = Directory.GetFiles(dir, "MultiplayerViewModel*.cs");
+        Assert.Contains(files, f => Path.GetFileName(f) == "MultiplayerViewModel.Invite.cs");
+        var source = string.Join("\n", files.Select(File.ReadAllText));
+        // Starting or switching a whole-LAN session waits for the system's permission prompt: never with the blocking
+        // start, and always with a token, so leaving the room closes the prompt.
+        Assert.DoesNotContain("EasyTierElevatedSession.Start(", source, StringComparison.Ordinal);
+        var starts = System.Text.RegularExpressions.Regex.Matches(source, @"EasyTierElevatedSession\.StartAsync\(([^;]*)\);");
+        Assert.NotEmpty(starts);
+        foreach (System.Text.RegularExpressions.Match start in starts)
+            Assert.Matches(@"[Tt]oken$", start.Groups[1].Value.Trim());
+        Assert.DoesNotContain("bool SwitchNetwork(", source, StringComparison.Ordinal);
+        // A live whole-LAN session changes network through its guard, without a new prompt.
+        var invite = File.ReadAllText(Path.Combine(dir, "MultiplayerViewModel.Invite.cs"));
+        var switchNetwork = invite[invite.IndexOf("Task<bool> SwitchNetworkAsync(", StringComparison.Ordinal)..];
+        switchNetwork = switchNetwork[..switchNetwork.IndexOf("private async Task SwitchDirectRoomAsync(", StringComparison.Ordinal)];
+        Assert.Contains(".RestartAsync(options, token)", switchNetwork, StringComparison.Ordinal);
         Assert.Contains("multiplayer.room.waiting_permission", source, StringComparison.Ordinal);
     }
 }

@@ -393,7 +393,7 @@ public sealed partial class MultiplayerViewModel
             foreach (var e in missed) members.Remove(e);
             for (var i = 0; i < Members.Count; i++)
                 if (missed.Any(e => e.PublicKey.AsSpan().SequenceEqual(Members[i].PublicKey))) Members[i] = Members[i] with { NeedsInvite = true };
-            if (!SwitchNetwork(room.Rekeyed(next.ToRekey()))) return;
+            if (!await SwitchNetworkAsync(r => ReferenceEquals(r, room) ? room.Rekeyed(next.ToRekey()) : null)) return;
             SetStatus(missed.Count > 0 && inviteRevoked ? StatusMessage.Warning("multiplayer.kick.invite_revoked_missed", item.Name, missed.Count)
                 : missed.Count > 0 ? StatusMessage.Warning("multiplayer.rekey.done_missed", item.Name, missed.Count)
                 : inviteRevoked ? StatusMessage.Warning("multiplayer.kick.invite_revoked", item.Name)
@@ -415,49 +415,85 @@ public sealed partial class MultiplayerViewModel
     }
 
     /// <summary>
-    /// 换到新的房间网络：关掉旧的 EasyTier 和封装通道，按同样的设置用新网络名和密钥重开（旧网络不留）。
+    /// 换到新的房间网络：关掉旧的封装通道，按同样的设置用新网络名和密钥重开 EasyTier（旧网络不留）。
     /// 房主的聊天服务和本机聊天连接不动；加入方的聊天连接经旧网络，丢掉重连。
+    /// <para>A live whole-LAN session restarts through its elevated guard, which needs no new permission prompt. Otherwise a
+    /// whole-LAN start waits for the prompt off the UI thread and is cancelled when the user leaves. Switches share the
+    /// exit-switch lock, so an exit or hotspot change never restarts the component with the old room. <paramref name="pick"/>
+    /// gets the room in use once the lock is held and returns the room to switch to, or null when the switch no longer
+    /// applies.</para>
     /// </summary>
-    private bool SwitchNetwork(RoomCode next)
+    private async Task<bool> SwitchNetworkAsync(Func<RoomCode, RoomCode?> pick)
     {
-        // 换网络：远程控制会话一律断开（经旧网络的连接本来也要断）。
-        StopAllRemote();
-        if (_direct is { } direct)
+        var lifetime = _sessionCts;
+        if (_direct is null && lifetime is null) return false;
+        var token = lifetime?.Token ?? CancellationToken.None;
+        var stops = _sessionStops;
+        try { await _exitSwitchLock.WaitAsync(token); }
+        catch (OperationCanceledException) { return false; }
+        try
         {
-            // 直连房间：直连桥不动（钥匙和房间无关），只让直连会话换上新房间重启 EasyTier。
+            if (stops != _sessionStops || _room is not { } current || pick(current) is not { } next) return false;
+            // 换网络：远程控制会话一律断开（经旧网络的连接本来也要断）。
+            StopAllRemote();
+            if (_direct is { } direct)
+            {
+                // 直连房间：直连桥不动（钥匙和房间无关），只让直连会话换上新房间重启 EasyTier。
+                _room = next;
+                _ = SwitchDirectRoomAsync(direct, next);
+                AfterNetworkSwitch();
+                return true;
+            }
+            if (_session is not { } old) return false;
+            var options = old.Options with { Room = next };
+            StopTransport();
+            try
+            {
+                var workDir = Path.Combine(EasyTierWorkRoot, options.Tun ? "run-lan" : "run");
+                if (options.Tun && old is EasyTierElevatedSession { HasExited: false } elevated)
+                    await elevated.RestartAsync(options, token);
+                else
+                {
+                    old.Dispose();
+                    _session = null;
+                    _service.ActiveMultiplayer = null;
+                    if (options.Tun)
+                    {
+                        _awaitingPermission = true;
+                        SetStatus(StatusMessage.Info("multiplayer.room.waiting_permission"));
+                        IEasyTierSession started;
+                        try { started = await EasyTierElevatedSession.StartAsync(_service.EasyTier, options, workDir, token); }
+                        finally { _awaitingPermission = false; }
+                        if (stops != _sessionStops)
+                        {
+                            started.Dispose();
+                            return false;
+                        }
+                        _session = started;
+                    }
+                    else _session = EasyTierSession.Start(_service.EasyTier, options, workDir);
+                }
+            }
+            catch (Exception e) when (e is OperationCanceledException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException or PlatformNotSupportedException or TimeoutException)
+            {
+                // Left the room while waiting: StopSession already ended everything.
+                if (stops != _sessionStops) return false;
+                StopSession();
+                SetStatus(StatusMessage.Failure("multiplayer.room.start_failed", e, ErrorText.Of(e)));
+                return false;
+            }
+            if (stops != _sessionStops) return false;
+            _service.ActiveMultiplayer = _session;
+            if (!TryStartTransport(_session?.Options ?? options))
+            {
+                StopSession();
+                return false;
+            }
             _room = next;
-            _ = SwitchDirectRoomAsync(direct, next);
             AfterNetworkSwitch();
             return true;
         }
-        if (_session is not { } old) return false;
-        var options = old.Options with { Room = next };
-        StopTransport();
-        old.Dispose();
-        _session = null;
-        _service.ActiveMultiplayer = null;
-        try
-        {
-            var workDir = Path.Combine(EasyTierWorkRoot, options.Tun ? "run-lan" : "run");
-            _session = options.Tun
-                ? EasyTierElevatedSession.Start(_service.EasyTier, options, workDir)
-                : EasyTierSession.Start(_service.EasyTier, options, workDir);
-        }
-        catch (Exception e) when (e is OperationCanceledException or IOException or System.ComponentModel.Win32Exception or InvalidOperationException or PlatformNotSupportedException)
-        {
-            StopSession();
-            SetStatus(StatusMessage.Failure("multiplayer.room.start_failed", e, ErrorText.Of(e)));
-            return false;
-        }
-        _service.ActiveMultiplayer = _session;
-        if (!TryStartTransport(_session?.Options ?? options))
-        {
-            StopSession();
-            return false;
-        }
-        _room = next;
-        AfterNetworkSwitch();
-        return true;
+        finally { _exitSwitchLock.Release(); }
     }
 
     private async Task SwitchDirectRoomAsync(DirectSession direct, RoomCode next)
@@ -501,7 +537,8 @@ public sealed partial class MultiplayerViewModel
     {
         if (_chat != client || !IsJoined || _room is not { FromInvite: true } room || next.Epoch <= room.Epoch) return;
         SetStatus(StatusMessage.Info("multiplayer.rekey.reconnecting"));
-        SwitchNetwork(room.Rekeyed(next));
+        // Picked again once the switch lock is held: a newer key that arrived meanwhile still wins, an older one is dropped.
+        _ = SwitchNetworkAsync(r => r is { FromInvite: true } && next.Epoch > r.Epoch ? r.Rekeyed(next) : null);
     }
 
     /// <summary>敲门的人通过了握手：在界面上放一张卡片，等房主点；超时或者房间关了算拒绝。</summary>

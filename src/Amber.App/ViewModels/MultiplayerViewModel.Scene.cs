@@ -223,7 +223,7 @@ public sealed partial class MultiplayerViewModel
                 switched = stand(next);
                 if (switched) _room = next;
             }
-            else switched = ReferenceEquals(_room, room) && SwitchNetwork(next);
+            else switched = await SwitchNetworkAsync(r => ReferenceEquals(r, room) ? next : null);
             if (switched) SetStatus(StatusMessage.Info(on ? "multiplayer.sees.relay_only.turned_on" : "multiplayer.sees.relay_only.turned_off"));
             // Still in the room, so nothing was restarted: say the switch did not take. (When the restart itself
             // failed, the room is gone and its own message stands.)
