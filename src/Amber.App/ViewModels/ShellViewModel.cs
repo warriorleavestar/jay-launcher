@@ -185,6 +185,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 _main.CurrentPage = PageFor(route);
                 if (_main.CurrentPage is HelpCenterViewModel help) help.ShowArticle(route[1]);
                 if (_main.CurrentPage is MultiplayerViewModel multiplayer) multiplayer.ShowRoute(route[1]);
+                if (_main.CurrentPage is PeopleViewModel people) people.ShowRoute(route[1]);
                 // The instance page was already showing another instance: it does not follow the focus change by itself
                 // (so work in progress is not moved to another instance), but an explicit library/{id} switches it.
                 if (instanceId is not null && _main.CurrentPage is InstanceViewModel page && !page.IsBusy

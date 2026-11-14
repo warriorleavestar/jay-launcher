@@ -65,6 +65,35 @@ public sealed class TrustedMembers(string path)
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Trusts exactly this device and no others: no Jay account is stored with it, so a new device of the same person
+    /// still has to knock and be confirmed. An account stored earlier for this key is dropped.
+    /// </summary>
+    public void AddDevice(byte[] publicKey, string name)
+    {
+        if (publicKey.Length != 32) throw new ArgumentException(null, nameof(publicKey));
+        lock (_gate)
+        {
+            var list = Load();
+            list.RemoveAll(m => m.PublicKey.AsSpan().SequenceEqual(publicKey));
+            list.Add(new TrustedMember((byte[])publicKey.Clone(), KnockProtocol.SanitizeName(name)));
+            Save(list);
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>Stops trusting this one device only, leaving the person's other devices as they are.</summary>
+    public void RemoveDevice(byte[] publicKey)
+    {
+        lock (_gate)
+        {
+            var list = Load();
+            if (list.RemoveAll(m => m.PublicKey.AsSpan().SequenceEqual(publicKey)) == 0) return;
+            Save(list);
+        }
+        Changed?.Invoke();
+    }
+
     /// <summary>Stops trusting the person: this device, and every other device of theirs trusted under the same Jay account.</summary>
     public void Remove(byte[] publicKey)
     {

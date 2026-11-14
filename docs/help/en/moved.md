@@ -18,6 +18,7 @@ Jay's layout has four places: the library, Discover, Multiplayer and Friends. He
 - **Toolbox** → clean-up is in Settings › Storage, the Java download in Settings › Game defaults, the update check in Settings › About.
 - **Accounts** → **Me**: click your avatar at the bottom left. Your friend code and your devices are there too.
 - **Light/dark and language** (they were in the avatar's menu) → **Me** › Appearance, and Settings as before.
-- **Friends** (they were only in Multiplayer settings) → the Friends entry in the sidebar.
+- **Friends** (they were in Multiplayer settings) → the Friends entry in the sidebar. Adding a friend, backup and restore are there.
+- **Trusted people** (a list in Multiplayer settings) → the switch "Let them straight in when they knock" on each person on the Friends page.
 - Which network Jay is using → the network status at the top right, on every page.
 - Ctrl+K finds anything, including the old page names.

@@ -729,8 +729,8 @@ internal sealed partial class SelfTest
     }
 
     /// <summary>
-    /// Contacts (zero-leak codes): my contact code, a pasted JAYC1 lands in the card, a request from someone, the four-emoji
-    /// card with names for screen readers, confirming, and a mailed invite in the activity centre. The other side is a
+    /// Contacts (zero-leak codes) as far as the multiplayer page goes: a pasted JAYC1 is sent on to the Friends page, a
+    /// request from someone, the four emoji with names for screen readers, confirming, and a mailed invite in the activity centre. The other side is a
     /// second contact book fed by hand, so nothing goes over the network.
     /// </summary>
     private async Task ContactsAsync(MultiplayerViewModel vm, MultiplayerPage page)
@@ -743,8 +743,14 @@ internal sealed partial class SelfTest
             if (File.Exists(Path.Combine(dir, f))) File.Delete(Path.Combine(dir, f));
         Dispatcher.UIThread.Invoke(() => vm.ContactsDir = dir);
         await Task.Delay(200);
-        Check("Contacts: card with my JAYC1 contact code and the add box", Shown("ContactsCard") is not null && Shown("MyContactCodeText") is not null
-            && vm.MyContactCode.StartsWith("JAYC1-") && Shown("ContactCodeBox") is not null && Shown("ContactsEmpty") is not null);
+        // Friends have their own page now (the "friends" scope checks it). Here: what the multiplayer page still does with
+        // a friend code, and the requests the activity centre gets. Going to the Friends page is recorded, not followed,
+        // so this page stays up for the checks after this one.
+        var navigate = vm.Navigate;
+        string? went = null;
+        vm.Navigate = route => went = route;
+        Check("Contacts: multiplayer settings no longer hold the friends card, only a link to the Friends page", Shown("ContactsCard") is null && Shown("OpenFriendsButton") is not null
+            && vm.MyContactCode.StartsWith("JAYC1-"));
 
         using var peer = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
         var code = Amber.Core.Multiplayer.Contacts.ContactCode.Format(peer.PublicKey);
@@ -761,8 +767,15 @@ internal sealed partial class SelfTest
             vm.PasteCode(code);
         });
         await Task.Delay(300);
-        Check("Contacts: Ctrl+V of a contact code fills the contacts box, nothing sent", vm.IsSettingsTab && vm.ContactCodeInput == code && !vm.HasContactRequests);
-        Dispatcher.UIThread.Invoke(() => vm.ContactCodeInput = "");
+        Check("Contacts: Ctrl+V of a contact code goes to the Friends page's add panel with the code filled in, nothing sent", went == "people/add" && vm.ContactCodeInput == code
+            && !vm.HasContactRequests, went ?? "");
+        // Back to multiplayer settings, where the checks after this one continue.
+        Dispatcher.UIThread.Invoke(() =>
+        {
+            vm.ContactCodeInput = "";
+            vm.ShowTabCommand.Execute("settings");
+        });
+        await Task.Delay(200);
 
         // They add me: request in the card and in the activity centre; I accept, they send their nonce, the emoji appear.
         var peerBook = new Amber.Core.Multiplayer.Contacts.ContactBook(Path.Combine(dir, "peer.json")) { Me = peer.PublicKey };
@@ -779,17 +792,17 @@ internal sealed partial class SelfTest
         });
         await Task.Delay(400);
         var item = vm.ContactRequests.FirstOrDefault();
-        var emoji = page.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault(i => i.Name == "ContactEmoji" && i.IsEffectivelyVisible);
-        Check("Contacts: the four emoji, big, each named for screen readers, same as the other side", item is { IsComparing: true } && emoji is not null
-            && Avalonia.Automation.AutomationProperties.GetName(emoji) == item.EmojiSpoken && item.Emoji.Count == 4
+        var compare = main.Service.Requests.Pending.FirstOrDefault(r => r.Spec.Kind == "contact-compare");
+        Check("Contacts: the four emoji are ready, each named for screen readers, same as the other side; the activity centre says so", item is { IsComparing: true, Emoji.Count: 4 }
+            && item.Emoji.All(e => e.Name.Length > 0)
             && item.Emoji.Select(e => e.Emoji).SequenceEqual(peerBook.Pending.Single().Sas!.Select(i => Amber.Core.Multiplayer.Contacts.ContactHandshake.Emoji[i]))
-            && Visible("ConfirmContactButton") is not null && Visible("RejectContactButton") is not null, item?.EmojiSpoken);
-        Dispatcher.UIThread.Invoke(() => emoji?.BringIntoView());
+            && compare is not null && compare.Spec.Body == L.T("multiplayer.contacts.compare.request_body"), item?.EmojiSpoken);
+        went = null;
+        if (compare is not null) main.Service.Requests.Resolve(compare, "open", Amber.Core.Activity.RequestSource.Bar);
+        Check("Contacts: [Open] on that request goes to the Friends page, where the emoji are", await WaitAsync(() => went == "people/add", 3), went ?? "");
+        Dispatcher.UIThread.Invoke(() => vm.ConfirmContactCommand.Execute(vm.ContactRequests.FirstOrDefault()));
         await Task.Delay(300);
-        await ShotAsync("contacts-emoji");
-        Press(Visible("ConfirmContactButton"));
-        await Task.Delay(300);
-        Check("Contacts: confirming saves Robin as a contact", vm.ContactList.SingleOrDefault()?.Name == "Robin" && !vm.HasContactRequests && Shown("ContactsEmpty") is null);
+        Check("Contacts: confirming saves Robin as a contact", vm.ContactList.SingleOrDefault()?.Name == "Robin" && !vm.HasContactRequests);
 
         // A mailed invite from Robin: a request in the activity centre with [Join], timing out to Ignore.
         using var host = Amber.Core.Multiplayer.Transport.X25519KeyPair.Generate();
@@ -799,12 +812,10 @@ internal sealed partial class SelfTest
         Check("Contacts: a mailed invite is an activity request with Join, defaulting to Ignore", mailed is not null && mailed.Spec.Title.Contains("Robin's world")
             && mailed.Spec.Choices.Any(c => c.Id == "join") && mailed.Spec.TimeoutChoice == "ignore");
         if (mailed is not null) main.Service.Requests.Resolve(mailed, "ignore", Amber.Core.Activity.RequestSource.Bar);
-        Dispatcher.UIThread.Invoke(() => Shown("ContactListView")?.BringIntoView());
-        await Task.Delay(300);
-        await ShotAsync("contacts-list");
         Dispatcher.UIThread.Invoke(() => vm.RemoveContactCommand.Execute(vm.ContactList[0]));
         await Task.Delay(200);
         Check("Contacts: removing empties the list", !vm.HasContacts);
         Check("Contacts: removing a friend takes the room they invited me to off \"where to play\"", vm.FriendRooms.Count == 0);
+        vm.Navigate = navigate;
     }
 }

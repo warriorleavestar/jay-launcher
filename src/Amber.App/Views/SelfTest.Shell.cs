@@ -417,8 +417,9 @@ internal sealed partial class SelfTest
     }
 
     /// <summary>
-    /// "Friends", the fourth entry: empty state, the list with one row per person, a friend's devices and safety codes,
-    /// which network delivers to them, and what "for a child" leaves of it.
+    /// "Friends", the fourth entry, as far as the shell goes: the entry, the empty state, one row per person, the
+    /// conversation at three widths in two languages, the <c>people/add</c> route and what "for a child" leaves of it.
+    /// The page itself (adding, the emoji check, people I've met, the conversation) is the <c>friends</c> scope.
     /// </summary>
     private async Task PeoplePageAsync(ShellViewModel shell)
     {
@@ -439,10 +440,10 @@ internal sealed partial class SelfTest
         }
         Check("朋友页：侧栏第四个入口选中", shell.SelectedSection?.Id == "people" && shell.Sections.Select(x => x.Id).SequenceEqual(new[] { "library", "discover", "multiplayer", "people" }),
             string.Join(",", shell.Sections.Select(x => x.Id)));
-        Check("朋友页：还没有朋友时给【复制我的好友码】和【添加朋友…】，没有空列表", Dispatcher.UIThread.Invoke(() =>
-            page.PeopleEmpty.IsEffectivelyVisible && page.CopyMyCodeButton.IsEffectivelyVisible && page.EmptyAddButton.IsEffectivelyVisible && !page.FriendListCard.IsVisible));
-        Check("朋友页：没连能送信的网络时写明，并给【连接网络】", Dispatcher.UIThread.Invoke(() =>
-            page.DeliveryText.Text == L.T("people.delivery.none") && page.ConnectNetworkButton.IsEffectivelyVisible));
+        Check("朋友页：还没有朋友时给【复制我的好友码】和【贴上对方的好友码】，没有空列表", Dispatcher.UIThread.Invoke(() =>
+            page.PeopleEmpty.IsEffectivelyVisible && page.EmptyCopyButton.IsEffectivelyVisible && page.EmptyAddButton.IsEffectivelyVisible && !page.FriendListCard.IsVisible));
+        Check("朋友页：没连能送信的网络时在顶上写明，并给【连接网络】和【加朋友】", Dispatcher.UIThread.Invoke(() =>
+            page.DeliveryText.Text == L.T("people.delivery.none") && page.ConnectNetworkButton.IsEffectivelyVisible && page.AddFriendButton.IsEffectivelyVisible));
         await ShotAsync("shell-people-empty");
 
         byte[] Key(byte n)
@@ -459,14 +460,12 @@ internal sealed partial class SelfTest
         ]));
         var listed = await WaitAsync(() => Dispatcher.UIThread.Invoke(() => page.FriendListCard.IsEffectivelyVisible && people.Friends.Count == 2), 3);
         Check("朋友页：一个人一行（同一 Jay 账户的两台设备算一个人）", listed && Dispatcher.UIThread.Invoke(() =>
-            !page.PeopleEmpty.IsVisible && page.PeoplePickHint.IsEffectivelyVisible && page.AddFriendButton.IsEffectivelyVisible), string.Join(",", people.Friends.Select(f => f.Name)));
+            !page.PeopleEmpty.IsEffectivelyVisible && page.PeoplePickHint.IsEffectivelyVisible), string.Join(",", people.Friends.Select(f => f.Name)));
         Dispatcher.UIThread.Invoke(() => page.FriendList.SelectedItem = people.Friends.First(f => f.Name == "Bob"));
         await Task.Delay(300);
-        Check("朋友页：选中后写出 TA 的 Jay 账户、每台设备和安全码", Dispatcher.UIThread.Invoke(() =>
-            page.FriendDetail.IsEffectivelyVisible && page.FriendName.Text == "Bob" && people.Selected is { HasJay: true, Devices.Count: 2 }
-            && page.FriendDevices.GetVisualDescendants().OfType<SelectableTextBlock>().Count() == 2 && !page.PeoplePickHint.IsVisible));
-        Check("朋友页：没开房间时【邀请到我的房间】不能点，并写明先开房间", Dispatcher.UIThread.Invoke(() =>
-            !page.InviteFriendButton.IsEffectivelyEnabled && people.ShowInviteHint));
+        Check("朋友页：选中后右边是和 TA 的对话，顶上常驻“端到端加密 · 已核对”", Dispatcher.UIThread.Invoke(() =>
+            page.FriendDetail.IsEffectivelyVisible && page.FriendName.Text == "Bob" && people.Selected is { HasJay: true, DeviceItems.Count: 2 }
+            && page.SafetyChipText.Text == L.T("people.safety.verified") && !page.PeoplePickHint.IsVisible));
         // The multiplayer page rebuilds its list on every change: the selection stays on the same person.
         Dispatcher.UIThread.Invoke(mp.RefreshContacts);
         await Task.Delay(200);
@@ -482,9 +481,10 @@ internal sealed partial class SelfTest
                 var bounds = new Rect(0, 0, window.Bounds.Width, window.Bounds.Height);
                 bool Inside(Control c) => c.IsEffectivelyVisible && c.TranslatePoint(new Point(0, 0), window) is { } p
                     && bounds.Contains(new Rect(p, c.Bounds.Size).Deflate(0.5));
-                Check($"朋友页（{lang} {w}×{h}）：列表、详情和送达行都在窗口里", Dispatcher.UIThread.Invoke(() =>
-                    Inside(page.FriendListCard) && Inside(page.FriendDetailCard) && Inside(page.PeopleStatusCard)
-                    && (w < 700 ? page.FriendDetailCard.Bounds.Top >= page.FriendListCard.Bounds.Bottom - 1 : page.FriendDetailCard.Bounds.Left >= page.FriendListCard.Bounds.Right - 1)),
+                Check($"朋友页（{lang} {w}×{h}）：顶上一行和对话都在窗口里，窄窗口只显示选中的人", Dispatcher.UIThread.Invoke(() =>
+                    Inside(page.FriendDetailCard) && Inside(page.PeopleStatusCard)
+                    && (w < 700 ? !page.FriendListCard.IsVisible && page.BackToListButton.IsEffectivelyVisible
+                        : Inside(page.FriendListCard) && page.FriendDetailCard.Bounds.Left >= page.FriendListCard.Bounds.Right - 1)),
                     $"list {page.FriendListCard.Bounds} detail {page.FriendDetailCard.Bounds}");
                 await ShotAsync($"shell-people-{lang}-{w}x{h}");
             }
@@ -494,9 +494,11 @@ internal sealed partial class SelfTest
         window.Height = 700;
         await Task.Delay(400);
 
-        Dispatcher.UIThread.Invoke(() => page.ManageFriendsButton.Command?.Execute(null));
-        var card = await WaitAsync(() => window.RevealedField?.Name == "ContactsCard", 3);
-        Check("【管理朋友】去联机设置里的朋友卡", card && main.CurrentPage is MultiplayerViewModel { Tab: MultiplayerTab.Settings }, $"{shell.Router.Current} {window.RevealedField?.Name}");
+        shell.Navigate("people/add");
+        await Task.Delay(300);
+        Check("people/add 打开朋友页的加朋友面板", main.CurrentPage is PeopleViewModel && people.IsAdding && Dispatcher.UIThread.Invoke(() => page.AddFriendCard.IsEffectivelyVisible),
+            shell.Router.Current.ToString());
+        Dispatcher.UIThread.Invoke(() => people.IsAdding = false);
 
         // "For a child": no public networks, so no friends through them. The page says so instead of showing a dead list.
         var child = settings.ChildMode;
