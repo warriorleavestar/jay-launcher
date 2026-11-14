@@ -497,6 +497,7 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         }
         // 连续勾选时只认最后一次的结果：旧的还在算的作废，算完也不会盖掉新的。
         _pendingCheck?.Cancel();
+        _pendingCheck?.Dispose();
         var cts = _pendingCheck = new CancellationTokenSource();
         var mods = Mods.Select(m => m.Mod).ToList();
         _ = UpdateAsync();
@@ -808,12 +809,15 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         _modsLoadedFor = null;
         var list = await Task.Run(() => new ModManager(c.ModsDir).List());
         if (generation != _modsGeneration || Current != c) return;
-        foreach (var mod in list)
+        BulkMods(() =>
         {
-            var item = new ModItem(mod) { EnabledChanged = RecheckCompat };
-            Mods.Add(item);
-            if (mod.Icon is { } icon) _ = DecodeIconAsync(item, icon);
-        }
+            foreach (var mod in list)
+            {
+                var item = new ModItem(mod) { EnabledChanged = OnModEnabledChanged };
+                Mods.Add(item);
+                if (mod.Icon is { } icon) _ = DecodeIconAsync(item, icon);
+            }
+        });
         ModSummary = L.P("instance.mods.summary", list.Count, list.Count, list.Count(m => m.Enabled));
         _modsLoadedFor = c;
         RecheckCompat();
@@ -849,7 +853,10 @@ public sealed partial class InstanceViewModel : PageViewModel, ISnapshotDemo
         // Forgified Fabric API 提供 fabric-api。
         if (ids.Contains("fabric_api") || enabled.Any(m => m.Mod.FileName.Contains("forgified-fabric-api", StringComparison.OrdinalIgnoreCase))) ids.Add("fabric-api");
         var connector = ConnectorInstaller.IsInstalled(enabled.Select(m => m.Requirements));
-        foreach (var m in Mods) m.Compat = m.Enabled ? ModCompat.Check(m.Requirements, c.Loader, c.McVersion, ids, connector) : null;
+        BulkMods(() =>
+        {
+            foreach (var m in Mods) m.Compat = m.Enabled ? ModCompat.Check(m.Requirements, c.Loader, c.McVersion, ids, connector) : null;
+        });
         var problems = Mods.Count(m => m.HasCompatProblem);
         NeedsConnector = !connector && Mods.Any(m => m.Compat?.Level == CompatLevel.NeedsConnector);
         CompatSummary = problems == 0 ? (Mods.Count > 0 ? L.T("instance.mods.all_matching") : "") : L.P("instance.mods.mismatched", problems, problems);
