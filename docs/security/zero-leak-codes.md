@@ -105,8 +105,9 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 
 ### Trustee keys for the built-in network (offline, one per person)
 
-The built-in network's directory certificates, and reviewed network strings, need 2 of the 3 Jay trustees
-(`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
+The built-in network's directory certificates, and reviewed network strings, need `JayTrust.Need` of the Jay trust keys
+(`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). The goal is 2 of 3 trustees; for now there are two keys, one
+trustee's own key and their offline cold backup, and both must sign. Each key is made on its own offline machine:
 
 ```bash
 jay-server network root-key --out <usb>/jay-trustee.key --paper
@@ -117,16 +118,18 @@ jay-server network paper-check --key <usb>/jay-trustee.key   # check the hand-co
 # on each directory node: print its directory public key (makes directory.key on first use)
 jay-server network dir-key --dir <node data dir>
 
-# trustee 1, offline, with only that public key:
+# the first key, offline, with only that public key:
 jay-server network dir-cert --root <usb>/jay-trustee.key --network jay-public-v1 --dir-key <node's key> --out directory.cert --days 365
-# trustee 2, on their own offline machine, adds their signature to the same file:
+# the second key, on its own offline machine, adds its signature to the same file:
 jay-server network dir-cert --cosign directory.cert --root <usb>/jay-trustee.key
 # copy directory.cert into the node's data dir; the node logs "directory certificate" at start
 ```
 
 No trustee key goes on a server, CI, a cloud drive, a chat or the repository. Certificates are not secret. A new or
-re-keyed node needs only a new certificate, not a Jay release. If one trustee loses their key, the other two can still
-sign; replacing a trustee needs a release with the new public key.
+re-keyed node needs only a new certificate, not a Jay release. With two keys and both needed, losing either one stops
+new certificates and reviews until a release carries a replacement key (once there are three trustees, the other two can
+still sign); replacing a key always needs a release with the new public key. Until a third trustee joins, this guards
+against one stolen key, not against that one person.
 
 ## Direct links without an IP in any code (done)
 
