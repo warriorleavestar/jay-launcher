@@ -96,6 +96,7 @@ public static class RemoteGeometry
     /// <summary>按 s×s 取平均缩小（s=1 时直接复制）。</summary>
     public static void Downscale(ScreenFrame source, ScreenFrame target, int s)
     {
+        if (ReferenceEquals(source, target)) throw new ArgumentException("source and target must differ", nameof(target));
         if (s <= 1)
         {
             target.CopyFrom(source);

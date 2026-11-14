@@ -25,6 +25,8 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private int _ended;
     private int _closed;
+    private readonly Lock _registrationsGate = new();
+    private readonly List<CancellationTokenRegistration> _registrations = [];
     private long _lastReceived = Stopwatch.GetTimestamp();
     private Task? _readLoop;
 
@@ -64,8 +66,22 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     /// <summary>这次会话结束时一起结束（比如成员钥匙作废）。</summary>
     public void EndWith(CancellationToken token)
     {
-        if (token.IsCancellationRequested) Abort(RemoteEnd.Disconnected);
-        else token.Register(() => Abort(RemoteEnd.Disconnected));
+        if (token.IsCancellationRequested)
+        {
+            Abort(RemoteEnd.Disconnected);
+            return;
+        }
+        var registration = token.Register(() => Abort(RemoteEnd.Disconnected));
+        // Keep the registration so Close can drop it; otherwise the token source keeps this session alive.
+        lock (_registrationsGate)
+        {
+            if (Volatile.Read(ref _closed) == 0)
+            {
+                _registrations.Add(registration);
+                return;
+            }
+        }
+        registration.Unregister();
     }
 
     protected async Task<bool> SendAsync(byte[] frame, CancellationToken ct = default)
@@ -103,6 +119,8 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     public async Task StopAsync(RemoteStopReason reason = RemoteStopReason.Normal)
     {
         if (HasEnded) return;
+        // Stop acting on the peer's input right away; sending Stop below may wait behind a large frame batch.
+        OnStopRequested();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
         var sent = await SendAsync(RemoteWire.Stop(reason), timeout.Token);
         if (Interlocked.Exchange(ref _ended, 1) != 0) return;
@@ -137,6 +155,14 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _closed, 1) != 0) return;
         try { _cts.Cancel(); } catch (ObjectDisposedException) { }
+        CancellationTokenRegistration[] registrations;
+        lock (_registrationsGate)
+        {
+            registrations = [.. _registrations];
+            _registrations.Clear();
+        }
+        // Unregister does not wait for a callback that is running (Close may be called from one).
+        foreach (var r in registrations) r.Unregister();
         if (_raw is SecureStream secure) secure.Abort();
         else _raw.Dispose();
     }
@@ -216,6 +242,9 @@ public abstract class RemoteEndpoint : IAsyncDisposable
 
     /// <summary>结束前的收尾（被控方松开按住的键）。</summary>
     protected virtual void OnEnding() { }
+
+    /// <summary>Called when StopAsync starts, before the Stop frame is sent.</summary>
+    protected virtual void OnStopRequested() { }
 
     /// <summary>读循环：逐帧交给 Handle，返回 false 表示协议错误。</summary>
     protected async Task ReadLoopAsync()
@@ -384,6 +413,13 @@ public sealed class RemoteSharer : RemoteEndpoint
         ControlChanged?.Invoke(allow);
     }
 
+    protected override void OnStopRequested()
+    {
+        // ReleaseAll takes the input lock, so no injection is still running once it returns.
+        _controlAllowed = false;
+        ReleaseAll();
+    }
+
     protected override void OnEnding()
     {
         _controlAllowed = false;
@@ -442,6 +478,8 @@ public sealed class RemoteSharer : RemoteEndpoint
                     continue;
                 }
                 var scale = RemoteGeometry.ScaleFor(raw.Width, raw.Height);
+                // The desktop grew past the threshold: downscale into a separate buffer, never into raw itself.
+                if (scale != 1 && ReferenceEquals(frame, raw)) frame = new ScreenFrame();
                 if (scale == 1 && !ReferenceEquals(frame, raw)) frame.CopyFrom(raw);
                 else if (scale != 1) RemoteGeometry.Downscale(raw, frame, scale);
                 _geometry = (_screen.Bounds, frame.Width, frame.Height);
