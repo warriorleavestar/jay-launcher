@@ -1361,6 +1361,42 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private bool _refreshing;
 
+    /// <summary>The last member list read from EasyTier, for the refreshes that skip reading it (see <see cref="ShouldQueryPeers"/>).</summary>
+    private List<PeerInfo>? _lastPeers;
+    private IEasyTierSession? _lastPeersSession;
+    private string _lastPeersKey = "";
+    private DateTime _peersSteadySince;
+    private int _peersSkipped;
+
+    /// <summary>
+    /// Every read of the member list starts an easytier-cli process. The refresh runs every 2 s; the list is read on every
+    /// one while the session is new or the list changed in the last 30 s, and on every third one (6 s) once it has stayed
+    /// the same, which is when nothing on the page depends on it changing quickly.
+    /// </summary>
+    internal static bool ShouldQueryPeers(bool haveList, TimeSpan steadyFor, int skipped) =>
+        !haveList || steadyFor < TimeSpan.FromSeconds(30) || skipped >= 2;
+
+    private async Task<List<PeerInfo>> ReadPeersAsync(IEasyTierSession session)
+    {
+        if (_lastPeers is { } cached && ReferenceEquals(_lastPeersSession, session) && !ShouldQueryPeers(true, DateTime.UtcNow - _peersSteadySince, _peersSkipped))
+        {
+            _peersSkipped++;
+            return cached;
+        }
+        var peers = await session.PeersAsync();
+        _peersSkipped = 0;
+        // Who is there and how they are reached: a change here keeps the fast refresh going.
+        var key = string.Join(";", peers.Select(p => p.Ip + "|" + p.Cost).Order(StringComparer.Ordinal));
+        if (_lastPeers is null || !ReferenceEquals(_lastPeersSession, session) || key != _lastPeersKey)
+        {
+            _lastPeersKey = key;
+            _peersSteadySince = DateTime.UtcNow;
+        }
+        _lastPeers = peers;
+        _lastPeersSession = session;
+        return peers;
+    }
+
     private async Task RefreshPeersAsync()
     {
         ExpireRoomGames();
@@ -1379,7 +1415,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         {
             SyncHotspotSharing();
             ExitWarning = _transport?.ExitProblem ?? "";
-            var peers = await session.PeersAsync();
+            var peers = await ReadPeersAsync(session);
             TickDirect(peers);
             if (UsingExit) OnPropertyChanged(nameof(ExitBanner));
             if (_session != session) return;
@@ -1550,6 +1586,8 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     private void StopSession()
     {
         _sessionStops++;
+        _lastPeers = null;
+        _lastPeersSession = null;
         _timer?.Stop();
         _timer = null;
         _sessionCts?.Cancel();
