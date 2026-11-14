@@ -1737,7 +1737,7 @@
   "mobile.enroll.button": "このスマートフォンを登録",
   "mobile.enroll.invalid": "招待が無効です",
   "mobile.tunnel.title": "ローカルゲートウェイは実行中です",
-  "mobile.tunnel.hint.android": "下の Jay 内蔵のゲームがこのアドレスに自動で参加するので、別のランチャーは要りません。プレイ中は Jay を開いたままにしてください。",
+  "mobile.tunnel.hint.android": "「ライブラリ」から Jay 内蔵のゲームを開くとこのアドレスに自動で参加するので、別のランチャーは要りません。プレイ中は Jay を開いたままにしてください。",
   "mobile.tunnel.hint.ios": "同じ iPhone または iPad の互換クライアントに上のアドレスを入力します。Jay を前面に保ってください。iOS はバックグラウンドでの継続動作を保証しません。",
   "mobile.tunnel.hint.mobile": "同じデバイスの互換クライアントに上のアドレスを入力し、Jay を前面に保ってください。",
   "mobile.tunnel.disconnect": "ゲートウェイを停止",

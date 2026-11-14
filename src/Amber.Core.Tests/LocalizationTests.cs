@@ -324,6 +324,12 @@ public partial class LocalizationTests
         var en = L.Load("en");
         Assert.DoesNotContain("another", en["mobile.tunnel.hint.android"], StringComparison.OrdinalIgnoreCase);
         Assert.Contains("built-in", en["mobile.tunnel.hint.android"], StringComparison.Ordinal);
+        // The built-in game is opened from the Library page, not from under the gateway card: every language names it.
+        foreach (var language in new[] { "en", "ja", "lzh", "zh-Hans", "zh-Hant" })
+        {
+            var table = L.Load(language);
+            Assert.Contains(table["shell.nav.library"], table["mobile.tunnel.hint.android"], StringComparison.Ordinal);
+        }
         Assert.Contains("No separate launcher", en["mobile.scope.description.android"], StringComparison.Ordinal);
     }
 

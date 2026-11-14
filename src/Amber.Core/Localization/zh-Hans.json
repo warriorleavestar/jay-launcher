@@ -1737,7 +1737,7 @@
   "mobile.enroll.button": "登记这台手机",
   "mobile.enroll.invalid": "邀请无效",
   "mobile.tunnel.title": "本机网关已开启",
-  "mobile.tunnel.hint.android": "下面 Jay 内置的游戏会自己连上这个地址，不需要别的启动器。玩的时候请让 Jay 保持打开。",
+  "mobile.tunnel.hint.android": "从“游戏库”打开 Jay 内置的游戏，它会自己连上这个地址，不需要别的启动器。玩的时候请让 Jay 保持打开。",
   "mobile.tunnel.hint.ios": "在同一 iPhone 或 iPad 上的兼容客户端中输入上面的地址。使用期间请让 Jay 保持在前台；iOS 不保证后台网关持续运行。",
   "mobile.tunnel.hint.mobile": "在同一设备的兼容客户端中输入上面的地址，并让 Jay 保持在前台。",
   "mobile.tunnel.disconnect": "关闭网关",

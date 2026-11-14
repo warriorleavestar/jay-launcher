@@ -1688,7 +1688,7 @@
   "mobile.enroll.button": "登此手機",
   "mobile.enroll.invalid": "邀碼不可用",
   "mobile.tunnel.title": "本機之閘已啟",
-  "mobile.tunnel.hint.android": "下 Jay 內置之戲自赴此址，無須他啟動器。戲時請令 Jay 常開。",
+  "mobile.tunnel.hint.android": "自「戲庫」開 Jay 內置之戲，即自赴此址，無須他啟動器。戲時請令 Jay 常開。",
   "mobile.tunnel.hint.ios": "於同 iPhone 或 iPad 之相容用戶端書上址。用時請令 Jay 常居前臺；iOS 不保後臺之閘常行。",
   "mobile.tunnel.hint.mobile": "於同器相容之用戶端書上址，并令 Jay 常居前臺。",
   "mobile.tunnel.disconnect": "閉閘",
