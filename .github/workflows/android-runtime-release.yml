@@ -270,5 +270,9 @@ jobs:
             archive_bytes="$(sed -n 's/^archive-bytes=//p' "$name.metadata")"
             extracted_bytes="$(sed -n 's/^extracted-bytes=//p' "$name.metadata")"
             version="${TAG#android-runtime-}"
-            echo "| $architecture | jay-android-runtime21-$version-$architecture | $archive_bytes | $extracted_bytes | \`$expected\` | $url |" >> "$GITHUB_STEP_SUMMARY"
+            # The app treats an installed runtime with the same id as current, so the id must change
+            # whenever the archive does. The v1 assets already use ids ending in -v2-<architecture>;
+            # the hash prefix keeps a new release from ever reusing one.
+            id="jay-android-runtime21-$version-$architecture-${expected:0:12}"
+            echo "| $architecture | $id | $archive_bytes | $extracted_bytes | \`$expected\` | $url |" >> "$GITHUB_STEP_SUMMARY"
           done
