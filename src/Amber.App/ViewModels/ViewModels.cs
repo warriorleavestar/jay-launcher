@@ -1442,10 +1442,10 @@ public sealed partial class LogViewModel : PageViewModel
     public void Add(GameLogLine line) => Add(null, line);
 
     /// <summary>加到某次启动的日志里（多开时游戏输出各进各的）；run 为 null 时加到正在看的那次。</summary>
-    public void Add(RunLog? run, GameLogLine line)
+    public void Add(RunLog? run, GameLogLine line, bool chat = false)
     {
         var level = LogLevelParser.Parse(line.Message, line.Level);
-        run?.Store?.Add(line.Time, level, line.Message);
+        run?.Store?.Add(line.Time, level, line.Message, chat: chat);
         Post(run, new LogEntry(line.Time, level.ToString().ToUpperInvariant(), line.Message, level));
     }
 

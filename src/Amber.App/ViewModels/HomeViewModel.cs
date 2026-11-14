@@ -687,8 +687,9 @@ public sealed partial class HomeViewModel : PageViewModel
             {
                 lock (parser)
                 {
-                    run.Output.Add(line);
-                    if (parser.Feed(line) is { } entry) _log.Add(run.Log, entry);
+                    var output = run.Output.Add(line);
+                    // The saved log leaves out the whole chat event in no-trace mode, continuation lines included.
+                    if (parser.Feed(line) is { } entry) _log.Add(run.Log, entry, output.IsChat);
                     if (run.Baked && Amber.Core.Bake.BakeRuntimeProblem.Parse(line, legacy: run.BakeProblemsFile is null) is { } bakeProblem
                         && run.AddBakeProblem(bakeProblem))
                         _log.AddRaw(run.Log, "[Bake] " + bakeProblem.Describe());
