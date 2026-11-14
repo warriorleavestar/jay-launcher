@@ -53,11 +53,14 @@ public sealed class JayNetworkServerBuilder
     /// <summary>用自己的公共网络（JAYNET2- 连接串）。不调就是内置的 Jay 公共网络。</summary>
     public JayNetworkServerBuilder UseNetwork(SignedNetwork network) { Network = network; return this; }
 
-    /// <summary>别的种子节点（tcp://host:11010），互相连起来组成一个网络。</summary>
+    /// <summary>
+    /// 别的种子节点（tcp://host:11010），互相连起来组成一个网络。
+    /// ws:// and wss:// seeds are accepted as before but skipped when connecting: the bundled EasyTier has no websocket support.
+    /// </summary>
     public JayNetworkServerBuilder UseSeeds(IEnumerable<string> seeds)
     {
         foreach (var s in seeds)
-            if (!RelayNodes.IsValid(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://1.2.3.4:11010）");
+            if (!RelayNodes.IsWellFormed(s)) throw new ArgumentException($"种子节点地址不对：{s}（例：tcp://1.2.3.4:11010）");
         Seeds = [.. seeds.Select(s => s.Trim())];
         return this;
     }
@@ -199,7 +202,7 @@ public sealed class JayNetworkServer : IAsyncDisposable
     {
         _b = b;
         _started = Now;
-        Profile = b.Network is { } n ? n.ToProfile() with { Nodes = b.Seeds } : PublicNetworkProfile.Jay(b.Seeds);
+        Profile = b.Network is { } n ? n.ToProfile() with { Nodes = SignedNetwork.UsableNodes(b.Seeds) } : PublicNetworkProfile.Jay(b.Seeds);
         // A node bound to its hardware checks the machine before it reads any key or opens any port.
         // Wrong hardware: its files are wiped and this throws HardwareMismatchException. Tampered runtime: NodeIntegrityException.
         Guard = b.HardwareGuard ?? new NodeHardwareGuard(b.DataDir) { Trust = new TrustQuorum(Profile.DirectoryRoots, Profile.DirectoryRootsNeed), DryRun = b.HardwareDryRun, Log = b.Log };

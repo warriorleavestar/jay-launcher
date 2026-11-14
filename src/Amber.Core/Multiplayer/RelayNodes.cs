@@ -49,9 +49,22 @@ public static class RelayNodes
     // so ws:// and wss:// relays are not accepted: they could never connect.
     private static readonly string[] Schemes = ["tcp", "udp", "quic", "wg"];
 
+    // Transports EasyTier itself knows but Jay's build can't use. Signed network strings and server seeds made before
+    // that may still list them next to usable nodes, so they are read as well-formed and then left out when connecting.
+    private static readonly string[] LegacySchemes = ["ws", "wss"];
+
     /// <summary>检查节点地址：协议是 EasyTier 支持的，带主机和端口。</summary>
-    public static bool IsValid(string url) =>
-        Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u) && Schemes.Contains(u.Scheme) && u.Host.Length > 0 && u.Port > 0;
+    public static bool IsValid(string url) => HasForm(url, Schemes);
+
+    /// <summary>
+    /// A well-formed node address, including ws:// and wss:// ones Jay's EasyTier build can't connect over.
+    /// For lists made elsewhere that are kept as written (signed network strings, server seeds); use <see cref="IsValid"/>
+    /// to choose the nodes to connect to.
+    /// </summary>
+    public static bool IsWellFormed(string url) => HasForm(url, Schemes) || HasForm(url, LegacySchemes);
+
+    private static bool HasForm(string url, string[] schemes) =>
+        Uri.TryCreate(url.Trim(), UriKind.Absolute, out var u) && schemes.Contains(u.Scheme) && u.Host.Length > 0 && u.Port > 0;
 
     /// <summary>The node's host is a raw IP address (any kind) rather than a name.</summary>
     public static bool HasIpHost(string url) =>

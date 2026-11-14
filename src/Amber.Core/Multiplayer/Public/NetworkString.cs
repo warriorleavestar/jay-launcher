@@ -137,9 +137,11 @@ public static partial class NetworkString
         if (string.IsNullOrWhiteSpace(info.NetworkName) || info.NetworkName.Length > 64 || string.IsNullOrEmpty(info.Secret) || info.Secret.Length > 128)
             return L.T("core.mp.network.bad_easytier");
         if (info.NetworkName == PublicNetworkProfile.JayNetworkName && info.Id != "jay") return L.T("core.mp.network.bad_easytier");
-        if (info.Nodes.Count is 0 or > MaxNodes || info.Nodes.Any(n => !RelayNodes.IsValid(n))) return L.T("core.mp.network.bad_nodes");
+        // ws:// and wss:// nodes are kept as signed (older strings list them) but never used: Jay's EasyTier can't connect over them.
+        if (info.Nodes.Count is 0 or > MaxNodes || info.Nodes.Any(n => !RelayNodes.IsWellFormed(n))) return L.T("core.mp.network.bad_nodes");
         // A network string is shared widely: its nodes go by domain name, never by a public IP address.
         if (info.Nodes.Any(RelayNodes.HasPublicIpHost)) return L.T("core.mp.network.ip_node");
+        if (!info.Nodes.Any(RelayNodes.IsValid)) return L.T("core.mp.network.no_usable_nodes");
         if (info.Home is { } home && !IsHttps(home)) return L.T("core.mp.network.bad_link");
         if (info.Config is { } config && (!IsHttps(config.Url) || config.Sha256.Length != 64 || !config.Sha256.All(Uri.IsHexDigit)))
             return L.T("core.mp.network.bad_config");
@@ -250,8 +252,11 @@ public sealed record SignedNetwork(NetworkInfo Info, byte[] SignerKey, bool Revi
     public bool IsReplacedBy(SignedNetwork incoming) =>
         incoming.Info.Id == Info.Id && incoming.SignerKey.AsSpan().SequenceEqual(SignerKey) && incoming.Info.Seq > Info.Seq;
 
+    /// <summary>The nodes Jay can connect to: the string may also list ws:// or wss:// nodes, which are left out.</summary>
+    public static IReadOnlyList<string> UsableNodes(IEnumerable<string> nodes) => [.. nodes.Select(n => n.Trim()).Where(RelayNodes.IsValid).Distinct()];
+
     public PublicNetworkProfile ToProfile() =>
-        new(Info.Id, Info.Name, Info.NetworkName, Info.Secret, Info.Nodes)
+        new(Info.Id, Info.Name, Info.NetworkName, Info.Secret, UsableNodes(Info.Nodes))
         {
             Reviewed = Reviewed, Config = Info.Config, Home = Info.Home, DirectoryKeys = Info.DirectoryKeys ?? [],
             DirectoryRoots = Info.DirectoryRoots ?? [], DirectoryRootsNeed = Info.DirectoryRootsNeed,
