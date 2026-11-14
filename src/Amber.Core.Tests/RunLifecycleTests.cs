@@ -99,7 +99,7 @@ public sealed class RunLifecycleTests : IDisposable
         }
     }
 
-    [Fact]
+    [MacFact]
     public void MacExitRequestDoesNotForceTerminateHeadlessProcesses()
     {
         if (!OperatingSystem.IsMacOS()) return;
@@ -143,7 +143,7 @@ public sealed class RunLifecycleTests : IDisposable
     // ---- 1：强制结束绑定到那一局 ----
 
     /// <summary>1：关不掉主窗口时“正在退出”撤回，强制结束只给这一局；又开了一局后收回，不会杀到新的那局。</summary>
-    [Fact]
+    [WindowsFact]
     public void ForceKillIsTiedToItsRun()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -179,7 +179,7 @@ public sealed class RunLifecycleTests : IDisposable
 
     // ---- 2：Tick 只覆盖自己写的状态 ----
 
-    [Fact]
+    [WindowsFact]
     public void TickKeepsOtherStatuses()
     {
         if (!OperatingSystem.IsWindows()) return;

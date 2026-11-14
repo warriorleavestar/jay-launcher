@@ -93,7 +93,7 @@ public sealed class InstanceOwnershipSecurityTests : IDisposable
         Assert.Equal(0, _handler.Requests);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task WindowsCaseAliasCannotReplaceAnExistingInstance()
     {
         if (!OperatingSystem.IsWindows()) return;

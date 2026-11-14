@@ -299,7 +299,7 @@ public sealed class NetworkAccountsTests : IAsyncDisposable
         Assert.Equal(Localization.L.T("core.mp.factor.setup"), e.Message);
     }
 
-    [Fact]
+    [UnixFact]
     public void CommandFactorRunsTheMaintainersProgram()
     {
         if (OperatingSystem.IsWindows()) return;

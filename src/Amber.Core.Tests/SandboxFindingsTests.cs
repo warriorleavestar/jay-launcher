@@ -152,7 +152,7 @@ public sealed class SandboxFindingsTests : IDisposable
         Assert.Equal(L.T("settings.sandbox.status.strong_pending"), service.SandboxStatusText);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task StrongSandbox_Off_UsesStandardWithoutAsking()
     {
         if (!OperatingSystem.IsWindows()) return;

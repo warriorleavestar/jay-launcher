@@ -305,7 +305,7 @@ public sealed class NodeHardwareBindingTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => NodeWiper.Wipe(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "test", true));
     }
 
-    [Fact]
+    [UnixFact]
     public void WipeRemovesLinksWithoutFollowingThem()
     {
         if (OperatingSystem.IsWindows()) return; // symlinks need privileges there

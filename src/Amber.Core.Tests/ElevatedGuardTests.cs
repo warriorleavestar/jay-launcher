@@ -52,7 +52,7 @@ public class ElevatedGuardTests
         catch (ArgumentException) { return false; }
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task ArgumentsGoThroughThePipeAndOutputComesBack()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -66,7 +66,7 @@ public class ElevatedGuardTests
         Assert.False(guard.HasExited);
     }
 
-    [Fact]
+    [WindowsFact]
     public async Task RestartSwitchesArgumentsAndStopEndsEverything()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -87,7 +87,7 @@ public class ElevatedGuardTests
     }
 
     /// <summary>Amber 崩溃（管道断开、没有停止命令）：守护脚本也要结束 easytier-core。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task BrokenPipeEndsCore()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -100,7 +100,7 @@ public class ElevatedGuardTests
     }
 
     /// <summary>别的程序抢先连上命令管道：认出进程号不对，断开它、什么都不发，接着等真正的守护脚本，之后照常启动。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task ImpostorClientGetsNothing()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -159,7 +159,7 @@ public class ElevatedGuardTests
     }
 
     /// <summary>管道不是 Amber 建的（服务端进程号不对）：守护脚本什么都不读就退出，不启动 easytier-core。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task GuardRefusesForeignPipeServer()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -170,7 +170,7 @@ public class ElevatedGuardTests
     }
 
     /// <summary>Amber 等超时了（PowerShell 启动太慢）：报告失败；晚到的守护脚本一连上就被关掉管道，很快退出，不启动 easytier-core。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task LateGuardAfterTimeoutIsReportedAndShutOut()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -197,7 +197,7 @@ public class ElevatedGuardTests
     }
 
     /// <summary>刚启动就 Dispose（比如端口被占用）：排着的启动命令不发，只发停止，easytier-core 一次都不启动。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task EarlyDisposeNeverStartsCore()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -209,7 +209,7 @@ public class ElevatedGuardTests
     }
 
     /// <summary>守护脚本只把 ET_NETWORK_SECRET 放进 easytier-core 的环境变量，别的键不认。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task OnlyAllowListedEnvironmentReachesCore()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -228,7 +228,7 @@ public class ElevatedGuardTests
         Assert.True(TimeSpan.FromSeconds(ElevatedGuard.GuardConnectSeconds) < ElevatedGuard.ConnectTimeout);
 
     /// <summary>程序路径里有 PowerShell 会当成引号的字符（‘’‚‛ 和 '）也能原样传过去。</summary>
-    [Fact]
+    [WindowsFact]
     public async Task CorePathWithQuoteCharacters()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -253,7 +253,7 @@ public class ElevatedGuardTests
         }
     }
 
-    [Theory]
+    [WindowsTheory]
     [InlineData("plain")]
     [InlineData("with space")]
     [InlineData("")]
@@ -292,7 +292,7 @@ public class ElevatedGuardTests
     private static extern IntPtr LocalFree(IntPtr memory);
 
     /// <summary>旧版本写在 run-lan 里的文件（参数、重启文件、日志都可能有密钥）启动时清掉；别的文件不碰。</summary>
-    [Fact]
+    [WindowsFact]
     public void LegacyFilesAreRemoved()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -320,7 +320,7 @@ public class ElevatedGuardTests
     }
 
     /// <summary>大文件分块覆盖；有别的硬链接的文件只删名字、不覆盖（覆盖会改到另一处的同一份内容）。</summary>
-    [Fact]
+    [WindowsFact]
     public void LegacyFilesChunkedAndSkipHardLinks()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -351,7 +351,7 @@ public class ElevatedGuardTests
     private static extern bool CreateHardLink(string newFile, string existingFile, IntPtr security);
 
     /// <summary>run-lan 里的联接（junction）指到别处：不跟过去，那边的同名文件留着。</summary>
-    [Fact]
+    [WindowsFact]
     public void LegacyFilesSkipJunctions()
     {
         if (!OperatingSystem.IsWindows()) return;
