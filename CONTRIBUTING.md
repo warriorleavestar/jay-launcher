@@ -35,7 +35,7 @@ GUI self-check (drives the real window and writes `report.txt`):
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-selftest.ps1 -Report <dir>
 ```
 
-Layout check only (every page × every language × 6 window sizes, screenshots plus a list of clipped controls in `layout.txt`):
+Layout check only (every page × every language × 8 window sizes, screenshots plus a list of clipped controls in `layout.txt`):
 
 ```bash
 AMBER_LAYOUTCHECK=<dir> src/Amber.App/bin/Release/net10.0/Jay.exe
@@ -91,7 +91,7 @@ A partial translation is fine to start with: missing strings show in English. Ma
 
 Docs use one file per language, side by side:
 
-- The English version has the plain name: `README.md`, `CONTRIBUTING.md`, `docs/themes.md`.
+- The English version has the plain name: `README.md`, `CONTRIBUTING.md`.
 - A translation adds the language code before `.md`: `README.zh-Hans.md`, `CONTRIBUTING.ja.md`, `docs/themes.zh-Hans.md`.
 - Put a language switcher line at the top of every version, for example `English | [简体中文](README.zh-Hans.md)`, and add the new language to the switcher in the other versions.
 - When you change a doc, update the translations you can, or say in the pull request which ones are now out of date.

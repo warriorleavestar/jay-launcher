@@ -86,7 +86,11 @@ public static class WorldBackups
     /// is unpacked next to it and checked, and only then is the old folder swapped out. Paths inside the zip are checked
     /// like an imported world, so a crafted zip can't write outside the world folder.
     /// </summary>
-    public static (string? Safety, string World) Restore(WorldBackup backup, string savesDir, string workDir, CancellationToken ct = default)
+    public static (string? Safety, string World) Restore(WorldBackup backup, string savesDir, string workDir, CancellationToken ct = default) =>
+        Restore(backup, savesDir, workDir, Directory.Move, ct);
+
+    /// <param name="move">Moves a folder (tests make it fail).</param>
+    internal static (string? Safety, string World) Restore(WorldBackup backup, string savesDir, string workDir, Action<string, string> move, CancellationToken ct = default)
     {
         WorldManager.CheckWorldComponent(backup.WorldFolder);
         var target = GameDirectory.Contained(savesDir, backup.WorldFolder);
@@ -119,11 +123,18 @@ public static class WorldBackups
             if (Directory.Exists(target))
             {
                 var old = Path.Combine(savesDir, ".jay-old-" + Guid.NewGuid().ToString("N")[..8]);
-                Directory.Move(target, old);
-                Directory.Move(staging, target);
+                move(target, old);
+                try { move(staging, target); }
+                catch
+                {
+                    // Put the current world back rather than leave the save without it.
+                    try { move(old, target); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                    throw;
+                }
                 TryDeleteDir(old);
             }
-            else Directory.Move(staging, target);
+            else move(staging, target);
             return (safety, target);
         }
         finally

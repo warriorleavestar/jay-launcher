@@ -1671,6 +1671,8 @@
   "core.gate.relay.heartbeat_down": "心跳之道已斷，少頃復連：{0}",
   "core.gate.log.relay_wrong_key": "拒：節點 {0} 之身已易（{1}）。若復置節點，以 jay-server relays code 復發節點碼",
   "core.gate.log.epoch": "節點見吊銷（紀元 {0}）：盡斷 {1} 連，眾復握而易新鑰",
+  "core.gate.log.state_unreadable": "名冊（state.json）不可讀：{0}。復可讀之前，新連不納。",
+  "core.gate.log.health_unwritable": "閘之狀簿（health.json）不可書：{0}。復可書之前，jay-server status 或示舊值。",
   "core.gate.log.relay_up": "節點上線：{0}",
   "core.gate.log.relay_down": "節點無心跳矣：{0}",
   "core.gate.log.breaker_open": "隱私++ 熔斷：不可用之節點 {0}；已斷 {1} 連，暫不受新連",

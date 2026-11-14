@@ -1721,6 +1721,8 @@
   "core.gate.relay.heartbeat_down": "心跳通道斷開，稍後重連：{0}",
   "core.gate.log.relay_wrong_key": "拒絕：中轉 {0} 的身分變了（{1}）。如果是重裝了中轉，用 jay-server relays code 重發中轉碼",
   "core.gate.log.epoch": "中轉被吊銷（紀元 {0}）：斷開全部 {1} 條連線，大家重新握手換新金鑰",
+  "core.gate.log.state_unreadable": "讀不了成員名單（state.json）：{0}。能重新讀到之前不接受新連線。",
+  "core.gate.log.health_unwritable": "寫不了閘道狀態檔（health.json）：{0}。能重新寫入之前，jay-server status 可能顯示舊的資料。",
   "core.gate.log.relay_up": "中轉上線：{0}",
   "core.gate.log.relay_down": "中轉沒有心跳了：{0}",
   "core.gate.log.breaker_open": "隱私++ 緊急斷開：不可用的中轉 {0}；斷開了 {1} 條連線，暫停接受新連線",

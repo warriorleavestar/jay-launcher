@@ -105,7 +105,7 @@ So **directory trust no longer decides whether a code leaks**. It only decides w
 
 ### Trustee keys for the built-in network (offline, one per person)
 
-The built-in network's directory certificates, and reviewed network strings, need 2 of the 3 Jay trustees
+The built-in network's directory certificates, and reviewed network strings, need enough Jay trustee keys (`JayTrust.Need`, today 2 of 2)
 (`src/Amber.Core/Multiplayer/Public/TrustQuorum.cs`). Each trustee makes their own key on their own offline machine:
 
 ```bash

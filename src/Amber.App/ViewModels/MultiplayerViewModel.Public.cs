@@ -479,6 +479,8 @@ public sealed partial class MultiplayerViewModel
     {
         var announcer = _announcer;
         _announcer = null;
+        // The listing goes away, so its standing invite must stop working too (as in UnpublishRoom).
+        if (_standing is { } standing) _lobby?.Book.Revoke(standing);
         _standing = null;
         _standingSalt = null;
         _searchPublished = false;
