@@ -32,6 +32,9 @@ internal sealed partial class SelfTest
                 host.Show();
                 await Task.Delay(600);
                 Check($"控件库（{name}）：图标都解析得到", gallery.IconCount >= 60, $"{gallery.IconCount} 个");
+                // A stretched icon is scaled from its geometry's bounds: an icon that keeps the whole 24×24 box stays centred.
+                var offBox = IconsWithoutFullBox();
+                Check($"Gallery ({variant}): every icon keeps its 24×24 box, so it sits in the middle of its button", offBox.Count == 0, string.Join(", ", offBox.Take(8)));
                 Check($"Gallery ({variant}): every automatic cover is shown for review", gallery.CoverCount == Amber.Core.GameLibrary.CoverArt.Slots, $"{gallery.CoverCount}");
                 var plays = gallery.GetVisualDescendants().OfType<Button>().Count(b => b.Classes.Contains("play") && b.IsEffectivelyVisible);
                 Check($"控件库（{name}）：琥珀按钮只有一个", plays == 1, $"{plays} 个");
@@ -82,6 +85,8 @@ internal sealed partial class SelfTest
                     await Task.Delay(500);
                     var amber = window.GetVisualDescendants().OfType<Button>().Count(b => b.Classes.Contains("play") && b.IsEffectivelyVisible);
                     Check($"{page.GetType().Name}（{name}）：琥珀按钮每屏最多一个", amber <= 1, $"{amber} 个");
+                    var offCentre = ButtonsWithOffCentreContent(window);
+                    Check($"{page.GetType().Name} ({variant}): button labels and icons sit in the middle of their buttons", offCentre.Count == 0, string.Join("; ", offCentre.Take(6)));
                     await ShotAsync($"{(variant == ThemeVariant.Dark ? "dark" : "light")}-{page.GetType().Name}");
                 }
             }
@@ -90,5 +95,45 @@ internal sealed partial class SelfTest
         {
             Application.Current.RequestedThemeVariant = original;
         }
+    }
+
+    /// <summary>The icon resources whose geometry does not span exactly 0,0 to 24,24 (they would be stretched off centre).</summary>
+    private static List<string> IconsWithoutFullBox()
+    {
+        var off = new List<string>();
+        foreach (var dict in Application.Current!.Resources.MergedDictionaries.OfType<ResourceDictionary>().Append(Application.Current.Resources))
+            foreach (var (key, value) in dict)
+                if (key is string k && k.StartsWith("Icon.", StringComparison.Ordinal) && value is Geometry g && g.Bounds != new Rect(0, 0, 24, 24))
+                    off.Add($"{k} {g.Bounds}");
+        return off;
+    }
+
+    /// <summary>
+    /// Visible buttons whose content is shorter (or, for icon-only buttons, narrower) than the room inside the button
+    /// and is not in the middle of it, by more than 1.5 px. Content that asks for an edge on purpose is left alone.
+    /// </summary>
+    internal static List<string> ButtonsWithOffCentreContent(Visual root)
+    {
+        var off = new List<string>();
+        foreach (var button in root.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible && b.Bounds.Width > 0 && b.Bounds.Height > 0))
+        {
+            if (button.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.ContentPresenter>().FirstOrDefault(p => p.Name == "PART_ContentPresenter") is not { Child: Control child } presenter
+                || !child.IsVisible || child.Bounds.Height <= 0)
+                continue;
+            var inner = new Rect(presenter.Bounds.Size).Deflate(presenter.Padding).Deflate(presenter.BorderThickness);
+            // A stretched label gets the whole height but draws its text at the top, so what shows is its desired size from the top-left.
+            var shown = new Size(Math.Min(child.Bounds.Width, child.DesiredSize.Width - child.Margin.Left - child.Margin.Right),
+                Math.Min(child.Bounds.Height, child.DesiredSize.Height - child.Margin.Top - child.Margin.Bottom));
+            var box = new Rect(child.Bounds.Position, shown).Inflate(child.Margin);
+            if (child.VerticalAlignment is Avalonia.Layout.VerticalAlignment.Center or Avalonia.Layout.VerticalAlignment.Stretch
+                && box.Height < inner.Height - 1 && Math.Abs(box.Center.Y - inner.Center.Y) > 1.5)
+                off.Add($"{Describe(button)} ↕{box.Center.Y - inner.Center.Y:0.#}");
+            if (button.Classes.Contains("icon-only") && child.HorizontalAlignment is Avalonia.Layout.HorizontalAlignment.Center or Avalonia.Layout.HorizontalAlignment.Stretch
+                && box.Width < inner.Width - 1 && Math.Abs(box.Center.X - inner.Center.X) > 1.5)
+                off.Add($"{Describe(button)} ↔{box.Center.X - inner.Center.X:0.#}");
+        }
+        return off;
+
+        static string Describe(Button b) => b.Name ?? (b.Content as string) ?? Avalonia.Automation.AutomationProperties.GetName(b) ?? b.GetType().Name;
     }
 }
