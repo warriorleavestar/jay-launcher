@@ -27,9 +27,9 @@ public sealed class ChatSplitMove
 
     /// <summary>Whether to move now; when it says yes, the try is counted.</summary>
     /// <param name="room">The current room: counts start again for another room (a rekeyed room counts as another).</param>
-    /// <param name="couldSplit">A new chat connection would split now.</param>
-    /// <param name="busy">Private work is going on that a move would cut off.</param>
-    public bool ShouldTry(object room, DateTime now, bool couldSplit, bool busy)
+    /// <param name="couldSplit">A new chat connection would split now. Only asked while moving is still possible.</param>
+    /// <param name="busy">Private work is going on that a move would cut off. Only asked when a split is possible.</param>
+    public bool ShouldTry(object room, DateTime now, Func<bool> couldSplit, Func<bool> busy)
     {
         if (!ReferenceEquals(room, _room))
         {
@@ -38,7 +38,7 @@ public sealed class ChatSplitMove
             _last = DateTime.MinValue;
             _done = false;
         }
-        if (_done || _tries >= MaxTries || !couldSplit || busy || now - _last < Spacing) return false;
+        if (_done || _tries >= MaxTries || now - _last < Spacing || !couldSplit() || busy()) return false;
         _tries++;
         _last = now;
         return true;

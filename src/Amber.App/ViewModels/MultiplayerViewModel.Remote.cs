@@ -230,13 +230,15 @@ public sealed partial class MultiplayerViewModel
     /// <summary>成员：房主请求看/控自己。弹同意窗；同意就连回房主并共享屏幕，不同意就经聊天通道回“拒绝”。</summary>
     private async Task OnRemoteRequestedAsync(ChatClient client, string sessionId)
     {
-        if (_chat != client || !IsJoined || _room is not { FromInvite: true } room) return;
+        if (!IsChatFrom(client) || !IsJoined || _room is not { FromInvite: true } room) return;
         // 已经在被控或者正在问：直接拒绝（不叠弹窗）。
         if (Child.HideRemoteControl || !RemotePlatform.Supported || _remoteSessions.OfType<RemoteSharer>().Any() || Interlocked.Exchange(ref _remotePrompting, 1) != 0)
         {
-            await DeclineRemote(client, sessionId);
+            // Answered over a connection the hub still knows (the request may have come in on either side of a move).
+            await DeclineRemote(_chatRoute.ReplyVia(client, _chat), sessionId);
             return;
         }
+        var generation = _chatRoute.Generation;
         RemoteConsent consent;
         try
         {
@@ -247,17 +249,20 @@ public sealed partial class MultiplayerViewModel
         {
             Volatile.Write(ref _remotePrompting, 0);
         }
-        if (_room != room || _chat != client) return;
+        // Still this room session (chat may have moved to a new connection meanwhile): the answer goes over the chat
+        // connection in use now.
+        if (_room != room || !_chatRoute.IsCurrent(generation)) return;
+        var reply = _chatRoute.ReplyVia(client, _chat);
         if (!consent.Accepted)
         {
-            await DeclineRemote(client, sessionId);
+            await DeclineRemote(reply, sessionId);
             return;
         }
         var screen = RemotePlatform.CreateScreen();
         if (screen is null)
         {
             // macOS 还没授权屏幕录制（系统这时已经弹了授权提示）之类：这次按拒绝回，界面上写原因。
-            await DeclineRemote(client, sessionId);
+            await DeclineRemote(reply, sessionId);
             SetRemoteStatus(new StatusMessage("common.raw", [RemoteUnavailableText.Length > 0 ? RemoteUnavailableText : L.T("multiplayer.remote.unsupported_os")], StatusKind.Warning));
             NotifyRemoteAvailability();
             return;

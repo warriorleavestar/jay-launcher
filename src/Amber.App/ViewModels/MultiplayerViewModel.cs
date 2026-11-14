@@ -1028,13 +1028,22 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         if ((replacing is null ? _chat is not null : _chat != replacing) || _chatConnecting || _room is not { } room) return;
         _chatConnecting = true;
         var client = new ChatClient(room, ChatName);
-        client.Received += m => Dispatcher.UIThread.Post(() => OnChatMessage(client, m));
-        client.Rekeyed += next => Dispatcher.UIThread.Post(() => OnRekey(client, next));
-        client.Kicked += () => Dispatcher.UIThread.Post(() => OnKicked(client));
-        client.Breaker += () => Dispatcher.UIThread.Post(() => OnBreakerFromHost(client));
-        client.RemoteRequested += sid => Dispatcher.UIThread.Post(() => _ = OnRemoteRequestedAsync(client, sid));
+        // Everything this connection reports belongs to this room session: once it is over, it is dropped.
+        var generation = _chatRoute.Generation;
+        var bind = _chatRoute.Binder();
+        void Post(Action handle) => Dispatcher.UIThread.Post(bind(handle));
+        client.Received += m => Post(() => OnChatMessage(client, m));
+        client.Rekeyed += next => Post(() => OnRekey(client, next));
+        client.Kicked += () => Post(() => OnKicked(client));
+        client.Breaker += () => Post(() => OnBreakerFromHost(client));
+        client.RemoteRequested += sid => Post(() => _ = OnRemoteRequestedAsync(client, sid));
         client.Disconnected += () => Dispatcher.UIThread.Post(() =>
         {
+            if (!_chatRoute.IsCurrent(generation))
+            {
+                _ = client.CloseQuietlyAsync();
+                return;
+            }
             // The connection being replaced: the hub drops it as soon as the new one joins, which can come before the new
             // one is in place here. Not a dropped chat unless the move fails (see below).
             if (client == _chatReplacing)
@@ -1052,6 +1061,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             ChatDropped(client);
         });
         _chatReplacing = replacing;
+        if (replacing is not null) _chatRoute.Moving(client);
         _chatReplacedDropped = false;
         var inPlace = false;
         try
@@ -1075,6 +1085,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
                 _chatMove.Moved(split);
                 if (!split) _diag.Add(L.T("multiplayer.transport.diagnostics_category"), L.F("multiplayer.chat.move_single", _transport?.ChatSplit?.LastReason ?? ""));
                 StopPrivate(keepPeers: true);
+                _chatRoute.Switched(replacing);
                 _ = CloseReplacedChatAsync(replacing);
             }
             _chat = client;
@@ -1106,10 +1117,15 @@ public sealed partial class MultiplayerViewModel : PageViewModel
             }
             _chatConnecting = false;
             _chatReplacing = null;
+            _chatRoute.MoveEnded(client);
         }
     }
 
     private ChatClient? _chatReplacing;
+    private readonly ChatRoute<ChatClient> _chatRoute = new();
+
+    /// <summary>Whether what this connection receives belongs to the current chat (also either side of a move).</summary>
+    private bool IsChatFrom(ChatClient client) => _chatRoute.Accepts(client, _chat);
     private bool _chatReplacedDropped;
     private readonly ChatSplitMove _chatMove = new();
 
@@ -1128,7 +1144,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
 
     private void OnChatMessage(ChatClient client, ChatMessage message)
     {
-        if (_chat is not null && _chat != client) return;
+        if (_chat is not null && !IsChatFrom(client)) return;
         // Our own client announcing itself (the host's included, when it opens the room): nobody else joined.
         if (message.Kind == ChatKind.Join && message.SenderId == client.SenderId) return;
         var mine = client.IsMine(message);
@@ -1172,9 +1188,10 @@ public sealed partial class MultiplayerViewModel : PageViewModel
     /// The hub drops a replaced connection once the new one has joined; this only closes it (without a goodbye) in case it
     /// is still open a little later.
     /// </summary>
-    private static async Task CloseReplacedChatAsync(ChatClient old)
+    private async Task CloseReplacedChatAsync(ChatClient old)
     {
         await Task.Delay(TimeSpan.FromSeconds(3));
+        _chatRoute.Closed(old);
         await old.CloseQuietlyAsync();
     }
 
@@ -1193,7 +1210,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         // Chat opens as soon as a member joins, usually before the direct path is up, so under Auto it starts on one path.
         // Once a new connection would split, chat moves over (ChatSplitMove says when, and when to stop trying).
         else if (IsJoined && _chat is { } current && ChatReady && !_chatConnecting && _localChatPort is { } local
-                 && _chatMove.ShouldTry(_room, DateTime.UtcNow, _transport?.ChatCouldSplit == true, PrivateBusy))
+                 && _chatMove.ShouldTry(_room, DateTime.UtcNow, () => _transport?.ChatCouldSplit == true, () => PrivateBusy))
         {
             _ = ConnectChatAsync("127.0.0.1", local, current);
         }
@@ -1523,6 +1540,7 @@ public sealed partial class MultiplayerViewModel : PageViewModel
         StopRemote();
         var chat = _chat;
         var hub = _hub;
+        _chatRoute.Retire();
         _chat = null;
         _hub = null;
         StopPrivate();
