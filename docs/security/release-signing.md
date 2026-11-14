@@ -17,7 +17,7 @@ Each release carries, next to its packages:
 
 ## What the app checks
 
-The update check (`UpdateCheck.cs`, Settings › About › Check for updates) downloads those three files from the newer
+The update check (`UpdateCheck.cs`, Settings › About › Check for updates, and the daily automatic check) downloads those three files from the newer
 release's assets and offers the update only when:
 
 - `SHA256SUMS.txt.sigs` is for exactly this `SHA256SUMS.txt` and this tag;
@@ -29,8 +29,8 @@ release's assets and offers the update only when:
   data folder), so an old signed release can't be passed off as new.
 
 Anything else: the app says the version was found but did not pass verification, and shows no button.
-When the user downloads a package from a verified release, it is kept only when its SHA-256 matches the
-signed list.
+Jay does not download or install the update itself: the notice opens the release page, whose address is
+built from the verified tag. A package downloaded from there can be checked with About › Verify a Jay download.
 
 About › **Verify a Jay download** runs the same check on a file the user already downloaded (with
 `SHA256SUMS.txt`, `.sigs` and `trust-chain.json` next to it). `jay-server release verify` does the same on

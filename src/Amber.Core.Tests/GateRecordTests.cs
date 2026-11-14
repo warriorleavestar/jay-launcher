@@ -93,6 +93,8 @@ public sealed class GateRecordTests : IAsyncLifetime
         Assert.Equal(locator.Id, parsed.Locator!.Id);
         Assert.Equal(locator.SignerHash, parsed.Locator.SignerHash);
         Assert.Equal(invite.Token, parsed.Token);
+        Assert.NotNull(GateInvite.TryParse(code + " thanks, see you at 8", out _));
+        Assert.NotNull(GateInvite.TryParse(code + "\nJoin tonight", out _));
 
         // Not published yet: nothing to find.
         var directories = Directories();

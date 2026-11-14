@@ -81,7 +81,7 @@ Grab the file for your computer from the [latest release](https://github.com/war
 <details>
 <summary><b>Windows notes</b></summary>
 
-`Jay-win-x64.zip` holds a single self-contained `Jay.exe` (ReadyToRun) that runs straight after unzipping. Native AOT packages are paused for now because they exhaust the memory or time limits of GitHub's build runners. v0.5.9 and older use the `Amber-` prefix and `Amber.exe`.
+`Jay-win-x64.zip` holds a single self-contained `Jay.exe` (ReadyToRun) that runs straight after unzipping, and an `easytier` folder with the multiplayer component. Native AOT packages are paused for now because they exhaust the memory or time limits of GitHub's build runners. v0.5.9 and older use the `Amber-` prefix and `Amber.exe`.
 
 The builds aren't code-signed yet, so Windows SmartScreen may warn you the first time. See the [FAQ](#faq).
 </details>
@@ -127,7 +127,7 @@ Jay's window needs a desktop session (X11, or Wayland with XWayland) and the lib
 - **Practice and diagnose.** A safe drill mode walks you through a knock without touching the network, and the "Connection trouble?" drawer runs a full test matrix and writes a report with secrets removed.
 - **Jay Server** *(experimental)*. Run a Minecraft server only Jay can join, on a VPS or a LAN machine. Players join with a single-use `JAYS2-` invite; unknown connections get not a single byte back.
 
-Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), in Jay's hardened build ([jay-easytier](https://github.com/Yumao-Feather/jay-easytier)), which comes with the release packages; Jay downloads and verifies it only when that copy is missing. The default mode needs no admin rights and installs no driver.
+Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0), in Jay's hardened build ([jay-easytier](https://github.com/Yumao-Feather/jay-easytier)), which the release packages include; Jay downloads and verifies it only if that copy is missing or can't be used. The default mode needs no admin rights and installs no driver.
 
 ### 🔐 Privacy and safety
 
@@ -180,7 +180,7 @@ Built on the open-source [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-
 </details>
 
 > [!TIP]
-> The new interface shown on this page (game library, Discover, Play) is on `main` and comes with the next release. v0.7.0 still uses the classic layout.
+> The new interface shown on this page (game library, Discover, Multiplayer) is on `main` and comes with the next release. v0.7.0 still uses the classic layout.
 
 ## Privacy
 
@@ -197,7 +197,7 @@ Jay is built on a simple promise: **it only goes online to do what you asked**, 
 - Signing in: Microsoft and Xbox sign-in, and any skin site you add.
 - Games: Mojang's game file servers, your chosen download source, loader download sites (OptiFine via BMCLAPI, authlib-injector via its official site or BMCLAPI).
 - Mods: Modrinth and CurseForge, only when you browse or install.
-- Multiplayer, only while you host or join: the relay nodes listed on the Multiplayer page, the other players in the room, the server named in a Jay Server invite, and the jay-easytier releases page (only if the copy that comes with Jay is missing).
+- Multiplayer, only while you host or join: the relay nodes listed on the Multiplayer page, the other players in the room, the server named in a Jay Server invite, and the jay-easytier GitHub releases page (only if the bundled copy is missing or can't be used).
 - Rare downloads: web.archive.org for missing libraries of very old Forge (1.5.2 and earlier), api.adoptium.net for Java on platforms Mojang has no Java for (ARM Linux), and the jay-loader releases page when baking (the universal loader) is turned on.
 - GitHub download mirrors: when the multiplayer component or the loader package can't be fetched from GitHub, the third-party mirrors `ghfast.top`, `gh-proxy.com` and `ghproxy.net` (tried before GitHub when the system time zone is China). Jay accepts a file only if it matches the fixed size and SHA-256.
 - Direct rooms ask the STUN servers you set (by default `stun.miwifi.com`, `stun.chat.bilibili.com`, `stun.cloudflare.com`; editable or empty) for your external address. They carry no game data. Jay may also ask your router for a temporary port mapping, removed when the session ends.
@@ -222,7 +222,7 @@ You need the [.NET 10 SDK](https://dotnet.microsoft.com/download). Jay is writte
 ```shell
 git clone https://github.com/warriorleavestar/jay-launcher.git
 cd jay-launcher/src
-dotnet build
+dotnet build Amber.slnx
 dotnet test Amber.Core.Tests
 dotnet run --project Amber.App
 ```
@@ -318,7 +318,7 @@ This license now covers every version of Jay, including v0.7.0 and earlier, whic
 
 Any place that still calls Jay "open source" or "MIT", including older docs, release notes and copies elsewhere, is outdated: [LICENSE](LICENSE) and [COMMERCIAL-EXCEPTION.md](COMMERCIAL-EXCEPTION.md) take precedence. If you find such a description, please [open an issue](https://github.com/warriorleavestar/jay-launcher/issues/new/choose).
 
-Multiplayer uses [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0) in a hardened build whose source is at [jay-easytier](https://github.com/Yumao-Feather/jay-easytier), a separate project that Jay downloads on first use and does not bundle. The Linux build bundles Noto Sans SC under the SIL Open Font License 1.1 ([OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)).
+Multiplayer uses [EasyTier](https://github.com/EasyTier/EasyTier) (LGPL-3.0) in a hardened build whose source is at [jay-easytier](https://github.com/Yumao-Feather/jay-easytier), a separate project which Jay's release packages include in the `easytier` folder (with its licence and source link). The Linux build bundles Noto Sans SC under the SIL Open Font License 1.1 ([OFL.txt](src/Amber.App/Assets/Fonts/OFL.txt)).
 
 <div align="center">
 <br>
