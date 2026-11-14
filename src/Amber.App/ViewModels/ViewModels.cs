@@ -314,7 +314,7 @@ public sealed partial class MainViewModel : ObservableObject
         home.NavigateToNewInstance = () => shell.Navigate(LegacyRoutes.NewInstance);
         // The live log has no page: "view log" on a failure opens it docked under the page the player is on.
         home.NavigateToLog = () => LogDocked = true;
-        home.NavigateToInstance = id => shell.Navigate(Route.Of(Section.Library, id).ToString());
+        home.NavigateToInstance = shell.OpenInstance;
         home.IsShowingInstance = id => instance.IsCurrent && string.Equals(instance.SelectedId, id, StringComparison.OrdinalIgnoreCase);
         home.Onboarding.MicrosoftLogin = () =>
         {
@@ -428,7 +428,7 @@ public sealed partial class MainViewModel : ObservableObject
         // The playing pill and a run in the activity drawer open that run's instance.
         Activity = new ActivityViewModel(service)
         {
-            OpenRun = s => shell.Navigate(service.InstalledVersions().Contains(s.InstanceId) ? Route.Of(Section.Library, s.InstanceId).ToString() : "library"),
+            OpenRun = s => { if (service.InstalledVersions().Contains(s.InstanceId)) shell.OpenInstance(s.InstanceId); else shell.Navigate("library"); },
         };
         home.SessionStarted += Activity.Track;
         // 游戏库的“上次玩”和“共玩”：只记本机的运行记录。
@@ -468,7 +468,7 @@ public sealed partial class MainViewModel : ObservableObject
         download.OpenInstance = id =>
         {
             service.SetCurrentInstance(id);
-            shell.Router.Navigate(Route.Of(Section.Library, id));
+            shell.Router.Navigate(Route.Parse(LegacyRoutes.InstanceRoute(id)));
         };
         download.BrowseModsFor = id =>
         {

@@ -252,7 +252,13 @@ public sealed partial class LibraryViewModel : PageViewModel
 
     /// <summary>The page of this instance, or of the one in focus when it is not installed (any more).</summary>
     private string InstanceRoute(string? id) =>
-        id is not null && _service.InstalledVersions().Contains(id) ? "library/" + id : Amber.Core.Navigation.LegacyRoutes.CurrentInstance;
+        id is not null && _service.InstalledVersions().Contains(id) ? FocusAndRoute(id) : Amber.Core.Navigation.LegacyRoutes.CurrentInstance;
+
+    private string FocusAndRoute(string id)
+    {
+        _service.SetCurrentInstance(id);
+        return Amber.Core.Navigation.LegacyRoutes.InstanceRoute(id);
+    }
 
     private void RefreshNeeds()
     {
@@ -283,7 +289,7 @@ public sealed partial class LibraryViewModel : PageViewModel
     public void OpenInstance(string id)
     {
         _service.SetCurrentInstance(id);
-        Navigate?.Invoke("library/" + id);
+        Navigate?.Invoke(Amber.Core.Navigation.LegacyRoutes.InstanceRoute(id));
     }
 
     /// <summary>The ▶ on a card: starts that instance without leaving the library (progress shows in the pill).</summary>

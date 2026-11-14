@@ -73,6 +73,41 @@ public sealed class ShellPeopleViewModelTests
     }
 
     [Fact]
+    public void InstancesNamedLikeLibraryRoutesStillOpen()
+    {
+        WithMain((service, main, root) =>
+        {
+            // Instances made before "new" and "current" were reserved for Jay's own routes.
+            foreach (var id in new[] { "new", "current", "plain" })
+            {
+                Directory.CreateDirectory(Path.Combine(root, "versions", id));
+                File.WriteAllText(Path.Combine(root, "versions", id, id + ".json"), $$"""{ "id": "{{id}}", "type": "release", "mainClass": "x" }""");
+            }
+            var shell = main.Shell;
+            Assert.Equal("library/current", LegacyRoutes.InstanceRoute("new"));
+            Assert.Equal("library/plain", LegacyRoutes.InstanceRoute("plain"));
+
+            shell.OpenInstance("new");
+            Assert.IsType<InstanceViewModel>(main.CurrentPage);
+            Assert.Equal("new", service.CurrentInstance);
+            Assert.Equal("library/current", shell.Router.Current.ToString());
+            Assert.Equal(shell.Router.Current, shell.RouteOf(main.CurrentPage));
+
+            shell.OpenInstance("plain");
+            Assert.Equal("plain", service.CurrentInstance);
+            Assert.Equal("library/plain", shell.Router.Current.ToString());
+
+            shell.OpenInstance("current");
+            Assert.IsType<InstanceViewModel>(main.CurrentPage);
+            Assert.Equal("current", service.CurrentInstance);
+
+            // library/new is still the new-instance view.
+            shell.Navigate(LegacyRoutes.NewInstance);
+            Assert.IsType<DownloadViewModel>(main.CurrentPage);
+        });
+    }
+
+    [Fact]
     public void MePageSharesAppearanceWithSettingsAndShowsTheFriendCode()
     {
         WithMain((service, main, _) =>

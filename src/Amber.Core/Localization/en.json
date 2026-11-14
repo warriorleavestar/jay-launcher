@@ -2403,6 +2403,7 @@
   "newinstance.name.invalid": "Names can't contain / \\ : * ? \" < > |.",
   "newinstance.name.trailing": "Names can't start with a space or end with a space or a dot.",
   "newinstance.name.reserved": "Windows reserves this name. Pick another.",
+  "newinstance.name.reserved_jay": "Jay uses this name for its own pages. Pick another.",
   "newinstance.name.taken": "An instance with this name already exists.",
   "newinstance.pack.heading": "Import a modpack file",
   "newinstance.pack.hint": "Modrinth (.mrpack), CurseForge, MultiMC / Prism and HMCL packs. You see what is inside before anything is imported.",

@@ -2364,6 +2364,7 @@
   "newinstance.name.invalid": "名字里不能有 / \\ : * ? \" < > |。",
   "newinstance.name.trailing": "名字不能以空格开头，也不能以空格或句点结尾。",
   "newinstance.name.reserved": "这个名字被 Windows 保留了，换一个吧。",
+  "newinstance.name.reserved_jay": "Jay 自己的页面用了这个名字，换一个吧。",
   "newinstance.name.taken": "已经有同名的实例了。",
   "newinstance.pack.heading": "导入整合包文件",
   "newinstance.pack.hint": "支持 Modrinth（.mrpack）、CurseForge、MultiMC / Prism 和 HMCL 整合包。导入前先看里面有什么。",

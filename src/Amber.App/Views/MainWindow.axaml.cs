@@ -229,10 +229,11 @@ public partial class MainWindow : Window
             Activate();
         }
         // Journey J6 (§7): Jay goes straight to this instance, where the last-session panel names the cause and the fixes.
-        if (DataContext is MainViewModel main && !main.Shell.Router.Current.ToString().StartsWith("library/" + id, StringComparison.Ordinal)
-            && main.Service.InstalledVersions().Contains(id))
+        if (DataContext is MainViewModel main && main.Service.InstalledVersions().Contains(id)
+            && (!main.Shell.Router.Current.ToString().StartsWith(Amber.Core.Navigation.LegacyRoutes.InstanceRoute(id), StringComparison.Ordinal)
+                || !string.Equals(main.Service.CurrentInstance, id, StringComparison.OrdinalIgnoreCase)))
         {
-            main.Shell.Navigate("library/" + id);
+            main.Shell.OpenInstance(id);
             return;
         }
         // The launch engine already raised a toast when another page was showing. Here the instance was on screen but
