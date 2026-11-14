@@ -108,6 +108,18 @@ public sealed class Downloader
         }
     }
 
+    /// <summary>
+    /// Candidate addresses for one file. A plain-http address is fetched over https (and through the mirrors that map
+    /// the https address); the http address itself is tried last, and only when a SHA-1 checks what arrives.
+    /// </summary>
+    private IReadOnlyList<string> CandidatesFor(DownloadItem item)
+    {
+        if (HttpsUpgrade.Upgrade(item.Url) is not { } secure) return OrderedCandidates(item.Url);
+        var list = OrderedCandidates(secure).ToList();
+        if (item.Sha1 is not null && !list.Contains(item.Url)) list.Add(item.Url);
+        return list;
+    }
+
     /// <summary>占用一个到该主机的连接名额，主机限流中就先等它恢复。</summary>
     private async Task<HostSlot> EnterHostAsync(string url, CancellationToken ct)
     {
@@ -319,7 +331,7 @@ public sealed class Downloader
         Exception? last = null;
         // 每个源最后一次失败的原因：全都失败时一起报出来（否则只看得到最后一个源，比如镜像限流，看不出官方源也连不上）。
         var reasons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var candidates = OrderedCandidates(item.Url);
+        var candidates = CandidatesFor(item);
         foreach (var url in candidates)
         {
             for (var attempt = 0; attempt < RetriesPerSource; attempt++)
