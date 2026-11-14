@@ -27,6 +27,10 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     private int _stopping;
     private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _writesWaiting;
+    // Cancelled when stop begins: cuts off an ordinary frame that is still being written.
+    private readonly CancellationTokenSource _stopSends = new();
+    // An ordinary frame was cut off part-way, so the stream may end mid-frame and Stop cannot follow it.
+    private int _brokenFrame;
     private int _closed;
     private readonly Lock _registrationsGate = new();
     private readonly List<CancellationTokenRegistration> _registrations = [];
@@ -72,6 +76,9 @@ public abstract class RemoteEndpoint : IAsyncDisposable
     /// <summary>Test hook: how many sends are waiting for the write lock right now.</summary>
     internal int WritesWaitingForLock => Volatile.Read(ref _writesWaiting);
 
+    /// <summary>Test hook: the write lock itself, so a test can hold it the way a slow write would.</summary>
+    internal SemaphoreSlim WriteLockForTest => _writeLock;
+
     /// <summary>结束了（只触发一次，可能在任何线程上）。</summary>
     public event Action<RemoteEnd>? Ended;
 
@@ -100,8 +107,10 @@ public abstract class RemoteEndpoint : IAsyncDisposable
 
     /// <summary>
     /// Writes one frame under the write lock. Ordinary frames are dropped once stopping has begun, checked both before
-    /// and after waiting for the lock (a frame may have queued behind a slow write before Stop was requested).
-    /// Only the Stop frame (teardown) is still written then.
+    /// and after waiting for the lock (a frame may have queued behind a slow write before Stop was requested), and one
+    /// still being written when stop begins is cut off. Only the Stop frame (teardown) is written then, and only if no
+    /// frame was cut off part-way. Returns false when the frame was not written, whether dropped on purpose or because
+    /// the connection failed (that ends the session as disconnected here), so callers never treat false as a protocol error.
     /// </summary>
     private async Task<bool> WriteFrameAsync(byte[] frame, bool teardown, CancellationToken ct)
     {
@@ -112,21 +121,33 @@ public abstract class RemoteEndpoint : IAsyncDisposable
             Interlocked.Increment(ref _writesWaiting);
             try { await _writeLock.WaitAsync(linked.Token); }
             finally { Interlocked.Decrement(ref _writesWaiting); }
+            var started = false;
+            var done = false;
             try
             {
+                // Stop after a frame that was cut off would be read as part of that frame: close without it instead.
+                if (teardown && Volatile.Read(ref _brokenFrame) != 0) return false;
+                // Linked before the check below, so a stop that begins after the check still cancels this write.
+                using var writing = teardown ? null : CancellationTokenSource.CreateLinkedTokenSource(linked.Token, _stopSends.Token);
                 if (!teardown && IsStopping) return false;
-                await Stream.WriteAsync(frame, linked.Token);
-                await Stream.FlushAsync(linked.Token);
+                var token = writing?.Token ?? linked.Token;
+                started = true;
+                await Stream.WriteAsync(frame, token);
+                await Stream.FlushAsync(token);
+                done = true;
             }
             finally
             {
+                // Recorded before the lock is released, so a Stop waiting for it sees it.
+                if (started && !done) Volatile.Write(ref _brokenFrame, 1);
                 _writeLock.Release();
             }
             return true;
         }
-        catch (OperationCanceledException) when (teardown && ct.IsCancellationRequested && !_cts.IsCancellationRequested)
+        catch (OperationCanceledException) when (!_cts.IsCancellationRequested
+            && (teardown ? ct.IsCancellationRequested : _stopSends.IsCancellationRequested && !ct.IsCancellationRequested))
         {
-            // Stop could not go out in time: the caller closes the connection without it.
+            // Stop could not go out in time (the caller closes without it), or stopping cut off this ordinary frame.
             return false;
         }
         catch (Exception e) when (IsConnectionError(e))
@@ -157,6 +178,8 @@ public abstract class RemoteEndpoint : IAsyncDisposable
         {
             // Stop acting on the peer's input and stop capturing right away.
             OnStopRequested();
+            // Cut off an ordinary frame that is still being written (a large batch goes out record by record).
+            _stopSends.Cancel();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
             var sent = await WriteFrameAsync(RemoteWire.Stop(reason), teardown: true, timeout.Token);
             if (Interlocked.Exchange(ref _ended, 1) != 0) return;
@@ -756,13 +779,17 @@ public sealed class RemoteViewer : RemoteEndpoint
                 }
                 BatchesReceived++;
                 FrameChanged?.Invoke();
-                return await SendAsync(RemoteWire.FrameAck(batch.Sequence));
+                // A reply that is not sent is not a protocol error: it was dropped because this side is stopping,
+                // or the connection failed and the session already ended as disconnected.
+                await SendAsync(RemoteWire.FrameAck(batch.Sequence));
+                return true;
             case RemoteFrameType.Cursor:
                 Cursor = RemoteWire.ParseCursor(frame.Payload);
                 CursorChanged?.Invoke();
                 return true;
             case RemoteFrameType.Ping:
-                return await SendAsync(RemoteWire.Pong(frame.Payload));
+                await SendAsync(RemoteWire.Pong(frame.Payload));
+                return true;
             case RemoteFrameType.Pong:
                 return true;
             case RemoteFrameType.GrantControl:
