@@ -71,6 +71,39 @@ public sealed class DirectInviteTests
         Assert.Equal(new Candidate(PathKind.Punch, IPEndPoint.Parse("198.51.100.7:40001")), parsed.Candidates[0]);
     }
 
+    /// <summary>
+    /// Addresses the other side sends are checked against their label before anything is sent to them: no unspecified,
+    /// multicast or broadcast address; STUN and mapped candidates only public IPv4; IPv6 only public IPv6.
+    /// </summary>
+    [Theory]
+    [InlineData("Punch", "224.0.0.1:5000", false)]
+    [InlineData("Punch", "255.255.255.255:5000", false)]
+    [InlineData("Punch", "0.0.0.0:5000", false)]
+    [InlineData("Punch", "192.168.1.9:5000", false)]
+    [InlineData("Punch", "127.0.0.1:5000", false)]
+    [InlineData("Punch", "[2408:8000::1]:5000", false)]
+    [InlineData("Mapped", "10.0.0.1:5000", false)]
+    [InlineData("Mapped", "100.64.1.1:5000", false)]
+    [InlineData("PunchSpray", "239.1.2.3:5000", false)]
+    [InlineData("IPv6", "[ff02::1]:5000", false)]
+    [InlineData("IPv6", "[fe80::1]:5000", false)]
+    [InlineData("IPv6", "[::]:5000", false)]
+    [InlineData("IPv6", "203.0.113.5:5000", false)]
+    [InlineData("Lan", "224.0.0.251:5000", false)]
+    [InlineData("Lan", "255.255.255.255:5000", false)]
+    [InlineData("Lan", "0.0.0.0:5000", false)]
+    [InlineData("Punch", "203.0.113.5:5000", true)]
+    [InlineData("Mapped", "198.51.100.7:5000", true)]
+    [InlineData("IPv6", "[2408:8000::1]:5000", true)]
+    [InlineData("Lan", "192.168.1.9:5000", true)]
+    [InlineData("Lan", "127.0.0.1:5000", true)]
+    public void CandidatesAreCheckedAgainstTheirKind(string kind, string endpoint, bool kept)
+    {
+        var json = new JsonObject { ["s"] = "abcdef0123456789", ["n"] = "Symmetric", ["c"] = new JsonArray(new JsonArray(kind, endpoint)) };
+        Assert.True(DirectAddresses.TryParse(json, out var parsed));
+        Assert.Equal(kept ? 1 : 0, parsed.Candidates.Count);
+    }
+
     /// <summary>A direct room hands out a plain JAY2 invite: no IP, no port, no room secret, no member key.</summary>
     [Fact]
     public void DirectRoomInviteCarriesNoAddressOrSecret()

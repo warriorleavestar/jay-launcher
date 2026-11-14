@@ -94,7 +94,8 @@ public sealed record DirectAddresses(string Session, NatKind Nat, IReadOnlyList<
                 if (candidates.Count >= MaxCandidates) break;
                 if (item is not JsonArray pair || pair.Count != 2) continue;
                 if ((pair[0] as JsonValue)?.TryGetValue<string>(out var k) == true && Enum.TryParse<PathKind>(k, out var path) && Enum.IsDefined(path)
-                    && (pair[1] as JsonValue)?.TryGetValue<string>(out var e) == true && IPEndPoint.TryParse(e, out var ep) && ep.Port > 0)
+                    && (pair[1] as JsonValue)?.TryGetValue<string>(out var e) == true && IPEndPoint.TryParse(e, out var ep) && ep.Port > 0
+                    && IsUsable(path, ep.Address))
                     candidates.Add(new Candidate(path, ep));
             }
             addresses = new DirectAddresses(session, nat, candidates);
@@ -104,6 +105,27 @@ public sealed record DirectAddresses(string Session, NatKind Nat, IReadOnlyList<
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Whether an address from the other side may be probed under this label. No kind may name an unspecified,
+    /// multicast or broadcast address. STUN and router-mapped candidates must be public IPv4 (the only kind that is
+    /// sprayed); IPv6 candidates must be public IPv6. LAN candidates may be any other IPv4 address, loopback included
+    /// (the simulated mode and the tests use it).
+    /// </summary>
+    internal static bool IsUsable(PathKind kind, IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any) || address.Equals(IPAddress.Broadcast)) return false;
+        var v4 = address.AddressFamily == AddressFamily.InterNetwork;
+        if (v4 ? address.GetAddressBytes()[0] >= 224 : address.IsIPv6Multicast) return false;
+        return kind switch
+        {
+            PathKind.Punch or PathKind.PunchSpray or PathKind.Mapped => v4 && PortMapping.IsPublic(address),
+            PathKind.IPv6 => !v4 && PortMapping.IsPublic(address),
+            PathKind.Lan => v4,
+            _ => false,
+        };
     }
 
     /// <summary>Session ids are 8–64 ASCII letters or digits (the host makes 16 hex digits).</summary>
@@ -383,7 +405,8 @@ public sealed class DirectBridge : IAsyncDisposable
         var acknowledged = new TaskCompletionSource<DirectPeer>(TaskCreationOptions.RunContinuationsAsynchronously);
         var targets = remote.Where(c => AllowedPaths.Contains(c.Kind)).ToList();
         var spray = AllowedPaths.Contains(PathKind.PunchSpray) && remoteNat == NatKind.Symmetric
-                    && remote.FirstOrDefault(c => c.Kind == PathKind.Punch) is { } punch ? punch.EndPoint : null;
+                    && remote.FirstOrDefault(c => c.Kind == PathKind.Punch) is { } punch && DirectAddresses.IsUsable(PathKind.Punch, punch.EndPoint.Address)
+                        ? punch.EndPoint : null;
         var startMessage = L.P("core.mp.punch.start", targets.Count, targets.Count);
         _log(spray is null ? startMessage : L.F("core.mp.punch.start_spray", startMessage,
             L.P("core.mp.punch.spray", SprayPorts, spray.Address, SprayPorts)));
