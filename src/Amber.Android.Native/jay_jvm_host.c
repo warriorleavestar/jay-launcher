@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JAY_JVM_ABI_VERSION 10
+#define JAY_JVM_ABI_VERSION 11
 #define JAY_ACTION_COUNT 12
 #define JAY_TEXT_CAPACITY 64
 #define JAY_KEY_CAPACITY 16
@@ -51,6 +51,7 @@ static char g_load_error[256];
 static char g_runtime_error[2048];
 static pthread_mutex_t g_surface_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ANativeWindow *g_surface;
+static _Atomic uint64_t g_surface_generation;
 static _Atomic float g_move_x;
 static _Atomic float g_move_y;
 static _Atomic float g_look_x;
@@ -370,8 +371,17 @@ void jay_surface_set(JNIEnv *env, jobject surface) {
     pthread_mutex_lock(&g_surface_mutex);
     ANativeWindow *previous = g_surface;
     g_surface = next;
+    atomic_fetch_add(&g_surface_generation, 1);
     pthread_mutex_unlock(&g_surface_mutex);
     if (previous != NULL) ANativeWindow_release(previous);
+}
+
+// Changes every time the activity hands over a new surface or takes it away (for example when
+// the app goes to the background and comes back). GLFW compares it on every event poll and
+// moves its EGL window surface to the current Android surface.
+__attribute__((visibility("default")))
+uint64_t jay_surface_generation(void) {
+    return atomic_load(&g_surface_generation);
 }
 
 __attribute__((visibility("default")))

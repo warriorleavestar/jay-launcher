@@ -27,6 +27,8 @@ index 4843a76..baa02ca 100644
 +    uint32_t        jayMovementKeys;
 +    uint64_t        jayPointerGeneration;
 +    uint64_t        jayInputGeneration;
++    uint64_t        jaySurfaceGeneration;
++    GLFWbool        jaySurfaceLost;
 +#endif
  } _GLFWwindowNull;
 
@@ -42,9 +44,11 @@ index 1db0811..b84b668 100644
 +#if defined(__ANDROID__)
 +#include <android/native_window.h>
 +#include <dlfcn.h>
++#include <time.h>
 +
 +typedef ANativeWindow* (*JaySurfaceAcquire)(void);
 +typedef void (*JaySurfaceRelease)(ANativeWindow*);
++typedef uint64_t (*JaySurfaceGeneration)(void);
 +typedef struct JayInputSnapshot
 +{
 +    float moveX;
@@ -74,6 +78,8 @@ index 1db0811..b84b668 100644
 +
 +static JaySurfaceAcquire jaySurfaceAcquire;
 +static JaySurfaceRelease jaySurfaceRelease;
++static JaySurfaceGeneration jaySurfaceGeneration;
++static void (*jayEglSwapBuffers)(_GLFWwindow*);
 +static JayInputRead jayInputRead;
 +static JayGameplayModeSet jayGameplayModeSet;
 +static JayJavaPointer jayJavaPointer;
@@ -94,6 +100,8 @@ index 1db0811..b84b668 100644
 +        jaySurfaceAcquire = (JaySurfaceAcquire) dlsym(jayBridge, "jay_surface_acquire");
 +    if (!jaySurfaceRelease)
 +        jaySurfaceRelease = (JaySurfaceRelease) dlsym(jayBridge, "jay_surface_release");
++    if (!jaySurfaceGeneration)
++        jaySurfaceGeneration = (JaySurfaceGeneration) dlsym(jayBridge, "jay_surface_generation");
 +    if (!jayInputRead)
 +        jayInputRead = (JayInputRead) dlsym(jayBridge, "jay_input_read");
 +    if (!jayGameplayModeSet)
@@ -110,7 +118,8 @@ index 1db0811..b84b668 100644
 +        jayJavaChar = (JayJavaChar) dlsym(jayBridge, "jay_java_char");
 +    if (!jayJavaLook)
 +        jayJavaLook = (JayJavaLook) dlsym(jayBridge, "jay_java_look");
-+    return jaySurfaceAcquire && jaySurfaceRelease && jayInputRead && jayGameplayModeSet &&
++    return jaySurfaceAcquire && jaySurfaceRelease && jaySurfaceGeneration &&
++           jayInputRead && jayGameplayModeSet &&
 +           jayJavaPointer && jayJavaMouseButton && jayJavaKey && jayJavaScroll &&
 +           jayJavaChar && jayJavaLook;
 +}
@@ -147,6 +156,8 @@ index 1db0811..b84b668 100644
 +        _glfwInputError(GLFW_PLATFORM_ERROR, "Android: Jay surface bridge is unavailable");
 +        return GLFW_FALSE;
 +    }
++    // Read the generation first: a surface change after this point is seen by the next poll.
++    window->null.jaySurfaceGeneration = jaySurfaceGeneration();
 +    window->null.nativeWindow = jaySurfaceAcquire();
 +    if (!window->null.nativeWindow)
 +    {
@@ -246,6 +257,99 @@ index 1db0811..b84b668 100644
 +    _glfwInputChar(window, codepoint, 0, GLFW_TRUE);
 +    window->callbacks.character = callback;
 +}
++
++// While the app is in the background Android takes the surface away. Skip presenting until a
++// new surface arrives instead of failing every frame, and do not spin the render loop.
++static void jaySwapBuffers(_GLFWwindow* window)
++{
++    if (window->null.jaySurfaceLost || window->context.egl.surface == EGL_NO_SURFACE)
++    {
++        const struct timespec pause = { 0, 16000000 };
++        nanosleep(&pause, NULL);
++        return;
++    }
++    jayEglSwapBuffers(window);
++}
++
++static void updateJaySurfaceSize(_GLFWwindow* window)
++{
++    ANativeWindow* nativeWindow = (ANativeWindow*) window->null.nativeWindow;
++    const int width = ANativeWindow_getWidth(nativeWindow);
++    const int height = ANativeWindow_getHeight(nativeWindow);
++    if (width <= 0 || height <= 0 ||
++        (width == window->null.width && height == window->null.height))
++        return;
++    window->null.width = width;
++    window->null.height = height;
++    _glfwInputWindowSize(window, width, height);
++    _glfwInputFramebufferSize(window, width, height);
++}
++
++// The activity replaces its surface when the app returns from the background. Move the EGL
++// window surface to the current Android surface; the GL context and its objects stay as they are.
++static void refreshJaySurface(_GLFWwindow* window)
++{
++    if (window->context.swapBuffers && window->context.swapBuffers != jaySwapBuffers)
++    {
++        jayEglSwapBuffers = window->context.swapBuffers;
++        window->context.swapBuffers = jaySwapBuffers;
++    }
++
++    const uint64_t generation = jaySurfaceGeneration();
++    if (generation == window->null.jaySurfaceGeneration)
++        return;
++    window->null.jaySurfaceGeneration = generation;
++
++    ANativeWindow* next = jaySurfaceAcquire();
++    if (!next)
++    {
++        // Keep the old EGL surface until a new one arrives; presenting is skipped meanwhile.
++        window->null.jaySurfaceLost = GLFW_TRUE;
++        return;
++    }
++    if (next == window->null.nativeWindow && !window->null.jaySurfaceLost)
++    {
++        // Same surface, only its size may have changed.
++        jaySurfaceRelease(next);
++        updateJaySurfaceSize(window);
++        return;
++    }
++
++    const GLFWbool current = _glfwPlatformGetTls(&_glfw.contextSlot) == window;
++    if (window->context.egl.surface != EGL_NO_SURFACE)
++    {
++        if (current)
++            eglMakeCurrent(_glfw.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++        eglDestroySurface(_glfw.egl.display, window->context.egl.surface);
++        window->context.egl.surface = EGL_NO_SURFACE;
++    }
++    if (window->null.nativeWindow)
++        jaySurfaceRelease((ANativeWindow*) window->null.nativeWindow);
++    window->null.nativeWindow = next;
++
++    window->context.egl.surface =
++        eglCreateWindowSurface(_glfw.egl.display, window->context.egl.config,
++                               (EGLNativeWindowType) next, NULL);
++    if (window->context.egl.surface == EGL_NO_SURFACE)
++    {
++        _glfwInputError(GLFW_PLATFORM_ERROR, "Android: could not attach the new game surface");
++        window->null.jaySurfaceLost = GLFW_TRUE;
++        if (current)
++            eglMakeCurrent(_glfw.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE,
++                           window->context.egl.handle);
++        return;
++    }
++    if (current &&
++        !eglMakeCurrent(_glfw.egl.display, window->context.egl.surface,
++                        window->context.egl.surface, window->context.egl.handle))
++    {
++        _glfwInputError(GLFW_PLATFORM_ERROR, "Android: could not use the new game surface");
++        window->null.jaySurfaceLost = GLFW_TRUE;
++        return;
++    }
++    window->null.jaySurfaceLost = GLFW_FALSE;
++    updateJaySurfaceSize(window);
++}
 +#endif
 +
  void _glfwPollEventsNull(void)
@@ -255,6 +359,7 @@ index 1db0811..b84b668 100644
 +    JayInputSnapshot input = {0};
 +    if (!window || !jayInputRead)
 +        return;
++    refreshJaySurface(window);
 +    jayGameplayModeSet(window->cursorMode == GLFW_CURSOR_DISABLED);
 +    jayInputRead(&input);
 +    if (input.generation == window->null.jayInputGeneration)
