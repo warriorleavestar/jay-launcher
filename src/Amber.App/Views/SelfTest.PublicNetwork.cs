@@ -316,6 +316,11 @@ internal sealed partial class SelfTest
                 && ReferenceEquals(Amber.App.Services.ThemeService.NetworkPack, host.NetworkThemePack) && !Amber.App.Services.ThemeService.NetworkGlobalAccepted);
             Check("网络配置：最低安全要求生效（设备验证必须、熔断开、倒计时至少 20 秒）",
                 host.Security is { Attestation: Amber.Core.Multiplayer.Transport.AttestationMode.Required, Breaker: true } && host.Security.EffectiveRestartDelay >= 20);
+            // The "use themes from multiplayer networks" setting: off drops the theme and fetches nothing; on fetches it again.
+            Dispatcher.UIThread.Invoke(() => { Amber.App.Services.ThemeService.AllowNetworkThemes = false; host.NetworkThemesAllowedChanged(); });
+            Check("网络主题：关掉设置后不用也不取", host.NetworkThemePack is null && Amber.App.Services.ThemeService.NetworkPack is null && !host.NetworkThemeAskGlobal);
+            Dispatcher.UIThread.Invoke(() => { Amber.App.Services.ThemeService.AllowNetworkThemes = true; host.NetworkThemesAllowedChanged(); });
+            Check("网络主题：重新打开设置后取回来", await WaitAsync(() => host.NetworkThemePack is not null && host.NetworkThemeAskGlobal, 10));
             await ShotAsync("网络配置公告");
             host.AcceptNetworkThemeGlobalCommand.Execute(null);
             Check("网络主题：用户同意后整个 Jay 都用", Amber.App.Services.ThemeService.NetworkGlobalAccepted && !host.NetworkThemeAskGlobal);

@@ -1120,9 +1120,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     partial void OnAutoJavaDownloadChanged(bool value) => Persist();
     partial void OnAllowNetworkThemesChanged(bool value)
     {
+        var changed = ThemeService.AllowNetworkThemes != value;
         ThemeService.AllowNetworkThemes = value;
         ThemeService.Refresh();
         Persist();
+        // Off: the network's theme is dropped and its cache cleared; on again: it is fetched for the network in use.
+        if (changed) Multiplayer?.NetworkThemesAllowedChanged();
     }
     partial void OnNoTraceChanged(bool value) => Persist();
     partial void OnAttestationIndexChanged(int value)

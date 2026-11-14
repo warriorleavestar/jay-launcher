@@ -95,6 +95,30 @@ public static partial class NetworkTheme
         }
     }
 
+    /// <summary>
+    /// Removes cached network themes other than <paramref name="keepSha256"/> (null removes them all), and partial
+    /// downloads of other themes. Only folders named like a cache entry are touched; anything that can't be removed now
+    /// is left for the next time.
+    /// </summary>
+    public static void Prune(string cacheRoot, string? keepSha256)
+    {
+        if (!Directory.Exists(cacheRoot)) return;
+        foreach (var dir in Directory.EnumerateDirectories(cacheRoot))
+        {
+            var name = Path.GetFileName(dir);
+            if (!Sha256Pattern().IsMatch(name) || name == keepSha256) continue;
+            try { Directory.Delete(dir, recursive: true); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        foreach (var file in Directory.EnumerateFiles(cacheRoot, "*.download"))
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            if (!Sha256Pattern().IsMatch(name) || name == keepSha256) continue;
+            try { File.Delete(file); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
     public static bool Verify(string path, string sha256)
     {
         using var stream = File.OpenRead(path);

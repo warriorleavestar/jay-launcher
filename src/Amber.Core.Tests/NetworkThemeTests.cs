@@ -99,4 +99,28 @@ public class NetworkThemeTests : IDisposable
         Assert.Null(pack.Shell);
         Assert.Empty(pack.Pages);
     }
+
+    [Fact]
+    public void PruneKeepsOnlyTheThemeInUse()
+    {
+        var keep = new string('a', 64);
+        var other = new string('b', 64);
+        Directory.CreateDirectory(Path.Combine(_dir, keep));
+        Directory.CreateDirectory(Path.Combine(_dir, other));
+        Directory.CreateDirectory(Path.Combine(_dir, "not-a-cache-entry"));
+        File.WriteAllText(Path.Combine(_dir, keep + ".download"), "x");
+        File.WriteAllText(Path.Combine(_dir, other + ".download"), "x");
+
+        NetworkTheme.Prune(_dir, keep);
+        Assert.True(Directory.Exists(Path.Combine(_dir, keep)));
+        Assert.False(Directory.Exists(Path.Combine(_dir, other)));
+        Assert.True(File.Exists(Path.Combine(_dir, keep + ".download")));
+        Assert.False(File.Exists(Path.Combine(_dir, other + ".download")));
+        Assert.True(Directory.Exists(Path.Combine(_dir, "not-a-cache-entry")));
+
+        NetworkTheme.Prune(_dir, null);
+        Assert.False(Directory.Exists(Path.Combine(_dir, keep)));
+        Assert.True(Directory.Exists(Path.Combine(_dir, "not-a-cache-entry")));
+        NetworkTheme.Prune(Path.Combine(_dir, "missing"), null);
+    }
 }

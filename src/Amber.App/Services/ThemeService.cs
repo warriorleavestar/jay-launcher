@@ -184,8 +184,11 @@ public static class ThemeService
     /// <summary>用户同意了这个网络的主题用在整个 Jay 上（只对当前这个网络主题有效）。</summary>
     public static bool NetworkGlobalAccepted { get; private set; }
 
-    /// <summary>设置里“使用联机网络带来的主题”。关掉后网络主题一律不用。</summary>
+    /// <summary>设置里“使用联机网络带来的主题”。关掉后网络主题一律不用，也不下载。</summary>
     public static bool AllowNetworkThemes { get; set; } = true;
+
+    /// <summary>Whether a network's theme may be fetched at all: the setting is on and Jay wasn't started with --default-theme.</summary>
+    public static bool NetworkThemesWanted => AllowNetworkThemes && SafeModeReason != "requested";
 
     private static bool _networkPageActive;
 
