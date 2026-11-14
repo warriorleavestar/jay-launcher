@@ -91,7 +91,11 @@ public sealed partial class LibraryViewModel : PageViewModel
     }
 
     protected override void OnFirstActivated() => Refresh();
-    protected override void OnBecameCurrent() => Refresh();
+    // The first showing also becomes current right away: one refresh is enough (one already running reads fresh data).
+    protected override void OnBecameCurrent()
+    {
+        if (Volatile.Read(ref _refreshing) == 0) Refresh();
+    }
     protected override void OnLanguageChanged() => Refresh();
 
     // ---- data ----
